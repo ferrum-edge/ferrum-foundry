@@ -1,0 +1,4675 @@
+openapi: 3.1.0
+info:
+  title: Ferrum Edge Admin API
+  description: |
+    RESTful API for managing the Ferrum Edge configuration at runtime.
+
+    All endpoints except `/health`, `/status`, `/metrics`, `/charges`, and
+    `/overload` require JWT bearer token authentication via the
+    `Authorization: Bearer <token>` header.
+
+    When the primary database is unavailable, read endpoints transparently fall
+    back to the most recent cached configuration and include an
+    `X-Data-Source: cached` response header. Write operations require a live
+    database and return `503 Service Unavailable` when one is not present.
+
+    The Admin API can be placed in **read-only mode**, in which case all POST,
+    PUT, and DELETE operations return `403 Forbidden`.
+  version: 0.1.0
+  license:
+    name: PolyForm Noncommercial 1.0.0
+    url: https://polyformproject.org/licenses/noncommercial/1.0.0
+
+servers:
+  - url: "{protocol}://{host}:{port}"
+    description: Admin API listener
+    variables:
+      protocol:
+        default: http
+        enum: [http, https]
+      host:
+        default: 127.0.0.1
+      port:
+        default: "9000"
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Health
+    description: Unauthenticated health and readiness probes
+  - name: Metrics
+    description: Observability and monitoring endpoints
+  - name: Proxies
+    description: Manage proxy route definitions
+  - name: Consumers
+    description: Manage API consumers and their credentials
+  - name: Plugins
+    description: Manage plugin configurations
+  - name: Upstreams
+    description: Manage upstream groups for load-balanced backends
+  - name: Batch
+    description: Bulk resource creation for high-throughput provisioning
+  - name: Backup & Restore
+    description: Full configuration backup and restore for disaster recovery and migration
+  - name: Namespaces
+    description: Multi-tenant namespace discovery
+
+paths:
+  # ── Health ──────────────────────────────────────────────────────────
+  /health:
+    get:
+      operationId: getHealth
+      summary: Gateway health check
+      description: |
+        Returns gateway health status including database connectivity and
+        cached configuration availability. Also accessible at `/status`.
+      tags: [Health]
+      security: []
+      responses:
+        "200":
+          description: Health status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /status:
+    get:
+      operationId: getStatus
+      summary: Gateway status (alias for /health)
+      tags: [Health]
+      security: []
+      responses:
+        "200":
+          description: Health status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  # ── Overload ────────────────────────────────────────────────────────
+  /overload:
+    get:
+      operationId: getOverload
+      summary: Overload status
+      description: |
+        Returns the gateway's current overload state including resource pressure
+        metrics (file descriptors, connections, event loop latency) and active
+        load-shedding actions. Unauthenticated so it can be used by load balancers
+        and monitoring probes.
+
+        Returns `503 Service Unavailable` when the overload level is `critical`.
+
+        In control-plane mode (no proxy state), returns a minimal
+        `{"level":"normal","message":"No proxy state available"}` response.
+      tags: [Health]
+      security: []
+      responses:
+        "200":
+          description: Overload state (normal or pressure)
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/OverloadSnapshot"
+                  - $ref: "#/components/schemas/OverloadNoProxyState"
+        "503":
+          description: Overload state is critical — gateway is shedding load
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OverloadSnapshot"
+
+  # ── Metrics ─────────────────────────────────────────────────────────
+  /metrics:
+    get:
+      operationId: getPrometheusMetrics
+      summary: Prometheus metrics
+      description: |
+        Returns gateway metrics in Prometheus exposition format.
+        Unauthenticated so it can be scraped by Prometheus without credentials.
+      tags: [Metrics]
+      security: []
+      responses:
+        "200":
+          description: Prometheus text exposition
+          content:
+            text/plain:
+              schema:
+                type: [string, "null"]
+              example: |
+                # HELP ferrum_requests_total Total number of requests processed
+                # TYPE ferrum_requests_total counter
+                ferrum_requests_total{proxy_id="my-api",method="GET",status_code="200"} 42
+
+  # ── Charges ────────────────────────────────────────────────────────
+  /charges:
+    get:
+      operationId: getCharges
+      summary: API chargeback data
+      description: |
+        Returns per-consumer API usage charges tracked by the `api_chargeback` plugin.
+        Unauthenticated so it can be scraped by Prometheus without credentials.
+        Default format is Prometheus text exposition; use `?format=json` for JSON.
+
+        **Multi-node deployments**: Each gateway node accumulates charges independently.
+        In CP/DP topologies, scrape every DP node and aggregate externally.
+      tags: [Metrics]
+      security: []
+      parameters:
+        - name: format
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [prometheus, json]
+          description: |
+            Output format. Default is Prometheus text exposition format.
+            Use `json` for a structured JSON breakdown by consumer, proxy, and status code.
+      responses:
+        "200":
+          description: Chargeback data
+          content:
+            text/plain:
+              schema:
+                type: [string, "null"]
+              example: |
+                # HELP ferrum_api_chargeable_calls_total Total chargeable API calls per consumer.
+                # TYPE ferrum_api_chargeable_calls_total counter
+                ferrum_api_chargeable_calls_total{consumer="alice",proxy_id="proxy-1",proxy_name="Payments API",status_code="200"} 150000
+                # HELP ferrum_api_charges_total Total charges accumulated per consumer.
+                # TYPE ferrum_api_charges_total counter
+                ferrum_api_charges_total{consumer="alice",proxy_id="proxy-1",proxy_name="Payments API",status_code="200",currency="USD"} 1.5000000000
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChargebackResponse"
+
+  /admin/metrics:
+    get:
+      operationId: getAdminMetrics
+      summary: Comprehensive gateway runtime metrics (JSON)
+      description: |
+        Returns a comprehensive snapshot of the gateway's runtime state including
+        request throughput, connection pool sizes, circuit breaker states, health
+        check results, load balancer active connections, cache statistics, consumer
+        index breakdowns, and rate limiter tracked keys.
+
+        The response is cached for 5 seconds to avoid performance impact from
+        frequent polling. The `X-Cache` response header indicates `hit` or `miss`.
+
+        Designed for dashboards and monitoring integrations that need richer data
+        than the Prometheus `/metrics` endpoint provides.
+      tags: [Metrics]
+      responses:
+        "200":
+          description: Runtime metrics snapshot
+          headers:
+            X-Cache:
+              schema:
+                type: string
+                enum: [hit, miss]
+              description: Whether this response was served from the 5-second cache
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMetrics"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ── Batch ────────────────────────────────────────────────────────────
+  /batch:
+    post:
+      operationId: batchCreate
+      summary: Batch create resources
+      description: |
+        Creates multiple resources in a single request. Each resource type is
+        persisted in a single database transaction, dramatically improving
+        throughput compared to individual create calls.
+
+        Resources are created in dependency order: consumers and upstreams
+        first, then proxies, then plugin configs. This ensures referential
+        integrity when plugins reference proxy IDs or consumer usernames.
+
+        All fields within each resource follow the same schema as the
+        individual create endpoints. IDs are auto-generated if omitted.
+      tags: [Batch]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BatchCreateRequest"
+      responses:
+        "201":
+          description: All resources created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchCreateResponse"
+        "207":
+          description: Partial success — some resource types failed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/BatchCreateResponse"
+                  - type: object
+                    properties:
+                      errors:
+                        type: array
+                        items:
+                          type: string
+                        description: Error messages for failed resource types
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ReadOnly"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  # ── Backup & Restore ────────────────────────────────────────────────
+  /backup:
+    get:
+      operationId: backupConfig
+      summary: Export full gateway configuration
+      description: |
+        Returns the complete gateway configuration as a single JSON document
+        suitable for archival or later restoration via `POST /restore`.
+
+        The output format is compatible with `POST /batch` (additive import)
+        and `POST /restore` (full replacement). Consumer credentials are
+        included **unredacted** since this is a backup endpoint.
+
+        Falls back to the in-memory cached configuration when the database is
+        unavailable, indicated by the `X-Data-Source: cached` response header.
+
+        ### Size guidance
+
+        The response is a single JSON document containing all requested
+        resources. Typical sizes:
+
+        | Deployment | Resources | Approx size |
+        |------------|-----------|-------------|
+        | Small | ~100 proxies, ~50 consumers | 100–200 KB |
+        | Medium | ~1,000 proxies, ~500 consumers | 1–2 MB |
+        | Large | ~5,000 proxies, ~3,000 consumers | 5–10 MB |
+        | Very large | 10,000+ proxies, 5,000+ consumers | 15+ MB |
+
+        For very large deployments, use the `resources` query parameter to
+        back up individual resource types separately.
+      tags: [Backup & Restore]
+      parameters:
+        - name: resources
+          in: query
+          required: false
+          description: |
+            Comma-separated list of resource types to include.
+            Valid values: `proxies`, `consumers`, `plugin_configs`, `upstreams`.
+            When omitted, all resource types are included.
+          schema:
+            type: string
+            example: "proxies,upstreams"
+      responses:
+        "200":
+          description: Full configuration backup
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+                example: 'attachment; filename="ferrum-backup.json"'
+            X-Data-Source:
+              schema:
+                type: string
+                enum: [database, cached]
+                description: Where the config was read from
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BackupResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /restore:
+    post:
+      operationId: restoreConfig
+      summary: Replace all configuration from a backup
+      description: |
+        **Destructive operation** — deletes ALL existing resources and imports
+        the provided configuration. Requires `?confirm=true` query parameter
+        to prevent accidental invocation.
+
+        Accepts the same JSON format produced by `GET /backup`. Resources are
+        imported in dependency order (consumers & upstreams first, then proxies,
+        then plugin configs).
+
+        To perform an additive (non-destructive) import, use `POST /batch`
+        instead.
+
+        ### Body size limit
+
+        Default: **100 MiB** (supports ~30K proxies + 90K plugins).
+        Configurable via the `FERRUM_ADMIN_RESTORE_MAX_BODY_SIZE_MIB`
+        environment variable. Returns `413 Payload Too Large` when exceeded.
+
+        Database inserts are chunked into 1,000-record transactions to keep
+        WAL/redo size bounded. A 90K-plugin restore runs as 90 commits, not
+        one massive transaction.
+
+        For configurations exceeding the body limit, restore resource types
+        separately using `POST /batch` with partial backup files
+        (generated via `GET /backup?resources=proxies`, etc.).
+      tags: [Backup & Restore]
+      parameters:
+        - name: confirm
+          in: query
+          required: true
+          description: Must be `true` to confirm the destructive operation
+          schema:
+            type: boolean
+            enum: [true]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RestoreRequest"
+      responses:
+        "200":
+          description: Configuration restored successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RestoreResponse"
+        "207":
+          description: Partial success — some resource types failed during import
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/RestoreResponse"
+                  - type: object
+                    properties:
+                      errors:
+                        type: array
+                        items:
+                          type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ReadOnly"
+        "413":
+          description: Request body too large (default max 100 MiB, configurable via FERRUM_ADMIN_RESTORE_MAX_BODY_SIZE_MIB)
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  # ── Proxies ─────────────────────────────────────────────────────────
+  /proxies:
+    get:
+      operationId: listProxies
+      summary: List all proxies
+      description: |
+        Falls back to cached config when the database is unavailable.
+
+        When `limit` or `offset` query parameters are provided, the response
+        is wrapped in a paginated envelope with `data` and `pagination` fields.
+        Without pagination parameters, a plain JSON array is returned for
+        backward compatibility.
+      tags: [Proxies]
+      parameters:
+        - $ref: "#/components/parameters/PaginationOffset"
+        - $ref: "#/components/parameters/PaginationLimit"
+      responses:
+        "200":
+          description: Array of proxy objects
+          headers:
+            X-Data-Source:
+              $ref: "#/components/headers/X-Data-Source"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Proxy"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+    post:
+      operationId: createProxy
+      summary: Create a proxy
+      description: |
+        Creates a new proxy route. A UUID is generated when `id` is omitted or
+        empty. `created_at` and `updated_at` are set automatically.
+      tags: [Proxies]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProxyCreate"
+      responses:
+        "201":
+          description: Proxy created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Proxy"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ReadOnly"
+        "409":
+          description: Conflict — `listen_path` already exists, or stream proxy `listen_port` conflicts with another proxy, a gateway reserved port, or is not available on the host
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /proxies/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ResourceId"
+
+    get:
+      operationId: getProxy
+      summary: Get a proxy
+      tags: [Proxies]
+      responses:
+        "200":
+          description: Proxy object
+          headers:
+            X-Data-Source:
+              $ref: "#/components/headers/X-Data-Source"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Proxy"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+    put:
+      operationId: updateProxy
+      summary: Update a proxy
+      description: |
+        Replaces the proxy with the given body. The `id` field in the body is
+        ignored — the path parameter is authoritative. `updated_at` is set
+        automatically.
+      tags: [Proxies]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProxyCreate"
+      responses:
+        "200":
+          description: Proxy updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Proxy"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ReadOnly"
+        "409":
+          description: Conflict — `listen_path` already exists on another proxy, or stream proxy `listen_port` conflicts with another proxy, a gateway reserved port, or is not available on the host
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+    delete:
+      operationId: deleteProxy
+      summary: Delete a proxy
+      tags: [Proxies]
+      responses:
+        "204":
+          description: Proxy deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ReadOnly"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  # ── Consumers ───────────────────────────────────────────────────────
+  /consumers:
+    get:
+      operationId: listConsumers
+      summary: List all consumers
+      description: |
+        When `limit` or `offset` query parameters are provided, the response
+        is wrapped in a paginated envelope. Without them, a plain JSON array
+        is returned for backward compatibility.
+      tags: [Consumers]
+      parameters:
+        - $ref: "#/components/parameters/PaginationOffset"
+        - $ref: "#/components/parameters/PaginationLimit"
+      responses:
+        "200":
+          description: Array of consumer objects
+          headers:
+            X-Data-Source:
+              $ref: "#/components/headers/X-Data-Source"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Consumer"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+    post:
+      operationId: createConsumer
+      summary: Create a consumer
+      description: |
+        Creates a new API consumer. A UUID is generated when `id` is omitted
+        or empty. Plaintext `password` fields inside `basicauth` credentials
+        are automatically bcrypt-hashed and stored as `password_hash`.
+      tags: [Consumers]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConsumerCreate"
+      responses:
+        "201":
+          description: Consumer created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Consumer"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ReadOnly"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /consumers/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ResourceId"
+
+    get:
+      operationId: getConsumer
+      summary: Get a consumer
+      tags: [Consumers]
+      responses:
+        "200":
+          description: Consumer object
+          headers:
+            X-Data-Source:
+              $ref: "#/components/headers/X-Data-Source"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Consumer"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+    put:
+      operationId: updateConsumer
+      summary: Update a consumer
+      tags: [Consumers]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConsumerCreate"
+      responses:
+        "200":
+          description: Consumer updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Consumer"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ReadOnly"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+    delete:
+      operationId: deleteConsumer
+      summary: Delete a consumer
+      tags: [Consumers]
+      responses:
+        "204":
+          description: Consumer deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ReadOnly"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /consumers/{consumer_id}/credentials/{cred_type}:
+    parameters:
+      - name: consumer_id
+        in: path
+        required: true
+        schema:
+          type: [string, "null"]
+        description: Consumer ID
+      - name: cred_type
+        in: path
+        required: true
+        schema:
+          type: [string, "null"]
+          examples:
+            - basicauth
+            - key-auth
+            - jwt
+            - hmac_auth
+            - mtls_auth
+        description: |
+          Credential type to set or remove (e.g. `basicauth`, `key-auth`,
+          `jwt`, `hmac_auth`, `mtls_auth`).
+
+    put:
+      operationId: updateConsumerCredentials
+      summary: Replace all credentials of a type
+      description: |
+        Replaces the entire credential value for the given type. Accepts a single
+        JSON object or an array of objects. For `basicauth`, plaintext `password`
+        fields are automatically hashed and stored as `password_hash`.
+      tags: [Consumers]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Credential payload (schema varies by credential type)
+              examples:
+                - username: alice
+                  password: s3cret
+                - key: my-api-key-value
+      responses:
+        "200":
+          description: Credentials updated — returns full consumer object
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Consumer"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+    post:
+      operationId: appendConsumerCredential
+      summary: Append a credential entry for rotation
+      description: |
+        Appends a new credential entry to the given type, enabling zero-downtime
+        credential rotation. If the existing credential is a single object, it is
+        converted to an array. Max entries per type is controlled by
+        `FERRUM_MAX_CREDENTIALS_PER_TYPE` (default: 2). For `basicauth`, plaintext
+        `password` fields are automatically hashed.
+      tags: [Consumers]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Single credential entry to append (must be a JSON object)
+      responses:
+        "200":
+          description: Credential appended — returns full consumer object
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Consumer"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+    delete:
+      operationId: deleteConsumerCredentials
+      summary: Remove all credentials of a type
+      tags: [Consumers]
+      responses:
+        "204":
+          description: Credential removed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /consumers/{consumer_id}/credentials/{cred_type}/{index}:
+    parameters:
+      - $ref: "#/components/parameters/ConsumerId"
+      - name: cred_type
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Credential type (e.g. `keyauth`, `jwt`, `basicauth`).
+      - name: index
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 0
+        description: Zero-based index of the credential entry to remove.
+    delete:
+      operationId: deleteConsumerCredentialByIndex
+      summary: Remove a specific credential entry by index
+      description: |
+        Removes a single credential entry at the given index. When the array has
+        one remaining element after removal, it is collapsed back to a single
+        object. When a single-object credential exists, only index 0 is valid.
+      tags: [Consumers]
+      responses:
+        "200":
+          description: Credential entry removed — returns full consumer object
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Consumer"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  # ── Plugins ─────────────────────────────────────────────────────────
+  /plugins:
+    get:
+      operationId: listAvailablePlugins
+      summary: List available plugin types
+      description: Returns the names of all built-in plugins that can be configured.
+      tags: [Plugins]
+      responses:
+        "200":
+          description: Array of plugin type names
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: [string, "null"]
+              example:
+                - stdout_logging
+                - statsd_logging
+                - http_logging
+                - tcp_logging
+                - kafka_logging
+                - ws_logging
+                - transaction_debugger
+                - jwks_auth
+                - jwt_auth
+                - key_auth
+                - basic_auth
+                - hmac_auth
+                - mtls_auth
+                - cors
+                - access_control
+                - tcp_connection_throttle
+                - ip_restriction
+                - bot_detection
+                - correlation_id
+                - request_transformer
+                - response_transformer
+                - compression
+                - graphql
+                - grpc_method_router
+                - grpc_deadline
+                - grpc_web
+                - rate_limiting
+                - request_size_limiting
+                - response_size_limiting
+                - body_validator
+                - request_termination
+                - response_mock
+                - response_caching
+                - prometheus_metrics
+                - otel_tracing
+                - ai_token_metrics
+                - ai_request_guard
+                - ai_rate_limiter
+                - ai_prompt_shield
+                - sse
+                - request_mirror
+                - load_testing
+                - ws_message_size_limiting
+                - ws_frame_logging
+                - ws_logging
+                - ws_rate_limiting
+                - udp_rate_limiting
+                - udp_logging
+                - loki_logging
+                - ldap_auth
+                - serverless_function
+                - soap_ws_security
+                - spec_expose
+                - api_chargeback
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /plugins/config:
+    get:
+      operationId: listPluginConfigs
+      summary: List all plugin configurations
+      description: |
+        When `limit` or `offset` query parameters are provided, the response
+        is wrapped in a paginated envelope. Without them, a plain JSON array
+        is returned for backward compatibility.
+      tags: [Plugins]
+      parameters:
+        - $ref: "#/components/parameters/PaginationOffset"
+        - $ref: "#/components/parameters/PaginationLimit"
+      responses:
+        "200":
+          description: Array of plugin configurations
+          headers:
+            X-Data-Source:
+              $ref: "#/components/headers/X-Data-Source"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PluginConfig"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+    post:
+      operationId: createPluginConfig
+      summary: Create a plugin configuration
+      tags: [Plugins]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PluginConfigCreate"
+      responses:
+        "201":
+          description: Plugin configuration created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PluginConfig"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ReadOnly"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /plugins/config/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ResourceId"
+
+    get:
+      operationId: getPluginConfig
+      summary: Get a plugin configuration
+      tags: [Plugins]
+      responses:
+        "200":
+          description: Plugin configuration object
+          headers:
+            X-Data-Source:
+              $ref: "#/components/headers/X-Data-Source"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PluginConfig"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+    put:
+      operationId: updatePluginConfig
+      summary: Update a plugin configuration
+      tags: [Plugins]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PluginConfigCreate"
+      responses:
+        "200":
+          description: Plugin configuration updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PluginConfig"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ReadOnly"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+    delete:
+      operationId: deletePluginConfig
+      summary: Delete a plugin configuration
+      tags: [Plugins]
+      responses:
+        "204":
+          description: Plugin configuration deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ReadOnly"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  # ── Upstreams ────────────────────────────────────────────────────────
+  /upstreams:
+    get:
+      operationId: listUpstreams
+      summary: List all upstreams
+      description: |
+        When `limit` or `offset` query parameters are provided, the response
+        is wrapped in a paginated envelope. Without them, a plain JSON array
+        is returned for backward compatibility.
+      tags: [Upstreams]
+      parameters:
+        - $ref: "#/components/parameters/PaginationOffset"
+        - $ref: "#/components/parameters/PaginationLimit"
+      responses:
+        "200":
+          description: Array of upstream objects
+          headers:
+            X-Data-Source:
+              $ref: "#/components/headers/X-Data-Source"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Upstream"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    post:
+      operationId: createUpstream
+      summary: Create an upstream
+      tags: [Upstreams]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Upstream"
+      responses:
+        "201":
+          description: Created upstream
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Upstream"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ReadOnly"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /upstreams/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ResourceId"
+    get:
+      operationId: getUpstream
+      summary: Get an upstream by ID
+      tags: [Upstreams]
+      responses:
+        "200":
+          description: Upstream object
+          headers:
+            X-Data-Source:
+              $ref: "#/components/headers/X-Data-Source"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Upstream"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    put:
+      operationId: updateUpstream
+      summary: Update an upstream
+      tags: [Upstreams]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Upstream"
+      responses:
+        "200":
+          description: Updated upstream
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Upstream"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ReadOnly"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    delete:
+      operationId: deleteUpstream
+      summary: Delete an upstream
+      tags: [Upstreams]
+      responses:
+        "204":
+          description: Upstream deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ReadOnly"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  # ── Namespaces ──────────────────────────────────────────────────────
+  /namespaces:
+    get:
+      operationId: listNamespaces
+      summary: List all namespaces
+      description: |
+        Returns a list of all distinct namespaces present in the configuration.
+        In database mode, queries the database directly. In file mode, returns
+        the namespaces captured at file load time (before namespace filtering).
+      tags: [Namespaces]
+      responses:
+        "200":
+          description: List of namespace strings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+                example: ["ferrum", "staging", "production"]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          description: Database query failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+# ════════════════════════════════════════════════════════════════════════
+components:
+  # ── Security ────────────────────────────────────────────────────────
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        HS256-signed JWT. Configure the secret, issuer, and max TTL via
+        environment variables:
+
+        | Variable | Default | Description |
+        |----------|---------|-------------|
+        | `FERRUM_ADMIN_JWT_SECRET` | *(required)* | Signing key |
+        | `FERRUM_ADMIN_JWT_ISSUER` | `ferrum-edge` | Expected `iss` claim |
+        | `FERRUM_ADMIN_JWT_MAX_TTL` | `3600` | Max token lifetime (seconds) |
+
+  # ── Reusable parameters ────────────────────────────────────────────
+  parameters:
+    ResourceId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Resource UUID
+
+    PaginationOffset:
+      name: offset
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+      description: |
+        Number of items to skip. When provided (along with or without `limit`),
+        the response switches from a plain JSON array to a paginated envelope
+        containing `data` and `pagination` fields.
+
+    PaginationLimit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000
+        default: 100
+      description: |
+        Maximum number of items to return (max 1000). When provided (along with
+        or without `offset`), the response switches from a plain JSON array to
+        a paginated envelope containing `data` and `pagination` fields.
+
+  # ── Reusable headers ───────────────────────────────────────────────
+  headers:
+    X-Data-Source:
+      description: |
+        Present with value `cached` when the response was served from the
+        in-memory config cache instead of the primary database.
+      required: false
+      schema:
+        type: string
+        enum: [cached]
+
+  # ── Reusable responses ─────────────────────────────────────────────
+  responses:
+    BadRequest:
+      description: Invalid request body
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: Missing or invalid JWT
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    ReadOnly:
+      description: Admin API is in read-only mode
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: Admin API is in read-only mode
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Conflict:
+      description: Resource already exists or conflicts with an existing resource
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    ServiceUnavailable:
+      description: Database unavailable and no cached config
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  # ── Schemas ─────────────────────────────────────────────────────────
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: [string, "null"]
+          description: Human-readable error message
+
+    # ── Proxy ───────────────────────────────────────────────────────
+    Proxy:
+      type: object
+      required:
+        - id
+        - listen_path
+        - backend_protocol
+        - backend_host
+        - backend_port
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: [string, "null"]
+          description: >-
+            Unique identifier (UUID auto-generated if omitted or empty on create).
+            Custom IDs must start with an alphanumeric character and contain only
+            alphanumeric characters, dots, underscores, or hyphens (max 254 chars).
+          pattern: "^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
+          maxLength: 254
+        name:
+          type: [string, "null"]
+          description: >-
+            Optional friendly name. Must be unique across all proxies when set.
+        listen_path:
+          type: [string, "null"]
+          description: >-
+            URL path prefix to match incoming requests. Must start with `/` for
+            literal path matching, or `~` for regex matching (e.g., `~^/api/v[0-9]+$`).
+            Regex patterns are compiled at creation time and auto-anchored with `^`
+            and `$` for full-path matching if not already present. To allow sub-path
+            matching, end the pattern with `.*` (e.g., `~/api/v[0-9]+/.*`).
+            The combination of `(hosts, listen_path)` must be unique across all proxies.
+          examples:
+            - /api/v1
+            - /users
+            - "~/api/v[0-9]+/users/[^/]+"
+        hosts:
+          type: array
+          items:
+            type: string
+          default: []
+          description: >-
+            Optional list of hostnames this proxy matches. Empty means match all
+            hosts. Supports exact hostnames (`api.example.com`) and wildcard
+            prefixes (`*.example.com`). Entries are normalized to lowercase on
+            create/update. Must match the format `[a-z0-9]([a-z0-9.-]*[a-z0-9])?`
+            for exact hosts or `*.[a-z0-9]([a-z0-9.-]*[a-z0-9])?` for wildcards.
+          examples:
+            - ["api.example.com", "*.internal.example.com"]
+        backend_protocol:
+          $ref: "#/components/schemas/BackendProtocol"
+        backend_host:
+          type: [string, "null"]
+          description: >-
+            Backend server hostname or IP. Required when `upstream_id` is not set.
+            When `upstream_id` is set, this field is ignored (upstream targets
+            provide the backend address).
+        backend_port:
+          type: integer
+          format: uint16
+          default: 0
+          description: >-
+            Backend server port. Required (>= 1) when `upstream_id` is not set.
+            When `upstream_id` is set, this field is ignored (upstream targets
+            provide the backend port).
+        backend_path:
+          type: [string, "null"]
+
+          description: Optional path prefix prepended to forwarded requests
+        strip_listen_path:
+          type: boolean
+          default: true
+          description: Strip listen_path prefix before forwarding to backend
+        preserve_host_header:
+          type: boolean
+          default: false
+          description: Forward the original Host header to the backend
+        backend_connect_timeout_ms:
+          type: integer
+          format: uint64
+          default: 5000
+          description: TCP connect timeout in milliseconds
+        backend_read_timeout_ms:
+          type: integer
+          format: uint64
+          default: 30000
+          description: Backend response timeout in milliseconds
+        backend_write_timeout_ms:
+          type: integer
+          format: uint64
+          default: 30000
+          description: Backend write timeout in milliseconds
+        backend_tls_client_cert_path:
+          type: [string, "null"]
+          maxLength: 4096
+          description: Path to mTLS client certificate (PEM). Max 4096 characters.
+        backend_tls_client_key_path:
+          type: [string, "null"]
+          maxLength: 4096
+          description: Path to mTLS client private key (PEM). Max 4096 characters.
+        backend_tls_verify_server_cert:
+          type: boolean
+          default: true
+          description: Verify the backend's TLS certificate
+        backend_tls_server_ca_cert_path:
+          type: [string, "null"]
+          maxLength: 4096
+          description: Path to custom CA bundle for backend TLS verification. Max 4096 characters.
+        dns_override:
+          type: [string, "null"]
+
+          description: Override DNS resolution with a specific IP address
+        dns_cache_ttl_seconds:
+          type: [integer, "null"]
+          format: uint64
+          description: DNS cache TTL override in seconds
+        auth_mode:
+          $ref: "#/components/schemas/AuthMode"
+        plugins:
+          type: array
+          default: []
+          items:
+            $ref: "#/components/schemas/PluginAssociation"
+          description: Plugin configurations applied to this proxy
+        pool_idle_timeout_seconds:
+          type: [integer, "null"]
+          format: uint64
+          description: Idle connection timeout in seconds (overrides global)
+        pool_enable_http_keep_alive:
+          type: [boolean, "null"]
+          description: Enable HTTP keep-alive (overrides global)
+        pool_enable_http2:
+          type: [boolean, "null"]
+          description: Enable HTTP/2 keep-alive PINGs (overrides global)
+        pool_tcp_keepalive_seconds:
+          type: [integer, "null"]
+          format: uint64
+          description: TCP keep-alive probe interval (overrides global)
+        pool_http2_keep_alive_interval_seconds:
+          type: [integer, "null"]
+          format: uint64
+          description: HTTP/2 PING interval in seconds (overrides global)
+        pool_http2_keep_alive_timeout_seconds:
+          type: [integer, "null"]
+          format: uint64
+          description: HTTP/2 PING timeout in seconds (overrides global)
+        pool_http2_initial_stream_window_size:
+          type: [integer, "null"]
+          format: uint32
+          minimum: 65535
+          maximum: 134217728
+          description: |
+            HTTP/2 initial per-stream flow-control window size in bytes (overrides global).
+            Larger values improve single-stream throughput. Range: 65535–134217728 (128 MiB). Default: 8388608 (8 MiB).
+        pool_http2_initial_connection_window_size:
+          type: [integer, "null"]
+          format: uint32
+          minimum: 65535
+          maximum: 134217728
+          description: |
+            HTTP/2 initial connection-level flow-control window size in bytes (overrides global).
+            Aggregate budget shared across all concurrent streams. Range: 65535–134217728 (128 MiB). Default: 33554432 (32 MiB).
+        pool_http2_adaptive_window:
+          type: [boolean, "null"]
+          description: |
+            Enable adaptive flow-control (BDP probing) for HTTP/2 connections (overrides global).
+            Enabled by default — BDP probing dynamically sizes flow-control windows for optimal throughput. Default: true.
+        pool_http2_max_frame_size:
+          type: [integer, "null"]
+          format: uint32
+          minimum: 16384
+          maximum: 1048576
+          description: |
+            Maximum HTTP/2 frame payload size in bytes (overrides global).
+            Range: 16384–1048576 (1 MiB). Default: 1048576 (1 MiB).
+        pool_http2_max_concurrent_streams:
+          type: [integer, "null"]
+          format: uint32
+          minimum: 1
+          description: |
+            Maximum concurrent HTTP/2 streams per backend connection (overrides global).
+            Must be at least 1. Default: 1000.
+        pool_http3_connections_per_backend:
+          type: [integer, "null"]
+          minimum: 1
+          maximum: 256
+          description: |
+            Number of QUIC connections per HTTP/3 backend (overrides global
+            FERRUM_HTTP3_CONNECTIONS_PER_BACKEND). Multiple connections distribute
+            QUIC frame processing across driver tasks. Range: 1–256. Default: 4.
+        upstream_id:
+          type: [string, "null"]
+          description: |
+            Reference to an existing Upstream for load-balanced backends. When set,
+            `backend_host` and `backend_port` are overridden by the selected
+            upstream target. The referenced upstream must exist at creation time.
+            Deleting an upstream that is referenced by a proxy is blocked.
+        listen_port:
+          type: [integer, "null"]
+          format: uint16
+          minimum: 1
+          description: |
+            Port for this TCP/UDP proxy to listen on (must be >= 1). Required when
+            backend_protocol is tcp, tcp_tls, udp, or dtls. Must NOT be set for HTTP
+            proxies. Each stream proxy binds its own dedicated port; duplicate ports
+            across stream proxies are rejected. In database mode, the Admin API also
+            rejects ports that conflict with gateway reserved ports (proxy/admin/gRPC
+            listeners) or are already bound on the host. In CP mode, local port
+            checks are skipped since stream proxies run on remote DP nodes.
+        frontend_tls:
+          type: boolean
+          default: false
+          description: |
+            Terminate encryption on the gateway side for incoming connections.
+            For TCP: uses the gateway's TLS certificate.
+            For UDP: uses DTLS with ECDSA P-256 or Ed25519 certificates
+            (configured via FERRUM_DTLS_CERT_PATH/FERRUM_DTLS_KEY_PATH env vars).
+        passthrough:
+          type: boolean
+          default: false
+          description: |
+            Forward encrypted client bytes directly to the backend without
+            terminating TLS (TCP) or DTLS (UDP). The proxy peeks at the
+            ClientHello to extract SNI for logging but does not decrypt traffic.
+            Only valid for stream proxies (tcp, tcp_tls, udp, dtls).
+            Mutually exclusive with frontend_tls.
+        tcp_idle_timeout_seconds:
+          type: integer
+          format: uint64
+          nullable: true
+          description: |
+            TCP stream idle timeout in seconds. After this duration of no data transfer
+            in either direction, the connection is closed. When omitted, uses the global
+            FERRUM_TCP_IDLE_TIMEOUT_SECONDS (default: 300s / 5 min). Set to 0 to disable.
+            Only applicable for tcp/tcp_tls protocols.
+        udp_idle_timeout_seconds:
+          type: integer
+          format: uint64
+          default: 60
+          description: |
+            UDP session idle timeout in seconds. After this duration of inactivity,
+            the UDP session mapping is removed. Only applicable for udp/dtls protocols.
+        allowed_methods:
+          oneOf:
+            - type: array
+              items:
+                type: string
+                enum: [GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, TRACE, CONNECT]
+            - type: "null"
+          default: null
+          description: |
+            Optional list of HTTP methods this proxy accepts. When null (default),
+            all methods are allowed. When set, requests with methods not in the list
+            receive 405 Method Not Allowed before any plugin processing.
+        allowed_ws_origins:
+          type: array
+          items:
+            type: string
+          default: []
+          description: |
+            Optional list of allowed WebSocket Origin values (e.g., ["https://example.com"]).
+            When non-empty, WebSocket upgrade requests must include an Origin header matching
+            one of these values (case-insensitive comparison). Empty array (default) means
+            no origin check. Protects against Cross-Site WebSocket Hijacking (CSWSH).
+        circuit_breaker:
+          oneOf:
+            - $ref: "#/components/schemas/CircuitBreakerConfig"
+            - type: "null"
+          description: Optional circuit breaker configuration
+        retry:
+          oneOf:
+            - $ref: "#/components/schemas/RetryConfig"
+            - type: "null"
+          description: Optional retry configuration
+        response_body_mode:
+          type: string
+          enum: [stream, buffer]
+          default: stream
+          description: |
+            Response body handling mode.
+
+            - `stream` (default): Passes response bytes through as they arrive for
+              lower latency and memory usage. If any plugin attached to this proxy
+              requires response body buffering (e.g., response_transformer), the
+              gateway automatically buffers regardless of this setting.
+            - `buffer`: Always buffers the full response body before running
+              after-proxy plugins, even if no plugin requires it. Use this when you
+              need to guarantee the complete body is available for inspection.
+        created_at:
+          type: [string, "null"]
+          format: date-time
+          description: Creation timestamp (set by server)
+        updated_at:
+          type: [string, "null"]
+          format: date-time
+          description: Last modification timestamp (set by server)
+
+    ProxyCreate:
+      description: |
+        Request body for creating or updating a proxy. Same schema as Proxy
+        but `id`, `created_at`, and `updated_at` are optional (server-managed).
+      allOf:
+        - $ref: "#/components/schemas/Proxy"
+      required:
+        - listen_path
+        - backend_protocol
+        - backend_host
+        - backend_port
+
+    BackendProtocol:
+      type: string
+      enum: [http, https, ws, wss, grpc, grpcs, h3, tcp, tcp_tls, udp, dtls]
+      description: |
+        Protocol used to communicate with the backend.
+        TCP/UDP protocols (tcp, tcp_tls, udp, dtls) are raw stream proxies
+        that require a `listen_port` instead of `listen_path`.
+        `dtls` encrypts UDP datagrams to the backend using DTLS 1.2/1.3 (ECDSA P-256/P-384 keys only, version auto-negotiated).
+
+    AuthMode:
+      type: string
+      enum: [single, multi]
+      default: single
+      description: |
+        `single` — first successful auth plugin wins.
+        `multi` — all auth plugins run; no single rejection blocks the request.
+
+    PluginAssociation:
+      type: object
+      required: [plugin_config_id]
+      properties:
+        plugin_config_id:
+          type: [string, "null"]
+          description: ID of the PluginConfig to apply to this proxy
+
+    # ── Consumer ────────────────────────────────────────────────────
+    Consumer:
+      type: object
+      required: [id, username, created_at, updated_at]
+      properties:
+        id:
+          type: [string, "null"]
+          description: >-
+            Unique identifier (UUID auto-generated if omitted or empty on create).
+            Custom IDs must start with an alphanumeric character and contain only
+            alphanumeric characters, dots, underscores, or hyphens (max 254 chars).
+          pattern: "^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
+          maxLength: 254
+        username:
+          type: [string, "null"]
+          minLength: 1
+          description: >-
+            Unique consumer username (must be non-empty). Used as the lookup key
+            for basic_auth authentication. Must be unique across all consumers.
+        custom_id:
+          type: [string, "null"]
+          description: >-
+            Optional external identifier. Must be unique across all consumers when
+            set. Empty strings are normalized to null. Must not collide with another
+            consumer's username (this would cause incorrect JWKS/JWT authentication).
+        credentials:
+          type: object
+          default: {}
+          additionalProperties:
+            oneOf:
+              - type: object
+                description: Single credential entry
+              - type: array
+                items:
+                  type: object
+                minItems: 1
+                description: Multiple credential entries for zero-downtime rotation
+          description: |
+            Map of credential type to credential payload. Each type maps to either
+            a single JSON object or an array of objects (for zero-downtime rotation).
+            Array elements must be JSON objects — non-object elements are rejected.
+            Credential values that serve as lookup keys must be unique across all
+            consumers and across all entries within arrays. Max entries per type is
+            controlled by `FERRUM_MAX_CREDENTIALS_PER_TYPE` (default: 2).
+
+            | Type | Fields | Uniqueness |
+            |------|--------|------------|
+            | `keyauth` | `key` | Each `key` must be globally unique |
+            | `basicauth` | `password` or `password_hash` (bcrypt/HMAC) | Indexed by consumer `username` (unique) |
+            | `mtls_auth` | `identity` | Each `identity` must be globally unique |
+            | `jwt` | `secret` | Looked up by `username`, `id`, or `custom_id`; all secrets tried |
+            | `jwks_auth` | (identity from JWT claim) | Looked up by `username`, `id`, or `custom_id` (optional — consumer-less flow supported) |
+            | `hmac_auth` | `secret` | Looked up by username in Authorization header; all secrets tried |
+        acl_groups:
+          type: array
+          items:
+            type: string
+            maxLength: 255
+          default: []
+          maxItems: 500
+          description: >-
+            ACL group memberships for group-based access control. The
+            `access_control` plugin can allow/deny by group instead of (or in
+            addition to) individual consumer usernames. A consumer can belong to
+            up to 500 groups.
+        created_at:
+          type: [string, "null"]
+          format: date-time
+        updated_at:
+          type: [string, "null"]
+          format: date-time
+
+    ConsumerCreate:
+      description: Request body for creating or updating a consumer.
+      allOf:
+        - $ref: "#/components/schemas/Consumer"
+      required:
+        - username
+
+    # ── Plugin Config ───────────────────────────────────────────────
+    PluginConfig:
+      type: object
+      required: [id, plugin_name, scope, enabled, created_at, updated_at]
+      properties:
+        id:
+          type: [string, "null"]
+          description: >-
+            Unique identifier (UUID auto-generated if omitted or empty on create).
+            Custom IDs must start with an alphanumeric character and contain only
+            alphanumeric characters, dots, underscores, or hyphens (max 254 chars).
+          pattern: "^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
+          maxLength: 254
+        plugin_name:
+          type: [string, "null"]
+          description: >-
+            Plugin type name. Must be one of the available built-in plugins
+            (e.g., key_auth, rate_limiting, cors, stdout_logging). Use
+            `GET /plugins` to discover available plugin names.
+        config:
+          type: object
+          default: {}
+          description: >-
+            Plugin-specific JSON configuration. Validated on create/update and
+            again when the plugin is instantiated at config reload time.
+            Security plugins (key_auth, basic_auth, jwt_auth, hmac_auth,
+            jwks_auth, mtls_auth, access_control, tcp_connection_throttle,
+            ip_restriction) block gateway startup if their config is invalid.
+            See `PluginConfigs` section for per-plugin schema definitions.
+        scope:
+          $ref: "#/components/schemas/PluginScope"
+        proxy_id:
+          type: [string, "null"]
+          description: >-
+            Required when scope is `proxy` — must reference an existing proxy ID.
+            Must be null (or omitted) when scope is `global`. The referenced proxy
+            must exist. When a proxy is deleted, its associated plugin configs are
+            automatically deleted (cascade).
+        enabled:
+          type: boolean
+          default: true
+        priority_override:
+          type: [integer, "null"]
+          minimum: 0
+          maximum: 10000
+          description: >-
+            Optional execution priority override. When set, replaces the plugin's
+            built-in priority constant. Lower values execute first. Useful when
+            multiple instances of the same plugin type are attached to a proxy
+            (e.g., two http_logging instances shipping to Splunk and Datadog).
+            When null (default), the plugin uses its built-in priority.
+        created_at:
+          type: [string, "null"]
+          format: date-time
+        updated_at:
+          type: [string, "null"]
+          format: date-time
+
+    PluginConfigCreate:
+      description: Request body for creating or updating a plugin configuration.
+      allOf:
+        - $ref: "#/components/schemas/PluginConfig"
+      required:
+        - plugin_name
+        - scope
+
+    PluginScope:
+      type: string
+      enum: [global, proxy]
+      description: |
+        `global` — plugin applies to all proxies; `proxy_id` must be null.
+        `proxy` — plugin applies only to the proxy referenced by `proxy_id`;
+        `proxy_id` is required.
+
+    # ── WebSocket Plugin Configs ─────────────────────────────────────
+    WsMessageSizeLimitingConfig:
+      type: object
+      description: |
+        Configuration for the `ws_message_size_limiting` plugin. Enforces a
+        maximum frame payload size on WebSocket connections. Frames exceeding
+        the limit trigger a close frame sent to both client and backend.
+      properties:
+        max_frame_bytes:
+          type: integer
+          default: 0
+          description: >-
+            Maximum frame payload size in bytes. Required for the plugin to
+            take effect — a value of 0 means no limit is enforced.
+        close_reason:
+          type: string
+          default: "Message too large"
+          description: Close frame reason text sent when a frame exceeds the limit.
+
+    WsFrameLoggingConfig:
+      type: object
+      description: |
+        Configuration for the `ws_frame_logging` plugin. Logs WebSocket frame
+        metadata (direction, opcode, payload size) for each Text, Binary, and
+        Ping frame.
+      properties:
+        log_level:
+          type: string
+          enum: [trace, debug, info]
+          default: info
+          description: Tracing level for frame log output.
+        include_payload_preview:
+          type: boolean
+          default: false
+          description: Include a payload preview in log output.
+        payload_preview_bytes:
+          type: integer
+          default: 128
+          maximum: 65536
+          description: >-
+            Maximum number of bytes to include in the payload preview. Only
+            applies when `include_payload_preview` is true.
+        log_ping_pong:
+          type: boolean
+          default: false
+          description: Whether to log ping/pong frames in addition to text/binary frames.
+
+    WsRateLimitingConfig:
+      type: object
+      description: |
+        Configuration for the `ws_rate_limiting` plugin. Enforces per-connection
+        frame rate limiting using a token-bucket algorithm. When the bucket is
+        exhausted, the plugin sends a close frame to both client and backend.
+        Supports centralized Redis-backed mode for cross-instance frame rate coordination.
+      properties:
+        frames_per_second:
+          type: integer
+          default: 100
+          description: Token refill rate per second.
+        burst_size:
+          type: integer
+          description: >-
+            Maximum burst capacity (tokens). Defaults to the value of
+            `frames_per_second` when not explicitly set.
+        close_reason:
+          type: string
+          default: "Frame rate exceeded"
+          description: Close frame reason text sent when the frame rate is exceeded.
+        sync_mode:
+          type: string
+          enum: [local, redis]
+          default: local
+          description: "Frame counter storage: 'local' (in-memory) or 'redis' (centralized). Any RESP-compatible server works."
+        redis_url:
+          type: string
+          description: "Redis connection URL. Required when sync_mode is 'redis'."
+        redis_tls:
+          type: boolean
+          default: false
+          description: "Enable TLS for the Redis connection. CA verification uses gateway-level FERRUM_TLS_CA_BUNDLE_PATH; skip-verify uses FERRUM_TLS_NO_VERIFY."
+        redis_key_prefix:
+          type: string
+          default: "ferrum:ws_rate_limiting"
+          description: Key prefix for all Redis keys
+        redis_pool_size:
+          type: integer
+          default: 4
+          description: Number of multiplexed Redis connections
+        redis_username:
+          type: string
+          description: Redis username for ACL authentication
+        redis_password:
+          type: string
+          description: Redis password
+        redis_connect_timeout_seconds:
+          type: integer
+          default: 5
+          description: Redis connection timeout in seconds
+        redis_health_check_interval_seconds:
+          type: integer
+          default: 5
+          description: Health check ping interval when Redis is unavailable
+
+    # ── Circuit Breaker ─────────────────────────────────────────────
+    CircuitBreakerConfig:
+      type: object
+      properties:
+        failure_threshold:
+          type: integer
+          format: uint32
+          default: 5
+          description: Consecutive failures to trip the circuit open
+        success_threshold:
+          type: integer
+          format: uint32
+          default: 3
+          description: Consecutive successes in half-open to close the circuit
+        timeout_seconds:
+          type: integer
+          format: uint64
+          default: 30
+          description: Seconds to wait in open state before transitioning to half-open
+        failure_status_codes:
+          type: array
+          items:
+            type: integer
+            format: uint16
+          default: [500, 502, 503, 504]
+          description: HTTP status codes that count as failures
+        half_open_max_requests:
+          type: integer
+          format: uint32
+          default: 1
+          description: Maximum concurrent probe requests allowed in half-open state
+        trip_on_connection_errors:
+          type: boolean
+          default: true
+          description: >
+            Whether connection-level errors (TCP refused, DNS failure, TLS handshake
+            error, connect timeout) count as circuit breaker failures independently
+            of failure_status_codes. When true (default), connection errors always
+            trip the breaker. When false, only real HTTP response status codes in
+            failure_status_codes are counted.
+
+    # ── Retry ───────────────────────────────────────────────────────
+    RetryConfig:
+      type: object
+      properties:
+        max_retries:
+          type: integer
+          format: uint32
+          default: 3
+          description: Maximum retry attempts
+        retryable_status_codes:
+          type: array
+          items:
+            type: integer
+            format: uint16
+          default: [502, 503, 504]
+          description: HTTP status codes eligible for retry
+        retryable_methods:
+          type: array
+          items:
+            type: string
+            enum: [GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, TRACE, CONNECT]
+          maxItems: 9
+          default: [GET, HEAD, OPTIONS, PUT, DELETE]
+          description: HTTP methods eligible for retry. Must be valid HTTP methods.
+        backoff:
+          $ref: "#/components/schemas/BackoffStrategy"
+        retry_on_connect_failure:
+          type: boolean
+          default: true
+          description: |
+            Retry on TCP-level failures (connect refused, DNS failure, TLS
+            error, timeout) independently of `retryable_status_codes`.
+
+    BackoffStrategy:
+      description: Retry delay strategy
+      oneOf:
+        - type: object
+          title: Fixed delay
+          required: [fixed]
+          properties:
+            fixed:
+              type: object
+              required: [delay_ms]
+              properties:
+                delay_ms:
+                  type: integer
+                  format: uint64
+                  default: 100
+                  description: Fixed delay between retries in milliseconds
+        - type: object
+          title: Exponential backoff
+          required: [exponential]
+          properties:
+            exponential:
+              type: object
+              required: [base_ms, max_ms]
+              properties:
+                base_ms:
+                  type: integer
+                  format: uint64
+                  description: Base delay in milliseconds (doubled each attempt)
+                max_ms:
+                  type: integer
+                  format: uint64
+                  description: Maximum delay cap in milliseconds
+      default:
+        fixed:
+          delay_ms: 100
+
+    # ── Upstream / Load Balancing ────────────────────────────────────
+    Upstream:
+      type: object
+      required: [id, targets, created_at, updated_at]
+      properties:
+        id:
+          type: [string, "null"]
+          description: >-
+            Unique identifier (UUID auto-generated if omitted or empty on create).
+            Custom IDs must start with an alphanumeric character and contain only
+            alphanumeric characters, dots, underscores, or hyphens (max 254 chars).
+          pattern: "^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
+          maxLength: 254
+        name:
+          type: [string, "null"]
+          description: >-
+            Optional friendly name. Must be unique across all upstreams when set.
+        targets:
+          type: array
+          items:
+            $ref: "#/components/schemas/UpstreamTarget"
+          description: >-
+            Static list of backend targets. At least one target is required unless
+            `service_discovery` is configured as an alternative target source.
+        algorithm:
+          $ref: "#/components/schemas/LoadBalancerAlgorithm"
+        hash_on:
+          type: [string, "null"]
+          description: |
+            Hash key source for consistent-hashing algorithm. Accepted values:
+            - `ip` (default) — hash on client IP address
+            - `header:<name>` — hash on a request header value (e.g. `header:x-user-id`)
+            - `cookie:<name>` — hash on a cookie value; if the cookie is absent, the
+              gateway sets a `Set-Cookie` response header to establish a sticky session.
+            Ignored by other algorithms.
+        hash_on_cookie_config:
+          oneOf:
+            - $ref: "#/components/schemas/HashOnCookieConfig"
+            - type: "null"
+          description: >-
+            Cookie attributes for `hash_on: "cookie:<name>"` sticky sessions.
+            Ignored when `hash_on` is not cookie-based. Defaults are used if omitted.
+        health_checks:
+          oneOf:
+            - $ref: "#/components/schemas/HealthCheckConfig"
+            - type: "null"
+        service_discovery:
+          oneOf:
+            - $ref: "#/components/schemas/ServiceDiscoveryConfig"
+            - type: "null"
+          description: >-
+            Dynamic target discovery configuration. When set, discovered targets
+            are merged with any static `targets`. Can be used as the sole target
+            source (allowing `targets` to be empty).
+        created_at:
+          type: [string, "null"]
+          format: date-time
+        updated_at:
+          type: [string, "null"]
+          format: date-time
+
+    UpstreamTarget:
+      type: object
+      required: [host, port]
+      properties:
+        host:
+          type: [string, "null"]
+          description: Backend hostname or IP
+        port:
+          type: integer
+          format: uint16
+        weight:
+          type: integer
+          format: uint32
+          default: 1
+          description: Relative weight for weighted round-robin
+        tags:
+          type: object
+          default: {}
+          additionalProperties:
+            type: [string, "null"]
+          description: Arbitrary key-value tags
+        path:
+          type: [string, "null"]
+          description: >-
+            Optional path prefix that overrides the proxy's backend_path when
+            this target is selected by the load balancer. If omitted or null,
+            the proxy's backend_path is used.
+
+    LoadBalancerAlgorithm:
+      type: string
+      enum:
+        - round_robin
+        - weighted_round_robin
+        - least_connections
+        - least_latency
+        - consistent_hashing
+        - random
+      default: round_robin
+
+    # ── Hash-On Cookie Config ────────────────────────────────────────
+    HashOnCookieConfig:
+      type: object
+      description: >-
+        Cookie attributes for `hash_on: "cookie:<name>"` sticky sessions.
+        Controls the Set-Cookie header injected when a new session is established.
+      properties:
+        path:
+          type: string
+          default: "/"
+          description: Cookie `Path` attribute.
+        ttl_seconds:
+          type: integer
+          default: 3600
+          description: Cookie `Max-Age` in seconds (default 1 hour).
+        domain:
+          type: [string, "null"]
+          description: Optional `Domain` attribute.
+        http_only:
+          type: boolean
+          default: true
+          description: Set `HttpOnly` flag.
+        secure:
+          type: boolean
+          default: false
+          description: Set `Secure` flag.
+        same_site:
+          type: [string, "null"]
+          enum: [Strict, Lax, None, null]
+          description: '`SameSite` attribute.'
+
+    # ── Health Checks ───────────────────────────────────────────────
+    HealthCheckConfig:
+      type: object
+      properties:
+        active:
+          oneOf:
+            - $ref: "#/components/schemas/ActiveHealthCheck"
+            - type: "null"
+        passive:
+          oneOf:
+            - $ref: "#/components/schemas/PassiveHealthCheck"
+            - type: "null"
+
+    ActiveHealthCheck:
+      type: object
+      properties:
+        http_path:
+          type: [string, "null"]
+          default: /health
+          description: HTTP path to probe
+        interval_seconds:
+          type: integer
+          format: uint64
+          default: 10
+          description: Seconds between probes
+        timeout_ms:
+          type: integer
+          format: uint64
+          default: 5000
+          description: Probe timeout in milliseconds
+        healthy_threshold:
+          type: integer
+          format: uint32
+          default: 3
+          description: Consecutive healthy probes to mark target healthy
+        unhealthy_threshold:
+          type: integer
+          format: uint32
+          default: 3
+          description: Consecutive unhealthy probes to mark target unhealthy
+        healthy_status_codes:
+          type: array
+          items:
+            type: integer
+            format: uint16
+          default: [200, 302]
+          description: Status codes considered healthy (HTTP probe only)
+        probe_type:
+          type: string
+          enum: [http, tcp, udp]
+          default: http
+          description: |
+            Type of health probe.
+            `http` — HTTP GET request (default).
+            `tcp` — TCP SYN connection probe.
+            `udp` — UDP probe with optional payload.
+        udp_probe_payload:
+          type: [string, "null"]
+          description: |
+            Hex-encoded payload to send for UDP probes (e.g., "0000").
+            If omitted, a single zero byte is sent.
+        use_tls:
+          type: boolean
+          default: false
+          description: Use HTTPS for HTTP probes
+
+    PassiveHealthCheck:
+      type: object
+      properties:
+        unhealthy_status_codes:
+          type: array
+          items:
+            type: integer
+            format: uint16
+          default: [500, 502, 503, 504]
+          description: Status codes that count toward the unhealthy threshold
+        unhealthy_threshold:
+          type: integer
+          format: uint32
+          default: 3
+          description: Failures within the window to mark target unhealthy
+        unhealthy_window_seconds:
+          type: integer
+          format: uint64
+          default: 30
+          description: Sliding window for counting failures
+
+    # ── Service Discovery ──────────────────────────────────────────
+    ServiceDiscoveryConfig:
+      type: object
+      required: [provider]
+      properties:
+        provider:
+          type: string
+          enum: [dns_sd, kubernetes, consul]
+          description: Service discovery provider type
+        dns_sd:
+          type: object
+          description: DNS-SD (SRV record) configuration. Required when provider is `dns_sd`.
+          properties:
+            service_name:
+              type: string
+              description: DNS name to query for SRV records (e.g., `_http._tcp.my-service.example.com`)
+            poll_interval_seconds:
+              type: integer
+              format: uint64
+              default: 30
+              description: Re-query interval in seconds
+        kubernetes:
+          type: object
+          description: Kubernetes EndpointSlice configuration. Required when provider is `kubernetes`.
+          properties:
+            service_name:
+              type: string
+              description: Kubernetes service name
+            namespace:
+              type: string
+              default: default
+              description: Kubernetes namespace
+            port_name:
+              type: [string, "null"]
+              description: Named port to select from EndpointSlice
+            poll_interval_seconds:
+              type: integer
+              format: uint64
+              default: 30
+        consul:
+          type: object
+          description: HashiCorp Consul configuration. Required when provider is `consul`.
+          properties:
+            address:
+              type: string
+              description: Consul HTTP API address (e.g., `http://consul:8500`)
+            service_name:
+              type: string
+              description: Service name registered in Consul
+            datacenter:
+              type: [string, "null"]
+              description: Datacenter filter (uses local datacenter if not set)
+            tag:
+              type: [string, "null"]
+              description: Service tag filter
+            healthy_only:
+              type: boolean
+              default: true
+              description: Only return healthy services
+            token:
+              type: [string, "null"]
+              description: Consul ACL token for authentication
+            poll_interval_seconds:
+              type: integer
+              format: uint64
+              default: 30
+        default_weight:
+          type: integer
+          format: uint32
+          default: 1
+          description: Default weight assigned to discovered targets
+
+    # ── Health response ─────────────────────────────────────────────
+    HealthResponse:
+      type: object
+      required: [status, timestamp, mode, database, cached_config]
+      properties:
+        status:
+          type: [string, "null"]
+          enum: [ok, degraded]
+        timestamp:
+          type: [string, "null"]
+          format: date-time
+        mode:
+          type: [string, "null"]
+          description: Gateway operating mode
+          examples:
+            - control_plane
+            - data_plane
+            - file
+        database:
+          type: object
+          required: [status, type]
+          properties:
+            status:
+              type: [string, "null"]
+              enum: [connected, disconnected]
+            type:
+              type: [string, "null"]
+              description: Database engine type
+              examples:
+                - postgres
+                - mysql
+                - sqlite
+            error:
+              type: [string, "null"]
+              description: Error message when disconnected
+        cached_config:
+          type: object
+          required: [available]
+          properties:
+            available:
+              type: boolean
+            loaded_at:
+              type: [string, "null"]
+              format: date-time
+              description: Present only when `available` is true
+            proxy_count:
+              type: integer
+              description: Present only when `available` is true
+            consumer_count:
+              type: integer
+              description: Present only when `available` is true
+
+    # ── Overload ──────────────────────────────────────────────────
+    OverloadNoProxyState:
+      type: object
+      description: |
+        Returned in control-plane mode where no proxy state exists.
+      required: [level, message]
+      properties:
+        level:
+          type: string
+          enum: [normal]
+        message:
+          type: string
+          example: No proxy state available
+
+    OverloadSnapshot:
+      type: object
+      required: [level, draining, active_connections, pressure, actions]
+      properties:
+        level:
+          type: string
+          enum: [normal, pressure, critical]
+          description: Current overload severity level
+        draining:
+          type: boolean
+          description: Whether the gateway is draining connections for shutdown
+        active_connections:
+          type: integer
+          format: uint64
+          description: Number of currently active proxy connections
+        pressure:
+          type: object
+          required: [file_descriptors, connections, event_loop_latency_us]
+          properties:
+            file_descriptors:
+              type: object
+              required: [current, max, ratio]
+              properties:
+                current:
+                  type: integer
+                  format: uint64
+                max:
+                  type: integer
+                  format: uint64
+                ratio:
+                  type: number
+                  format: double
+                  description: current / max (0.0–1.0)
+            connections:
+              type: object
+              required: [current, max, ratio]
+              properties:
+                current:
+                  type: integer
+                  format: uint64
+                max:
+                  type: integer
+                  format: uint64
+                ratio:
+                  type: number
+                  format: double
+                  description: current / max (0.0–1.0)
+            event_loop_latency_us:
+              type: integer
+              format: uint64
+              description: Event loop scheduling latency in microseconds
+        actions:
+          type: object
+          required: [disable_keepalive, reject_new_connections]
+          properties:
+            disable_keepalive:
+              type: boolean
+              description: Whether Connection:close is being sent on responses
+            reject_new_connections:
+              type: boolean
+              description: Whether new connections are being refused
+
+    # ── Admin metrics ───────────────────────────────────────────────
+    AdminMetrics:
+      type: object
+      description: |
+        Comprehensive gateway runtime metrics snapshot. Cached for 5 seconds
+        to avoid performance impact from frequent polling.
+      required:
+        - gateway
+        - connection_pools
+        - circuit_breakers
+        - health_check
+        - load_balancers
+        - caches
+        - consumer_index
+        - rate_limiting
+      properties:
+        gateway:
+          $ref: "#/components/schemas/AdminMetricsGateway"
+        connection_pools:
+          $ref: "#/components/schemas/AdminMetricsConnectionPools"
+        circuit_breakers:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminMetricsCircuitBreaker"
+          description: |
+            Per-proxy circuit breaker states. Only proxies with circuit breaker
+            config that have been accessed appear here.
+        health_check:
+          $ref: "#/components/schemas/AdminMetricsHealthCheck"
+        load_balancers:
+          $ref: "#/components/schemas/AdminMetricsLoadBalancers"
+        caches:
+          $ref: "#/components/schemas/AdminMetricsCaches"
+        consumer_index:
+          $ref: "#/components/schemas/AdminMetricsConsumerIndex"
+        rate_limiting:
+          $ref: "#/components/schemas/AdminMetricsRateLimiting"
+
+    AdminMetricsGateway:
+      type: object
+      description: Top-level gateway info and throughput counters.
+      required:
+        - mode
+        - ferrum_version
+        - uptime_seconds
+        - requests_per_second_current
+        - status_codes_last_second
+        - proxy_count
+        - consumer_count
+        - upstream_count
+        - plugin_config_count
+      properties:
+        mode:
+          type: string
+          enum: [database, file, cp, dp]
+        ferrum_version:
+          type: string
+          description: Ferrum Edge binary version
+          example: "0.9.0"
+          description: Operating mode (set by FERRUM_MODE)
+        uptime_seconds:
+          type: integer
+          format: int64
+          description: Seconds since the gateway process started
+        requests_per_second_current:
+          type: integer
+          format: int64
+          description: Requests processed in the most recent 1-second window
+        status_codes_last_second:
+          type: object
+          additionalProperties:
+            type: integer
+          description: |
+            Map of HTTP status code (as string key) to count in the last second.
+            Only status codes that were seen appear as keys.
+          example:
+            "200": 1105
+            "404": 38
+            "429": 31
+        config_last_updated_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: RFC 3339 timestamp of the last successful config load/reload
+        config_source_status:
+          type: string
+          enum: [online, "n/a"]
+          description: |
+            "online" when a database is configured and reachable,
+            "n/a" for file mode or CP mode without a database
+        proxy_count:
+          type: integer
+          description: Number of proxy routes in the active config
+        consumer_count:
+          type: integer
+          description: Number of consumers in the active config
+        upstream_count:
+          type: integer
+          description: Number of upstreams (load-balanced target groups) in the active config
+        plugin_config_count:
+          type: integer
+          description: Number of plugin configurations in the active config
+
+    AdminMetricsConnectionPools:
+      type: object
+      description: |
+        Connection pool sizes for all four protocol pools. Each pool reuses
+        connections to backend services to avoid TCP/TLS handshake overhead.
+      properties:
+        http:
+          type: object
+          description: HTTP/1.1 connection pool (reqwest-based, supports HTTP and HTTPS backends)
+          properties:
+            total_pools:
+              type: integer
+              description: Number of distinct backend host:port:protocol pool entries
+            max_idle_per_host:
+              type: integer
+              description: Maximum idle connections kept per host (from FERRUM_POOL_MAX_IDLE_PER_HOST)
+            idle_timeout_seconds:
+              type: integer
+              description: Seconds before an idle connection is evicted
+            entries_per_host:
+              type: object
+              additionalProperties:
+                type: integer
+              description: Map of pool key (host:port:tls) to connection count
+        grpc:
+          type: object
+          description: gRPC HTTP/2 connection pool (h2c + h2 with trailer support)
+          properties:
+            total_connections:
+              type: integer
+        http2:
+          type: object
+          description: HTTP/2 connection pool for HTTPS backends (stream multiplexing)
+          properties:
+            total_connections:
+              type: integer
+        http3:
+          type: object
+          description: HTTP/3 QUIC connection pool
+          properties:
+            total_connections:
+              type: integer
+
+    AdminMetricsCircuitBreaker:
+      type: object
+      description: |
+        Circuit breaker state for a single proxy. Three states:
+        - **closed**: Normal operation, requests pass through
+        - **open**: Failures exceeded threshold, requests rejected with 503
+        - **half_open**: Timeout elapsed, limited probe requests allowed to test recovery
+      required: [proxy_id, state, failure_count, success_count]
+      properties:
+        proxy_id:
+          type: string
+          description: ID of the proxy this circuit breaker protects
+        state:
+          type: string
+          enum: [closed, open, half_open]
+        failure_count:
+          type: integer
+          description: |
+            Consecutive failures in current state. In closed state, triggers
+            opening when it reaches the configured threshold.
+        success_count:
+          type: integer
+          description: |
+            Consecutive successes during half_open state. When this reaches the
+            configured success_threshold, the circuit closes (recovers).
+
+    AdminMetricsHealthCheck:
+      type: object
+      description: |
+        Health check state showing which upstream targets are currently
+        marked unhealthy and excluded from load balancing.
+      required: [unhealthy_target_count, unhealthy_targets]
+      properties:
+        unhealthy_target_count:
+          type: integer
+          description: Number of targets currently marked unhealthy
+        unhealthy_targets:
+          type: array
+          items:
+            type: object
+            required: [target, since_epoch_ms]
+            properties:
+              target:
+                type: string
+                description: "Target in host:port format"
+                example: "10.0.3.12:8080"
+              since_epoch_ms:
+                type: integer
+                format: int64
+                description: Unix epoch milliseconds when the target was marked unhealthy
+
+    AdminMetricsLoadBalancers:
+      type: object
+      description: |
+        Active connection counts per upstream target. Only upstreams with
+        at least one active connection appear. Useful for verifying even
+        distribution across targets and spotting hot targets.
+      properties:
+        active_connections:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties:
+              type: integer
+          description: |
+            Nested map: upstream_id → { "host:port" → active_connection_count }.
+            Only targets with count > 0 are included.
+
+    AdminMetricsCaches:
+      type: object
+      description: Router lookup cache and DNS resolver cache statistics.
+      properties:
+        router:
+          type: object
+          description: |
+            Router cache stores (host, path) → proxy lookups for O(1) repeated hits.
+            Prefix and regex routes use separate cache partitions.
+          properties:
+            prefix_cache_entries:
+              type: integer
+              description: Current entries in the prefix route cache
+            regex_cache_entries:
+              type: integer
+              description: Current entries in the regex route cache
+            prefix_eviction_count:
+              type: integer
+              format: int64
+              description: Total number of prefix cache eviction sweeps since startup
+            regex_eviction_count:
+              type: integer
+              format: int64
+              description: Total number of regex cache eviction sweeps since startup
+            max_cache_entries:
+              type: integer
+              description: Maximum entries per cache partition before eviction triggers
+        dns:
+          type: object
+          description: DNS resolver cache with stale-while-revalidate support
+          properties:
+            cache_entries:
+              type: integer
+              description: Number of hostname entries currently cached
+
+    AdminMetricsConsumerIndex:
+      type: object
+      description: |
+        Consumer credential index counts by authentication type.
+        These are pre-built hash map indexes for O(1) credential lookup.
+      required: [total_consumers, key_auth_credentials, basic_auth_credentials, mtls_credentials]
+      properties:
+        total_consumers:
+          type: integer
+          description: Total number of consumers loaded in the index
+        key_auth_credentials:
+          type: integer
+          description: Number of API key credentials indexed (for key_auth plugin)
+        basic_auth_credentials:
+          type: integer
+          description: Number of username credentials indexed (for basic_auth plugin)
+        mtls_credentials:
+          type: integer
+          description: Number of mTLS identity credentials indexed (for mtls_auth plugin)
+
+    AdminMetricsRateLimiting:
+      type: object
+      description: |
+        Rate limiter state across all plugin instances. Each tracked key
+        represents a unique client (by IP or consumer) with an active
+        rate-limit window. Bounded to 100K entries per plugin instance.
+      required: [tracked_key_count]
+      properties:
+        tracked_key_count:
+          type: integer
+          description: |
+            Total number of rate-limit keys currently tracked across all
+            rate_limiting plugin instances (deduplicated by plugin identity)
+
+    # ── Pagination envelope ────────────────────────────────────────────
+    Pagination:
+      type: object
+      description: |
+        Pagination metadata returned when `limit` or `offset` query parameters
+        are provided on a list endpoint. Without these parameters, list endpoints
+        return a plain JSON array for backward compatibility.
+      required: [offset, limit, total]
+      properties:
+        offset:
+          type: integer
+          description: Number of items skipped
+        limit:
+          type: integer
+          description: Maximum items per page
+        total:
+          type: integer
+          description: Total number of items in the collection (before pagination)
+
+    # ── Batch ──────────────────────────────────────────────────────────
+    BatchCreateRequest:
+      type: object
+      description: |
+        Batch create request. All fields are optional — include only the
+        resource types you want to create.
+      properties:
+        proxies:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProxyCreate"
+          description: Proxies to create
+        consumers:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConsumerCreate"
+          description: Consumers to create
+        plugin_configs:
+          type: array
+          items:
+            $ref: "#/components/schemas/PluginConfigCreate"
+          description: Plugin configurations to create
+        upstreams:
+          type: array
+          items:
+            $ref: "#/components/schemas/Upstream"
+          description: Upstreams to create
+
+    BatchCreateResponse:
+      type: object
+      required: [created]
+      properties:
+        created:
+          type: object
+          required: [proxies, consumers, plugin_configs, upstreams]
+          properties:
+            proxies:
+              type: integer
+              description: Number of proxies created
+            consumers:
+              type: integer
+              description: Number of consumers created
+            plugin_configs:
+              type: integer
+              description: Number of plugin configs created
+            upstreams:
+              type: integer
+              description: Number of upstreams created
+        errors:
+          type: array
+          items:
+            type: string
+          description: Present only on 207 Multi-Status; lists per-type error messages
+
+    BackupResponse:
+      type: object
+      required: [version, ferrum_version, exported_at, source, counts, proxies, consumers, plugin_configs, upstreams]
+      properties:
+        version:
+          type: string
+          description: Configuration schema version
+          example: "1"
+        ferrum_version:
+          type: string
+          description: Ferrum Edge binary version that produced this backup
+          example: "0.9.0"
+        exported_at:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp of when the backup was created
+        source:
+          type: string
+          enum: [database, cached]
+          description: Where the config was read from
+        counts:
+          type: object
+          required: [proxies, consumers, plugin_configs, upstreams]
+          properties:
+            proxies:
+              type: integer
+            consumers:
+              type: integer
+            plugin_configs:
+              type: integer
+            upstreams:
+              type: integer
+        proxies:
+          type: array
+          items:
+            $ref: "#/components/schemas/Proxy"
+        consumers:
+          type: array
+          items:
+            $ref: "#/components/schemas/Consumer"
+        plugin_configs:
+          type: array
+          items:
+            $ref: "#/components/schemas/PluginConfig"
+        upstreams:
+          type: array
+          items:
+            $ref: "#/components/schemas/Upstream"
+
+    RestoreRequest:
+      type: object
+      description: |
+        Same format as the backup output or the batch create request.
+        All fields are optional — omitted resource types are treated as empty.
+      properties:
+        proxies:
+          type: array
+          items:
+            $ref: "#/components/schemas/Proxy"
+        consumers:
+          type: array
+          items:
+            $ref: "#/components/schemas/Consumer"
+        plugin_configs:
+          type: array
+          items:
+            $ref: "#/components/schemas/PluginConfig"
+        upstreams:
+          type: array
+          items:
+            $ref: "#/components/schemas/Upstream"
+
+    RestoreResponse:
+      type: object
+      required: [restored]
+      properties:
+        restored:
+          type: object
+          required: [proxies, consumers, plugin_configs, upstreams]
+          properties:
+            proxies:
+              type: integer
+              description: Number of proxies restored
+            consumers:
+              type: integer
+              description: Number of consumers restored
+            plugin_configs:
+              type: integer
+              description: Number of plugin configs restored
+            upstreams:
+              type: integer
+              description: Number of upstreams restored
+        errors:
+          type: array
+          items:
+            type: string
+          description: Present only on 207 Multi-Status; lists per-type error messages
+
+    # ── Plugin Config Schemas ──────────────────────────────────────────
+    # Per-plugin configuration schemas. The `config` field on PluginConfig
+    # accepts one of these depending on the `plugin_name` value.
+
+    StdoutLoggingConfig:
+      type: object
+      description: "Plugin: stdout_logging — Logs JSON transaction summaries to stdout."
+      properties: {}
+
+    HttpLoggingConfig:
+      type: object
+      description: "Plugin: http_logging — Sends transaction logs to an HTTP endpoint in batches."
+      properties:
+        endpoint_url:
+          type: string
+          description: URL to POST transaction logs to
+        custom_headers:
+          type: object
+          additionalProperties:
+            type: string
+          description: "Key-value pairs of custom HTTP headers to include on every batch request. Use this for service-specific auth (e.g., DD-API-KEY for Datadog, Api-Key for New Relic) or metadata headers."
+          example:
+            DD-API-KEY: your-datadog-api-key
+        batch_size:
+          type: integer
+          default: 50
+          description: Number of entries to buffer before sending a batch
+        flush_interval_ms:
+          type: integer
+          default: 1000
+          minimum: 100
+          description: Max milliseconds before flushing a partial batch
+        max_retries:
+          type: integer
+          default: 3
+          description: Retry attempts on failed batch delivery
+        retry_delay_ms:
+          type: integer
+          default: 1000
+          description: Delay in milliseconds between retry attempts
+        buffer_capacity:
+          type: integer
+          default: 10000
+          description: Channel capacity — new entries are dropped when full
+
+    TcpLoggingConfig:
+      type: object
+      description: "Plugin: tcp_logging — Sends transaction logs as NDJSON over a persistent TCP or TCP+TLS connection."
+      required:
+        - host
+        - port
+      properties:
+        host:
+          type: string
+          description: Hostname or IP of the TCP log receiver
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          description: Port of the TCP log receiver
+        tls:
+          type: boolean
+          default: false
+          description: Enable TLS encryption for the connection
+        tls_server_name:
+          type: string
+          description: SNI server name override for TLS (defaults to host)
+        batch_size:
+          type: integer
+          default: 50
+          description: Number of entries to buffer before sending a batch
+        flush_interval_ms:
+          type: integer
+          default: 1000
+          minimum: 100
+          description: Max milliseconds before flushing a partial batch
+        max_retries:
+          type: integer
+          default: 3
+          description: Retry attempts on failed batch delivery
+        retry_delay_ms:
+          type: integer
+          default: 1000
+          description: Delay in milliseconds between retry attempts
+        buffer_capacity:
+          type: integer
+          default: 10000
+          description: Channel capacity — new entries are dropped when full
+        connect_timeout_ms:
+          type: integer
+          default: 5000
+          minimum: 100
+          description: TCP connection timeout in milliseconds
+
+    UdpLoggingConfig:
+      type: object
+      description: "Plugin: udp_logging — Sends transaction logs to a UDP/DTLS endpoint in batches."
+      required:
+        - host
+        - port
+      properties:
+        host:
+          type: string
+          description: UDP endpoint hostname or IP address
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          description: UDP endpoint port
+        dtls:
+          type: boolean
+          default: false
+          description: Enable DTLS encryption for log datagrams
+        dtls_cert_path:
+          type: string
+          description: PEM client certificate for DTLS mutual TLS
+        dtls_key_path:
+          type: string
+          description: PEM private key for DTLS mutual TLS (must be paired with dtls_cert_path)
+        dtls_ca_cert_path:
+          type: string
+          description: PEM CA certificate for verifying the DTLS server
+        dtls_no_verify:
+          type: boolean
+          default: false
+          description: Skip DTLS server certificate verification (testing only)
+        batch_size:
+          type: integer
+          default: 10
+          description: Number of entries to buffer before sending a batch
+        flush_interval_ms:
+          type: integer
+          default: 1000
+          minimum: 100
+          description: Max milliseconds before flushing a partial batch
+        max_retries:
+          type: integer
+          default: 1
+          description: Retry attempts on failed batch delivery
+        retry_delay_ms:
+          type: integer
+          default: 500
+          description: Delay in milliseconds between retry attempts
+        buffer_capacity:
+          type: integer
+          default: 10000
+          description: Channel capacity — new entries are dropped when full
+
+    KafkaLoggingConfig:
+      type: object
+      description: "Plugin: kafka_logging — Produces transaction summaries as JSON messages to an Apache Kafka topic. Uses an async channel to decouple the proxy hot path from Kafka I/O, with librdkafka handling batching, compression, and delivery retries."
+      required:
+        - broker_list
+        - topic
+      properties:
+        broker_list:
+          type: string
+          description: Comma-separated Kafka broker addresses (e.g., broker1:9092,broker2:9092)
+        topic:
+          type: string
+          description: Kafka topic to produce messages to
+        key_field:
+          type: string
+          enum: [client_ip, proxy_id, none]
+          default: client_ip
+          description: "Partition key field: client_ip (groups by client), proxy_id (groups by route), none (round-robin)"
+        buffer_capacity:
+          type: integer
+          default: 10000
+          minimum: 1
+          description: "Channel capacity — new entries are dropped when full. Each entry is ~1-2 KB, so 10,000 entries may use ~10-20 MB"
+        compression:
+          type: string
+          enum: [none, gzip, snappy, lz4, zstd]
+          default: lz4
+          description: Kafka message compression algorithm
+        flush_timeout_seconds:
+          type: integer
+          default: 5
+          minimum: 1
+          description: Seconds to wait for librdkafka to flush pending messages during graceful shutdown
+        acks:
+          type: string
+          enum: ["0", "1", "all", "-1"]
+          description: "Delivery acknowledgment level: 0 (fire-and-forget), 1 (leader ack), all/-1 (full ISR ack)"
+        message_timeout_ms:
+          type: integer
+          description: Timeout for message delivery in milliseconds
+        security_protocol:
+          type: string
+          enum: [plaintext, ssl, sasl_plaintext, sasl_ssl]
+          description: Kafka security protocol
+        sasl_mechanism:
+          type: string
+          description: SASL mechanism (e.g., PLAIN, SCRAM-SHA-256, SCRAM-SHA-512)
+        sasl_username:
+          type: string
+          description: SASL username
+        sasl_password:
+          type: string
+          description: SASL password
+        ssl_ca_location:
+          type: string
+          description: Path to CA certificate for broker TLS verification. Falls back to FERRUM_TLS_CA_BUNDLE_PATH
+        ssl_no_verify:
+          type: boolean
+          description: Skip broker TLS certificate verification. Falls back to FERRUM_TLS_NO_VERIFY
+        ssl_certificate_location:
+          type: string
+          description: Path to client certificate for mTLS
+        ssl_key_location:
+          type: string
+          description: Path to client private key for mTLS
+        producer_config:
+          type: object
+          additionalProperties:
+            type: string
+          description: "Escape hatch: arbitrary librdkafka producer properties as key-value pairs"
+
+    WsLoggingConfig:
+      type: object
+      description: "Plugin: ws_logging — Sends transaction logs to a WebSocket endpoint in batches."
+      properties:
+        endpoint_url:
+          type: string
+          description: WebSocket URL (ws:// or wss://) to send transaction logs to
+        reconnect_delay_ms:
+          type: integer
+          default: 5000
+          description: Delay in milliseconds before reconnecting after connection failure
+        batch_size:
+          type: integer
+          default: 50
+          description: Number of entries to buffer before sending a batch
+        flush_interval_ms:
+          type: integer
+          default: 1000
+          minimum: 100
+          description: Max milliseconds before flushing a partial batch
+        max_retries:
+          type: integer
+          default: 3
+          description: Retry attempts on failed batch delivery
+        retry_delay_ms:
+          type: integer
+          default: 1000
+          description: Delay in milliseconds between retry attempts
+        buffer_capacity:
+          type: integer
+          default: 10000
+          description: Channel capacity — new entries are dropped when full
+
+    StatsdLoggingConfig:
+      type: object
+      description: "Plugin: statsd_logging — Sends transaction metrics to a StatsD-compatible server over UDP."
+      required:
+        - host
+      properties:
+        host:
+          type: string
+          description: StatsD server hostname or IP address
+        port:
+          type: integer
+          default: 8125
+          minimum: 1
+          maximum: 65535
+          description: StatsD server UDP port
+        prefix:
+          type: string
+          default: "ferrum"
+          description: Metric name prefix (e.g., ferrum.request.count)
+        global_tags:
+          type: object
+          additionalProperties:
+            type: string
+          description: Key-value pairs appended as DogStatsD tags to every metric
+        flush_interval_ms:
+          type: integer
+          default: 500
+          minimum: 50
+          description: Max milliseconds before flushing buffered metrics
+        buffer_capacity:
+          type: integer
+          default: 10000
+          description: Channel capacity — new entries are dropped when full
+        max_batch_lines:
+          type: integer
+          default: 50
+          description: Max metric entries to batch before flushing
+
+    TransactionDebuggerConfig:
+      type: object
+      description: "Plugin: transaction_debugger — Emits verbose request/response diagnostics via tracing::debug on the transaction_debug target. Requires FERRUM_LOG_LEVEL=debug to see output."
+      properties:
+        log_request_body:
+          type: boolean
+          default: false
+          description: Log incoming request body
+        log_response_body:
+          type: boolean
+          default: false
+          description: Log backend response body
+        redacted_headers:
+          type: array
+          items:
+            type: string
+          description: Additional header names to redact beyond the built-in sensitive list
+
+    CorrelationIdConfig:
+      type: object
+      description: "Plugin: correlation_id — Generates and propagates correlation IDs."
+      properties:
+        header_name:
+          type: string
+          default: X-Correlation-ID
+          description: Header name for correlation ID
+        generator:
+          type: string
+          default: uuid
+          description: ID generation strategy
+        echo_downstream:
+          type: boolean
+          default: true
+          description: Include correlation ID in response headers
+
+    PrometheusMetricsConfig:
+      type: object
+      description: "Plugin: prometheus_metrics — Exports gateway metrics in Prometheus format."
+      properties:
+        render_cache_ttl_seconds:
+          type: integer
+          default: 5
+          description: How long the cached /metrics response is served before rebuilding (seconds)
+        stale_entry_ttl_seconds:
+          type: integer
+          default: 3600
+          description: How long idle metric entries live before eviction (seconds). Prevents unbounded memory growth from deleted/recreated proxies
+        cache_invalidation_min_age_ms:
+          type: integer
+          default: 500
+          description: Minimum age (ms) of the render cache before record() will invalidate it. Under extreme load this prevents an allocation per request
+
+    OtelTracingConfig:
+      type: object
+      description: "Plugin: otel_tracing — W3C Trace Context propagation and OTLP span export."
+      properties:
+        endpoint:
+          type: string
+          description: OTLP/HTTP collector endpoint. Omit for propagation-only mode
+        service_name:
+          type: string
+          default: ferrum-edge
+          description: Service name in spans and resource attributes
+        deployment_environment:
+          type: string
+          description: deployment.environment resource attribute
+        generate_trace_id:
+          type: boolean
+          default: true
+          description: Generate trace IDs for requests without incoming traceparent
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+          default: {}
+          description: Custom HTTP headers sent with OTLP exports
+        authorization:
+          type: string
+          description: Authorization header value for OTLP exports
+        batch_size:
+          type: integer
+          default: 50
+          description: Spans per export batch
+        flush_interval_ms:
+          type: integer
+          default: 5000
+          description: Max delay before flushing a partial batch
+        buffer_capacity:
+          type: integer
+          default: 10000
+          description: Max pending spans; drops oldest when full
+        max_retries:
+          type: integer
+          default: 2
+          description: Retry attempts on export failure
+        retry_delay_ms:
+          type: integer
+          default: 1000
+          description: Delay between retries
+
+    MtlsAuthConfig:
+      type: object
+      description: "Plugin: mtls_auth — Authenticates using client TLS certificate fields for HTTP-family and TCP+TLS proxies."
+      properties:
+        cert_field:
+          type: string
+          default: subject_cn
+          enum: [subject_cn, subject_ou, subject_o, san_dns, san_email, fingerprint_sha256, serial]
+          description: Certificate field to use as identity
+        allowed_issuers:
+          type: array
+          items:
+            type: object
+            properties:
+              cn:
+                type: string
+              o:
+                type: string
+              ou:
+                type: string
+          description: Per-proxy issuer DN filters (AND within entry, OR across entries)
+        allowed_ca_fingerprints_sha256:
+          type: array
+          items:
+            type: string
+          description: SHA-256 fingerprints of allowed CA/intermediate certs
+
+    JwksAuthConfig:
+      type: object
+      description: "Plugin: jwks_auth — Multi-provider JWKS JWT validation with claim-based authorization."
+      required: [providers]
+      properties:
+        providers:
+          type: array
+          items:
+            type: object
+            properties:
+              jwks_uri:
+                type: string
+                description: Direct URL to the IdP's JWKS endpoint
+              discovery_url:
+                type: string
+                description: OIDC discovery URL (auto-discovers jwks_uri)
+              issuer:
+                type: string
+                description: Expected JWT iss claim — routes tokens to this provider
+              audience:
+                type: string
+                description: Expected JWT aud claim
+              required_scopes:
+                type: array
+                items:
+                  type: string
+                description: Scopes that must all be present in the token
+              required_roles:
+                type: array
+                items:
+                  type: string
+                description: Roles where any one must be present
+              scope_claim:
+                type: string
+                description: Per-provider override for scope claim path
+              role_claim:
+                type: string
+                description: Per-provider override for role claim path
+              consumer_identity_claim:
+                type: string
+                description: Per-provider override for consumer identity claim (falls back to global)
+              consumer_header_claim:
+                type: string
+                description: Per-provider override for consumer header claim (falls back to global)
+          description: Array of identity provider configurations
+        scope_claim:
+          type: string
+          default: scope
+          description: Global scope claim path
+        role_claim:
+          type: string
+          default: roles
+          description: Global role claim path
+        consumer_identity_claim:
+          type: string
+          default: sub
+          description: JWT claim for consumer lookup
+        consumer_header_claim:
+          type: string
+          description: JWT claim for X-Consumer-Username header (default same as consumer_identity_claim)
+        jwks_refresh_interval_secs:
+          type: integer
+          format: uint64
+          default: 900
+          description: JWKS key refresh interval in seconds
+
+    JwtAuthConfig:
+      type: object
+      description: "Plugin: jwt_auth — HS256 JWT Bearer token authentication."
+      properties:
+        token_lookup:
+          type: string
+          default: "header:Authorization"
+          description: "Where to find the token (header:<name> or query:<name>)"
+        consumer_claim_field:
+          type: string
+          default: sub
+          description: JWT claim identifying the consumer
+
+    KeyAuthConfig:
+      type: object
+      description: "Plugin: key_auth — API key authentication."
+      properties:
+        key_location:
+          type: string
+          default: "header:X-API-Key"
+          description: "Where to find the key (header:<name> or query:<name>)"
+
+    BasicAuthConfig:
+      type: object
+      description: "Plugin: basic_auth — HTTP Basic credentials (HMAC-SHA256 or bcrypt)."
+      properties: {}
+
+    LdapAuthConfig:
+      type: object
+      description: "Plugin: ldap_auth — LDAP directory authentication with optional AD group filtering."
+      required:
+        - ldap_url
+      properties:
+        ldap_url:
+          type: string
+          description: "LDAP server URL (ldap:// or ldaps://)"
+          example: "ldap://ldap.example.com:389"
+        bind_dn_template:
+          type: string
+          description: "Direct bind DN template with {username} placeholder"
+          example: "uid={username},ou=users,dc=example,dc=com"
+        search_base_dn:
+          type: string
+          description: "Base DN for search-then-bind user search"
+        search_filter:
+          type: string
+          description: "LDAP search filter with {username} placeholder"
+          example: "(&(objectClass=user)(sAMAccountName={username}))"
+        service_account_dn:
+          type: string
+          description: "DN for the service account used in search-then-bind"
+        service_account_password:
+          type: string
+          description: "Password for the service account"
+        group_base_dn:
+          type: string
+          description: "Base DN for group membership search"
+        group_filter:
+          type: string
+          description: "Group search filter with {user_dn} and {username} placeholders"
+        required_groups:
+          type: array
+          items:
+            type: string
+          description: "LDAP/AD group names the user must belong to (OR logic)"
+        group_attribute:
+          type: string
+          default: "cn"
+          description: "Attribute containing the group name"
+        starttls:
+          type: boolean
+          default: false
+          description: "Use STARTTLS to upgrade ldap:// connections"
+        connect_timeout_seconds:
+          type: integer
+          default: 5
+          description: "LDAP connection and operation timeout in seconds"
+        cache_ttl_seconds:
+          type: integer
+          default: 0
+          description: "Cache TTL for successful auth results (0 = disabled)"
+        consumer_mapping:
+          type: boolean
+          default: true
+          description: "Whether to map LDAP user to a gateway Consumer"
+
+    HmacAuthConfig:
+      type: object
+      description: "Plugin: hmac_auth — HMAC signature verification."
+      properties:
+        secret:
+          type: string
+          description: Shared secret for HMAC computation
+        algorithm:
+          type: string
+          description: Hash algorithm (e.g., sha256)
+        header:
+          type: string
+          description: Header containing the HMAC signature
+
+    CorsConfig:
+      type: object
+      description: "Plugin: cors — Cross-Origin Resource Sharing."
+      properties:
+        allowed_origins:
+          type: array
+          items:
+            type: string
+          default: ["*"]
+          description: Permitted origins
+        allowed_methods:
+          type: array
+          items:
+            type: string
+          default: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+          description: Allowed methods
+        allowed_headers:
+          type: array
+          items:
+            type: string
+          default: ["Accept", "Authorization", "Content-Type", "Origin", "X-Requested-With"]
+          description: Allowed headers
+        exposed_headers:
+          type: array
+          items:
+            type: string
+          default: []
+          description: Response headers exposed to browser JavaScript
+        allow_credentials:
+          type: boolean
+          default: false
+          description: "Send Access-Control-Allow-Credentials: true"
+        max_age:
+          type: integer
+          format: uint64
+          default: 86400
+          description: Preflight cache duration in seconds
+        preflight_continue:
+          type: boolean
+          default: false
+          description: Pass preflight requests to backend
+
+    AccessControlConfig:
+      type: object
+      description: >-
+        Plugin: access_control — consumer-based and group-based allow/deny for
+        HTTP-family and TCP stream proxies. Evaluation order: deny (consumer
+        username → group) then allow (consumer username → group). At least one
+        rule must be configured. Use ip_restriction for IP/CIDR rules.
+      properties:
+        allowed_consumers:
+          type: array
+          items:
+            type: string
+          description: Usernames allowed access (empty = no username-level allow rule)
+        disallowed_consumers:
+          type: array
+          items:
+            type: string
+          description: Usernames explicitly denied
+        allowed_groups:
+          type: array
+          items:
+            type: string
+          description: ACL group names allowed access — matches against consumer acl_groups
+        disallowed_groups:
+          type: array
+          items:
+            type: string
+          description: ACL group names explicitly denied — matches against consumer acl_groups
+        allow_authenticated_identity:
+          type: boolean
+          default: false
+          description: Allow requests with an external authenticated identity even when no Consumer was mapped
+
+    TcpConnectionThrottleConfig:
+      type: object
+      description: "Plugin: tcp_connection_throttle — Caps active TCP connections per Consumer when a stream auth plugin identified one, else per client IP."
+      required: [max_connections_per_key]
+      properties:
+        max_connections_per_key:
+          type: integer
+          format: uint64
+          minimum: 1
+          description: Maximum active TCP connections allowed for one Consumer/IP key
+
+    IpRestrictionConfig:
+      type: object
+      description: "Plugin: ip_restriction — IP/CIDR access control."
+      properties:
+        allow:
+          type: array
+          items:
+            type: string
+          description: Allowed IP addresses or CIDR ranges
+        deny:
+          type: array
+          items:
+            type: string
+          description: Denied IP addresses or CIDR ranges
+
+    BotDetectionConfig:
+      type: object
+      description: "Plugin: bot_detection — User-Agent pattern blocking."
+      properties:
+        blocked_patterns:
+          type: array
+          items:
+            type: string
+          description: User-Agent substrings to block
+        allow_list:
+          type: array
+          items:
+            type: string
+          default: []
+          description: User-Agent substrings to always allow
+        allow_missing_user_agent:
+          type: boolean
+          default: true
+          description: Allow requests with no User-Agent header
+        custom_response_code:
+          type: integer
+          format: uint16
+          default: 403
+          description: HTTP status code for blocked requests
+
+    RequestTransformerConfig:
+      type: object
+      description: "Plugin: request_transformer — Modifies request headers, query params, and JSON body."
+      properties:
+        rules:
+          type: array
+          items:
+            type: object
+            required: [operation, key]
+            properties:
+              operation:
+                type: string
+                enum: [add, remove, update, rename]
+              target:
+                type: string
+                enum: [header, query, body]
+                default: header
+              key:
+                type: string
+                description: Header name, query param, or dot-notation body path
+              value:
+                type: string
+                description: Value to set (for add/update operations)
+              new_key:
+                type: string
+                description: New key name (for rename operations)
+
+    ResponseTransformerConfig:
+      type: object
+      description: "Plugin: response_transformer — Modifies response headers and JSON body."
+      properties:
+        rules:
+          type: array
+          items:
+            type: object
+            required: [operation, key]
+            properties:
+              operation:
+                type: string
+                enum: [add, remove, update, rename]
+              target:
+                type: string
+                enum: [header, body]
+                default: header
+              key:
+                type: string
+              value:
+                type: string
+              new_key:
+                type: string
+
+    CompressionConfig:
+      type: object
+      description: "Plugin: compression — On-the-fly response compression (gzip, brotli) and optional request decompression."
+      properties:
+        algorithms:
+          type: array
+          items:
+            type: string
+            enum: [gzip, br, brotli]
+          default: [gzip, br]
+          description: "Enabled compression algorithms in server preference order"
+        min_content_length:
+          type: integer
+          format: uint64
+          default: 256
+          description: "Skip compression for bodies smaller than this (bytes)"
+        content_types:
+          type: array
+          items:
+            type: string
+          description: "Content-type whitelist. Defaults to 10 common text/application types"
+        disable_on_etag:
+          type: boolean
+          default: false
+          description: "Skip compression when the response has an ETag header"
+        remove_accept_encoding:
+          type: boolean
+          default: true
+          description: "Strip Accept-Encoding from backend request so backend sends uncompressed"
+        gzip_level:
+          type: integer
+          minimum: 1
+          maximum: 9
+          default: 6
+          description: "Gzip compression level (1=fastest, 9=best)"
+        brotli_quality:
+          type: integer
+          minimum: 0
+          maximum: 11
+          default: 4
+          description: "Brotli quality (0=fastest, 11=best)"
+        decompress_request:
+          type: boolean
+          default: false
+          description: "Enable decompression of gzip/brotli request bodies"
+        max_decompressed_request_size:
+          type: integer
+          format: uint64
+          default: 10485760
+          description: "Zip bomb protection: max decompressed request body size in bytes (10 MB)"
+
+    SseConfig:
+      type: object
+      description: "Plugin: sse — Server-Sent Events stream handler. Validates SSE client criteria, shapes requests, and ensures proper streaming response headers."
+      properties:
+        require_get_method:
+          type: boolean
+          default: true
+          description: "Reject non-GET requests with 405 (SSE is read-only)"
+        require_accept_header:
+          type: boolean
+          default: true
+          description: "Require Accept: text/event-stream header (406 if missing)"
+        strip_accept_encoding:
+          type: boolean
+          default: true
+          description: "Strip Accept-Encoding to prevent compressed responses breaking SSE framing"
+        add_no_buffering_header:
+          type: boolean
+          default: true
+          description: "Add X-Accel-Buffering: no to disable nginx/ALB response buffering"
+        strip_content_length:
+          type: boolean
+          default: true
+          description: "Remove Content-Length from SSE responses (streams are indefinite)"
+        retry_ms:
+          type: integer
+          format: uint64
+          description: "EventSource reconnection hint in milliseconds"
+        force_sse_content_type:
+          type: boolean
+          default: false
+          description: "Force Content-Type: text/event-stream even if backend returns something else"
+        wrap_non_sse_responses:
+          type: boolean
+          default: false
+          description: "Wrap non-SSE response bodies in data: ...\\n\\n SSE event framing (enables response buffering)"
+
+    RateLimitingConfig:
+      type: object
+      description: "Plugin: rate_limiting — Per-IP or per-consumer request rate limiting. On stream proxies, consumer mode uses the identified stream Consumer when available and otherwise falls back to client IP. Supports centralized Redis-backed mode for coordinating rate limits across multiple gateway instances."
+      properties:
+        limit_by:
+          type: string
+          enum: [ip, consumer]
+          default: ip
+          description: "Rate limit key: ip or consumer"
+        expose_headers:
+          type: boolean
+          default: false
+          description: Inject x-ratelimit-* headers on requests and responses
+        requests_per_second:
+          type: integer
+          format: uint64
+          description: Max requests per second
+        requests_per_minute:
+          type: integer
+          format: uint64
+          description: Max requests per minute
+        requests_per_hour:
+          type: integer
+          format: uint64
+          description: Max requests per hour
+        sync_mode:
+          type: string
+          enum: [local, redis]
+          default: local
+          description: "Rate limit state storage: 'local' (in-memory per instance) or 'redis' (centralized across instances). Any RESP-compatible server works (Redis, Valkey, DragonflyDB, KeyDB, Garnet)."
+        redis_url:
+          type: string
+          description: "Redis connection URL (e.g., redis://host:6379/0). Required when sync_mode is 'redis'."
+        redis_tls:
+          type: boolean
+          default: false
+          description: "Enable TLS for the Redis connection (upgrades redis:// to rediss://). CA verification uses gateway-level FERRUM_TLS_CA_BUNDLE_PATH; skip-verify uses FERRUM_TLS_NO_VERIFY."
+        redis_key_prefix:
+          type: string
+          default: "ferrum:rate_limiting"
+          description: Key prefix for all Redis keys (namespace isolation)
+        redis_pool_size:
+          type: integer
+          default: 4
+          description: Number of multiplexed Redis connections
+        redis_username:
+          type: string
+          description: Redis username for ACL-based authentication (Redis 6+)
+        redis_password:
+          type: string
+          description: Redis password for authentication
+        redis_connect_timeout_seconds:
+          type: integer
+          default: 5
+          description: Redis connection timeout in seconds
+        redis_health_check_interval_seconds:
+          type: integer
+          default: 5
+          description: Interval in seconds for health check pings when Redis is marked unavailable
+
+    RequestSizeLimitingConfig:
+      type: object
+      description: "Plugin: request_size_limiting — Per-proxy request body size limits."
+      properties:
+        max_bytes:
+          type: integer
+          format: uint64
+          default: 0
+          description: Maximum allowed request body size in bytes (0 = disabled)
+
+    ResponseSizeLimitingConfig:
+      type: object
+      description: "Plugin: response_size_limiting — Per-proxy response body size limits."
+      properties:
+        max_bytes:
+          type: integer
+          format: uint64
+          default: 0
+          description: Maximum allowed response body size in bytes (0 = disabled)
+        require_buffered_check:
+          type: boolean
+          default: false
+          description: Force response body buffering to verify actual size
+
+    BodyValidatorConfig:
+      type: object
+      description: "Plugin: body_validator — JSON Schema, XML, and gRPC protobuf validation for request/response bodies."
+      properties:
+        json_schema:
+          type: object
+          description: JSON Schema for request body validation
+        required_fields:
+          type: array
+          items:
+            type: string
+          default: []
+          description: Simple required field names in request body
+        validate_xml:
+          type: boolean
+          default: false
+          description: Enable XML well-formedness validation
+        required_xml_elements:
+          type: array
+          items:
+            type: string
+          default: []
+          description: Required XML element names
+        content_types:
+          type: array
+          items:
+            type: string
+          default: ["application/json", "application/xml", "text/xml"]
+          description: MIME types to validate
+        response_json_schema:
+          type: object
+          description: JSON Schema for response body validation
+        response_required_fields:
+          type: array
+          items:
+            type: string
+          default: []
+          description: Required field names in response
+        response_validate_xml:
+          type: boolean
+          default: false
+        response_required_xml_elements:
+          type: array
+          items:
+            type: string
+          default: []
+        response_content_types:
+          type: array
+          items:
+            type: string
+          default: ["application/json", "application/xml", "text/xml"]
+        protobuf_descriptor_path:
+          type: string
+          description: Path to compiled FileDescriptorSet binary (protoc --descriptor_set_out --include_imports)
+        protobuf_request_type:
+          type: string
+          description: Default fully-qualified protobuf message type for request validation
+        protobuf_response_type:
+          type: string
+          description: Default fully-qualified protobuf message type for response validation
+        protobuf_method_messages:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              request:
+                type: string
+                description: Fully-qualified protobuf message type for request validation
+              response:
+                type: string
+                description: Fully-qualified protobuf message type for response validation
+          description: Per-method message type overrides keyed by gRPC path
+        protobuf_reject_unknown_fields:
+          type: boolean
+          default: false
+          description: Reject messages containing field numbers not in the descriptor
+
+    RequestTerminationConfig:
+      type: object
+      description: "Plugin: request_termination — Returns a predefined response without proxying."
+      properties:
+        status_code:
+          type: integer
+          format: uint16
+          description: HTTP status code to return
+        body:
+          type: string
+          description: Response body
+        content_type:
+          type: string
+          description: Response Content-Type header
+        message:
+          type: string
+          description: Error message
+
+    ResponseMockConfig:
+      type: object
+      description: "Plugin: response_mock — Returns mock responses for API testing before backends are ready. Rule paths are relative to the proxy's listen_path."
+      required:
+        - rules
+      properties:
+        rules:
+          type: array
+          description: Mock rules evaluated in order (first match wins)
+          minItems: 1
+          items:
+            type: object
+            required:
+              - path
+            properties:
+              method:
+                type: string
+                description: HTTP method to match (omit to match all methods)
+              path:
+                type: string
+                description: "Path relative to the proxy's listen_path (e.g., /users for a proxy with listen_path /api/v1). Regex supported with ~ prefix (auto-anchored). For root or regex listen_paths, uses full request path."
+              status_code:
+                type: integer
+                format: uint16
+                description: HTTP status code to return (default 200)
+              headers:
+                type: object
+                additionalProperties:
+                  type: string
+                description: Response headers (default content-type application/json)
+              body:
+                type: string
+                description: Response body string
+              delay_ms:
+                type: integer
+                format: uint64
+                description: Simulated latency in milliseconds (default 0)
+        passthrough_on_no_match:
+          type: boolean
+          description: "If true, unmatched requests continue to the backend. If false (default), returns 404."
+
+    SpecExposeConfig:
+      type: object
+      description: "Plugin: spec_expose — Exposes API specification documents (OpenAPI, WSDL, WADL) on a /specz sub-path. Unauthenticated. Only works with prefix-based listen_path proxies (HTTP only)."
+      required:
+        - spec_url
+      properties:
+        spec_url:
+          type: string
+          description: Full URL to fetch the API specification document (e.g., https://internal-service/docs/openapi.yaml)
+        content_type:
+          type: string
+          description: "Override the response Content-Type. When omitted, the upstream response's Content-Type is passed through."
+        tls_no_verify:
+          type: boolean
+          description: "Skip TLS certificate verification when fetching the spec. Defaults to the gateway's FERRUM_TLS_NO_VERIFY setting."
+
+    LoadTestingConfig:
+      type: object
+      description: "Plugin: load_testing — On-demand proxy load testing triggered by X-Loadtesting-Key header. Spawns concurrent clients through the gateway's own proxy listener (HTTP only)."
+      required:
+        - key
+        - concurrent_clients
+        - duration_seconds
+      properties:
+        key:
+          type: string
+          description: Secret value that the X-Loadtesting-Key header must match to trigger the load test
+        concurrent_clients:
+          type: integer
+          format: uint64
+          minimum: 1
+          maximum: 10000
+          description: Number of concurrent virtual clients
+        duration_seconds:
+          type: integer
+          format: uint64
+          minimum: 1
+          maximum: 3600
+          description: How long the test runs in seconds
+        ramp:
+          type: boolean
+          default: false
+          description: When true, clients start gradually over the duration instead of all at once
+        request_timeout_ms:
+          type: integer
+          format: uint64
+          default: 30000
+          minimum: 1
+          description: "Per-request timeout in milliseconds. Prevents workers from hanging on streaming/long-lived responses (SSE, long-poll)"
+        gateway_port:
+          type: integer
+          format: uint16
+          description: "Local gateway port for synthetic requests. Defaults to FERRUM_PROXY_HTTP_PORT (or FERRUM_PROXY_HTTPS_PORT when gateway_tls is enabled) or 8000/8443"
+        gateway_tls:
+          type: boolean
+          default: false
+          description: Use HTTPS for local loopback synthetic requests
+        gateway_tls_no_verify:
+          type: boolean
+          description: "Skip TLS cert verification for loopback connections. Defaults to true when gateway_tls is enabled (gateway cert typically won't match 127.0.0.1)"
+        gateway_addresses:
+          type: array
+          items:
+            type: string
+          description: "Remote gateway URLs to fan out the trigger to. Each receives the original request WITH the key header so it starts its own local load test"
+
+    ResponseCachingConfig:
+      type: object
+      description: "Plugin: response_caching — Response body caching (HTTP only)."
+      properties:
+        ttl_seconds:
+          type: integer
+          format: uint64
+          description: Cache entry time-to-live in seconds
+        max_entries:
+          type: integer
+          format: uint64
+          description: Maximum number of cached entries
+        cache_methods:
+          type: array
+          items:
+            type: string
+          description: HTTP methods to cache (e.g., GET, HEAD)
+
+    GraphqlConfig:
+      type: object
+      description: "Plugin: graphql — Query depth/complexity limiting, introspection control, per-operation rate limiting."
+      properties:
+        max_depth:
+          type: integer
+          format: uint32
+          description: Maximum allowed query nesting depth
+        max_complexity:
+          type: integer
+          format: uint32
+          description: Maximum allowed field count
+        max_aliases:
+          type: integer
+          format: uint32
+          description: Maximum allowed alias count
+        introspection_allowed:
+          type: boolean
+          default: true
+          description: Whether introspection queries are permitted
+        limit_by:
+          type: string
+          enum: [ip, consumer]
+          default: ip
+          description: Rate limit key
+        type_rate_limits:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/RateSpec"
+          description: "Rate limits by operation type (query, mutation, subscription)"
+        operation_rate_limits:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/RateSpec"
+          description: Rate limits by named operation
+
+    GrpcMethodRouterConfig:
+      type: object
+      description: >-
+        Plugin: grpc_method_router — Per-method access control and rate limiting
+        for gRPC services. Parses the gRPC path (/package.Service/Method) and
+        populates grpc_service, grpc_method, grpc_full_method metadata.
+      properties:
+        allow_methods:
+          type: array
+          items:
+            type: string
+          description: >-
+            Only these gRPC methods are permitted (allowlist). Each entry is a
+            full method path like /package.Service/Method.
+        deny_methods:
+          type: array
+          items:
+            type: string
+          default: []
+          description: >-
+            These gRPC methods are explicitly blocked. Deny takes precedence
+            over allow.
+        method_rate_limits:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/RateSpec"
+          description: >-
+            Per-method rate limits keyed by full method path
+            (e.g., /myapp.UserService/CreateUser).
+        limit_by:
+          type: string
+          enum: [ip, consumer]
+          default: ip
+          description: >-
+            Rate limit key. When consumer, uses identified_consumer then
+            authenticated_identity then client IP as fallback.
+
+    GrpcWebConfig:
+      type: object
+      description: >-
+        Plugin: grpc_web — Translates between gRPC-Web (browser-compatible)
+        and native gRPC (HTTP/2) wire formats. Supports binary
+        (application/grpc-web) and text (application/grpc-web-text) encoding.
+      properties:
+        expose_headers:
+          type: array
+          items:
+            type: string
+          description: >-
+            Additional response headers to include in
+            Access-Control-Expose-Headers for browser CORS compatibility.
+            grpc-status and grpc-message are always exposed.
+
+    GrpcDeadlineConfig:
+      type: object
+      description: >-
+        Plugin: grpc_deadline — Manages the grpc-timeout metadata header.
+        Supports all gRPC timeout units (H, M, S, m, u, n).
+      properties:
+        max_deadline_ms:
+          type: integer
+          format: uint64
+          description: Cap incoming deadlines to this value (milliseconds)
+        default_deadline_ms:
+          type: integer
+          format: uint64
+          description: Inject grpc-timeout when client omits it
+        subtract_gateway_processing:
+          type: boolean
+          default: false
+          description: >-
+            Subtract elapsed gateway processing time before forwarding.
+            Returns gRPC DEADLINE_EXCEEDED (status 4) if remaining time is zero.
+        reject_no_deadline:
+          type: boolean
+          default: false
+          description: >-
+            Reject requests missing grpc-timeout with HTTP 400. Takes
+            precedence over default_deadline_ms.
+
+    AiSemanticCacheConfig:
+      type: object
+      description: "Plugin: ai_semantic_cache — Caches LLM responses keyed by normalized prompts (v1 exact-match with whitespace/case normalization, SHA-256 hash). Supports local DashMap and Redis storage."
+      properties:
+        ttl_seconds:
+          type: integer
+          format: uint64
+          default: 300
+          description: Time-to-live for cached entries in seconds
+        max_entries:
+          type: integer
+          format: uint64
+          default: 10000
+          description: Maximum number of cached entries (local mode)
+        max_entry_size_bytes:
+          type: integer
+          format: uint64
+          default: 1048576
+          description: Maximum size of a single cached response body in bytes (1 MiB)
+        max_total_size_bytes:
+          type: integer
+          format: uint64
+          default: 104857600
+          description: Maximum total cache size in bytes (100 MiB, local mode)
+        include_model_in_key:
+          type: boolean
+          default: true
+          description: Include the model name in the cache key (different models get separate cache entries)
+        include_params_in_key:
+          type: boolean
+          default: false
+          description: Include request parameters (temperature, max_tokens, etc.) in the cache key
+        scope_by_consumer:
+          type: boolean
+          default: false
+          description: Scope cache entries per consumer (authenticated consumer ID is included in the cache key)
+        sync_mode:
+          type: string
+          enum: [local, redis]
+          default: local
+          description: "Storage backend: 'local' (in-memory DashMap) or 'redis' (centralized Redis)"
+        redis_url:
+          type: string
+          description: Redis connection URL (required when sync_mode is redis)
+        redis_tls:
+          type: boolean
+          default: false
+          description: Enable TLS for Redis connection
+        redis_key_prefix:
+          type: string
+          default: "ferrum:ai_semantic_cache"
+          description: Redis key namespace prefix
+        redis_pool_size:
+          type: integer
+          format: uint64
+          default: 4
+          description: Number of multiplexed Redis connections
+        redis_connect_timeout_seconds:
+          type: integer
+          format: uint64
+          default: 5
+          description: Redis connection timeout in seconds
+        redis_health_check_interval_seconds:
+          type: integer
+          format: uint64
+          default: 5
+          description: Interval for background health check pings when Redis is unavailable
+        redis_username:
+          type: string
+          description: Redis ACL username (Redis 6+)
+        redis_password:
+          type: string
+          description: Redis password
+
+    AiTokenMetricsConfig:
+      type: object
+      description: "Plugin: ai_token_metrics — Extracts token usage from LLM response bodies."
+      properties:
+        provider:
+          type: string
+          default: auto
+          description: "LLM provider format (auto, openai, anthropic, google, cohere, mistral, bedrock)"
+        include_model:
+          type: boolean
+          default: true
+          description: Extract model name into metadata
+        include_token_details:
+          type: boolean
+          default: true
+          description: Extract prompt/completion tokens separately
+        metadata_prefix:
+          type: string
+          default: ai
+          description: Prefix for metadata keys
+        cost_per_prompt_token:
+          type: number
+          format: double
+          description: Calculate estimated cost per request (prompt tokens)
+        cost_per_completion_token:
+          type: number
+          format: double
+          description: Calculate estimated cost per request (completion tokens)
+
+    AiRequestGuardConfig:
+      type: object
+      description: "Plugin: ai_request_guard — Validates and constrains AI/LLM API requests."
+      properties:
+        max_tokens_limit:
+          type: integer
+          description: Maximum allowed max_tokens value
+        enforce_max_tokens:
+          type: string
+          enum: [reject, clamp]
+          default: reject
+          description: Reject (400 error) or clamp (silently cap) max_tokens
+        default_max_tokens:
+          type: integer
+          description: Inject max_tokens if not present
+        allowed_models:
+          type: array
+          items:
+            type: string
+          default: []
+          description: Whitelist of allowed model names (empty = allow all)
+        blocked_models:
+          type: array
+          items:
+            type: string
+          default: []
+          description: Blacklist of model names (takes precedence over allowed)
+        require_user_field:
+          type: boolean
+          default: false
+          description: Require user field in request body
+        max_messages:
+          type: integer
+          description: Maximum messages in the messages array
+        max_prompt_characters:
+          type: integer
+          description: Maximum total characters across messages
+        temperature_range:
+          type: array
+          items:
+            type: number
+            format: double
+          minItems: 2
+          maxItems: 2
+          description: "Allowed [min, max] range for temperature"
+        block_system_prompts:
+          type: boolean
+          default: false
+          description: "Reject requests with role: system messages"
+        required_metadata_fields:
+          type: array
+          items:
+            type: string
+          default: []
+          description: Required fields in request body
+
+    AiRateLimiterConfig:
+      type: object
+      description: "Plugin: ai_rate_limiter — Token-aware rate limiting for LLM APIs. Supports centralized Redis-backed mode for cross-instance token budget coordination."
+      properties:
+        token_limit:
+          type: integer
+          default: 100000
+          description: Maximum tokens allowed per window
+        window_seconds:
+          type: integer
+          default: 60
+          description: Sliding window duration in seconds
+        count_mode:
+          type: string
+          enum: [total_tokens, prompt_tokens, completion_tokens]
+          default: total_tokens
+          description: What to count
+        limit_by:
+          type: string
+          enum: [consumer, ip]
+          default: consumer
+          description: Rate limit key
+        expose_headers:
+          type: boolean
+          default: false
+          description: Inject x-ai-ratelimit-* headers
+        provider:
+          type: string
+          default: auto
+          description: LLM provider format for token extraction
+        sync_mode:
+          type: string
+          enum: [local, redis]
+          default: local
+          description: "Token budget storage: 'local' (in-memory) or 'redis' (centralized). Any RESP-compatible server works."
+        redis_url:
+          type: string
+          description: "Redis connection URL. Required when sync_mode is 'redis'."
+        redis_tls:
+          type: boolean
+          default: false
+          description: "Enable TLS for the Redis connection. CA verification uses gateway-level FERRUM_TLS_CA_BUNDLE_PATH; skip-verify uses FERRUM_TLS_NO_VERIFY."
+        redis_key_prefix:
+          type: string
+          default: "ferrum:ai_rate_limiter"
+          description: Key prefix for all Redis keys
+        redis_pool_size:
+          type: integer
+          default: 4
+          description: Number of multiplexed Redis connections
+        redis_username:
+          type: string
+          description: Redis username for ACL authentication
+        redis_password:
+          type: string
+          description: Redis password
+        redis_connect_timeout_seconds:
+          type: integer
+          default: 5
+          description: Redis connection timeout in seconds
+        redis_health_check_interval_seconds:
+          type: integer
+          default: 5
+          description: Health check ping interval when Redis is unavailable
+
+    AiPromptShieldConfig:
+      type: object
+      description: "Plugin: ai_prompt_shield — PII detection and redaction in prompts."
+      properties:
+        action:
+          type: string
+          enum: [reject, redact, warn]
+          default: reject
+          description: Action when PII is detected
+        patterns:
+          type: array
+          items:
+            type: string
+          default: [ssn, credit_card, api_key, aws_key]
+          description: "Built-in patterns: ssn, credit_card, email, phone_us, api_key, aws_key, ip_address, iban"
+        custom_patterns:
+          type: array
+          items:
+            type: object
+            required: [name, regex]
+            properties:
+              name:
+                type: string
+              regex:
+                type: string
+          default: []
+          description: "Custom {name, regex} patterns"
+        scan_fields:
+          type: string
+          enum: [content, all]
+          default: content
+          description: Which message fields to scan
+        exclude_roles:
+          type: array
+          items:
+            type: string
+          default: []
+          description: Message roles to skip scanning
+        redaction_placeholder:
+          type: string
+          default: "[REDACTED:{type}]"
+          description: Template for redacted text
+        max_scan_bytes:
+          type: integer
+          default: 1048576
+          description: Skip scanning if body exceeds this size
+
+    AiResponseGuardConfig:
+      type: object
+      description: "Plugin: ai_response_guard — Validates and filters AI/LLM API responses for PII, blocked content, and structural requirements."
+      properties:
+        action:
+          type: string
+          enum: [reject, redact, warn]
+          default: reject
+          description: Action when a violation is detected in the response body
+        pii_patterns:
+          type: array
+          items:
+            type: string
+          default: []
+          description: "Built-in PII pattern names to scan for (e.g., ssn, credit_card, email, phone_us, api_key, aws_key, ip_address, iban)"
+        custom_pii_patterns:
+          type: array
+          items:
+            type: object
+            required: [name, regex]
+            properties:
+              name:
+                type: string
+                description: Pattern identifier used in redaction placeholders and violation reports
+              regex:
+                type: string
+                description: Regular expression pattern to match
+          default: []
+          description: "Custom PII {name, regex} patterns for domain-specific detection"
+        blocked_phrases:
+          type: array
+          items:
+            type: string
+          default: []
+          description: Exact phrases to block in response content (case-insensitive)
+        blocked_patterns:
+          type: array
+          items:
+            type: object
+            required: [name, regex]
+            properties:
+              name:
+                type: string
+                description: Pattern identifier for violation reports
+              regex:
+                type: string
+                description: Regular expression pattern to match
+          default: []
+          description: "Custom {name, regex} patterns for blocking arbitrary content in responses"
+        scan_fields:
+          type: string
+          enum: [content, all]
+          default: content
+          description: "Which response fields to scan: 'content' scans message content only, 'all' scans the entire response body"
+        redaction_placeholder:
+          type: string
+          default: "[REDACTED:{type}]"
+          description: "Template for redacted text. {type} is replaced with the pattern name"
+        max_scan_bytes:
+          type: integer
+          default: 1048576
+          description: Skip scanning if response body exceeds this size in bytes
+        require_json:
+          type: boolean
+          default: false
+          description: Reject responses that are not valid JSON
+        required_fields:
+          type: array
+          items:
+            type: string
+          default: []
+          description: JSON field names that must be present in the response body
+        max_completion_length:
+          type: integer
+          default: 0
+          description: Maximum allowed character length of completion content. 0 = no limit
+
+    ApiChargebackConfig:
+      type: object
+      description: "Plugin: api_chargeback — Per-consumer API usage charge tracking with configurable pricing tiers by HTTP status code."
+      required: [pricing_tiers]
+      properties:
+        currency:
+          type: string
+          default: "USD"
+          description: Currency label included in Prometheus metrics and JSON output. Informational only — the plugin does not perform currency conversion.
+        pricing_tiers:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [status_codes, price_per_call]
+            properties:
+              status_codes:
+                type: array
+                minItems: 1
+                items:
+                  type: integer
+                description: HTTP status codes that trigger this tier's charge. A status code must appear in exactly one tier.
+              price_per_call:
+                type: number
+                minimum: 0
+                description: Charge per API call (e.g. 0.00001). Must be non-negative.
+          description: One or more pricing tiers mapping status codes to per-call prices.
+        render_cache_ttl_seconds:
+          type: integer
+          default: 5
+          description: How long the cached /charges response is served before rebuilding.
+        stale_entry_ttl_seconds:
+          type: integer
+          default: 3600
+          description: How long idle chargeback entries live before eviction.
+        cache_invalidation_min_age_ms:
+          type: integer
+          default: 500
+          description: Minimum age (ms) of the render cache before record() will invalidate it.
+
+    ChargebackResponse:
+      type: object
+      description: JSON format response from the /charges endpoint.
+      properties:
+        currency:
+          type: string
+          example: "USD"
+        generated_at:
+          type: string
+          format: date-time
+        consumers:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              total_charges:
+                type: number
+              total_calls:
+                type: integer
+              proxies:
+                type: object
+                additionalProperties:
+                  type: object
+                  properties:
+                    proxy_name:
+                      type: string
+                    total_charges:
+                      type: number
+                    total_calls:
+                      type: integer
+                    by_status:
+                      type: object
+                      additionalProperties:
+                        type: object
+                        properties:
+                          calls:
+                            type: integer
+                          charges:
+                            type: number
+
+    RequestDeduplicationConfig:
+      type: object
+      description: "Plugin: request_deduplication — Idempotency-key based request deduplication. Returns cached responses for duplicate requests within a TTL window. Supports centralized Redis-backed mode for cross-instance deduplication."
+      properties:
+        header_name:
+          type: string
+          default: "Idempotency-Key"
+          description: Request header name containing the deduplication key
+        ttl_seconds:
+          type: integer
+          default: 300
+          description: Time-to-live in seconds for cached responses
+        max_entries:
+          type: integer
+          default: 10000
+          description: Maximum number of cached deduplication entries (local mode only)
+        applicable_methods:
+          type: array
+          items:
+            type: string
+          default: ["POST", "PUT", "PATCH"]
+          description: HTTP methods that require deduplication
+        scope_by_consumer:
+          type: boolean
+          default: true
+          description: Scope deduplication keys per consumer identity
+        enforce_required:
+          type: boolean
+          default: false
+          description: Reject requests missing the deduplication header with 400
+        sync_mode:
+          type: string
+          enum: [local, redis]
+          default: local
+          description: "Dedup cache storage: 'local' (in-memory) or 'redis' (centralized). Any RESP-compatible server works."
+        redis_url:
+          type: string
+          description: "Redis connection URL. Required when sync_mode is 'redis'."
+        redis_tls:
+          type: boolean
+          default: false
+          description: "Enable TLS for the Redis connection. CA verification uses gateway-level FERRUM_TLS_CA_BUNDLE_PATH; skip-verify uses FERRUM_TLS_NO_VERIFY."
+        redis_key_prefix:
+          type: string
+          default: "ferrum:dedup"
+          description: Key prefix for all Redis keys
+        redis_pool_size:
+          type: integer
+          default: 4
+          description: Number of multiplexed Redis connections
+        redis_connect_timeout_seconds:
+          type: integer
+          default: 5
+          description: Redis connection timeout in seconds
+        redis_health_check_interval_seconds:
+          type: integer
+          default: 5
+          description: Health check ping interval when Redis is unavailable
+        redis_username:
+          type: string
+          description: Redis username for ACL authentication
+        redis_password:
+          type: string
+          description: Redis password
+
+    GeoRestrictionConfig:
+      type: object
+      description: "Plugin: geo_restriction — IP geolocation-based access control using MaxMind GeoIP2/GeoLite2 databases."
+      required: [db_path]
+      properties:
+        db_path:
+          type: string
+          description: Path to MaxMind GeoIP2 or GeoLite2 .mmdb database file (required)
+        allow_countries:
+          type: array
+          items:
+            type: string
+          default: []
+          description: "ISO 3166-1 alpha-2 country codes to allow (e.g., [\"US\", \"CA\", \"GB\"]). If non-empty, only these countries are allowed"
+        deny_countries:
+          type: array
+          items:
+            type: string
+          default: []
+          description: "ISO 3166-1 alpha-2 country codes to deny. Evaluated after allow_countries"
+        inject_headers:
+          type: boolean
+          default: false
+          description: "Inject X-Geo-Country and X-Geo-Country-Name headers into proxied requests"
+        on_lookup_failure:
+          type: string
+          enum: [allow, deny]
+          default: allow
+          description: Action when the IP cannot be resolved to a country
+
+    RateSpec:
+      type: object
+      description: Rate limit specification used by graphql and grpc_method_router plugins.
+      required: [max_requests, window_seconds]
+      properties:
+        max_requests:
+          type: integer
+          format: uint64
+          description: Maximum requests allowed in the window
+        window_seconds:
+          type: integer
+          format: uint64
+          minimum: 1
+          description: Time window in seconds
