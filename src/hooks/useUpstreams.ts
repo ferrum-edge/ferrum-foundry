@@ -9,17 +9,20 @@ import {
 } from "@tanstack/react-query";
 import * as upstreams from "@/api/upstreams";
 import type { PaginationParams, UpstreamCreate } from "@/api/types";
+import { useNamespace } from "@/stores/namespace";
 
 export function useUpstreams(params: PaginationParams = {}) {
+  const { selectedNamespace: ns } = useNamespace();
   return useQuery({
-    queryKey: ["upstreams", { offset: params.offset, limit: params.limit }],
+    queryKey: ["upstreams", ns, { offset: params.offset, limit: params.limit }],
     queryFn: () => upstreams.list(params),
   });
 }
 
 export function useUpstream(id: string) {
+  const { selectedNamespace: ns } = useNamespace();
   return useQuery({
-    queryKey: ["upstream", id],
+    queryKey: ["upstream", ns, id],
     queryFn: () => upstreams.get(id),
     enabled: !!id,
   });
@@ -42,7 +45,7 @@ export function useUpdateUpstream() {
       upstreams.update(id, data),
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: ["upstreams"] });
-      qc.invalidateQueries({ queryKey: ["upstream", variables.id] });
+      qc.invalidateQueries({ queryKey: ["upstream"] });
     },
   });
 }

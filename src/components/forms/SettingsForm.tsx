@@ -21,8 +21,9 @@ interface Settings {
 }
 
 interface StatusResult {
-  connected: boolean;
-  message?: string;
+  reachable: boolean;
+  status?: number;
+  body?: unknown;
   error?: string;
 }
 
@@ -80,7 +81,7 @@ export function SettingsForm() {
       setStatus(res);
     } catch (err) {
       setStatus({
-        connected: false,
+        reachable: false,
         error: err instanceof Error ? err.message : "Connection test failed",
       });
     } finally {
@@ -198,10 +199,10 @@ export function SettingsForm() {
           </Button>
 
           {status && (
-            <Badge variant={status.connected ? "green" : "red"}>
-              {status.connected
-                ? status.message || "Connected"
-                : status.error || "Not connected"}
+            <Badge variant={status.reachable ? "green" : "red"}>
+              {status.reachable
+                ? `Connected (HTTP ${status.status})`
+                : status.error || "Not reachable"}
             </Badge>
           )}
         </div>

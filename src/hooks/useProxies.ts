@@ -9,17 +9,20 @@ import {
 } from "@tanstack/react-query";
 import * as proxies from "@/api/proxies";
 import type { PaginationParams, ProxyCreate } from "@/api/types";
+import { useNamespace } from "@/stores/namespace";
 
 export function useProxies(params: PaginationParams = {}) {
+  const { selectedNamespace: ns } = useNamespace();
   return useQuery({
-    queryKey: ["proxies", { offset: params.offset, limit: params.limit }],
+    queryKey: ["proxies", ns, { offset: params.offset, limit: params.limit }],
     queryFn: () => proxies.list(params),
   });
 }
 
 export function useProxy(id: string) {
+  const { selectedNamespace: ns } = useNamespace();
   return useQuery({
-    queryKey: ["proxy", id],
+    queryKey: ["proxy", ns, id],
     queryFn: () => proxies.get(id),
     enabled: !!id,
   });
@@ -42,7 +45,7 @@ export function useUpdateProxy() {
       proxies.update(id, data),
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: ["proxies"] });
-      qc.invalidateQueries({ queryKey: ["proxy", variables.id] });
+      qc.invalidateQueries({ queryKey: ["proxy"] });
     },
   });
 }

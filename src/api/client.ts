@@ -71,4 +71,4 @@ export const api = ky.create({
  * Returns a ky instance whose prefixUrl is `/api/proxy/`.
  * Usage:  `proxyApi.get("proxies")` => GET /api/proxy/proxies
  */
-export const proxyApi = api.extend({ prefixUrl: "api/proxy" });
+export const proxyApi = api.extend({ prefixUrl: "/api/proxy" });

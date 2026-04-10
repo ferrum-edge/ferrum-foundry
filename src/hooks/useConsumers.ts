@@ -9,17 +9,20 @@ import {
 } from "@tanstack/react-query";
 import * as consumers from "@/api/consumers";
 import type { ConsumerCreate, PaginationParams } from "@/api/types";
+import { useNamespace } from "@/stores/namespace";
 
 export function useConsumers(params: PaginationParams = {}) {
+  const { selectedNamespace: ns } = useNamespace();
   return useQuery({
-    queryKey: ["consumers", { offset: params.offset, limit: params.limit }],
+    queryKey: ["consumers", ns, { offset: params.offset, limit: params.limit }],
     queryFn: () => consumers.list(params),
   });
 }
 
 export function useConsumer(id: string) {
+  const { selectedNamespace: ns } = useNamespace();
   return useQuery({
-    queryKey: ["consumer", id],
+    queryKey: ["consumer", ns, id],
     queryFn: () => consumers.get(id),
     enabled: !!id,
   });
@@ -42,7 +45,7 @@ export function useUpdateConsumer() {
       consumers.update(id, data),
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: ["consumers"] });
-      qc.invalidateQueries({ queryKey: ["consumer", variables.id] });
+      qc.invalidateQueries({ queryKey: ["consumer"] });
     },
   });
 }
@@ -72,7 +75,7 @@ export function useUpdateCredentials() {
       data: unknown;
     }) => consumers.updateCredentials(consumerId, credType, data),
     onSuccess: (_data, variables) => {
-      qc.invalidateQueries({ queryKey: ["consumer", variables.consumerId] });
+      qc.invalidateQueries({ queryKey: ["consumer"] });
       qc.invalidateQueries({ queryKey: ["consumers"] });
     },
   });
@@ -91,7 +94,7 @@ export function useAppendCredential() {
       data: unknown;
     }) => consumers.appendCredential(consumerId, credType, data),
     onSuccess: (_data, variables) => {
-      qc.invalidateQueries({ queryKey: ["consumer", variables.consumerId] });
+      qc.invalidateQueries({ queryKey: ["consumer"] });
       qc.invalidateQueries({ queryKey: ["consumers"] });
     },
   });
@@ -108,7 +111,7 @@ export function useDeleteCredentials() {
       credType: string;
     }) => consumers.deleteCredentials(consumerId, credType),
     onSuccess: (_data, variables) => {
-      qc.invalidateQueries({ queryKey: ["consumer", variables.consumerId] });
+      qc.invalidateQueries({ queryKey: ["consumer"] });
       qc.invalidateQueries({ queryKey: ["consumers"] });
     },
   });
@@ -127,7 +130,7 @@ export function useDeleteCredentialByIndex() {
       index: number;
     }) => consumers.deleteCredentialByIndex(consumerId, credType, index),
     onSuccess: (_data, variables) => {
-      qc.invalidateQueries({ queryKey: ["consumer", variables.consumerId] });
+      qc.invalidateQueries({ queryKey: ["consumer"] });
       qc.invalidateQueries({ queryKey: ["consumers"] });
     },
   });

@@ -9,18 +9,22 @@ import {
 } from "@tanstack/react-query";
 import * as plugins from "@/api/plugins";
 import type { PaginationParams, PluginConfigCreate } from "@/api/types";
+import { useNamespace } from "@/stores/namespace";
 
 export function useAvailablePlugins() {
+  const { selectedNamespace: ns } = useNamespace();
   return useQuery({
-    queryKey: ["plugins", "available"],
+    queryKey: ["plugins", "available", ns],
     queryFn: () => plugins.listAvailable(),
   });
 }
 
 export function usePluginConfigs(params: PaginationParams = {}) {
+  const { selectedNamespace: ns } = useNamespace();
   return useQuery({
     queryKey: [
       "pluginConfigs",
+      ns,
       { offset: params.offset, limit: params.limit },
     ],
     queryFn: () => plugins.listConfigs(params),
@@ -28,8 +32,9 @@ export function usePluginConfigs(params: PaginationParams = {}) {
 }
 
 export function usePluginConfig(id: string) {
+  const { selectedNamespace: ns } = useNamespace();
   return useQuery({
-    queryKey: ["pluginConfig", id],
+    queryKey: ["pluginConfig", ns, id],
     queryFn: () => plugins.getConfig(id),
     enabled: !!id,
   });
@@ -52,7 +57,7 @@ export function useUpdatePluginConfig() {
       plugins.updateConfig(id, data),
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: ["pluginConfigs"] });
-      qc.invalidateQueries({ queryKey: ["pluginConfig", variables.id] });
+      qc.invalidateQueries({ queryKey: ["pluginConfig"] });
     },
   });
 }
