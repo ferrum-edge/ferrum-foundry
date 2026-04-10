@@ -21,6 +21,16 @@ function statusBadgeVariant(code?: number) {
   return "red" as const;
 }
 
+function formatBody(body?: string) {
+  if (!body) return "";
+
+  try {
+    return JSON.stringify(JSON.parse(body), null, 2);
+  } catch {
+    return body;
+  }
+}
+
 export function ErrorPopup({
   open,
   onClose,
@@ -28,11 +38,13 @@ export function ErrorPopup({
   body,
   url,
 }: ErrorPopupProps) {
+  const formattedBody = formatBody(body);
+
   const handleCopy = async () => {
     const text = [
       statusCode && `Status: ${statusCode}`,
       url && `URL: ${url}`,
-      body && `\nResponse:\n${body}`,
+      formattedBody && `\nResponse:\n${formattedBody}`,
     ]
       .filter(Boolean)
       .join("\n");
@@ -62,13 +74,13 @@ export function ErrorPopup({
           </div>
         )}
 
-        {body && (
+        {formattedBody && (
           <div className="mb-4">
             <span className="text-text-muted text-xs font-medium uppercase tracking-wider">
               Response
             </span>
             <pre className="mt-1 bg-code-bg border border-border rounded-lg p-3 text-sm text-text-secondary font-mono overflow-auto max-h-64 whitespace-pre-wrap break-words">
-              {body}
+              {formattedBody}
             </pre>
           </div>
         )}

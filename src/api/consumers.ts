@@ -10,6 +10,12 @@ import type {
   PaginationParams,
 } from "./types";
 
+type ConsumerPayload = ConsumerCreate & { id: string };
+
+function withConsumerId(data: ConsumerCreate, id?: string): ConsumerPayload {
+  return { ...data, id: id ?? data.id ?? "" };
+}
+
 export async function list(
   params: PaginationParams = {},
 ): Promise<PaginatedResponse<Consumer>> {
@@ -27,14 +33,14 @@ export async function get(id: string): Promise<Consumer> {
 }
 
 export async function create(data: ConsumerCreate): Promise<Consumer> {
-  return proxyApi.post("consumers", { json: data }).json<Consumer>();
+  return proxyApi.post("consumers", { json: withConsumerId(data) }).json<Consumer>();
 }
 
 export async function update(
   id: string,
   data: ConsumerCreate,
 ): Promise<Consumer> {
-  return proxyApi.put(`consumers/${id}`, { json: data }).json<Consumer>();
+  return proxyApi.put(`consumers/${id}`, { json: withConsumerId(data, id) }).json<Consumer>();
 }
 
 export async function remove(id: string): Promise<void> {

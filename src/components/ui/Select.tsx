@@ -25,7 +25,7 @@ export function Select({
   disabled,
 }: SelectProps) {
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex min-w-0 flex-col gap-1.5">
       {label && (
         <span className="text-text-secondary text-sm font-medium">{label}</span>
       )}
@@ -35,10 +35,10 @@ export function Select({
         disabled={disabled}
       >
         <SelectPrimitive.Trigger
-          className={`inline-flex items-center justify-between bg-bg-input border rounded-lg px-3 py-2 text-sm transition-colors duration-150 ${error ? "border-danger" : "border-border focus:border-orange focus:ring-1 focus:ring-orange/30"} ${value ? "text-text-primary" : "text-text-muted"} ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+          className={`inline-flex w-full min-w-0 items-center justify-between bg-bg-input border rounded-lg px-3 py-2 text-sm transition-colors duration-150 ${error ? "border-danger" : "border-border focus:border-orange focus:ring-1 focus:ring-orange/30"} ${value ? "text-text-primary" : "text-text-muted"} ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
         >
-          <SelectPrimitive.Value placeholder={placeholder} />
-          <SelectPrimitive.Icon className="ml-2 text-text-muted">
+          <SelectPrimitive.Value className="truncate" placeholder={placeholder} />
+          <SelectPrimitive.Icon className="ml-2 shrink-0 text-text-muted">
             <svg
               width="12"
               height="12"
@@ -59,19 +59,19 @@ export function Select({
 
         <SelectPrimitive.Portal>
           <SelectPrimitive.Content
-            className="z-50 bg-bg-card border border-border rounded-lg shadow-xl overflow-hidden"
+            className="z-50 min-w-[var(--radix-select-trigger-width)] max-w-[calc(100vw-2rem)] bg-bg-card border border-border rounded-lg shadow-xl overflow-hidden"
             position="popper"
             sideOffset={4}
           >
-            <SelectPrimitive.Viewport className="p-1">
+            <SelectPrimitive.Viewport className="p-1 max-h-[min(var(--radix-select-content-available-height),20rem)]">
               {options.map((option) => (
                 <SelectPrimitive.Item
                   key={option.value}
                   value={option.value}
-                  className="relative flex items-center px-3 py-2 text-sm text-text-primary rounded-md cursor-pointer select-none outline-none data-[highlighted]:bg-bg-card-hover"
+                  className="relative flex min-w-0 items-center px-3 py-2 text-sm text-text-primary rounded-md cursor-pointer select-none outline-none data-[highlighted]:bg-bg-card-hover"
                 >
                   <SelectPrimitive.ItemText>
-                    {option.label}
+                    <span className="block truncate">{option.label}</span>
                   </SelectPrimitive.ItemText>
                 </SelectPrimitive.Item>
               ))}

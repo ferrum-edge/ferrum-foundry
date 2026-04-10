@@ -7,6 +7,7 @@ import { useCreateConsumer } from "@/hooks/useConsumers";
 import { useToast } from "@/components/ui/Toast";
 import { Card } from "@/components/ui/Card";
 import { ConsumerForm } from "@/components/forms/ConsumerForm";
+import { getApiErrorMessage } from "@/api/client";
 import type { ConsumerCreate } from "@/api/types";
 
 export default function ConsumerNewPage() {
@@ -23,8 +24,7 @@ export default function ConsumerNewPage() {
         params: { consumerId: created.id },
       });
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Failed to create consumer";
+      const message = await getApiErrorMessage(err, "Failed to create consumer");
       toast("error", message);
     }
   };

@@ -10,6 +10,12 @@ import type {
   ProxyCreate,
 } from "./types";
 
+type ProxyPayload = ProxyCreate & { id: string };
+
+function withProxyId(data: ProxyCreate, id?: string): ProxyPayload {
+  return { ...data, id: id ?? data.id ?? "" };
+}
+
 export async function list(
   params: PaginationParams = {},
 ): Promise<PaginatedResponse<Proxy>> {
@@ -25,11 +31,11 @@ export async function get(id: string): Promise<Proxy> {
 }
 
 export async function create(data: ProxyCreate): Promise<Proxy> {
-  return proxyApi.post("proxies", { json: data }).json<Proxy>();
+  return proxyApi.post("proxies", { json: withProxyId(data) }).json<Proxy>();
 }
 
 export async function update(id: string, data: ProxyCreate): Promise<Proxy> {
-  return proxyApi.put(`proxies/${id}`, { json: data }).json<Proxy>();
+  return proxyApi.put(`proxies/${id}`, { json: withProxyId(data, id) }).json<Proxy>();
 }
 
 export async function remove(id: string): Promise<void> {

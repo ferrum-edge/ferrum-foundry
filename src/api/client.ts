@@ -15,7 +15,7 @@ let errorHandler: ApiErrorHandler | undefined;
  * Register a handler that will be called on every non-2xx API response.
  * Only one handler is active at a time (last-write wins).
  */
-export function setApiErrorHandler(handler: ApiErrorHandler): void {
+export function setApiErrorHandler(handler?: ApiErrorHandler): void {
   errorHandler = handler;
 }
 
@@ -24,6 +24,38 @@ export function setApiErrorHandler(handler: ApiErrorHandler): void {
  */
 export function onApiError(error: ApiError): void {
   errorHandler?.(error);
+}
+
+export function extractApiErrorDetail(body: string): string {
+  if (!body.trim()) return "";
+
+  try {
+    const parsed = JSON.parse(body) as unknown;
+    if (parsed && typeof parsed === "object") {
+      const record = parsed as Record<string, unknown>;
+      const detail = record.error ?? record.message ?? record.detail;
+      if (typeof detail === "string") return detail;
+    }
+  } catch {
+    // Plain text responses are fine; fall through to the raw body.
+  }
+
+  return body;
+}
+
+export async function getApiErrorMessage(
+  error: unknown,
+  fallback: string,
+): Promise<string> {
+  if (!(error instanceof Error)) return fallback;
+
+  const response = "response" in error
+    ? (error as { response?: Response }).response
+    : undefined;
+  const body = response ? await response.clone().text().catch(() => "") : "";
+  const detail = extractApiErrorDetail(body);
+
+  return detail ? `${error.message}: ${detail}` : error.message;
 }
 
 // ── localStorage namespace helper ────────────────────────────────

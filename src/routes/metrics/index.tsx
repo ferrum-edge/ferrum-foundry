@@ -2,8 +2,9 @@
 /*  Ferrum Foundry – Metrics dashboard page                            */
 /* ------------------------------------------------------------------ */
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAdminMetrics, usePrometheusMetrics } from "@/hooks/useMetrics";
+import { useGatewayRequestStats } from "@/hooks/useGatewayRequestStats";
 import { Card } from "@/components/ui/Card";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
@@ -15,23 +16,91 @@ import { HealthCheckPanel } from "@/components/metrics/HealthCheckPanel";
 import { LoadBalancerPanel } from "@/components/metrics/LoadBalancerPanel";
 import { CachePanel } from "@/components/metrics/CachePanel";
 import { RateLimitPanel } from "@/components/metrics/RateLimitPanel";
+import {
+  getStoredMetricsLastUpdated,
+  getStoredMetricsRefreshInterval,
+  setStoredMetricsLastUpdated,
+  setStoredMetricsRefreshInterval,
+} from "@/utils/metricsRefresh";
 
 /* ================================================================== */
 /*  MetricsPage                                                        */
 /* ================================================================== */
 
 export default function MetricsPage() {
-  const [refreshInterval, setRefreshInterval] = useState(300_000);
+  const [refreshInterval, setRefreshInterval] = useState(
+    getStoredMetricsRefreshInterval,
+  );
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(
+    getStoredMetricsLastUpdated,
+  );
+  const hasSeenInitialFetch = useRef(false);
+  const lastSyncedDataUpdatedAt = useRef(0);
+
   const {
     data: metrics,
     isLoading,
     isError,
     error,
     dataUpdatedAt,
-    refetch,
-  } = useAdminMetrics(refreshInterval || undefined);
+    isFetching: isAdminMetricsFetching,
+    refetch: refetchAdminMetrics,
+  } = useAdminMetrics(refreshInterval);
 
-  const { data: prometheusText } = usePrometheusMetrics();
+  const {
+    data: prometheusText,
+    isFetching: isPrometheusFetching,
+    refetch: refetchPrometheusMetrics,
+  } = usePrometheusMetrics();
+
+  const requestStats = useGatewayRequestStats(metrics?.gateway, dataUpdatedAt);
+
+  const syncLastUpdated = useCallback((timestamp: number) => {
+    setLastUpdatedAt(timestamp);
+    try {
+      setStoredMetricsLastUpdated(timestamp);
+    } catch {
+      // Ignore storage failures; the in-page timestamp still updates.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!dataUpdatedAt || lastSyncedDataUpdatedAt.current === dataUpdatedAt) {
+      return;
+    }
+
+    lastSyncedDataUpdatedAt.current = dataUpdatedAt;
+
+    if (!hasSeenInitialFetch.current) {
+      hasSeenInitialFetch.current = true;
+      if (!lastUpdatedAt) {
+        syncLastUpdated(dataUpdatedAt);
+      }
+      return;
+    }
+
+    syncLastUpdated(dataUpdatedAt);
+  }, [dataUpdatedAt, lastUpdatedAt, syncLastUpdated]);
+
+  const handleIntervalChange = (intervalMs: number) => {
+    setRefreshInterval(intervalMs);
+    try {
+      setStoredMetricsRefreshInterval(intervalMs);
+    } catch {
+      // Ignore storage failures; the selected interval still applies in-page.
+    }
+  };
+
+  const handleRefreshNow = async () => {
+    const [adminMetricsResult] = await Promise.all([
+      refetchAdminMetrics(),
+      refetchPrometheusMetrics(),
+    ]);
+
+    if (adminMetricsResult.isSuccess && adminMetricsResult.dataUpdatedAt) {
+      syncLastUpdated(adminMetricsResult.dataUpdatedAt);
+    }
+  };
 
   /* ---------------------------------------------------------------- */
   /*  Loading state                                                    */
@@ -77,8 +146,8 @@ export default function MetricsPage() {
 
   if (!metrics) return null;
 
-  const lastUpdated = dataUpdatedAt
-    ? new Date(dataUpdatedAt).toISOString()
+  const lastUpdated = lastUpdatedAt
+    ? new Date(lastUpdatedAt).toISOString()
     : undefined;
 
   /* ---------------------------------------------------------------- */
@@ -94,9 +163,10 @@ export default function MetricsPage() {
         </h1>
         <RefreshControl
           refreshInterval={refreshInterval}
-          onIntervalChange={setRefreshInterval}
-          onRefreshNow={() => refetch()}
+          onIntervalChange={handleIntervalChange}
+          onRefreshNow={handleRefreshNow}
           lastUpdated={lastUpdated}
+          isRefreshing={isAdminMetricsFetching || isPrometheusFetching}
         />
       </div>
 
@@ -105,7 +175,7 @@ export default function MetricsPage() {
         <h2 className="text-lg font-semibold text-text-primary mb-3">
           Gateway
         </h2>
-        <GatewayStats metrics={metrics.gateway} />
+        <GatewayStats metrics={metrics.gateway} requestStats={requestStats} />
       </section>
 
       {/* Panels grid */}

@@ -2,12 +2,13 @@
 /*  Ferrum Foundry – Plugin Config create / edit form                  */
 /* ------------------------------------------------------------------ */
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import type { PluginConfig, PluginConfigCreate } from "@/api/types";
+import { formatPluginConfigDefault } from "@/lib/pluginConfigDefaults";
 
 /* ------------------------------------------------------------------ */
 /*  Props                                                              */
@@ -67,9 +68,11 @@ export function PluginConfigForm({
   const [priorityOverride, setPriorityOverride] = useState<number | "">(
     initialData?.priority_override ?? "",
   );
-  const [configJson, setConfigJson] = useState(
-    initialData ? JSON.stringify(initialData.config, null, 2) : "{}",
-  );
+  const initialConfigJson = initialData
+    ? JSON.stringify(initialData.config, null, 2)
+    : formatPluginConfigDefault("");
+  const generatedConfigJsonRef = useRef<string | null>(isEdit ? null : initialConfigJson);
+  const [configJson, setConfigJson] = useState(initialConfigJson);
 
   /* ---------- Validation ---------- */
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -116,6 +119,30 @@ export function PluginConfigForm({
   }));
 
   const numVal = (v: number | ""): string => (v === "" ? "" : String(v));
+
+  const resetConfigToPluginDefault = () => {
+    const nextConfigJson = formatPluginConfigDefault(pluginName);
+    generatedConfigJsonRef.current = nextConfigJson;
+    setConfigJson(nextConfigJson);
+    setErrors(({ config, ...remainingErrors }) => remainingErrors);
+  };
+
+  useEffect(() => {
+    if (isEdit || !pluginName) return;
+
+    const nextConfigJson = formatPluginConfigDefault(pluginName);
+    setConfigJson((currentConfigJson) => {
+      const shouldReplace =
+        currentConfigJson.trim() === "" ||
+        currentConfigJson.trim() === "{}" ||
+        currentConfigJson === generatedConfigJsonRef.current;
+
+      if (!shouldReplace) return currentConfigJson;
+
+      generatedConfigJsonRef.current = nextConfigJson;
+      return nextConfigJson;
+    });
+  }, [isEdit, pluginName]);
 
   /* ================================================================ */
   /*  Render                                                           */
@@ -177,11 +204,26 @@ export function PluginConfigForm({
 
       {/* ── Config JSON ── */}
       <div className="border-b border-border/50 py-4">
-        <h3 className="text-sm font-semibold text-text-primary mb-4">Config (JSON)</h3>
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <h3 className="text-sm font-semibold text-text-primary">Config (JSON)</h3>
+          {!isEdit && pluginName && (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={resetConfigToPluginDefault}
+            >
+              Reset Defaults
+            </Button>
+          )}
+        </div>
         <div className="flex flex-col gap-1.5">
           <textarea
             value={configJson}
-            onChange={(e) => setConfigJson(e.target.value)}
+            onChange={(e) => {
+              generatedConfigJsonRef.current = null;
+              setConfigJson(e.target.value);
+            }}
             rows={12}
             className={`bg-code-bg border rounded-lg px-3 py-2 text-text-primary text-sm font-mono placeholder:text-text-muted transition-colors duration-150 resize-y min-h-[120px] ${
               errors.config
@@ -190,6 +232,11 @@ export function PluginConfigForm({
             }`}
             spellCheck={false}
           />
+          {!isEdit && (
+            <p className="text-xs text-text-muted">
+              Defaults are editable templates for the selected plugin.
+            </p>
+          )}
           {errors.config && <p className="text-danger text-xs">{errors.config}</p>}
         </div>
       </div>

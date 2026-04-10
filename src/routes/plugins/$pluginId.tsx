@@ -16,6 +16,7 @@ import { Card } from "@/components/ui/Card";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { PluginConfigForm } from "@/components/forms/PluginConfigForm";
+import { getApiErrorMessage } from "@/api/client";
 import type { PluginConfigCreate } from "@/api/types";
 
 export default function PluginDetailPage() {
@@ -37,8 +38,10 @@ export default function PluginDetailPage() {
       await updatePlugin.mutateAsync({ id: pluginId, data });
       toast("success", "Plugin configuration updated successfully");
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Failed to update plugin configuration";
+      const message = await getApiErrorMessage(
+        err,
+        "Failed to update plugin configuration",
+      );
       toast("error", message);
     }
   };
@@ -49,8 +52,10 @@ export default function PluginDetailPage() {
       toast("success", "Plugin configuration deleted successfully");
       navigate({ to: "/plugins" });
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Failed to delete plugin configuration";
+      const message = await getApiErrorMessage(
+        err,
+        "Failed to delete plugin configuration",
+      );
       toast("error", message);
     }
   };

@@ -10,6 +10,15 @@ import type {
   PluginConfigCreate,
 } from "./types";
 
+type PluginConfigPayload = PluginConfigCreate & { id: string };
+
+function withPluginConfigId(
+  data: PluginConfigCreate,
+  id?: string,
+): PluginConfigPayload {
+  return { ...data, id: id ?? data.id ?? "" };
+}
+
 /** List available plugin names (built-in registry). */
 export async function listAvailable(): Promise<string[]> {
   return proxyApi.get("plugins").json<string[]>();
@@ -37,7 +46,7 @@ export async function createConfig(
   data: PluginConfigCreate,
 ): Promise<PluginConfig> {
   return proxyApi
-    .post("plugins/config", { json: data })
+    .post("plugins/config", { json: withPluginConfigId(data) })
     .json<PluginConfig>();
 }
 
@@ -46,7 +55,7 @@ export async function updateConfig(
   data: PluginConfigCreate,
 ): Promise<PluginConfig> {
   return proxyApi
-    .put(`plugins/config/${id}`, { json: data })
+    .put(`plugins/config/${id}`, { json: withPluginConfigId(data, id) })
     .json<PluginConfig>();
 }
 

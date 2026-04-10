@@ -2,27 +2,21 @@
 /*  Ferrum Foundry – Refresh interval control bar                      */
 /* ------------------------------------------------------------------ */
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Select";
+import { METRICS_REFRESH_OPTIONS } from "@/utils/metricsRefresh";
 
 export interface RefreshControlProps {
   refreshInterval: number;
   onIntervalChange: (ms: number) => void;
-  onRefreshNow: () => void;
+  onRefreshNow: () => void | Promise<void>;
   lastUpdated?: string;
+  isRefreshing?: boolean;
 }
 
-const intervalOptions = [
-  { value: "30000", label: "30s" },
-  { value: "60000", label: "1m" },
-  { value: "300000", label: "5m" },
-  { value: "900000", label: "15m" },
-  { value: "0", label: "Manual" },
-];
-
 function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
+  const diff = Math.max(0, Date.now() - new Date(iso).getTime());
   const seconds = Math.floor(diff / 1000);
   if (seconds < 60) return `${seconds}s ago`;
   const minutes = Math.floor(seconds / 60);
@@ -36,10 +30,18 @@ export function RefreshControl({
   onIntervalChange,
   onRefreshNow,
   lastUpdated,
+  isRefreshing = false,
 }: RefreshControlProps) {
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(intervalId);
+  }, []);
+
   const agoText = useMemo(
     () => (lastUpdated ? timeAgo(lastUpdated) : undefined),
-    [lastUpdated],
+    [lastUpdated, now],
   );
 
   return (
@@ -53,12 +55,19 @@ export function RefreshControl({
         <Select
           value={String(refreshInterval)}
           onValueChange={(v) => onIntervalChange(Number(v))}
-          options={intervalOptions}
+          options={METRICS_REFRESH_OPTIONS}
           placeholder="Interval"
         />
       </div>
-      <Button variant="secondary" size="sm" onClick={onRefreshNow}>
-        Refresh Now
+      <Button
+        variant="secondary"
+        size="sm"
+        loading={isRefreshing}
+        onClick={() => {
+          void onRefreshNow();
+        }}
+      >
+        {isRefreshing ? "Refreshing..." : "Refresh Now"}
       </Button>
     </div>
   );

@@ -23,7 +23,8 @@ export function useAdminMetrics(refreshInterval: number = FIVE_MINUTES) {
   return useQuery({
     queryKey: ["adminMetrics", ns],
     queryFn: () => metrics.getAdminMetrics(),
-    refetchInterval: refreshInterval,
+    refetchInterval: refreshInterval > 0 ? refreshInterval : false,
+    refetchOnWindowFocus: false,
   });
 }
 
@@ -32,5 +33,6 @@ export function usePrometheusMetrics() {
   return useQuery({
     queryKey: ["prometheusMetrics", ns],
     queryFn: () => metrics.getPrometheusMetrics(),
+    refetchOnWindowFocus: false,
   });
 }

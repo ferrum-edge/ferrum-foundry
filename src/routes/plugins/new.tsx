@@ -8,6 +8,7 @@ import { useToast } from "@/components/ui/Toast";
 import { Card } from "@/components/ui/Card";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { PluginConfigForm } from "@/components/forms/PluginConfigForm";
+import { getApiErrorMessage } from "@/api/client";
 import type { PluginConfigCreate } from "@/api/types";
 
 export default function PluginNewPage() {
@@ -25,8 +26,10 @@ export default function PluginNewPage() {
         params: { pluginId: created.id },
       });
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Failed to create plugin configuration";
+      const message = await getApiErrorMessage(
+        err,
+        "Failed to create plugin configuration",
+      );
       toast("error", message);
     }
   };

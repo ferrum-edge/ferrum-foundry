@@ -1,4 +1,5 @@
 import { SignJWT } from 'jose';
+import { randomUUID } from 'node:crypto';
 import type { Config } from './config.js';
 
 let cachedToken: string | undefined;
@@ -18,8 +19,11 @@ export async function generateToken(config: Config): Promise<string> {
   cachedToken = await new SignJWT({})
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuer(config.jwtIssuer)
+    .setSubject('ferrum-foundry')
     .setIssuedAt(now)
+    .setNotBefore(now)
     .setExpirationTime(exp)
+    .setJti(randomUUID())
     .sign(secret);
 
   tokenExp = exp;

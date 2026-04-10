@@ -15,6 +15,7 @@ import { SkeletonCard } from "@/components/ui/Skeleton";
 import { ProxyForm } from "@/components/forms/ProxyForm";
 import { Badge } from "@/components/ui/Badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
+import { getApiErrorMessage } from "@/api/client";
 import type { ProxyCreate, PluginConfig } from "@/api/types";
 
 export default function ProxyDetailPage() {
@@ -48,11 +49,13 @@ export default function ProxyDetailPage() {
 
   const handleSubmit = async (data: ProxyCreate) => {
     try {
-      await updateProxy.mutateAsync({ id: proxyId, data });
+      await updateProxy.mutateAsync({
+        id: proxyId,
+        data: { ...data, plugins: proxy?.plugins ?? [] },
+      });
       toast("success", "Proxy updated successfully");
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Failed to update proxy";
+      const message = await getApiErrorMessage(err, "Failed to update proxy");
       toast("error", message);
     }
   };
@@ -63,8 +66,7 @@ export default function ProxyDetailPage() {
       toast("success", "Proxy deleted successfully");
       navigate({ to: "/proxies" });
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Failed to delete proxy";
+      const message = await getApiErrorMessage(err, "Failed to delete proxy");
       toast("error", message);
     }
   };

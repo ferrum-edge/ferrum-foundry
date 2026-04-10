@@ -7,6 +7,7 @@ import { useCreateProxy } from "@/hooks/useProxies";
 import { useToast } from "@/components/ui/Toast";
 import { Card } from "@/components/ui/Card";
 import { ProxyForm } from "@/components/forms/ProxyForm";
+import { getApiErrorMessage } from "@/api/client";
 import type { ProxyCreate } from "@/api/types";
 
 export default function ProxyNewPage() {
@@ -23,8 +24,7 @@ export default function ProxyNewPage() {
         params: { proxyId: created.id },
       });
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Failed to create proxy";
+      const message = await getApiErrorMessage(err, "Failed to create proxy");
       toast("error", message);
     }
   };

@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
+import { getApiErrorMessage } from "@/api/client";
 import {
   useAppendCredential,
   useDeleteCredentialByIndex,
@@ -234,8 +235,7 @@ export function CredentialForm({
       setErrors({});
       setShowForm(false);
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Failed to add credential";
+      const message = await getApiErrorMessage(err, "Failed to add credential");
       toast("error", message);
     }
   };
@@ -251,8 +251,7 @@ export function CredentialForm({
       toast("success", `${config.label} credential removed`);
       setDeleteIndex(null);
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Failed to delete credential";
+      const message = await getApiErrorMessage(err, "Failed to delete credential");
       toast("error", message);
     }
   };

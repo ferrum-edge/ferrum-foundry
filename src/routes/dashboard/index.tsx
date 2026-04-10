@@ -4,25 +4,15 @@
 
 import { Link } from "@tanstack/react-router";
 import { useHealth, useAdminMetrics } from "@/hooks/useMetrics";
+import { useGatewayRequestStats } from "@/hooks/useGatewayRequestStats";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { StatCard } from "@/components/metrics/StatCard";
 import { SkeletonCard } from "@/components/ui/Skeleton";
+import { getStoredMetricsRefreshInterval } from "@/utils/metricsRefresh";
 
 /* ── Helpers ───────────────────────────────────────────────────────── */
-
-const REFRESH_KEY = "ferrum:metricsRefreshInterval";
-const DEFAULT_REFRESH = 300_000;
-
-function getRefreshInterval(): number {
-  try {
-    const stored = localStorage.getItem(REFRESH_KEY);
-    return stored ? Number(stored) : DEFAULT_REFRESH;
-  } catch {
-    return DEFAULT_REFRESH;
-  }
-}
 
 function formatUptime(seconds: number): string {
   const d = Math.floor(seconds / 86400);
@@ -67,9 +57,13 @@ const NAV_CARDS = [
 /* ================================================================== */
 
 export default function DashboardPage() {
-  const refreshInterval = getRefreshInterval();
+  const refreshInterval = getStoredMetricsRefreshInterval();
   const health = useHealth();
   const metrics = useAdminMetrics(refreshInterval);
+  const requestStats = useGatewayRequestStats(
+    metrics.data?.gateway,
+    metrics.dataUpdatedAt,
+  );
 
   const isConnected = !health.isError && !metrics.isError;
 
@@ -278,7 +272,14 @@ export default function DashboardPage() {
         <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
           <StatCard
             label="Requests / sec"
-            value={metrics.data.gateway.requests_per_second_current.toFixed(1)}
+            value={
+              requestStats.requestsPerSecond === undefined
+                ? "Collecting"
+                : requestStats.requestsPerSecond >= 10
+                  ? requestStats.requestsPerSecond.toFixed(0)
+                  : requestStats.requestsPerSecond.toFixed(1)
+            }
+            subtitle={`${requestStats.totalRequests.toLocaleString()} total`}
             variant="success"
           />
           <StatCard

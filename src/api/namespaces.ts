@@ -5,5 +5,5 @@
 import { proxyApi } from "./client";
 
 export async function list(): Promise<string[]> {
-  return proxyApi.get("admin/namespaces").json<string[]>();
+  return proxyApi.get("namespaces").json<string[]>();
 }
