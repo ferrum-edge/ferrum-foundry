@@ -1,6 +1,6 @@
 # Ferrum Foundry
 
-Admin panel UI for managing and observing the [Ferrum Edge](https://github.com/ferrum-edge/ferrum-edge) API Gateway.
+Admin panel UI for managing and observing the [Ferrum Edge](https://github.com/ferrum-edge/ferrum-edge) Gateway.
 
 ## Features
 
