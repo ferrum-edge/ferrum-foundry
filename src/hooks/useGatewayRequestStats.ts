@@ -99,11 +99,19 @@ export function useGatewayRequestStats(
 ): GatewayRequestStats {
   const { selectedNamespace } = useNamespace();
   const previousSampleRef = useRef<RequestSample | undefined>(undefined);
+  const lastNamespaceRef = useRef(selectedNamespace);
   const [stats, setStats] = useState<GatewayRequestStats>(() => ({
     totalRequests: gateway?.requests_per_second_current ?? 0,
   }));
 
   useEffect(() => {
+    // Reset the in-memory sample when the namespace changes so we don't
+    // diff counters from two different gateways / namespaces.
+    if (lastNamespaceRef.current !== selectedNamespace) {
+      previousSampleRef.current = undefined;
+      lastNamespaceRef.current = selectedNamespace;
+    }
+
     if (!gateway || !dataUpdatedAt) return;
 
     const currentSample = toSample(gateway, dataUpdatedAt);

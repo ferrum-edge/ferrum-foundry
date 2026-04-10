@@ -10,10 +10,9 @@ import type {
   PaginationParams,
 } from "./types";
 
-type ConsumerPayload = ConsumerCreate & { id: string };
-
-function withConsumerId(data: ConsumerCreate, id?: string): ConsumerPayload {
-  return { ...data, id: id ?? data.id ?? "" };
+function withConsumerId(data: ConsumerCreate, id?: string): ConsumerCreate {
+  const resolvedId = id ?? data.id;
+  return resolvedId ? { ...data, id: resolvedId } : data;
 }
 
 export async function list(

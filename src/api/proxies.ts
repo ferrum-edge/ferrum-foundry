@@ -10,10 +10,9 @@ import type {
   ProxyCreate,
 } from "./types";
 
-type ProxyPayload = ProxyCreate & { id: string };
-
-function withProxyId(data: ProxyCreate, id?: string): ProxyPayload {
-  return { ...data, id: id ?? data.id ?? "" };
+function withProxyId(data: ProxyCreate, id?: string): ProxyCreate {
+  const resolvedId = id ?? data.id;
+  return resolvedId ? { ...data, id: resolvedId } : data;
 }
 
 export async function list(

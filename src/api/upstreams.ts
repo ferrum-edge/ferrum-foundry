@@ -10,10 +10,9 @@ import type {
   UpstreamCreate,
 } from "./types";
 
-type UpstreamPayload = UpstreamCreate & { id: string };
-
-function withUpstreamId(data: UpstreamCreate, id?: string): UpstreamPayload {
-  return { ...data, id: id ?? data.id ?? "" };
+function withUpstreamId(data: UpstreamCreate, id?: string): UpstreamCreate {
+  const resolvedId = id ?? data.id;
+  return resolvedId ? { ...data, id: resolvedId } : data;
 }
 
 export async function list(

@@ -10,13 +10,12 @@ import type {
   PluginConfigCreate,
 } from "./types";
 
-type PluginConfigPayload = PluginConfigCreate & { id: string };
-
 function withPluginConfigId(
   data: PluginConfigCreate,
   id?: string,
-): PluginConfigPayload {
-  return { ...data, id: id ?? data.id ?? "" };
+): PluginConfigCreate {
+  const resolvedId = id ?? data.id;
+  return resolvedId ? { ...data, id: resolvedId } : data;
 }
 
 /** List available plugin names (built-in registry). */
