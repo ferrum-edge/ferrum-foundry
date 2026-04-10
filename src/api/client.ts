@@ -42,16 +42,16 @@ function getNamespace(): string {
 // ── Configured ky instance ───────────────────────────────────────
 
 export const api = ky.create({
-  prefixUrl: "",
+  prefix: "",
   hooks: {
     beforeRequest: [
-      (request) => {
+      ({ request }) => {
         // Attach the current namespace header to every proxy request
         request.headers.set("X-Ferrum-Namespace", getNamespace());
       },
     ],
     afterResponse: [
-      async (_request, _options, response) => {
+      async ({ response }) => {
         if (!response.ok) {
           const body = await response.clone().text().catch(() => "");
           onApiError({
@@ -68,7 +68,7 @@ export const api = ky.create({
 // ── Proxy helper ─────────────────────────────────────────────────
 
 /**
- * Returns a ky instance whose prefixUrl is `/api/proxy/`.
+ * Returns a ky instance whose prefix is `/api/proxy/`.
  * Usage:  `proxyApi.get("proxies")` => GET /api/proxy/proxies
  */
-export const proxyApi = api.extend({ prefixUrl: "/api/proxy" });
+export const proxyApi = api.extend({ prefix: "/api/proxy" });
