@@ -42,7 +42,7 @@ interface CredentialFieldConfig {
 /* ------------------------------------------------------------------ */
 
 const CREDENTIAL_CONFIGS: Record<string, CredentialFieldConfig> = {
-  "key-auth": {
+  keyauth: {
     label: "Key Authentication",
     fields: [
       {
@@ -116,7 +116,7 @@ const CREDENTIAL_CONFIGS: Record<string, CredentialFieldConfig> = {
 /* ------------------------------------------------------------------ */
 
 const CRED_BADGE_VARIANT: Record<string, "orange" | "blue" | "green" | "purple" | "yellow"> = {
-  "key-auth": "orange",
+  keyauth: "orange",
   basicauth: "blue",
   jwt: "green",
   hmac_auth: "purple",
@@ -132,7 +132,7 @@ function renderCredentialSummary(
   cred: Record<string, unknown>,
 ): string {
   switch (credType) {
-    case "key-auth":
+    case "keyauth":
       return cred.key ? `Key: ${maskString(String(cred.key))}` : "Key (auto-generated)";
     case "basicauth":
       return cred.username ? `User: ${String(cred.username)}` : "Basic auth credential";

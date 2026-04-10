@@ -7,7 +7,6 @@ import { useAdminMetrics, usePrometheusMetrics } from "@/hooks/useMetrics";
 import { useGatewayRequestStats } from "@/hooks/useGatewayRequestStats";
 import { Card } from "@/components/ui/Card";
 import { SkeletonCard } from "@/components/ui/Skeleton";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
 import { RefreshControl } from "@/components/metrics/RefreshControl";
 import { GatewayStats } from "@/components/metrics/GatewayStats";
 import { CircuitBreakerPanel } from "@/components/metrics/CircuitBreakerPanel";
@@ -16,6 +15,7 @@ import { HealthCheckPanel } from "@/components/metrics/HealthCheckPanel";
 import { LoadBalancerPanel } from "@/components/metrics/LoadBalancerPanel";
 import { CachePanel } from "@/components/metrics/CachePanel";
 import { RateLimitPanel } from "@/components/metrics/RateLimitPanel";
+import { PrometheusStatsPanel } from "@/components/metrics/PrometheusStatsPanel";
 import {
   getStoredMetricsLastUpdated,
   getStoredMetricsRefreshInterval,
@@ -223,19 +223,15 @@ export default function MetricsPage() {
         </Card>
       </div>
 
-      {/* Prometheus tab */}
-      <Tabs defaultValue="prometheus">
-        <TabsList>
-          <TabsTrigger value="prometheus">Prometheus</TabsTrigger>
-        </TabsList>
-        <TabsContent value="prometheus">
-          <div className="bg-bg-card border border-border rounded-xl overflow-auto max-h-[600px]">
-            <pre className="p-4 text-xs text-text-secondary font-mono whitespace-pre">
-              <code>{prometheusText ?? "Loading..."}</code>
-            </pre>
-          </div>
-        </TabsContent>
-      </Tabs>
+      {/* Per-route Prometheus stats */}
+      {prometheusText && (
+        <section>
+          <h2 className="text-lg font-semibold text-text-primary mb-3">
+            Per-Route Metrics
+          </h2>
+          <PrometheusStatsPanel text={prometheusText} />
+        </section>
+      )}
     </div>
   );
 }
