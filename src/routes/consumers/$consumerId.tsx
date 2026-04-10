@@ -21,7 +21,8 @@ import {
   CredentialForm,
   CREDENTIAL_TYPES,
 } from "@/components/forms/CredentialForm";
-import type { ConsumerCreate } from "@/api/types";
+import { getApiErrorMessage } from "@/api/client";
+import type { ConsumerCreate, Consumer } from "@/api/types";
 
 /* ================================================================== */
 /*  ConsumerDetailPage                                                 */
@@ -44,11 +45,13 @@ export default function ConsumerDetailPage() {
 
   const handleSubmit = async (data: ConsumerCreate) => {
     try {
-      await updateConsumer.mutateAsync({ id: consumerId, data });
+      await updateConsumer.mutateAsync({
+        id: consumerId,
+        data: { ...data, credentials: consumer?.credentials ?? {} },
+      });
       toast("success", "Consumer updated successfully");
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Failed to update consumer";
+      const message = await getApiErrorMessage(err, "Failed to update consumer");
       toast("error", message);
     }
   };
@@ -59,8 +62,7 @@ export default function ConsumerDetailPage() {
       toast("success", "Consumer deleted successfully");
       navigate({ to: "/consumers" });
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Failed to delete consumer";
+      const message = await getApiErrorMessage(err, "Failed to delete consumer");
       toast("error", message);
     }
   };
@@ -199,7 +201,7 @@ function AclGroupsManager({
 }: {
   consumerId: string;
   groups: string[];
-  consumer: { username: string; custom_id?: string };
+  consumer: Pick<Consumer, "username" | "custom_id" | "credentials">;
 }) {
   const { toast } = useToast();
   const updateConsumer = useUpdateConsumer();
@@ -220,14 +222,14 @@ function AclGroupsManager({
         data: {
           username: consumer.username,
           ...(consumer.custom_id && { custom_id: consumer.custom_id }),
+          credentials: consumer.credentials ?? {},
           acl_groups: [...groups, trimmed],
         },
       });
       toast("success", `Added group "${trimmed}"`);
       setNewGroup("");
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Failed to add group";
+      const message = await getApiErrorMessage(err, "Failed to add group");
       toast("error", message);
     }
   };
@@ -239,13 +241,13 @@ function AclGroupsManager({
         data: {
           username: consumer.username,
           ...(consumer.custom_id && { custom_id: consumer.custom_id }),
+          credentials: consumer.credentials ?? {},
           acl_groups: groups.filter((g) => g !== group),
         },
       });
       toast("success", `Removed group "${group}"`);
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Failed to remove group";
+      const message = await getApiErrorMessage(err, "Failed to remove group");
       toast("error", message);
     }
   };

@@ -2,10 +2,12 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useState,
   type ReactNode,
 } from "react";
 import { ErrorPopup } from "@/components/shared/ErrorPopup";
+import { setApiErrorHandler } from "@/api/client";
 
 interface ErrorState {
   open: boolean;
@@ -45,6 +47,11 @@ export function ErrorPopupProvider({ children }: { children: ReactNode }) {
   const hideError = useCallback(() => {
     setState(initialState);
   }, []);
+
+  useEffect(() => {
+    setApiErrorHandler(showError);
+    return () => setApiErrorHandler(undefined);
+  }, [showError]);
 
   return (
     <ErrorPopupContext.Provider value={{ state, showError, hideError }}>

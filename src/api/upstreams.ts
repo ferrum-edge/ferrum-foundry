@@ -10,6 +10,11 @@ import type {
   UpstreamCreate,
 } from "./types";
 
+function withUpstreamId(data: UpstreamCreate, id?: string): UpstreamCreate {
+  const resolvedId = id ?? data.id;
+  return resolvedId ? { ...data, id: resolvedId } : data;
+}
+
 export async function list(
   params: PaginationParams = {},
 ): Promise<PaginatedResponse<Upstream>> {
@@ -27,14 +32,14 @@ export async function get(id: string): Promise<Upstream> {
 }
 
 export async function create(data: UpstreamCreate): Promise<Upstream> {
-  return proxyApi.post("upstreams", { json: data }).json<Upstream>();
+  return proxyApi.post("upstreams", { json: withUpstreamId(data) }).json<Upstream>();
 }
 
 export async function update(
   id: string,
   data: UpstreamCreate,
 ): Promise<Upstream> {
-  return proxyApi.put(`upstreams/${id}`, { json: data }).json<Upstream>();
+  return proxyApi.put(`upstreams/${id}`, { json: withUpstreamId(data, id) }).json<Upstream>();
 }
 
 export async function remove(id: string): Promise<void> {

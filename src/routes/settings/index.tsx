@@ -12,28 +12,11 @@ import { Input } from "@/components/ui/Input";
 import { useToast } from "@/components/ui/Toast";
 import { useNamespace } from "@/stores/namespace";
 import { useNamespaces } from "@/hooks/useNamespaces";
-
-/* ── Constants ─────────────────────────────────────────────────────── */
-
-const REFRESH_KEY = "ferrum:metricsRefreshInterval";
-const DEFAULT_REFRESH = "300000"; // 5 minutes
-
-const REFRESH_OPTIONS = [
-  { value: "10000", label: "10 seconds" },
-  { value: "30000", label: "30 seconds" },
-  { value: "60000", label: "1 minute" },
-  { value: "120000", label: "2 minutes" },
-  { value: "300000", label: "5 minutes" },
-  { value: "600000", label: "10 minutes" },
-];
-
-function getStoredRefresh(): string {
-  try {
-    return localStorage.getItem(REFRESH_KEY) ?? DEFAULT_REFRESH;
-  } catch {
-    return DEFAULT_REFRESH;
-  }
-}
+import {
+  getStoredMetricsRefreshInterval,
+  METRICS_REFRESH_OPTIONS,
+  setStoredMetricsRefreshInterval,
+} from "@/utils/metricsRefresh";
 
 /* ================================================================== */
 /*  SettingsPage                                                       */
@@ -44,14 +27,16 @@ export default function SettingsPage() {
   const { selectedNamespace, setNamespace } = useNamespace();
   const { data: namespaces, isLoading: nsLoading } = useNamespaces();
 
-  const [refreshInterval, setRefreshInterval] = useState(getStoredRefresh);
+  const [refreshInterval, setRefreshInterval] = useState(() =>
+    String(getStoredMetricsRefreshInterval()),
+  );
 
   /* ── Handlers ───────────────────────────────────────────────────── */
 
   function handleRefreshChange(value: string) {
     setRefreshInterval(value);
     try {
-      localStorage.setItem(REFRESH_KEY, value);
+      setStoredMetricsRefreshInterval(Number(value));
       toast("success", "Metrics refresh interval updated");
     } catch {
       toast("error", "Failed to save preference");
@@ -120,7 +105,7 @@ export default function SettingsPage() {
             label="Default Refresh Interval"
             value={refreshInterval}
             onValueChange={handleRefreshChange}
-            options={REFRESH_OPTIONS}
+            options={METRICS_REFRESH_OPTIONS}
           />
           <p className="text-text-muted text-xs mt-3">
             Controls how often metrics data is automatically refreshed on the

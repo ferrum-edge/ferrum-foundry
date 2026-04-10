@@ -119,6 +119,7 @@ export interface Proxy {
 }
 
 export interface ProxyCreate {
+  id?: string;
   listen_path: string;
   backend_protocol: Proxy["backend_protocol"];
   backend_host: string;
@@ -177,6 +178,7 @@ export interface Consumer {
 }
 
 export interface ConsumerCreate {
+  id?: string;
   username: string;
   custom_id?: string;
   credentials?: Record<string, unknown>;
@@ -198,6 +200,7 @@ export interface PluginConfig {
 }
 
 export interface PluginConfigCreate {
+  id?: string;
   plugin_name: string;
   config?: Record<string, unknown>;
   scope: "global" | "proxy";
@@ -271,6 +274,7 @@ export interface Upstream {
 }
 
 export interface UpstreamCreate {
+  id?: string;
   targets: UpstreamTarget[];
   algorithm: Upstream["algorithm"];
   name?: string;

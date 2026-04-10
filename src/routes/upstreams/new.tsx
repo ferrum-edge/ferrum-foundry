@@ -7,6 +7,7 @@ import { useCreateUpstream } from "@/hooks/useUpstreams";
 import { useToast } from "@/components/ui/Toast";
 import { Card } from "@/components/ui/Card";
 import { UpstreamForm } from "@/components/forms/UpstreamForm";
+import { getApiErrorMessage } from "@/api/client";
 import type { UpstreamCreate } from "@/api/types";
 
 export default function UpstreamNewPage() {
@@ -23,8 +24,7 @@ export default function UpstreamNewPage() {
         params: { upstreamId: created.id },
       });
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Failed to create upstream";
+      const message = await getApiErrorMessage(err, "Failed to create upstream");
       toast("error", message);
     }
   };

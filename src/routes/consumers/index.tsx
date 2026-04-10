@@ -30,7 +30,7 @@ function formatDate(iso: string): string {
 }
 
 const CREDENTIAL_TYPE_LABELS: Record<string, string> = {
-  "key-auth": "Key Auth",
+  keyauth: "Key Auth",
   basicauth: "Basic Auth",
   jwt: "JWT",
   hmac_auth: "HMAC",
@@ -41,7 +41,7 @@ const CREDENTIAL_BADGE_VARIANT: Record<
   string,
   "orange" | "blue" | "green" | "purple" | "yellow"
 > = {
-  "key-auth": "orange",
+  keyauth: "orange",
   basicauth: "blue",
   jwt: "green",
   hmac_auth: "purple",

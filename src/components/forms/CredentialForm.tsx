@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
+import { getApiErrorMessage } from "@/api/client";
 import {
   useAppendCredential,
   useDeleteCredentialByIndex,
@@ -41,7 +42,7 @@ interface CredentialFieldConfig {
 /* ------------------------------------------------------------------ */
 
 const CREDENTIAL_CONFIGS: Record<string, CredentialFieldConfig> = {
-  "key-auth": {
+  keyauth: {
     label: "Key Authentication",
     fields: [
       {
@@ -115,7 +116,7 @@ const CREDENTIAL_CONFIGS: Record<string, CredentialFieldConfig> = {
 /* ------------------------------------------------------------------ */
 
 const CRED_BADGE_VARIANT: Record<string, "orange" | "blue" | "green" | "purple" | "yellow"> = {
-  "key-auth": "orange",
+  keyauth: "orange",
   basicauth: "blue",
   jwt: "green",
   hmac_auth: "purple",
@@ -131,7 +132,7 @@ function renderCredentialSummary(
   cred: Record<string, unknown>,
 ): string {
   switch (credType) {
-    case "key-auth":
+    case "keyauth":
       return cred.key ? `Key: ${maskString(String(cred.key))}` : "Key (auto-generated)";
     case "basicauth":
       return cred.username ? `User: ${String(cred.username)}` : "Basic auth credential";
@@ -234,8 +235,7 @@ export function CredentialForm({
       setErrors({});
       setShowForm(false);
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Failed to add credential";
+      const message = await getApiErrorMessage(err, "Failed to add credential");
       toast("error", message);
     }
   };
@@ -251,8 +251,7 @@ export function CredentialForm({
       toast("success", `${config.label} credential removed`);
       setDeleteIndex(null);
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Failed to delete credential";
+      const message = await getApiErrorMessage(err, "Failed to delete credential");
       toast("error", message);
     }
   };

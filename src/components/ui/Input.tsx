@@ -11,7 +11,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
     const inputId = id || label?.toLowerCase().replace(/\s+/g, "-");
 
     return (
-      <div className="flex flex-col gap-1.5">
+      <div className="flex min-w-0 flex-col gap-1.5">
         {label && (
           <label
             htmlFor={inputId}
@@ -23,7 +23,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
         <input
           ref={ref}
           id={inputId}
-          className={`bg-bg-input border rounded-lg px-3 py-2 text-text-primary text-sm placeholder:text-text-muted transition-colors duration-150 ${error ? "border-danger focus:border-danger focus:ring-1 focus:ring-danger/30" : "border-border focus:border-orange focus:ring-1 focus:ring-orange/30"} ${className}`}
+          className={`w-full min-w-0 bg-bg-input border rounded-lg px-3 py-2 text-text-primary text-sm placeholder:text-text-muted transition-colors duration-150 ${error ? "border-danger focus:border-danger focus:ring-1 focus:ring-danger/30" : "border-border focus:border-orange focus:ring-1 focus:ring-orange/30"} ${className}`}
           {...props}
         />
         {error && <p className="text-danger text-xs">{error}</p>}

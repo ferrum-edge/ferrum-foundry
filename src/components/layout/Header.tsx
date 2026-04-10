@@ -46,15 +46,20 @@ export function Header({ onToggleSidebar }: HeaderProps) {
       </div>
 
       {/* Right side */}
-      <div className="flex items-center gap-4">
+      <div className="flex min-w-0 items-center gap-3 sm:gap-4">
         {/* Namespace selector */}
-        <div className="w-44">
-          <Select
-            value={selectedNamespace}
-            onValueChange={setNamespace}
-            options={displayOptions}
-            placeholder="Namespace"
-          />
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="hidden sm:inline text-sm font-semibold text-text-secondary whitespace-nowrap">
+            Active Namespace:
+          </span>
+          <div className="w-36 min-w-0 sm:w-44 md:w-52">
+            <Select
+              value={selectedNamespace}
+              onValueChange={setNamespace}
+              options={displayOptions}
+              placeholder="Namespace"
+            />
+          </div>
         </div>
 
         {/* Connection status indicator */}

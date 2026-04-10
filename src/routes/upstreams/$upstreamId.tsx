@@ -18,6 +18,7 @@ import { SkeletonCard } from "@/components/ui/Skeleton";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
 import { UpstreamForm } from "@/components/forms/UpstreamForm";
 import { TargetForm } from "@/components/forms/TargetForm";
+import { getApiErrorMessage } from "@/api/client";
 import type { UpstreamCreate, UpstreamTarget } from "@/api/types";
 
 export default function UpstreamDetailPage() {
@@ -42,8 +43,7 @@ export default function UpstreamDetailPage() {
       await updateUpstream.mutateAsync({ id: upstreamId, data });
       toast("success", "Upstream updated successfully");
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Failed to update upstream";
+      const message = await getApiErrorMessage(err, "Failed to update upstream");
       toast("error", message);
     }
   };
@@ -54,8 +54,7 @@ export default function UpstreamDetailPage() {
       toast("success", "Upstream deleted successfully");
       navigate({ to: "/upstreams" });
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Failed to delete upstream";
+      const message = await getApiErrorMessage(err, "Failed to delete upstream");
       toast("error", message);
     }
   };
@@ -79,8 +78,7 @@ export default function UpstreamDetailPage() {
       });
       toast("success", "Targets updated successfully");
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Failed to update targets";
+      const message = await getApiErrorMessage(err, "Failed to update targets");
       toast("error", message);
     }
   };

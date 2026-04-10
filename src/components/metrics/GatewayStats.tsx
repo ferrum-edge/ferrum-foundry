@@ -5,9 +5,11 @@
 import type { AdminMetrics } from "@/api/types";
 import { Badge } from "@/components/ui/Badge";
 import { StatCard } from "./StatCard";
+import type { GatewayRequestStats } from "@/hooks/useGatewayRequestStats";
 
 interface GatewayStatsProps {
   metrics: AdminMetrics["gateway"];
+  requestStats: GatewayRequestStats;
 }
 
 function formatUptime(seconds: number): string {
@@ -29,8 +31,16 @@ function statusCodeVariant(code: string): "green" | "yellow" | "red" | "blue" {
   return "blue";
 }
 
-export function GatewayStats({ metrics }: GatewayStatsProps) {
-  const statusCodes = Object.entries(metrics.status_codes_last_second);
+function formatRate(rate?: number): string {
+  if (rate === undefined) return "Collecting";
+  return rate >= 10 ? rate.toFixed(0) : rate.toFixed(1);
+}
+
+export function GatewayStats({ metrics, requestStats }: GatewayStatsProps) {
+  const hasStatusRates = requestStats.statusCodesPerSecond !== undefined;
+  const statusCodes = Object.entries(metrics.status_codes_last_second)
+    .filter(([, count]) => count > 0)
+    .sort(([a], [b]) => a.localeCompare(b));
 
   return (
     <div className="space-y-4">
@@ -43,7 +53,16 @@ export function GatewayStats({ metrics }: GatewayStatsProps) {
         />
         <StatCard
           label="Requests/sec"
-          value={metrics.requests_per_second_current.toFixed(1)}
+          value={formatRate(requestStats.requestsPerSecond)}
+          subtitle={
+            requestStats.requestsPerSecond === undefined
+              ? "Waiting for next sample"
+              : "Calculated from counter delta"
+          }
+        />
+        <StatCard
+          label="Total Requests"
+          value={requestStats.totalRequests.toLocaleString()}
         />
         <StatCard
           label="Config Source"
@@ -66,14 +85,17 @@ export function GatewayStats({ metrics }: GatewayStatsProps) {
       {statusCodes.length > 0 && (
         <div>
           <h4 className="text-text-secondary text-xs font-medium mb-2">
-            Status Codes (last second)
+            {hasStatusRates ? "Status Codes / sec" : "Status Code Totals"}
           </h4>
           <div className="flex flex-wrap gap-2">
-            {statusCodes.map(([code, count]) => (
-              <Badge key={code} variant={statusCodeVariant(code)}>
-                {code}: {count}
-              </Badge>
-            ))}
+            {statusCodes.map(([code, total]) => {
+              const rate = requestStats.statusCodesPerSecond?.[code];
+              return (
+                <Badge key={code} variant={statusCodeVariant(code)}>
+                  {code}: {rate === undefined ? total : `${formatRate(rate)}/s`}
+                </Badge>
+              );
+            })}
           </div>
         </div>
       )}

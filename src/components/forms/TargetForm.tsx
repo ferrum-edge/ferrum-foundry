@@ -103,7 +103,7 @@ export function TargetForm({ initialData, onSubmit, onCancel }: TargetFormProps)
       className="bg-bg-primary/50 border border-border rounded-lg p-4 space-y-3"
     >
       {/* Row 1: host, port, weight, path */}
-      <div className="grid grid-cols-[2fr_1fr_1fr_1.5fr] gap-3">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.5fr)]">
         <Input
           label="Host"
           value={host}
