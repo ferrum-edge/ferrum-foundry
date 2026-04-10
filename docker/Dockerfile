@@ -12,7 +12,7 @@ RUN npm run build
 RUN npm prune --production
 
 # Stage 2: Production (distroless)
-FROM gcr.io/distroless/nodejs22-debian12:nonroot
+FROM gcr.io/distroless/nodejs22-debian13:nonroot
 WORKDIR /app
 
 # Copy built SPA
