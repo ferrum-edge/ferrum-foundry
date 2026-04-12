@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – Plugin Config create / edit form                  */
 /* ------------------------------------------------------------------ */
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -14,8 +14,15 @@ import { formatPluginConfigDefault } from "@/lib/pluginConfigDefaults";
 /*  Props                                                              */
 /* ------------------------------------------------------------------ */
 
+export interface PluginFormDefaults {
+  pluginName?: string;
+  scope?: "global" | "proxy";
+  proxyId?: string;
+}
+
 export interface PluginConfigFormProps {
   initialData?: PluginConfig;
+  defaults?: PluginFormDefaults;
   onSubmit: (data: PluginConfigCreate) => Promise<void>;
   isLoading: boolean;
   availablePlugins: string[];
@@ -53,6 +60,7 @@ function Checkbox({
 
 export function PluginConfigForm({
   initialData,
+  defaults,
   onSubmit,
   isLoading,
   availablePlugins,
@@ -61,18 +69,20 @@ export function PluginConfigForm({
   const isEdit = !!initialData;
 
   /* ---------- State ---------- */
-  const [pluginName, setPluginName] = useState(initialData?.plugin_name ?? "");
-  const [scope, setScope] = useState<"global" | "proxy">(initialData?.scope ?? "global");
-  const [proxyId, setProxyId] = useState(initialData?.proxy_id ?? "");
+  const [pluginName, setPluginName] = useState(initialData?.plugin_name ?? defaults?.pluginName ?? "");
+  const [scope, setScope] = useState<"global" | "proxy">(initialData?.scope ?? defaults?.scope ?? "global");
+  const [proxyId, setProxyId] = useState(initialData?.proxy_id ?? defaults?.proxyId ?? "");
   const [enabled, setEnabled] = useState(initialData?.enabled ?? true);
   const [priorityOverride, setPriorityOverride] = useState<number | "">(
     initialData?.priority_override ?? "",
   );
+  const initialPluginForConfig = initialData?.plugin_name ?? defaults?.pluginName ?? "";
   const initialConfigJson = initialData
     ? JSON.stringify(initialData.config, null, 2)
-    : formatPluginConfigDefault("");
-  const generatedConfigJsonRef = useRef<string | null>(isEdit ? null : initialConfigJson);
+    : formatPluginConfigDefault(initialPluginForConfig);
   const [configJson, setConfigJson] = useState(initialConfigJson);
+  // Track whether the user has manually edited the config textarea
+  const [userEditedConfig, setUserEditedConfig] = useState(false);
 
   /* ---------- Validation ---------- */
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -120,28 +130,21 @@ export function PluginConfigForm({
 
   const numVal = (v: number | ""): string => (v === "" ? "" : String(v));
 
+  const currentDefault = formatPluginConfigDefault(pluginName);
+  const configMatchesDefault = configJson === currentDefault;
+
   const resetConfigToPluginDefault = () => {
-    const nextConfigJson = formatPluginConfigDefault(pluginName);
-    generatedConfigJsonRef.current = nextConfigJson;
-    setConfigJson(nextConfigJson);
+    setConfigJson(currentDefault);
+    setUserEditedConfig(false);
     setErrors(({ config, ...remainingErrors }) => remainingErrors);
   };
 
+  // When plugin name changes in create mode, always update config to the new default
   useEffect(() => {
     if (isEdit || !pluginName) return;
-
     const nextConfigJson = formatPluginConfigDefault(pluginName);
-    setConfigJson((currentConfigJson) => {
-      const shouldReplace =
-        currentConfigJson.trim() === "" ||
-        currentConfigJson.trim() === "{}" ||
-        currentConfigJson === generatedConfigJsonRef.current;
-
-      if (!shouldReplace) return currentConfigJson;
-
-      generatedConfigJsonRef.current = nextConfigJson;
-      return nextConfigJson;
-    });
+    setConfigJson(nextConfigJson);
+    setUserEditedConfig(false);
   }, [isEdit, pluginName]);
 
   /* ================================================================ */
@@ -196,7 +199,7 @@ export function PluginConfigForm({
               setPriorityOverride(raw === "" ? "" : Number(raw));
             }}
             placeholder="Optional (0-10000)"
-            helpText="Higher priority plugins execute first. Leave empty for default."
+            helpText="Lower values execute first. Leave empty for default."
             error={errors.priority_override}
           />
         </div>
@@ -206,7 +209,7 @@ export function PluginConfigForm({
       <div className="border-b border-border/50 py-4">
         <div className="flex items-center justify-between gap-3 mb-4">
           <h3 className="text-sm font-semibold text-text-primary">Config (JSON)</h3>
-          {!isEdit && pluginName && (
+          {!isEdit && pluginName && userEditedConfig && !configMatchesDefault && (
             <Button
               type="button"
               variant="secondary"
@@ -221,7 +224,7 @@ export function PluginConfigForm({
           <textarea
             value={configJson}
             onChange={(e) => {
-              generatedConfigJsonRef.current = null;
+              setUserEditedConfig(true);
               setConfigJson(e.target.value);
             }}
             rows={12}

@@ -8,6 +8,7 @@ import { useGatewayRequestStats } from "@/hooks/useGatewayRequestStats";
 import { Card } from "@/components/ui/Card";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { RefreshControl } from "@/components/metrics/RefreshControl";
+import { StatCard } from "@/components/metrics/StatCard";
 import { GatewayStats } from "@/components/metrics/GatewayStats";
 import { CircuitBreakerPanel } from "@/components/metrics/CircuitBreakerPanel";
 import { ConnectionPoolPanel } from "@/components/metrics/ConnectionPoolPanel";
@@ -221,17 +222,33 @@ export default function MetricsPage() {
           </h3>
           <RateLimitPanel rateLimiting={metrics.rate_limiting} />
         </Card>
+
+        <Card>
+          <h3 className="text-sm font-semibold text-text-primary mb-3">
+            Consumer Index
+          </h3>
+          <div className="grid grid-cols-2 gap-3">
+            <StatCard label="Total Consumers" value={metrics.consumer_index.total_consumers} />
+            {(Object.entries(metrics.consumer_index) as [string, number][])
+              .filter(([key, val]) => key !== "total_consumers" && val > 0)
+              .map(([key, val]) => (
+                <StatCard
+                  key={key}
+                  label={key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
+                  value={val}
+                />
+              ))}
+          </div>
+        </Card>
       </div>
 
       {/* Per-route Prometheus stats */}
-      {prometheusText && (
-        <section>
-          <h2 className="text-lg font-semibold text-text-primary mb-3">
-            Per-Route Metrics
-          </h2>
-          <PrometheusStatsPanel text={prometheusText} />
-        </section>
-      )}
+      <section>
+        <h2 className="text-lg font-semibold text-text-primary mb-3">
+          Per-Route Metrics
+        </h2>
+        <PrometheusStatsPanel text={prometheusText ?? ""} />
+      </section>
     </div>
   );
 }

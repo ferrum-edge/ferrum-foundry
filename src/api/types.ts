@@ -220,26 +220,30 @@ export interface UpstreamTarget {
 }
 
 export interface HashOnCookieConfig {
-  name: string;
   path?: string;
   ttl_seconds?: number;
+  domain?: string;
+  http_only?: boolean;
+  secure?: boolean;
+  same_site?: "Strict" | "Lax" | "None" | null;
 }
 
 export interface ActiveHealthCheck {
-  enabled: boolean;
   interval_seconds: number;
-  timeout_seconds: number;
+  timeout_ms: number;
   healthy_threshold: number;
   unhealthy_threshold: number;
-  path: string;
-  expected_status_codes: number[];
+  http_path: string;
+  healthy_status_codes: number[];
+  probe_type?: "http" | "tcp" | "udp";
+  udp_probe_payload?: string;
+  use_tls?: boolean;
 }
 
 export interface PassiveHealthCheck {
-  enabled: boolean;
   unhealthy_threshold: number;
   unhealthy_status_codes: number[];
-  healthy_threshold: number;
+  unhealthy_window_seconds: number;
 }
 
 export interface HealthCheckConfig {
@@ -248,10 +252,27 @@ export interface HealthCheckConfig {
 }
 
 export interface ServiceDiscoveryConfig {
-  provider: string;
-  service_name: string;
-  refresh_interval_seconds: number;
-  config: Record<string, unknown>;
+  provider: "dns_sd" | "kubernetes" | "consul";
+  dns_sd?: {
+    service_name?: string;
+    poll_interval_seconds?: number;
+  };
+  kubernetes?: {
+    service_name?: string;
+    namespace?: string;
+    port_name?: string;
+    poll_interval_seconds?: number;
+  };
+  consul?: {
+    address?: string;
+    service_name?: string;
+    datacenter?: string;
+    tag?: string;
+    healthy_only?: boolean;
+    token?: string;
+    poll_interval_seconds?: number;
+  };
+  default_weight?: number;
 }
 
 export interface Upstream {
@@ -304,8 +325,11 @@ export interface AdminMetrics {
     mode: string;
     ferrum_version: string;
     uptime_seconds: number;
-    requests_per_second_current: number;
-    status_codes_last_second: Record<string, number>;
+    total_requests: number;
+    requests_per_second: number;
+    status_codes_total: Record<string, number>;
+    status_codes_per_second: Record<string, number>;
+    metrics_window_seconds?: number;
     config_last_updated_at?: string;
     config_source_status: string;
     proxy_count: number;

@@ -2,17 +2,19 @@
 /*  Ferrum Foundry – Create Plugin Config page                         */
 /* ------------------------------------------------------------------ */
 
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useCreatePluginConfig, useAvailablePlugins } from "@/hooks/usePlugins";
 import { useToast } from "@/components/ui/Toast";
 import { Card } from "@/components/ui/Card";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { PluginConfigForm } from "@/components/forms/PluginConfigForm";
+import type { PluginFormDefaults } from "@/components/forms/PluginConfigForm";
 import { getApiErrorMessage } from "@/api/client";
 import type { PluginConfigCreate } from "@/api/types";
 
 export default function PluginNewPage() {
   const navigate = useNavigate();
+  const search = useSearch({ strict: false }) as Record<string, string | undefined>;
   const createPlugin = useCreatePluginConfig();
   const { toast } = useToast();
   const { data: availablePlugins, isLoading: pluginsLoading } = useAvailablePlugins();
@@ -56,6 +58,11 @@ export default function PluginNewPage() {
           onSubmit={handleSubmit}
           isLoading={createPlugin.isPending}
           availablePlugins={availablePlugins ?? []}
+          defaults={{
+            pluginName: search.plugin ?? undefined,
+            scope: search.scope === "proxy" ? "proxy" : search.proxyId ? "proxy" : undefined,
+            proxyId: search.proxyId ?? undefined,
+          } satisfies PluginFormDefaults}
         />
       </Card>
     </div>

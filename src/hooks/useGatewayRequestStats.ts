@@ -56,8 +56,8 @@ function toSample(
   return {
     timestamp,
     uptimeSeconds: gateway.uptime_seconds,
-    totalRequests: gateway.requests_per_second_current,
-    statusCodeTotals: gateway.status_codes_last_second,
+    totalRequests: gateway.total_requests,
+    statusCodeTotals: gateway.status_codes_total,
   };
 }
 
@@ -101,7 +101,7 @@ export function useGatewayRequestStats(
   const previousSampleRef = useRef<RequestSample | undefined>(undefined);
   const lastNamespaceRef = useRef(selectedNamespace);
   const [stats, setStats] = useState<GatewayRequestStats>(() => ({
-    totalRequests: gateway?.requests_per_second_current ?? 0,
+    totalRequests: gateway?.total_requests ?? 0,
   }));
 
   useEffect(() => {

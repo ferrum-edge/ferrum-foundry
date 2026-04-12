@@ -7,6 +7,7 @@ import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useProxy, useUpdateProxy, useDeleteProxy } from "@/hooks/useProxies";
 import { usePluginConfigs } from "@/hooks/usePlugins";
 import { useUpstream } from "@/hooks/useUpstreams";
+import { useConsumers } from "@/hooks/useConsumers";
 import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -16,7 +17,7 @@ import { ProxyForm } from "@/components/forms/ProxyForm";
 import { Badge } from "@/components/ui/Badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
 import { getApiErrorMessage } from "@/api/client";
-import type { ProxyCreate, PluginConfig } from "@/api/types";
+import type { ProxyCreate, PluginConfig, Consumer } from "@/api/types";
 
 export default function ProxyDetailPage() {
   const { proxyId } = useParams({ strict: false }) as { proxyId: string };
@@ -44,6 +45,49 @@ export default function ProxyDetailPage() {
       (p: PluginConfig) => p.proxy_id === proxyId,
     );
   }, [pluginConfigsResponse, proxyId]);
+
+  // Auth analysis for the Authorized Consumers tab
+  const AUTH_PLUGIN_NAMES = [
+    "key_auth", "basic_auth", "jwt_auth", "jwks_auth",
+    "hmac_auth", "mtls_auth", "ldap_auth",
+  ];
+
+  const { hasAuthPlugin, authPluginTypes, aclAllowGroups, aclDenyGroups } = useMemo(() => {
+    const types: string[] = [];
+    let allow: string[] = [];
+    let deny: string[] = [];
+    for (const p of proxyPlugins) {
+      if (AUTH_PLUGIN_NAMES.includes(p.plugin_name)) {
+        types.push(p.plugin_name);
+      }
+      if (p.plugin_name === "access_control" && p.config) {
+        const cfg = p.config as Record<string, unknown>;
+        if (Array.isArray(cfg.allow)) allow = cfg.allow as string[];
+        if (Array.isArray(cfg.deny)) deny = cfg.deny as string[];
+      }
+    }
+    return { hasAuthPlugin: types.length > 0, authPluginTypes: types, aclAllowGroups: allow, aclDenyGroups: deny };
+  }, [proxyPlugins]);
+
+  const hasAclFilter = aclAllowGroups.length > 0 || aclDenyGroups.length > 0;
+
+  // Only fetch consumers when ACL groups are configured (otherwise we show "All consumers allowed")
+  const { data: consumersResponse } = useConsumers(hasAclFilter ? { limit: 1000 } : { limit: 0 });
+
+  // Filter consumers by ACL groups
+  const authorizedConsumers = useMemo(() => {
+    if (!hasAclFilter) return [];
+    const allConsumers = consumersResponse?.data ?? [];
+    return allConsumers.filter((c: Consumer) => {
+      if (aclAllowGroups.length > 0) {
+        if (!c.acl_groups.some((g) => aclAllowGroups.includes(g))) return false;
+      }
+      if (aclDenyGroups.length > 0) {
+        if (c.acl_groups.some((g) => aclDenyGroups.includes(g))) return false;
+      }
+      return true;
+    });
+  }, [consumersResponse, hasAclFilter, aclAllowGroups, aclDenyGroups]);
 
   /* ---------- Handlers ---------- */
 
@@ -132,6 +176,9 @@ export default function ProxyDetailPage() {
           <TabsTrigger value="plugins">
             Plugins ({proxyPlugins.length})
           </TabsTrigger>
+          <TabsTrigger value="consumers">
+            Consumers
+          </TabsTrigger>
           <TabsTrigger value="upstream">
             {proxy.upstream_id ? "Upstream (linked)" : "Upstream"}
           </TabsTrigger>
@@ -214,6 +261,103 @@ export default function ProxyDetailPage() {
           )}
         </TabsContent>
 
+        {/* ── Consumers Tab ──────────────────────────────────────── */}
+        <TabsContent value="consumers">
+          {!hasAuthPlugin ? (
+            <Card>
+              <div className="text-center py-8">
+                <p className="text-text-secondary">
+                  No authentication plugins configured for this proxy.
+                </p>
+                <p className="text-text-muted text-sm mt-2">
+                  Add an auth plugin (key_auth, basic_auth, jwt_auth, etc.) to
+                  restrict access to specific consumers.
+                </p>
+              </div>
+            </Card>
+          ) : !hasAclFilter ? (
+            <Card>
+              <div className="py-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <Badge variant="green">Open Access</Badge>
+                  <span className="text-text-primary font-medium">
+                    All authenticated consumers allowed
+                  </span>
+                </div>
+                <p className="text-text-muted text-sm">
+                  This proxy requires authentication via{" "}
+                  {authPluginTypes.map((t) => t.replace(/_/g, " ")).join(", ")},
+                  but has no access_control plugin restricting by ACL group. Any
+                  consumer with valid credentials can access this proxy.
+                </p>
+                <Link
+                  to="/plugins/new"
+                  search={{ plugin: "access_control", scope: "proxy", proxyId: proxy.id }}
+                  className="inline-block mt-4 text-sm text-orange hover:text-orange-light font-medium transition-colors"
+                >
+                  Add an access_control plugin to restrict by group
+                </Link>
+              </div>
+            </Card>
+          ) : (
+            <div className="space-y-3">
+              {/* ACL summary */}
+              <Card>
+                <div className="flex flex-wrap items-center gap-2 mb-1">
+                  <span className="text-sm font-semibold text-text-secondary uppercase tracking-wide">
+                    ACL Groups
+                  </span>
+                  {aclAllowGroups.map((g) => (
+                    <Badge key={`allow-${g}`} variant="green">{g}</Badge>
+                  ))}
+                  {aclDenyGroups.map((g) => (
+                    <Badge key={`deny-${g}`} variant="red">deny: {g}</Badge>
+                  ))}
+                </div>
+                <p className="text-text-muted text-xs">
+                  {authorizedConsumers.length} consumer{authorizedConsumers.length !== 1 ? "s" : ""} match
+                </p>
+              </Card>
+
+              {/* Consumer list — virtualized-ready with fixed height and scroll */}
+              <Card className="p-0 overflow-hidden">
+                <div className="grid grid-cols-[2fr_1.5fr_2fr] gap-4 px-5 py-2.5 border-b border-border text-text-muted text-xs font-semibold uppercase tracking-wider">
+                  <span>Username</span>
+                  <span>Custom ID</span>
+                  <span>ACL Groups</span>
+                </div>
+                <div className="max-h-[400px] overflow-y-auto divide-y divide-border/50">
+                  {authorizedConsumers.map((c: Consumer) => (
+                    <Link
+                      key={c.id}
+                      to="/consumers/$consumerId"
+                      params={{ consumerId: c.id }}
+                      className="grid grid-cols-[2fr_1.5fr_2fr] gap-4 px-5 py-3 text-sm hover:bg-bg-card-hover transition-colors"
+                    >
+                      <span className="text-text-primary font-medium break-all">
+                        {c.username}
+                      </span>
+                      <span className="text-text-muted break-all">
+                        {c.custom_id || "—"}
+                      </span>
+                      <div className="flex flex-wrap gap-1">
+                        {c.acl_groups.map((g) => (
+                          <Badge
+                            key={g}
+                            variant={aclAllowGroups.includes(g) ? "green" : "default"}
+                          >
+                            {g}
+                          </Badge>
+                        ))}
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              </Card>
+            </div>
+          )}
+        </TabsContent>
+
         {/* ── Upstream Tab ───────────────────────────────────────── */}
         <TabsContent value="upstream">
           {!proxy.upstream_id ? (
@@ -261,14 +405,14 @@ export default function ProxyDetailPage() {
                     </span>{" "}
                     target{upstream.targets.length !== 1 ? "s" : ""}
                   </span>
-                  {upstream.health_checks?.active?.enabled && (
+                  {upstream.health_checks?.active && (
                     <Badge variant="green">Active health checks</Badge>
                   )}
-                  {upstream.health_checks?.passive?.enabled && (
+                  {upstream.health_checks?.passive && (
                     <Badge variant="yellow">Passive health checks</Badge>
                   )}
-                  {!upstream.health_checks?.active?.enabled &&
-                    !upstream.health_checks?.passive?.enabled && (
+                  {!upstream.health_checks?.active &&
+                    !upstream.health_checks?.passive && (
                       <Badge variant="default">No health checks</Badge>
                     )}
                 </div>

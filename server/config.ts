@@ -15,6 +15,10 @@ export interface Config {
 
 export interface RuntimeConfig {
   adminUrl: string;
+  jwtSecret: string;
+  jwtIssuer: string;
+  jwtTtl: number;
+  tlsCaPath: string | undefined;
   tlsVerify: boolean;
   connectTimeout: number;
   readTimeout: number;
@@ -65,6 +69,10 @@ export function getRuntimeConfig(): RuntimeConfig {
   const cfg = loadConfig();
   return {
     adminUrl: cfg.adminUrl,
+    jwtSecret: cfg.jwtSecret,
+    jwtIssuer: cfg.jwtIssuer,
+    jwtTtl: cfg.jwtTtl,
+    tlsCaPath: cfg.tlsCaPath,
     tlsVerify: cfg.tlsVerify,
     connectTimeout: cfg.connectTimeout,
     readTimeout: cfg.readTimeout,
@@ -74,6 +82,10 @@ export function getRuntimeConfig(): RuntimeConfig {
 
 export function updateRuntimeConfig(updates: Partial<RuntimeConfig>): RuntimeConfig {
   if (updates.adminUrl !== undefined) runtimeOverrides.adminUrl = updates.adminUrl;
+  if (updates.jwtSecret !== undefined) runtimeOverrides.jwtSecret = updates.jwtSecret;
+  if (updates.jwtIssuer !== undefined) runtimeOverrides.jwtIssuer = updates.jwtIssuer;
+  if (updates.jwtTtl !== undefined) runtimeOverrides.jwtTtl = updates.jwtTtl;
+  if (updates.tlsCaPath !== undefined) runtimeOverrides.tlsCaPath = updates.tlsCaPath;
   if (updates.tlsVerify !== undefined) runtimeOverrides.tlsVerify = updates.tlsVerify;
   if (updates.connectTimeout !== undefined) runtimeOverrides.connectTimeout = updates.connectTimeout;
   if (updates.readTimeout !== undefined) runtimeOverrides.readTimeout = updates.readTimeout;

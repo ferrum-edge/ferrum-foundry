@@ -57,9 +57,9 @@ const SD_PROVIDERS = [
 ];
 
 const SAME_SITE_OPTIONS = [
-  { value: "strict", label: "Strict" },
-  { value: "lax", label: "Lax" },
-  { value: "none", label: "None" },
+  { value: "Strict", label: "Strict" },
+  { value: "Lax", label: "Lax" },
+  { value: "None", label: "None" },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -94,30 +94,33 @@ function Checkbox({
 
 function defaultActiveHealthCheck(): ActiveHealthCheck {
   return {
-    enabled: true,
+    http_path: "/health",
     interval_seconds: 10,
-    timeout_seconds: 5,
+    timeout_ms: 5000,
     healthy_threshold: 3,
     unhealthy_threshold: 3,
-    path: "/health",
-    expected_status_codes: [200],
+    healthy_status_codes: [200, 302],
+    probe_type: "http",
+    use_tls: false,
   };
 }
 
 function defaultPassiveHealthCheck(): PassiveHealthCheck {
   return {
-    enabled: true,
     unhealthy_threshold: 3,
-    unhealthy_status_codes: [500, 502, 503],
-    healthy_threshold: 3,
+    unhealthy_status_codes: [500, 502, 503, 504],
+    unhealthy_window_seconds: 30,
   };
 }
 
 function defaultHashOnCookieConfig(): HashOnCookieConfig {
   return {
-    name: "",
     path: "/",
     ttl_seconds: 3600,
+    domain: undefined,
+    http_only: true,
+    secure: false,
+    same_site: "Lax",
   };
 }
 
@@ -142,52 +145,48 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
   const [editingTargetIndex, setEditingTargetIndex] = useState<number | null>(null);
 
   /* ---------- Health Checks ---------- */
-  const [activeHcEnabled, setActiveHcEnabled] = useState(
-    initialData?.health_checks?.active?.enabled ?? false,
-  );
+  const [activeHcEnabled, setActiveHcEnabled] = useState(!!initialData?.health_checks?.active);
   const [activeHc, setActiveHc] = useState<ActiveHealthCheck>(
     initialData?.health_checks?.active ?? defaultActiveHealthCheck(),
   );
-  const [passiveHcEnabled, setPassiveHcEnabled] = useState(
-    initialData?.health_checks?.passive?.enabled ?? false,
-  );
+  const [passiveHcEnabled, setPassiveHcEnabled] = useState(!!initialData?.health_checks?.passive);
   const [passiveHc, setPassiveHc] = useState<PassiveHealthCheck>(
     initialData?.health_checks?.passive ?? defaultPassiveHealthCheck(),
   );
 
   /* ---------- Hash Cookie Config ---------- */
-  const [cookieConfig, setCookieConfig] = useState<HashOnCookieConfig & {
-    domain?: string;
-    http_only?: boolean;
-    secure?: boolean;
-    same_site?: string;
-  }>({
-    name: initialData?.hash_on_cookie_config?.name ?? "",
+  const [cookieConfig, setCookieConfig] = useState<HashOnCookieConfig>({
     path: initialData?.hash_on_cookie_config?.path ?? "/",
     ttl_seconds: initialData?.hash_on_cookie_config?.ttl_seconds ?? 3600,
-    domain: "",
-    http_only: false,
-    secure: false,
-    same_site: "lax",
+    domain: initialData?.hash_on_cookie_config?.domain,
+    http_only: initialData?.hash_on_cookie_config?.http_only ?? true,
+    secure: initialData?.hash_on_cookie_config?.secure ?? false,
+    same_site: initialData?.hash_on_cookie_config?.same_site ?? "Lax",
   });
 
   /* ---------- Service Discovery ---------- */
   const [sdEnabled, setSdEnabled] = useState(!!initialData?.service_discovery);
   const [sdProvider, setSdProvider] = useState(initialData?.service_discovery?.provider ?? "dns_sd");
-  const [sdServiceName, setSdServiceName] = useState(initialData?.service_discovery?.service_name ?? "");
-  const [sdRefreshInterval, setSdRefreshInterval] = useState(
-    initialData?.service_discovery?.refresh_interval_seconds ?? 30,
-  );
-  const [sdConfig, setSdConfig] = useState<Record<string, unknown>>(
-    initialData?.service_discovery?.config ?? {},
-  );
+  const [sdServiceName, setSdServiceName] = useState(() => {
+    const sd = initialData?.service_discovery;
+    if (!sd) return "";
+    return sd.dns_sd?.service_name ?? sd.kubernetes?.service_name ?? sd.consul?.service_name ?? "";
+  });
+  const [sdConfig, setSdConfig] = useState<Record<string, unknown>>(() => {
+    const sd = initialData?.service_discovery;
+    if (!sd) return {};
+    const providerConfig = sd[sd.provider] as Record<string, unknown> | undefined;
+    if (!providerConfig) return {};
+    const { service_name: _, ...rest } = providerConfig;
+    return { ...rest, default_weight: sd.default_weight ?? 1 };
+  });
 
   /* ---------- Validation ---------- */
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const validate = (): boolean => {
     const errs: Record<string, string> = {};
-    if (targets.length === 0) errs.targets = "At least one target is required";
+    if (targets.length === 0 && !sdEnabled) errs.targets = "At least one target is required (unless service discovery is enabled)";
     if (algorithm === "consistent_hashing" && !hashOn.trim()) {
       errs.hash_on = "Hash key is required for consistent hashing";
     }
@@ -204,26 +203,52 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
     const healthChecks: HealthCheckConfig | undefined =
       activeHcEnabled || passiveHcEnabled
         ? {
-            ...(activeHcEnabled && { active: { ...activeHc, enabled: true } }),
-            ...(passiveHcEnabled && { passive: { ...passiveHc, enabled: true } }),
+            ...(activeHcEnabled && { active: activeHc }),
+            ...(passiveHcEnabled && { passive: passiveHc }),
           }
         : undefined;
 
     const hashOnCookie: HashOnCookieConfig | undefined =
-      hashOn.startsWith("cookie:") && cookieConfig.name
+      hashOn.startsWith("cookie:")
         ? {
-            name: cookieConfig.name,
-            ...(cookieConfig.path && { path: cookieConfig.path }),
-            ...(cookieConfig.ttl_seconds && { ttl_seconds: cookieConfig.ttl_seconds }),
+            path: cookieConfig.path,
+            ttl_seconds: cookieConfig.ttl_seconds,
+            ...(cookieConfig.domain && { domain: cookieConfig.domain }),
+            http_only: cookieConfig.http_only,
+            secure: cookieConfig.secure,
+            same_site: cookieConfig.same_site,
           }
         : undefined;
 
     const serviceDiscovery: ServiceDiscoveryConfig | undefined = sdEnabled
       ? {
-          provider: sdProvider,
-          service_name: sdServiceName,
-          refresh_interval_seconds: sdRefreshInterval,
-          config: sdConfig,
+          provider: sdProvider as ServiceDiscoveryConfig["provider"],
+          ...(sdProvider === "dns_sd" && {
+            dns_sd: {
+              service_name: sdServiceName,
+              poll_interval_seconds: (sdConfig.poll_interval_seconds as number) ?? 30,
+            },
+          }),
+          ...(sdProvider === "kubernetes" && {
+            kubernetes: {
+              service_name: sdServiceName,
+              namespace: (sdConfig.namespace as string) || undefined,
+              port_name: (sdConfig.port_name as string) || undefined,
+              poll_interval_seconds: (sdConfig.poll_interval_seconds as number) ?? 30,
+            },
+          }),
+          ...(sdProvider === "consul" && {
+            consul: {
+              address: (sdConfig.address as string) || undefined,
+              service_name: sdServiceName,
+              datacenter: (sdConfig.datacenter as string) || undefined,
+              tag: (sdConfig.tag as string) || undefined,
+              healthy_only: (sdConfig.healthy_only as boolean) ?? true,
+              token: (sdConfig.token as string) || undefined,
+              poll_interval_seconds: (sdConfig.poll_interval_seconds as number) ?? 30,
+            },
+          }),
+          default_weight: (sdConfig.default_weight as number) ?? 1,
         }
       : undefined;
 
@@ -419,11 +444,15 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
         />
         {activeHcEnabled && (
           <div className="space-y-4 pl-6 border-l-2 border-border/50">
-            <Input
-              label="HTTP Path"
-              value={activeHc.path}
-              onChange={(e) => setActiveHc({ ...activeHc, path: e.target.value })}
-              placeholder="/health"
+            <Select
+              label="Probe Type"
+              value={activeHc.probe_type ?? "http"}
+              onValueChange={(v) => setActiveHc({ ...activeHc, probe_type: v as "http" | "tcp" | "udp" })}
+              options={[
+                { value: "http", label: "HTTP / HTTPS" },
+                { value: "tcp", label: "TCP" },
+                { value: "udp", label: "UDP" },
+              ]}
             />
             <Input
               label="Interval (seconds)"
@@ -432,10 +461,10 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
               onChange={(e) => setActiveHc({ ...activeHc, interval_seconds: Number(e.target.value) })}
             />
             <Input
-              label="Timeout (seconds)"
+              label="Timeout (ms)"
               type="number"
-              value={String(activeHc.timeout_seconds)}
-              onChange={(e) => setActiveHc({ ...activeHc, timeout_seconds: Number(e.target.value) })}
+              value={String(activeHc.timeout_ms)}
+              onChange={(e) => setActiveHc({ ...activeHc, timeout_ms: Number(e.target.value) })}
             />
             <Input
               label="Healthy Threshold"
@@ -449,21 +478,45 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
               value={String(activeHc.unhealthy_threshold)}
               onChange={(e) => setActiveHc({ ...activeHc, unhealthy_threshold: Number(e.target.value) })}
             />
-            <Input
-              label="Expected Status Codes"
-              value={activeHc.expected_status_codes.join(", ")}
-              onChange={(e) =>
-                setActiveHc({
-                  ...activeHc,
-                  expected_status_codes: e.target.value
-                    .split(",")
-                    .map((s) => parseInt(s.trim(), 10))
-                    .filter((n) => !isNaN(n)),
-                })
-              }
-              placeholder="200, 201"
-              helpText="Comma-separated HTTP status codes"
-            />
+            {(activeHc.probe_type ?? "http") === "http" && (
+              <>
+                <Input
+                  label="HTTP Path"
+                  value={activeHc.http_path}
+                  onChange={(e) => setActiveHc({ ...activeHc, http_path: e.target.value })}
+                  placeholder="/health"
+                />
+                <Input
+                  label="Healthy Status Codes"
+                  value={activeHc.healthy_status_codes.join(", ")}
+                  onChange={(e) =>
+                    setActiveHc({
+                      ...activeHc,
+                      healthy_status_codes: e.target.value
+                        .split(",")
+                        .map((s) => parseInt(s.trim(), 10))
+                        .filter((n) => !isNaN(n)),
+                    })
+                  }
+                  placeholder="200, 302"
+                  helpText="Comma-separated HTTP status codes considered healthy"
+                />
+                <Checkbox
+                  label="Use HTTPS for health probes"
+                  checked={activeHc.use_tls ?? false}
+                  onChange={(v) => setActiveHc({ ...activeHc, use_tls: v })}
+                />
+              </>
+            )}
+            {(activeHc.probe_type) === "udp" && (
+              <Input
+                label="UDP Probe Payload"
+                value={activeHc.udp_probe_payload ?? ""}
+                onChange={(e) => setActiveHc({ ...activeHc, udp_probe_payload: e.target.value || undefined })}
+                placeholder="0000"
+                helpText="Hex-encoded payload to send for UDP probes. If empty, a single zero byte is sent."
+              />
+            )}
           </div>
         )}
 
@@ -499,10 +552,10 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
               onChange={(e) => setPassiveHc({ ...passiveHc, unhealthy_threshold: Number(e.target.value) })}
             />
             <Input
-              label="Healthy Threshold"
+              label="Unhealthy Window (seconds)"
               type="number"
-              value={String(passiveHc.healthy_threshold)}
-              onChange={(e) => setPassiveHc({ ...passiveHc, healthy_threshold: Number(e.target.value) })}
+              value={String(passiveHc.unhealthy_window_seconds)}
+              onChange={(e) => setPassiveHc({ ...passiveHc, unhealthy_window_seconds: Number(e.target.value) })}
             />
           </div>
         )}
@@ -511,12 +564,6 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
       {/* ── Hash Cookie Config ── */}
       {showHashCookie && (
         <CollapsibleSection title="Hash Cookie Config">
-          <Input
-            label="Cookie Name"
-            value={cookieConfig.name}
-            onChange={(e) => setCookieConfig({ ...cookieConfig, name: e.target.value })}
-            placeholder="session_id"
-          />
           <Input
             label="Path"
             value={cookieConfig.path ?? ""}
@@ -547,8 +594,8 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
           />
           <Select
             label="SameSite"
-            value={cookieConfig.same_site ?? "lax"}
-            onValueChange={(v) => setCookieConfig({ ...cookieConfig, same_site: v })}
+            value={cookieConfig.same_site ?? "Lax"}
+            onValueChange={(v) => setCookieConfig({ ...cookieConfig, same_site: v as HashOnCookieConfig["same_site"] })}
             options={SAME_SITE_OPTIONS}
           />
         </CollapsibleSection>
@@ -570,7 +617,7 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
               label="Provider"
               value={sdProvider}
               onValueChange={(v) => {
-                setSdProvider(v);
+                setSdProvider(v as ServiceDiscoveryConfig["provider"]);
                 setSdConfig({});
               }}
               options={SD_PROVIDERS}
@@ -582,13 +629,6 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
               placeholder="my-service"
               required
             />
-            <Input
-              label="Refresh Interval (seconds)"
-              type="number"
-              value={String(sdRefreshInterval)}
-              onChange={(e) => setSdRefreshInterval(Number(e.target.value))}
-            />
-
             {/* Provider-specific fields */}
             {sdProvider === "dns_sd" && (
               <Input

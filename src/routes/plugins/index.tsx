@@ -102,12 +102,12 @@ const FALLBACK_PRIORITY = 5000;
 /* ------------------------------------------------------------------ */
 
 const columns = [
-  { key: "plugin_name", label: "Plugin", className: "" },
-  { key: "scope", label: "Scope", className: "" },
-  { key: "proxy_id", label: "Proxy ID", className: "" },
-  { key: "enabled", label: "Enabled", className: "text-center" },
-  { key: "priority", label: "Priority", className: "text-center" },
-  { key: "created_at", label: "Created", className: "text-right" },
+  { key: "plugin_name", label: "Plugin" },
+  { key: "scope", label: "Scope" },
+  { key: "proxy_id", label: "Proxy ID" },
+  { key: "enabled", label: "Enabled" },
+  { key: "priority", label: "Priority" },
+  { key: "created_at", label: "Created" },
 ] as const;
 
 /* ================================================================== */
@@ -171,9 +171,9 @@ export default function PluginsPage() {
       {/* Table */}
       <Card className="overflow-hidden p-0">
         {/* Header row */}
-        <div className="grid grid-cols-[minmax(0,2fr)_5rem_minmax(0,1.5fr)_5rem_6rem_minmax(0,1fr)] gap-4 px-6 py-3 border-b border-border bg-bg-card text-text-muted text-xs font-semibold uppercase tracking-wider">
+        <div className="grid grid-cols-[2fr_4rem_1.5fr_4rem_4rem_1fr] gap-4 px-6 py-3 border-b border-border bg-bg-card text-text-muted text-xs font-semibold uppercase tracking-wider">
           {columns.map((col) => (
-            <span key={col.key} className={col.className}>
+            <span key={col.key}>
               {col.label}
             </span>
           ))}
@@ -219,7 +219,7 @@ export default function PluginsPage() {
               <button
                 key={config.id}
                 type="button"
-                className="grid grid-cols-[minmax(0,2fr)_5rem_minmax(0,1.5fr)_5rem_6rem_minmax(0,1fr)] gap-4 px-6 py-3.5 w-full text-left hover:bg-bg-card-hover transition-colors cursor-pointer"
+                className="grid grid-cols-[2fr_4rem_1.5fr_4rem_4rem_1fr] gap-4 px-6 py-3.5 w-full text-left hover:bg-bg-card-hover transition-colors cursor-pointer"
                 onClick={() =>
                   navigate({
                     to: "/plugins/$pluginId",
@@ -230,8 +230,8 @@ export default function PluginsPage() {
                 {/* Plugin name */}
                 <div className="min-w-0">
                   <Badge variant="orange">{formatPluginName(config.plugin_name)}</Badge>
-                  <span className="text-xs text-text-muted font-mono truncate block mt-1">
-                    {config.id.slice(0, 8)}...
+                  <span className="text-xs text-text-muted font-mono break-all block mt-1">
+                    {config.id}
                   </span>
                 </div>
 
@@ -243,23 +243,21 @@ export default function PluginsPage() {
                 </span>
 
                 {/* Proxy ID */}
-                <span className="text-sm text-text-muted font-mono truncate block min-w-0">
-                  {config.proxy_id ? (
-                    <span title={config.proxy_id}>{config.proxy_id}</span>
-                  ) : (
+                <span className="text-sm text-text-muted font-mono break-all block min-w-0">
+                  {config.proxy_id ?? (
                     <span className="italic">--</span>
                   )}
                 </span>
 
                 {/* Enabled */}
-                <span className="text-center">
+                <span>
                   <Badge variant={config.enabled ? "green" : "red"}>
                     {config.enabled ? "Yes" : "No"}
                   </Badge>
                 </span>
 
                 {/* Priority */}
-                <span className="text-center">
+                <span>
                   {config.priority_override !== undefined ? (
                     <span className="inline-block text-sm font-bold text-danger border border-danger/40 bg-danger/10 rounded px-1.5 py-0.5">
                       {config.priority_override}
@@ -272,7 +270,7 @@ export default function PluginsPage() {
                 </span>
 
                 {/* Created at */}
-                <span className="text-sm text-text-muted text-right whitespace-nowrap">
+                <span className="text-sm text-text-muted">
                   {formatDate(config.created_at)}
                 </span>
               </button>

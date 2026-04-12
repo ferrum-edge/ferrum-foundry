@@ -5,6 +5,7 @@
 import { useState, useMemo } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useProxies } from "@/hooks/useProxies";
+import { useUpstreams } from "@/hooks/useUpstreams";
 import { usePagination } from "@/hooks/usePagination";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -38,12 +39,11 @@ function formatDate(iso: string): string {
 /* ------------------------------------------------------------------ */
 
 const columns = [
-  { key: "name", label: "Name / ID", className: "w-1/5" },
-  { key: "listen_path", label: "Listen Path", className: "w-1/6" },
-  { key: "backend", label: "Backend", className: "w-1/4" },
-  { key: "plugins", label: "Plugins", className: "w-16 text-center" },
-  { key: "upstream", label: "Upstream", className: "w-1/6" },
-  { key: "created_at", label: "Created", className: "w-1/6 text-right" },
+  { key: "name", label: "Name / ID" },
+  { key: "listen_path", label: "Listen Path" },
+  { key: "backend", label: "Backend / Upstream" },
+  { key: "plugins", label: "Plugins", className: "text-center" },
+  { key: "created_at", label: "Created" },
 ] as const;
 
 /* ================================================================== */
@@ -55,6 +55,16 @@ export default function ProxiesPage() {
   const [search, setSearch] = useState("");
 
   /* --- Data fetching with pagination --- */
+  const { data: upstreamData } = useUpstreams({ limit: 1000 });
+  const upstreamNameMap = useMemo(() => {
+    const map = new Map<string, string>();
+    const upstreams = upstreamData?.data ?? [];
+    for (const u of upstreams) {
+      map.set(u.id, u.name ?? u.id);
+    }
+    return map;
+  }, [upstreamData]);
+
   const { data, isLoading, isError } = useProxies();
   const total = data?.pagination?.total ?? 0;
   const { offset, limit, paginationParams } = usePagination(total);
@@ -102,16 +112,16 @@ export default function ProxiesPage() {
       <SearchBar
         value={search}
         onChange={setSearch}
-        placeholder="Search by name, ID, path, or host..."
+        placeholder="Search by name, listen path, ID, or backend host..."
         className="max-w-md"
       />
 
       {/* Table */}
       <Card className="overflow-hidden p-0">
         {/* Header row */}
-        <div className="grid grid-cols-[1fr_1fr_1.5fr_4rem_1fr_1fr] gap-4 px-6 py-3 border-b border-border bg-bg-card text-text-muted text-xs font-semibold uppercase tracking-wider">
+        <div className="grid grid-cols-[2fr_1.5fr_2fr_4rem_1fr] gap-4 px-6 py-3 border-b border-border bg-bg-card text-text-muted text-xs font-semibold uppercase tracking-wider">
           {columns.map((col) => (
-            <span key={col.key} className={col.className}>
+            <span key={col.key} className={"className" in col ? col.className : ""}>
               {col.label}
             </span>
           ))}
@@ -157,7 +167,7 @@ export default function ProxiesPage() {
               <button
                 key={proxy.id}
                 type="button"
-                className="grid grid-cols-[1fr_1fr_1.5fr_4rem_1fr_1fr] gap-4 px-6 py-3.5 w-full text-left hover:bg-bg-card-hover transition-colors cursor-pointer"
+                className="grid grid-cols-[2fr_1.5fr_2fr_4rem_1fr] gap-4 px-6 py-3.5 w-full text-left hover:bg-bg-card-hover transition-colors cursor-pointer"
                 onClick={() =>
                   navigate({
                     to: "/proxies/$proxyId",
@@ -169,29 +179,40 @@ export default function ProxiesPage() {
                 <div className="min-w-0">
                   {proxy.name ? (
                     <>
-                      <span className="text-sm text-text-primary font-medium truncate block">
+                      <span className="text-sm text-text-primary font-medium break-all">
                         {proxy.name}
                       </span>
-                      <span className="text-xs text-text-muted font-mono truncate block">
-                        {proxy.id.slice(0, 8)}...
+                      <span className="text-xs text-text-muted font-mono break-all block">
+                        {proxy.id}
                       </span>
                     </>
                   ) : (
-                    <span className="text-sm text-text-primary font-mono truncate block">
-                      {proxy.id.slice(0, 12)}...
+                    <span className="text-sm text-text-primary font-mono break-all">
+                      {proxy.id}
                     </span>
                   )}
                 </div>
 
                 {/* Listen Path */}
-                <span className="text-sm text-text-secondary font-mono truncate">
+                <span className="text-sm text-text-secondary font-mono break-all">
                   {proxy.listen_path}
                 </span>
 
-                {/* Backend */}
-                <span className="text-sm text-text-secondary font-mono truncate">
-                  {formatBackend(proxy)}
-                </span>
+                {/* Backend / Upstream */}
+                <div className="min-w-0">
+                  {proxy.upstream_id ? (
+                    <>
+                      <span className="text-sm text-text-primary break-all">
+                        {upstreamNameMap.get(proxy.upstream_id) ?? proxy.upstream_id}
+                      </span>
+                      <span className="text-xs text-text-muted block">load balanced</span>
+                    </>
+                  ) : (
+                    <span className="text-sm text-text-secondary font-mono break-all">
+                      {formatBackend(proxy)}
+                    </span>
+                  )}
+                </div>
 
                 {/* Plugins count */}
                 <span className="text-center">
@@ -200,17 +221,8 @@ export default function ProxiesPage() {
                   </Badge>
                 </span>
 
-                {/* Upstream */}
-                <span className="text-sm text-text-muted truncate">
-                  {proxy.upstream_id ? (
-                    <span className="font-mono text-xs">{proxy.upstream_id.slice(0, 8)}...</span>
-                  ) : (
-                    <span className="italic">None</span>
-                  )}
-                </span>
-
                 {/* Created at */}
-                <span className="text-sm text-text-muted text-right">
+                <span className="text-sm text-text-muted">
                   {formatDate(proxy.created_at)}
                 </span>
               </button>
