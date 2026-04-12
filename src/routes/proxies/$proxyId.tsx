@@ -292,6 +292,7 @@ export default function ProxyDetailPage() {
                 </p>
                 <Link
                   to="/plugins/new"
+                  search={{ plugin: "access_control", scope: "proxy", proxyId: proxy.id }}
                   className="inline-block mt-4 text-sm text-orange hover:text-orange-light font-medium transition-colors"
                 >
                   Add an access_control plugin to restrict by group
