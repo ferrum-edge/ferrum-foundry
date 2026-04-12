@@ -143,6 +143,7 @@ export function ConsumerForm({
   const isEdit = !!initialData;
 
   /* ---------- Form state ---------- */
+  const [resourceId, setResourceId] = useState("");
   const [username, setUsername] = useState(initialData?.username ?? "");
   const [customId, setCustomId] = useState(initialData?.custom_id ?? "");
   const [aclGroups, setAclGroups] = useState<string[]>(
@@ -186,6 +187,7 @@ export function ConsumerForm({
     }
 
     const data: ConsumerCreate = {
+      ...(resourceId.trim() && { id: resourceId.trim() }),
       username: username.trim(),
       ...(customId.trim() && { custom_id: customId.trim() }),
       ...(aclGroups.length > 0 && { acl_groups: aclGroups }),
@@ -203,6 +205,28 @@ export function ConsumerForm({
         <h3 className="text-sm font-semibold text-text-primary mb-4">
           Consumer Details
         </h3>
+        {!isEdit && (
+          <div className="flex items-end gap-2">
+            <div className="flex-1">
+              <Input
+                label="ID"
+                value={resourceId}
+                onChange={(e) => setResourceId(e.target.value)}
+                placeholder="Auto-generated UUID if left blank"
+                helpText="Optional custom ID. Must start with alphanumeric, max 254 chars."
+              />
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="shrink-0 mb-[1px]"
+              onClick={() => setResourceId(crypto.randomUUID())}
+            >
+              Generate UUID
+            </Button>
+          </div>
+        )}
         <Input
           label="Username"
           value={username}

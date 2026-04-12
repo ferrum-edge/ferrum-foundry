@@ -444,11 +444,15 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
         />
         {activeHcEnabled && (
           <div className="space-y-4 pl-6 border-l-2 border-border/50">
-            <Input
-              label="HTTP Path"
-              value={activeHc.http_path}
-              onChange={(e) => setActiveHc({ ...activeHc, http_path: e.target.value })}
-              placeholder="/health"
+            <Select
+              label="Probe Type"
+              value={activeHc.probe_type ?? "http"}
+              onValueChange={(v) => setActiveHc({ ...activeHc, probe_type: v as "http" | "tcp" | "udp" })}
+              options={[
+                { value: "http", label: "HTTP / HTTPS" },
+                { value: "tcp", label: "TCP" },
+                { value: "udp", label: "UDP" },
+              ]}
             />
             <Input
               label="Interval (seconds)"
@@ -474,36 +478,45 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
               value={String(activeHc.unhealthy_threshold)}
               onChange={(e) => setActiveHc({ ...activeHc, unhealthy_threshold: Number(e.target.value) })}
             />
-            <Input
-              label="Healthy Status Codes"
-              value={activeHc.healthy_status_codes.join(", ")}
-              onChange={(e) =>
-                setActiveHc({
-                  ...activeHc,
-                  healthy_status_codes: e.target.value
-                    .split(",")
-                    .map((s) => parseInt(s.trim(), 10))
-                    .filter((n) => !isNaN(n)),
-                })
-              }
-              placeholder="200, 302"
-              helpText="Comma-separated HTTP status codes"
-            />
-            <Select
-              label="Probe Type"
-              value={activeHc.probe_type ?? "http"}
-              onValueChange={(v) => setActiveHc({ ...activeHc, probe_type: v as "http" | "tcp" | "udp" })}
-              options={[
-                { value: "http", label: "HTTP" },
-                { value: "tcp", label: "TCP" },
-                { value: "udp", label: "UDP" },
-              ]}
-            />
-            <Checkbox
-              label="Use TLS"
-              checked={activeHc.use_tls ?? false}
-              onChange={(v) => setActiveHc({ ...activeHc, use_tls: v })}
-            />
+            {(activeHc.probe_type ?? "http") === "http" && (
+              <>
+                <Input
+                  label="HTTP Path"
+                  value={activeHc.http_path}
+                  onChange={(e) => setActiveHc({ ...activeHc, http_path: e.target.value })}
+                  placeholder="/health"
+                />
+                <Input
+                  label="Healthy Status Codes"
+                  value={activeHc.healthy_status_codes.join(", ")}
+                  onChange={(e) =>
+                    setActiveHc({
+                      ...activeHc,
+                      healthy_status_codes: e.target.value
+                        .split(",")
+                        .map((s) => parseInt(s.trim(), 10))
+                        .filter((n) => !isNaN(n)),
+                    })
+                  }
+                  placeholder="200, 302"
+                  helpText="Comma-separated HTTP status codes considered healthy"
+                />
+                <Checkbox
+                  label="Use HTTPS for health probes"
+                  checked={activeHc.use_tls ?? false}
+                  onChange={(v) => setActiveHc({ ...activeHc, use_tls: v })}
+                />
+              </>
+            )}
+            {(activeHc.probe_type) === "udp" && (
+              <Input
+                label="UDP Probe Payload"
+                value={activeHc.udp_probe_payload ?? ""}
+                onChange={(e) => setActiveHc({ ...activeHc, udp_probe_payload: e.target.value || undefined })}
+                placeholder="0000"
+                helpText="Hex-encoded payload to send for UDP probes. If empty, a single zero byte is sent."
+              />
+            )}
           </div>
         )}
 
