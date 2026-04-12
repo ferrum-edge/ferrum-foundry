@@ -163,7 +163,7 @@ export default function DashboardPage() {
               Database:{" "}
               <Badge
                 variant={
-                  health.data.database.status === "ok" ? "green" : "red"
+                  health.data.database.status === "connected" ? "green" : "red"
                 }
               >
                 {health.data.database.status}

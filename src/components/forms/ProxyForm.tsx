@@ -472,6 +472,7 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
   const isTcpLike = backendProtocol === "tcp" || backendProtocol === "tcp_tls";
   const isUdpLike = backendProtocol === "udp" || backendProtocol === "dtls";
   const isH3 = backendProtocol === "h3";
+  const isWebSocket = backendProtocol === "ws" || backendProtocol === "wss";
   const showProtocolSection = isTcpLike || isUdpLike || isH3;
 
   /* ================================================================ */
@@ -566,12 +567,15 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
           onChange={setAllowedMethods}
           options={ALL_HTTP_METHODS}
         />
-        <TagInput
-          label="Allowed WebSocket Origins"
-          values={allowedWsOrigins}
-          onChange={(v) => setAllowedWsOrigins(v as string[])}
-          placeholder="https://example.com"
-        />
+        {isWebSocket && (
+          <TagInput
+            label="Allowed WebSocket Origins"
+            values={allowedWsOrigins}
+            onChange={(v) => setAllowedWsOrigins(v as string[])}
+            placeholder="https://example.com"
+            helpText="Protects against Cross-Site WebSocket Hijacking (CSWSH). Leave empty to allow all origins."
+          />
+        )}
       </CollapsibleSection>
 
       {/* ── Section 3: Backend Timeouts ── */}

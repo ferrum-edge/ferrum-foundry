@@ -38,7 +38,7 @@ function formatRate(rate?: number): string {
 
 export function GatewayStats({ metrics, requestStats }: GatewayStatsProps) {
   const hasStatusRates = requestStats.statusCodesPerSecond !== undefined;
-  const statusCodes = Object.entries(metrics.status_codes_last_second)
+  const statusCodes = Object.entries(metrics.status_codes_total)
     .filter(([, count]) => count > 0)
     .sort(([a], [b]) => a.localeCompare(b));
 
@@ -67,7 +67,7 @@ export function GatewayStats({ metrics, requestStats }: GatewayStatsProps) {
         <StatCard
           label="Config Source"
           value={metrics.config_source_status}
-          variant={metrics.config_source_status === "ok" ? "success" : "warning"}
+          variant={metrics.config_source_status === "online" ? "success" : "warning"}
         />
         <StatCard label="Proxies" value={metrics.proxy_count} />
         <StatCard label="Consumers" value={metrics.consumer_count} />

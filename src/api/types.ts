@@ -325,8 +325,11 @@ export interface AdminMetrics {
     mode: string;
     ferrum_version: string;
     uptime_seconds: number;
-    requests_per_second_current: number;
-    status_codes_last_second: Record<string, number>;
+    total_requests: number;
+    requests_per_second: number;
+    status_codes_total: Record<string, number>;
+    status_codes_per_second: Record<string, number>;
+    metrics_window_seconds?: number;
     config_last_updated_at?: string;
     config_source_status: string;
     proxy_count: number;
