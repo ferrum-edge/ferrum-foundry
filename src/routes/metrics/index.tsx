@@ -221,17 +221,39 @@ export default function MetricsPage() {
           </h3>
           <RateLimitPanel rateLimiting={metrics.rate_limiting} />
         </Card>
+
+        <Card>
+          <h3 className="text-sm font-semibold text-text-primary mb-3">
+            Consumer Index
+          </h3>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-bg-card border border-border rounded-lg p-4">
+              <div className="text-text-secondary text-xs font-medium mb-1">Total Consumers</div>
+              <p className="text-2xl font-bold text-text-primary">{metrics.consumer_index.total_consumers}</p>
+            </div>
+            <div className="bg-bg-card border border-border rounded-lg p-4">
+              <div className="text-text-secondary text-xs font-medium mb-1">Key Auth Credentials</div>
+              <p className="text-2xl font-bold text-text-primary">{metrics.consumer_index.key_auth_credentials}</p>
+            </div>
+            <div className="bg-bg-card border border-border rounded-lg p-4">
+              <div className="text-text-secondary text-xs font-medium mb-1">Basic Auth Credentials</div>
+              <p className="text-2xl font-bold text-text-primary">{metrics.consumer_index.basic_auth_credentials}</p>
+            </div>
+            <div className="bg-bg-card border border-border rounded-lg p-4">
+              <div className="text-text-secondary text-xs font-medium mb-1">mTLS Credentials</div>
+              <p className="text-2xl font-bold text-text-primary">{metrics.consumer_index.mtls_credentials}</p>
+            </div>
+          </div>
+        </Card>
       </div>
 
       {/* Per-route Prometheus stats */}
-      {prometheusText && (
-        <section>
-          <h2 className="text-lg font-semibold text-text-primary mb-3">
-            Per-Route Metrics
-          </h2>
-          <PrometheusStatsPanel text={prometheusText} />
-        </section>
-      )}
+      <section>
+        <h2 className="text-lg font-semibold text-text-primary mb-3">
+          Per-Route Metrics
+        </h2>
+        <PrometheusStatsPanel text={prometheusText ?? ""} />
+      </section>
     </div>
   );
 }

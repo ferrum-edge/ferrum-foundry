@@ -261,14 +261,14 @@ export default function ProxyDetailPage() {
                     </span>{" "}
                     target{upstream.targets.length !== 1 ? "s" : ""}
                   </span>
-                  {upstream.health_checks?.active?.enabled && (
+                  {upstream.health_checks?.active && (
                     <Badge variant="green">Active health checks</Badge>
                   )}
-                  {upstream.health_checks?.passive?.enabled && (
+                  {upstream.health_checks?.passive && (
                     <Badge variant="yellow">Passive health checks</Badge>
                   )}
-                  {!upstream.health_checks?.active?.enabled &&
-                    !upstream.health_checks?.passive?.enabled && (
+                  {!upstream.health_checks?.active &&
+                    !upstream.health_checks?.passive && (
                       <Badge variant="default">No health checks</Badge>
                     )}
                 </div>

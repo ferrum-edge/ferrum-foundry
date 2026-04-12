@@ -214,7 +214,7 @@ export default function UpstreamsPage() {
 
                 {/* Health check status */}
                 <span className="text-center">
-                  {upstream.health_checks?.active?.enabled || upstream.health_checks?.passive?.enabled ? (
+                  {upstream.health_checks?.active || upstream.health_checks?.passive ? (
                     <Badge variant="green">Active</Badge>
                   ) : (
                     <Badge variant="default">None</Badge>

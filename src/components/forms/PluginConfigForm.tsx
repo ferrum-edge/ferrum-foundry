@@ -196,7 +196,7 @@ export function PluginConfigForm({
               setPriorityOverride(raw === "" ? "" : Number(raw));
             }}
             placeholder="Optional (0-10000)"
-            helpText="Higher priority plugins execute first. Leave empty for default."
+            helpText="Lower values execute first. Leave empty for default."
             error={errors.priority_override}
           />
         </div>

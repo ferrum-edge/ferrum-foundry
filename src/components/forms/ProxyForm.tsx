@@ -211,21 +211,26 @@ function Checkbox({
   label,
   checked,
   onChange,
+  helpText,
 }: {
   label: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
+  helpText?: string;
 }) {
   return (
-    <label className="inline-flex items-center gap-2 cursor-pointer select-none">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-        className="w-4 h-4 rounded border-border bg-bg-input text-orange accent-orange cursor-pointer"
-      />
-      <span className="text-sm text-text-secondary">{label}</span>
-    </label>
+    <div className="flex flex-col gap-1">
+      <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onChange(e.target.checked)}
+          className="w-4 h-4 rounded border-border bg-bg-input text-orange accent-orange cursor-pointer"
+        />
+        <span className="text-sm text-text-secondary">{label}</span>
+      </label>
+      {helpText && <p className="text-text-muted text-xs pl-6">{helpText}</p>}
+    </div>
   );
 }
 
@@ -238,7 +243,7 @@ function defaultCircuitBreaker(): CircuitBreakerConfig {
     failure_threshold: 5,
     success_threshold: 3,
     timeout_seconds: 30,
-    failure_status_codes: [],
+    failure_status_codes: [500, 502, 503, 504],
     half_open_max_requests: 1,
     trip_on_connection_errors: true,
   };
@@ -247,9 +252,9 @@ function defaultCircuitBreaker(): CircuitBreakerConfig {
 function defaultRetryConfig(): RetryConfig {
   return {
     max_retries: 3,
-    retryable_status_codes: [],
-    retryable_methods: [],
-    backoff: { fixed: { delay_ms: 1000 } },
+    retryable_status_codes: [502, 503, 504],
+    retryable_methods: ["GET", "HEAD", "OPTIONS", "PUT", "DELETE"],
+    backoff: { fixed: { delay_ms: 100 } },
     retry_on_connect_failure: true,
   };
 }
@@ -338,7 +343,7 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
     initialData?.retry ? getBackoffType(initialData.retry.backoff) : "fixed",
   );
   const [fixedDelay, setFixedDelay] = useState(
-    initialData?.retry ? getFixedDelay(initialData.retry.backoff) : 1000,
+    initialData?.retry ? getFixedDelay(initialData.retry.backoff) : 100,
   );
   const [expBase, setExpBase] = useState(
     initialData?.retry ? getExponentialBase(initialData.retry.backoff) : 100,
@@ -593,8 +598,24 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
 
       {/* ── Section 4: TLS Settings ── */}
       <CollapsibleSection title="TLS Settings">
-        <Checkbox label="Frontend TLS" checked={frontendTls} onChange={setFrontendTls} />
-        <Checkbox label="Passthrough" checked={passthrough} onChange={setPassthrough} />
+        <Checkbox
+          label="Frontend TLS"
+          checked={frontendTls}
+          onChange={(v) => {
+            setFrontendTls(v);
+            if (v) setPassthrough(false);
+          }}
+          helpText="Mutually exclusive with Passthrough"
+        />
+        <Checkbox
+          label="Passthrough"
+          checked={passthrough}
+          onChange={(v) => {
+            setPassthrough(v);
+            if (v) setFrontendTls(false);
+          }}
+          helpText="Mutually exclusive with Frontend TLS. Only valid for stream proxies (tcp, tcp_tls, udp, dtls)"
+        />
         <Checkbox
           label="Verify backend TLS server certificate"
           checked={backendTlsVerify}
