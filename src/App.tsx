@@ -4,6 +4,7 @@ import { ToastProvider } from "@/components/ui/Toast";
 import { TooltipProvider } from "@/components/ui/Tooltip";
 import { NamespaceProvider } from "@/stores/namespace";
 import { ErrorPopupProvider } from "@/stores/error";
+import { ThemeProvider } from "@/stores/theme";
 import { router } from "./router";
 
 const queryClient = new QueryClient({
@@ -17,16 +18,18 @@ const queryClient = new QueryClient({
 
 export function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <ToastProvider>
-        <TooltipProvider>
-          <NamespaceProvider>
-            <ErrorPopupProvider>
-              <RouterProvider router={router} />
-            </ErrorPopupProvider>
-          </NamespaceProvider>
-        </TooltipProvider>
-      </ToastProvider>
-    </QueryClientProvider>
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <TooltipProvider>
+            <NamespaceProvider>
+              <ErrorPopupProvider>
+                <RouterProvider router={router} />
+              </ErrorPopupProvider>
+            </NamespaceProvider>
+          </TooltipProvider>
+        </ToastProvider>
+      </QueryClientProvider>
+    </ThemeProvider>
   );
 }
