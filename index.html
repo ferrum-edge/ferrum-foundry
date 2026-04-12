@@ -18,8 +18,10 @@
     <script>
       // Apply persisted theme before first paint to prevent flash
       (function() {
-        var t = localStorage.getItem('ferrum:theme');
-        if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+        try {
+          var t = localStorage.getItem('ferrum:theme');
+          if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+        } catch(e) {}
       })();
     </script>
     <script type="module" src="/src/main.tsx"></script>
