@@ -24,6 +24,28 @@
   --sidebar-width: 240px;
 }
 
+/* Light theme overrides */
+:root[data-theme="light"] {
+  --bg-primary: #F8FAFC;
+  --bg-card: #FFFFFF;
+  --bg-card-hover: #F1F5F9;
+  --bg-input: #FFFFFF;
+  --border: #E2E8F0;
+  --border-hover: #CBD5E1;
+  --orange: #D9630E;
+  --orange-light: #E8701A;
+  --orange-dark: #B8520B;
+  --blue: #2563EB;
+  --blue-light: #3B82F6;
+  --text-primary: #0F172A;
+  --text-secondary: #475569;
+  --text-muted: #94A3B8;
+  --success: #059669;
+  --warning: #D97706;
+  --danger: #DC2626;
+  --code-bg: #F1F5F9;
+}
+
 /* Tailwind v4 theme extension */
 @theme {
   --color-bg-primary: var(--bg-primary);
@@ -48,6 +70,10 @@
   --font-mono: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
 }
 
+/* Color scheme for native elements */
+:root { color-scheme: dark; }
+:root[data-theme="light"] { color-scheme: light; }
+
 /* Base styles */
 body {
   font-family: var(--font-sans);
@@ -63,6 +89,9 @@ body {
 ::-webkit-scrollbar-track { background: var(--bg-primary); }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--border-hover); }
+
+/* Light theme shadow utility */
+:root[data-theme="light"] ::-webkit-scrollbar-track { background: #F1F5F9; }
 
 /* Focus styles */
 *:focus-visible {

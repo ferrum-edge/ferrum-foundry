@@ -49,6 +49,16 @@ docker run --rm -d --name ferrum-edge \
   ferrumedge/ferrum-edge:latest run -m database -v
 ```
 
+## Theming
+
+The app supports dark and light themes via CSS custom properties. Dark is the default.
+
+- **Design tokens** are defined in `src/styles/globals.css` as `:root` variables (dark) with `:root[data-theme="light"]` overrides
+- **Theme state** lives in `src/stores/theme.tsx` (`ThemeProvider` + `useTheme` hook), persisted to `localStorage` under `ferrum:theme`
+- **Toggle** is in the header (`src/components/layout/Header.tsx`) — sun/moon icon button
+- **Flash prevention**: `index.html` has an inline script that applies the persisted `data-theme` attribute before first paint
+- All UI colors flow through CSS variables mapped via Tailwind v4's `@theme` — adding or changing colors only requires editing `globals.css`
+
 ## Key directories
 
 - `src/routes/` - Page components (TanStack Router, lazy-loaded)
