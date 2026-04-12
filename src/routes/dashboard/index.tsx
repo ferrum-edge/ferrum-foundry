@@ -93,7 +93,7 @@ export default function DashboardPage() {
             />
           </svg>
         </div>
-        <div>
+        <div className="flex-1">
           <h1 className="text-2xl font-bold text-text-primary">
             Ferrum Foundry
           </h1>
@@ -101,6 +101,11 @@ export default function DashboardPage() {
             API gateway management dashboard
           </p>
         </div>
+        <img
+          src="/logo.png"
+          alt="Ferrum Foundry logo"
+          className="w-40 h-40 object-contain"
+        />
       </div>
 
       {/* ── Connection error prompt ────────────────────────────────── */}
