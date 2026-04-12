@@ -57,11 +57,11 @@ function algorithmBadgeVariant(algo: string) {
 /* ------------------------------------------------------------------ */
 
 const columns = [
-  { key: "name", label: "Name / ID", className: "w-1/4" },
-  { key: "algorithm", label: "Algorithm", className: "w-1/5" },
-  { key: "targets", label: "Targets", className: "w-20 text-center" },
-  { key: "health", label: "Health Check", className: "w-28 text-center" },
-  { key: "created_at", label: "Created", className: "w-1/5 text-right" },
+  { key: "name", label: "Name / ID" },
+  { key: "algorithm", label: "Algorithm" },
+  { key: "targets", label: "Targets" },
+  { key: "health", label: "Health Check" },
+  { key: "created_at", label: "Created" },
 ] as const;
 
 /* ================================================================== */
@@ -124,9 +124,9 @@ export default function UpstreamsPage() {
       {/* Table */}
       <Card className="overflow-hidden p-0">
         {/* Header row */}
-        <div className="grid grid-cols-[1fr_1fr_5rem_7rem_1fr] gap-4 px-6 py-3 border-b border-border bg-bg-card text-text-muted text-xs font-semibold uppercase tracking-wider">
+        <div className="grid grid-cols-[2fr_1.5fr_4rem_5rem_1fr] gap-4 px-6 py-3 border-b border-border bg-bg-card text-text-muted text-xs font-semibold uppercase tracking-wider">
           {columns.map((col) => (
-            <span key={col.key} className={col.className}>
+            <span key={col.key}>
               {col.label}
             </span>
           ))}
@@ -172,7 +172,7 @@ export default function UpstreamsPage() {
               <button
                 key={upstream.id}
                 type="button"
-                className="grid grid-cols-[1fr_1fr_5rem_7rem_1fr] gap-4 px-6 py-3.5 w-full text-left hover:bg-bg-card-hover transition-colors cursor-pointer"
+                className="grid grid-cols-[2fr_1.5fr_4rem_5rem_1fr] gap-4 px-6 py-3.5 w-full text-left hover:bg-bg-card-hover transition-colors cursor-pointer"
                 onClick={() =>
                   navigate({
                     to: "/upstreams/$upstreamId",
@@ -184,16 +184,16 @@ export default function UpstreamsPage() {
                 <div className="min-w-0">
                   {upstream.name ? (
                     <>
-                      <span className="text-sm text-text-primary font-medium truncate block">
+                      <span className="text-sm text-text-primary font-medium break-all">
                         {upstream.name}
                       </span>
-                      <span className="text-xs text-text-muted font-mono truncate block">
-                        {upstream.id.slice(0, 8)}...
+                      <span className="text-xs text-text-muted font-mono break-all block">
+                        {upstream.id}
                       </span>
                     </>
                   ) : (
-                    <span className="text-sm text-text-primary font-mono truncate block">
-                      {upstream.id.slice(0, 12)}...
+                    <span className="text-sm text-text-primary font-mono break-all">
+                      {upstream.id}
                     </span>
                   )}
                 </div>
@@ -206,14 +206,14 @@ export default function UpstreamsPage() {
                 </span>
 
                 {/* Target count */}
-                <span className="text-center">
+                <span>
                   <Badge variant={upstream.targets.length > 0 ? "blue" : "default"}>
                     {upstream.targets.length}
                   </Badge>
                 </span>
 
                 {/* Health check status */}
-                <span className="text-center">
+                <span>
                   {upstream.health_checks?.active || upstream.health_checks?.passive ? (
                     <Badge variant="green">Active</Badge>
                   ) : (
@@ -222,7 +222,7 @@ export default function UpstreamsPage() {
                 </span>
 
                 {/* Created at */}
-                <span className="text-sm text-text-muted text-right">
+                <span className="text-sm text-text-muted">
                   {formatDate(upstream.created_at)}
                 </span>
               </button>

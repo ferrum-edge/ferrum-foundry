@@ -5,7 +5,7 @@ import { fetch, Agent } from 'undici';
 import { generateToken } from '../jwt.js';
 
 const settingsPlugin: FastifyPluginAsync = async (fastify) => {
-  // GET /api/settings - return current runtime config (never expose JWT secret)
+  // GET /api/settings - return current runtime config (JWT secret masked)
   fastify.get('/api/settings', async () => {
     return getRuntimeConfig();
   });
@@ -17,6 +17,18 @@ const settingsPlugin: FastifyPluginAsync = async (fastify) => {
     // Basic validation
     if (body.adminUrl !== undefined && typeof body.adminUrl !== 'string') {
       return reply.status(400).send({ error: 'adminUrl must be a string' });
+    }
+    if (body.jwtSecret !== undefined && (typeof body.jwtSecret !== 'string' || body.jwtSecret.length === 0)) {
+      return reply.status(400).send({ error: 'jwtSecret must be a non-empty string' });
+    }
+    if (body.jwtIssuer !== undefined && typeof body.jwtIssuer !== 'string') {
+      return reply.status(400).send({ error: 'jwtIssuer must be a string' });
+    }
+    if (body.jwtTtl !== undefined && (typeof body.jwtTtl !== 'number' || body.jwtTtl <= 0)) {
+      return reply.status(400).send({ error: 'jwtTtl must be a positive number' });
+    }
+    if (body.tlsCaPath !== undefined && body.tlsCaPath !== null && typeof body.tlsCaPath !== 'string') {
+      return reply.status(400).send({ error: 'tlsCaPath must be a string or null' });
     }
     if (body.tlsVerify !== undefined && typeof body.tlsVerify !== 'boolean') {
       return reply.status(400).send({ error: 'tlsVerify must be a boolean' });
@@ -31,8 +43,8 @@ const settingsPlugin: FastifyPluginAsync = async (fastify) => {
       return reply.status(400).send({ error: 'writeTimeout must be a positive number' });
     }
 
-    const updated = updateRuntimeConfig(body);
-    return updated;
+    updateRuntimeConfig(body);
+    return getRuntimeConfig();
   });
 
   // GET /api/settings/status - test connectivity to admin API

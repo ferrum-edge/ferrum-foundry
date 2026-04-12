@@ -8,6 +8,7 @@ import { useGatewayRequestStats } from "@/hooks/useGatewayRequestStats";
 import { Card } from "@/components/ui/Card";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { RefreshControl } from "@/components/metrics/RefreshControl";
+import { StatCard } from "@/components/metrics/StatCard";
 import { GatewayStats } from "@/components/metrics/GatewayStats";
 import { CircuitBreakerPanel } from "@/components/metrics/CircuitBreakerPanel";
 import { ConnectionPoolPanel } from "@/components/metrics/ConnectionPoolPanel";
@@ -227,22 +228,16 @@ export default function MetricsPage() {
             Consumer Index
           </h3>
           <div className="grid grid-cols-2 gap-3">
-            <div className="bg-bg-card border border-border rounded-lg p-4">
-              <div className="text-text-secondary text-xs font-medium mb-1">Total Consumers</div>
-              <p className="text-2xl font-bold text-text-primary">{metrics.consumer_index.total_consumers}</p>
-            </div>
-            <div className="bg-bg-card border border-border rounded-lg p-4">
-              <div className="text-text-secondary text-xs font-medium mb-1">Key Auth Credentials</div>
-              <p className="text-2xl font-bold text-text-primary">{metrics.consumer_index.key_auth_credentials}</p>
-            </div>
-            <div className="bg-bg-card border border-border rounded-lg p-4">
-              <div className="text-text-secondary text-xs font-medium mb-1">Basic Auth Credentials</div>
-              <p className="text-2xl font-bold text-text-primary">{metrics.consumer_index.basic_auth_credentials}</p>
-            </div>
-            <div className="bg-bg-card border border-border rounded-lg p-4">
-              <div className="text-text-secondary text-xs font-medium mb-1">mTLS Credentials</div>
-              <p className="text-2xl font-bold text-text-primary">{metrics.consumer_index.mtls_credentials}</p>
-            </div>
+            <StatCard label="Total Consumers" value={metrics.consumer_index.total_consumers} />
+            {(Object.entries(metrics.consumer_index) as [string, number][])
+              .filter(([key, val]) => key !== "total_consumers" && val > 0)
+              .map(([key, val]) => (
+                <StatCard
+                  key={key}
+                  label={key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
+                  value={val}
+                />
+              ))}
           </div>
         </Card>
       </div>

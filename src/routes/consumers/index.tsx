@@ -64,11 +64,11 @@ function getCredentialTypes(consumer: Consumer): string[] {
 /* ------------------------------------------------------------------ */
 
 const columns = [
-  { key: "username", label: "Username", className: "w-1/5" },
-  { key: "custom_id", label: "Custom ID", className: "w-1/6" },
-  { key: "acl_groups", label: "ACL Groups", className: "w-1/5" },
-  { key: "credentials", label: "Credentials", className: "w-1/5" },
-  { key: "created_at", label: "Created", className: "w-1/6 text-right" },
+  { key: "username", label: "Username" },
+  { key: "custom_id", label: "Custom ID" },
+  { key: "acl_groups", label: "ACL Groups" },
+  { key: "credentials", label: "Credentials" },
+  { key: "created_at", label: "Created" },
 ] as const;
 
 /* ================================================================== */
@@ -144,9 +144,9 @@ export default function ConsumersPage() {
       {/* Table */}
       <Card className="overflow-hidden p-0">
         {/* Header row */}
-        <div className="grid grid-cols-[1fr_1fr_1.2fr_1.2fr_1fr] gap-4 px-6 py-3 border-b border-border bg-bg-card text-text-muted text-xs font-semibold uppercase tracking-wider">
+        <div className="grid grid-cols-[1.5fr_1fr_1.5fr_1.5fr_1fr] gap-4 px-6 py-3 border-b border-border bg-bg-card text-text-muted text-xs font-semibold uppercase tracking-wider">
           {columns.map((col) => (
-            <span key={col.key} className={col.className}>
+            <span key={col.key}>
               {col.label}
             </span>
           ))}
@@ -200,7 +200,7 @@ export default function ConsumersPage() {
                 <button
                   key={consumer.id}
                   type="button"
-                  className="grid grid-cols-[1fr_1fr_1.2fr_1.2fr_1fr] gap-4 px-6 py-3.5 w-full text-left hover:bg-bg-card-hover transition-colors cursor-pointer"
+                  className="grid grid-cols-[1.5fr_1fr_1.5fr_1.5fr_1fr] gap-4 px-6 py-3.5 w-full text-left hover:bg-bg-card-hover transition-colors cursor-pointer"
                   onClick={() =>
                     navigate({
                       to: "/consumers/$consumerId",
@@ -210,16 +210,16 @@ export default function ConsumersPage() {
                 >
                   {/* Username */}
                   <div className="min-w-0">
-                    <span className="text-sm text-text-primary font-medium truncate block">
+                    <span className="text-sm text-text-primary font-medium break-all">
                       {consumer.username}
                     </span>
-                    <span className="text-xs text-text-muted font-mono truncate block">
-                      {consumer.id.slice(0, 8)}...
+                    <span className="text-xs text-text-muted font-mono break-all block">
+                      {consumer.id}
                     </span>
                   </div>
 
                   {/* Custom ID */}
-                  <span className="text-sm text-text-secondary truncate">
+                  <span className="text-sm text-text-secondary break-all">
                     {consumer.custom_id || (
                       <span className="text-text-muted italic">None</span>
                     )}
@@ -264,7 +264,7 @@ export default function ConsumersPage() {
                   </div>
 
                   {/* Created at */}
-                  <span className="text-sm text-text-muted text-right">
+                  <span className="text-sm text-text-muted">
                     {formatDate(consumer.created_at)}
                   </span>
                 </button>
