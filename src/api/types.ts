@@ -187,11 +187,13 @@ export interface ConsumerCreate {
 
 // ── Plugins ───────────────────────────────────────────────────────
 
+export type PluginScope = "global" | "proxy" | "proxy_group";
+
 export interface PluginConfig {
   id: string;
   plugin_name: string;
   config: Record<string, unknown>;
-  scope: "global" | "proxy";
+  scope: PluginScope;
   proxy_id?: string;
   enabled: boolean;
   priority_override?: number;
@@ -203,7 +205,7 @@ export interface PluginConfigCreate {
   id?: string;
   plugin_name: string;
   config?: Record<string, unknown>;
-  scope: "global" | "proxy";
+  scope: PluginScope;
   proxy_id?: string;
   enabled?: boolean;
   priority_override?: number;

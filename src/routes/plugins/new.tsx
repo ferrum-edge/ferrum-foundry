@@ -4,6 +4,7 @@
 
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useCreatePluginConfig, useAvailablePlugins } from "@/hooks/usePlugins";
+import { useUpdateProxy, useProxies } from "@/hooks/useProxies";
 import { useToast } from "@/components/ui/Toast";
 import { Card } from "@/components/ui/Card";
 import { SkeletonCard } from "@/components/ui/Skeleton";
@@ -16,12 +17,37 @@ export default function PluginNewPage() {
   const navigate = useNavigate();
   const search = useSearch({ strict: false }) as Record<string, string | undefined>;
   const createPlugin = useCreatePluginConfig();
+  const updateProxy = useUpdateProxy();
+  const { data: proxiesData } = useProxies({ limit: 1000 });
   const { toast } = useToast();
   const { data: availablePlugins, isLoading: pluginsLoading } = useAvailablePlugins();
 
-  const handleSubmit = async (data: PluginConfigCreate) => {
+  const handleSubmit = async (data: PluginConfigCreate, proxyGroupIds?: string[]) => {
     try {
       const created = await createPlugin.mutateAsync(data);
+
+      // For proxy_group, associate selected proxies with this plugin
+      if (proxyGroupIds && proxyGroupIds.length > 0 && proxiesData?.data) {
+        const associationPromises = proxyGroupIds.map((proxyId) => {
+          const proxy = proxiesData.data.find((p) => p.id === proxyId);
+          if (!proxy) return Promise.resolve();
+          const existingPlugins = proxy.plugins ?? [];
+          // Skip if already associated
+          if (existingPlugins.some((a) => a.plugin_config_id === created.id)) return Promise.resolve();
+          return updateProxy.mutateAsync({
+            id: proxyId,
+            data: {
+              listen_path: proxy.listen_path,
+              backend_protocol: proxy.backend_protocol,
+              backend_host: proxy.backend_host,
+              backend_port: proxy.backend_port,
+              plugins: [...existingPlugins, { plugin_config_id: created.id }],
+            },
+          });
+        });
+        await Promise.all(associationPromises);
+      }
+
       toast("success", "Plugin configuration created successfully");
       navigate({
         to: "/plugins/$pluginId",
@@ -60,7 +86,13 @@ export default function PluginNewPage() {
           availablePlugins={availablePlugins ?? []}
           defaults={{
             pluginName: search.plugin ?? undefined,
-            scope: search.scope === "proxy" ? "proxy" : search.proxyId ? "proxy" : undefined,
+            scope: search.scope === "proxy_group"
+              ? "proxy_group"
+              : search.scope === "proxy"
+                ? "proxy"
+                : search.proxyId
+                  ? "proxy"
+                  : undefined,
             proxyId: search.proxyId ?? undefined,
           } satisfies PluginFormDefaults}
         />
