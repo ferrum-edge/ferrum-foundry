@@ -7,8 +7,9 @@ import { useNavigate } from "@tanstack/react-router";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
-import type { PluginConfig, PluginConfigCreate } from "@/api/types";
+import type { PluginConfig, PluginConfigCreate, PluginScope } from "@/api/types";
 import { formatPluginConfigDefault } from "@/lib/pluginConfigDefaults";
+import { ProxySearchPicker } from "@/components/forms/ProxySearchPicker";
 
 /* ------------------------------------------------------------------ */
 /*  Props                                                              */
@@ -16,16 +17,20 @@ import { formatPluginConfigDefault } from "@/lib/pluginConfigDefaults";
 
 export interface PluginFormDefaults {
   pluginName?: string;
-  scope?: "global" | "proxy";
+  scope?: PluginScope;
   proxyId?: string;
+  /** Pre-selected proxy IDs for proxy_group scope */
+  proxyGroupIds?: string[];
 }
 
 export interface PluginConfigFormProps {
   initialData?: PluginConfig;
   defaults?: PluginFormDefaults;
-  onSubmit: (data: PluginConfigCreate) => Promise<void>;
+  onSubmit: (data: PluginConfigCreate, proxyGroupIds?: string[]) => Promise<void>;
   isLoading: boolean;
   availablePlugins: string[];
+  /** Pre-loaded proxy IDs that currently reference this plugin (edit mode, proxy_group) */
+  initialProxyGroupIds?: string[];
 }
 
 /* ------------------------------------------------------------------ */
@@ -64,14 +69,18 @@ export function PluginConfigForm({
   onSubmit,
   isLoading,
   availablePlugins,
+  initialProxyGroupIds,
 }: PluginConfigFormProps) {
   const navigate = useNavigate();
   const isEdit = !!initialData;
 
   /* ---------- State ---------- */
   const [pluginName, setPluginName] = useState(initialData?.plugin_name ?? defaults?.pluginName ?? "");
-  const [scope, setScope] = useState<"global" | "proxy">(initialData?.scope ?? defaults?.scope ?? "global");
+  const [scope, setScope] = useState<PluginScope>(initialData?.scope ?? defaults?.scope ?? "global");
   const [proxyId, setProxyId] = useState(initialData?.proxy_id ?? defaults?.proxyId ?? "");
+  const [proxyGroupIds, setProxyGroupIds] = useState<string[]>(
+    initialProxyGroupIds ?? defaults?.proxyGroupIds ?? [],
+  );
   const [enabled, setEnabled] = useState(initialData?.enabled ?? true);
   const [priorityOverride, setPriorityOverride] = useState<number | "">(
     initialData?.priority_override ?? "",
@@ -90,7 +99,10 @@ export function PluginConfigForm({
   const validate = (): boolean => {
     const errs: Record<string, string> = {};
     if (!pluginName) errs.plugin_name = "Plugin name is required";
-    if (scope === "proxy" && !proxyId.trim()) errs.proxy_id = "Proxy ID is required for proxy scope";
+    if (scope === "proxy" && !proxyId.trim()) errs.proxy_id = "A proxy is required for proxy scope";
+    if (scope === "proxy_group" && proxyGroupIds.length === 0) {
+      errs.proxy_group = "Select at least one proxy for proxy group scope";
+    }
     if (priorityOverride !== "" && (Number(priorityOverride) < 0 || Number(priorityOverride) > 10000)) {
       errs.priority_override = "Must be between 0 and 10000";
     }
@@ -118,7 +130,7 @@ export function PluginConfigForm({
       ...(priorityOverride !== "" && { priority_override: Number(priorityOverride) }),
     };
 
-    await onSubmit(data);
+    await onSubmit(data, scope === "proxy_group" ? proxyGroupIds : undefined);
   };
 
   /* ---------- Helpers ---------- */
@@ -170,21 +182,39 @@ export function PluginConfigForm({
           <Select
             label="Scope"
             value={scope}
-            onValueChange={(v) => setScope(v as "global" | "proxy")}
+            onValueChange={(v) => {
+              const next = v as PluginScope;
+              setScope(next);
+              // Clear proxy selections when switching scopes
+              if (next !== "proxy") setProxyId("");
+              if (next !== "proxy_group") setProxyGroupIds([]);
+            }}
             options={[
               { value: "global", label: "Global" },
               { value: "proxy", label: "Proxy" },
+              { value: "proxy_group", label: "Proxy Group" },
             ]}
           />
 
           {scope === "proxy" && (
-            <Input
-              label="Proxy ID"
+            <ProxySearchPicker
+              mode="single"
+              label="Proxy"
               value={proxyId}
-              onChange={(e) => setProxyId(e.target.value)}
-              placeholder="proxy-uuid"
+              onChange={setProxyId}
               error={errors.proxy_id}
-              required
+              helpText="The single proxy this plugin applies to."
+            />
+          )}
+
+          {scope === "proxy_group" && (
+            <ProxySearchPicker
+              mode="multi"
+              label="Proxies"
+              value={proxyGroupIds}
+              onChange={setProxyGroupIds}
+              error={errors.proxy_group}
+              helpText="Select proxies that will share this plugin instance. Stateful plugins (e.g. rate limiting) share counters across the group."
             />
           )}
 

@@ -237,8 +237,8 @@ export default function PluginsPage() {
 
                 {/* Scope */}
                 <span>
-                  <Badge variant={config.scope === "global" ? "blue" : "orange"}>
-                    {config.scope}
+                  <Badge variant={config.scope === "global" ? "blue" : config.scope === "proxy_group" ? "purple" : "orange"}>
+                    {config.scope === "proxy_group" ? "group" : config.scope}
                   </Badge>
                 </span>
 
