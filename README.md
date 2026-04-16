@@ -23,7 +23,7 @@ Admin panel UI for managing and observing the [Ferrum Edge](https://github.com/f
 - **Metrics Dashboard** - Gateway stats, circuit breakers, connection pools, health checks, load balancers, caches, and Prometheus metrics with configurable auto-refresh
 - **Health Monitoring** - Real-time gateway and database health status
 - **Namespace Support** - Browse and manage resources across namespaces via `X-Ferrum-Namespace`
-- **Dark Theme** - Consistent design matching the Ferrum Edge brand
+- **Dark / Light Theme** - Dark theme by default with a light theme toggle in the header
 
 ## Architecture
 
