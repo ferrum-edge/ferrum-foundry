@@ -24,7 +24,7 @@
     "@tanstack/react-query": "^5.99.0",
     "@tanstack/react-router": "^1.168.22",
     "@tanstack/react-table": "^8.21.3",
-    "@tanstack/react-virtual": "^3.13.6",
+    "@tanstack/react-virtual": "^3.13.24",
     "fastify": "^5.3.3",
     "@fastify/cors": "^11.0.1",
     "@fastify/static": "^9.1.0",
