@@ -176,8 +176,10 @@ export function SettingsForm() {
             </div>
             <p className="text-text-muted text-xs">
               HS256 signing secret used by this BFF to sign requests to the
-              gateway. Must match the gateway's FERRUM_ADMIN_JWT_SECRET. Changes
-              here are in-memory only and reset on BFF restart.
+              gateway. Must match the gateway's FERRUM_ADMIN_JWT_SECRET. The
+              current value is masked; leave the masked text to keep it, or
+              type a new value to rotate. Changes are in-memory only and reset
+              on BFF restart.
             </p>
           </div>
 

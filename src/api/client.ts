@@ -58,6 +58,27 @@ export async function getApiErrorMessage(
   return detail ? `${error.message}: ${detail}` : error.message;
 }
 
+// ── BFF bearer token (set by AuthProvider) ───────────────────────
+
+let bearerToken: string | null = null;
+let unauthorizedHandler: (() => void) | undefined;
+
+/**
+ * Set the BFF bearer token attached to every request. Pass `null` to clear.
+ * Called by `AuthProvider` whenever the auth state changes.
+ */
+export function setBearerToken(token: string | null): void {
+  bearerToken = token;
+}
+
+/**
+ * Register a callback invoked when the BFF returns 401. The auth store uses
+ * this to clear the local token and force re-login.
+ */
+export function setOnUnauthorized(handler: (() => void) | undefined): void {
+  unauthorizedHandler = handler;
+}
+
 // ── localStorage namespace helper ────────────────────────────────
 
 const NAMESPACE_STORAGE_KEY = "ferrum:namespace";
@@ -80,10 +101,17 @@ export const api = ky.create({
       ({ request }) => {
         // Attach the current namespace header to every proxy request
         request.headers.set("X-Ferrum-Namespace", getNamespace());
+        // Attach the BFF bearer token if the user is signed in
+        if (bearerToken) {
+          request.headers.set("Authorization", `Bearer ${bearerToken}`);
+        }
       },
     ],
     afterResponse: [
       async ({ response }) => {
+        if (response.status === 401) {
+          unauthorizedHandler?.();
+        }
         if (!response.ok) {
           const body = await response.clone().text().catch(() => "");
           onApiError({
