@@ -3,20 +3,24 @@ import { getRuntimeConfig, updateRuntimeConfig, loadConfig } from '../config.js'
 import type { RuntimeConfig } from '../config.js';
 import { fetch, Agent } from 'undici';
 import { generateToken } from '../jwt.js';
+import { requireAdminAuth } from '../auth.js';
 
 const settingsPlugin: FastifyPluginAsync = async (fastify) => {
   // GET /api/settings - return current runtime config (JWT secret masked)
-  fastify.get('/api/settings', async () => {
+  fastify.get('/api/settings', { preHandler: requireAdminAuth }, async () => {
     return getRuntimeConfig();
   });
 
   // PUT /api/settings - update runtime config
-  fastify.put('/api/settings', async (request, reply) => {
+  fastify.put('/api/settings', { preHandler: requireAdminAuth }, async (request, reply) => {
     const body = request.body as Partial<RuntimeConfig>;
 
     // Basic validation
     if (body.adminUrl !== undefined && typeof body.adminUrl !== 'string') {
       return reply.status(400).send({ error: 'adminUrl must be a string' });
+    }
+    if (body.bffAuthToken !== undefined) {
+      return reply.status(400).send({ error: 'bffAuthToken cannot be updated at runtime' });
     }
     if (body.jwtSecret !== undefined && (typeof body.jwtSecret !== 'string' || body.jwtSecret.length === 0)) {
       return reply.status(400).send({ error: 'jwtSecret must be a non-empty string' });
@@ -48,7 +52,7 @@ const settingsPlugin: FastifyPluginAsync = async (fastify) => {
   });
 
   // GET /api/settings/status - test connectivity to admin API
-  fastify.get('/api/settings/status', async (_request, reply) => {
+  fastify.get('/api/settings/status', { preHandler: requireAdminAuth }, async (_request, reply) => {
     const config = loadConfig();
     const token = await generateToken(config);
 

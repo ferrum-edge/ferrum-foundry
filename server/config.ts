@@ -11,6 +11,7 @@ export interface Config {
   readTimeout: number;
   writeTimeout: number;
   port: number;
+  bffAuthToken: string;
 }
 
 export interface RuntimeConfig {
@@ -23,6 +24,7 @@ export interface RuntimeConfig {
   connectTimeout: number;
   readTimeout: number;
   writeTimeout: number;
+  bffAuthToken: string;
 }
 
 function requireEnv(name: string): string {
@@ -51,6 +53,7 @@ function parseBaseConfig(): Config {
     readTimeout: Number(process.env.FERRUM_READ_TIMEOUT ?? 60000),
     writeTimeout: Number(process.env.FERRUM_WRITE_TIMEOUT ?? 60000),
     port: Number(process.env.PORT ?? 3001),
+    bffAuthToken: requireEnv('FERRUM_BFF_AUTH_TOKEN'),
   };
 }
 
@@ -77,6 +80,7 @@ export function getRuntimeConfig(): RuntimeConfig {
     connectTimeout: cfg.connectTimeout,
     readTimeout: cfg.readTimeout,
     writeTimeout: cfg.writeTimeout,
+    bffAuthToken: cfg.bffAuthToken ? '******' : '',
   };
 }
 
