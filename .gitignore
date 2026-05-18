@@ -5,6 +5,9 @@ node_modules/
 dist/
 dist-server/
 
+# Test coverage
+coverage/
+
 # Environment
 .env
 .env.local
