@@ -13,8 +13,10 @@
     "preview": "vite preview",
     "start": "node dist-server/index.js",
     "lint": "eslint src server --ext .ts,.tsx",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit",
-    "test": "node --import tsx --test server/routes/settings.test.ts"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.6",
@@ -41,13 +43,16 @@
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
     "@vitejs/plugin-react": "^6.0.1",
+    "@vitest/coverage-v8": "^4.1.6",
     "autoprefixer": "^10.5.0",
     "concurrently": "^9.1.2",
+    "jsdom": "^29.1.1",
     "postcss": "^8.5.14",
     "tailwindcss": "^4.2.4",
     "@tailwindcss/vite": "^4.3.0",
     "tsx": "^4.19.4",
     "typescript": "^6.0.3",
-    "vite": "^8.0.12"
+    "vite": "^8.0.12",
+    "vitest": "^4.1.6"
   }
 }
