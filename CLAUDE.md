@@ -23,9 +23,12 @@ Always reference the upstream spec when validating types or form fields. The spe
 # Required env vars for the BFF server
 export FERRUM_ADMIN_URL=http://127.0.0.1:9000
 export FERRUM_JWT_SECRET=dev-secret
+export FERRUM_BFF_AUTH_TOKEN=dev-bff-token-please-make-this-long-and-random
 
 # Start frontend + BFF
 npm run dev
+
+# In the browser, paste FERRUM_BFF_AUTH_TOKEN into the login screen on first load.
 
 # Start demo backends (ports 9101-9105)
 node scripts/demo-backend.mjs
@@ -48,6 +51,18 @@ docker run --rm -d --name ferrum-edge \
   -p 9000:9000 -p 8000:8000 \
   ferrumedge/ferrum-edge:latest run -m database -v
 ```
+
+## Authentication
+
+The BFF requires `FERRUM_BFF_AUTH_TOKEN` and gates all privileged endpoints
+(`/api/proxy/*`, `/api/settings`, `/api/settings/status`) with a bearer-token
+preHandler (`server/auth.ts`). The frontend `AuthProvider` (`src/stores/auth.tsx`)
+holds the token in `localStorage` under `ferrum:bff-auth-token`; the ky client
+attaches it as `Authorization: Bearer <token>` on every request and clears it
+on a 401. The `LoginGate` (`src/components/auth/LoginGate.tsx`) wraps the
+router and prompts for the token whenever none is stored. `GET /api/settings`
+returns the JWT secret as a sentinel (`'********'`); the server ignores PUTs
+that echo that sentinel back.
 
 ## Theming
 

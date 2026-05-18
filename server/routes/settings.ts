@@ -19,9 +19,6 @@ const settingsPlugin: FastifyPluginAsync = async (fastify) => {
     if (body.adminUrl !== undefined && typeof body.adminUrl !== 'string') {
       return reply.status(400).send({ error: 'adminUrl must be a string' });
     }
-    if (body.bffAuthToken !== undefined) {
-      return reply.status(400).send({ error: 'bffAuthToken cannot be updated at runtime' });
-    }
     if (body.jwtSecret !== undefined && (typeof body.jwtSecret !== 'string' || body.jwtSecret.length === 0)) {
       return reply.status(400).send({ error: 'jwtSecret must be a non-empty string' });
     }
