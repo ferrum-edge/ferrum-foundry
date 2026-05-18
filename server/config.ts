@@ -25,6 +25,9 @@ export interface RuntimeConfig {
   writeTimeout: number;
 }
 
+// Shape returned to API clients — never includes the signing secret.
+export type PublicRuntimeConfig = Omit<RuntimeConfig, 'jwtSecret'>;
+
 function requireEnv(name: string): string {
   const value = process.env[name];
   if (!value) {
