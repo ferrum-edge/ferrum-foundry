@@ -103,7 +103,11 @@ export function SettingsForm() {
   async function handleSave() {
     setSaving(true);
     try {
-      await api.put("api/settings", { json: settings });
+      const payload = {
+        ...settings,
+        ...(settings.jwtSecret.trim().length === 0 ? { jwtSecret: undefined } : {}),
+      };
+      await api.put("api/settings", { json: payload });
       toast("success", "Settings saved successfully");
     } catch {
       toast("error", "Failed to save settings");

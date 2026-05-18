@@ -4,10 +4,17 @@ import type { RuntimeConfig } from '../config.js';
 import { fetch, Agent } from 'undici';
 import { generateToken } from '../jwt.js';
 
+function toPublicRuntimeConfig(config: RuntimeConfig): RuntimeConfig {
+  return {
+    ...config,
+    jwtSecret: '',
+  };
+}
+
 const settingsPlugin: FastifyPluginAsync = async (fastify) => {
   // GET /api/settings - return current runtime config (JWT secret masked)
   fastify.get('/api/settings', async () => {
-    return getRuntimeConfig();
+    return toPublicRuntimeConfig(getRuntimeConfig());
   });
 
   // PUT /api/settings - update runtime config
@@ -44,7 +51,7 @@ const settingsPlugin: FastifyPluginAsync = async (fastify) => {
     }
 
     updateRuntimeConfig(body);
-    return getRuntimeConfig();
+    return toPublicRuntimeConfig(getRuntimeConfig());
   });
 
   // GET /api/settings/status - test connectivity to admin API
