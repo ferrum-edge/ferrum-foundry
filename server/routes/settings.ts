@@ -3,6 +3,7 @@ import { getRuntimeConfig, updateRuntimeConfig, loadConfig } from '../config.js'
 import type { PublicRuntimeConfig, RuntimeConfig } from '../config.js';
 import { fetch, Agent } from 'undici';
 import { generateToken } from '../jwt.js';
+import { requireAdminAuth } from '../auth.js';
 
 // Strip the signing secret before returning the runtime config over HTTP.
 // Pairs with PUT /api/settings rejecting jwtSecret — the secret is env-only,
@@ -14,12 +15,12 @@ function redactRuntimeConfig(config: RuntimeConfig): PublicRuntimeConfig {
 
 const settingsPlugin: FastifyPluginAsync = async (fastify) => {
   // GET /api/settings - return current runtime config (jwtSecret omitted)
-  fastify.get('/api/settings', async () => {
+  fastify.get('/api/settings', { preHandler: requireAdminAuth }, async () => {
     return redactRuntimeConfig(getRuntimeConfig());
   });
 
   // PUT /api/settings - update runtime config (jwtSecret is env-only)
-  fastify.put('/api/settings', async (request, reply) => {
+  fastify.put('/api/settings', { preHandler: requireAdminAuth }, async (request, reply) => {
     const body = request.body as Partial<RuntimeConfig>;
 
     // Allowing runtime rotation here would let any caller swap the secret to
@@ -61,7 +62,7 @@ const settingsPlugin: FastifyPluginAsync = async (fastify) => {
   });
 
   // GET /api/settings/status - test connectivity to admin API
-  fastify.get('/api/settings/status', async (_request, reply) => {
+  fastify.get('/api/settings/status', { preHandler: requireAdminAuth }, async (_request, reply) => {
     const config = loadConfig();
     const token = await generateToken(config);
 

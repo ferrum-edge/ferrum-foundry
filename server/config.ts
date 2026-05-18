@@ -11,6 +11,7 @@ export interface Config {
   readTimeout: number;
   writeTimeout: number;
   port: number;
+  bffAuthToken: string;
 }
 
 export interface RuntimeConfig {
@@ -28,6 +29,8 @@ export interface RuntimeConfig {
 // Shape returned to API clients — never includes the signing secret.
 export type PublicRuntimeConfig = Omit<RuntimeConfig, 'jwtSecret'>;
 
+const MIN_BFF_AUTH_TOKEN_LENGTH = 16;
+
 function requireEnv(name: string): string {
   const value = process.env[name];
   if (!value) {
@@ -43,6 +46,14 @@ function parseBaseConfig(): Config {
     readFileSync(tlsCaPath);
   }
 
+  const bffAuthToken = requireEnv('FERRUM_BFF_AUTH_TOKEN');
+  if (bffAuthToken.length < MIN_BFF_AUTH_TOKEN_LENGTH) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[ferrum-foundry] FERRUM_BFF_AUTH_TOKEN is shorter than ${MIN_BFF_AUTH_TOKEN_LENGTH} chars; use a long, random secret in production.`,
+    );
+  }
+
   return {
     adminUrl: requireEnv('FERRUM_ADMIN_URL'),
     jwtSecret: requireEnv('FERRUM_JWT_SECRET'),
@@ -54,6 +65,7 @@ function parseBaseConfig(): Config {
     readTimeout: Number(process.env.FERRUM_READ_TIMEOUT ?? 60000),
     writeTimeout: Number(process.env.FERRUM_WRITE_TIMEOUT ?? 60000),
     port: Number(process.env.PORT ?? 3001),
+    bffAuthToken,
   };
 }
 

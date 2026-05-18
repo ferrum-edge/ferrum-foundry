@@ -5,6 +5,8 @@ import { TooltipProvider } from "@/components/ui/Tooltip";
 import { NamespaceProvider } from "@/stores/namespace";
 import { ErrorPopupProvider } from "@/stores/error";
 import { ThemeProvider } from "@/stores/theme";
+import { AuthProvider } from "@/stores/auth";
+import { LoginGate } from "@/components/auth/LoginGate";
 import { router } from "./router";
 
 const queryClient = new QueryClient({
@@ -19,17 +21,21 @@ const queryClient = new QueryClient({
 export function App() {
   return (
     <ThemeProvider>
-      <QueryClientProvider client={queryClient}>
-        <ToastProvider>
-          <TooltipProvider>
-            <NamespaceProvider>
-              <ErrorPopupProvider>
-                <RouterProvider router={router} />
-              </ErrorPopupProvider>
-            </NamespaceProvider>
-          </TooltipProvider>
-        </ToastProvider>
-      </QueryClientProvider>
+      <AuthProvider>
+        <QueryClientProvider client={queryClient}>
+          <ToastProvider>
+            <TooltipProvider>
+              <NamespaceProvider>
+                <ErrorPopupProvider>
+                  <LoginGate>
+                    <RouterProvider router={router} />
+                  </LoginGate>
+                </ErrorPopupProvider>
+              </NamespaceProvider>
+            </TooltipProvider>
+          </ToastProvider>
+        </QueryClientProvider>
+      </AuthProvider>
     </ThemeProvider>
   );
 }

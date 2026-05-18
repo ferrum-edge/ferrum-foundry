@@ -56,7 +56,15 @@ Set required environment variables:
 ```bash
 export FERRUM_ADMIN_URL=http://localhost:9000   # Ferrum Admin API URL
 export FERRUM_JWT_SECRET=your-jwt-secret         # HS256 signing key
+export FERRUM_BFF_AUTH_TOKEN=$(openssl rand -hex 32)  # Bearer token for the BFF
 ```
+
+`FERRUM_BFF_AUTH_TOKEN` gates the BFF's privileged endpoints
+(`/api/proxy/*`, `/api/settings`, `/api/settings/status`). The SPA prompts
+for this token on first load and stores it in `localStorage`; every request
+the browser makes to the BFF carries it as `Authorization: Bearer <token>`.
+Use a long, random secret (the warning in the server logs flags anything
+shorter than 16 chars).
 
 Optional environment variables:
 
@@ -94,6 +102,7 @@ docker build -f docker/Dockerfile -t ferrum-foundry .
 docker run \
   -e FERRUM_ADMIN_URL=http://your-gateway:9000 \
   -e FERRUM_JWT_SECRET=your-secret \
+  -e FERRUM_BFF_AUTH_TOKEN=your-bff-bearer-token \
   -p 8080:8080 \
   ferrum-foundry
 ```

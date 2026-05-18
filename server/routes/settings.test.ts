@@ -4,10 +4,14 @@ import Fastify from 'fastify';
 
 // Required env must be set before importing the plugin — config.ts
 // reads it at module load time.
+const BFF_TOKEN = 'test-bff-token-must-be-at-least-16-chars';
 process.env.FERRUM_ADMIN_URL ??= 'http://127.0.0.1:9999';
 process.env.FERRUM_JWT_SECRET ??= 'super-secret-test-value-do-not-leak';
+process.env.FERRUM_BFF_AUTH_TOKEN ??= BFF_TOKEN;
 
 const { default: settingsPlugin } = await import('./settings.js');
+
+const AUTH_HEADERS = { authorization: `Bearer ${process.env.FERRUM_BFF_AUTH_TOKEN}` };
 
 async function buildApp() {
   const app = Fastify();
@@ -16,10 +20,24 @@ async function buildApp() {
 }
 
 describe('GET /api/settings', () => {
-  test('omits jwtSecret from the response body', async () => {
+  test('requires bearer auth', async () => {
     const app = await buildApp();
     try {
       const res = await app.inject({ method: 'GET', url: '/api/settings' });
+      assert.equal(res.statusCode, 401);
+    } finally {
+      await app.close();
+    }
+  });
+
+  test('omits jwtSecret from the response body', async () => {
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/settings',
+        headers: AUTH_HEADERS,
+      });
       assert.equal(res.statusCode, 200);
 
       const body = res.json() as Record<string, unknown>;
@@ -41,12 +59,27 @@ describe('GET /api/settings', () => {
 });
 
 describe('PUT /api/settings', () => {
+  test('requires bearer auth', async () => {
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'PUT',
+        url: '/api/settings',
+        payload: { jwtIssuer: 'whatever' },
+      });
+      assert.equal(res.statusCode, 401);
+    } finally {
+      await app.close();
+    }
+  });
+
   test('rejects jwtSecret in the payload', async () => {
     const app = await buildApp();
     try {
       const res = await app.inject({
         method: 'PUT',
         url: '/api/settings',
+        headers: AUTH_HEADERS,
         payload: { jwtSecret: 'attacker-chosen-value' },
       });
       assert.equal(res.statusCode, 400);
@@ -64,6 +97,7 @@ describe('PUT /api/settings', () => {
       const res = await app.inject({
         method: 'PUT',
         url: '/api/settings',
+        headers: AUTH_HEADERS,
         payload: { jwtIssuer: 'ok', jwtSecret: 'attacker-chosen-value' },
       });
       assert.equal(res.statusCode, 400);
@@ -78,6 +112,7 @@ describe('PUT /api/settings', () => {
       const res = await app.inject({
         method: 'PUT',
         url: '/api/settings',
+        headers: AUTH_HEADERS,
         payload: { jwtIssuer: 'updated-issuer' },
       });
       assert.equal(res.statusCode, 200);
