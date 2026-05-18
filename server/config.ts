@@ -26,9 +26,8 @@ export interface RuntimeConfig {
   writeTimeout: number;
 }
 
-// Sentinel returned by GET /api/settings instead of the real secret. When
-// a PUT body echoes this value back, the secret is left unchanged.
-export const MASKED_SECRET = '********';
+// Shape returned to API clients — never includes the signing secret.
+export type PublicRuntimeConfig = Omit<RuntimeConfig, 'jwtSecret'>;
 
 const MIN_BFF_AUTH_TOKEN_LENGTH = 16;
 
@@ -85,7 +84,7 @@ export function getRuntimeConfig(): RuntimeConfig {
   const cfg = loadConfig();
   return {
     adminUrl: cfg.adminUrl,
-    jwtSecret: cfg.jwtSecret ? MASKED_SECRET : '',
+    jwtSecret: cfg.jwtSecret,
     jwtIssuer: cfg.jwtIssuer,
     jwtTtl: cfg.jwtTtl,
     tlsCaPath: cfg.tlsCaPath,
@@ -98,11 +97,7 @@ export function getRuntimeConfig(): RuntimeConfig {
 
 export function updateRuntimeConfig(updates: Partial<RuntimeConfig>): RuntimeConfig {
   if (updates.adminUrl !== undefined) runtimeOverrides.adminUrl = updates.adminUrl;
-  // Ignore the masked sentinel so the GET-then-PUT round-trip doesn't overwrite
-  // the real secret with '********'.
-  if (updates.jwtSecret !== undefined && updates.jwtSecret !== MASKED_SECRET) {
-    runtimeOverrides.jwtSecret = updates.jwtSecret;
-  }
+  if (updates.jwtSecret !== undefined) runtimeOverrides.jwtSecret = updates.jwtSecret;
   if (updates.jwtIssuer !== undefined) runtimeOverrides.jwtIssuer = updates.jwtIssuer;
   if (updates.jwtTtl !== undefined) runtimeOverrides.jwtTtl = updates.jwtTtl;
   if (updates.tlsCaPath !== undefined) runtimeOverrides.tlsCaPath = updates.tlsCaPath;
