@@ -180,23 +180,52 @@ describe('config', () => {
       expect(third.jwtSecret).toBe('unit-test-secret');
     });
 
-    it('ignores the masked-secret sentinel when updating jwtSecret', async () => {
+    it('overrides jwtSecret when a non-empty value is provided', async () => {
       setValidEnv();
-      const { loadConfig, updateRuntimeConfig, MASKED_SECRET } =
-        await loadConfigModule();
+      const { loadConfig, updateRuntimeConfig } = await loadConfigModule();
 
-      const originalSecret = loadConfig().jwtSecret;
-      updateRuntimeConfig({ jwtSecret: MASKED_SECRET });
-      expect(loadConfig().jwtSecret).toBe(originalSecret);
-
+      expect(loadConfig().jwtSecret).toBe('unit-test-secret');
       updateRuntimeConfig({ jwtSecret: 'rotated-secret' });
       expect(loadConfig().jwtSecret).toBe('rotated-secret');
     });
 
-    it('masks jwtSecret in getRuntimeConfig output', async () => {
+    it('exposes jwtSecret through getRuntimeConfig (route layer is responsible for redaction)', async () => {
       setValidEnv();
-      const { getRuntimeConfig, MASKED_SECRET } = await loadConfigModule();
-      expect(getRuntimeConfig().jwtSecret).toBe(MASKED_SECRET);
+      const { getRuntimeConfig } = await loadConfigModule();
+      // getRuntimeConfig returns the raw secret; server/routes/settings.ts
+      // strips it before sending over HTTP via redactRuntimeConfig().
+      expect(getRuntimeConfig().jwtSecret).toBe('unit-test-secret');
+    });
+  });
+
+  describe('FERRUM_BFF_AUTH_TOKEN length warning', () => {
+    it('logs a console.warn when the token is shorter than 16 chars', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        setValidEnv({ FERRUM_BFF_AUTH_TOKEN: 'too-short' });
+        const { loadConfig } = await loadConfigModule();
+        loadConfig();
+
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+        const [message] = warnSpy.mock.calls[0] as [string];
+        expect(message).toMatch(/FERRUM_BFF_AUTH_TOKEN/);
+        expect(message).toMatch(/16/);
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('does not warn when the token meets the minimum length', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        setValidEnv({ FERRUM_BFF_AUTH_TOKEN: 'a'.repeat(16) });
+        const { loadConfig } = await loadConfigModule();
+        loadConfig();
+
+        expect(warnSpy).not.toHaveBeenCalled();
+      } finally {
+        warnSpy.mockRestore();
+      }
     });
   });
 });

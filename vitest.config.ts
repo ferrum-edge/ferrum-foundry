@@ -13,7 +13,15 @@ export default defineConfig({
     // Coverage settings apply to whichever project(s) run.
     coverage: {
       provider: "v8",
-      reporter: ["text", "html", "lcov"],
+      // The `skipFull: false` option is passed per-reporter (not on the
+      // coverage block) because vitest force-overrides text-reporter options
+      // to `skipFull: true` when it detects an agent/CI environment. Without
+      // this, files at 100% coverage (e.g. server/jwt.ts, server/auth.ts)
+      // silently disappear from the text report and look "untested".
+      reporter: [["text", { skipFull: false }], "html", "lcov"],
+      // v8 only instruments modules touched at runtime; explicit `include`
+      // surfaces server-side files that tests reach via `vi.resetModules()`
+      // + dynamic import (e.g. server/jwt.ts) so they appear in the report.
       include: ["src/**/*.{ts,tsx}", "server/**/*.ts"],
       exclude: [
         "**/*.test.{ts,tsx}",
