@@ -195,7 +195,7 @@ export function PluginConfigForm({
   const resetConfigToPluginDefault = () => {
     setConfigJson(currentDefault);
     setUserEditedConfig(false);
-    setErrors(({ config, ...remainingErrors }) => remainingErrors);
+    setErrors(({ config: _config, ...remainingErrors }) => remainingErrors);
   };
 
   // When plugin name changes in create mode, always update config to the new default

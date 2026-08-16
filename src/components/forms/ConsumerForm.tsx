@@ -128,8 +128,6 @@ function generateSecret(length = 32): string {
   return Array.from(array, (b) => chars[b % chars.length]).join("");
 }
 
-type CredentialType = (typeof CREDENTIAL_TYPES)[number]["value"];
-
 /* ================================================================== */
 /*  ConsumerForm                                                       */
 /* ================================================================== */

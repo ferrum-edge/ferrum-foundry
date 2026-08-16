@@ -7,7 +7,6 @@ import { SettingsForm } from "@/components/forms/SettingsForm";
 import { BackupRestoreCard } from "@/components/forms/BackupRestoreCard";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Select";
 import { Input } from "@/components/ui/Input";
 import { useToast } from "@/components/ui/Toast";

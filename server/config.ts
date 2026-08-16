@@ -70,7 +70,7 @@ function parseBaseConfig(): Config {
 }
 
 // In-memory runtime overrides
-let runtimeOverrides: Partial<RuntimeConfig> = {};
+const runtimeOverrides: Partial<RuntimeConfig> = {};
 let baseConfig: Config | undefined;
 
 export function loadConfig(): Config {

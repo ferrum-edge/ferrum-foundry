@@ -43,7 +43,7 @@ export function useUpdateProxy() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: ProxyCreate }) =>
       proxies.update(id, data),
-    onSuccess: (_data, variables) => {
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["proxies"] });
       qc.invalidateQueries({ queryKey: ["proxy"] });
     },

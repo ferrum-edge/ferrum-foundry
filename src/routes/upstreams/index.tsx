@@ -13,7 +13,6 @@ import { SearchBar } from "@/components/shared/SearchBar";
 import { PaginationControls } from "@/components/shared/PaginationControls";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { SkeletonRow } from "@/components/ui/Skeleton";
-import type { Upstream } from "@/api/types";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */

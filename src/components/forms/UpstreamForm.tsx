@@ -116,17 +116,6 @@ function defaultPassiveHealthCheck(): PassiveHealthCheck {
   };
 }
 
-function defaultHashOnCookieConfig(): HashOnCookieConfig {
-  return {
-    path: "/",
-    ttl_seconds: 3600,
-    domain: undefined,
-    http_only: true,
-    secure: false,
-    same_site: "Lax",
-  };
-}
-
 /* ================================================================== */
 /*  UpstreamForm                                                       */
 /* ================================================================== */
@@ -357,7 +346,6 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
 
   /* ---------- Helpers ---------- */
 
-  const numVal = (v: number | ""): string => (v === "" ? "" : String(v));
   const showHashCookie = hashOn.startsWith("cookie:");
 
   /* ================================================================ */

@@ -1,7 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { fetch, Agent } from 'undici';
 import { loadConfig } from './config.js';
-import { createHttpAgent } from './tls.js';
 import { generateToken } from './jwt.js';
 import { requireAdminAuth } from './auth.js';
 

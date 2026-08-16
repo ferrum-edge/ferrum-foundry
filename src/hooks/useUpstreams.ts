@@ -43,7 +43,7 @@ export function useUpdateUpstream() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: UpstreamCreate }) =>
       upstreams.update(id, data),
-    onSuccess: (_data, variables) => {
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["upstreams"] });
       qc.invalidateQueries({ queryKey: ["upstream"] });
     },
