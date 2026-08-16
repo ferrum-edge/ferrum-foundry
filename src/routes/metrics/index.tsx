@@ -18,6 +18,11 @@ import { CachePanel } from "@/components/metrics/CachePanel";
 import { RateLimitPanel } from "@/components/metrics/RateLimitPanel";
 import { PrometheusStatsPanel } from "@/components/metrics/PrometheusStatsPanel";
 import {
+  OverloadPanel,
+  RuntimePanel,
+  ChargesPanel,
+} from "@/components/metrics/OpsPanels";
+import {
   getStoredMetricsLastUpdated,
   getStoredMetricsRefreshInterval,
   setStoredMetricsLastUpdated,
@@ -183,6 +188,20 @@ export default function MetricsPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
           <h3 className="text-sm font-semibold text-text-primary mb-3">
+            Overload Protection
+          </h3>
+          <OverloadPanel />
+        </Card>
+
+        <Card>
+          <h3 className="text-sm font-semibold text-text-primary mb-3">
+            Host Runtime
+          </h3>
+          <RuntimePanel />
+        </Card>
+
+        <Card>
+          <h3 className="text-sm font-semibold text-text-primary mb-3">
             Circuit Breakers
           </h3>
           <CircuitBreakerPanel breakers={metrics.circuit_breakers} />
@@ -239,6 +258,12 @@ export default function MetricsPage() {
                 />
               ))}
           </div>
+        </Card>
+        <Card>
+          <h3 className="text-sm font-semibold text-text-primary mb-3">
+            API Chargeback
+          </h3>
+          <ChargesPanel />
         </Card>
       </div>
 

@@ -21,7 +21,7 @@ import type { Proxy } from "@/api/types";
 /* ------------------------------------------------------------------ */
 
 function formatBackend(proxy: Proxy): string {
-  return `${proxy.backend_protocol}://${proxy.backend_host}:${proxy.backend_port}`;
+  return `${proxy.backend_scheme ?? "https"}://${proxy.backend_host}:${proxy.backend_port}`;
 }
 
 function formatDate(iso: string): string {
@@ -81,7 +81,7 @@ export default function ProxiesPage() {
       (p) =>
         (p.name && p.name.toLowerCase().includes(q)) ||
         p.id.toLowerCase().includes(q) ||
-        p.listen_path.toLowerCase().includes(q) ||
+        (p.listen_path ?? "").toLowerCase().includes(q) ||
         p.backend_host.toLowerCase().includes(q),
     );
   }, [proxies, search]);

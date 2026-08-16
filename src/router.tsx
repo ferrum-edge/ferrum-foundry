@@ -30,6 +30,12 @@ const StatusPage = lazy(() => import("@/routes/status/index"));
 const DashboardPage = lazy(() => import("@/routes/dashboard/index"));
 const SettingsPage = lazy(() => import("@/routes/settings/index"));
 
+const TlsPage = lazy(() => import("@/routes/tls/index"));
+const ApiSpecsPage = lazy(() => import("@/routes/api-specs/index"));
+const AuditPage = lazy(() => import("@/routes/audit/index"));
+const ClusterPage = lazy(() => import("@/routes/cluster/index"));
+const MeshPage = lazy(() => import("@/routes/mesh/index"));
+
 /* ---------- Root route ---------- */
 
 const rootRoute = createRootRoute({
@@ -148,6 +154,38 @@ const settingsRoute = createRoute({
   component: SettingsPage,
 });
 
+/* ---------- TLS / API Specs / Audit / Cluster / Mesh ---------- */
+
+const tlsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/tls",
+  component: TlsPage,
+});
+
+const apiSpecsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/api-specs",
+  component: ApiSpecsPage,
+});
+
+const auditRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/audit",
+  component: AuditPage,
+});
+
+const clusterRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/cluster",
+  component: ClusterPage,
+});
+
+const meshRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/mesh",
+  component: MeshPage,
+});
+
 /* ---------- Route tree & router ---------- */
 
 const routeTree = rootRoute.addChildren([
@@ -167,6 +205,11 @@ const routeTree = rootRoute.addChildren([
   metricsRoute,
   statusRoute,
   settingsRoute,
+  tlsRoute,
+  apiSpecsRoute,
+  auditRoute,
+  clusterRoute,
+  meshRoute,
 ]);
 
 export const router = createRouter({ routeTree });

@@ -164,16 +164,18 @@ export default function DashboardPage() {
                 {health.data.mode}
               </span>
             </span>
-            <span className="text-text-secondary text-sm">
-              Database:{" "}
-              <Badge
-                variant={
-                  health.data.database.status === "connected" ? "green" : "red"
-                }
-              >
-                {health.data.database.status}
-              </Badge>
-            </span>
+            {health.data.database && (
+              <span className="text-text-secondary text-sm">
+                Database:{" "}
+                <Badge
+                  variant={
+                    health.data.database.status === "connected" ? "green" : "red"
+                  }
+                >
+                  {health.data.database.status}
+                </Badge>
+              </span>
+            )}
           </div>
         </Card>
       ) : null}

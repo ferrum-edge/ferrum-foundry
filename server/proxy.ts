@@ -35,10 +35,23 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
       headers['x-ferrum-namespace'] = Array.isArray(namespace) ? namespace[0] : namespace;
     }
 
-    // Build request body
+    // Pass through Accept so content-negotiated endpoints (api-specs
+    // YAML/JSON documents) return the requested representation.
+    const accept = request.headers['accept'];
+    if (accept) {
+      headers['accept'] = Array.isArray(accept) ? accept[0] : accept;
+    }
+
+    // Build request body. String bodies (YAML/text spec uploads parsed by the
+    // raw content-type parsers) are forwarded verbatim; everything else is
+    // re-serialized JSON.
     const method = request.method as string;
     const hasBody = method !== 'GET' && method !== 'HEAD' && method !== 'DELETE';
-    const body = hasBody ? JSON.stringify(request.body) : undefined;
+    const body = hasBody
+      ? typeof request.body === 'string'
+        ? request.body
+        : JSON.stringify(request.body)
+      : undefined;
 
     // Set up abort controller for read timeout
     const controller = new AbortController();

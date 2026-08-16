@@ -14,12 +14,31 @@ const fastify = Fastify({
   logger: {
     level: isProduction ? 'info' : 'debug',
   },
+  // Restore payloads can carry a full gateway backup (gateway default cap
+  // is 100 MiB); leave headroom for JSON envelope overhead.
+  bodyLimit: 110 * 1024 * 1024,
 });
 
 // CORS - allow all origins in dev
 await fastify.register(cors, {
   origin: isProduction ? false : true,
 });
+
+// Accept raw YAML/text bodies (API spec uploads) as plain strings so the
+// admin proxy can forward them verbatim to the gateway.
+for (const contentType of [
+  'application/yaml',
+  'application/x-yaml',
+  'text/yaml',
+  'text/x-yaml',
+  'text/plain',
+]) {
+  fastify.addContentTypeParser(
+    contentType,
+    { parseAs: 'string', bodyLimit: 30 * 1024 * 1024 },
+    (_request, body, done) => done(null, body),
+  );
+}
 
 // API routes
 await fastify.register(healthPlugin);

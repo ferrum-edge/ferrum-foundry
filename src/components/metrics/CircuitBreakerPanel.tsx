@@ -42,9 +42,15 @@ export function CircuitBreakerPanel({ breakers }: CircuitBreakerPanelProps) {
         </thead>
         <tbody>
           {breakers.map((cb) => (
-            <tr key={cb.proxy_id} className="border-b border-border/50">
+            <tr
+              key={`${cb.namespace}:${cb.proxy_id}:${cb.target ?? ""}`}
+              className="border-b border-border/50"
+            >
               <td className="py-2 pr-4 text-text-primary font-mono text-xs">
                 {cb.proxy_id}
+                {cb.target && (
+                  <span className="text-text-muted"> → {cb.target}</span>
+                )}
               </td>
               <td className="py-2 pr-4">
                 <Badge variant={stateVariant(cb.state)}>{cb.state}</Badge>

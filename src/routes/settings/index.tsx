@@ -4,6 +4,7 @@
 
 import { useState } from "react";
 import { SettingsForm } from "@/components/forms/SettingsForm";
+import { BackupRestoreCard } from "@/components/forms/BackupRestoreCard";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -93,6 +94,14 @@ export default function SettingsPage() {
             )}
           </div>
         </Card>
+      </section>
+
+      {/* ── Backup & Restore ──────────────────────────────────────── */}
+      <section>
+        <h2 className="text-lg font-semibold text-text-primary mb-4">
+          Backup &amp; Restore
+        </h2>
+        <BackupRestoreCard />
       </section>
 
       {/* ── Metrics Refresh ───────────────────────────────────────── */}
