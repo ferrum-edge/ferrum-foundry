@@ -188,7 +188,10 @@ export default function ApiSpecsPage() {
                     <Badge key={tag} variant="purple">{tag}</Badge>
                   ))}
                 </div>
-                <p className="text-xs text-text-muted mt-1 font-mono break-all">
+                <p
+                  className="text-xs text-text-muted mt-1 font-mono truncate"
+                  title={`proxy: ${spec.proxy_id} · ${formatBytes(spec.uncompressed_size)} · updated ${formatDate(spec.updated_at)}`}
+                >
                   proxy: {spec.proxy_id} · {formatBytes(spec.uncompressed_size)} ·
                   updated {formatDate(spec.updated_at)}
                 </p>

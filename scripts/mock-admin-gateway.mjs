@@ -223,14 +223,14 @@ function readBody(req) {
   });
 }
 
-function crud(list, url, method, id, body) {
+function crud(list, url, method, id, body, defaults = {}) {
   if (method === 'GET' && !id) return [200, paginate(list, url)];
   if (method === 'GET') {
     const item = list.find((x) => x.id === id);
     return item ? [200, item] : [404, { error: 'not found' }];
   }
   if (method === 'POST') {
-    const item = { id: randomUUID(), namespace: 'ferrum', ...body, created_at: now(), updated_at: now() };
+    const item = { id: randomUUID(), namespace: 'ferrum', ...defaults, ...body, created_at: now(), updated_at: now() };
     list.push(item);
     return [201, item];
   }
@@ -544,15 +544,17 @@ const server = createServer(async (req, res) => {
 
   /* core CRUD */
   const routes = [
-    [/^\/proxies(?:\/([^/]+))?$/, proxies],
+    // The real gateway always returns a plugins association array on proxies;
+    // default it on create so upstream-only proxies match that shape.
+    [/^\/proxies(?:\/([^/]+))?$/, proxies, { plugins: [] }],
     [/^\/consumers(?:\/([^/]+))?$/, consumers],
     [/^\/plugins\/config(?:\/([^/]+))?$/, pluginConfigs],
     [/^\/upstreams(?:\/([^/]+))?$/, upstreams],
   ];
-  for (const [pattern, list] of routes) {
+  for (const [pattern, list, defaults] of routes) {
     const match = path.match(pattern);
     if (match) {
-      const [status, payload] = crud(list, url, method, match[1], body);
+      const [status, payload] = crud(list, url, method, match[1], body, defaults);
       return send(status, payload);
     }
   }

@@ -214,13 +214,13 @@ export default function ProxyDetailPage() {
           ) : (
             <div className="space-y-3">
               {/* Plugin association IDs from the proxy object */}
-              {proxy.plugins.length > 0 && (
+              {(proxy.plugins ?? []).length > 0 && (
                 <Card>
                   <h3 className="text-sm font-semibold text-text-secondary uppercase tracking-wide mb-3">
                     Plugin Associations
                   </h3>
                   <div className="flex flex-wrap gap-2">
-                    {proxy.plugins.map((assoc) => (
+                    {(proxy.plugins ?? []).map((assoc) => (
                       <Link
                         key={assoc.plugin_config_id}
                         to="/plugins/$pluginId"
