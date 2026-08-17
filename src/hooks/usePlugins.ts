@@ -55,7 +55,7 @@ export function useUpdatePluginConfig() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: PluginConfigCreate }) =>
       plugins.updateConfig(id, data),
-    onSuccess: (_data, variables) => {
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pluginConfigs"] });
       qc.invalidateQueries({ queryKey: ["pluginConfig"] });
     },

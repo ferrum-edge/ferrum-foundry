@@ -28,13 +28,16 @@ export function HealthCheckPanel({ healthCheck }: HealthCheckPanelProps) {
           <ul className="space-y-2">
             {healthCheck.unhealthy_targets.map((t) => (
               <li
-                key={t.target}
-                className="flex items-center justify-between text-sm bg-danger/5 border border-danger/20 rounded-lg px-3 py-2"
+                key={`${t.namespace}:${t.type}:${t.target}`}
+                className="flex items-center justify-between gap-3 text-sm bg-danger/5 border border-danger/20 rounded-lg px-3 py-2"
               >
                 <span className="text-text-primary font-mono text-xs">
                   {t.target}
+                  <span className="text-text-muted font-sans">
+                    {" "}({t.type}{t.upstream_id ? ` · ${t.upstream_id}` : t.proxy_id ? ` · ${t.proxy_id}` : ""})
+                  </span>
                 </span>
-                <span className="text-text-muted text-xs">
+                <span className="text-text-muted text-xs shrink-0">
                   since {new Date(t.since_epoch_ms).toLocaleString()}
                 </span>
               </li>

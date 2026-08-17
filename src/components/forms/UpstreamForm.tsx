@@ -43,6 +43,7 @@ const ALGORITHMS: Upstream["algorithm"][] = [
   "least_latency",
   "consistent_hashing",
   "random",
+  "passthrough",
 ];
 
 const ALGORITHM_OPTIONS = ALGORITHMS.map((a) => ({
@@ -54,6 +55,7 @@ const SD_PROVIDERS = [
   { value: "dns_sd", label: "DNS Service Discovery" },
   { value: "kubernetes", label: "Kubernetes" },
   { value: "consul", label: "Consul" },
+  { value: "mesh", label: "Ferrum Mesh" },
 ];
 
 const SAME_SITE_OPTIONS = [
@@ -110,17 +112,7 @@ function defaultPassiveHealthCheck(): PassiveHealthCheck {
     unhealthy_threshold: 3,
     unhealthy_status_codes: [500, 502, 503, 504],
     unhealthy_window_seconds: 30,
-  };
-}
-
-function defaultHashOnCookieConfig(): HashOnCookieConfig {
-  return {
-    path: "/",
-    ttl_seconds: 3600,
-    domain: undefined,
-    http_only: true,
-    secure: false,
-    same_site: "Lax",
+    healthy_after_seconds: 30,
   };
 }
 
@@ -164,13 +156,39 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
     same_site: initialData?.hash_on_cookie_config?.same_site ?? "Lax",
   });
 
+  /* ---------- Subsets ---------- */
+  const [subsets, setSubsets] = useState<Array<{ name: string; labels: string }>>(
+    (initialData?.subsets ?? []).map((s) => ({
+      name: s.name,
+      labels: Object.entries(s.labels)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(", "),
+    })),
+  );
+
+  /* ---------- Backend TLS ---------- */
+  const [tlsCertPath, setTlsCertPath] = useState(initialData?.backend_tls_client_cert_path ?? "");
+  const [tlsKeyPath, setTlsKeyPath] = useState(initialData?.backend_tls_client_key_path ?? "");
+  const [tlsVerify, setTlsVerify] = useState(initialData?.backend_tls_verify_server_cert ?? true);
+  const [tlsCaPath, setTlsCaPath] = useState(initialData?.backend_tls_server_ca_cert_path ?? "");
+  const [tlsSni, setTlsSni] = useState(initialData?.backend_tls_sni ?? "");
+  const [tlsSanAllowList, setTlsSanAllowList] = useState(
+    (initialData?.backend_tls_san_allow_list ?? []).join(", "),
+  );
+
   /* ---------- Service Discovery ---------- */
   const [sdEnabled, setSdEnabled] = useState(!!initialData?.service_discovery);
   const [sdProvider, setSdProvider] = useState(initialData?.service_discovery?.provider ?? "dns_sd");
   const [sdServiceName, setSdServiceName] = useState(() => {
     const sd = initialData?.service_discovery;
     if (!sd) return "";
-    return sd.dns_sd?.service_name ?? sd.kubernetes?.service_name ?? sd.consul?.service_name ?? "";
+    return (
+      sd.dns_sd?.service_name ??
+      sd.kubernetes?.service_name ??
+      sd.consul?.service_name ??
+      sd.mesh?.service_name ??
+      ""
+    );
   });
   const [sdConfig, setSdConfig] = useState<Record<string, unknown>>(() => {
     const sd = initialData?.service_discovery;
@@ -239,7 +257,7 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
           }),
           ...(sdProvider === "consul" && {
             consul: {
-              address: (sdConfig.address as string) || undefined,
+              address: (sdConfig.address as string) ?? "",
               service_name: sdServiceName,
               datacenter: (sdConfig.datacenter as string) || undefined,
               tag: (sdConfig.tag as string) || undefined,
@@ -248,9 +266,39 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
               poll_interval_seconds: (sdConfig.poll_interval_seconds as number) ?? 30,
             },
           }),
+          ...(sdProvider === "mesh" && {
+            mesh: {
+              service_name: sdServiceName,
+              namespace: (sdConfig.namespace as string) || undefined,
+              port: (sdConfig.port as number) || undefined,
+              poll_interval_seconds: (sdConfig.poll_interval_seconds as number) ?? 30,
+              topology: (sdConfig.topology as "ambient" | "sidecar") ?? "ambient",
+            },
+          }),
           default_weight: (sdConfig.default_weight as number) ?? 1,
         }
       : undefined;
+
+    const parsedSubsets = subsets
+      .filter((s) => s.name.trim())
+      .map((s) => ({
+        name: s.name.trim(),
+        labels: Object.fromEntries(
+          s.labels
+            .split(",")
+            .map((pair) => pair.trim())
+            .filter((pair) => pair.includes("="))
+            .map((pair) => {
+              const eq = pair.indexOf("=");
+              return [pair.slice(0, eq).trim(), pair.slice(eq + 1).trim()];
+            }),
+        ),
+      }));
+
+    const sanList = tlsSanAllowList
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
 
     const data: UpstreamCreate = {
       targets,
@@ -260,6 +308,13 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
       ...(hashOnCookie && { hash_on_cookie_config: hashOnCookie }),
       ...(healthChecks && { health_checks: healthChecks }),
       ...(serviceDiscovery && { service_discovery: serviceDiscovery }),
+      ...(parsedSubsets.length > 0 && { subsets: parsedSubsets }),
+      ...(tlsCertPath && { backend_tls_client_cert_path: tlsCertPath }),
+      ...(tlsKeyPath && { backend_tls_client_key_path: tlsKeyPath }),
+      backend_tls_verify_server_cert: tlsVerify,
+      ...(tlsCaPath && { backend_tls_server_ca_cert_path: tlsCaPath }),
+      ...(tlsSni && { backend_tls_sni: tlsSni }),
+      ...(sanList.length > 0 && { backend_tls_san_allow_list: sanList }),
     };
 
     await onSubmit(data);
@@ -291,7 +346,6 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
 
   /* ---------- Helpers ---------- */
 
-  const numVal = (v: number | ""): string => (v === "" ? "" : String(v));
   const showHashCookie = hashOn.startsWith("cookie:");
 
   /* ================================================================ */
@@ -447,48 +501,51 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
             <Select
               label="Probe Type"
               value={activeHc.probe_type ?? "http"}
-              onValueChange={(v) => setActiveHc({ ...activeHc, probe_type: v as "http" | "tcp" | "udp" })}
+              onValueChange={(v) =>
+                setActiveHc({ ...activeHc, probe_type: v as ActiveHealthCheck["probe_type"] })
+              }
               options={[
                 { value: "http", label: "HTTP / HTTPS" },
                 { value: "tcp", label: "TCP" },
                 { value: "udp", label: "UDP" },
+                { value: "grpc", label: "gRPC (grpc.health.v1)" },
               ]}
             />
             <Input
               label="Interval (seconds)"
               type="number"
-              value={String(activeHc.interval_seconds)}
+              value={String(activeHc.interval_seconds ?? 10)}
               onChange={(e) => setActiveHc({ ...activeHc, interval_seconds: Number(e.target.value) })}
             />
             <Input
               label="Timeout (ms)"
               type="number"
-              value={String(activeHc.timeout_ms)}
+              value={String(activeHc.timeout_ms ?? 5000)}
               onChange={(e) => setActiveHc({ ...activeHc, timeout_ms: Number(e.target.value) })}
             />
             <Input
               label="Healthy Threshold"
               type="number"
-              value={String(activeHc.healthy_threshold)}
+              value={String(activeHc.healthy_threshold ?? 3)}
               onChange={(e) => setActiveHc({ ...activeHc, healthy_threshold: Number(e.target.value) })}
             />
             <Input
               label="Unhealthy Threshold"
               type="number"
-              value={String(activeHc.unhealthy_threshold)}
+              value={String(activeHc.unhealthy_threshold ?? 3)}
               onChange={(e) => setActiveHc({ ...activeHc, unhealthy_threshold: Number(e.target.value) })}
             />
             {(activeHc.probe_type ?? "http") === "http" && (
               <>
                 <Input
                   label="HTTP Path"
-                  value={activeHc.http_path}
+                  value={activeHc.http_path ?? "/health"}
                   onChange={(e) => setActiveHc({ ...activeHc, http_path: e.target.value })}
                   placeholder="/health"
                 />
                 <Input
                   label="Healthy Status Codes"
-                  value={activeHc.healthy_status_codes.join(", ")}
+                  value={(activeHc.healthy_status_codes ?? []).join(", ")}
                   onChange={(e) =>
                     setActiveHc({
                       ...activeHc,
@@ -517,6 +574,17 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
                 helpText="Hex-encoded payload to send for UDP probes. If empty, a single zero byte is sent."
               />
             )}
+            {activeHc.probe_type === "grpc" && (
+              <Input
+                label="gRPC Service Name"
+                value={activeHc.grpc_service_name ?? ""}
+                onChange={(e) =>
+                  setActiveHc({ ...activeHc, grpc_service_name: e.target.value || undefined })
+                }
+                placeholder="my.package.MyService"
+                helpText="Empty checks overall server health via grpc.health.v1.Health/Check."
+              />
+            )}
           </div>
         )}
 
@@ -532,7 +600,7 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
           <div className="space-y-4 pl-6 border-l-2 border-border/50">
             <Input
               label="Unhealthy Status Codes"
-              value={passiveHc.unhealthy_status_codes.join(", ")}
+              value={(passiveHc.unhealthy_status_codes ?? []).join(", ")}
               onChange={(e) =>
                 setPassiveHc({
                   ...passiveHc,
@@ -548,14 +616,34 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
             <Input
               label="Unhealthy Threshold"
               type="number"
-              value={String(passiveHc.unhealthy_threshold)}
+              value={String(passiveHc.unhealthy_threshold ?? 3)}
               onChange={(e) => setPassiveHc({ ...passiveHc, unhealthy_threshold: Number(e.target.value) })}
             />
             <Input
               label="Unhealthy Window (seconds)"
               type="number"
-              value={String(passiveHc.unhealthy_window_seconds)}
+              value={String(passiveHc.unhealthy_window_seconds ?? 30)}
               onChange={(e) => setPassiveHc({ ...passiveHc, unhealthy_window_seconds: Number(e.target.value) })}
+            />
+            <Input
+              label="Auto-recovery After (seconds)"
+              type="number"
+              value={String(passiveHc.healthy_after_seconds ?? 30)}
+              onChange={(e) => setPassiveHc({ ...passiveHc, healthy_after_seconds: Number(e.target.value) })}
+              helpText="Seconds until an ejected target is restored to rotation. 0 disables auto-recovery."
+            />
+            <Input
+              label="Max Ejection Percent"
+              type="number"
+              value={passiveHc.max_ejection_percent != null ? String(passiveHc.max_ejection_percent) : ""}
+              onChange={(e) =>
+                setPassiveHc({
+                  ...passiveHc,
+                  max_ejection_percent: e.target.value === "" ? null : Number(e.target.value),
+                })
+              }
+              placeholder="No cap"
+              helpText="Maximum % of targets that may be passively ejected at once."
             />
           </div>
         )}
@@ -662,6 +750,42 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
               </>
             )}
 
+            {sdProvider === "mesh" && (
+              <>
+                <Input
+                  label="Mesh Namespace"
+                  value={String(sdConfig.namespace ?? "")}
+                  onChange={(e) => updateSdConfig("namespace", e.target.value)}
+                  placeholder="Defaults to upstream namespace"
+                />
+                <Input
+                  label="Service Port"
+                  type="number"
+                  value={sdConfig.port != null ? String(sdConfig.port) : ""}
+                  onChange={(e) =>
+                    updateSdConfig("port", e.target.value === "" ? undefined : Number(e.target.value))
+                  }
+                  placeholder="Defaults to first service port"
+                />
+                <Select
+                  label="Topology"
+                  value={String(sdConfig.topology ?? "ambient")}
+                  onValueChange={(v) => updateSdConfig("topology", v)}
+                  options={[
+                    { value: "ambient", label: "Ambient (HBONE)" },
+                    { value: "sidecar", label: "Sidecar (mTLS :15006)" },
+                  ]}
+                  helpText="Must match the destination mesh topology or dispatch fails closed."
+                />
+                <Input
+                  label="Poll Interval (seconds)"
+                  type="number"
+                  value={String((sdConfig.poll_interval_seconds as number) ?? 30)}
+                  onChange={(e) => updateSdConfig("poll_interval_seconds", Number(e.target.value))}
+                />
+              </>
+            )}
+
             {sdProvider === "consul" && (
               <>
                 <Input
@@ -711,6 +835,109 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
             />
           </div>
         )}
+      </CollapsibleSection>
+
+      {/* ── Subsets ── */}
+      <CollapsibleSection
+        title="Subsets"
+        badge={subsets.length > 0 ? String(subsets.length) : undefined}
+      >
+        <p className="text-text-muted text-xs">
+          Named target subsets for DestinationRule-style routing. A proxy's
+          "Upstream Subset" selects one by name; a target matches when its tags
+          contain every label listed here.
+        </p>
+        {subsets.map((subset, index) => (
+          <div key={index} className="flex items-start gap-2">
+            <div className="flex-1 grid grid-cols-2 gap-2">
+              <Input
+                label={index === 0 ? "Name" : undefined}
+                value={subset.name}
+                onChange={(e) =>
+                  setSubsets((prev) =>
+                    prev.map((s, i) => (i === index ? { ...s, name: e.target.value } : s)),
+                  )
+                }
+                placeholder="v2"
+              />
+              <Input
+                label={index === 0 ? "Labels (key=value)" : undefined}
+                value={subset.labels}
+                onChange={(e) =>
+                  setSubsets((prev) =>
+                    prev.map((s, i) => (i === index ? { ...s, labels: e.target.value } : s)),
+                  )
+                }
+                placeholder="version=v2, tier=canary"
+              />
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={index === 0 ? "mt-7" : ""}
+              onClick={() => setSubsets((prev) => prev.filter((_, i) => i !== index))}
+            >
+              <svg className="w-4 h-4 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </Button>
+          </div>
+        ))}
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={() => setSubsets((prev) => [...prev, { name: "", labels: "" }])}
+        >
+          Add Subset
+        </Button>
+      </CollapsibleSection>
+
+      {/* ── Backend TLS ── */}
+      <CollapsibleSection
+        title="Backend TLS"
+        badge={tlsCertPath || tlsSni ? "ON" : undefined}
+      >
+        <p className="text-text-muted text-xs">
+          TLS settings for backend connections. When this upstream is linked to
+          a proxy, these take precedence over the proxy's backend TLS fields.
+        </p>
+        <Input
+          label="Client Cert Path (mTLS)"
+          value={tlsCertPath}
+          onChange={(e) => setTlsCertPath(e.target.value)}
+          placeholder="/path/to/cert.pem"
+        />
+        <Input
+          label="Client Key Path (mTLS)"
+          value={tlsKeyPath}
+          onChange={(e) => setTlsKeyPath(e.target.value)}
+          placeholder="/path/to/key.pem"
+        />
+        <Checkbox
+          label="Verify backend server certificate"
+          checked={tlsVerify}
+          onChange={setTlsVerify}
+        />
+        <Input
+          label="Server CA Cert Path"
+          value={tlsCaPath}
+          onChange={(e) => setTlsCaPath(e.target.value)}
+          placeholder="/path/to/ca.pem or system://"
+        />
+        <Input
+          label="SNI Override"
+          value={tlsSni}
+          onChange={(e) => setTlsSni(e.target.value)}
+          placeholder="backend.internal.example.com"
+        />
+        <Input
+          label="SAN Allow List"
+          value={tlsSanAllowList}
+          onChange={(e) => setTlsSanAllowList(e.target.value)}
+          placeholder="api.internal, spiffe://cluster.local/ns/prod/sa/api"
+        />
       </CollapsibleSection>
 
       {/* ── Actions ── */}

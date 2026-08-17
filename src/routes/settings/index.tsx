@@ -4,9 +4,9 @@
 
 import { useState } from "react";
 import { SettingsForm } from "@/components/forms/SettingsForm";
+import { BackupRestoreCard } from "@/components/forms/BackupRestoreCard";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Select";
 import { Input } from "@/components/ui/Input";
 import { useToast } from "@/components/ui/Toast";
@@ -93,6 +93,14 @@ export default function SettingsPage() {
             )}
           </div>
         </Card>
+      </section>
+
+      {/* ── Backup & Restore ──────────────────────────────────────── */}
+      <section>
+        <h2 className="text-lg font-semibold text-text-primary mb-4">
+          Backup &amp; Restore
+        </h2>
+        <BackupRestoreCard />
       </section>
 
       {/* ── Metrics Refresh ───────────────────────────────────────── */}

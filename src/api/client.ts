@@ -92,6 +92,32 @@ function getNamespace(): string {
   }
 }
 
+// ── Expected probe failures ──────────────────────────────────────
+
+/**
+ * Mode-dependent observability endpoints that legitimately return 404/503
+ * on gateways where the feature is inactive (non-mesh mode, DP mode, no
+ * chargeback plugin, ...). Their pages render a friendly empty state, so
+ * the global error popup stays quiet for them.
+ */
+const SILENT_PROBE_PATTERNS = [
+  /\/api\/proxy\/mesh\//,
+  /\/api\/proxy\/node-waypoint\//,
+  /\/api\/proxy\/service-waypoint\//,
+  /\/api\/proxy\/gateway-trust/,
+  /\/api\/proxy\/charges/,
+  /\/api\/proxy\/backend-capabilities/,
+  /\/api\/proxy\/api-specs/,
+  /\/api\/proxy\/audit/,
+];
+
+function isExpectedProbeFailure(response: Response): boolean {
+  if (response.status !== 404 && response.status !== 503 && response.status !== 501) {
+    return false;
+  }
+  return SILENT_PROBE_PATTERNS.some((pattern) => pattern.test(response.url));
+}
+
 // ── Configured ky instance ───────────────────────────────────────
 
 export const api = ky.create({
@@ -113,6 +139,7 @@ export const api = ky.create({
           unauthorizedHandler?.();
         }
         if (!response.ok) {
+          if (isExpectedProbeFailure(response)) return;
           const body = await response.clone().text().catch(() => "");
           onApiError({
             statusCode: response.status,

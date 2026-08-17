@@ -31,18 +31,18 @@ export interface ProxyFormProps {
 /*  Constants                                                          */
 /* ------------------------------------------------------------------ */
 
-const BACKEND_PROTOCOLS: Proxy["backend_protocol"][] = [
-  "http",
-  "https",
-  "ws",
-  "wss",
-  "grpc",
-  "grpcs",
-  "h3",
-  "tcp",
-  "tcp_tls",
-  "udp",
-  "dtls",
+/**
+ * Wire-level backend schemes. gRPC and WebSocket are detected per-request
+ * by the gateway, so a single http/https proxy serves REST, gRPC, and
+ * WebSocket traffic on the same backend pool.
+ */
+const BACKEND_SCHEMES: { value: NonNullable<Proxy["backend_scheme"]>; label: string }[] = [
+  { value: "http", label: "HTTP (REST / gRPC / WebSocket)" },
+  { value: "https", label: "HTTPS (REST / gRPC / WebSocket, auto H2/H3)" },
+  { value: "tcp", label: "TCP (raw stream)" },
+  { value: "tcps", label: "TCP + TLS (stream)" },
+  { value: "udp", label: "UDP (datagram)" },
+  { value: "dtls", label: "DTLS (encrypted datagram)" },
 ];
 
 const ALL_HTTP_METHODS = [
@@ -293,8 +293,8 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
   const [name, setName] = useState(initialData?.name ?? "");
   const [listenPath, setListenPath] = useState(initialData?.listen_path ?? "/");
   const [hosts, setHosts] = useState<string[]>(initialData?.hosts ?? []);
-  const [backendProtocol, setBackendProtocol] = useState<Proxy["backend_protocol"]>(
-    initialData?.backend_protocol ?? "http",
+  const [backendScheme, setBackendScheme] = useState<NonNullable<Proxy["backend_scheme"]>>(
+    initialData?.backend_scheme ?? "https",
   );
   const [backendHost, setBackendHost] = useState(initialData?.backend_host ?? "");
   const [backendPort, setBackendPort] = useState(initialData?.backend_port ?? 80);
@@ -325,6 +325,21 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
 
   /* ---------- Upstream ---------- */
   const [upstreamId, setUpstreamId] = useState(initialData?.upstream_id ?? "");
+  const [upstreamSubset, setUpstreamSubset] = useState(initialData?.upstream_subset ?? "");
+
+  /* ---------- Stream extras ---------- */
+  const [streamProxyProtocol, setStreamProxyProtocol] = useState(
+    initialData?.stream_proxy_protocol ?? false,
+  );
+  const [backendProxyProtocol, setBackendProxyProtocol] = useState(
+    initialData?.backend_proxy_protocol === "v2",
+  );
+  const [wsIdleTimeout, setWsIdleTimeout] = useState<number | "">(
+    initialData?.websocket_idle_timeout_seconds ?? "",
+  );
+  const [udpAmplificationFactor, setUdpAmplificationFactor] = useState<number | "">(
+    initialData?.udp_max_response_amplification_factor ?? "",
+  );
 
   /* ---------- DNS ---------- */
   const [dnsOverride, setDnsOverride] = useState(initialData?.dns_override ?? "");
@@ -383,14 +398,31 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
     initialData?.pool_http3_connections_per_backend ?? "",
   );
 
+  /* ---------- Scheme family checks ---------- */
+
+  const isTcpLike = backendScheme === "tcp" || backendScheme === "tcps";
+  const isUdpLike = backendScheme === "udp" || backendScheme === "dtls";
+  const isStream = isTcpLike || isUdpLike;
+  const isHttpLike = !isStream;
+
   /* ---------- Validation ---------- */
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const validate = (): boolean => {
     const errs: Record<string, string> = {};
-    if (!listenPath.trim()) errs.listen_path = "Listen path is required";
-    if (!backendHost.trim()) errs.backend_host = "Backend host is required";
-    if (!backendPort || backendPort <= 0) errs.backend_port = "Backend port is required";
+    if (isHttpLike && !listenPath.trim() && hosts.length === 0) {
+      errs.listen_path = "Set a listen path or at least one host";
+    }
+    if (isStream && (listenPort === "" || Number(listenPort) <= 0)) {
+      errs.listen_port = "Stream proxies must bind a listen port";
+    }
+    const usingUpstream = upstreamId.trim().length > 0;
+    if (!usingUpstream && !backendHost.trim()) {
+      errs.backend_host = "Backend host is required (or link an upstream)";
+    }
+    if (!usingUpstream && (!backendPort || backendPort <= 0)) {
+      errs.backend_port = "Backend port is required";
+    }
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -407,8 +439,10 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
     };
 
     const data: ProxyCreate = {
-      listen_path: listenPath,
-      backend_protocol: backendProtocol,
+      // Stream proxies must omit listen_path entirely; HTTP proxies may be
+      // host-only (null listen_path).
+      ...(isHttpLike && listenPath.trim() && { listen_path: listenPath }),
+      backend_scheme: backendScheme,
       backend_host: backendHost,
       backend_port: backendPort,
       ...(name && { name }),
@@ -430,6 +464,7 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
       ...(backendTlsKeyPath && { backend_tls_client_key_path: backendTlsKeyPath }),
       ...(backendTlsCaPath && { backend_tls_server_ca_cert_path: backendTlsCaPath }),
       ...(upstreamId && { upstream_id: upstreamId }),
+      ...(upstreamId && upstreamSubset && { upstream_subset: upstreamSubset }),
       ...(dnsOverride && { dns_override: dnsOverride }),
       ...(dnsCacheTtl !== "" && { dns_cache_ttl_seconds: Number(dnsCacheTtl) }),
       ...(cbEnabled && { circuit_breaker: cb }),
@@ -454,6 +489,14 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
       ...(tcpIdleTimeout !== "" && { tcp_idle_timeout_seconds: Number(tcpIdleTimeout) }),
       udp_idle_timeout_seconds: udpIdleTimeout,
       ...(poolH3ConnsPerBackend !== "" && { pool_http3_connections_per_backend: Number(poolH3ConnsPerBackend) }),
+      ...(isStream && streamProxyProtocol && { stream_proxy_protocol: true }),
+      ...(isTcpLike && backendProxyProtocol && { backend_proxy_protocol: "v2" as const }),
+      ...(isHttpLike && wsIdleTimeout !== "" && {
+        websocket_idle_timeout_seconds: Number(wsIdleTimeout),
+      }),
+      ...(isUdpLike && udpAmplificationFactor !== "" && {
+        udp_max_response_amplification_factor: Number(udpAmplificationFactor),
+      }),
     };
 
     await onSubmit(data);
@@ -467,29 +510,18 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
     setter(raw === "" ? "" : Number(raw));
   };
 
-  /* ---------- Protocol checks ---------- */
+  /* ---------- Section visibility ---------- */
 
-  const isTcpLike = backendProtocol === "tcp" || backendProtocol === "tcp_tls";
-  const isUdpLike = backendProtocol === "udp" || backendProtocol === "dtls";
-  const isStream = isTcpLike || isUdpLike;
-  const isH3 = backendProtocol === "h3";
-  const isWebSocket = backendProtocol === "ws" || backendProtocol === "wss";
-  const isGrpc = backendProtocol === "grpc" || backendProtocol === "grpcs";
-  const isHttpLike = !isStream; // HTTP, HTTPS, H3, WS, WSS, gRPC, gRPCs all use listen_path
   const showListenPath = isHttpLike;
-  const showHosts = isHttpLike;
-  const showBackendPath = !isStream && !isWebSocket && !isGrpc;
+  // Hosts double as SNI route predicates for opaque stream listeners.
+  const showHosts = true;
+  const showBackendPath = isHttpLike;
   const showRoutingOptions = isHttpLike;
-  const showStripAndPreserve = isHttpLike;
-  const showAuthMode = isHttpLike;
-  const showResponseBodyMode = !isStream && !isWebSocket && !isGrpc;
-  const showAllowedMethods = !isStream && !isWebSocket && !isGrpc;
   const showConnectionPool = isHttpLike;
-  const supportsHttp2 = backendProtocol === "https" || backendProtocol === "h3"
-    || backendProtocol === "grpcs" || backendProtocol === "wss";
+  const supportsHttp2 = backendScheme === "https";
   const showCircuitBreaker = isHttpLike;
   const showRetry = isHttpLike;
-  const showProtocolSection = isTcpLike || isUdpLike || isH3;
+  const showProtocolSection = true;
 
   /* ================================================================ */
   /*  Render                                                           */
@@ -508,10 +540,11 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
             placeholder="My API Proxy"
           />
           <Select
-            label="Backend Protocol"
-            value={backendProtocol}
-            onValueChange={(v) => setBackendProtocol(v as Proxy["backend_protocol"])}
-            options={BACKEND_PROTOCOLS.map((p) => ({ value: p, label: p.toUpperCase() }))}
+            label="Backend Scheme"
+            value={backendScheme}
+            onValueChange={(v) => setBackendScheme(v as NonNullable<Proxy["backend_scheme"]>)}
+            options={BACKEND_SCHEMES.map((s) => ({ value: s.value, label: s.label }))}
+            helpText="gRPC and WebSocket are auto-detected per request — no separate scheme needed."
           />
           {showListenPath && (
             <Input
@@ -519,9 +552,8 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
               value={listenPath}
               onChange={(e) => setListenPath(e.target.value)}
               placeholder="/api/v1"
-              helpText='Starts with / for literal or ~ for regex'
+              helpText="Starts with / for prefix, =/ for exact, or ~ for regex. Optional when hosts are set."
               error={errors.listen_path}
-              required
             />
           )}
           {showHosts && (
@@ -529,8 +561,12 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
               label="Hosts"
               values={hosts}
               onChange={(v) => setHosts(v as string[])}
-              placeholder="example.com, api.example.com"
-              helpText="Comma-separated hostnames, press Enter to add"
+              placeholder="example.com, *.example.com"
+              helpText={
+                isStream
+                  ? "SNI route predicates — only valid on opaque (passthrough / non-TLS TCP) listeners."
+                  : "Hostnames this proxy matches. Empty matches all hosts."
+              }
             />
           )}
           <Input
@@ -564,51 +600,47 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
       {/* ── Section 2: Routing Options ── */}
       {showRoutingOptions && (
         <CollapsibleSection title="Routing Options">
-          {showStripAndPreserve && (
-            <>
-              <Checkbox label="Strip listen path" checked={stripListenPath} onChange={setStripListenPath} />
-              <Checkbox label="Preserve host header" checked={preserveHostHeader} onChange={setPreserveHostHeader} />
-            </>
-          )}
-          {showAuthMode && (
-            <Select
-              label="Auth Mode"
-              value={authMode}
-              onValueChange={(v) => setAuthMode(v as "single" | "multi")}
-              options={[
-                { value: "single", label: "Single" },
-                { value: "multi", label: "Multi" },
-              ]}
-            />
-          )}
-          {showResponseBodyMode && (
-            <Select
-              label="Response Body Mode"
-              value={responseBodyMode}
-              onValueChange={(v) => setResponseBodyMode(v as "stream" | "buffer")}
-              options={[
-                { value: "stream", label: "Stream" },
-                { value: "buffer", label: "Buffer" },
-              ]}
-            />
-          )}
-          {showAllowedMethods && (
-            <MethodCheckboxGroup
-              label="Allowed Methods"
-              selected={allowedMethods}
-              onChange={setAllowedMethods}
-              options={ALL_HTTP_METHODS}
-            />
-          )}
-          {isWebSocket && (
-            <TagInput
-              label="Allowed WebSocket Origins"
-              values={allowedWsOrigins}
-              onChange={(v) => setAllowedWsOrigins(v as string[])}
-              placeholder="https://example.com"
-              helpText="Protects against Cross-Site WebSocket Hijacking (CSWSH). Leave empty to allow all origins."
-            />
-          )}
+          <Checkbox label="Strip listen path" checked={stripListenPath} onChange={setStripListenPath} />
+          <Checkbox label="Preserve host header" checked={preserveHostHeader} onChange={setPreserveHostHeader} />
+          <Select
+            label="Auth Mode"
+            value={authMode}
+            onValueChange={(v) => setAuthMode(v as "single" | "multi")}
+            options={[
+              { value: "single", label: "Single (first success wins)" },
+              { value: "multi", label: "Multi (try all until success)" },
+            ]}
+          />
+          <Select
+            label="Response Body Mode"
+            value={responseBodyMode}
+            onValueChange={(v) => setResponseBodyMode(v as "stream" | "buffer")}
+            options={[
+              { value: "stream", label: "Stream" },
+              { value: "buffer", label: "Buffer" },
+            ]}
+          />
+          <MethodCheckboxGroup
+            label="Allowed Methods"
+            selected={allowedMethods}
+            onChange={setAllowedMethods}
+            options={ALL_HTTP_METHODS}
+          />
+          <TagInput
+            label="Allowed WebSocket Origins"
+            values={allowedWsOrigins}
+            onChange={(v) => setAllowedWsOrigins(v as string[])}
+            placeholder="https://example.com"
+            helpText="Protects WebSocket upgrades against CSWSH. Leave empty to allow all origins."
+          />
+          <Input
+            label="WebSocket Idle Timeout (seconds)"
+            type="number"
+            value={numVal(wsIdleTimeout)}
+            onChange={setNum(setWsIdleTimeout)}
+            placeholder="300"
+            helpText="Idle timeout for upgraded WebSocket sessions. 0 disables the idle bound."
+          />
         </CollapsibleSection>
       )}
 
@@ -682,14 +714,23 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
       </CollapsibleSection>
 
       {/* ── Section 5: Upstream ── */}
-      <CollapsibleSection title="Upstream">
+      <CollapsibleSection title="Upstream" badge={upstreamId ? "LINKED" : undefined}>
         <Input
           label="Upstream ID"
           value={upstreamId}
           onChange={(e) => setUpstreamId(e.target.value)}
           placeholder="upstream-uuid"
-          helpText="Link this proxy to an upstream load-balancer group"
+          helpText="Link this proxy to an upstream load-balancer group. Overrides backend host/port."
         />
+        {upstreamId && (
+          <Input
+            label="Upstream Subset"
+            value={upstreamSubset}
+            onChange={(e) => setUpstreamSubset(e.target.value)}
+            placeholder="v2"
+            helpText="Optional named subset defined on the upstream (DestinationRule-style routing)."
+          />
+        )}
       </CollapsibleSection>
 
       {/* ── Section 6: DNS ── */}
@@ -895,17 +936,20 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
       {showProtocolSection && (
         <CollapsibleSection
           title="Protocol-Specific"
-          badge={backendProtocol.toUpperCase()}
+          badge={backendScheme.toUpperCase()}
         >
-          {(isTcpLike || isUdpLike) && (
-            <Input
-              label="Listen Port"
-              type="number"
-              value={numVal(listenPort)}
-              onChange={setNum(setListenPort)}
-              helpText="Required for TCP/UDP protocols"
-            />
-          )}
+          <Input
+            label="Listen Port"
+            type="number"
+            value={numVal(listenPort)}
+            onChange={setNum(setListenPort)}
+            helpText={
+              isStream
+                ? "Required — stream proxies bind and route by this port."
+                : "Optional — scopes this HTTP proxy to one frontend port."
+            }
+            error={errors.listen_port}
+          />
           {isTcpLike && (
             <Input
               label="TCP Idle Timeout (seconds)"
@@ -915,19 +959,46 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
             />
           )}
           {isUdpLike && (
-            <Input
-              label="UDP Idle Timeout (seconds)"
-              type="number"
-              value={String(udpIdleTimeout)}
-              onChange={(e) => setUdpIdleTimeout(Number(e.target.value))}
+            <>
+              <Input
+                label="UDP Idle Timeout (seconds)"
+                type="number"
+                value={String(udpIdleTimeout)}
+                onChange={(e) => setUdpIdleTimeout(Number(e.target.value))}
+              />
+              <Input
+                label="Max Response Amplification Factor"
+                type="number"
+                value={numVal(udpAmplificationFactor)}
+                onChange={setNum(setUdpAmplificationFactor)}
+                placeholder="8"
+                helpText="Caps backend→client bytes per request payload byte. Protects against UDP reflection attacks."
+              />
+            </>
+          )}
+          {isStream && (
+            <Checkbox
+              label="Inbound PROXY protocol"
+              checked={streamProxyProtocol}
+              onChange={setStreamProxyProtocol}
+              helpText="Read PROXY protocol v1/v2 headers from a trusted load balancer to recover client IPs."
             />
           )}
-          {isH3 && (
+          {isTcpLike && (
+            <Checkbox
+              label="Outbound PROXY protocol v2 to backend"
+              checked={backendProxyProtocol}
+              onChange={setBackendProxyProtocol}
+              helpText="Prepend a PROXY v2 header on backend connects so backends see the client IP."
+            />
+          )}
+          {backendScheme === "https" && (
             <Input
               label="HTTP/3 Connections Per Backend"
               type="number"
               value={numVal(poolH3ConnsPerBackend)}
               onChange={setNum(setPoolH3ConnsPerBackend)}
+              helpText="QUIC connections per H3-capable backend (H3 is auto-selected when supported)."
             />
           )}
         </CollapsibleSection>

@@ -35,7 +35,8 @@ export type ProxySearchPickerProps = SingleProps | MultiProps;
 /* ------------------------------------------------------------------ */
 
 function proxyLabel(p: Proxy): string {
-  return p.name ? `${p.name} (${p.listen_path})` : p.listen_path;
+  const path = p.listen_path ?? (p.listen_port ? `:${p.listen_port}` : p.id);
+  return p.name ? `${p.name} (${path})` : path;
 }
 
 /* ------------------------------------------------------------------ */
@@ -60,7 +61,7 @@ export function ProxySearchPicker(props: ProxySearchPickerProps) {
       (p) =>
         p.id.toLowerCase().includes(q) ||
         (p.name && p.name.toLowerCase().includes(q)) ||
-        p.listen_path.toLowerCase().includes(q) ||
+        (p.listen_path ?? "").toLowerCase().includes(q) ||
         p.backend_host.toLowerCase().includes(q),
     );
   }, [proxies, search]);
@@ -219,11 +220,11 @@ export function ProxySearchPicker(props: ProxySearchPickerProps) {
                       )}
                       <div className="min-w-0 flex-1">
                         <div className="font-medium truncate">
-                          {proxy.name || proxy.listen_path}
+                          {proxy.name || proxy.listen_path || proxy.id}
                         </div>
                         <div className="text-xs text-text-muted truncate">
                           {proxy.name ? `${proxy.listen_path} · ` : ""}
-                          {proxy.backend_protocol}://{proxy.backend_host}:{proxy.backend_port}
+                          {proxy.backend_scheme ?? "https"}://{proxy.backend_host}:{proxy.backend_port}
                           <span className="ml-1.5 font-mono opacity-70">{proxy.id.slice(0, 12)}...</span>
                         </div>
                       </div>

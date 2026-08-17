@@ -33,6 +33,10 @@ npm run dev
 # Start demo backends (ports 9101-9105)
 node scripts/demo-backend.mjs
 
+# OR: run against a mock admin API (no gateway needed; serves sample data
+# for every admin surface including TLS, ACME, audit, mesh, chargeback)
+node scripts/mock-admin-gateway.mjs   # listens on :9000
+
 # Seed demo data (needs running Ferrum Edge gateway)
 node scripts/seed-demo-gateway.mjs
 
@@ -76,20 +80,29 @@ The app supports dark and light themes via CSS custom properties. Dark is the de
 
 ## Key directories
 
-- `src/routes/` - Page components (TanStack Router, lazy-loaded)
+- `src/routes/` - Page components (TanStack Router, lazy-loaded). Includes
+  `tls/` (inventory, managed stores, ACME, events, validate), `api-specs/`
+  (spec import), `audit/`, `cluster/`, and `mesh/` (service graph, drift,
+  egress, waypoints, trust) alongside the core CRUD pages
 - `src/components/forms/` - CRUD form components (ProxyForm, ConsumerForm, PluginConfigForm, UpstreamForm, etc.)
-- `src/components/metrics/` - Metrics dashboard panels
-- `src/api/` - API client, types, and endpoint modules
+- `src/components/metrics/` - Metrics dashboard panels (incl. `OpsPanels.tsx` for overload/runtime/chargeback)
+- `src/api/` - API client, types, and endpoint modules (`tls.ts`, `mesh.ts`, `ops.ts`, `apiSpecs.ts`, `trust.ts` bundle their own response types)
 - `src/hooks/` - React Query hooks for data fetching
+- `src/lib/pluginConfigDefaults.ts` - plugin catalog: per-plugin default configs plus `PLUGIN_METADATA` (category + description) used by the plugin picker
 - `server/` - Fastify BFF server
-- `scripts/` - Demo backend, seeding, and traffic generation
+- `scripts/` - Demo backend, seeding, traffic generation, and `mock-admin-gateway.mjs`
 
 ## Type conventions
 
 - `src/api/types.ts` mirrors the Ferrum Edge admin API response shapes (NOT the OpenAPI spec schemas directly -- field names must match what the API actually returns)
 - Form components use `*Create` types for submission payloads
+- Proxies use `backend_scheme` (`http`/`https`/`tcp`/`tcps`/`udp`/`dtls`); gRPC and WebSocket are detected per-request and are NOT schemes. The legacy `backend_protocol` enum is gone
+- HTTP proxies need `hosts` and/or `listen_path`; stream proxies must omit `listen_path` and set `listen_port`
+- Consumer credentials are maps of rotation ARRAYS per type (`keyauth`, `basicauth`, `jwt`, `hmac_auth`, `mtls_auth`); ordinary responses redact secrets as the literal `[REDACTED]`, which PUT accepts as a round-trip marker
+- Proxy PUT is full-replace: build update payloads with `proxies.toUpdatePayload(proxy)` and override fields, never send partial bodies
 - Health check enablement is controlled by presence/absence (not an `enabled` boolean field)
-- `ServiceDiscoveryConfig` uses nested provider-specific objects (`dns_sd`, `kubernetes`, `consul`)
+- `ServiceDiscoveryConfig` uses nested provider-specific objects (`dns_sd`, `kubernetes`, `consul`, `mesh`)
+- Mode-dependent observability endpoints (mesh/*, waypoints, charges, trust, audit, api-specs) legitimately 404/503 on gateways without the feature; the ky client suppresses the global error popup for them (see `SILENT_PROBE_PATTERNS` in `src/api/client.ts`) and pages render empty states
 
 ## Build & check
 

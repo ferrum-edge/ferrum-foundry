@@ -13,7 +13,9 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": {
+      // Match only /api/ (with slash) so SPA routes like /api-specs are
+      // served by the router rather than proxied to the BFF.
+      "^/api/": {
         target: "http://localhost:3001",
         changeOrigin: true,
       },

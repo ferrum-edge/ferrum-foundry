@@ -11,6 +11,7 @@ import { SkeletonCard } from "@/components/ui/Skeleton";
 import { PluginConfigForm } from "@/components/forms/PluginConfigForm";
 import type { PluginFormDefaults } from "@/components/forms/PluginConfigForm";
 import { getApiErrorMessage } from "@/api/client";
+import * as proxiesApi from "@/api/proxies";
 import type { PluginConfigCreate } from "@/api/types";
 
 export default function PluginNewPage() {
@@ -37,10 +38,7 @@ export default function PluginNewPage() {
           return updateProxy.mutateAsync({
             id: proxyId,
             data: {
-              listen_path: proxy.listen_path,
-              backend_protocol: proxy.backend_protocol,
-              backend_host: proxy.backend_host,
-              backend_port: proxy.backend_port,
+              ...proxiesApi.toUpdatePayload(proxy),
               plugins: [...existingPlugins, { plugin_config_id: created.id }],
             },
           });

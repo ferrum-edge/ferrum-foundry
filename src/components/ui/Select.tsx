@@ -12,6 +12,7 @@ export interface SelectProps {
   placeholder?: string;
   label?: string;
   error?: string;
+  helpText?: string;
   disabled?: boolean;
 }
 
@@ -22,6 +23,7 @@ export function Select({
   placeholder = "Select...",
   label,
   error,
+  helpText,
   disabled,
 }: SelectProps) {
   return (
@@ -79,6 +81,7 @@ export function Select({
           </SelectPrimitive.Content>
         </SelectPrimitive.Portal>
       </SelectPrimitive.Root>
+      {helpText && !error && <p className="text-text-muted text-xs">{helpText}</p>}
       {error && <p className="text-danger text-xs">{error}</p>}
     </div>
   );

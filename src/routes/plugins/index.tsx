@@ -13,7 +13,7 @@ import { SearchBar } from "@/components/shared/SearchBar";
 import { PaginationControls } from "@/components/shared/PaginationControls";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { SkeletonRow } from "@/components/ui/Skeleton";
-import type { PluginConfig } from "@/api/types";
+import { getPluginMeta } from "@/lib/pluginConfigDefaults";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -94,8 +94,6 @@ const DEFAULT_PLUGIN_PRIORITY: Record<string, number> = {
   request_deduplication: 9850,
   spec_expose: 9900,
 };
-
-const FALLBACK_PRIORITY = 5000;
 
 /* ------------------------------------------------------------------ */
 /*  Column definitions                                                 */
@@ -229,7 +227,13 @@ export default function PluginsPage() {
               >
                 {/* Plugin name */}
                 <div className="min-w-0">
-                  <Badge variant="orange">{formatPluginName(config.plugin_name)}</Badge>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <Badge variant="orange">{formatPluginName(config.plugin_name)}</Badge>
+                    <span className="text-[11px] text-text-muted">
+                      {getPluginMeta(config.plugin_name).category}
+                    </span>
+                    {config.trigger && <Badge variant="purple">triggered</Badge>}
+                  </div>
                   <span className="text-xs text-text-muted font-mono break-all block mt-1">
                     {config.id}
                   </span>
@@ -264,7 +268,7 @@ export default function PluginsPage() {
                     </span>
                   ) : (
                     <span className="text-sm text-text-muted">
-                      {DEFAULT_PLUGIN_PRIORITY[config.plugin_name] ?? FALLBACK_PRIORITY}
+                      {DEFAULT_PLUGIN_PRIORITY[config.plugin_name] ?? "\u2014"}
                     </span>
                   )}
                 </span>

@@ -16,12 +16,16 @@ Admin panel UI for managing and observing the [Ferrum Edge](https://github.com/f
 
 ## Features
 
-- **Resource Management** - Full CRUD for Proxies, Consumers, Plugins, and Upstreams with paginated tables supporting 50k+ records via virtual scrolling
-- **Relational Browsing** - Navigate Proxy -> Plugins -> Upstream -> Targets with tabs and breadcrumbs
-- **Consumer Credentials** - Manage key-auth, basic-auth, JWT, HMAC, and mTLS credentials with ACL groups
-- **Plugin Configuration** - JSON editor for all 46+ gateway plugins with scope (global/proxy) support
-- **Metrics Dashboard** - Gateway stats, circuit breakers, connection pools, health checks, load balancers, caches, and Prometheus metrics with configurable auto-refresh
-- **Health Monitoring** - Real-time gateway and database health status
+- **Resource Management** - Full CRUD for Proxies (HTTP + TCP/UDP/DTLS stream routes), Consumers, Plugins, and Upstreams with paginated tables supporting 50k+ records via virtual scrolling
+- **Relational Browsing** - Navigate Proxy -> Plugins -> Upstream -> Targets (with subsets and locality) via tabs and breadcrumbs
+- **Consumer Credentials** - Manage key-auth, basic-auth, JWT, HMAC, and mTLS credential rotation arrays with ACL groups
+- **Plugin Configuration** - Category-grouped catalog of 80+ gateway plugins (auth, security/WAF, traffic control, AI gateway, mesh, observability, billing) with default config templates, per-instance execution triggers, and scope (global/proxy/group) support
+- **TLS Management** - Certificate/CA/CRL/OCSP/JWKS stores, ACME order automation (HTTP-01/TLS-ALPN-01/DNS-01), material inventory with expiry tracking, surface rotation, and PEM validation
+- **API Spec Import** - Create spec-managed proxies, upstreams, and plugins from OpenAPI documents (`x-ferrum-proxy` extensions) with replace/delete lifecycle
+- **Metrics Dashboard** - Gateway stats, overload protection, host runtime, circuit breakers, connection pools, health checks, load balancers, caches, API chargeback, and Prometheus metrics with configurable auto-refresh
+- **Operations** - Audit log with filters and redacted diffs, CP/DP cluster topology, backend protocol capability probes, and full configuration backup/restore
+- **Mesh Observability** - Service graph, config/slice drift, policy denies, remote clusters and federation, egress scope testing, waypoints, and SPIFFE gateway trust (mesh-mode gateways)
+- **Health Monitoring** - Real-time gateway, database, and FIPS/readiness status
 - **Namespace Support** - Browse and manage resources across namespaces via `X-Ferrum-Namespace`
 - **Dark / Light Theme** - Dark theme by default with a light theme toggle in the header
 
@@ -86,6 +90,14 @@ npm run dev
 ```
 
 This starts Vite (port 5173) and Fastify (port 3001) concurrently. Open http://localhost:5173.
+
+No gateway handy? Run the bundled mock admin API, which serves realistic
+sample data for every admin surface (CRUD, TLS/ACME, audit, cluster, mesh,
+chargeback):
+
+```bash
+node scripts/mock-admin-gateway.mjs   # listens on :9000
+```
 
 ### Production Build
 

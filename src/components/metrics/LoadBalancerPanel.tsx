@@ -9,7 +9,7 @@ interface LoadBalancerPanelProps {
 }
 
 export function LoadBalancerPanel({ loadBalancers }: LoadBalancerPanelProps) {
-  const upstreams = Object.entries(loadBalancers.active_connections);
+  const upstreams = loadBalancers.active_connections;
 
   if (upstreams.length === 0) {
     return (
@@ -19,11 +19,14 @@ export function LoadBalancerPanel({ loadBalancers }: LoadBalancerPanelProps) {
 
   return (
     <div className="space-y-4">
-      {upstreams.map(([upstreamId, targets]) => (
-        <div key={upstreamId}>
+      {upstreams.map((upstream) => (
+        <div key={`${upstream.namespace}:${upstream.upstream_id}`}>
           <h4 className="text-text-secondary text-xs font-medium mb-2">
             Upstream:{" "}
-            <span className="text-text-primary font-mono">{upstreamId}</span>
+            <span className="text-text-primary font-mono">{upstream.upstream_id}</span>
+            {upstream.namespace !== "ferrum" && (
+              <span className="text-text-muted"> · ns {upstream.namespace}</span>
+            )}
           </h4>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -34,7 +37,7 @@ export function LoadBalancerPanel({ loadBalancers }: LoadBalancerPanelProps) {
                 </tr>
               </thead>
               <tbody>
-                {Object.entries(targets).map(([target, count]) => (
+                {Object.entries(upstream.targets).map(([target, count]) => (
                   <tr key={target} className="border-b border-border/50">
                     <td className="py-1.5 pr-4 text-text-primary font-mono text-xs">
                       {target}

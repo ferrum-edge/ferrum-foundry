@@ -2,13 +2,22 @@
 /*  Ferrum Foundry – Plugin Config create / edit form                  */
 /* ------------------------------------------------------------------ */
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
-import type { PluginConfig, PluginConfigCreate, PluginScope } from "@/api/types";
-import { formatPluginConfigDefault } from "@/lib/pluginConfigDefaults";
+import type {
+  PluginConfig,
+  PluginConfigCreate,
+  PluginScope,
+  PluginTrigger,
+} from "@/api/types";
+import {
+  formatPluginConfigDefault,
+  getPluginMeta,
+  isInternalPlugin,
+} from "@/lib/pluginConfigDefaults";
 import { ProxySearchPicker } from "@/components/forms/ProxySearchPicker";
 
 /* ------------------------------------------------------------------ */
@@ -93,6 +102,18 @@ export function PluginConfigForm({
   // Track whether the user has manually edited the config textarea
   const [userEditedConfig, setUserEditedConfig] = useState(false);
 
+  /* ---------- Trigger (optional per-instance execution predicate) --- */
+  const [triggerEnabled, setTriggerEnabled] = useState(!!initialData?.trigger);
+  const [triggerJson, setTriggerJson] = useState(
+    initialData?.trigger
+      ? JSON.stringify(initialData.trigger, null, 2)
+      : JSON.stringify(
+          { when: { match: { path: { prefix: ["/api/"] } } } },
+          null,
+          2,
+        ),
+  );
+
   /* ---------- Validation ---------- */
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -111,6 +132,16 @@ export function PluginConfigForm({
     } catch {
       errs.config = "Invalid JSON";
     }
+    if (triggerEnabled) {
+      try {
+        const parsed = JSON.parse(triggerJson) as PluginTrigger;
+        if (!parsed || typeof parsed !== "object" || !parsed.when) {
+          errs.trigger = 'Trigger must be an object with a "when" predicate node';
+        }
+      } catch {
+        errs.trigger = "Invalid JSON";
+      }
+    }
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -128,6 +159,7 @@ export function PluginConfigForm({
       enabled,
       ...(scope === "proxy" && proxyId && { proxy_id: proxyId }),
       ...(priorityOverride !== "" && { priority_override: Number(priorityOverride) }),
+      trigger: triggerEnabled ? (JSON.parse(triggerJson) as PluginTrigger) : null,
     };
 
     await onSubmit(data, scope === "proxy_group" ? proxyGroupIds : undefined);
@@ -135,10 +167,25 @@ export function PluginConfigForm({
 
   /* ---------- Helpers ---------- */
 
-  const pluginOptions = availablePlugins.map((p) => ({
-    value: p,
-    label: p.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
-  }));
+  // Group by category so the picker reads like a catalog; internal (__-prefixed)
+  // plugins are gateway-injected and never user-configurable.
+  const pluginOptions = useMemo(() => {
+    const selectable = availablePlugins.filter((p) => !isInternalPlugin(p));
+    const sorted = [...selectable].sort((a, b) => {
+      const catA = getPluginMeta(a).category;
+      const catB = getPluginMeta(b).category;
+      if (catA !== catB) return catA.localeCompare(catB);
+      return a.localeCompare(b);
+    });
+    return sorted.map((p) => ({
+      value: p,
+      label: `${getPluginMeta(p).category} · ${p
+        .replace(/_/g, " ")
+        .replace(/\b\w/g, (c) => c.toUpperCase())}`,
+    }));
+  }, [availablePlugins]);
+
+  const selectedMeta = pluginName ? getPluginMeta(pluginName) : undefined;
 
   const numVal = (v: number | ""): string => (v === "" ? "" : String(v));
 
@@ -148,7 +195,7 @@ export function PluginConfigForm({
   const resetConfigToPluginDefault = () => {
     setConfigJson(currentDefault);
     setUserEditedConfig(false);
-    setErrors(({ config, ...remainingErrors }) => remainingErrors);
+    setErrors(({ config: _config, ...remainingErrors }) => remainingErrors);
   };
 
   // When plugin name changes in create mode, always update config to the new default
@@ -176,6 +223,7 @@ export function PluginConfigForm({
             options={pluginOptions}
             placeholder="Select a plugin..."
             error={errors.plugin_name}
+            helpText={selectedMeta?.description}
             disabled={isEdit}
           />
 
@@ -272,6 +320,37 @@ export function PluginConfigForm({
           )}
           {errors.config && <p className="text-danger text-xs">{errors.config}</p>}
         </div>
+      </div>
+
+      {/* ── Execution Trigger ── */}
+      <div className="border-b border-border/50 py-4">
+        <div className="flex items-center justify-between gap-3 mb-2">
+          <h3 className="text-sm font-semibold text-text-primary">Execution Trigger</h3>
+          <Checkbox label="Enabled" checked={triggerEnabled} onChange={setTriggerEnabled} />
+        </div>
+        <p className="text-xs text-text-muted mb-3">
+          Optional per-instance predicate deciding when this plugin runs.
+          Combine <code className="font-mono">all</code> / <code className="font-mono">any</code> /{" "}
+          <code className="font-mono">not</code> nodes with <code className="font-mono">match</code>{" "}
+          leaves on method, path, host, SNI, header, query, cookie, protocol,
+          source CIDR, consumer, and more.
+        </p>
+        {triggerEnabled && (
+          <div className="flex flex-col gap-1.5">
+            <textarea
+              value={triggerJson}
+              onChange={(e) => setTriggerJson(e.target.value)}
+              rows={8}
+              className={`bg-code-bg border rounded-lg px-3 py-2 text-text-primary text-sm font-mono placeholder:text-text-muted transition-colors duration-150 resize-y min-h-[100px] ${
+                errors.trigger
+                  ? "border-danger focus:border-danger focus:ring-1 focus:ring-danger/30"
+                  : "border-border focus:border-orange focus:ring-1 focus:ring-orange/30"
+              }`}
+              spellCheck={false}
+            />
+            {errors.trigger && <p className="text-danger text-xs">{errors.trigger}</p>}
+          </div>
+        )}
       </div>
 
       {/* ── Actions ── */}

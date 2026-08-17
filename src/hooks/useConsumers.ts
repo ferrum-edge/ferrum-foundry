@@ -43,7 +43,7 @@ export function useUpdateConsumer() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: ConsumerCreate }) =>
       consumers.update(id, data),
-    onSuccess: (_data, variables) => {
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["consumers"] });
       qc.invalidateQueries({ queryKey: ["consumer"] });
     },
@@ -74,7 +74,7 @@ export function useUpdateCredentials() {
       credType: string;
       data: unknown;
     }) => consumers.updateCredentials(consumerId, credType, data),
-    onSuccess: (_data, variables) => {
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["consumer"] });
       qc.invalidateQueries({ queryKey: ["consumers"] });
     },
@@ -93,7 +93,7 @@ export function useAppendCredential() {
       credType: string;
       data: unknown;
     }) => consumers.appendCredential(consumerId, credType, data),
-    onSuccess: (_data, variables) => {
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["consumer"] });
       qc.invalidateQueries({ queryKey: ["consumers"] });
     },
@@ -110,7 +110,7 @@ export function useDeleteCredentials() {
       consumerId: string;
       credType: string;
     }) => consumers.deleteCredentials(consumerId, credType),
-    onSuccess: (_data, variables) => {
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["consumer"] });
       qc.invalidateQueries({ queryKey: ["consumers"] });
     },
@@ -129,7 +129,7 @@ export function useDeleteCredentialByIndex() {
       credType: string;
       index: number;
     }) => consumers.deleteCredentialByIndex(consumerId, credType, index),
-    onSuccess: (_data, variables) => {
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["consumer"] });
       qc.invalidateQueries({ queryKey: ["consumers"] });
     },

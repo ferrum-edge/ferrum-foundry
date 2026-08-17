@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
 import { CollapsibleSection } from "./CollapsibleSection";
-import type { Consumer, ConsumerCreate } from "@/api/types";
+import type { Consumer, ConsumerCreate, ConsumerCredentials } from "@/api/types";
 
 /* ------------------------------------------------------------------ */
 /*  Props                                                              */
@@ -128,8 +128,6 @@ function generateSecret(length = 32): string {
   return Array.from(array, (b) => chars[b % chars.length]).join("");
 }
 
-type CredentialType = (typeof CREDENTIAL_TYPES)[number]["value"];
-
 /* ================================================================== */
 /*  ConsumerForm                                                       */
 /* ================================================================== */
@@ -177,12 +175,13 @@ export function ConsumerForm({
     e.preventDefault();
     if (!validate()) return;
 
-    // Build credentials object from all filled credential fields
-    const credentials: Record<string, unknown> = {};
+    // Build the credentials map. Each type takes an ARRAY of entries
+    // (rotation support); we submit a single-entry array per filled type.
+    const credentials: Record<string, Array<Record<string, string>>> = {};
     for (const typeDef of CREDENTIAL_TYPES) {
       const val = credValues[typeDef.value]?.trim();
       if (val) {
-        credentials[typeDef.value] = { [typeDef.field]: val };
+        credentials[typeDef.value] = [{ [typeDef.field]: val }];
       }
     }
 
@@ -191,7 +190,9 @@ export function ConsumerForm({
       username: username.trim(),
       ...(customId.trim() && { custom_id: customId.trim() }),
       ...(aclGroups.length > 0 && { acl_groups: aclGroups }),
-      ...(Object.keys(credentials).length > 0 && { credentials }),
+      ...(Object.keys(credentials).length > 0 && {
+        credentials: credentials as ConsumerCredentials,
+      }),
     };
 
     await onSubmit(data);
