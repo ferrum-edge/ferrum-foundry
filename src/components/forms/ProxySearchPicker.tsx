@@ -62,7 +62,7 @@ export function ProxySearchPicker(props: ProxySearchPickerProps) {
         p.id.toLowerCase().includes(q) ||
         (p.name && p.name.toLowerCase().includes(q)) ||
         (p.listen_path ?? "").toLowerCase().includes(q) ||
-        p.backend_host.toLowerCase().includes(q),
+        (p.backend_host ?? "").toLowerCase().includes(q),
     );
   }, [proxies, search]);
 

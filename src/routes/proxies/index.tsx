@@ -82,7 +82,8 @@ export default function ProxiesPage() {
         (p.name && p.name.toLowerCase().includes(q)) ||
         p.id.toLowerCase().includes(q) ||
         (p.listen_path ?? "").toLowerCase().includes(q) ||
-        p.backend_host.toLowerCase().includes(q),
+        // Upstream-only proxies may omit backend_host entirely
+        (p.backend_host ?? "").toLowerCase().includes(q),
     );
   }, [proxies, search]);
 
@@ -223,10 +224,11 @@ export default function ProxiesPage() {
                   )}
                 </div>
 
-                {/* Plugins count */}
+                {/* Plugins count — plugins can be absent on freshly created
+                    upstream-only proxies, so never dereference it directly */}
                 <span className="text-center">
-                  <Badge variant={proxy.plugins.length > 0 ? "blue" : "default"}>
-                    {proxy.plugins.length}
+                  <Badge variant={(proxy.plugins ?? []).length > 0 ? "blue" : "default"}>
+                    {(proxy.plugins ?? []).length}
                   </Badge>
                 </span>
 
