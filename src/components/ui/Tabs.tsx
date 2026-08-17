@@ -9,7 +9,9 @@ export const TabsList = forwardRef<
 >(({ className = "", ...props }, ref) => (
   <TabsPrimitive.List
     ref={ref}
-    className={`flex border-b border-border gap-1 ${className}`}
+    // Scroll horizontally instead of wrapping when many tabs (e.g. TLS) don't
+    // fit the viewport.
+    className={`flex border-b border-border gap-1 overflow-x-auto overflow-y-hidden ${className}`}
     {...props}
   />
 ));
@@ -21,7 +23,9 @@ export const TabsTrigger = forwardRef<
 >(({ className = "", ...props }, ref) => (
   <TabsPrimitive.Trigger
     ref={ref}
-    className={`px-4 py-2 text-sm font-medium text-text-secondary hover:text-text-primary transition-colors duration-150 border-b-2 border-transparent cursor-pointer -mb-px data-[state=active]:text-orange data-[state=active]:border-orange ${className}`}
+    // The focus indicator is an inset ring (not the global orange outline) so
+    // a focused-but-inactive tab can't be mistaken for a second active tab.
+    className={`px-4 py-2 text-sm font-medium whitespace-nowrap shrink-0 text-text-secondary hover:text-text-primary transition-colors duration-150 border-b-2 border-transparent cursor-pointer -mb-px rounded-t-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-orange/40 data-[state=active]:text-orange data-[state=active]:border-orange ${className}`}
     {...props}
   />
 ));

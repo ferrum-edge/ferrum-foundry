@@ -51,7 +51,11 @@ export function LoginGate({ children }: { children: ReactNode }) {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 autoFocus
-                autoComplete="current-password"
+                // API token, not a user password — don't invite the browser
+                // password manager to store the shared BFF secret.
+                autoComplete="off"
+                data-1p-ignore
+                data-lpignore="true"
                 className="w-full min-w-0 bg-bg-input border border-border rounded-lg px-3 py-2 pr-10 text-text-primary text-sm placeholder:text-text-muted transition-colors duration-150 focus:border-orange focus:ring-1 focus:ring-orange/30"
                 placeholder="paste token"
               />

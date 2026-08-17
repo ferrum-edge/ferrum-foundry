@@ -155,6 +155,14 @@ export function RuntimePanel() {
 
 /* ---------- Chargeback ---------- */
 
+/** Group thousands and cap at 4 decimals so 421875 and 1.02 read consistently. */
+function formatCharge(amount: number): string {
+  return amount.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+  });
+}
+
 export function ChargesPanel() {
   const { data, isLoading, isError } = useCharges();
 
@@ -187,15 +195,15 @@ export function ChargesPanel() {
           {consumers.map(([name, entry]) => (
             <tr key={name} className="border-b border-border/50">
               <td className="py-2 pr-4 text-text-primary font-mono text-xs">{name}</td>
-              <td className="py-2 pr-4 text-right text-text-primary">
-                {entry.total_calls ?? 0}
+              <td className="py-2 pr-4 text-right text-text-primary tabular-nums">
+                {(entry.total_calls ?? 0).toLocaleString()}
               </td>
-              <td className="py-2 text-right text-text-primary">
+              <td className="py-2 text-right text-text-primary tabular-nums">
                 {entry.total_charges != null
-                  ? entry.total_charges.toFixed(4)
+                  ? formatCharge(entry.total_charges)
                   : entry.charges_by_currency
                     ? Object.entries(entry.charges_by_currency)
-                        .map(([cur, c]) => `${(c.total_charges ?? 0).toFixed(4)} ${cur}`)
+                        .map(([cur, c]) => `${formatCharge(c.total_charges ?? 0)} ${cur}`)
                         .join(" + ")
                     : "—"}
               </td>

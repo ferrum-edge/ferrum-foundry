@@ -1,5 +1,6 @@
 import { Select } from "@/components/ui/Select";
 import { useNamespace } from "@/stores/namespace";
+import { useNamespaces } from "@/hooks/useNamespaces";
 import { useTheme } from "@/stores/theme";
 import { useAuth } from "@/stores/auth";
 
@@ -8,20 +9,20 @@ interface HeaderProps {
 }
 
 export function Header({ onToggleSidebar }: HeaderProps) {
-  const { selectedNamespace, namespaces, setNamespace } = useNamespace();
+  const { selectedNamespace, setNamespace } = useNamespace();
+  const { data: namespaces } = useNamespaces();
   const { theme, toggleTheme } = useTheme();
   const { clearToken } = useAuth();
 
-  const namespaceOptions = namespaces.map((ns) => ({
-    value: ns,
-    label: ns,
-  }));
-
-  // Fallback options if namespaces haven't loaded yet
-  const displayOptions =
-    namespaceOptions.length > 0
-      ? namespaceOptions
-      : [{ value: selectedNamespace, label: selectedNamespace }];
+  // Always offer the full namespace set from GET /namespaces; include the
+  // selected namespace even if the list hasn't loaded (or omits it) so the
+  // control never collapses to fewer options after a switch.
+  const namespaceList = namespaces ?? [];
+  const displayOptions = (
+    namespaceList.includes(selectedNamespace)
+      ? namespaceList
+      : [selectedNamespace, ...namespaceList]
+  ).map((ns) => ({ value: ns, label: ns }));
 
   return (
     <header className="fixed top-0 right-0 left-0 md:left-[var(--sidebar-width)] h-[var(--nav-height)] bg-bg-card border-b border-border z-20 flex items-center justify-between px-4">

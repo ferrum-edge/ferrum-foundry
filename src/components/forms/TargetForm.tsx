@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – Inline target add/edit form for UpstreamForm      */
 /* ------------------------------------------------------------------ */
 
-import { useState, type FormEvent, type KeyboardEvent } from "react";
+import { useState, type KeyboardEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
@@ -43,8 +43,7 @@ export function TargetForm({ initialData, onSubmit, onCancel }: TargetFormProps)
     return Object.keys(errs).length === 0;
   };
 
-  const handleSubmit = (e: FormEvent) => {
-    e.preventDefault();
+  const submit = () => {
     if (!validate()) return;
 
     const target: UpstreamTarget = {
@@ -56,6 +55,16 @@ export function TargetForm({ initialData, onSubmit, onCancel }: TargetFormProps)
     };
 
     onSubmit(target);
+  };
+
+  // TargetForm may be rendered inside UpstreamForm's <form>; intercept Enter
+  // so it adds the target instead of submitting the parent create/edit form.
+  const handleFieldKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Enter" && (e.target as HTMLElement).tagName === "INPUT") {
+      e.preventDefault();
+      e.stopPropagation();
+      submit();
+    }
   };
 
   /* -- Tag helpers -- */
@@ -73,6 +82,7 @@ export function TargetForm({ initialData, onSubmit, onCancel }: TargetFormProps)
   const handleTagKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" || e.key === ",") {
       e.preventDefault();
+      e.stopPropagation();
       addTag(tagInput);
       setTagInput("");
     }
@@ -98,8 +108,10 @@ export function TargetForm({ initialData, onSubmit, onCancel }: TargetFormProps)
   /* ================================================================ */
 
   return (
-    <form
-      onSubmit={handleSubmit}
+    // Not a <form>: nesting a form inside UpstreamForm's <form> is invalid
+    // HTML and made the inner submit button submit (and reset) the parent page.
+    <div
+      onKeyDown={handleFieldKeyDown}
       className="bg-bg-primary/50 border border-border rounded-lg p-4 space-y-3"
     >
       {/* Row 1: host, port, weight, path */}
@@ -110,7 +122,6 @@ export function TargetForm({ initialData, onSubmit, onCancel }: TargetFormProps)
           onChange={(e) => setHost(e.target.value)}
           placeholder="10.0.0.1"
           error={errors.host}
-          required
         />
         <Input
           label="Port"
@@ -119,7 +130,6 @@ export function TargetForm({ initialData, onSubmit, onCancel }: TargetFormProps)
           onChange={(e) => setPort(Number(e.target.value))}
           placeholder="80"
           error={errors.port}
-          required
         />
         <Input
           label="Weight"
@@ -175,10 +185,10 @@ export function TargetForm({ initialData, onSubmit, onCancel }: TargetFormProps)
         <Button type="button" variant="secondary" size="sm" onClick={onCancel}>
           Cancel
         </Button>
-        <Button type="submit" size="sm">
+        <Button type="button" size="sm" onClick={submit}>
           {initialData ? "Update Target" : "Add Target"}
         </Button>
       </div>
-    </form>
+    </div>
   );
 }

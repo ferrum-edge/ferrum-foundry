@@ -39,7 +39,9 @@
   --blue-light: #3B82F6;
   --text-primary: #0F172A;
   --text-secondary: #475569;
-  --text-muted: #94A3B8;
+  /* Slate-500: #94A3B8 was ~2.9:1 on white — too pale for placeholders and
+     helper text. #64748B keeps the muted look at readable contrast. */
+  --text-muted: #64748B;
   --success: #059669;
   --warning: #D97706;
   --danger: #DC2626;

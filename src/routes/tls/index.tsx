@@ -397,7 +397,7 @@ function InventoryTab() {
               className="grid grid-cols-[1.2fr_5rem_5rem_2fr_6rem] gap-4 px-6 py-3 border-b border-border/50 last:border-b-0 items-center"
             >
               <div className="min-w-0">
-                <p className="text-sm text-text-primary truncate">
+                <p className="text-sm text-text-primary truncate" title={entry.subject || entry.id}>
                   {entry.subject || entry.id}
                 </p>
                 {entry.used_by.length > 0 && (
@@ -406,7 +406,7 @@ function InventoryTab() {
                   </p>
                 )}
                 {entry.error && (
-                  <p className="text-xs text-danger truncate">{entry.error}</p>
+                  <p className="text-xs text-danger truncate" title={entry.error}>{entry.error}</p>
                 )}
               </div>
               <span className="text-xs text-text-secondary">{entry.material_kind}</span>
@@ -880,7 +880,7 @@ export default function TlsPage() {
       </div>
 
       <Tabs defaultValue="inventory">
-        <TabsList className="flex-wrap">
+        <TabsList>
           <TabsTrigger value="inventory">Inventory</TabsTrigger>
           {MANAGED_TABS.map((tab) => (
             <TabsTrigger key={tab.collection} value={tab.collection}>

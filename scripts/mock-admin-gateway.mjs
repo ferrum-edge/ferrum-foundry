@@ -162,6 +162,23 @@ const auditEvents = Array.from({ length: 24 }, (_, i) => ({
   diff: { changed: { enabled: { from: false, to: true } } },
 }));
 
+// Mirror the real gateway: the spec summary title comes from the document's
+// info.title, not a hardcoded placeholder.
+function extractSpecTitle(doc) {
+  try {
+    if (doc.trimStart().startsWith('{')) {
+      const title = JSON.parse(doc)?.info?.title;
+      if (title) return String(title);
+    } else {
+      const m = doc.match(/^\s*title:\s*['"]?(.+?)['"]?\s*$/m);
+      if (m) return m[1];
+    }
+  } catch {
+    // fall through to placeholder
+  }
+  return 'Imported Spec';
+}
+
 const apiSpecs = [
   {
     id: 'spec-orders', proxy_id: 'proxy-orders-api', namespace: 'ferrum',
@@ -344,12 +361,16 @@ const tlsEvents = [
   { id: 2, at: ago(1500), surface: 'backend_tls', outcome: 'load_error', sources: [{ label: 'ca', cert_id: 'inv-old-ca', source_id: '/etc/ferrum/old-ca.pem', scheme: 'file', kind: 'ca_bundle' }], error: 'PEM parse error at byte 120' },
 ];
 
+const serviceGraphEdges = [
+  { source_principal: 'spiffe://prod/ns/web/sa/frontend', source_workload: 'frontend-7d9', source_namespace: 'web', source_app: 'frontend', source_service: 'frontend', destination_principal: 'spiffe://prod/ns/api/sa/orders', destination_workload: 'orders-5f2', destination_namespace: 'api', destination_app: 'orders', destination_service: 'orders', request_protocol: 'http', connection_security_policy: 'mutual_tls', requests_total: 48211, errors_total: 12, duration_ms_total: 482110, duration_ms_avg: 10.0, last_seen_unix_ms: Date.now(), last_seen: now() },
+];
+
 const meshData = {
   'service-graph': {
-    generated_at_unix_ms: Date.now(), generated_at: now(), edge_count: 2,
-    edges: [
-      { source_principal: 'spiffe://prod/ns/web/sa/frontend', source_workload: 'frontend-7d9', source_namespace: 'web', source_app: 'frontend', source_service: 'frontend', destination_principal: 'spiffe://prod/ns/api/sa/orders', destination_workload: 'orders-5f2', destination_namespace: 'api', destination_app: 'orders', destination_service: 'orders', request_protocol: 'http', connection_security_policy: 'mutual_tls', requests_total: 48211, errors_total: 12, duration_ms_total: 482110, duration_ms_avg: 10.0, last_seen_unix_ms: Date.now(), last_seen: now() },
-    ],
+    generated_at_unix_ms: Date.now(), generated_at: now(),
+    // Keep the count derived so it always matches the rows the UI renders.
+    edge_count: serviceGraphEdges.length,
+    edges: serviceGraphEdges,
   },
 };
 
@@ -437,7 +458,7 @@ const server = createServer(async (req, res) => {
     const id = `spec-${randomUUID().slice(0, 8)}`;
     const doc = typeof body._raw === 'string' ? body._raw : JSON.stringify(body);
     specDocuments[id] = doc;
-    apiSpecs.push({ id, proxy_id: `proxy-${id}`, namespace: 'ferrum', spec_version: '3.1.0', spec_format: doc.trimStart().startsWith('{') ? 'json' : 'yaml', title: 'Imported Spec', info_version: '1.0.0', description: null, contact_name: null, contact_email: null, license_name: null, license_identifier: null, tags: [], server_urls: [], operation_count: 1, uncompressed_size: doc.length, content_hash: 'cafebabe', content_encoding: 'gzip', created_at: now(), updated_at: now() });
+    apiSpecs.push({ id, proxy_id: `proxy-${id}`, namespace: 'ferrum', spec_version: '3.1.0', spec_format: doc.trimStart().startsWith('{') ? 'json' : 'yaml', title: extractSpecTitle(doc), info_version: '1.0.0', description: null, contact_name: null, contact_email: null, license_name: null, license_identifier: null, tags: [], server_urls: [], operation_count: 1, uncompressed_size: doc.length, content_hash: 'cafebabe', content_encoding: 'gzip', created_at: now(), updated_at: now() });
     return send(201, { id, proxy_id: `proxy-${id}`, spec_version: '3.1.0', content_hash: 'cafebabe' });
   }
   const specMatch = path.match(/^\/api-specs\/([^/]+)$/);
@@ -447,6 +468,7 @@ const server = createServer(async (req, res) => {
     if (method === 'GET') return send(200, specDocuments[spec.id] ?? '# document unavailable', 'application/yaml');
     if (method === 'PUT') {
       specDocuments[spec.id] = typeof body._raw === 'string' ? body._raw : JSON.stringify(body);
+      spec.title = extractSpecTitle(specDocuments[spec.id]);
       spec.updated_at = now();
       return send(200, { id: spec.id, proxy_id: spec.proxy_id, spec_version: spec.spec_version, content_hash: 'cafebabe2' });
     }

@@ -144,7 +144,7 @@ export default function ConsumersPage() {
       {/* Table */}
       <Card className="overflow-hidden p-0">
         {/* Header row */}
-        <div className="grid grid-cols-[1.5fr_1fr_1.5fr_1.5fr_1fr] gap-4 px-6 py-3 border-b border-border bg-bg-card text-text-muted text-xs font-semibold uppercase tracking-wider">
+        <div className="grid grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1.5fr)_max-content] gap-4 px-6 py-3 border-b border-border bg-bg-card text-text-muted text-xs font-semibold uppercase tracking-wider">
           {columns.map((col) => (
             <span key={col.key}>
               {col.label}
@@ -200,7 +200,7 @@ export default function ConsumersPage() {
                 <button
                   key={consumer.id}
                   type="button"
-                  className="grid grid-cols-[1.5fr_1fr_1.5fr_1.5fr_1fr] gap-4 px-6 py-3.5 w-full text-left hover:bg-bg-card-hover transition-colors cursor-pointer"
+                  className="grid grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1.5fr)_max-content] gap-4 px-6 py-3.5 w-full text-left hover:bg-bg-card-hover transition-colors cursor-pointer"
                   onClick={() =>
                     navigate({
                       to: "/consumers/$consumerId",
@@ -210,16 +210,19 @@ export default function ConsumersPage() {
                 >
                   {/* Username */}
                   <div className="min-w-0">
-                    <span className="text-sm text-text-primary font-medium break-all">
+                    <span className="text-sm text-text-primary font-medium truncate block" title={consumer.username}>
                       {consumer.username}
                     </span>
-                    <span className="text-xs text-text-muted font-mono break-all block">
+                    <span className="text-xs text-text-muted font-mono truncate block" title={consumer.id}>
                       {consumer.id}
                     </span>
                   </div>
 
                   {/* Custom ID */}
-                  <span className="text-sm text-text-secondary break-all">
+                  <span
+                    className="text-sm text-text-secondary truncate min-w-0"
+                    title={consumer.custom_id ?? undefined}
+                  >
                     {consumer.custom_id || (
                       <span className="text-text-muted italic">None</span>
                     )}
@@ -264,7 +267,7 @@ export default function ConsumersPage() {
                   </div>
 
                   {/* Created at */}
-                  <span className="text-sm text-text-muted">
+                  <span className="text-sm text-text-muted whitespace-nowrap">
                     {formatDate(consumer.created_at)}
                   </span>
                 </button>
