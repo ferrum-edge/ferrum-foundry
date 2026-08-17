@@ -168,7 +168,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={{ toast }}>
       {children}
-      <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2">
+      {/* Top-right so toasts never cover a page's primary save/cancel
+          actions, which live at the bottom of forms. */}
+      <div className="fixed top-[calc(var(--nav-height)+0.75rem)] right-4 z-[100] flex flex-col gap-2">
         {toasts.map((item) => (
           <ToastNotification key={item.id} item={item} onDismiss={dismiss} />
         ))}

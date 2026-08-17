@@ -6,15 +6,9 @@ import {
   type ReactNode,
 } from "react";
 
-interface NamespaceState {
+interface NamespaceContextValue {
   selectedNamespace: string;
-  namespaces: string[];
-  isLoaded: boolean;
-}
-
-interface NamespaceContextValue extends NamespaceState {
   setNamespace: (ns: string) => void;
-  setNamespaces: (list: string[]) => void;
 }
 
 const NamespaceContext = createContext<NamespaceContextValue | null>(null);
@@ -38,25 +32,17 @@ function persistNamespace(ns: string) {
 }
 
 export function NamespaceProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<NamespaceState>({
-    selectedNamespace: loadPersistedNamespace(),
-    namespaces: [],
-    isLoaded: false,
-  });
+  const [selectedNamespace, setSelectedNamespace] = useState<string>(
+    loadPersistedNamespace,
+  );
 
   const setNamespace = useCallback((ns: string) => {
     persistNamespace(ns);
-    setState((prev) => ({ ...prev, selectedNamespace: ns }));
-  }, []);
-
-  const setNamespaces = useCallback((list: string[]) => {
-    setState((prev) => ({ ...prev, namespaces: list, isLoaded: true }));
+    setSelectedNamespace(ns);
   }, []);
 
   return (
-    <NamespaceContext.Provider
-      value={{ ...state, setNamespace, setNamespaces }}
-    >
+    <NamespaceContext.Provider value={{ selectedNamespace, setNamespace }}>
       {children}
     </NamespaceContext.Provider>
   );

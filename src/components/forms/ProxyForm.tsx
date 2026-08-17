@@ -544,7 +544,11 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
             value={backendScheme}
             onValueChange={(v) => setBackendScheme(v as NonNullable<Proxy["backend_scheme"]>)}
             options={BACKEND_SCHEMES.map((s) => ({ value: s.value, label: s.label }))}
-            helpText="gRPC and WebSocket are auto-detected per request — no separate scheme needed."
+            helpText={
+              isStream
+                ? "Raw L4 stream proxy — bind a Listen Port (Protocol-Specific section); hosts act as SNI matchers on TLS-capable listeners."
+                : "gRPC and WebSocket are auto-detected per request — no separate scheme needed."
+            }
           />
           {showListenPath && (
             <Input
@@ -569,13 +573,19 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
               }
             />
           )}
+          {/* No native `required`: a proxy may reference an upstream instead
+              of a direct backend host, and validate() shows styled errors. */}
           <Input
             label="Backend Host"
             value={backendHost}
             onChange={(e) => setBackendHost(e.target.value)}
             placeholder="upstream.example.com"
             error={errors.backend_host}
-            required
+            helpText={
+              upstreamId.trim()
+                ? "Optional while an upstream is linked (see Upstream section)."
+                : undefined
+            }
           />
           <Input
             label="Backend Port"
@@ -584,7 +594,6 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
             onChange={(e) => setBackendPort(Number(e.target.value))}
             placeholder="80"
             error={errors.backend_port}
-            required
           />
           {showBackendPath && (
             <Input

@@ -104,7 +104,7 @@ export default function DashboardPage() {
         <img
           src="/logo.png"
           alt="Ferrum Foundry logo"
-          className="w-40 h-40 object-contain"
+          className="w-40 h-40 object-contain rounded-2xl"
         />
       </div>
 
@@ -365,7 +365,8 @@ export default function DashboardPage() {
         <h2 className="text-lg font-semibold text-text-primary mb-4">
           Quick Navigation
         </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* 2-up until xl so card descriptions don't wrap word-per-line */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
           {NAV_CARDS.map((card) => (
             <Link key={card.href} to={card.href}>
               <Card hoverable className="h-full">
@@ -389,7 +390,7 @@ export default function DashboardPage() {
                     <h3 className="text-sm font-semibold text-text-primary">
                       {card.title}
                     </h3>
-                    <p className="text-text-muted text-xs mt-1">
+                    <p className="text-text-secondary text-xs mt-1">
                       {card.description}
                     </p>
                   </div>

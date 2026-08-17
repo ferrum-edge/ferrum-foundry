@@ -119,7 +119,7 @@ export default function ProxiesPage() {
       {/* Table */}
       <Card className="overflow-hidden p-0">
         {/* Header row */}
-        <div className="grid grid-cols-[2fr_1.5fr_2fr_4rem_1fr] gap-4 px-6 py-3 border-b border-border bg-bg-card text-text-muted text-xs font-semibold uppercase tracking-wider">
+        <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,2fr)_4rem_max-content] gap-4 px-6 py-3 border-b border-border bg-bg-card text-text-muted text-xs font-semibold uppercase tracking-wider">
           {columns.map((col) => (
             <span key={col.key} className={"className" in col ? col.className : ""}>
               {col.label}
@@ -167,7 +167,7 @@ export default function ProxiesPage() {
               <button
                 key={proxy.id}
                 type="button"
-                className="grid grid-cols-[2fr_1.5fr_2fr_4rem_1fr] gap-4 px-6 py-3.5 w-full text-left hover:bg-bg-card-hover transition-colors cursor-pointer"
+                className="grid grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,2fr)_4rem_max-content] gap-4 px-6 py-3.5 w-full text-left hover:bg-bg-card-hover transition-colors cursor-pointer"
                 onClick={() =>
                   navigate({
                     to: "/proxies/$proxyId",
@@ -179,22 +179,25 @@ export default function ProxiesPage() {
                 <div className="min-w-0">
                   {proxy.name ? (
                     <>
-                      <span className="text-sm text-text-primary font-medium break-all">
+                      <span className="text-sm text-text-primary font-medium truncate block" title={proxy.name}>
                         {proxy.name}
                       </span>
-                      <span className="text-xs text-text-muted font-mono break-all block">
+                      <span className="text-xs text-text-muted font-mono truncate block" title={proxy.id}>
                         {proxy.id}
                       </span>
                     </>
                   ) : (
-                    <span className="text-sm text-text-primary font-mono break-all">
+                    <span className="text-sm text-text-primary font-mono truncate block" title={proxy.id}>
                       {proxy.id}
                     </span>
                   )}
                 </div>
 
                 {/* Listen Path */}
-                <span className="text-sm text-text-secondary font-mono break-all">
+                <span
+                  className="text-sm text-text-secondary font-mono truncate min-w-0"
+                  title={proxy.listen_path ?? undefined}
+                >
                   {proxy.listen_path}
                 </span>
 
@@ -202,13 +205,19 @@ export default function ProxiesPage() {
                 <div className="min-w-0">
                   {proxy.upstream_id ? (
                     <>
-                      <span className="text-sm text-text-primary break-all">
+                      <span
+                        className="text-sm text-text-primary truncate block"
+                        title={upstreamNameMap.get(proxy.upstream_id) ?? proxy.upstream_id}
+                      >
                         {upstreamNameMap.get(proxy.upstream_id) ?? proxy.upstream_id}
                       </span>
                       <span className="text-xs text-text-muted block">load balanced</span>
                     </>
                   ) : (
-                    <span className="text-sm text-text-secondary font-mono break-all">
+                    <span
+                      className="text-sm text-text-secondary font-mono truncate block"
+                      title={formatBackend(proxy)}
+                    >
                       {formatBackend(proxy)}
                     </span>
                   )}
@@ -222,7 +231,7 @@ export default function ProxiesPage() {
                 </span>
 
                 {/* Created at */}
-                <span className="text-sm text-text-muted">
+                <span className="text-sm text-text-muted whitespace-nowrap">
                   {formatDate(proxy.created_at)}
                 </span>
               </button>

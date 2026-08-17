@@ -169,7 +169,7 @@ export default function PluginsPage() {
       {/* Table */}
       <Card className="overflow-hidden p-0">
         {/* Header row */}
-        <div className="grid grid-cols-[2fr_4rem_1.5fr_4rem_4rem_1fr] gap-4 px-6 py-3 border-b border-border bg-bg-card text-text-muted text-xs font-semibold uppercase tracking-wider">
+        <div className="grid grid-cols-[minmax(0,2fr)_4rem_minmax(0,1.5fr)_4rem_4rem_max-content] gap-4 px-6 py-3 border-b border-border bg-bg-card text-text-muted text-xs font-semibold uppercase tracking-wider">
           {columns.map((col) => (
             <span key={col.key}>
               {col.label}
@@ -217,7 +217,7 @@ export default function PluginsPage() {
               <button
                 key={config.id}
                 type="button"
-                className="grid grid-cols-[2fr_4rem_1.5fr_4rem_4rem_1fr] gap-4 px-6 py-3.5 w-full text-left hover:bg-bg-card-hover transition-colors cursor-pointer"
+                className="grid grid-cols-[minmax(0,2fr)_4rem_minmax(0,1.5fr)_4rem_4rem_max-content] gap-4 px-6 py-3.5 w-full text-left hover:bg-bg-card-hover transition-colors cursor-pointer"
                 onClick={() =>
                   navigate({
                     to: "/plugins/$pluginId",
@@ -234,7 +234,7 @@ export default function PluginsPage() {
                     </span>
                     {config.trigger && <Badge variant="purple">triggered</Badge>}
                   </div>
-                  <span className="text-xs text-text-muted font-mono break-all block mt-1">
+                  <span className="text-xs text-text-muted font-mono truncate block mt-1" title={config.id}>
                     {config.id}
                   </span>
                 </div>
@@ -247,7 +247,10 @@ export default function PluginsPage() {
                 </span>
 
                 {/* Proxy ID */}
-                <span className="text-sm text-text-muted font-mono break-all block min-w-0">
+                <span
+                  className="text-sm text-text-muted font-mono truncate block min-w-0"
+                  title={config.proxy_id ?? undefined}
+                >
                   {config.proxy_id ?? (
                     <span className="italic">--</span>
                   )}
@@ -260,9 +263,10 @@ export default function PluginsPage() {
                   </Badge>
                 </span>
 
-                {/* Priority */}
+                {/* Priority — treat null the same as absent so rows without an
+                    override never render an empty red pill. */}
                 <span>
-                  {config.priority_override !== undefined ? (
+                  {config.priority_override != null ? (
                     <span className="inline-block text-sm font-bold text-danger border border-danger/40 bg-danger/10 rounded px-1.5 py-0.5">
                       {config.priority_override}
                     </span>
@@ -274,7 +278,7 @@ export default function PluginsPage() {
                 </span>
 
                 {/* Created at */}
-                <span className="text-sm text-text-muted">
+                <span className="text-sm text-text-muted whitespace-nowrap">
                   {formatDate(config.created_at)}
                 </span>
               </button>

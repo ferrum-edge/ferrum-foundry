@@ -123,7 +123,7 @@ export default function UpstreamsPage() {
       {/* Table */}
       <Card className="overflow-hidden p-0">
         {/* Header row */}
-        <div className="grid grid-cols-[2fr_1.5fr_4rem_5rem_1fr] gap-4 px-6 py-3 border-b border-border bg-bg-card text-text-muted text-xs font-semibold uppercase tracking-wider">
+        <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_4rem_5rem_max-content] gap-4 px-6 py-3 border-b border-border bg-bg-card text-text-muted text-xs font-semibold uppercase tracking-wider">
           {columns.map((col) => (
             <span key={col.key}>
               {col.label}
@@ -171,7 +171,7 @@ export default function UpstreamsPage() {
               <button
                 key={upstream.id}
                 type="button"
-                className="grid grid-cols-[2fr_1.5fr_4rem_5rem_1fr] gap-4 px-6 py-3.5 w-full text-left hover:bg-bg-card-hover transition-colors cursor-pointer"
+                className="grid grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_4rem_5rem_max-content] gap-4 px-6 py-3.5 w-full text-left hover:bg-bg-card-hover transition-colors cursor-pointer"
                 onClick={() =>
                   navigate({
                     to: "/upstreams/$upstreamId",
@@ -183,15 +183,15 @@ export default function UpstreamsPage() {
                 <div className="min-w-0">
                   {upstream.name ? (
                     <>
-                      <span className="text-sm text-text-primary font-medium break-all">
+                      <span className="text-sm text-text-primary font-medium truncate block" title={upstream.name}>
                         {upstream.name}
                       </span>
-                      <span className="text-xs text-text-muted font-mono break-all block">
+                      <span className="text-xs text-text-muted font-mono truncate block" title={upstream.id}>
                         {upstream.id}
                       </span>
                     </>
                   ) : (
-                    <span className="text-sm text-text-primary font-mono break-all">
+                    <span className="text-sm text-text-primary font-mono truncate block" title={upstream.id}>
                       {upstream.id}
                     </span>
                   )}
@@ -221,7 +221,7 @@ export default function UpstreamsPage() {
                 </span>
 
                 {/* Created at */}
-                <span className="text-sm text-text-muted">
+                <span className="text-sm text-text-muted whitespace-nowrap">
                   {formatDate(upstream.created_at)}
                 </span>
               </button>

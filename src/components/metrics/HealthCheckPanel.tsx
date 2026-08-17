@@ -31,7 +31,7 @@ export function HealthCheckPanel({ healthCheck }: HealthCheckPanelProps) {
                 key={`${t.namespace}:${t.type}:${t.target}`}
                 className="flex items-center justify-between gap-3 text-sm bg-danger/5 border border-danger/20 rounded-lg px-3 py-2"
               >
-                <span className="text-text-primary font-mono text-xs">
+                <span className="text-text-primary font-mono text-xs min-w-0 break-all">
                   {t.target}
                   <span className="text-text-muted font-sans">
                     {" "}({t.type}{t.upstream_id ? ` · ${t.upstream_id}` : t.proxy_id ? ` · ${t.proxy_id}` : ""})

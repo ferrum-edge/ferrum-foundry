@@ -604,7 +604,7 @@ export default function MeshPage() {
       </div>
 
       <Tabs defaultValue="overview">
-        <TabsList className="flex-wrap">
+        <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="graph">Service Graph</TabsTrigger>
           <TabsTrigger value="denies">Policy Denies</TabsTrigger>
