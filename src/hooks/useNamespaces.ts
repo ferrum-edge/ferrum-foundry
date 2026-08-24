@@ -51,6 +51,22 @@ export function useNamespaceDetail(name: string) {
   });
 }
 
+/**
+ * Count what a cascade delete of `name` would destroy. Disabled until the
+ * gateway has actually refused an unconfirmed delete, so opening the delete
+ * dialog costs no requests.
+ */
+export function useNamespaceOccupancy(name: string | null) {
+  return useQuery({
+    queryKey: ["namespace-occupancy", name],
+    queryFn: () => namespaces.getOccupancy(name!),
+    enabled: !!name,
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnWindowFocus: false,
+  });
+}
+
 export function useCreateNamespace() {
   const qc = useQueryClient();
   return useMutation({

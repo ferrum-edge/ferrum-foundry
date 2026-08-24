@@ -43,17 +43,62 @@ export function extractApiErrorDetail(body: string): string {
   return body;
 }
 
+/**
+ * Pull the server's error detail out of ky's pre-parsed `error.data`.
+ *
+ * ky v2 parses the failing response body into `data` and, in doing so,
+ * *consumes the response* — `error.response.clone()` throws "body is already
+ * used" from then on. `data` is a parsed object for JSON content types, a
+ * plain string otherwise, and `undefined` when the body was empty or failed
+ * to parse.
+ */
+export function extractApiErrorData(data: unknown): string {
+  if (typeof data === "string") return extractApiErrorDetail(data);
+  if (data && typeof data === "object") {
+    const record = data as Record<string, unknown>;
+    const detail = record.error ?? record.message ?? record.detail;
+    if (typeof detail === "string") return detail;
+    try {
+      return JSON.stringify(data);
+    } catch {
+      return "";
+    }
+  }
+  return "";
+}
+
+/** The server's error detail for a failed request, or `""` if unavailable. */
+export async function getApiErrorDetail(error: unknown): Promise<string> {
+  if (!(error instanceof Error)) return "";
+
+  if ("data" in error) {
+    const detail = extractApiErrorData(
+      (error as { data?: unknown }).data,
+    );
+    if (detail) return detail;
+  }
+
+  // Errors not produced by ky (hand-built, or from other layers) may still
+  // carry an unconsumed response body.
+  const response = "response" in error
+    ? (error as { response?: Response }).response
+    : undefined;
+  if (!response) return "";
+  try {
+    return extractApiErrorDetail(await response.clone().text());
+  } catch {
+    // Already consumed — nothing further to recover.
+    return "";
+  }
+}
+
 export async function getApiErrorMessage(
   error: unknown,
   fallback: string,
 ): Promise<string> {
   if (!(error instanceof Error)) return fallback;
 
-  const response = "response" in error
-    ? (error as { response?: Response }).response
-    : undefined;
-  const body = response ? await response.clone().text().catch(() => "") : "";
-  const detail = extractApiErrorDetail(body);
+  const detail = await getApiErrorDetail(error);
 
   return detail ? `${error.message}: ${detail}` : error.message;
 }
@@ -80,6 +125,8 @@ export function setOnUnauthorized(handler: (() => void) | undefined): void {
 }
 
 // ── localStorage namespace helper ────────────────────────────────
+
+export const NAMESPACE_HEADER = "X-Ferrum-Namespace";
 
 const NAMESPACE_STORAGE_KEY = "ferrum:namespace";
 const DEFAULT_NAMESPACE = "ferrum";
@@ -111,6 +158,17 @@ const SILENT_PROBE_PATTERNS = [
   /\/api\/proxy\/audit/,
 ];
 
+/**
+ * Per-request opt-out from the global error popup, for calls whose failure is
+ * a meaningful result the caller handles itself rather than a fault to report.
+ *
+ * Pass as `{ context: { [SILENT_ERRORS]: true } }`. The canonical case is the
+ * unconfirmed `DELETE /namespaces/{name}`: its 409 *is* the gateway's "this
+ * namespace is not empty" answer, which the delete flow turns into a cascade
+ * confirmation. Surfacing a raw API Error dialog over that would be wrong.
+ */
+export const SILENT_ERRORS = "silentErrors";
+
 function isExpectedProbeFailure(response: Response): boolean {
   if (response.status !== 404 && response.status !== 503 && response.status !== 501) {
     return false;
@@ -125,8 +183,13 @@ export const api = ky.create({
   hooks: {
     beforeRequest: [
       ({ request }) => {
-        // Attach the current namespace header to every proxy request
-        request.headers.set("X-Ferrum-Namespace", getNamespace());
+        // Attach the active namespace header to every proxy request, unless
+        // the caller already scoped this one to a specific namespace (e.g.
+        // counting a delete target's resources while a different namespace is
+        // selected).
+        if (!request.headers.has(NAMESPACE_HEADER)) {
+          request.headers.set(NAMESPACE_HEADER, getNamespace());
+        }
         // Attach the BFF bearer token if the user is signed in
         if (bearerToken) {
           request.headers.set("Authorization", `Bearer ${bearerToken}`);
@@ -134,11 +197,12 @@ export const api = ky.create({
       },
     ],
     afterResponse: [
-      async ({ response }) => {
+      async ({ options, response }) => {
         if (response.status === 401) {
           unauthorizedHandler?.();
         }
         if (!response.ok) {
+          if (options.context?.[SILENT_ERRORS]) return;
           if (isExpectedProbeFailure(response)) return;
           const body = await response.clone().text().catch(() => "");
           onApiError({

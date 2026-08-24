@@ -255,14 +255,18 @@ function readBody(req) {
   });
 }
 
-function crud(list, url, method, id, body, defaults = {}) {
-  if (method === 'GET' && !id) return [200, paginate(list, url)];
+function crud(list, url, method, id, body, defaults = {}, ns = 'ferrum') {
+  // The real gateway isolates resources per namespace; list responses must
+  // reflect that or namespace occupancy counts are meaningless.
+  if (method === 'GET' && !id) {
+    return [200, paginate(list.filter((x) => (x.namespace ?? 'ferrum') === ns), url)];
+  }
   if (method === 'GET') {
     const item = list.find((x) => x.id === id);
     return item ? [200, item] : [404, { error: 'not found' }];
   }
   if (method === 'POST') {
-    const item = { id: randomUUID(), namespace: 'ferrum', ...defaults, ...body, created_at: now(), updated_at: now() };
+    const item = { id: randomUUID(), namespace: ns, ...defaults, ...body, created_at: now(), updated_at: now() };
     list.push(item);
     return [201, item];
   }
@@ -416,6 +420,10 @@ const server = createServer(async (req, res) => {
   let body = {};
   try { body = raw ? JSON.parse(raw) : {}; } catch { body = { _raw: raw }; }
 
+  const ns = (Array.isArray(req.headers['x-ferrum-namespace'])
+    ? req.headers['x-ferrum-namespace'][0]
+    : req.headers['x-ferrum-namespace']) || 'ferrum';
+
   const send = (status, payload, contentType = 'application/json') => {
     res.writeHead(status, { 'content-type': contentType });
     res.end(payload == null ? '' : contentType === 'application/json' ? JSON.stringify(payload) : payload);
@@ -551,7 +559,7 @@ const server = createServer(async (req, res) => {
       list.push(record);
       return send(201, record);
     }
-    const [status, payload] = crud(list, url, method, id, body);
+    const [status, payload] = crud(list, url, method, id, body, {}, ns);
     return send(status, payload);
   }
 
@@ -666,7 +674,7 @@ const server = createServer(async (req, res) => {
   for (const [pattern, list, defaults] of routes) {
     const match = path.match(pattern);
     if (match) {
-      const [status, payload] = crud(list, url, method, match[1], body, defaults);
+      const [status, payload] = crud(list, url, method, match[1], body, defaults, ns);
       return send(status, payload);
     }
   }

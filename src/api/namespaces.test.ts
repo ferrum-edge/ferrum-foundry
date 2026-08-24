@@ -3,6 +3,8 @@ import {
   buildNamespaceUpdate,
   create,
   get,
+  getOccupancy,
+  isCascadableDeleteError,
   list,
   remove,
   update,
@@ -320,5 +322,159 @@ describe("namespace API requests", () => {
       });
 
     await expect(create({ name: "ferrum" })).rejects.toThrow();
+  });
+});
+
+/* ================================================================== */
+/*  isCascadableDeleteError                                           */
+/* ================================================================== */
+
+describe("isCascadableDeleteError", () => {
+  const occupancy = JSON.stringify({
+    error: 'namespace "qa" still has resources; pass confirm=true to cascade-delete',
+  });
+  const protectedNs = JSON.stringify({
+    error:
+      "cannot delete a namespace this gateway is configured to serve (FERRUM_NAMESPACE / FERRUM_CP_NAMESPACES)",
+  });
+  const lastRow = JSON.stringify({
+    error: "cannot delete the last remaining namespace registry row",
+  });
+
+  it("treats an occupancy 409 as cascadable", () => {
+    expect(isCascadableDeleteError(409, occupancy)).toBe(true);
+  });
+
+  it("does not offer a cascade for a protected namespace", () => {
+    // A cascade cannot fix this — offering it walks the user into a 2nd 409.
+    expect(isCascadableDeleteError(409, protectedNs)).toBe(false);
+  });
+
+  it("does not offer a cascade for the last remaining registry row", () => {
+    expect(isCascadableDeleteError(409, lastRow)).toBe(false);
+  });
+
+  it("matches the protected reason regardless of case", () => {
+    expect(
+      isCascadableDeleteError(409, "blocked by ferrum_cp_namespaces"),
+    ).toBe(false);
+  });
+
+  it("ignores non-409 statuses", () => {
+    expect(isCascadableDeleteError(404, occupancy)).toBe(false);
+    expect(isCascadableDeleteError(403, occupancy)).toBe(false);
+    expect(isCascadableDeleteError(503, occupancy)).toBe(false);
+  });
+});
+
+/* ================================================================== */
+/*  getOccupancy                                                      */
+/* ================================================================== */
+
+describe("getOccupancy", () => {
+  const captured: CapturedRequest[] = [];
+
+  class BasedRequest extends Request {
+    constructor(input: RequestInfo | URL, init?: RequestInit) {
+      if (typeof input === "string" && input.startsWith("/")) {
+        input = new URL(input, "http://localhost").toString();
+      }
+      super(input, init);
+    }
+  }
+
+  const stub = (responder: (url: string) => Response) => {
+    vi.stubGlobal("Request", BasedRequest);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request | string | URL) => {
+        const request =
+          input instanceof Request ? input : new Request(String(input));
+        captured.push({
+          url: request.url,
+          method: request.method,
+          body: request.headers.get("X-Ferrum-Namespace"),
+        });
+        return responder(request.url);
+      }),
+    );
+  };
+
+  const paginated = (total: number) =>
+    new Response(
+      JSON.stringify({ data: [], pagination: { offset: 0, limit: 1, total } }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+
+  beforeEach(() => {
+    captured.length = 0;
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("sums totals and reports only non-empty kinds", async () => {
+    stub((url) => {
+      if (url.includes("/proxies")) return paginated(12);
+      if (url.includes("/consumers")) return paginated(4);
+      return paginated(0);
+    });
+
+    const result = await getOccupancy("qa");
+
+    expect(result.total).toBe(16);
+    expect(result.partial).toBe(false);
+    expect(result.entries).toEqual([
+      { label: "proxies", count: 12 },
+      { label: "consumers", count: 4 },
+    ]);
+  });
+
+  it("pins every count to the target namespace, not the active one", async () => {
+    stub(() => paginated(0));
+
+    await getOccupancy("other-tenant");
+
+    expect(captured).toHaveLength(5);
+    // `body` carries the X-Ferrum-Namespace header for this suite.
+    expect(captured.map((r) => r.body)).toEqual(
+      Array(5).fill("other-tenant"),
+    );
+  });
+
+  it("requests only one row per kind — totals come from pagination", async () => {
+    stub(() => paginated(9999));
+
+    await getOccupancy("qa");
+
+    expect(captured.every((r) => r.url.includes("limit=1"))).toBe(true);
+  });
+
+  it("marks the result partial when a kind cannot be counted", async () => {
+    stub((url) =>
+      url.includes("/api-specs")
+        ? new Response(JSON.stringify({ error: "not found" }), { status: 404 })
+        : paginated(2),
+    );
+
+    const result = await getOccupancy("qa");
+
+    // api-specs legitimately 404s on gateways without the feature; it must
+    // count as uncountable rather than as zero, so the UI can say so.
+    expect(result.partial).toBe(true);
+    expect(result.total).toBe(8);
+  });
+
+  it("does not treat an uncountable kind as empty", async () => {
+    stub(() =>
+      new Response(JSON.stringify({ error: "unavailable" }), { status: 503 }),
+    );
+
+    const result = await getOccupancy("qa");
+
+    expect(result.partial).toBe(true);
+    expect(result.entries).toEqual([]);
+    expect(result.total).toBe(0);
   });
 });

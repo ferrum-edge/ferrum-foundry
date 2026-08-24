@@ -21,13 +21,15 @@ import {
   useCreateNamespace,
   useUpdateNamespace,
   useDeleteNamespace,
+  useNamespaceOccupancy,
 } from "@/hooks/useNamespaces";
 import {
   buildNamespaceUpdate,
+  isCascadableDeleteError,
   validateNamespaceName,
   NAMESPACE_DESCRIPTION_MAX_LENGTH,
 } from "@/api/namespaces";
-import { getApiErrorMessage } from "@/api/client";
+import { getApiErrorDetail, getApiErrorMessage } from "@/api/client";
 
 const DEFAULT_NAMESPACE = "ferrum";
 
@@ -251,9 +253,19 @@ function EditNamespaceDialog({
 }
 
 /* ================================================================== */
-/*  Delete dialog (with cascade confirm)                              */
+/*  Delete dialog                                                     */
 /* ================================================================== */
 
+/**
+ * Two-stage delete, driven by the gateway rather than by a checkbox.
+ *
+ * Stage 1 always attempts the *unconfirmed* DELETE. An empty namespace is
+ * removed in one click. A non-empty one is refused with a 409 — which is the
+ * gateway's own occupancy signal, not something the UI guesses — and only
+ * then does stage 2 appear: what is actually in there, plus a type-the-name
+ * gate before the cascade. Nothing about the cascade is reachable until the
+ * gateway has said it is needed.
+ */
 function DeleteNamespaceDialog({
   target,
   onOpenChange,
@@ -264,62 +276,157 @@ function DeleteNamespaceDialog({
   const { toast } = useToast();
   const { selectedNamespace, setNamespace } = useNamespace();
   const deleteNamespace = useDeleteNamespace();
-  const [cascade, setCascade] = useState(false);
+
+  // Set only once the gateway refuses an unconfirmed delete for occupancy.
+  const [cascadeFor, setCascadeFor] = useState<string | null>(null);
+  const [typed, setTyped] = useState("");
+  const occupancy = useNamespaceOccupancy(cascadeFor);
 
   useEffect(() => {
-    if (target) setCascade(false);
+    if (!target) {
+      setCascadeFor(null);
+      setTyped("");
+    }
   }, [target]);
 
-  async function handleDelete() {
+  function finish(name: string) {
+    // The deleted namespace can no longer be the active scope.
+    if (name === selectedNamespace) setNamespace(DEFAULT_NAMESPACE);
+    toast("success", `Namespace "${name}" deleted`);
+    onOpenChange(false);
+  }
+
+  async function handleDelete(confirm: boolean) {
     if (!target) return;
     try {
-      await deleteNamespace.mutateAsync({ name: target, confirm: cascade });
-      // The deleted namespace can no longer be the active scope.
-      if (target === selectedNamespace) {
-        setNamespace(DEFAULT_NAMESPACE);
-      }
-      toast("success", `Namespace "${target}" deleted`);
-      onOpenChange(false);
+      await deleteNamespace.mutateAsync({ name: target, confirm });
+      finish(target);
     } catch (err) {
+      const status =
+        err instanceof Error && "response" in err
+          ? (err as { response?: Response }).response?.status
+          : undefined;
+      // ky consumes the body to build `error.data`, so read the reason
+      // through that rather than by cloning the response.
+      const reason = await getApiErrorDetail(err);
+
+      // A non-empty namespace is the one refusal a cascade can resolve;
+      // protected and last-row refusals are terminal, so surface those as-is
+      // rather than walking the user into a second 409.
+      if (
+        !confirm &&
+        status !== undefined &&
+        isCascadableDeleteError(status, reason)
+      ) {
+        setCascadeFor(target);
+        return;
+      }
       toast("error", await getApiErrorMessage(err, "Failed to delete namespace"));
     }
   }
 
+  const confirmed = typed.trim() === target;
+
   return (
     <Dialog open={target !== null} onOpenChange={onOpenChange}>
       <DialogContent>
-        <DialogTitle>Delete Namespace</DialogTitle>
-        <DialogDescription className="mt-2">
-          {`Delete namespace "${target ?? ""}"? A namespace that still contains resources is only deleted when cascade is enabled.`}
-        </DialogDescription>
-        <label className="flex items-start gap-2 mt-4 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={cascade}
-            onChange={(e) => setCascade(e.target.checked)}
-            className="mt-0.5 accent-orange"
-          />
-          <span className="text-sm text-text-secondary">
-            Cascade-delete all resources (proxies, consumers, plugin configs,
-            upstreams, API specs, trust bundle) in this namespace
-          </span>
-        </label>
-        <div className="flex justify-end gap-3 mt-6">
-          <Button
-            variant="secondary"
-            onClick={() => onOpenChange(false)}
-            disabled={deleteNamespace.isPending}
-          >
-            Cancel
-          </Button>
-          <Button
-            variant="danger"
-            onClick={handleDelete}
-            loading={deleteNamespace.isPending}
-          >
-            Delete
-          </Button>
-        </div>
+        {!cascadeFor ? (
+          <>
+            <DialogTitle>Delete Namespace</DialogTitle>
+            <DialogDescription className="mt-2">
+              {`Delete namespace "${target ?? ""}"? This action cannot be undone.`}
+            </DialogDescription>
+            <div className="flex justify-end gap-3 mt-6">
+              <Button
+                variant="secondary"
+                onClick={() => onOpenChange(false)}
+                disabled={deleteNamespace.isPending}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                onClick={() => handleDelete(false)}
+                loading={deleteNamespace.isPending}
+              >
+                Delete Namespace
+              </Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <DialogTitle>Namespace is not empty</DialogTitle>
+            <DialogDescription className="mt-2">
+              {`"${cascadeFor}" still contains resources, so it was not deleted. Deleting it now also destroys everything below — permanently, with no backup taken.`}
+            </DialogDescription>
+
+            <div className="mt-4 rounded-lg border border-danger/30 bg-danger/5 px-4 py-3">
+              {occupancy.isLoading ? (
+                <div className="h-5 w-40 bg-bg-card-hover rounded animate-pulse" />
+              ) : occupancy.data && occupancy.data.entries.length > 0 ? (
+                <>
+                  <ul className="space-y-1">
+                    {occupancy.data.entries.map((entry) => (
+                      <li
+                        key={entry.label}
+                        className="flex justify-between text-sm"
+                      >
+                        <span className="text-text-secondary">
+                          {entry.label}
+                        </span>
+                        <span className="font-semibold text-danger tabular-nums">
+                          {entry.count}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-text-muted text-xs mt-2">
+                    Consumer credentials and the gateway trust bundle are
+                    removed with them
+                    {occupancy.data.partial
+                      ? ", and some resource types could not be counted on this gateway"
+                      : ""}
+                    .
+                  </p>
+                </>
+              ) : (
+                <p className="text-sm text-text-secondary">
+                  The gateway reports this namespace as non-empty. Its contents
+                  could not be counted, so this list may be incomplete.
+                </p>
+              )}
+            </div>
+
+            <div className="mt-4">
+              <Input
+                label={`Type "${cascadeFor}" to confirm`}
+                value={typed}
+                onChange={(e) => setTyped(e.target.value)}
+                placeholder={cascadeFor}
+                autoComplete="off"
+                autoFocus
+              />
+            </div>
+
+            <div className="flex justify-end gap-3 mt-6">
+              <Button
+                variant="secondary"
+                onClick={() => onOpenChange(false)}
+                disabled={deleteNamespace.isPending}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                disabled={!confirmed}
+                onClick={() => handleDelete(true)}
+                loading={deleteNamespace.isPending}
+              >
+                Permanently Delete Everything
+              </Button>
+            </div>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );

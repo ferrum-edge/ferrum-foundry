@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – Namespace API functions                          */
 /* ------------------------------------------------------------------ */
 
-import { proxyApi } from "./client";
+import { NAMESPACE_HEADER, SILENT_ERRORS, proxyApi } from "./client";
 import type { PaginatedResponse } from "./types";
 
 // ── Types (mirror the upstream Namespace registry contract) ──────
@@ -84,6 +84,88 @@ export function buildNamespaceUpdate(
   return Object.keys(payload).length > 0 ? payload : null;
 }
 
+// ── Occupancy ────────────────────────────────────────────────────
+
+/**
+ * Resource kinds that keep a namespace "non-empty" for the purposes of
+ * `DELETE /namespaces/{name}` — i.e. the rows a `?confirm=true` cascade
+ * deletes. Ordered for display.
+ */
+const OCCUPANCY_ENDPOINTS = [
+  { key: "proxies", label: "proxies", path: "proxies" },
+  { key: "consumers", label: "consumers", path: "consumers" },
+  { key: "plugin_configs", label: "plugin configs", path: "plugins/config" },
+  { key: "upstreams", label: "upstreams", path: "upstreams" },
+  { key: "api_specs", label: "API specs", path: "api-specs" },
+] as const;
+
+export interface OccupancyEntry {
+  label: string;
+  count: number;
+}
+
+export interface NamespaceOccupancy {
+  entries: OccupancyEntry[];
+  total: number;
+  /**
+   * True when at least one endpoint could not be counted (a mode-dependent
+   * surface such as api-specs returning 404/503). The cascade may then remove
+   * more than `total` reports, so the UI must not present it as exhaustive.
+   */
+  partial: boolean;
+}
+
+/**
+ * Count the resources a cascade delete of `name` would destroy.
+ *
+ * Each list is fetched with `limit=1` — only `pagination.total` is used, so
+ * this stays cheap regardless of namespace size. Requests are pinned to
+ * `name` via an explicit namespace header rather than the active namespace,
+ * since the delete target is usually not the namespace being viewed.
+ */
+export async function getOccupancy(name: string): Promise<NamespaceOccupancy> {
+  const results = await Promise.all(
+    OCCUPANCY_ENDPOINTS.map(async (endpoint): Promise<OccupancyEntry | null> => {
+      try {
+        const response = await proxyApi
+          .get(endpoint.path, {
+            searchParams: { limit: "1" },
+            headers: { [NAMESPACE_HEADER]: name },
+          })
+          .json<PaginatedResponse<unknown>>();
+        return { label: endpoint.label, count: response.pagination?.total ?? 0 };
+      } catch {
+        // Mode-dependent surfaces legitimately 404/503 on gateways without
+        // the feature; treat them as uncountable rather than as zero.
+        return null;
+      }
+    }),
+  );
+
+  const entries = results.filter((r): r is OccupancyEntry => r !== null);
+  return {
+    entries: entries.filter((e) => e.count > 0),
+    total: entries.reduce((sum, e) => sum + e.count, 0),
+    partial: results.some((r) => r === null),
+  };
+}
+
+
+/**
+ * Whether a failed delete is one a `?confirm=true` cascade could resolve.
+ *
+ * The gateway refuses a delete for two unrelated reasons: the namespace is
+ * non-empty (cascade fixes it), or the namespace is protected — one this
+ * gateway is configured to serve, or the last remaining registry row (cascade
+ * cannot fix either, and offering it would just walk the user into a second
+ * 409). The protected reason is documented as a fixed string naming the two
+ * configuration keys, which is what we match on.
+ */
+export function isCascadableDeleteError(status: number, body: string): boolean {
+  if (status !== 409) return false;
+  return !/FERRUM_NAMESPACE|FERRUM_CP_NAMESPACES|last remaining/i.test(body);
+}
+
 // ── API functions ────────────────────────────────────────────────
 
 export async function list(): Promise<string[]> {
@@ -122,5 +204,10 @@ export async function remove(
 ): Promise<void> {
   await proxyApi.delete(`namespaces/${encodeURIComponent(name)}`, {
     searchParams: options.confirm ? { confirm: "true" } : {},
+    // The unconfirmed call is a deliberate probe — a 409 is the gateway
+    // telling us the namespace is non-empty, which the caller turns into a
+    // cascade confirmation. Terminal failures are reported as a toast by the
+    // caller, so the global popup would double up either way.
+    context: { [SILENT_ERRORS]: true },
   });
 }
