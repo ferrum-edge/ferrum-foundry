@@ -5,6 +5,7 @@
 import { useState } from "react";
 import { SettingsForm } from "@/components/forms/SettingsForm";
 import { BackupRestoreCard } from "@/components/forms/BackupRestoreCard";
+import { NamespaceManagerCard } from "@/components/forms/NamespaceManagerCard";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Select } from "@/components/ui/Select";
@@ -93,6 +94,10 @@ export default function SettingsPage() {
             )}
           </div>
         </Card>
+
+        <div className="mt-4">
+          <NamespaceManagerCard />
+        </div>
       </section>
 
       {/* ── Backup & Restore ──────────────────────────────────────── */}

@@ -104,6 +104,21 @@ The app supports dark and light themes via CSS custom properties. Dark is the de
 - `ServiceDiscoveryConfig` uses nested provider-specific objects (`dns_sd`, `kubernetes`, `consul`, `mesh`)
 - Mode-dependent observability endpoints (mesh/*, waypoints, charges, trust, audit, api-specs) legitimately 404/503 on gateways without the feature; the ky client suppresses the global error popup for them (see `SILENT_PROBE_PATTERNS` in `src/api/client.ts`) and pages render empty states
 
+## Namespaces
+
+Namespaces are a full CRUD registry on the gateway, not just a header value.
+`src/api/namespaces.ts` covers `GET/POST /namespaces` and
+`GET/PUT/DELETE /namespaces/{name}`; the Settings page manages them via
+`src/components/forms/NamespaceManagerCard.tsx`.
+
+- `GET /namespaces` returns a paginated envelope of plain **name strings**, not records. It is the union of the durable registry and namespaces derived from resource rows, so a name can appear in the list with no registry row behind it
+- `GET /namespaces/{name}` synthesizes a record for such derived-only names. Its `created_at`/`updated_at` are **observation timestamps stamped per request** — never compare them, cache them as identity, or sort by them
+- Names must match `^[a-zA-Z0-9][a-zA-Z0-9._-]*$` (max 254). `validateNamespaceName()` mirrors this client-side so bad input never reaches the gateway
+- PUT is a partial update, unlike proxy PUT: omit a field to keep it. `name: null` is a `400` (omit instead); `description: null` or `""` clears the description. Build payloads with `buildNamespaceUpdate()` rather than by hand
+- DELETE needs `?confirm=true` to cascade-delete a non-empty namespace; without it a non-empty namespace is a `409`
+- The gateway's own configured namespaces (`FERRUM_NAMESPACE`, `FERRUM_CP_NAMESPACES`) and the last remaining registry row cannot be renamed or deleted — expect `409`
+- After a rename or delete, **remove** the retired `["namespace", name]` query key rather than invalidating it (`reconcileNamespaceCache` in `src/hooks/useNamespaces.ts`). Invalidating refetches a name the gateway no longer resolves and pops a spurious 404 on top of a successful mutation
+
 ## Build & check
 
 ```bash
