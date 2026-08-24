@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { extractApiErrorDetail, getApiErrorMessage } from "./client";
+import {
+  extractApiErrorData,
+  extractApiErrorDetail,
+  getApiErrorDetail,
+  getApiErrorMessage,
+} from "./client";
 
 describe("extractApiErrorDetail", () => {
   it("returns empty string for empty body", () => {
@@ -121,5 +126,96 @@ describe("getApiErrorMessage", () => {
     // The caller should still be able to read the body afterwards.
     expect(response.bodyUsed).toBe(false);
     await expect(response.json()).resolves.toEqual({ message: "boom" });
+  });
+});
+
+/* ================================================================== */
+/*  ky v2 error shape                                                  */
+/* ================================================================== */
+
+/**
+ * ky v2 pre-parses a failing response body into `error.data` and consumes
+ * the response doing it, so `error.response.clone()` throws from then on.
+ * These cover the real error shape — the hand-built errors above carry a
+ * fresh, unconsumed response and so never exercised it.
+ */
+function consumedResponse(body: string, status: number): Response {
+  const response = new Response(body, {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+  // Mirror ky: the body has already been read to populate `data`.
+  void response.text();
+  return response;
+}
+
+describe("extractApiErrorData", () => {
+  it("reads `error` from a parsed JSON object", () => {
+    expect(extractApiErrorData({ error: "namespace not empty" })).toBe(
+      "namespace not empty",
+    );
+  });
+
+  it("falls back through message and detail", () => {
+    expect(extractApiErrorData({ message: "m" })).toBe("m");
+    expect(extractApiErrorData({ detail: "d" })).toBe("d");
+  });
+
+  it("handles a plain-text body", () => {
+    expect(extractApiErrorData("upstream unreachable")).toBe(
+      "upstream unreachable",
+    );
+  });
+
+  it("returns empty string when there is no body", () => {
+    expect(extractApiErrorData(undefined)).toBe("");
+    expect(extractApiErrorData(null)).toBe("");
+  });
+
+  it("serializes an object with no recognized field", () => {
+    expect(extractApiErrorData({ status: "fail" })).toBe('{"status":"fail"}');
+  });
+});
+
+describe("getApiErrorDetail on a ky-shaped error", () => {
+  it("reads the detail from `data` when the response is consumed", async () => {
+    const error = Object.assign(new Error("HTTP 409"), {
+      response: consumedResponse('{"error":"still has resources"}', 409),
+      data: { error: "still has resources" },
+    });
+
+    await expect(getApiErrorDetail(error)).resolves.toBe("still has resources");
+  });
+
+  it("does not throw when the response body is already consumed", async () => {
+    // Regression: cloning a consumed Response throws synchronously, which
+    // escaped the old `.catch()` and killed the caller's error handling.
+    const error = Object.assign(new Error("HTTP 409"), {
+      response: consumedResponse('{"error":"gone"}', 409),
+    });
+
+    await expect(getApiErrorDetail(error)).resolves.toBe("");
+  });
+
+  it("still appends the detail to the message", async () => {
+    const error = Object.assign(new Error("HTTP 409"), {
+      response: consumedResponse('{"error":"still has resources"}', 409),
+      data: { error: "still has resources" },
+    });
+
+    await expect(getApiErrorMessage(error, "fallback")).resolves.toBe(
+      "HTTP 409: still has resources",
+    );
+  });
+
+  it("prefers `data` over an unconsumed response body", async () => {
+    const error = Object.assign(new Error("HTTP 500"), {
+      response: new Response(JSON.stringify({ error: "from body" }), {
+        status: 500,
+      }),
+      data: { error: "from data" },
+    });
+
+    await expect(getApiErrorDetail(error)).resolves.toBe("from data");
   });
 });

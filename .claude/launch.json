@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ferrum-foundry-dev",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "PORT=3001",
+        "FERRUM_ADMIN_URL=http://127.0.0.1:9000",
+        "FERRUM_JWT_SECRET=dev-secret",
+        "FERRUM_BFF_AUTH_TOKEN=dev-bff-token-please-make-this-long-and-random",
+        "npm",
+        "run",
+        "dev"
+      ],
+      "port": 5173
+    }
+  ]
+}

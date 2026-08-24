@@ -204,6 +204,38 @@ const trustBundle = {
   revision: 7, updated_by: 'admin@example.com', created_at: ago(30000), updated_at: ago(500),
 };
 
+/* ---------------- Namespace registry ---------------- */
+
+const PROTECTED_NAMESPACE = 'ferrum';
+const NAMESPACE_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
+
+const namespaceRegistry = new Map([
+  ['ferrum', { name: 'ferrum', description: 'Default namespace', created_at: ago(90000), updated_at: ago(90000) }],
+  ['staging', { name: 'staging', created_at: ago(45000), updated_at: ago(45000) }],
+]);
+
+function namespaceHasResources(name) {
+  return [...proxies, ...consumers, ...pluginConfigs, ...upstreams, ...apiSpecs]
+    .some((r) => r.namespace === name);
+}
+
+function normalizeNamespaceDescription(description) {
+  return typeof description === 'string' ? description.trim() : '';
+}
+
+function validateNamespaceBody(body, nameRequired) {
+  const hasName = body.name !== undefined;
+  if (nameRequired && !hasName) return 'name is required';
+  if (hasName && (typeof body.name !== 'string' || body.name.length > 254 || !NAMESPACE_NAME_PATTERN.test(body.name))) {
+    return 'name must match ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ and be at most 254 characters';
+  }
+  if (body.description !== undefined && body.description !== null) {
+    if (typeof body.description !== 'string') return 'description must be a string or null';
+    if ([...body.description].length > 1024) return 'description must be at most 1024 characters';
+  }
+  return null;
+}
+
 /* ---------------- Helpers ---------------- */
 
 function paginate(items, url) {
@@ -223,14 +255,18 @@ function readBody(req) {
   });
 }
 
-function crud(list, url, method, id, body, defaults = {}) {
-  if (method === 'GET' && !id) return [200, paginate(list, url)];
+function crud(list, url, method, id, body, defaults = {}, ns = 'ferrum') {
+  // The real gateway isolates resources per namespace; list responses must
+  // reflect that or namespace occupancy counts are meaningless.
+  if (method === 'GET' && !id) {
+    return [200, paginate(list.filter((x) => (x.namespace ?? 'ferrum') === ns), url)];
+  }
   if (method === 'GET') {
     const item = list.find((x) => x.id === id);
     return item ? [200, item] : [404, { error: 'not found' }];
   }
   if (method === 'POST') {
-    const item = { id: randomUUID(), namespace: 'ferrum', ...defaults, ...body, created_at: now(), updated_at: now() };
+    const item = { id: randomUUID(), namespace: ns, ...defaults, ...body, created_at: now(), updated_at: now() };
     list.push(item);
     return [201, item];
   }
@@ -384,6 +420,10 @@ const server = createServer(async (req, res) => {
   let body = {};
   try { body = raw ? JSON.parse(raw) : {}; } catch { body = { _raw: raw }; }
 
+  const ns = (Array.isArray(req.headers['x-ferrum-namespace'])
+    ? req.headers['x-ferrum-namespace'][0]
+    : req.headers['x-ferrum-namespace']) || 'ferrum';
+
   const send = (status, payload, contentType = 'application/json') => {
     res.writeHead(status, { 'content-type': contentType });
     res.end(payload == null ? '' : contentType === 'application/json' ? JSON.stringify(payload) : payload);
@@ -519,7 +559,7 @@ const server = createServer(async (req, res) => {
       list.push(record);
       return send(201, record);
     }
-    const [status, payload] = crud(list, url, method, id, body);
+    const [status, payload] = crud(list, url, method, id, body, {}, ns);
     return send(status, payload);
   }
 
@@ -539,7 +579,87 @@ const server = createServer(async (req, res) => {
   }
 
   /* namespaces & plugin registry */
-  if (path === '/namespaces') return send(200, paginate(['ferrum', 'staging'], url));
+  if (path === '/namespaces') {
+    if (method === 'GET') {
+      // Union of the durable registry and namespaces derived from resources.
+      const derived = [...proxies, ...consumers, ...pluginConfigs, ...upstreams, ...apiSpecs]
+        .map((r) => r.namespace)
+        .filter(Boolean);
+      const names = [...new Set([...namespaceRegistry.keys(), ...derived])].sort();
+      return send(200, paginate(names, url));
+    }
+    if (method === 'POST') {
+      const validationError = validateNamespaceBody(body, true);
+      if (validationError) return send(400, { error: validationError });
+      if (namespaceRegistry.has(body.name) || namespaceHasResources(body.name)) {
+        return send(409, { error: `namespace "${body.name}" already exists` });
+      }
+      const record = { name: body.name, created_at: now(), updated_at: now() };
+      const description = normalizeNamespaceDescription(body.description);
+      if (description) record.description = description;
+      namespaceRegistry.set(record.name, record);
+      return send(201, record);
+    }
+    return send(405, { error: 'method not allowed' });
+  }
+  const namespaceMatch = path.match(/^\/namespaces\/([^/]+)$/);
+  if (namespaceMatch) {
+    const name = decodeURIComponent(namespaceMatch[1]);
+    const existing = namespaceRegistry.get(name);
+    if (method === 'GET') {
+      if (existing) return send(200, existing);
+      // Derived-only names get a synthesized record with observation timestamps.
+      if (namespaceHasResources(name)) return send(200, { name, created_at: now(), updated_at: now() });
+      return send(404, { error: 'not found' });
+    }
+    if (method === 'PUT') {
+      if (!existing && !namespaceHasResources(name)) return send(404, { error: 'not found' });
+      const validationError = validateNamespaceBody(body, false);
+      if (validationError) return send(400, { error: validationError });
+      const renaming = body.name !== undefined && body.name !== name;
+      if (renaming && name === PROTECTED_NAMESPACE) {
+        return send(409, { error: 'cannot rename a namespace this gateway is configured to serve (FERRUM_NAMESPACE / FERRUM_CP_NAMESPACES)' });
+      }
+      if (renaming && (namespaceRegistry.has(body.name) || namespaceHasResources(body.name))) {
+        return send(409, { error: `namespace "${body.name}" already exists` });
+      }
+      // A derived-only namespace is materialized by the update.
+      const record = existing ?? { name, created_at: now(), updated_at: now() };
+      if ('description' in body) {
+        const description = normalizeNamespaceDescription(body.description);
+        if (description) record.description = description;
+        else delete record.description;
+      }
+      if (renaming) {
+        namespaceRegistry.delete(name);
+        record.name = body.name;
+        for (const resource of [...proxies, ...consumers, ...pluginConfigs, ...upstreams, ...apiSpecs]) {
+          if (resource.namespace === name) resource.namespace = body.name;
+        }
+      }
+      record.updated_at = now();
+      namespaceRegistry.set(record.name, record);
+      return send(200, record);
+    }
+    if (method === 'DELETE') {
+      if (name === PROTECTED_NAMESPACE) {
+        return send(409, { error: 'cannot delete a namespace this gateway is configured to serve (FERRUM_NAMESPACE / FERRUM_CP_NAMESPACES)' });
+      }
+      if (!existing) return send(404, { error: 'not found' });
+      if (namespaceRegistry.size <= 1) return send(409, { error: 'cannot delete the last remaining namespace registry row' });
+      if (namespaceHasResources(name) && url.searchParams.get('confirm') !== 'true') {
+        return send(409, { error: `namespace "${name}" still has resources; pass confirm=true to cascade-delete` });
+      }
+      for (const list of [proxies, consumers, pluginConfigs, upstreams, apiSpecs]) {
+        for (let i = list.length - 1; i >= 0; i--) {
+          if (list[i].namespace === name) list.splice(i, 1);
+        }
+      }
+      namespaceRegistry.delete(name);
+      return send(204, null);
+    }
+    return send(405, { error: 'method not allowed' });
+  }
   if (path === '/plugins' && method === 'GET') return send(200, AVAILABLE_PLUGINS);
 
   /* core CRUD */
@@ -554,7 +674,7 @@ const server = createServer(async (req, res) => {
   for (const [pattern, list, defaults] of routes) {
     const match = path.match(pattern);
     if (match) {
-      const [status, payload] = crud(list, url, method, match[1], body, defaults);
+      const [status, payload] = crud(list, url, method, match[1], body, defaults, ns);
       return send(status, payload);
     }
   }

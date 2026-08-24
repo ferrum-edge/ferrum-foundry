@@ -102,7 +102,26 @@ The app supports dark and light themes via CSS custom properties. Dark is the de
 - Proxy PUT is full-replace: build update payloads with `proxies.toUpdatePayload(proxy)` and override fields, never send partial bodies
 - Health check enablement is controlled by presence/absence (not an `enabled` boolean field)
 - `ServiceDiscoveryConfig` uses nested provider-specific objects (`dns_sd`, `kubernetes`, `consul`, `mesh`)
+- ky v2 parses a failing response body into `error.data` **and consumes the response doing it** — `error.response.clone()` throws "body is already used" from then on, and that throw is synchronous, so it escapes a trailing `.catch()`. Read error bodies with `getApiErrorDetail()` / `extractApiErrorData()`, never by cloning the response
 - Mode-dependent observability endpoints (mesh/*, waypoints, charges, trust, audit, api-specs) legitimately 404/503 on gateways without the feature; the ky client suppresses the global error popup for them (see `SILENT_PROBE_PATTERNS` in `src/api/client.ts`) and pages render empty states
+
+## Namespaces
+
+Namespaces are a full CRUD registry on the gateway, not just a header value.
+`src/api/namespaces.ts` covers `GET/POST /namespaces` and
+`GET/PUT/DELETE /namespaces/{name}`; the Settings page manages them via
+`src/components/forms/NamespaceManagerCard.tsx`.
+
+- `GET /namespaces` returns a paginated envelope of plain **name strings**, not records. It is the union of the durable registry and namespaces derived from resource rows, so a name can appear in the list with no registry row behind it
+- `GET /namespaces/{name}` synthesizes a record for such derived-only names. Its `created_at`/`updated_at` are **observation timestamps stamped per request** — never compare them, cache them as identity, or sort by them
+- Names must match `^[a-zA-Z0-9][a-zA-Z0-9._-]*$` (max 254). `validateNamespaceName()` mirrors this client-side so bad input never reaches the gateway
+- PUT is a partial update, unlike proxy PUT: omit a field to keep it. `name: null` is a `400` (omit instead); `description: null` or `""` clears the description. Build payloads with `buildNamespaceUpdate()` rather than by hand
+- DELETE needs `?confirm=true` to cascade-delete a non-empty namespace; without it a non-empty namespace is a `409`
+- The gateway's own configured namespaces (`FERRUM_NAMESPACE`, `FERRUM_CP_NAMESPACES`) and the last remaining registry row cannot be renamed or deleted — expect `409`
+- After a rename or delete, **remove** the retired `["namespace", name]` query key rather than invalidating it (`reconcileNamespaceCache` in `src/hooks/useNamespaces.ts`). Invalidating refetches a name the gateway no longer resolves and pops a spurious 404 on top of a successful mutation
+- Delete is a two-stage, gateway-driven flow (`DeleteNamespaceDialog`), not a cascade checkbox. Stage 1 always sends the **unconfirmed** DELETE; an empty namespace goes in one click. The `409` is the gateway's own "not empty" signal and is what promotes stage 2, which shows real occupancy counts and gates the cascade behind typing the namespace name — the only type-to-confirm in the app, because it is the highest-blast-radius action in it
+- Only an occupancy `409` is cascadable. Protected-namespace and last-registry-row `409`s are terminal — `isCascadableDeleteError()` filters them out so the UI never offers a cascade that would just fail again
+- `namespaces.remove()` opts out of the global error popup via `context: { [SILENT_ERRORS]: true }` (`src/api/client.ts`), since its `409` is an expected answer rather than a fault. Use the same opt-out for any call whose failure the caller handles itself
 
 ## Build & check
 
