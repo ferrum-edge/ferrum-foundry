@@ -23,6 +23,20 @@ export default defineConfig({
       // surfaces server-side files that tests reach via `vi.resetModules()`
       // + dynamic import (e.g. server/jwt.ts) so they appear in the report.
       include: ["src/**/*.{ts,tsx}", "server/**/*.ts"],
+      thresholds: {
+        // Ratchet the measured launch baseline. Server-side security code has
+        // a substantially higher floor than the still-growing UI suite.
+        statements: 17,
+        branches: 14,
+        functions: 9,
+        lines: 17,
+        "server/**/*.ts": {
+          statements: 75,
+          branches: 65,
+          functions: 70,
+          lines: 75,
+        },
+      },
       exclude: [
         "**/*.test.{ts,tsx}",
         "**/__tests__/**",

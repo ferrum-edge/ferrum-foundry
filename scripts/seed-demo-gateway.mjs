@@ -1,12 +1,15 @@
-import { randomUUID } from "node:crypto";
-import { writeFileSync } from "node:fs";
-import { SignJWT } from "jose";
+import {
+  closeSync,
+  constants as fsConstants,
+  fchmodSync,
+  openSync,
+  writeFileSync,
+} from "node:fs";
+import { isIP } from "node:net";
+import { pathToFileURL } from "node:url";
+import { signAdminJwt } from "../shared/admin-jwt.js";
 
-const adminUrl = process.env.FERRUM_ADMIN_URL ?? "http://127.0.0.1:9000";
-const jwtSecret = process.env.FERRUM_JWT_SECRET ?? "dev-secret";
-const jwtIssuer = process.env.FERRUM_JWT_ISSUER ?? "ferrum-edge";
-const namespace = process.env.FERRUM_NAMESPACE ?? "ferrum";
-const manifestPath = process.env.FERRUM_DEMO_MANIFEST ?? "/tmp/ferrum-foundry-demo-manifest.json";
+const CONTRACT_REVISION = "50e65b5798555209114cbe08ab2d011b3896ad00";
 
 const backendPorts = [9101, 9102, 9103, 9104, 9105];
 const algorithms = [
@@ -64,27 +67,85 @@ function isoNow() {
   return new Date().toISOString();
 }
 
-async function adminToken() {
-  const now = Math.floor(Date.now() / 1000);
-  return new SignJWT({})
-    .setProtectedHeader({ alg: "HS256" })
-    .setIssuer(jwtIssuer)
-    .setSubject("ferrum-foundry-demo-seeder")
-    .setIssuedAt(now)
-    .setNotBefore(now)
-    .setExpirationTime(now + 3600)
-    .setJti(randomUUID())
-    .sign(new TextEncoder().encode(jwtSecret));
+function parseAudience(value) {
+  const entries = value?.split(",").map((entry) => entry.trim()).filter(Boolean);
+  if (!entries?.length) return undefined;
+  return entries.length === 1 ? entries[0] : [...new Set(entries)];
 }
 
-async function adminRequest(path, options = {}) {
-  const token = await adminToken();
-  const response = await fetch(`${adminUrl}${path}`, {
+function parseHttpOrigin(value, name, fallback) {
+  const raw = value?.trim() || fallback;
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error(`${name} must be a valid absolute URL`);
+  }
+  if (!['http:', 'https:'].includes(parsed.protocol)
+    || parsed.username
+    || parsed.password
+    || parsed.pathname !== "/"
+    || parsed.search
+    || parsed.hash) {
+    throw new Error(`${name} must be an HTTP(S) origin without credentials, path, query, or fragment`);
+  }
+  return parsed.origin;
+}
+
+function parseBackendHost(value) {
+  const host = value?.trim() || "127.0.0.1";
+  const validHostname = host.length <= 253 && host.split(".").every((label) => (
+    /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(label)
+  ));
+  if (!isIP(host) && !validHostname) {
+    throw new Error("FERRUM_DEMO_BACKEND_HOST must be an IP address or DNS hostname without a port");
+  }
+  return host;
+}
+
+export function readSeedConfig(env = process.env) {
+  const jwtSecret = env.FERRUM_JWT_SECRET?.trim();
+  if (!jwtSecret) throw new Error("FERRUM_JWT_SECRET is required; the demo seeder has no fallback signing key");
+
+  return {
+    adminUrl: parseHttpOrigin(env.FERRUM_ADMIN_URL, "FERRUM_ADMIN_URL", "http://127.0.0.1:9000"),
+    proxyBaseUrl: parseHttpOrigin(
+      env.FERRUM_DEMO_PROXY_URL,
+      "FERRUM_DEMO_PROXY_URL",
+      "http://127.0.0.1:8000",
+    ),
+    backendHost: parseBackendHost(env.FERRUM_DEMO_BACKEND_HOST),
+    jwtSecret,
+    jwtIssuer: env.FERRUM_JWT_ISSUER?.trim() || "ferrum-edge",
+    jwtAudience: parseAudience(env.FERRUM_JWT_AUDIENCE),
+    namespace: env.FERRUM_NAMESPACE?.trim() || "ferrum-foundry-demo",
+    manifestPath: env.FERRUM_DEMO_MANIFEST?.trim() || "/tmp/ferrum-foundry-demo-manifest.json",
+    allowDestructive: env.FERRUM_DEMO_ALLOW_DESTRUCTIVE === "true",
+  };
+}
+
+export async function adminToken(config, options = {}) {
+  return signAdminJwt({
+    secret: config.jwtSecret,
+    issuer: config.jwtIssuer,
+    subject: "ferrum-foundry-demo-seeder",
+    role: "admin",
+    audience: config.jwtAudience,
+    namespaces: [config.namespace],
+    ttlSeconds: 900,
     ...options,
+  });
+}
+
+async function adminRequest(config, path, options = {}) {
+  const token = await adminToken(config);
+  const response = await fetch(`${config.adminUrl}${path}`, {
+    ...options,
+    signal: options.signal ?? AbortSignal.timeout(30_000),
     headers: {
       authorization: `Bearer ${token}`,
       "content-type": "application/json",
-      "x-ferrum-namespace": namespace,
+      "x-ferrum-namespace": config.namespace,
       ...(options.headers ?? {}),
     },
   });
@@ -101,7 +162,7 @@ function makeConsumers(now) {
     id: `demo-key-consumer-${index + 1}`,
     username: `demo-key-${index + 1}`,
     custom_id: `key-app-${index + 1}`,
-    credentials: { keyauth: { key: `ff-key-${index + 1}` } },
+    credentials: { keyauth: [{ key: `ff-key-${index + 1}` }] },
     acl_groups: ["demo", index < 3 ? "commerce" : "warehouse", index === 4 ? "finance" : "edge"],
     created_at: now,
     updated_at: now,
@@ -111,7 +172,7 @@ function makeConsumers(now) {
     id: `demo-basic-consumer-${index + 1}`,
     username: `demo-basic-${index + 1}`,
     custom_id: `ops-user-${index + 1}`,
-    credentials: { basicauth: { password: `basic-pass-${index + 1}` } },
+    credentials: { basicauth: [{ password: `basic-pass-${index + 1}` }] },
     acl_groups: ["demo", "ops", index % 2 === 0 ? "support" : "identity"],
     created_at: now,
     updated_at: now,
@@ -121,7 +182,7 @@ function makeConsumers(now) {
     id: `demo-jwt-consumer-${index + 1}`,
     username: `demo-jwt-${index + 1}`,
     custom_id: `mobile-user-${index + 1}`,
-    credentials: { jwt: { secret: `jwt-secret-${index + 1}` } },
+    credentials: { jwt: [{ secret: `jwt-demo-consumer-${index + 1}-secret-at-least-32-characters` }] },
     acl_groups: ["demo", index < 3 ? "mobile" : "finance", "partner"],
     created_at: now,
     updated_at: now,
@@ -130,14 +191,14 @@ function makeConsumers(now) {
   return [...keyConsumers, ...basicConsumers, ...jwtConsumers];
 }
 
-function makeUpstreams(now) {
+function makeUpstreams(now, backendHost) {
   return upstreamNames.map((name, index) => {
     const algorithm = algorithms[index % algorithms.length];
     const upstream = {
       id: `demo-upstream-${name}`,
       name: `${name} service pool`,
       targets: [0, 1, 2].map((offset) => ({
-        host: "127.0.0.1",
+        host: backendHost,
         port: backendPorts[(index + offset) % backendPorts.length],
         weight: offset + 1,
         path: `/${name}`,
@@ -212,7 +273,7 @@ function globalPluginConfigs(now) {
       plugin_name: "correlation_id",
       scope: "global",
       enabled: true,
-      config: { header_name: "X-Correlation-ID", generator: "uuid", echo_downstream: true },
+      config: { header_name: "X-Correlation-ID", echo_downstream: true },
       created_at: now,
       updated_at: now,
     },
@@ -383,8 +444,11 @@ function makeProxyScopedPluginConfigs(now) {
         config: {
           limit_by: ["key", "basic", "jwt", "multi"].includes(plan.auth) ? "consumer" : "ip",
           expose_headers: true,
-          requests_per_second: 400,
-          requests_per_minute: 20000,
+          limits: [{
+            scope: "default",
+            requests_per_second: 400,
+            requests_per_minute: 20000,
+          }],
           sync_mode: "local",
         },
         created_at: now,
@@ -441,7 +505,7 @@ function makeProxyScopedPluginConfigs(now) {
   });
 }
 
-function makeProxies(now) {
+function makeProxies(now, backendHost) {
   return proxyPlans.map((plan) => {
     const proxyId = `demo-proxy-${plan.slug}`;
     const upstreamId = `demo-upstream-${plan.slug}`;
@@ -454,8 +518,8 @@ function makeProxies(now) {
       name: `${plan.slug.replace(/-/g, " ")} edge route`,
       listen_path: `/demo/${plan.slug}`,
       hosts: [],
-      backend_protocol: "http",
-      backend_host: "127.0.0.1",
+      backend_scheme: "http",
+      backend_host: backendHost,
       backend_port: backendPorts[0],
       strip_listen_path: true,
       preserve_host_header: false,
@@ -470,7 +534,7 @@ function makeProxies(now) {
       passthrough: false,
       udp_idle_timeout_seconds: 60,
       allowed_methods: ["GET", "POST", "OPTIONS"],
-      allowed_ws_origins: [],
+      allowed_ws_origins: ["http://localhost:5173", "http://localhost:8000"],
       response_body_mode: plan.slug === "analytics" ? "buffer" : "stream",
       pool_idle_timeout_seconds: 45,
       pool_enable_http_keep_alive: true,
@@ -496,7 +560,7 @@ function makeProxies(now) {
   });
 }
 
-function buildManifest() {
+function buildManifest(proxyBaseUrl) {
   const keyConsumers = Array.from({ length: 6 }, (_, index) => ({
     username: `demo-key-${index + 1}`,
     key: `ff-key-${index + 1}`,
@@ -507,12 +571,12 @@ function buildManifest() {
   }));
   const jwtConsumers = Array.from({ length: 6 }, (_, index) => ({
     username: `demo-jwt-${index + 1}`,
-    secret: `jwt-secret-${index + 1}`,
+    secret: `jwt-demo-consumer-${index + 1}-secret-at-least-32-characters`,
   }));
 
   return {
     generated_at: new Date().toISOString(),
-    proxy_base_url: "http://127.0.0.1:8000",
+    proxy_base_url: proxyBaseUrl,
     key_consumers: keyConsumers,
     basic_consumers: basicConsumers,
     jwt_consumers: jwtConsumers,
@@ -524,38 +588,77 @@ function buildManifest() {
   };
 }
 
-const now = isoNow();
-const consumers = makeConsumers(now);
-const upstreams = makeUpstreams(now);
-const proxyScopedPluginConfigs = makeProxyScopedPluginConfigs(now);
-const proxies = makeProxies(now);
-const pluginConfigs = [
-  ...globalPluginConfigs(now),
-  ...proxyScopedPluginConfigs,
-];
+export function buildRestorePayload(now = isoNow(), { backendHost = "127.0.0.1" } = {}) {
+  const consumers = makeConsumers(now);
+  const upstreams = makeUpstreams(now, backendHost);
+  const proxyScopedPluginConfigs = makeProxyScopedPluginConfigs(now);
+  const proxies = makeProxies(now, backendHost);
+  const pluginConfigs = [
+    ...globalPluginConfigs(now),
+    ...proxyScopedPluginConfigs,
+  ];
 
-const restorePayload = {
-  consumers,
-  upstreams,
-  proxies,
-  plugin_configs: pluginConfigs,
-};
+  return {
+    version: "1",
+    ferrum_version: `contract-${CONTRACT_REVISION}`,
+    exported_at: now,
+    source: "database",
+    counts: {
+      consumers: consumers.length,
+      upstreams: upstreams.length,
+      proxies: proxies.length,
+      plugin_configs: pluginConfigs.length,
+      api_specs: 0,
+      gateway_trust_bundles: 0,
+    },
+    consumers,
+    upstreams,
+    proxies,
+    plugin_configs: pluginConfigs,
+    api_specs: { section_version: "2", items: [] },
+  };
+}
 
-const restored = await adminRequest("/restore?confirm=true", {
-  method: "POST",
-  body: JSON.stringify(restorePayload),
-});
+export async function runSeed(config = readSeedConfig()) {
+  if (!config.allowDestructive) {
+    throw new Error(
+      `Refusing to replace namespace ${JSON.stringify(config.namespace)}. `
+      + "Set FERRUM_DEMO_ALLOW_DESTRUCTIVE=true after confirming this isolated demo namespace may be erased.",
+    );
+  }
 
-const manifest = buildManifest();
-writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+  const restorePayload = buildRestorePayload(undefined, { backendHost: config.backendHost });
+  const restored = await adminRequest(config, "/restore?confirm=true", {
+    method: "POST",
+    body: JSON.stringify(restorePayload),
+  });
 
-console.log(JSON.stringify({
-  restored,
-  manifest_path: manifestPath,
-  counts: {
-    consumers: consumers.length,
-    upstreams: upstreams.length,
-    proxies: proxies.length,
-    plugin_configs: pluginConfigs.length,
-  },
-}, null, 2));
+  const manifest = buildManifest(config.proxyBaseUrl);
+  const manifestFd = openSync(
+    config.manifestPath,
+    fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | fsConstants.O_NOFOLLOW,
+    0o600,
+  );
+  try {
+    fchmodSync(manifestFd, 0o600);
+    writeFileSync(manifestFd, JSON.stringify(manifest, null, 2));
+  } finally {
+    closeSync(manifestFd);
+  }
+
+  return {
+    restored,
+    manifest_path: config.manifestPath,
+    namespace: config.namespace,
+    counts: restorePayload.counts,
+  };
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  runSeed()
+    .then((result) => console.log(JSON.stringify(result, null, 2)))
+    .catch((error) => {
+      console.error(error instanceof Error ? error.message : "Demo seeding failed");
+      process.exitCode = 1;
+    });
+}
