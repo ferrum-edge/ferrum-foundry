@@ -2,6 +2,7 @@ export type ApplyState =
   | "idle"
   | "nothing_applied"
   | "pending"
+  | "succeeded"
   | "applied"
   | "rejected"
   | "unverifiable";
@@ -247,6 +248,26 @@ export async function observeGatewayResponse(
         polling: false,
       },
     };
+  } else if (response.ok) {
+    // A successful mutation can legitimately omit a cursor outside a served
+    // database namespace (for example CP/file/DP modes). Retire any older
+    // monitor without claiming cursor-proven liveness for this response.
+    next = {
+      ...next,
+      apply: {
+        state: "succeeded",
+        cursor: null,
+        requestUrl: request.url,
+        reason: null,
+        retryAfter: null,
+        polling: false,
+      },
+    };
+  } else {
+    // The ordinary error surface owns other failures. The generation was
+    // still superseded above, so never leave the retired cursor marked as if
+    // its poll were continuing.
+    next = { ...next, apply: IDLE_APPLY };
   }
 
   publish(next);
