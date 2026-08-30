@@ -34,7 +34,7 @@ export function GatewayMetadataBanner() {
       {apply.state !== "idle" && (
         <div
           className={`rounded-lg border px-4 py-3 text-sm text-text-secondary ${
-            apply.state === "applied"
+            apply.state === "applied" || apply.state === "succeeded"
               ? "border-success/40 bg-success/10"
               : apply.state === "nothing_applied"
                 ? "border-warning/40 bg-warning/10"
@@ -60,6 +60,12 @@ export function GatewayMetadataBanner() {
             <>
               <strong className="text-success">Configuration is live.</strong>{" "}
               Cursor {apply.cursor} has converged.
+            </>
+          )}
+          {apply.state === "succeeded" && (
+            <>
+              <strong className="text-success">Configuration request succeeded.</strong>{" "}
+              The gateway emitted no live-apply cursor for this mode or namespace.
             </>
           )}
           {apply.state === "rejected" && (

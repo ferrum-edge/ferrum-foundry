@@ -25,6 +25,8 @@ export const EMPTY_TRUST_BUNDLE_FORM: TrustBundleFormState = {
 
 export class TrustBundleFormError extends Error {}
 
+const PRIVATE_JWK_MEMBERS = ["d", "p", "q", "dp", "dq", "qi", "oth", "k"] as const;
+
 function parseJsonArray(value: string, label: string): unknown[] {
   if (!value.trim()) return [];
   if (value.length > 512 * 1024) {
@@ -101,8 +103,11 @@ function validatePublicKey(value: unknown, label: string): string {
   try {
     const jwk = JSON.parse(material) as unknown;
     if (!jwk || typeof jwk !== "object" || Array.isArray(jwk)) throw new Error();
-    if ("d" in (jwk as Record<string, unknown>)) {
-      throw new TrustBundleFormError(`${label} JWK must not contain private parameter d`);
+    const record = jwk as Record<string, unknown>;
+    if (PRIVATE_JWK_MEMBERS.some((member) => member in record)) {
+      throw new TrustBundleFormError(
+        `${label} JWK must not contain private or symmetric key material`,
+      );
     }
     return material;
   } catch (error) {

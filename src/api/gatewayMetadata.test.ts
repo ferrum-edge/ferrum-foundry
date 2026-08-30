@@ -181,4 +181,48 @@ describe("observeGatewayResponse", () => {
 
     expect(getGatewayMetadataSnapshot().apply.state).toBe("nothing_applied");
   });
+
+  it("retires an older poll when a later success has no apply cursor", async () => {
+    let resolveStatus!: (value: {
+      topology_epoch: string;
+      sequence: string;
+      state: "applied";
+      accepted_topology_epoch: string;
+      accepted_sequence: string;
+    }) => void;
+    setApplyStatusFetcher(
+      () =>
+        new Promise((resolve) => {
+          resolveStatus = resolve;
+        }),
+    );
+    await observeGatewayResponse(
+      mutationRequest(),
+      new Response("{}", {
+        status: 202,
+        headers: { "x-ferrum-config-cursor": "7:21" },
+      }),
+    );
+
+    await observeGatewayResponse(
+      mutationRequest(),
+      new Response(null, { status: 204 }),
+    );
+    expect(getGatewayMetadataSnapshot().apply).toMatchObject({
+      state: "succeeded",
+      cursor: null,
+      polling: false,
+    });
+
+    resolveStatus({
+      topology_epoch: "7",
+      sequence: "21",
+      state: "applied",
+      accepted_topology_epoch: "7",
+      accepted_sequence: "21",
+    });
+    await Promise.resolve();
+
+    expect(getGatewayMetadataSnapshot().apply.state).toBe("succeeded");
+  });
 });
