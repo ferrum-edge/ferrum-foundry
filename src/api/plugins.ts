@@ -9,6 +9,7 @@ import type {
   PluginConfig,
   PluginConfigCreate,
 } from "./types";
+import { collectAllPages } from "./pagination";
 
 function withPluginConfigId(
   data: PluginConfigCreate,
@@ -37,8 +38,21 @@ export async function listConfigs(
     .json<PaginatedResponse<PluginConfig>>();
 }
 
+export async function listAllConfigs(): Promise<PluginConfig[]> {
+  return collectAllPages((offset, limit) => listConfigs({ offset, limit }));
+}
+
 export async function getConfig(id: string): Promise<PluginConfig> {
   return proxyApi.get(`plugins/config/${id}`).json<PluginConfig>();
+}
+
+export function toUpdatePayload(plugin: PluginConfig): PluginConfigCreate {
+  const { created_at, updated_at, namespace, api_spec_id, ...rest } = plugin;
+  void created_at;
+  void updated_at;
+  void namespace;
+  void api_spec_id;
+  return rest;
 }
 
 export async function createConfig(

@@ -10,6 +10,11 @@ import {
 import * as plugins from "@/api/plugins";
 import type { PaginationParams, PluginConfigCreate } from "@/api/types";
 import { useNamespace } from "@/stores/namespace";
+import {
+  createPluginWithMembership,
+  deletePluginWithMembership,
+  updatePluginWithMembership,
+} from "@/lib/pluginMembership";
 
 export function useAvailablePlugins() {
   const { selectedNamespace: ns } = useNamespace();
@@ -28,6 +33,14 @@ export function usePluginConfigs(params: PaginationParams = {}) {
       { offset: params.offset, limit: params.limit },
     ],
     queryFn: () => plugins.listConfigs(params),
+  });
+}
+
+export function useAllPluginConfigs() {
+  const { selectedNamespace: ns } = useNamespace();
+  return useQuery({
+    queryKey: ["pluginConfigs", ns, "all"],
+    queryFn: () => plugins.listAllConfigs(),
   });
 }
 
@@ -50,6 +63,23 @@ export function useCreatePluginConfig() {
   });
 }
 
+export function useCreatePluginWithMembership() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      data,
+      proxyIds = [],
+    }: {
+      data: PluginConfigCreate;
+      proxyIds?: string[];
+    }) => createPluginWithMembership(data, proxyIds),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["pluginConfigs"] });
+      qc.invalidateQueries({ queryKey: ["proxies"] });
+    },
+  });
+}
+
 export function useUpdatePluginConfig() {
   const qc = useQueryClient();
   return useMutation({
@@ -62,12 +92,43 @@ export function useUpdatePluginConfig() {
   });
 }
 
+export function useUpdatePluginWithMembership() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      data,
+      proxyIds = [],
+    }: {
+      id: string;
+      data: PluginConfigCreate;
+      proxyIds?: string[];
+    }) => updatePluginWithMembership(id, data, proxyIds),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["pluginConfigs"] });
+      qc.invalidateQueries({ queryKey: ["pluginConfig"] });
+      qc.invalidateQueries({ queryKey: ["proxies"] });
+    },
+  });
+}
+
 export function useDeletePluginConfig() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => plugins.removeConfig(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pluginConfigs"] });
+    },
+  });
+}
+
+export function useDeletePluginWithMembership() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => deletePluginWithMembership(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["pluginConfigs"] });
+      qc.invalidateQueries({ queryKey: ["proxies"] });
     },
   });
 }

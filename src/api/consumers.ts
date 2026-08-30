@@ -4,11 +4,14 @@
 
 import { proxyApi } from "./client";
 import type {
+  BuiltInCredentialType,
   Consumer,
+  ConsumerCredentialInput,
   ConsumerCreate,
   PaginatedResponse,
   PaginationParams,
 } from "./types";
+import { collectAllPages } from "./pagination";
 
 function withConsumerId(data: ConsumerCreate, id?: string): ConsumerCreate {
   const resolvedId = id ?? data.id;
@@ -25,6 +28,10 @@ export async function list(
   return proxyApi
     .get("consumers", { searchParams })
     .json<PaginatedResponse<Consumer>>();
+}
+
+export async function listAll(): Promise<Consumer[]> {
+  return collectAllPages((offset, limit) => list({ offset, limit }));
 }
 
 export async function get(id: string): Promise<Consumer> {
@@ -50,8 +57,8 @@ export async function remove(id: string): Promise<void> {
 
 export async function updateCredentials(
   consumerId: string,
-  credType: string,
-  data: unknown,
+  credType: BuiltInCredentialType,
+  data: ConsumerCredentialInput | ConsumerCredentialInput[],
 ): Promise<Consumer> {
   return proxyApi
     .put(`consumers/${consumerId}/credentials/${credType}`, { json: data })
@@ -60,8 +67,8 @@ export async function updateCredentials(
 
 export async function appendCredential(
   consumerId: string,
-  credType: string,
-  data: unknown,
+  credType: BuiltInCredentialType,
+  data: ConsumerCredentialInput,
 ): Promise<Consumer> {
   return proxyApi
     .post(`consumers/${consumerId}/credentials/${credType}`, { json: data })

@@ -19,6 +19,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
 import { UpstreamForm } from "@/components/forms/UpstreamForm";
 import { TargetForm } from "@/components/forms/TargetForm";
 import { getApiErrorMessage } from "@/api/client";
+import * as upstreamsApi from "@/api/upstreams";
 import type { UpstreamCreate, UpstreamTarget } from "@/api/types";
 
 export default function UpstreamDetailPage() {
@@ -39,8 +40,12 @@ export default function UpstreamDetailPage() {
   /* ---------- Handlers ---------- */
 
   const handleSubmit = async (data: UpstreamCreate) => {
+    if (!upstream) return;
     try {
-      await updateUpstream.mutateAsync({ id: upstreamId, data });
+      await updateUpstream.mutateAsync({
+        id: upstreamId,
+        data: upstreamsApi.mergeFormUpdatePayload(upstream, data),
+      });
       toast("success", "Upstream updated successfully");
     } catch (err: unknown) {
       const message = await getApiErrorMessage(err, "Failed to update upstream");
@@ -67,13 +72,8 @@ export default function UpstreamDetailPage() {
       await updateUpstream.mutateAsync({
         id: upstreamId,
         data: {
+          ...upstreamsApi.toUpdatePayload(upstream),
           targets: newTargets,
-          algorithm: upstream.algorithm,
-          ...(upstream.name && { name: upstream.name }),
-          ...(upstream.hash_on && { hash_on: upstream.hash_on }),
-          ...(upstream.hash_on_cookie_config && { hash_on_cookie_config: upstream.hash_on_cookie_config }),
-          ...(upstream.health_checks && { health_checks: upstream.health_checks }),
-          ...(upstream.service_discovery && { service_discovery: upstream.service_discovery }),
         },
       });
       toast("success", "Targets updated successfully");

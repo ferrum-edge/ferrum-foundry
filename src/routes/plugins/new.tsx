@@ -3,48 +3,31 @@
 /* ------------------------------------------------------------------ */
 
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { useCreatePluginConfig, useAvailablePlugins } from "@/hooks/usePlugins";
-import { useUpdateProxy, useProxies } from "@/hooks/useProxies";
+import {
+  useAvailablePlugins,
+  useCreatePluginWithMembership,
+} from "@/hooks/usePlugins";
 import { useToast } from "@/components/ui/Toast";
 import { Card } from "@/components/ui/Card";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { PluginConfigForm } from "@/components/forms/PluginConfigForm";
 import type { PluginFormDefaults } from "@/components/forms/PluginConfigForm";
 import { getApiErrorMessage } from "@/api/client";
-import * as proxiesApi from "@/api/proxies";
 import type { PluginConfigCreate } from "@/api/types";
 
 export default function PluginNewPage() {
   const navigate = useNavigate();
   const search = useSearch({ strict: false }) as Record<string, string | undefined>;
-  const createPlugin = useCreatePluginConfig();
-  const updateProxy = useUpdateProxy();
-  const { data: proxiesData } = useProxies({ limit: 1000 });
+  const createPlugin = useCreatePluginWithMembership();
   const { toast } = useToast();
   const { data: availablePlugins, isLoading: pluginsLoading } = useAvailablePlugins();
 
   const handleSubmit = async (data: PluginConfigCreate, proxyGroupIds?: string[]) => {
     try {
-      const created = await createPlugin.mutateAsync(data);
-
-      // For proxy_group, associate selected proxies with this plugin
-      if (proxyGroupIds && proxyGroupIds.length > 0 && proxiesData?.data) {
-        const associationPromises = proxyGroupIds.map((proxyId) => {
-          const proxy = proxiesData.data.find((p) => p.id === proxyId);
-          if (!proxy) return Promise.resolve();
-          const existingPlugins = proxy.plugins ?? [];
-          // Skip if already associated
-          if (existingPlugins.some((a) => a.plugin_config_id === created.id)) return Promise.resolve();
-          return updateProxy.mutateAsync({
-            id: proxyId,
-            data: {
-              ...proxiesApi.toUpdatePayload(proxy),
-              plugins: [...existingPlugins, { plugin_config_id: created.id }],
-            },
-          });
-        });
-        await Promise.all(associationPromises);
-      }
+      const created = await createPlugin.mutateAsync({
+        data,
+        proxyIds: proxyGroupIds ?? [],
+      });
 
       toast("success", "Plugin configuration created successfully");
       navigate({

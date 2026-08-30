@@ -27,6 +27,7 @@ export function TargetForm({ initialData, onSubmit, onCancel }: TargetFormProps)
   const [port, setPort] = useState(initialData?.port ?? 80);
   const [weight, setWeight] = useState(initialData?.weight ?? 1);
   const [path, setPath] = useState(initialData?.path ?? "");
+  const [locality, setLocality] = useState(initialData?.locality ?? "");
   const [tags, setTags] = useState<Record<string, string>>(initialData?.tags ?? {});
 
   /* -- Tag input state -- */
@@ -47,11 +48,13 @@ export function TargetForm({ initialData, onSubmit, onCancel }: TargetFormProps)
     if (!validate()) return;
 
     const target: UpstreamTarget = {
+      ...(initialData ?? {}),
       host: host.trim(),
       port,
       weight,
-      ...(path.trim() && { path: path.trim() }),
-      ...(Object.keys(tags).length > 0 && { tags }),
+      path: path.trim() || null,
+      locality: locality.trim() || null,
+      tags,
     };
 
     onSubmit(target);
@@ -146,6 +149,14 @@ export function TargetForm({ initialData, onSubmit, onCancel }: TargetFormProps)
           placeholder="/optional"
         />
       </div>
+
+      <Input
+        label="Locality"
+        value={locality}
+        onChange={(e) => setLocality(e.target.value)}
+        placeholder="region/zone/subzone"
+        helpText="Optional topology locality used by locality-aware balancing."
+      />
 
       {/* Tags */}
       <div className="flex flex-col gap-1.5">

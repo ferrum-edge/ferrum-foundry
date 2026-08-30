@@ -14,6 +14,8 @@ import {
   useAppendCredential,
   useDeleteCredentialByIndex,
 } from "@/hooks/useConsumers";
+import { buildCredentialInput, CredentialInputError } from "@/lib/credentials";
+import type { BuiltInCredentialType } from "@/api/types";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -21,7 +23,7 @@ import {
 
 export interface CredentialFormProps {
   consumerId: string;
-  credentialType: string;
+  credentialType: BuiltInCredentialType;
   existingCredentials?: unknown;
 }
 
@@ -48,21 +50,15 @@ const CREDENTIAL_CONFIGS: Record<string, CredentialFieldConfig> = {
       {
         name: "key",
         label: "API Key",
-        placeholder: "Leave blank to auto-generate",
-        required: false,
-        helpText: "A unique API key. If left empty, one will be auto-generated.",
+        placeholder: "Enter a unique API key",
+        required: true,
+        helpText: "Required. This gateway endpoint does not auto-generate keys.",
       },
     ],
   },
   basicauth: {
     label: "Basic Authentication",
     fields: [
-      {
-        name: "username",
-        label: "Username",
-        placeholder: "basic-auth-username",
-        required: true,
-      },
       {
         name: "password",
         label: "Password",
@@ -199,29 +195,23 @@ export function CredentialForm({
     );
   }
 
-  /* ---------- Validation ---------- */
-
-  const validate = (): boolean => {
-    const errs: Record<string, string> = {};
-    for (const field of config.fields) {
-      if (field.required && !formValues[field.name]?.trim()) {
-        errs[field.name] = `${field.label} is required`;
-      }
-    }
-    setErrors(errs);
-    return Object.keys(errs).length === 0;
-  };
-
   /* ---------- Handlers ---------- */
 
   const handleAdd = async (e: FormEvent) => {
     e.preventDefault();
-    if (!validate()) return;
-
-    const data: Record<string, string> = {};
-    for (const field of config.fields) {
-      const val = formValues[field.name]?.trim();
-      if (val) data[field.name] = val;
+    let data;
+    try {
+      data = buildCredentialInput(credentialType, formValues);
+      setErrors({});
+    } catch (error) {
+      if (error instanceof CredentialInputError) {
+        const configuredField = config.fields.find((field) =>
+          error.field.toLowerCase().includes(field.name.toLowerCase()),
+        )?.name ?? config.fields[0]?.name ?? error.field;
+        setErrors({ [configuredField]: error.message });
+        return;
+      }
+      throw error;
     }
 
     try {
@@ -402,7 +392,7 @@ export function CredentialForm({
 /*  Exports for use in the detail page                                 */
 /* ------------------------------------------------------------------ */
 
-export const CREDENTIAL_TYPES = Object.keys(CREDENTIAL_CONFIGS);
+export const CREDENTIAL_TYPES = Object.keys(CREDENTIAL_CONFIGS) as BuiltInCredentialType[];
 export const CREDENTIAL_LABELS = Object.fromEntries(
   Object.entries(CREDENTIAL_CONFIGS).map(([k, v]) => [k, v.label]),
 );
