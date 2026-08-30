@@ -1,183 +1,189 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import Fastify from 'fastify';
-import type { FastifyInstance } from 'fastify';
+import cookie from '@fastify/cookie';
+import Fastify, { type FastifyInstance } from 'fastify';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-// Env must be set before importing auth.ts (which loads config at first call).
-const BFF_TOKEN = 'unit-test-bff-token-1234567890ABC';
-const ADMIN_URL = 'http://127.0.0.1:9999';
-const JWT_SECRET = 'unit-test-secret-do-not-leak';
+const BFF_TOKEN = 'development-bff-token-is-long-enough-123';
+const ENV = {
+  FERRUM_ADMIN_URL: 'http://127.0.0.1:9999',
+  FERRUM_JWT_SECRET: 'test-signing-secret-is-long-enough-123',
+  FERRUM_BFF_AUTH_TOKEN: BFF_TOKEN,
+  FERRUM_AUTH_MODE: 'static',
+  FERRUM_SECURE_COOKIES: 'false',
+};
+const snapshot: Record<string, string | undefined> = {};
 
-const ENV_KEYS = [
-  'FERRUM_ADMIN_URL',
-  'FERRUM_JWT_SECRET',
-  'FERRUM_BFF_AUTH_TOKEN',
-] as const;
-
-const envSnapshot: Record<string, string | undefined> = {};
-
+let authPlugin: typeof import('./auth.js').authPlugin;
 let requireAdminAuth: typeof import('./auth.js').requireAdminAuth;
 
 beforeAll(async () => {
-  for (const key of ENV_KEYS) {
-    envSnapshot[key] = process.env[key];
+  for (const [key, value] of Object.entries(ENV)) {
+    snapshot[key] = process.env[key];
+    process.env[key] = value;
   }
-  process.env.FERRUM_ADMIN_URL = ADMIN_URL;
-  process.env.FERRUM_JWT_SECRET = JWT_SECRET;
-  process.env.FERRUM_BFF_AUTH_TOKEN = BFF_TOKEN;
-
-  const mod = await import('./auth.js');
-  requireAdminAuth = mod.requireAdminAuth;
+  vi.resetModules();
+  const auth = await import('./auth.js');
+  authPlugin = auth.authPlugin;
+  requireAdminAuth = auth.requireAdminAuth;
 });
 
 afterAll(() => {
-  for (const key of ENV_KEYS) {
-    const previous = envSnapshot[key];
-    if (previous === undefined) {
-      delete process.env[key];
-    } else {
-      process.env[key] = previous;
-    }
+  for (const key of Object.keys(ENV)) {
+    const value = snapshot[key];
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
   }
 });
 
 async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify();
-  app.get('/protected', { preHandler: requireAdminAuth }, async () => ({
-    ok: true,
+  await app.register(cookie);
+  await app.register(authPlugin);
+  app.get('/protected', { onRequest: requireAdminAuth }, async (request) => ({
+    principal: request.authPrincipal,
   }));
+  app.post('/protected', { onRequest: requireAdminAuth }, async () => ({ ok: true }));
   return app;
 }
 
-describe('requireAdminAuth', () => {
-  it('returns 401 when Authorization header is missing', async () => {
-    const app = await buildApp();
-    try {
-      const res = await app.inject({ method: 'GET', url: '/protected' });
-      expect(res.statusCode).toBe(401);
-      expect(res.json()).toEqual({ error: 'Unauthorized' });
-    } finally {
-      await app.close();
-    }
+async function login(app: FastifyInstance) {
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/auth/login',
+    payload: { token: BFF_TOKEN },
   });
+  const body = response.json() as { csrfToken: string };
+  const cookieHeader = response.cookies.map((entry) => `${entry.name}=${entry.value}`).join('; ');
+  return { response, body, cookieHeader };
+}
 
-  it('returns 401 when the header does not use the Bearer scheme', async () => {
+describe('static development sessions', () => {
+  it('does not accept the deployment token as a reusable bearer credential', async () => {
     const app = await buildApp();
     try {
-      const res = await app.inject({
-        method: 'GET',
-        url: '/protected',
-        headers: { authorization: 'Basic dXNlcjpwYXNz' },
-      });
-      expect(res.statusCode).toBe(401);
-      expect(res.json()).toEqual({ error: 'Unauthorized' });
-    } finally {
-      await app.close();
-    }
-  });
-
-  it('returns 401 when Bearer is present but the token is empty', async () => {
-    const app = await buildApp();
-    try {
-      const res = await app.inject({
-        method: 'GET',
-        url: '/protected',
-        headers: { authorization: 'Bearer ' },
-      });
-      expect(res.statusCode).toBe(401);
-      expect(res.json()).toEqual({ error: 'Unauthorized' });
-    } finally {
-      await app.close();
-    }
-  });
-
-  it('returns 401 when the token is wrong', async () => {
-    const app = await buildApp();
-    try {
-      const res = await app.inject({
-        method: 'GET',
-        url: '/protected',
-        headers: { authorization: 'Bearer this-is-not-the-token-xxxxxxxxx' },
-      });
-      expect(res.statusCode).toBe(401);
-      expect(res.json()).toEqual({ error: 'Unauthorized' });
-    } finally {
-      await app.close();
-    }
-  });
-
-  it('reaches the protected handler when the correct token is supplied', async () => {
-    const app = await buildApp();
-    try {
-      const res = await app.inject({
+      const response = await app.inject({
         method: 'GET',
         url: '/protected',
         headers: { authorization: `Bearer ${BFF_TOKEN}` },
       });
-      expect(res.statusCode).toBe(200);
-      expect(res.json()).toEqual({ ok: true });
+      expect(response.statusCode).toBe(401);
+      expect(response.headers['x-ferrum-auth-layer']).toBe('bff');
     } finally {
       await app.close();
     }
   });
 
-  it('accepts lowercase "bearer" prefix (case-insensitive)', async () => {
+  it('rejects malformed JSON before parsing when an early auth hook protects the route', async () => {
     const app = await buildApp();
     try {
-      const res = await app.inject({
-        method: 'GET',
+      const response = await app.inject({
+        method: 'POST',
         url: '/protected',
-        headers: { authorization: `bearer ${BFF_TOKEN}` },
+        headers: { 'content-type': 'application/json' },
+        payload: '{ malformed',
       });
-      expect(res.statusCode).toBe(200);
-      expect(res.json()).toEqual({ ok: true });
+      expect(response.statusCode).toBe(401);
+      expect(response.json()).toEqual({ error: 'Unauthorized' });
     } finally {
       await app.close();
     }
   });
 
-  it('accepts uppercase "BEARER" prefix (case-insensitive)', async () => {
+  it('exchanges the token once for an HttpOnly SameSite session', async () => {
     const app = await buildApp();
     try {
-      const res = await app.inject({
-        method: 'GET',
-        url: '/protected',
-        headers: { authorization: `BEARER ${BFF_TOKEN}` },
-      });
-      expect(res.statusCode).toBe(200);
-      expect(res.json()).toEqual({ ok: true });
+      const { response } = await login(app);
+      expect(response.statusCode).toBe(200);
+      const setCookies = Array.isArray(response.headers['set-cookie'])
+        ? response.headers['set-cookie'].join('; ')
+        : response.headers['set-cookie'];
+      expect(setCookies).toContain('ferrum-foundry-session=');
+      expect(setCookies).toContain('HttpOnly');
+      expect(setCookies).toContain('SameSite=Strict');
     } finally {
       await app.close();
     }
   });
 
-  it('returns 401 (without throwing) when the provided token is shorter than the configured token', async () => {
+  it('attaches the static role and exact namespace grants to the session principal', async () => {
     const app = await buildApp();
     try {
-      // safeEqual must run a fixed-length compare to avoid leaking length via
-      // timing — but functionally, mismatched lengths must just yield 401.
-      const res = await app.inject({
+      const { cookieHeader } = await login(app);
+      const response = await app.inject({
         method: 'GET',
         url: '/protected',
-        headers: { authorization: 'Bearer short' },
+        headers: { cookie: cookieHeader },
       });
-      expect(res.statusCode).toBe(401);
-      expect(res.json()).toEqual({ error: 'Unauthorized' });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().principal).toMatchObject({
+        subject: 'ferrum-foundry-static',
+        role: 'admin',
+        authMode: 'static',
+      });
     } finally {
       await app.close();
     }
   });
 
-  it('returns 401 when the provided token is longer than the configured token', async () => {
+  it('requires the session-bound CSRF token for mutations', async () => {
     const app = await buildApp();
     try {
-      const tooLong = `${BFF_TOKEN}-extra-suffix`;
-      const res = await app.inject({
-        method: 'GET',
+      const { body, cookieHeader } = await login(app);
+      const missing = await app.inject({ method: 'POST', url: '/protected', headers: { cookie: cookieHeader } });
+      expect(missing.statusCode).toBe(403);
+
+      const accepted = await app.inject({
+        method: 'POST',
         url: '/protected',
-        headers: { authorization: `Bearer ${tooLong}` },
+        headers: { cookie: cookieHeader, 'x-csrf-token': body.csrfToken },
       });
-      expect(res.statusCode).toBe(401);
-      expect(res.json()).toEqual({ error: 'Unauthorized' });
+      expect(accepted.statusCode).toBe(200);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('revokes the server-side session on logout', async () => {
+    const app = await buildApp();
+    try {
+      const { body, cookieHeader } = await login(app);
+      const logout = await app.inject({
+        method: 'POST',
+        url: '/api/auth/logout',
+        headers: { cookie: cookieHeader, 'x-csrf-token': body.csrfToken },
+      });
+      expect(logout.statusCode).toBe(200);
+      const after = await app.inject({ method: 'GET', url: '/protected', headers: { cookie: cookieHeader } });
+      expect(after.statusCode).toBe(401);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('expires a server-side session without a process restart', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    const app = await buildApp();
+    try {
+      const { cookieHeader } = await login(app);
+      vi.setSystemTime(new Date('2026-01-01T02:00:00Z'));
+      const response = await app.inject({ method: 'GET', url: '/protected', headers: { cookie: cookieHeader } });
+      expect(response.statusCode).toBe(401);
+    } finally {
+      await app.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it('rejects an incorrect login token without disclosing why', async () => {
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/auth/login',
+        payload: { token: 'wrong-token-that-is-also-long-enough' },
+      });
+      expect(response.statusCode).toBe(401);
+      expect(response.json()).toEqual({ error: 'Unauthorized' });
     } finally {
       await app.close();
     }

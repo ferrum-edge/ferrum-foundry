@@ -22,13 +22,13 @@ Always reference the upstream spec when validating types or form fields. The spe
 ```bash
 # Required env vars for the BFF server
 export FERRUM_ADMIN_URL=http://127.0.0.1:9000
-export FERRUM_JWT_SECRET=dev-secret
-export FERRUM_BFF_AUTH_TOKEN=dev-bff-token-please-make-this-long-and-random
+export FERRUM_JWT_SECRET=dev-secret-at-least-32-characters-long
+export FERRUM_BFF_AUTH_TOKEN=dev-bff-token-at-least-32-characters-long
 
 # Start frontend + BFF
 npm run dev
 
-# In the browser, paste FERRUM_BFF_AUTH_TOKEN into the login screen on first load.
+# In development, paste FERRUM_BFF_AUTH_TOKEN once to exchange it for an HttpOnly session.
 
 # Start demo backends (ports 9101-9105)
 node scripts/demo-backend.mjs
@@ -51,22 +51,21 @@ docker run --rm -d --name ferrum-edge \
   -e FERRUM_MODE=database \
   -e FERRUM_DB_TYPE=sqlite \
   -e FERRUM_DB_URL="sqlite:///tmp/ferrum.db?mode=rwc" \
-  -e FERRUM_ADMIN_JWT_SECRET=dev-secret \
+  -e FERRUM_ADMIN_JWT_SECRET=dev-secret-at-least-32-characters-long \
   -p 9000:9000 -p 8000:8000 \
   ferrumedge/ferrum-edge:latest run -m database -v
 ```
 
 ## Authentication
 
-The BFF requires `FERRUM_BFF_AUTH_TOKEN` and gates all privileged endpoints
-(`/api/proxy/*`, `/api/settings`, `/api/settings/status`) with a bearer-token
-preHandler (`server/auth.ts`). The frontend `AuthProvider` (`src/stores/auth.tsx`)
-holds the token in `localStorage` under `ferrum:bff-auth-token`; the ky client
-attaches it as `Authorization: Bearer <token>` on every request and clears it
-on a 401. The `LoginGate` (`src/components/auth/LoginGate.tsx`) wraps the
-router and prompts for the token whenever none is stored. `GET /api/settings`
-returns the JWT secret as a sentinel (`'********'`); the server ignores PUTs
-that echo that sentinel back.
+Production uses `FERRUM_AUTH_MODE=trusted-proxy`: an OIDC/OAuth2-capable proxy
+asserts a stable actor, Ferrum role, and exact namespace grants behind a shared
+proof header. Static-token mode is development-only; the login route exchanges
+`FERRUM_BFF_AUTH_TOKEN` for a bounded server-side session in an HttpOnly,
+SameSite cookie plus CSRF protection. No reusable administrator credential is
+stored in browser storage. Auth executes in `onRequest`, before content parsing.
+The authenticated actor/role/namespaces become downstream JWT `sub`, `role`,
+and `ns` claims. See `docs/authentication.md`.
 
 ## Theming
 

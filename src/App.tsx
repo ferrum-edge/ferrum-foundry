@@ -21,8 +21,8 @@ const queryClient = new QueryClient({
 export function App() {
   return (
     <ThemeProvider>
-      <AuthProvider>
-        <QueryClientProvider client={queryClient}>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
           <ToastProvider>
             <TooltipProvider>
               <NamespaceProvider>
@@ -34,8 +34,8 @@ export function App() {
               </NamespaceProvider>
             </TooltipProvider>
           </ToastProvider>
-        </QueryClientProvider>
-      </AuthProvider>
+        </AuthProvider>
+      </QueryClientProvider>
     </ThemeProvider>
   );
 }

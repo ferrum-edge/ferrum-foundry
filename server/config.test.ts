@@ -1,12 +1,26 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const REQUIRED_ENV_KEYS = [
+const ENV_KEYS = [
+  'NODE_ENV',
   'FERRUM_ADMIN_URL',
+  'FERRUM_ADMIN_ALLOWED_ORIGINS',
+  'FERRUM_ADMIN_ALLOWED_CIDRS',
+  'FERRUM_ALLOW_RUNTIME_SETTINGS',
   'FERRUM_JWT_SECRET',
-  'FERRUM_BFF_AUTH_TOKEN',
   'FERRUM_JWT_ISSUER',
   'FERRUM_JWT_TTL',
+  'FERRUM_JWT_MAX_TTL',
+  'FERRUM_JWT_ROLE',
+  'FERRUM_JWT_AUDIENCE',
+  'FERRUM_JWT_NAMESPACES',
+  'FERRUM_AUTH_MODE',
+  'FERRUM_AUTH_LOGIN_URL',
+  'FERRUM_AUTH_LOGOUT_URL',
+  'FERRUM_ALLOW_INSECURE_STATIC_AUTH',
+  'FERRUM_BFF_AUTH_TOKEN',
+  'FERRUM_TRUSTED_PROXY_SECRET',
   'FERRUM_TLS_CA_PATH',
+  'FERRUM_TLS_CA_ROOT',
   'FERRUM_TLS_VERIFY',
   'FERRUM_CONNECT_TIMEOUT',
   'FERRUM_READ_TIMEOUT',
@@ -14,218 +28,215 @@ const REQUIRED_ENV_KEYS = [
   'PORT',
 ] as const;
 
-function clearFerrumEnv(): void {
-  for (const key of REQUIRED_ENV_KEYS) {
-    delete process.env[key];
-  }
+const snapshot: Record<string, string | undefined> = {};
+
+function clearTestEnv(): void {
+  for (const key of ENV_KEYS) delete process.env[key];
 }
 
 function setValidEnv(overrides: Record<string, string | undefined> = {}): void {
   process.env.FERRUM_ADMIN_URL = 'http://127.0.0.1:9000';
-  process.env.FERRUM_JWT_SECRET = 'unit-test-secret';
-  process.env.FERRUM_BFF_AUTH_TOKEN = 'unit-test-bff-token-1234567890';
+  process.env.FERRUM_JWT_SECRET = 'j'.repeat(40);
+  process.env.FERRUM_BFF_AUTH_TOKEN = 'b'.repeat(40);
   for (const [key, value] of Object.entries(overrides)) {
-    if (value === undefined) {
-      delete process.env[key];
-    } else {
-      process.env[key] = value;
-    }
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
   }
 }
 
-async function loadConfigModule(): Promise<typeof import('./config.js')> {
+async function loadModule(): Promise<typeof import('./config.js')> {
   vi.resetModules();
-  return await import('./config.js');
+  return import('./config.js');
 }
 
 describe('config', () => {
-  // Snapshot every Ferrum-related env var so tests can mutate process.env
-  // freely without leaking into the rest of the suite.
-  const snapshot: Record<string, string | undefined> = {};
-
   beforeEach(() => {
-    for (const key of REQUIRED_ENV_KEYS) {
+    for (const key of ENV_KEYS) {
       snapshot[key] = process.env[key];
+      delete process.env[key];
     }
-    clearFerrumEnv();
   });
 
   afterEach(() => {
-    for (const key of REQUIRED_ENV_KEYS) {
-      const previous = snapshot[key];
-      if (previous === undefined) {
-        delete process.env[key];
-      } else {
-        process.env[key] = previous;
-      }
+    for (const key of ENV_KEYS) {
+      const value = snapshot[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
     }
   });
 
-  describe('loadConfig - required env vars', () => {
-    it('throws when FERRUM_ADMIN_URL is missing', async () => {
-      setValidEnv({ FERRUM_ADMIN_URL: undefined });
-      const { loadConfig } = await loadConfigModule();
+  it('requires the gateway URL, signing secret, and static development token', async () => {
+    setValidEnv({ FERRUM_ADMIN_URL: undefined });
+    const missingUrl = await loadModule();
+    expect(() => missingUrl.loadConfig()).toThrow(/FERRUM_ADMIN_URL/);
+
+    setValidEnv({ FERRUM_JWT_SECRET: undefined });
+    const missingSecret = await loadModule();
+    expect(() => missingSecret.loadConfig()).toThrow(/FERRUM_JWT_SECRET/);
+
+    setValidEnv({ FERRUM_BFF_AUTH_TOKEN: undefined });
+    const missingToken = await loadModule();
+    expect(() => missingToken.loadConfig()).toThrow(/FERRUM_BFF_AUTH_TOKEN/);
+  });
+
+  it('rejects gateway signing and static secrets shorter than 32 characters', async () => {
+    setValidEnv({ FERRUM_JWT_SECRET: 'short' });
+    const weakJwt = await loadModule();
+    expect(() => weakJwt.loadConfig()).toThrow(/32/);
+
+    setValidEnv({ FERRUM_BFF_AUTH_TOKEN: 'short' });
+    const weakBff = await loadModule();
+    expect(() => weakBff.loadConfig()).toThrow(/32/);
+  });
+
+  it('applies bounded launch-safe defaults', async () => {
+    setValidEnv();
+    const { loadConfig } = await loadModule();
+    expect(loadConfig()).toMatchObject({
+      adminUrl: 'http://127.0.0.1:9000',
+      jwtIssuer: 'ferrum-edge',
+      jwtTtl: 900,
+      jwtMaxTtl: 3600,
+      jwtRole: 'admin',
+      jwtAudience: undefined,
+      jwtNamespaces: undefined,
+      tlsVerify: true,
+      connectTimeout: 5000,
+      readTimeout: 60000,
+      writeTimeout: 60000,
+      port: 3001,
+      authMode: 'static',
+      allowRuntimeSettings: false,
+    });
+  });
+
+  it('parses role, audience, and exact namespace claims', async () => {
+    setValidEnv({
+      FERRUM_JWT_ROLE: 'operator',
+      FERRUM_JWT_AUDIENCE: 'admin-a, admin-b',
+      FERRUM_JWT_NAMESPACES: 'ferrum, tenant-a',
+    });
+    const { loadConfig } = await loadModule();
+    expect(loadConfig()).toMatchObject({
+      jwtRole: 'operator',
+      jwtAudience: ['admin-a', 'admin-b'],
+      jwtNamespaces: ['ferrum', 'tenant-a'],
+    });
+  });
+
+  it('rejects invalid URL forms and schemes', async () => {
+    for (const url of ['file:///etc/passwd', 'http://user:pass@example.test', 'http://example.test/admin']) {
+      clearTestEnv();
+      setValidEnv({ FERRUM_ADMIN_URL: url });
+      const { loadConfig } = await loadModule();
       expect(() => loadConfig()).toThrow(/FERRUM_ADMIN_URL/);
-    });
-
-    it('throws when FERRUM_JWT_SECRET is missing', async () => {
-      setValidEnv({ FERRUM_JWT_SECRET: undefined });
-      const { loadConfig } = await loadConfigModule();
-      expect(() => loadConfig()).toThrow(/FERRUM_JWT_SECRET/);
-    });
-
-    it('throws when FERRUM_BFF_AUTH_TOKEN is missing', async () => {
-      setValidEnv({ FERRUM_BFF_AUTH_TOKEN: undefined });
-      const { loadConfig } = await loadConfigModule();
-      expect(() => loadConfig()).toThrow(/FERRUM_BFF_AUTH_TOKEN/);
-    });
+    }
   });
 
-  describe('loadConfig - defaults', () => {
-    it('applies sensible defaults when only required vars are set', async () => {
-      setValidEnv();
-      const { loadConfig } = await loadConfigModule();
-      const cfg = loadConfig();
+  it('rejects unsafe authentication redirects and malformed CIDR policy', async () => {
+    setValidEnv({ FERRUM_AUTH_LOGIN_URL: 'javascript:alert(1)' });
+    const redirect = await loadModule();
+    expect(() => redirect.loadConfig()).toThrow(/FERRUM_AUTH_LOGIN_URL/);
 
-      expect(cfg.adminUrl).toBe('http://127.0.0.1:9000');
-      expect(cfg.jwtSecret).toBe('unit-test-secret');
-      expect(cfg.jwtIssuer).toBe('ferrum-edge');
-      expect(cfg.jwtTtl).toBe(3600);
-      expect(cfg.tlsCaPath).toBeUndefined();
-      expect(cfg.tlsVerify).toBe(true);
-      expect(cfg.connectTimeout).toBe(5000);
-      expect(cfg.readTimeout).toBe(60000);
-      expect(cfg.writeTimeout).toBe(60000);
-      expect(cfg.port).toBe(3001);
-    });
-
-    it('parses numeric env vars as numbers', async () => {
-      setValidEnv({
-        FERRUM_JWT_TTL: '120',
-        FERRUM_CONNECT_TIMEOUT: '1500',
-        FERRUM_READ_TIMEOUT: '20000',
-        FERRUM_WRITE_TIMEOUT: '25000',
-        PORT: '4242',
-      });
-      const { loadConfig } = await loadConfigModule();
-      const cfg = loadConfig();
-
-      expect(cfg.jwtTtl).toBe(120);
-      expect(cfg.connectTimeout).toBe(1500);
-      expect(cfg.readTimeout).toBe(20000);
-      expect(cfg.writeTimeout).toBe(25000);
-      expect(cfg.port).toBe(4242);
-    });
-
-    it('treats FERRUM_TLS_VERIFY="false" as false and any other value as true', async () => {
-      setValidEnv({ FERRUM_TLS_VERIFY: 'false' });
-      const { loadConfig: loadDisabled } = await loadConfigModule();
-      expect(loadDisabled().tlsVerify).toBe(false);
-
-      setValidEnv({ FERRUM_TLS_VERIFY: 'true' });
-      const { loadConfig: loadEnabled } = await loadConfigModule();
-      expect(loadEnabled().tlsVerify).toBe(true);
-
-      setValidEnv({ FERRUM_TLS_VERIFY: undefined });
-      const { loadConfig: loadDefault } = await loadConfigModule();
-      expect(loadDefault().tlsVerify).toBe(true);
-    });
-
-    it('honors a custom FERRUM_JWT_ISSUER', async () => {
-      setValidEnv({ FERRUM_JWT_ISSUER: 'custom-issuer' });
-      const { loadConfig } = await loadConfigModule();
-      expect(loadConfig().jwtIssuer).toBe('custom-issuer');
-    });
+    clearTestEnv();
+    setValidEnv({ FERRUM_ADMIN_ALLOWED_CIDRS: '10.0.0.0/99' });
+    const cidr = await loadModule();
+    expect(() => cidr.loadConfig()).toThrow(/FERRUM_ADMIN_ALLOWED_CIDRS/);
   });
 
-  describe('updateRuntimeConfig', () => {
-    it('overlays overrides onto the base config', async () => {
-      setValidEnv();
-      const { loadConfig, updateRuntimeConfig } = await loadConfigModule();
-
-      const before = loadConfig();
-      expect(before.adminUrl).toBe('http://127.0.0.1:9000');
-      expect(before.jwtTtl).toBe(3600);
-
-      updateRuntimeConfig({
-        adminUrl: 'http://override:9000',
-        jwtTtl: 900,
-      });
-
-      const after = loadConfig();
-      expect(after.adminUrl).toBe('http://override:9000');
-      expect(after.jwtTtl).toBe(900);
-      // Untouched fields keep their base value.
-      expect(after.jwtSecret).toBe('unit-test-secret');
-      expect(after.jwtIssuer).toBe('ferrum-edge');
-    });
-
-    it('returns a fresh object so callers cannot mutate the cached base', async () => {
-      setValidEnv();
-      const { loadConfig, updateRuntimeConfig } = await loadConfigModule();
-
-      // Mutating the returned object must not leak into subsequent reads.
-      const first = loadConfig();
-      first.adminUrl = 'http://tampered:9000';
-      first.jwtTtl = -1;
-
-      const second = loadConfig();
-      expect(second.adminUrl).toBe('http://127.0.0.1:9000');
-      expect(second.jwtTtl).toBe(3600);
-
-      // updateRuntimeConfig overlays without disturbing untouched fields.
-      updateRuntimeConfig({ adminUrl: 'http://override:9000' });
-      const third = loadConfig();
-      expect(third.adminUrl).toBe('http://override:9000');
-      expect(third.jwtSecret).toBe('unit-test-secret');
-    });
-
-    it('overrides jwtSecret when a non-empty value is provided', async () => {
-      setValidEnv();
-      const { loadConfig, updateRuntimeConfig } = await loadConfigModule();
-
-      expect(loadConfig().jwtSecret).toBe('unit-test-secret');
-      updateRuntimeConfig({ jwtSecret: 'rotated-secret' });
-      expect(loadConfig().jwtSecret).toBe('rotated-secret');
-    });
-
-    it('exposes jwtSecret through getRuntimeConfig (route layer is responsible for redaction)', async () => {
-      setValidEnv();
-      const { getRuntimeConfig } = await loadConfigModule();
-      // getRuntimeConfig returns the raw secret; server/routes/settings.ts
-      // strips it before sending over HTTP via redactRuntimeConfig().
-      expect(getRuntimeConfig().jwtSecret).toBe('unit-test-secret');
-    });
+  it('rejects non-integer, non-finite, negative, and out-of-range numeric settings', async () => {
+    for (const [name, value] of [
+      ['FERRUM_JWT_TTL', 'NaN'],
+      ['FERRUM_CONNECT_TIMEOUT', '-1'],
+      ['FERRUM_READ_TIMEOUT', '1.5'],
+      ['FERRUM_WRITE_TIMEOUT', 'Infinity'],
+      ['PORT', '70000'],
+    ]) {
+      clearTestEnv();
+      setValidEnv({ [name]: value });
+      const { loadConfig } = await loadModule();
+      expect(() => loadConfig()).toThrow(new RegExp(name));
+    }
   });
 
-  describe('FERRUM_BFF_AUTH_TOKEN length warning', () => {
-    it('logs a console.warn when the token is shorter than 16 chars', async () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      try {
-        setValidEnv({ FERRUM_BFF_AUTH_TOKEN: 'too-short' });
-        const { loadConfig } = await loadConfigModule();
-        loadConfig();
+  it('rejects a token TTL above the configured gateway maximum', async () => {
+    setValidEnv({ FERRUM_JWT_TTL: '3601', FERRUM_JWT_MAX_TTL: '3600' });
+    const { loadConfig } = await loadModule();
+    expect(() => loadConfig()).toThrow(/must not exceed/);
+  });
 
-        expect(warnSpy).toHaveBeenCalledTimes(1);
-        const [message] = warnSpy.mock.calls[0] as [string];
-        expect(message).toMatch(/FERRUM_BFF_AUTH_TOKEN/);
-        expect(message).toMatch(/16/);
-      } finally {
-        warnSpy.mockRestore();
-      }
+  it('fails closed on static authentication in production', async () => {
+    setValidEnv({ NODE_ENV: 'production' });
+    const { loadConfig } = await loadModule();
+    expect(() => loadConfig()).toThrow(/Static authentication is disabled/);
+  });
+
+  it('allows an explicit development-only static production override', async () => {
+    setValidEnv({ NODE_ENV: 'production', FERRUM_ALLOW_INSECURE_STATIC_AUTH: 'true' });
+    const { loadConfig } = await loadModule();
+    expect(loadConfig().authMode).toBe('static');
+  });
+
+  it('supports trusted-proxy production auth without a browser bearer token', async () => {
+    setValidEnv({
+      NODE_ENV: 'production',
+      FERRUM_AUTH_MODE: 'trusted-proxy',
+      FERRUM_BFF_AUTH_TOKEN: undefined,
+      FERRUM_TRUSTED_PROXY_SECRET: 'p'.repeat(40),
     });
+    const { loadConfig } = await loadModule();
+    expect(loadConfig()).toMatchObject({ authMode: 'trusted-proxy', bffAuthToken: undefined });
+  });
 
-    it('does not warn when the token meets the minimum length', async () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      try {
-        setValidEnv({ FERRUM_BFF_AUTH_TOKEN: 'a'.repeat(16) });
-        const { loadConfig } = await loadConfigModule();
-        loadConfig();
+  it('keeps runtime connection mutation disabled by default', async () => {
+    setValidEnv();
+    const { updateRuntimeConfig } = await loadModule();
+    await expect(updateRuntimeConfig({ adminUrl: 'https://gateway.example' })).rejects.toThrow(/disabled/);
+  });
 
-        expect(warnSpy).not.toHaveBeenCalled();
-      } finally {
-        warnSpy.mockRestore();
-      }
+  it('allows only pre-authorized runtime gateway origins', async () => {
+    setValidEnv({
+      FERRUM_ALLOW_RUNTIME_SETTINGS: 'true',
+      FERRUM_ADMIN_ALLOWED_ORIGINS: 'https://gateway.example',
     });
+    const { loadConfig, updateRuntimeConfig } = await loadModule();
+    await updateRuntimeConfig({ adminUrl: 'https://gateway.example' });
+    expect(loadConfig().adminUrl).toBe('https://gateway.example');
+    await expect(updateRuntimeConfig({ adminUrl: 'http://169.254.169.254' })).rejects.toThrow(/allow/i);
+  });
+
+  it('validates a runtime update atomically before changing any field', async () => {
+    setValidEnv({
+      FERRUM_ALLOW_RUNTIME_SETTINGS: 'true',
+      FERRUM_ADMIN_ALLOWED_ORIGINS: 'https://gateway.example',
+    });
+    const { loadConfig, updateRuntimeConfig } = await loadModule();
+    await expect(updateRuntimeConfig({
+      adminUrl: 'https://gateway.example',
+      readTimeout: -1,
+    })).rejects.toThrow(/readTimeout/);
+    expect(loadConfig().adminUrl).toBe('http://127.0.0.1:9000');
+  });
+
+  it('returns defensive copies of namespace and network policy arrays', async () => {
+    setValidEnv({
+      FERRUM_JWT_NAMESPACES: 'tenant-a',
+      FERRUM_ADMIN_ALLOWED_CIDRS: '10.0.0.0/8',
+    });
+    const { loadConfig } = await loadModule();
+    const first = loadConfig();
+    first.jwtNamespaces?.push('attacker');
+    first.adminAllowedCidrs.push('0.0.0.0/0');
+    expect(loadConfig().jwtNamespaces).toEqual(['tenant-a']);
+    expect(loadConfig().adminAllowedCidrs).toEqual(['10.0.0.0/8']);
+  });
+
+  it('never exposes the signing secret or local CA path in public settings', async () => {
+    setValidEnv();
+    const { getPublicRuntimeConfig } = await loadModule();
+    const serialized = JSON.stringify(getPublicRuntimeConfig());
+    expect(serialized).not.toContain('j'.repeat(40));
+    expect(getPublicRuntimeConfig()).not.toHaveProperty('jwtSecret');
+    expect(getPublicRuntimeConfig()).not.toHaveProperty('tlsCaPath');
   });
 });

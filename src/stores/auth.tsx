@@ -1,80 +1,188 @@
+import { useQueryClient } from "@tanstack/react-query";
 import {
   createContext,
   useCallback,
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
-import { setBearerToken, setOnUnauthorized } from "@/api/client";
+import { api, setCsrfToken, setOnUnauthorized, SILENT_ERRORS } from "@/api/client";
+
+export type AuthMode = "static" | "trusted-proxy";
+export type AuthStatus = "loading" | "authenticated" | "unauthenticated";
+
+export interface AuthPrincipal {
+  subject: string;
+  displayName: string;
+  role: "viewer" | "operator" | "admin";
+  namespaces?: string[];
+  authMode: AuthMode;
+}
+
+interface AuthConfig {
+  mode: AuthMode;
+  loginUrl?: string;
+  logoutUrl?: string;
+}
+
+interface SessionResponse {
+  principal: AuthPrincipal;
+  csrfToken: string;
+  expiresAt?: number;
+  logoutUrl?: string;
+}
 
 interface AuthContextValue {
-  token: string | null;
-  setToken: (token: string) => void;
-  clearToken: () => void;
+  status: AuthStatus;
+  mode: AuthMode | null;
+  principal: AuthPrincipal | null;
+  loginUrl?: string;
+  error: string | null;
+  login: (token: string) => Promise<void>;
+  logout: () => Promise<void>;
+  refreshSession: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const STORAGE_KEY = "ferrum:bff-auth-token";
-
-function loadPersistedToken(): string | null {
+function removeLegacyCredential(): void {
   try {
-    return localStorage.getItem(STORAGE_KEY);
+    localStorage.removeItem("ferrum:bff-auth-token");
   } catch {
-    return null;
+    // Storage can be disabled. No credential is written by the new flow.
   }
 }
 
-function persistToken(token: string | null) {
-  try {
-    if (token) {
-      localStorage.setItem(STORAGE_KEY, token);
-    } else {
-      localStorage.removeItem(STORAGE_KEY);
-    }
-  } catch {
-    // ignore storage errors
-  }
+function responseStatus(error: unknown): number | undefined {
+  if (!error || typeof error !== "object" || !("response" in error)) return undefined;
+  const response = (error as { response?: Response }).response;
+  return response?.status;
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setTokenState] = useState<string | null>(loadPersistedToken);
+  const queryClient = useQueryClient();
+  const [status, setStatus] = useState<AuthStatus>("loading");
+  const [config, setConfig] = useState<AuthConfig | null>(null);
+  const [principal, setPrincipal] = useState<AuthPrincipal | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const principalRef = useRef<AuthPrincipal | null>(null);
 
-  // Keep the module-scoped ky client in sync with the React-side token.
+  const clearLocalSession = useCallback(() => {
+    setCsrfToken(null);
+    principalRef.current = null;
+    setPrincipal(null);
+    setStatus("unauthenticated");
+    queryClient.clear();
+  }, [queryClient]);
+
+  const acceptSession = useCallback((session: SessionResponse) => {
+    const previous = principalRef.current;
+    if (previous && previous.subject !== session.principal.subject) queryClient.clear();
+    principalRef.current = session.principal;
+    setPrincipal(session.principal);
+    setCsrfToken(session.csrfToken);
+    setStatus("authenticated");
+    setError(null);
+  }, [queryClient]);
+
+  const refreshSession = useCallback(async () => {
+    try {
+      const session = await api.get("api/auth/session", {
+        context: { [SILENT_ERRORS]: true },
+      }).json<SessionResponse>();
+      acceptSession(session);
+    } catch (sessionError) {
+      if (responseStatus(sessionError) === 401) {
+        clearLocalSession();
+      } else if (principalRef.current) {
+        setError("Session verification is temporarily unavailable.");
+      } else {
+        setError("Unable to verify your Foundry session.");
+        setStatus("unauthenticated");
+      }
+    }
+  }, [acceptSession, clearLocalSession]);
+
   useEffect(() => {
-    setBearerToken(token);
-  }, [token]);
+    removeLegacyCredential();
+    let cancelled = false;
+    void (async () => {
+      try {
+        const nextConfig = await api.get("api/auth/config", {
+          context: { [SILENT_ERRORS]: true },
+        }).json<AuthConfig>();
+        if (cancelled) return;
+        setConfig(nextConfig);
+        await refreshSession();
+      } catch {
+        if (!cancelled) {
+          setError("Unable to load the Foundry authentication configuration.");
+          setStatus("unauthenticated");
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [refreshSession]);
 
-  const setToken = useCallback((next: string) => {
-    persistToken(next);
-    setTokenState(next);
-  }, []);
-
-  const clearToken = useCallback(() => {
-    persistToken(null);
-    setTokenState(null);
-  }, []);
-
-  // Wire the ky 401 handler to clear local auth state.
   useEffect(() => {
-    setOnUnauthorized(clearToken);
+    if (status !== "authenticated") return;
+    const timer = window.setInterval(() => void refreshSession(), 60_000);
+    return () => window.clearInterval(timer);
+  }, [refreshSession, status]);
+
+  useEffect(() => {
+    setOnUnauthorized(clearLocalSession);
     return () => setOnUnauthorized(undefined);
-  }, [clearToken]);
+  }, [clearLocalSession]);
 
-  const value = useMemo(
-    () => ({ token, setToken, clearToken }),
-    [token, setToken, clearToken],
-  );
+  const login = useCallback(async (token: string) => {
+    setError(null);
+    try {
+      const session = await api.post("api/auth/login", {
+        json: { token },
+        context: { [SILENT_ERRORS]: true },
+      }).json<SessionResponse>();
+      acceptSession(session);
+    } catch {
+      setError("The token was rejected.");
+      throw new Error("Authentication failed");
+    }
+  }, [acceptSession]);
+
+  const logout = useCallback(async () => {
+    let logoutUrl = config?.logoutUrl;
+    try {
+      const response = await api.post("api/auth/logout", {
+        context: { [SILENT_ERRORS]: true },
+      }).json<{ logoutUrl?: string }>();
+      logoutUrl = response.logoutUrl ?? logoutUrl;
+      clearLocalSession();
+    } catch {
+      setError("Sign out could not be confirmed by the server. Please try again.");
+      return;
+    }
+    if (logoutUrl) window.location.assign(logoutUrl);
+  }, [clearLocalSession, config?.logoutUrl]);
+
+  const value = useMemo<AuthContextValue>(() => ({
+    status,
+    mode: config?.mode ?? null,
+    principal,
+    loginUrl: config?.loginUrl,
+    error,
+    login,
+    logout,
+    refreshSession,
+  }), [config, error, login, logout, principal, refreshSession, status]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth(): AuthContextValue {
-  const ctx = useContext(AuthContext);
-  if (!ctx) {
-    throw new Error("useAuth must be used within an AuthProvider");
-  }
-  return ctx;
+  const context = useContext(AuthContext);
+  if (!context) throw new Error("useAuth must be used within an AuthProvider");
+  return context;
 }

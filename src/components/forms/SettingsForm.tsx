@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import { Select } from "@/components/ui/Select";
 import { useToast } from "@/components/ui/Toast";
 
 /* ── Types ─────────────────────────────────────────────────────────── */
@@ -16,11 +17,15 @@ interface Settings {
   adminUrl: string;
   jwtIssuer: string;
   jwtTtl: number;
-  tlsCaPath: string | undefined;
+  jwtRole: "viewer" | "operator" | "admin";
+  jwtAudience: string | string[] | undefined;
+  jwtNamespaces: string[] | undefined;
+  tlsCaConfigured: boolean;
   tlsVerify: boolean;
   connectTimeout: number;
   readTimeout: number;
   writeTimeout: number;
+  runtimeSettingsEnabled: boolean;
 }
 
 interface StatusResult {
@@ -33,12 +38,16 @@ interface StatusResult {
 const DEFAULT_SETTINGS: Settings = {
   adminUrl: "",
   jwtIssuer: "ferrum-edge",
-  jwtTtl: 3600,
-  tlsCaPath: undefined,
+  jwtTtl: 900,
+  jwtRole: "admin",
+  jwtAudience: undefined,
+  jwtNamespaces: undefined,
+  tlsCaConfigured: false,
   tlsVerify: true,
   connectTimeout: 5000,
   readTimeout: 60000,
   writeTimeout: 60000,
+  runtimeSettingsEnabled: false,
 };
 
 /* ================================================================== */
@@ -100,7 +109,12 @@ export function SettingsForm() {
   async function handleSave() {
     setSaving(true);
     try {
-      await api.put("api/settings", { json: settings });
+      const {
+        tlsCaConfigured: _tlsCaConfigured,
+        runtimeSettingsEnabled: _runtimeSettingsEnabled,
+        ...updates
+      } = settings;
+      await api.put("api/settings", { json: updates });
       toast("success", "Settings saved successfully");
     } catch {
       toast("error", "Failed to save settings");
@@ -139,6 +153,7 @@ export function SettingsForm() {
             onChange={(e) => update("adminUrl", e.target.value)}
             placeholder="http://localhost:9876"
             helpText="The Ferrum Admin API URL that this BFF server connects to"
+            disabled={!settings.runtimeSettingsEnabled}
           />
 
           <div className="flex min-w-0 flex-col gap-1.5">
@@ -161,6 +176,7 @@ export function SettingsForm() {
               onChange={(e) => update("jwtIssuer", e.target.value)}
               placeholder="ferrum-edge"
               helpText="JWT 'iss' claim. Must match gateway's FERRUM_ADMIN_JWT_ISSUER."
+              disabled={!settings.runtimeSettingsEnabled}
             />
             <Input
               label="JWT TTL (seconds)"
@@ -169,8 +185,39 @@ export function SettingsForm() {
               value={settings.jwtTtl}
               onChange={(e) => update("jwtTtl", Number(e.target.value))}
               helpText="Token lifetime in seconds. Maps to FERRUM_JWT_TTL."
+              disabled={!settings.runtimeSettingsEnabled}
             />
           </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Select
+              label="Default gateway role"
+              value={settings.jwtRole}
+              onValueChange={(value) => update("jwtRole", value as Settings["jwtRole"])}
+              options={[
+                { value: "viewer", label: "Viewer" },
+                { value: "operator", label: "Operator" },
+                { value: "admin", label: "Admin" },
+              ]}
+              disabled={!settings.runtimeSettingsEnabled}
+            />
+            <Input
+              label="JWT Audience"
+              value={Array.isArray(settings.jwtAudience) ? settings.jwtAudience.join(", ") : settings.jwtAudience ?? ""}
+              onChange={(event) => update("jwtAudience", event.target.value || undefined)}
+              helpText="Optional comma-separated aud claim; leave empty unless the gateway requires it."
+              disabled={!settings.runtimeSettingsEnabled}
+            />
+          </div>
+          <Input
+            label="Namespace grants"
+            value={settings.jwtNamespaces?.join(", ") ?? ""}
+            onChange={(event) => update(
+              "jwtNamespaces",
+              event.target.value.split(",").map((value) => value.trim()).filter(Boolean),
+            )}
+            helpText="Exact comma-separated ns grants. No wildcard semantics are inferred."
+            disabled={!settings.runtimeSettingsEnabled}
+          />
         </div>
       </Card>
 
@@ -181,19 +228,16 @@ export function SettingsForm() {
             TLS
           </h2>
           <div className="space-y-4">
-            <Input
-              label="TLS CA Path"
-              value={settings.tlsCaPath ?? ""}
-              onChange={(e) => update("tlsCaPath", e.target.value || undefined)}
-              placeholder="/path/to/ca-bundle.pem"
-              helpText="Path to a custom CA bundle for verifying the gateway's TLS certificate. Maps to FERRUM_TLS_CA_PATH. In-memory only, resets on restart."
-            />
+            <div className="rounded-lg border border-border bg-bg-input px-3 py-2 text-sm text-text-secondary">
+              Custom CA bundle: {settings.tlsCaConfigured ? "configured by the server" : "not configured"}
+            </div>
             <label className="flex items-center gap-3 cursor-pointer">
               <input
                 type="checkbox"
                 checked={settings.tlsVerify}
                 onChange={(e) => update("tlsVerify", e.target.checked)}
                 className="h-4 w-4 rounded border-border bg-bg-input accent-orange"
+                disabled={!settings.runtimeSettingsEnabled}
               />
               <div>
                 <span className="text-sm font-medium text-text-secondary">
@@ -220,6 +264,7 @@ export function SettingsForm() {
             min={0}
             value={settings.connectTimeout}
             onChange={(e) => update("connectTimeout", Number(e.target.value))}
+            disabled={!settings.runtimeSettingsEnabled}
           />
           <Input
             label="Read Timeout (ms)"
@@ -227,6 +272,7 @@ export function SettingsForm() {
             min={0}
             value={settings.readTimeout}
             onChange={(e) => update("readTimeout", Number(e.target.value))}
+            disabled={!settings.runtimeSettingsEnabled}
           />
           <Input
             label="Write Timeout (ms)"
@@ -234,6 +280,7 @@ export function SettingsForm() {
             min={0}
             value={settings.writeTimeout}
             onChange={(e) => update("writeTimeout", Number(e.target.value))}
+            disabled={!settings.runtimeSettingsEnabled}
           />
         </div>
       </Card>
@@ -265,12 +312,13 @@ export function SettingsForm() {
       {/* Actions */}
       <div className="flex items-center justify-between gap-4">
         <p className="text-text-muted text-xs max-w-md">
-          All settings are in-memory overrides and reset to their environment
-          variable values on BFF restart.
+          {settings.runtimeSettingsEnabled
+            ? "Overrides reset to environment values on BFF restart and are restricted to the server allowlist."
+            : "Connection and signing settings are immutable environment/secret-mounted configuration."}
         </p>
-        <Button onClick={handleSave} loading={saving}>
-          Save Settings
-        </Button>
+        {settings.runtimeSettingsEnabled && (
+          <Button onClick={handleSave} loading={saving}>Save Settings</Button>
+        )}
       </div>
     </div>
   );
