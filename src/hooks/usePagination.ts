@@ -47,7 +47,6 @@ export function usePagination(
 
   const updateSearch = useCallback(
     (patch: Record<string, number>) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       navigate({
         search: (prev: any) => ({ ...prev, ...patch }),
         replace: true,

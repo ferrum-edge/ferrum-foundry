@@ -1,5 +1,5 @@
-import { createHash, randomUUID } from 'node:crypto';
-import { SignJWT } from 'jose';
+import { createHash } from 'node:crypto';
+import { signAdminJwt } from '../shared/admin-jwt.js';
 import type { AuthPrincipal } from './auth-types.js';
 import type { Config } from './config.js';
 
@@ -16,6 +16,7 @@ function tokenFingerprint(config: Config, principal: AuthPrincipal): string {
     .update(config.jwtSecret)
     .update('\0')
     .update(JSON.stringify({
+      adminUrl: config.adminUrl,
       issuer: config.jwtIssuer,
       ttl: config.jwtTtl,
       audience: config.jwtAudience,
@@ -55,22 +56,16 @@ export async function generateToken(config: Config, principal: AuthPrincipal): P
 
   pruneCache(now);
   const expiresAt = now + config.jwtTtl;
-  const namespaces = principal.namespaces;
-  const claims: Record<string, unknown> = { role: principal.role };
-  if (namespaces) claims.ns = namespaces.length === 1 ? namespaces[0] : namespaces;
-
-  let signer = new SignJWT(claims)
-    .setProtectedHeader({ alg: 'HS256' })
-    .setIssuer(config.jwtIssuer)
-    .setSubject(principal.subject)
-    .setIssuedAt(now)
-    .setNotBefore(now)
-    .setExpirationTime(expiresAt)
-    .setJti(randomUUID());
-
-  if (config.jwtAudience) signer = signer.setAudience(config.jwtAudience);
-
-  const token = await signer.sign(new TextEncoder().encode(config.jwtSecret));
+  const token = await signAdminJwt({
+    secret: config.jwtSecret,
+    issuer: config.jwtIssuer,
+    subject: principal.subject,
+    role: principal.role,
+    audience: config.jwtAudience,
+    namespaces: principal.namespaces,
+    ttlSeconds: config.jwtTtl,
+    now,
+  });
   tokenCache.set(fingerprint, { token, expiresAt });
   return token;
 }

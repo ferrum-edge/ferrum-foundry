@@ -109,7 +109,11 @@ describe('generateToken', () => {
     const first = await generateToken(config, principal);
     expect(await generateToken(config, principal)).toBe(first);
     expect(await generateToken(config, makePrincipal({ role: 'viewer' }))).not.toBe(first);
+    expect(await generateToken(config, makePrincipal({ namespaces: ['tenant-c'] }))).not.toBe(first);
+    expect(await generateToken({ ...config, adminUrl: 'https://other-gateway.test' }, principal)).not.toBe(first);
     expect(await generateToken({ ...config, jwtIssuer: 'changed' }, principal)).not.toBe(first);
+    expect(await generateToken({ ...config, jwtTtl: 300 }, principal)).not.toBe(first);
+    expect(await generateToken({ ...config, jwtAudience: 'other-admin-api' }, principal)).not.toBe(first);
     expect(await generateToken({ ...config, jwtSecret: 'another-signing-secret-that-is-long-enough' }, principal)).not.toBe(first);
   });
 

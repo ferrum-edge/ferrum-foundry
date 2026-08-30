@@ -19,6 +19,11 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
 import { getApiErrorMessage } from "@/api/client";
 import type { ProxyCreate, PluginConfig, Consumer } from "@/api/types";
 
+const AUTH_PLUGIN_NAMES = [
+  "key_auth", "basic_auth", "jwt_auth", "jwks_auth",
+  "hmac_auth", "mtls_auth", "ldap_auth",
+];
+
 export default function ProxyDetailPage() {
   const { proxyId } = useParams({ strict: false }) as { proxyId: string };
   const navigate = useNavigate();
@@ -47,11 +52,6 @@ export default function ProxyDetailPage() {
   }, [pluginConfigsResponse, proxyId]);
 
   // Auth analysis for the Authorized Consumers tab
-  const AUTH_PLUGIN_NAMES = [
-    "key_auth", "basic_auth", "jwt_auth", "jwks_auth",
-    "hmac_auth", "mtls_auth", "ldap_auth",
-  ];
-
   const { hasAuthPlugin, authPluginTypes, aclAllowGroups, aclDenyGroups } = useMemo(() => {
     const types: string[] = [];
     let allow: string[] = [];

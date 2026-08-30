@@ -51,7 +51,7 @@ export function ProxySearchPicker(props: ProxySearchPickerProps) {
 
   // Fetch all proxies (high limit to get them all for the picker)
   const { data, isLoading } = useProxies({ limit: 1000 });
-  const proxies = data?.data ?? [];
+  const proxies = useMemo(() => data?.data ?? [], [data?.data]);
 
   // Filter by search term
   const filtered = useMemo(() => {

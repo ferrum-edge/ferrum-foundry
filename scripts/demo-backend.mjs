@@ -8,6 +8,7 @@ const backends = [
   { port: 9104, name: "billing-core", zone: "az-a" },
   { port: 9105, name: "analytics-core", zone: "az-b" },
 ];
+const bindAddress = process.env.FERRUM_DEMO_BACKEND_BIND?.trim() || "127.0.0.1";
 
 const servers = [];
 
@@ -63,8 +64,8 @@ for (const backend of backends) {
     }, latencyMs);
   });
 
-  server.listen(backend.port, "127.0.0.1", () => {
-    console.log(`${backend.name} listening on http://127.0.0.1:${backend.port}`);
+  server.listen(backend.port, bindAddress, () => {
+    console.log(`${backend.name} listening on http://${bindAddress}:${backend.port}`);
   });
   servers.push(server);
 }

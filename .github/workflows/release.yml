@@ -10,30 +10,47 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
-    name: Build Release
+  release-metadata:
+    name: Validate Release Tag
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      major_minor: ${{ steps.version.outputs.major_minor }}
+      stable: ${{ steps.version.outputs.stable }}
     steps:
-      - uses: actions/checkout@v7
+      - name: Require a safe semantic-version tag
+        id: version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+            echo "Release tag must be vMAJOR.MINOR.PATCH with an optional safe prerelease suffix" >&2
+            exit 1
+          fi
+          version="${RELEASE_TAG#v}"
+          {
+            echo "tag=$RELEASE_TAG"
+            echo "version=$version"
+            echo "major_minor=${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+            if [[ "$version" == *-* ]]; then
+              echo "stable=false"
+            else
+              echo "stable=true"
+            fi
+          } >> "$GITHUB_OUTPUT"
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Type-check
-        run: npm run typecheck
-
-      - name: Build
-        run: npm run build
+  quality-gates:
+    name: Pre-publication Gates
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
 
   docker:
     name: Docker (${{ matrix.platform }})
-    needs: [build]
+    needs: [quality-gates, release-metadata]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -47,153 +64,190 @@ jobs:
           - platform: linux/arm64
             arch_dir: arm64
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
         with:
-          platforms: ${{ matrix.platform }}
+          platforms: ${{ matrix.arch_dir }}
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Extract version from tag
-        id: version
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          MAJOR_MINOR="${VERSION%.*}"
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "major_minor=$MAJOR_MINOR" >> $GITHUB_OUTPUT
-
-      - name: Build and push per-platform digest
+      - name: Build and push attested per-platform digest
         id: build
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
           file: docker/Dockerfile
           platforms: ${{ matrix.platform }}
+          build-args: SOURCE_REVISION=${{ github.sha }}
           outputs: type=image,"name=ferrumedge/ferrum-foundry,ghcr.io/${{ github.repository }}",push-by-digest=true,name-canonical=true,push=true
-          provenance: false
-          cache-from: type=gha,scope=${{ matrix.arch_dir }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.arch_dir }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=release-${{ matrix.arch_dir }}
+          cache-to: type=gha,mode=max,scope=release-${{ matrix.arch_dir }}
 
       - name: Export digest
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           mkdir -p /tmp/digests
-          digest="${{ steps.build.outputs.digest }}"
-          touch "/tmp/digests/${digest#sha256:}"
+          if [[ ! "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "Build returned an invalid image digest" >&2
+            exit 1
+          fi
+          touch "/tmp/digests/${IMAGE_DIGEST#sha256:}"
 
       - name: Upload digest
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: docker-digest-${{ matrix.arch_dir }}
+          name: release-docker-digest-${{ matrix.arch_dir }}
           path: /tmp/digests/*
           if-no-files-found: error
 
   docker-manifest:
     name: Docker Manifest
-    needs: docker
+    needs: [docker, release-metadata]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     steps:
       - name: Download digests
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: /tmp/digests
-          pattern: docker-digest-*
+          pattern: release-docker-digest-*
           merge-multiple: true
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Extract version from tag
-        id: version
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          MAJOR_MINOR="${VERSION%.*}"
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "major_minor=$MAJOR_MINOR" >> $GITHUB_OUTPUT
-
       - name: Create and push multi-arch manifest (Docker Hub)
         working-directory: /tmp/digests
+        env:
+          IMAGE_REPOSITORY: ferrumedge/ferrum-foundry
+          RELEASE_TAG: ${{ needs.release-metadata.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.release-metadata.outputs.version }}
+          RELEASE_MAJOR_MINOR: ${{ needs.release-metadata.outputs.major_minor }}
+          STABLE_RELEASE: ${{ needs.release-metadata.outputs.stable }}
         run: |
-          docker buildx imagetools create \
-            -t ferrumedge/ferrum-foundry:${{ github.ref_name }} \
-            -t ferrumedge/ferrum-foundry:${{ steps.version.outputs.version }} \
-            -t ferrumedge/ferrum-foundry:${{ steps.version.outputs.major_minor }} \
-            $(printf 'ferrumedge/ferrum-foundry@sha256:%s ' *)
+          images=()
+          for digest in *; do
+            [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || { echo "Invalid digest artifact: $digest" >&2; exit 1; }
+            images+=("$IMAGE_REPOSITORY@sha256:${digest}")
+          done
+          tags=(-t "$IMAGE_REPOSITORY:$RELEASE_TAG" -t "$IMAGE_REPOSITORY:$RELEASE_VERSION")
+          if [[ "$STABLE_RELEASE" == "true" ]]; then
+            tags+=(-t "$IMAGE_REPOSITORY:$RELEASE_MAJOR_MINOR")
+          fi
+          docker buildx imagetools create "${tags[@]}" "${images[@]}"
 
       - name: Create and push multi-arch manifest (GHCR)
         working-directory: /tmp/digests
+        env:
+          IMAGE_REPOSITORY: ghcr.io/${{ github.repository }}
+          RELEASE_TAG: ${{ needs.release-metadata.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.release-metadata.outputs.version }}
+          RELEASE_MAJOR_MINOR: ${{ needs.release-metadata.outputs.major_minor }}
+          STABLE_RELEASE: ${{ needs.release-metadata.outputs.stable }}
         run: |
-          docker buildx imagetools create \
-            -t ghcr.io/${{ github.repository }}:${{ github.ref_name }} \
-            -t ghcr.io/${{ github.repository }}:${{ steps.version.outputs.version }} \
-            -t ghcr.io/${{ github.repository }}:${{ steps.version.outputs.major_minor }} \
-            $(printf 'ghcr.io/${{ github.repository }}@sha256:%s ' *)
+          images=()
+          for digest in *; do
+            [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || { echo "Invalid digest artifact: $digest" >&2; exit 1; }
+            images+=("$IMAGE_REPOSITORY@sha256:${digest}")
+          done
+          tags=(-t "$IMAGE_REPOSITORY:$RELEASE_TAG" -t "$IMAGE_REPOSITORY:$RELEASE_VERSION")
+          if [[ "$STABLE_RELEASE" == "true" ]]; then
+            tags+=(-t "$IMAGE_REPOSITORY:$RELEASE_MAJOR_MINOR")
+          fi
+          docker buildx imagetools create "${tags[@]}" "${images[@]}"
 
   create-release:
     name: Create GitHub Release
-    needs: [docker-manifest]
+    needs: [docker-manifest, release-metadata]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Create release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.release-metadata.outputs.tag }}
+          IMAGE_REPOSITORY: ghcr.io/${{ github.repository }}
+          SOURCE_REPOSITORY: ${{ github.repository }}
         run: |
-          cat > notes.md << 'NOTES'
-          ## Ferrum Foundry ${{ github.ref_name }}
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          tag = os.environ["RELEASE_TAG"]
+          ghcr = os.environ["IMAGE_REPOSITORY"]
+          repository = os.environ["SOURCE_REPOSITORY"]
+          notes = f"""## Ferrum Foundry {tag}
 
           ### Docker
 
           ```bash
-          docker pull ferrumedge/ferrum-foundry:${{ github.ref_name }}
-          docker pull ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+          docker pull ferrumedge/ferrum-foundry:{tag}
+          docker pull {ghcr}:{tag}
           ```
 
-          ### Quick Start
+          ### Production quick start
+
+          Run Foundry only behind an identity-aware reverse proxy that removes
+          client-supplied identity headers and injects the trusted proxy proof:
 
           ```bash
-          docker run \
-            -e FERRUM_ADMIN_URL=http://your-gateway:9000 \
-            -e FERRUM_JWT_SECRET=your-secret \
-            -p 8080:8080 \
-            ferrumedge/ferrum-foundry:${{ github.ref_name }}
-          ```
-          NOTES
+          export FERRUM_JWT_SECRET=$(openssl rand -hex 32)
+          export FERRUM_TRUSTED_PROXY_SECRET=$(openssl rand -hex 32)
 
-          gh release create "${{ github.ref_name }}" \
-            --title "Ferrum Foundry ${{ github.ref_name }}" \
+          docker run \\
+            -e FERRUM_ADMIN_URL=https://your-gateway:9443 \\
+            -e FERRUM_JWT_SECRET \\
+            -e FERRUM_AUTH_MODE=trusted-proxy \\
+            -e FERRUM_TRUSTED_PROXY_SECRET \\
+            -p 127.0.0.1:8080:8080 \\
+            ferrumedge/ferrum-foundry:{tag}
+          ```
+
+          Configure the proxy to send `X-Ferrum-Auth-Secret`,
+          `X-Forwarded-User`, `X-Ferrum-Role`, and exact
+          `X-Ferrum-Namespaces` grants. See
+          [Production authentication](https://github.com/{repository}/blob/{tag}/docs/authentication.md).
+          """
+          Path("notes.md").write_text(notes, encoding="utf-8")
+          PY
+
+          gh release create "$RELEASE_TAG" \
+            --title "Ferrum Foundry $RELEASE_TAG" \
             --notes-file notes.md

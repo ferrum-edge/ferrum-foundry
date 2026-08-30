@@ -26,6 +26,15 @@ import {
 import { getApiErrorMessage } from "@/api/client";
 import type { ConsumerCreate, Consumer, PluginConfig } from "@/api/types";
 
+const AUTH_PLUGIN_CRED_MAP: Record<string, string> = {
+  key_auth: "keyauth",
+  basic_auth: "basicauth",
+  jwt_auth: "jwt",
+  jwks_auth: "jwt",
+  hmac_auth: "hmac_auth",
+  mtls_auth: "mtls_auth",
+};
+
 /* ================================================================== */
 /*  ConsumerDetailPage                                                 */
 /* ================================================================== */
@@ -46,15 +55,6 @@ export default function ConsumerDetailPage() {
   // Fetch proxies and plugin configs for Authorized Proxies tab
   const { data: proxiesResponse } = useProxies({ limit: 1000 });
   const { data: pluginConfigsResponse } = usePluginConfigs({ limit: 1000 });
-
-  const AUTH_PLUGIN_CRED_MAP: Record<string, string> = {
-    key_auth: "keyauth",
-    basic_auth: "basicauth",
-    jwt_auth: "jwt",
-    jwks_auth: "jwt",
-    hmac_auth: "hmac_auth",
-    mtls_auth: "mtls_auth",
-  };
 
   const authorizedProxies = useMemo(() => {
     if (!consumer || !proxiesResponse?.data || !pluginConfigsResponse?.data) return [];

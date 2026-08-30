@@ -12,10 +12,12 @@
     "build:server": "tsc -p tsconfig.server.json",
     "preview": "vite preview",
     "start": "node dist-server/index.js",
-    "lint": "eslint src server",
-    "test": "vitest run",
+    "lint": "eslint src server scripts shared",
+    "test": "vitest run && npm run test:contracts",
+    "test:contracts": "node --test scripts/*.test.mjs",
+    "test:gateway-contract": "node scripts/seed-demo-gateway.mjs && node scripts/seed-demo-gateway.mjs && node scripts/gateway-contract-smoke.mjs && node scripts/verify-demo-gateway.mjs && node scripts/demo-route-smoke.mjs",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
+    "test:coverage": "vitest run --coverage && npm run test:contracts",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit"
   },
   "dependencies": {

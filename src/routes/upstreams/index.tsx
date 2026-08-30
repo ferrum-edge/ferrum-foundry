@@ -77,7 +77,10 @@ export default function UpstreamsPage() {
   const { offset, limit, paginationParams } = usePagination(total);
 
   const { data: paginatedData, isLoading: isPaginating } = useUpstreams(paginationParams);
-  const upstreams = paginatedData?.data ?? data?.data ?? [];
+  const upstreams = useMemo(
+    () => paginatedData?.data ?? data?.data ?? [],
+    [paginatedData?.data, data?.data],
+  );
 
   /* --- Client-side search filter --- */
   const filtered = useMemo(() => {

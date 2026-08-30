@@ -87,7 +87,10 @@ export default function ConsumersPage() {
   /* Re-fetch when pagination params change */
   const { data: paginatedData, isLoading: isPaginating } =
     useConsumers(paginationParams);
-  const consumers = paginatedData?.data ?? data?.data ?? [];
+  const consumers = useMemo(
+    () => paginatedData?.data ?? data?.data ?? [],
+    [paginatedData?.data, data?.data],
+  );
 
   /* --- Client-side search filter --- */
   const filtered = useMemo(() => {

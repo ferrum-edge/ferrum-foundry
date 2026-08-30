@@ -71,7 +71,10 @@ export default function ProxiesPage() {
 
   /* Re-fetch when pagination params change */
   const { data: paginatedData, isLoading: isPaginating } = useProxies(paginationParams);
-  const proxies = paginatedData?.data ?? data?.data ?? [];
+  const proxies = useMemo(
+    () => paginatedData?.data ?? data?.data ?? [],
+    [paginatedData?.data, data?.data],
+  );
 
   /* --- Client-side search filter --- */
   const filtered = useMemo(() => {

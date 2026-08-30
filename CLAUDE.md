@@ -30,14 +30,18 @@ npm run dev
 
 # In development, paste FERRUM_BFF_AUTH_TOKEN once to exchange it for an HttpOnly session.
 
-# Start demo backends (ports 9101-9105)
-node scripts/demo-backend.mjs
+# Start demo backends (ports 9101-9105). Bind all interfaces only when the
+# throwaway gateway runs in Docker and must reach the host aliases below.
+FERRUM_DEMO_BACKEND_BIND=0.0.0.0 node scripts/demo-backend.mjs
 
 # OR: run against a mock admin API (no gateway needed; serves sample data
 # for every admin surface including TLS, ACME, audit, mesh, chargeback)
 node scripts/mock-admin-gateway.mjs   # listens on :9000
 
 # Seed demo data (needs running Ferrum Edge gateway)
+FERRUM_NAMESPACE=ferrum-foundry-demo \
+FERRUM_DEMO_ALLOW_DESTRUCTIVE=true \
+FERRUM_DEMO_BACKEND_HOST=host.docker.internal \
 node scripts/seed-demo-gateway.mjs
 
 # Generate demo traffic
@@ -48,13 +52,22 @@ node scripts/demo-traffic-client.mjs mixed
 
 ```bash
 docker run --rm -d --name ferrum-edge \
+  --add-host host.docker.internal:host-gateway \
   -e FERRUM_MODE=database \
   -e FERRUM_DB_TYPE=sqlite \
-  -e FERRUM_DB_URL="sqlite:///tmp/ferrum.db?mode=rwc" \
+  -e FERRUM_DB_URL="sqlite:////tmp/ferrum.db?mode=rwc" \
+  -e FERRUM_NAMESPACE=ferrum-foundry-demo \
   -e FERRUM_ADMIN_JWT_SECRET=dev-secret-at-least-32-characters-long \
-  -p 9000:9000 -p 8000:8000 \
+  -e FERRUM_BASIC_AUTH_HMAC_SECRET=dev-basic-hmac-secret-at-least-32-characters \
+  -e FERRUM_ADMIN_BIND_ADDRESS=0.0.0.0 \
+  -e FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true \
+  -p 127.0.0.1:9000:9000 -p 127.0.0.1:8000:8000 \
   ferrumedge/ferrum-edge:latest run -m database -v
 ```
+
+The public plaintext admin bind above is a local-development exception and is
+restricted to host loopback by Docker's published-port mapping. Use admin TLS
+and an allowlist outside a throwaway workstation demo.
 
 ## Authentication
 

@@ -5,76 +5,253 @@ on:
     branches:
       - main
   pull_request:
-    branches:
-      - main
+  workflow_call:
 
 concurrency:
-  group: ci-publish-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
-  typecheck:
-    name: Type Check
+  quality:
+    name: Quality Gate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           cache: npm
 
-      - name: Install dependencies
+      - name: Install locked dependencies
         run: npm ci
 
-      - name: Type-check frontend
-        run: npx tsc --noEmit
+      - name: Lint with zero warnings
+        run: npm run lint -- --max-warnings 0
 
-      - name: Type-check server
-        run: npx tsc -p tsconfig.server.json --noEmit
+      - name: Type-check frontend and server
+        run: npm run typecheck
 
-  build:
-    name: Build
+      - name: Test with enforced coverage thresholds
+        run: npm run test:coverage
+
+      - name: Upload coverage evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: coverage-report
+          path: coverage/
+          if-no-files-found: error
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Build production artifacts
+        run: npm run build
+
+  gateway-contract:
+    name: Pinned Gateway Contract
     runs-on: ubuntu-latest
-    needs: [typecheck]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           cache: npm
 
-      - name: Install dependencies
+      - name: Install locked dependencies
         run: npm ci
 
-      - name: Build frontend (Vite)
-        run: npm run build:vite
-
-      - name: Build server (TypeScript)
-        run: npm run build:server
-
-      - name: Summarize build
-        if: always()
+      - name: Start demo backends
         run: |
-          echo "## Build Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Frontend and server TypeScript compilation complete." >> $GITHUB_STEP_SUMMARY
-          if [ -d dist ]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### Frontend Bundle" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            du -sh dist/assets/*.js dist/assets/*.css 2>/dev/null || true
-            echo '```' >> $GITHUB_STEP_SUMMARY
+          FERRUM_DEMO_BACKEND_BIND=0.0.0.0 node scripts/demo-backend.mjs >/tmp/ferrum-demo-backend.log 2>&1 &
+          echo $! >/tmp/ferrum-demo-backend.pid
+          for port in 9101 9102 9103 9104 9105; do
+            for _attempt in $(seq 1 30); do
+              if curl --fail --silent --show-error "http://127.0.0.1:${port}/health" >/dev/null; then
+                break
+              fi
+              sleep 1
+            done
+            curl --fail --silent --show-error "http://127.0.0.1:${port}/health" >/dev/null
+          done
+
+      - name: Start pinned Ferrum Edge gateway
+        run: |
+          docker run --detach --name ferrum-edge-contract \
+            --publish 127.0.0.1:9000:9000 \
+            --publish 127.0.0.1:8000:8000 \
+            --add-host host.docker.internal:host-gateway \
+            --env FERRUM_MODE=database \
+            --env FERRUM_NAMESPACE=ferrum-foundry-demo \
+            --env FERRUM_DB_TYPE=sqlite \
+            --env 'FERRUM_DB_URL=sqlite:////tmp/ferrum-contract.db?mode=rwc' \
+            --env FERRUM_PROXY_BIND_ADDRESS=0.0.0.0 \
+            --env FERRUM_ADMIN_BIND_ADDRESS=0.0.0.0 \
+            --env FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true \
+            --env FERRUM_ADMIN_JWT_SECRET=contract-admin-signing-secret-at-least-32-characters \
+            --env FERRUM_ADMIN_JWT_AUDIENCE=ferrum-admin \
+            --env FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM=true \
+            --env FERRUM_BASIC_AUTH_HMAC_SECRET=contract-basic-auth-hmac-secret-at-least-32-characters \
+            ferrumedge/ferrum-edge@sha256:fb0f05b0392a272ba36a493584bced171655ce8ebd36b2ae0818bb5c3c25ef2d
+
+      - name: Wait for gateway readiness
+        run: |
+          for _attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error http://127.0.0.1:9000/health >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs ferrum-edge-contract
+          exit 1
+
+      - name: Seed twice and verify canonical backup state
+        env:
+          FERRUM_ADMIN_URL: http://127.0.0.1:9000
+          FERRUM_JWT_SECRET: contract-admin-signing-secret-at-least-32-characters
+          FERRUM_JWT_AUDIENCE: ferrum-admin
+          FERRUM_NAMESPACE: ferrum-foundry-demo
+          FERRUM_DEMO_ALLOW_DESTRUCTIVE: 'true'
+          FERRUM_DEMO_BACKEND_HOST: host.docker.internal
+          FERRUM_DEMO_PROXY_URL: http://127.0.0.1:8000
+        run: npm run test:gateway-contract
+
+      - name: Show gateway logs on failure
+        if: failure()
+        run: |
+          docker logs ferrum-edge-contract
+          cat /tmp/ferrum-demo-backend.log
+
+  container:
+    name: Container Gate (${{ matrix.platform }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            arch_dir: amd64
+          - platform: linux/arm64
+            arch_dir: arm64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
+        with:
+          platforms: ${{ matrix.arch_dir }}
+
+      - name: Plant an excluded canary and build the exact image
+        env:
+          CANARY: FERRUM_BUILD_CONTEXT_SECRET_CANARY_7a65576b
+        run: |
+          printf '%s\n' "$CANARY" > .env
+          docker build \
+            --platform "${{ matrix.platform }}" \
+            --file docker/Dockerfile \
+            --build-arg SOURCE_REVISION="${GITHUB_SHA}" \
+            --tag ferrum-foundry:ci \
+            .
+          if docker history --no-trunc ferrum-foundry:ci | grep --fixed-strings "$CANARY"; then
+            echo 'Canary leaked into image history' >&2
+            exit 1
+          fi
+          docker save --output /tmp/ferrum-foundry-image.tar ferrum-foundry:ci
+          if grep --binary-files=text --fixed-strings "$CANARY" /tmp/ferrum-foundry-image.tar; then
+            echo 'Canary leaked into an image layer or config' >&2
+            exit 1
           fi
 
-  # ── Docker multi-arch builds (main only) ──────────────────────────────
+      - name: Verify non-root runtime and liveness
+        run: |
+          runtime_user=$(docker image inspect --format '{{.Config.User}}' ferrum-foundry:ci)
+          if [ -z "$runtime_user" ] || [ "$runtime_user" = '0' ] || [ "$runtime_user" = 'root' ]; then
+            echo "Unsafe runtime user: ${runtime_user:-unset}" >&2
+            exit 1
+          fi
+          docker network create ferrum-foundry-contract
+          docker run --detach --name ferrum-edge-for-foundry \
+            --network ferrum-foundry-contract \
+            --network-alias ferrum-edge \
+            --env FERRUM_MODE=database \
+            --env FERRUM_NAMESPACE=ferrum-foundry-demo \
+            --env FERRUM_DB_TYPE=sqlite \
+            --env 'FERRUM_DB_URL=sqlite:////tmp/ferrum-container-contract.db?mode=rwc' \
+            --env FERRUM_ADMIN_BIND_ADDRESS=0.0.0.0 \
+            --env FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true \
+            --env FERRUM_ADMIN_JWT_SECRET=container-contract-signing-secret-at-least-32-characters \
+            --env FERRUM_ADMIN_JWT_AUDIENCE=ferrum-admin \
+            --env FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM=true \
+            ferrumedge/ferrum-edge@sha256:fb0f05b0392a272ba36a493584bced171655ce8ebd36b2ae0818bb5c3c25ef2d
+          docker run --detach --name ferrum-foundry-contract \
+            --network ferrum-foundry-contract \
+            --publish 127.0.0.1:8080:8080 \
+            --env FERRUM_ADMIN_URL=http://ferrum-edge:9000 \
+            --env FERRUM_JWT_SECRET=container-contract-signing-secret-at-least-32-characters \
+            --env FERRUM_JWT_AUDIENCE=ferrum-admin \
+            --env FERRUM_AUTH_MODE=trusted-proxy \
+            --env FERRUM_TRUSTED_PROXY_SECRET=container-proxy-proof-secret-at-least-32-characters \
+            ferrum-foundry:ci
+          for _attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error http://127.0.0.1:8080/api/health/live >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs ferrum-foundry-contract
+          exit 1
+
+      - name: Verify a protected request through the exact BFF image
+        run: |
+          for _attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error \
+              --header 'X-Ferrum-Auth-Secret: container-proxy-proof-secret-at-least-32-characters' \
+              --header 'X-Forwarded-User: container-contract-reviewer' \
+              --header 'X-Ferrum-Role: admin' \
+              --header 'X-Ferrum-Namespaces: ferrum-foundry-demo' \
+              --header 'X-Ferrum-Namespace: ferrum-foundry-demo' \
+              'http://127.0.0.1:8080/api/proxy/proxies?offset=0&limit=20' \
+              | python3 -c 'import json,sys; assert isinstance(json.load(sys.stdin)["data"], list)'; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs ferrum-edge-for-foundry
+          docker logs ferrum-foundry-contract
+          exit 1
+
+      - name: Scan image for high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8
+        with:
+          image-ref: ferrum-foundry:ci
+          format: table
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+
+      - name: Generate CycloneDX SBOM
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8
+        with:
+          image-ref: ferrum-foundry:ci
+          format: cyclonedx
+          output: ferrum-foundry.cdx.json
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ferrum-foundry-sbom-${{ matrix.arch_dir }}
+          path: ferrum-foundry.cdx.json
+          if-no-files-found: error
 
   docker:
     name: Docker (${{ matrix.platform }})
-    needs: [build]
+    needs: [quality, gateway-contract, container]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -89,49 +266,56 @@ jobs:
           - platform: linux/arm64
             arch_dir: arm64
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
         with:
-          platforms: ${{ matrix.platform }}
+          platforms: ${{ matrix.arch_dir }}
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push per-platform digest
+      - name: Build and push attested per-platform digest
         id: build
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
           file: docker/Dockerfile
           platforms: ${{ matrix.platform }}
+          build-args: SOURCE_REVISION=${{ github.sha }}
           outputs: type=image,"name=ferrumedge/ferrum-foundry,ghcr.io/${{ github.repository }}",push-by-digest=true,name-canonical=true,push=true
-          provenance: false
+          provenance: mode=max
+          sbom: true
           cache-from: type=gha,scope=${{ matrix.arch_dir }}
           cache-to: type=gha,mode=max,scope=${{ matrix.arch_dir }}
 
       - name: Export digest
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           mkdir -p /tmp/digests
-          digest="${{ steps.build.outputs.digest }}"
-          touch "/tmp/digests/${digest#sha256:}"
+          if [[ ! "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "Build returned an invalid image digest" >&2
+            exit 1
+          fi
+          touch "/tmp/digests/${IMAGE_DIGEST#sha256:}"
 
       - name: Upload digest
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: docker-digest-${{ matrix.arch_dir }}
           path: /tmp/digests/*
@@ -147,40 +331,54 @@ jobs:
       packages: write
     steps:
       - name: Download digests
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: /tmp/digests
           pattern: docker-digest-*
           merge-multiple: true
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Create and push multi-arch manifest (Docker Hub)
         working-directory: /tmp/digests
+        env:
+          IMAGE_REPOSITORY: ferrumedge/ferrum-foundry
         run: |
+          images=()
+          for digest in *; do
+            [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || { echo "Invalid digest artifact: $digest" >&2; exit 1; }
+            images+=("$IMAGE_REPOSITORY@sha256:${digest}")
+          done
           docker buildx imagetools create \
-            -t ferrumedge/ferrum-foundry:latest \
-            -t ferrumedge/ferrum-foundry:main-${{ github.sha }} \
-            $(printf 'ferrumedge/ferrum-foundry@sha256:%s ' *)
+            -t "$IMAGE_REPOSITORY:latest" \
+            -t "$IMAGE_REPOSITORY:main-$GITHUB_SHA" \
+            "${images[@]}"
 
       - name: Create and push multi-arch manifest (GHCR)
         working-directory: /tmp/digests
+        env:
+          IMAGE_REPOSITORY: ghcr.io/${{ github.repository }}
         run: |
+          images=()
+          for digest in *; do
+            [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || { echo "Invalid digest artifact: $digest" >&2; exit 1; }
+            images+=("$IMAGE_REPOSITORY@sha256:${digest}")
+          done
           docker buildx imagetools create \
-            -t ghcr.io/${{ github.repository }}:latest \
-            -t ghcr.io/${{ github.repository }}:main-${{ github.sha }} \
-            $(printf 'ghcr.io/${{ github.repository }}@sha256:%s ' *)
+            -t "$IMAGE_REPOSITORY:latest" \
+            -t "$IMAGE_REPOSITORY:main-$GITHUB_SHA" \
+            "${images[@]}"

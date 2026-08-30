@@ -122,7 +122,10 @@ export default function PluginsPage() {
   const { offset, limit, paginationParams } = usePagination(total);
 
   const { data: paginatedData, isLoading: isPaginating } = usePluginConfigs(paginationParams);
-  const configs = paginatedData?.data ?? data?.data ?? [];
+  const configs = useMemo(
+    () => paginatedData?.data ?? data?.data ?? [],
+    [paginatedData?.data, data?.data],
+  );
 
   /* --- Client-side search filter --- */
   const filtered = useMemo(() => {
