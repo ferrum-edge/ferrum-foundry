@@ -32,7 +32,11 @@ export async function collectAllPages<T>(
       throw new Error("Gateway returned inconsistent pagination metadata");
     }
 
-    expectedTotal = pagination.total;
+    if (expectedTotal === undefined) {
+      expectedTotal = pagination.total;
+    } else if (pagination.total !== expectedTotal) {
+      throw new Error("Gateway changed pagination total while collecting pages");
+    }
     items.push(...page.data);
 
     if (items.length >= expectedTotal) {

@@ -4,8 +4,8 @@
 
 import { useState, useMemo } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { usePluginConfigs } from "@/hooks/usePlugins";
-import { usePagination } from "@/hooks/usePagination";
+import { useAllPluginConfigs, usePluginConfigs } from "@/hooks/usePlugins";
+import { usePaginationParams } from "@/hooks/usePagination";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -14,6 +14,7 @@ import { PaginationControls } from "@/components/shared/PaginationControls";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { SkeletonRow } from "@/components/ui/Skeleton";
 import { getPluginMeta } from "@/lib/pluginConfigDefaults";
+import { filterAndPage } from "@/lib/collectionSearch";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -117,24 +118,30 @@ export default function PluginsPage() {
   const [search, setSearch] = useState("");
 
   /* --- Data fetching with pagination --- */
-  const { data, isLoading, isError } = usePluginConfigs();
-  const total = data?.pagination?.total ?? 0;
-  const { offset, limit, paginationParams } = usePagination(total);
-
-  const { data: paginatedData, isLoading: isPaginating } = usePluginConfigs(paginationParams);
-  const configs = paginatedData?.data ?? data?.data ?? [];
-
-  /* --- Client-side search filter --- */
-  const filtered = useMemo(() => {
-    if (!search.trim()) return configs;
-    const q = search.toLowerCase();
-    return configs.filter(
-      (c) =>
-        c.plugin_name.toLowerCase().includes(q) ||
-        c.id.toLowerCase().includes(q) ||
-        (c.proxy_id && c.proxy_id.toLowerCase().includes(q)),
-    );
-  }, [configs, search]);
+  const pagination = usePaginationParams();
+  const searching = search.trim().length > 0;
+  const pageQuery = usePluginConfigs(pagination.paginationParams, !searching);
+  const allQuery = useAllPluginConfigs(searching);
+  const searchPage = useMemo(
+    () =>
+      filterAndPage(
+        allQuery.data ?? [],
+        search,
+        (config, query) =>
+          config.plugin_name.toLowerCase().includes(query) ||
+          config.id.toLowerCase().includes(query) ||
+          Boolean(config.proxy_id?.toLowerCase().includes(query)),
+        pagination.offset,
+        pagination.limit,
+      ),
+    [allQuery.data, pagination.limit, pagination.offset, search],
+  );
+  const configs = searching ? searchPage.items : (pageQuery.data?.data ?? []);
+  const total = searching
+    ? searchPage.total
+    : (pageQuery.data?.pagination?.total ?? 0);
+  const isLoading = searching ? allQuery.isLoading : pageQuery.isLoading;
+  const isError = searching ? allQuery.isError : pageQuery.isError;
 
   /* ---------------------------------------------------------------- */
   /*  Render                                                           */
@@ -161,7 +168,10 @@ export default function PluginsPage() {
       {/* Search */}
       <SearchBar
         value={search}
-        onChange={setSearch}
+        onChange={(value) => {
+          setSearch(value);
+          pagination.setParams({ offset: 0, limit: pagination.limit });
+        }}
         placeholder="Search by plugin name, ID, or proxy ID..."
         className="max-w-md"
       />
@@ -178,7 +188,7 @@ export default function PluginsPage() {
         </div>
 
         {/* Body */}
-        {(isLoading || isPaginating) && (
+        {isLoading && (
           <div className="px-6 divide-y divide-border/50">
             {Array.from({ length: 5 }).map((_, i) => (
               <SkeletonRow key={i} />
@@ -186,14 +196,14 @@ export default function PluginsPage() {
           </div>
         )}
 
-        {!isLoading && !isPaginating && isError && (
+        {!isLoading && isError && (
           <EmptyState
             title="Failed to load plugins"
             description="An error occurred while fetching plugin configurations."
           />
         )}
 
-        {!isLoading && !isPaginating && !isError && filtered.length === 0 && (
+        {!isLoading && !isError && configs.length === 0 && (
           <EmptyState
             title={search ? "No matching plugins" : "No plugin configs yet"}
             description={
@@ -211,9 +221,9 @@ export default function PluginsPage() {
           />
         )}
 
-        {!isLoading && !isPaginating && filtered.length > 0 && (
+        {!isLoading && !isError && configs.length > 0 && (
           <div className="divide-y divide-border/50">
-            {filtered.map((config) => (
+            {configs.map((config) => (
               <button
                 key={config.id}
                 type="button"
@@ -290,19 +300,10 @@ export default function PluginsPage() {
       {/* Pagination */}
       {total > 0 && (
         <PaginationControls
-          offset={offset}
-          limit={limit}
+          offset={pagination.offset}
+          limit={pagination.limit}
           total={total}
-          onChange={({ offset: newOffset, limit: newLimit }) => {
-            navigate({
-              search: (prev: Record<string, unknown>) => ({
-                ...prev,
-                offset: newOffset,
-                limit: newLimit,
-              }),
-              replace: true,
-            } as any);
-          }}
+          onChange={pagination.setParams}
         />
       )}
     </div>

@@ -84,11 +84,13 @@ export function useRestore() {
   return useMutation({
     mutationFn: ({
       data,
+      namespace,
       confirmApiSpecDeletion,
     }: {
       data: Record<string, unknown>;
+      namespace: string;
       confirmApiSpecDeletion?: boolean;
-    }) => ops.restore(data, { confirmApiSpecDeletion }),
+    }) => ops.restore(data, { namespace, confirmApiSpecDeletion }),
     onSuccess: () => {
       qc.invalidateQueries();
     },

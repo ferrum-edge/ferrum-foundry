@@ -4,7 +4,7 @@
 /*   audit, batch, backup/restore)                                    */
 /* ------------------------------------------------------------------ */
 
-import { proxyApi } from "./client";
+import { NAMESPACE_HEADER, SILENT_ERRORS, proxyApi } from "./client";
 import type {
   Consumer,
   ConsumerCreate,
@@ -415,15 +415,55 @@ export interface RestoreResponse {
   };
 }
 
+export interface RestoreApiSpecConfirmationRequired {
+  error: string;
+  api_specs_at_risk: number;
+  confirmation_required: "confirm_api_spec_deletion=true";
+}
+
+/** Recognize only the gateway's canonical destructive-restore conflict. */
+export function getRestoreApiSpecConfirmation(
+  error: unknown,
+): RestoreApiSpecConfirmationRequired | null {
+  if (!error || typeof error !== "object") return null;
+  const candidate = error as {
+    response?: { status?: unknown };
+    data?: unknown;
+  };
+  if (candidate.response?.status !== 409) return null;
+  if (!candidate.data || typeof candidate.data !== "object") return null;
+  const body = candidate.data as Record<string, unknown>;
+  const keys = Object.keys(body).sort();
+  if (
+    keys.length !== 3 ||
+    keys[0] !== "api_specs_at_risk" ||
+    keys[1] !== "confirmation_required" ||
+    keys[2] !== "error" ||
+    typeof body.error !== "string" ||
+    !Number.isSafeInteger(body.api_specs_at_risk) ||
+    (body.api_specs_at_risk as number) < 0 ||
+    body.confirmation_required !== "confirm_api_spec_deletion=true"
+  ) {
+    return null;
+  }
+  return body as unknown as RestoreApiSpecConfirmationRequired;
+}
+
 export async function restore(
   data: Record<string, unknown>,
-  options: { confirmApiSpecDeletion?: boolean } = {},
+  options: { namespace: string; confirmApiSpecDeletion?: boolean },
 ): Promise<RestoreResponse> {
   const searchParams: Record<string, string> = { confirm: "true" };
   if (options.confirmApiSpecDeletion) {
     searchParams.confirm_api_spec_deletion = "true";
   }
   return proxyApi
-    .post("restore", { json: data, searchParams, timeout: 120000 })
+    .post("restore", {
+      json: data,
+      searchParams,
+      headers: { [NAMESPACE_HEADER]: options.namespace },
+      timeout: 120000,
+      context: { [SILENT_ERRORS]: true },
+    })
     .json<RestoreResponse>();
 }

@@ -16,19 +16,21 @@ import type {
 } from "@/api/types";
 import { useNamespace } from "@/stores/namespace";
 
-export function useConsumers(params: PaginationParams = {}) {
+export function useConsumers(params: PaginationParams = {}, enabled = true) {
   const { selectedNamespace: ns } = useNamespace();
   return useQuery({
     queryKey: ["consumers", ns, { offset: params.offset, limit: params.limit }],
     queryFn: () => consumers.list(params),
+    enabled,
   });
 }
 
-export function useAllConsumers() {
+export function useAllConsumers(enabled = true) {
   const { selectedNamespace: ns } = useNamespace();
   return useQuery({
     queryKey: ["consumers", ns, "all"],
     queryFn: () => consumers.listAll(),
+    enabled,
   });
 }
 

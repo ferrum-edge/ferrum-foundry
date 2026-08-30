@@ -6,10 +6,30 @@ import { useRef, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@/components/ui/Dialog";
+import { Input } from "@/components/ui/Input";
 import { useToast } from "@/components/ui/Toast";
 import { getApiErrorMessage } from "@/api/client";
 import { useBackup, useRestore } from "@/hooks/useOps";
 import { useNamespace } from "@/stores/namespace";
+import { getRestoreApiSpecConfirmation } from "@/api/ops";
+
+interface PendingRestore {
+  data: Record<string, unknown>;
+  namespace: string;
+  fileName: string;
+}
+
+interface ApiSpecRisk {
+  pending: PendingRestore;
+  count: number;
+  serverMessage: string;
+}
 
 export function BackupRestoreCard() {
   const { toast } = useToast();
@@ -17,7 +37,9 @@ export function BackupRestoreCard() {
   const backup = useBackup();
   const restore = useRestore();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [pendingRestore, setPendingRestore] = useState<Record<string, unknown> | null>(null);
+  const [pendingRestore, setPendingRestore] = useState<PendingRestore | null>(null);
+  const [apiSpecRisk, setApiSpecRisk] = useState<ApiSpecRisk | null>(null);
+  const [riskPhrase, setRiskPhrase] = useState("");
 
   const handleDownload = async () => {
     try {
@@ -43,10 +65,75 @@ export function BackupRestoreCard() {
   const handleFileSelected = async (file: File) => {
     try {
       const text = await file.text();
-      const parsed = JSON.parse(text) as Record<string, unknown>;
-      setPendingRestore(parsed);
+      const parsed = JSON.parse(text) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("Backup root must be an object");
+      }
+      setPendingRestore({
+        data: parsed as Record<string, unknown>,
+        namespace: selectedNamespace,
+        fileName: file.name,
+      });
     } catch {
       toast("error", "Not a valid JSON backup file");
+    }
+  };
+
+  const clearRestore = () => {
+    setPendingRestore(null);
+    setApiSpecRisk(null);
+    setRiskPhrase("");
+  };
+
+  const showRestoreSuccess = (result: Awaited<ReturnType<typeof restore.mutateAsync>>) => {
+    const counts = result.restored;
+    toast(
+      "success",
+      `Restored ${counts.proxies} proxies, ${counts.consumers} consumers, ${counts.plugin_configs} plugins, ${counts.upstreams} upstreams, ${counts.api_specs ?? 0} API specs, and ${counts.gateway_trust_bundles ?? 0} trust bundles.`,
+    );
+    clearRestore();
+  };
+
+  const runInitialRestore = async () => {
+    if (!pendingRestore) return;
+    try {
+      const result = await restore.mutateAsync({
+        data: pendingRestore.data,
+        namespace: pendingRestore.namespace,
+      });
+      showRestoreSuccess(result);
+    } catch (err) {
+      const conflict = getRestoreApiSpecConfirmation(err);
+      if (conflict) {
+        setApiSpecRisk({
+          pending: pendingRestore,
+          count: conflict.api_specs_at_risk,
+          serverMessage: conflict.error,
+        });
+        setRiskPhrase("");
+        return;
+      }
+      toast("error", await getApiErrorMessage(err, "Restore failed"));
+    }
+  };
+
+  const riskConfirmationPhrase = apiSpecRisk
+    ? `DELETE ${apiSpecRisk.count} API SPECS IN ${apiSpecRisk.pending.namespace}`
+    : "";
+
+  const runConfirmedRestore = async () => {
+    if (!apiSpecRisk || riskPhrase !== riskConfirmationPhrase) return;
+    try {
+      const result = await restore.mutateAsync({
+        data: apiSpecRisk.pending.data,
+        namespace: apiSpecRisk.pending.namespace,
+        confirmApiSpecDeletion: true,
+      });
+      showRestoreSuccess(result);
+    } catch (err) {
+      // A confirmed restore is never offered a third attempt automatically.
+      toast("error", await getApiErrorMessage(err, "Confirmed restore failed"));
+      clearRestore();
     }
   };
 
@@ -94,26 +181,54 @@ export function BackupRestoreCard() {
       </div>
 
       <ConfirmDialog
-        open={!!pendingRestore}
-        onOpenChange={(open) => !open && setPendingRestore(null)}
+        open={!!pendingRestore && !apiSpecRisk}
+        onOpenChange={(open) => !open && clearRestore()}
         title="Restore configuration?"
-        description={`This is a DESTRUCTIVE full replacement of namespace "${selectedNamespace}": all current proxies, consumers, plugins, upstreams, and API specs are replaced by the backup contents.`}
+        description={`This is a DESTRUCTIVE full replacement of namespace "${pendingRestore?.namespace ?? selectedNamespace}" using "${pendingRestore?.fileName ?? "the selected file"}": all current proxies, consumers, plugins, upstreams, and API specs are replaced by the pinned backup contents.`}
         confirmLabel="Restore"
         loading={restore.isPending}
-        onConfirm={async () => {
-          if (!pendingRestore) return;
-          try {
-            const result = await restore.mutateAsync({ data: pendingRestore });
-            toast(
-              "success",
-              `Restored ${result.restored.proxies} proxies, ${result.restored.consumers} consumers, ${result.restored.plugin_configs} plugins, ${result.restored.upstreams} upstreams.`,
-            );
-            setPendingRestore(null);
-          } catch (err) {
-            toast("error", await getApiErrorMessage(err, "Restore failed"));
-          }
-        }}
+        onConfirm={() => void runInitialRestore()}
       />
+
+      <Dialog open={!!apiSpecRisk} onOpenChange={(open) => !open && clearRestore()}>
+        <DialogContent>
+          <DialogTitle>Confirm API spec deletion</DialogTitle>
+          <DialogDescription className="mt-2">
+            The gateway reports that restoring {apiSpecRisk?.pending.fileName} into
+            namespace &quot;{apiSpecRisk?.pending.namespace}&quot; will delete {" "}
+            <strong className="text-danger">
+              {apiSpecRisk?.count ?? 0} existing API specs
+            </strong>
+            . {apiSpecRisk?.serverMessage}
+          </DialogDescription>
+          <div className="mt-5 space-y-4">
+            <Input
+              label="Type the exact phrase to continue"
+              value={riskPhrase}
+              onChange={(event) => setRiskPhrase(event.target.value)}
+              placeholder={riskConfirmationPhrase}
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <code className="block rounded bg-code-bg p-3 text-xs text-text-secondary break-all">
+              {riskConfirmationPhrase}
+            </code>
+            <div className="flex justify-end gap-3">
+              <Button variant="secondary" onClick={clearRestore} disabled={restore.isPending}>
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                loading={restore.isPending}
+                disabled={riskPhrase !== riskConfirmationPhrase}
+                onClick={() => void runConfirmedRestore()}
+              >
+                Delete specs and restore
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

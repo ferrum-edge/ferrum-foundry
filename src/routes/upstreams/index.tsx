@@ -4,8 +4,8 @@
 
 import { useState, useMemo } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { useUpstreams } from "@/hooks/useUpstreams";
-import { usePagination } from "@/hooks/usePagination";
+import { useAllUpstreams, useUpstreams } from "@/hooks/useUpstreams";
+import { usePaginationParams } from "@/hooks/usePagination";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -13,6 +13,7 @@ import { SearchBar } from "@/components/shared/SearchBar";
 import { PaginationControls } from "@/components/shared/PaginationControls";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { SkeletonRow } from "@/components/ui/Skeleton";
+import { filterAndPage } from "@/lib/collectionSearch";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -72,23 +73,29 @@ export default function UpstreamsPage() {
   const [search, setSearch] = useState("");
 
   /* --- Data fetching with pagination --- */
-  const { data, isLoading, isError } = useUpstreams();
-  const total = data?.pagination?.total ?? 0;
-  const { offset, limit, paginationParams } = usePagination(total);
-
-  const { data: paginatedData, isLoading: isPaginating } = useUpstreams(paginationParams);
-  const upstreams = paginatedData?.data ?? data?.data ?? [];
-
-  /* --- Client-side search filter --- */
-  const filtered = useMemo(() => {
-    if (!search.trim()) return upstreams;
-    const q = search.toLowerCase();
-    return upstreams.filter(
-      (u) =>
-        (u.name && u.name.toLowerCase().includes(q)) ||
-        u.id.toLowerCase().includes(q),
-    );
-  }, [upstreams, search]);
+  const pagination = usePaginationParams();
+  const searching = search.trim().length > 0;
+  const pageQuery = useUpstreams(pagination.paginationParams, !searching);
+  const allQuery = useAllUpstreams(searching);
+  const searchPage = useMemo(
+    () =>
+      filterAndPage(
+        allQuery.data ?? [],
+        search,
+        (upstream, query) =>
+          Boolean(upstream.name?.toLowerCase().includes(query)) ||
+          upstream.id.toLowerCase().includes(query),
+        pagination.offset,
+        pagination.limit,
+      ),
+    [allQuery.data, pagination.limit, pagination.offset, search],
+  );
+  const upstreams = searching ? searchPage.items : (pageQuery.data?.data ?? []);
+  const total = searching
+    ? searchPage.total
+    : (pageQuery.data?.pagination?.total ?? 0);
+  const isLoading = searching ? allQuery.isLoading : pageQuery.isLoading;
+  const isError = searching ? allQuery.isError : pageQuery.isError;
 
   /* ---------------------------------------------------------------- */
   /*  Render                                                           */
@@ -115,7 +122,10 @@ export default function UpstreamsPage() {
       {/* Search */}
       <SearchBar
         value={search}
-        onChange={setSearch}
+        onChange={(value) => {
+          setSearch(value);
+          pagination.setParams({ offset: 0, limit: pagination.limit });
+        }}
         placeholder="Search by name or ID..."
         className="max-w-md"
       />
@@ -132,7 +142,7 @@ export default function UpstreamsPage() {
         </div>
 
         {/* Body */}
-        {(isLoading || isPaginating) && (
+        {isLoading && (
           <div className="px-6 divide-y divide-border/50">
             {Array.from({ length: 5 }).map((_, i) => (
               <SkeletonRow key={i} />
@@ -140,14 +150,14 @@ export default function UpstreamsPage() {
           </div>
         )}
 
-        {!isLoading && !isPaginating && isError && (
+        {!isLoading && isError && (
           <EmptyState
             title="Failed to load upstreams"
             description="An error occurred while fetching upstream configurations."
           />
         )}
 
-        {!isLoading && !isPaginating && !isError && filtered.length === 0 && (
+        {!isLoading && !isError && upstreams.length === 0 && (
           <EmptyState
             title={search ? "No matching upstreams" : "No upstreams yet"}
             description={
@@ -165,9 +175,9 @@ export default function UpstreamsPage() {
           />
         )}
 
-        {!isLoading && !isPaginating && filtered.length > 0 && (
+        {!isLoading && !isError && upstreams.length > 0 && (
           <div className="divide-y divide-border/50">
-            {filtered.map((upstream) => (
+            {upstreams.map((upstream) => (
               <button
                 key={upstream.id}
                 type="button"
@@ -233,19 +243,10 @@ export default function UpstreamsPage() {
       {/* Pagination */}
       {total > 0 && (
         <PaginationControls
-          offset={offset}
-          limit={limit}
+          offset={pagination.offset}
+          limit={pagination.limit}
           total={total}
-          onChange={({ offset: newOffset, limit: newLimit }) => {
-            navigate({
-              search: (prev: Record<string, unknown>) => ({
-                ...prev,
-                offset: newOffset,
-                limit: newLimit,
-              }),
-              replace: true,
-            } as any);
-          }}
+          onChange={pagination.setParams}
         />
       )}
     </div>
