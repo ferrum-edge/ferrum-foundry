@@ -76,6 +76,7 @@ test("restore fixture uses current resource names and versioned API-spec semanti
   for (const proxy of payload.proxies) {
     assert.equal(proxy.backend_scheme, "http");
     assert.equal(Object.hasOwn(proxy, "backend_protocol"), false);
+    assert.deepEqual(proxy.allowed_ws_origins, ["http://localhost:5173", "http://localhost:8000"]);
     assert.ok(proxy.id);
   }
 

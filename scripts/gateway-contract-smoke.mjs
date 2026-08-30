@@ -21,7 +21,7 @@ async function request(path, { method = "GET", body, expected = [200, 201] } = {
     `${method} ${path} returned ${response.status}: ${text}`,
   );
   const cursor = response.headers.get("x-ferrum-config-cursor");
-  if (cursor !== null) assert.match(cursor, /^\d+$/);
+  if (cursor !== null) assert.match(cursor, /^\d+:\d+$/);
   return text ? JSON.parse(text) : undefined;
 }
 

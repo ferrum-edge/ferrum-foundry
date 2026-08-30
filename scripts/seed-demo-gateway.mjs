@@ -534,7 +534,7 @@ function makeProxies(now, backendHost) {
       passthrough: false,
       udp_idle_timeout_seconds: 60,
       allowed_methods: ["GET", "POST", "OPTIONS"],
-      allowed_ws_origins: [],
+      allowed_ws_origins: ["http://localhost:5173", "http://localhost:8000"],
       response_body_mode: plan.slug === "analytics" ? "buffer" : "stream",
       pool_idle_timeout_seconds: 45,
       pool_enable_http_keep_alive: true,
