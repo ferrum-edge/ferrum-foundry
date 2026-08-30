@@ -308,6 +308,9 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
     initialData?.response_body_mode ?? "stream",
   );
   const [allowedMethods, setAllowedMethods] = useState<string[]>(initialData?.allowed_methods ?? []);
+  const [restrictMethods, setRestrictMethods] = useState(
+    initialData?.allowed_methods !== null && initialData?.allowed_methods !== undefined,
+  );
   const [allowedWsOrigins, setAllowedWsOrigins] = useState<string[]>(initialData?.allowed_ws_origins ?? []);
 
   /* ---------- Backend Timeouts ---------- */
@@ -369,8 +372,12 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
 
   /* ---------- Connection Pool ---------- */
   const [poolIdleTimeout, setPoolIdleTimeout] = useState<number | "">(initialData?.pool_idle_timeout_seconds ?? "");
-  const [poolKeepAlive, setPoolKeepAlive] = useState(initialData?.pool_enable_http_keep_alive ?? true);
-  const [poolHttp2, setPoolHttp2] = useState(initialData?.pool_enable_http2 ?? false);
+  const [poolKeepAlive, setPoolKeepAlive] = useState<boolean | null>(
+    initialData?.pool_enable_http_keep_alive ?? null,
+  );
+  const [poolHttp2, setPoolHttp2] = useState<boolean | null>(
+    initialData?.pool_enable_http2 ?? null,
+  );
   const [poolTcpKeepAlive, setPoolTcpKeepAlive] = useState<number | "">(initialData?.pool_tcp_keepalive_seconds ?? "");
   const [poolH2KeepAliveInterval, setPoolH2KeepAliveInterval] = useState<number | "">(
     initialData?.pool_http2_keep_alive_interval_seconds ?? "",
@@ -384,10 +391,15 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
   const [poolH2InitConnWindow, setPoolH2InitConnWindow] = useState<number | "">(
     initialData?.pool_http2_initial_connection_window_size ?? "",
   );
-  const [poolH2AdaptiveWindow, setPoolH2AdaptiveWindow] = useState(initialData?.pool_http2_adaptive_window ?? false);
+  const [poolH2AdaptiveWindow, setPoolH2AdaptiveWindow] = useState<boolean | null>(
+    initialData?.pool_http2_adaptive_window ?? null,
+  );
   const [poolH2MaxFrameSize, setPoolH2MaxFrameSize] = useState<number | "">(initialData?.pool_http2_max_frame_size ?? "");
   const [poolH2MaxConcurrentStreams, setPoolH2MaxConcurrentStreams] = useState<number | "">(
     initialData?.pool_http2_max_concurrent_streams ?? "",
+  );
+  const [poolMaxRequests, setPoolMaxRequests] = useState<number | "">(
+    initialData?.pool_max_requests_per_connection ?? "",
   );
 
   /* ---------- Protocol-Specific ---------- */
@@ -452,7 +464,9 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
       preserve_host_header: preserveHostHeader,
       auth_mode: authMode,
       response_body_mode: responseBodyMode,
-      ...(allowedMethods.length > 0 && { allowed_methods: allowedMethods as ProxyCreate["allowed_methods"] }),
+      allowed_methods: restrictMethods
+        ? allowedMethods as ProxyCreate["allowed_methods"]
+        : null,
       ...(allowedWsOrigins.length > 0 && { allowed_ws_origins: allowedWsOrigins }),
       backend_connect_timeout_ms: connectTimeout,
       backend_read_timeout_ms: readTimeout,
@@ -475,16 +489,21 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
         },
       }),
       ...(poolIdleTimeout !== "" && { pool_idle_timeout_seconds: Number(poolIdleTimeout) }),
-      pool_enable_http_keep_alive: poolKeepAlive,
-      pool_enable_http2: poolHttp2,
+      ...(poolKeepAlive !== null && { pool_enable_http_keep_alive: poolKeepAlive }),
+      ...(poolHttp2 !== null && { pool_enable_http2: poolHttp2 }),
       ...(poolTcpKeepAlive !== "" && { pool_tcp_keepalive_seconds: Number(poolTcpKeepAlive) }),
       ...(poolH2KeepAliveInterval !== "" && { pool_http2_keep_alive_interval_seconds: Number(poolH2KeepAliveInterval) }),
       ...(poolH2KeepAliveTimeout !== "" && { pool_http2_keep_alive_timeout_seconds: Number(poolH2KeepAliveTimeout) }),
       ...(poolH2InitStreamWindow !== "" && { pool_http2_initial_stream_window_size: Number(poolH2InitStreamWindow) }),
       ...(poolH2InitConnWindow !== "" && { pool_http2_initial_connection_window_size: Number(poolH2InitConnWindow) }),
-      pool_http2_adaptive_window: poolH2AdaptiveWindow,
+      ...(poolH2AdaptiveWindow !== null && {
+        pool_http2_adaptive_window: poolH2AdaptiveWindow,
+      }),
       ...(poolH2MaxFrameSize !== "" && { pool_http2_max_frame_size: Number(poolH2MaxFrameSize) }),
       ...(poolH2MaxConcurrentStreams !== "" && { pool_http2_max_concurrent_streams: Number(poolH2MaxConcurrentStreams) }),
+      ...(poolMaxRequests !== "" && {
+        pool_max_requests_per_connection: Number(poolMaxRequests),
+      }),
       ...(listenPort !== "" && { listen_port: Number(listenPort) }),
       ...(tcpIdleTimeout !== "" && { tcp_idle_timeout_seconds: Number(tcpIdleTimeout) }),
       udp_idle_timeout_seconds: udpIdleTimeout,
@@ -629,12 +648,19 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
               { value: "buffer", label: "Buffer" },
             ]}
           />
-          <MethodCheckboxGroup
-            label="Allowed Methods"
-            selected={allowedMethods}
-            onChange={setAllowedMethods}
-            options={ALL_HTTP_METHODS}
+          <Checkbox
+            label="Restrict HTTP methods"
+            checked={restrictMethods}
+            onChange={setRestrictMethods}
           />
+          {restrictMethods && (
+            <MethodCheckboxGroup
+              label="Allowed Methods"
+              selected={allowedMethods}
+              onChange={setAllowedMethods}
+              options={ALL_HTTP_METHODS}
+            />
+          )}
           <TagInput
             label="Allowed WebSocket Origins"
             values={allowedWsOrigins}
@@ -889,8 +915,30 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
             value={numVal(poolIdleTimeout)}
             onChange={setNum(setPoolIdleTimeout)}
           />
-          <Checkbox label="Enable HTTP Keep-Alive" checked={poolKeepAlive} onChange={setPoolKeepAlive} />
-          <Checkbox label="Enable HTTP/2" checked={poolHttp2} onChange={setPoolHttp2} />
+          <Select
+            label="HTTP Keep-Alive Override"
+            value={poolKeepAlive === null ? "inherit" : String(poolKeepAlive)}
+            onValueChange={(value) =>
+              setPoolKeepAlive(value === "inherit" ? null : value === "true")
+            }
+            options={[
+              { value: "inherit", label: "Inherit gateway default" },
+              { value: "true", label: "Enabled" },
+              { value: "false", label: "Disabled" },
+            ]}
+          />
+          <Select
+            label="HTTP/2 Override"
+            value={poolHttp2 === null ? "inherit" : String(poolHttp2)}
+            onValueChange={(value) =>
+              setPoolHttp2(value === "inherit" ? null : value === "true")
+            }
+            options={[
+              { value: "inherit", label: "Inherit gateway default" },
+              { value: "true", label: "Enabled" },
+              { value: "false", label: "Disabled" },
+            ]}
+          />
           <Input
             label="TCP Keep-Alive (seconds)"
             type="number"
@@ -923,7 +971,18 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
                 value={numVal(poolH2InitConnWindow)}
                 onChange={setNum(setPoolH2InitConnWindow)}
               />
-              <Checkbox label="HTTP/2 Adaptive Window" checked={poolH2AdaptiveWindow} onChange={setPoolH2AdaptiveWindow} />
+              <Select
+                label="HTTP/2 Adaptive Window Override"
+                value={poolH2AdaptiveWindow === null ? "inherit" : String(poolH2AdaptiveWindow)}
+                onValueChange={(value) =>
+                  setPoolH2AdaptiveWindow(value === "inherit" ? null : value === "true")
+                }
+                options={[
+                  { value: "inherit", label: "Inherit gateway default" },
+                  { value: "true", label: "Enabled" },
+                  { value: "false", label: "Disabled" },
+                ]}
+              />
               <Input
                 label="HTTP/2 Max Frame Size"
                 type="number"
@@ -938,6 +997,13 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
               />
             </>
           )}
+          <Input
+            label="Max Requests per Connection"
+            type="number"
+            value={numVal(poolMaxRequests)}
+            onChange={setNum(setPoolMaxRequests)}
+            helpText="Leave blank to inherit the gateway default."
+          />
         </CollapsibleSection>
       )}
 

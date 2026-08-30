@@ -19,6 +19,14 @@ export function useProxies(params: PaginationParams = {}) {
   });
 }
 
+export function useAllProxies() {
+  const { selectedNamespace: ns } = useNamespace();
+  return useQuery({
+    queryKey: ["proxies", ns, "all"],
+    queryFn: () => proxies.listAll(),
+  });
+}
+
 export function useProxy(id: string) {
   const { selectedNamespace: ns } = useNamespace();
   return useQuery({

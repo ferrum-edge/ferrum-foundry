@@ -6,11 +6,11 @@ import { useState, useMemo } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import {
   usePluginConfig,
-  useUpdatePluginConfig,
-  useDeletePluginConfig,
+  useUpdatePluginWithMembership,
+  useDeletePluginWithMembership,
   useAvailablePlugins,
 } from "@/hooks/usePlugins";
-import { useProxies, useUpdateProxy } from "@/hooks/useProxies";
+import { useAllProxies } from "@/hooks/useProxies";
 import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -18,7 +18,6 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { PluginConfigForm } from "@/components/forms/PluginConfigForm";
 import { getApiErrorMessage } from "@/api/client";
-import * as proxiesApi from "@/api/proxies";
 import type { PluginConfigCreate } from "@/api/types";
 
 export default function PluginDetailPage() {
@@ -28,64 +27,29 @@ export default function PluginDetailPage() {
 
   const { data: plugin, isLoading, isError } = usePluginConfig(pluginId);
   const { data: availablePlugins, isLoading: pluginsLoading } = useAvailablePlugins();
-  const { data: proxiesData } = useProxies({ limit: 1000 });
-  const updatePlugin = useUpdatePluginConfig();
-  const updateProxy = useUpdateProxy();
-  const deletePlugin = useDeletePluginConfig();
+  const { data: allProxies } = useAllProxies();
+  const updatePlugin = useUpdatePluginWithMembership();
+  const deletePlugin = useDeletePluginWithMembership();
 
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   // Compute which proxies currently reference this plugin (for proxy_group)
   const initialProxyGroupIds = useMemo(() => {
-    if (!proxiesData?.data || !plugin || plugin.scope !== "proxy_group") return [];
-    return proxiesData.data
+    if (!allProxies || !plugin || plugin.scope !== "proxy_group") return [];
+    return allProxies
       .filter((p) => p.plugins?.some((a) => a.plugin_config_id === pluginId))
       .map((p) => p.id);
-  }, [proxiesData?.data, plugin, pluginId]);
+  }, [allProxies, plugin, pluginId]);
 
   /* ---------- Handlers ---------- */
 
   const handleSubmit = async (data: PluginConfigCreate, proxyGroupIds?: string[]) => {
     try {
-      await updatePlugin.mutateAsync({ id: pluginId, data });
-
-      // Sync proxy associations for proxy_group scope
-      if (data.scope === "proxy_group" && proxyGroupIds && proxiesData?.data) {
-        const currentIds = new Set(initialProxyGroupIds);
-        const desiredIds = new Set(proxyGroupIds);
-
-        // Add association to newly selected proxies
-        const toAdd = proxyGroupIds.filter((id) => !currentIds.has(id));
-        // Remove association from de-selected proxies
-        const toRemove = initialProxyGroupIds.filter((id) => !desiredIds.has(id));
-
-        const promises = [
-          ...toAdd.map((proxyId) => {
-            const proxy = proxiesData.data.find((p) => p.id === proxyId);
-            if (!proxy) return Promise.resolve();
-            return updateProxy.mutateAsync({
-              id: proxyId,
-              data: {
-                ...proxiesApi.toUpdatePayload(proxy),
-                plugins: [...(proxy.plugins ?? []), { plugin_config_id: pluginId }],
-              },
-            });
-          }),
-          ...toRemove.map((proxyId) => {
-            const proxy = proxiesData.data.find((p) => p.id === proxyId);
-            if (!proxy) return Promise.resolve();
-            return updateProxy.mutateAsync({
-              id: proxyId,
-              data: {
-                ...proxiesApi.toUpdatePayload(proxy),
-                plugins: (proxy.plugins ?? []).filter((a) => a.plugin_config_id !== pluginId),
-              },
-            });
-          }),
-        ];
-
-        if (promises.length > 0) await Promise.all(promises);
-      }
+      await updatePlugin.mutateAsync({
+        id: pluginId,
+        data,
+        proxyIds: data.scope === "proxy_group" ? proxyGroupIds ?? [] : [],
+      });
 
       toast("success", "Plugin configuration updated successfully");
     } catch (err: unknown) {

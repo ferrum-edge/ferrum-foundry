@@ -3,7 +3,7 @@
 /* ------------------------------------------------------------------ */
 
 import { useState, useMemo, useRef, useEffect } from "react";
-import { useProxies } from "@/hooks/useProxies";
+import { useAllProxies } from "@/hooks/useProxies";
 import type { Proxy } from "@/api/types";
 
 /* ------------------------------------------------------------------ */
@@ -49,9 +49,8 @@ export function ProxySearchPicker(props: ProxySearchPickerProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Fetch all proxies (high limit to get them all for the picker)
-  const { data, isLoading } = useProxies({ limit: 1000 });
-  const proxies = data?.data ?? [];
+  const { data, isLoading } = useAllProxies();
+  const proxies = useMemo(() => data ?? [], [data]);
 
   // Filter by search term
   const filtered = useMemo(() => {

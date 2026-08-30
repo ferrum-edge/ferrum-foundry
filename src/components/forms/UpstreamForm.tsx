@@ -154,15 +154,23 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
     http_only: initialData?.hash_on_cookie_config?.http_only ?? true,
     secure: initialData?.hash_on_cookie_config?.secure ?? false,
     same_site: initialData?.hash_on_cookie_config?.same_site ?? "Lax",
+    session_cookie: initialData?.hash_on_cookie_config?.session_cookie ?? false,
   });
 
   /* ---------- Subsets ---------- */
-  const [subsets, setSubsets] = useState<Array<{ name: string; labels: string }>>(
+  const [subsets, setSubsets] = useState<Array<{
+    name: string;
+    labels: string;
+    algorithm: Upstream["algorithm"] | "";
+    hashOn: string;
+  }>>(
     (initialData?.subsets ?? []).map((s) => ({
       name: s.name,
       labels: Object.entries(s.labels)
         .map(([k, v]) => `${k}=${v}`)
         .join(", "),
+      algorithm: s.traffic_policy?.load_balancer_algorithm ?? "",
+      hashOn: s.traffic_policy?.hash_on ?? "",
     })),
   );
 
@@ -198,6 +206,12 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
     const { service_name: _, ...rest } = providerConfig;
     return { ...rest, default_weight: sd.default_weight ?? 1 };
   });
+  const [sdMaxStale, setSdMaxStale] = useState<number | "">(
+    initialData?.service_discovery?.max_stale_seconds ?? "",
+  );
+  const [sdStalePolicy, setSdStalePolicy] = useState(
+    initialData?.service_discovery?.stale_policy ?? "",
+  );
 
   /* ---------- Validation ---------- */
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -235,6 +249,7 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
             http_only: cookieConfig.http_only,
             secure: cookieConfig.secure,
             same_site: cookieConfig.same_site,
+            session_cookie: cookieConfig.session_cookie,
           }
         : undefined;
 
@@ -252,6 +267,7 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
               service_name: sdServiceName,
               namespace: (sdConfig.namespace as string) || undefined,
               port_name: (sdConfig.port_name as string) || undefined,
+              label_selector: (sdConfig.label_selector as string) || undefined,
               poll_interval_seconds: (sdConfig.poll_interval_seconds as number) ?? 30,
             },
           }),
@@ -276,6 +292,10 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
             },
           }),
           default_weight: (sdConfig.default_weight as number) ?? 1,
+          ...(sdMaxStale !== "" && { max_stale_seconds: Number(sdMaxStale) }),
+          ...(sdStalePolicy && {
+            stale_policy: sdStalePolicy as NonNullable<ServiceDiscoveryConfig["stale_policy"]>,
+          }),
         }
       : undefined;
 
@@ -293,6 +313,12 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
               return [pair.slice(0, eq).trim(), pair.slice(eq + 1).trim()];
             }),
         ),
+        ...((s.algorithm || s.hashOn.trim()) && {
+          traffic_policy: {
+            ...(s.algorithm && { load_balancer_algorithm: s.algorithm }),
+            ...(s.hashOn.trim() && { hash_on: s.hashOn.trim() }),
+          },
+        }),
       }));
 
     const sanList = tlsSanAllowList
@@ -680,6 +706,11 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
             checked={cookieConfig.secure ?? false}
             onChange={(v) => setCookieConfig({ ...cookieConfig, secure: v })}
           />
+          <Checkbox
+            label="Session Cookie"
+            checked={cookieConfig.session_cookie ?? false}
+            onChange={(v) => setCookieConfig({ ...cookieConfig, session_cookie: v })}
+          />
           <Select
             label="SameSite"
             value={cookieConfig.same_site ?? "Lax"}
@@ -740,6 +771,12 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
                   value={String(sdConfig.port_name ?? "")}
                   onChange={(e) => updateSdConfig("port_name", e.target.value)}
                   placeholder="http"
+                />
+                <Input
+                  label="Label Selector"
+                  value={String(sdConfig.label_selector ?? "")}
+                  onChange={(e) => updateSdConfig("label_selector", e.target.value)}
+                  placeholder="app=payments,tier=backend"
                 />
                 <Input
                   label="Poll Interval (seconds)"
@@ -833,6 +870,28 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
               onChange={(e) => updateSdConfig("default_weight", Number(e.target.value))}
               helpText="Default weight for discovered targets"
             />
+            <Input
+              label="Maximum Stale Age (seconds)"
+              type="number"
+              value={sdMaxStale === "" ? "" : String(sdMaxStale)}
+              onChange={(e) =>
+                setSdMaxStale(e.target.value === "" ? "" : Number(e.target.value))
+              }
+              placeholder="Gateway default"
+            />
+            <Select
+              label="Stale Endpoint Policy"
+              value={sdStalePolicy || "inherit"}
+              onValueChange={(value) =>
+                setSdStalePolicy(value === "inherit" ? "" : value as typeof sdStalePolicy)
+              }
+              options={[
+                { value: "inherit", label: "Inherit gateway default" },
+                { value: "retain", label: "Retain stale endpoints" },
+                { value: "withdraw", label: "Withdraw stale endpoints" },
+                { value: "fail_readiness", label: "Fail readiness" },
+              ]}
+            />
           </div>
         )}
       </CollapsibleSection>
@@ -870,6 +929,31 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
                 }
                 placeholder="version=v2, tier=canary"
               />
+              <Select
+                label={index === 0 ? "Subset Algorithm" : undefined}
+                value={subset.algorithm || "inherit"}
+                onValueChange={(value) =>
+                  setSubsets((prev) =>
+                    prev.map((s, i) => i === index
+                      ? { ...s, algorithm: value === "inherit" ? "" : value as Upstream["algorithm"] }
+                      : s),
+                  )
+                }
+                options={[
+                  { value: "inherit", label: "Inherit upstream algorithm" },
+                  ...ALGORITHM_OPTIONS,
+                ]}
+              />
+              <Input
+                label={index === 0 ? "Subset Hash Key" : undefined}
+                value={subset.hashOn}
+                onChange={(e) =>
+                  setSubsets((prev) =>
+                    prev.map((s, i) => i === index ? { ...s, hashOn: e.target.value } : s),
+                  )
+                }
+                placeholder="Optional hash key"
+              />
             </div>
             <Button
               type="button"
@@ -888,7 +972,10 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
           type="button"
           variant="secondary"
           size="sm"
-          onClick={() => setSubsets((prev) => [...prev, { name: "", labels: "" }])}
+          onClick={() => setSubsets((prev) => [
+            ...prev,
+            { name: "", labels: "", algorithm: "", hashOn: "" },
+          ])}
         >
           Add Subset
         </Button>
