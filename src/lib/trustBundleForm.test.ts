@@ -72,6 +72,32 @@ describe("buildTrustBundlePayload", () => {
         ...EMPTY_TRUST_BUNDLE_FORM,
         trustDomain: "example.org",
         jwtAuthorities: JSON.stringify([
+          {
+            key_id: "symmetric-key",
+            public_key_pem: JSON.stringify({ kty: "oct", k: "c2VjcmV0" }),
+          },
+        ]),
+      }),
+    ).toThrow("must not contain private or symmetric key material");
+
+    expect(() =>
+      buildTrustBundlePayload({
+        ...EMPTY_TRUST_BUNDLE_FORM,
+        trustDomain: "example.org",
+        jwtAuthorities: JSON.stringify([
+          {
+            key_id: "partial-private-key",
+            public_key_pem: JSON.stringify({ kty: "RSA", n: "abc", e: "AQAB", p: "secret" }),
+          },
+        ]),
+      }),
+    ).toThrow("must not contain private or symmetric key material");
+
+    expect(() =>
+      buildTrustBundlePayload({
+        ...EMPTY_TRUST_BUNDLE_FORM,
+        trustDomain: "example.org",
+        jwtAuthorities: JSON.stringify([
           { key_id: "key-1", public_key_pem: '{"kty":"OKP","x":"abc"}' },
           { key_id: "key-1", public_key_pem: '{"kty":"OKP","x":"def"}' },
         ]),
