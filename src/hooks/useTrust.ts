@@ -10,7 +10,7 @@ export function useTrustBundles() {
   const { selectedNamespace: ns } = useNamespace();
   return useQuery({
     queryKey: ["trustBundles", ns],
-    queryFn: () => trust.list(),
+    queryFn: () => trust.list({}, ns),
     retry: false,
   });
 }
@@ -19,7 +19,7 @@ export function useTrustStatus() {
   const { selectedNamespace: ns } = useNamespace();
   return useQuery({
     queryKey: ["trustStatus", ns],
-    queryFn: () => trust.status(),
+    queryFn: () => trust.status(ns),
     retry: false,
   });
 }
@@ -27,7 +27,13 @@ export function useTrustStatus() {
 export function useCreateTrustBundle() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: trust.GatewayTrustBundleCreate) => trust.create(data),
+    mutationFn: ({
+      data,
+      namespace,
+    }: {
+      data: trust.GatewayTrustBundleCreate;
+      namespace: string;
+    }) => trust.create(data, namespace),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["trustBundles"] });
       qc.invalidateQueries({ queryKey: ["trustStatus"] });
@@ -41,10 +47,12 @@ export function useUpdateTrustBundle() {
     mutationFn: ({
       id,
       data,
+      namespace,
     }: {
       id: string;
       data: trust.GatewayTrustBundleCreate;
-    }) => trust.update(id, data),
+      namespace: string;
+    }) => trust.update(id, data, namespace),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["trustBundles"] });
       qc.invalidateQueries({ queryKey: ["trustStatus"] });
@@ -55,7 +63,8 @@ export function useUpdateTrustBundle() {
 export function useDeleteTrustBundle() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => trust.remove(id),
+    mutationFn: ({ id, namespace }: { id: string; namespace: string }) =>
+      trust.remove(id, namespace),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["trustBundles"] });
       qc.invalidateQueries({ queryKey: ["trustStatus"] });
