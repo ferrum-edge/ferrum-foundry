@@ -87,7 +87,7 @@ The app supports dark and light themes via CSS custom properties. Dark is the de
 - **Design tokens** are defined in `src/styles/globals.css` as `:root` variables (dark) with `:root[data-theme="light"]` overrides
 - **Theme state** lives in `src/stores/theme.tsx` (`ThemeProvider` + `useTheme` hook), persisted to `localStorage` under `ferrum:theme`
 - **Toggle** is in the header (`src/components/layout/Header.tsx`) — sun/moon icon button
-- **Flash prevention**: `index.html` has an inline script that applies the persisted `data-theme` attribute before first paint
+- **Flash prevention**: `index.html` loads `public/theme-bootstrap.js` before the app so the persisted `data-theme` attribute is applied before first paint without weakening the production CSP
 - All UI colors flow through CSS variables mapped via Tailwind v4's `@theme` — adding or changing colors only requires editing `globals.css`
 
 ## Key directories
