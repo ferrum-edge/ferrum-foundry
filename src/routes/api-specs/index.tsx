@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – API spec import & management page                 */
 /* ------------------------------------------------------------------ */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -11,16 +11,20 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { SearchBar } from "@/components/shared/SearchBar";
 import { SkeletonRow } from "@/components/ui/Skeleton";
+import { PaginationControls } from "@/components/shared/PaginationControls";
 import { useToast } from "@/components/ui/Toast";
 import { getApiErrorMessage } from "@/api/client";
 import {
   useApiSpecs,
+  useAllApiSpecs,
   useImportApiSpec,
   useUpdateApiSpec,
   useDeleteApiSpec,
 } from "@/hooks/useApiSpecs";
 import * as apiSpecsApi from "@/api/apiSpecs";
 import type { ApiSpecSummary } from "@/api/apiSpecs";
+import { usePaginationParams } from "@/hooks/usePagination";
+import { filterAndPage } from "@/lib/collectionSearch";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -58,7 +62,10 @@ paths:
 export default function ApiSpecsPage() {
   const { toast } = useToast();
   const [search, setSearch] = useState("");
-  const { data, isLoading, isError } = useApiSpecs({ limit: 200 });
+  const pagination = usePaginationParams();
+  const searching = search.trim().length > 0;
+  const pageQuery = useApiSpecs(pagination.paginationParams, !searching);
+  const allQuery = useAllApiSpecs(searching);
   const importSpec = useImportApiSpec();
   const updateSpec = useUpdateApiSpec();
   const deleteSpec = useDeleteApiSpec();
@@ -70,16 +77,25 @@ export default function ApiSpecsPage() {
   const [viewDoc, setViewDoc] = useState<string>("");
   const [deleteTarget, setDeleteTarget] = useState<ApiSpecSummary | null>(null);
 
-  const specs = (data?.items ?? []).filter((spec) => {
-    if (!search.trim()) return true;
-    const q = search.toLowerCase();
-    return (
-      (spec.title ?? "").toLowerCase().includes(q) ||
-      spec.id.toLowerCase().includes(q) ||
-      spec.proxy_id.toLowerCase().includes(q) ||
-      spec.tags.some((t) => t.toLowerCase().includes(q))
-    );
-  });
+  const searchPage = useMemo(
+    () =>
+      filterAndPage(
+        allQuery.data ?? [],
+        search,
+        (spec, query) =>
+          (spec.title ?? "").toLowerCase().includes(query) ||
+          spec.id.toLowerCase().includes(query) ||
+          spec.proxy_id.toLowerCase().includes(query) ||
+          spec.tags.some((tag) => tag.toLowerCase().includes(query)),
+        pagination.offset,
+        pagination.limit,
+      ),
+    [allQuery.data, pagination.limit, pagination.offset, search],
+  );
+  const specs = searching ? searchPage.items : (pageQuery.data?.items ?? []);
+  const total = searching ? searchPage.total : (pageQuery.data?.total ?? 0);
+  const isLoading = searching ? allQuery.isLoading : pageQuery.isLoading;
+  const isError = searching ? allQuery.isError : pageQuery.isError;
 
   const handleImport = async () => {
     if (!importDoc.trim()) {
@@ -141,7 +157,10 @@ export default function ApiSpecsPage() {
 
       <SearchBar
         value={search}
-        onChange={setSearch}
+        onChange={(value) => {
+          setSearch(value);
+          pagination.setParams({ offset: 0, limit: pagination.limit });
+        }}
         placeholder="Search by title, ID, proxy, or tag..."
         className="max-w-md"
       />
@@ -231,6 +250,15 @@ export default function ApiSpecsPage() {
             </div>
           ))}
       </Card>
+
+      {total > 0 && (
+        <PaginationControls
+          offset={pagination.offset}
+          limit={pagination.limit}
+          total={total}
+          onChange={pagination.setParams}
+        />
+      )}
 
       {/* Import / replace dialog */}
       <Dialog open={importOpen} onOpenChange={setImportOpen}>

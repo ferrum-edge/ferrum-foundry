@@ -198,14 +198,41 @@ describe("namespace API requests", () => {
       new Response(
         JSON.stringify({
           data: ["ferrum", "production", "staging"],
-          pagination: { offset: 0, limit: 1000, total: 3 },
+          pagination: { offset: 0, limit: 250, total: 3 },
         }),
         { status: 200, headers: { "content-type": "application/json" } },
       );
 
     await expect(list()).resolves.toEqual(["ferrum", "production", "staging"]);
     expect(captured[0].method).toBe("GET");
-    expect(captured[0].url).toContain("/api/proxy/namespaces?limit=1000");
+    expect(captured[0].url).toContain(
+      "/api/proxy/namespaces?offset=0&limit=250",
+    );
+  });
+
+  it("list() follows every paginated namespace page", async () => {
+    let call = 0;
+    nextResponse = () => {
+      call += 1;
+      return new Response(
+        JSON.stringify(
+          call === 1
+            ? {
+                data: ["ferrum", "production"],
+                pagination: { offset: 0, limit: 250, total: 3 },
+              }
+            : {
+                data: ["staging"],
+                pagination: { offset: 2, limit: 250, total: 3 },
+              },
+        ),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    };
+
+    await expect(list()).resolves.toEqual(["ferrum", "production", "staging"]);
+    expect(captured).toHaveLength(2);
+    expect(captured[1].url).toContain("offset=2&limit=250");
   });
 
   it("list() passes through a bare array response", async () => {

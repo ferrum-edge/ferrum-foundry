@@ -11,19 +11,21 @@ import * as proxies from "@/api/proxies";
 import type { PaginationParams, ProxyCreate } from "@/api/types";
 import { useNamespace } from "@/stores/namespace";
 
-export function useProxies(params: PaginationParams = {}) {
+export function useProxies(params: PaginationParams = {}, enabled = true) {
   const { selectedNamespace: ns } = useNamespace();
   return useQuery({
     queryKey: ["proxies", ns, { offset: params.offset, limit: params.limit }],
     queryFn: () => proxies.list(params),
+    enabled,
   });
 }
 
-export function useAllProxies() {
+export function useAllProxies(enabled = true) {
   const { selectedNamespace: ns } = useNamespace();
   return useQuery({
     queryKey: ["proxies", ns, "all"],
     queryFn: () => proxies.listAll(),
+    enabled,
   });
 }
 

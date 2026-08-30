@@ -4,6 +4,7 @@
 
 import { NAMESPACE_HEADER, SILENT_ERRORS, proxyApi } from "./client";
 import type { PaginatedResponse } from "./types";
+import { ALL_PAGE_SIZE, collectAllPages } from "./pagination";
 
 // ── Types (mirror the upstream Namespace registry contract) ──────
 
@@ -170,11 +171,26 @@ export function isCascadableDeleteError(status: number, body: string): boolean {
 
 export async function list(): Promise<string[]> {
   // GET /namespaces returns the standard { data, pagination } envelope of
-  // plain namespace name strings.
-  const response = await proxyApi
-    .get("namespaces", { searchParams: { limit: "1000" } })
+  // plain namespace name strings. Older gateways returned a bare array.
+  const first = await proxyApi
+    .get("namespaces", {
+      searchParams: { offset: "0", limit: String(ALL_PAGE_SIZE) },
+    })
     .json<PaginatedResponse<string> | string[]>();
-  return Array.isArray(response) ? response : response.data;
+  if (Array.isArray(first)) return first;
+
+  return collectAllPages(async (offset, limit) => {
+    if (offset === 0 && limit === ALL_PAGE_SIZE) return first;
+    const page = await proxyApi
+      .get("namespaces", {
+        searchParams: { offset: String(offset), limit: String(limit) },
+      })
+      .json<PaginatedResponse<string> | string[]>();
+    if (Array.isArray(page)) {
+      throw new Error("Gateway changed namespace pagination format mid-request");
+    }
+    return page;
+  });
 }
 
 export async function get(name: string): Promise<Namespace> {

@@ -4,6 +4,7 @@
 
 import { proxyApi } from "./client";
 import type { PaginatedResponse, PaginationParams } from "./types";
+import { collectAllPages } from "./pagination";
 
 /* ---------- Inventory ---------- */
 
@@ -380,6 +381,14 @@ export async function listManagedRecords(
     .json<PaginatedResponse<ManagedTlsRecord>>();
 }
 
+export async function listAllManagedRecords(
+  collection: ManagedTlsCollection,
+): Promise<ManagedTlsRecord[]> {
+  return collectAllPages((offset, limit) =>
+    listManagedRecords(collection, { offset, limit }),
+  );
+}
+
 export async function createManagedRecord(
   collection: ManagedTlsCollection,
   data: ManagedTlsRequest,
@@ -418,6 +427,12 @@ export async function listAcmeCertificates(
     .json<PaginatedResponse<AcmeCertificateRecord>>();
 }
 
+export async function listAllAcmeCertificates(): Promise<AcmeCertificateRecord[]> {
+  return collectAllPages((offset, limit) =>
+    listAcmeCertificates({ offset, limit }),
+  );
+}
+
 export async function createAcmeCertificate(
   data: AcmeCertificateRequest,
 ): Promise<AcmeCertificateRecord> {
@@ -436,6 +451,10 @@ export async function listAcmeOrders(
   return proxyApi
     .get("admin/tls/acme/orders", { searchParams: paginationSearch(params) })
     .json<PaginatedResponse<AcmeOrder>>();
+}
+
+export async function listAllAcmeOrders(): Promise<AcmeOrder[]> {
+  return collectAllPages((offset, limit) => listAcmeOrders({ offset, limit }));
 }
 
 export async function createAcmeOrder(
@@ -472,6 +491,10 @@ export async function listAcmeAccounts(
   return proxyApi
     .get("admin/tls/acme/accounts", { searchParams: paginationSearch(params) })
     .json<PaginatedResponse<AcmeAccount>>();
+}
+
+export async function listAllAcmeAccounts(): Promise<AcmeAccount[]> {
+  return collectAllPages((offset, limit) => listAcmeAccounts({ offset, limit }));
 }
 
 /* ---------- Rotate / validate ---------- */

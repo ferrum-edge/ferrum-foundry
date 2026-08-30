@@ -4,9 +4,9 @@
 
 import { useState, useMemo } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { useProxies } from "@/hooks/useProxies";
-import { useUpstreams } from "@/hooks/useUpstreams";
-import { usePagination } from "@/hooks/usePagination";
+import { useAllProxies, useProxies } from "@/hooks/useProxies";
+import { useAllUpstreams } from "@/hooks/useUpstreams";
+import { usePaginationParams } from "@/hooks/usePagination";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -15,6 +15,7 @@ import { PaginationControls } from "@/components/shared/PaginationControls";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { SkeletonRow } from "@/components/ui/Skeleton";
 import type { Proxy } from "@/api/types";
+import { filterAndPage } from "@/lib/collectionSearch";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -55,37 +56,41 @@ export default function ProxiesPage() {
   const [search, setSearch] = useState("");
 
   /* --- Data fetching with pagination --- */
-  const { data: upstreamData } = useUpstreams({ limit: 1000 });
+  const pagination = usePaginationParams();
+  const searching = search.trim().length > 0;
+  const { data: upstreamData } = useAllUpstreams();
   const upstreamNameMap = useMemo(() => {
     const map = new Map<string, string>();
-    const upstreams = upstreamData?.data ?? [];
+    const upstreams = upstreamData ?? [];
     for (const u of upstreams) {
       map.set(u.id, u.name ?? u.id);
     }
     return map;
   }, [upstreamData]);
 
-  const { data, isLoading, isError } = useProxies();
-  const total = data?.pagination?.total ?? 0;
-  const { offset, limit, paginationParams } = usePagination(total);
-
-  /* Re-fetch when pagination params change */
-  const { data: paginatedData, isLoading: isPaginating } = useProxies(paginationParams);
-  const proxies = paginatedData?.data ?? data?.data ?? [];
-
-  /* --- Client-side search filter --- */
-  const filtered = useMemo(() => {
-    if (!search.trim()) return proxies;
-    const q = search.toLowerCase();
-    return proxies.filter(
-      (p) =>
-        (p.name && p.name.toLowerCase().includes(q)) ||
-        p.id.toLowerCase().includes(q) ||
-        (p.listen_path ?? "").toLowerCase().includes(q) ||
-        // Upstream-only proxies may omit backend_host entirely
-        (p.backend_host ?? "").toLowerCase().includes(q),
-    );
-  }, [proxies, search]);
+  const pageQuery = useProxies(pagination.paginationParams, !searching);
+  const allQuery = useAllProxies(searching);
+  const searchPage = useMemo(
+    () =>
+      filterAndPage(
+        allQuery.data ?? [],
+        search,
+        (proxy, query) =>
+          Boolean(proxy.name?.toLowerCase().includes(query)) ||
+          proxy.id.toLowerCase().includes(query) ||
+          (proxy.listen_path ?? "").toLowerCase().includes(query) ||
+          (proxy.backend_host ?? "").toLowerCase().includes(query),
+        pagination.offset,
+        pagination.limit,
+      ),
+    [allQuery.data, pagination.limit, pagination.offset, search],
+  );
+  const proxies = searching ? searchPage.items : (pageQuery.data?.data ?? []);
+  const total = searching
+    ? searchPage.total
+    : (pageQuery.data?.pagination?.total ?? 0);
+  const isLoading = searching ? allQuery.isLoading : pageQuery.isLoading;
+  const isError = searching ? allQuery.isError : pageQuery.isError;
 
   /* ---------------------------------------------------------------- */
   /*  Render                                                           */
@@ -112,7 +117,10 @@ export default function ProxiesPage() {
       {/* Search */}
       <SearchBar
         value={search}
-        onChange={setSearch}
+        onChange={(value) => {
+          setSearch(value);
+          pagination.setParams({ offset: 0, limit: pagination.limit });
+        }}
         placeholder="Search by name, listen path, ID, or backend host..."
         className="max-w-md"
       />
@@ -129,7 +137,7 @@ export default function ProxiesPage() {
         </div>
 
         {/* Body */}
-        {(isLoading || isPaginating) && (
+        {isLoading && (
           <div className="px-6 divide-y divide-border/50">
             {Array.from({ length: 5 }).map((_, i) => (
               <SkeletonRow key={i} />
@@ -137,14 +145,14 @@ export default function ProxiesPage() {
           </div>
         )}
 
-        {!isLoading && !isPaginating && isError && (
+        {!isLoading && isError && (
           <EmptyState
             title="Failed to load proxies"
             description="An error occurred while fetching proxy configurations."
           />
         )}
 
-        {!isLoading && !isPaginating && !isError && filtered.length === 0 && (
+        {!isLoading && !isError && proxies.length === 0 && (
           <EmptyState
             title={search ? "No matching proxies" : "No proxies yet"}
             description={
@@ -162,9 +170,9 @@ export default function ProxiesPage() {
           />
         )}
 
-        {!isLoading && !isPaginating && filtered.length > 0 && (
+        {!isLoading && !isError && proxies.length > 0 && (
           <div className="divide-y divide-border/50">
-            {filtered.map((proxy) => (
+            {proxies.map((proxy) => (
               <button
                 key={proxy.id}
                 type="button"
@@ -245,21 +253,10 @@ export default function ProxiesPage() {
       {/* Pagination */}
       {total > 0 && (
         <PaginationControls
-          offset={offset}
-          limit={limit}
+          offset={pagination.offset}
+          limit={pagination.limit}
           total={total}
-          onChange={({ offset: newOffset, limit: newLimit }) => {
-            // usePagination handles URL sync, but PaginationControls needs the callback
-            // We re-navigate with search params
-            navigate({
-              search: (prev: Record<string, unknown>) => ({
-                ...prev,
-                offset: newOffset,
-                limit: newLimit,
-              }),
-              replace: true,
-            } as any);
-          }}
+          onChange={pagination.setParams}
         />
       )}
     </div>
