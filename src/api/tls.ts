@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – TLS management API (types + endpoints)           */
 /* ------------------------------------------------------------------ */
 
-import { proxyApi } from "./client";
+import { NAMESPACE_HEADER, proxyApi } from "./client";
 import type { PaginatedResponse, PaginationParams } from "./types";
 import { collectAllPages } from "./pagination";
 
@@ -435,14 +435,47 @@ export async function listAllAcmeCertificates(): Promise<AcmeCertificateRecord[]
 
 export async function createAcmeCertificate(
   data: AcmeCertificateRequest,
+  namespace?: string,
 ): Promise<AcmeCertificateRecord> {
   return proxyApi
-    .post("admin/tls/acme/certificates", { json: data })
+    .post("admin/tls/acme/certificates", {
+      json: data,
+      ...(namespace && { headers: { [NAMESPACE_HEADER]: namespace } }),
+    })
     .json<AcmeCertificateRecord>();
 }
 
-export async function removeAcmeCertificate(id: string): Promise<void> {
-  await proxyApi.delete(`admin/tls/acme/certificates/${id}`);
+export async function getAcmeCertificate(
+  id: string,
+  namespace?: string,
+): Promise<AcmeCertificateRecord> {
+  return proxyApi
+    .get(`admin/tls/acme/certificates/${id}`, {
+      ...(namespace && { headers: { [NAMESPACE_HEADER]: namespace } }),
+    })
+    .json<AcmeCertificateRecord>();
+}
+
+export async function updateAcmeCertificate(
+  id: string,
+  data: AcmeCertificateRequest,
+  namespace?: string,
+): Promise<AcmeCertificateRecord> {
+  return proxyApi
+    .put(`admin/tls/acme/certificates/${id}`, {
+      json: { ...data, id },
+      ...(namespace && { headers: { [NAMESPACE_HEADER]: namespace } }),
+    })
+    .json<AcmeCertificateRecord>();
+}
+
+export async function removeAcmeCertificate(
+  id: string,
+  namespace?: string,
+): Promise<void> {
+  await proxyApi.delete(`admin/tls/acme/certificates/${id}`, {
+    ...(namespace && { headers: { [NAMESPACE_HEADER]: namespace } }),
+  });
 }
 
 export async function listAcmeOrders(

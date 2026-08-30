@@ -92,6 +92,45 @@ export function useAllAcmeCertificates() {
   });
 }
 
+export function useAcmeCertificate(id: string) {
+  const { selectedNamespace: ns } = useNamespace();
+  return useQuery({
+    queryKey: ["tls", "acme", "certificate", ns, id],
+    queryFn: () => tls.getAcmeCertificate(id, ns),
+    enabled: Boolean(id),
+  });
+}
+
+export function useImportAcmeCertificate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ data, namespace }: { data: tls.AcmeCertificateRequest; namespace: string }) =>
+      tls.createAcmeCertificate(data, namespace),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["tls", "acme", "certificates"] });
+    },
+  });
+}
+
+export function useUpdateAcmeCertificate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      data,
+      namespace,
+    }: {
+      id: string;
+      data: tls.AcmeCertificateRequest;
+      namespace: string;
+    }) => tls.updateAcmeCertificate(id, data, namespace),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["tls", "acme", "certificates"] });
+      qc.invalidateQueries({ queryKey: ["tls", "acme", "certificate"], exact: false });
+    },
+  });
+}
+
 export function useAcmeOrders(params: PaginationParams = {}) {
   const { selectedNamespace: ns } = useNamespace();
   return useQuery({
@@ -176,7 +215,8 @@ export function useRenewAcmeCertificate() {
 export function useDeleteAcmeCertificate() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => tls.removeAcmeCertificate(id),
+    mutationFn: ({ id, namespace }: { id: string; namespace: string }) =>
+      tls.removeAcmeCertificate(id, namespace),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["tls", "acme"] });
     },
