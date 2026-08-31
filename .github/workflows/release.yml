@@ -6,7 +6,7 @@ on:
       - 'v*'
 
 concurrency:
-  group: release-channels
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -121,12 +121,34 @@ jobs:
     needs: [docker, release-metadata]
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+
+      - name: Wait for earlier release runs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_WORKFLOW_PATH: .github/workflows/release.yml
+        run: |
+          for _attempt in $(seq 1 360); do
+            blocking_runs="$(
+              gh api --method GET "repos/${GITHUB_REPOSITORY}/actions/runs" \
+                -f event=push \
+                -f per_page=100 \
+                | node scripts/release-run-order.mjs
+            )"
+            if [[ -z "$blocking_runs" ]]; then
+              exit 0
+            fi
+            echo "Waiting for earlier release runs: $blocking_runs"
+            sleep 30
+          done
+          echo "Timed out waiting for earlier release runs" >&2
+          exit 1
 
       - name: Download digests
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
