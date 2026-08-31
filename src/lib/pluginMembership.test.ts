@@ -70,6 +70,7 @@ function harness(
   let listCalled = false;
   let createCalls = 0;
   let updatePluginCalls = 0;
+  let updateProxyCalls = 0;
   let deleteCalls = 0;
 
   const stamp = () => `v${++version}`;
@@ -89,6 +90,7 @@ function harness(
       return structuredClone(proxy);
     },
     updateProxy: async (id: string, data: ProxyCreate) => {
+      updateProxyCalls += 1;
       if (options.failProxyOnce === id && !failedProxy) {
         failedProxy = true;
         throw new Error(`injected proxy failure ${id}`);
@@ -139,7 +141,7 @@ function harness(
     deps,
     proxies,
     plugins,
-    counts: () => ({ createCalls, updatePluginCalls, deleteCalls }),
+    counts: () => ({ createCalls, updatePluginCalls, updateProxyCalls, deleteCalls }),
   };
 }
 
@@ -214,6 +216,26 @@ describe("proxy-group membership reconciliation", () => {
       state.deps,
     );
     expect(memberships(state.proxies, "plugin-1")).toEqual(["p2", "p3"]);
+  });
+
+  it("does not rewrite an unchanged membership just because association order differs", async () => {
+    const state = harness(
+      [makeProxy("p1", ["plugin-1", "unrelated-plugin"])],
+      [makePlugin("plugin-1")],
+    );
+
+    await updatePluginWithMembership(
+      "plugin-1",
+      groupInput(),
+      ["p1"],
+      state.deps,
+    );
+
+    expect(state.counts().updateProxyCalls).toBe(0);
+    expect(state.proxies.get("p1")?.plugins).toEqual([
+      { plugin_config_id: "plugin-1" },
+      { plugin_config_id: "unrelated-plugin" },
+    ]);
   });
 
   it("supports a global-to-group transition", async () => {
