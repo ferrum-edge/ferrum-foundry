@@ -4,6 +4,9 @@ export function blockingReleaseRuns(payload, currentRunNumber, currentRunId, wor
   if (!payload || !Array.isArray(payload.workflow_runs)) {
     throw new Error('GitHub Actions response does not contain workflow_runs');
   }
+  if (!Number.isSafeInteger(payload.total_count) || payload.total_count !== payload.workflow_runs.length) {
+    throw new Error('GitHub Actions response is incomplete');
+  }
   if (!Number.isSafeInteger(currentRunNumber) || currentRunNumber <= 0) {
     throw new Error('GITHUB_RUN_NUMBER must be a positive safe integer');
   }
@@ -12,15 +15,24 @@ export function blockingReleaseRuns(payload, currentRunNumber, currentRunId, wor
   }
   if (!workflowPath) throw new Error('RELEASE_WORKFLOW_PATH is required');
 
-  return payload.workflow_runs
+  const relevantRuns = payload.workflow_runs.filter((run) => run?.path === workflowPath);
+  if (relevantRuns.some((run) => (
+    !Number.isSafeInteger(run.id)
+    || !Number.isSafeInteger(run.run_number)
+    || typeof run.status !== 'string'
+  ))) {
+    throw new Error('GitHub Actions response contains an invalid release run');
+  }
+
+  const blockersById = new Map(relevantRuns
     .filter((run) => (
-      run
-      && run.path === workflowPath
-      && run.id !== currentRunId
-      && Number.isSafeInteger(run.run_number)
+      run.id !== currentRunId
       && run.run_number < currentRunNumber
       && run.status !== 'completed'
     ))
+    .map((run) => [run.id, run]));
+
+  return [...blockersById.values()]
     .sort((left, right) => left.run_number - right.run_number)
     .map((run) => ({ id: run.id, runNumber: run.run_number, status: run.status }));
 }

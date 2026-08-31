@@ -134,18 +134,30 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_WORKFLOW_PATH: .github/workflows/release.yml
         run: |
-          for _attempt in $(seq 1 360); do
+          set -euo pipefail
+          for _attempt in $(seq 1 90); do
             blocking_runs="$(
-              gh api --method GET "repos/${GITHUB_REPOSITORY}/actions/runs" \
-                -f event=push \
-                -f per_page=100 \
+              {
+                for run_status in requested pending queued waiting in_progress; do
+                  gh api --paginate --slurp --method GET \
+                    "repos/${GITHUB_REPOSITORY}/actions/workflows/release.yml/runs" \
+                    -f event=push \
+                    -f status="$run_status" \
+                    -f per_page=100 \
+                    || exit 1
+                done
+              } \
+                | jq -s '{
+                    total_count: ([.[] | (.[0].total_count // 0)] | add // 0),
+                    workflow_runs: [.[][] | .workflow_runs[]]
+                  }' \
                 | node scripts/release-run-order.mjs
             )"
             if [[ -z "$blocking_runs" ]]; then
               exit 0
             fi
             echo "Waiting for earlier release runs: $blocking_runs"
-            sleep 30
+            sleep 120
           done
           echo "Timed out waiting for earlier release runs" >&2
           exit 1
