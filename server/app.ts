@@ -7,6 +7,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { authPlugin } from './auth.js';
 import { loadConfig } from './config.js';
 import proxyPlugin from './proxy.js';
+import { requestIsApiRoute } from './proxy-path.js';
 import healthPlugin from './routes/health.js';
 import settingsPlugin from './routes/settings.js';
 import { closeDispatchers } from './tls.js';
@@ -61,7 +62,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       'permissions-policy',
       'camera=(), geolocation=(), microphone=(), payment=(), usb=()',
     );
-    if (request.url.startsWith('/api/') && !reply.hasHeader('cache-control')) {
+    if (requestIsApiRoute(request) && !reply.hasHeader('cache-control')) {
       reply.header('cache-control', 'no-store');
     }
     return payload;
@@ -93,7 +94,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     });
 
     fastify.setNotFoundHandler(async (request, reply) => {
-      if (request.url.startsWith('/api/')) return reply.status(404).send({ error: 'Not Found' });
+      if (requestIsApiRoute(request)) return reply.status(404).send({ error: 'Not Found' });
       reply.header('cache-control', 'no-cache, no-store, must-revalidate');
       return reply.sendFile('index.html');
     });

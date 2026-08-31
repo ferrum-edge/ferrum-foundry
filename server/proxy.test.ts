@@ -130,7 +130,7 @@ async function slowStreamingUpload(path: string): Promise<{ statusCode: number; 
   return response;
 }
 
-async function rawGet(path: string): Promise<{ statusCode: number; body: string }> {
+async function rawGet(path: string): Promise<{ statusCode: number; body: string; cacheControl?: string }> {
   const port = (app.server.address() as AddressInfo).port;
   return new Promise((resolve, reject) => {
     const request = httpRequest({ host: '127.0.0.1', port, path, headers: sessionHeaders }, (incoming) => {
@@ -139,6 +139,7 @@ async function rawGet(path: string): Promise<{ statusCode: number; body: string 
       incoming.on('end', () => resolve({
         statusCode: incoming.statusCode ?? 0,
         body: Buffer.concat(chunks).toString('utf8'),
+        cacheControl: incoming.headers['cache-control'],
       }));
     });
     request.on('error', reject);
@@ -210,6 +211,13 @@ describe('streaming gateway proxy', () => {
       });
     }
     expect(observed).toHaveLength(before);
+  });
+
+  it('classifies an encoded API prefix from the matched route', async () => {
+    const response = await rawGet('/%61pi/proxy/echo');
+    expect(response.statusCode).toBe(200);
+    expect(response.cacheControl).toBe('no-store');
+    expect(observed.at(-1)?.url).toBe('/echo');
   });
 
   it('enforces a small default streaming body limit without buffering the request', async () => {
