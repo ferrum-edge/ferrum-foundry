@@ -130,6 +130,22 @@ async function slowStreamingUpload(path: string): Promise<{ statusCode: number; 
   return response;
 }
 
+async function rawGet(path: string): Promise<{ statusCode: number; body: string }> {
+  const port = (app.server.address() as AddressInfo).port;
+  return new Promise((resolve, reject) => {
+    const request = httpRequest({ host: '127.0.0.1', port, path, headers: sessionHeaders }, (incoming) => {
+      const chunks: Buffer[] = [];
+      incoming.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+      incoming.on('end', () => resolve({
+        statusCode: incoming.statusCode ?? 0,
+        body: Buffer.concat(chunks).toString('utf8'),
+      }));
+    });
+    request.on('error', reject);
+    request.end();
+  });
+}
+
 afterAll(async () => {
   await app.close();
   gateway.close();
@@ -176,6 +192,23 @@ describe('streaming gateway proxy', () => {
     });
     expect(response.statusCode).toBe(401);
     expect(response.json()).toEqual({ error: 'Unauthorized' });
+    expect(observed).toHaveLength(before);
+  });
+
+  it('rejects encoded and unencoded dot segments before contacting the gateway', async () => {
+    const before = observed.length;
+    for (const path of [
+      '/api/proxy/admin/tls/../../echo',
+      '/api/proxy/admin/tls/%2e%2e/%2e%2e/echo',
+      '/api/proxy/admin/tls/%252e%252e/%252e%252e/echo',
+    ]) {
+      const response = await rawGet(path);
+      expect(response.statusCode).toBe(400);
+      expect(JSON.parse(response.body)).toEqual({
+        error: 'Bad Request',
+        code: 'FERRUM_BFF_UNSAFE_PATH',
+      });
+    }
     expect(observed).toHaveLength(before);
   });
 

@@ -79,7 +79,7 @@ Optional environment variables:
 | `FERRUM_JWT_ROLE` | `admin` | Static development role: viewer/operator/admin |
 | `FERRUM_JWT_AUDIENCE` | - | Optional exact audience claim(s), comma separated |
 | `FERRUM_JWT_NAMESPACES` | - | Optional exact namespace grants, comma separated |
-| `FERRUM_TLS_CA_PATH` | - | Path to .pem truststore |
+| `FERRUM_TLS_CA_PATH` | - | Path to a .pem truststore (contained projected-volume symlinks are supported) |
 | `FERRUM_TLS_CA_ROOT` | CA file directory | Approved root for CA bundles |
 | `FERRUM_TLS_VERIFY` | `true` | Verify TLS certificates |
 | `FERRUM_CONNECT_TIMEOUT` | `5000` | Connection timeout (ms) |
