@@ -105,6 +105,30 @@ chargeback):
 node scripts/mock-admin-gateway.mjs   # listens on :9000
 ```
 
+To seed a real gateway, use a dedicated namespace. Seeding performs a full
+replacement of that namespace, so it refuses to run without an explicit opt-in:
+
+```bash
+# FERRUM_JWT_SECRET is the same 32+ character admin signing key used by Ferrum.
+FERRUM_NAMESPACE=ferrum-foundry-demo \
+FERRUM_DEMO_CONFIRM_TARGET='http://127.0.0.1:9000#ferrum-foundry-demo' \
+node scripts/seed-demo-gateway.mjs
+```
+
+The confirmation must exactly match `<FERRUM_ADMIN_URL>#<FERRUM_NAMESPACE>`;
+changing either target invalidates a previously copied confirmation before any
+HTTP request is made.
+
+The payload uses deterministic resource IDs and can be run repeatedly. It
+includes the current versioned API-spec backup section, current credential-array
+shapes, and the same admin JWT signer used by the BFF. If Ferrum requires an
+admin audience, set the same value in `FERRUM_JWT_AUDIENCE`. Configure the demo
+gateway itself with `FERRUM_NAMESPACE=ferrum-foundry-demo` so it serves the
+seeded routes. Containerized gateways can reach a host-side demo backend by
+setting `FERRUM_DEMO_BACKEND_HOST` to a Docker host alias; override
+`FERRUM_DEMO_PROXY_URL` when the data-plane origin is not
+`http://127.0.0.1:8000`.
+
 ### Production Build
 
 ```bash
@@ -117,18 +141,23 @@ npm start
 ```bash
 docker build -f docker/Dockerfile -t ferrum-foundry .
 
+export FERRUM_JWT_SECRET=$(openssl rand -hex 32) # also configure this on Ferrum Edge
+export FERRUM_TRUSTED_PROXY_SECRET=$(openssl rand -hex 32)
+
 docker run \
   -e FERRUM_ADMIN_URL=http://your-gateway:9000 \
-  -e FERRUM_JWT_SECRET=a-random-secret-at-least-32-characters-long \
+  -e FERRUM_JWT_SECRET \
   -e FERRUM_AUTH_MODE=trusted-proxy \
-  -e FERRUM_TRUSTED_PROXY_SECRET=a-separate-random-32-character-secret \
+  -e FERRUM_TRUSTED_PROXY_SECRET \
   -p 127.0.0.1:8080:8080 \
   ferrum-foundry
 ```
 
 The production BFF must be reachable only through the configured identity
 proxy. The Docker image uses `gcr.io/distroless/nodejs22-debian13:nonroot` for
-a minimal attack surface.
+a minimal attack surface. Build inputs are allowlisted by `.dockerignore`, base
+images are digest-pinned, and published images carry provenance and SBOM
+attestations. See [Release and supply-chain gates](docs/release-security.md).
 
 ## Tech Stack
 

@@ -425,7 +425,6 @@ const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
   },
   correlation_id: {
     header_name: "X-Correlation-ID",
-    generator: "uuid",
     echo_downstream: true,
   },
   cors: {
@@ -779,8 +778,11 @@ const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
   rate_limiting: {
     limit_by: "consumer",
     expose_headers: true,
-    requests_per_second: 400,
-    requests_per_minute: 20000,
+    limits: [{
+      scope: "default",
+      requests_per_second: 400,
+      requests_per_minute: 20000,
+    }],
     sync_mode: "local",
   },
   request_deduplication: {

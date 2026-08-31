@@ -1,0 +1,21 @@
+# Deny by default. The build receives only reviewed manifests, build config,
+# source, and public assets; credentials, Git history, docs, and local output
+# cannot enter a layer even when accidentally added to the working directory.
+**
+
+!package.json
+!package-lock.json
+!index.html
+!vite.config.ts
+!tsconfig.json
+!tsconfig.server.json
+!vite-env.d.ts
+
+!public/
+!public/**
+!src/
+!src/**
+!server/
+!server/**
+!shared/
+!shared/**
