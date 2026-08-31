@@ -6,11 +6,25 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as apiSpecs from "@/api/apiSpecs";
 import { useNamespace } from "@/stores/namespace";
 
-export function useApiSpecs(params: apiSpecs.ApiSpecListParams = {}) {
+export function useApiSpecs(
+  params: apiSpecs.ApiSpecListParams = {},
+  enabled = true,
+) {
   const { selectedNamespace: ns } = useNamespace();
   return useQuery({
     queryKey: ["apiSpecs", ns, params],
     queryFn: () => apiSpecs.list(params),
+    retry: false,
+    enabled,
+  });
+}
+
+export function useAllApiSpecs(enabled = true) {
+  const { selectedNamespace: ns } = useNamespace();
+  return useQuery({
+    queryKey: ["apiSpecs", ns, "all"],
+    queryFn: () => apiSpecs.listAll(),
+    enabled,
     retry: false,
   });
 }

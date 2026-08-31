@@ -4,7 +4,7 @@
 /*   audit, batch, backup/restore)                                    */
 /* ------------------------------------------------------------------ */
 
-import { proxyApi } from "./client";
+import { NAMESPACE_HEADER, SILENT_ERRORS, proxyApi } from "./client";
 import type {
   Consumer,
   ConsumerCreate,
@@ -415,15 +415,122 @@ export interface RestoreResponse {
   };
 }
 
+export interface RestoreApiSpecConfirmationRequired {
+  error: string;
+  api_specs_at_risk: number;
+  confirmation_required: "confirm_api_spec_deletion=true";
+}
+
+/** Recognize the gateway's canonical destructive-restore conflict fields. */
+export function getRestoreApiSpecConfirmation(
+  error: unknown,
+): RestoreApiSpecConfirmationRequired | null {
+  if (!error || typeof error !== "object") return null;
+  const candidate = error as {
+    response?: { status?: unknown };
+    data?: unknown;
+  };
+  if (candidate.response?.status !== 409) return null;
+  if (!candidate.data || typeof candidate.data !== "object") return null;
+  const body = candidate.data as Record<string, unknown>;
+  if (
+    typeof body.error !== "string" ||
+    !Number.isSafeInteger(body.api_specs_at_risk) ||
+    (body.api_specs_at_risk as number) < 0 ||
+    body.confirmation_required !== "confirm_api_spec_deletion=true"
+  ) {
+    return null;
+  }
+  return {
+    error: body.error,
+    api_specs_at_risk: body.api_specs_at_risk as number,
+    confirmation_required: body.confirmation_required,
+  };
+}
+
+export type RestoreRollbackOutcome =
+  | "completed"
+  | "incomplete"
+  | "not_needed"
+  | "unknown_outcome";
+
+export interface RestoreFailure {
+  error: string;
+  restore_errors?: string[];
+  rollback?: RestoreRollbackOutcome;
+  failure_class?: "data_integrity";
+  rollback_errors?: string[];
+  api_specs_not_restored?: number;
+  api_specs_note?: string;
+}
+
+const RESTORE_ROLLBACK_OUTCOMES = new Set<RestoreRollbackOutcome>([
+  "completed",
+  "incomplete",
+  "not_needed",
+  "unknown_outcome",
+]);
+
+function optionalStringArray(body: Record<string, unknown>, key: string): string[] | null | undefined {
+  const value = body[key];
+  if (value === undefined) return undefined;
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string")
+    ? value
+    : null;
+}
+
+/** Preserve the gateway's authoritative rollback outcome from a restore 500. */
+export function getRestoreFailure(error: unknown): RestoreFailure | null {
+  if (!error || typeof error !== "object") return null;
+  const candidate = error as { response?: { status?: unknown }; data?: unknown };
+  if (candidate.response?.status !== 500 || !candidate.data || typeof candidate.data !== "object") {
+    return null;
+  }
+  const body = candidate.data as Record<string, unknown>;
+  if (typeof body.error !== "string") return null;
+
+  const restoreErrors = optionalStringArray(body, "restore_errors");
+  const rollbackErrors = optionalStringArray(body, "rollback_errors");
+  if (restoreErrors === null || rollbackErrors === null) return null;
+  if (
+    body.rollback !== undefined &&
+    (typeof body.rollback !== "string" || !RESTORE_ROLLBACK_OUTCOMES.has(body.rollback as RestoreRollbackOutcome))
+  ) return null;
+  if (body.failure_class !== undefined && body.failure_class !== "data_integrity") return null;
+  if (
+    body.api_specs_not_restored !== undefined &&
+    (!Number.isSafeInteger(body.api_specs_not_restored) || (body.api_specs_not_restored as number) < 0)
+  ) return null;
+  if (body.api_specs_note !== undefined && typeof body.api_specs_note !== "string") return null;
+
+  return {
+    error: body.error,
+    ...(restoreErrors !== undefined && { restore_errors: restoreErrors }),
+    ...(body.rollback !== undefined && { rollback: body.rollback as RestoreRollbackOutcome }),
+    ...(body.failure_class === "data_integrity" && { failure_class: body.failure_class }),
+    ...(rollbackErrors !== undefined && { rollback_errors: rollbackErrors }),
+    ...(body.api_specs_not_restored !== undefined && {
+      api_specs_not_restored: body.api_specs_not_restored as number,
+    }),
+    ...(body.api_specs_note !== undefined && { api_specs_note: body.api_specs_note }),
+  };
+}
+
 export async function restore(
   data: Record<string, unknown>,
-  options: { confirmApiSpecDeletion?: boolean } = {},
+  options: { namespace: string; confirmApiSpecDeletion?: boolean },
 ): Promise<RestoreResponse> {
   const searchParams: Record<string, string> = { confirm: "true" };
   if (options.confirmApiSpecDeletion) {
     searchParams.confirm_api_spec_deletion = "true";
   }
   return proxyApi
-    .post("restore", { json: data, searchParams, timeout: 120000 })
+    .post("restore", {
+      json: data,
+      searchParams,
+      headers: { [NAMESPACE_HEADER]: options.namespace },
+      timeout: 120000,
+      context: { [SILENT_ERRORS]: true },
+    })
     .json<RestoreResponse>();
 }

@@ -11,11 +11,21 @@ import * as upstreams from "@/api/upstreams";
 import type { PaginationParams, UpstreamCreate } from "@/api/types";
 import { useNamespace } from "@/stores/namespace";
 
-export function useUpstreams(params: PaginationParams = {}) {
+export function useUpstreams(params: PaginationParams = {}, enabled = true) {
   const { selectedNamespace: ns } = useNamespace();
   return useQuery({
     queryKey: ["upstreams", ns, { offset: params.offset, limit: params.limit }],
     queryFn: () => upstreams.list(params),
+    enabled,
+  });
+}
+
+export function useAllUpstreams(enabled = true) {
+  const { selectedNamespace: ns } = useNamespace();
+  return useQuery({
+    queryKey: ["upstreams", ns, "all"],
+    queryFn: () => upstreams.listAll(),
+    enabled,
   });
 }
 

@@ -4,8 +4,8 @@
 
 import { useState, useMemo } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { useConsumers } from "@/hooks/useConsumers";
-import { usePagination } from "@/hooks/usePagination";
+import { useAllConsumers, useConsumers } from "@/hooks/useConsumers";
+import { usePaginationParams } from "@/hooks/usePagination";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -14,6 +14,7 @@ import { PaginationControls } from "@/components/shared/PaginationControls";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { SkeletonRow } from "@/components/ui/Skeleton";
 import type { Consumer } from "@/api/types";
+import { filterAndPage } from "@/lib/collectionSearch";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -80,25 +81,29 @@ export default function ConsumersPage() {
   const [search, setSearch] = useState("");
 
   /* --- Data fetching with pagination --- */
-  const { data, isLoading, isError } = useConsumers();
-  const total = data?.pagination?.total ?? 0;
-  const { offset, limit, paginationParams } = usePagination(total);
-
-  /* Re-fetch when pagination params change */
-  const { data: paginatedData, isLoading: isPaginating } =
-    useConsumers(paginationParams);
-  const consumers = paginatedData?.data ?? data?.data ?? [];
-
-  /* --- Client-side search filter --- */
-  const filtered = useMemo(() => {
-    if (!search.trim()) return consumers;
-    const q = search.toLowerCase();
-    return consumers.filter(
-      (c) =>
-        c.username.toLowerCase().includes(q) ||
-        (c.custom_id && c.custom_id.toLowerCase().includes(q)),
-    );
-  }, [consumers, search]);
+  const pagination = usePaginationParams();
+  const searching = search.trim().length > 0;
+  const pageQuery = useConsumers(pagination.paginationParams, !searching);
+  const allQuery = useAllConsumers(searching);
+  const searchPage = useMemo(
+    () =>
+      filterAndPage(
+        allQuery.data ?? [],
+        search,
+        (consumer, query) =>
+          consumer.username.toLowerCase().includes(query) ||
+          Boolean(consumer.custom_id?.toLowerCase().includes(query)),
+        pagination.offset,
+        pagination.limit,
+      ),
+    [allQuery.data, pagination.limit, pagination.offset, search],
+  );
+  const consumers = searching ? searchPage.items : (pageQuery.data?.data ?? []);
+  const total = searching
+    ? searchPage.total
+    : (pageQuery.data?.pagination?.total ?? 0);
+  const isLoading = searching ? allQuery.isLoading : pageQuery.isLoading;
+  const isError = searching ? allQuery.isError : pageQuery.isError;
 
   /* ---------------------------------------------------------------- */
   /*  Render                                                           */
@@ -136,7 +141,10 @@ export default function ConsumersPage() {
       {/* Search */}
       <SearchBar
         value={search}
-        onChange={setSearch}
+        onChange={(value) => {
+          setSearch(value);
+          pagination.setParams({ offset: 0, limit: pagination.limit });
+        }}
         placeholder="Search by username or custom ID..."
         className="max-w-md"
       />
@@ -153,7 +161,7 @@ export default function ConsumersPage() {
         </div>
 
         {/* Body */}
-        {(isLoading || isPaginating) && (
+        {isLoading && (
           <div className="px-6 divide-y divide-border/50">
             {Array.from({ length: 5 }).map((_, i) => (
               <SkeletonRow key={i} />
@@ -161,14 +169,14 @@ export default function ConsumersPage() {
           </div>
         )}
 
-        {!isLoading && !isPaginating && isError && (
+        {!isLoading && isError && (
           <EmptyState
             title="Failed to load consumers"
             description="An error occurred while fetching consumer data."
           />
         )}
 
-        {!isLoading && !isPaginating && !isError && filtered.length === 0 && (
+        {!isLoading && !isError && consumers.length === 0 && (
           <EmptyState
             title={search ? "No matching consumers" : "No consumers yet"}
             description={
@@ -189,9 +197,9 @@ export default function ConsumersPage() {
           />
         )}
 
-        {!isLoading && !isPaginating && filtered.length > 0 && (
+        {!isLoading && !isError && consumers.length > 0 && (
           <div className="divide-y divide-border/50">
-            {filtered.map((consumer) => {
+            {consumers.map((consumer) => {
               const credTypes = getCredentialTypes(consumer);
               const groupsToShow = consumer.acl_groups.slice(0, 3);
               const extraGroups = consumer.acl_groups.length - 3;
@@ -280,19 +288,10 @@ export default function ConsumersPage() {
       {/* Pagination */}
       {total > 0 && (
         <PaginationControls
-          offset={offset}
-          limit={limit}
+          offset={pagination.offset}
+          limit={pagination.limit}
           total={total}
-          onChange={({ offset: newOffset, limit: newLimit }) => {
-            navigate({
-              search: (prev: Record<string, unknown>) => ({
-                ...prev,
-                offset: newOffset,
-                limit: newLimit,
-              }),
-              replace: true,
-            } as any);
-          }}
+          onChange={pagination.setParams}
         />
       )}
     </div>

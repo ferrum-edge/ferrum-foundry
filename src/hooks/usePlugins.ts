@@ -24,7 +24,7 @@ export function useAvailablePlugins() {
   });
 }
 
-export function usePluginConfigs(params: PaginationParams = {}) {
+export function usePluginConfigs(params: PaginationParams = {}, enabled = true) {
   const { selectedNamespace: ns } = useNamespace();
   return useQuery({
     queryKey: [
@@ -33,14 +33,16 @@ export function usePluginConfigs(params: PaginationParams = {}) {
       { offset: params.offset, limit: params.limit },
     ],
     queryFn: () => plugins.listConfigs(params),
+    enabled,
   });
 }
 
-export function useAllPluginConfigs() {
+export function useAllPluginConfigs(enabled = true) {
   const { selectedNamespace: ns } = useNamespace();
   return useQuery({
     queryKey: ["pluginConfigs", ns, "all"],
     queryFn: () => plugins.listAllConfigs(),
+    enabled,
   });
 }
 

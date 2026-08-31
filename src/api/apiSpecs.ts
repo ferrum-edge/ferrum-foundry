@@ -86,6 +86,45 @@ export async function list(
     .json<ApiSpecListResponse>();
 }
 
+/** Fetch every API spec without imposing a silent UI-side record cap. */
+export async function listAll(): Promise<ApiSpecSummary[]> {
+  const items: ApiSpecSummary[] = [];
+  let offset = 0;
+  const limit = 250;
+  let expectedTotal: number | undefined;
+
+  for (;;) {
+    const page = await list({ offset, limit });
+    if (
+      !Number.isSafeInteger(page.total) ||
+      page.total < 0 ||
+      !Number.isSafeInteger(page.offset) ||
+      page.offset !== offset
+    ) {
+      throw new Error("Gateway returned inconsistent API spec pagination metadata");
+    }
+    if (expectedTotal === undefined) {
+      expectedTotal = page.total;
+    } else if (page.total !== expectedTotal) {
+      throw new Error("Gateway changed API spec pagination total while collecting pages");
+    }
+    items.push(...page.items);
+    if (items.length >= expectedTotal) {
+      if (items.length !== expectedTotal) {
+        throw new Error("Gateway returned more API specs than its pagination total");
+      }
+      return items;
+    }
+    if (page.items.length === 0 || page.next_offset == null) {
+      throw new Error("API spec pagination stopped advancing before completion");
+    }
+    if (!Number.isSafeInteger(page.next_offset) || page.next_offset <= offset) {
+      throw new Error("Gateway returned a non-advancing API spec cursor");
+    }
+    offset = page.next_offset;
+  }
+}
+
 /** Fetch the raw stored spec document as YAML text. */
 export async function getDocument(id: string): Promise<string> {
   return proxyApi

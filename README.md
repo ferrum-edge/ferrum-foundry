@@ -16,7 +16,7 @@ Admin panel UI for managing and observing the [Ferrum Edge](https://github.com/f
 
 ## Features
 
-- **Resource Management** - Full CRUD for Proxies (HTTP + TCP/UDP/DTLS stream routes), Consumers, Plugins, and Upstreams with paginated tables supporting 50k+ records via virtual scrolling
+- **Resource Management** - Full CRUD for Proxies (HTTP + TCP/UDP/DTLS stream routes), Consumers, Plugins, and Upstreams with server-paginated tables and complete-collection search
 - **Relational Browsing** - Navigate Proxy -> Plugins -> Upstream -> Targets (with subsets and locality) via tabs and breadcrumbs
 - **Consumer Credentials** - Manage key-auth, basic-auth, JWT, HMAC, and mTLS credential rotation arrays with ACL groups
 - **Plugin Configuration** - Category-grouped catalog of 80+ gateway plugins (auth, security/WAF, traffic control, AI gateway, mesh, observability, billing) with default config templates, per-instance execution triggers, and scope (global/proxy/group) support

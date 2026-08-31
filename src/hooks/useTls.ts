@@ -34,6 +34,14 @@ export function useManagedTlsRecords(
   });
 }
 
+export function useAllManagedTlsRecords(collection: tls.ManagedTlsCollection) {
+  const { selectedNamespace: ns } = useNamespace();
+  return useQuery({
+    queryKey: ["tls", "managed", collection, ns, "all"],
+    queryFn: () => tls.listAllManagedRecords(collection),
+  });
+}
+
 export function useCreateManagedTlsRecord(collection: tls.ManagedTlsCollection) {
   const qc = useQueryClient();
   return useMutation({
@@ -76,6 +84,14 @@ export function useAcmeCertificates(params: PaginationParams = {}) {
   });
 }
 
+export function useAllAcmeCertificates() {
+  const { selectedNamespace: ns } = useNamespace();
+  return useQuery({
+    queryKey: ["tls", "acme", "certificates", ns, "all"],
+    queryFn: () => tls.listAllAcmeCertificates(),
+  });
+}
+
 export function useAcmeOrders(params: PaginationParams = {}) {
   const { selectedNamespace: ns } = useNamespace();
   return useQuery({
@@ -85,11 +101,28 @@ export function useAcmeOrders(params: PaginationParams = {}) {
   });
 }
 
+export function useAllAcmeOrders() {
+  const { selectedNamespace: ns } = useNamespace();
+  return useQuery({
+    queryKey: ["tls", "acme", "orders", ns, "all"],
+    queryFn: () => tls.listAllAcmeOrders(),
+    refetchInterval: 15000,
+  });
+}
+
 export function useAcmeAccounts(params: PaginationParams = {}) {
   const { selectedNamespace: ns } = useNamespace();
   return useQuery({
     queryKey: ["tls", "acme", "accounts", ns, params],
     queryFn: () => tls.listAcmeAccounts(params),
+  });
+}
+
+export function useAllAcmeAccounts() {
+  const { selectedNamespace: ns } = useNamespace();
+  return useQuery({
+    queryKey: ["tls", "acme", "accounts", ns, "all"],
+    queryFn: () => tls.listAllAcmeAccounts(),
   });
 }
 

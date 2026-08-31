@@ -29,6 +29,18 @@ describe("collectAllPages", () => {
     }))).rejects.toThrow("inconsistent pagination");
   });
 
+  it("rejects a total that changes between pages", async () => {
+    await expect(
+      collectAllPages(
+        async (offset) => ({
+          data: [offset],
+          pagination: { offset, limit: 1, total: offset === 0 ? 2 : 3 },
+        }),
+        1,
+      ),
+    ).rejects.toThrow("changed pagination total");
+  });
+
   it("rejects an invalid caller page size", async () => {
     await expect(collectAllPages(async () => ({
       data: [],

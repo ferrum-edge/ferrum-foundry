@@ -4,6 +4,11 @@
 
 import ky from "ky";
 import type { ApiError } from "./types";
+import {
+  observeGatewayResponse,
+  setApplyStatusFetcher,
+  type ApplyStatusResponse,
+} from "./gatewayMetadata";
 
 // ── Global error handler (event-emitter style) ───────────────────
 
@@ -208,7 +213,8 @@ export const api = ky.create({
       },
     ],
     afterResponse: [
-      async ({ options, response }) => {
+      async ({ request, options, response }) => {
+        await observeGatewayResponse(request, response);
         if (
           response.status === 401 &&
           response.headers.get("x-ferrum-auth-layer") === "bff"
@@ -237,3 +243,12 @@ export const api = ky.create({
  * Usage:  `proxyApi.get("proxies")` => GET /api/proxy/proxies
  */
 export const proxyApi = api.extend({ prefix: "/api/proxy" });
+
+setApplyStatusFetcher((epoch, sequence, waitMs) =>
+  proxyApi
+    .get("config/apply-status", {
+      searchParams: { epoch, sequence, wait_ms: String(waitMs) },
+      context: { [SILENT_ERRORS]: true },
+    })
+    .json<ApplyStatusResponse>(),
+);

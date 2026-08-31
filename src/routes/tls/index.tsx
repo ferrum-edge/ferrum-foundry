@@ -15,17 +15,18 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/Dialog";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { SkeletonRow } from "@/components/ui/Skeleton";
+import { PaginationControls } from "@/components/shared/PaginationControls";
 import { useToast } from "@/components/ui/Toast";
 import { getApiErrorMessage } from "@/api/client";
 import {
   useTlsInventory,
   useTlsEvents,
-  useManagedTlsRecords,
+  useAllManagedTlsRecords,
   useCreateManagedTlsRecord,
   useDeleteManagedTlsRecord,
-  useAcmeCertificates,
-  useAcmeOrders,
-  useAcmeAccounts,
+  useAllAcmeCertificates,
+  useAllAcmeOrders,
+  useAllAcmeAccounts,
   useCreateAcmeOrder,
   useDeleteAcmeOrder,
   useFinalizeAcmeOrder,
@@ -40,6 +41,7 @@ import type {
   TlsRotateSurface,
   AcmeOrder,
 } from "@/api/tls";
+import { usePaginationParams } from "@/hooks/usePagination";
 
 /* ------------------------------------------------------------------ */
 /*  Small helpers                                                      */
@@ -136,7 +138,7 @@ const MANAGED_TABS: ManagedTabConfig[] = [
 
 function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
   const { toast } = useToast();
-  const { data, isLoading } = useManagedTlsRecords(config.collection);
+  const { data, isLoading } = useAllManagedTlsRecords(config.collection);
   const createRecord = useCreateManagedTlsRecord(config.collection);
   const deleteRecord = useDeleteManagedTlsRecord(config.collection);
 
@@ -144,7 +146,7 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
   const [deleteTarget, setDeleteTarget] = useState<ManagedTlsRecord | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
 
-  const records = data?.data ?? [];
+  const records = data ?? [];
 
   const handleCreate = async () => {
     for (const field of config.fields) {
@@ -330,7 +332,8 @@ function stateBadge(state: string): ReactNode {
 
 function InventoryTab() {
   const { toast } = useToast();
-  const { data, isLoading } = useTlsInventory({ limit: 200 });
+  const pagination = usePaginationParams({ defaultLimit: 50 });
+  const { data, isLoading } = useTlsInventory(pagination.paginationParams);
   const rotate = useRotateTlsSurface();
   const [surface, setSurface] = useState<TlsRotateSurface>("proxy_https");
 
@@ -418,6 +421,14 @@ function InventoryTab() {
             </div>
           ))}
       </Card>
+      {(data?.pagination.total ?? 0) > 0 && (
+        <PaginationControls
+          offset={pagination.offset}
+          limit={pagination.limit}
+          total={data?.pagination.total ?? 0}
+          onChange={pagination.setParams}
+        />
+      )}
     </div>
   );
 }
@@ -428,8 +439,9 @@ function InventoryTab() {
 
 function EventsTab() {
   const [outcome, setOutcome] = useState<string>("");
+  const pagination = usePaginationParams({ defaultLimit: 50 });
   const { data, isLoading } = useTlsEvents({
-    limit: 100,
+    ...pagination.paginationParams,
     ...(outcome && { outcome: outcome as "rotated" | "load_error" | "rebuild_error" }),
   });
   const events = data?.data ?? [];
@@ -440,7 +452,10 @@ function EventsTab() {
         <Select
           label="Outcome"
           value={outcome || "all"}
-          onValueChange={(v) => setOutcome(v === "all" ? "" : v)}
+          onValueChange={(v) => {
+            setOutcome(v === "all" ? "" : v);
+            pagination.setParams({ offset: 0, limit: pagination.limit });
+          }}
           options={[
             { value: "all", label: "All outcomes" },
             { value: "rotated", label: "Rotated" },
@@ -485,6 +500,14 @@ function EventsTab() {
             </div>
           ))}
       </Card>
+      {(data?.pagination.total ?? 0) > 0 && (
+        <PaginationControls
+          offset={pagination.offset}
+          limit={pagination.limit}
+          total={data?.pagination.total ?? 0}
+          onChange={pagination.setParams}
+        />
+      )}
     </div>
   );
 }
@@ -505,9 +528,9 @@ function acmeStatusBadge(status: AcmeOrder["status"] | string): ReactNode {
 
 function AcmeTab() {
   const { toast } = useToast();
-  const { data: certs, isLoading: certsLoading } = useAcmeCertificates();
-  const { data: orders, isLoading: ordersLoading } = useAcmeOrders();
-  const { data: accounts } = useAcmeAccounts();
+  const { data: certs, isLoading: certsLoading } = useAllAcmeCertificates();
+  const { data: orders, isLoading: ordersLoading } = useAllAcmeOrders();
+  const { data: accounts } = useAllAcmeAccounts();
   const createOrder = useCreateAcmeOrder();
   const deleteOrder = useDeleteAcmeOrder();
   const finalizeOrder = useFinalizeAcmeOrder();
@@ -571,13 +594,13 @@ function AcmeTab() {
               ))}
             </div>
           )}
-          {!certsLoading && (certs?.data ?? []).length === 0 && (
+          {!certsLoading && (certs ?? []).length === 0 && (
             <EmptyState
               title="No ACME certificates"
               description="Create an order to obtain a certificate, or import issued material."
             />
           )}
-          {(certs?.data ?? []).map((cert) => (
+          {(certs ?? []).map((cert) => (
             <div key={cert.id} className="px-6 py-3.5 border-b border-border/50 last:border-b-0 flex items-center justify-between gap-4">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -638,13 +661,13 @@ function AcmeTab() {
               ))}
             </div>
           )}
-          {!ordersLoading && (orders?.data ?? []).length === 0 && (
+          {!ordersLoading && (orders ?? []).length === 0 && (
             <EmptyState
               title="No active orders"
               description="ACME orders and their pending challenges appear here."
             />
           )}
-          {(orders?.data ?? []).map((order) => (
+          {(orders ?? []).map((order) => (
             <div key={order.id} className="px-6 py-3.5 border-b border-border/50 last:border-b-0">
               <div className="flex items-center justify-between gap-4">
                 <div className="min-w-0">
@@ -711,11 +734,11 @@ function AcmeTab() {
       </div>
 
       {/* Accounts */}
-      {(accounts?.data ?? []).length > 0 && (
+      {(accounts ?? []).length > 0 && (
         <div className="space-y-3">
           <h3 className="text-sm font-semibold text-text-primary">Accounts</h3>
           <Card className="overflow-hidden p-0">
-            {(accounts?.data ?? []).map((account) => (
+            {(accounts ?? []).map((account) => (
               <div key={account.account_id} className="px-6 py-3 border-b border-border/50 last:border-b-0 flex items-center justify-between gap-4">
                 <div className="min-w-0">
                   <Mono>{account.account_id}</Mono>
