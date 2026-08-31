@@ -127,6 +127,8 @@ export function setOnUnauthorized(handler: (() => void) | undefined): void {
 // ── localStorage namespace helper ────────────────────────────────
 
 export const NAMESPACE_HEADER = "X-Ferrum-Namespace";
+/** Mark a documented fleet-global gateway operation so no tenant header is implied. */
+export const FLEET_GLOBAL = "fleetGlobal";
 
 const NAMESPACE_STORAGE_KEY = "ferrum:namespace";
 const DEFAULT_NAMESPACE = "ferrum";
@@ -183,12 +185,16 @@ export const api = ky.create({
   credentials: "same-origin",
   hooks: {
     beforeRequest: [
-      ({ request }) => {
+      ({ request, options }) => {
         // Attach the active namespace header to every proxy request, unless
         // the caller already scoped this one to a specific namespace (e.g.
         // counting a delete target's resources while a different namespace is
         // selected).
-        if (request.url.includes("/api/proxy/") && !request.headers.has(NAMESPACE_HEADER)) {
+        if (
+          request.url.includes("/api/proxy/") &&
+          !options.context?.[FLEET_GLOBAL] &&
+          !request.headers.has(NAMESPACE_HEADER)
+        ) {
           request.headers.set(NAMESPACE_HEADER, getNamespace());
         }
         if (
