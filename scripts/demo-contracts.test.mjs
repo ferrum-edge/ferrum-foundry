@@ -5,6 +5,7 @@ import {
   adminToken,
   buildRestorePayload,
   readSeedConfig,
+  runSeed,
 } from "./seed-demo-gateway.mjs";
 
 const SIGNING_SECRET = "contract-test-signing-secret-at-least-32-characters";
@@ -40,24 +41,40 @@ test("demo admin token matches the Ferrum admin claim contract", async () => {
   assert.equal(payload.jti, "contract-test-jti");
 });
 
-test("demo seeder has no fallback signing credential and requires an explicit destructive opt-in", () => {
+test("demo seeder has no fallback signing credential and requires a target-bound confirmation", () => {
   assert.throws(() => readSeedConfig({}), /FERRUM_JWT_SECRET is required/);
 
   const config = readSeedConfig({ FERRUM_JWT_SECRET: SIGNING_SECRET });
   assert.equal(config.namespace, "ferrum-foundry-demo");
-  assert.equal(config.allowDestructive, false);
+  assert.equal(config.destructiveConfirmation, undefined);
   assert.equal(config.backendHost, "127.0.0.1");
   assert.equal(config.proxyBaseUrl, "http://127.0.0.1:8000");
 
   const optedIn = readSeedConfig({
     FERRUM_JWT_SECRET: SIGNING_SECRET,
-    FERRUM_DEMO_ALLOW_DESTRUCTIVE: "true",
+    FERRUM_DEMO_CONFIRM_TARGET: "http://127.0.0.1:9000#ferrum-foundry-demo",
   });
-  assert.equal(optedIn.allowDestructive, true);
+  assert.equal(
+    optedIn.destructiveConfirmation,
+    "http://127.0.0.1:9000#ferrum-foundry-demo",
+  );
   assert.throws(() => readSeedConfig({
     FERRUM_JWT_SECRET: SIGNING_SECRET,
     FERRUM_DEMO_BACKEND_HOST: "backend:9101",
   }), /DNS hostname without a port/);
+});
+
+test("demo seeder rejects a confirmation copied from a different target before HTTP", async () => {
+  const config = readSeedConfig({
+    FERRUM_JWT_SECRET: SIGNING_SECRET,
+    FERRUM_ADMIN_URL: "https://gateway.example",
+    FERRUM_NAMESPACE: "payments",
+    FERRUM_DEMO_CONFIRM_TARGET: "http://127.0.0.1:9000#ferrum-foundry-demo",
+  });
+  await assert.rejects(
+    runSeed(config),
+    /must exactly equal "https:\/\/gateway\.example#payments"/,
+  );
 });
 
 test("restore fixture uses current resource names and versioned API-spec semantics", () => {

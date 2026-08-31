@@ -40,7 +40,7 @@ node scripts/mock-admin-gateway.mjs   # listens on :9000
 
 # Seed demo data (needs running Ferrum Edge gateway)
 FERRUM_NAMESPACE=ferrum-foundry-demo \
-FERRUM_DEMO_ALLOW_DESTRUCTIVE=true \
+FERRUM_DEMO_CONFIRM_TARGET='http://127.0.0.1:9000#ferrum-foundry-demo' \
 FERRUM_DEMO_BACKEND_HOST=host.docker.internal \
 node scripts/seed-demo-gateway.mjs
 

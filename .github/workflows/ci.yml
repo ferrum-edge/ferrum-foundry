@@ -117,7 +117,7 @@ jobs:
           FERRUM_JWT_SECRET: contract-admin-signing-secret-at-least-32-characters
           FERRUM_JWT_AUDIENCE: ferrum-admin
           FERRUM_NAMESPACE: ferrum-foundry-demo
-          FERRUM_DEMO_ALLOW_DESTRUCTIVE: 'true'
+          FERRUM_DEMO_CONFIRM_TARGET: 'http://127.0.0.1:9000#ferrum-foundry-demo'
           FERRUM_DEMO_BACKEND_HOST: host.docker.internal
           FERRUM_DEMO_PROXY_URL: http://127.0.0.1:8000
         run: npm run test:gateway-contract
@@ -168,7 +168,7 @@ jobs:
             exit 1
           fi
 
-      - name: Verify non-root runtime and liveness
+      - name: Verify non-root runtime, liveness, and readiness
         run: |
           runtime_user=$(docker image inspect --format '{{.Config.User}}' ferrum-foundry:ci)
           if [ -z "$runtime_user" ] || [ "$runtime_user" = '0' ] || [ "$runtime_user" = 'root' ]; then
@@ -199,7 +199,8 @@ jobs:
             --env FERRUM_TRUSTED_PROXY_SECRET=container-proxy-proof-secret-at-least-32-characters \
             ferrum-foundry:ci
           for _attempt in $(seq 1 30); do
-            if curl --fail --silent --show-error http://127.0.0.1:8080/api/health/live >/dev/null; then
+            if curl --fail --silent --show-error http://127.0.0.1:8080/api/health/live >/dev/null \
+              && curl --fail --silent --show-error http://127.0.0.1:8080/api/health/ready >/dev/null; then
               exit 0
             fi
             sleep 1
@@ -363,10 +364,22 @@ jobs:
             [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || { echo "Invalid digest artifact: $digest" >&2; exit 1; }
             images+=("$IMAGE_REPOSITORY@sha256:${digest}")
           done
+          if [[ ${#images[@]} -ne 2 ]]; then
+            echo "Expected exactly two platform digests, found ${#images[@]}" >&2
+            exit 1
+          fi
           docker buildx imagetools create \
-            -t "$IMAGE_REPOSITORY:latest" \
+            -t "$IMAGE_REPOSITORY:main" \
             -t "$IMAGE_REPOSITORY:main-$GITHUB_SHA" \
             "${images[@]}"
+          platforms="$(
+            docker buildx imagetools inspect "$IMAGE_REPOSITORY:main-$GITHUB_SHA" --raw \
+              | jq -r '[.manifests[]?.platform | select(.os != "unknown" or .architecture != "unknown") | "\(.os // "missing")/\(.architecture // "missing")"] | sort | join(",")'
+          )"
+          if [[ "$platforms" != "linux/amd64,linux/arm64" ]]; then
+            echo "Published manifest has unexpected platforms: ${platforms:-none}" >&2
+            exit 1
+          fi
 
       - name: Create and push multi-arch manifest (GHCR)
         working-directory: /tmp/digests
@@ -378,7 +391,19 @@ jobs:
             [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || { echo "Invalid digest artifact: $digest" >&2; exit 1; }
             images+=("$IMAGE_REPOSITORY@sha256:${digest}")
           done
+          if [[ ${#images[@]} -ne 2 ]]; then
+            echo "Expected exactly two platform digests, found ${#images[@]}" >&2
+            exit 1
+          fi
           docker buildx imagetools create \
-            -t "$IMAGE_REPOSITORY:latest" \
+            -t "$IMAGE_REPOSITORY:main" \
             -t "$IMAGE_REPOSITORY:main-$GITHUB_SHA" \
             "${images[@]}"
+          platforms="$(
+            docker buildx imagetools inspect "$IMAGE_REPOSITORY:main-$GITHUB_SHA" --raw \
+              | jq -r '[.manifests[]?.platform | select(.os != "unknown" or .architecture != "unknown") | "\(.os // "missing")/\(.architecture // "missing")"] | sort | join(",")'
+          )"
+          if [[ "$platforms" != "linux/amd64,linux/arm64" ]]; then
+            echo "Published manifest has unexpected platforms: ${platforms:-none}" >&2
+            exit 1
+          fi

@@ -23,14 +23,22 @@ and Vite build configuration, application/server/shared source, and public
 assets are sent. Files such as `.env`, Git history, documentation, local build
 output, test coverage, and developer caches are outside the context.
 
-The Node 22 builder and distroless Node 22 runtime use immutable multi-platform
-base-image digests. Main and tagged multi-architecture publications request
-maximum-mode build provenance and SBOM attestations from BuildKit. The image's
-OCI revision label is set to the exact Git commit being published.
+The Dockerfile frontend, Node 22 builder, and distroless Node 22 runtime use
+immutable multi-platform image digests. Main and tagged multi-architecture
+publications request maximum-mode build provenance and SBOM attestations from
+BuildKit. Each manifest job requires exactly two build digests and verifies the
+published index contains both `linux/amd64` and `linux/arm64`. The image's OCI
+revision label is set to the exact Git commit being published.
 
 Every third-party GitHub Action is pinned to a full commit SHA. Release tags are
-validated as safe semantic versions before any registry login or build, and a
-prerelease never advances the stable major/minor image tag.
+validated as safe semantic versions and must point to a commit reachable from
+`main` before any registry login or build. A prerelease is marked as such on
+GitHub and never advances the stable major/minor or `latest` image tags.
+
+Channel tags are explicit: every `main` publication advances `main` and an
+immutable `main-<commit>` tag, while only a stable semantic-version release
+advances `latest`. Consequently, an untagged commit can never replace the image
+operators receive from an unqualified `docker pull ferrumedge/ferrum-foundry`.
 
 Coverage floors are intentional baseline ratchets, not a claim that the UI is
 fully covered. Server security code has a separate, higher aggregate floor.

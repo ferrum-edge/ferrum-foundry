@@ -109,11 +109,15 @@ To seed a real gateway, use a dedicated namespace. Seeding performs a full
 replacement of that namespace, so it refuses to run without an explicit opt-in:
 
 ```bash
-export FERRUM_NAMESPACE=ferrum-foundry-demo
-export FERRUM_DEMO_ALLOW_DESTRUCTIVE=true
 # FERRUM_JWT_SECRET is the same 32+ character admin signing key used by Ferrum.
+FERRUM_NAMESPACE=ferrum-foundry-demo \
+FERRUM_DEMO_CONFIRM_TARGET='http://127.0.0.1:9000#ferrum-foundry-demo' \
 node scripts/seed-demo-gateway.mjs
 ```
+
+The confirmation must exactly match `<FERRUM_ADMIN_URL>#<FERRUM_NAMESPACE>`;
+changing either target invalidates a previously copied confirmation before any
+HTTP request is made.
 
 The payload uses deterministic resource IDs and can be run repeatedly. It
 includes the current versioned API-spec backup section, current credential-array

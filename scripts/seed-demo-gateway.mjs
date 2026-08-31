@@ -120,7 +120,7 @@ export function readSeedConfig(env = process.env) {
     jwtAudience: parseAudience(env.FERRUM_JWT_AUDIENCE),
     namespace: env.FERRUM_NAMESPACE?.trim() || "ferrum-foundry-demo",
     manifestPath: env.FERRUM_DEMO_MANIFEST?.trim() || "/tmp/ferrum-foundry-demo-manifest.json",
-    allowDestructive: env.FERRUM_DEMO_ALLOW_DESTRUCTIVE === "true",
+    destructiveConfirmation: env.FERRUM_DEMO_CONFIRM_TARGET?.trim(),
   };
 }
 
@@ -620,10 +620,11 @@ export function buildRestorePayload(now = isoNow(), { backendHost = "127.0.0.1" 
 }
 
 export async function runSeed(config = readSeedConfig()) {
-  if (!config.allowDestructive) {
+  const destructiveTarget = `${config.adminUrl}#${config.namespace}`;
+  if (config.destructiveConfirmation !== destructiveTarget) {
     throw new Error(
       `Refusing to replace namespace ${JSON.stringify(config.namespace)}. `
-      + "Set FERRUM_DEMO_ALLOW_DESTRUCTIVE=true after confirming this isolated demo namespace may be erased.",
+      + `FERRUM_DEMO_CONFIRM_TARGET must exactly equal ${JSON.stringify(destructiveTarget)}.`,
     );
   }
 
