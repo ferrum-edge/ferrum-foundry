@@ -65,14 +65,15 @@ describe("ACME certificate API wiring", () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
-  it("pins import, read, replace, and delete to the selected namespace", async () => {
-    await createAcmeCertificate(request, "production");
-    await getAcmeCertificate("edge-cert", "production");
-    await updateAcmeCertificate("edge-cert", { ...request, id: "wrong-id" }, "production");
-    await removeAcmeCertificate("edge-cert", "production");
+  it("treats import, read, replace, and delete as fleet-global operations", async () => {
+    localStorage.setItem("ferrum:namespace", "production");
+    await createAcmeCertificate(request);
+    await getAcmeCertificate("edge-cert");
+    await updateAcmeCertificate("edge-cert", { ...request, id: "wrong-id" });
+    await removeAcmeCertificate("edge-cert");
 
     expect(captured.map(({ method }) => method)).toEqual(["POST", "GET", "PUT", "DELETE"]);
-    expect(captured.every(({ namespace }) => namespace === "production")).toBe(true);
+    expect(captured.every(({ namespace }) => namespace === null)).toBe(true);
     expect(captured[0].url).toMatch(/\/admin\/tls\/acme\/certificates$/);
     expect(captured[1].url).toMatch(/\/admin\/tls\/acme\/certificates\/edge-cert$/);
     expect(captured[2].body).toMatchObject({ id: "edge-cert", key_pem: request.key_pem });

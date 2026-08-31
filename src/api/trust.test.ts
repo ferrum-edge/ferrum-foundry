@@ -13,6 +13,7 @@ describe("getGatewayTrustRevisionConflict", () => {
           error: "revision mismatch",
           expected_revision: 41,
           current_revision: 42,
+          request_id: "additive-field",
         }),
       ),
     ).toEqual({
@@ -26,7 +27,6 @@ describe("getGatewayTrustRevisionConflict", () => {
     [409, { error: "already exists" }],
     [400, { error: "revision mismatch", expected_revision: 1, current_revision: 2 }],
     [409, { error: "revision mismatch", expected_revision: 1.5, current_revision: 2 }],
-    [409, { error: "revision mismatch", expected_revision: 1, current_revision: 2, extra: true }],
   ])("rejects noncanonical response %#", (status, data) => {
     expect(getGatewayTrustRevisionConflict(conflict(data, status))).toBeNull();
   });

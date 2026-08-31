@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – TLS management API (types + endpoints)           */
 /* ------------------------------------------------------------------ */
 
-import { NAMESPACE_HEADER, proxyApi } from "./client";
+import { FLEET_GLOBAL, proxyApi } from "./client";
 import type { PaginatedResponse, PaginationParams } from "./types";
 import { collectAllPages } from "./pagination";
 
@@ -346,13 +346,18 @@ function paginationSearch(params: PaginationParams): Record<string, string> {
   return searchParams;
 }
 
+const FLEET_GLOBAL_CONTEXT = { [FLEET_GLOBAL]: true };
+
 /* ---------- Inventory & events ---------- */
 
 export async function listInventory(
   params: PaginationParams = {},
 ): Promise<PaginatedResponse<TlsInventoryEntry>> {
   return proxyApi
-    .get("admin/tls/inventory", { searchParams: paginationSearch(params) })
+    .get("admin/tls/inventory", {
+      searchParams: paginationSearch(params),
+      context: FLEET_GLOBAL_CONTEXT,
+    })
     .json<PaginatedResponse<TlsInventoryEntry>>();
 }
 
@@ -366,7 +371,7 @@ export async function listEvents(
   if (params.outcome) searchParams.outcome = params.outcome;
   if (params.since) searchParams.since = params.since;
   return proxyApi
-    .get("admin/tls/events", { searchParams })
+    .get("admin/tls/events", { searchParams, context: FLEET_GLOBAL_CONTEXT })
     .json<PaginatedResponse<TlsSourceEvent>>();
 }
 
@@ -377,7 +382,10 @@ export async function listManagedRecords(
   params: PaginationParams = {},
 ): Promise<PaginatedResponse<ManagedTlsRecord>> {
   return proxyApi
-    .get(`admin/tls/${collection}`, { searchParams: paginationSearch(params) })
+    .get(`admin/tls/${collection}`, {
+      searchParams: paginationSearch(params),
+      context: FLEET_GLOBAL_CONTEXT,
+    })
     .json<PaginatedResponse<ManagedTlsRecord>>();
 }
 
@@ -394,7 +402,7 @@ export async function createManagedRecord(
   data: ManagedTlsRequest,
 ): Promise<ManagedTlsRecord> {
   return proxyApi
-    .post(`admin/tls/${collection}`, { json: data })
+    .post(`admin/tls/${collection}`, { json: data, context: FLEET_GLOBAL_CONTEXT })
     .json<ManagedTlsRecord>();
 }
 
@@ -404,7 +412,7 @@ export async function updateManagedRecord(
   data: ManagedTlsRequest,
 ): Promise<ManagedTlsRecord> {
   return proxyApi
-    .put(`admin/tls/${collection}/${id}`, { json: data })
+    .put(`admin/tls/${collection}/${id}`, { json: data, context: FLEET_GLOBAL_CONTEXT })
     .json<ManagedTlsRecord>();
 }
 
@@ -412,7 +420,7 @@ export async function removeManagedRecord(
   collection: ManagedTlsCollection,
   id: string,
 ): Promise<void> {
-  await proxyApi.delete(`admin/tls/${collection}/${id}`);
+  await proxyApi.delete(`admin/tls/${collection}/${id}`, { context: FLEET_GLOBAL_CONTEXT });
 }
 
 /* ---------- ACME ---------- */
@@ -423,6 +431,7 @@ export async function listAcmeCertificates(
   return proxyApi
     .get("admin/tls/acme/certificates", {
       searchParams: paginationSearch(params),
+      context: FLEET_GLOBAL_CONTEXT,
     })
     .json<PaginatedResponse<AcmeCertificateRecord>>();
 }
@@ -435,23 +444,21 @@ export async function listAllAcmeCertificates(): Promise<AcmeCertificateRecord[]
 
 export async function createAcmeCertificate(
   data: AcmeCertificateRequest,
-  namespace?: string,
 ): Promise<AcmeCertificateRecord> {
   return proxyApi
     .post("admin/tls/acme/certificates", {
       json: data,
-      ...(namespace && { headers: { [NAMESPACE_HEADER]: namespace } }),
+      context: FLEET_GLOBAL_CONTEXT,
     })
     .json<AcmeCertificateRecord>();
 }
 
 export async function getAcmeCertificate(
   id: string,
-  namespace?: string,
 ): Promise<AcmeCertificateRecord> {
   return proxyApi
     .get(`admin/tls/acme/certificates/${id}`, {
-      ...(namespace && { headers: { [NAMESPACE_HEADER]: namespace } }),
+      context: FLEET_GLOBAL_CONTEXT,
     })
     .json<AcmeCertificateRecord>();
 }
@@ -459,22 +466,20 @@ export async function getAcmeCertificate(
 export async function updateAcmeCertificate(
   id: string,
   data: AcmeCertificateRequest,
-  namespace?: string,
 ): Promise<AcmeCertificateRecord> {
   return proxyApi
     .put(`admin/tls/acme/certificates/${id}`, {
       json: { ...data, id },
-      ...(namespace && { headers: { [NAMESPACE_HEADER]: namespace } }),
+      context: FLEET_GLOBAL_CONTEXT,
     })
     .json<AcmeCertificateRecord>();
 }
 
 export async function removeAcmeCertificate(
   id: string,
-  namespace?: string,
 ): Promise<void> {
   await proxyApi.delete(`admin/tls/acme/certificates/${id}`, {
-    ...(namespace && { headers: { [NAMESPACE_HEADER]: namespace } }),
+    context: FLEET_GLOBAL_CONTEXT,
   });
 }
 
@@ -482,7 +487,10 @@ export async function listAcmeOrders(
   params: PaginationParams = {},
 ): Promise<PaginatedResponse<AcmeOrder>> {
   return proxyApi
-    .get("admin/tls/acme/orders", { searchParams: paginationSearch(params) })
+    .get("admin/tls/acme/orders", {
+      searchParams: paginationSearch(params),
+      context: FLEET_GLOBAL_CONTEXT,
+    })
     .json<PaginatedResponse<AcmeOrder>>();
 }
 
@@ -493,11 +501,13 @@ export async function listAllAcmeOrders(): Promise<AcmeOrder[]> {
 export async function createAcmeOrder(
   data: AcmeOrderRequest,
 ): Promise<AcmeOrder> {
-  return proxyApi.post("admin/tls/acme/orders", { json: data }).json<AcmeOrder>();
+  return proxyApi
+    .post("admin/tls/acme/orders", { json: data, context: FLEET_GLOBAL_CONTEXT })
+    .json<AcmeOrder>();
 }
 
 export async function removeAcmeOrder(id: string): Promise<void> {
-  await proxyApi.delete(`admin/tls/acme/orders/${id}`);
+  await proxyApi.delete(`admin/tls/acme/orders/${id}`, { context: FLEET_GLOBAL_CONTEXT });
 }
 
 export async function finalizeAcmeOrder(
@@ -505,7 +515,10 @@ export async function finalizeAcmeOrder(
   data: AcmeOrderFinalizeRequest = {},
 ): Promise<AcmeOrderFinalizeResponse> {
   return proxyApi
-    .post(`admin/tls/acme/orders/${id}/finalize`, { json: data })
+    .post(`admin/tls/acme/orders/${id}/finalize`, {
+      json: data,
+      context: FLEET_GLOBAL_CONTEXT,
+    })
     .json<AcmeOrderFinalizeResponse>();
 }
 
@@ -514,7 +527,7 @@ export async function renewAcmeCertificate(
   data: AcmeRenewRequest = {},
 ): Promise<AcmeOrder> {
   return proxyApi
-    .post(`admin/tls/acme/renew/${id}`, { json: data })
+    .post(`admin/tls/acme/renew/${id}`, { json: data, context: FLEET_GLOBAL_CONTEXT })
     .json<AcmeOrder>();
 }
 
@@ -522,7 +535,10 @@ export async function listAcmeAccounts(
   params: PaginationParams = {},
 ): Promise<PaginatedResponse<AcmeAccount>> {
   return proxyApi
-    .get("admin/tls/acme/accounts", { searchParams: paginationSearch(params) })
+    .get("admin/tls/acme/accounts", {
+      searchParams: paginationSearch(params),
+      context: FLEET_GLOBAL_CONTEXT,
+    })
     .json<PaginatedResponse<AcmeAccount>>();
 }
 
@@ -536,7 +552,7 @@ export async function rotateSurface(
   surface: TlsRotateSurface,
 ): Promise<TlsRotateAcceptedResponse> {
   return proxyApi
-    .post(`admin/tls/rotate/${surface}`)
+    .post(`admin/tls/rotate/${surface}`, { context: FLEET_GLOBAL_CONTEXT })
     .json<TlsRotateAcceptedResponse>();
 }
 
@@ -544,6 +560,6 @@ export async function validateMaterial(
   data: TlsValidateRequest,
 ): Promise<TlsValidateResponse> {
   return proxyApi
-    .post("admin/tls/validate", { json: data })
+    .post("admin/tls/validate", { json: data, context: FLEET_GLOBAL_CONTEXT })
     .json<TlsValidateResponse>();
 }
