@@ -38,8 +38,11 @@ export function proxyTargetPath(request: FastifyRequest): string {
   if (typeof wildcard === 'string') {
     value = wildcard;
   } else {
+    const routePath = request.routeOptions.url ?? '';
     const requestPath = request.url.split('?', 1)[0];
-    const encoded = requestPath.startsWith(PROXY_PREFIX) ? requestPath.slice(PROXY_PREFIX.length) : '';
+    const encoded = routePath.startsWith(PROXY_PREFIX)
+      ? routePath.slice(PROXY_PREFIX.length)
+      : requestPath.startsWith(PROXY_PREFIX) ? requestPath.slice(PROXY_PREFIX.length) : '';
     try {
       value = decodeURIComponent(encoded);
     } catch {
@@ -49,6 +52,29 @@ export function proxyTargetPath(request: FastifyRequest): string {
   value = value.replace(/^\/+/, '');
   if (containsDotSegment(value)) throw new UnsafeProxyPathError();
   return `/${value}`;
+}
+
+export function requestIsProxyRoute(request: FastifyRequest): boolean {
+  const routePath = request.routeOptions.url ?? '';
+  return routePath === '/api/proxy/*' || routePath.startsWith(PROXY_PREFIX);
+}
+
+export function requestIsApiRoute(request: FastifyRequest): boolean {
+  if (request.routeOptions.url?.startsWith('/api/')) return true;
+
+  let requestPath = request.url.split('?', 1)[0];
+  for (let pass = 0; pass < MAX_DECODE_PASSES; pass += 1) {
+    if (requestPath.startsWith('/api/')) return true;
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(requestPath);
+    } catch {
+      return false;
+    }
+    if (decoded === requestPath) return false;
+    requestPath = decoded;
+  }
+  return true;
 }
 
 export function proxyPathIsFleetGlobal(request: FastifyRequest): boolean {
