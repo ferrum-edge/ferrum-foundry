@@ -26,7 +26,7 @@ import {
   useNodeWaypointIdentities,
   useServiceWaypointServices,
 } from "@/hooks/useMesh";
-import { useTrustBundles, useTrustStatus } from "@/hooks/useTrust";
+import { GatewayTrustManager } from "@/components/forms/GatewayTrustManager";
 
 function NotMeshEmpty({ what }: { what: string }) {
   return (
@@ -506,86 +506,7 @@ function WaypointsTab() {
 /* ---------- Gateway trust ---------- */
 
 function TrustTab() {
-  const { data: status } = useTrustStatus();
-  const { data: bundles, isError } = useTrustBundles();
-
-  if (isError && !status) return <NotMeshEmpty what="Gateway trust" />;
-
-  const bundle = bundles?.data?.[0];
-
-  return (
-    <div className="space-y-4">
-      {status && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <StatTile
-            label="Configured"
-            value={status.configured ? "yes" : "no"}
-            tone={status.configured ? "good" : "warn"}
-          />
-          <StatTile
-            label="Authority"
-            value={status.authority_unresolved ? "unresolved" : "resolved"}
-            tone={status.authority_unresolved ? "bad" : "good"}
-          />
-          <StatTile label="Published" value={status.process.published_generations_total} />
-          <StatTile
-            label="Load rejections"
-            value={status.process.load_rejections_total}
-            tone={status.process.load_rejections_total > 0 ? "warn" : "good"}
-          />
-        </div>
-      )}
-
-      {status?.bundle && (
-        <Card>
-          <h3 className="text-sm font-semibold text-text-primary mb-3">Active Bundle</h3>
-          <div className="space-y-1 text-sm text-text-secondary">
-            <p>
-              Trust domain:{" "}
-              <span className="font-mono text-text-primary">{status.bundle.trust_domain}</span>
-            </p>
-            <p>
-              Revision {status.bundle.revision} · {status.bundle.x509_authority_count} x509 ·{" "}
-              {status.bundle.jwt_authority_count} JWT · {status.bundle.federated_count} federated
-            </p>
-            <p className="text-xs text-text-muted">
-              updated {new Date(status.bundle.updated_at).toLocaleString()}
-            </p>
-          </div>
-        </Card>
-      )}
-
-      {bundle && (
-        <Card>
-          <h3 className="text-sm font-semibold text-text-primary mb-3">Bundle Detail</h3>
-          <pre className="text-xs font-mono text-text-secondary bg-code-bg rounded-lg p-3 overflow-x-auto max-h-96">
-            {JSON.stringify(
-              {
-                id: bundle.id,
-                trust_domain: bundle.trust_domain,
-                revision: bundle.revision,
-                local_x509_authorities: bundle.bundle.local.x509_authorities?.length ?? 0,
-                local_jwt_authorities: bundle.bundle.local.jwt_authorities?.length ?? 0,
-                federated: (bundle.bundle.federated ?? []).map((f) => f.trust_domain),
-              },
-              null,
-              2,
-            )}
-          </pre>
-          <p className="text-xs text-text-muted mt-2">
-            Bundles are rotated via the admin API with optimistic revision checks.
-          </p>
-        </Card>
-      )}
-
-      {!status?.configured && !bundle && (
-        <EmptyState
-          title="No gateway trust bundle"
-          description="This namespace has no SPIFFE trust bundle configured. Create one via POST /gateway-trust-bundles."
-        />
-      )}
-    </div>
-  );
+  return <GatewayTrustManager />;
 }
 
 /* ================================================================== */

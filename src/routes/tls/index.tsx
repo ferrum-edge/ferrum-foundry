@@ -4,14 +4,19 @@
 /*  surface rotation, and material validation.                        */
 /* ------------------------------------------------------------------ */
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/Dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@/components/ui/Dialog";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { SkeletonRow } from "@/components/ui/Skeleton";
@@ -27,6 +32,9 @@ import {
   useAllAcmeCertificates,
   useAllAcmeOrders,
   useAllAcmeAccounts,
+  useAcmeCertificate,
+  useImportAcmeCertificate,
+  useUpdateAcmeCertificate,
   useCreateAcmeOrder,
   useDeleteAcmeOrder,
   useFinalizeAcmeOrder,
@@ -40,8 +48,16 @@ import type {
   ManagedTlsRecord,
   TlsRotateSurface,
   AcmeOrder,
+  AcmeCertificateRecord,
 } from "@/api/tls";
 import { usePaginationParams } from "@/hooks/usePagination";
+import {
+  acmeCertificateToForm,
+  buildAcmeCertificateRequest,
+  EMPTY_ACME_CERTIFICATE_FORM,
+  AcmeCertificateFormError,
+  type AcmeCertificateFormState,
+} from "@/lib/acmeCertificateForm";
 
 /* ------------------------------------------------------------------ */
 /*  Small helpers                                                      */
@@ -290,7 +306,7 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
         open={!!deleteTarget}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
         title={`Delete ${deleteTarget?.name || deleteTarget?.id}?`}
-        description="Records still referenced by TLS configuration cannot be deleted (the gateway returns 409)."
+        description="This is a fleet-global record shared by every namespace. Records still referenced by TLS configuration cannot be deleted (the gateway returns 409)."
         confirmLabel="Delete"
         onConfirm={async () => {
           if (!deleteTarget) return;
@@ -526,11 +542,27 @@ function acmeStatusBadge(status: AcmeOrder["status"] | string): ReactNode {
   return <Badge variant={variant}>{status.replace(/_/g, " ")}</Badge>;
 }
 
+const ACME_PAGE_SIZE = 20;
+const EMPTY_ACME_ORDER_FORM = {
+  domains: "",
+  directory_url: "https://acme-v02.api.letsencrypt.org/directory",
+  contact: "",
+  challenge_type: "http01",
+  terms_of_service_agreed: false,
+};
+
+interface AcmeCertificateEditor {
+  mode: "import" | "replace";
+  target: AcmeCertificateRecord | null;
+}
+
 function AcmeTab() {
   const { toast } = useToast();
   const { data: certs, isLoading: certsLoading } = useAllAcmeCertificates();
   const { data: orders, isLoading: ordersLoading } = useAllAcmeOrders();
   const { data: accounts } = useAllAcmeAccounts();
+  const importCert = useImportAcmeCertificate();
+  const updateCert = useUpdateAcmeCertificate();
   const createOrder = useCreateAcmeOrder();
   const deleteOrder = useDeleteAcmeOrder();
   const finalizeOrder = useFinalizeAcmeOrder();
@@ -538,13 +570,100 @@ function AcmeTab() {
   const deleteCert = useDeleteAcmeCertificate();
 
   const [orderOpen, setOrderOpen] = useState(false);
-  const [orderForm, setOrderForm] = useState({
-    domains: "",
-    directory_url: "https://acme-v02.api.letsencrypt.org/directory",
-    contact: "",
-    challenge_type: "http01",
-    terms_of_service_agreed: false,
-  });
+  const [orderForm, setOrderForm] = useState(EMPTY_ACME_ORDER_FORM);
+  const [certificateEditor, setCertificateEditor] =
+    useState<AcmeCertificateEditor | null>(null);
+  const [certificateForm, setCertificateForm] =
+    useState<AcmeCertificateFormState>(EMPTY_ACME_CERTIFICATE_FORM);
+  const [detailId, setDetailId] = useState("");
+  const detailQuery = useAcmeCertificate(detailId);
+  const [deleteCertificateTarget, setDeleteCertificateTarget] =
+    useState<AcmeCertificateRecord | null>(null);
+  const [deleteOrderTarget, setDeleteOrderTarget] = useState<AcmeOrder | null>(null);
+  const [certificateOffset, setCertificateOffset] = useState(0);
+  const [orderOffset, setOrderOffset] = useState(0);
+  const pendingKeysRef = useRef(new Set<string>());
+  const [pendingKeys, setPendingKeys] = useState<ReadonlySet<string>>(new Set());
+
+  const closeCertificateEditor = () => {
+    setCertificateEditor(null);
+    setCertificateForm(EMPTY_ACME_CERTIFICATE_FORM);
+  };
+
+  useEffect(() => {
+    const certificateTotal = certs?.length ?? 0;
+    if (certificateOffset > 0 && certificateOffset >= certificateTotal) {
+      setCertificateOffset(Math.max(0, Math.floor((certificateTotal - 1) / ACME_PAGE_SIZE) * ACME_PAGE_SIZE));
+    }
+  }, [certificateOffset, certs?.length]);
+
+  useEffect(() => {
+    const orderTotal = orders?.length ?? 0;
+    if (orderOffset > 0 && orderOffset >= orderTotal) {
+      setOrderOffset(Math.max(0, Math.floor((orderTotal - 1) / ACME_PAGE_SIZE) * ACME_PAGE_SIZE));
+    }
+  }, [orderOffset, orders?.length]);
+
+  const runRowAction = async (key: string, action: () => Promise<void>) => {
+    if (pendingKeysRef.current.has(key)) return;
+    pendingKeysRef.current.add(key);
+    setPendingKeys(new Set(pendingKeysRef.current));
+    try {
+      await action();
+    } finally {
+      pendingKeysRef.current.delete(key);
+      setPendingKeys(new Set(pendingKeysRef.current));
+    }
+  };
+
+  const openCertificateImport = () => {
+    setCertificateForm(EMPTY_ACME_CERTIFICATE_FORM);
+    setCertificateEditor({ mode: "import", target: null });
+  };
+
+  const openCertificateReplace = (target: AcmeCertificateRecord) => {
+    setCertificateForm(acmeCertificateToForm(target));
+    setCertificateEditor({ mode: "replace", target });
+  };
+
+  const saveCertificate = async () => {
+    if (!certificateEditor) return;
+    try {
+      const data = {
+        ...buildAcmeCertificateRequest(certificateForm),
+        // Import never overwrites an existing record. Existing material must
+        // be replaced through the explicit per-record Replace workflow.
+        allow_overwrite: certificateEditor.mode === "replace",
+      };
+      if (certificateEditor.mode === "import") {
+        await importCert.mutateAsync(data);
+      } else if (certificateEditor.target) {
+        await updateCert.mutateAsync({
+          id: certificateEditor.target.id,
+          data,
+        });
+      }
+      toast(
+        "success",
+        certificateEditor.mode === "import"
+          ? "ACME certificate imported"
+          : "ACME certificate material replaced",
+      );
+      closeCertificateEditor();
+    } catch (error) {
+      if (error instanceof AcmeCertificateFormError) {
+        toast("error", error.message);
+        return;
+      }
+      toast("error", await getApiErrorMessage(error, "Certificate save failed"));
+    }
+  };
+
+  const visibleCertificates = (certs ?? []).slice(
+    certificateOffset,
+    certificateOffset + ACME_PAGE_SIZE,
+  );
+  const visibleOrders = (orders ?? []).slice(orderOffset, orderOffset + ACME_PAGE_SIZE);
 
   const handleCreateOrder = async () => {
     const domains = orderForm.domains
@@ -571,6 +690,7 @@ function AcmeTab() {
       });
       toast("success", "ACME order created — challenges are being served");
       setOrderOpen(false);
+      setOrderForm(EMPTY_ACME_ORDER_FORM);
     } catch (err) {
       toast("error", await getApiErrorMessage(err, "Failed to create order"));
     }
@@ -582,9 +702,14 @@ function AcmeTab() {
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold text-text-primary">Certificates</h3>
-          <Button size="sm" onClick={() => setOrderOpen(true)}>
-            New ACME Order
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" size="sm" onClick={openCertificateImport}>
+              Import Certificate
+            </Button>
+            <Button size="sm" onClick={() => setOrderOpen(true)}>
+              New ACME Order
+            </Button>
+          </div>
         </div>
         <Card className="overflow-hidden p-0">
           {certsLoading && (
@@ -600,7 +725,7 @@ function AcmeTab() {
               description="Create an order to obtain a certificate, or import issued material."
             />
           )}
-          {(certs ?? []).map((cert) => (
+          {visibleCertificates.map((cert) => (
             <div key={cert.id} className="px-6 py-3.5 border-b border-border/50 last:border-b-0 flex items-center justify-between gap-4">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -614,31 +739,45 @@ function AcmeTab() {
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setDetailId(cert.id)}
+                >
+                  View
+                </Button>
+                <Button
                   variant="secondary"
                   size="sm"
-                  loading={renewCert.isPending}
-                  onClick={async () => {
-                    try {
-                      await renewCert.mutateAsync({ id: cert.id, data: { terms_of_service_agreed: true } });
-                      toast("success", "Renewal order created");
-                    } catch (err) {
-                      toast("error", await getApiErrorMessage(err, "Renewal failed"));
-                    }
-                  }}
+                  onClick={() => openCertificateReplace(cert)}
+                >
+                  Replace
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  loading={pendingKeys.has(`renew:${cert.id}`)}
+                  onClick={() =>
+                    void runRowAction(`renew:${cert.id}`, async () => {
+                      try {
+                        await renewCert.mutateAsync({
+                          id: cert.id,
+                          data: { terms_of_service_agreed: true },
+                        });
+                        toast("success", `Renewal order created for ${cert.domains.join(", ")}`);
+                      } catch (err) {
+                        toast("error", await getApiErrorMessage(err, "Renewal failed"));
+                      }
+                    })
+                  }
                 >
                   Renew
                 </Button>
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={async () => {
-                    try {
-                      await deleteCert.mutateAsync(cert.id);
-                      toast("success", "Certificate record deleted");
-                    } catch (err) {
-                      toast("error", await getApiErrorMessage(err, "Delete failed (referenced records return 409)"));
-                    }
-                  }}
+                  onClick={() => setDeleteCertificateTarget(cert)}
+                  disabled={pendingKeys.has(`delete-cert:${cert.id}`)}
+                  aria-label={`Delete certificate for ${cert.domains.join(", ")}`}
                 >
                   <svg className="w-4 h-4 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -648,6 +787,14 @@ function AcmeTab() {
             </div>
           ))}
         </Card>
+        {(certs?.length ?? 0) > 0 && (
+          <PaginationControls
+            offset={certificateOffset}
+            limit={ACME_PAGE_SIZE}
+            total={certs?.length ?? 0}
+            onChange={({ offset }) => setCertificateOffset(offset)}
+          />
+        )}
       </div>
 
       {/* Orders */}
@@ -667,7 +814,7 @@ function AcmeTab() {
               description="ACME orders and their pending challenges appear here."
             />
           )}
-          {(orders ?? []).map((order) => (
+          {visibleOrders.map((order) => (
             <div key={order.id} className="px-6 py-3.5 border-b border-border/50 last:border-b-0">
               <div className="flex items-center justify-between gap-4">
                 <div className="min-w-0">
@@ -687,15 +834,17 @@ function AcmeTab() {
                     <Button
                       variant="secondary"
                       size="sm"
-                      loading={finalizeOrder.isPending}
-                      onClick={async () => {
-                        try {
-                          await finalizeOrder.mutateAsync({ id: order.id });
-                          toast("success", "Order finalized — certificate stored");
-                        } catch (err) {
-                          toast("error", await getApiErrorMessage(err, "Finalize failed"));
-                        }
-                      }}
+                      loading={pendingKeys.has(`finalize:${order.id}`)}
+                      onClick={() =>
+                        void runRowAction(`finalize:${order.id}`, async () => {
+                          try {
+                            await finalizeOrder.mutateAsync({ id: order.id });
+                            toast("success", `Order finalized for ${order.domains.join(", ")}`);
+                          } catch (err) {
+                            toast("error", await getApiErrorMessage(err, "Finalize failed"));
+                          }
+                        })
+                      }
                     >
                       Finalize
                     </Button>
@@ -703,14 +852,9 @@ function AcmeTab() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={async () => {
-                      try {
-                        await deleteOrder.mutateAsync(order.id);
-                        toast("success", "Order deleted");
-                      } catch (err) {
-                        toast("error", await getApiErrorMessage(err, "Delete failed"));
-                      }
-                    }}
+                    onClick={() => setDeleteOrderTarget(order)}
+                    disabled={pendingKeys.has(`delete-order:${order.id}`)}
+                    aria-label={`Delete ${order.status} order for ${order.domains.join(", ")}`}
                   >
                     <svg className="w-4 h-4 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -731,6 +875,14 @@ function AcmeTab() {
             </div>
           ))}
         </Card>
+        {(orders?.length ?? 0) > 0 && (
+          <PaginationControls
+            offset={orderOffset}
+            limit={ACME_PAGE_SIZE}
+            total={orders?.length ?? 0}
+            onChange={({ offset }) => setOrderOffset(offset)}
+          />
+        )}
       </div>
 
       {/* Accounts */}
@@ -756,10 +908,244 @@ function AcmeTab() {
         </div>
       )}
 
+      {/* Import / replace certificate material. Private key bytes are kept
+          only in this component state and cleared whenever the dialog closes. */}
+      <Dialog
+        open={!!certificateEditor}
+        onOpenChange={(open) => !open && closeCertificateEditor()}
+      >
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogTitle>
+            {certificateEditor?.mode === "replace"
+              ? `Replace certificate ${certificateEditor.target?.id ?? ""}`
+              : "Import ACME certificate"}
+          </DialogTitle>
+          <DialogDescription className="mt-2">
+            This certificate store is fleet-global: replacing material can affect TLS
+            listeners in every namespace. Private keys are sent only to Ferrum Edge,
+            are never returned by its API, and are cleared from this form on close.
+          </DialogDescription>
+          <div className="space-y-4 mt-5">
+            <div className="grid sm:grid-cols-2 gap-3">
+              <Input
+                label="Certificate ID"
+                value={certificateForm.id}
+                disabled={certificateEditor?.mode === "replace"}
+                onChange={(event) =>
+                  setCertificateForm((current) => ({ ...current, id: event.target.value }))
+                }
+                placeholder="Generated when omitted"
+                autoComplete="off"
+              />
+              <Input
+                label="Expiry warning days"
+                type="number"
+                min={0}
+                step={1}
+                value={certificateForm.expiryWarningDays}
+                onChange={(event) =>
+                  setCertificateForm((current) => ({
+                    ...current,
+                    expiryWarningDays: event.target.value,
+                  }))
+                }
+              />
+            </div>
+            <Input
+              label="Domains"
+              value={certificateForm.domains}
+              onChange={(event) =>
+                setCertificateForm((current) => ({ ...current, domains: event.target.value }))
+              }
+              placeholder="example.com, www.example.com"
+              helpText="Comma-separated DNS identifiers covered by the certificate"
+              autoComplete="off"
+            />
+            <Input
+              label="ACME directory URL"
+              value={certificateForm.directoryUrl}
+              onChange={(event) =>
+                setCertificateForm((current) => ({ ...current, directoryUrl: event.target.value }))
+              }
+              autoComplete="off"
+            />
+            <div className="grid sm:grid-cols-2 gap-3">
+              <Input
+                label="Account ID / URL"
+                value={certificateForm.accountId}
+                onChange={(event) =>
+                  setCertificateForm((current) => ({ ...current, accountId: event.target.value }))
+                }
+                autoComplete="off"
+              />
+              <Input
+                label="Order URL"
+                value={certificateForm.orderUrl}
+                onChange={(event) =>
+                  setCertificateForm((current) => ({ ...current, orderUrl: event.target.value }))
+                }
+                autoComplete="off"
+              />
+            </div>
+            {(
+              [
+                ["Leaf certificate PEM", "certPem", certificateForm.certPem, 8],
+                ["Private key PEM", "keyPem", certificateForm.keyPem, 8],
+                ["Intermediate chain PEM (optional)", "chainPem", certificateForm.chainPem, 6],
+              ] as const
+            ).map(([label, key, value, rows]) => (
+              <label key={key} className="flex flex-col gap-1.5">
+                <span className="text-text-secondary text-sm font-medium">{label}</span>
+                <textarea
+                  value={value}
+                  onChange={(event) =>
+                    setCertificateForm((current) => ({
+                      ...current,
+                      [key]: event.target.value,
+                    }))
+                  }
+                  rows={rows}
+                  className="bg-code-bg border border-border rounded-lg px-3 py-2 text-text-primary text-xs font-mono focus:border-orange focus:ring-1 focus:ring-orange/30 resize-y"
+                  spellCheck={false}
+                  autoComplete="off"
+                />
+              </label>
+            ))}
+            <div className="flex flex-wrap gap-5">
+              <label className="inline-flex items-center gap-2 text-sm text-text-secondary">
+                <input
+                  type="checkbox"
+                  checked={certificateForm.allowExpired}
+                  onChange={(event) =>
+                    setCertificateForm((current) => ({
+                      ...current,
+                      allowExpired: event.target.checked,
+                    }))
+                  }
+                  className="accent-orange"
+                />
+                Allow expired certificate
+              </label>
+            </div>
+            {certificateEditor?.mode === "replace" && (
+              <p className="text-xs text-warning">
+                Ferrum never returns the existing private key. A complete new certificate,
+                matching private key, and any required chain must be supplied for replacement.
+              </p>
+            )}
+            {certificateEditor?.mode === "import" && (
+              <p className="text-xs text-text-muted">
+                Import cannot overwrite an existing certificate ID. Use the explicit
+                Replace action on that record so the affected domains are visible.
+              </p>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={closeCertificateEditor}>Cancel</Button>
+              <Button
+                onClick={() => void saveCertificate()}
+                loading={importCert.isPending || updateCert.isPending}
+              >
+                {certificateEditor?.mode === "replace" ? "Replace material" : "Import certificate"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(detailId)} onOpenChange={(open) => !open && setDetailId("")}>
+        <DialogContent>
+          <DialogTitle>ACME certificate detail</DialogTitle>
+          {detailQuery.isLoading && <p className="mt-4 text-sm text-text-muted">Loading…</p>}
+          {detailQuery.isError && (
+            <p className="mt-4 text-sm text-danger">Certificate detail could not be loaded.</p>
+          )}
+          {detailQuery.data && (
+            <div className="mt-4 space-y-2 text-sm text-text-secondary">
+              <p><span className="text-text-muted">ID:</span> <span className="font-mono">{detailQuery.data.id}</span></p>
+              <p><span className="text-text-muted">Domains:</span> {detailQuery.data.domains.join(", ")}</p>
+              <p><span className="text-text-muted">Status:</span> {detailQuery.data.status}</p>
+              <p><span className="text-text-muted">Directory:</span> <span className="font-mono break-all">{detailQuery.data.directory_url}</span></p>
+              <p><span className="text-text-muted">Subject:</span> {detailQuery.data.subject ?? "—"}</p>
+              <p><span className="text-text-muted">Issuer:</span> {detailQuery.data.issuer ?? "—"}</p>
+              <p><span className="text-text-muted">Valid:</span> {formatDate(detailQuery.data.not_before)} – {formatDate(detailQuery.data.not_after)}</p>
+              <p><span className="text-text-muted">Fingerprint:</span> <span className="font-mono break-all">{detailQuery.data.fingerprint_sha256 ?? "—"}</span></p>
+              <p className="text-xs text-text-muted">
+                Private-key material is intentionally absent from all detail responses.
+              </p>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDialog
+        open={!!deleteCertificateTarget}
+        onOpenChange={(open) => !open && setDeleteCertificateTarget(null)}
+        title={`Delete certificate for ${deleteCertificateTarget?.domains.join(", ") ?? "these domains"}?`}
+        description={`This permanently removes fleet-global certificate record "${deleteCertificateTarget?.id ?? ""}" and may affect TLS listeners in every namespace. TLS configurations that reference it prevent deletion with 409; Foundry will preserve the row and show that server error.`}
+        confirmLabel="Delete Certificate"
+        loading={Boolean(
+          deleteCertificateTarget &&
+            pendingKeys.has(`delete-cert:${deleteCertificateTarget.id}`),
+        )}
+        onConfirm={() => {
+          if (!deleteCertificateTarget) return;
+          const target = deleteCertificateTarget;
+          void runRowAction(`delete-cert:${target.id}`, async () => {
+            try {
+              await deleteCert.mutateAsync(target.id);
+              toast("success", `Certificate ${target.id} deleted`);
+              setDeleteCertificateTarget(null);
+            } catch (error) {
+              toast(
+                "error",
+                await getApiErrorMessage(
+                  error,
+                  "Delete failed; remove certificate references before retrying",
+                ),
+              );
+            }
+          });
+        }}
+      />
+
+      <ConfirmDialog
+        open={!!deleteOrderTarget}
+        onOpenChange={(open) => !open && setDeleteOrderTarget(null)}
+        title={`Delete ${deleteOrderTarget?.status.replace(/_/g, " ") ?? "ACME"} order?`}
+        description={`Fleet-global order "${deleteOrderTarget?.id ?? ""}" covers ${deleteOrderTarget?.domains.join(", ") ?? "the selected domains"}. Deleting an active order cancels/removes the challenge workflow for every namespace and cannot be undone.`}
+        confirmLabel="Delete Order"
+        loading={Boolean(
+          deleteOrderTarget && pendingKeys.has(`delete-order:${deleteOrderTarget.id}`),
+        )}
+        onConfirm={() => {
+          if (!deleteOrderTarget) return;
+          const target = deleteOrderTarget;
+          void runRowAction(`delete-order:${target.id}`, async () => {
+            try {
+              await deleteOrder.mutateAsync(target.id);
+              toast("success", `Order ${target.id} deleted`);
+              setDeleteOrderTarget(null);
+            } catch (error) {
+              toast("error", await getApiErrorMessage(error, "Order delete failed"));
+            }
+          });
+        }}
+      />
+
       {/* New order dialog */}
-      <Dialog open={orderOpen} onOpenChange={setOrderOpen}>
+      <Dialog
+        open={orderOpen}
+        onOpenChange={(open) => {
+          setOrderOpen(open);
+          if (!open) setOrderForm(EMPTY_ACME_ORDER_FORM);
+        }}
+      >
         <DialogContent className="max-h-[85vh] overflow-y-auto">
           <DialogTitle>New ACME Order</DialogTitle>
+          <DialogDescription className="mt-2">
+            ACME orders and issued certificate material are fleet-global and can be used
+            by TLS listeners in every namespace.
+          </DialogDescription>
           <div className="space-y-4 mt-4">
           <Input
             label="Domains"
@@ -803,7 +1189,13 @@ function AcmeTab() {
             </span>
           </label>
           <div className="flex justify-end gap-2 pt-2">
-            <Button variant="secondary" onClick={() => setOrderOpen(false)}>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setOrderOpen(false);
+                setOrderForm(EMPTY_ACME_ORDER_FORM);
+              }}
+            >
               Cancel
             </Button>
             <Button onClick={handleCreateOrder} loading={createOrder.isPending}>
@@ -899,6 +1291,19 @@ export default function TlsPage() {
         <p className="text-text-muted text-sm mt-1">
           Inventory, managed certificate stores, ACME automation, rotation, and
           validation for every TLS surface of the gateway.
+        </p>
+      </div>
+
+      <div
+        role="note"
+        className="rounded-lg border border-warning/40 bg-warning/5 px-4 py-3"
+      >
+        <p className="text-sm font-semibold text-warning">Fleet-global TLS surface</p>
+        <p className="text-xs text-text-secondary mt-1">
+          Ferrum does not namespace-filter TLS inventory, managed material, ACME,
+          rotation, or validation. The namespace selector does not scope these operations;
+          mutations can affect every namespace and are audited under the canonical
+          <span className="font-mono"> ferrum </span>namespace.
         </p>
       </div>
 

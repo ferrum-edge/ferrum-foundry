@@ -20,13 +20,13 @@ Admin panel UI for managing and observing the [Ferrum Edge](https://github.com/f
 - **Relational Browsing** - Navigate Proxy -> Plugins -> Upstream -> Targets (with subsets and locality) via tabs and breadcrumbs
 - **Consumer Credentials** - Manage key-auth, basic-auth, JWT, HMAC, and mTLS credential rotation arrays with ACL groups
 - **Plugin Configuration** - Category-grouped catalog of 80+ gateway plugins (auth, security/WAF, traffic control, AI gateway, mesh, observability, billing) with default config templates, per-instance execution triggers, and scope (global/proxy/group) support
-- **TLS Management** - Certificate/CA/CRL/OCSP/JWKS stores, ACME order automation (HTTP-01/TLS-ALPN-01/DNS-01), material inventory with expiry tracking, surface rotation, and PEM validation
+- **TLS Management** - Fleet-global certificate/CA/CRL/OCSP/JWKS stores, ACME order automation (HTTP-01/TLS-ALPN-01/DNS-01), material inventory with expiry tracking, surface rotation, and PEM validation
 - **API Spec Import** - Create spec-managed proxies, upstreams, and plugins from OpenAPI documents (`x-ferrum-proxy` extensions) with replace/delete lifecycle
 - **Metrics Dashboard** - Gateway stats, overload protection, host runtime, circuit breakers, connection pools, health checks, load balancers, caches, API chargeback, and Prometheus metrics with configurable auto-refresh
 - **Operations** - Audit log with filters and redacted diffs, CP/DP cluster topology, backend protocol capability probes, and full configuration backup/restore
 - **Mesh Observability** - Service graph, config/slice drift, policy denies, remote clusters and federation, egress scope testing, waypoints, and SPIFFE gateway trust (mesh-mode gateways)
 - **Health Monitoring** - Real-time gateway, database, and FIPS/readiness status
-- **Namespace Support** - Browse and manage resources across namespaces via `X-Ferrum-Namespace`
+- **Namespace Support** - Browse and manage tenant resources across namespaces via `X-Ferrum-Namespace`; process/runtime surfaces such as TLS management remain fleet-global
 - **Dark / Light Theme** - Dark theme by default with a light theme toggle in the header
 
 ## Architecture

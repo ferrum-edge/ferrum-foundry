@@ -112,6 +112,7 @@ Namespaces are a full CRUD registry on the gateway, not just a header value.
 `src/components/forms/NamespaceManagerCard.tsx`.
 
 - `GET /namespaces` returns a paginated envelope of plain **name strings**, not records. It is the union of the durable registry and namespaces derived from resource rows, so a name can appear in the list with no registry row behind it
+- TLS inventory, managed TLS material, ACME, rotation, and validation are fleet-global upstream surfaces. They deliberately use the `FLEET_GLOBAL` client context so Foundry does not imply that `X-Ferrum-Namespace` scopes them; keep the UI warning and destructive confirmation wording explicit
 - `GET /namespaces/{name}` synthesizes a record for such derived-only names. Its `created_at`/`updated_at` are **observation timestamps stamped per request** — never compare them, cache them as identity, or sort by them
 - Names must match `^[a-zA-Z0-9][a-zA-Z0-9._-]*$` (max 254). `validateNamespaceName()` mirrors this client-side so bad input never reaches the gateway
 - PUT is a partial update, unlike proxy PUT: omit a field to keep it. `name: null` is a `400` (omit instead); `description: null` or `""` clears the description. Build payloads with `buildNamespaceUpdate()` rather than by hand
