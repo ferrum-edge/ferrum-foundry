@@ -8,9 +8,10 @@ import {
   useConsumer,
   useUpdateConsumer,
   useDeleteConsumer,
+  useAllConsumers,
 } from "@/hooks/useConsumers";
-import { useProxies } from "@/hooks/useProxies";
-import { usePluginConfigs } from "@/hooks/usePlugins";
+import { useAllProxies } from "@/hooks/useProxies";
+import { useAllPluginConfigs } from "@/hooks/usePlugins";
 import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -24,7 +25,8 @@ import {
   CREDENTIAL_TYPES,
 } from "@/components/forms/CredentialForm";
 import { getApiErrorMessage } from "@/api/client";
-import type { ConsumerCreate, Consumer, PluginConfig } from "@/api/types";
+import { analyzeProxyPolicy } from "@/lib/effectivePolicy";
+import type { ConsumerCreate, Consumer } from "@/api/types";
 
 /* ================================================================== */
 /*  ConsumerDetailPage                                                 */
@@ -43,77 +45,34 @@ export default function ConsumerDetailPage() {
 
   const [deleteOpen, setDeleteOpen] = useState(false);
 
-  // Fetch proxies and plugin configs for Authorized Proxies tab
-  const { data: proxiesResponse } = useProxies({ limit: 1000 });
-  const { data: pluginConfigsResponse } = usePluginConfigs({ limit: 1000 });
-
-  const AUTH_PLUGIN_CRED_MAP: Record<string, string> = {
-    key_auth: "keyauth",
-    basic_auth: "basicauth",
-    jwt_auth: "jwt",
-    jwks_auth: "jwt",
-    hmac_auth: "hmac_auth",
-    mtls_auth: "mtls_auth",
-  };
+  const { data: allProxies } = useAllProxies();
+  const { data: allPluginConfigs } = useAllPluginConfigs();
+  const { data: allConsumers } = useAllConsumers();
 
   const authorizedProxies = useMemo(() => {
-    if (!consumer || !proxiesResponse?.data || !pluginConfigsResponse?.data) return [];
+    if (!consumer || !allProxies || !allPluginConfigs) return [];
+    const consumers = allConsumers?.some((candidate) => candidate.id === consumer.id)
+      ? allConsumers
+      : [...(allConsumers ?? []), consumer];
 
-    const consumerCredTypes = new Set(Object.keys(consumer.credentials ?? {}));
-    const consumerGroups = new Set(consumer.acl_groups ?? []);
-    const allPlugins = pluginConfigsResponse.data;
-
-    return proxiesResponse.data
+    return allProxies
       .map((proxy) => {
-        // Find plugins scoped to this proxy
-        const proxyPlugins = allPlugins.filter(
-          (p: PluginConfig) => p.proxy_id === proxy.id && p.enabled,
+        const analysis = analyzeProxyPolicy(proxy, allPluginConfigs, consumers);
+        const result = analysis.consumers.find(
+          (candidate) => candidate.consumer.id === consumer.id,
         );
-
-        // Find auth plugins on this proxy
-        const authPlugins = proxyPlugins.filter((p: PluginConfig) =>
-          Object.keys(AUTH_PLUGIN_CRED_MAP).includes(p.plugin_name),
-        );
-        if (authPlugins.length === 0) return null; // no auth = public, not relevant
-
-        // Check if consumer has a matching credential type
-        const hasMatchingCred = authPlugins.some((p: PluginConfig) => {
-          const credType = AUTH_PLUGIN_CRED_MAP[p.plugin_name];
-          return credType && consumerCredTypes.has(credType);
-        });
-        if (!hasMatchingCred) return null;
-
-        // Check ACL
-        const aclPlugin = proxyPlugins.find(
-          (p: PluginConfig) => p.plugin_name === "access_control",
-        );
-        let aclStatus: "open" | "allowed" | "denied" = "open";
-        if (aclPlugin?.config) {
-          const cfg = aclPlugin.config as Record<string, unknown>;
-          const allow = Array.isArray(cfg.allow) ? (cfg.allow as string[]) : [];
-          const deny = Array.isArray(cfg.deny) ? (cfg.deny as string[]) : [];
-
-          if (deny.length > 0 && deny.some((g) => consumerGroups.has(g))) {
-            aclStatus = "denied";
-          } else if (allow.length > 0) {
-            aclStatus = allow.some((g) => consumerGroups.has(g)) ? "allowed" : "denied";
-          }
+        if (!result || (result.decision !== "allowed" && result.decision !== "conditional")) {
+          return null;
         }
-
-        if (aclStatus === "denied") return null;
-
         return {
           proxy,
-          authTypes: authPlugins.map((p: PluginConfig) => p.plugin_name),
-          aclStatus,
+          authTypes: analysis.authPlugins.map((plugin) => plugin.plugin_name),
+          result,
+          evaluatedAt: analysis.evaluatedAt,
         };
       })
-      .filter(Boolean) as Array<{
-        proxy: (typeof proxiesResponse.data)[number];
-        authTypes: string[];
-        aclStatus: "open" | "allowed";
-      }>;
-  }, [consumer, proxiesResponse, pluginConfigsResponse]);
+      .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+  }, [consumer, allProxies, allPluginConfigs, allConsumers]);
 
   /* ---------- Handlers ---------- */
 
@@ -253,43 +212,33 @@ export default function ConsumerDetailPage() {
 
         {/* ── Authorized Proxies Tab ── */}
         <TabsContent value="proxies">
-          {Object.keys(consumer.credentials ?? {}).length === 0 ? (
-            <Card>
-              <div className="text-center py-8">
-                <p className="text-text-secondary">
-                  No credentials configured for this consumer.
-                </p>
-                <p className="text-text-muted text-sm mt-2">
-                  Add credentials in the Credentials tab to enable proxy access.
-                </p>
-              </div>
-            </Card>
-          ) : authorizedProxies.length === 0 ? (
+          {authorizedProxies.length === 0 ? (
             <Card>
               <div className="text-center py-8">
                 <p className="text-text-secondary">
                   No proxies currently authorize this consumer.
                 </p>
                 <p className="text-text-muted text-sm mt-2">
-                  Proxies need a matching auth plugin and compatible ACL groups.
+                  Complete global, direct, and proxy-group policy found no
+                  conclusive or request-conditional match.
                 </p>
               </div>
             </Card>
           ) : (
             <Card className="p-0 overflow-hidden">
-              <div className="grid grid-cols-[2fr_1.5fr_1fr_1fr] gap-4 px-5 py-2.5 border-b border-border text-text-muted text-xs font-semibold uppercase tracking-wider">
+              <div className="grid grid-cols-[2fr_1.5fr_1fr_2fr] gap-4 px-5 py-2.5 border-b border-border text-text-muted text-xs font-semibold uppercase tracking-wider">
                 <span>Proxy</span>
                 <span>Listen Path</span>
                 <span>Auth Type</span>
-                <span>ACL</span>
+                <span>Decision / Evidence</span>
               </div>
               <div className="max-h-[400px] overflow-y-auto divide-y divide-border/50">
-                {authorizedProxies.map(({ proxy, authTypes, aclStatus }) => (
+                {authorizedProxies.map(({ proxy, authTypes, result, evaluatedAt }) => (
                   <Link
                     key={proxy.id}
                     to="/proxies/$proxyId"
                     params={{ proxyId: proxy.id }}
-                    className="grid grid-cols-[2fr_1.5fr_1fr_1fr] gap-4 px-5 py-3 text-sm hover:bg-bg-card-hover transition-colors"
+                    className="grid grid-cols-[2fr_1.5fr_1fr_2fr] gap-4 px-5 py-3 text-sm hover:bg-bg-card-hover transition-colors"
                   >
                     <div className="min-w-0">
                       <span className="text-text-primary font-medium break-all block">
@@ -311,9 +260,17 @@ export default function ConsumerDetailPage() {
                         </Badge>
                       ))}
                     </div>
-                    <Badge variant={aclStatus === "open" ? "default" : "green"}>
-                      {aclStatus === "open" ? "Open" : "ACL match"}
-                    </Badge>
+                    <div>
+                      <Badge variant={result.decision === "allowed" ? "green" : "yellow"}>
+                        {result.decision}
+                      </Badge>
+                      <p className="text-text-muted text-xs mt-1">
+                        {result.reasons.join("; ")}
+                      </p>
+                      <p className="text-text-muted text-[11px] mt-1">
+                        evaluated {new Date(evaluatedAt).toLocaleString()}
+                      </p>
+                    </div>
                   </Link>
                 ))}
               </div>

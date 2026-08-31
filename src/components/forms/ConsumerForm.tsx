@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
 import { CollapsibleSection } from "./CollapsibleSection";
 import type { Consumer, ConsumerCreate, ConsumerCredentials } from "@/api/types";
+import { buildCredentialInput, CredentialInputError } from "@/lib/credentials";
 
 /* ------------------------------------------------------------------ */
 /*  Props                                                              */
@@ -165,6 +166,19 @@ export function ConsumerForm({
   const validate = (): boolean => {
     const errs: Record<string, string> = {};
     if (!username.trim()) errs.username = "Username is required";
+    if (!initialData) {
+      for (const typeDef of CREDENTIAL_TYPES) {
+        const value = credValues[typeDef.value];
+        if (!value) continue;
+        try {
+          buildCredentialInput(typeDef.value, { [typeDef.field]: value });
+        } catch (error) {
+          errs[`credential.${typeDef.value}`] = error instanceof CredentialInputError
+            ? error.message
+            : "Invalid credential";
+        }
+      }
+    }
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -177,11 +191,13 @@ export function ConsumerForm({
 
     // Build the credentials map. Each type takes an ARRAY of entries
     // (rotation support); we submit a single-entry array per filled type.
-    const credentials: Record<string, Array<Record<string, string>>> = {};
+    const credentials: ConsumerCredentials = {};
     for (const typeDef of CREDENTIAL_TYPES) {
-      const val = credValues[typeDef.value]?.trim();
+      const val = credValues[typeDef.value];
       if (val) {
-        credentials[typeDef.value] = [{ [typeDef.field]: val }];
+        (credentials as Record<string, object[]>)[typeDef.value] = [
+          buildCredentialInput(typeDef.value, { [typeDef.field]: val }),
+        ];
       }
     }
 
@@ -191,7 +207,7 @@ export function ConsumerForm({
       ...(customId.trim() && { custom_id: customId.trim() }),
       ...(aclGroups.length > 0 && { acl_groups: aclGroups }),
       ...(Object.keys(credentials).length > 0 && {
-        credentials: credentials as ConsumerCredentials,
+        credentials,
       }),
     };
 
@@ -271,6 +287,7 @@ export function ConsumerForm({
                     onChange={(e) => updateCred(typeDef.value, e.target.value)}
                     placeholder={typeDef.placeholder}
                     helpText={typeDef.helpText}
+                    error={errors[`credential.${typeDef.value}`]}
                     type={typeDef.field === "password" || typeDef.field === "secret" ? "password" : "text"}
                   />
                 </div>

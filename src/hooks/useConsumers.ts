@@ -8,7 +8,12 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import * as consumers from "@/api/consumers";
-import type { ConsumerCreate, PaginationParams } from "@/api/types";
+import type {
+  BuiltInCredentialType,
+  ConsumerCreate,
+  ConsumerCredentialInput,
+  PaginationParams,
+} from "@/api/types";
 import { useNamespace } from "@/stores/namespace";
 
 export function useConsumers(params: PaginationParams = {}) {
@@ -16,6 +21,14 @@ export function useConsumers(params: PaginationParams = {}) {
   return useQuery({
     queryKey: ["consumers", ns, { offset: params.offset, limit: params.limit }],
     queryFn: () => consumers.list(params),
+  });
+}
+
+export function useAllConsumers() {
+  const { selectedNamespace: ns } = useNamespace();
+  return useQuery({
+    queryKey: ["consumers", ns, "all"],
+    queryFn: () => consumers.listAll(),
   });
 }
 
@@ -71,8 +84,8 @@ export function useUpdateCredentials() {
       data,
     }: {
       consumerId: string;
-      credType: string;
-      data: unknown;
+      credType: BuiltInCredentialType;
+      data: ConsumerCredentialInput | ConsumerCredentialInput[];
     }) => consumers.updateCredentials(consumerId, credType, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["consumer"] });
@@ -90,8 +103,8 @@ export function useAppendCredential() {
       data,
     }: {
       consumerId: string;
-      credType: string;
-      data: unknown;
+      credType: BuiltInCredentialType;
+      data: ConsumerCredentialInput;
     }) => consumers.appendCredential(consumerId, credType, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["consumer"] });
