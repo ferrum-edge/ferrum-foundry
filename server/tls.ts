@@ -1,12 +1,18 @@
 import { lookup as dnsLookup, type LookupAddress, type LookupOptions } from 'node:dns';
+import { lstatSync, realpathSync } from 'node:fs';
 import { BlockList, isIP, type LookupFunction } from 'node:net';
 import { Agent } from 'undici';
-import { loadCaBundle } from './ca.js';
+import { loadCaBundle, type CaBundle } from './ca.js';
 import { registerRuntimeConfigListener, type Config } from './config.js';
 
 interface ManagedDispatcher {
   fingerprint: string;
   agent: Agent;
+}
+
+interface CachedCaBundle {
+  fileIdentity: string;
+  bundle: CaBundle;
 }
 
 const blockedNetworks = new BlockList();
@@ -36,6 +42,7 @@ for (const [address, prefix, family] of [
 }
 
 let activeDispatcher: ManagedDispatcher | undefined;
+let cachedCaBundle: CachedCaBundle | undefined;
 
 function parseAllowedCidrs(values: string[]): BlockList {
   const list = new BlockList();
@@ -91,23 +98,77 @@ function secureLookup(config: Config): LookupFunction {
   };
 }
 
-function dispatcherFingerprint(config: Config): string {
+function caFileIdentity(config: Config): string {
+  if (!config.tlsCaPath) return '';
+  const stat = lstatSync(config.tlsCaPath, { bigint: true });
+  return JSON.stringify({
+    requestedPath: config.tlsCaPath,
+    configuredRoot: config.tlsCaRoot,
+    canonicalRoot: config.tlsCaRoot ? realpathSync(config.tlsCaRoot) : undefined,
+    device: stat.dev.toString(),
+    inode: stat.ino.toString(),
+    mode: stat.mode.toString(),
+    size: stat.size.toString(),
+    modified: stat.mtimeNs.toString(),
+    changed: stat.ctimeNs.toString(),
+  });
+}
+
+function currentCaBundle(config: Config): CaBundle | undefined {
+  if (!config.adminUrl.startsWith('https://') || !config.tlsCaPath) {
+    cachedCaBundle = undefined;
+    return undefined;
+  }
+
+  let identity: string;
+  try {
+    identity = caFileIdentity(config);
+  } catch {
+    // Preserve loadCaBundle's stable, path-redacted validation errors.
+    return loadCaBundle(config.tlsCaPath, config.tlsCaRoot);
+  }
+  if (cachedCaBundle?.fileIdentity === identity) return cachedCaBundle.bundle;
+
+  // Detect an in-place rewrite or replacement racing the bounded read. A
+  // second stable snapshot is accepted; a continuously changing trust file is
+  // rejected instead of creating a dispatcher from ambiguous material.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const bundle = loadCaBundle(config.tlsCaPath, config.tlsCaRoot);
+    let after: string;
+    try {
+      after = caFileIdentity(config);
+    } catch {
+      return loadCaBundle(config.tlsCaPath, config.tlsCaRoot);
+    }
+    if (identity === after) {
+      cachedCaBundle = { fileIdentity: after, bundle };
+      return bundle;
+    }
+    identity = after;
+  }
+  throw new Error('TLS CA bundle changed while it was being read');
+}
+
+function dispatcherFingerprint(config: Config, caBundle: CaBundle | undefined): string {
   return JSON.stringify({
     origin: config.adminUrl,
     connectTimeout: config.connectTimeout,
     readTimeout: config.readTimeout,
     tlsVerify: config.tlsVerify,
-    caPath: config.tlsCaPath,
+    caPath: caBundle?.path,
+    caFingerprint: caBundle?.fingerprint,
+    caRoot: config.tlsCaRoot,
     cidrs: config.adminAllowedCidrs,
   });
 }
 
-function createDispatcher(config: Config, fingerprint: string): ManagedDispatcher {
+function createDispatcher(
+  config: Config,
+  fingerprint: string,
+  caBundle: CaBundle | undefined,
+): ManagedDispatcher {
   assertLiteralAddressAllowed(config);
   const isHttps = config.adminUrl.startsWith('https://');
-  const caBundle = isHttps && config.tlsCaPath
-    ? loadCaBundle(config.tlsCaPath, config.tlsCaRoot)
-    : undefined;
   const agent = new Agent({
     connect: {
       timeout: config.connectTimeout,
@@ -126,11 +187,12 @@ function createDispatcher(config: Config, fingerprint: string): ManagedDispatche
 }
 
 export function getDispatcher(config: Config): Agent {
-  const fingerprint = dispatcherFingerprint(config);
+  const caBundle = currentCaBundle(config);
+  const fingerprint = dispatcherFingerprint(config, caBundle);
   if (activeDispatcher?.fingerprint === fingerprint) return activeDispatcher.agent;
 
   const retired = activeDispatcher;
-  activeDispatcher = createDispatcher(config, fingerprint);
+  activeDispatcher = createDispatcher(config, fingerprint, caBundle);
   if (retired) void retired.agent.close().catch(() => undefined);
   return activeDispatcher.agent;
 }
@@ -138,6 +200,7 @@ export function getDispatcher(config: Config): Agent {
 export async function closeDispatchers(): Promise<void> {
   const dispatcher = activeDispatcher;
   activeDispatcher = undefined;
+  cachedCaBundle = undefined;
   if (dispatcher) await dispatcher.agent.close();
 }
 

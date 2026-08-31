@@ -1,6 +1,17 @@
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Config } from './config.js';
 import { closeDispatchers, getDispatcher } from './tls.js';
+
+const directories: string[] = [];
+
+function tempDirectory(): string {
+  const path = mkdtempSync(join(tmpdir(), 'foundry-tls-test-'));
+  directories.push(path);
+  return path;
+}
 
 function makeConfig(overrides: Partial<Config> = {}): Config {
   return {
@@ -39,7 +50,11 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
   };
 }
 
-afterEach(() => closeDispatchers());
+afterEach(async () => {
+  await closeDispatchers();
+  const { rm } = await import('node:fs/promises');
+  await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+});
 
 describe('managed Undici dispatchers', () => {
   it('reuses one dispatcher for an unchanged effective connection configuration', () => {
@@ -54,6 +69,25 @@ describe('managed Undici dispatchers', () => {
     expect(first.closed).toBe(true);
     await closeDispatchers();
     expect(second.closed).toBe(true);
+  });
+
+  it('replaces the dispatcher when a CA bundle changes in place', () => {
+    const root = tempDirectory();
+    const caPath = join(root, 'ca.pem');
+    writeFileSync(caPath, '-----BEGIN CERTIFICATE-----\nfirst\n-----END CERTIFICATE-----\n');
+    const config = makeConfig({
+      adminUrl: 'https://gateway.example',
+      initialAdminOrigin: 'https://gateway.example',
+      tlsCaPath: caPath,
+      tlsCaRoot: root,
+    });
+
+    const first = getDispatcher(config);
+    writeFileSync(caPath, '-----BEGIN CERTIFICATE-----\nrotated-material\n-----END CERTIFICATE-----\n');
+    const second = getDispatcher(config);
+
+    expect(second).not.toBe(first);
+    expect(first.closed).toBe(true);
   });
 
   it('rejects a runtime-selected metadata/private address outside explicit policy', () => {

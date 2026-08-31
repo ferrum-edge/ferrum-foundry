@@ -3,6 +3,7 @@ import {
   api,
   extractApiErrorData,
   extractApiErrorDetail,
+  FLEET_GLOBAL,
   getApiErrorDetail,
   getApiErrorMessage,
   setCsrfToken,
@@ -271,6 +272,14 @@ describe("session request hooks", () => {
     await api.get("api/proxy/proxies");
     expect(captured[0].headers.has("x-ferrum-namespace")).toBe(false);
     expect(captured[1].headers.get("x-ferrum-namespace")).toBe("tenant-a");
+  });
+
+  it("does not imply tenant scoping for documented fleet-global requests", async () => {
+    localStorage.setItem("ferrum:namespace", "tenant-a");
+    await api.get("api/proxy/admin/tls/inventory", {
+      context: { [FLEET_GLOBAL]: true },
+    });
+    expect(captured[0].headers.has("x-ferrum-namespace")).toBe(false);
   });
 
   it("clears auth only for a BFF-layer 401, not a gateway JWT failure", async () => {

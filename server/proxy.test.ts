@@ -1,6 +1,7 @@
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
+import { gzipSync } from 'node:zlib';
 import type { FastifyInstance } from 'fastify';
 import { decodeJwt } from 'jose';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -8,7 +9,13 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 const BFF_TOKEN = 'proxy-test-bff-token-is-long-enough-123';
 const JWT_SECRET = 'proxy-test-jwt-secret-is-long-enough-123';
 const snapshot: Record<string, string | undefined> = {};
-const observed: Array<{ url: string; body: string; authorization?: string }> = [];
+const observed: Array<{
+  url: string;
+  body: string;
+  authorization?: string;
+  acceptEncoding?: string;
+}> = [];
+const GZIP_RESPONSE = JSON.stringify({ ok: true, payload: 'x'.repeat(4096) });
 
 async function readBody(request: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
@@ -22,6 +29,7 @@ function gatewayHandler(request: IncomingMessage, response: ServerResponse): voi
       url: request.url ?? '',
       body: await readBody(request),
       authorization: request.headers.authorization,
+      acceptEncoding: request.headers['accept-encoding'],
     });
     if (request.url?.startsWith('/slow-headers')) {
       setTimeout(() => response.end('{"ok":true}'), 250);
@@ -37,6 +45,14 @@ function gatewayHandler(request: IncomingMessage, response: ServerResponse): voi
     if (request.url?.startsWith('/unauthorized')) {
       response.statusCode = 401;
       response.end('{"error":"bad gateway jwt"}');
+      return;
+    }
+    if (request.url?.startsWith('/gzip')) {
+      const compressed = gzipSync(GZIP_RESPONSE);
+      response.setHeader('content-type', 'application/json');
+      response.setHeader('content-encoding', 'gzip');
+      response.setHeader('content-length', String(compressed.length));
+      response.end(compressed);
       return;
     }
     response.setHeader('content-type', 'application/json');
@@ -72,6 +88,7 @@ beforeAll(async () => {
   vi.resetModules();
   const { buildApp } = await import('./app.js');
   app = await buildApp({ serveStatic: false, logger: false });
+  await app.listen({ host: '127.0.0.1', port: 0 });
   const login = await app.inject({
     method: 'POST',
     url: '/api/auth/login',
@@ -83,6 +100,35 @@ beforeAll(async () => {
     'x-csrf-token': csrfToken,
   };
 });
+
+async function slowStreamingUpload(path: string): Promise<{ statusCode: number; body: string }> {
+  const port = (app.server.address() as AddressInfo).port;
+  let request: ReturnType<typeof httpRequest>;
+  const response = new Promise<{ statusCode: number; body: string }>((resolve, reject) => {
+    request = httpRequest({
+      host: '127.0.0.1',
+      port,
+      path,
+      method: 'POST',
+      headers: { ...sessionHeaders, 'content-type': 'application/octet-stream' },
+    }, (incoming) => {
+      const chunks: Buffer[] = [];
+      incoming.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+      incoming.on('end', () => resolve({
+        statusCode: incoming.statusCode ?? 0,
+        body: Buffer.concat(chunks).toString('utf8'),
+      }));
+    });
+    request.on('error', reject);
+  });
+
+  request!.write('first');
+  await new Promise((resolve) => setTimeout(resolve, 70));
+  request!.write('second');
+  await new Promise((resolve) => setTimeout(resolve, 70));
+  request!.end('third');
+  return response;
+}
 
 afterAll(async () => {
   await app.close();
@@ -106,6 +152,7 @@ describe('streaming gateway proxy', () => {
       ready: true,
       components: { bff: { status: 'ok' }, gateway: { status: 'ok' } },
     });
+    expect(observed.some(({ url }) => url === '/namespaces?offset=0&limit=1')).toBe(true);
   });
 
   it('applies baseline browser hardening headers to API responses', async () => {
@@ -176,6 +223,17 @@ describe('streaming gateway proxy', () => {
     expect(response.headers['set-cookie']).toBeUndefined();
   });
 
+  it('streams a decoded upstream response without forwarding its compressed length', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/proxy/gzip',
+      headers: sessionHeaders,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toBe(GZIP_RESPONSE);
+    expect(observed.at(-1)?.acceptEncoding).toBe('identity');
+  });
+
   it('distinguishes an upstream gateway 401 from a BFF session failure', async () => {
     const response = await app.inject({
       method: 'GET',
@@ -205,6 +263,13 @@ describe('streaming gateway proxy', () => {
     });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ restored: true });
+  });
+
+  it('starts the response deadline after a progressing upload completes', async () => {
+    const response = await slowStreamingUpload('/api/proxy/api-specs');
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body)).toEqual({ ok: true });
+    expect(observed.at(-1)?.body).toBe('firstsecondthird');
   });
 
   it('bounds concurrent large uploads and provides retry guidance', async () => {

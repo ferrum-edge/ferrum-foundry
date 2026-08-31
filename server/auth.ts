@@ -17,6 +17,7 @@ interface TrustedCsrfGrant {
 const MAX_STATIC_SESSIONS = 256;
 const staticSessions = new Map<string, StaticSession>();
 const trustedCsrfGrants = new Map<string, TrustedCsrfGrant>();
+const trustedCsrfTokensBySubject = new Map<string, string>();
 const NAMESPACE_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$/;
 const TRUSTED_PROXY_SECRET_HEADER = 'x-ferrum-auth-secret';
 
@@ -52,6 +53,14 @@ function cookieOptions(config: Config, httpOnly: boolean) {
   };
 }
 
+function deleteTrustedCsrfGrant(token: string): void {
+  const grant = trustedCsrfGrants.get(token);
+  trustedCsrfGrants.delete(token);
+  if (grant && trustedCsrfTokensBySubject.get(grant.subject) === token) {
+    trustedCsrfTokensBySubject.delete(grant.subject);
+  }
+}
+
 function pruneSessions(now = Date.now()): void {
   for (const [id, session] of staticSessions) {
     if (session.expiresAt <= now) staticSessions.delete(id);
@@ -62,12 +71,12 @@ function pruneSessions(now = Date.now()): void {
     staticSessions.delete(oldest);
   }
   for (const [token, grant] of trustedCsrfGrants) {
-    if (grant.expiresAt <= now) trustedCsrfGrants.delete(token);
+    if (grant.expiresAt <= now) deleteTrustedCsrfGrant(token);
   }
   while (trustedCsrfGrants.size >= MAX_STATIC_SESSIONS * 4) {
     const oldest = trustedCsrfGrants.keys().next().value as string | undefined;
     if (!oldest) break;
-    trustedCsrfGrants.delete(oldest);
+    deleteTrustedCsrfGrant(oldest);
   }
 }
 
@@ -157,8 +166,13 @@ function csrfIsValid(
 
 function namespaceIsAllowed(request: FastifyRequest, principal: AuthPrincipal): boolean {
   if (!principal.namespaces) return true;
+  const requestPath = request.url.split('?', 1)[0];
+  if (!requestPath.startsWith('/api/proxy/')) return true;
+  // Ferrum documents TLS management as a fleet-global surface. The namespace
+  // header is inert there, so Foundry must not pretend that it scopes access.
+  if (requestPath.startsWith('/api/proxy/admin/tls/')) return true;
   const namespace = singleHeader(request, 'x-ferrum-namespace');
-  return !namespace || principal.namespaces.includes(namespace);
+  return Boolean(namespace && principal.namespaces.includes(namespace));
 }
 
 function rejectAuth(reply: FastifyReply, status = 401, error = 'Unauthorized'): FastifyReply {
@@ -238,14 +252,26 @@ export const authPlugin: FastifyPluginAsync = async (fastify) => {
     const principal = session?.principal ?? trustedProxyPrincipal(request, config);
     if (!principal) return rejectAuth(reply);
 
-    const csrfToken = session?.csrfToken ?? randomBytes(32).toString('base64url');
+    let csrfToken = session?.csrfToken;
     if (!session) {
       pruneSessions();
-      trustedCsrfGrants.set(csrfToken, {
+      const existingToken = trustedCsrfTokensBySubject.get(principal.subject);
+      const existingGrant = existingToken ? trustedCsrfGrants.get(existingToken) : undefined;
+      const trustedCsrfToken = existingToken && existingGrant && existingGrant.expiresAt > Date.now()
+        ? existingToken
+        : randomBytes(32).toString('base64url');
+      csrfToken = trustedCsrfToken;
+      if (existingToken && existingToken !== csrfToken) deleteTrustedCsrfGrant(existingToken);
+      // Refresh the subject's single grant and move it to the end of the map so
+      // the bounded cache evicts inactive identities rather than active ones.
+      trustedCsrfGrants.delete(trustedCsrfToken);
+      trustedCsrfGrants.set(trustedCsrfToken, {
         subject: principal.subject,
         expiresAt: Date.now() + config.sessionTtl * 1000,
       });
+      trustedCsrfTokensBySubject.set(principal.subject, trustedCsrfToken);
     }
+    if (!csrfToken) return rejectAuth(reply);
     issueCsrfCookie(reply, config, csrfToken);
     return {
       principal,
@@ -261,7 +287,7 @@ export const authPlugin: FastifyPluginAsync = async (fastify) => {
     const sessionId = request.cookies[names.session];
     if (sessionId) staticSessions.delete(sessionId);
     const csrfToken = request.cookies[names.csrf];
-    if (csrfToken) trustedCsrfGrants.delete(csrfToken);
+    if (csrfToken) deleteTrustedCsrfGrant(csrfToken);
     reply.clearCookie(names.session, { path: '/', secure: config.secureCookies });
     reply.clearCookie(names.csrf, { path: '/', secure: config.secureCookies });
     return { loggedOut: true, logoutUrl: config.authLogoutUrl };
