@@ -1,4 +1,6 @@
 import cookie from '@fastify/cookie';
+import { request as httpRequest } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
@@ -46,8 +48,30 @@ async function buildApp(): Promise<FastifyInstance> {
   app.post('/protected', { onRequest: requireAdminAuth }, async () => ({ ok: true }));
   app.get('/api/proxy/test', { onRequest: requireAdminAuth }, async () => ({ ok: true }));
   app.get('/api/proxy/admin/tls/inventory', { onRequest: requireAdminAuth }, async () => ({ ok: true }));
+  app.get('/api/proxy/*', { onRequest: requireAdminAuth }, async () => ({ ok: true }));
   app.get('/admin-only', { onRequest: requireRole('admin') }, async () => ({ ok: true }));
   return app;
+}
+
+async function rawGet(
+  app: FastifyInstance,
+  path: string,
+  headers: Record<string, string>,
+): Promise<{ statusCode: number; body: string }> {
+  if (!app.server.listening) await app.listen({ host: '127.0.0.1', port: 0 });
+  const port = (app.server.address() as AddressInfo).port;
+  return new Promise((resolve, reject) => {
+    const request = httpRequest({ host: '127.0.0.1', port, path, headers }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+      response.on('end', () => resolve({
+        statusCode: response.statusCode ?? 0,
+        body: Buffer.concat(chunks).toString('utf8'),
+      }));
+    });
+    request.on('error', reject);
+    request.end();
+  });
 }
 
 function identityHeaders(overrides: Record<string, string> = {}) {
@@ -130,6 +154,23 @@ describe('trusted OIDC proxy authentication', () => {
       });
       expect(local.statusCode).toBe(200);
       expect(fleetGlobal.statusCode).toBe(200);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('does not let dot segments cross the fleet-global TLS authorization boundary', async () => {
+    const app = await buildApp();
+    try {
+      for (const path of [
+        '/api/proxy/admin/tls/../../test',
+        '/api/proxy/admin/tls/%2e%2e/%2e%2e/test',
+        '/api/proxy/admin/tls/%252e%252e/%252e%252e/test',
+      ]) {
+        const response = await rawGet(app, path, identityHeaders());
+        expect(response.statusCode).toBe(403);
+        expect(JSON.parse(response.body)).toEqual({ error: 'Namespace access denied' });
+      }
     } finally {
       await app.close();
     }
