@@ -15,8 +15,8 @@ export interface RefreshControlProps {
   isRefreshing?: boolean;
 }
 
-function timeAgo(iso: string): string {
-  const diff = Math.max(0, Date.now() - new Date(iso).getTime());
+function timeAgo(iso: string, now: number): string {
+  const diff = Math.max(0, now - new Date(iso).getTime());
   const seconds = Math.floor(diff / 1000);
   if (seconds < 60) return `${seconds}s ago`;
   const minutes = Math.floor(seconds / 60);
@@ -40,7 +40,7 @@ export function RefreshControl({
   }, []);
 
   const agoText = useMemo(
-    () => (lastUpdated ? timeAgo(lastUpdated) : undefined),
+    () => (lastUpdated ? timeAgo(lastUpdated, now) : undefined),
     [lastUpdated, now],
   );
 
