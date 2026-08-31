@@ -6,7 +6,7 @@ on:
       - 'v*'
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-channels
   cancel-in-progress: false
 
 jobs:
@@ -20,8 +20,6 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       major_minor: ${{ steps.version.outputs.major_minor }}
       stable: ${{ steps.version.outputs.stable }}
-      advance_latest: ${{ steps.version.outputs.advance_latest }}
-      advance_major_minor: ${{ steps.version.outputs.advance_major_minor }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -126,6 +124,10 @@ jobs:
       contents: read
       packages: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
       - name: Download digests
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
@@ -149,6 +151,14 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Resolve current release channels
+        id: channels
+        env:
+          RELEASE_TAG: ${{ needs.release-metadata.outputs.tag }}
+        run: |
+          git fetch --tags origin
+          node scripts/release-channel-tags.mjs >> "$GITHUB_OUTPUT"
+
       - name: Create and push multi-arch manifest (Docker Hub)
         working-directory: /tmp/digests
         env:
@@ -156,8 +166,8 @@ jobs:
           RELEASE_TAG: ${{ needs.release-metadata.outputs.tag }}
           RELEASE_VERSION: ${{ needs.release-metadata.outputs.version }}
           RELEASE_MAJOR_MINOR: ${{ needs.release-metadata.outputs.major_minor }}
-          ADVANCE_LATEST: ${{ needs.release-metadata.outputs.advance_latest }}
-          ADVANCE_MAJOR_MINOR: ${{ needs.release-metadata.outputs.advance_major_minor }}
+          ADVANCE_LATEST: ${{ steps.channels.outputs.advance_latest }}
+          ADVANCE_MAJOR_MINOR: ${{ steps.channels.outputs.advance_major_minor }}
         run: |
           images=()
           for digest in *; do
@@ -203,8 +213,8 @@ jobs:
           RELEASE_TAG: ${{ needs.release-metadata.outputs.tag }}
           RELEASE_VERSION: ${{ needs.release-metadata.outputs.version }}
           RELEASE_MAJOR_MINOR: ${{ needs.release-metadata.outputs.major_minor }}
-          ADVANCE_LATEST: ${{ needs.release-metadata.outputs.advance_latest }}
-          ADVANCE_MAJOR_MINOR: ${{ needs.release-metadata.outputs.advance_major_minor }}
+          ADVANCE_LATEST: ${{ steps.channels.outputs.advance_latest }}
+          ADVANCE_MAJOR_MINOR: ${{ steps.channels.outputs.advance_major_minor }}
         run: |
           images=()
           for digest in *; do
@@ -251,13 +261,23 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Resolve current release channels
+        id: channels
+        env:
+          RELEASE_TAG: ${{ needs.release-metadata.outputs.tag }}
+        run: |
+          git fetch --tags origin
+          node scripts/release-channel-tags.mjs >> "$GITHUB_OUTPUT"
 
       - name: Create release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ needs.release-metadata.outputs.tag }}
           STABLE_RELEASE: ${{ needs.release-metadata.outputs.stable }}
-          ADVANCE_LATEST: ${{ needs.release-metadata.outputs.advance_latest }}
+          ADVANCE_LATEST: ${{ steps.channels.outputs.advance_latest }}
           IMAGE_REPOSITORY: ghcr.io/${{ github.repository }}
           SOURCE_REPOSITORY: ${{ github.repository }}
         run: |

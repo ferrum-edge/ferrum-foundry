@@ -38,7 +38,9 @@ validated as safe semantic versions and must point to a commit reachable from
 GitHub and never advances the stable major/minor or `latest` image tags. A
 stable backport advances its major/minor channel only when it is the newest
 patch in that line, and advances `latest` only when it is the newest stable
-version in the repository.
+version in the repository. Release workflows serialize channel mutation across
+tags and re-fetch tag state immediately before image promotion and GitHub
+release creation, preventing a slower older run from overwriting a newer one.
 
 Channel tags are explicit: every `main` publication advances `main` and an
 immutable `main-<commit>` tag, while only the newest stable semantic-version
