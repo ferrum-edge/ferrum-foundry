@@ -36,14 +36,29 @@ describe('loadCaBundle', () => {
     expect(() => loadCaBundle(path, root)).toThrow(/inside FERRUM_TLS_CA_ROOT/);
   });
 
-  it('rejects symlinks and oversized files', () => {
+  it('supports a projected-volume symlink whose target remains inside the approved root', () => {
     const root = tempDirectory();
     const target = join(root, 'target.pem');
     const link = join(root, 'link.pem');
     writeFileSync(target, 'certificate');
     symlinkSync(target, link);
-    expect(() => loadCaBundle(link, root)).toThrow(/symbolic link/);
+    const bundle = loadCaBundle(link, root);
+    expect(bundle.path).toBe(realpathSync(target));
+    expect(bundle.pem).toBe('certificate');
+  });
 
+  it('rejects a projected-volume symlink whose target escapes the approved root', () => {
+    const root = tempDirectory();
+    const outside = tempDirectory();
+    const target = join(outside, 'target.pem');
+    const link = join(root, 'link.pem');
+    writeFileSync(target, 'certificate');
+    symlinkSync(target, link);
+    expect(() => loadCaBundle(link, root)).toThrow(/inside FERRUM_TLS_CA_ROOT/);
+  });
+
+  it('rejects oversized files', () => {
+    const root = tempDirectory();
     const large = join(root, 'large.pem');
     writeFileSync(large, Buffer.alloc(1025));
     expect(() => loadCaBundle(large, root, 1024)).toThrow(/between 1 and 1024/);

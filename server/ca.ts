@@ -3,10 +3,10 @@ import {
   closeSync,
   constants,
   fstatSync,
-  lstatSync,
   openSync,
   readFileSync,
   realpathSync,
+  statSync,
 } from 'node:fs';
 import { dirname, relative, sep } from 'node:path';
 
@@ -24,9 +24,9 @@ function isWithinRoot(candidate: string, root: string): boolean {
 }
 
 /**
- * Resolve and read a CA bundle without following a final-component symlink.
- * The returned fingerprint is safe to use in dispatcher cache keys; the PEM
- * itself must never be logged or returned to an API client.
+ * Resolve and read a CA bundle through a stable path contained by the approved
+ * root. This supports projected-volume symlinks without allowing them to
+ * escape the root. The PEM itself must never be logged or returned to a client.
  */
 export function loadCaBundle(
   requestedPath: string,
@@ -37,9 +37,6 @@ export function loadCaBundle(
   let canonicalRoot: string;
 
   try {
-    if (lstatSync(requestedPath).isSymbolicLink()) {
-      throw new Error('TLS CA bundle must not be a symbolic link');
-    }
     canonicalPath = realpathSync(requestedPath);
     canonicalRoot = realpathSync(configuredRoot ?? dirname(canonicalPath));
   } catch (error) {
@@ -54,15 +51,37 @@ export function loadCaBundle(
   let fd: number | undefined;
   try {
     fd = openSync(canonicalPath, constants.O_RDONLY | constants.O_NOFOLLOW);
-    const stat = fstatSync(fd);
-    if (!stat.isFile()) {
+    const before = fstatSync(fd, { bigint: true });
+    if (!before.isFile()) {
       throw new Error('TLS CA bundle must be a regular file');
     }
-    if (stat.size <= 0 || stat.size > maxBytes) {
+    if (before.size <= 0n || before.size > BigInt(maxBytes)) {
       throw new Error(`TLS CA bundle must be between 1 and ${maxBytes} bytes`);
     }
 
-    const pem = readFileSync(fd, 'utf8');
+    const contents = readFileSync(fd);
+    const after = fstatSync(fd, { bigint: true });
+    const pathAfter = realpathSync(requestedPath);
+    const rootAfter = realpathSync(configuredRoot ?? dirname(pathAfter));
+    const pathStat = statSync(canonicalPath, { bigint: true });
+    if (contents.length <= 0 || contents.length > maxBytes) {
+      throw new Error(`TLS CA bundle must be between 1 and ${maxBytes} bytes`);
+    }
+    if (
+      pathAfter !== canonicalPath
+      || rootAfter !== canonicalRoot
+      || after.dev !== before.dev
+      || after.ino !== before.ino
+      || pathStat.dev !== before.dev
+      || pathStat.ino !== before.ino
+      || after.size !== before.size
+      || after.mtimeNs !== before.mtimeNs
+      || after.ctimeNs !== before.ctimeNs
+    ) {
+      throw new Error('TLS CA bundle changed while it was being read');
+    }
+
+    const pem = contents.toString('utf8');
     return {
       path: canonicalPath,
       pem,

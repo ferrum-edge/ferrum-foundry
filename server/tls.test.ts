@@ -1,7 +1,7 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from './config.js';
 import { closeDispatchers, getDispatcher } from './tls.js';
 
@@ -51,6 +51,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
 }
 
 afterEach(async () => {
+  vi.useRealTimers();
   await closeDispatchers();
   const { rm } = await import('node:fs/promises');
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
@@ -71,7 +72,9 @@ describe('managed Undici dispatchers', () => {
     expect(second.closed).toBe(true);
   });
 
-  it('replaces the dispatcher when a CA bundle changes in place', () => {
+  it('replaces the dispatcher after the bounded CA recheck detects an in-place change', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
     const root = tempDirectory();
     const caPath = join(root, 'ca.pem');
     writeFileSync(caPath, '-----BEGIN CERTIFICATE-----\nfirst\n-----END CERTIFICATE-----\n');
@@ -84,6 +87,37 @@ describe('managed Undici dispatchers', () => {
 
     const first = getDispatcher(config);
     writeFileSync(caPath, '-----BEGIN CERTIFICATE-----\nrotated-material\n-----END CERTIFICATE-----\n');
+    expect(getDispatcher(config)).toBe(first);
+    vi.advanceTimersByTime(1_001);
+    const second = getDispatcher(config);
+
+    expect(second).not.toBe(first);
+    expect(first.closed).toBe(true);
+  });
+
+  it('replaces the dispatcher when a projected CA volume atomically rotates its target', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    const root = tempDirectory();
+    const firstData = join(root, '..data-1');
+    const secondData = join(root, '..data-2');
+    mkdirSync(firstData);
+    mkdirSync(secondData);
+    writeFileSync(join(firstData, 'ca.pem'), '-----BEGIN CERTIFICATE-----\nfirst\n-----END CERTIFICATE-----\n');
+    writeFileSync(join(secondData, 'ca.pem'), '-----BEGIN CERTIFICATE-----\nsecond\n-----END CERTIFICATE-----\n');
+    symlinkSync('..data-1', join(root, '..data'));
+    symlinkSync('..data/ca.pem', join(root, 'ca.pem'));
+    const config = makeConfig({
+      adminUrl: 'https://gateway.example',
+      initialAdminOrigin: 'https://gateway.example',
+      tlsCaPath: join(root, 'ca.pem'),
+      tlsCaRoot: root,
+    });
+
+    const first = getDispatcher(config);
+    symlinkSync('..data-2', join(root, '..data-next'));
+    renameSync(join(root, '..data-next'), join(root, '..data'));
+    vi.advanceTimersByTime(1_001);
     const second = getDispatcher(config);
 
     expect(second).not.toBe(first);

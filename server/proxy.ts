@@ -5,6 +5,7 @@ import { fetch, type RequestInit } from 'undici';
 import { requireAdminAuth } from './auth.js';
 import { loadConfig } from './config.js';
 import { generateToken } from './jwt.js';
+import { proxyTargetPath, UnsafeProxyPathError } from './proxy-path.js';
 import { getDispatcher } from './tls.js';
 
 const DEFAULT_BODY_LIMIT = 2 * 1024 * 1024;
@@ -97,11 +98,6 @@ class GuardedUpload extends Transform {
   }
 }
 
-function targetPathFor(request: FastifyRequest): string {
-  const wildcard = (request.params as Record<string, string>)['*'] ?? '';
-  return `/${wildcard.replace(/^\/+/, '')}`;
-}
-
 function bodyLimitFor(path: string): number {
   if (path === '/restore') return RESTORE_BODY_LIMIT;
   if (path === '/api-specs' || path.startsWith('/api-specs/')) return API_SPEC_BODY_LIMIT;
@@ -110,7 +106,7 @@ function bodyLimitFor(path: string): number {
 
 function isLargeUpload(request: FastifyRequest): boolean {
   if (request.method === 'GET' || request.method === 'HEAD' || request.method === 'DELETE') return false;
-  return bodyLimitFor(targetPathFor(request)) > DEFAULT_BODY_LIMIT;
+  return bodyLimitFor(proxyTargetPath(request)) > DEFAULT_BODY_LIMIT;
 }
 
 function copyRequestHeaders(request: FastifyRequest, authorization: string): Record<string, string> {
@@ -176,15 +172,32 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
   fastify.addHook('onResponse', async (request) => releaseLargeUpload(request));
   fastify.addHook('onRequestAbort', async (request) => releaseLargeUpload(request));
 
+  const requireSafeProxyPath = async (
+    request: FastifyRequest,
+    reply: Parameters<typeof requireAdminAuth>[1],
+  ) => {
+    try {
+      proxyTargetPath(request);
+    } catch (error) {
+      if (error instanceof UnsafeProxyPathError) {
+        return reply.status(400).send({
+          error: 'Bad Request',
+          code: 'FERRUM_BFF_UNSAFE_PATH',
+        });
+      }
+      throw error;
+    }
+  };
+
   fastify.all('/api/proxy/*', {
-    onRequest: [requireAdminAuth, reserveLargeUpload],
+    onRequest: [requireAdminAuth, requireSafeProxyPath, reserveLargeUpload],
     bodyLimit: RESTORE_BODY_LIMIT,
   }, async (request, reply) => {
     const config = loadConfig();
     const principal = request.authPrincipal;
     if (!principal) return reply.status(401).send({ error: 'Unauthorized' });
 
-    const targetPath = targetPathFor(request);
+    const targetPath = proxyTargetPath(request);
     const target = new URL(config.adminUrl);
     target.pathname = targetPath;
     const queryIndex = request.url.indexOf('?');
