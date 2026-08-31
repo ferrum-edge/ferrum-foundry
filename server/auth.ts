@@ -2,7 +2,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import type { AuthPrincipal } from './auth-types.js';
 import { loadConfig, type Config, type GatewayRole } from './config.js';
-import { proxyPathIsFleetGlobal } from './proxy-path.js';
+import { proxyPathIsFleetGlobal, requestIsProxyRoute } from './proxy-path.js';
 
 interface StaticSession {
   principal: AuthPrincipal;
@@ -167,8 +167,7 @@ function csrfIsValid(
 
 function namespaceIsAllowed(request: FastifyRequest, principal: AuthPrincipal): boolean {
   if (!principal.namespaces) return true;
-  const requestPath = request.url.split('?', 1)[0];
-  if (!requestPath.startsWith('/api/proxy/')) return true;
+  if (!requestIsProxyRoute(request)) return true;
   // Ferrum documents TLS management as a fleet-global surface. The namespace
   // header is inert there, so Foundry must not pretend that it scopes access.
   if (proxyPathIsFleetGlobal(request)) return true;
