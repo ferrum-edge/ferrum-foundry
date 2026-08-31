@@ -103,17 +103,17 @@ export async function getApiErrorMessage(
   return detail ? `${error.message}: ${detail}` : error.message;
 }
 
-// ── BFF bearer token (set by AuthProvider) ───────────────────────
+// ── BFF session / CSRF state (set by AuthProvider) ───────────────
 
-let bearerToken: string | null = null;
+let csrfToken: string | null = null;
 let unauthorizedHandler: (() => void) | undefined;
 
 /**
- * Set the BFF bearer token attached to every request. Pass `null` to clear.
- * Called by `AuthProvider` whenever the auth state changes.
+ * Set the non-secret CSRF token paired with the HttpOnly BFF session cookie.
+ * It intentionally lives only in memory and is never a reusable login secret.
  */
-export function setBearerToken(token: string | null): void {
-  bearerToken = token;
+export function setCsrfToken(token: string | null): void {
+  csrfToken = token;
 }
 
 /**
@@ -127,6 +127,8 @@ export function setOnUnauthorized(handler: (() => void) | undefined): void {
 // ── localStorage namespace helper ────────────────────────────────
 
 export const NAMESPACE_HEADER = "X-Ferrum-Namespace";
+/** Mark a documented fleet-global gateway operation so no tenant header is implied. */
+export const FLEET_GLOBAL = "fleetGlobal";
 
 const NAMESPACE_STORAGE_KEY = "ferrum:namespace";
 const DEFAULT_NAMESPACE = "ferrum";
@@ -180,25 +182,37 @@ function isExpectedProbeFailure(response: Response): boolean {
 
 export const api = ky.create({
   prefix: "",
+  credentials: "same-origin",
   hooks: {
     beforeRequest: [
-      ({ request }) => {
+      ({ request, options }) => {
         // Attach the active namespace header to every proxy request, unless
         // the caller already scoped this one to a specific namespace (e.g.
         // counting a delete target's resources while a different namespace is
         // selected).
-        if (!request.headers.has(NAMESPACE_HEADER)) {
+        if (
+          request.url.includes("/api/proxy/") &&
+          !options.context?.[FLEET_GLOBAL] &&
+          !request.headers.has(NAMESPACE_HEADER)
+        ) {
           request.headers.set(NAMESPACE_HEADER, getNamespace());
         }
-        // Attach the BFF bearer token if the user is signed in
-        if (bearerToken) {
-          request.headers.set("Authorization", `Bearer ${bearerToken}`);
+        if (
+          csrfToken &&
+          request.method !== "GET" &&
+          request.method !== "HEAD" &&
+          request.method !== "OPTIONS"
+        ) {
+          request.headers.set("X-CSRF-Token", csrfToken);
         }
       },
     ],
     afterResponse: [
       async ({ options, response }) => {
-        if (response.status === 401) {
+        if (
+          response.status === 401 &&
+          response.headers.get("x-ferrum-auth-layer") === "bff"
+        ) {
           unauthorizedHandler?.();
         }
         if (!response.ok) {

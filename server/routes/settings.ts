@@ -1,117 +1,133 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { getRuntimeConfig, updateRuntimeConfig, loadConfig } from '../config.js';
-import type { PublicRuntimeConfig, RuntimeConfig } from '../config.js';
-import { fetch, Agent } from 'undici';
+import { fetch } from 'undici';
+import { requireRole } from '../auth.js';
+import {
+  getPublicRuntimeConfig,
+  loadConfig,
+  updateRuntimeConfig,
+  type RuntimeConfig,
+} from '../config.js';
 import { generateToken } from '../jwt.js';
-import { requireAdminAuth } from '../auth.js';
+import { getDispatcher } from '../tls.js';
 
-// Strip the signing secret before returning the runtime config over HTTP.
-// Pairs with PUT /api/settings rejecting jwtSecret — the secret is env-only,
-// so callers never read or write it through this API.
-function redactRuntimeConfig(config: RuntimeConfig): PublicRuntimeConfig {
-  const { jwtSecret: _jwtSecret, ...rest } = config;
-  return rest;
+const ALLOWED_UPDATE_FIELDS = new Set<keyof RuntimeConfig>([
+  'adminUrl',
+  'jwtIssuer',
+  'jwtTtl',
+  'jwtRole',
+  'jwtAudience',
+  'jwtNamespaces',
+  'tlsCaPath',
+  'tlsVerify',
+  'connectTimeout',
+  'readTimeout',
+  'writeTimeout',
+]);
+
+async function readBoundedBody(response: Awaited<ReturnType<typeof fetch>>, maxBytes = 64 * 1024): Promise<string> {
+  if (!response.body) return '';
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let received = 0;
+  let result = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      received += value.byteLength;
+      if (received > maxBytes) throw new Error('Gateway status response exceeded the permitted size');
+      result += decoder.decode(value, { stream: true });
+    }
+    return result + decoder.decode();
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
 }
 
 const settingsPlugin: FastifyPluginAsync = async (fastify) => {
-  // GET /api/settings - return current runtime config (jwtSecret omitted)
-  fastify.get('/api/settings', { preHandler: requireAdminAuth }, async () => {
-    return redactRuntimeConfig(getRuntimeConfig());
-  });
+  const requireAdmin = requireRole('admin');
 
-  // PUT /api/settings - update runtime config (jwtSecret is env-only)
-  fastify.put('/api/settings', { preHandler: requireAdminAuth }, async (request, reply) => {
-    const body = request.body as Partial<RuntimeConfig>;
+  fastify.get('/api/settings', { onRequest: requireAdmin }, async () => getPublicRuntimeConfig());
 
-    // Allowing runtime rotation here would let any caller swap the secret to
-    // a value they choose and forge admin JWTs. Secret must come from env.
-    if (body.jwtSecret !== undefined) {
-      return reply.status(400).send({
-        error: 'jwtSecret cannot be set via the API; use the FERRUM_JWT_SECRET environment variable',
+  fastify.put('/api/settings', { onRequest: requireAdmin, bodyLimit: 32 * 1024 }, async (request, reply) => {
+    const config = loadConfig();
+    if (!config.allowRuntimeSettings) {
+      return reply.status(403).send({
+        error: 'Runtime settings are disabled',
+        code: 'FERRUM_BFF_SETTINGS_IMMUTABLE',
       });
     }
 
-    // Basic validation
-    if (body.adminUrl !== undefined && typeof body.adminUrl !== 'string') {
-      return reply.status(400).send({ error: 'adminUrl must be a string' });
+    if (!request.body || typeof request.body !== 'object' || Array.isArray(request.body)) {
+      return reply.status(400).send({ error: 'Settings body must be an object' });
     }
-    if (body.jwtIssuer !== undefined && typeof body.jwtIssuer !== 'string') {
-      return reply.status(400).send({ error: 'jwtIssuer must be a string' });
+    const body = request.body as Record<string, unknown>;
+    const unknownFields = Object.keys(body).filter((key) => !ALLOWED_UPDATE_FIELDS.has(key as keyof RuntimeConfig));
+    if (unknownFields.length > 0) {
+      return reply.status(400).send({ error: 'Settings body contains unsupported fields' });
     }
-    if (body.jwtTtl !== undefined && (typeof body.jwtTtl !== 'number' || body.jwtTtl <= 0)) {
-      return reply.status(400).send({ error: 'jwtTtl must be a positive number' });
-    }
-    if (body.tlsCaPath !== undefined && body.tlsCaPath !== null && typeof body.tlsCaPath !== 'string') {
-      return reply.status(400).send({ error: 'tlsCaPath must be a string or null' });
-    }
-    if (body.tlsVerify !== undefined && typeof body.tlsVerify !== 'boolean') {
-      return reply.status(400).send({ error: 'tlsVerify must be a boolean' });
-    }
-    if (body.connectTimeout !== undefined && (typeof body.connectTimeout !== 'number' || body.connectTimeout <= 0)) {
-      return reply.status(400).send({ error: 'connectTimeout must be a positive number' });
-    }
-    if (body.readTimeout !== undefined && (typeof body.readTimeout !== 'number' || body.readTimeout <= 0)) {
-      return reply.status(400).send({ error: 'readTimeout must be a positive number' });
-    }
-    if (body.writeTimeout !== undefined && (typeof body.writeTimeout !== 'number' || body.writeTimeout <= 0)) {
-      return reply.status(400).send({ error: 'writeTimeout must be a positive number' });
-    }
-
-    updateRuntimeConfig(body);
-    return redactRuntimeConfig(getRuntimeConfig());
-  });
-
-  // GET /api/settings/status - test connectivity to admin API
-  fastify.get('/api/settings/status', { preHandler: requireAdminAuth }, async (_request, reply) => {
-    const config = loadConfig();
-    const token = await generateToken(config);
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), config.readTimeout);
 
     try {
-      const isHttps = config.adminUrl.startsWith('https://');
-      const dispatcher = new Agent({
-        connect: {
-          timeout: config.connectTimeout,
-          ...(isHttps && {
-            rejectUnauthorized: config.tlsVerify,
-            ...(config.tlsCaPath && {
-              ca: (await import('node:fs')).readFileSync(config.tlsCaPath, 'utf-8'),
-            }),
-          }),
-        },
+      const before = getPublicRuntimeConfig();
+      await updateRuntimeConfig(body as Partial<RuntimeConfig>);
+      const after = getPublicRuntimeConfig();
+      const changedFields = Object.keys(body);
+      fastify.log.info({
+        actor: request.authPrincipal?.subject,
+        changedFields,
+        changes: Object.fromEntries(changedFields.map((field) => [
+          field,
+          field === 'adminUrl' || field === 'tlsCaPath'
+            ? '[redacted connection setting]'
+            : { before: before[field as keyof typeof before], after: after[field as keyof typeof after] },
+        ])),
+      }, 'Runtime settings changed');
+      return after;
+    } catch {
+      return reply.status(400).send({
+        error: 'Settings validation failed',
+        code: 'FERRUM_BFF_INVALID_SETTINGS',
       });
+    }
+  });
 
-      const response = await fetch(`${config.adminUrl}/health`, {
+  fastify.get('/api/settings/status', { onRequest: requireAdmin }, async (request, reply) => {
+    const config = loadConfig();
+    const principal = request.authPrincipal;
+    if (!principal) return reply.status(401).send({ error: 'Unauthorized' });
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), config.readTimeout);
+    timeout.unref();
+    try {
+      const token = await generateToken(config, principal);
+      const response = await fetch(new URL('/health', config.adminUrl), {
         method: 'GET',
-        headers: { 'Authorization': `Bearer ${token}` },
+        headers: { authorization: `Bearer ${token}` },
         signal: controller.signal,
-        dispatcher,
+        dispatcher: getDispatcher(config),
+        redirect: 'error',
       });
-
-      clearTimeout(timeoutId);
-
-      const body = await response.text();
-      let parsed: unknown;
+      const rawBody = await readBoundedBody(response);
+      let body: unknown = rawBody;
       try {
-        parsed = JSON.parse(body);
+        body = JSON.parse(rawBody);
       } catch {
-        parsed = body;
+        // The gateway may return text for a proxy/intermediary failure.
       }
-
       return reply.status(response.status).send({
         reachable: response.ok,
         status: response.status,
-        body: parsed,
+        body,
       });
-    } catch (err: unknown) {
-      clearTimeout(timeoutId);
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      return reply.status(502).send({
+    } catch (error: unknown) {
+      const timeoutFailure = controller.signal.aborted || (error instanceof Error && error.name === 'AbortError');
+      return reply.status(timeoutFailure ? 504 : 502).send({
         reachable: false,
-        error: message,
+        code: timeoutFailure ? 'FERRUM_BFF_TIMEOUT' : 'FERRUM_BFF_UPSTREAM_FAILURE',
       });
+    } finally {
+      clearTimeout(timeout);
     }
   });
 };

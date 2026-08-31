@@ -1,105 +1,125 @@
+import { decodeProtectedHeader, jwtVerify, type JWTPayload } from 'jose';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { jwtVerify, decodeProtectedHeader, type JWTPayload } from 'jose';
+import type { AuthPrincipal } from './auth-types.js';
 import type { Config } from './config.js';
 
 function makeConfig(overrides: Partial<Config> = {}): Config {
   return {
     adminUrl: 'http://127.0.0.1:9000',
-    jwtSecret: 'unit-test-secret-do-not-use-in-prod',
+    initialAdminOrigin: 'http://127.0.0.1:9000',
+    adminAllowedOrigins: [],
+    adminAllowedCidrs: [],
+    jwtSecret: 'unit-test-signing-secret-is-long-enough',
     jwtIssuer: 'ferrum-foundry-tests',
-    jwtTtl: 3600,
+    jwtTtl: 600,
+    jwtMaxTtl: 3600,
+    jwtRole: 'admin',
+    jwtAudience: undefined,
+    jwtNamespaces: undefined,
     tlsCaPath: undefined,
+    tlsCaRoot: undefined,
     tlsVerify: true,
     connectTimeout: 5000,
     readTimeout: 60000,
     writeTimeout: 60000,
     port: 3001,
-    bffAuthToken: 'unit-test-bff-token-do-not-use-in-prod',
+    maxLargeUploads: 2,
+    allowRuntimeSettings: false,
+    authMode: 'trusted-proxy',
+    bffAuthToken: undefined,
+    sessionTtl: 3600,
+    trustedProxySecret: 'trusted-proxy-secret-is-long-enough',
+    trustedProxyUserHeader: 'x-forwarded-user',
+    trustedProxyRoleHeader: 'x-ferrum-role',
+    trustedProxyNamespacesHeader: 'x-ferrum-namespaces',
+    authLoginUrl: undefined,
+    authLogoutUrl: undefined,
+    secureCookies: true,
+    enableHsts: false,
     ...overrides,
   };
 }
 
-async function verify(
-  token: string,
-  secret: string,
-  issuer = 'ferrum-foundry-tests',
-): Promise<JWTPayload> {
-  const key = new TextEncoder().encode(secret);
-  const { payload } = await jwtVerify(token, key, { issuer });
-  return payload;
+function makePrincipal(overrides: Partial<AuthPrincipal> = {}): AuthPrincipal {
+  return {
+    subject: 'alice@example.test',
+    displayName: 'Alice',
+    role: 'operator',
+    namespaces: ['tenant-a', 'tenant-b'],
+    authMode: 'trusted-proxy',
+    ...overrides,
+  };
 }
 
-// jwt.ts memoizes the signed token at module scope, so re-import a fresh copy
-// per test to keep cases independent.
-async function loadGenerateToken(): Promise<
-  (config: Config) => Promise<string>
-> {
+async function verify(token: string, config: Config): Promise<JWTPayload> {
+  return (await jwtVerify(token, new TextEncoder().encode(config.jwtSecret), {
+    issuer: config.jwtIssuer,
+    ...(config.jwtAudience && { audience: config.jwtAudience }),
+  })).payload;
+}
+
+async function loadModule(): Promise<typeof import('./jwt.js')> {
   vi.resetModules();
-  const mod = await import('./jwt.js');
-  return mod.generateToken;
+  return import('./jwt.js');
 }
 
 describe('generateToken', () => {
-  beforeEach(() => {
-    vi.resetModules();
-  });
+  beforeEach(() => vi.resetModules());
 
-  it('signs a token that can be verified with the configured secret', async () => {
-    const generateToken = await loadGenerateToken();
-    const config = makeConfig();
-    const token = await generateToken(config);
+  it('emits every claim required by the Ferrum Edge contract', async () => {
+    const { generateToken } = await loadModule();
+    const config = makeConfig({ jwtAudience: ['edge-admin', 'edge-ops'] });
+    const token = await generateToken(config, makePrincipal());
+    const payload = await verify(token, config);
 
-    // Three base64url segments separated by '.'.
-    expect(token.split('.')).toHaveLength(3);
-
-    const payload = await verify(token, config.jwtSecret);
-    expect(payload.iss).toBe(config.jwtIssuer);
-    expect(payload.sub).toBe('ferrum-foundry');
-    expect(typeof payload.jti).toBe('string');
-    expect((payload.jti as string).length).toBeGreaterThan(0);
-  });
-
-  it('uses HS256 in the protected header', async () => {
-    const generateToken = await loadGenerateToken();
-    const token = await generateToken(makeConfig());
     expect(decodeProtectedHeader(token)).toMatchObject({ alg: 'HS256' });
+    expect(payload).toMatchObject({
+      iss: config.jwtIssuer,
+      sub: 'alice@example.test',
+      role: 'operator',
+      ns: ['tenant-a', 'tenant-b'],
+      aud: ['edge-admin', 'edge-ops'],
+    });
+    for (const claim of ['exp', 'iat', 'nbf', 'jti']) expect(payload[claim]).toBeDefined();
   });
 
-  it('sets exp/iat/nbf consistent with the configured TTL', async () => {
-    const generateToken = await loadGenerateToken();
-    const config = makeConfig({ jwtTtl: 600 });
-    const before = Math.floor(Date.now() / 1000);
-    const token = await generateToken(config);
-    const after = Math.floor(Date.now() / 1000);
-
-    const payload = await verify(token, config.jwtSecret);
-    expect(typeof payload.iat).toBe('number');
-    expect(typeof payload.nbf).toBe('number');
-    expect(typeof payload.exp).toBe('number');
-
-    const iat = payload.iat as number;
-    const nbf = payload.nbf as number;
-    const exp = payload.exp as number;
-
-    expect(iat).toBeGreaterThanOrEqual(before);
-    expect(iat).toBeLessThanOrEqual(after);
-    expect(nbf).toBe(iat);
-    expect(exp - iat).toBe(config.jwtTtl);
-  });
-
-  it('fails to verify when a different secret is used', async () => {
-    const generateToken = await loadGenerateToken();
+  it('uses a scalar namespace claim for one exact grant and omits optional claims when absent', async () => {
+    const { generateToken } = await loadModule();
     const config = makeConfig();
-    const token = await generateToken(config);
-
-    await expect(verify(token, 'wrong-secret')).rejects.toThrow();
+    const payload = await verify(
+      await generateToken(config, makePrincipal({ namespaces: ['tenant-a'] })),
+      config,
+    );
+    expect(payload.ns).toBe('tenant-a');
+    expect(payload.aud).toBeUndefined();
   });
 
-  it('reuses the cached token within its validity window', async () => {
-    const generateToken = await loadGenerateToken();
+  it('sets a positive bounded lifetime with aligned issued/not-before timestamps', async () => {
+    const { generateToken } = await loadModule();
+    const config = makeConfig({ jwtTtl: 300 });
+    const payload = await verify(await generateToken(config, makePrincipal()), config);
+    expect(payload.nbf).toBe(payload.iat);
+    expect((payload.exp as number) - (payload.iat as number)).toBe(300);
+  });
+
+  it('reuses a token only when every signing input and principal claim matches', async () => {
+    const { generateToken } = await loadModule();
     const config = makeConfig();
-    const first = await generateToken(config);
-    const second = await generateToken(config);
-    expect(second).toBe(first);
+    const principal = makePrincipal();
+    const first = await generateToken(config, principal);
+    expect(await generateToken(config, principal)).toBe(first);
+    expect(await generateToken(config, makePrincipal({ role: 'viewer' }))).not.toBe(first);
+    expect(await generateToken({ ...config, jwtIssuer: 'changed' }, principal)).not.toBe(first);
+    expect(await generateToken({ ...config, jwtSecret: 'another-signing-secret-that-is-long-enough' }, principal)).not.toBe(first);
+  });
+
+  it('attributes downstream activity to the authenticated actor', async () => {
+    const { generateToken } = await loadModule();
+    const config = makeConfig();
+    const alice = await generateToken(config, makePrincipal({ subject: 'alice@example.test' }));
+    const bob = await generateToken(config, makePrincipal({ subject: 'bob@example.test' }));
+    expect((await verify(alice, config)).sub).toBe('alice@example.test');
+    expect((await verify(bob, config)).sub).toBe('bob@example.test');
+    expect(bob).not.toBe(alice);
   });
 });

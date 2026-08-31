@@ -2,9 +2,11 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useState,
   type ReactNode,
 } from "react";
+import { useAuth } from "@/stores/auth";
 
 interface NamespaceContextValue {
   selectedNamespace: string;
@@ -32,6 +34,7 @@ function persistNamespace(ns: string) {
 }
 
 export function NamespaceProvider({ children }: { children: ReactNode }) {
+  const { principal } = useAuth();
   const [selectedNamespace, setSelectedNamespace] = useState<string>(
     loadPersistedNamespace,
   );
@@ -40,6 +43,13 @@ export function NamespaceProvider({ children }: { children: ReactNode }) {
     persistNamespace(ns);
     setSelectedNamespace(ns);
   }, []);
+
+  useEffect(() => {
+    if (!principal?.namespaces?.length || principal.namespaces.includes(selectedNamespace)) return;
+    const firstAllowed = principal.namespaces[0];
+    persistNamespace(firstAllowed);
+    setSelectedNamespace(firstAllowed);
+  }, [principal, selectedNamespace]);
 
   return (
     <NamespaceContext.Provider value={{ selectedNamespace, setNamespace }}>

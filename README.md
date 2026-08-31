@@ -59,28 +59,34 @@ Set required environment variables:
 
 ```bash
 export FERRUM_ADMIN_URL=http://localhost:9000   # Ferrum Admin API URL
-export FERRUM_JWT_SECRET=your-jwt-secret         # HS256 signing key
-export FERRUM_BFF_AUTH_TOKEN=$(openssl rand -hex 32)  # Bearer token for the BFF
+export FERRUM_JWT_SECRET=$(openssl rand -hex 32)       # HS256 signing key (32+ chars)
+export FERRUM_BFF_AUTH_TOKEN=$(openssl rand -hex 32)  # Development login exchange token
 ```
 
-`FERRUM_BFF_AUTH_TOKEN` gates the BFF's privileged endpoints
-(`/api/proxy/*`, `/api/settings`, `/api/settings/status`). The SPA prompts
-for this token on first load and stores it in `localStorage`; every request
-the browser makes to the BFF carries it as `Authorization: Bearer <token>`.
-Use a long, random secret (the warning in the server logs flags anything
-shorter than 16 chars).
+Static-token authentication is intended for local development only. The SPA
+exchanges `FERRUM_BFF_AUTH_TOKEN` once for a bounded HttpOnly, SameSite session;
+the deployment credential is never stored in browser storage or reused as a
+bearer token. Production startup fails closed unless a trusted identity proxy
+mode is configured. See [Production authentication](docs/authentication.md).
 
 Optional environment variables:
 
 | Variable | Default | Description |
 |---|---|---|
 | `FERRUM_JWT_ISSUER` | `ferrum-edge` | JWT issuer claim |
-| `FERRUM_JWT_TTL` | `3600` | JWT token TTL (seconds) |
-| `FERRUM_TLS_CA_PATH` | - | Path to .pem truststore |
+| `FERRUM_JWT_TTL` | `900` | JWT token TTL (seconds) |
+| `FERRUM_JWT_MAX_TTL` | `3600` | Gateway-configured maximum JWT TTL |
+| `FERRUM_JWT_ROLE` | `admin` | Static development role: viewer/operator/admin |
+| `FERRUM_JWT_AUDIENCE` | - | Optional exact audience claim(s), comma separated |
+| `FERRUM_JWT_NAMESPACES` | - | Optional exact namespace grants, comma separated |
+| `FERRUM_TLS_CA_PATH` | - | Path to a .pem truststore (contained projected-volume symlinks are supported) |
+| `FERRUM_TLS_CA_ROOT` | CA file directory | Approved root for CA bundles |
 | `FERRUM_TLS_VERIFY` | `true` | Verify TLS certificates |
 | `FERRUM_CONNECT_TIMEOUT` | `5000` | Connection timeout (ms) |
 | `FERRUM_READ_TIMEOUT` | `60000` | Read timeout (ms) |
 | `FERRUM_WRITE_TIMEOUT` | `60000` | Write timeout (ms) |
+| `FERRUM_MAX_LARGE_UPLOADS` | `2` | Maximum concurrent restore/spec uploads |
+| `FERRUM_ALLOW_RUNTIME_SETTINGS` | `false` | Permit restricted browser connection overrides |
 | `PORT` | `3001` | BFF server port |
 
 Start the dev server:
@@ -113,13 +119,16 @@ docker build -f docker/Dockerfile -t ferrum-foundry .
 
 docker run \
   -e FERRUM_ADMIN_URL=http://your-gateway:9000 \
-  -e FERRUM_JWT_SECRET=your-secret \
-  -e FERRUM_BFF_AUTH_TOKEN=your-bff-bearer-token \
-  -p 8080:8080 \
+  -e FERRUM_JWT_SECRET=a-random-secret-at-least-32-characters-long \
+  -e FERRUM_AUTH_MODE=trusted-proxy \
+  -e FERRUM_TRUSTED_PROXY_SECRET=a-separate-random-32-character-secret \
+  -p 127.0.0.1:8080:8080 \
   ferrum-foundry
 ```
 
-The Docker image uses `gcr.io/distroless/nodejs22-debian12:nonroot` for a minimal attack surface.
+The production BFF must be reachable only through the configured identity
+proxy. The Docker image uses `gcr.io/distroless/nodejs22-debian13:nonroot` for
+a minimal attack surface.
 
 ## Tech Stack
 

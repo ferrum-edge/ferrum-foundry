@@ -3,6 +3,7 @@ import { useNamespace } from "@/stores/namespace";
 import { useNamespaces } from "@/hooks/useNamespaces";
 import { useTheme } from "@/stores/theme";
 import { useAuth } from "@/stores/auth";
+import { useBffReadiness } from "@/hooks/useBffHealth";
 
 interface HeaderProps {
   onToggleSidebar: () => void;
@@ -12,7 +13,24 @@ export function Header({ onToggleSidebar }: HeaderProps) {
   const { selectedNamespace, setNamespace } = useNamespace();
   const { data: namespaces } = useNamespaces();
   const { theme, toggleTheme } = useTheme();
-  const { clearToken } = useAuth();
+  const { logout, principal } = useAuth();
+  const readiness = useBffReadiness();
+
+  const connection = readiness.data?.status ?? (readiness.isError ? "unavailable" : "unknown");
+  const connectionLabel = connection === "ready"
+    ? "Connected"
+    : connection === "degraded"
+      ? "Degraded"
+      : connection === "unavailable"
+        ? "Disconnected"
+        : "Checking";
+  const connectionColor = connection === "ready"
+    ? "bg-success"
+    : connection === "degraded"
+      ? "bg-warning"
+      : connection === "unavailable"
+        ? "bg-danger"
+        : "bg-text-muted";
 
   // Always offer the full namespace set from GET /namespaces; include the
   // selected namespace even if the list hasn't loaded (or omits it) so the
@@ -85,17 +103,22 @@ export function Header({ onToggleSidebar }: HeaderProps) {
         </button>
 
         {/* Connection status indicator */}
-        <div className="flex items-center gap-2 text-xs text-text-muted">
+        <div
+          className="flex items-center gap-2 text-xs text-text-muted"
+          title={principal ? `${principal.displayName} · ${principal.role}` : connectionLabel}
+        >
           <span className="relative flex h-2.5 w-2.5">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75" />
-            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-success" />
+            {connection === "ready" && (
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-50" />
+            )}
+            <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${connectionColor}`} />
           </span>
-          <span className="hidden sm:inline">Connected</span>
+          <span className="hidden sm:inline">{connectionLabel}</span>
         </div>
 
         {/* Sign out */}
         <button
-          onClick={clearToken}
+          onClick={() => void logout()}
           className="p-1.5 rounded-lg text-text-secondary hover:bg-bg-card-hover hover:text-text-primary transition-colors cursor-pointer"
           aria-label="Sign out"
           title="Sign out"

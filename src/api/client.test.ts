@@ -1,9 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  api,
   extractApiErrorData,
   extractApiErrorDetail,
+  FLEET_GLOBAL,
   getApiErrorDetail,
   getApiErrorMessage,
+  setCsrfToken,
+  setOnUnauthorized,
 } from "./client";
 
 describe("extractApiErrorDetail", () => {
@@ -217,5 +221,82 @@ describe("getApiErrorDetail on a ky-shaped error", () => {
     });
 
     await expect(getApiErrorDetail(error)).resolves.toBe("from data");
+  });
+});
+
+describe("session request hooks", () => {
+  const captured: Request[] = [];
+  let nextResponse: () => Response;
+
+  class BasedRequest extends Request {
+    constructor(input: RequestInfo | URL, init?: RequestInit) {
+      if (typeof input === "string" && !/^[a-z][a-z0-9+.-]*:/i.test(input)) {
+        input = new URL(input, "http://localhost").toString();
+      }
+      super(input, init);
+    }
+  }
+
+  beforeEach(() => {
+    captured.length = 0;
+    setCsrfToken(null);
+    setOnUnauthorized(undefined);
+    nextResponse = () => new Response("{}", {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+    vi.stubGlobal("Request", BasedRequest);
+    vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
+      captured.push(request.clone());
+      return nextResponse();
+    }));
+  });
+
+  afterEach(() => {
+    setCsrfToken(null);
+    setOnUnauthorized(undefined);
+    vi.unstubAllGlobals();
+  });
+
+  it("uses cookies and an in-memory CSRF value without a bearer credential", async () => {
+    setCsrfToken("csrf-fixture");
+    await api.post("api/settings", { json: { readTimeout: 1000 } });
+    expect(captured[0].credentials).toBe("same-origin");
+    expect(captured[0].headers.get("x-csrf-token")).toBe("csrf-fixture");
+    expect(captured[0].headers.has("authorization")).toBe(false);
+  });
+
+  it("adds namespace context only to gateway proxy requests", async () => {
+    localStorage.setItem("ferrum:namespace", "tenant-a");
+    await api.get("api/auth/session");
+    await api.get("api/proxy/proxies");
+    expect(captured[0].headers.has("x-ferrum-namespace")).toBe(false);
+    expect(captured[1].headers.get("x-ferrum-namespace")).toBe("tenant-a");
+  });
+
+  it("does not imply tenant scoping for documented fleet-global requests", async () => {
+    localStorage.setItem("ferrum:namespace", "tenant-a");
+    await api.get("api/proxy/admin/tls/inventory", {
+      context: { [FLEET_GLOBAL]: true },
+    });
+    expect(captured[0].headers.has("x-ferrum-namespace")).toBe(false);
+  });
+
+  it("clears auth only for a BFF-layer 401, not a gateway JWT failure", async () => {
+    const unauthorized = vi.fn();
+    setOnUnauthorized(unauthorized);
+    nextResponse = () => new Response("{}", {
+      status: 401,
+      headers: { "content-type": "application/json", "x-ferrum-auth-layer": "gateway" },
+    });
+    await api.get("api/proxy/proxies", { throwHttpErrors: false });
+    expect(unauthorized).not.toHaveBeenCalled();
+
+    nextResponse = () => new Response("{}", {
+      status: 401,
+      headers: { "content-type": "application/json", "x-ferrum-auth-layer": "bff" },
+    });
+    await api.get("api/settings", { throwHttpErrors: false });
+    expect(unauthorized).toHaveBeenCalledTimes(1);
   });
 });
