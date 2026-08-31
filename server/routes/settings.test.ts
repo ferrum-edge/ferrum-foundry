@@ -95,6 +95,22 @@ describe('PUT /api/settings', () => {
     }
   });
 
+  it('rejects unauthenticated requests before parsing the body', async () => {
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'PUT',
+        url: '/api/settings',
+        headers: { 'content-type': 'application/json' },
+        payload: '{',
+      });
+      expect(res.statusCode).toBe(401);
+      expect(res.json()).toEqual({ error: 'Unauthorized' });
+    } finally {
+      await app.close();
+    }
+  });
+
   it('rejects jwtSecret in the payload', async () => {
     const app = await buildApp();
     try {

@@ -5,7 +5,7 @@ import { generateToken } from './jwt.js';
 import { requireAdminAuth } from './auth.js';
 
 const proxyPlugin: FastifyPluginAsync = async (fastify) => {
-  fastify.all('/api/proxy/*', { preHandler: requireAdminAuth }, async (request, reply) => {
+  fastify.all('/api/proxy/*', { onRequest: requireAdminAuth }, async (request, reply) => {
     const config = loadConfig();
     const token = await generateToken(config);
 

@@ -42,7 +42,7 @@ afterAll(() => {
 
 async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify();
-  app.get('/protected', { preHandler: requireAdminAuth }, async () => ({
+  app.get('/protected', { onRequest: requireAdminAuth }, async () => ({
     ok: true,
   }));
   return app;
