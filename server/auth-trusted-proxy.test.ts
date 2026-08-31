@@ -176,6 +176,22 @@ describe('trusted OIDC proxy authentication', () => {
     }
   });
 
+  it('uses the matched proxy route when the raw prefix is percent-encoded', async () => {
+    const app = await buildApp();
+    try {
+      for (const path of ['/%61pi/proxy/test', '/api/pro%78y/test']) {
+        const response = await rawGet(app, path, identityHeaders());
+        expect(response.statusCode).toBe(403);
+        expect(JSON.parse(response.body)).toEqual({ error: 'Namespace access denied' });
+      }
+
+      const fleetGlobal = await rawGet(app, '/%61pi/proxy/admin/tls/inventory', identityHeaders());
+      expect(fleetGlobal.statusCode).toBe(200);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('enforces BFF-local role requirements before privileged server settings', async () => {
     const app = await buildApp();
     try {
