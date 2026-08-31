@@ -368,18 +368,26 @@ jobs:
             echo "Expected exactly two platform digests, found ${#images[@]}" >&2
             exit 1
           fi
-          docker buildx imagetools create \
-            -t "$IMAGE_REPOSITORY:main" \
-            -t "$IMAGE_REPOSITORY:main-$GITHUB_SHA" \
-            "${images[@]}"
+          source_platforms="$(
+            for image in "${images[@]}"; do
+              docker buildx imagetools inspect "$image" --raw
+            done | jq -sr '[.[] | .manifests[]?.platform | select(.os != "unknown" or .architecture != "unknown") | "\(.os // "missing")/\(.architecture // "missing")"] | sort | join(",")'
+          )"
+          if [[ "$source_platforms" != "linux/amd64,linux/arm64" ]]; then
+            echo "Source digests have unexpected platforms: ${source_platforms:-none}" >&2
+            exit 1
+          fi
+          immutable_tag="$IMAGE_REPOSITORY:main-$GITHUB_SHA"
+          docker buildx imagetools create -t "$immutable_tag" "${images[@]}"
           platforms="$(
-            docker buildx imagetools inspect "$IMAGE_REPOSITORY:main-$GITHUB_SHA" --raw \
+            docker buildx imagetools inspect "$immutable_tag" --raw \
               | jq -r '[.manifests[]?.platform | select(.os != "unknown" or .architecture != "unknown") | "\(.os // "missing")/\(.architecture // "missing")"] | sort | join(",")'
           )"
           if [[ "$platforms" != "linux/amd64,linux/arm64" ]]; then
             echo "Published manifest has unexpected platforms: ${platforms:-none}" >&2
             exit 1
           fi
+          docker buildx imagetools create -t "$IMAGE_REPOSITORY:main" "$immutable_tag"
 
       - name: Create and push multi-arch manifest (GHCR)
         working-directory: /tmp/digests
@@ -395,15 +403,23 @@ jobs:
             echo "Expected exactly two platform digests, found ${#images[@]}" >&2
             exit 1
           fi
-          docker buildx imagetools create \
-            -t "$IMAGE_REPOSITORY:main" \
-            -t "$IMAGE_REPOSITORY:main-$GITHUB_SHA" \
-            "${images[@]}"
+          source_platforms="$(
+            for image in "${images[@]}"; do
+              docker buildx imagetools inspect "$image" --raw
+            done | jq -sr '[.[] | .manifests[]?.platform | select(.os != "unknown" or .architecture != "unknown") | "\(.os // "missing")/\(.architecture // "missing")"] | sort | join(",")'
+          )"
+          if [[ "$source_platforms" != "linux/amd64,linux/arm64" ]]; then
+            echo "Source digests have unexpected platforms: ${source_platforms:-none}" >&2
+            exit 1
+          fi
+          immutable_tag="$IMAGE_REPOSITORY:main-$GITHUB_SHA"
+          docker buildx imagetools create -t "$immutable_tag" "${images[@]}"
           platforms="$(
-            docker buildx imagetools inspect "$IMAGE_REPOSITORY:main-$GITHUB_SHA" --raw \
+            docker buildx imagetools inspect "$immutable_tag" --raw \
               | jq -r '[.manifests[]?.platform | select(.os != "unknown" or .architecture != "unknown") | "\(.os // "missing")/\(.architecture // "missing")"] | sort | join(",")'
           )"
           if [[ "$platforms" != "linux/amd64,linux/arm64" ]]; then
             echo "Published manifest has unexpected platforms: ${platforms:-none}" >&2
             exit 1
           fi
+          docker buildx imagetools create -t "$IMAGE_REPOSITORY:main" "$immutable_tag"

@@ -20,6 +20,8 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       major_minor: ${{ steps.version.outputs.major_minor }}
       stable: ${{ steps.version.outputs.stable }}
+      advance_latest: ${{ steps.version.outputs.advance_latest }}
+      advance_major_minor: ${{ steps.version.outputs.advance_major_minor }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -30,32 +32,20 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
-            echo "Release tag must be vMAJOR.MINOR.PATCH with an optional safe prerelease suffix" >&2
-            exit 1
-          fi
+          metadata="$(node scripts/release-channel-tags.mjs)"
           tag_commit="$(git rev-parse --verify "${RELEASE_TAG}^{commit}")"
           if ! git merge-base --is-ancestor "$tag_commit" origin/main; then
             echo "Release tags must point to commits reachable from main" >&2
             exit 1
           fi
-          version="${RELEASE_TAG#v}"
-          {
-            echo "tag=$RELEASE_TAG"
-            echo "version=$version"
-            echo "major_minor=${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
-            if [[ "$version" == *-* ]]; then
-              echo "stable=false"
-            else
-              echo "stable=true"
-            fi
-          } >> "$GITHUB_OUTPUT"
+          echo "$metadata" >> "$GITHUB_OUTPUT"
 
   quality-gates:
     name: Pre-publication Gates
     uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
+      packages: write
 
   docker:
     name: Docker (${{ matrix.platform }})
@@ -166,7 +156,8 @@ jobs:
           RELEASE_TAG: ${{ needs.release-metadata.outputs.tag }}
           RELEASE_VERSION: ${{ needs.release-metadata.outputs.version }}
           RELEASE_MAJOR_MINOR: ${{ needs.release-metadata.outputs.major_minor }}
-          STABLE_RELEASE: ${{ needs.release-metadata.outputs.stable }}
+          ADVANCE_LATEST: ${{ needs.release-metadata.outputs.advance_latest }}
+          ADVANCE_MAJOR_MINOR: ${{ needs.release-metadata.outputs.advance_major_minor }}
         run: |
           images=()
           for digest in *; do
@@ -177,19 +168,33 @@ jobs:
             echo "Expected exactly two platform digests, found ${#images[@]}" >&2
             exit 1
           fi
-          tags=(-t "$IMAGE_REPOSITORY:$RELEASE_TAG" -t "$IMAGE_REPOSITORY:$RELEASE_VERSION")
-          if [[ "$STABLE_RELEASE" == "true" ]]; then
-            tags+=(-t "$IMAGE_REPOSITORY:$RELEASE_MAJOR_MINOR" -t "$IMAGE_REPOSITORY:latest")
+          source_platforms="$(
+            for image in "${images[@]}"; do
+              docker buildx imagetools inspect "$image" --raw
+            done | jq -sr '[.[] | .manifests[]?.platform | select(.os != "unknown" or .architecture != "unknown") | "\(.os // "missing")/\(.architecture // "missing")"] | sort | join(",")'
+          )"
+          if [[ "$source_platforms" != "linux/amd64,linux/arm64" ]]; then
+            echo "Source digests have unexpected platforms: ${source_platforms:-none}" >&2
+            exit 1
           fi
-          docker buildx imagetools create "${tags[@]}" "${images[@]}"
+          immutable_tag="$IMAGE_REPOSITORY:$RELEASE_TAG"
+          docker buildx imagetools create -t "$immutable_tag" "${images[@]}"
           platforms="$(
-            docker buildx imagetools inspect "$IMAGE_REPOSITORY:$RELEASE_TAG" --raw \
+            docker buildx imagetools inspect "$immutable_tag" --raw \
               | jq -r '[.manifests[]?.platform | select(.os != "unknown" or .architecture != "unknown") | "\(.os // "missing")/\(.architecture // "missing")"] | sort | join(",")'
           )"
           if [[ "$platforms" != "linux/amd64,linux/arm64" ]]; then
             echo "Published manifest has unexpected platforms: ${platforms:-none}" >&2
             exit 1
           fi
+          channel_tags=(-t "$IMAGE_REPOSITORY:$RELEASE_VERSION")
+          if [[ "$ADVANCE_MAJOR_MINOR" == "true" ]]; then
+            channel_tags+=(-t "$IMAGE_REPOSITORY:$RELEASE_MAJOR_MINOR")
+          fi
+          if [[ "$ADVANCE_LATEST" == "true" ]]; then
+            channel_tags+=(-t "$IMAGE_REPOSITORY:latest")
+          fi
+          docker buildx imagetools create "${channel_tags[@]}" "$immutable_tag"
 
       - name: Create and push multi-arch manifest (GHCR)
         working-directory: /tmp/digests
@@ -198,7 +203,8 @@ jobs:
           RELEASE_TAG: ${{ needs.release-metadata.outputs.tag }}
           RELEASE_VERSION: ${{ needs.release-metadata.outputs.version }}
           RELEASE_MAJOR_MINOR: ${{ needs.release-metadata.outputs.major_minor }}
-          STABLE_RELEASE: ${{ needs.release-metadata.outputs.stable }}
+          ADVANCE_LATEST: ${{ needs.release-metadata.outputs.advance_latest }}
+          ADVANCE_MAJOR_MINOR: ${{ needs.release-metadata.outputs.advance_major_minor }}
         run: |
           images=()
           for digest in *; do
@@ -209,19 +215,33 @@ jobs:
             echo "Expected exactly two platform digests, found ${#images[@]}" >&2
             exit 1
           fi
-          tags=(-t "$IMAGE_REPOSITORY:$RELEASE_TAG" -t "$IMAGE_REPOSITORY:$RELEASE_VERSION")
-          if [[ "$STABLE_RELEASE" == "true" ]]; then
-            tags+=(-t "$IMAGE_REPOSITORY:$RELEASE_MAJOR_MINOR" -t "$IMAGE_REPOSITORY:latest")
+          source_platforms="$(
+            for image in "${images[@]}"; do
+              docker buildx imagetools inspect "$image" --raw
+            done | jq -sr '[.[] | .manifests[]?.platform | select(.os != "unknown" or .architecture != "unknown") | "\(.os // "missing")/\(.architecture // "missing")"] | sort | join(",")'
+          )"
+          if [[ "$source_platforms" != "linux/amd64,linux/arm64" ]]; then
+            echo "Source digests have unexpected platforms: ${source_platforms:-none}" >&2
+            exit 1
           fi
-          docker buildx imagetools create "${tags[@]}" "${images[@]}"
+          immutable_tag="$IMAGE_REPOSITORY:$RELEASE_TAG"
+          docker buildx imagetools create -t "$immutable_tag" "${images[@]}"
           platforms="$(
-            docker buildx imagetools inspect "$IMAGE_REPOSITORY:$RELEASE_TAG" --raw \
+            docker buildx imagetools inspect "$immutable_tag" --raw \
               | jq -r '[.manifests[]?.platform | select(.os != "unknown" or .architecture != "unknown") | "\(.os // "missing")/\(.architecture // "missing")"] | sort | join(",")'
           )"
           if [[ "$platforms" != "linux/amd64,linux/arm64" ]]; then
             echo "Published manifest has unexpected platforms: ${platforms:-none}" >&2
             exit 1
           fi
+          channel_tags=(-t "$IMAGE_REPOSITORY:$RELEASE_VERSION")
+          if [[ "$ADVANCE_MAJOR_MINOR" == "true" ]]; then
+            channel_tags+=(-t "$IMAGE_REPOSITORY:$RELEASE_MAJOR_MINOR")
+          fi
+          if [[ "$ADVANCE_LATEST" == "true" ]]; then
+            channel_tags+=(-t "$IMAGE_REPOSITORY:latest")
+          fi
+          docker buildx imagetools create "${channel_tags[@]}" "$immutable_tag"
 
   create-release:
     name: Create GitHub Release
@@ -237,6 +257,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ needs.release-metadata.outputs.tag }}
           STABLE_RELEASE: ${{ needs.release-metadata.outputs.stable }}
+          ADVANCE_LATEST: ${{ needs.release-metadata.outputs.advance_latest }}
           IMAGE_REPOSITORY: ghcr.io/${{ github.repository }}
           SOURCE_REPOSITORY: ${{ github.repository }}
         run: |
@@ -287,9 +308,11 @@ jobs:
             --notes-file notes.md
             --verify-tag
           )
-          if [[ "$STABLE_RELEASE" == "true" ]]; then
+          if [[ "$STABLE_RELEASE" != "true" ]]; then
+            release_args+=(--prerelease --latest=false)
+          elif [[ "$ADVANCE_LATEST" == "true" ]]; then
             release_args+=(--latest)
           else
-            release_args+=(--prerelease --latest=false)
+            release_args+=(--latest=false)
           fi
           gh release create "$RELEASE_TAG" "${release_args[@]}"
