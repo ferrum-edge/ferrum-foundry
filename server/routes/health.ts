@@ -81,10 +81,12 @@ async function probeReadiness(): Promise<ReadinessResult> {
     let authStatus = response.status;
     let authReady = false;
     if (healthReady) {
-      const authHeaders: Record<string, string> = { authorization: `Bearer ${token}` };
-      if (config.jwtNamespaces?.[0]) authHeaders['x-ferrum-namespace'] = config.jwtNamespaces[0];
-      const authResponse = await fetch(new URL('/proxies?limit=1&offset=0', config.adminUrl), {
-        headers: authHeaders,
+      // `/namespaces` is authenticated but fleet-global. Ferrum filters it to
+      // JWT namespace claims when enforcement is enabled, so it proves that
+      // authentication works without inventing a tenant for a global readiness
+      // principal or failing when trusted-proxy deployments omit static grants.
+      const authResponse = await fetch(new URL('/namespaces?offset=0&limit=1', config.adminUrl), {
+        headers: { authorization: `Bearer ${token}` },
         signal: controller.signal,
         dispatcher: getDispatcher(config),
         redirect: 'error',

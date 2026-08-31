@@ -106,8 +106,18 @@ function desiredAssociations(
     : withoutPlugin;
 }
 
-function associationsEqual(left: Proxy["plugins"], right: Proxy["plugins"]): boolean {
-  return JSON.stringify(left ?? []) === JSON.stringify(right ?? []);
+function associationNeedsChange(
+  proxy: Proxy,
+  pluginId: string,
+  shouldInclude: boolean,
+): boolean {
+  const matches = (proxy.plugins ?? []).filter(
+    (association) => association.plugin_config_id === pluginId,
+  ).length;
+  // One existing association already expresses the requested membership,
+  // regardless of its position among unrelated plugins. Duplicate entries are
+  // still normalized through the update path.
+  return shouldInclude ? matches !== 1 : matches !== 0;
 }
 
 async function applyAssociationPlan(
@@ -117,10 +127,9 @@ async function applyAssociationPlan(
   deps: PluginMembershipDependencies,
   applied: AppliedProxyChange[] = [],
 ): Promise<AppliedProxyChange[]> {
-  const changed = proxies.filter((proxy) => {
-    const next = desiredAssociations(proxy, pluginId, desired.has(proxy.id));
-    return !associationsEqual(proxy.plugins, next);
-  });
+  const changed = proxies.filter((proxy) =>
+    associationNeedsChange(proxy, pluginId, desired.has(proxy.id)),
+  );
   for (const snapshot of changed) {
     const current = await deps.getProxy(snapshot.id);
     if (current.updated_at !== snapshot.updated_at) {

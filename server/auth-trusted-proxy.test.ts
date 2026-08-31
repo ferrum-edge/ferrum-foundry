@@ -44,6 +44,8 @@ async function buildApp(): Promise<FastifyInstance> {
   await app.register(authPlugin);
   app.get('/protected', { onRequest: requireAdminAuth }, async (request) => request.authPrincipal);
   app.post('/protected', { onRequest: requireAdminAuth }, async () => ({ ok: true }));
+  app.get('/api/proxy/test', { onRequest: requireAdminAuth }, async () => ({ ok: true }));
+  app.get('/api/proxy/admin/tls/inventory', { onRequest: requireAdminAuth }, async () => ({ ok: true }));
   app.get('/admin-only', { onRequest: requireRole('admin') }, async () => ({ ok: true }));
   return app;
 }
@@ -88,16 +90,46 @@ describe('trusted OIDC proxy authentication', () => {
     }
   });
 
-  it('denies a selected namespace outside the identity grants', async () => {
+  it('requires a granted namespace on namespace-scoped gateway requests', async () => {
     const app = await buildApp();
     try {
-      const response = await app.inject({
+      const missing = await app.inject({
         method: 'GET',
-        url: '/protected',
+        url: '/api/proxy/test',
+        headers: identityHeaders(),
+      });
+      expect(missing.statusCode).toBe(403);
+
+      const denied = await app.inject({
+        method: 'GET',
+        url: '/api/proxy/test',
         headers: identityHeaders({ 'x-ferrum-namespace': 'tenant-c' }),
       });
-      expect(response.statusCode).toBe(403);
-      expect(response.json()).toEqual({ error: 'Namespace access denied' });
+      expect(denied.statusCode).toBe(403);
+      expect(denied.json()).toEqual({ error: 'Namespace access denied' });
+
+      const allowed = await app.inject({
+        method: 'GET',
+        url: '/api/proxy/test',
+        headers: identityHeaders({ 'x-ferrum-namespace': 'tenant-a' }),
+      });
+      expect(allowed.statusCode).toBe(200);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('does not apply tenant headers to BFF-local or documented fleet-global routes', async () => {
+    const app = await buildApp();
+    try {
+      const local = await app.inject({ method: 'GET', url: '/protected', headers: identityHeaders() });
+      const fleetGlobal = await app.inject({
+        method: 'GET',
+        url: '/api/proxy/admin/tls/inventory',
+        headers: identityHeaders(),
+      });
+      expect(local.statusCode).toBe(200);
+      expect(fleetGlobal.statusCode).toBe(200);
     } finally {
       await app.close();
     }
@@ -132,6 +164,19 @@ describe('trusted OIDC proxy authentication', () => {
       });
       expect(response.statusCode).toBe(200);
       expect(session.headers['set-cookie']).not.toContain('ferrum-foundry-session=');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('reuses one bounded CSRF grant per trusted identity', async () => {
+    const app = await buildApp();
+    try {
+      const first = await app.inject({ method: 'GET', url: '/api/auth/session', headers: identityHeaders() });
+      const second = await app.inject({ method: 'GET', url: '/api/auth/session', headers: identityHeaders() });
+      expect(first.statusCode).toBe(200);
+      expect(second.statusCode).toBe(200);
+      expect(second.json().csrfToken).toBe(first.json().csrfToken);
     } finally {
       await app.close();
     }

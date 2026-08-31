@@ -114,7 +114,10 @@ function isLargeUpload(request: FastifyRequest): boolean {
 }
 
 function copyRequestHeaders(request: FastifyRequest, authorization: string): Record<string, string> {
-  const headers: Record<string, string> = { authorization };
+  // Undici transparently decodes compressed fetch responses while preserving
+  // the upstream content-length. Prefer an identity response so downstream
+  // framing describes the bytes Foundry actually streams.
+  const headers: Record<string, string> = { authorization, 'accept-encoding': 'identity' };
   for (const name of REQUEST_HEADER_ALLOWLIST) {
     const value = request.headers[name];
     if (typeof value === 'string') headers[name] = value;
@@ -202,11 +205,19 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
     const responseTimeout = targetPath === '/restore'
       ? Math.max(config.readTimeout, RESTORE_OPERATION_TIMEOUT)
       : config.readTimeout;
-    const responseTimer = setTimeout(() => {
+    let responseTimer: NodeJS.Timeout | undefined;
+    const clearResponseDeadline = () => {
+      if (responseTimer) clearTimeout(responseTimer);
+      responseTimer = undefined;
+    };
+    const startResponseDeadline = () => {
+      if (responseTimer) return;
       timeoutPhase = 'response';
-      controller.abort(new Error('Response deadline exceeded'));
-    }, responseTimeout);
-    responseTimer.unref();
+      responseTimer = setTimeout(() => {
+        controller.abort(new Error('Response deadline exceeded'));
+      }, responseTimeout);
+      responseTimer.unref();
+    };
 
     const abortOnDisconnect = () => {
       if (!reply.raw.writableEnded) controller.abort(new Error('Downstream client disconnected'));
@@ -223,7 +234,9 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
         body = (request.body as Readable).pipe(
           new GuardedUpload(routeBodyLimit, config.writeTimeout, controller),
         );
-        body.once('end', () => { timeoutPhase = 'response'; });
+        body.once('end', startResponseDeadline);
+      } else {
+        startResponseDeadline();
       }
 
       const init: RequestInit = {
@@ -236,9 +249,15 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
         ...(body && { duplex: 'half' }),
       };
       const response = await fetch(target, init);
+      // An upstream may answer before consuming the entire request body. Once
+      // response headers exist, bound the downstream phase immediately.
+      startResponseDeadline();
 
       reply.status(response.status);
+      const upstreamEncoding = response.headers.get('content-encoding')?.trim().toLowerCase();
+      const responseWasDecoded = Boolean(upstreamEncoding && upstreamEncoding !== 'identity');
       for (const name of RESPONSE_HEADER_ALLOWLIST) {
+        if (name === 'content-length' && responseWasDecoded) continue;
         const value = response.headers.get(name);
         if (value !== null) {
           const safeValue = safeResponseHeader(name, value, target);
@@ -248,13 +267,13 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
       if (response.status === 401) reply.header('x-ferrum-auth-layer', 'gateway');
 
       if (!response.body) {
-        clearTimeout(responseTimer);
+        clearResponseDeadline();
         return reply.send();
       }
 
       const stream = Readable.fromWeb(response.body as unknown as NodeReadableStream<Uint8Array>);
       const clear = () => {
-        clearTimeout(responseTimer);
+        clearResponseDeadline();
         reply.raw.off('close', abortOnDisconnect);
       };
       stream.once('end', clear);
@@ -265,7 +284,7 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
       });
       return reply.send(stream);
     } catch (error: unknown) {
-      clearTimeout(responseTimer);
+      clearResponseDeadline();
       reply.raw.off('close', abortOnDisconnect);
       if (error instanceof PayloadTooLargeError || controller.signal.reason instanceof PayloadTooLargeError) {
         return reply.status(413).send({ error: 'Payload Too Large', code: 'FERRUM_BFF_BODY_LIMIT' });
