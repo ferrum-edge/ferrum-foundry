@@ -204,6 +204,14 @@ export function buildTrustBundlePayload(
   form: TrustBundleFormState,
   expectedRevision?: number,
 ): GatewayTrustBundleCreate {
+  if (
+    expectedRevision !== undefined &&
+    (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1)
+  ) {
+    throw new TrustBundleFormError(
+      "The loaded trust bundle has no usable revision; reload it before editing",
+    );
+  }
   const trustDomain = validateTrustDomain(form.trustDomain, "Trust domain");
   const x509Authorities = form.x509Authorities
     .split(/\r?\n/)

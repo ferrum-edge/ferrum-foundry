@@ -58,7 +58,6 @@ import {
   AcmeCertificateFormError,
   type AcmeCertificateFormState,
 } from "@/lib/acmeCertificateForm";
-import { useNamespace } from "@/stores/namespace";
 
 /* ------------------------------------------------------------------ */
 /*  Small helpers                                                      */
@@ -307,7 +306,7 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
         open={!!deleteTarget}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
         title={`Delete ${deleteTarget?.name || deleteTarget?.id}?`}
-        description="Records still referenced by TLS configuration cannot be deleted (the gateway returns 409)."
+        description="This is a fleet-global record shared by every namespace. Records still referenced by TLS configuration cannot be deleted (the gateway returns 409)."
         confirmLabel="Delete"
         onConfirm={async () => {
           if (!deleteTarget) return;
@@ -554,13 +553,11 @@ const EMPTY_ACME_ORDER_FORM = {
 
 interface AcmeCertificateEditor {
   mode: "import" | "replace";
-  namespace: string;
   target: AcmeCertificateRecord | null;
 }
 
 function AcmeTab() {
   const { toast } = useToast();
-  const { selectedNamespace } = useNamespace();
   const { data: certs, isLoading: certsLoading } = useAllAcmeCertificates();
   const { data: orders, isLoading: ordersLoading } = useAllAcmeOrders();
   const { data: accounts } = useAllAcmeAccounts();
@@ -594,22 +591,6 @@ function AcmeTab() {
   };
 
   useEffect(() => {
-    // Certificate/key buffers and row targets are namespace-pinned and are
-    // discarded immediately when the active tenant changes.
-    setOrderOpen(false);
-    setOrderForm(EMPTY_ACME_ORDER_FORM);
-    setCertificateEditor(null);
-    setCertificateForm(EMPTY_ACME_CERTIFICATE_FORM);
-    setDetailId("");
-    setDeleteCertificateTarget(null);
-    setDeleteOrderTarget(null);
-    setCertificateOffset(0);
-    setOrderOffset(0);
-    pendingKeysRef.current.clear();
-    setPendingKeys(new Set());
-  }, [selectedNamespace]);
-
-  useEffect(() => {
     const certificateTotal = certs?.length ?? 0;
     if (certificateOffset > 0 && certificateOffset >= certificateTotal) {
       setCertificateOffset(Math.max(0, Math.floor((certificateTotal - 1) / ACME_PAGE_SIZE) * ACME_PAGE_SIZE));
@@ -637,12 +618,12 @@ function AcmeTab() {
 
   const openCertificateImport = () => {
     setCertificateForm(EMPTY_ACME_CERTIFICATE_FORM);
-    setCertificateEditor({ mode: "import", namespace: selectedNamespace, target: null });
+    setCertificateEditor({ mode: "import", target: null });
   };
 
   const openCertificateReplace = (target: AcmeCertificateRecord) => {
     setCertificateForm(acmeCertificateToForm(target));
-    setCertificateEditor({ mode: "replace", namespace: selectedNamespace, target });
+    setCertificateEditor({ mode: "replace", target });
   };
 
   const saveCertificate = async () => {
@@ -655,12 +636,11 @@ function AcmeTab() {
         allow_overwrite: certificateEditor.mode === "replace",
       };
       if (certificateEditor.mode === "import") {
-        await importCert.mutateAsync({ data, namespace: certificateEditor.namespace });
+        await importCert.mutateAsync(data);
       } else if (certificateEditor.target) {
         await updateCert.mutateAsync({
           id: certificateEditor.target.id,
           data,
-          namespace: certificateEditor.namespace,
         });
       }
       toast(
@@ -941,9 +921,9 @@ function AcmeTab() {
               : "Import ACME certificate"}
           </DialogTitle>
           <DialogDescription className="mt-2">
-            Target namespace: <span className="font-mono">{certificateEditor?.namespace}</span>.
-            Private keys are sent only to Ferrum Edge, are never returned by its API,
-            and are cleared from this form on close.
+            This certificate store is fleet-global: replacing material can affect TLS
+            listeners in every namespace. Private keys are sent only to Ferrum Edge,
+            are never returned by its API, and are cleared from this form on close.
           </DialogDescription>
           <div className="space-y-4 mt-5">
             <div className="grid sm:grid-cols-2 gap-3">
@@ -1101,7 +1081,7 @@ function AcmeTab() {
         open={!!deleteCertificateTarget}
         onOpenChange={(open) => !open && setDeleteCertificateTarget(null)}
         title={`Delete certificate for ${deleteCertificateTarget?.domains.join(", ") ?? "these domains"}?`}
-        description={`This permanently removes certificate record "${deleteCertificateTarget?.id ?? ""}". TLS configurations that reference it prevent deletion with 409; Foundry will preserve the row and show that server error.`}
+        description={`This permanently removes fleet-global certificate record "${deleteCertificateTarget?.id ?? ""}" and may affect TLS listeners in every namespace. TLS configurations that reference it prevent deletion with 409; Foundry will preserve the row and show that server error.`}
         confirmLabel="Delete Certificate"
         loading={Boolean(
           deleteCertificateTarget &&
@@ -1112,7 +1092,7 @@ function AcmeTab() {
           const target = deleteCertificateTarget;
           void runRowAction(`delete-cert:${target.id}`, async () => {
             try {
-              await deleteCert.mutateAsync({ id: target.id, namespace: selectedNamespace });
+              await deleteCert.mutateAsync(target.id);
               toast("success", `Certificate ${target.id} deleted`);
               setDeleteCertificateTarget(null);
             } catch (error) {
@@ -1132,7 +1112,7 @@ function AcmeTab() {
         open={!!deleteOrderTarget}
         onOpenChange={(open) => !open && setDeleteOrderTarget(null)}
         title={`Delete ${deleteOrderTarget?.status.replace(/_/g, " ") ?? "ACME"} order?`}
-        description={`Order "${deleteOrderTarget?.id ?? ""}" covers ${deleteOrderTarget?.domains.join(", ") ?? "the selected domains"}. Deleting an active order cancels/removes the challenge workflow and cannot be undone.`}
+        description={`Fleet-global order "${deleteOrderTarget?.id ?? ""}" covers ${deleteOrderTarget?.domains.join(", ") ?? "the selected domains"}. Deleting an active order cancels/removes the challenge workflow for every namespace and cannot be undone.`}
         confirmLabel="Delete Order"
         loading={Boolean(
           deleteOrderTarget && pendingKeys.has(`delete-order:${deleteOrderTarget.id}`),
@@ -1162,6 +1142,10 @@ function AcmeTab() {
       >
         <DialogContent className="max-h-[85vh] overflow-y-auto">
           <DialogTitle>New ACME Order</DialogTitle>
+          <DialogDescription className="mt-2">
+            ACME orders and issued certificate material are fleet-global and can be used
+            by TLS listeners in every namespace.
+          </DialogDescription>
           <div className="space-y-4 mt-4">
           <Input
             label="Domains"
@@ -1307,6 +1291,19 @@ export default function TlsPage() {
         <p className="text-text-muted text-sm mt-1">
           Inventory, managed certificate stores, ACME automation, rotation, and
           validation for every TLS surface of the gateway.
+        </p>
+      </div>
+
+      <div
+        role="note"
+        className="rounded-lg border border-warning/40 bg-warning/5 px-4 py-3"
+      >
+        <p className="text-sm font-semibold text-warning">Fleet-global TLS surface</p>
+        <p className="text-xs text-text-secondary mt-1">
+          Ferrum does not namespace-filter TLS inventory, managed material, ACME,
+          rotation, or validation. The namespace selector does not scope these operations;
+          mutations can affect every namespace and are audited under the canonical
+          <span className="font-mono"> ferrum </span>namespace.
         </p>
       </div>
 

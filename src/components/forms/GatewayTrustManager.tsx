@@ -139,6 +139,16 @@ export function GatewayTrustManager() {
   const save = async () => {
     if (!editor) return;
     try {
+      if (
+        editor.mode === "edit" &&
+        (!editor.target ||
+          !Number.isSafeInteger(editor.target.revision) ||
+          editor.target.revision < 1)
+      ) {
+        throw new TrustBundleFormError(
+          "The loaded trust bundle has no usable revision; reload it before editing",
+        );
+      }
       const payload = buildTrustBundlePayload(
         form,
         editor.target?.revision,

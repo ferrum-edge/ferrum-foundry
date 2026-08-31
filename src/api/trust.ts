@@ -85,19 +85,18 @@ export function getGatewayTrustRevisionConflict(
     return null;
   }
   const body = candidate.data as Record<string, unknown>;
-  const keys = Object.keys(body).sort();
   if (
-    keys.length !== 3 ||
-    keys[0] !== "current_revision" ||
-    keys[1] !== "error" ||
-    keys[2] !== "expected_revision" ||
     typeof body.error !== "string" ||
     !Number.isSafeInteger(body.expected_revision) ||
     !Number.isSafeInteger(body.current_revision)
   ) {
     return null;
   }
-  return body as unknown as GatewayTrustRevisionConflict;
+  return {
+    error: body.error,
+    expected_revision: body.expected_revision as number,
+    current_revision: body.current_revision as number,
+  };
 }
 
 export async function list(

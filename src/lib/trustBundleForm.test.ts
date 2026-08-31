@@ -52,6 +52,18 @@ describe("buildTrustBundlePayload", () => {
     ).toThrow("requires at least one");
   });
 
+  it("refuses an edit when the loaded revision would skip concurrency checks", () => {
+    const form = {
+      ...EMPTY_TRUST_BUNDLE_FORM,
+      trustDomain: "example.org",
+      x509Authorities: "AQID",
+    };
+    expect(() => buildTrustBundlePayload(form, 0)).toThrow("no usable revision");
+    expect(() => buildTrustBundlePayload(form, -1)).toThrow("no usable revision");
+    expect(() => buildTrustBundlePayload(form, 1.5)).toThrow("no usable revision");
+    expect(buildTrustBundlePayload(form, 1).revision).toBe(1);
+  });
+
   it("rejects private JWT keys and duplicate key ids", () => {
     expect(() =>
       buildTrustBundlePayload({

@@ -35,6 +35,14 @@ Non-admin identities are rejected when the namespace header is missing. An
 admin may omit it only when policy deliberately grants global administration.
 Header names can be changed with `FERRUM_TRUSTED_PROXY_*_HEADER` variables.
 
+Namespace grants constrain Ferrum operations that declare
+`X-Ferrum-Namespace`; they do not turn fleet-global process/runtime APIs into
+tenant APIs. TLS inventory, managed TLS material, ACME, rotation, and validation
+are fleet-global, so Foundry deliberately omits the tenant header and labels the
+surface accordingly. Map roles with that blast radius in mind, and restrict
+fleet-global routes at the identity proxy when scoped identities must not use
+them.
+
 Do not expose the BFF port directly to an untrusted network. Terminate TLS at
 the identity proxy, strip every identity/proof header supplied by the client,
 inject the trusted values after authentication, and firewall the BFF so only
