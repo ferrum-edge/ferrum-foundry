@@ -17,7 +17,11 @@ import { useToast } from "@/components/ui/Toast";
 import { getApiErrorMessage } from "@/api/client";
 import { useBackup, useRestore } from "@/hooks/useOps";
 import { useNamespace } from "@/stores/namespace";
-import { getRestoreApiSpecConfirmation } from "@/api/ops";
+import {
+  getRestoreApiSpecConfirmation,
+  getRestoreFailure,
+  type RestoreFailure,
+} from "@/api/ops";
 
 interface PendingRestore {
   data: Record<string, unknown>;
@@ -40,6 +44,7 @@ export function BackupRestoreCard() {
   const [pendingRestore, setPendingRestore] = useState<PendingRestore | null>(null);
   const [apiSpecRisk, setApiSpecRisk] = useState<ApiSpecRisk | null>(null);
   const [riskPhrase, setRiskPhrase] = useState("");
+  const [restoreFailure, setRestoreFailure] = useState<RestoreFailure | null>(null);
 
   const handleDownload = async () => {
     try {
@@ -64,6 +69,7 @@ export function BackupRestoreCard() {
 
   const handleFileSelected = async (file: File) => {
     try {
+      setRestoreFailure(null);
       const text = await file.text();
       const parsed = JSON.parse(text) as unknown;
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -85,12 +91,21 @@ export function BackupRestoreCard() {
     setRiskPhrase("");
   };
 
+  const showRestoreFailure = (error: unknown): boolean => {
+    const failure = getRestoreFailure(error);
+    if (!failure) return false;
+    clearRestore();
+    setRestoreFailure(failure);
+    return true;
+  };
+
   const showRestoreSuccess = (result: Awaited<ReturnType<typeof restore.mutateAsync>>) => {
     const counts = result.restored;
     toast(
       "success",
       `Restored ${counts.proxies} proxies, ${counts.consumers} consumers, ${counts.plugin_configs} plugins, ${counts.upstreams} upstreams, ${counts.api_specs ?? 0} API specs, and ${counts.gateway_trust_bundles ?? 0} trust bundles.`,
     );
+    setRestoreFailure(null);
     clearRestore();
   };
 
@@ -113,6 +128,7 @@ export function BackupRestoreCard() {
         setRiskPhrase("");
         return;
       }
+      if (showRestoreFailure(err)) return;
       toast("error", await getApiErrorMessage(err, "Restore failed"));
     }
   };
@@ -132,6 +148,7 @@ export function BackupRestoreCard() {
       showRestoreSuccess(result);
     } catch (err) {
       // A confirmed restore is never offered a third attempt automatically.
+      if (showRestoreFailure(err)) return;
       toast("error", await getApiErrorMessage(err, "Confirmed restore failed"));
       clearRestore();
     }
@@ -178,6 +195,65 @@ export function BackupRestoreCard() {
             }}
           />
         </div>
+        {restoreFailure && (
+          <div
+            role="alert"
+            className="rounded-lg border border-danger/40 bg-danger/5 p-4 space-y-3"
+          >
+            <div>
+              <p className="text-sm font-semibold text-danger">
+                {restoreFailure.rollback === "incomplete" ||
+                restoreFailure.rollback === "unknown_outcome"
+                  ? "Restore failed — manual recovery required"
+                  : restoreFailure.failure_class === "data_integrity"
+                    ? "Restore blocked by a data-integrity failure"
+                    : "Restore failed; review the rollback outcome"}
+              </p>
+              <p className="text-sm text-text-secondary mt-1">{restoreFailure.error}</p>
+            </div>
+            {restoreFailure.rollback && (
+              <p className="text-sm text-text-secondary">
+                Rollback outcome: {" "}
+                <span className="font-mono text-text-primary">{restoreFailure.rollback}</span>
+              </p>
+            )}
+            {(restoreFailure.restore_errors?.length ?? 0) > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-text-secondary">Restore errors</p>
+                <ul className="list-disc pl-5 text-xs text-text-muted space-y-1 mt-1">
+                  {restoreFailure.restore_errors?.map((entry, index) => (
+                    <li key={`${entry}-${index}`}>{entry}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {(restoreFailure.rollback_errors?.length ?? 0) > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-text-secondary">Rollback errors</p>
+                <ul className="list-disc pl-5 text-xs text-text-muted space-y-1 mt-1">
+                  {restoreFailure.rollback_errors?.map((entry, index) => (
+                    <li key={`${entry}-${index}`}>{entry}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {restoreFailure.api_specs_not_restored !== undefined && (
+              <p className="text-sm text-warning">
+                {restoreFailure.api_specs_not_restored} API specs may still be missing.
+              </p>
+            )}
+            {restoreFailure.api_specs_note && (
+              <p className="text-xs text-text-secondary">{restoreFailure.api_specs_note}</p>
+            )}
+            <p className="text-xs text-text-muted">
+              The failed backup was cleared. Review the gateway state and recovery details before
+              deliberately selecting a file again.
+            </p>
+            <Button size="sm" variant="secondary" onClick={() => setRestoreFailure(null)}>
+              Dismiss
+            </Button>
+          </div>
+        )}
       </div>
 
       <ConfirmDialog
