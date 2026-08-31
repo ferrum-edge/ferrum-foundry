@@ -1,5 +1,5 @@
 import { lookup as dnsLookup, type LookupAddress, type LookupOptions } from 'node:dns';
-import { lstatSync, realpathSync } from 'node:fs';
+import { lstatSync, realpathSync, statSync } from 'node:fs';
 import { BlockList, isIP, type LookupFunction } from 'node:net';
 import { Agent } from 'undici';
 import { loadCaBundle, type CaBundle } from './ca.js';
@@ -11,9 +11,13 @@ interface ManagedDispatcher {
 }
 
 interface CachedCaBundle {
+  configIdentity: string;
   fileIdentity: string;
+  checkedAt: number;
   bundle: CaBundle;
 }
+
+const CA_RECHECK_INTERVAL_MS = 1_000;
 
 const blockedNetworks = new BlockList();
 for (const [address, prefix, family] of [
@@ -100,17 +104,22 @@ function secureLookup(config: Config): LookupFunction {
 
 function caFileIdentity(config: Config): string {
   if (!config.tlsCaPath) return '';
-  const stat = lstatSync(config.tlsCaPath, { bigint: true });
+  const requestedStat = lstatSync(config.tlsCaPath, { bigint: true });
+  const targetStat = statSync(config.tlsCaPath, { bigint: true });
   return JSON.stringify({
     requestedPath: config.tlsCaPath,
     configuredRoot: config.tlsCaRoot,
     canonicalRoot: config.tlsCaRoot ? realpathSync(config.tlsCaRoot) : undefined,
-    device: stat.dev.toString(),
-    inode: stat.ino.toString(),
-    mode: stat.mode.toString(),
-    size: stat.size.toString(),
-    modified: stat.mtimeNs.toString(),
-    changed: stat.ctimeNs.toString(),
+    canonicalPath: realpathSync(config.tlsCaPath),
+    requestedDevice: requestedStat.dev.toString(),
+    requestedInode: requestedStat.ino.toString(),
+    requestedMode: requestedStat.mode.toString(),
+    targetDevice: targetStat.dev.toString(),
+    targetInode: targetStat.ino.toString(),
+    targetMode: targetStat.mode.toString(),
+    targetSize: targetStat.size.toString(),
+    targetModified: targetStat.mtimeNs.toString(),
+    targetChanged: targetStat.ctimeNs.toString(),
   });
 }
 
@@ -120,6 +129,18 @@ function currentCaBundle(config: Config): CaBundle | undefined {
     return undefined;
   }
 
+  const configIdentity = JSON.stringify({ path: config.tlsCaPath, root: config.tlsCaRoot });
+  const now = Date.now();
+  const elapsed = cachedCaBundle ? now - cachedCaBundle.checkedAt : undefined;
+  if (
+    cachedCaBundle?.configIdentity === configIdentity
+    && elapsed !== undefined
+    && elapsed >= 0
+    && elapsed < CA_RECHECK_INTERVAL_MS
+  ) {
+    return cachedCaBundle.bundle;
+  }
+
   let identity: string;
   try {
     identity = caFileIdentity(config);
@@ -127,7 +148,10 @@ function currentCaBundle(config: Config): CaBundle | undefined {
     // Preserve loadCaBundle's stable, path-redacted validation errors.
     return loadCaBundle(config.tlsCaPath, config.tlsCaRoot);
   }
-  if (cachedCaBundle?.fileIdentity === identity) return cachedCaBundle.bundle;
+  if (cachedCaBundle?.configIdentity === configIdentity && cachedCaBundle.fileIdentity === identity) {
+    cachedCaBundle.checkedAt = now;
+    return cachedCaBundle.bundle;
+  }
 
   // Detect an in-place rewrite or replacement racing the bounded read. A
   // second stable snapshot is accepted; a continuously changing trust file is
@@ -141,7 +165,12 @@ function currentCaBundle(config: Config): CaBundle | undefined {
       return loadCaBundle(config.tlsCaPath, config.tlsCaRoot);
     }
     if (identity === after) {
-      cachedCaBundle = { fileIdentity: after, bundle };
+      cachedCaBundle = {
+        configIdentity,
+        fileIdentity: after,
+        checkedAt: Date.now(),
+        bundle,
+      };
       return bundle;
     }
     identity = after;
