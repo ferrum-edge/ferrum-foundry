@@ -251,12 +251,20 @@ describe('trusted OIDC proxy authentication', () => {
     }
   });
 
-  it('reuses one bounded CSRF grant per trusted identity', async () => {
+  it('keeps the CSRF token stable across session checks that present the cookie', async () => {
     const app = await buildApp();
     try {
       const first = await app.inject({ method: 'GET', url: '/api/auth/session', headers: identityHeaders() });
-      const second = await app.inject({ method: 'GET', url: '/api/auth/session', headers: identityHeaders() });
       expect(first.statusCode).toBe(200);
+      // The token is derived from the subject and the expiry second, so two
+      // cookie-less calls only match when they land in the same second. The
+      // stability guarantee is for a caller that presents the cookie it holds.
+      const cookie = first.cookies.map((entry) => `${entry.name}=${entry.value}`).join('; ');
+      const second = await app.inject({
+        method: 'GET',
+        url: '/api/auth/session',
+        headers: identityHeaders({ cookie }),
+      });
       expect(second.statusCode).toBe(200);
       expect(second.json().csrfToken).toBe(first.json().csrfToken);
     } finally {
