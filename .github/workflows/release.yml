@@ -38,6 +38,17 @@ jobs:
           fi
           echo "$metadata" >> "$GITHUB_OUTPUT"
 
+      - name: Require package.json to match the release tag
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          package_version="$(node -p "JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).version")"
+          if [[ "$package_version" != "$RELEASE_VERSION" ]]; then
+            echo "package.json version ${package_version} does not match release tag version ${RELEASE_VERSION}" >&2
+            echo "Bump package.json (and package-lock.json) before tagging so the health endpoint reports the released version" >&2
+            exit 1
+          fi
+
   quality-gates:
     name: Pre-publication Gates
     uses: ./.github/workflows/ci.yml

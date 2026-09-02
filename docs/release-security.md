@@ -34,7 +34,10 @@ revision label is set to the exact Git commit being published.
 
 Every third-party GitHub Action is pinned to a full commit SHA. Release tags are
 validated as safe semantic versions and must point to a commit reachable from
-`main` before any registry login or build. A prerelease is marked as such on
+`main` before any registry login or build. The `version` field in
+`package.json` must equal the tag without its `v` prefix (`v1.2.3` requires
+`1.2.3`), because the BFF reports that field from `/api/health/live` and
+`/api/health/ready`; a mismatch fails the release before anything is built. A prerelease is marked as such on
 GitHub and never advances the stable major/minor or `latest` image tags. A
 stable backport advances its major/minor channel only when it is the newest
 patch in that line, and advances `latest` only when it is the newest stable
