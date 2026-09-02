@@ -24,6 +24,8 @@ export interface Config {
   readTimeout: number;
   writeTimeout: number;
   port: number;
+  bindAddress: string;
+  shutdownTimeout: number;
   maxLargeUploads: number;
   allowRuntimeSettings: boolean;
   authMode: AuthMode;
@@ -163,6 +165,14 @@ function parseCidrs(value: string | undefined): string[] {
   return cidrs;
 }
 
+function parseBindAddress(value: string | undefined): string {
+  const address = value ?? '0.0.0.0';
+  // A literal address (or the loopback alias) keeps the listening interface an
+  // explicit deployment decision instead of an implicit all-interfaces bind.
+  if (address === 'localhost' || isIP(address) !== 0) return address;
+  throw new Error('FERRUM_BIND_ADDRESS must be an IP address or localhost');
+}
+
 function validateSecret(value: string, name: string): string {
   if (value.length < MIN_SECRET_LENGTH) {
     throw new Error(`${name} must be at least ${MIN_SECRET_LENGTH} characters`);
@@ -255,6 +265,8 @@ function parseBaseConfig(): Config {
     readTimeout: parseInteger('FERRUM_READ_TIMEOUT', 60_000, 100, 3_600_000),
     writeTimeout: parseInteger('FERRUM_WRITE_TIMEOUT', 60_000, 100, 3_600_000),
     port: parseInteger('PORT', 3001, 1, 65_535),
+    bindAddress: parseBindAddress(optionalEnv('FERRUM_BIND_ADDRESS')),
+    shutdownTimeout: parseInteger('FERRUM_SHUTDOWN_TIMEOUT', 10_000, 1000, 300_000),
     maxLargeUploads: parseInteger('FERRUM_MAX_LARGE_UPLOADS', 2, 1, 32),
     allowRuntimeSettings,
     authMode,
