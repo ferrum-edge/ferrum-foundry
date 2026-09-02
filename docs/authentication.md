@@ -46,8 +46,29 @@ them.
 Do not expose the BFF port directly to an untrusted network. Terminate TLS at
 the identity proxy, strip every identity/proof header supplied by the client,
 inject the trusted values after authentication, and firewall the BFF so only
-that proxy can connect. Configure the identity proxy to disable a user and
-revoke its session immediately when the identity provider does so.
+that proxy can connect. When the identity proxy runs on the same host, set
+`FERRUM_BIND_ADDRESS` (default `0.0.0.0`) to a loopback or private interface —
+for example `127.0.0.1` or `::1` — so the port is never published beyond that
+proxy. Configure the identity proxy to disable a user and revoke its session
+immediately when the identity provider does so.
+
+### Horizontal scaling
+
+Trusted-proxy mode keeps no per-user server state, so replicas are
+interchangeable and no sticky sessions or shared cache are required. CSRF
+tokens are HMAC-signed with a key derived from `FERRUM_TRUSTED_PROXY_SECRET`
+and bound to the asserted subject plus an expiry of `FERRUM_SESSION_TTL`
+seconds, so any replica configured with the same secret validates a token
+another replica minted. A restart or a rollout loses nothing.
+
+Rotating `FERRUM_TRUSTED_PROXY_SECRET` invalidates every outstanding CSRF
+token; the SPA re-fetches `/api/auth/session` and recovers on its own. Static
+development mode is different: it stores sessions in process memory and is
+therefore single-process only.
+
+Graceful shutdown is bounded by `FERRUM_SHUTDOWN_TIMEOUT` (milliseconds,
+default `10000`), so a drain that outlasts the deadline exits non-zero instead
+of waiting for the orchestrator's SIGKILL.
 
 ## Development: static exchange token
 

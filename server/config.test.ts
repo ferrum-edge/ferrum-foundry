@@ -25,6 +25,8 @@ const ENV_KEYS = [
   'FERRUM_CONNECT_TIMEOUT',
   'FERRUM_READ_TIMEOUT',
   'FERRUM_WRITE_TIMEOUT',
+  'FERRUM_BIND_ADDRESS',
+  'FERRUM_SHUTDOWN_TIMEOUT',
   'PORT',
 ] as const;
 
@@ -105,9 +107,51 @@ describe('config', () => {
       readTimeout: 60000,
       writeTimeout: 60000,
       port: 3001,
+      bindAddress: '0.0.0.0',
+      shutdownTimeout: 10_000,
       authMode: 'static',
       allowRuntimeSettings: false,
     });
+  });
+
+  it('accepts an explicit literal listening interface', async () => {
+    for (const [address, expected] of [
+      ['127.0.0.1', '127.0.0.1'],
+      ['::1', '::1'],
+      ['localhost', 'localhost'],
+    ]) {
+      clearTestEnv();
+      setValidEnv({ FERRUM_BIND_ADDRESS: address });
+      const { loadConfig } = await loadModule();
+      expect(loadConfig().bindAddress).toBe(expected);
+    }
+  });
+
+  it('rejects a listening interface that is not a literal address', async () => {
+    for (const address of ['bff.internal', '0.0.0.0:3001', '10.0.0.256', '']) {
+      clearTestEnv();
+      setValidEnv({ FERRUM_BIND_ADDRESS: address });
+      const { loadConfig } = await loadModule();
+      if (address === '') {
+        // An empty value is indistinguishable from an unset variable.
+        expect(loadConfig().bindAddress).toBe('0.0.0.0');
+      } else {
+        expect(() => loadConfig()).toThrow(/FERRUM_BIND_ADDRESS must be an IP address or localhost/);
+      }
+    }
+  });
+
+  it('bounds the graceful shutdown deadline', async () => {
+    setValidEnv({ FERRUM_SHUTDOWN_TIMEOUT: '30000' });
+    const { loadConfig } = await loadModule();
+    expect(loadConfig().shutdownTimeout).toBe(30_000);
+
+    for (const value of ['999', '300001', 'soon']) {
+      clearTestEnv();
+      setValidEnv({ FERRUM_SHUTDOWN_TIMEOUT: value });
+      const invalid = await loadModule();
+      expect(() => invalid.loadConfig()).toThrow(/FERRUM_SHUTDOWN_TIMEOUT/);
+    }
   });
 
   it('parses role, audience, and exact namespace claims', async () => {

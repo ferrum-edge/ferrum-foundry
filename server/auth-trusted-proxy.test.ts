@@ -53,6 +53,31 @@ async function buildApp(): Promise<FastifyInstance> {
   return app;
 }
 
+/** Builds an app from an independently imported auth module, i.e. a second replica. */
+async function buildAppFrom(auth: typeof import('./auth.js')): Promise<FastifyInstance> {
+  const app = Fastify();
+  await app.register(cookie);
+  await app.register(auth.authPlugin);
+  app.get('/protected', { onRequest: auth.requireAdminAuth }, async (request) => request.authPrincipal);
+  app.post('/protected', { onRequest: auth.requireAdminAuth }, async () => ({ ok: true }));
+  return app;
+}
+
+function cookieHeaderOf(response: { cookies: { name: string; value: string }[] }): string {
+  return response.cookies.map((entry) => `${entry.name}=${entry.value}`).join('; ');
+}
+
+async function issueCsrf(
+  app: FastifyInstance,
+  headers: Record<string, string> = identityHeaders(),
+): Promise<{ csrfToken: string; cookieHeader: string }> {
+  const session = await app.inject({ method: 'GET', url: '/api/auth/session', headers });
+  return {
+    csrfToken: (session.json() as { csrfToken: string }).csrfToken,
+    cookieHeader: cookieHeaderOf(session),
+  };
+}
+
 async function rawGet(
   app: FastifyInstance,
   path: string,
@@ -236,6 +261,139 @@ describe('trusted OIDC proxy authentication', () => {
       expect(second.json().csrfToken).toBe(first.json().csrfToken);
     } finally {
       await app.close();
+    }
+  });
+
+  it('accepts a CSRF token minted by a different replica holding the same secret', async () => {
+    const first = await buildApp();
+    let issued: { csrfToken: string; cookieHeader: string };
+    try {
+      issued = await issueCsrf(first);
+    } finally {
+      await first.close();
+    }
+
+    // A fresh module graph has none of the first instance's in-process state,
+    // exactly like a sibling pod behind the load balancer.
+    vi.resetModules();
+    const replica = await import('./auth.js');
+    expect(replica.requireAdminAuth).not.toBe(requireAdminAuth);
+    const second = await buildAppFrom(replica);
+    try {
+      const response = await second.inject({
+        method: 'POST',
+        url: '/protected',
+        headers: identityHeaders({
+          cookie: issued.cookieHeader,
+          'x-csrf-token': issued.csrfToken,
+        }),
+      });
+      expect(response.statusCode).toBe(200);
+    } finally {
+      await second.close();
+    }
+  });
+
+  it('binds a CSRF token to the subject the identity proxy asserted', async () => {
+    const app = await buildApp();
+    try {
+      const { csrfToken, cookieHeader } = await issueCsrf(app);
+      const response = await app.inject({
+        method: 'POST',
+        url: '/protected',
+        headers: identityHeaders({
+          'x-forwarded-user': 'mallory@example.test',
+          cookie: cookieHeader,
+          'x-csrf-token': csrfToken,
+        }),
+      });
+      expect(response.statusCode).toBe(403);
+      expect(response.json()).toEqual({ error: 'CSRF validation failed' });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('rejects tampered and malformed CSRF tokens', async () => {
+    const app = await buildApp();
+    try {
+      const { csrfToken } = await issueCsrf(app);
+      const [encodedExpiry, mac] = csrfToken.split('.');
+      const flipped = `${mac[0] === 'A' ? 'B' : 'A'}${mac.slice(1)}`;
+      const nonIntegerExpiry = Buffer.from('not-a-number', 'utf8').toString('base64url');
+
+      const candidates = [
+        `${encodedExpiry}.${flipped}`,
+        `${encodedExpiry}${mac}`,
+        `${nonIntegerExpiry}.${mac}`,
+        `${encodedExpiry}.${mac}.${mac}`,
+      ];
+      for (const candidate of candidates) {
+        const response = await app.inject({
+          method: 'POST',
+          url: '/protected',
+          headers: identityHeaders({
+            cookie: `ferrum-foundry-csrf=${candidate}`,
+            'x-csrf-token': candidate,
+          }),
+        });
+        expect(response.statusCode).toBe(403);
+        expect(response.json()).toEqual({ error: 'CSRF validation failed' });
+      }
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('rejects a CSRF token past its signed expiry', async () => {
+    const previousTtl = process.env.FERRUM_SESSION_TTL;
+    process.env.FERRUM_SESSION_TTL = '60';
+    vi.resetModules();
+    const shortTtl = await import('./auth.js');
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-03-01T00:00:00Z'));
+    const app = await buildAppFrom(shortTtl);
+    try {
+      const { csrfToken, cookieHeader } = await issueCsrf(app);
+      const headers = identityHeaders({ cookie: cookieHeader, 'x-csrf-token': csrfToken });
+
+      vi.setSystemTime(new Date('2026-03-01T00:00:30Z'));
+      const live = await app.inject({ method: 'POST', url: '/protected', headers });
+      expect(live.statusCode).toBe(200);
+
+      vi.setSystemTime(new Date('2026-03-01T00:01:01Z'));
+      const expired = await app.inject({ method: 'POST', url: '/protected', headers });
+      expect(expired.statusCode).toBe(403);
+      expect(expired.json()).toEqual({ error: 'CSRF validation failed' });
+    } finally {
+      await app.close();
+      vi.useRealTimers();
+      if (previousTtl === undefined) delete process.env.FERRUM_SESSION_TTL;
+      else process.env.FERRUM_SESSION_TTL = previousTtl;
+    }
+  });
+
+  it('keeps a fresh CSRF cookie stable and rotates it inside the final quarter', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-03-01T00:00:00Z'));
+    const app = await buildApp();
+    try {
+      const { csrfToken, cookieHeader } = await issueCsrf(app);
+      const withCookie = identityHeaders({ cookie: cookieHeader });
+
+      // Half of the 3600s default TTL elapsed: the open tab keeps its cookie.
+      vi.setSystemTime(new Date('2026-03-01T00:30:00Z'));
+      const reused = await app.inject({ method: 'GET', url: '/api/auth/session', headers: withCookie });
+      expect(reused.json().csrfToken).toBe(csrfToken);
+
+      // 80% elapsed, inside the final quarter: reissue before it can expire.
+      vi.setSystemTime(new Date('2026-03-01T00:48:00Z'));
+      const rotated = await app.inject({ method: 'GET', url: '/api/auth/session', headers: withCookie });
+      expect(rotated.json().csrfToken).not.toBe(csrfToken);
+      expect(rotated.cookies.map((entry) => entry.value)).toContain(rotated.json().csrfToken);
+    } finally {
+      await app.close();
+      vi.useRealTimers();
     }
   });
 });

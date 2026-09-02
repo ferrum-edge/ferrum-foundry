@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import type { AuthPrincipal } from './auth-types.js';
 import { loadConfig, type Config, type GatewayRole } from './config.js';
@@ -10,17 +10,18 @@ interface StaticSession {
   expiresAt: number;
 }
 
-interface TrustedCsrfGrant {
-  subject: string;
-  expiresAt: number;
-}
-
 const MAX_STATIC_SESSIONS = 256;
 const staticSessions = new Map<string, StaticSession>();
-const trustedCsrfGrants = new Map<string, TrustedCsrfGrant>();
-const trustedCsrfTokensBySubject = new Map<string, string>();
 const NAMESPACE_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$/;
 const TRUSTED_PROXY_SECRET_HEADER = 'x-ferrum-auth-secret';
+// Domain-separated key derivation so the CSRF MAC can never be confused with
+// any other use of the trusted-proxy proof secret.
+const CSRF_KEY_LABEL = 'ferrum-foundry-csrf-v1';
+const CSRF_MAC_CONTEXT = 'csrf';
+// Reissue once a token is inside its final quarter so an open tab refreshes
+// before the cookie it already holds expires.
+const CSRF_REISSUE_FRACTION = 0.25;
+const CSRF_EXPIRY_PATTERN = /^\d{1,15}$/;
 
 function safeEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a, 'utf8');
@@ -54,14 +55,6 @@ function cookieOptions(config: Config, httpOnly: boolean) {
   };
 }
 
-function deleteTrustedCsrfGrant(token: string): void {
-  const grant = trustedCsrfGrants.get(token);
-  trustedCsrfGrants.delete(token);
-  if (grant && trustedCsrfTokensBySubject.get(grant.subject) === token) {
-    trustedCsrfTokensBySubject.delete(grant.subject);
-  }
-}
-
 function pruneSessions(now = Date.now()): void {
   for (const [id, session] of staticSessions) {
     if (session.expiresAt <= now) staticSessions.delete(id);
@@ -71,14 +64,47 @@ function pruneSessions(now = Date.now()): void {
     if (!oldest) break;
     staticSessions.delete(oldest);
   }
-  for (const [token, grant] of trustedCsrfGrants) {
-    if (grant.expiresAt <= now) deleteTrustedCsrfGrant(token);
+}
+
+let csrfKeyCache: { secret: string; key: Buffer } | undefined;
+
+function csrfKey(secret: string): Buffer {
+  if (!csrfKeyCache || csrfKeyCache.secret !== secret) {
+    csrfKeyCache = { secret, key: createHmac('sha256', secret).update(CSRF_KEY_LABEL).digest() };
   }
-  while (trustedCsrfGrants.size >= MAX_STATIC_SESSIONS * 4) {
-    const oldest = trustedCsrfGrants.keys().next().value as string | undefined;
-    if (!oldest) break;
-    deleteTrustedCsrfGrant(oldest);
-  }
+  return csrfKeyCache.key;
+}
+
+function csrfMac(secret: string, subject: string, expiresAtSeconds: number): string {
+  return createHmac('sha256', csrfKey(secret))
+    .update(`${CSRF_MAC_CONTEXT}\0${subject}\0${expiresAtSeconds}`)
+    .digest('base64url');
+}
+
+// Trusted-proxy CSRF tokens are signed double-submit values rather than rows in
+// a per-process map: the identity proxy already authenticated the request, so
+// any replica holding the same secret can verify the token without shared state.
+function issueTrustedCsrfToken(config: Config, subject: string): string | undefined {
+  if (!config.trustedProxySecret) return undefined;
+  const expiresAtSeconds = Math.floor(Date.now() / 1000) + config.sessionTtl;
+  const encodedExpiry = Buffer.from(String(expiresAtSeconds), 'utf8').toString('base64url');
+  return `${encodedExpiry}.${csrfMac(config.trustedProxySecret, subject, expiresAtSeconds)}`;
+}
+
+/** Returns the token's expiry in milliseconds, or undefined when it is not valid. */
+function readTrustedCsrfExpiry(config: Config, subject: string, token: string): number | undefined {
+  if (!config.trustedProxySecret) return undefined;
+  const parts = token.split('.');
+  if (parts.length !== 2) return undefined;
+  const [encodedExpiry, mac] = parts;
+  const decodedExpiry = Buffer.from(encodedExpiry, 'base64url').toString('utf8');
+  if (!CSRF_EXPIRY_PATTERN.test(decodedExpiry)) return undefined;
+  const expiresAtSeconds = Number(decodedExpiry);
+  if (!Number.isSafeInteger(expiresAtSeconds)) return undefined;
+  const expiresAt = expiresAtSeconds * 1000;
+  if (expiresAt <= Date.now()) return undefined;
+  if (!safeEqual(mac, csrfMac(config.trustedProxySecret, subject, expiresAtSeconds))) return undefined;
+  return expiresAt;
 }
 
 function staticPrincipal(config: Config): AuthPrincipal {
@@ -161,8 +187,7 @@ function csrfIsValid(
   const headerToken = singleHeader(request, 'x-csrf-token');
   if (!cookieToken || !headerToken || !safeEqual(cookieToken, headerToken)) return false;
   if (session) return safeEqual(session.csrfToken, headerToken);
-  const grant = trustedCsrfGrants.get(headerToken);
-  return Boolean(grant && grant.expiresAt > Date.now() && grant.subject === principal.subject);
+  return readTrustedCsrfExpiry(config, principal.subject, headerToken) !== undefined;
 }
 
 function namespaceIsAllowed(request: FastifyRequest, principal: AuthPrincipal): boolean {
@@ -254,22 +279,15 @@ export const authPlugin: FastifyPluginAsync = async (fastify) => {
 
     let csrfToken = session?.csrfToken;
     if (!session) {
-      pruneSessions();
-      const existingToken = trustedCsrfTokensBySubject.get(principal.subject);
-      const existingGrant = existingToken ? trustedCsrfGrants.get(existingToken) : undefined;
-      const trustedCsrfToken = existingToken && existingGrant && existingGrant.expiresAt > Date.now()
-        ? existingToken
-        : randomBytes(32).toString('base64url');
-      csrfToken = trustedCsrfToken;
-      if (existingToken && existingToken !== csrfToken) deleteTrustedCsrfGrant(existingToken);
-      // Refresh the subject's single grant and move it to the end of the map so
-      // the bounded cache evicts inactive identities rather than active ones.
-      trustedCsrfGrants.delete(trustedCsrfToken);
-      trustedCsrfGrants.set(trustedCsrfToken, {
-        subject: principal.subject,
-        expiresAt: Date.now() + config.sessionTtl * 1000,
-      });
-      trustedCsrfTokensBySubject.set(principal.subject, trustedCsrfToken);
+      // Keep a still-fresh cookie stable so concurrent tabs do not invalidate
+      // each other's in-flight token, but reissue before it can expire.
+      const cookieToken = request.cookies[cookieNames(config).csrf];
+      const expiresAt = cookieToken
+        ? readTrustedCsrfExpiry(config, principal.subject, cookieToken)
+        : undefined;
+      const reusable = expiresAt !== undefined
+        && expiresAt - Date.now() > config.sessionTtl * 1000 * CSRF_REISSUE_FRACTION;
+      csrfToken = reusable ? cookieToken : issueTrustedCsrfToken(config, principal.subject);
     }
     if (!csrfToken) return rejectAuth(reply);
     issueCsrfCookie(reply, config, csrfToken);
@@ -286,8 +304,8 @@ export const authPlugin: FastifyPluginAsync = async (fastify) => {
     const names = cookieNames(config);
     const sessionId = request.cookies[names.session];
     if (sessionId) staticSessions.delete(sessionId);
-    const csrfToken = request.cookies[names.csrf];
-    if (csrfToken) deleteTrustedCsrfGrant(csrfToken);
+    // Trusted-proxy CSRF tokens hold no server-side state; clearing the cookie
+    // is the whole revocation, and the identity proxy owns the user session.
     reply.clearCookie(names.session, { path: '/', secure: config.secureCookies });
     reply.clearCookie(names.csrf, { path: '/', secure: config.secureCookies });
     return { loggedOut: true, logoutUrl: config.authLogoutUrl };
