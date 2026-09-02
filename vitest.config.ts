@@ -2,7 +2,7 @@ import { defineConfig } from "vitest/config";
 import path from "node:path";
 
 const sharedAlias = {
-  "@": path.resolve(__dirname, "src"),
+  "@": path.resolve(import.meta.dirname, "src"),
 };
 
 export default defineConfig({
