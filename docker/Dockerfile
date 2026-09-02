@@ -1,8 +1,9 @@
 # syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
 
-# Keep the build and runtime on the supported Node.js major. Both multi-platform
-# base indexes are digest-pinned so release provenance identifies exact inputs.
-FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS builder
+# Keep the build and runtime on the same active LTS Node.js major (24 until
+# Node 26 enters LTS). Both multi-platform base indexes are digest-pinned so
+# release provenance identifies exact inputs; move both majors together.
+FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS builder
 WORKDIR /app
 
 COPY package.json package-lock.json ./
@@ -18,7 +19,7 @@ RUN npm run build \
   && npm prune --omit=dev \
   && npm cache clean --force
 
-FROM gcr.io/distroless/nodejs22-debian13:nonroot@sha256:4e4fb0ce55fd73901600796ef079a9490369d2515d7da31633a91608c82ca13b
+FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:774b7d020b24214835769e24c3544835526cd0288f0b094eae48e8b2c2429a79
 WORKDIR /app
 
 ARG SOURCE_REVISION=unknown
