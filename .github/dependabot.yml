@@ -23,6 +23,12 @@ updates:
       - dependency-name: "@types/node"
         update-types:
           - "version-update:semver-major"
+      # @tanstack/react-table 9 is a different API (useTable, tableFeatures,
+      # createCoreRowModel) rather than a drop-in major. Migrate DataTable.tsx
+      # deliberately, then remove this entry.
+      - dependency-name: "@tanstack/react-table"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: "docker"
     directory: "/docker"
