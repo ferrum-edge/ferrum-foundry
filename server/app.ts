@@ -19,6 +19,10 @@ export interface BuildAppOptions {
 
 const HASHED_ASSET_PATTERN = /-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$/;
 
+export function trustDirectlyConnectedProxy(_address: string, hop: number): boolean {
+  return hop === 0;
+}
+
 export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
   const config = loadConfig();
   const isProduction = process.env.NODE_ENV === 'production';
@@ -28,7 +32,11 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       level: isProduction ? 'info' : 'debug',
     },
     bodyLimit: 2 * 1024 * 1024,
-    trustProxy: isProduction ? 1 : false,
+    // Trust exactly the directly connected hop (the identity proxy) for
+    // X-Forwarded-* headers. Fastify 5.12.1 stopped honoring the numeric hop
+    // count form, so the equivalent predicate is spelled out: hop 0 is the
+    // socket peer, and anything a client could append further out is ignored.
+    trustProxy: isProduction ? trustDirectlyConnectedProxy : false,
   });
 
   await fastify.register(cookie);

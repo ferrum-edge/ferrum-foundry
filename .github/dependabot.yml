@@ -17,6 +17,12 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      # @types/node tracks the Node.js major the image runs (docker/Dockerfile);
+      # its major moves by hand together with the runtime, never on its own.
+      - dependency-name: "@types/node"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: "docker"
     directory: "/docker"
