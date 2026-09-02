@@ -274,6 +274,20 @@ describe("session request hooks", () => {
     expect(captured[1].headers.get("x-ferrum-namespace")).toBe("tenant-a");
   });
 
+  it("root-anchors BFF paths so a nested route does not change the request target", async () => {
+    // A deep link or refresh on /proxies/<id> used to resolve `api/auth/session`
+    // against the document URL and request /proxies/api/auth/session.
+    window.history.pushState({}, "", "/proxies/proxy-orders-api");
+    try {
+      await api.get("api/auth/session");
+      await api.get("api/proxy/proxies");
+      expect(new URL(captured[0].url).pathname).toBe("/api/auth/session");
+      expect(new URL(captured[1].url).pathname).toBe("/api/proxy/proxies");
+    } finally {
+      window.history.pushState({}, "", "/");
+    }
+  });
+
   it("does not imply tenant scoping for documented fleet-global requests", async () => {
     localStorage.setItem("ferrum:namespace", "tenant-a");
     await api.get("api/proxy/admin/tls/inventory", {

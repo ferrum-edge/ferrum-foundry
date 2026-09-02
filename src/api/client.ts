@@ -186,7 +186,11 @@ function isExpectedProbeFailure(response: Response): boolean {
 // ── Configured ky instance ───────────────────────────────────────
 
 export const api = ky.create({
-  prefix: "",
+  // Root-anchor every BFF path. With an empty prefix ky resolves
+  // `api/auth/session` against the document URL, so a deep link or refresh on
+  // a nested route such as `/proxies/<id>` would request
+  // `/proxies/api/auth/session` and break authentication.
+  prefix: "/",
   credentials: "same-origin",
   hooks: {
     beforeRequest: [

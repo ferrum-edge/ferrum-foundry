@@ -7,13 +7,19 @@
       "runtimeArgs": [
         "PORT=3001",
         "FERRUM_ADMIN_URL=http://127.0.0.1:9000",
-        "FERRUM_JWT_SECRET=dev-secret",
-        "FERRUM_BFF_AUTH_TOKEN=dev-bff-token-please-make-this-long-and-random",
+        "FERRUM_JWT_SECRET=dev-secret-at-least-32-characters-long",
+        "FERRUM_BFF_AUTH_TOKEN=dev-bff-token-at-least-32-characters-long",
         "npm",
         "run",
         "dev"
       ],
       "port": 5173
+    },
+    {
+      "name": "mock-gateway",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["scripts/mock-admin-gateway.mjs"],
+      "port": 9000
     }
   ]
 }

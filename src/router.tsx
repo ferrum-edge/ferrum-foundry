@@ -5,6 +5,9 @@ import {
   createRoute,
 } from "@tanstack/react-router";
 import { AppShell } from "@/components/layout/AppShell";
+import { ErrorFallback } from "@/components/shared/ErrorFallback";
+import { NotFound } from "@/components/shared/NotFound";
+import { RoutePending } from "@/components/shared/RoutePending";
 
 /* ---------- Lazy-loaded route components ---------- */
 
@@ -212,7 +215,17 @@ const routeTree = rootRoute.addChildren([
   meshRoute,
 ]);
 
-export const router = createRouter({ routeTree });
+export const router = createRouter({
+  routeTree,
+  // Unknown paths, failed route renders, and slow chunk loads all render
+  // inside the app shell with the same styling as the rest of the UI instead
+  // of TanStack Router's unstyled defaults.
+  defaultNotFoundComponent: NotFound,
+  defaultErrorComponent: ({ error, reset }) => (
+    <ErrorFallback error={error} onRetry={reset} retryLabel="Try again" />
+  ),
+  defaultPendingComponent: RoutePending,
+});
 
 /* ---------- Type registration ---------- */
 
