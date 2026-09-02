@@ -41,7 +41,7 @@ export function loadCaBundle(
     canonicalRoot = realpathSync(configuredRoot ?? dirname(canonicalPath));
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('TLS CA bundle')) throw error;
-    throw new Error('TLS CA bundle path is not readable');
+    throw new Error('TLS CA bundle path is not readable', { cause: error });
   }
 
   if (!isWithinRoot(canonicalPath, canonicalRoot)) {
@@ -91,7 +91,7 @@ export function loadCaBundle(
     if (error instanceof Error && error.message.startsWith('TLS CA bundle')) {
       throw error;
     }
-    throw new Error('TLS CA bundle path is not readable');
+    throw new Error('TLS CA bundle path is not readable', { cause: error });
   } finally {
     if (fd !== undefined) closeSync(fd);
   }

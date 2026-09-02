@@ -10,6 +10,13 @@ updates:
     open-pull-requests-limit: 10
     labels:
       - "dependencies"
+    groups:
+      # Weekly minor and patch bumps arrive as one pull request; majors stay
+      # separate so a breaking upgrade is reviewed on its own.
+      npm-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: "docker"
     directory: "/docker"
@@ -20,6 +27,14 @@ updates:
       prefix: "deps"
     labels:
       - "dependencies"
+    ignore:
+      # The builder's Node major is deliberately coupled to the distroless
+      # runtime major (node:22-bookworm-slim -> distroless/nodejs22): a major
+      # bump here alone would build against one Node and run on another. The
+      # pair is moved by hand once the matching distroless nodejs image exists.
+      - dependency-name: "node"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -30,3 +45,7 @@ updates:
       prefix: "ci"
     labels:
       - "dependencies"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
