@@ -417,7 +417,7 @@ const server = createServer(async (req, res) => {
   const path = url.pathname.replace(/\/+$/, '') || '/';
   const method = req.method ?? 'GET';
   const raw = await readBody(req);
-  let body = {};
+  let body;
   try { body = raw ? JSON.parse(raw) : {}; } catch { body = { _raw: raw }; }
 
   const ns = (Array.isArray(req.headers['x-ferrum-namespace'])

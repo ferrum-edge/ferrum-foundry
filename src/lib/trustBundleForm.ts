@@ -71,7 +71,7 @@ function validateBase64Der(value: unknown, label: string): string {
   ) {
     throw new TrustBundleFormError(`${label} is not valid base64 DER`);
   }
-  let decodedLength = 0;
+  let decodedLength: number;
   try {
     decodedLength = atob(encoded).length;
   } catch {
