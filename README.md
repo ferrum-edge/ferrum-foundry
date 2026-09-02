@@ -8,7 +8,7 @@
   <a href="https://github.com/ferrum-edge/ferrum-foundry/actions/workflows/ci.yml"><img src="https://github.com/ferrum-edge/ferrum-foundry/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
   <a href="https://github.com/ferrum-edge/ferrum-foundry/actions/workflows/release.yml"><img src="https://github.com/ferrum-edge/ferrum-foundry/actions/workflows/release.yml/badge.svg" alt="Release" /></a>
   <a href="https://github.com/ferrum-edge/ferrum-foundry/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue" alt="License" /></a>
-  <img src="https://img.shields.io/badge/node-%3E%3D22-brightgreen" alt="Node.js 22+" />
+  <img src="https://img.shields.io/badge/node-%3E%3D22%20%28image%3A%2024%20LTS%29-brightgreen" alt="Node.js 22+ (image: 24 LTS)" />
   <img src="https://img.shields.io/badge/TypeScript-6-blue" alt="TypeScript" />
 </p>
 
@@ -46,7 +46,7 @@ The BFF (Backend-for-Frontend) handles TLS trust stores, connection/read/write t
 
 ### Prerequisites
 
-- Node.js 22+
+- Node.js 22 or newer. The published container image runs Node.js 24 LTS.
 - npm 10+
 
 ### Local Development
@@ -69,25 +69,20 @@ the deployment credential is never stored in browser storage or reused as a
 bearer token. Production startup fails closed unless a trusted identity proxy
 mode is configured. See [Production authentication](docs/authentication.md).
 
-Optional environment variables:
+The most commonly adjusted optional variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `FERRUM_JWT_ISSUER` | `ferrum-edge` | JWT issuer claim |
+| `PORT` | `3001` | BFF server port |
 | `FERRUM_JWT_TTL` | `900` | JWT token TTL (seconds) |
-| `FERRUM_JWT_MAX_TTL` | `3600` | Gateway-configured maximum JWT TTL |
 | `FERRUM_JWT_ROLE` | `admin` | Static development role: viewer/operator/admin |
 | `FERRUM_JWT_AUDIENCE` | - | Optional exact audience claim(s), comma separated |
-| `FERRUM_JWT_NAMESPACES` | - | Optional exact namespace grants, comma separated |
 | `FERRUM_TLS_CA_PATH` | - | Path to a .pem truststore (contained projected-volume symlinks are supported) |
-| `FERRUM_TLS_CA_ROOT` | CA file directory | Approved root for CA bundles |
 | `FERRUM_TLS_VERIFY` | `true` | Verify TLS certificates |
-| `FERRUM_CONNECT_TIMEOUT` | `5000` | Connection timeout (ms) |
-| `FERRUM_READ_TIMEOUT` | `60000` | Read timeout (ms) |
-| `FERRUM_WRITE_TIMEOUT` | `60000` | Write timeout (ms) |
-| `FERRUM_MAX_LARGE_UPLOADS` | `2` | Maximum concurrent restore/spec uploads |
-| `FERRUM_ALLOW_RUNTIME_SETTINGS` | `false` | Permit restricted browser connection overrides |
-| `PORT` | `3001` | BFF server port |
+
+Every environment variable the BFF reads, with its default, allowed range, and
+meaning, is listed in the
+[configuration reference](docs/deployment.md#2-configuration-reference).
 
 Start the dev server:
 
@@ -154,10 +149,18 @@ docker run \
 ```
 
 The production BFF must be reachable only through the configured identity
-proxy. The Docker image uses `gcr.io/distroless/nodejs22-debian13:nonroot` for
+proxy. The Docker image uses `gcr.io/distroless/nodejs24-debian13:nonroot` for
 a minimal attack surface. Build inputs are allowlisted by `.dockerignore`, base
 images are digest-pinned, and published images carry provenance and SBOM
 attestations. See [Release and supply-chain gates](docs/release-security.md).
+
+## Documentation
+
+- [Deployment](docs/deployment.md) - production topology, full configuration reference, reverse proxy / Compose / Kubernetes examples, and a go-live checklist
+- [Production authentication](docs/authentication.md) - trusted-proxy identity contract and downstream JWT claims
+- [Release and supply-chain gates](docs/release-security.md) - publication gates, image tags, provenance and SBOM
+- [Security](SECURITY.md) - supported versions and how to report a vulnerability privately
+- [Changelog](CHANGELOG.md) - notable changes
 
 ## Tech Stack
 
@@ -169,7 +172,7 @@ attestations. See [Release and supply-chain gates](docs/release-security.md).
 | UI | Radix UI primitives (Dialog, Select, Tabs, Tooltip) |
 | Backend | Node.js, Fastify 5 |
 | JWT | jose (HS256) |
-| Docker | Distroless Node.js 22 |
+| Docker | Distroless Node.js 24 |
 
 ## License
 
