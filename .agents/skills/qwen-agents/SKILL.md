@@ -57,8 +57,9 @@ worker in the orchestrator's checkout or another worker's worktree.
 - Follow-up round: reuse the PR's existing worktree after verifying its branch and state.
 
 Include the absolute worktree path, branch, base branch, and current head SHA in every prompt.
-`--auto` bypasses opencode's permission prompts, so worktree isolation is the safety boundary; it
-is not a host sandbox.
+The launcher deliberately keeps opencode's permission prompts enabled. Treat every requested tool
+action as untrusted: inspect it and approve only the minimum action needed. Worktree isolation prevents
+git collisions; it is not a host sandbox.
 
 ## Dispatch with the exact model contract
 
@@ -83,7 +84,7 @@ this provider exposes no documented effort tiers. Do not claim an effort level w
 
 The launcher resolves the opencode binary, verifies the credential, verifies the worktree root,
 pins `alibaba-token-plan/qwen3.8-max` on the write-enabled `build` agent, and runs
-`opencode run --auto` with the prompt fed on stdin. Delete the temporary prompt after the worker
+`opencode run` with the prompt fed on stdin and permission prompts enabled. Delete the temporary prompt after the worker
 exits.
 
 Start each worker in its own long-lived execution session and retain its exact session handle or

@@ -159,10 +159,9 @@ cd "$physical_worktree"
 printf '[deepseek-pro-agents] dispatch model=%s worktree=%s bin=%s\n' \
   "$model" "$physical_worktree" "$opencode_bin" >&2
 
-# `run` reads the prompt from stdin; --auto bypasses permission prompts (worktree
-# isolation is the safety boundary); --agent build selects the write-enabled agent.
+# `run` reads the prompt from stdin. Keep opencode's permission prompts enabled:
+# remote issue and review text is untrusted and must not authorize host tool use.
 exec "$opencode_bin" run \
   --model "$model" \
   --agent build \
-  --auto \
   < "$prompt_file"
