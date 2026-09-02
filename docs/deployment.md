@@ -228,7 +228,7 @@ server {
 
     location / {
         auth_request /oauth2/auth;
-        error_page 401 = /oauth2/sign_in;
+        error_page 401 = @signin;
 
         auth_request_set $auth_user   $upstream_http_x_auth_request_user;
         auth_request_set $auth_groups $upstream_http_x_auth_request_groups;
@@ -253,6 +253,16 @@ server {
         proxy_read_timeout 180s;
 
         proxy_pass http://foundry:8080;
+    }
+
+    # A browser loading a page is sent through the login flow. An XHR from the
+    # SPA keeps the raw 401 so the app can offer "Continue with SSO" itself and
+    # never receives a sign-in page where it expects JSON.
+    location @signin {
+        if ($request_uri ~ ^/api/) {
+            return 401;
+        }
+        return 302 /oauth2/start?rd=$request_uri;
     }
 }
 ```
@@ -281,7 +291,13 @@ Notes:
   mapped variables resolve when `proxy_set_header` uses them, which is after
   `auth_request` has run. Do not try to gate on `$ferrum_role` with an `if`:
   `if` runs in the rewrite phase, before the auth subrequest, so it would always
-  see an empty value.
+  see an empty value. The `if` inside `@signin` is safe because it tests only
+  `$request_uri`, and a named location entered through `error_page` runs after
+  the auth subrequest has already failed.
+- Keep the split in `@signin`. The SPA calls `/api/auth/session` on load and
+  every minute afterwards and expects a `401` when the proxy session is gone;
+  a redirect or an HTML sign-in page in its place shows a generic session error
+  instead of the sign-in button.
 - Denial for an unmapped user happens twice. oauth2-proxy's `--allowed-group`
   refuses the login, and the empty `map` default means no role is asserted, so
   Foundry rejects the request with `401` and an `x-ferrum-auth-layer: bff`
@@ -313,8 +329,6 @@ services:
       FERRUM_TLS_CA_PATH: /etc/ferrum/ca/gateway-ca.pem
       FERRUM_ENABLE_HSTS: "true"
       FERRUM_SHUTDOWN_TIMEOUT: "10000"
-    env_file:
-      - .env
     volumes:
       - ./ca:/etc/ferrum/ca:ro
 
@@ -356,7 +370,11 @@ services:
 Put `FERRUM_JWT_SECRET`, `FERRUM_TRUSTED_PROXY_SECRET`,
 `OAUTH2_PROXY_CLIENT_ID`, `OAUTH2_PROXY_CLIENT_SECRET`, and
 `OAUTH2_PROXY_COOKIE_SECRET` in `.env` with restrictive permissions, and keep
-`.env` out of version control.
+`.env` out of version control. Compose substitutes the `${...}` references in
+the `foundry` service from that file, and oauth2-proxy reads its
+`OAUTH2_PROXY_*` variables from it through `env_file`. The `foundry` service
+deliberately has no `env_file`, so the OAuth client secret never enters the
+BFF's environment.
 
 The image ships a `HEALTHCHECK` that requests `/api/health/live` on the
 container's own `PORT`, so `docker ps` reports the container unhealthy when the
