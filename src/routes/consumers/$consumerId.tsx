@@ -214,13 +214,13 @@ export default function ConsumerDetailPage() {
         <TabsContent value="proxies">
           {authorizedProxies.length === 0 ? (
             <Card>
-              <div className="text-center py-8">
+              <div className="flex flex-col items-center text-center py-8">
                 <p className="text-text-secondary">
-                  No proxies currently authorize this consumer.
+                  This consumer is not authorized on any proxy.
                 </p>
-                <p className="text-text-muted text-sm mt-2">
-                  Complete global, direct, and proxy-group policy found no
-                  conclusive or request-conditional match.
+                <p className="text-text-muted text-sm mt-2 max-w-md">
+                  Add a credential on the Credentials tab and attach a matching
+                  authentication plugin to a proxy.
                 </p>
               </div>
             </Card>

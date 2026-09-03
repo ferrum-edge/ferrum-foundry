@@ -4,6 +4,7 @@ import type {
   PluginConfig,
   Proxy,
 } from "@/api/types";
+import { pluginAppliesToProxy } from "@/lib/pluginProtocols";
 
 const LOCAL_AUTH_CREDENTIALS: Readonly<Record<string, BuiltInCredentialType>> = {
   key_auth: "keyauth",
@@ -64,7 +65,11 @@ function priority(plugin: PluginConfig): number {
   return plugin.priority_override ?? Number.MAX_SAFE_INTEGER;
 }
 
-export function effectivePluginsForProxy(
+/**
+ * Every enabled plugin config attached to this proxy by global, direct, or
+ * proxy-group scope, before the gateway's protocol filter is applied.
+ */
+function attachedPluginsForProxy(
   proxy: Proxy,
   pluginConfigs: PluginConfig[],
 ): EffectivePlugin[] {
@@ -86,6 +91,36 @@ export function effectivePluginsForProxy(
     .sort((left, right) =>
       priority(left) - priority(right) || left.id.localeCompare(right.id),
     );
+}
+
+/**
+ * Plugins the gateway actually runs for this proxy: attached by scope AND
+ * applicable to the proxy's protocol. A stream (tcp/tcps/udp/dtls) proxy
+ * never executes HTTP-only plugins, so counting them would overstate both
+ * policy coverage and consumer exposure.
+ */
+export function effectivePluginsForProxy(
+  proxy: Proxy,
+  pluginConfigs: PluginConfig[],
+): EffectivePlugin[] {
+  return attachedPluginsForProxy(proxy, pluginConfigs).filter((plugin) =>
+    pluginAppliesToProxy(plugin.plugin_name, proxy),
+  );
+}
+
+/**
+ * The counterpart of {@link effectivePluginsForProxy}: enabled global,
+ * direct, and proxy-group plugins that are attached to this proxy but which
+ * the gateway skips because they are HTTP-only. Always empty for an HTTP
+ * proxy; the UI shows them so an attachment never silently disappears.
+ */
+export function inapplicablePluginsForProxy(
+  proxy: Proxy,
+  pluginConfigs: PluginConfig[],
+): EffectivePlugin[] {
+  return attachedPluginsForProxy(proxy, pluginConfigs).filter(
+    (plugin) => !pluginAppliesToProxy(plugin.plugin_name, proxy),
+  );
 }
 
 function stringList(config: Record<string, unknown>, key: string): string[] {

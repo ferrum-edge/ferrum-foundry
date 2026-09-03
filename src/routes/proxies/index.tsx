@@ -6,6 +6,7 @@ import { useState, useMemo } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useAllProxies, useProxies } from "@/hooks/useProxies";
 import { useAllUpstreams } from "@/hooks/useUpstreams";
+import { useAllPluginConfigs } from "@/hooks/usePlugins";
 import { usePaginationParams } from "@/hooks/usePagination";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -14,8 +15,13 @@ import { SearchBar } from "@/components/shared/SearchBar";
 import { PaginationControls } from "@/components/shared/PaginationControls";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { SkeletonRow } from "@/components/ui/Skeleton";
-import type { Proxy } from "@/api/types";
+import type { PluginConfig, Proxy } from "@/api/types";
 import { filterAndPage } from "@/lib/collectionSearch";
+import {
+  effectivePluginsForProxy,
+  inapplicablePluginsForProxy,
+  type EffectivePlugin,
+} from "@/lib/effectivePolicy";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -33,6 +39,72 @@ function formatDate(iso: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+interface PluginSummary {
+  /** Plugins the gateway actually runs for this proxy. */
+  total: number;
+  /** Human-readable breakdown of where that number comes from. */
+  breakdown: string;
+}
+
+/**
+ * `GET /proxies` only carries direct proxy-scoped attachments, so
+ * `proxy.plugins.length` is not the number of plugins that run. Compute the
+ * same effective set the proxy detail page shows: global + direct +
+ * proxy-group, minus anything the proxy's protocol never invokes.
+ */
+function summarizePlugins(proxy: Proxy, pluginConfigs: PluginConfig[]): PluginSummary {
+  const effective = effectivePluginsForProxy(proxy, pluginConfigs);
+  const counted = (source: EffectivePlugin["effectiveSource"]) =>
+    effective.filter((plugin) => plugin.effectiveSource === source).length;
+
+  const breakdown = [
+    `${counted("proxy")} direct`,
+    `${counted("global")} global`,
+    `${counted("proxy_group")} group`,
+  ];
+  const skipped = inapplicablePluginsForProxy(proxy, pluginConfigs).length;
+  if (skipped > 0) {
+    breakdown.push(`${skipped} not applied (HTTP only)`);
+  }
+
+  return { total: effective.length, breakdown: breakdown.join(" · ") };
+}
+
+/**
+ * Effective plugin count cell. Until the plugin collection resolves there is
+ * no honest number to print, so show a muted placeholder rather than 0.
+ */
+function PluginCountCell({
+  summary,
+  unavailable,
+}: {
+  summary?: PluginSummary;
+  unavailable: boolean;
+}) {
+  if (!summary) {
+    return (
+      <span
+        className="text-center text-sm text-text-muted"
+        title={
+          unavailable
+            ? "Effective plugin count unavailable"
+            : "Counting effective plugins"
+        }
+      >
+        &hellip;
+      </span>
+    );
+  }
+
+  return (
+    <span className="text-center" title={summary.breakdown}>
+      <Badge variant={summary.total > 0 ? "blue" : "default"}>
+        {summary.total}
+      </Badge>
+    </span>
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -85,12 +157,29 @@ export default function ProxiesPage() {
       ),
     [allQuery.data, pagination.limit, pagination.offset, search],
   );
-  const proxies = searching ? searchPage.items : (pageQuery.data?.data ?? []);
+  const proxies = useMemo(
+    () => (searching ? searchPage.items : (pageQuery.data?.data ?? [])),
+    [searching, searchPage.items, pageQuery.data],
+  );
   const total = searching
     ? searchPage.total
     : (pageQuery.data?.pagination?.total ?? 0);
   const isLoading = searching ? allQuery.isLoading : pageQuery.isLoading;
   const isError = searching ? allQuery.isError : pageQuery.isError;
+
+  /* --- Effective plugin counts (global + direct + group, protocol-filtered) --- */
+  const {
+    data: allPluginConfigs,
+    isError: pluginConfigsError,
+  } = useAllPluginConfigs();
+  const pluginSummaries = useMemo(() => {
+    const map = new Map<string, PluginSummary>();
+    if (!allPluginConfigs) return map;
+    for (const proxy of proxies) {
+      map.set(proxy.id, summarizePlugins(proxy, allPluginConfigs));
+    }
+    return map;
+  }, [allPluginConfigs, proxies]);
 
   /* ---------------------------------------------------------------- */
   /*  Render                                                           */
@@ -232,13 +321,12 @@ export default function ProxiesPage() {
                   )}
                 </div>
 
-                {/* Plugins count — plugins can be absent on freshly created
-                    upstream-only proxies, so never dereference it directly */}
-                <span className="text-center">
-                  <Badge variant={(proxy.plugins ?? []).length > 0 ? "blue" : "default"}>
-                    {(proxy.plugins ?? []).length}
-                  </Badge>
-                </span>
+                {/* Effective plugin count. `proxy.plugins` holds direct
+                    attachments only, so it is never the number that runs. */}
+                <PluginCountCell
+                  summary={pluginSummaries.get(proxy.id)}
+                  unavailable={pluginConfigsError}
+                />
 
                 {/* Created at */}
                 <span className="text-sm text-text-muted whitespace-nowrap">

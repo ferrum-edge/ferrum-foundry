@@ -13,7 +13,7 @@ import { SearchBar } from "@/components/shared/SearchBar";
 import { PaginationControls } from "@/components/shared/PaginationControls";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { SkeletonRow } from "@/components/ui/Skeleton";
-import { getPluginMeta } from "@/lib/pluginConfigDefaults";
+import { formatPluginName, getPluginMeta } from "@/lib/pluginConfigDefaults";
 import { filterAndPage } from "@/lib/collectionSearch";
 
 /* ------------------------------------------------------------------ */
@@ -28,10 +28,6 @@ function formatDate(iso: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
-}
-
-function formatPluginName(name: string): string {
-  return name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 /** Built-in plugin priorities from ferrum-edge (lower = runs first). */
