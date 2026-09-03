@@ -5,10 +5,15 @@ export interface SelectOption {
   label: string;
 }
 
-export interface SelectProps {
+/** A titled bucket of options, rendered under a non-selectable group heading. */
+export interface SelectOptionGroup {
+  label: string;
+  options: SelectOption[];
+}
+
+interface SelectBaseProps {
   value?: string;
   onValueChange?: (value: string) => void;
-  options: SelectOption[];
   placeholder?: string;
   label?: string;
   error?: string;
@@ -16,16 +21,39 @@ export interface SelectProps {
   disabled?: boolean;
 }
 
+/**
+ * A select takes either a flat `options` list or a grouped `groups` list, never
+ * both. Existing flat callers are unaffected.
+ */
+export type SelectProps = SelectBaseProps &
+  (
+    | { options: SelectOption[]; groups?: never }
+    | { groups: SelectOptionGroup[]; options?: never }
+  );
+
 export function Select({
   value,
   onValueChange,
   options,
+  groups,
   placeholder = "Select...",
   label,
   error,
   helpText,
   disabled,
 }: SelectProps) {
+  const renderOption = (option: SelectOption) => (
+    <SelectPrimitive.Item
+      key={option.value}
+      value={option.value}
+      className="relative flex min-w-0 items-center px-3 py-2 text-sm text-text-primary rounded-md cursor-pointer select-none outline-none data-[highlighted]:bg-bg-card-hover"
+    >
+      <SelectPrimitive.ItemText>
+        <span className="block truncate">{option.label}</span>
+      </SelectPrimitive.ItemText>
+    </SelectPrimitive.Item>
+  );
+
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
       {label && (
@@ -66,17 +94,16 @@ export function Select({
             sideOffset={4}
           >
             <SelectPrimitive.Viewport className="p-1 max-h-[min(var(--radix-select-content-available-height),20rem)]">
-              {options.map((option) => (
-                <SelectPrimitive.Item
-                  key={option.value}
-                  value={option.value}
-                  className="relative flex min-w-0 items-center px-3 py-2 text-sm text-text-primary rounded-md cursor-pointer select-none outline-none data-[highlighted]:bg-bg-card-hover"
-                >
-                  <SelectPrimitive.ItemText>
-                    <span className="block truncate">{option.label}</span>
-                  </SelectPrimitive.ItemText>
-                </SelectPrimitive.Item>
-              ))}
+              {groups
+                ? groups.map((group) => (
+                    <SelectPrimitive.Group key={group.label}>
+                      <SelectPrimitive.Label className="text-text-muted text-xs font-semibold uppercase tracking-wider px-3 pt-2 pb-1">
+                        {group.label}
+                      </SelectPrimitive.Label>
+                      {group.options.map(renderOption)}
+                    </SelectPrimitive.Group>
+                  ))
+                : options?.map(renderOption)}
             </SelectPrimitive.Viewport>
           </SelectPrimitive.Content>
         </SelectPrimitive.Portal>
