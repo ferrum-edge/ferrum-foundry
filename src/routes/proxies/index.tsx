@@ -123,6 +123,17 @@ const columns = [
 /*  ProxiesPage                                                        */
 /* ================================================================== */
 
+/*
+ * The header row and each body row are separate grid containers, so labels
+ * only line up with the values under them when the template resolves to the
+ * same tracks in both. A content-sized last track (`max-content`) measured
+ * the short "CREATED" label in the header and a full timestamp in the rows,
+ * which shifted every flexible column between the two. Every track here is
+ * a fixed length or a `minmax(0, fr)`, so both containers agree by
+ * construction.
+ */
+const GRID_TEMPLATE = "grid grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,2fr)_4rem_10rem] gap-4";
+
 export default function ProxiesPage() {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
@@ -217,9 +228,9 @@ export default function ProxiesPage() {
       {/* Table */}
       <Card className="overflow-hidden p-0">
         {/* Header row */}
-        <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,2fr)_4rem_max-content] gap-4 px-6 py-3 border-b border-border bg-bg-card text-text-muted text-xs font-semibold uppercase tracking-wider">
+        <div className={`${GRID_TEMPLATE} px-6 py-3 border-b border-border bg-bg-card text-text-muted text-xs font-semibold uppercase tracking-wider`}>
           {columns.map((col) => (
-            <span key={col.key} className={"className" in col ? col.className : ""}>
+            <span key={col.key} className={`whitespace-nowrap ${"className" in col ? col.className : ""}`}>
               {col.label}
             </span>
           ))}
@@ -265,7 +276,7 @@ export default function ProxiesPage() {
               <button
                 key={proxy.id}
                 type="button"
-                className="grid grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,2fr)_4rem_max-content] gap-4 px-6 py-3.5 w-full text-left hover:bg-bg-card-hover transition-colors cursor-pointer"
+                className={`${GRID_TEMPLATE} px-6 py-3.5 w-full text-left hover:bg-bg-card-hover transition-colors cursor-pointer`}
                 onClick={() =>
                   navigate({
                     to: "/proxies/$proxyId",
