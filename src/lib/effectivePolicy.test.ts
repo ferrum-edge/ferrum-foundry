@@ -3,6 +3,7 @@ import type { Consumer, PluginConfig, Proxy } from "@/api/types";
 import {
   analyzeProxyPolicy,
   effectivePluginsForProxy,
+  inapplicablePluginsForProxy,
 } from "./effectivePolicy";
 
 function proxy(overrides: Partial<Proxy> = {}): Proxy {
@@ -79,6 +80,50 @@ describe("effective authorization policy", () => {
       "global-auth",
       "group-acl",
     ]);
+  });
+
+  it("does not count HTTP-only plugins as effective on a stream proxy", () => {
+    const plugins = [
+      plugin("global-cors", "cors", "global"),
+      plugin("global-logging", "stdout_logging", "global"),
+    ];
+    const httpProxy = proxy({ plugins: [] });
+    const streamProxy = proxy({
+      backend_scheme: "tcp",
+      listen_port: 18_443,
+      listen_path: null,
+      plugins: [],
+    });
+
+    expect(effectivePluginsForProxy(httpProxy, plugins).map((p) => p.id)).toEqual([
+      "global-cors",
+      "global-logging",
+    ]);
+    expect(inapplicablePluginsForProxy(httpProxy, plugins)).toEqual([]);
+
+    expect(effectivePluginsForProxy(streamProxy, plugins).map((p) => p.id)).toEqual([
+      "global-logging",
+    ]);
+    expect(inapplicablePluginsForProxy(streamProxy, plugins).map((p) => p.id)).toEqual([
+      "global-cors",
+    ]);
+  });
+
+  it("reports no authentication for a stream proxy whose only auth plugin is HTTP-only", () => {
+    const streamProxy = proxy({
+      backend_scheme: "tcp",
+      listen_port: 18_443,
+      listen_path: null,
+      plugins: [],
+    });
+    const analysis = analyzeProxyPolicy(
+      streamProxy,
+      [plugin("global-jwt", "jwt_auth", "global")],
+      [consumer("1", "alice", [], { jwt: [{ secret: "[REDACTED]" }] })],
+    );
+    expect(analysis.effectivePlugins).toEqual([]);
+    expect(analysis.authPlugins).toEqual([]);
+    expect(analysis.consumers[0]?.decision).toBe("public");
   });
 
   it("implements canonical consumer/group allow fields with deny precedence", () => {

@@ -18,8 +18,25 @@ import { Badge } from "@/components/ui/Badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
 import { getApiErrorMessage } from "@/api/client";
 import * as proxiesApi from "@/api/proxies";
-import { analyzeProxyPolicy } from "@/lib/effectivePolicy";
+import {
+  analyzeProxyPolicy,
+  inapplicablePluginsForProxy,
+} from "@/lib/effectivePolicy";
 import type { ProxyCreate, PluginConfig } from "@/api/types";
+
+/**
+ * Plugin config JSON preview. Scrolls in both axes inside a bounded box so a
+ * long line is never clipped mid-glyph by a horizontal-only overflow.
+ */
+function PluginConfigPreview({ config }: { config: Record<string, unknown> }) {
+  return (
+    <div className="bg-bg-secondary rounded p-2 max-h-40 overflow-auto">
+      <pre className="text-xs text-text-muted whitespace-pre">
+        {JSON.stringify(config, null, 2)}
+      </pre>
+    </div>
+  );
+}
 
 export default function ProxyDetailPage() {
   const { proxyId } = useParams({ strict: false }) as { proxyId: string };
@@ -47,6 +64,11 @@ export default function ProxyDetailPage() {
     [proxy, allPluginConfigs, allConsumers],
   );
   const proxyPlugins = policy?.effectivePlugins ?? [];
+  // Attached but never invoked: HTTP-only plugins on a TCP/UDP listener.
+  const skippedPlugins = useMemo(
+    () => (proxy ? inapplicablePluginsForProxy(proxy, allPluginConfigs ?? []) : []),
+    [proxy, allPluginConfigs],
+  );
   const visibleConsumers = policy?.consumers.filter(
     (result) => result.decision === "allowed" || result.decision === "conditional",
   ) ?? [];
@@ -160,83 +182,118 @@ export default function ProxyDetailPage() {
 
         {/* ── Plugins Tab ────────────────────────────────────────── */}
         <TabsContent value="plugins">
-          {proxyPlugins.length === 0 ? (
-            <Card>
-              <div className="text-center py-8">
-                <p className="text-text-secondary mb-4">
-                  No plugins configured for this proxy.
-                </p>
-                <Link
-                  to="/plugins/new"
-                  className="text-orange hover:text-orange-light font-medium transition-colors"
-                >
-                  Create a plugin
-                </Link>
-              </div>
-            </Card>
-          ) : (
-            <div className="space-y-3">
-              {/* Plugin association IDs from the proxy object */}
-              {(proxy.plugins ?? []).length > 0 && (
-                <Card>
-                  <h3 className="text-sm font-semibold text-text-secondary uppercase tracking-wide mb-3">
-                    Plugin Associations
-                  </h3>
-                  <div className="flex flex-wrap gap-2">
-                    {(proxy.plugins ?? []).map((assoc) => (
-                      <Link
-                        key={assoc.plugin_config_id}
-                        to="/plugins/$pluginId"
-                        params={{ pluginId: assoc.plugin_config_id }}
-                        className="font-mono text-xs text-orange hover:text-orange-light transition-colors"
-                      >
-                        <Badge variant="orange">{assoc.plugin_config_id}</Badge>
-                      </Link>
-                    ))}
-                  </div>
-                </Card>
-              )}
-
-              {/* Scoped plugin configs */}
-              {proxyPlugins.map((plugin: PluginConfig) => (
-                <Link
-                  key={plugin.id}
-                  to="/plugins/$pluginId"
-                  params={{ pluginId: plugin.id }}
-                  className="block"
-                >
-                  <Card className="hover:border-orange/40 transition-colors cursor-pointer">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-semibold text-text-primary">
-                        {plugin.plugin_name}
-                      </span>
-                      <Badge variant={plugin.enabled ? "green" : "red"}>
-                        {plugin.enabled ? "Enabled" : "Disabled"}
-                      </Badge>
+          <div className="space-y-3">
+            {proxyPlugins.length === 0 ? (
+              <Card>
+                <div className="text-center py-8">
+                  <p className="text-text-secondary mb-4">
+                    No plugins run on this proxy.
+                  </p>
+                  <Link
+                    to="/plugins/new"
+                    className="text-orange hover:text-orange-light font-medium transition-colors"
+                  >
+                    Create a plugin
+                  </Link>
+                </div>
+              </Card>
+            ) : (
+              <>
+                {/* Plugin association IDs from the proxy object */}
+                {(proxy.plugins ?? []).length > 0 && (
+                  <Card>
+                    <h3 className="text-sm font-semibold text-text-secondary uppercase tracking-wide mb-3">
+                      Plugin Associations
+                    </h3>
+                    <div className="flex flex-wrap gap-2">
+                      {(proxy.plugins ?? []).map((assoc) => (
+                        <Link
+                          key={assoc.plugin_config_id}
+                          to="/plugins/$pluginId"
+                          params={{ pluginId: assoc.plugin_config_id }}
+                          className="font-mono text-xs text-orange hover:text-orange-light transition-colors"
+                        >
+                          <Badge variant="orange">{assoc.plugin_config_id}</Badge>
+                        </Link>
+                      ))}
                     </div>
-                    <pre className="text-xs text-text-muted bg-bg-secondary rounded p-2 overflow-x-auto max-h-24">
-                      {JSON.stringify(plugin.config, null, 2)}
-                    </pre>
                   </Card>
-                </Link>
-              ))}
-            </div>
-          )}
+                )}
+
+                {/* Scoped plugin configs */}
+                {proxyPlugins.map((plugin: PluginConfig) => (
+                  <Link
+                    key={plugin.id}
+                    to="/plugins/$pluginId"
+                    params={{ pluginId: plugin.id }}
+                    className="block"
+                  >
+                    <Card className="hover:border-orange/40 transition-colors cursor-pointer">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="font-semibold text-text-primary">
+                          {plugin.plugin_name}
+                        </span>
+                        <Badge variant={plugin.enabled ? "green" : "red"}>
+                          {plugin.enabled ? "Enabled" : "Disabled"}
+                        </Badge>
+                      </div>
+                      <PluginConfigPreview config={plugin.config} />
+                    </Card>
+                  </Link>
+                ))}
+              </>
+            )}
+
+            {/* Attached but never invoked on an L4 listener */}
+            {skippedPlugins.length > 0 && (
+              <Card>
+                <h3 className="text-sm font-semibold text-text-muted uppercase tracking-wide">
+                  Not applied on this stream proxy
+                </h3>
+                <p className="text-text-muted text-sm mt-1 mb-3">
+                  The gateway skips HTTP-only plugins on TCP/UDP listeners.
+                </p>
+                <div className="space-y-2">
+                  {skippedPlugins.map((plugin) => (
+                    <Link
+                      key={plugin.id}
+                      to="/plugins/$pluginId"
+                      params={{ pluginId: plugin.id }}
+                      className="block rounded-lg border border-border p-3 opacity-70 hover:opacity-100 transition-opacity"
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="font-medium text-text-secondary">
+                          {plugin.plugin_name}
+                        </span>
+                        <Badge variant="default">HTTP only</Badge>
+                      </div>
+                      <PluginConfigPreview config={plugin.config} />
+                    </Link>
+                  ))}
+                </div>
+              </Card>
+            )}
+          </div>
         </TabsContent>
 
         {/* ── Consumers Tab ──────────────────────────────────────── */}
         <TabsContent value="consumers">
           {!policy || policy.authPlugins.length === 0 ? (
             <Card>
-              <div className="text-center py-8">
+              <div className="flex flex-col items-center text-center py-8">
                 <p className="text-text-secondary">
-                  No recognized consumer-authentication plugin is effective here.
+                  No consumers are authorized for this proxy.
                 </p>
-                <p className="text-text-muted text-sm mt-2">
-                  Complete global, direct, and proxy-group policy was evaluated,
-                  but this consumer relationship view cannot conclude overall
-                  exposure when non-consumer or custom controls apply.
+                <p className="text-text-muted text-sm mt-2 max-w-md">
+                  Attach an authentication plugin such as key auth, basic auth,
+                  JWT, or mTLS to this proxy, or globally, to control who can
+                  call it.
                 </p>
+                <Link to="/plugins/new" className="mt-4">
+                  <Button size="sm" variant="secondary">
+                    Add an authentication plugin
+                  </Button>
+                </Link>
               </div>
             </Card>
           ) : (
