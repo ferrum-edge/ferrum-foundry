@@ -143,6 +143,126 @@ export function isInternalPlugin(pluginName: string): boolean {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Display names                                                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Plugin keys whose display form cannot be derived from the snake_case key:
+ * expanded abbreviations, hyphenated protocol names, and vendor spellings.
+ * Everything else falls through to the acronym-aware title-caser below, so a
+ * plugin the gateway adds later still reads well without a code change here.
+ */
+const PLUGIN_DISPLAY_NAMES: Record<string, string> = {
+  a2a_gateway: "A2A Gateway",
+  ai_prompt_shield: "AI Prompt Shield",
+  ai_rate_limiter: "AI Rate Limiter",
+  api_chargeback_sink: "API Chargeback Sink",
+  cors: "CORS",
+  dns_sd: "DNS SD",
+  geo_restriction: "Geo Restriction",
+  graphql: "GraphQL",
+  grpc_deadline: "gRPC Deadline",
+  grpc_method_router: "gRPC Method Router",
+  grpc_web: "gRPC-Web",
+  hmac_auth: "HMAC Auth",
+  http_logging: "HTTP Logging",
+  ip_restriction: "IP Restriction",
+  jwks_auth: "JWKS Auth",
+  jwt_auth: "JWT Auth",
+  ldap_auth: "LDAP Auth",
+  mcp_gateway: "MCP Gateway",
+  mtls_auth: "mTLS Auth",
+  oauth2_introspection: "OAuth2 Introspection",
+  oidc_relying_party: "OIDC Relying Party",
+  opa: "OPA",
+  openapi_validator: "OpenAPI Validator",
+  otel_tracing: "OpenTelemetry Tracing",
+  soap_ws_security: "SOAP WS-Security",
+  spiffe_identity: "SPIFFE Identity",
+  sse: "SSE",
+  statsd_logging: "StatsD Logging",
+  tcp_connection_throttle: "TCP Connection Throttle",
+  tcp_logging: "TCP Logging",
+  udp_logging: "UDP Logging",
+  udp_rate_limiting: "UDP Rate Limiting",
+  waf: "WAF",
+  ws_frame_logging: "WebSocket Frame Logging",
+  ws_logging: "WebSocket Logging",
+  ws_message_size_limiting: "WebSocket Message Size Limiting",
+  ws_rate_limiting: "WebSocket Rate Limiting",
+};
+
+/**
+ * Lowercase word tokens rendered with their canonical casing instead of plain
+ * title case. Most are ordinary acronyms; a few carry a conventional mixed
+ * case (`gRPC`, `mTLS`, `OTel`). Consulted by the generic fallback only.
+ */
+const ACRONYM_TOKENS: Record<string, string> = {
+  a2a: "A2A",
+  acl: "ACL",
+  ai: "AI",
+  api: "API",
+  cors: "CORS",
+  crl: "CRL",
+  dns: "DNS",
+  dtls: "DTLS",
+  grpc: "gRPC",
+  hmac: "HMAC",
+  http: "HTTP",
+  https: "HTTPS",
+  id: "ID",
+  ip: "IP",
+  jwks: "JWKS",
+  jwt: "JWT",
+  ldap: "LDAP",
+  mcp: "MCP",
+  mtls: "mTLS",
+  oidc: "OIDC",
+  opa: "OPA",
+  otel: "OTel",
+  saml: "SAML",
+  sni: "SNI",
+  soap: "SOAP",
+  spiffe: "SPIFFE",
+  sse: "SSE",
+  ssl: "SSL",
+  tcp: "TCP",
+  tls: "TLS",
+  udp: "UDP",
+  url: "URL",
+  waf: "WAF",
+  ws: "WS",
+  xml: "XML",
+};
+
+function formatPluginWord(word: string): string {
+  const lower = word.toLowerCase();
+  return ACRONYM_TOKENS[lower] ?? lower.charAt(0).toUpperCase() + lower.slice(1);
+}
+
+/**
+ * Human-readable display name for a plugin key
+ * (`ai_prompt_shield` -> "AI Prompt Shield", `cors` -> "CORS").
+ *
+ * The single source of truth for plugin naming across the plugin picker, the
+ * plugin list, and the plugin detail heading. Internal (`__`-prefixed) plugins
+ * are gateway-reserved identifiers, so they are shown verbatim rather than
+ * prettified into something indistinguishable from a real plugin.
+ */
+export function formatPluginName(pluginName: string): string {
+  const key = pluginName.trim();
+  if (!key) return "";
+  if (isInternalPlugin(key)) return key;
+  const override = PLUGIN_DISPLAY_NAMES[key.toLowerCase()];
+  if (override) return override;
+  return key
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map(formatPluginWord)
+    .join(" ");
+}
+
+/* ------------------------------------------------------------------ */
 /*  Default (template) configs per plugin                             */
 /* ------------------------------------------------------------------ */
 

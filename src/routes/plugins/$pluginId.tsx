@@ -18,6 +18,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { PluginConfigForm } from "@/components/forms/PluginConfigForm";
 import { getApiErrorMessage } from "@/api/client";
+import { formatPluginName } from "@/lib/pluginConfigDefaults";
 import type { PluginConfigCreate } from "@/api/types";
 
 export default function PluginDetailPage() {
@@ -113,7 +114,7 @@ export default function PluginDetailPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-text-primary">
-            {plugin.plugin_name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
+            {formatPluginName(plugin.plugin_name)}
           </h1>
           <p className="text-text-muted text-sm mt-1 font-mono">{plugin.id}</p>
         </div>

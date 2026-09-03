@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { Select } from "@/components/ui/Select";
+import { Select, type SelectOptionGroup } from "@/components/ui/Select";
 import type {
   PluginConfig,
   PluginConfigCreate,
@@ -15,6 +15,7 @@ import type {
 } from "@/api/types";
 import {
   formatPluginConfigDefault,
+  formatPluginName,
   getPluginMeta,
   isInternalPlugin,
 } from "@/lib/pluginConfigDefaults";
@@ -167,22 +168,29 @@ export function PluginConfigForm({
 
   /* ---------- Helpers ---------- */
 
-  // Group by category so the picker reads like a catalog; internal (__-prefixed)
-  // plugins are gateway-injected and never user-configurable.
-  const pluginOptions = useMemo(() => {
-    const selectable = availablePlugins.filter((p) => !isInternalPlugin(p));
-    const sorted = [...selectable].sort((a, b) => {
-      const catA = getPluginMeta(a).category;
-      const catB = getPluginMeta(b).category;
-      if (catA !== catB) return catA.localeCompare(catB);
-      return a.localeCompare(b);
-    });
-    return sorted.map((p) => ({
-      value: p,
-      label: `${getPluginMeta(p).category} · ${p
-        .replace(/_/g, " ")
-        .replace(/\b\w/g, (c) => c.toUpperCase())}`,
-    }));
+  // Group by category so the picker reads like a catalog instead of one flat
+  // ~80-entry list; the group heading carries the category, so an option label
+  // is just the plugin's display name. Internal (__-prefixed) plugins are
+  // gateway-injected and never user-configurable.
+  const pluginGroups = useMemo<SelectOptionGroup[]>(() => {
+    const byCategory = new Map<string, SelectOptionGroup>();
+    for (const plugin of availablePlugins) {
+      if (isInternalPlugin(plugin)) continue;
+      const { category } = getPluginMeta(plugin);
+      let group = byCategory.get(category);
+      if (!group) {
+        group = { label: category, options: [] };
+        byCategory.set(category, group);
+      }
+      group.options.push({ value: plugin, label: formatPluginName(plugin) });
+    }
+    const groups = [...byCategory.values()].sort((a, b) =>
+      a.label.localeCompare(b.label),
+    );
+    for (const group of groups) {
+      group.options.sort((a, b) => a.label.localeCompare(b.label));
+    }
+    return groups;
   }, [availablePlugins]);
 
   const selectedMeta = pluginName ? getPluginMeta(pluginName) : undefined;
@@ -220,7 +228,7 @@ export function PluginConfigForm({
             label="Plugin Name"
             value={pluginName}
             onValueChange={setPluginName}
-            options={pluginOptions}
+            groups={pluginGroups}
             placeholder="Select a plugin..."
             error={errors.plugin_name}
             helpText={selectedMeta?.description}
