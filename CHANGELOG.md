@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-03
+
+First public release of Ferrum Foundry.
+
 ### Added
 
 - Trusted-proxy authentication mode that turns a proxy-asserted actor, role, and namespace grants into the downstream Ferrum admin JWT (#149).
@@ -29,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Admin JWT signing is centralized so the BFF and the demo seeder share one role, audience, and namespace claim contract (#155).
 - The container base and CI runtime move to Node.js 24 LTS; Node.js 22 remains the minimum supported local version.
 - Dependencies refreshed across frontend, server, and tooling, including adoption of ESLint 10.
+- The BFF trusts forwarded client addresses from exactly the directly connected identity proxy through an explicit predicate, after Fastify 5.12.1 stopped honoring the numeric hop-count form.
 - Trusted-proxy CSRF tokens are stateless, so replicas no longer depend on shared server-side grant state.
 - Repository agent skill setup mirrored from Ferrum Edge for local review workflows (#154).
 
@@ -59,3 +64,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deny-by-default Docker build context, digest-pinned multi-architecture bases, and full commit SHA pins for every third-party GitHub Action (#155).
 - Release channels are monotonic: tags are validated and ancestry-checked before registry access, prereleases never advance stable tags, and promotion runs through a fail-closed FIFO queue (#155).
 - Scheduled live branch deletion replaced with dry-run planning plus a separately approved, exact-SHA-revalidated deletion path (#155).
+
+[Unreleased]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/ferrum-edge/ferrum-foundry/releases/tag/v0.1.0
