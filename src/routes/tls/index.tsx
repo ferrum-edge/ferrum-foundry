@@ -22,7 +22,8 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { SkeletonRow } from "@/components/ui/Skeleton";
 import { PaginationControls } from "@/components/shared/PaginationControls";
 import { useToast } from "@/components/ui/Toast";
-import { getApiErrorMessage } from "@/api/client";
+import { getApiErrorDetail, getApiErrorMessage } from "@/api/client";
+import { parseFieldError } from "@/lib/apiFieldErrors";
 import {
   useTlsInventory,
   useTlsEvents,
@@ -43,10 +44,12 @@ import {
   useRotateTlsSurface,
   useValidateTlsMaterial,
 } from "@/hooks/useTls";
+import { TLS_VALIDATE_FIELDS } from "@/api/tls";
 import type {
   ManagedTlsCollection,
   ManagedTlsRecord,
   TlsRotateSurface,
+  TlsValidateRequest,
   AcmeOrder,
   AcmeCertificateRecord,
 } from "@/api/tls";
@@ -95,6 +98,14 @@ interface ManagedTabConfig {
   collection: ManagedTlsCollection;
   title: string;
   description: string;
+  /** Heading for the empty state; each store holds a different material. */
+  emptyTitle: string;
+  /**
+   * What this store is for, in one sentence. The empty state appends the
+   * `managed://{collection}/{id}` reference line, so the URI shape can never
+   * drift from the collection the tab actually reads.
+   */
+  emptyDescription: string;
   /** Field definitions for the create dialog. */
   fields: Array<{
     key: string;
@@ -111,6 +122,9 @@ const MANAGED_TABS: ManagedTabConfig[] = [
     title: "Certificates",
     description:
       "Managed server/client certificates referenced as managed://certificates/{id}. Private keys are stored but never returned.",
+    emptyTitle: "No certificates yet",
+    emptyDescription:
+      "Upload a certificate and its private key to terminate TLS on a listener.",
     fields: [
       { key: "cert_pem", label: "Certificate (PEM)", textarea: true, required: true, placeholder: "-----BEGIN CERTIFICATE-----" },
       { key: "key_pem", label: "Private Key (PEM)", textarea: true, required: true, placeholder: "-----BEGIN PRIVATE KEY-----" },
@@ -122,6 +136,9 @@ const MANAGED_TABS: ManagedTabConfig[] = [
     title: "CA Bundles",
     description:
       "Trust anchor bundles referenced as managed://ca-bundles/{id} for client or backend verification.",
+    emptyTitle: "No CA bundles yet",
+    emptyDescription:
+      "Upload a bundle to verify client or upstream certificates.",
     fields: [
       { key: "ca_bundle_pem", label: "CA Bundle (PEM)", textarea: true, required: true, placeholder: "-----BEGIN CERTIFICATE-----" },
     ],
@@ -130,6 +147,9 @@ const MANAGED_TABS: ManagedTabConfig[] = [
     collection: "crls",
     title: "CRLs",
     description: "Certificate revocation lists referenced as managed://crls/{id}.",
+    emptyTitle: "No CRLs yet",
+    emptyDescription:
+      "Upload a certificate revocation list to reject revoked client certificates.",
     fields: [
       { key: "crl_pem", label: "CRL (PEM)", textarea: true, required: true, placeholder: "-----BEGIN X509 CRL-----" },
     ],
@@ -138,6 +158,9 @@ const MANAGED_TABS: ManagedTabConfig[] = [
     collection: "ocsp-responses",
     title: "OCSP",
     description: "Stapled OCSP responses referenced as managed://ocsp-responses/{id}.",
+    emptyTitle: "No OCSP responses yet",
+    emptyDescription:
+      "Upload a stapled OCSP response to serve with a certificate.",
     fields: [
       { key: "ocsp_der_base64", label: "OCSP Response (base64 DER)", textarea: true, required: true },
     ],
@@ -146,6 +169,8 @@ const MANAGED_TABS: ManagedTabConfig[] = [
     collection: "jwks",
     title: "JWKS",
     description: "JSON Web Key Sets referenced as managed://jwks/{id} for token verification.",
+    emptyTitle: "No JWKS documents yet",
+    emptyDescription: "Upload a JSON Web Key Set to verify tokens.",
     fields: [
       { key: "jwks_json", label: "JWKS Document (JSON)", textarea: true, required: true, placeholder: '{"keys":[...]}' },
     ],
@@ -161,8 +186,26 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ManagedTlsRecord | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const records = data ?? [];
+
+  const setField = (key: string, value: string) => {
+    setForm((f) => ({ ...f, [key]: value }));
+    // The message described the material that was submitted; it stops being
+    // true the moment the operator edits that field.
+    setFieldErrors((errors) => {
+      if (!(key in errors)) return errors;
+      const next = { ...errors };
+      delete next[key];
+      return next;
+    });
+  };
+
+  const closeCreate = () => {
+    setCreateOpen(false);
+    setFieldErrors({});
+  };
 
   const handleCreate = async () => {
     for (const field of config.fields) {
@@ -182,8 +225,21 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
       toast("success", `${config.title} record created`);
       setCreateOpen(false);
       setForm({});
+      setFieldErrors({});
     } catch (err) {
-      toast("error", await getApiErrorMessage(err, "Failed to create record"));
+      // The gateway rejects unusable material with `field: message` naming the
+      // request key. Show it under that field instead of toasting ky's
+      // "status 400 ... <url>" wrapper over the same sentence.
+      const detail = await getApiErrorDetail(err);
+      const fieldError = parseFieldError(
+        detail,
+        config.fields.map((field) => field.key),
+      );
+      if (fieldError) {
+        setFieldErrors({ [fieldError.field]: fieldError.message });
+        return;
+      }
+      toast("error", detail || `Could not save ${config.title}`);
     }
   };
 
@@ -206,8 +262,8 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
         )}
         {!isLoading && records.length === 0 && (
           <EmptyState
-            title={`No ${config.title.toLowerCase()} yet`}
-            description={`Upload material to reference it from TLS source fields as managed://${config.collection}/{id}.`}
+            title={config.emptyTitle}
+            description={`${config.emptyDescription} Reference it as managed://${config.collection}/{id}.`}
           />
         )}
         {!isLoading && records.length > 0 && (
@@ -248,7 +304,7 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
       </Card>
 
       {/* Create dialog */}
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+      <Dialog open={createOpen} onOpenChange={(open) => (open ? setCreateOpen(true) : closeCreate())}>
         <DialogContent className="max-h-[85vh] overflow-y-auto">
           <DialogTitle>{`Add ${config.title.replace(/s$/, "")}`}</DialogTitle>
           <div className="space-y-4 mt-4">
@@ -256,13 +312,13 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
             <Input
               label="ID"
               value={form.id ?? ""}
-              onChange={(e) => setForm((f) => ({ ...f, id: e.target.value }))}
+              onChange={(e) => setField("id", e.target.value)}
               placeholder="Auto-generated"
             />
             <Input
               label="Name"
               value={form.name ?? ""}
-              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              onChange={(e) => setField("name", e.target.value)}
               placeholder="Friendly name"
             />
           </div>
@@ -272,25 +328,30 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
                 <span className="text-text-secondary text-sm font-medium">{field.label}</span>
                 <textarea
                   value={form[field.key] ?? ""}
-                  onChange={(e) => setForm((f) => ({ ...f, [field.key]: e.target.value }))}
+                  onChange={(e) => setField(field.key, e.target.value)}
                   rows={6}
                   placeholder={field.placeholder}
-                  className="bg-code-bg border border-border rounded-lg px-3 py-2 text-text-primary text-xs font-mono placeholder:text-text-muted focus:border-orange focus:ring-1 focus:ring-orange/30 resize-y"
+                  className={`bg-code-bg border rounded-lg px-3 py-2 text-text-primary text-xs font-mono placeholder:text-text-muted resize-y ${fieldErrors[field.key] ? "border-danger focus:border-danger focus:ring-1 focus:ring-danger/30" : "border-border focus:border-orange focus:ring-1 focus:ring-orange/30"}`}
                   spellCheck={false}
+                  aria-invalid={fieldErrors[field.key] ? true : undefined}
                 />
+                {fieldErrors[field.key] && (
+                  <p className="text-danger text-xs">{fieldErrors[field.key]}</p>
+                )}
               </div>
             ) : (
               <Input
                 key={field.key}
                 label={field.label}
                 value={form[field.key] ?? ""}
-                onChange={(e) => setForm((f) => ({ ...f, [field.key]: e.target.value }))}
+                onChange={(e) => setField(field.key, e.target.value)}
                 placeholder={field.placeholder}
+                error={fieldErrors[field.key]}
               />
             ),
           )}
           <div className="flex justify-end gap-2 pt-2">
-            <Button variant="secondary" onClick={() => setCreateOpen(false)}>
+            <Button variant="secondary" onClick={closeCreate}>
               Cancel
             </Button>
             <Button onClick={handleCreate} loading={createRecord.isPending}>
@@ -1213,13 +1274,59 @@ function AcmeTab() {
 /*  Validate tab                                                       */
 /* ------------------------------------------------------------------ */
 
+/** The validate request keys this tab actually renders a textarea for. */
+const VALIDATE_FIELDS = [
+  { key: "cert_pem", label: "Certificate (PEM)" },
+  { key: "key_pem", label: "Private Key (PEM)" },
+  { key: "ca_bundle_pem", label: "CA Bundle (PEM)" },
+] as const satisfies readonly { key: keyof TlsValidateRequest; label: string }[];
+
 function ValidateTab() {
   const { toast } = useToast();
   const validateMaterial = useValidateTlsMaterial();
-  const [certPem, setCertPem] = useState("");
-  const [keyPem, setKeyPem] = useState("");
-  const [caPem, setCaPem] = useState("");
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [result, setResult] = useState<{ valid: boolean; validated: Record<string, unknown> } | null>(null);
+
+  const setField = (key: string, value: string) => {
+    setValues((current) => ({ ...current, [key]: value }));
+    setFieldErrors((errors) => {
+      if (!(key in errors)) return errors;
+      const next = { ...errors };
+      delete next[key];
+      return next;
+    });
+  };
+
+  const handleValidate = async () => {
+    setResult(null);
+    setFieldErrors({});
+    const request: TlsValidateRequest = {};
+    if (values.cert_pem?.trim()) request.cert_pem = values.cert_pem;
+    if (values.key_pem?.trim()) request.key_pem = values.key_pem;
+    if (values.ca_bundle_pem?.trim()) request.ca_bundle_pem = values.ca_bundle_pem;
+    try {
+      setResult(await validateMaterial.mutateAsync(request));
+    } catch (err) {
+      // A 400 here names the request key it rejected, so the message belongs
+      // under that textarea rather than in a toast quoting the request URL.
+      const detail = await getApiErrorDetail(err);
+      const fieldError = parseFieldError(detail, TLS_VALIDATE_FIELDS);
+      if (
+        fieldError &&
+        VALIDATE_FIELDS.some((field) => field.key === fieldError.field)
+      ) {
+        setFieldErrors({ [fieldError.field]: fieldError.message });
+        return;
+      }
+      // A field with no control on this tab (crl_pem, ...) still has to be
+      // readable, so fall back to the bare message.
+      toast(
+        "error",
+        fieldError?.message || detail || "Could not validate this material",
+      );
+    }
+  };
 
   return (
     <div className="space-y-4 max-w-3xl">
@@ -1227,40 +1334,23 @@ function ValidateTab() {
         Validate PEM material without persisting anything — cert/key match, chain
         integrity, and expiry are checked by the gateway.
       </p>
-      {(
-        [
-          ["Certificate (PEM)", certPem, setCertPem],
-          ["Private Key (PEM)", keyPem, setKeyPem],
-          ["CA Bundle (PEM)", caPem, setCaPem],
-        ] as const
-      ).map(([label, value, setter]) => (
-        <div key={label} className="flex flex-col gap-1.5">
-          <span className="text-text-secondary text-sm font-medium">{label}</span>
+      {VALIDATE_FIELDS.map((field) => (
+        <div key={field.key} className="flex flex-col gap-1.5">
+          <span className="text-text-secondary text-sm font-medium">{field.label}</span>
           <textarea
-            value={value}
-            onChange={(e) => setter(e.target.value)}
+            value={values[field.key] ?? ""}
+            onChange={(e) => setField(field.key, e.target.value)}
             rows={5}
-            className="bg-code-bg border border-border rounded-lg px-3 py-2 text-text-primary text-xs font-mono placeholder:text-text-muted focus:border-orange focus:ring-1 focus:ring-orange/30 resize-y"
+            className={`bg-code-bg border rounded-lg px-3 py-2 text-text-primary text-xs font-mono placeholder:text-text-muted resize-y ${fieldErrors[field.key] ? "border-danger focus:border-danger focus:ring-1 focus:ring-danger/30" : "border-border focus:border-orange focus:ring-1 focus:ring-orange/30"}`}
             spellCheck={false}
+            aria-invalid={fieldErrors[field.key] ? true : undefined}
           />
+          {fieldErrors[field.key] && (
+            <p className="text-danger text-xs">{fieldErrors[field.key]}</p>
+          )}
         </div>
       ))}
-      <Button
-        loading={validateMaterial.isPending}
-        onClick={async () => {
-          setResult(null);
-          try {
-            const res = await validateMaterial.mutateAsync({
-              ...(certPem.trim() && { cert_pem: certPem }),
-              ...(keyPem.trim() && { key_pem: keyPem }),
-              ...(caPem.trim() && { ca_bundle_pem: caPem }),
-            });
-            setResult(res);
-          } catch (err) {
-            toast("error", await getApiErrorMessage(err, "Validation request failed"));
-          }
-        }}
-      >
+      <Button loading={validateMaterial.isPending} onClick={handleValidate}>
         Validate
       </Button>
       {result && (
