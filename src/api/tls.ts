@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – TLS management API (types + endpoints)           */
 /* ------------------------------------------------------------------ */
 
-import { FLEET_GLOBAL, proxyApi } from "./client";
+import { FLEET_GLOBAL, SILENT_ERRORS, proxyApi } from "./client";
 import type { PaginatedResponse, PaginationParams } from "./types";
 import { collectAllPages } from "./pagination";
 
@@ -330,6 +330,21 @@ export interface TlsValidateRequest {
   cert_expiry_warning_days?: number;
 }
 
+/**
+ * Request keys `POST /admin/tls/validate` can name in a `field: message`
+ * validation error. `satisfies` keeps the list honest against the request
+ * type: renaming a field upstream fails the build rather than silently
+ * dropping an inline form error.
+ */
+export const TLS_VALIDATE_FIELDS = [
+  "cert_pem",
+  "key_pem",
+  "ca_bundle_pem",
+  "crl_pem",
+  "allow_expired",
+  "cert_expiry_warning_days",
+] as const satisfies readonly (keyof TlsValidateRequest)[];
+
 export interface TlsValidateResponse {
   valid: boolean;
   validated: Record<string, unknown>;
@@ -347,6 +362,19 @@ function paginationSearch(params: PaginationParams): Record<string, string> {
 }
 
 const FLEET_GLOBAL_CONTEXT = { [FLEET_GLOBAL]: true };
+
+/**
+ * Fleet-global, and the caller owns the failure.
+ *
+ * The gateway answers unusable operator-pasted material with a field-scoped
+ * 400 (`{"error":"cert_pem: no PEM certificates found"}`). That is a form
+ * validation result, not a fault to report: the form renders it under the
+ * offending textarea, so the global "API Error" dialog must stay closed.
+ */
+const FLEET_GLOBAL_SILENT_CONTEXT = {
+  [FLEET_GLOBAL]: true,
+  [SILENT_ERRORS]: true,
+};
 
 /* ---------- Inventory & events ---------- */
 
@@ -402,7 +430,10 @@ export async function createManagedRecord(
   data: ManagedTlsRequest,
 ): Promise<ManagedTlsRecord> {
   return proxyApi
-    .post(`admin/tls/${collection}`, { json: data, context: FLEET_GLOBAL_CONTEXT })
+    .post(`admin/tls/${collection}`, {
+      json: data,
+      context: FLEET_GLOBAL_SILENT_CONTEXT,
+    })
     .json<ManagedTlsRecord>();
 }
 
@@ -560,6 +591,9 @@ export async function validateMaterial(
   data: TlsValidateRequest,
 ): Promise<TlsValidateResponse> {
   return proxyApi
-    .post("admin/tls/validate", { json: data, context: FLEET_GLOBAL_CONTEXT })
+    .post("admin/tls/validate", {
+      json: data,
+      context: FLEET_GLOBAL_SILENT_CONTEXT,
+    })
     .json<TlsValidateResponse>();
 }

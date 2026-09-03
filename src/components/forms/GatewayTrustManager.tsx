@@ -19,6 +19,7 @@ import {
   type GatewayTrustBundle,
   type GatewayTrustRevisionConflict,
 } from "@/api/trust";
+import { useHealth } from "@/hooks/useMetrics";
 import {
   useCreateTrustBundle,
   useDeleteTrustBundle,
@@ -70,6 +71,36 @@ function TextAreaField({
   );
 }
 
+/**
+ * Empty-state copy for a namespace with no trust bundle.
+ *
+ * Outside mesh mode a trust bundle is inert, so saying only "no trust bundle"
+ * would imply something is missing when nothing would read it anyway. `mode`
+ * is undefined while `/health` is loading or unreachable; the generic sentence
+ * then states the fact without guessing at a mode.
+ */
+function emptyTrustCopy(
+  namespace: string,
+  mode: string | undefined,
+): { title: string; description: string } {
+  if (!mode) {
+    return {
+      title: "No gateway trust bundle",
+      description: `Namespace ${namespace} has no SPIFFE trust bundle configured.`,
+    };
+  }
+  if (mode.trim().toLowerCase() === "mesh") {
+    return {
+      title: "No gateway trust bundle",
+      description: `Namespace ${namespace} has no SPIFFE trust bundle. Create one to establish mesh identity for this namespace.`,
+    };
+  }
+  return {
+    title: `Mesh trust is not active in ${mode} mode`,
+    description: `Trust bundles only take effect when the gateway runs in mesh mode. You can still create one for namespace ${namespace} so it is ready.`,
+  };
+}
+
 function countAuthorities(bundle: GatewayTrustBundle): {
   x509: number;
   jwt: number;
@@ -87,6 +118,7 @@ export function GatewayTrustManager() {
   const { selectedNamespace } = useNamespace();
   const bundlesQuery = useTrustBundles();
   const statusQuery = useTrustStatus();
+  const healthQuery = useHealth();
   const createBundle = useCreateTrustBundle();
   const updateBundle = useUpdateTrustBundle();
   const deleteBundle = useDeleteTrustBundle();
@@ -182,10 +214,16 @@ export function GatewayTrustManager() {
   };
 
   const counts = bundle ? countAuthorities(bundle) : null;
+  // Publication numbers describe a bundle that exists. With no bundle and a
+  // status that says so, the tiles and the publication card contradicted the
+  // "no gateway trust bundle" state they were rendered above, so nothing is
+  // shown but the empty state and its Create button.
+  const hasTrustDetail = Boolean(bundle) || status?.configured === true;
+  const emptyCopy = emptyTrustCopy(selectedNamespace, healthQuery.data?.mode);
 
   return (
     <div className="space-y-4">
-      {status && (
+      {status && hasTrustDetail && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <Card>
             <p className="text-xs text-text-muted uppercase tracking-wider">Configured</p>
@@ -214,7 +252,7 @@ export function GatewayTrustManager() {
         </div>
       )}
 
-      {status && (
+      {status && hasTrustDetail && (
         <Card className={status.process.last_failure_reason === "none" ? "" : "border-warning/40"}>
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-semibold text-text-primary">Publication status</span>
@@ -268,8 +306,8 @@ export function GatewayTrustManager() {
         </Card>
       ) : (
         <EmptyState
-          title="No gateway trust bundle"
-          description={`Namespace ${selectedNamespace} has no SPIFFE trust bundle configured.`}
+          title={emptyCopy.title}
+          description={emptyCopy.description}
           action={<Button size="sm" onClick={openCreate}>Create Trust Bundle</Button>}
         />
       )}

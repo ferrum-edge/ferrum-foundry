@@ -58,6 +58,12 @@ const variantTextColor: Record<ToastVariant, string> = {
   info: "text-blue",
 };
 
+/**
+ * Cap the toast at the viewport minus the container's 1rem inset on each side
+ * so a long message cannot push it off the right edge of a narrow screen.
+ */
+const TOAST_WIDTH = "max-w-[calc(100vw-2rem)] sm:max-w-sm";
+
 const variantProgressColor: Record<ToastVariant, string> = {
   success: "bg-success",
   error: "bg-danger",
@@ -105,7 +111,7 @@ function ToastNotification({
 
   return (
     <div
-      className={`relative overflow-hidden border rounded-lg shadow-xl max-w-sm w-full transition-all duration-200 ${config.bg} ${config.border} ${exiting ? "opacity-0 translate-x-full" : "opacity-100 translate-x-0"}`}
+      className={`relative overflow-hidden border rounded-lg shadow-xl w-full ${TOAST_WIDTH} transition-all duration-200 ${config.bg} ${config.border} ${exiting ? "opacity-0 translate-x-full" : "opacity-100 translate-x-0"}`}
     >
       <div className="flex items-start gap-3 p-3">
         <svg
@@ -121,7 +127,11 @@ function ToastNotification({
             d={config.icon}
           />
         </svg>
-        <p className="text-sm text-text-primary flex-1">{item.message}</p>
+        {/* An API detail can carry an unbroken URL or fingerprint; wrap it
+            anywhere rather than let it overflow the toast. */}
+        <p className="text-sm text-text-primary flex-1 min-w-0 break-words [overflow-wrap:anywhere]">
+          {item.message}
+        </p>
         <button
           onClick={handleDismiss}
           className="text-text-muted hover:text-text-primary shrink-0 cursor-pointer"
