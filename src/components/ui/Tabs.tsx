@@ -23,9 +23,19 @@ export const TabsTrigger = forwardRef<
 >(({ className = "", ...props }, ref) => (
   <TabsPrimitive.Trigger
     ref={ref}
+    // Exactly one tab may ever look active. Two rules protect that:
+    //
+    //  1. No colour transition. Radix flips `data-state` on both tabs in the
+    //     same commit, so the underline moves instantly while a transitioned
+    //     text colour would fade — leaving the outgoing tab still orange for
+    //     ~150ms next to the already-orange incoming tab.
+    //  2. Hover is scoped to `data-[state=inactive]`, so hovering the active
+    //     tab can never repaint it with the inactive colour regardless of how
+    //     the generated `hover:` / `data-[state=active]:` rules end up ordered.
+    //
     // The focus indicator is an inset ring (not the global orange outline) so
     // a focused-but-inactive tab can't be mistaken for a second active tab.
-    className={`px-4 py-2 text-sm font-medium whitespace-nowrap shrink-0 text-text-secondary hover:text-text-primary transition-colors duration-150 border-b-2 border-transparent cursor-pointer -mb-px rounded-t-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-orange/40 data-[state=active]:text-orange data-[state=active]:border-orange ${className}`}
+    className={`px-4 py-2 text-sm font-medium whitespace-nowrap shrink-0 text-text-secondary data-[state=inactive]:hover:text-text-primary border-b-2 border-transparent cursor-pointer -mb-px rounded-t-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-orange/40 data-[state=active]:text-orange data-[state=active]:border-orange ${className}`}
     {...props}
   />
 ));
