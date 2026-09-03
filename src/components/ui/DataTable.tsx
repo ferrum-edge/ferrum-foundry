@@ -44,6 +44,17 @@ export interface DataTableProps<T> {
 const PAGE_SIZES = [25, 50, 100, 250] as const;
 
 // ---------------------------------------------------------------------------
+// TanStack column sizing defaults
+// ---------------------------------------------------------------------------
+
+// TanStack merges its own sizing defaults into every resolved columnDef, so a
+// column that never declared a size still reports `size: 150` / `minSize: 20`.
+// Comparing against these constants is how we tell an intentional value from
+// the library default and avoid pinning every column to 150px / 20px.
+const TANSTACK_DEFAULT_SIZE = 150;
+const TANSTACK_DEFAULT_MIN_SIZE = 20;
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -243,15 +254,23 @@ export function DataTable<T>({
                 {headerGroup.headers.map((header) => {
                   const canSort = header.column.getCanSort();
                   const sortDir = header.column.getIsSorted();
+                  const size = header.getSize();
+                  const minSize = header.column.columnDef.minSize;
 
                   return (
                     <th
                       key={header.id}
                       className={`px-4 py-3 text-left text-text-secondary text-xs font-semibold uppercase tracking-wider select-none whitespace-nowrap ${canSort ? "cursor-pointer hover:text-text-primary" : ""}`}
                       style={{
-                        width:
-                          header.getSize() !== 150
-                            ? header.getSize()
+                        width: size !== TANSTACK_DEFAULT_SIZE ? size : undefined,
+                        // A `minSize` on the column definition becomes a real
+                        // `min-width` so a long label (e.g. "HEALTH CHECK")
+                        // keeps its column wide enough to stay on one line
+                        // instead of being squeezed by its neighbours.
+                        minWidth:
+                          minSize !== undefined &&
+                          minSize !== TANSTACK_DEFAULT_MIN_SIZE
+                            ? minSize
                             : undefined,
                       }}
                       onClick={
@@ -260,7 +279,11 @@ export function DataTable<T>({
                           : undefined
                       }
                     >
-                      <span className="inline-flex items-center gap-1">
+                      {/* `whitespace-nowrap` also belongs on the inner span:
+                          the `th` rule does not survive the inline-flex
+                          formatting context, so without it the label wraps
+                          around the sort icon even in a nowrap cell. */}
+                      <span className="inline-flex items-center gap-1 whitespace-nowrap">
                         {header.isPlaceholder
                           ? null
                           : flexRender(

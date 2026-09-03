@@ -64,6 +64,26 @@ const columns = [
   { key: "created_at", label: "Created" },
 ] as const;
 
+/*
+ * The header row and every body row are separate grid containers, so the
+ * template only lines labels up with the values underneath them if it resolves
+ * to identical track sizes in both. That rules out content-dependent tracks: a
+ * `max-content` "Created" column measured "CREATED" (~56px) in the header and
+ * a formatted timestamp (~150px) in the rows, so the header's flexible columns
+ * came out ~90px wider than the body's — and the two badge columns absorbed
+ * the squeeze.
+ *
+ * Every track below is therefore a fixed length or an `fr` with an explicit
+ * `minmax(0, …)`, none of which can disagree between the two containers. The
+ * badge columns are sized off their *labels*, which are the widest thing in
+ * them: "HEALTH CHECK" needs ~100px at text-xs/uppercase/tracking-wider, so
+ * the old 5rem (80px) wrapped it onto two lines. The tracks sum to ~860px of
+ * the ~860px available inside the card at a 1280px viewport and shrink from
+ * the flexible columns below that, so nothing overflows or scrolls sideways.
+ */
+const GRID_TEMPLATE =
+  "grid grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_5rem_7.5rem_10rem] gap-4";
+
 /* ================================================================== */
 /*  UpstreamsPage                                                      */
 /* ================================================================== */
@@ -133,9 +153,11 @@ export default function UpstreamsPage() {
       {/* Table */}
       <Card className="overflow-hidden p-0">
         {/* Header row */}
-        <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_4rem_5rem_max-content] gap-4 px-6 py-3 border-b border-border bg-bg-card text-text-muted text-xs font-semibold uppercase tracking-wider">
+        <div
+          className={`${GRID_TEMPLATE} px-6 py-3 border-b border-border bg-bg-card text-text-muted text-xs font-semibold uppercase tracking-wider`}
+        >
           {columns.map((col) => (
-            <span key={col.key}>
+            <span key={col.key} className="whitespace-nowrap">
               {col.label}
             </span>
           ))}
@@ -181,7 +203,7 @@ export default function UpstreamsPage() {
               <button
                 key={upstream.id}
                 type="button"
-                className="grid grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_4rem_5rem_max-content] gap-4 px-6 py-3.5 w-full text-left hover:bg-bg-card-hover transition-colors cursor-pointer"
+                className={`${GRID_TEMPLATE} px-6 py-3.5 w-full text-left hover:bg-bg-card-hover transition-colors cursor-pointer`}
                 onClick={() =>
                   navigate({
                     to: "/upstreams/$upstreamId",

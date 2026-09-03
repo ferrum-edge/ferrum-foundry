@@ -224,7 +224,11 @@ export function PrometheusStatsPanel({ text }: { text: string }) {
   }
 
   return (
-    <div className="space-y-6">
+    // `min-w-0 max-w-full`: a flex/grid item defaults to `min-width:auto`, so
+    // wherever this panel is dropped into one the raw metrics text below could
+    // push the panel — and the page — wider than the viewport instead of
+    // scrolling inside its own card.
+    <div className="space-y-6 min-w-0 max-w-full">
       {/* Per-route summary table */}
       {summaries.length > 0 && (
         <div>
@@ -288,7 +292,7 @@ export function PrometheusStatsPanel({ text }: { text: string }) {
       )}
 
       {/* Raw text toggle */}
-      <div>
+      <div className="min-w-0 max-w-full">
         <button
           type="button"
           className="text-xs text-text-muted hover:text-text-secondary transition-colors cursor-pointer flex items-center gap-1"
@@ -310,7 +314,12 @@ export function PrometheusStatsPanel({ text }: { text: string }) {
           {showRaw ? "Hide" : "Show"} raw Prometheus text
         </button>
         {showRaw && (
-          <div className="mt-2 bg-bg-card border border-border rounded-xl overflow-auto max-h-[400px]">
+          // The `<pre>` deliberately keeps `whitespace-pre` — metric lines must
+          // not wrap mid-label — so this wrapper is what has to absorb the
+          // overflow: `min-w-0 max-w-full` stops the long lines widening any
+          // ancestor and `overflow-auto` turns them into a scrollbar inside
+          // the card.
+          <div className="mt-2 bg-bg-card border border-border rounded-xl overflow-auto max-h-[400px] min-w-0 max-w-full">
             <pre className="p-4 text-xs text-text-secondary font-mono whitespace-pre">
               <code>{text}</code>
             </pre>
