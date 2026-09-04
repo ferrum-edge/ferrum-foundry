@@ -25,6 +25,9 @@ const ENV_KEYS = [
   'FERRUM_CONNECT_TIMEOUT',
   'FERRUM_READ_TIMEOUT',
   'FERRUM_WRITE_TIMEOUT',
+  'FERRUM_UPLOAD_TIMEOUT',
+  'FERRUM_MAX_LARGE_UPLOADS',
+  'FERRUM_MAX_ACTIVE_UPLOADS',
   'FERRUM_BIND_ADDRESS',
   'FERRUM_SHUTDOWN_TIMEOUT',
   'PORT',
@@ -106,6 +109,9 @@ describe('config', () => {
       connectTimeout: 5000,
       readTimeout: 60000,
       writeTimeout: 60000,
+      uploadTimeout: 300_000,
+      maxLargeUploads: 2,
+      maxActiveUploads: 32,
       port: 3001,
       bindAddress: '0.0.0.0',
       shutdownTimeout: 10_000,
@@ -152,6 +158,45 @@ describe('config', () => {
       const invalid = await loadModule();
       expect(() => invalid.loadConfig()).toThrow(/FERRUM_SHUTDOWN_TIMEOUT/);
     }
+  });
+
+  it('bounds the absolute upload deadline', async () => {
+    setValidEnv({ FERRUM_UPLOAD_TIMEOUT: '90000' });
+    const { loadConfig } = await loadModule();
+    expect(loadConfig().uploadTimeout).toBe(90_000);
+
+    for (const value of ['999', '3600001', 'never']) {
+      clearTestEnv();
+      setValidEnv({ FERRUM_UPLOAD_TIMEOUT: value });
+      const invalid = await loadModule();
+      expect(() => invalid.loadConfig()).toThrow(/FERRUM_UPLOAD_TIMEOUT/);
+    }
+  });
+
+  it('bounds the global and large in-flight upload pools', async () => {
+    setValidEnv({ FERRUM_MAX_ACTIVE_UPLOADS: '64', FERRUM_MAX_LARGE_UPLOADS: '8' });
+    const { loadConfig } = await loadModule();
+    expect(loadConfig()).toMatchObject({ maxActiveUploads: 64, maxLargeUploads: 8 });
+
+    for (const value of ['0', '1025', 'many']) {
+      clearTestEnv();
+      setValidEnv({ FERRUM_MAX_ACTIVE_UPLOADS: value });
+      const invalid = await loadModule();
+      expect(() => invalid.loadConfig()).toThrow(/FERRUM_MAX_ACTIVE_UPLOADS/);
+    }
+
+    for (const value of ['0', '33']) {
+      clearTestEnv();
+      setValidEnv({ FERRUM_MAX_LARGE_UPLOADS: value });
+      const invalid = await loadModule();
+      expect(() => invalid.loadConfig()).toThrow(/FERRUM_MAX_LARGE_UPLOADS/);
+    }
+  });
+
+  it('rejects a large-upload pool wider than the global in-flight upload pool', async () => {
+    setValidEnv({ FERRUM_MAX_LARGE_UPLOADS: '8', FERRUM_MAX_ACTIVE_UPLOADS: '4' });
+    const { loadConfig } = await loadModule();
+    expect(() => loadConfig()).toThrow(/FERRUM_MAX_LARGE_UPLOADS must not exceed FERRUM_MAX_ACTIVE_UPLOADS/);
   });
 
   it('parses role, audience, and exact namespace claims', async () => {

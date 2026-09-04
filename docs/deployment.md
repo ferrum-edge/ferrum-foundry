@@ -115,8 +115,10 @@ strings `true` and `false`. Duration variables are integers.
 | `FERRUM_TLS_VERIFY` | No | `true` | `true`/`false` | Verify the admin API certificate; never set to `false` in production |
 | `FERRUM_CONNECT_TIMEOUT` | No | `5000` | 100-300000 ms | TCP/TLS connect timeout to the admin API |
 | `FERRUM_READ_TIMEOUT` | No | `60000` | 100-3600000 ms | Response read timeout |
-| `FERRUM_WRITE_TIMEOUT` | No | `60000` | 100-3600000 ms | Request write timeout |
-| `FERRUM_MAX_LARGE_UPLOADS` | No | `2` | 1-32 | Concurrent restore and API-spec uploads before the BFF returns `429` |
+| `FERRUM_WRITE_TIMEOUT` | No | `60000` | 100-3600000 ms | Request write timeout: the idle gap allowed between request body chunks, and the absolute body deadline on ordinary (2 MiB) routes |
+| `FERRUM_UPLOAD_TIMEOUT` | No | `300000` | 1000-3600000 ms | Absolute wall-clock deadline for a restore or API-spec request body to finish arriving; measured from the first byte and never extended by progress |
+| `FERRUM_MAX_LARGE_UPLOADS` | No | `2` | 1-32, must not exceed `FERRUM_MAX_ACTIVE_UPLOADS` | Concurrent restore and API-spec uploads before the BFF returns `429` |
+| `FERRUM_MAX_ACTIVE_UPLOADS` | No | `32` | 1-1024 | Concurrent proxied requests carrying a request body, of any size, before the BFF returns `429` |
 
 ### Browser security
 
@@ -304,6 +306,11 @@ Notes:
   header.
 - Any header you do not overwrite with `proxy_set_header` is forwarded from the
   client as-is, so keep all four lines even when a value is empty.
+- `proxy_request_buffering off` streams a client's body straight through, so
+  keep `proxy_read_timeout` and `client_body_timeout` at or below Foundry's
+  upload budget (`FERRUM_UPLOAD_TIMEOUT`, and `FERRUM_WRITE_TIMEOUT` for
+  ordinary routes). A proxy willing to hold a request open longer than the BFF
+  will accept a body only ties up a connection on both sides.
 
 ## 4. Docker Compose example
 
@@ -547,6 +554,25 @@ settings changes are logged with the acting subject and the changed field names;
 
 API responses are sent with `cache-control: no-store`. Hashed static assets are
 immutable for a year; `index.html` and `theme-bootstrap.js` are never cached.
+
+### Upload bounds
+
+A proxied request body is bounded twice. `FERRUM_WRITE_TIMEOUT` limits the idle
+gap between chunks, and `FERRUM_UPLOAD_TIMEOUT` is an absolute deadline for the
+whole body that a slowly progressing sender cannot extend; ordinary 2 MiB routes
+use `FERRUM_WRITE_TIMEOUT` for both. Either bound answers `504` with `code:
+FERRUM_BFF_TIMEOUT`, `phase: "upload"`, and a `reason` of `idle` or `deadline`,
+so a response says which bound fired. As a backstop, the HTTP server closes any
+request that has still not fully arrived five seconds past
+`FERRUM_UPLOAD_TIMEOUT`.
+
+Concurrency is bounded twice as well: `FERRUM_MAX_ACTIVE_UPLOADS` covers every
+proxied request carrying a body, and `FERRUM_MAX_LARGE_UPLOADS` is a stricter
+inner bound on the restore and API-spec routes. Both answer `429` with `code:
+FERRUM_BFF_UPLOAD_CAPACITY`, `retry-after: 1`, and a `scope` of `all` or
+`large`. Sustained `429`s at `scope: "all"` mean the instance is at its
+body-bearing request ceiling; raise the cap only alongside the socket and memory
+headroom to match.
 
 ### Graceful shutdown
 

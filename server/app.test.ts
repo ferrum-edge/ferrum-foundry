@@ -33,6 +33,24 @@ afterAll(() => {
   }
 });
 
+describe('request receive deadline', () => {
+  it('applies a server-level absolute receive timeout as an upload backstop', async () => {
+    const previous = process.env.FERRUM_UPLOAD_TIMEOUT;
+    delete process.env.FERRUM_UPLOAD_TIMEOUT;
+    const app = await loadApp();
+    try {
+      // Node's own absolute receive deadline, kept deliberately looser than the
+      // proxy's upload deadline so it only catches a request that never reaches
+      // the guarded upload stream.
+      expect(app.server.requestTimeout).toBe(305_000);
+    } finally {
+      await app.close();
+      if (previous === undefined) delete process.env.FERRUM_UPLOAD_TIMEOUT;
+      else process.env.FERRUM_UPLOAD_TIMEOUT = previous;
+    }
+  });
+});
+
 describe('forwarded client address', () => {
   it('exports a predicate that trusts only the directly connected hop', async () => {
     const { trustDirectlyConnectedProxy } = await import('./app.js');

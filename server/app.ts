@@ -32,6 +32,13 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       level: isProduction ? 'info' : 'debug',
     },
     bodyLimit: 2 * 1024 * 1024,
+    // Absolute receive deadline for a whole request, as a backstop underneath
+    // the proxy's own upload deadline: a code path that never reaches the
+    // guarded upload stream still cannot hold a socket open indefinitely. Node
+    // evaluates it on `connectionsCheckingInterval` (30s by default), so it is
+    // deliberately looser than the application-level budget it backs up and
+    // must never be the bound that fires first.
+    requestTimeout: config.uploadTimeout + 5000,
     // Trust exactly the directly connected hop (the identity proxy) for
     // X-Forwarded-* headers. Fastify 5.12.1 stopped honoring the numeric hop
     // count form, so the equivalent predicate is spelled out: hop 0 is the

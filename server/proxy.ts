@@ -47,42 +47,58 @@ class PayloadTooLargeError extends Error {
   }
 }
 
+type UploadTimeoutReason = 'idle' | 'deadline';
+
 class UploadTimeoutError extends Error {
-  constructor() {
-    super('Request upload timed out');
+  constructor(readonly reason: UploadTimeoutReason) {
+    super(`Request upload exceeded its ${reason} budget`);
     this.name = 'UploadTimeoutError';
   }
 }
 
 class GuardedUpload extends Transform {
   private received = 0;
-  private timer: NodeJS.Timeout | undefined;
+  private idleTimer: NodeJS.Timeout | undefined;
+  private readonly deadlineTimer: NodeJS.Timeout;
 
   constructor(
     private readonly limit: number,
-    private readonly timeout: number,
+    private readonly idleTimeout: number,
+    deadline: number,
     private readonly controller: AbortController,
   ) {
     super();
-    this.resetTimer();
-    this.once('end', () => this.clearTimer());
-    this.once('close', () => this.clearTimer());
-    this.once('error', () => this.clearTimer());
+    // Two independent bounds. The idle timer restarts on every chunk and only
+    // catches a stalled sender. The deadline timer is armed once here and is
+    // never reset, so a body that keeps trickling bytes cannot extend how long
+    // it may hold this request, its upstream socket, and its upload permits.
+    this.deadlineTimer = setTimeout(() => this.fail('deadline'), deadline);
+    this.deadlineTimer.unref();
+    this.resetIdleTimer();
+    this.once('end', () => this.clearTimers());
+    this.once('close', () => this.clearTimers());
+    this.once('error', () => this.clearTimers());
   }
 
-  private resetTimer(): void {
-    this.clearTimer();
-    this.timer = setTimeout(() => {
-      const error = new UploadTimeoutError();
-      this.controller.abort(error);
-      this.destroy(error);
-    }, this.timeout);
-    this.timer.unref();
+  private fail(reason: UploadTimeoutReason): void {
+    this.clearTimers();
+    const error = new UploadTimeoutError(reason);
+    // The controller is the one shared with the undici request, so aborting it
+    // cancels the in-flight upstream call as well as this stream.
+    this.controller.abort(error);
+    this.destroy(error);
   }
 
-  private clearTimer(): void {
-    if (this.timer) clearTimeout(this.timer);
-    this.timer = undefined;
+  private resetIdleTimer(): void {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = setTimeout(() => this.fail('idle'), this.idleTimeout);
+    this.idleTimer.unref();
+  }
+
+  private clearTimers(): void {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = undefined;
+    clearTimeout(this.deadlineTimer);
   }
 
   override _transform(chunk: Buffer, _encoding: BufferEncoding, callback: TransformCallback): void {
@@ -93,7 +109,7 @@ class GuardedUpload extends Transform {
       callback(error);
       return;
     }
-    this.resetTimer();
+    this.resetIdleTimer();
     callback(null, chunk);
   }
 }
@@ -104,8 +120,13 @@ function bodyLimitFor(path: string): number {
   return DEFAULT_BODY_LIMIT;
 }
 
+function carriesRequestBody(request: FastifyRequest): boolean {
+  const method = request.method;
+  return method !== 'GET' && method !== 'HEAD' && method !== 'DELETE';
+}
+
 function isLargeUpload(request: FastifyRequest): boolean {
-  if (request.method === 'GET' || request.method === 'HEAD' || request.method === 'DELETE') return false;
+  if (!carriesRequestBody(request)) return false;
   return bodyLimitFor(proxyTargetPath(request)) > DEFAULT_BODY_LIMIT;
 }
 
@@ -122,11 +143,12 @@ function copyRequestHeaders(request: FastifyRequest, authorization: string): Rec
   return headers;
 }
 
-function timeoutResponse(phase: string) {
+function timeoutResponse(phase: string, reason?: UploadTimeoutReason) {
   return {
     error: 'Gateway Timeout',
     code: 'FERRUM_BFF_TIMEOUT',
     phase,
+    ...(reason && { reason }),
   };
 }
 
@@ -148,29 +170,54 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
   fastify.removeAllContentTypeParsers();
   fastify.addContentTypeParser('*', (_request, payload, done) => done(null, payload));
 
+  // Every proxied request that carries a body occupies a socket and an upstream
+  // connection for as long as the body takes to arrive, so the global pool
+  // bounds all of them. The large-upload pool is a stricter inner bound on the
+  // routes whose bodies may be tens of megabytes.
+  let activeUploads = 0;
   let activeLargeUploads = 0;
   const reservedUploads = new WeakSet<FastifyRequest>();
+  const reservedLargeUploads = new WeakSet<FastifyRequest>();
 
-  const reserveLargeUpload = async (request: FastifyRequest, reply: Parameters<typeof requireAdminAuth>[1]) => {
-    if (!isLargeUpload(request)) return;
+  const reserveUpload = async (request: FastifyRequest, reply: Parameters<typeof requireAdminAuth>[1]) => {
+    if (!carriesRequestBody(request)) return;
     const config = loadConfig();
-    if (activeLargeUploads >= config.maxLargeUploads) {
+    if (activeUploads >= config.maxActiveUploads) {
       return reply.status(429).header('retry-after', '1').send({
         error: 'Too Many Requests',
         code: 'FERRUM_BFF_UPLOAD_CAPACITY',
+        scope: 'all',
       });
     }
-    activeLargeUploads += 1;
+    if (isLargeUpload(request)) {
+      if (activeLargeUploads >= config.maxLargeUploads) {
+        return reply.status(429).header('retry-after', '1').send({
+          error: 'Too Many Requests',
+          code: 'FERRUM_BFF_UPLOAD_CAPACITY',
+          scope: 'large',
+        });
+      }
+      activeLargeUploads += 1;
+      reservedLargeUploads.add(request);
+    }
+    activeUploads += 1;
     reservedUploads.add(request);
   };
 
-  const releaseLargeUpload = (request: FastifyRequest) => {
-    if (!reservedUploads.delete(request)) return;
-    activeLargeUploads = Math.max(0, activeLargeUploads - 1);
+  // Both releases are keyed off a WeakSet membership test, so a request that
+  // holds one or both permits gives back exactly what it took, exactly once,
+  // whichever of the two terminal hooks fires.
+  const releaseUpload = (request: FastifyRequest) => {
+    if (reservedLargeUploads.delete(request)) {
+      activeLargeUploads = Math.max(0, activeLargeUploads - 1);
+    }
+    if (reservedUploads.delete(request)) {
+      activeUploads = Math.max(0, activeUploads - 1);
+    }
   };
 
-  fastify.addHook('onResponse', async (request) => releaseLargeUpload(request));
-  fastify.addHook('onRequestAbort', async (request) => releaseLargeUpload(request));
+  fastify.addHook('onResponse', async (request) => releaseUpload(request));
+  fastify.addHook('onRequestAbort', async (request) => releaseUpload(request));
 
   const requireSafeProxyPath = async (
     request: FastifyRequest,
@@ -190,7 +237,7 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
   };
 
   fastify.all('/api/proxy/*', {
-    onRequest: [requireAdminAuth, requireSafeProxyPath, reserveLargeUpload],
+    onRequest: [requireAdminAuth, requireSafeProxyPath, reserveUpload],
     bodyLimit: RESTORE_BODY_LIMIT,
   }, async (request, reply) => {
     const config = loadConfig();
@@ -240,12 +287,18 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
     try {
       const token = await generateToken(config, principal);
       const method = request.method;
-      const hasBody = method !== 'GET' && method !== 'HEAD' && method !== 'DELETE';
+      const hasBody = carriesRequestBody(request);
       let body: GuardedUpload | undefined;
       if (hasBody && request.body && typeof (request.body as NodeJS.ReadableStream).pipe === 'function') {
         timeoutPhase = 'upload';
+        // The large-upload routes get their own, longer wall-clock budget. A
+        // 2 MiB body has no business outlasting the write timeout, so ordinary
+        // routes reuse it as their absolute budget as well as their idle one.
+        const uploadDeadline = routeBodyLimit > DEFAULT_BODY_LIMIT
+          ? config.uploadTimeout
+          : config.writeTimeout;
         body = (request.body as Readable).pipe(
-          new GuardedUpload(routeBodyLimit, config.writeTimeout, controller),
+          new GuardedUpload(routeBodyLimit, config.writeTimeout, uploadDeadline, controller),
         );
         body.once('end', startResponseDeadline);
       } else {
@@ -302,8 +355,15 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
       if (error instanceof PayloadTooLargeError || controller.signal.reason instanceof PayloadTooLargeError) {
         return reply.status(413).send({ error: 'Payload Too Large', code: 'FERRUM_BFF_BODY_LIMIT' });
       }
-      if (error instanceof UploadTimeoutError || controller.signal.reason instanceof UploadTimeoutError) {
-        return reply.status(504).send(timeoutResponse('upload'));
+      const uploadTimeout = error instanceof UploadTimeoutError
+        ? error
+        : controller.signal.reason instanceof UploadTimeoutError
+          ? controller.signal.reason
+          : undefined;
+      if (uploadTimeout) {
+        // `reason` tells an operator which bound fired: a sender that stopped
+        // ("idle") or one that kept trickling past its budget ("deadline").
+        return reply.status(504).send(timeoutResponse('upload', uploadTimeout.reason));
       }
       if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
         return reply.status(504).send(timeoutResponse(timeoutPhase));

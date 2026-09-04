@@ -23,10 +23,12 @@ export interface Config {
   connectTimeout: number;
   readTimeout: number;
   writeTimeout: number;
+  uploadTimeout: number;
   port: number;
   bindAddress: string;
   shutdownTimeout: number;
   maxLargeUploads: number;
+  maxActiveUploads: number;
   allowRuntimeSettings: boolean;
   authMode: AuthMode;
   bffAuthToken: string | undefined;
@@ -240,6 +242,15 @@ function parseBaseConfig(): Config {
   const tlsCaRoot = optionalEnv('FERRUM_TLS_CA_ROOT') ?? (tlsCaPath ? dirname(tlsCaPath) : undefined);
   if (tlsCaPath) loadCaBundle(tlsCaPath, tlsCaRoot);
 
+  // The large-upload pool is a subset of the global in-flight upload pool, so a
+  // larger large-upload cap could never be reached and would misdescribe the
+  // real bound. Reject the contradiction at load instead of silently clamping.
+  const maxActiveUploads = parseInteger('FERRUM_MAX_ACTIVE_UPLOADS', 32, 1, 1024);
+  const maxLargeUploads = parseInteger('FERRUM_MAX_LARGE_UPLOADS', 2, 1, 32);
+  if (maxLargeUploads > maxActiveUploads) {
+    throw new Error('FERRUM_MAX_LARGE_UPLOADS must not exceed FERRUM_MAX_ACTIVE_UPLOADS');
+  }
+
   const allowRuntimeSettings = parseBoolean('FERRUM_ALLOW_RUNTIME_SETTINGS', false);
   const adminAllowedOrigins = parseOrigins(optionalEnv('FERRUM_ADMIN_ALLOWED_ORIGINS'));
   if (allowRuntimeSettings && adminAllowedOrigins.length === 0) {
@@ -264,10 +275,12 @@ function parseBaseConfig(): Config {
     connectTimeout: parseInteger('FERRUM_CONNECT_TIMEOUT', 5000, 100, 300_000),
     readTimeout: parseInteger('FERRUM_READ_TIMEOUT', 60_000, 100, 3_600_000),
     writeTimeout: parseInteger('FERRUM_WRITE_TIMEOUT', 60_000, 100, 3_600_000),
+    uploadTimeout: parseInteger('FERRUM_UPLOAD_TIMEOUT', 300_000, 1000, 3_600_000),
     port: parseInteger('PORT', 3001, 1, 65_535),
     bindAddress: parseBindAddress(optionalEnv('FERRUM_BIND_ADDRESS')),
     shutdownTimeout: parseInteger('FERRUM_SHUTDOWN_TIMEOUT', 10_000, 1000, 300_000),
-    maxLargeUploads: parseInteger('FERRUM_MAX_LARGE_UPLOADS', 2, 1, 32),
+    maxLargeUploads,
+    maxActiveUploads,
     allowRuntimeSettings,
     authMode,
     bffAuthToken,
