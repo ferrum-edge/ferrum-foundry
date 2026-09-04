@@ -16,6 +16,10 @@ const observed: Array<{
   acceptEncoding?: string;
 }> = [];
 const GZIP_RESPONSE = JSON.stringify({ ok: true, payload: 'x'.repeat(4096) });
+// Upstream requests whose body never finished arriving because the BFF cut them
+// off. `complete` is the only reliable signal here: an aborted upload may either
+// error the request stream or simply stop, depending on how the peer went away.
+const abandonedUploads: string[] = [];
 
 async function readBody(request: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
@@ -24,6 +28,9 @@ async function readBody(request: IncomingMessage): Promise<string> {
 }
 
 function gatewayHandler(request: IncomingMessage, response: ServerResponse): void {
+  request.once('close', () => {
+    if (!request.complete) abandonedUploads.push(request.url ?? '');
+  });
   void (async () => {
     observed.push({
       url: request.url ?? '',
@@ -80,6 +87,7 @@ beforeAll(async () => {
     FERRUM_SECURE_COOKIES: 'false',
     FERRUM_READ_TIMEOUT: '100',
     FERRUM_WRITE_TIMEOUT: '100',
+    FERRUM_UPLOAD_TIMEOUT: '1000',
   };
   for (const [key, value] of Object.entries(env)) {
     snapshot[key] = process.env[key];
@@ -128,6 +136,64 @@ async function slowStreamingUpload(path: string): Promise<{ statusCode: number; 
   await new Promise((resolve) => setTimeout(resolve, 70));
   request!.end('third');
   return response;
+}
+
+// A body that keeps making progress and never ends: exactly the shape the idle
+// timer alone cannot bound. `intervalMs` stays below FERRUM_WRITE_TIMEOUT so the
+// stream is never idle; a null interval sends one chunk and then goes quiet.
+async function trickleUpload(
+  path: string,
+  intervalMs: number | null,
+): Promise<{ statusCode: number; body: string }> {
+  const port = (app.server.address() as AddressInfo).port;
+  return new Promise((resolve, reject) => {
+    const request = httpRequest({
+      host: '127.0.0.1',
+      port,
+      path,
+      method: 'POST',
+      headers: { ...sessionHeaders, 'content-type': 'application/octet-stream' },
+    });
+    let settled = false;
+    let timer: NodeJS.Timeout | undefined;
+    const stopWriting = () => {
+      if (timer) clearInterval(timer);
+      timer = undefined;
+    };
+    const finish = (value: { statusCode: number; body: string }) => {
+      if (settled) return;
+      settled = true;
+      stopWriting();
+      request.destroy();
+      resolve(value);
+    };
+
+    request.on('response', (incoming) => {
+      // Stop writing as soon as the BFF has answered; further writes on a
+      // half-closed socket would only raise noise the assertion does not need.
+      stopWriting();
+      const chunks: Buffer[] = [];
+      incoming.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+      const done = () => finish({
+        statusCode: incoming.statusCode ?? 0,
+        body: Buffer.concat(chunks).toString('utf8'),
+      });
+      incoming.on('end', done);
+      incoming.on('close', done);
+    });
+    request.on('error', (error) => {
+      if (settled) return;
+      settled = true;
+      stopWriting();
+      reject(error);
+    });
+
+    request.write('x');
+    if (intervalMs !== null) {
+      timer = setInterval(() => request.write('x'), intervalMs);
+      timer.unref();
+    }
+  });
 }
 
 async function rawGet(path: string): Promise<{ statusCode: number; body: string; cacheControl?: string }> {
@@ -306,11 +372,60 @@ describe('streaming gateway proxy', () => {
     expect(response.json()).toEqual({ restored: true });
   });
 
-  it('starts the response deadline after a progressing upload completes', async () => {
+  it('lets a progressing upload outlast the idle timeout but not the absolute budget', async () => {
+    // Chunks 70ms apart never leave the stream idle for the 100ms write
+    // timeout, and the whole body still lands well inside the 1000ms absolute
+    // upload budget, so progress is rewarded only up to that budget.
     const response = await slowStreamingUpload('/api/proxy/api-specs');
     expect(response.statusCode).toBe(200);
     expect(JSON.parse(response.body)).toEqual({ ok: true });
     expect(observed.at(-1)?.body).toBe('firstsecondthird');
+  });
+
+  it('aborts a large upload that keeps progressing past the absolute deadline', async () => {
+    const before = abandonedUploads.length;
+    const started = Date.now();
+    const response = await trickleUpload('/api/proxy/restore', 50);
+    const elapsed = Date.now() - started;
+
+    expect(response.statusCode).toBe(504);
+    expect(JSON.parse(response.body)).toEqual({
+      error: 'Gateway Timeout',
+      code: 'FERRUM_BFF_TIMEOUT',
+      phase: 'upload',
+      reason: 'deadline',
+    });
+    // Bounded by FERRUM_UPLOAD_TIMEOUT, not by the idle timer the trickle keeps
+    // resetting, and not by anything the client can extend.
+    expect(elapsed).toBeGreaterThanOrEqual(900);
+    expect(elapsed).toBeLessThan(3000);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(abandonedUploads.slice(before)).toContain('/restore');
+
+    // The permit came back, so the capped restore pool is not pinned.
+    const next = await app.inject({
+      method: 'POST',
+      url: '/api/proxy/restore',
+      headers: { ...sessionHeaders, 'content-type': 'application/json' },
+      payload: '{"version":1}',
+    });
+    expect(next.statusCode).toBe(200);
+  });
+
+  it('bounds an ordinary route body by the write timeout even while it progresses', async () => {
+    const started = Date.now();
+    const response = await trickleUpload('/api/proxy/echo', 40);
+    const elapsed = Date.now() - started;
+
+    expect(response.statusCode).toBe(504);
+    expect(JSON.parse(response.body)).toMatchObject({ phase: 'upload', reason: 'deadline' });
+    expect(elapsed).toBeLessThan(1000);
+  });
+
+  it('still reports a stalled upload as an idle timeout', async () => {
+    const response = await trickleUpload('/api/proxy/api-specs', null);
+    expect(response.statusCode).toBe(504);
+    expect(JSON.parse(response.body)).toMatchObject({ phase: 'upload', reason: 'idle' });
   });
 
   it('bounds concurrent large uploads and provides retry guidance', async () => {
@@ -324,5 +439,79 @@ describe('streaming gateway proxy', () => {
     expect(responses.map((response) => response.statusCode).sort()).toEqual([200, 200, 429]);
     const rejected = responses.find((response) => response.statusCode === 429);
     expect(rejected?.headers['retry-after']).toBe('1');
+    expect(rejected?.json()).toEqual({
+      error: 'Too Many Requests',
+      code: 'FERRUM_BFF_UPLOAD_CAPACITY',
+      scope: 'large',
+    });
+  });
+});
+
+describe('global in-flight upload capacity', () => {
+  const capSnapshot: Record<string, string | undefined> = {};
+  let capped: FastifyInstance;
+  let cappedHeaders: Record<string, string>;
+
+  beforeAll(async () => {
+    // A separate instance, because the interesting case is a deployment
+    // configured with a small global pool rather than the launch default.
+    const overrides = { FERRUM_MAX_ACTIVE_UPLOADS: '2', FERRUM_READ_TIMEOUT: '5000' };
+    for (const [key, value] of Object.entries(overrides)) {
+      capSnapshot[key] = process.env[key];
+      process.env[key] = value;
+    }
+    vi.resetModules();
+    const { buildApp } = await import('./app.js');
+    capped = await buildApp({ serveStatic: false, logger: false });
+    const login = await capped.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { token: BFF_TOKEN },
+    });
+    const { csrfToken } = login.json() as { csrfToken: string };
+    cappedHeaders = {
+      cookie: login.cookies.map((entry) => `${entry.name}=${entry.value}`).join('; '),
+      'x-csrf-token': csrfToken,
+    };
+  });
+
+  afterAll(async () => {
+    await capped.close();
+    for (const [key, value] of Object.entries(capSnapshot)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  it('bounds every body-bearing proxied request, not only the large-upload routes', async () => {
+    const post = () => capped.inject({
+      method: 'POST',
+      url: '/api/proxy/slow-headers',
+      headers: { ...cappedHeaders, 'content-type': 'application/json' },
+      payload: '{"version":1}',
+    });
+
+    const first = post();
+    const second = post();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const third = await post();
+    expect(third.statusCode).toBe(429);
+    expect(third.headers['retry-after']).toBe('1');
+    expect(third.json()).toEqual({
+      error: 'Too Many Requests',
+      code: 'FERRUM_BFF_UPLOAD_CAPACITY',
+      scope: 'all',
+    });
+
+    // A read carries no body, so it never occupies the upload pool.
+    const read = await capped.inject({ method: 'GET', url: '/api/proxy/echo', headers: cappedHeaders });
+    expect(read.statusCode).toBe(200);
+
+    const inflight = await Promise.all([first, second]);
+    expect(inflight.map((response) => response.statusCode)).toEqual([200, 200]);
+
+    const after = await post();
+    expect(after.statusCode).toBe(200);
   });
 });
