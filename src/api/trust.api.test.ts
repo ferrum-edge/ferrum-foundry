@@ -54,9 +54,10 @@ describe("gateway trust mutation wiring", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("pins namespace and preserves the optimistic revision on update", async () => {
-    await create({ ...payload, revision: undefined }, "production");
-    await update("trust-1", payload, "production");
-    await remove("trust-1", "production");
+    const scope = { namespace: "production" };
+    await create(scope, { ...payload, revision: undefined });
+    await update(scope, "trust-1", payload);
+    await remove(scope, "trust-1");
 
     expect(captured.map(({ method }) => method)).toEqual(["POST", "PUT", "DELETE"]);
     expect(captured.every(({ namespace }) => namespace === "production")).toBe(true);

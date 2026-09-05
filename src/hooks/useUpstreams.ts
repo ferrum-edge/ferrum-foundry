@@ -1,5 +1,10 @@
 /* ------------------------------------------------------------------ */
 /*  Ferrum Foundry – TanStack Query hooks for Upstreams               */
+/*                                                                    */
+/*  Every hook captures `scope` from the namespace provider and binds */
+/*  the whole operation — the query, a mutation and its follow-ups —  */
+/*  to it. A mutation reads the scope at `mutate()` time, so a switch */
+/*  after the click cannot retarget the write.                        */
 /* ------------------------------------------------------------------ */
 
 import {
@@ -12,36 +17,41 @@ import type { PaginationParams, UpstreamCreate } from "@/api/types";
 import { useNamespace } from "@/stores/namespace";
 
 export function useUpstreams(params: PaginationParams = {}, enabled = true) {
-  const { selectedNamespace: ns } = useNamespace();
+  const { scope } = useNamespace();
   return useQuery({
-    queryKey: ["upstreams", ns, { offset: params.offset, limit: params.limit }],
-    queryFn: () => upstreams.list(params),
+    queryKey: [
+      "upstreams",
+      scope.namespace,
+      { offset: params.offset, limit: params.limit },
+    ],
+    queryFn: () => upstreams.list(scope, params),
     enabled,
   });
 }
 
 export function useAllUpstreams(enabled = true) {
-  const { selectedNamespace: ns } = useNamespace();
+  const { scope } = useNamespace();
   return useQuery({
-    queryKey: ["upstreams", ns, "all"],
-    queryFn: () => upstreams.listAll(),
+    queryKey: ["upstreams", scope.namespace, "all"],
+    queryFn: () => upstreams.listAll(scope),
     enabled,
   });
 }
 
 export function useUpstream(id: string) {
-  const { selectedNamespace: ns } = useNamespace();
+  const { scope } = useNamespace();
   return useQuery({
-    queryKey: ["upstream", ns, id],
-    queryFn: () => upstreams.get(id),
+    queryKey: ["upstream", scope.namespace, id],
+    queryFn: () => upstreams.get(scope, id),
     enabled: !!id,
   });
 }
 
 export function useCreateUpstream() {
   const qc = useQueryClient();
+  const { scope } = useNamespace();
   return useMutation({
-    mutationFn: (data: UpstreamCreate) => upstreams.create(data),
+    mutationFn: (data: UpstreamCreate) => upstreams.create(scope, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["upstreams"] });
     },
@@ -50,9 +60,10 @@ export function useCreateUpstream() {
 
 export function useUpdateUpstream() {
   const qc = useQueryClient();
+  const { scope } = useNamespace();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: UpstreamCreate }) =>
-      upstreams.update(id, data),
+      upstreams.update(scope, id, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["upstreams"] });
       qc.invalidateQueries({ queryKey: ["upstream"] });
@@ -62,8 +73,9 @@ export function useUpdateUpstream() {
 
 export function useDeleteUpstream() {
   const qc = useQueryClient();
+  const { scope } = useNamespace();
   return useMutation({
-    mutationFn: (id: string) => upstreams.remove(id),
+    mutationFn: (id: string) => upstreams.remove(scope, id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["upstreams"] });
     },

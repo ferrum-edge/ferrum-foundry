@@ -43,6 +43,43 @@ surface accordingly. Map roles with that blast radius in mind, and restrict
 fleet-global routes at the identity proxy when scoped identities must not use
 them.
 
+### Namespace binding
+
+The namespace shown in the header selector is the namespace every gateway
+request from that tab carries. Foundry enforces this with one rule: **an
+operation is bound to the namespace that was active when it started, and every
+request it makes carries that binding.** In practice:
+
+- The `NamespaceProvider` in each tab owns the active namespace. A hook or
+  page captures it as an immutable scope when a query or mutation starts and
+  passes that scope to the API layer, which stamps `X-Ferrum-Namespace` on
+  each request it sends. The HTTP client never chooses a namespace itself; a
+  gateway request that reaches it without a binding (and is not a documented
+  fleet-global call) is refused before it goes on the wire.
+- The binding covers every request an operation makes, not just the first:
+  each page of a "fetch all" listing, query retries, a plugin membership
+  plan's preflight reads, association writes and compensating rollbacks, a
+  namespace restore, and the apply-status poll that follows a mutation. A
+  switch made after an operation has started, in this tab or any other,
+  does not retarget it.
+- `localStorage` (`ferrum:namespace`) stores a *preference*, not the active
+  namespace. It is read once when a tab loads, so a new tab opens on the
+  namespace last chosen anywhere, and it is written when the user switches.
+  Foundry deliberately does not react to cross-tab `storage` events: another
+  tab's switch neither changes what this tab displays nor what it sends. It
+  takes effect here only on the next load. Two tabs can therefore show and
+  operate on different namespaces at the same time, each consistently.
+- When storage is unavailable (private browsing, a disabled or throwing
+  storage accessor), the provider runs purely on in-memory state from the
+  default namespace `ferrum`. The displayed namespace and the request header
+  come from the same value, so they cannot diverge; only the preference is
+  lost between loads.
+
+Operators who need a hard guarantee that an identity can never write outside
+one namespace should still grant exactly that namespace at the identity
+proxy; the binding rule keeps the UI honest, and the BFF's grant check keeps
+the gateway honest.
+
 Do not expose the BFF port directly to an untrusted network. Terminate TLS at
 the identity proxy, strip every identity/proof header supplied by the client,
 inject the trusted values after authentication, and firewall the BFF so only

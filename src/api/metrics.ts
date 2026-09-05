@@ -2,17 +2,21 @@
 /*  Ferrum Foundry – Health & Metrics API functions                   */
 /* ------------------------------------------------------------------ */
 
-import { proxyApi } from "./client";
+import { proxyApi, scoped, type NamespaceScope } from "./client";
 import type { AdminMetrics, HealthResponse } from "./types";
 
-export async function getHealth(): Promise<HealthResponse> {
-  return proxyApi.get("health").json<HealthResponse>();
+export async function getHealth(scope: NamespaceScope): Promise<HealthResponse> {
+  return proxyApi.get("health", scoped(scope)).json<HealthResponse>();
 }
 
-export async function getAdminMetrics(): Promise<AdminMetrics> {
-  return proxyApi.get("admin/metrics").json<AdminMetrics>();
+export async function getAdminMetrics(
+  scope: NamespaceScope,
+): Promise<AdminMetrics> {
+  return proxyApi.get("admin/metrics", scoped(scope)).json<AdminMetrics>();
 }
 
-export async function getPrometheusMetrics(): Promise<string> {
-  return proxyApi.get("metrics").text();
+export async function getPrometheusMetrics(
+  scope: NamespaceScope,
+): Promise<string> {
+  return proxyApi.get("metrics", scoped(scope)).text();
 }

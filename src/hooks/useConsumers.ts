@@ -1,5 +1,10 @@
 /* ------------------------------------------------------------------ */
 /*  Ferrum Foundry – TanStack Query hooks for Consumers               */
+/*                                                                    */
+/*  Every hook captures `scope` from the namespace provider and binds */
+/*  the whole operation — the query, a mutation and its follow-ups —  */
+/*  to it. A mutation reads the scope at `mutate()` time, so a switch */
+/*  after the click cannot retarget the write.                        */
 /* ------------------------------------------------------------------ */
 
 import {
@@ -17,36 +22,41 @@ import type {
 import { useNamespace } from "@/stores/namespace";
 
 export function useConsumers(params: PaginationParams = {}, enabled = true) {
-  const { selectedNamespace: ns } = useNamespace();
+  const { scope } = useNamespace();
   return useQuery({
-    queryKey: ["consumers", ns, { offset: params.offset, limit: params.limit }],
-    queryFn: () => consumers.list(params),
+    queryKey: [
+      "consumers",
+      scope.namespace,
+      { offset: params.offset, limit: params.limit },
+    ],
+    queryFn: () => consumers.list(scope, params),
     enabled,
   });
 }
 
 export function useAllConsumers(enabled = true) {
-  const { selectedNamespace: ns } = useNamespace();
+  const { scope } = useNamespace();
   return useQuery({
-    queryKey: ["consumers", ns, "all"],
-    queryFn: () => consumers.listAll(),
+    queryKey: ["consumers", scope.namespace, "all"],
+    queryFn: () => consumers.listAll(scope),
     enabled,
   });
 }
 
 export function useConsumer(id: string) {
-  const { selectedNamespace: ns } = useNamespace();
+  const { scope } = useNamespace();
   return useQuery({
-    queryKey: ["consumer", ns, id],
-    queryFn: () => consumers.get(id),
+    queryKey: ["consumer", scope.namespace, id],
+    queryFn: () => consumers.get(scope, id),
     enabled: !!id,
   });
 }
 
 export function useCreateConsumer() {
   const qc = useQueryClient();
+  const { scope } = useNamespace();
   return useMutation({
-    mutationFn: (data: ConsumerCreate) => consumers.create(data),
+    mutationFn: (data: ConsumerCreate) => consumers.create(scope, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["consumers"] });
     },
@@ -55,9 +65,10 @@ export function useCreateConsumer() {
 
 export function useUpdateConsumer() {
   const qc = useQueryClient();
+  const { scope } = useNamespace();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: ConsumerCreate }) =>
-      consumers.update(id, data),
+      consumers.update(scope, id, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["consumers"] });
       qc.invalidateQueries({ queryKey: ["consumer"] });
@@ -67,8 +78,9 @@ export function useUpdateConsumer() {
 
 export function useDeleteConsumer() {
   const qc = useQueryClient();
+  const { scope } = useNamespace();
   return useMutation({
-    mutationFn: (id: string) => consumers.remove(id),
+    mutationFn: (id: string) => consumers.remove(scope, id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["consumers"] });
     },
@@ -79,6 +91,7 @@ export function useDeleteConsumer() {
 
 export function useUpdateCredentials() {
   const qc = useQueryClient();
+  const { scope } = useNamespace();
   return useMutation({
     mutationFn: ({
       consumerId,
@@ -88,7 +101,7 @@ export function useUpdateCredentials() {
       consumerId: string;
       credType: BuiltInCredentialType;
       data: ConsumerCredentialInput | ConsumerCredentialInput[];
-    }) => consumers.updateCredentials(consumerId, credType, data),
+    }) => consumers.updateCredentials(scope, consumerId, credType, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["consumer"] });
       qc.invalidateQueries({ queryKey: ["consumers"] });
@@ -98,6 +111,7 @@ export function useUpdateCredentials() {
 
 export function useAppendCredential() {
   const qc = useQueryClient();
+  const { scope } = useNamespace();
   return useMutation({
     mutationFn: ({
       consumerId,
@@ -107,7 +121,7 @@ export function useAppendCredential() {
       consumerId: string;
       credType: BuiltInCredentialType;
       data: ConsumerCredentialInput;
-    }) => consumers.appendCredential(consumerId, credType, data),
+    }) => consumers.appendCredential(scope, consumerId, credType, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["consumer"] });
       qc.invalidateQueries({ queryKey: ["consumers"] });
@@ -117,6 +131,7 @@ export function useAppendCredential() {
 
 export function useDeleteCredentials() {
   const qc = useQueryClient();
+  const { scope } = useNamespace();
   return useMutation({
     mutationFn: ({
       consumerId,
@@ -124,7 +139,7 @@ export function useDeleteCredentials() {
     }: {
       consumerId: string;
       credType: string;
-    }) => consumers.deleteCredentials(consumerId, credType),
+    }) => consumers.deleteCredentials(scope, consumerId, credType),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["consumer"] });
       qc.invalidateQueries({ queryKey: ["consumers"] });
@@ -134,6 +149,7 @@ export function useDeleteCredentials() {
 
 export function useDeleteCredentialByIndex() {
   const qc = useQueryClient();
+  const { scope } = useNamespace();
   return useMutation({
     mutationFn: ({
       consumerId,
@@ -143,7 +159,7 @@ export function useDeleteCredentialByIndex() {
       consumerId: string;
       credType: string;
       index: number;
-    }) => consumers.deleteCredentialByIndex(consumerId, credType, index),
+    }) => consumers.deleteCredentialByIndex(scope, consumerId, credType, index),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["consumer"] });
       qc.invalidateQueries({ queryKey: ["consumers"] });

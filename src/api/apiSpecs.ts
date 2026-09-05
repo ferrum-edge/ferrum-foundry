@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – API spec import endpoints (types + functions)    */
 /* ------------------------------------------------------------------ */
 
-import { proxyApi } from "./client";
+import { proxyApi, scoped, type NamespaceScope } from "./client";
 
 export interface ApiSpecSummary {
   id: string;
@@ -75,6 +75,7 @@ export interface ApiSpecListParams {
 }
 
 export async function list(
+  scope: NamespaceScope,
   params: ApiSpecListParams = {},
 ): Promise<ApiSpecListResponse> {
   const searchParams: Record<string, string> = {};
@@ -82,19 +83,22 @@ export async function list(
     if (value !== undefined && value !== "") searchParams[key] = String(value);
   }
   return proxyApi
-    .get("api-specs", { searchParams })
+    .get("api-specs", scoped(scope, { searchParams }))
     .json<ApiSpecListResponse>();
 }
 
-/** Fetch every API spec without imposing a silent UI-side record cap. */
-export async function listAll(): Promise<ApiSpecSummary[]> {
+/**
+ * Fetch every API spec without imposing a silent UI-side record cap. Every
+ * page is fetched under `scope`, however long the collection takes.
+ */
+export async function listAll(scope: NamespaceScope): Promise<ApiSpecSummary[]> {
   const items: ApiSpecSummary[] = [];
   let offset = 0;
   const limit = 250;
   let expectedTotal: number | undefined;
 
   for (;;) {
-    const page = await list({ offset, limit });
+    const page = await list(scope, { offset, limit });
     if (
       !Number.isSafeInteger(page.total) ||
       page.total < 0 ||
@@ -126,9 +130,15 @@ export async function listAll(): Promise<ApiSpecSummary[]> {
 }
 
 /** Fetch the raw stored spec document as YAML text. */
-export async function getDocument(id: string): Promise<string> {
+export async function getDocument(
+  scope: NamespaceScope,
+  id: string,
+): Promise<string> {
   return proxyApi
-    .get(`api-specs/${id}`, { headers: { accept: "application/yaml" } })
+    .get(
+      `api-specs/${id}`,
+      scoped(scope, { headers: { accept: "application/yaml" } }),
+    )
     .text();
 }
 
@@ -146,23 +156,27 @@ function specBodyOptions(document: string): {
 }
 
 /** Import a spec document (YAML or JSON text), creating proxy/upstream/plugins. */
-export async function create(document: string): Promise<ApiSpecCreateResponse> {
+export async function create(
+  scope: NamespaceScope,
+  document: string,
+): Promise<ApiSpecCreateResponse> {
   return proxyApi
-    .post("api-specs", specBodyOptions(document))
+    .post("api-specs", scoped(scope, specBodyOptions(document)))
     .json<ApiSpecCreateResponse>();
 }
 
 /** Replace a spec's document and its spec-owned resources. */
 export async function update(
+  scope: NamespaceScope,
   id: string,
   document: string,
 ): Promise<ApiSpecCreateResponse> {
   return proxyApi
-    .put(`api-specs/${id}`, specBodyOptions(document))
+    .put(`api-specs/${id}`, scoped(scope, specBodyOptions(document)))
     .json<ApiSpecCreateResponse>();
 }
 
 /** Delete the spec and cascade its proxy, plugins, and spec-owned upstream. */
-export async function remove(id: string): Promise<void> {
-  await proxyApi.delete(`api-specs/${id}`);
+export async function remove(scope: NamespaceScope, id: string): Promise<void> {
+  await proxyApi.delete(`api-specs/${id}`, scoped(scope));
 }

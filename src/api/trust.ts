@@ -2,7 +2,12 @@
 /*  Ferrum Foundry – Gateway trust bundle API (types + functions)     */
 /* ------------------------------------------------------------------ */
 
-import { NAMESPACE_HEADER, SILENT_ERRORS, proxyApi } from "./client";
+import {
+  SILENT_ERRORS,
+  proxyApi,
+  scoped,
+  type NamespaceScope,
+} from "./client";
 import type { PaginatedResponse, PaginationParams } from "./types";
 
 export interface TrustBundleJwtAuthority {
@@ -100,69 +105,62 @@ export function getGatewayTrustRevisionConflict(
 }
 
 export async function list(
+  scope: NamespaceScope,
   params: PaginationParams = {},
-  namespace?: string,
 ): Promise<PaginatedResponse<GatewayTrustBundle>> {
   const searchParams: Record<string, string> = {};
   if (params.offset !== undefined) searchParams.offset = String(params.offset);
   if (params.limit !== undefined) searchParams.limit = String(params.limit);
   return proxyApi
-    .get("gateway-trust-bundles", {
-      searchParams,
-      ...(namespace && { headers: { [NAMESPACE_HEADER]: namespace } }),
-    })
+    .get("gateway-trust-bundles", scoped(scope, { searchParams }))
     .json<PaginatedResponse<GatewayTrustBundle>>();
 }
 
 export async function get(
+  scope: NamespaceScope,
   id: string,
-  namespace: string,
 ): Promise<GatewayTrustBundle> {
   return proxyApi
-    .get(`gateway-trust-bundles/${id}`, {
-      headers: { [NAMESPACE_HEADER]: namespace },
-    })
+    .get(`gateway-trust-bundles/${id}`, scoped(scope))
     .json<GatewayTrustBundle>();
 }
 
 export async function create(
+  scope: NamespaceScope,
   data: GatewayTrustBundleCreate,
-  namespace: string,
 ): Promise<GatewayTrustBundle> {
   return proxyApi
-    .post("gateway-trust-bundles", {
-      json: data,
-      headers: { [NAMESPACE_HEADER]: namespace },
-      context: { [SILENT_ERRORS]: true },
-    })
+    .post(
+      "gateway-trust-bundles",
+      scoped(scope, { json: data, context: { [SILENT_ERRORS]: true } }),
+    )
     .json<GatewayTrustBundle>();
 }
 
 export async function update(
+  scope: NamespaceScope,
   id: string,
   data: GatewayTrustBundleCreate,
-  namespace: string,
 ): Promise<GatewayTrustBundle> {
   return proxyApi
-    .put(`gateway-trust-bundles/${id}`, {
-      json: data,
-      headers: { [NAMESPACE_HEADER]: namespace },
-      context: { [SILENT_ERRORS]: true },
-    })
+    .put(
+      `gateway-trust-bundles/${id}`,
+      scoped(scope, { json: data, context: { [SILENT_ERRORS]: true } }),
+    )
     .json<GatewayTrustBundle>();
 }
 
-export async function remove(id: string, namespace: string): Promise<void> {
-  await proxyApi.delete(`gateway-trust-bundles/${id}`, {
-    headers: { [NAMESPACE_HEADER]: namespace },
-    context: { [SILENT_ERRORS]: true },
-  });
+export async function remove(scope: NamespaceScope, id: string): Promise<void> {
+  await proxyApi.delete(
+    `gateway-trust-bundles/${id}`,
+    scoped(scope, { context: { [SILENT_ERRORS]: true } }),
+  );
 }
 
-export async function status(namespace?: string): Promise<GatewayTrustStatus> {
+export async function status(
+  scope: NamespaceScope,
+): Promise<GatewayTrustStatus> {
   return proxyApi
-    .get("gateway-trust/status", {
-      ...(namespace && { headers: { [NAMESPACE_HEADER]: namespace } }),
-    })
+    .get("gateway-trust/status", scoped(scope))
     .json<GatewayTrustStatus>();
 }
