@@ -17,6 +17,7 @@ import { Card } from "@/components/ui/Card";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { PluginConfigForm } from "@/components/forms/PluginConfigForm";
+import { PluginMembershipRecovery } from "@/components/forms/PluginMembershipRecovery";
 import { getApiErrorMessage } from "@/api/client";
 import { formatPluginName } from "@/lib/pluginConfigDefaults";
 import type { PluginConfigCreate } from "@/api/types";
@@ -33,6 +34,7 @@ export default function PluginDetailPage() {
   const deletePlugin = useDeletePluginWithMembership();
 
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [membershipError, setMembershipError] = useState<unknown>(null);
 
   // Compute which proxies currently reference this plugin (for proxy_group)
   const initialProxyGroupIds = useMemo(() => {
@@ -45,6 +47,7 @@ export default function PluginDetailPage() {
   /* ---------- Handlers ---------- */
 
   const handleSubmit = async (data: PluginConfigCreate, proxyGroupIds?: string[]) => {
+    setMembershipError(null);
     try {
       await updatePlugin.mutateAsync({
         id: pluginId,
@@ -54,6 +57,7 @@ export default function PluginDetailPage() {
 
       toast("success", "Plugin configuration updated successfully");
     } catch (err: unknown) {
+      setMembershipError(err);
       const message = await getApiErrorMessage(
         err,
         "Failed to update plugin configuration",
@@ -63,11 +67,14 @@ export default function PluginDetailPage() {
   };
 
   const handleDelete = async () => {
+    setMembershipError(null);
     try {
       await deletePlugin.mutateAsync(pluginId);
       toast("success", "Plugin configuration deleted successfully");
       navigate({ to: "/plugins" });
     } catch (err: unknown) {
+      setMembershipError(err);
+      setDeleteOpen(false);
       const message = await getApiErrorMessage(
         err,
         "Failed to delete plugin configuration",
@@ -90,6 +97,7 @@ export default function PluginDetailPage() {
   if (isError || !plugin) {
     return (
       <div className="max-w-2xl">
+        <PluginMembershipRecovery error={membershipError} />
         <Card>
           <p className="text-text-secondary">
             Failed to load plugin configuration.
@@ -131,6 +139,7 @@ export default function PluginDetailPage() {
       </div>
 
       {/* Form */}
+      <PluginMembershipRecovery error={membershipError} />
       <Card>
         <PluginConfigForm
           initialData={plugin}

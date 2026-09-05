@@ -20,7 +20,7 @@ const defaultDependencies: PluginMembershipDependencies = {
   listProxies: proxiesApi.listAll,
   getProxy: proxiesApi.get,
   updateProxy: proxiesApi.update,
-  getPlugin: pluginsApi.getConfig,
+  getPlugin: (id) => pluginsApi.getConfig(id, true),
   createPlugin: pluginsApi.createConfig,
   updatePlugin: pluginsApi.updateConfig,
   deletePlugin: pluginsApi.removeConfig,
@@ -36,10 +36,11 @@ export class PluginMembershipError extends Error {
     message: string,
     readonly recovery: string[],
     options?: ErrorOptions,
+    readonly lastKnownConfig?: PluginConfigCreate,
   ) {
     super(
       recovery.length > 0
-        ? `${message} Manual recovery required: ${recovery.join("; ")}`
+        ? `${message} Recovery details: ${recovery.join("; ")}`
         : message,
       options,
     );
@@ -47,7 +48,65 @@ export class PluginMembershipError extends Error {
   }
 }
 
+function isNotFound(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    "response" in error &&
+    (error.response as Response | undefined)?.status === 404
+  );
+}
+
+async function getPluginIfPresent(
+  pluginId: string,
+  deps: PluginMembershipDependencies,
+): Promise<PluginConfig | undefined> {
+  try {
+    return await deps.getPlugin(pluginId);
+  } catch (error) {
+    if (isNotFound(error)) return undefined;
+    throw error;
+  }
+}
+
+function referencesPlugin(proxy: Proxy, pluginId: string): boolean {
+  return (proxy.plugins ?? []).some(
+    (association) => association.plugin_config_id === pluginId,
+  );
+}
+
+async function recoveryState(
+  pluginId: string,
+  deps: PluginMembershipDependencies,
+): Promise<string[]> {
+  const details: string[] = [];
+  try {
+    const plugin = await getPluginIfPresent(pluginId, deps);
+    details.push(
+      plugin
+        ? `plugin ${pluginId} exists with scope ${plugin.scope}`
+        : `plugin ${pluginId} is missing (GET returned 404); recreate it from the saved configuration before attaching proxies`,
+    );
+  } catch {
+    details.push(`plugin ${pluginId} existence could not be verified`);
+  }
+  try {
+    const remaining = (await deps.listProxies())
+      .filter((proxy) => referencesPlugin(proxy, pluginId))
+      .map((proxy) => proxy.id);
+    details.push(`remaining proxy references: ${remaining.join(", ") || "none"}`);
+  } catch {
+    details.push("remaining proxy references could not be verified");
+  }
+  return details;
+}
+
 function validateScope(data: PluginConfigCreate, desiredProxyIds: string[]): void {
+  if (data.scope === "proxy_group" && desiredProxyIds.length === 0) {
+    throw new PluginMembershipError(
+      "Proxy-group plugins require at least one proxy",
+      [],
+    );
+  }
   if (data.scope === "proxy" && !data.proxy_id) {
     throw new PluginMembershipError("Proxy-scoped plugins require a proxy", []);
   }
@@ -130,6 +189,9 @@ async function applyAssociationPlan(
   const changed = proxies.filter((proxy) =>
     associationNeedsChange(proxy, pluginId, desired.has(proxy.id)),
   );
+  // Removing the final group reference deletes its configuration on Edge.
+  // Establish every destination before detaching any source.
+  changed.sort((a, b) => Number(desired.has(b.id)) - Number(desired.has(a.id)));
   for (const snapshot of changed) {
     const current = await deps.getProxy(snapshot.id);
     if (current.updated_at !== snapshot.updated_at) {
@@ -150,10 +212,17 @@ async function applyAssociationPlan(
 
 async function rollbackAssociations(
   applied: AppliedProxyChange[],
+  pluginId: string,
   deps: PluginMembershipDependencies,
+  disposablePlugin?: PluginConfig,
 ): Promise<string[]> {
   const failures: string[] = [];
-  for (const change of [...applied].reverse()) {
+  const changes = [...applied].reverse().sort(
+    (a, b) =>
+      Number(referencesPlugin(b.before, pluginId)) -
+      Number(referencesPlugin(a.before, pluginId)),
+  );
+  for (const change of changes) {
     try {
       const current = await deps.getProxy(change.after.id);
       if (current.updated_at !== change.after.updated_at) {
@@ -161,6 +230,28 @@ async function rollbackAssociations(
           `proxy ${current.id} changed after Foundry updated it; association was not overwritten`,
         );
         continue;
+      }
+      const plugin = await getPluginIfPresent(pluginId, deps);
+      if (referencesPlugin(change.before, pluginId) && !plugin) {
+        failures.push(
+          `proxy ${current.id} was not reattached because plugin ${pluginId} is missing`,
+        );
+        continue;
+      }
+      if (
+        plugin?.scope === "proxy_group" &&
+        plugin.updated_at !== disposablePlugin?.updated_at &&
+        !referencesPlugin(change.before, pluginId)
+      ) {
+        const hasOtherReference = (await deps.listProxies()).some(
+          (proxy) => proxy.id !== current.id && referencesPlugin(proxy, pluginId),
+        );
+        if (!hasOtherReference) {
+          failures.push(
+            `proxy ${current.id} was retained as the last reference to preserve plugin ${pluginId}`,
+          );
+          continue;
+        }
       }
       await deps.updateProxy(current.id, proxiesApi.toUpdatePayload(change.before));
     } catch (error) {
@@ -178,7 +269,10 @@ async function rollbackPlugin(
   deps: PluginMembershipDependencies,
 ): Promise<string[]> {
   try {
-    const current = await deps.getPlugin(after.id);
+    const current = await getPluginIfPresent(after.id, deps);
+    if (!current) {
+      return [`plugin ${after.id} was not restored because it is missing`];
+    }
     if (current.updated_at !== after.updated_at) {
       return [`plugin ${after.id} changed after Foundry updated it; config was not overwritten`];
     }
@@ -231,15 +325,15 @@ export async function createPluginWithMembership(
     return created;
   } catch (error) {
     const failure = error instanceof Error ? error.message : "unknown error";
-    const recovery = await rollbackAssociations(applied, deps);
+    const recovery = await rollbackAssociations(applied, created.id, deps, created);
     if (recovery.length === 0) {
       try {
-        const current = await deps.getPlugin(created.id);
-        if (current.updated_at !== created.updated_at) {
+        const current = await getPluginIfPresent(created.id, deps);
+        if (current && current.updated_at !== created.updated_at) {
           recovery.push(
             `orphan plugin ${created.id} changed concurrently and was not deleted`,
           );
-        } else {
+        } else if (current) {
           await deps.deletePlugin(created.id);
         }
       } catch (deleteError) {
@@ -247,13 +341,15 @@ export async function createPluginWithMembership(
           `orphan plugin ${created.id} could not be deleted (${deleteError instanceof Error ? deleteError.message : "unknown error"})`,
         );
       }
-    } else {
-      recovery.push(`plugin ${created.id} was retained to avoid dangling associations`);
+    }
+    if (recovery.length > 0) {
+      recovery.push(...await recoveryState(created.id, deps));
     }
     throw new PluginMembershipError(
       `Plugin creation did not converge (${failure}); rollback was attempted`,
       recovery,
       { cause: error },
+      pluginsApi.toUpdatePayload(created),
     );
   }
 }
@@ -270,7 +366,6 @@ export async function updatePluginWithMembership(
     data.scope === "proxy_group" ? desiredProxyIds : [],
     deps,
   );
-  const previousWasGroup = beforePlugin.scope === "proxy_group";
   const nextIsGroup = data.scope === "proxy_group";
   const desired = nextIsGroup ? plan.desired : new Set<string>();
 
@@ -278,15 +373,9 @@ export async function updatePluginWithMembership(
   let updatedPlugin: PluginConfig | undefined;
 
   try {
-    // Leaving group scope must remove incompatible associations first.
-    if (previousWasGroup && !nextIsGroup) {
-      await applyAssociationPlan(plan.proxies, pluginId, desired, deps, applied);
-      updatedPlugin = await updatePluginIfUnchanged(beforePlugin, data, deps);
-      return updatedPlugin;
-    }
-
-    // Entering or retaining group scope establishes the group config before
-    // attaching references; failures compensate both layers below.
+    // Edge atomically reconciles associations when PUT changes scope to global
+    // or proxy. Do not detach first or remove the proxy-scoped target it adds.
+    // Group membership remains operator-managed through proxy PUTs.
     updatedPlugin = await updatePluginIfUnchanged(beforePlugin, data, deps);
     if (nextIsGroup) {
       await applyAssociationPlan(plan.proxies, pluginId, desired, deps, applied);
@@ -294,18 +383,23 @@ export async function updatePluginWithMembership(
     return updatedPlugin;
   } catch (error) {
     const failure = error instanceof Error ? error.message : "unknown error";
-    const recovery = await rollbackAssociations(applied, deps);
-    if (updatedPlugin && (!nextIsGroup || previousWasGroup || recovery.length === 0)) {
+    const recovery: string[] = [];
+    if (updatedPlugin && beforePlugin.scope !== "proxy_group") {
+      // Restore non-group scope first: its atomic reconciliation removes group
+      // attachments without ever orphaning a group config.
       recovery.push(...await rollbackPlugin(beforePlugin, updatedPlugin, deps));
-    } else if (updatedPlugin && nextIsGroup && !previousWasGroup) {
-      recovery.push(
-        `plugin ${pluginId} was retained in proxy_group scope to avoid invalid dangling associations`,
-      );
+    } else {
+      recovery.push(...await rollbackAssociations(applied, pluginId, deps));
+      if (updatedPlugin) {
+        recovery.push(...await rollbackPlugin(beforePlugin, updatedPlugin, deps));
+      }
     }
+    recovery.push(...await recoveryState(pluginId, deps));
     throw new PluginMembershipError(
       `Plugin update did not converge (${failure}); compensating rollback was attempted`,
       recovery,
       { cause: error },
+      pluginsApi.toUpdatePayload(beforePlugin),
     );
   }
 }
@@ -321,14 +415,20 @@ export async function deletePluginWithMembership(
     if (plugin.scope === "proxy_group") {
       await applyAssociationPlan(proxies, pluginId, new Set(), deps, applied);
     }
-    await deps.deletePlugin(pluginId);
+    // The final detach may already have deleted the group. Only an observed
+    // 404 confirms success; authentication/transport errors must still fail.
+    if (await getPluginIfPresent(pluginId, deps)) {
+      await deps.deletePlugin(pluginId);
+    }
   } catch (error) {
     const failure = error instanceof Error ? error.message : "unknown error";
-    const recovery = await rollbackAssociations(applied, deps);
+    const recovery = await rollbackAssociations(applied, pluginId, deps);
+    recovery.push(...await recoveryState(pluginId, deps));
     throw new PluginMembershipError(
       `Plugin deletion failed (${failure}); membership rollback was attempted`,
       recovery,
       { cause: error },
+      pluginsApi.toUpdatePayload(plugin),
     );
   }
 }
