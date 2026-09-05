@@ -1,7 +1,8 @@
-import { useState, useRef, useCallback, useId } from "react";
+import { useState, useRef, useCallback, useId, useMemo } from "react";
 import {
   useReactTable,
   getCoreRowModel,
+  getSortedRowModel,
   flexRender,
   type ColumnDef,
   type SortingState,
@@ -21,10 +22,12 @@ export interface DataTablePagination {
   total: number;
 }
 
-export interface DataTableProps<T> {
+export interface DataTableProps<T extends { id: string }> {
   columns: ColumnDef<T, unknown>[];
   data: T[];
   pagination?: DataTablePagination;
+  /** Client mode requires the complete collection, never an already sliced page. */
+  paginationMode?: "server" | "client";
   onPaginationChange?: (params: { offset: number; limit: number }) => void;
   isLoading: boolean;
   searchValue?: string;
@@ -34,7 +37,6 @@ export interface DataTableProps<T> {
   emptyMessage?: string;
   virtualScroll?: boolean;
   tableHeight?: string;
-  onSortingChange?: (sorting: SortingState) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -58,10 +60,11 @@ const TANSTACK_DEFAULT_MIN_SIZE = 20;
 // Component
 // ---------------------------------------------------------------------------
 
-export function DataTable<T>({
+export function DataTable<T extends { id: string }>({
   columns,
   data,
   pagination,
+  paginationMode = "server",
   onPaginationChange,
   isLoading,
   searchValue,
@@ -71,30 +74,49 @@ export function DataTable<T>({
   emptyMessage = "No data found.",
   virtualScroll = false,
   tableHeight = "calc(100vh - 300px)",
-  onSortingChange,
 }: DataTableProps<T>) {
   const pageSizeId = useId();
   const [sorting, setSorting] = useState<SortingState>([]);
+  const serverPage = pagination !== undefined && paginationMode === "server";
+
+  // TanStack breaks equal sort values by core row index. Seed that index by ID
+  // so ties stay deterministic in both directions, including after a refetch.
+  const orderedData = useMemo(
+    () =>
+      serverPage || sorting.length === 0
+        ? data
+        : [...data].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
+    [data, serverPage, sorting.length],
+  );
 
   const handleSortingChange = useCallback(
     (updater: SortingState | ((old: SortingState) => SortingState)) => {
       const next = typeof updater === "function" ? updater(sorting) : updater;
       setSorting(next);
-      onSortingChange?.(next);
+      if (pagination) {
+        onPaginationChange?.({ offset: 0, limit: pagination.limit });
+      }
     },
-    [sorting, onSortingChange],
+    [sorting, pagination, onPaginationChange],
   );
 
   const table = useReactTable({
-    data,
+    data: orderedData,
     columns,
-    state: { sorting },
+    state: { sorting: serverPage ? [] : sorting },
     onSortingChange: handleSortingChange,
     getCoreRowModel: getCoreRowModel(),
-    manualSorting: true,
+    getSortedRowModel: getSortedRowModel(),
+    getRowId: (row) => row.id,
+    enableSorting: !serverPage,
+    manualSorting: serverPage,
   });
 
-  const { rows } = table.getRowModel();
+  const sortedRows = table.getRowModel().rows;
+  const rows =
+    pagination && !serverPage
+      ? sortedRows.slice(pagination.offset, pagination.offset + pagination.limit)
+      : sortedRows;
 
   // Virtual scrolling
   const tableContainerRef = useRef<HTMLDivElement>(null);
@@ -264,6 +286,15 @@ export function DataTable<T>({
                   return (
                     <th
                       key={header.id}
+                      aria-sort={
+                        canSort
+                          ? sortDir === "asc"
+                            ? "ascending"
+                            : sortDir === "desc"
+                              ? "descending"
+                              : "none"
+                          : undefined
+                      }
                       className={`px-4 py-3 text-left text-text-secondary text-xs font-semibold uppercase tracking-wider select-none whitespace-nowrap ${canSort ? "cursor-pointer hover:text-text-primary" : ""}`}
                       style={{
                         width: size !== TANSTACK_DEFAULT_SIZE ? size : undefined,
@@ -330,7 +361,7 @@ export function DataTable<T>({
           <PaginationControls
             offset={pagination.offset}
             limit={pagination.limit}
-            total={pagination.total}
+            total={serverPage ? pagination.total : data.length}
             onChange={onPaginationChange}
           />
         </div>

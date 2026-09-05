@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { act, type ReactElement } from "react";
+import { act, useState, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable } from "./DataTable";
@@ -10,6 +10,7 @@ import { DataTable } from "./DataTable";
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
 interface Row {
+  id: string;
   name: string;
 }
 
@@ -39,6 +40,162 @@ afterEach(async () => {
     });
   }
   activeContainer?.remove();
+});
+
+const sortingColumns: ColumnDef<Row, unknown>[] = [
+  { header: "Name", accessorKey: "name" },
+  { header: "ID", accessorKey: "id", enableSorting: false },
+];
+
+function bodyValues(host: HTMLElement, column = 0) {
+  return Array.from(host.querySelectorAll("tbody tr"), (row) =>
+    row.querySelectorAll("td")[column].textContent,
+  );
+}
+
+async function click(element: HTMLElement) {
+  await act(async () => {
+    element.click();
+  });
+}
+
+describe("DataTable sorting", () => {
+  it("reorders the real tbody in both directions with a matching indicator", async () => {
+    const data = [
+      { id: "z", name: "Zebra" },
+      { id: "a", name: "Alpha" },
+    ];
+    const host = await render(
+      <DataTable columns={sortingColumns} data={data} isLoading={false} />,
+    );
+    const header = host.querySelectorAll("th")[0];
+
+    expect(bodyValues(host)).toEqual(["Zebra", "Alpha"]);
+    await click(header);
+    expect(header.getAttribute("aria-sort")).toBe("ascending");
+    expect(bodyValues(host)).toEqual(["Alpha", "Zebra"]);
+
+    await click(header);
+    expect(header.getAttribute("aria-sort")).toBe("descending");
+    expect(bodyValues(host)).toEqual(["Zebra", "Alpha"]);
+
+    await click(header);
+    expect(header.getAttribute("aria-sort")).toBe("none");
+    expect(bodyValues(host)).toEqual(["Zebra", "Alpha"]);
+    expect(data.map((row) => row.id)).toEqual(["z", "a"]);
+  });
+
+  it("sorts the complete collection before paging and resets the page on direction changes", async () => {
+    const data = [
+      { id: "z", name: "Zebra" },
+      { id: "m", name: "Middle" },
+      { id: "b", name: "Alpha" },
+      { id: "a", name: "Alpha" },
+    ];
+    function CollectionTable() {
+      const [page, setPage] = useState({ offset: 2, limit: 2 });
+      return (
+        <DataTable
+          columns={sortingColumns}
+          data={data}
+          isLoading={false}
+          paginationMode="client"
+          pagination={{ ...page, total: data.length }}
+          onPaginationChange={setPage}
+        />
+      );
+    }
+    const host = await render(<CollectionTable />);
+    const header = host.querySelectorAll("th")[0];
+    const nextButton = Array.from(host.querySelectorAll("button")).find(
+      (button) => button.textContent?.includes("Next"),
+    )!;
+
+    expect(bodyValues(host, 1)).toEqual(["b", "a"]);
+    await click(header);
+    expect(header.getAttribute("aria-sort")).toBe("ascending");
+    expect(bodyValues(host, 1)).toEqual(["a", "b"]);
+    expect(host.textContent).toContain("Showing 1-2 of 4");
+
+    await click(nextButton);
+    expect(bodyValues(host, 1)).toEqual(["m", "z"]);
+    expect(nextButton.disabled).toBe(true);
+
+    await click(header);
+    expect(header.getAttribute("aria-sort")).toBe("descending");
+    expect(bodyValues(host, 1)).toEqual(["z", "m"]);
+    expect(host.textContent).toContain("Showing 1-2 of 4");
+
+    await click(nextButton);
+    expect(bodyValues(host, 1)).toEqual(["a", "b"]);
+    expect(data.map((row) => row.id)).toEqual(["z", "m", "b", "a"]);
+  });
+
+  it("keeps equal values ordered by ID after the collection arrives in a different order", async () => {
+    const data = [
+      { id: "b", name: "Alpha" },
+      { id: "a", name: "Alpha" },
+    ];
+    const host = await render(
+      <DataTable columns={sortingColumns} data={data} isLoading={false} />,
+    );
+    const header = host.querySelectorAll("th")[0];
+    await click(header);
+    expect(bodyValues(host, 1)).toEqual(["a", "b"]);
+    await click(header);
+    expect(bodyValues(host, 1)).toEqual(["a", "b"]);
+
+    await act(async () => {
+      root?.render(
+        <DataTable
+          columns={sortingColumns}
+          data={[...data].reverse()}
+          isLoading={false}
+        />,
+      );
+    });
+    expect(header.getAttribute("aria-sort")).toBe("descending");
+    expect(bodyValues(host, 1)).toEqual(["a", "b"]);
+  });
+
+  it("disables the affordance on server pages even when a column enables sorting", async () => {
+    const host = await render(
+      <DataTable
+        columns={[{ header: "Name", accessorKey: "name", enableSorting: true }]}
+        data={[
+          { id: "z", name: "Zebra" },
+          { id: "a", name: "Alpha" },
+        ]}
+        isLoading={false}
+        pagination={{ offset: 2, limit: 2, total: 6 }}
+      />,
+    );
+    const header = host.querySelectorAll("th")[0];
+    expect(header.hasAttribute("aria-sort")).toBe(false);
+    expect(header.querySelector("svg")).toBeNull();
+    expect(header.className).not.toContain("cursor-pointer");
+    await click(header);
+    await click(header);
+    expect(bodyValues(host)).toEqual(["Zebra", "Alpha"]);
+    expect(header.hasAttribute("aria-sort")).toBe(false);
+  });
+
+  it("respects enableSorting false on complete-collection columns", async () => {
+    const host = await render(
+      <DataTable
+        columns={sortingColumns}
+        data={[
+          { id: "z", name: "Zebra" },
+          { id: "a", name: "Alpha" },
+        ]}
+        isLoading={false}
+      />,
+    );
+    const header = host.querySelectorAll("th")[1];
+    expect(header.querySelector("svg")).toBeNull();
+    await click(header);
+    expect(bodyValues(host, 1)).toEqual(["z", "a"]);
+  });
 });
 
 const columns: ColumnDef<Row, unknown>[] = [
