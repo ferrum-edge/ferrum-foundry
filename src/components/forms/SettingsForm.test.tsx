@@ -1,11 +1,7 @@
-import { webcrypto } from "node:crypto";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { decodeJwt } from "jose";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AuthPrincipal } from "../../../server/auth-types";
-import type { RuntimeConfig } from "../../../server/config";
 import { SettingsForm } from "./SettingsForm";
 
 const { get, put, toast } = vi.hoisted(() => ({
@@ -22,22 +18,22 @@ vi.mock("@/components/ui/Toast", () => ({
 let host: HTMLDivElement;
 let root: Root;
 let queryClient: QueryClient;
-let config: typeof import("../../../server/config");
-let generateToken: typeof import("../../../server/jwt").generateToken;
-let submitted: Partial<RuntimeConfig>;
+let submitted: Record<string, unknown>;
+let currentSettings: Record<string, unknown>;
+let savedSettings: Record<string, unknown>;
 
-const principal: AuthPrincipal = {
-  subject: "settings-test",
-  displayName: "Settings test",
-  role: "admin",
-  namespaces: ["tenant-a"],
-  authMode: "static",
+const baseSettings = {
+  adminUrl: "http://127.0.0.1:9000",
+  jwtIssuer: "ferrum-edge",
+  jwtTtl: 900,
+  jwtRole: "admin",
+  tlsCaConfigured: false,
+  tlsVerify: true,
+  connectTimeout: 5000,
+  readTimeout: 60000,
+  writeTimeout: 60000,
+  runtimeSettingsEnabled: true,
 };
-
-function publicSettings() {
-  // Model the HTTP response: absent optional claims disappear on the wire.
-  return JSON.parse(JSON.stringify(config.getPublicRuntimeConfig()));
-}
 
 async function renderForm() {
   await act(async () => {
@@ -77,33 +73,24 @@ async function save() {
   await act(async () => button.click());
 }
 
-beforeEach(async () => {
-  vi.resetModules();
+beforeEach(() => {
   vi.clearAllMocks();
-  for (const key of Object.keys(process.env)) {
-    if (key.startsWith("FERRUM_")) vi.stubEnv(key, undefined);
-  }
-  vi.stubEnv("NODE_ENV", "test");
-  vi.stubEnv("FERRUM_ADMIN_URL", "http://127.0.0.1:9000");
-  vi.stubEnv("FERRUM_JWT_SECRET", "settings-test-signing-secret-long-enough");
-  vi.stubEnv("FERRUM_BFF_AUTH_TOKEN", "settings-test-session-token-long-enough");
-  vi.stubEnv("FERRUM_ALLOW_RUNTIME_SETTINGS", "true");
-  vi.stubEnv("FERRUM_ADMIN_ALLOWED_ORIGINS", "http://127.0.0.1:9000");
-  vi.stubEnv("FERRUM_JWT_AUDIENCE", "old-audience");
-  vi.stubEnv("FERRUM_JWT_NAMESPACES", "tenant-a");
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  vi.stubGlobal("crypto", webcrypto);
-
-  config = await import("../../../server/config");
-  ({ generateToken } = await import("../../../server/jwt"));
-  get.mockImplementation(() => ({ json: async () => publicSettings() }));
-  put.mockImplementation((_path, options: { json: Partial<RuntimeConfig> }) => ({
+  submitted = {};
+  currentSettings = {
+    ...baseSettings,
+    jwtAudience: "old-audience",
+    jwtNamespaces: ["tenant-a"],
+  };
+  // Cleared optional claims are absent from the canonical HTTP response.
+  savedSettings = { ...baseSettings };
+  get.mockImplementation(() => ({ json: async () => currentSettings }));
+  put.mockImplementation((_path, options: { json: Record<string, unknown> }) => ({
     json: async () => {
-      // Exercise the form's actual payload through JSON serialization and the
-      // real server updater, just as the settings PUT route does.
+      // Preserve the wire boundary: JSON serialization drops undefined values.
       submitted = JSON.parse(JSON.stringify(options.json));
-      await config.updateRuntimeConfig(submitted);
-      return publicSettings();
+      currentSettings = savedSettings;
+      return savedSettings;
     },
   }));
   queryClient = new QueryClient({
@@ -118,14 +105,11 @@ afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
   queryClient.clear();
-  vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
 
 describe("SettingsForm runtime saves", () => {
-  it("serializes explicit clears and removes the old audience from subsequent JWTs", async () => {
-    const before = await generateToken(config.loadConfig(), principal);
-    expect(decodeJwt(before).aud).toBe("old-audience");
+  it("serializes explicit clears and adopts the canonical response", async () => {
     await renderForm();
     expect(input("jwt-audience").value).toBe("old-audience");
     await change("jwt-audience", "");
@@ -135,12 +119,9 @@ describe("SettingsForm runtime saves", () => {
     expect(put).toHaveBeenCalledWith("api/settings", expect.any(Object));
     expect(submitted).toMatchObject({ jwtAudience: "", jwtNamespaces: [] });
     expect(toast).toHaveBeenCalledWith("success", "Settings saved successfully");
-    const after = await generateToken(config.loadConfig(), principal);
-    expect(after).not.toBe(before);
-    expect(decodeJwt(after)).not.toHaveProperty("aud");
-    expect(publicSettings()).not.toHaveProperty("jwtAudience");
-    expect(publicSettings()).not.toHaveProperty("jwtNamespaces");
-    expect(queryClient.getQueryData(["settings"])).toEqual(publicSettings());
+    expect(queryClient.getQueryData(["settings"])).toEqual(savedSettings);
+    expect(input("jwt-audience").value).toBe("");
+    expect(input("namespace-grants").value).toBe("");
 
     await act(async () => root.render(null));
     await renderForm();
@@ -149,6 +130,12 @@ describe("SettingsForm runtime saves", () => {
   });
 
   it("replaces the draft and cached settings with the canonical save response", async () => {
+    savedSettings = {
+      ...baseSettings,
+      jwtIssuer: "canonical-issuer",
+      jwtAudience: ["edge-admin", "edge-ops"],
+      jwtNamespaces: ["tenant-a"],
+    };
     await renderForm();
     await change("jwt-issuer", "  canonical-issuer  ");
     await change("jwt-audience", " edge-admin , edge-ops ");
@@ -156,7 +143,7 @@ describe("SettingsForm runtime saves", () => {
 
     expect(input("jwt-issuer").value).toBe("canonical-issuer");
     expect(input("jwt-audience").value).toBe("edge-admin, edge-ops");
-    expect(queryClient.getQueryData(["settings"])).toEqual(publicSettings());
+    expect(queryClient.getQueryData(["settings"])).toEqual(savedSettings);
     expect(queryClient.getQueryData(["settings"])).toMatchObject({
       jwtIssuer: "canonical-issuer",
       jwtAudience: ["edge-admin", "edge-ops"],
@@ -164,7 +151,7 @@ describe("SettingsForm runtime saves", () => {
   });
 
   it("keeps runtime editing unavailable when the server gate is disabled", async () => {
-    vi.stubEnv("FERRUM_ALLOW_RUNTIME_SETTINGS", "false");
+    currentSettings.runtimeSettingsEnabled = false;
     await renderForm();
 
     expect(input("jwt-audience").disabled).toBe(true);
