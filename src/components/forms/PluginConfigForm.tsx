@@ -41,6 +41,8 @@ export interface PluginConfigFormProps {
   availablePlugins: string[];
   /** Pre-loaded proxy IDs that currently reference this plugin (edit mode, proxy_group) */
   initialProxyGroupIds?: string[];
+  /** True only after all membership pages succeed; [] can then mean empty. */
+  initialProxyGroupIdsLoaded?: boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -73,7 +75,21 @@ function Checkbox({
 /*  PluginConfigForm                                                   */
 /* ================================================================== */
 
-export function PluginConfigForm({
+export function PluginConfigForm(props: PluginConfigFormProps) {
+  const membershipLoaded =
+    props.initialProxyGroupIdsLoaded ?? props.initialProxyGroupIds !== undefined;
+
+  // Mount fresh when this plugin's complete membership first arrives. Do not
+  // key on the IDs themselves: refetches must preserve subsequent user edits.
+  return (
+    <PluginConfigFormFields
+      key={JSON.stringify([props.initialData?.id, membershipLoaded])}
+      {...props}
+    />
+  );
+}
+
+function PluginConfigFormFields({
   initialData,
   defaults,
   onSubmit,

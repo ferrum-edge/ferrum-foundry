@@ -47,7 +47,12 @@ function PluginEditor({ session }: { session: EditorSession }) {
 
   const { data: plugin, isLoading, isError } = usePluginConfig(pluginId);
   const { data: availablePlugins, isLoading: pluginsLoading } = useAvailablePlugins();
-  const { data: allProxies } = useAllProxies();
+  const {
+    data: allProxies,
+    isPending: proxiesPending,
+    isError: proxiesError,
+    isSuccess: proxiesLoaded,
+  } = useAllProxies();
   const updatePlugin = useUpdatePluginWithMembership();
   const deletePlugin = useDeletePluginWithMembership();
 
@@ -105,7 +110,11 @@ function PluginEditor({ session }: { session: EditorSession }) {
 
   /* ---------- Loading / Error states ---------- */
 
-  if (isLoading || pluginsLoading) {
+  const needsMembership = plugin?.scope === "proxy_group";
+
+  // listAll resolves only after every page succeeds; partial membership must
+  // never become the initial selection for a full membership replacement.
+  if (isLoading || pluginsLoading || (needsMembership && proxiesPending)) {
     return (
       <div className="space-y-6 max-w-3xl">
         <SkeletonCard />
@@ -114,13 +123,15 @@ function PluginEditor({ session }: { session: EditorSession }) {
     );
   }
 
-  if (isError || !plugin) {
+  if (isError || !plugin || (needsMembership && proxiesError)) {
     return (
       <div className="max-w-2xl">
         <PluginMembershipRecovery error={membershipError} />
         <Card>
           <p className="text-text-secondary">
-            Failed to load plugin configuration.
+            {needsMembership && proxiesError
+              ? "Failed to load proxy group membership. Reload to try again."
+              : "Failed to load plugin configuration."}
           </p>
           <Button
             variant="secondary"
@@ -167,6 +178,7 @@ function PluginEditor({ session }: { session: EditorSession }) {
           isLoading={updatePlugin.isPending}
           availablePlugins={availablePlugins ?? []}
           initialProxyGroupIds={initialProxyGroupIds}
+          initialProxyGroupIdsLoaded={!needsMembership || proxiesLoaded}
         />
       </Card>
 
