@@ -3,6 +3,7 @@
 /* ------------------------------------------------------------------ */
 
 import { useCallback, useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
@@ -56,6 +57,7 @@ const DEFAULT_SETTINGS: Settings = {
 
 export function SettingsForm() {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [loading, setLoading] = useState(true);
@@ -69,12 +71,13 @@ export function SettingsForm() {
     try {
       const data = await api.get("api/settings").json<Settings>();
       setSettings(data);
+      queryClient.setQueryData(["settings"], data);
     } catch {
       toast("error", "Failed to load settings");
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [queryClient, toast]);
 
   useEffect(() => {
     fetchSettings();
@@ -114,7 +117,11 @@ export function SettingsForm() {
         runtimeSettingsEnabled: _runtimeSettingsEnabled,
         ...updates
       } = settings;
-      await api.put("api/settings", { json: updates });
+      const data = await api
+        .put("api/settings", { json: updates })
+        .json<Settings>();
+      setSettings(data);
+      queryClient.setQueryData(["settings"], data);
       toast("success", "Settings saved successfully");
     } catch {
       toast("error", "Failed to save settings");
@@ -203,7 +210,7 @@ export function SettingsForm() {
             <Input
               label="JWT Audience"
               value={Array.isArray(settings.jwtAudience) ? settings.jwtAudience.join(", ") : settings.jwtAudience ?? ""}
-              onChange={(event) => update("jwtAudience", event.target.value || undefined)}
+              onChange={(event) => update("jwtAudience", event.target.value)}
               helpText="Optional comma-separated aud claim; leave empty unless the gateway requires it."
               disabled={!settings.runtimeSettingsEnabled}
             />
