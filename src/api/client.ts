@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – configured ky HTTP client                        */
 /* ------------------------------------------------------------------ */
 
-import ky from "ky";
+import ky, { isHTTPError } from "ky";
 import type { ApiError } from "./types";
 import {
   observeGatewayResponse,
@@ -192,6 +192,30 @@ export const api = ky.create({
   // `/proxies/api/auth/session` and break authentication.
   prefix: "/",
   credentials: "same-origin",
+  retry: {
+    // A failed write may already be committed. Even full-replace PUTs and
+    // indexed credential DELETEs must surface the error without replay.
+    // ky checks methods before Retry-After, so that header cannot opt writes in.
+    limit: 2,
+    methods: ["get", "head", "options"],
+    statusCodes: [408, 413, 429, 500, 502, 503, 504],
+    shouldRetry: ({ error }) => {
+      // A committed-but-not-live response is never permission to retry,
+      // even if it unexpectedly arrives on a read. Use ky's parsed body.
+      if (
+        isHTTPError(error) &&
+        error.response.status === 503 &&
+        error.response.headers.has("x-ferrum-config-cursor") &&
+        error.data &&
+        typeof error.data === "object" &&
+        "applied" in error.data &&
+        error.data.applied === false
+      ) {
+        return false;
+      }
+      return undefined;
+    },
+  },
   hooks: {
     beforeRequest: [
       ({ request, options }) => {
