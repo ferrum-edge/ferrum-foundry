@@ -133,7 +133,8 @@ describe("plugin membership plans bind every request to the starting namespace",
       "membership rollback was attempted",
     );
 
-    // p1 was detached, p2 failed, so p1 was restored by the rollback.
+    // p1 was detached, p2 failed, so p1 was restored by the rollback; the
+    // cascade-aware rollback re-checks the plugin and the remaining references.
     expect(captured.map((r) => `${r.method} ${r.path}`)).toEqual([
       "GET plugins/config/plugin-1",
       "GET proxies",
@@ -142,7 +143,10 @@ describe("plugin membership plans bind every request to the starting namespace",
       "GET proxies/p2",
       "PUT proxies/p2",
       "GET proxies/p1",
+      "GET plugins/config/plugin-1",
       "PUT proxies/p1",
+      "GET plugins/config/plugin-1",
+      "GET proxies",
     ]);
     expect(captured.every((r) => r.namespace === "tenant-a")).toBe(true);
     expect(localStorage.getItem("ferrum:namespace")).toBe("tenant-b");

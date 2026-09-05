@@ -317,7 +317,7 @@ describe("session request hooks", () => {
     window.history.pushState({}, "", "/proxies/proxy-orders-api");
     try {
       await api.get("api/auth/session");
-      await api.get("api/proxy/proxies");
+      await api.get("api/proxy/proxies", scoped({ namespace: "ferrum" }));
       expect(new URL(captured[0].url).pathname).toBe("/api/auth/session");
       expect(new URL(captured[1].url).pathname).toBe("/api/proxy/proxies");
     } finally {
@@ -339,7 +339,10 @@ describe("session request hooks", () => {
       status: 401,
       headers: { "content-type": "application/json", "x-ferrum-auth-layer": "gateway" },
     });
-    await api.get("api/proxy/proxies", { throwHttpErrors: false });
+    await api.get(
+      "api/proxy/proxies",
+      scoped({ namespace: "ferrum" }, { throwHttpErrors: false }),
+    );
     expect(unauthorized).not.toHaveBeenCalled();
 
     nextResponse = () => new Response("{}", {
