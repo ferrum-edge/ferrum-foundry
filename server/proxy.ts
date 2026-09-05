@@ -7,6 +7,7 @@ import { loadConfig } from './config.js';
 import { generateToken } from './jwt.js';
 import { proxyTargetPath, UnsafeProxyPathError } from './proxy-path.js';
 import { getDispatcher } from './tls.js';
+import { waitingRouteTimeout } from './waitBudget.js';
 
 const DEFAULT_BODY_LIMIT = 2 * 1024 * 1024;
 const API_SPEC_BODY_LIMIT = 30 * 1024 * 1024;
@@ -262,9 +263,10 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
 
     const controller = new AbortController();
     let timeoutPhase = 'response';
+    const waitTimeout = waitingRouteTimeout(request.method, targetPath);
     const responseTimeout = targetPath === '/restore'
       ? Math.max(config.readTimeout, RESTORE_OPERATION_TIMEOUT)
-      : config.readTimeout;
+      : Math.max(config.readTimeout, waitTimeout);
     let responseTimer: NodeJS.Timeout | undefined;
     const clearResponseDeadline = () => {
       if (responseTimer) clearTimeout(responseTimer);
@@ -310,7 +312,7 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
         headers: copyRequestHeaders(request, `Bearer ${token}`),
         body,
         signal: controller.signal,
-        dispatcher: getDispatcher(config),
+        dispatcher: getDispatcher(waitTimeout ? { ...config, readTimeout: responseTimeout } : config),
         redirect: 'error',
         ...(body && { duplex: 'half' }),
       };

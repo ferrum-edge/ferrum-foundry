@@ -1,3 +1,5 @@
+import { APPLY_WAIT_MS } from "../../server/waitBudget";
+
 export type ApplyState =
   | "idle"
   | "nothing_applied"
@@ -134,7 +136,7 @@ async function pollApplyStatus(
       const result = await statusFetcher(
         cursor.epoch,
         cursor.sequence,
-        25_000,
+        APPLY_WAIT_MS,
         namespace,
       );
       if (generation !== pollGeneration) return;
