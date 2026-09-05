@@ -8,11 +8,13 @@ import PluginDetailPage from "./$pluginId";
 
 const { get } = vi.hoisted(() => ({ get: vi.fn() }));
 
-vi.mock("@/api/client", () => ({
-  proxyApi: { get },
-  SILENT_ERRORS: "silentErrors",
-  getApiErrorMessage: vi.fn(),
-}));
+vi.mock("@/api/client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/api/client")>();
+  return {
+    ...actual,
+    proxyApi: { get },
+  };
+});
 vi.mock("@/stores/namespace", () => ({
   useNamespace: () => ({
     selectedNamespace: "default",
@@ -159,11 +161,24 @@ describe("proxy group membership loading", () => {
 
   it("waits for every listAll page before mounting the picker", async () => {
     await render();
+    for (const path of ["plugins", "plugins/config/group-1"]) {
+      expect(get).toHaveBeenCalledWith(
+        path,
+        expect.objectContaining({
+          headers: { "X-Ferrum-Namespace": "default" },
+        }),
+      );
+    }
+    expect(get).toHaveBeenCalledWith("proxies", {
+      searchParams: { offset: "0", limit: "250" },
+      headers: { "X-Ferrum-Namespace": "default" },
+    });
     pluginResponse.resolve(plugin);
     firstPage.resolve(page([member("source")], 0, 2));
     await settle();
     expect(get).toHaveBeenCalledWith("proxies", {
       searchParams: { offset: "1", limit: "250" },
+      headers: { "X-Ferrum-Namespace": "default" },
     });
     expect(host.querySelector("form")).toBeNull();
     secondPage.resolve(page([member("destination")], 1, 2));
