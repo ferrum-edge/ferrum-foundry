@@ -205,6 +205,32 @@ const columns: ColumnDef<Row, unknown>[] = [
 ];
 
 describe("DataTable header sizing", () => {
+  it("associates each Rows label with its own page-size select", async () => {
+    const host = await render(
+      <>
+        <DataTable<Row>
+          columns={columns}
+          data={[]}
+          isLoading={false}
+          onPaginationChange={() => {}}
+        />
+        <DataTable<Row>
+          columns={columns}
+          data={[]}
+          isLoading={false}
+          onPaginationChange={() => {}}
+        />
+      </>,
+    );
+    const selects = host.querySelectorAll("select");
+    expect(selects).toHaveLength(2);
+    expect(selects[0].id).not.toBe(selects[1].id);
+    for (const select of selects) {
+      expect(select.labels).toHaveLength(1);
+      expect(select.labels?.[0].textContent).toBe("Rows");
+    }
+  });
+
   it("applies a declared minSize as a min-width on the header cell", async () => {
     const host = await render(
       <DataTable<Row> columns={columns} data={[]} isLoading={false} />,
