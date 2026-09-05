@@ -564,6 +564,11 @@ the gateway is unreachable, unhealthy, or rejects the JWT. Wire the readiness
 probe so a gateway outage or a signing-key mismatch takes Foundry out of
 rotation instead of serving an admin UI that cannot reach anything.
 
+The header checks BFF readiness every 15 seconds. It shows **Unreachable** when
+the browser's readiness request fails, even if a previous check succeeded, and
+returns to **Connected** after a successful ready response. Gateway responses
+with `degraded` or `unavailable` status show **Degraded** or **Disconnected**.
+
 All three endpoints are unauthenticated, which is why liveness carries no
 gateway detail and readiness reports only component status, HTTP status, and the
 Foundry version.

@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { Select } from "@/components/ui/Select";
 import { useNamespace } from "@/stores/namespace";
 import { useNamespaces } from "@/hooks/useNamespaces";
@@ -10,20 +11,28 @@ interface HeaderProps {
 }
 
 export function Header({ onToggleSidebar }: HeaderProps) {
+  const namespaceLabelId = useId();
   const { selectedNamespace, setNamespace } = useNamespace();
   const { data: namespaces } = useNamespaces();
   const { theme, toggleTheme } = useTheme();
   const { logout, principal } = useAuth();
   const readiness = useBffReadiness();
 
-  const connection = readiness.data?.status ?? (readiness.isError ? "unavailable" : "unknown");
-  const connectionLabel = connection === "ready"
-    ? "Connected"
-    : connection === "degraded"
-      ? "Degraded"
-      : connection === "unavailable"
-        ? "Disconnected"
-        : "Checking";
+  // A failed background check retains the last successful data in React Query.
+  const unreachable =
+    readiness.isError || (readiness.isFetching && readiness.failureCount > 0);
+  const connection = unreachable
+    ? "unavailable"
+    : (readiness.data?.status ?? "unknown");
+  const connectionLabel = unreachable
+    ? "Unreachable"
+    : connection === "ready"
+      ? "Connected"
+      : connection === "degraded"
+        ? "Degraded"
+        : connection === "unavailable"
+          ? "Disconnected"
+          : "Checking";
   const connectionColor = connection === "ready"
     ? "bg-success"
     : connection === "degraded"
@@ -72,11 +81,15 @@ export function Header({ onToggleSidebar }: HeaderProps) {
       <div className="flex min-w-0 items-center gap-3 sm:gap-4">
         {/* Namespace selector */}
         <div className="flex min-w-0 items-center gap-2">
-          <span className="hidden sm:inline text-sm font-semibold text-text-secondary whitespace-nowrap">
+          <span
+            id={namespaceLabelId}
+            className="hidden sm:inline text-sm font-semibold text-text-secondary whitespace-nowrap"
+          >
             Active Namespace:
           </span>
           <div className="w-36 min-w-0 sm:w-44 md:w-52">
             <Select
+              aria-labelledby={namespaceLabelId}
               value={selectedNamespace}
               onValueChange={setNamespace}
               options={displayOptions}
