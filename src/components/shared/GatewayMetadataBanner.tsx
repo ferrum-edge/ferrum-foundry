@@ -46,7 +46,8 @@ export function GatewayMetadataBanner() {
           {apply.state === "nothing_applied" && (
             <>
               <strong className="text-warning">Change was not committed.</strong>{" "}
-              The request was not replayed. Retry manually
+              The request was not replayed. Re-check the current configuration
+              before retrying manually
               {apply.retryAfter ? ` after at least ${apply.retryAfter} seconds` : " when the gateway is available"}.
             </>
           )}
