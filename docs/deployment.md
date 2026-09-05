@@ -134,6 +134,14 @@ strings `true` and `false`. Duration variables are integers.
 | `FERRUM_ADMIN_ALLOWED_ORIGINS` | Required when runtime settings are enabled | - | comma-separated `http`/`https` origins | Origins a runtime `adminUrl` change may select |
 | `FERRUM_ADMIN_ALLOWED_CIDRS` | No | - | comma-separated CIDRs | Private or special-purpose ranges a changed admin URL may resolve to; the startup origin is always permitted |
 
+With `FERRUM_ALLOW_RUNTIME_SETTINGS=true`, clearing **JWT Audience** and saving
+removes the `aud` claim from subsequent BFF-generated JWTs. The Settings form
+displays the canonical values returned by the BFF after each successful save.
+For `PUT /api/settings`, an omitted field leaves its current value unchanged;
+send `jwtAudience: ""` (or `[]`) to clear the audience, and `jwtNamespaces: []`
+to clear the default namespace grants. Runtime overrides reset to environment
+values when the BFF restarts.
+
 ### Process lifecycle
 
 | Variable | Required | Default | Range or format | Meaning |
