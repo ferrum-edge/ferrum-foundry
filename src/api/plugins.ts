@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – Plugin API functions                             */
 /* ------------------------------------------------------------------ */
 
-import { proxyApi, scoped, type NamespaceScope } from "./client";
+import { proxyApi, scoped, SILENT_ERRORS, type NamespaceScope } from "./client";
 import type {
   PaginatedResponse,
   PaginationParams,
@@ -51,9 +51,13 @@ export async function listAllConfigs(
 export async function getConfig(
   scope: NamespaceScope,
   id: string,
+  silentErrors = false,
 ): Promise<PluginConfig> {
   return proxyApi
-    .get(`plugins/config/${id}`, scoped(scope))
+    .get(
+      `plugins/config/${id}`,
+      scoped(scope, { context: { [SILENT_ERRORS]: silentErrors } }),
+    )
     .json<PluginConfig>();
 }
 
