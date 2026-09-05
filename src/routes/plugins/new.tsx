@@ -11,6 +11,7 @@ import { useToast } from "@/components/ui/Toast";
 import { Card } from "@/components/ui/Card";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { PluginConfigForm } from "@/components/forms/PluginConfigForm";
+import { PluginMembershipRecovery } from "@/components/forms/PluginMembershipRecovery";
 import type { PluginFormDefaults } from "@/components/forms/PluginConfigForm";
 import { getApiErrorMessage } from "@/api/client";
 import type { PluginConfigCreate } from "@/api/types";
@@ -60,6 +61,7 @@ export default function PluginNewPage() {
         </p>
       </div>
 
+      <PluginMembershipRecovery error={createPlugin.error} />
       <Card>
         <PluginConfigForm
           onSubmit={handleSubmit}

@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – Plugin API functions                             */
 /* ------------------------------------------------------------------ */
 
-import { proxyApi } from "./client";
+import { proxyApi, SILENT_ERRORS } from "./client";
 import type {
   PaginatedResponse,
   PaginationParams,
@@ -42,8 +42,15 @@ export async function listAllConfigs(): Promise<PluginConfig[]> {
   return collectAllPages((offset, limit) => listConfigs({ offset, limit }));
 }
 
-export async function getConfig(id: string): Promise<PluginConfig> {
-  return proxyApi.get(`plugins/config/${id}`).json<PluginConfig>();
+export async function getConfig(
+  id: string,
+  silentErrors = false,
+): Promise<PluginConfig> {
+  return proxyApi
+    .get(`plugins/config/${id}`, {
+      context: { [SILENT_ERRORS]: silentErrors },
+    })
+    .json<PluginConfig>();
 }
 
 export function toUpdatePayload(plugin: PluginConfig): PluginConfigCreate {
