@@ -217,6 +217,9 @@ export async function observeGatewayResponse(
   if (response.status === 503) {
     body = await response.clone().json().catch(() => undefined);
   }
+  // A newer mutation may have superseded this response during the body read.
+  // Discard every stale classification before publishing or starting a poll.
+  if (generation !== pollGeneration) return;
 
   if (response.status === 503 && isCommittedNotLive(body)) {
     next = {

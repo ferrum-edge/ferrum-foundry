@@ -5,6 +5,7 @@ import {
   parseConfigCursor,
   resetGatewayMetadata,
   setApplyStatusFetcher,
+  type ApplyStatusResponse,
 } from "./gatewayMetadata";
 
 function mutationRequest(namespace?: string): Request {
@@ -32,6 +33,75 @@ describe("parseConfigCursor", () => {
 });
 
 describe("observeGatewayResponse", () => {
+  it.each([
+    { status: 200, state: "applied", cursor: "1:2", polling: false },
+    { status: 400, state: "idle", cursor: null, polling: false },
+    { status: 503, state: "nothing_applied", cursor: null, polling: false },
+    { status: 202, state: "pending", cursor: "1:2", polling: true },
+  ])(
+    "discards an older delayed 503 after a newer $status mutation",
+    async ({ status, state, cursor, polling }) => {
+      let bodyController!: ReadableStreamDefaultController<Uint8Array>;
+      const olderBody = new ReadableStream<Uint8Array>({
+        start(controller) {
+          bodyController = controller;
+        },
+      });
+      let resolveStatus!: (value: ApplyStatusResponse) => void;
+      const fetchStatus = vi.fn(
+        () =>
+          new Promise<ApplyStatusResponse>((resolve) => {
+            resolveStatus = resolve;
+          }),
+      );
+      setApplyStatusFetcher(fetchStatus);
+      const olderObservation = observeGatewayResponse(
+        mutationRequest("older"),
+        new Response(olderBody, {
+          status: 503,
+          headers: { "x-ferrum-config-cursor": "1:1" },
+        }),
+      );
+
+      await observeGatewayResponse(
+        mutationRequest("newer"),
+        new Response("{}", {
+          status,
+          headers: { "x-ferrum-config-cursor": "1:2" },
+        }),
+      );
+      const newerSnapshot = getGatewayMetadataSnapshot();
+      expect(newerSnapshot.apply).toMatchObject({ state, cursor, polling });
+
+      bodyController.enqueue(
+        new TextEncoder().encode(JSON.stringify({ applied: false })),
+      );
+      bodyController.close();
+      await olderObservation;
+
+      // Discard silently: even the snapshot identity remains unchanged.
+      expect(getGatewayMetadataSnapshot()).toBe(newerSnapshot);
+      expect(fetchStatus).toHaveBeenCalledTimes(polling ? 1 : 0);
+      if (polling) {
+        expect(fetchStatus).toHaveBeenCalledWith("1", "2", 25_000, "newer");
+        resolveStatus({
+          topology_epoch: "1",
+          sequence: "2",
+          state: "applied",
+          accepted_topology_epoch: "1",
+          accepted_sequence: "2",
+        });
+        await vi.waitFor(() => {
+          expect(getGatewayMetadataSnapshot().apply).toMatchObject({
+            state: "applied",
+            cursor: "1:2",
+            polling: false,
+          });
+        });
+      }
+    },
+  );
+
   it("retains cached-response and safe HTTP metadata", async () => {
     await observeGatewayResponse(
       new Request("http://localhost/api/proxy/backup"),
