@@ -5,6 +5,7 @@
 import { FLEET_GLOBAL, SILENT_ERRORS, proxyApi } from "./client";
 import type { PaginatedResponse, PaginationParams } from "./types";
 import { collectAllPages } from "./pagination";
+import { ACME_MAX_WAIT_MS, serverWaitTimeout } from "../../server/waitBudget";
 
 /* ---------- Inventory ---------- */
 
@@ -541,16 +542,51 @@ export async function removeAcmeOrder(id: string): Promise<void> {
   await proxyApi.delete(`admin/tls/acme/orders/${id}`, { context: FLEET_GLOBAL_CONTEXT });
 }
 
+export class AcmeFinalizationUnknownError extends Error {
+  constructor(readonly orderId: string, cause: unknown) {
+    super(
+      "Finalization may still be in progress; the result is unknown. Re-check order status before taking further action. Do not repeat finalization blindly.",
+      { cause },
+    );
+    this.name = "AcmeFinalizationUnknownError";
+  }
+}
+
+export async function getAcmeOrder(id: string): Promise<AcmeOrder> {
+  return proxyApi
+    .get(`admin/tls/acme/orders/${encodeURIComponent(id)}`, {
+      context: FLEET_GLOBAL_CONTEXT,
+    })
+    .json<AcmeOrder>();
+}
+
 export async function finalizeAcmeOrder(
   id: string,
   data: AcmeOrderFinalizeRequest = {},
 ): Promise<AcmeOrderFinalizeResponse> {
-  return proxyApi
-    .post(`admin/tls/acme/orders/${id}/finalize`, {
-      json: data,
-      context: FLEET_GLOBAL_CONTEXT,
-    })
-    .json<AcmeOrderFinalizeResponse>();
+  const seconds = data.poll_timeout_seconds ?? 60;
+  if (!Number.isInteger(seconds) || seconds < 1 || seconds > ACME_MAX_WAIT_MS / 1000) {
+    throw new RangeError("ACME polling budget must be an integer from 1 to 600 seconds.");
+  }
+  try {
+    return await proxyApi
+      .post(`admin/tls/acme/orders/${encodeURIComponent(id)}/finalize`, {
+        json: { ...data, poll_timeout_seconds: seconds },
+        timeout: serverWaitTimeout(seconds * 1000),
+        retry: 0,
+        context: { ...FLEET_GLOBAL_CONTEXT, [SILENT_ERRORS]: true },
+      })
+      .json<AcmeOrderFinalizeResponse>();
+  } catch (error) {
+    // A transport failure or upstream 5xx cannot prove the mutation stopped.
+    const status = error instanceof Error && "response" in error
+      ? (error as { response: Response }).response.status
+      : undefined;
+    if (status === undefined || status >= 500 || status === 408) {
+      throw new AcmeFinalizationUnknownError(id, error);
+    }
+    throw error;
+  }
 }
 
 export async function renewAcmeCertificate(

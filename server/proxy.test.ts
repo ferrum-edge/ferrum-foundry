@@ -42,7 +42,11 @@ function gatewayHandler(request: IncomingMessage, response: ServerResponse): voi
       setTimeout(() => response.end('{"ok":true}'), 250);
       return;
     }
-    if (request.url?.startsWith('/restore')) {
+    if (
+      request.url?.startsWith('/restore') ||
+      request.url?.startsWith('/config/apply-status') ||
+      request.url === '/admin/tls/acme/orders/test/finalize'
+    ) {
       setTimeout(() => {
         response.setHeader('content-type', 'application/json');
         response.end('{"restored":true}');
@@ -370,6 +374,19 @@ describe('streaming gateway proxy', () => {
     });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ restored: true });
+  });
+
+  it.each([
+    ['GET', '/config/apply-status?epoch=1&sequence=9&wait_ms=25000'],
+    ['POST', '/admin/tls/acme/orders/test/finalize'],
+  ] as const)('lets %s %s outlast a lower deployment read timeout', async (method, path) => {
+    const response = await app.inject({
+      method,
+      url: `/api/proxy${path}`,
+      headers: { ...sessionHeaders, 'content-type': 'application/json' },
+      ...(method === 'POST' && { payload: '{"poll_timeout_seconds":600}' }),
+    });
+    expect(response.statusCode).toBe(200);
   });
 
   it('lets a progressing upload outlast the idle timeout but not the absolute budget', async () => {

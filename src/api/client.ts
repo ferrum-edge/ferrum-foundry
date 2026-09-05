@@ -3,6 +3,7 @@
 /* ------------------------------------------------------------------ */
 
 import ky, { isHTTPError, type Options } from "ky";
+import { serverWaitTimeout } from "../../server/waitBudget";
 import type { ApiError } from "./types";
 import {
   observeGatewayResponse,
@@ -320,10 +321,13 @@ export const proxyApi = api.extend({ prefix: "/api/proxy" });
 
 // The apply-status poll is a follow-up of the mutation that produced the
 // cursor, so it inherits that mutation's binding: the same namespace header,
-// or fleet-global when the mutation itself was fleet-global.
+// or fleet-global when the mutation itself was fleet-global. Its client
+// timeout is sized to the server-side wait it requests (#204).
 setApplyStatusFetcher((epoch, sequence, waitMs, namespace) => {
   const options = {
     searchParams: { epoch, sequence, wait_ms: String(waitMs) },
+    timeout: serverWaitTimeout(waitMs),
+    retry: 0,
     context: { [SILENT_ERRORS]: true, [FLEET_GLOBAL]: namespace === null },
   };
   return proxyApi
