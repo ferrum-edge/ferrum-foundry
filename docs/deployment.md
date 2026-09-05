@@ -320,6 +320,33 @@ Notes:
   ordinary routes). A proxy willing to hold a request open longer than the BFF
   will accept a body only ties up a connection on both sides.
 
+### Live-apply monitoring and ACME issuance deadlines
+
+Foundry requests 25-second config apply-status long polls with a 30-second
+browser deadline. Pending responses continue monitoring; they do not mean the
+status endpoint is unavailable. The BFF allows at least 35 seconds for this GET,
+even when `FERRUM_READ_TIMEOUT` is lower.
+
+ACME finalization waits synchronously in the gateway. Foundry explicitly sends
+the requested polling budget (default 60 seconds; accepted range 1–600) and gives
+the browser five additional seconds. Invalid budgets are rejected before sending.
+The BFF allows at least 610 seconds specifically for the finalize POST, including
+its upstream HTTP transport deadlines. These route allowances override a lower
+`FERRUM_READ_TIMEOUT`; other routes retain their ordinary deadlines.
+
+Configure any outer reverse proxy or load balancer to allow at least 35 seconds
+for apply-status and 610 seconds for ACME finalization responses. In particular,
+the general 180-second nginx example above needs a larger response timeout for
+finalizations requesting more than 175 seconds. A lower infrastructure maximum
+can still interrupt the response; it does not prove the gateway stopped issuing.
+
+On timeout, disconnect, or a server error, Foundry reports finalization as
+**in progress / unknown** and replaces Finalize with **Re-check status**, which
+GETs the order without repeating the POST. Continue checking until the gateway
+reports a terminal status. Do not blindly retry issuance after navigating away
+or reloading the page; the interrupted-operation warning is local to the open
+ACME view. Finalization has no automatic HTTP or mutation retries.
+
 ## 4. Docker Compose example
 
 The BFF publishes no host port. Only the proxy does.
