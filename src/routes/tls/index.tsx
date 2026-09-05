@@ -44,7 +44,7 @@ import {
   useRotateTlsSurface,
   useValidateTlsMaterial,
 } from "@/hooks/useTls";
-import { TLS_VALIDATE_FIELDS } from "@/api/tls";
+import { AcmeFinalizationUnknownError, getAcmeOrder, TLS_VALIDATE_FIELDS } from "@/api/tls";
 import type {
   ManagedTlsCollection,
   ManagedTlsRecord,
@@ -627,6 +627,8 @@ function AcmeTab() {
   const createOrder = useCreateAcmeOrder();
   const deleteOrder = useDeleteAcmeOrder();
   const finalizeOrder = useFinalizeAcmeOrder();
+  const [unknownOrders, setUnknownOrders] = useState<ReadonlySet<string>>(new Set());
+  const [checkedOrders, setCheckedOrders] = useState<Record<string, AcmeOrder>>({});
   const renewCert = useRenewAcmeCertificate();
   const deleteCert = useDeleteAcmeCertificate();
 
@@ -724,7 +726,9 @@ function AcmeTab() {
     certificateOffset,
     certificateOffset + ACME_PAGE_SIZE,
   );
-  const visibleOrders = (orders ?? []).slice(orderOffset, orderOffset + ACME_PAGE_SIZE);
+  const visibleOrders = (orders ?? [])
+    .slice(orderOffset, orderOffset + ACME_PAGE_SIZE)
+    .map((order) => checkedOrders[order.id] ?? order);
 
   const handleCreateOrder = async () => {
     const domains = orderForm.domains
@@ -887,9 +891,15 @@ function AcmeTab() {
                   </div>
                   <Mono>{order.id}</Mono>
                   {order.error && <p className="text-xs text-danger mt-1">{order.error}</p>}
+                  {unknownOrders.has(order.id) && (
+                    <p className="text-xs text-warning mt-1">
+                      Finalization in progress / unknown. Re-check status; do not repeat finalization.
+                    </p>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  {(order.status === "ready" ||
+                  {(unknownOrders.has(order.id) ||
+                    order.status === "ready" ||
                     order.status === "pending_challenges" ||
                     order.status === "processing") && (
                     <Button
@@ -899,15 +909,33 @@ function AcmeTab() {
                       onClick={() =>
                         void runRowAction(`finalize:${order.id}`, async () => {
                           try {
+                            if (unknownOrders.has(order.id) || order.status === "processing") {
+                              const checked = await getAcmeOrder(order.id);
+                              setCheckedOrders((previous) => ({ ...previous, [order.id]: checked }));
+                              if (["valid", "failed", "cancelled"].includes(checked.status)) {
+                                setUnknownOrders((previous) => {
+                                  const next = new Set(previous);
+                                  next.delete(order.id);
+                                  return next;
+                                });
+                              }
+                              toast("success", `Order status: ${checked.status}`);
+                              return;
+                            }
                             await finalizeOrder.mutateAsync({ id: order.id });
                             toast("success", `Order finalized for ${order.domains.join(", ")}`);
                           } catch (err) {
+                            if (err instanceof AcmeFinalizationUnknownError) {
+                              setUnknownOrders((previous) => new Set([...previous, order.id]));
+                            }
                             toast("error", await getApiErrorMessage(err, "Finalize failed"));
                           }
                         })
                       }
                     >
-                      Finalize
+                      {unknownOrders.has(order.id) || order.status === "processing"
+                        ? "Re-check status"
+                        : "Finalize"}
                     </Button>
                   )}
                   <Button

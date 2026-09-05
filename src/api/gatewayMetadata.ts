@@ -1,3 +1,5 @@
+import { APPLY_WAIT_MS } from "../../server/waitBudget";
+
 export type ApplyState =
   | "idle"
   | "nothing_applied"
@@ -118,7 +120,7 @@ async function pollApplyStatus(cursor: ConfigCursor, generation: number): Promis
   for (let attempt = 0; attempt < 8; attempt += 1) {
     if (generation !== pollGeneration) return;
     try {
-      const result = await statusFetcher(cursor.epoch, cursor.sequence, 25_000);
+      const result = await statusFetcher(cursor.epoch, cursor.sequence, APPLY_WAIT_MS);
       if (generation !== pollGeneration) return;
       if (result.state === "pending") continue;
       publish({

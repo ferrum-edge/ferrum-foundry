@@ -3,6 +3,7 @@
 /* ------------------------------------------------------------------ */
 
 import ky from "ky";
+import { serverWaitTimeout } from "../../server/waitBudget";
 import type { ApiError } from "./types";
 import {
   observeGatewayResponse,
@@ -252,6 +253,8 @@ setApplyStatusFetcher((epoch, sequence, waitMs) =>
   proxyApi
     .get("config/apply-status", {
       searchParams: { epoch, sequence, wait_ms: String(waitMs) },
+      timeout: serverWaitTimeout(waitMs),
+      retry: 0,
       context: { [SILENT_ERRORS]: true },
     })
     .json<ApplyStatusResponse>(),
