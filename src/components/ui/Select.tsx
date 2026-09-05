@@ -1,3 +1,4 @@
+import { useId } from "react";
 import * as SelectPrimitive from "@radix-ui/react-select";
 
 export interface SelectOption {
@@ -19,6 +20,7 @@ interface SelectBaseProps {
   error?: string;
   helpText?: string;
   disabled?: boolean;
+  "aria-labelledby"?: string;
 }
 
 /**
@@ -41,7 +43,11 @@ export function Select({
   error,
   helpText,
   disabled,
+  "aria-labelledby": ariaLabelledBy,
 }: SelectProps) {
+  const id = useId();
+  const labelId = `${id}-label`;
+  const descriptionId = `${id}-description`;
   const renderOption = (option: SelectOption) => (
     <SelectPrimitive.Item
       key={option.value}
@@ -57,7 +63,9 @@ export function Select({
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
       {label && (
-        <span className="text-text-secondary text-sm font-medium">{label}</span>
+        <span id={labelId} className="text-text-secondary text-sm font-medium">
+          {label}
+        </span>
       )}
       <SelectPrimitive.Root
         value={value}
@@ -65,6 +73,9 @@ export function Select({
         disabled={disabled}
       >
         <SelectPrimitive.Trigger
+          aria-labelledby={label ? labelId : ariaLabelledBy}
+          aria-describedby={error || helpText ? descriptionId : undefined}
+          aria-invalid={error ? true : undefined}
           className={`inline-flex w-full min-w-0 items-center justify-between bg-bg-input border rounded-lg px-3 py-2 text-sm transition-colors duration-150 ${error ? "border-danger" : "border-border focus:border-orange focus:ring-1 focus:ring-orange/30"} ${value ? "text-text-primary" : "text-text-muted"} ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
         >
           <SelectPrimitive.Value className="truncate" placeholder={placeholder} />
@@ -108,8 +119,16 @@ export function Select({
           </SelectPrimitive.Content>
         </SelectPrimitive.Portal>
       </SelectPrimitive.Root>
-      {helpText && !error && <p className="text-text-muted text-xs">{helpText}</p>}
-      {error && <p className="text-danger text-xs">{error}</p>}
+      {helpText && !error && (
+        <p id={descriptionId} className="text-text-muted text-xs">
+          {helpText}
+        </p>
+      )}
+      {error && (
+        <p id={descriptionId} className="text-danger text-xs">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
