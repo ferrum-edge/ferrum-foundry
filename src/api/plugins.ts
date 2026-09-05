@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – Plugin API functions                             */
 /* ------------------------------------------------------------------ */
 
-import { proxyApi } from "./client";
+import { proxyApi, scoped, type NamespaceScope } from "./client";
 import type {
   PaginatedResponse,
   PaginationParams,
@@ -20,13 +20,14 @@ function withPluginConfigId(
 }
 
 /** List available plugin names (built-in registry). */
-export async function listAvailable(): Promise<string[]> {
-  return proxyApi.get("plugins").json<string[]>();
+export async function listAvailable(scope: NamespaceScope): Promise<string[]> {
+  return proxyApi.get("plugins", scoped(scope)).json<string[]>();
 }
 
 // ── Plugin config CRUD ───────────────────────────────────────────
 
 export async function listConfigs(
+  scope: NamespaceScope,
   params: PaginationParams = {},
 ): Promise<PaginatedResponse<PluginConfig>> {
   const searchParams: Record<string, string> = {};
@@ -34,16 +35,26 @@ export async function listConfigs(
   if (params.limit !== undefined) searchParams.limit = String(params.limit);
 
   return proxyApi
-    .get("plugins/config", { searchParams })
+    .get("plugins/config", scoped(scope, { searchParams }))
     .json<PaginatedResponse<PluginConfig>>();
 }
 
-export async function listAllConfigs(): Promise<PluginConfig[]> {
-  return collectAllPages((offset, limit) => listConfigs({ offset, limit }));
+/** Every page is fetched under `scope`, however long the collection takes. */
+export async function listAllConfigs(
+  scope: NamespaceScope,
+): Promise<PluginConfig[]> {
+  return collectAllPages((offset, limit) =>
+    listConfigs(scope, { offset, limit }),
+  );
 }
 
-export async function getConfig(id: string): Promise<PluginConfig> {
-  return proxyApi.get(`plugins/config/${id}`).json<PluginConfig>();
+export async function getConfig(
+  scope: NamespaceScope,
+  id: string,
+): Promise<PluginConfig> {
+  return proxyApi
+    .get(`plugins/config/${id}`, scoped(scope))
+    .json<PluginConfig>();
 }
 
 export function toUpdatePayload(plugin: PluginConfig): PluginConfigCreate {
@@ -56,22 +67,30 @@ export function toUpdatePayload(plugin: PluginConfig): PluginConfigCreate {
 }
 
 export async function createConfig(
+  scope: NamespaceScope,
   data: PluginConfigCreate,
 ): Promise<PluginConfig> {
   return proxyApi
-    .post("plugins/config", { json: withPluginConfigId(data) })
+    .post("plugins/config", scoped(scope, { json: withPluginConfigId(data) }))
     .json<PluginConfig>();
 }
 
 export async function updateConfig(
+  scope: NamespaceScope,
   id: string,
   data: PluginConfigCreate,
 ): Promise<PluginConfig> {
   return proxyApi
-    .put(`plugins/config/${id}`, { json: withPluginConfigId(data, id) })
+    .put(
+      `plugins/config/${id}`,
+      scoped(scope, { json: withPluginConfigId(data, id) }),
+    )
     .json<PluginConfig>();
 }
 
-export async function removeConfig(id: string): Promise<void> {
-  await proxyApi.delete(`plugins/config/${id}`);
+export async function removeConfig(
+  scope: NamespaceScope,
+  id: string,
+): Promise<void> {
+  await proxyApi.delete(`plugins/config/${id}`, scoped(scope));
 }

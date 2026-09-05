@@ -1,5 +1,10 @@
 /* ------------------------------------------------------------------ */
 /*  Ferrum Foundry – TanStack Query hooks for Proxies                 */
+/*                                                                    */
+/*  Every hook captures `scope` from the namespace provider and binds */
+/*  the whole operation — the query, a mutation and its follow-ups —  */
+/*  to it. A mutation reads the scope at `mutate()` time, so a switch */
+/*  after the click cannot retarget the write.                        */
 /* ------------------------------------------------------------------ */
 
 import {
@@ -12,36 +17,41 @@ import type { PaginationParams, ProxyCreate } from "@/api/types";
 import { useNamespace } from "@/stores/namespace";
 
 export function useProxies(params: PaginationParams = {}, enabled = true) {
-  const { selectedNamespace: ns } = useNamespace();
+  const { scope } = useNamespace();
   return useQuery({
-    queryKey: ["proxies", ns, { offset: params.offset, limit: params.limit }],
-    queryFn: () => proxies.list(params),
+    queryKey: [
+      "proxies",
+      scope.namespace,
+      { offset: params.offset, limit: params.limit },
+    ],
+    queryFn: () => proxies.list(scope, params),
     enabled,
   });
 }
 
 export function useAllProxies(enabled = true) {
-  const { selectedNamespace: ns } = useNamespace();
+  const { scope } = useNamespace();
   return useQuery({
-    queryKey: ["proxies", ns, "all"],
-    queryFn: () => proxies.listAll(),
+    queryKey: ["proxies", scope.namespace, "all"],
+    queryFn: () => proxies.listAll(scope),
     enabled,
   });
 }
 
 export function useProxy(id: string) {
-  const { selectedNamespace: ns } = useNamespace();
+  const { scope } = useNamespace();
   return useQuery({
-    queryKey: ["proxy", ns, id],
-    queryFn: () => proxies.get(id),
+    queryKey: ["proxy", scope.namespace, id],
+    queryFn: () => proxies.get(scope, id),
     enabled: !!id,
   });
 }
 
 export function useCreateProxy() {
   const qc = useQueryClient();
+  const { scope } = useNamespace();
   return useMutation({
-    mutationFn: (data: ProxyCreate) => proxies.create(data),
+    mutationFn: (data: ProxyCreate) => proxies.create(scope, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["proxies"] });
     },
@@ -50,9 +60,10 @@ export function useCreateProxy() {
 
 export function useUpdateProxy() {
   const qc = useQueryClient();
+  const { scope } = useNamespace();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: ProxyCreate }) =>
-      proxies.update(id, data),
+      proxies.update(scope, id, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["proxies"] });
       qc.invalidateQueries({ queryKey: ["proxy"] });
@@ -62,8 +73,9 @@ export function useUpdateProxy() {
 
 export function useDeleteProxy() {
   const qc = useQueryClient();
+  const { scope } = useNamespace();
   return useMutation({
-    mutationFn: (id: string) => proxies.remove(id),
+    mutationFn: (id: string) => proxies.remove(scope, id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["proxies"] });
     },

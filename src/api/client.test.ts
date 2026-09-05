@@ -6,8 +6,11 @@ import {
   FLEET_GLOBAL,
   getApiErrorDetail,
   getApiErrorMessage,
+  NAMESPACE_HEADER,
+  scoped,
   setCsrfToken,
   setOnUnauthorized,
+  UnboundNamespaceError,
 } from "./client";
 
 describe("extractApiErrorDetail", () => {
@@ -266,12 +269,46 @@ describe("session request hooks", () => {
     expect(captured[0].headers.has("authorization")).toBe(false);
   });
 
-  it("adds namespace context only to gateway proxy requests", async () => {
-    localStorage.setItem("ferrum:namespace", "tenant-a");
+  it("sends the namespace the operation was scoped to", async () => {
     await api.get("api/auth/session");
-    await api.get("api/proxy/proxies");
+    await api.get("api/proxy/proxies", scoped({ namespace: "tenant-a" }));
     expect(captured[0].headers.has("x-ferrum-namespace")).toBe(false);
     expect(captured[1].headers.get("x-ferrum-namespace")).toBe("tenant-a");
+  });
+
+  it("never reads the namespace from localStorage", async () => {
+    // Regression for issue #202: the client used to look the namespace up
+    // per request, so another tab's switch (which lands in shared storage)
+    // silently retargeted this tab's next write.
+    localStorage.setItem("ferrum:namespace", "tenant-b");
+    try {
+      await api.post("api/proxy/consumers", scoped({ namespace: "tenant-a" }, {
+        json: { username: "alice" },
+      }));
+    } finally {
+      localStorage.removeItem("ferrum:namespace");
+    }
+    expect(captured[0].headers.get("x-ferrum-namespace")).toBe("tenant-a");
+  });
+
+  it("fails closed on a gateway request with no namespace binding", async () => {
+    localStorage.setItem("ferrum:namespace", "tenant-a");
+    try {
+      await expect(api.get("api/proxy/proxies")).rejects.toBeInstanceOf(
+        UnboundNamespaceError,
+      );
+    } finally {
+      localStorage.removeItem("ferrum:namespace");
+    }
+    // Nothing reached the wire: inventing a namespace is the bug, not a
+    // fallback.
+    expect(captured).toHaveLength(0);
+  });
+
+  it("still lets BFF (non-gateway) requests through unscoped", async () => {
+    await api.get("api/settings");
+    expect(captured).toHaveLength(1);
+    expect(captured[0].headers.has("x-ferrum-namespace")).toBe(false);
   });
 
   it("root-anchors BFF paths so a nested route does not change the request target", async () => {
@@ -289,7 +326,6 @@ describe("session request hooks", () => {
   });
 
   it("does not imply tenant scoping for documented fleet-global requests", async () => {
-    localStorage.setItem("ferrum:namespace", "tenant-a");
     await api.get("api/proxy/admin/tls/inventory", {
       context: { [FLEET_GLOBAL]: true },
     });
@@ -312,5 +348,31 @@ describe("session request hooks", () => {
     });
     await api.get("api/settings", { throwHttpErrors: false });
     expect(unauthorized).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("scoped", () => {
+  it("stamps the namespace header and keeps the other options", () => {
+    const options = scoped(
+      { namespace: "tenant-a" },
+      { searchParams: { limit: "1" }, headers: { accept: "application/yaml" } },
+    );
+    expect(options.searchParams).toEqual({ limit: "1" });
+    expect(options.headers).toEqual({
+      accept: "application/yaml",
+      [NAMESPACE_HEADER]: "tenant-a",
+    });
+  });
+
+  it("does not let a caller-supplied header override the scope", () => {
+    const options = scoped(
+      { namespace: "tenant-a" },
+      { headers: { [NAMESPACE_HEADER]: "tenant-b" } },
+    );
+    expect(options.headers).toEqual({ [NAMESPACE_HEADER]: "tenant-a" });
+  });
+
+  it("rejects an empty scope before any request is built", () => {
+    expect(() => scoped({ namespace: "" })).toThrow(/non-empty namespace/);
   });
 });

@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – Upstream API functions                           */
 /* ------------------------------------------------------------------ */
 
-import { proxyApi } from "./client";
+import { proxyApi, scoped, type NamespaceScope } from "./client";
 import type {
   PaginatedResponse,
   PaginationParams,
@@ -17,6 +17,7 @@ function withUpstreamId(data: UpstreamCreate, id?: string): UpstreamCreate {
 }
 
 export async function list(
+  scope: NamespaceScope,
   params: PaginationParams = {},
 ): Promise<PaginatedResponse<Upstream>> {
   const searchParams: Record<string, string> = {};
@@ -24,16 +25,17 @@ export async function list(
   if (params.limit !== undefined) searchParams.limit = String(params.limit);
 
   return proxyApi
-    .get("upstreams", { searchParams })
+    .get("upstreams", scoped(scope, { searchParams }))
     .json<PaginatedResponse<Upstream>>();
 }
 
-export async function listAll(): Promise<Upstream[]> {
-  return collectAllPages((offset, limit) => list({ offset, limit }));
+/** Every page is fetched under `scope`, however long the collection takes. */
+export async function listAll(scope: NamespaceScope): Promise<Upstream[]> {
+  return collectAllPages((offset, limit) => list(scope, { offset, limit }));
 }
 
-export async function get(id: string): Promise<Upstream> {
-  return proxyApi.get(`upstreams/${id}`).json<Upstream>();
+export async function get(scope: NamespaceScope, id: string): Promise<Upstream> {
+  return proxyApi.get(`upstreams/${id}`, scoped(scope)).json<Upstream>();
 }
 
 /** Strip server- and mesh-owned fields from a fetched full-replace resource. */
@@ -102,17 +104,25 @@ export function mergeFormUpdatePayload(
   return merged;
 }
 
-export async function create(data: UpstreamCreate): Promise<Upstream> {
-  return proxyApi.post("upstreams", { json: withUpstreamId(data) }).json<Upstream>();
+export async function create(
+  scope: NamespaceScope,
+  data: UpstreamCreate,
+): Promise<Upstream> {
+  return proxyApi
+    .post("upstreams", scoped(scope, { json: withUpstreamId(data) }))
+    .json<Upstream>();
 }
 
 export async function update(
+  scope: NamespaceScope,
   id: string,
   data: UpstreamCreate,
 ): Promise<Upstream> {
-  return proxyApi.put(`upstreams/${id}`, { json: withUpstreamId(data, id) }).json<Upstream>();
+  return proxyApi
+    .put(`upstreams/${id}`, scoped(scope, { json: withUpstreamId(data, id) }))
+    .json<Upstream>();
 }
 
-export async function remove(id: string): Promise<void> {
-  await proxyApi.delete(`upstreams/${id}`);
+export async function remove(scope: NamespaceScope, id: string): Promise<void> {
+  await proxyApi.delete(`upstreams/${id}`, scoped(scope));
 }

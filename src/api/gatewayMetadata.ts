@@ -36,11 +36,20 @@ export interface GatewayMetadataSnapshot {
   };
 }
 
+/**
+ * `namespace` is the `X-Ferrum-Namespace` the originating mutation carried,
+ * or `null` when that mutation was fleet-global. The poll is a follow-up of
+ * that mutation and must keep its binding rather than pick a namespace of
+ * its own.
+ */
 type ApplyStatusFetcher = (
   epoch: string,
   sequence: string,
   waitMs: number,
+  namespace: string | null,
 ) => Promise<ApplyStatusResponse>;
+
+const NAMESPACE_HEADER = "x-ferrum-namespace";
 
 const IDLE_APPLY: GatewayMetadataSnapshot["apply"] = {
   state: "idle",
@@ -104,7 +113,11 @@ function isCommittedNotLive(body: unknown): boolean {
   );
 }
 
-async function pollApplyStatus(cursor: ConfigCursor, generation: number): Promise<void> {
+async function pollApplyStatus(
+  cursor: ConfigCursor,
+  generation: number,
+  namespace: string | null,
+): Promise<void> {
   if (!statusFetcher) {
     if (generation === pollGeneration) {
       publish({
@@ -118,7 +131,12 @@ async function pollApplyStatus(cursor: ConfigCursor, generation: number): Promis
   for (let attempt = 0; attempt < 8; attempt += 1) {
     if (generation !== pollGeneration) return;
     try {
-      const result = await statusFetcher(cursor.epoch, cursor.sequence, 25_000);
+      const result = await statusFetcher(
+        cursor.epoch,
+        cursor.sequence,
+        25_000,
+        namespace,
+      );
       if (generation !== pollGeneration) return;
       if (result.state === "pending") continue;
       publish({
@@ -272,7 +290,11 @@ export async function observeGatewayResponse(
 
   publish(next);
   if (cursor && next.apply.polling) {
-    void pollApplyStatus(cursor, generation);
+    void pollApplyStatus(
+      cursor,
+      generation,
+      request.headers.get(NAMESPACE_HEADER),
+    );
   }
 }
 

@@ -1,5 +1,11 @@
 /* ------------------------------------------------------------------ */
 /*  Ferrum Foundry – TanStack Query hooks for Plugins                 */
+/*                                                                    */
+/*  Every hook captures `scope` from the namespace provider and binds */
+/*  the whole operation to it. Membership plans bind their listing,   */
+/*  preflight, apply, and rollback requests through                   */
+/*  `bindPluginMembership(scope)`, so a switch mid-plan cannot split  */
+/*  the plan (or its compensation) across namespaces.                 */
 /* ------------------------------------------------------------------ */
 
 import {
@@ -11,54 +17,56 @@ import * as plugins from "@/api/plugins";
 import type { PaginationParams, PluginConfigCreate } from "@/api/types";
 import { useNamespace } from "@/stores/namespace";
 import {
+  bindPluginMembership,
   createPluginWithMembership,
   deletePluginWithMembership,
   updatePluginWithMembership,
 } from "@/lib/pluginMembership";
 
 export function useAvailablePlugins() {
-  const { selectedNamespace: ns } = useNamespace();
+  const { scope } = useNamespace();
   return useQuery({
-    queryKey: ["plugins", "available", ns],
-    queryFn: () => plugins.listAvailable(),
+    queryKey: ["plugins", "available", scope.namespace],
+    queryFn: () => plugins.listAvailable(scope),
   });
 }
 
 export function usePluginConfigs(params: PaginationParams = {}, enabled = true) {
-  const { selectedNamespace: ns } = useNamespace();
+  const { scope } = useNamespace();
   return useQuery({
     queryKey: [
       "pluginConfigs",
-      ns,
+      scope.namespace,
       { offset: params.offset, limit: params.limit },
     ],
-    queryFn: () => plugins.listConfigs(params),
+    queryFn: () => plugins.listConfigs(scope, params),
     enabled,
   });
 }
 
 export function useAllPluginConfigs(enabled = true) {
-  const { selectedNamespace: ns } = useNamespace();
+  const { scope } = useNamespace();
   return useQuery({
-    queryKey: ["pluginConfigs", ns, "all"],
-    queryFn: () => plugins.listAllConfigs(),
+    queryKey: ["pluginConfigs", scope.namespace, "all"],
+    queryFn: () => plugins.listAllConfigs(scope),
     enabled,
   });
 }
 
 export function usePluginConfig(id: string) {
-  const { selectedNamespace: ns } = useNamespace();
+  const { scope } = useNamespace();
   return useQuery({
-    queryKey: ["pluginConfig", ns, id],
-    queryFn: () => plugins.getConfig(id),
+    queryKey: ["pluginConfig", scope.namespace, id],
+    queryFn: () => plugins.getConfig(scope, id),
     enabled: !!id,
   });
 }
 
 export function useCreatePluginConfig() {
   const qc = useQueryClient();
+  const { scope } = useNamespace();
   return useMutation({
-    mutationFn: (data: PluginConfigCreate) => plugins.createConfig(data),
+    mutationFn: (data: PluginConfigCreate) => plugins.createConfig(scope, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pluginConfigs"] });
     },
@@ -67,6 +75,7 @@ export function useCreatePluginConfig() {
 
 export function useCreatePluginWithMembership() {
   const qc = useQueryClient();
+  const { scope } = useNamespace();
   return useMutation({
     mutationFn: ({
       data,
@@ -74,7 +83,7 @@ export function useCreatePluginWithMembership() {
     }: {
       data: PluginConfigCreate;
       proxyIds?: string[];
-    }) => createPluginWithMembership(data, proxyIds),
+    }) => createPluginWithMembership(data, proxyIds, bindPluginMembership(scope)),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pluginConfigs"] });
       qc.invalidateQueries({ queryKey: ["proxies"] });
@@ -84,9 +93,10 @@ export function useCreatePluginWithMembership() {
 
 export function useUpdatePluginConfig() {
   const qc = useQueryClient();
+  const { scope } = useNamespace();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: PluginConfigCreate }) =>
-      plugins.updateConfig(id, data),
+      plugins.updateConfig(scope, id, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pluginConfigs"] });
       qc.invalidateQueries({ queryKey: ["pluginConfig"] });
@@ -96,6 +106,7 @@ export function useUpdatePluginConfig() {
 
 export function useUpdatePluginWithMembership() {
   const qc = useQueryClient();
+  const { scope } = useNamespace();
   return useMutation({
     mutationFn: ({
       id,
@@ -105,7 +116,8 @@ export function useUpdatePluginWithMembership() {
       id: string;
       data: PluginConfigCreate;
       proxyIds?: string[];
-    }) => updatePluginWithMembership(id, data, proxyIds),
+    }) =>
+      updatePluginWithMembership(id, data, proxyIds, bindPluginMembership(scope)),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pluginConfigs"] });
       qc.invalidateQueries({ queryKey: ["pluginConfig"] });
@@ -116,8 +128,9 @@ export function useUpdatePluginWithMembership() {
 
 export function useDeletePluginConfig() {
   const qc = useQueryClient();
+  const { scope } = useNamespace();
   return useMutation({
-    mutationFn: (id: string) => plugins.removeConfig(id),
+    mutationFn: (id: string) => plugins.removeConfig(scope, id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pluginConfigs"] });
     },
@@ -126,8 +139,10 @@ export function useDeletePluginConfig() {
 
 export function useDeletePluginWithMembership() {
   const qc = useQueryClient();
+  const { scope } = useNamespace();
   return useMutation({
-    mutationFn: (id: string) => deletePluginWithMembership(id),
+    mutationFn: (id: string) =>
+      deletePluginWithMembership(id, bindPluginMembership(scope)),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pluginConfigs"] });
       qc.invalidateQueries({ queryKey: ["proxies"] });
