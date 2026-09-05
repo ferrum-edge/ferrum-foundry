@@ -1,3 +1,4 @@
+import type { NamespaceScope } from "@/api/client";
 import * as pluginsApi from "@/api/plugins";
 import * as proxiesApi from "@/api/proxies";
 import type {
@@ -16,15 +17,28 @@ export interface PluginMembershipDependencies {
   deletePlugin: (id: string) => Promise<void>;
 }
 
-const defaultDependencies: PluginMembershipDependencies = {
-  listProxies: proxiesApi.listAll,
-  getProxy: proxiesApi.get,
-  updateProxy: proxiesApi.update,
-  getPlugin: (id) => pluginsApi.getConfig(id, true),
-  createPlugin: pluginsApi.createConfig,
-  updatePlugin: pluginsApi.updateConfig,
-  deletePlugin: pluginsApi.removeConfig,
-};
+/**
+ * Gateway-backed dependencies bound to one namespace for the whole plan.
+ *
+ * A membership change is several requests — the proxy listing, per-proxy
+ * preflight reads, the plugin write, the association updates, and on failure
+ * the compensating rollbacks. Binding all of them to the scope captured when
+ * the plan started is what keeps a rollback from landing in a different
+ * namespace than the change it undoes.
+ */
+export function bindPluginMembership(
+  scope: NamespaceScope,
+): PluginMembershipDependencies {
+  return {
+    listProxies: () => proxiesApi.listAll(scope),
+    getProxy: (id) => proxiesApi.get(scope, id),
+    updateProxy: (id, data) => proxiesApi.update(scope, id, data),
+    getPlugin: (id) => pluginsApi.getConfig(scope, id, true),
+    createPlugin: (data) => pluginsApi.createConfig(scope, data),
+    updatePlugin: (id, data) => pluginsApi.updateConfig(scope, id, data),
+    deletePlugin: (id) => pluginsApi.removeConfig(scope, id),
+  };
+}
 
 interface AppliedProxyChange {
   before: Proxy;
@@ -302,8 +316,8 @@ async function updatePluginIfUnchanged(
 
 export async function createPluginWithMembership(
   data: PluginConfigCreate,
-  desiredProxyIds: string[] = [],
-  deps: PluginMembershipDependencies = defaultDependencies,
+  desiredProxyIds: string[],
+  deps: PluginMembershipDependencies,
 ): Promise<PluginConfig> {
   validateScope(data, desiredProxyIds);
   const plan = await loadPlan(
@@ -357,8 +371,8 @@ export async function createPluginWithMembership(
 export async function updatePluginWithMembership(
   pluginId: string,
   data: PluginConfigCreate,
-  desiredProxyIds: string[] = [],
-  deps: PluginMembershipDependencies = defaultDependencies,
+  desiredProxyIds: string[],
+  deps: PluginMembershipDependencies,
 ): Promise<PluginConfig> {
   validateScope(data, desiredProxyIds);
   const beforePlugin = await deps.getPlugin(pluginId);
@@ -406,7 +420,7 @@ export async function updatePluginWithMembership(
 
 export async function deletePluginWithMembership(
   pluginId: string,
-  deps: PluginMembershipDependencies = defaultDependencies,
+  deps: PluginMembershipDependencies,
 ): Promise<void> {
   const plugin = await deps.getPlugin(pluginId);
   const proxies = await deps.listProxies();

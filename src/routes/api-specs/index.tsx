@@ -25,6 +25,7 @@ import * as apiSpecsApi from "@/api/apiSpecs";
 import type { ApiSpecSummary } from "@/api/apiSpecs";
 import { usePaginationParams } from "@/hooks/usePagination";
 import { filterAndPage } from "@/lib/collectionSearch";
+import { useNamespace } from "@/stores/namespace";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -61,6 +62,7 @@ paths:
 
 export default function ApiSpecsPage() {
   const { toast } = useToast();
+  const { scope } = useNamespace();
   const [search, setSearch] = useState("");
   const pagination = usePaginationParams();
   const searching = search.trim().length > 0;
@@ -122,7 +124,7 @@ export default function ApiSpecsPage() {
     setViewTarget(spec);
     setViewDoc("Loading…");
     try {
-      const doc = await apiSpecsApi.getDocument(spec.id);
+      const doc = await apiSpecsApi.getDocument(scope, spec.id);
       setViewDoc(doc);
     } catch (err) {
       setViewDoc(await getApiErrorMessage(err, "Failed to load document"));
@@ -227,7 +229,7 @@ export default function ApiSpecsPage() {
                     setImportDoc("Loading current document…");
                     setImportOpen(true);
                     try {
-                      setImportDoc(await apiSpecsApi.getDocument(spec.id));
+                      setImportDoc(await apiSpecsApi.getDocument(scope, spec.id));
                     } catch {
                       setImportDoc("");
                     }

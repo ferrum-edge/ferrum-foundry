@@ -2,7 +2,12 @@
 /*  Ferrum Foundry – Namespace API functions                          */
 /* ------------------------------------------------------------------ */
 
-import { NAMESPACE_HEADER, SILENT_ERRORS, proxyApi } from "./client";
+import {
+  SILENT_ERRORS,
+  proxyApi,
+  scoped,
+  type NamespaceScope,
+} from "./client";
 import type { PaginatedResponse } from "./types";
 import { ALL_PAGE_SIZE, collectAllPages } from "./pagination";
 
@@ -120,19 +125,17 @@ export interface NamespaceOccupancy {
  * Count the resources a cascade delete of `name` would destroy.
  *
  * Each list is fetched with `limit=1` — only `pagination.total` is used, so
- * this stays cheap regardless of namespace size. Requests are pinned to
- * `name` via an explicit namespace header rather than the active namespace,
- * since the delete target is usually not the namespace being viewed.
+ * this stays cheap regardless of namespace size. Requests are scoped to
+ * `name` itself rather than the active namespace, since the delete target is
+ * usually not the namespace being viewed.
  */
 export async function getOccupancy(name: string): Promise<NamespaceOccupancy> {
+  const target: NamespaceScope = { namespace: name };
   const results = await Promise.all(
     OCCUPANCY_ENDPOINTS.map(async (endpoint): Promise<OccupancyEntry | null> => {
       try {
         const response = await proxyApi
-          .get(endpoint.path, {
-            searchParams: { limit: "1" },
-            headers: { [NAMESPACE_HEADER]: name },
-          })
+          .get(endpoint.path, scoped(target, { searchParams: { limit: "1" } }))
           .json<PaginatedResponse<unknown>>();
         return { label: endpoint.label, count: response.pagination?.total ?? 0 };
       } catch {
@@ -168,23 +171,33 @@ export function isCascadableDeleteError(status: number, body: string): boolean {
 }
 
 // ── API functions ────────────────────────────────────────────────
+//
+// The registry itself is not tenant data, but the BFF still authorizes every
+// gateway request against the caller's namespace grants, so registry calls
+// carry the scope of the operation that made them like any other request.
 
-export async function list(): Promise<string[]> {
+export async function list(scope: NamespaceScope): Promise<string[]> {
   // GET /namespaces returns the standard { data, pagination } envelope of
   // plain namespace name strings. Older gateways returned a bare array.
   const first = await proxyApi
-    .get("namespaces", {
-      searchParams: { offset: "0", limit: String(ALL_PAGE_SIZE) },
-    })
+    .get(
+      "namespaces",
+      scoped(scope, {
+        searchParams: { offset: "0", limit: String(ALL_PAGE_SIZE) },
+      }),
+    )
     .json<PaginatedResponse<string> | string[]>();
   if (Array.isArray(first)) return first;
 
   return collectAllPages(async (offset, limit) => {
     if (offset === 0 && limit === ALL_PAGE_SIZE) return first;
     const page = await proxyApi
-      .get("namespaces", {
-        searchParams: { offset: String(offset), limit: String(limit) },
-      })
+      .get(
+        "namespaces",
+        scoped(scope, {
+          searchParams: { offset: String(offset), limit: String(limit) },
+        }),
+      )
       .json<PaginatedResponse<string> | string[]>();
     if (Array.isArray(page)) {
       throw new Error("Gateway changed namespace pagination format mid-request");
@@ -193,20 +206,31 @@ export async function list(): Promise<string[]> {
   });
 }
 
-export async function get(name: string): Promise<Namespace> {
-  return proxyApi.get(`namespaces/${encodeURIComponent(name)}`).json<Namespace>();
+export async function get(
+  scope: NamespaceScope,
+  name: string,
+): Promise<Namespace> {
+  return proxyApi
+    .get(`namespaces/${encodeURIComponent(name)}`, scoped(scope))
+    .json<Namespace>();
 }
 
-export async function create(data: NamespaceCreate): Promise<Namespace> {
-  return proxyApi.post("namespaces", { json: data }).json<Namespace>();
+export async function create(
+  scope: NamespaceScope,
+  data: NamespaceCreate,
+): Promise<Namespace> {
+  return proxyApi
+    .post("namespaces", scoped(scope, { json: data }))
+    .json<Namespace>();
 }
 
 export async function update(
+  scope: NamespaceScope,
   name: string,
   data: NamespaceUpdate,
 ): Promise<Namespace> {
   return proxyApi
-    .put(`namespaces/${encodeURIComponent(name)}`, { json: data })
+    .put(`namespaces/${encodeURIComponent(name)}`, scoped(scope, { json: data }))
     .json<Namespace>();
 }
 
@@ -215,15 +239,19 @@ export async function update(
  * `confirm` is set, which cascade-deletes every resource in the namespace.
  */
 export async function remove(
+  scope: NamespaceScope,
   name: string,
   options: { confirm?: boolean } = {},
 ): Promise<void> {
-  await proxyApi.delete(`namespaces/${encodeURIComponent(name)}`, {
-    searchParams: options.confirm ? { confirm: "true" } : {},
-    // The unconfirmed call is a deliberate probe — a 409 is the gateway
-    // telling us the namespace is non-empty, which the caller turns into a
-    // cascade confirmation. Terminal failures are reported as a toast by the
-    // caller, so the global popup would double up either way.
-    context: { [SILENT_ERRORS]: true },
-  });
+  await proxyApi.delete(
+    `namespaces/${encodeURIComponent(name)}`,
+    scoped(scope, {
+      searchParams: options.confirm ? { confirm: "true" } : {},
+      // The unconfirmed call is a deliberate probe — a 409 is the gateway
+      // telling us the namespace is non-empty, which the caller turns into a
+      // cascade confirmation. Terminal failures are reported as a toast by
+      // the caller, so the global popup would double up either way.
+      context: { [SILENT_ERRORS]: true },
+    }),
+  );
 }
