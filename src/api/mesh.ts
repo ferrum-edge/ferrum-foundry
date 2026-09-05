@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – mesh observability API                            */
 /* ------------------------------------------------------------------ */
 
-import { proxyApi } from "./client";
+import { proxyApi, scoped, type NamespaceScope } from "./client";
 
 /* ---------- Service graph ---------- */
 
@@ -34,8 +34,12 @@ export interface MeshServiceGraphResponse {
   edges: MeshServiceGraphEdge[];
 }
 
-export async function getServiceGraph(): Promise<MeshServiceGraphResponse> {
-  return proxyApi.get("mesh/service-graph").json<MeshServiceGraphResponse>();
+export async function getServiceGraph(
+  scope: NamespaceScope,
+): Promise<MeshServiceGraphResponse> {
+  return proxyApi
+    .get("mesh/service-graph", scoped(scope))
+    .json<MeshServiceGraphResponse>();
 }
 
 /* ---------- Egress scope ---------- */
@@ -68,8 +72,12 @@ export interface MeshEgressScopeResponse {
   };
 }
 
-export async function getEgressScope(): Promise<MeshEgressScopeResponse> {
-  return proxyApi.get("mesh/egress-scope").json<MeshEgressScopeResponse>();
+export async function getEgressScope(
+  scope: NamespaceScope,
+): Promise<MeshEgressScopeResponse> {
+  return proxyApi
+    .get("mesh/egress-scope", scoped(scope))
+    .json<MeshEgressScopeResponse>();
 }
 
 export interface EgressScopeTestResult {
@@ -81,13 +89,15 @@ export interface EgressScopeTestResult {
 }
 
 export async function testEgressScope(
+  scope: NamespaceScope,
   host: string,
   port?: number,
 ): Promise<EgressScopeTestResult> {
   return proxyApi
-    .post("mesh/egress-scope/test", {
-      json: port !== undefined ? { host, port } : { host },
-    })
+    .post(
+      "mesh/egress-scope/test",
+      scoped(scope, { json: port !== undefined ? { host, port } : { host } }),
+    )
     .json<EgressScopeTestResult>();
 }
 
@@ -104,9 +114,11 @@ export interface MeshFederationBundle {
   refresh_hint_seconds?: number | null;
 }
 
-export async function getFederation(): Promise<{ bundles: MeshFederationBundle[] }> {
+export async function getFederation(
+  scope: NamespaceScope,
+): Promise<{ bundles: MeshFederationBundle[] }> {
   return proxyApi
-    .get("mesh/federation")
+    .get("mesh/federation", scoped(scope))
     .json<{ bundles: MeshFederationBundle[] }>();
 }
 
@@ -140,8 +152,12 @@ export interface MeshRemoteClustersResponse {
   configured: ConfiguredCluster[];
 }
 
-export async function getRemoteClusters(): Promise<MeshRemoteClustersResponse> {
-  return proxyApi.get("mesh/remote-clusters").json<MeshRemoteClustersResponse>();
+export async function getRemoteClusters(
+  scope: NamespaceScope,
+): Promise<MeshRemoteClustersResponse> {
+  return proxyApi
+    .get("mesh/remote-clusters", scoped(scope))
+    .json<MeshRemoteClustersResponse>();
 }
 
 /* ---------- Config drift ---------- */
@@ -185,16 +201,20 @@ export interface MeshConfigDriftResponse {
   };
 }
 
-export async function getConfigDrift(): Promise<MeshConfigDriftResponse> {
-  return proxyApi.get("mesh/config-drift").json<MeshConfigDriftResponse>();
+export async function getConfigDrift(
+  scope: NamespaceScope,
+): Promise<MeshConfigDriftResponse> {
+  return proxyApi
+    .get("mesh/config-drift", scoped(scope))
+    .json<MeshConfigDriftResponse>();
 }
 
-export async function resetConfigRevision(): Promise<{
+export async function resetConfigRevision(scope: NamespaceScope): Promise<{
   status: string;
   cleared_revision?: { authority: string; sequence: number } | null;
 }> {
   return proxyApi
-    .post("mesh/config-revision/reset")
+    .post("mesh/config-revision/reset", scoped(scope))
     .json<{ status: string; cleared_revision?: { authority: string; sequence: number } | null }>();
 }
 
@@ -246,8 +266,12 @@ export interface MeshSliceDriftResponse {
   data_planes: MeshSliceDriftEntry[];
 }
 
-export async function getSliceDrift(): Promise<MeshSliceDriftResponse> {
-  return proxyApi.get("mesh/slice-drift").json<MeshSliceDriftResponse>();
+export async function getSliceDrift(
+  scope: NamespaceScope,
+): Promise<MeshSliceDriftResponse> {
+  return proxyApi
+    .get("mesh/slice-drift", scoped(scope))
+    .json<MeshSliceDriftResponse>();
 }
 
 /* ---------- Policy denies ---------- */
@@ -270,13 +294,15 @@ export interface MeshPolicyDeniesResponse {
 }
 
 export async function getPolicyDenies(
+  scope: NamespaceScope,
   window = "5m",
   limit = 50,
 ): Promise<MeshPolicyDeniesResponse> {
   return proxyApi
-    .get("mesh/policy-denies/recent", {
-      searchParams: { window, limit: String(limit) },
-    })
+    .get(
+      "mesh/policy-denies/recent",
+      scoped(scope, { searchParams: { window, limit: String(limit) } }),
+    )
     .json<MeshPolicyDeniesResponse>();
 }
 
@@ -297,9 +323,11 @@ export interface NodeWaypointIdentitiesResponse {
   identities: NodeWaypointIdentityEntry[];
 }
 
-export async function getNodeWaypointIdentities(): Promise<NodeWaypointIdentitiesResponse> {
+export async function getNodeWaypointIdentities(
+  scope: NamespaceScope,
+): Promise<NodeWaypointIdentitiesResponse> {
   return proxyApi
-    .get("node-waypoint/identities")
+    .get("node-waypoint/identities", scoped(scope))
     .json<NodeWaypointIdentitiesResponse>();
 }
 
@@ -317,8 +345,10 @@ export interface ServiceWaypointServicesResponse {
   services: ServiceWaypointServiceEntry[];
 }
 
-export async function getServiceWaypointServices(): Promise<ServiceWaypointServicesResponse> {
+export async function getServiceWaypointServices(
+  scope: NamespaceScope,
+): Promise<ServiceWaypointServicesResponse> {
   return proxyApi
-    .get("service-waypoint/services")
+    .get("service-waypoint/services", scoped(scope))
     .json<ServiceWaypointServicesResponse>();
 }

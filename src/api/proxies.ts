@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – Proxy API functions                              */
 /* ------------------------------------------------------------------ */
 
-import { proxyApi } from "./client";
+import { proxyApi, scoped, type NamespaceScope } from "./client";
 import type {
   PaginatedResponse,
   PaginationParams,
@@ -17,21 +17,25 @@ function withProxyId(data: ProxyCreate, id?: string): ProxyCreate {
 }
 
 export async function list(
+  scope: NamespaceScope,
   params: PaginationParams = {},
 ): Promise<PaginatedResponse<Proxy>> {
   const searchParams: Record<string, string> = {};
   if (params.offset !== undefined) searchParams.offset = String(params.offset);
   if (params.limit !== undefined) searchParams.limit = String(params.limit);
 
-  return proxyApi.get("proxies", { searchParams }).json<PaginatedResponse<Proxy>>();
+  return proxyApi
+    .get("proxies", scoped(scope, { searchParams }))
+    .json<PaginatedResponse<Proxy>>();
 }
 
-export async function listAll(): Promise<Proxy[]> {
-  return collectAllPages((offset, limit) => list({ offset, limit }));
+/** Every page is fetched under `scope`, however long the collection takes. */
+export async function listAll(scope: NamespaceScope): Promise<Proxy[]> {
+  return collectAllPages((offset, limit) => list(scope, { offset, limit }));
 }
 
-export async function get(id: string): Promise<Proxy> {
-  return proxyApi.get(`proxies/${id}`).json<Proxy>();
+export async function get(scope: NamespaceScope, id: string): Promise<Proxy> {
+  return proxyApi.get(`proxies/${id}`, scoped(scope)).json<Proxy>();
 }
 
 /**
@@ -107,14 +111,25 @@ export function mergeFormUpdatePayload(
   return { ...payload, ...changes, plugins: proxy.plugins ?? [] };
 }
 
-export async function create(data: ProxyCreate): Promise<Proxy> {
-  return proxyApi.post("proxies", { json: withProxyId(data) }).json<Proxy>();
+export async function create(
+  scope: NamespaceScope,
+  data: ProxyCreate,
+): Promise<Proxy> {
+  return proxyApi
+    .post("proxies", scoped(scope, { json: withProxyId(data) }))
+    .json<Proxy>();
 }
 
-export async function update(id: string, data: ProxyCreate): Promise<Proxy> {
-  return proxyApi.put(`proxies/${id}`, { json: withProxyId(data, id) }).json<Proxy>();
+export async function update(
+  scope: NamespaceScope,
+  id: string,
+  data: ProxyCreate,
+): Promise<Proxy> {
+  return proxyApi
+    .put(`proxies/${id}`, scoped(scope, { json: withProxyId(data, id) }))
+    .json<Proxy>();
 }
 
-export async function remove(id: string): Promise<void> {
-  await proxyApi.delete(`proxies/${id}`);
+export async function remove(scope: NamespaceScope, id: string): Promise<void> {
+  await proxyApi.delete(`proxies/${id}`, scoped(scope));
 }

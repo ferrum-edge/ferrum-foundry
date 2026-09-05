@@ -7,9 +7,10 @@ import {
   setApplyStatusFetcher,
 } from "./gatewayMetadata";
 
-function mutationRequest(): Request {
+function mutationRequest(namespace?: string): Request {
   return new Request("http://localhost/api/proxy/proxies/p-1", {
     method: "PUT",
+    ...(namespace && { headers: { "x-ferrum-namespace": namespace } }),
   });
 }
 
@@ -103,7 +104,36 @@ describe("observeGatewayResponse", () => {
       expect(getGatewayMetadataSnapshot().apply.state).toBe("applied");
     });
     expect(fetchStatus).toHaveBeenCalledTimes(1);
-    expect(fetchStatus).toHaveBeenCalledWith("4", "9", 25_000);
+    // A fleet-global mutation carried no namespace, so neither does its poll.
+    expect(fetchStatus).toHaveBeenCalledWith("4", "9", 25_000, null);
+  });
+
+  it("polls under the namespace the originating mutation was bound to", async () => {
+    const fetchStatus = vi.fn().mockResolvedValue({
+      topology_epoch: "4",
+      sequence: "9",
+      state: "applied",
+      accepted_topology_epoch: "4",
+      accepted_sequence: "9",
+    });
+    setApplyStatusFetcher(fetchStatus);
+    await observeGatewayResponse(
+      mutationRequest("tenant-a"),
+      new Response(JSON.stringify({ id: "p-1" }), {
+        status: 202,
+        headers: {
+          "content-type": "application/json",
+          "x-ferrum-config-cursor": "4:9",
+        },
+      }),
+    );
+
+    await vi.waitFor(() => {
+      expect(getGatewayMetadataSnapshot().apply.state).toBe("applied");
+    });
+    // The poll is a follow-up of the mutation and inherits its binding; it
+    // must not pick up whatever namespace the tab has switched to since.
+    expect(fetchStatus).toHaveBeenCalledWith("4", "9", 25_000, "tenant-a");
   });
 
   it("does not claim liveness when committed response has no cursor", async () => {

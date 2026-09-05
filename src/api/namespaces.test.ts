@@ -155,6 +155,7 @@ interface CapturedRequest {
 
 describe("namespace API requests", () => {
   const captured: CapturedRequest[] = [];
+  const scope = { namespace: "ferrum" };
   let nextResponse: () => Response;
 
   // Node's Request rejects relative URLs; in the browser they resolve
@@ -203,7 +204,7 @@ describe("namespace API requests", () => {
         { status: 200, headers: { "content-type": "application/json" } },
       );
 
-    await expect(list()).resolves.toEqual(["ferrum", "production", "staging"]);
+    await expect(list(scope)).resolves.toEqual(["ferrum", "production", "staging"]);
     expect(captured[0].method).toBe("GET");
     expect(captured[0].url).toContain(
       "/api/proxy/namespaces?offset=0&limit=250",
@@ -230,7 +231,7 @@ describe("namespace API requests", () => {
       );
     };
 
-    await expect(list()).resolves.toEqual(["ferrum", "production", "staging"]);
+    await expect(list(scope)).resolves.toEqual(["ferrum", "production", "staging"]);
     expect(captured).toHaveLength(2);
     expect(captured[1].url).toContain("offset=2&limit=250");
   });
@@ -242,7 +243,7 @@ describe("namespace API requests", () => {
         headers: { "content-type": "application/json" },
       });
 
-    await expect(list()).resolves.toEqual(["ferrum"]);
+    await expect(list(scope)).resolves.toEqual(["ferrum"]);
   });
 
   it("get() targets /namespaces/{name}", async () => {
@@ -256,7 +257,7 @@ describe("namespace API requests", () => {
         { status: 200, headers: { "content-type": "application/json" } },
       );
 
-    const namespace = await get("staging");
+    const namespace = await get(scope, "staging");
     expect(namespace.name).toBe("staging");
     expect(captured[0].method).toBe("GET");
     expect(captured[0].url).toMatch(/\/api\/proxy\/namespaces\/staging$/);
@@ -274,7 +275,7 @@ describe("namespace API requests", () => {
         { status: 201, headers: { "content-type": "application/json" } },
       );
 
-    await create({ name: "qa", description: "QA tenant" });
+    await create(scope, { name: "qa", description: "QA tenant" });
     expect(captured[0].method).toBe("POST");
     expect(captured[0].url).toMatch(/\/api\/proxy\/namespaces$/);
     expect(captured[0].body).toEqual({ name: "qa", description: "QA tenant" });
@@ -291,7 +292,7 @@ describe("namespace API requests", () => {
         { status: 200, headers: { "content-type": "application/json" } },
       );
 
-    await update("qa", { name: "quality" });
+    await update(scope, "qa", { name: "quality" });
     expect(captured[0].method).toBe("PUT");
     expect(captured[0].url).toMatch(/\/api\/proxy\/namespaces\/qa$/);
     expect(captured[0].body).toEqual({ name: "quality" });
@@ -300,7 +301,7 @@ describe("namespace API requests", () => {
   it("remove() without confirm sends no query parameter", async () => {
     nextResponse = () => new Response(null, { status: 204 });
 
-    await remove("qa");
+    await remove(scope, "qa");
     expect(captured[0].method).toBe("DELETE");
     expect(captured[0].url).toMatch(/\/api\/proxy\/namespaces\/qa$/);
     expect(captured[0].url).not.toContain("confirm");
@@ -309,7 +310,7 @@ describe("namespace API requests", () => {
   it("remove() with confirm sends ?confirm=true for the cascade", async () => {
     nextResponse = () => new Response(null, { status: 204 });
 
-    await remove("qa", { confirm: true });
+    await remove(scope, "qa", { confirm: true });
     expect(captured[0].url).toMatch(/\/api\/proxy\/namespaces\/qa\?confirm=true$/);
   });
 
@@ -318,7 +319,7 @@ describe("namespace API requests", () => {
 
     // Not producible via the create form (validation rejects it), but the
     // API layer must never build a broken path from a hostile name.
-    await remove("a/b");
+    await remove(scope, "a/b");
     expect(captured[0].url).toMatch(/\/api\/proxy\/namespaces\/a%2Fb$/);
   });
 
@@ -337,7 +338,7 @@ describe("namespace API requests", () => {
       { name: "qa", description: "old" },
       { name: "qa", description: "" },
     );
-    await update("qa", payload!);
+    await update(scope, "qa", payload!);
     expect(captured[0].body).toEqual({ description: null });
   });
 
@@ -348,7 +349,7 @@ describe("namespace API requests", () => {
         headers: { "content-type": "application/json" },
       });
 
-    await expect(create({ name: "ferrum" })).rejects.toThrow();
+    await expect(create(scope, { name: "ferrum" })).rejects.toThrow();
   });
 });
 

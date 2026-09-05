@@ -4,7 +4,12 @@
 /*   audit, batch, backup/restore)                                    */
 /* ------------------------------------------------------------------ */
 
-import { NAMESPACE_HEADER, SILENT_ERRORS, proxyApi } from "./client";
+import {
+  SILENT_ERRORS,
+  proxyApi,
+  scoped,
+  type NamespaceScope,
+} from "./client";
 import type {
   Consumer,
   ConsumerCreate,
@@ -49,8 +54,13 @@ export interface OverloadSnapshot {
 }
 
 /** GET /overload returns 503 with the same body at critical level. */
-export async function getOverload(): Promise<OverloadSnapshot> {
-  const response = await proxyApi.get("overload", { throwHttpErrors: false });
+export async function getOverload(
+  scope: NamespaceScope,
+): Promise<OverloadSnapshot> {
+  const response = await proxyApi.get(
+    "overload",
+    scoped(scope, { throwHttpErrors: false }),
+  );
   if (response.status === 503 || response.ok) {
     return response.json<OverloadSnapshot>();
   }
@@ -130,8 +140,12 @@ export interface RuntimeMetricsSnapshot {
   [extra: string]: unknown;
 }
 
-export async function getRuntimeMetrics(): Promise<RuntimeMetricsSnapshot> {
-  return proxyApi.get("metrics/runtime").json<RuntimeMetricsSnapshot>();
+export async function getRuntimeMetrics(
+  scope: NamespaceScope,
+): Promise<RuntimeMetricsSnapshot> {
+  return proxyApi
+    .get("metrics/runtime", scoped(scope))
+    .json<RuntimeMetricsSnapshot>();
 }
 
 /* ---------- Chargeback ---------- */
@@ -180,9 +194,11 @@ export interface ChargebackResponse {
   consumers?: Record<string, ChargebackConsumerEntry>;
 }
 
-export async function getCharges(): Promise<ChargebackResponse> {
+export async function getCharges(
+  scope: NamespaceScope,
+): Promise<ChargebackResponse> {
   return proxyApi
-    .get("charges", { searchParams: { format: "json" } })
+    .get("charges", scoped(scope, { searchParams: { format: "json" } }))
     .json<ChargebackResponse>();
 }
 
@@ -215,8 +231,12 @@ export interface ChargebackSinkStatusResponse {
   }>;
 }
 
-export async function getChargesSinkStatus(): Promise<ChargebackSinkStatusResponse> {
-  return proxyApi.get("charges/sink/status").json<ChargebackSinkStatusResponse>();
+export async function getChargesSinkStatus(
+  scope: NamespaceScope,
+): Promise<ChargebackSinkStatusResponse> {
+  return proxyApi
+    .get("charges/sink/status", scoped(scope))
+    .json<ChargebackSinkStatusResponse>();
 }
 
 /* ---------- Cluster ---------- */
@@ -269,8 +289,10 @@ export function isDpStatus(status: ClusterStatus): status is ClusterStatusDp {
   return status.mode === "dp";
 }
 
-export async function getClusterStatus(): Promise<ClusterStatus> {
-  return proxyApi.get("cluster").json<ClusterStatus>();
+export async function getClusterStatus(
+  scope: NamespaceScope,
+): Promise<ClusterStatus> {
+  return proxyApi.get("cluster", scoped(scope)).json<ClusterStatus>();
 }
 
 /* ---------- Backend capabilities ---------- */
@@ -290,12 +312,20 @@ export interface BackendCapabilitiesResponse {
   entries: BackendCapabilityEntry[];
 }
 
-export async function getBackendCapabilities(): Promise<BackendCapabilitiesResponse> {
-  return proxyApi.get("backend-capabilities").json<BackendCapabilitiesResponse>();
+export async function getBackendCapabilities(
+  scope: NamespaceScope,
+): Promise<BackendCapabilitiesResponse> {
+  return proxyApi
+    .get("backend-capabilities", scoped(scope))
+    .json<BackendCapabilitiesResponse>();
 }
 
-export async function refreshBackendCapabilities(): Promise<{ status: string }> {
-  return proxyApi.post("backend-capabilities/refresh").json<{ status: string }>();
+export async function refreshBackendCapabilities(
+  scope: NamespaceScope,
+): Promise<{ status: string }> {
+  return proxyApi
+    .post("backend-capabilities/refresh", scoped(scope))
+    .json<{ status: string }>();
 }
 
 /* ---------- Audit ---------- */
@@ -340,6 +370,7 @@ export interface AuditListParams {
 }
 
 export async function listAuditEvents(
+  scope: NamespaceScope,
   params: AuditListParams = {},
 ): Promise<AuditEventListResponse> {
   const searchParams: Record<string, string> = {};
@@ -347,7 +378,7 @@ export async function listAuditEvents(
     if (value !== undefined && value !== "") searchParams[key] = String(value);
   }
   return proxyApi
-    .get("audit", { searchParams })
+    .get("audit", scoped(scope, { searchParams }))
     .json<AuditEventListResponse>();
 }
 
@@ -370,9 +401,12 @@ export interface BatchCreateResponse {
 }
 
 export async function batchCreate(
+  scope: NamespaceScope,
   data: BatchCreateRequest,
 ): Promise<BatchCreateResponse> {
-  return proxyApi.post("batch", { json: data }).json<BatchCreateResponse>();
+  return proxyApi
+    .post("batch", scoped(scope, { json: data }))
+    .json<BatchCreateResponse>();
 }
 
 export interface BackupResponse {
@@ -396,12 +430,17 @@ export interface BackupResponse {
   api_specs?: unknown;
 }
 
-export async function getBackup(resources?: string[]): Promise<BackupResponse> {
+export async function getBackup(
+  scope: NamespaceScope,
+  resources?: string[],
+): Promise<BackupResponse> {
   const searchParams: Record<string, string> = {};
   if (resources && resources.length > 0) {
     searchParams.resources = resources.join(",");
   }
-  return proxyApi.get("backup", { searchParams }).json<BackupResponse>();
+  return proxyApi
+    .get("backup", scoped(scope, { searchParams }))
+    .json<BackupResponse>();
 }
 
 export interface RestoreResponse {
@@ -516,21 +555,29 @@ export function getRestoreFailure(error: unknown): RestoreFailure | null {
   };
 }
 
+/**
+ * Restore replaces the whole of `scope.namespace`. The scope is the one the
+ * user confirmed in the restore dialog, captured when the dialog opened, so
+ * a later switch cannot redirect the replacement.
+ */
 export async function restore(
+  scope: NamespaceScope,
   data: Record<string, unknown>,
-  options: { namespace: string; confirmApiSpecDeletion?: boolean },
+  options: { confirmApiSpecDeletion?: boolean } = {},
 ): Promise<RestoreResponse> {
   const searchParams: Record<string, string> = { confirm: "true" };
   if (options.confirmApiSpecDeletion) {
     searchParams.confirm_api_spec_deletion = "true";
   }
   return proxyApi
-    .post("restore", {
-      json: data,
-      searchParams,
-      headers: { [NAMESPACE_HEADER]: options.namespace },
-      timeout: 120000,
-      context: { [SILENT_ERRORS]: true },
-    })
+    .post(
+      "restore",
+      scoped(scope, {
+        json: data,
+        searchParams,
+        timeout: 120000,
+        context: { [SILENT_ERRORS]: true },
+      }),
+    )
     .json<RestoreResponse>();
 }
