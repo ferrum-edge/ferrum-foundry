@@ -10,29 +10,29 @@ import { useNamespace } from "@/stores/namespace";
 const FIVE_MINUTES = 300_000;
 
 export function useHealth() {
-  const { selectedNamespace: ns } = useNamespace();
+  const { scope } = useNamespace();
   return useQuery({
-    queryKey: ["health", ns],
-    queryFn: () => metrics.getHealth(),
+    queryKey: ["health", scope.namespace],
+    queryFn: () => metrics.getHealth(scope),
     staleTime: 30_000,
   });
 }
 
 export function useAdminMetrics(refreshInterval: number = FIVE_MINUTES) {
-  const { selectedNamespace: ns } = useNamespace();
+  const { scope } = useNamespace();
   return useQuery({
-    queryKey: ["adminMetrics", ns],
-    queryFn: () => metrics.getAdminMetrics(),
+    queryKey: ["adminMetrics", scope.namespace],
+    queryFn: () => metrics.getAdminMetrics(scope),
     refetchInterval: refreshInterval > 0 ? refreshInterval : false,
     refetchOnWindowFocus: false,
   });
 }
 
 export function usePrometheusMetrics() {
-  const { selectedNamespace: ns } = useNamespace();
+  const { scope } = useNamespace();
   return useQuery({
-    queryKey: ["prometheusMetrics", ns],
-    queryFn: () => metrics.getPrometheusMetrics(),
+    queryKey: ["prometheusMetrics", scope.namespace],
+    queryFn: () => metrics.getPrometheusMetrics(scope),
     refetchOnWindowFocus: false,
   });
 }

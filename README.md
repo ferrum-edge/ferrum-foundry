@@ -26,7 +26,7 @@ Admin panel UI for managing and observing the [Ferrum Edge](https://github.com/f
 - **Operations** - Audit log with filters and redacted diffs, CP/DP cluster topology, backend protocol capability probes, and full configuration backup/restore
 - **Mesh Observability** - Service graph, config/slice drift, policy denies, remote clusters and federation, egress scope testing, waypoints, and SPIFFE gateway trust (mesh-mode gateways)
 - **Health Monitoring** - Real-time gateway, database, and FIPS/readiness status
-- **Namespace Support** - Browse and manage tenant resources across namespaces via `X-Ferrum-Namespace`; process/runtime surfaces such as TLS management remain fleet-global
+- **Namespace Support** - Browse and manage tenant resources across namespaces via `X-Ferrum-Namespace`; every operation is bound to the namespace active when it started (see `docs/authentication.md` → "Namespace binding"), and process/runtime surfaces such as TLS management remain fleet-global
 - **Dark / Light Theme** - Dark theme by default with a light theme toggle in the header
 
 ## Architecture

@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – configured ky HTTP client                        */
 /* ------------------------------------------------------------------ */
 
-import ky from "ky";
+import ky, { type Options } from "ky";
 import { serverWaitTimeout } from "../../server/waitBudget";
 import type { ApiError } from "./types";
 import {
@@ -130,20 +130,63 @@ export function setOnUnauthorized(handler: (() => void) | undefined): void {
   unauthorizedHandler = handler;
 }
 
-// ── localStorage namespace helper ────────────────────────────────
+// ── Namespace binding ────────────────────────────────────────────
 
 export const NAMESPACE_HEADER = "X-Ferrum-Namespace";
 /** Mark a documented fleet-global gateway operation so no tenant header is implied. */
 export const FLEET_GLOBAL = "fleetGlobal";
 
-const NAMESPACE_STORAGE_KEY = "ferrum:namespace";
-const DEFAULT_NAMESPACE = "ferrum";
+/**
+ * The namespace an operation is bound to.
+ *
+ * Every namespace-scoped API function takes a scope as its first argument and
+ * stamps `X-Ferrum-Namespace` from it on each request it makes — the first
+ * page and every following page of a `listAll()`, the preflight, apply, and
+ * rollback calls of a membership plan, and the mutation itself. The scope is
+ * captured once, by the hook or component that starts the operation, from
+ * `useNamespace()`; it is never re-read from storage mid-flight, so a
+ * namespace switch in this tab or another one cannot retarget a running
+ * operation. See `src/stores/namespace.tsx`.
+ */
+export interface NamespaceScope {
+  readonly namespace: string;
+}
 
-function getNamespace(): string {
-  try {
-    return localStorage.getItem(NAMESPACE_STORAGE_KEY) ?? DEFAULT_NAMESPACE;
-  } catch {
-    return DEFAULT_NAMESPACE;
+type ScopedOptions = Omit<Options, "headers"> & {
+  headers?: Record<string, string>;
+};
+
+/**
+ * Build ky options that pin a gateway request to `scope.namespace`. The
+ * header is set explicitly here rather than looked up by a hook so that the
+ * outgoing request carries the operation's own binding and nothing else.
+ */
+export function scoped(
+  scope: NamespaceScope,
+  options: ScopedOptions = {},
+): Options {
+  if (typeof scope.namespace !== "string" || scope.namespace.length === 0) {
+    throw new Error("Gateway request requires a non-empty namespace scope");
+  }
+  const { headers, ...rest } = options;
+  return {
+    ...rest,
+    headers: { ...headers, [NAMESPACE_HEADER]: scope.namespace },
+  };
+}
+
+/**
+ * Thrown when a gateway request reaches the wire without a namespace binding.
+ * Sending such a request would force the client to invent a namespace — the
+ * exact failure this client refuses to have — so it fails closed instead.
+ */
+export class UnboundNamespaceError extends Error {
+  constructor(url: string) {
+    super(
+      `Gateway request ${url} has no namespace binding; pass a NamespaceScope ` +
+        "(or mark the call FLEET_GLOBAL)",
+    );
+    this.name = "UnboundNamespaceError";
   }
 }
 
@@ -196,16 +239,18 @@ export const api = ky.create({
   hooks: {
     beforeRequest: [
       ({ request, options }) => {
-        // Attach the active namespace header to every proxy request, unless
-        // the caller already scoped this one to a specific namespace (e.g.
-        // counting a delete target's resources while a different namespace is
-        // selected).
+        // Every gateway request must already carry the namespace its
+        // operation was bound to (via `scoped()`), or be a documented
+        // fleet-global call. The client never picks a namespace itself: the
+        // old per-request localStorage read let another tab's switch — or a
+        // switch between two pages of one listing — silently retarget a
+        // request while the UI still displayed the original namespace.
         if (
           request.url.includes("/api/proxy/") &&
           !options.context?.[FLEET_GLOBAL] &&
           !request.headers.has(NAMESPACE_HEADER)
         ) {
-          request.headers.set(NAMESPACE_HEADER, getNamespace());
+          throw new UnboundNamespaceError(request.url);
         }
         if (
           csrfToken &&
@@ -245,17 +290,26 @@ export const api = ky.create({
 
 /**
  * Returns a ky instance whose prefix is `/api/proxy/`.
- * Usage:  `proxyApi.get("proxies")` => GET /api/proxy/proxies
+ * Usage:  `proxyApi.get("proxies", scoped(scope))` => GET /api/proxy/proxies
+ * with `X-Ferrum-Namespace: <scope.namespace>`.
  */
 export const proxyApi = api.extend({ prefix: "/api/proxy" });
 
-setApplyStatusFetcher((epoch, sequence, waitMs) =>
-  proxyApi
-    .get("config/apply-status", {
-      searchParams: { epoch, sequence, wait_ms: String(waitMs) },
-      timeout: serverWaitTimeout(waitMs),
-      retry: 0,
-      context: { [SILENT_ERRORS]: true },
-    })
-    .json<ApplyStatusResponse>(),
-);
+// The apply-status poll is a follow-up of the mutation that produced the
+// cursor, so it inherits that mutation's binding: the same namespace header,
+// or fleet-global when the mutation itself was fleet-global. Its client
+// timeout is sized to the server-side wait it requests (#204).
+setApplyStatusFetcher((epoch, sequence, waitMs, namespace) => {
+  const options = {
+    searchParams: { epoch, sequence, wait_ms: String(waitMs) },
+    timeout: serverWaitTimeout(waitMs),
+    retry: 0,
+    context: { [SILENT_ERRORS]: true, [FLEET_GLOBAL]: namespace === null },
+  };
+  return proxyApi
+    .get(
+      "config/apply-status",
+      namespace === null ? options : scoped({ namespace }, options),
+    )
+    .json<ApplyStatusResponse>();
+});
