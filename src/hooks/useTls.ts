@@ -173,6 +173,7 @@ export function useDeleteAcmeOrder() {
 export function useFinalizeAcmeOrder() {
   const qc = useQueryClient();
   return useMutation({
+    retry: false,
     mutationFn: ({
       id,
       data,
