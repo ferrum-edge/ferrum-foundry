@@ -10,6 +10,7 @@ import {
 } from "@tanstack/react-query";
 import * as namespaces from "@/api/namespaces";
 import type { NamespaceCreate, NamespaceUpdate } from "@/api/namespaces";
+import { useNamespace } from "@/stores/namespace";
 
 /**
  * Reconcile the query cache after a namespace mutation.
@@ -34,18 +35,24 @@ export function reconcileNamespaceCache(
   }
 }
 
+// The registry is global, so its cache keys carry no namespace; each request
+// is still bound to the scope current when it started, because the BFF
+// authorizes every gateway call against the caller's namespace grants.
+
 export function useNamespaces() {
+  const { scope } = useNamespace();
   return useQuery({
     queryKey: ["namespaces"],
-    queryFn: () => namespaces.list(),
+    queryFn: () => namespaces.list(scope),
     refetchOnWindowFocus: false,
   });
 }
 
 export function useNamespaceDetail(name: string) {
+  const { scope } = useNamespace();
   return useQuery({
     queryKey: ["namespace", name],
-    queryFn: () => namespaces.get(name),
+    queryFn: () => namespaces.get(scope, name),
     enabled: !!name,
     refetchOnWindowFocus: false,
   });
@@ -69,8 +76,9 @@ export function useNamespaceOccupancy(name: string | null) {
 
 export function useCreateNamespace() {
   const qc = useQueryClient();
+  const { scope } = useNamespace();
   return useMutation({
-    mutationFn: (data: NamespaceCreate) => namespaces.create(data),
+    mutationFn: (data: NamespaceCreate) => namespaces.create(scope, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["namespaces"] });
     },
@@ -79,9 +87,10 @@ export function useCreateNamespace() {
 
 export function useUpdateNamespace() {
   const qc = useQueryClient();
+  const { scope } = useNamespace();
   return useMutation({
     mutationFn: ({ name, data }: { name: string; data: NamespaceUpdate }) =>
-      namespaces.update(name, data),
+      namespaces.update(scope, name, data),
     onSuccess: (updated, { name }) => {
       reconcileNamespaceCache(qc, name, updated.name);
     },
@@ -90,9 +99,10 @@ export function useUpdateNamespace() {
 
 export function useDeleteNamespace() {
   const qc = useQueryClient();
+  const { scope } = useNamespace();
   return useMutation({
     mutationFn: ({ name, confirm }: { name: string; confirm?: boolean }) =>
-      namespaces.remove(name, { confirm }),
+      namespaces.remove(scope, name, { confirm }),
     onSuccess: (_result, { name }) => {
       reconcileNamespaceCache(qc, name, null);
     },

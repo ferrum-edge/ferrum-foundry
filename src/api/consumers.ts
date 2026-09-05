@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – Consumer API functions                           */
 /* ------------------------------------------------------------------ */
 
-import { proxyApi } from "./client";
+import { proxyApi, scoped, type NamespaceScope } from "./client";
 import type {
   BuiltInCredentialType,
   Consumer,
@@ -19,6 +19,7 @@ function withConsumerId(data: ConsumerCreate, id?: string): ConsumerCreate {
 }
 
 export async function list(
+  scope: NamespaceScope,
   params: PaginationParams = {},
 ): Promise<PaginatedResponse<Consumer>> {
   const searchParams: Record<string, string> = {};
@@ -26,68 +27,91 @@ export async function list(
   if (params.limit !== undefined) searchParams.limit = String(params.limit);
 
   return proxyApi
-    .get("consumers", { searchParams })
+    .get("consumers", scoped(scope, { searchParams }))
     .json<PaginatedResponse<Consumer>>();
 }
 
-export async function listAll(): Promise<Consumer[]> {
-  return collectAllPages((offset, limit) => list({ offset, limit }));
+/** Every page is fetched under `scope`, however long the collection takes. */
+export async function listAll(scope: NamespaceScope): Promise<Consumer[]> {
+  return collectAllPages((offset, limit) => list(scope, { offset, limit }));
 }
 
-export async function get(id: string): Promise<Consumer> {
-  return proxyApi.get(`consumers/${id}`).json<Consumer>();
+export async function get(scope: NamespaceScope, id: string): Promise<Consumer> {
+  return proxyApi.get(`consumers/${id}`, scoped(scope)).json<Consumer>();
 }
 
-export async function create(data: ConsumerCreate): Promise<Consumer> {
-  return proxyApi.post("consumers", { json: withConsumerId(data) }).json<Consumer>();
+export async function create(
+  scope: NamespaceScope,
+  data: ConsumerCreate,
+): Promise<Consumer> {
+  return proxyApi
+    .post("consumers", scoped(scope, { json: withConsumerId(data) }))
+    .json<Consumer>();
 }
 
 export async function update(
+  scope: NamespaceScope,
   id: string,
   data: ConsumerCreate,
 ): Promise<Consumer> {
-  return proxyApi.put(`consumers/${id}`, { json: withConsumerId(data, id) }).json<Consumer>();
+  return proxyApi
+    .put(`consumers/${id}`, scoped(scope, { json: withConsumerId(data, id) }))
+    .json<Consumer>();
 }
 
-export async function remove(id: string): Promise<void> {
-  await proxyApi.delete(`consumers/${id}`);
+export async function remove(scope: NamespaceScope, id: string): Promise<void> {
+  await proxyApi.delete(`consumers/${id}`, scoped(scope));
 }
 
 // ── Credential sub-endpoints ─────────────────────────────────────
 
 export async function updateCredentials(
+  scope: NamespaceScope,
   consumerId: string,
   credType: BuiltInCredentialType,
   data: ConsumerCredentialInput | ConsumerCredentialInput[],
 ): Promise<Consumer> {
   return proxyApi
-    .put(`consumers/${consumerId}/credentials/${credType}`, { json: data })
+    .put(
+      `consumers/${consumerId}/credentials/${credType}`,
+      scoped(scope, { json: data }),
+    )
     .json<Consumer>();
 }
 
 export async function appendCredential(
+  scope: NamespaceScope,
   consumerId: string,
   credType: BuiltInCredentialType,
   data: ConsumerCredentialInput,
 ): Promise<Consumer> {
   return proxyApi
-    .post(`consumers/${consumerId}/credentials/${credType}`, { json: data })
+    .post(
+      `consumers/${consumerId}/credentials/${credType}`,
+      scoped(scope, { json: data }),
+    )
     .json<Consumer>();
 }
 
 export async function deleteCredentials(
+  scope: NamespaceScope,
   consumerId: string,
   credType: string,
 ): Promise<void> {
-  await proxyApi.delete(`consumers/${consumerId}/credentials/${credType}`);
+  await proxyApi.delete(
+    `consumers/${consumerId}/credentials/${credType}`,
+    scoped(scope),
+  );
 }
 
 export async function deleteCredentialByIndex(
+  scope: NamespaceScope,
   consumerId: string,
   credType: string,
   index: number,
 ): Promise<void> {
   await proxyApi.delete(
     `consumers/${consumerId}/credentials/${credType}/${index}`,
+    scoped(scope),
   );
 }

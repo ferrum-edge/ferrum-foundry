@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Proxy } from "./types";
-import { mergeFormUpdatePayload, toUpdatePayload } from "./proxies";
+import { listAll, mergeFormUpdatePayload, toUpdatePayload } from "./proxies";
 
 function fullProxy(): Proxy {
   return {
@@ -88,5 +88,74 @@ describe("proxy full-replacement builders", () => {
     expect(payload.backend_path).toBeNull();
     expect(payload.hosts).toEqual([]);
     expect(payload.allowed_ws_origins).toEqual([]);
+  });
+});
+
+/* ================================================================== */
+/*  listAll namespace binding                                          */
+/* ================================================================== */
+
+describe("listAll", () => {
+  const captured: Array<{ offset: string | null; namespace: string | null }> = [];
+
+  class BasedRequest extends Request {
+    constructor(input: RequestInfo | URL, init?: RequestInit) {
+      if (typeof input === "string" && !/^[a-z][a-z0-9+.-]*:/i.test(input)) {
+        input = new URL(input, "http://localhost").toString();
+      }
+      super(input, init);
+    }
+  }
+
+  beforeEach(() => {
+    captured.length = 0;
+    localStorage.setItem("ferrum:namespace", "tenant-a");
+    vi.stubGlobal("Request", BasedRequest);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request | string | URL) => {
+        const request = input instanceof Request ? input : new Request(String(input));
+        const url = new URL(request.url);
+        const namespace = request.headers.get("x-ferrum-namespace");
+        const offset = Number(url.searchParams.get("offset") ?? "0");
+        captured.push({ offset: String(offset), namespace });
+        // The tab (or another one) switches between the first and second
+        // page; the shared preference now says tenant-b.
+        localStorage.setItem("ferrum:namespace", "tenant-b");
+        const rows = [
+          { id: "a-1", namespace },
+          { id: "a-2", namespace },
+          { id: "a-3", namespace },
+        ];
+        return new Response(
+          JSON.stringify({
+            data: rows.slice(offset, offset + 2),
+            pagination: { offset, limit: 250, total: rows.length },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    localStorage.removeItem("ferrum:namespace");
+  });
+
+  it("carries the starting namespace on every page", async () => {
+    const rows = await listAll({ namespace: "tenant-a" });
+
+    expect(captured).toEqual([
+      { offset: "0", namespace: "tenant-a" },
+      { offset: "2", namespace: "tenant-a" },
+    ]);
+    // A page fetched under the switched namespace would show up here as a
+    // tenant-b record inside a collection cached as tenant-a.
+    expect(rows.map((proxy) => proxy.namespace)).toEqual([
+      "tenant-a",
+      "tenant-a",
+      "tenant-a",
+    ]);
   });
 });
