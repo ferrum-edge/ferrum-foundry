@@ -80,6 +80,44 @@ one namespace should still grant exactly that namespace at the identity
 proxy; the binding rule keeps the UI honest, and the BFF's grant check keeps
 the gateway honest.
 
+### Editor identity
+
+Binding the request is not enough on its own. A detail page whose data for
+both tenants is already cached re-renders on a switch without passing through
+its loading state, so a form that seeded its fields once could keep showing
+the previous tenant's values under the new tenant's heading and then submit
+them, correctly addressed, to the wrong consumer. Foundry therefore binds the
+**editor** as well as the request (`src/lib/editorIdentity.ts`):
+
+- An editor's identity is `{ namespace, resourceId }`. The detail pages for
+  proxies, consumers, plugins, and upstreams key their entire editor subtree
+  on it — the form, credential drafts, inline target editors, the membership
+  recovery notice, and every confirmation dialog — so a namespace switch or a
+  route change to another resource remounts the editor against the newly
+  selected resource. Nothing carries across: fields are re-seeded, an open
+  "Delete …" confirmation closes, a half-typed credential is discarded. When
+  the new resource is not cached the editor shows its loading state rather
+  than the old fields. The API-specs list page applies the same rule with the
+  namespace alone as its identity, since its import, replace, and delete
+  targets are pending state for one tenant.
+- Submit and confirm handlers capture the identity they were created under
+  (`useEditorIdentity().bind`) and are refused if the page's live identity has
+  moved on by the time they run; the page reports the discard in a toast. The
+  remount makes such a call unreachable through the UI, so the guard covers a
+  closure that outlives its editor. The request itself is still pinned to the
+  namespace active when the mutation started, so a write that is already in
+  flight when the operator switches completes against its original tenant
+  and never touches the editor now on screen.
+- **Refresh policy for the same identity.** Fields are seeded once, when the
+  editor mounts for an identity. A background refetch of the same identity —
+  a poll, an invalidation after a save, a new response object with a newer
+  `updated_at` — never rewrites fields, dirty or clean, so an in-progress edit
+  is never clobbered. Live data still drives the heading, counts, and
+  read-only panels. A successful save leaves the submitted values in place
+  because they are what the gateway now holds; to pick up a change made
+  elsewhere, leave and reopen the resource. Only an identity change resets
+  the editor.
+
 Do not expose the BFF port directly to an untrusted network. Terminate TLS at
 the identity proxy, strip every identity/proof header supplied by the client,
 inject the trusted values after authentication, and firewall the BFF so only

@@ -290,6 +290,10 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
   const isEdit = !!initialData;
 
   /* ---------- Basic Configuration ---------- */
+  // Seeded once per editor identity: the parent keys this form on
+  // `{ namespace, resourceId }` so a tenant or resource change remounts it,
+  // while a background refetch of the same identity never rewrites fields
+  // (see the refresh policy in `src/lib/editorIdentity.ts`).
   const [name, setName] = useState(initialData?.name ?? "");
   const [listenPath, setListenPath] = useState(initialData?.listen_path ?? "/");
   const [hosts, setHosts] = useState<string[]>(initialData?.hosts ?? []);
