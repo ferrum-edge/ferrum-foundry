@@ -14,7 +14,11 @@ vi.mock("@/api/client", () => ({
   getApiErrorMessage: vi.fn(),
 }));
 vi.mock("@/stores/namespace", () => ({
-  useNamespace: () => ({ selectedNamespace: "default" }),
+  useNamespace: () => ({
+    selectedNamespace: "default",
+    scope: { namespace: "default" },
+    setNamespace: () => undefined,
+  }),
 }));
 vi.mock("@tanstack/react-router", () => ({
   useParams: () => ({ pluginId: "group-1" }),
