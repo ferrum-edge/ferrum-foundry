@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api, proxyApi } from "./client";
+import { api, proxyApi, scoped } from "./client";
 import { deleteCredentialByIndex, get as getConsumer } from "./consumers";
+
+// Every gateway request must carry its namespace binding (#202).
+const scope = { namespace: "ferrum" };
+const scopedProxy = proxyApi.extend(scoped(scope));
 import { resetGatewayMetadata } from "./gatewayMetadata";
 
 // Match browser URL resolution while keeping the real configured ky clients.
@@ -54,7 +58,7 @@ describe("configured client retry policy", () => {
     respond = committedResponse;
 
     await expect(
-      api.put("api/proxy/proxies/orders", { json: { id: "orders" } }),
+      api.put("api/proxy/proxies/orders", scoped(scope, { json: { id: "orders" } })),
     ).rejects.toMatchObject({
       response: { status: 503 },
       data: { applied: false, reason: "runtime_rejected" },
@@ -80,7 +84,7 @@ describe("configured client retry policy", () => {
     };
 
     await expect(
-      deleteCredentialByIndex({ namespace: "ferrum" }, "alice", "keyauth", 0),
+      deleteCredentialByIndex(scope, "alice", "keyauth", 0),
     ).rejects.toMatchObject({ response: { status: 502 } });
 
     expect(captured).toHaveLength(1);
@@ -88,7 +92,7 @@ describe("configured client retry policy", () => {
     expect(credentials).toEqual([{ key: "new-key" }]);
 
     // A deliberate re-check reads the committed state without repeating DELETE.
-    const current = await getConsumer({ namespace: "ferrum" }, "alice");
+    const current = await getConsumer(scope, "alice");
     expect(current.credentials.keyauth).toEqual([{ key: "new-key" }]);
     expect(captured.map((request) => request.method)).toEqual(["DELETE", "GET"]);
   });
@@ -103,7 +107,7 @@ describe("configured client retry policy", () => {
         });
 
       await expect(
-        proxyApi("consumers/alice", { method }),
+        scopedProxy("consumers/alice", { method }),
       ).rejects.toMatchObject({ response: { status: 503 } });
       expect(captured).toHaveLength(1);
     },
@@ -116,7 +120,7 @@ describe("configured client retry policy", () => {
         throw new TypeError("Failed to fetch");
       };
 
-      await expect(proxyApi("consumers/alice", { method })).rejects.toThrow();
+      await expect(scopedProxy("consumers/alice", { method })).rejects.toThrow();
       expect(captured).toHaveLength(1);
     },
   );
@@ -131,7 +135,7 @@ describe("configured client retry policy", () => {
         });
 
       await expect(
-        proxyApi("consumers/alice", { method }),
+        scopedProxy("consumers/alice", { method }),
       ).rejects.toMatchObject({ response: { status: 503 } });
       expect(captured).toHaveLength(3);
       expect(captured.every((request) => request.method === method)).toBe(true);
@@ -144,7 +148,7 @@ describe("configured client retry policy", () => {
         ? new Response(null, { status: 503, headers: { "retry-after": "0" } })
         : Response.json({ id: "alice" });
 
-    await expect(proxyApi.get("consumers/alice").json()).resolves.toEqual({
+    await expect(scopedProxy.get("consumers/alice").json()).resolves.toEqual({
       id: "alice",
     });
     expect(captured).toHaveLength(2);
@@ -153,7 +157,7 @@ describe("configured client retry policy", () => {
   it("never retries a committed-but-not-live response even on a GET", async () => {
     respond = committedResponse;
 
-    await expect(proxyApi.get("consumers/alice")).rejects.toMatchObject({
+    await expect(scopedProxy.get("consumers/alice")).rejects.toMatchObject({
       response: { status: 503 },
     });
     expect(captured).toHaveLength(1);
