@@ -37,7 +37,10 @@ describe("sanitizePaginationSearch", () => {
   });
 
   it("corrects a numeric negative offset from the real router parser", () => {
-    const search = parseSearchWith(JSON.parse)("?offset=-20&limit=20");
+    const search = parseSearchWith(JSON.parse)("?offset=-20&limit=20") as Record<
+      string,
+      unknown
+    >;
     expect(search.offset).toBe(-20);
     expect(sanitizePaginationSearch(search)).toEqual({
       offset: 0,
