@@ -80,7 +80,7 @@ describe("configured client retry policy", () => {
     };
 
     await expect(
-      deleteCredentialByIndex("alice", "keyauth", 0),
+      deleteCredentialByIndex({ namespace: "ferrum" }, "alice", "keyauth", 0),
     ).rejects.toMatchObject({ response: { status: 502 } });
 
     expect(captured).toHaveLength(1);
@@ -88,7 +88,7 @@ describe("configured client retry policy", () => {
     expect(credentials).toEqual([{ key: "new-key" }]);
 
     // A deliberate re-check reads the committed state without repeating DELETE.
-    const current = await getConsumer("alice");
+    const current = await getConsumer({ namespace: "ferrum" }, "alice");
     expect(current.credentials.keyauth).toEqual([{ key: "new-key" }]);
     expect(captured.map((request) => request.method)).toEqual(["DELETE", "GET"]);
   });
