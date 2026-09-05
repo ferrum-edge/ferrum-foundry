@@ -20,10 +20,28 @@ import { PluginConfigForm } from "@/components/forms/PluginConfigForm";
 import { PluginMembershipRecovery } from "@/components/forms/PluginMembershipRecovery";
 import { getApiErrorMessage } from "@/api/client";
 import { formatPluginName } from "@/lib/pluginConfigDefaults";
+import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
+import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
 import type { PluginConfigCreate } from "@/api/types";
 
+/**
+ * The route component survives a namespace switch; `PluginEditor` is keyed on
+ * `{ namespace, pluginId }` so the form, the membership recovery notice, and
+ * the delete confirmation remount against the newly selected tenant (see
+ * `src/lib/editorIdentity.ts`).
+ */
 export default function PluginDetailPage() {
   const { pluginId } = useParams({ strict: false }) as { pluginId: string };
+  const { toast } = useToast();
+  const session = useEditorIdentity(pluginId, {
+    onStale: () => toast("warning", STALE_EDITOR_MESSAGE),
+  });
+
+  return <PluginEditor key={session.key} session={session} />;
+}
+
+function PluginEditor({ session }: { session: EditorSession }) {
+  const pluginId = session.identity.resourceId;
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -51,27 +69,29 @@ export default function PluginDetailPage() {
 
   /* ---------- Handlers ---------- */
 
-  const handleSubmit = async (data: PluginConfigCreate, proxyGroupIds?: string[]) => {
-    setMembershipError(null);
-    try {
-      await updatePlugin.mutateAsync({
-        id: pluginId,
-        data,
-        proxyIds: data.scope === "proxy_group" ? proxyGroupIds ?? [] : [],
-      });
+  const handleSubmit = session.bind(
+    async (data: PluginConfigCreate, proxyGroupIds?: string[]) => {
+      setMembershipError(null);
+      try {
+        await updatePlugin.mutateAsync({
+          id: pluginId,
+          data,
+          proxyIds: data.scope === "proxy_group" ? proxyGroupIds ?? [] : [],
+        });
 
-      toast("success", "Plugin configuration updated successfully");
-    } catch (err: unknown) {
-      setMembershipError(err);
-      const message = await getApiErrorMessage(
-        err,
-        "Failed to update plugin configuration",
-      );
-      toast("error", message);
-    }
-  };
+        toast("success", "Plugin configuration updated successfully");
+      } catch (err: unknown) {
+        setMembershipError(err);
+        const message = await getApiErrorMessage(
+          err,
+          "Failed to update plugin configuration",
+        );
+        toast("error", message);
+      }
+    },
+  );
 
-  const handleDelete = async () => {
+  const handleDelete = session.bind(async () => {
     setMembershipError(null);
     try {
       await deletePlugin.mutateAsync(pluginId);
@@ -86,7 +106,7 @@ export default function PluginDetailPage() {
       );
       toast("error", message);
     }
-  };
+  });
 
   /* ---------- Loading / Error states ---------- */
 

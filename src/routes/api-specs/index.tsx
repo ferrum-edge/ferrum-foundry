@@ -60,7 +60,19 @@ paths:
           description: OK
 `;
 
+/**
+ * A list page's editor identity is the namespace alone. The import editor,
+ * replace/view/delete targets, and the search box below are pending state
+ * for one tenant, so the workspace is keyed on the namespace and remounts
+ * on a switch rather than letting a confirmation opened under one tenant
+ * act on the same spec id in another (see `src/lib/editorIdentity.ts`).
+ */
 export default function ApiSpecsPage() {
+  const { scope } = useNamespace();
+  return <ApiSpecsWorkspace key={scope.namespace} />;
+}
+
+function ApiSpecsWorkspace() {
   const { toast } = useToast();
   const { scope } = useNamespace();
   const [search, setSearch] = useState("");

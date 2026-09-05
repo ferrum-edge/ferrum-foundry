@@ -101,6 +101,10 @@ function PluginConfigFormFields({
   const isEdit = !!initialData;
 
   /* ---------- State ---------- */
+  // Seeded once per editor identity: the parent keys this form on
+  // `{ namespace, resourceId }` so a tenant or resource change remounts it,
+  // while a background refetch of the same identity never rewrites fields
+  // (see the refresh policy in `src/lib/editorIdentity.ts`).
   const [pluginName, setPluginName] = useState(initialData?.plugin_name ?? defaults?.pluginName ?? "");
   const [scope, setScope] = useState<PluginScope>(initialData?.scope ?? defaults?.scope ?? "global");
   const [proxyId, setProxyId] = useState(initialData?.proxy_id ?? defaults?.proxyId ?? "");
