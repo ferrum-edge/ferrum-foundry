@@ -26,16 +26,36 @@ import {
 } from "@/components/forms/CredentialForm";
 import { getApiErrorMessage } from "@/api/client";
 import { analyzeProxyPolicy } from "@/lib/effectivePolicy";
+import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
+import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
 import type { ConsumerCreate, Consumer } from "@/api/types";
 
 /* ================================================================== */
 /*  ConsumerDetailPage                                                 */
 /* ================================================================== */
 
+/**
+ * The route component survives a namespace switch; the editor below it does
+ * not. Everything that can hold tenant data or a pending action — the form,
+ * credential drafts, the ACL input, the delete confirmation — lives in
+ * `ConsumerEditor`, which is keyed on `{ namespace, consumerId }` so a switch
+ * remounts it against the newly selected tenant instead of carrying the
+ * previous tenant's fields across (see `src/lib/editorIdentity.ts`).
+ */
 export default function ConsumerDetailPage() {
   const { consumerId } = useParams({ strict: false }) as {
     consumerId: string;
   };
+  const { toast } = useToast();
+  const session = useEditorIdentity(consumerId, {
+    onStale: () => toast("warning", STALE_EDITOR_MESSAGE),
+  });
+
+  return <ConsumerEditor key={session.key} session={session} />;
+}
+
+function ConsumerEditor({ session }: { session: EditorSession }) {
+  const consumerId = session.identity.resourceId;
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -76,7 +96,10 @@ export default function ConsumerDetailPage() {
 
   /* ---------- Handlers ---------- */
 
-  const handleSubmit = async (data: ConsumerCreate) => {
+  // Both handlers are bound to the identity this editor opened for; a call
+  // that outlives it is discarded with a toast rather than acting on the
+  // consumer now on screen.
+  const handleSubmit = session.bind(async (data: ConsumerCreate) => {
     try {
       await updateConsumer.mutateAsync({
         id: consumerId,
@@ -87,9 +110,9 @@ export default function ConsumerDetailPage() {
       const message = await getApiErrorMessage(err, "Failed to update consumer");
       toast("error", message);
     }
-  };
+  });
 
-  const handleDelete = async () => {
+  const handleDelete = session.bind(async () => {
     try {
       await deleteConsumer.mutateAsync(consumerId);
       toast("success", "Consumer deleted successfully");
@@ -98,7 +121,7 @@ export default function ConsumerDetailPage() {
       const message = await getApiErrorMessage(err, "Failed to delete consumer");
       toast("error", message);
     }
-  };
+  });
 
   /* ---------- Loading / Error states ---------- */
 
@@ -190,7 +213,7 @@ export default function ConsumerDetailPage() {
             {CREDENTIAL_TYPES.map((credType) => (
               <Card key={credType}>
                 <CredentialForm
-                  consumerId={consumerId}
+                  session={session}
                   credentialType={credType}
                   existingCredentials={consumer.credentials?.[credType]}
                 />
@@ -203,7 +226,7 @@ export default function ConsumerDetailPage() {
         <TabsContent value="acl">
           <Card>
             <AclGroupsManager
-              consumerId={consumerId}
+              session={session}
               groups={consumer.acl_groups}
               consumer={consumer}
             />
@@ -299,20 +322,20 @@ export default function ConsumerDetailPage() {
 /* ------------------------------------------------------------------ */
 
 function AclGroupsManager({
-  consumerId,
+  session,
   groups,
   consumer,
 }: {
-  consumerId: string;
+  session: EditorSession;
   groups: string[];
   consumer: Pick<Consumer, "username" | "custom_id" | "credentials">;
 }) {
+  const consumerId = session.identity.resourceId;
   const { toast } = useToast();
   const updateConsumer = useUpdateConsumer();
   const [newGroup, setNewGroup] = useState("");
 
-  const handleAddGroup = async (e: FormEvent) => {
-    e.preventDefault();
+  const addGroup = session.bind(async () => {
     const trimmed = newGroup.trim();
     if (!trimmed) return;
     if (groups.includes(trimmed)) {
@@ -336,9 +359,14 @@ function AclGroupsManager({
       const message = await getApiErrorMessage(err, "Failed to add group");
       toast("error", message);
     }
+  });
+
+  const handleAddGroup = (e: FormEvent) => {
+    e.preventDefault();
+    void addGroup();
   };
 
-  const handleRemoveGroup = async (group: string) => {
+  const handleRemoveGroup = session.bind(async (group: string) => {
     try {
       await updateConsumer.mutateAsync({
         id: consumerId,
@@ -354,12 +382,12 @@ function AclGroupsManager({
       const message = await getApiErrorMessage(err, "Failed to remove group");
       toast("error", message);
     }
-  };
+  });
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
       e.preventDefault();
-      handleAddGroup(e as unknown as FormEvent);
+      void addGroup();
     }
   };
 

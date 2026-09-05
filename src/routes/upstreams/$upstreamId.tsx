@@ -20,10 +20,28 @@ import { UpstreamForm } from "@/components/forms/UpstreamForm";
 import { TargetForm } from "@/components/forms/TargetForm";
 import { getApiErrorMessage } from "@/api/client";
 import * as upstreamsApi from "@/api/upstreams";
+import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
+import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
 import type { UpstreamCreate, UpstreamTarget } from "@/api/types";
 
+/**
+ * The route component survives a namespace switch; `UpstreamEditor` is keyed
+ * on `{ namespace, upstreamId }` so the form, the inline target editors, and
+ * the delete confirmation remount against the newly selected tenant (see
+ * `src/lib/editorIdentity.ts`).
+ */
 export default function UpstreamDetailPage() {
   const { upstreamId } = useParams({ strict: false }) as { upstreamId: string };
+  const { toast } = useToast();
+  const session = useEditorIdentity(upstreamId, {
+    onStale: () => toast("warning", STALE_EDITOR_MESSAGE),
+  });
+
+  return <UpstreamEditor key={session.key} session={session} />;
+}
+
+function UpstreamEditor({ session }: { session: EditorSession }) {
+  const upstreamId = session.identity.resourceId;
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -39,7 +57,7 @@ export default function UpstreamDetailPage() {
 
   /* ---------- Handlers ---------- */
 
-  const handleSubmit = async (data: UpstreamCreate) => {
+  const handleSubmit = session.bind(async (data: UpstreamCreate) => {
     if (!upstream) return;
     try {
       await updateUpstream.mutateAsync({
@@ -51,9 +69,9 @@ export default function UpstreamDetailPage() {
       const message = await getApiErrorMessage(err, "Failed to update upstream");
       toast("error", message);
     }
-  };
+  });
 
-  const handleDelete = async () => {
+  const handleDelete = session.bind(async () => {
     try {
       await deleteUpstream.mutateAsync(upstreamId);
       toast("success", "Upstream deleted successfully");
@@ -62,11 +80,12 @@ export default function UpstreamDetailPage() {
       const message = await getApiErrorMessage(err, "Failed to delete upstream");
       toast("error", message);
     }
-  };
+  });
 
   /* ---------- Target management (Targets tab) ---------- */
 
-  const saveTargets = async (newTargets: UpstreamTarget[]) => {
+  // Every target edit funnels through this one bound write.
+  const saveTargets = session.bind(async (newTargets: UpstreamTarget[]) => {
     if (!upstream) return;
     try {
       await updateUpstream.mutateAsync({
@@ -81,7 +100,7 @@ export default function UpstreamDetailPage() {
       const message = await getApiErrorMessage(err, "Failed to update targets");
       toast("error", message);
     }
-  };
+  });
 
   const handleAddTarget = async (target: UpstreamTarget) => {
     if (!upstream) return;

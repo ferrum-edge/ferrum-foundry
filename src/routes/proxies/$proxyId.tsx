@@ -22,6 +22,8 @@ import {
   analyzeProxyPolicy,
   inapplicablePluginsForProxy,
 } from "@/lib/effectivePolicy";
+import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
+import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
 import type { ProxyCreate, PluginConfig } from "@/api/types";
 
 /**
@@ -38,8 +40,23 @@ function PluginConfigPreview({ config }: { config: Record<string, unknown> }) {
   );
 }
 
+/**
+ * The route component survives a namespace switch; `ProxyEditor` is keyed on
+ * `{ namespace, proxyId }` so the form and the delete confirmation remount
+ * against the newly selected tenant (see `src/lib/editorIdentity.ts`).
+ */
 export default function ProxyDetailPage() {
   const { proxyId } = useParams({ strict: false }) as { proxyId: string };
+  const { toast } = useToast();
+  const session = useEditorIdentity(proxyId, {
+    onStale: () => toast("warning", STALE_EDITOR_MESSAGE),
+  });
+
+  return <ProxyEditor key={session.key} session={session} />;
+}
+
+function ProxyEditor({ session }: { session: EditorSession }) {
+  const proxyId = session.identity.resourceId;
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -75,7 +92,7 @@ export default function ProxyDetailPage() {
 
   /* ---------- Handlers ---------- */
 
-  const handleSubmit = async (data: ProxyCreate) => {
+  const handleSubmit = session.bind(async (data: ProxyCreate) => {
     if (!proxy) return;
     try {
       await updateProxy.mutateAsync({
@@ -87,9 +104,9 @@ export default function ProxyDetailPage() {
       const message = await getApiErrorMessage(err, "Failed to update proxy");
       toast("error", message);
     }
-  };
+  });
 
-  const handleDelete = async () => {
+  const handleDelete = session.bind(async () => {
     try {
       await deleteProxy.mutateAsync(proxyId);
       toast("success", "Proxy deleted successfully");
@@ -98,7 +115,7 @@ export default function ProxyDetailPage() {
       const message = await getApiErrorMessage(err, "Failed to delete proxy");
       toast("error", message);
     }
-  };
+  });
 
   /* ---------- Loading / Error states ---------- */
 
