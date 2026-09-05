@@ -79,7 +79,8 @@ describe("configured client server-side waiting calls", () => {
   it.each([60, 600])("bounds a %s-second wait and re-checks without a second POST", async (seconds) => {
     const requests: Request[] = [];
     vi.stubGlobal("fetch", vi.fn((request: Request) => {
-      requests.push(request);
+      // ky consumes the request body it hands to fetch; keep a readable copy.
+      requests.push(request.clone());
       if (request.method === "GET") return Promise.resolve(Response.json({ status: "processing" }));
       return new Promise<Response>((_resolve, reject) => {
         request.signal.addEventListener("abort", () => reject(request.signal.reason));
