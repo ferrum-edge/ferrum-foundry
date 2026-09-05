@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useId } from "react";
 import {
   useReactTable,
   getCoreRowModel,
@@ -73,6 +73,7 @@ export function DataTable<T>({
   tableHeight = "calc(100vh - 300px)",
   onSortingChange,
 }: DataTableProps<T>) {
+  const pageSizeId = useId();
   const [sorting, setSorting] = useState<SortingState>([]);
 
   const handleSortingChange = useCallback(
@@ -224,8 +225,11 @@ export function DataTable<T>({
           )}
           {onPaginationChange && (
             <div className="flex items-center gap-2 shrink-0">
-              <label className="text-text-muted text-xs">Rows</label>
+              <label htmlFor={pageSizeId} className="text-text-muted text-xs">
+                Rows
+              </label>
               <select
+                id={pageSizeId}
                 value={currentLimit}
                 onChange={handlePageSizeChange}
                 className="bg-bg-input border border-border rounded-lg px-2 py-1.5 text-text-primary text-xs cursor-pointer focus:border-orange focus:ring-1 focus:ring-orange/30 outline-none"
