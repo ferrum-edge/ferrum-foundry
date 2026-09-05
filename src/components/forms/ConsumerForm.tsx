@@ -142,6 +142,10 @@ export function ConsumerForm({
   const isEdit = !!initialData;
 
   /* ---------- Form state ---------- */
+  // Seeded once per editor identity: the parent keys this form on
+  // `{ namespace, resourceId }` so a tenant or resource change remounts it,
+  // while a background refetch of the same identity never rewrites fields
+  // (see the refresh policy in `src/lib/editorIdentity.ts`).
   const [resourceId, setResourceId] = useState("");
   const [username, setUsername] = useState(initialData?.username ?? "");
   const [customId, setCustomId] = useState(initialData?.custom_id ?? "");

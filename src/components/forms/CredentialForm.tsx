@@ -15,6 +15,7 @@ import {
   useDeleteCredentialByIndex,
 } from "@/hooks/useConsumers";
 import { buildCredentialInput, CredentialInputError } from "@/lib/credentials";
+import type { EditorSession } from "@/hooks/useEditorIdentity";
 import type { BuiltInCredentialType } from "@/api/types";
 
 /* ------------------------------------------------------------------ */
@@ -22,7 +23,12 @@ import type { BuiltInCredentialType } from "@/api/types";
 /* ------------------------------------------------------------------ */
 
 export interface CredentialFormProps {
-  consumerId: string;
+  /**
+   * The consumer this card edits. The parent keys the whole editor on the
+   * session identity, so a half-typed credential and a pending delete are
+   * discarded when the namespace or consumer changes.
+   */
+  session: EditorSession;
   credentialType: BuiltInCredentialType;
   existingCredentials?: unknown;
 }
@@ -168,10 +174,11 @@ function normalizeCredentials(
 /* ================================================================== */
 
 export function CredentialForm({
-  consumerId,
+  session,
   credentialType,
   existingCredentials,
 }: CredentialFormProps) {
+  const consumerId = session.identity.resourceId;
   const config = CREDENTIAL_CONFIGS[credentialType];
   const { toast } = useToast();
   const appendCredential = useAppendCredential();
@@ -197,8 +204,7 @@ export function CredentialForm({
 
   /* ---------- Handlers ---------- */
 
-  const handleAdd = async (e: FormEvent) => {
-    e.preventDefault();
+  const addCredential = session.bind(async () => {
     let data;
     try {
       data = buildCredentialInput(credentialType, formValues);
@@ -228,9 +234,14 @@ export function CredentialForm({
       const message = await getApiErrorMessage(err, "Failed to add credential");
       toast("error", message);
     }
+  });
+
+  const handleAdd = (e: FormEvent) => {
+    e.preventDefault();
+    void addCredential();
   };
 
-  const handleDelete = async () => {
+  const handleDelete = session.bind(async () => {
     if (deleteIndex === null) return;
     try {
       await deleteCredentialByIndex.mutateAsync({
@@ -244,7 +255,7 @@ export function CredentialForm({
       const message = await getApiErrorMessage(err, "Failed to delete credential");
       toast("error", message);
     }
-  };
+  });
 
   /* ---------- Render ---------- */
 
