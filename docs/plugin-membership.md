@@ -5,6 +5,11 @@ Ferrum Edge deletes that configuration when a proxy update removes its final
 reference. An empty selection is therefore not a membership edit: use Delete
 Plugin to remove a group.
 
+The group editor waits for the complete proxy list, including every page, before
+showing the current membership. A failed list request shows a load error instead
+of an editable empty group. Initial membership is applied once when it becomes
+available; later successful refreshes do not overwrite selections you have edited.
+
 Foundry attaches all selected destinations before detaching any previous members.
 During a move, both source and destination can briefly use the configuration.
 Membership changes span multiple requests and are not atomic.
