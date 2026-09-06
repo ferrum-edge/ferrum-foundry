@@ -175,3 +175,13 @@ audience. `ns` contains one exact string or an array of exact namespace grants;
 Foundry does not invent wildcard behavior. Tokens are cached by every signing
 input and authenticated principal, so a configuration or identity change can
 never reuse an earlier token.
+
+### Session authorization changes
+
+A refreshed session with a different subject, authentication mode, role, or
+namespace-grant set clears cached gateway data and remounts the authenticated
+workspace. This discards previously loaded form state as well as query results
+when access changes, including a downgrade for the same user. Reordered or
+duplicated namespace grants and display-name-only updates preserve the workspace.
+The periodic session refresh applies this rule every 60 seconds; backend role
+and namespace checks continue to authorize each request independently.

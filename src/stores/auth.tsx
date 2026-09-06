@@ -1,5 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  Fragment,
   createContext,
   useCallback,
   useContext,
@@ -62,6 +63,16 @@ function responseStatus(error: unknown): number | undefined {
   return response?.status;
 }
 
+function authorizationKey(principal: AuthPrincipal | null): string {
+  if (!principal) return "anonymous";
+  return JSON.stringify([
+    principal.subject,
+    principal.authMode,
+    principal.role,
+    principal.namespaces === undefined ? null : [...new Set(principal.namespaces)].sort(),
+  ]);
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<AuthStatus>("loading");
@@ -80,7 +91,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const acceptSession = useCallback((session: SessionResponse) => {
     const previous = principalRef.current;
-    if (previous && previous.subject !== session.principal.subject) queryClient.clear();
+    if (previous && authorizationKey(previous) !== authorizationKey(session.principal)) {
+      queryClient.clear();
+    }
     principalRef.current = session.principal;
     setPrincipal(session.principal);
     setCsrfToken(session.csrfToken);
@@ -178,7 +191,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     refreshSession,
   }), [config, error, login, logout, principal, refreshSession, status]);
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={value}>
+      <Fragment key={authorizationKey(principal)}>{children}</Fragment>
+    </AuthContext.Provider>
+  );
 }
 
 export function useAuth(): AuthContextValue {
