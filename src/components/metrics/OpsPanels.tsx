@@ -174,9 +174,12 @@ export function ChargesPanel({ refetchInterval }: RefreshPolicy = {}) {
   if (isLoading) return <p className="text-text-muted text-sm">Loading…</p>;
   if (isError || !data)
     return (
-      <><MetricsSampleTime timestamp={dataUpdatedAt} /><p className="text-text-muted text-sm">
-        No chargeback data — enable the api_chargeback plugin to meter API usage.
-      </p></>
+      <>
+        <MetricsSampleTime timestamp={dataUpdatedAt} />
+        <p className="text-text-muted text-sm">
+          Chargeback unavailable. The latest usage totals could not be retrieved.
+        </p>
+      </>
     );
 
   const consumers = Object.entries(data.consumers ?? {});
