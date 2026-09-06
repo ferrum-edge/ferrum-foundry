@@ -69,9 +69,16 @@ export function useUpdateConsumer() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: ConsumerCreate }) =>
       consumers.update(scope, id, data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["consumers"] });
-      qc.invalidateQueries({ queryKey: ["consumer"] });
+    onSuccess: async (consumer, { id }) => {
+      const queryKey = ["consumer", scope.namespace, id];
+      await qc.cancelQueries({ queryKey, exact: true });
+      qc.setQueryData(queryKey, consumer);
+      // Keep the mutation pending through reconciliation, so a second ACL
+      // edit uses the accepted group list instead of the previous render.
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["consumers", scope.namespace] }),
+        qc.invalidateQueries({ queryKey, exact: true }),
+      ]);
     },
   });
 }

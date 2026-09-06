@@ -408,8 +408,9 @@ describe("consumer editor identity across a namespace switch", () => {
     expect(field("username")?.value).toBe("tenant-b-user");
 
     release();
-    // The write settles and its invalidation refetches the active tenant-b query.
-    await waitFor(() => detailGets("tenant-b").length >= 2);
+    // The write reconciles its captured tenant, without invalidating tenant-b.
+    await waitFor(() => queryClient.getQueryData<Consumer>(["consumer", "tenant-a", "shared"])?.username === "tenant-a-edit");
+    expect(detailGets("tenant-b")).toHaveLength(1);
 
     expect(puts()).toHaveLength(1);
     expect(records.get("tenant-a")?.username).toBe("tenant-a-edit");
@@ -417,4 +418,66 @@ describe("consumer editor identity across a namespace switch", () => {
     expect(heading()).toBe("tenant-b-user");
     expect(field("username")?.value).toBe("tenant-b-user");
   });
+
+  it("invalidates an indexed delete confirmation after the credential list refreshes", async () => {
+    records.set("tenant-a", {
+      ...consumerFixture("tenant-a"),
+      credentials: { keyauth: [{ key: "redacted" }, { key: "redacted" }] },
+    });
+    await mount();
+    await waitFor(() => heading() === "tenant-a-user");
+    await act(async () => {
+      [...host!.querySelectorAll("button")].find((button) => button.textContent === "Credentials")!.click();
+    });
+    await act(async () => {
+      host!.querySelector<HTMLButtonElement>('[aria-label="Delete Key Authentication credential 1"]')!.click();
+    });
+    await waitFor(() => dialog() !== null);
+    records.set("tenant-a", {
+      ...consumerFixture("tenant-a"),
+      credentials: { keyauth: [{ key: "redacted" }] },
+    });
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: ["consumer", "tenant-a", "shared"] });
+    });
+    await act(async () => {
+      [...dialog()!.querySelectorAll("button")].find((button) => button.textContent === "Delete Credential")!.click();
+    });
+    await waitFor(() => dialog() === null);
+    expect(captured.filter((request) => request.method === "DELETE")).toHaveLength(0);
+    expect(document.body.textContent).toContain("Select the credential again");
+  });
+
+  it("keeps ACL edits pending through reconciliation and retains the first accepted group", async () => {
+    await mount();
+    await waitFor(() => heading() === "tenant-a-user");
+    await act(async () => {
+      [...host!.querySelectorAll("button")].find((button) => button.textContent === "ACL Groups")!.click();
+    });
+    const input = host!.querySelector<HTMLInputElement>('[placeholder="Enter group name"]')!;
+    const releasePut = hold("PUT tenant-a");
+    await act(async () => { typeInto(input, "first-group"); });
+    await submitForm();
+    await waitFor(() => puts().length === 1);
+    const releaseRead = hold("GET tenant-a");
+    releasePut();
+    await waitFor(() => queryClient.getQueryData<Consumer>(["consumer", "tenant-a", "shared"])?.acl_groups?.includes("first-group") === true);
+    const addButton = [...host!.querySelectorAll("button")].find((button) => button.textContent === "Add")!;
+    expect(addButton.disabled).toBe(true);
+    await act(async () => {
+      typeInto(input, "second-group");
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    expect(puts()).toHaveLength(1);
+    releaseRead();
+    await waitFor(() => !addButton.disabled || input.value === "");
+    await act(async () => { typeInto(input, "second-group"); });
+    await waitFor(() => !addButton.disabled);
+    await submitForm();
+    await waitFor(() => puts().length === 2);
+    expect(puts()[1].body).toMatchObject({
+      acl_groups: ["tenant-a-group", "first-group", "second-group"],
+    });
+  });
+
 });

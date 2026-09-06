@@ -31,6 +31,8 @@ export interface CredentialFormProps {
   session: EditorSession;
   credentialType: BuiltInCredentialType;
   existingCredentials?: unknown;
+  revision: number;
+  isRefreshing: boolean;
 }
 
 interface CredentialFieldConfig {
@@ -177,6 +179,8 @@ export function CredentialForm({
   session,
   credentialType,
   existingCredentials,
+  revision,
+  isRefreshing,
 }: CredentialFormProps) {
   const consumerId = session.identity.resourceId;
   const config = CREDENTIAL_CONFIGS[credentialType];
@@ -187,7 +191,9 @@ export function CredentialForm({
   const [formValues, setFormValues] = useState<Record<string, string>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [showForm, setShowForm] = useState(false);
-  const [deleteIndex, setDeleteIndex] = useState<number | null>(null);
+  const [deleteSelection, setDeleteSelection] = useState<{
+    index: number; revision: number; snapshot: unknown;
+  } | null>(null);
 
   const credentials = normalizeCredentials(existingCredentials);
   const badgeVariant = CRED_BADGE_VARIANT[credentialType] ?? "default";
@@ -242,15 +248,20 @@ export function CredentialForm({
   };
 
   const handleDelete = session.bind(async () => {
-    if (deleteIndex === null) return;
+    if (!deleteSelection) return;
+    if (isRefreshing || deleteSelection.revision !== revision || deleteSelection.snapshot !== existingCredentials) {
+      setDeleteSelection(null);
+      toast("warning", "The credential list refreshed. Select the credential again before deleting it.");
+      return;
+    }
     try {
       await deleteCredentialByIndex.mutateAsync({
         consumerId,
         credType: credentialType,
-        index: deleteIndex,
+        index: deleteSelection.index,
       });
       toast("success", `${config.label} credential removed`);
-      setDeleteIndex(null);
+      setDeleteSelection(null);
     } catch (err: unknown) {
       const message = await getApiErrorMessage(err, "Failed to delete credential");
       toast("error", message);
@@ -307,7 +318,9 @@ export function CredentialForm({
               <Button
                 size="sm"
                 variant="ghost"
-                onClick={() => setDeleteIndex(index)}
+                aria-label={`Delete ${config.label} credential ${index + 1}`}
+                onClick={() => setDeleteSelection({ index, revision, snapshot: existingCredentials })}
+                disabled={isRefreshing || deleteCredentialByIndex.isPending}
               >
                 <svg
                   className="w-4 h-4 text-danger"
@@ -384,16 +397,16 @@ export function CredentialForm({
 
       {/* Delete confirmation */}
       <ConfirmDialog
-        open={deleteIndex !== null}
+        open={deleteSelection !== null}
         onOpenChange={(open) => {
-          if (!open) setDeleteIndex(null);
+          if (!open) setDeleteSelection(null);
         }}
         title={`Delete ${config.label} Credential`}
         description={`Are you sure you want to delete this credential? This action cannot be undone.`}
         confirmLabel="Delete Credential"
         variant="danger"
         onConfirm={handleDelete}
-        loading={deleteCredentialByIndex.isPending}
+        loading={deleteCredentialByIndex.isPending || isRefreshing}
       />
     </div>
   );

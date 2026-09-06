@@ -59,7 +59,7 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const { data: consumer, isLoading, isError } = useConsumer(consumerId);
+  const { data: consumer, isLoading, isError, isFetching, dataUpdatedAt } = useConsumer(consumerId);
   const updateConsumer = useUpdateConsumer();
   const deleteConsumer = useDeleteConsumer();
 
@@ -103,7 +103,7 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
     try {
       await updateConsumer.mutateAsync({
         id: consumerId,
-        data: { ...data, credentials: consumer?.credentials ?? {} },
+        data,
       });
       toast("success", "Consumer updated successfully");
     } catch (err: unknown) {
@@ -216,6 +216,8 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
                   session={session}
                   credentialType={credType}
                   existingCredentials={consumer.credentials?.[credType]}
+                  revision={dataUpdatedAt}
+                  isRefreshing={isFetching}
                 />
               </Card>
             ))}
@@ -328,7 +330,7 @@ function AclGroupsManager({
 }: {
   session: EditorSession;
   groups: string[];
-  consumer: Pick<Consumer, "username" | "custom_id" | "credentials">;
+  consumer: Pick<Consumer, "username" | "custom_id">;
 }) {
   const consumerId = session.identity.resourceId;
   const { toast } = useToast();
@@ -336,6 +338,7 @@ function AclGroupsManager({
   const [newGroup, setNewGroup] = useState("");
 
   const addGroup = session.bind(async () => {
+    if (updateConsumer.isPending) return;
     const trimmed = newGroup.trim();
     if (!trimmed) return;
     if (groups.includes(trimmed)) {
@@ -349,7 +352,6 @@ function AclGroupsManager({
         data: {
           username: consumer.username,
           ...(consumer.custom_id && { custom_id: consumer.custom_id }),
-          credentials: consumer.credentials ?? {},
           acl_groups: [...groups, trimmed],
         },
       });
@@ -367,13 +369,13 @@ function AclGroupsManager({
   };
 
   const handleRemoveGroup = session.bind(async (group: string) => {
+    if (updateConsumer.isPending) return;
     try {
       await updateConsumer.mutateAsync({
         id: consumerId,
         data: {
           username: consumer.username,
           ...(consumer.custom_id && { custom_id: consumer.custom_id }),
-          credentials: consumer.credentials ?? {},
           acl_groups: groups.filter((g) => g !== group),
         },
       });
