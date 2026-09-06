@@ -51,15 +51,26 @@ function StatTile({ label, value, tone }: { label: string; value: string | numbe
 /* ---------- Overview: config drift + slice drift ---------- */
 
 function OverviewTab() {
-  const { data: drift, isLoading, isError } = useConfigDrift();
-  const { data: sliceDrift } = useSliceDrift();
-
-  if (isLoading) return <SkeletonCard />;
-  if (isError && !sliceDrift) return <NotMeshEmpty what="Mesh configuration state" />;
+  const configQuery = useConfigDrift();
+  const sliceQuery = useSliceDrift();
+  const { data: drift, isLoading, isError } = configQuery;
+  const { data: sliceDrift, isError: sliceError } = sliceQuery;
 
   return (
     <div className="space-y-4">
-      {drift && (
+      {isLoading && <SkeletonCard />}
+      {isError && (drift ? (
+        <Card className="border-warning/40">
+          <p className="text-sm text-warning">Mesh configuration refresh failed</p>
+          <p className="text-xs text-text-muted mt-1">
+            Current convergence and quarantine state are unavailable. Last successful observation:{" "}
+            {new Date(configQuery.dataUpdatedAt).toLocaleString()}.
+          </p>
+          <Button variant="secondary" size="sm" className="mt-3" loading={configQuery.isFetching}
+            onClick={() => void configQuery.refetch()}>Retry configuration</Button>
+        </Card>
+      ) : <NotMeshEmpty what="Mesh configuration state" />)}
+      {drift && !isError && (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <StatTile label="Source" value={drift.slice.source_protocol} />
@@ -124,8 +135,20 @@ function OverviewTab() {
         </>
       )}
 
-      {/* CP-side slice drift */}
-      {sliceDrift && (
+      {/* CP-side slice drift is an independent observation. */}
+      {sliceQuery.isLoading && <SkeletonCard />}
+      {sliceError && (sliceDrift ? (
+        <Card className="border-warning/40">
+          <p className="text-sm text-warning">Data plane convergence refresh failed</p>
+          <p className="text-xs text-text-muted mt-1">
+            Current data plane convergence is unavailable. Last successful observation:{" "}
+            {new Date(sliceQuery.dataUpdatedAt).toLocaleString()}.
+          </p>
+          <Button variant="secondary" size="sm" className="mt-3" loading={sliceQuery.isFetching}
+            onClick={() => void sliceQuery.refetch()}>Retry convergence</Button>
+        </Card>
+      ) : <NotMeshEmpty what="Data plane convergence" />)}
+      {sliceDrift && !sliceError && (
         <Card className="overflow-hidden p-0">
           <div className="px-6 py-3 border-b border-border flex items-center gap-3">
             <h3 className="text-sm font-semibold text-text-primary">
