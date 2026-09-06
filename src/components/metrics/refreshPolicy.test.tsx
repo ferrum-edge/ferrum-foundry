@@ -37,6 +37,7 @@ let root: Root;
 let client: QueryClient;
 let counts: Record<string, number>;
 let failPrometheus: boolean;
+let failAdmin: boolean;
 let holdPrometheus: boolean;
 let releasePrometheus: (() => void) | undefined;
 
@@ -46,13 +47,14 @@ beforeEach(() => {
   localStorage.clear();
   counts = {};
   failPrometheus = false;
+  failAdmin = false;
   holdPrometheus = false;
   releasePrometheus = undefined;
   vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
     const path = new URL(request.url).pathname.replace("/api/proxy", "");
     expect(request.headers.get("X-Ferrum-Namespace")).toBe("ferrum");
     counts[path] = (counts[path] ?? 0) + 1;
-    if (path === "/admin/metrics") return Response.json(metrics);
+    if (path === "/admin/metrics") return Response.json(failAdmin ? { error: "Unavailable" } : metrics, { status: failAdmin ? 503 : 200 });
     if (path === "/metrics/runtime") return Response.json({});
     if (path === "/overload") return Response.json({ level: "normal" });
     if (path === "/charges") return Response.json({ consumers: {} });
@@ -140,6 +142,21 @@ describe("Metrics page refresh policy", () => {
     releasePrometheus!();
     await advance(100);
     expect(refreshButton().disabled).toBe(false);
+  });
+
+  it("keeps manual recovery available after the admin metrics request fails", async () => {
+    failAdmin = true;
+    localStorage.setItem(METRICS_REFRESH_INTERVAL_KEY, "0");
+    await act(async () => root.render(<QueryClientProvider client={client}><MetricsPage /></QueryClientProvider>));
+    await advance(2000);
+    expect(host.textContent).toContain("Failed to load metrics");
+    expect(refreshButton().disabled).toBe(false);
+    failAdmin = false;
+    await act(async () => refreshButton().click());
+    await advance(100);
+    await advance(100);
+    expect(host.textContent).not.toContain("Failed to load metrics");
+    expect(host.textContent).toContain("Requests by Route");
   });
 
   it.each(["NaN", "-1", "1", "Infinity", "junk"])("rejects unsupported stored interval %s", (value) => {

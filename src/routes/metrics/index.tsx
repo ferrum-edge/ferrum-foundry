@@ -83,6 +83,17 @@ export default function MetricsPage() {
     ]);
   };
 
+  const refreshControl = (
+    <RefreshControl
+      refreshInterval={refreshInterval}
+      onIntervalChange={handleIntervalChange}
+      onRefreshNow={handleRefreshNow}
+      lastUpdated={dataUpdatedAt ? new Date(dataUpdatedAt).toISOString() : undefined}
+      lastUpdatedLabel="Admin metrics updated"
+      isRefreshing={isAdminMetricsFetching || isPrometheusFetching || isOpsFetching}
+    />
+  );
+
   /* ---------------------------------------------------------------- */
   /*  Loading state                                                    */
   /* ---------------------------------------------------------------- */
@@ -94,6 +105,7 @@ export default function MetricsPage() {
           <h1 className="text-2xl font-bold text-text-primary">
             Metrics Dashboard
           </h1>
+          {refreshControl}
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <SkeletonCard />
@@ -115,6 +127,7 @@ export default function MetricsPage() {
         <h1 className="text-2xl font-bold text-text-primary">
           Metrics Dashboard
         </h1>
+        {refreshControl}
         <Card>
           <p className="text-danger font-medium">Failed to load metrics</p>
           <p className="text-text-muted text-sm mt-1">
@@ -127,10 +140,6 @@ export default function MetricsPage() {
 
   if (!metrics) return null;
 
-  const lastUpdated = dataUpdatedAt
-    ? new Date(dataUpdatedAt).toISOString()
-    : undefined;
-
   /* ---------------------------------------------------------------- */
   /*  Render                                                           */
   /* ---------------------------------------------------------------- */
@@ -142,14 +151,7 @@ export default function MetricsPage() {
         <h1 className="text-2xl font-bold text-text-primary">
           Metrics Dashboard
         </h1>
-        <RefreshControl
-          refreshInterval={refreshInterval}
-          onIntervalChange={handleIntervalChange}
-          onRefreshNow={handleRefreshNow}
-          lastUpdated={lastUpdated}
-          lastUpdatedLabel="Admin metrics updated"
-          isRefreshing={isAdminMetricsFetching || isPrometheusFetching || isOpsFetching}
-        />
+        {refreshControl}
       </div>
 
       {/* Gateway Stats */}
