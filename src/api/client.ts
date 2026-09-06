@@ -294,11 +294,9 @@ export const api = ky.create({
         ) {
           throw new UnboundNamespaceError(request.url);
         }
-        // Keep identity private to this dispatch, even when callers reuse options.
-        options.context = {
-          ...options.context,
-          [GATEWAY_REQUEST_IDENTITY]: beginGatewayRequest(request),
-        };
+        // ky shallow-copies context for each request; set a fresh identity
+        // without replacing the read-only normalized context property.
+        options.context[GATEWAY_REQUEST_IDENTITY] = beginGatewayRequest(request);
         if (
           csrfToken &&
           request.method !== "GET" &&
