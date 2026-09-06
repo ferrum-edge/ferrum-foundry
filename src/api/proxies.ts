@@ -108,7 +108,11 @@ export function mergeFormUpdatePayload(
   if (!("stream_proxy_protocol" in changes)) payload.stream_proxy_protocol = false;
   if (!("backend_proxy_protocol" in changes)) payload.backend_proxy_protocol = null;
 
-  return { ...payload, ...changes, plugins: proxy.plugins ?? [] };
+  // ProxyForm does not own membership. Edge preserves the current live
+  // associations only when this key is absent, so never replay a cached list.
+  const merged = { ...payload, ...changes };
+  delete merged.plugins;
+  return merged;
 }
 
 export async function create(

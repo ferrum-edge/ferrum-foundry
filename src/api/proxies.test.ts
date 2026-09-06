@@ -60,10 +60,26 @@ describe("proxy full-replacement builders", () => {
     expect(payload.name).toBe("after");
     expect(payload.stream_match).toEqual(fullProxy().stream_match);
     expect(payload.pool_max_requests_per_connection).toBe(900);
-    expect(payload.plugins).toEqual([{ plugin_config_id: "group-1" }]);
+    expect(payload).not.toHaveProperty("plugins");
     expect(payload.pool_enable_http_keep_alive).toBeNull();
     expect(payload.pool_enable_http2).toBeNull();
     expect(payload.pool_http2_adaptive_window).toBeNull();
+  });
+
+  it("omits membership from form writes while retaining explicit membership payloads", () => {
+    const snapshot = fullProxy();
+    for (const plugins of [snapshot.plugins, []]) {
+      const formPayload = mergeFormUpdatePayload(snapshot, {
+        backend_host: snapshot.backend_host,
+        backend_port: snapshot.backend_port,
+        name: "after",
+        plugins,
+      });
+      expect(formPayload).not.toHaveProperty("plugins");
+    }
+    expect(snapshot.plugins).toEqual([{ plugin_config_id: "group-1" }]);
+    expect(toUpdatePayload(snapshot).plugins).toEqual(snapshot.plugins);
+    expect(toUpdatePayload({ ...snapshot, plugins: [] }).plugins).toEqual([]);
   });
 
   it("distinguishes explicit false from inherited null", () => {
