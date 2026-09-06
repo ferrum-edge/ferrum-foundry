@@ -21,7 +21,7 @@ type ApiErrorHandler = (error: ApiError) => void;
 let errorHandler: ApiErrorHandler | undefined;
 
 /**
- * Register a handler that will be called on every non-2xx API response.
+ * Register a handler for terminal API failures after their owner's retries.
  * Only one handler is active at a time (last-write wins).
  */
 export function setApiErrorHandler(handler?: ApiErrorHandler): void {
