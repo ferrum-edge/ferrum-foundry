@@ -4,6 +4,7 @@
 /*   audit, batch, backup/restore)                                    */
 /* ------------------------------------------------------------------ */
 
+import { parseConfigCursor } from "./gatewayMetadata";
 import {
   SILENT_ERRORS,
   reportRequestError,
@@ -524,7 +525,7 @@ export interface RestoreFailure {
   error: string;
   restore_errors?: string[];
   rollback?: RestoreRollbackOutcome;
-  failure_class?: "data_integrity";
+  failure_class?: "data_integrity" | "connectivity";
   rollback_errors?: string[];
   api_specs_not_restored?: number;
   api_specs_note?: string;
@@ -545,11 +546,29 @@ function optionalStringArray(body: Record<string, unknown>, key: string): string
     : null;
 }
 
-/** Preserve the gateway's authoritative rollback outcome from a restore 500. */
+export interface RestoreCommitted {
+  cursor: string | null;
+  reason: string | null;
+}
+
+/** A committed restore is a recovery result even though its HTTP status is 503. */
+export function getRestoreCommitted(error: unknown): RestoreCommitted | null {
+  if (!error || typeof error !== "object") return null;
+  const candidate = error as { response?: { status?: unknown; headers?: Headers }; data?: unknown };
+  if (candidate.response?.status !== 503) return null;
+  const cursor = parseConfigCursor(candidate.response.headers?.get("x-ferrum-config-cursor") ?? null);
+  const body = candidate.data && typeof candidate.data === "object"
+    ? candidate.data as Record<string, unknown> : undefined;
+  if (!cursor && body?.applied !== false) return null;
+  return { cursor: cursor?.raw ?? null, reason: typeof body?.reason === "string" ? body.reason : null };
+}
+
+/** Preserve authoritative rollback or pre-commit connectivity details. */
 export function getRestoreFailure(error: unknown): RestoreFailure | null {
   if (!error || typeof error !== "object") return null;
   const candidate = error as { response?: { status?: unknown }; data?: unknown };
-  if (candidate.response?.status !== 500 || !candidate.data || typeof candidate.data !== "object") {
+  if ((candidate.response?.status !== 500 && candidate.response?.status !== 503) ||
+      getRestoreCommitted(error) || !candidate.data || typeof candidate.data !== "object") {
     return null;
   }
   const body = candidate.data as Record<string, unknown>;
@@ -562,7 +581,7 @@ export function getRestoreFailure(error: unknown): RestoreFailure | null {
     body.rollback !== undefined &&
     (typeof body.rollback !== "string" || !RESTORE_ROLLBACK_OUTCOMES.has(body.rollback as RestoreRollbackOutcome))
   ) return null;
-  if (body.failure_class !== undefined && body.failure_class !== "data_integrity") return null;
+  if (body.failure_class !== undefined && body.failure_class !== "data_integrity" && body.failure_class !== "connectivity") return null;
   if (
     body.api_specs_not_restored !== undefined &&
     (!Number.isSafeInteger(body.api_specs_not_restored) || (body.api_specs_not_restored as number) < 0)
@@ -573,7 +592,7 @@ export function getRestoreFailure(error: unknown): RestoreFailure | null {
     error: body.error,
     ...(restoreErrors !== undefined && { restore_errors: restoreErrors }),
     ...(body.rollback !== undefined && { rollback: body.rollback as RestoreRollbackOutcome }),
-    ...(body.failure_class === "data_integrity" && { failure_class: body.failure_class }),
+    ...((body.failure_class === "data_integrity" || body.failure_class === "connectivity") && { failure_class: body.failure_class }),
     ...(rollbackErrors !== undefined && { rollback_errors: rollbackErrors }),
     ...(body.api_specs_not_restored !== undefined && {
       api_specs_not_restored: body.api_specs_not_restored as number,

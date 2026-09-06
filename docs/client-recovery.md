@@ -92,6 +92,15 @@ cache retention. Later gateway reads continue to redact secrets or omit Basic
 auth credentials. Copy secrets to an appropriate credential store before leaving
 this view; Foundry cannot recover them afterward.
 
+Restore also distinguishes HTTP 503 recovery outcomes. A valid commit cursor or
+`applied: false` produces a “Restore committed” warning, clears the restore
+confirmation, and refreshes cached resource reads. The shared live-apply banner
+monitors a valid cursor; a committed response without a valid cursor remains
+unverifiable. Foundry never resubmits the restore automatically. Pre-commit
+connectivity failures retain the gateway's structured `restore_errors` and
+`failure_class` in the recovery panel. Typed API-spec deletion confirmation and
+HTTP 500 rollback outcomes keep their existing handling.
+
 The global error dialog reports terminal failures. Direct HTTP calls notify from
 ky's final-error hook after its retry budget is exhausted. Query hooks explicitly
 pass `queryScope(scope)` (or `QUERY_ERROR_CONTEXT` for fleet-global reads), so
