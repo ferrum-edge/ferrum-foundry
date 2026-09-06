@@ -44,6 +44,7 @@ function gatewayHandler(request: IncomingMessage, response: ServerResponse): voi
     }
     if (
       request.url?.startsWith('/restore') ||
+      request.url?.startsWith('/backup') ||
       request.url?.startsWith('/config/apply-status') ||
       request.url === '/admin/tls/acme/orders/test/finalize'
     ) {
@@ -363,6 +364,15 @@ describe('streaming gateway proxy', () => {
     });
     expect(response.statusCode).toBe(504);
     expect(response.json()).toMatchObject({ code: 'FERRUM_BFF_TIMEOUT', phase: 'response' });
+  });
+
+  it('lets backup generation outlast the normal read timeout', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/proxy/backup',
+      headers: sessionHeaders,
+    });
+    expect(response.statusCode).toBe(200);
   });
 
   it('uses the explicit long-running restore policy instead of the normal read timeout', async () => {

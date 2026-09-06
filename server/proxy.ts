@@ -12,7 +12,7 @@ import { waitingRouteTimeout } from './waitBudget.js';
 const DEFAULT_BODY_LIMIT = 2 * 1024 * 1024;
 const API_SPEC_BODY_LIMIT = 30 * 1024 * 1024;
 const RESTORE_BODY_LIMIT = 110 * 1024 * 1024;
-const RESTORE_OPERATION_TIMEOUT = 120_000;
+const BACKUP_RESTORE_OPERATION_TIMEOUT = 120_000;
 
 const REQUEST_HEADER_ALLOWLIST = [
   'accept',
@@ -264,8 +264,8 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
     const controller = new AbortController();
     let timeoutPhase = 'response';
     const waitTimeout = waitingRouteTimeout(request.method, targetPath);
-    const responseTimeout = targetPath === '/restore'
-      ? Math.max(config.readTimeout, RESTORE_OPERATION_TIMEOUT)
+    const responseTimeout = targetPath === '/restore' || (request.method === 'GET' && targetPath === '/backup')
+      ? Math.max(config.readTimeout, BACKUP_RESTORE_OPERATION_TIMEOUT)
       : Math.max(config.readTimeout, waitTimeout);
     let responseTimer: NodeJS.Timeout | undefined;
     const clearResponseDeadline = () => {

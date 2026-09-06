@@ -465,7 +465,7 @@ export async function getBackup(
     searchParams.resources = resources.join(",");
   }
   return proxyApi
-    .get("backup", scoped(scope, { searchParams }))
+    .get("backup", scoped(scope, { searchParams, timeout: 120_000, retry: 0 }))
     .json<BackupResponse>();
 }
 
