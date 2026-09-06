@@ -6,8 +6,9 @@ import { Badge } from "@/components/ui/Badge";
 import { StatCard } from "./StatCard";
 import { MetricsSampleTime } from "./MetricsSampleTime";
 
-interface RefreshPolicy { refetchInterval?: number | false; }
 import { useOverload, useRuntimeMetrics, useCharges } from "@/hooks/useOps";
+
+interface RefreshPolicy { refetchInterval?: number | false; }
 
 function ratioBar(label: string, current: number, max: number) {
   const ratio = max > 0 ? Math.min(1, current / max) : 0;

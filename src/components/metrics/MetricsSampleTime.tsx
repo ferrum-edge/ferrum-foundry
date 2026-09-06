@@ -2,7 +2,7 @@
 export function MetricsSampleTime({ timestamp }: { timestamp: number }) {
   return (
     <p className="text-text-muted text-xs mb-3">
-      {timestamp > 0 ? <>Last successful sample: <time dateTime={new Date(timestamp).toISOString()}>{new Date(timestamp).toLocaleTimeString()}</time></> : "No successful sample yet."}
+      {timestamp > 0 ? <>Last successful sample: <time dateTime={new Date(timestamp).toISOString()}>{new Date(timestamp).toLocaleString()}</time></> : "No successful sample yet."}
     </p>
   );
 }

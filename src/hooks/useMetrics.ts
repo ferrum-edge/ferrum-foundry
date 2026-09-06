@@ -29,13 +29,13 @@ export function useAdminMetrics(refreshInterval: number = FIVE_MINUTES) {
   });
 }
 
-export function usePrometheusMetrics(refreshInterval: number = 0) {
+export function usePrometheusMetrics(refreshInterval?: number) {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["prometheusMetrics", scope.namespace],
     queryFn: () => metrics.getPrometheusMetrics(scope),
-    refetchInterval: refreshInterval > 0 ? refreshInterval : false,
+    refetchInterval: refreshInterval !== undefined && refreshInterval > 0 ? refreshInterval : false,
     refetchOnWindowFocus: false,
-    refetchOnReconnect: refreshInterval > 0,
+    refetchOnReconnect: refreshInterval === undefined ? undefined : refreshInterval > 0,
   });
 }
