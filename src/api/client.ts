@@ -6,9 +6,12 @@ import ky, { isHTTPError, type Options } from "ky";
 import { serverWaitTimeout } from "../../server/waitBudget";
 import type { ApiError } from "./types";
 import {
+  beginGatewayRequest,
+  GATEWAY_REQUEST_IDENTITY,
   observeGatewayResponse,
   setApplyStatusFetcher,
   type ApplyStatusResponse,
+  type GatewayRequestIdentity,
 } from "./gatewayMetadata";
 
 // ── Global error handler (event-emitter style) ───────────────────
@@ -264,15 +267,11 @@ export const api = ky.create({
     statusCodes: [408, 413, 429, 500, 502, 503, 504],
     shouldRetry: ({ error }) => {
       // A committed-but-not-live response is never permission to retry,
-      // even if it unexpectedly arrives on a read. Use ky's parsed body.
+      // even if its body is missing or it unexpectedly arrives on a read.
       if (
         isHTTPError(error) &&
         error.response.status === 503 &&
-        error.response.headers.has("x-ferrum-config-cursor") &&
-        error.data &&
-        typeof error.data === "object" &&
-        "applied" in error.data &&
-        error.data.applied === false
+        error.response.headers.has("x-ferrum-config-cursor")
       ) {
         return false;
       }
@@ -295,6 +294,11 @@ export const api = ky.create({
         ) {
           throw new UnboundNamespaceError(request.url);
         }
+        // Keep identity private to this dispatch, even when callers reuse options.
+        options.context = {
+          ...options.context,
+          [GATEWAY_REQUEST_IDENTITY]: beginGatewayRequest(request),
+        };
         if (
           csrfToken &&
           request.method !== "GET" &&
@@ -307,7 +311,11 @@ export const api = ky.create({
     ],
     afterResponse: [
       async ({ request, options, response }) => {
-        await observeGatewayResponse(request, response);
+        await observeGatewayResponse(
+          request,
+          response,
+          options.context[GATEWAY_REQUEST_IDENTITY] as GatewayRequestIdentity | undefined,
+        );
         if (
           response.status === 401 &&
           response.headers.get("x-ferrum-auth-layer") === "bff"

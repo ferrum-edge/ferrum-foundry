@@ -36,7 +36,11 @@ describe("configured client server-side waiting calls", () => {
     const fetcher = vi.fn((request: Request) => {
       expect(new URL(request.url).searchParams.get("wait_ms")).toBe("25000");
       polls += 1;
-      return delayedResponse({ state: polls < 4 ? "pending" : "applied" }, 25_000);
+      return delayedResponse({
+        state: polls < 4 ? "pending" : "applied",
+        topology_epoch: "1", sequence: "9",
+        accepted_topology_epoch: "1", accepted_sequence: polls < 4 ? "8" : "9",
+      }, 25_000);
     });
     vi.stubGlobal("fetch", fetcher);
     await import("./client");
