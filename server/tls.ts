@@ -3,7 +3,7 @@ import { lstatSync, realpathSync, statSync } from 'node:fs';
 import { BlockList, isIP, type LookupFunction } from 'node:net';
 import { Agent } from 'undici';
 import { loadCaBundle, type CaBundle } from './ca.js';
-import { registerRuntimeConfigListener, type Config } from './config.js';
+import type { Config } from './config.js';
 
 interface ManagedDispatcher {
   fingerprint: string;
@@ -46,6 +46,7 @@ for (const [address, prefix, family] of [
 }
 
 let activeDispatcher: ManagedDispatcher | undefined;
+const retiringDispatchers = new Map<Agent, Promise<void>>();
 let cachedCaBundle: CachedCaBundle | undefined;
 
 function parseAllowedCidrs(values: string[]): BlockList {
@@ -215,6 +216,14 @@ function createDispatcher(
   return { fingerprint, agent };
 }
 
+function retireDispatcher(agent: Agent): void {
+  if (retiringDispatchers.has(agent)) return;
+  const closing = agent.close()
+    .catch(async () => { await agent.destroy().catch(() => undefined); })
+    .finally(() => retiringDispatchers.delete(agent));
+  retiringDispatchers.set(agent, closing);
+}
+
 export function getDispatcher(config: Config): Agent {
   const caBundle = currentCaBundle(config);
   const fingerprint = dispatcherFingerprint(config, caBundle);
@@ -222,7 +231,7 @@ export function getDispatcher(config: Config): Agent {
 
   const retired = activeDispatcher;
   activeDispatcher = createDispatcher(config, fingerprint, caBundle);
-  if (retired) void retired.agent.close().catch(() => undefined);
+  if (retired) retireDispatcher(retired.agent);
   return activeDispatcher.agent;
 }
 
@@ -230,7 +239,10 @@ export async function closeDispatchers(): Promise<void> {
   const dispatcher = activeDispatcher;
   activeDispatcher = undefined;
   cachedCaBundle = undefined;
-  if (dispatcher) await dispatcher.agent.close();
+  if (dispatcher) retireDispatcher(dispatcher.agent);
+  await Promise.all([...retiringDispatchers.values()]);
 }
 
-registerRuntimeConfigListener(closeDispatchers);
+// Connection fingerprints select the next dispatcher lazily. Signing-only
+// updates reuse the active transport; replacement drains independently of the
+// settings response. Shutdown owns both active and still-retiring agents.

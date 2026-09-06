@@ -76,8 +76,8 @@ const settingsPlugin: FastifyPluginAsync = async (fastify) => {
 
     try {
       const before = getPublicRuntimeConfig();
-      await updateRuntimeConfig(body as Partial<RuntimeConfig>);
-      const after = getPublicRuntimeConfig();
+      const accepted = await updateRuntimeConfig(body as Partial<RuntimeConfig>);
+      const after = getPublicRuntimeConfig(accepted);
       const changedFields = Object.keys(body);
       fastify.log.info({
         actor: request.authPrincipal?.subject,
