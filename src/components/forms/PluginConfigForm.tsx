@@ -261,9 +261,12 @@ function PluginConfigFormFields({
             onValueChange={(v) => {
               const next = v as PluginScope;
               setScope(next);
-              // Clear proxy selections when switching scopes
-              if (next !== "proxy") setProxyId("");
-              if (next !== "proxy_group") setProxyGroupIds([]);
+              // Editing another scope must not discard the existing draft.
+              // Submit includes only the selections for the chosen scope.
+              if (!isEdit) {
+                if (next !== "proxy") setProxyId("");
+                if (next !== "proxy_group") setProxyGroupIds([]);
+              }
             }}
             options={[
               { value: "global", label: "Global" },
