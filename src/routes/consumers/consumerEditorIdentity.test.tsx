@@ -427,7 +427,8 @@ describe("consumer editor identity across a namespace switch", () => {
     await mount();
     await waitFor(() => heading() === "tenant-a-user");
     await act(async () => {
-      [...host!.querySelectorAll("button")].find((button) => button.textContent === "Credentials")!.click();
+      [...host!.querySelectorAll("button")].find((button) => button.textContent === "Credentials")!
+        .dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     });
     await act(async () => {
       host!.querySelector<HTMLButtonElement>('[aria-label="Delete Key Authentication credential 1"]')!.click();
@@ -452,7 +453,8 @@ describe("consumer editor identity across a namespace switch", () => {
     await mount();
     await waitFor(() => heading() === "tenant-a-user");
     await act(async () => {
-      [...host!.querySelectorAll("button")].find((button) => button.textContent === "ACL Groups")!.click();
+      [...host!.querySelectorAll("button")].find((button) => button.textContent === "ACL Groups")!
+        .dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     });
     const input = host!.querySelector<HTMLInputElement>('[placeholder="Enter group name"]')!;
     const releasePut = hold("PUT tenant-a");
