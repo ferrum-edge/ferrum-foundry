@@ -381,12 +381,12 @@ function DeleteNamespaceDialog({
                     ))}
                   </ul>
                   <p className="text-text-muted text-xs mt-2">
-                    Consumer credentials and the gateway trust bundle are
-                    removed with them
+                    Consumer credentials are removed with them
                     {occupancy.data.partial
                       ? ", and some resource types could not be counted on this gateway"
                       : ""}
-                    .
+                    . Counts are a snapshot; concurrent changes can alter what
+                    the cascade removes.
                   </p>
                 </>
               ) : (
