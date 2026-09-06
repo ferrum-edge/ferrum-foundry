@@ -93,6 +93,7 @@ let secondPage: ReturnType<typeof deferred<ReturnType<typeof page>>>;
 
 beforeEach(() => {
   vi.useFakeTimers();
+  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
   get.mockReset();
   pluginResponse = deferred<PluginConfig>();
   firstPage = deferred<ReturnType<typeof page>>();
@@ -122,6 +123,7 @@ afterEach(async () => {
   client.clear();
   host.remove();
   vi.useRealTimers();
+  Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
 });
 
 async function render(ui: ReactElement = <PluginDetailPage />) {
@@ -141,6 +143,24 @@ function selectedIds() {
   return Array.from(
     host.querySelectorAll("button[aria-label^='Remove ']"),
   ).map((button) => button.getAttribute("aria-label"));
+}
+
+async function chooseScope(label: string) {
+  const trigger = [...host.querySelectorAll<HTMLElement>('[role="combobox"]')].find((entry) =>
+    document.getElementById(entry.getAttribute("aria-labelledby") ?? "")?.textContent === "Scope",
+  )!;
+  await act(async () => {
+    trigger.focus();
+    trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  });
+  await settle();
+  const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find((entry) => entry.textContent === label)!;
+  expect(option).toBeTruthy();
+  await act(async () => {
+    option.focus();
+    option.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  });
+  await settle();
 }
 
 describe("proxy group membership loading", () => {
@@ -270,4 +290,46 @@ describe("proxy group membership loading", () => {
     await render(form(["source"], true, { ...plugin, id: "group-2" }));
     expect(selectedIds()).toEqual(["Remove /source"]);
   });
+  it("preserves loaded edit membership across a scope round trip and submits it unchanged", async () => {
+    client.setQueryData(["proxies", "default", "all"], [member("source"), member("destination")]);
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    await render(<PluginConfigForm initialData={plugin} initialProxyGroupIds={["source", "destination"]} availablePlugins={["rate_limiting"]} isLoading={false} onSubmit={onSubmit} />);
+    await chooseScope("Global");
+    expect(selectedIds()).toEqual([]);
+    await chooseScope("Proxy Group");
+    expect(selectedIds()).toEqual(["Remove /source", "Remove /destination"]);
+    await act(async () => {
+      host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ scope: "proxy_group" }), ["source", "destination"]);
+  });
+
+  it("keeps a missing selected member visible until explicitly removed", async () => {
+    client.setQueryData(["proxies", "default", "all"], [member("source"), member("destination")]);
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    await render(<PluginConfigForm initialData={plugin} initialProxyGroupIds={["source", "destination"]} availablePlugins={["rate_limiting"]} isLoading={false} onSubmit={onSubmit} />);
+    await act(async () => {
+      client.setQueryData(["proxies", "default", "all"], [member("source")]);
+    });
+    await settle();
+    expect(selectedIds()).toEqual(["Remove /source", "Remove destination (not in current catalog)"]);
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>('button[aria-label="Remove destination (not in current catalog)"]')!.click();
+    });
+    expect(selectedIds()).toEqual(["Remove /source"]);
+    await act(async () => {
+      host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ scope: "proxy_group" }), ["source"]);
+  });
+
+  it("keeps create-mode scope resets explicit and unchanged", async () => {
+    client.setQueryData(["proxies", "default", "all"], [member("source")]);
+    await render(<PluginConfigForm defaults={{ scope: "proxy_group", pluginName: "rate_limiting", proxyGroupIds: ["source"] }} availablePlugins={["rate_limiting"]} isLoading={false} onSubmit={vi.fn()} />);
+    expect(selectedIds()).toEqual(["Remove /source"]);
+    await chooseScope("Global");
+    await chooseScope("Proxy Group");
+    expect(selectedIds()).toEqual([]);
+  });
+
 });

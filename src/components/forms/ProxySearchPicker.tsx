@@ -76,13 +76,15 @@ export function ProxySearchPicker(props: ProxySearchPickerProps) {
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  // Selected proxy objects for display
+  // Every selected ID stays visible even if a later catalog omits its proxy.
+  // Do not silently change desired membership when a catalog refreshes.
   const selectedProxies = useMemo(() => {
-    if (mode === "single") {
-      const found = proxies.find((p) => p.id === value);
-      return found ? [found] : [];
-    }
-    return proxies.filter((p) => (value as string[]).includes(p.id));
+    const byId = new Map(proxies.map((proxy) => [proxy.id, proxy]));
+    const ids = mode === "single" ? (value ? [value as string] : []) : value as string[];
+    return [...new Set(ids)].map((id) => {
+      const proxy = byId.get(id);
+      return { id, label: proxy ? proxyLabel(proxy) : `${id} (not in current catalog)` };
+    });
   }, [proxies, value, mode]);
 
   /* ---------- Handlers ---------- */
@@ -131,12 +133,12 @@ export function ProxySearchPicker(props: ProxySearchPickerProps) {
               key={p.id}
               className="inline-flex items-center gap-1.5 bg-orange/10 text-orange-light border border-orange/20 rounded-md px-2.5 py-1 text-xs font-medium"
             >
-              <span className="truncate max-w-[200px]">{proxyLabel(p)}</span>
+              <span className="truncate max-w-[200px]" title={p.label}>{p.label}</span>
               <button
                 type="button"
                 onClick={() => handleRemove(p.id)}
                 className="shrink-0 hover:text-danger transition-colors"
-                aria-label={`Remove ${proxyLabel(p)}`}
+                aria-label={`Remove ${p.label}`}
               >
                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
