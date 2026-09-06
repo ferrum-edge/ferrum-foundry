@@ -67,6 +67,13 @@ const settingsPlugin: FastifyPluginAsync = async (fastify) => {
       return reply.status(400).send({ error: 'Settings body contains unsupported fields' });
     }
 
+    if (config.authMode === 'trusted-proxy' && ('jwtRole' in body || 'jwtNamespaces' in body)) {
+      return reply.status(400).send({
+        error: 'Role and namespace grants are managed by the trusted identity proxy',
+        code: 'FERRUM_BFF_PROXY_MANAGED_IDENTITY',
+      });
+    }
+
     try {
       const before = getPublicRuntimeConfig();
       await updateRuntimeConfig(body as Partial<RuntimeConfig>);

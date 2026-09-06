@@ -23,6 +23,7 @@ let currentSettings: Record<string, unknown>;
 let savedSettings: Record<string, unknown>;
 
 const baseSettings = {
+  authMode: "static",
   adminUrl: "http://127.0.0.1:9000",
   jwtIssuer: "ferrum-edge",
   jwtTtl: 900,
@@ -148,6 +149,25 @@ describe("SettingsForm runtime saves", () => {
       jwtIssuer: "canonical-issuer",
       jwtAudience: ["edge-admin", "edge-ops"],
     });
+  });
+
+  it("disables proxy-managed identity fields and omits them from unrelated saves", async () => {
+    currentSettings.authMode = "trusted-proxy";
+    savedSettings = { ...currentSettings, jwtAudience: "updated-audience" };
+    await renderForm();
+
+    expect(host.textContent).toContain("Your identity proxy manages gateway roles");
+    expect(host.querySelector<HTMLButtonElement>('[role="combobox"]')?.disabled).toBe(true);
+    expect(input("namespace-grants").disabled).toBe(true);
+    expect(input("jwt-audience").disabled).toBe(false);
+    await change("jwt-audience", "updated-audience");
+    await save();
+
+    expect(submitted).toMatchObject({ jwtAudience: "updated-audience" });
+    expect(submitted).not.toHaveProperty("jwtRole");
+    expect(submitted).not.toHaveProperty("jwtNamespaces");
+    expect(submitted).not.toHaveProperty("authMode");
+    expect(toast).toHaveBeenCalledWith("success", "Settings saved successfully");
   });
 
   it("keeps runtime editing unavailable when the server gate is disabled", async () => {

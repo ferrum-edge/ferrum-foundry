@@ -15,6 +15,7 @@ import { useToast } from "@/components/ui/Toast";
 /* ── Types ─────────────────────────────────────────────────────────── */
 
 interface Settings {
+  authMode: "static" | "trusted-proxy";
   adminUrl: string;
   jwtIssuer: string;
   jwtTtl: number;
@@ -37,6 +38,7 @@ interface StatusResult {
 }
 
 const DEFAULT_SETTINGS: Settings = {
+  authMode: "trusted-proxy",
   adminUrl: "",
   jwtIssuer: "ferrum-edge",
   jwtTtl: 900,
@@ -113,12 +115,17 @@ export function SettingsForm() {
     setSaving(true);
     try {
       const {
+        authMode,
+        jwtRole,
+        jwtNamespaces,
         tlsCaConfigured: _tlsCaConfigured,
         runtimeSettingsEnabled: _runtimeSettingsEnabled,
         ...updates
       } = settings;
       const data = await api
-        .put("api/settings", { json: updates })
+        .put("api/settings", {
+          json: authMode === "static" ? { ...updates, jwtRole, jwtNamespaces } : updates,
+        })
         .json<Settings>();
       setSettings(data);
       queryClient.setQueryData(["settings"], data);
@@ -195,9 +202,17 @@ export function SettingsForm() {
               disabled={!settings.runtimeSettingsEnabled}
             />
           </div>
+          {settings.authMode === "trusted-proxy" && (
+            <p className="text-text-secondary text-sm">
+              Your identity proxy manages gateway roles and namespace grants.
+              Change access there; these static login defaults do not affect
+              trusted-proxy sessions.
+            </p>
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Select
               label="Default gateway role"
+              helpText="Applies to new static logins. Trusted-proxy roles come from the identity proxy."
               value={settings.jwtRole}
               onValueChange={(value) => update("jwtRole", value as Settings["jwtRole"])}
               options={[
@@ -205,7 +220,7 @@ export function SettingsForm() {
                 { value: "operator", label: "Operator" },
                 { value: "admin", label: "Admin" },
               ]}
-              disabled={!settings.runtimeSettingsEnabled}
+              disabled={!settings.runtimeSettingsEnabled || settings.authMode !== "static"}
             />
             <Input
               label="JWT Audience"
@@ -222,8 +237,8 @@ export function SettingsForm() {
               "jwtNamespaces",
               event.target.value.split(",").map((value) => value.trim()).filter(Boolean),
             )}
-            helpText="Exact comma-separated ns grants. No wildcard semantics are inferred."
-            disabled={!settings.runtimeSettingsEnabled}
+            helpText="Applies to new static logins: exact comma-separated namespace grants."
+            disabled={!settings.runtimeSettingsEnabled || settings.authMode !== "static"}
           />
         </div>
       </Card>

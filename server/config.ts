@@ -58,6 +58,7 @@ export interface RuntimeConfig {
 }
 
 export interface PublicRuntimeConfig extends Omit<RuntimeConfig, 'tlsCaPath'> {
+  authMode: AuthMode;
   tlsCaConfigured: boolean;
   runtimeSettingsEnabled: boolean;
 }
@@ -342,6 +343,7 @@ export function getPublicRuntimeConfig(): PublicRuntimeConfig {
   const { tlsCaPath, ...runtime } = getRuntimeConfig();
   return {
     ...runtime,
+    authMode: loadConfig().authMode,
     tlsCaConfigured: Boolean(tlsCaPath),
     runtimeSettingsEnabled: loadConfig().allowRuntimeSettings,
   };
