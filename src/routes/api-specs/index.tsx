@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – API spec import & management page                 */
 /* ------------------------------------------------------------------ */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -86,6 +86,13 @@ function ApiSpecsWorkspace() {
 
   const [importOpen, setImportOpen] = useState(false);
   const [importDoc, setImportDoc] = useState("");
+  const [importLoading, setImportLoading] = useState(false);
+  const importGeneration = useRef(0);
+  const viewGeneration = useRef(0);
+  useEffect(() => () => {
+    importGeneration.current += 1;
+    viewGeneration.current += 1;
+  }, []);
   const [replaceTarget, setReplaceTarget] = useState<ApiSpecSummary | null>(null);
   const [viewTarget, setViewTarget] = useState<ApiSpecSummary | null>(null);
   const [viewDoc, setViewDoc] = useState<string>("");
@@ -111,35 +118,72 @@ function ApiSpecsWorkspace() {
   const isLoading = searching ? allQuery.isLoading : pageQuery.isLoading;
   const isError = searching ? allQuery.isError : pageQuery.isError;
 
+  // Each opening is a new session, even when the same spec is reopened.
+  const closeImport = () => {
+    importGeneration.current += 1;
+    setImportOpen(false);
+    setImportLoading(false);
+  };
+
+  const openReplace = async (spec: ApiSpecSummary) => {
+    const generation = ++importGeneration.current;
+    setReplaceTarget(spec);
+    setImportDoc("");
+    setImportLoading(true);
+    setImportOpen(true);
+    try {
+      const doc = await apiSpecsApi.getDocument(scope, spec.id);
+      if (generation === importGeneration.current) setImportDoc(doc);
+    } catch (err) {
+      const message = await getApiErrorMessage(err, "Failed to load document");
+      if (generation === importGeneration.current) toast("error", message);
+    } finally {
+      if (generation === importGeneration.current) setImportLoading(false);
+    }
+  };
+
   const handleImport = async () => {
+    if (importLoading) return;
     if (!importDoc.trim()) {
       toast("error", "Paste an OpenAPI document first");
       return;
     }
+    const generation = importGeneration.current;
     try {
+      let message: string;
       if (replaceTarget) {
         await updateSpec.mutateAsync({ id: replaceTarget.id, document: importDoc });
-        toast("success", `Spec ${replaceTarget.title ?? replaceTarget.id} replaced`);
+        message = `Spec ${replaceTarget.title ?? replaceTarget.id} replaced`;
       } else {
         const created = await importSpec.mutateAsync(importDoc);
-        toast("success", `Spec imported — proxy ${created.proxy_id} created`);
+        message = `Spec imported — proxy ${created.proxy_id} created`;
       }
-      setImportOpen(false);
+      if (generation !== importGeneration.current) return;
+      toast("success", message);
+      closeImport();
       setImportDoc("");
       setReplaceTarget(null);
     } catch (err) {
-      toast("error", await getApiErrorMessage(err, "Spec import failed"));
+      const message = await getApiErrorMessage(err, "Spec import failed");
+      if (generation === importGeneration.current) toast("error", message);
     }
   };
 
+  const closeView = () => {
+    viewGeneration.current += 1;
+    setViewTarget(null);
+  };
+
   const openView = async (spec: ApiSpecSummary) => {
+    const generation = ++viewGeneration.current;
     setViewTarget(spec);
     setViewDoc("Loading…");
     try {
       const doc = await apiSpecsApi.getDocument(scope, spec.id);
-      setViewDoc(doc);
+      if (generation === viewGeneration.current) setViewDoc(doc);
     } catch (err) {
-      setViewDoc(await getApiErrorMessage(err, "Failed to load document"));
+      const message = await getApiErrorMessage(err, "Failed to load document");
+      if (generation === viewGeneration.current) setViewDoc(message);
     }
   };
 
@@ -157,6 +201,8 @@ function ApiSpecsWorkspace() {
         </div>
         <Button
           onClick={() => {
+            importGeneration.current += 1;
+            setImportLoading(false);
             setReplaceTarget(null);
             setImportDoc(IMPORT_TEMPLATE);
             setImportOpen(true);
@@ -236,16 +282,7 @@ function ApiSpecsWorkspace() {
                 <Button
                   variant="secondary"
                   size="sm"
-                  onClick={async () => {
-                    setReplaceTarget(spec);
-                    setImportDoc("Loading current document…");
-                    setImportOpen(true);
-                    try {
-                      setImportDoc(await apiSpecsApi.getDocument(scope, spec.id));
-                    } catch {
-                      setImportDoc("");
-                    }
-                  }}
+                  onClick={() => void openReplace(spec)}
                 >
                   Replace
                 </Button>
@@ -275,7 +312,7 @@ function ApiSpecsWorkspace() {
       )}
 
       {/* Import / replace dialog */}
-      <Dialog open={importOpen} onOpenChange={setImportOpen}>
+      <Dialog open={importOpen} onOpenChange={(open) => !open && closeImport()}>
         <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
           <DialogTitle>
             {replaceTarget
@@ -291,6 +328,9 @@ function ApiSpecsWorkspace() {
               <code className="font-mono">x-ferrum-validate</code> are optional.
             </p>
             <textarea
+              aria-label="OpenAPI document"
+              disabled={importLoading}
+              placeholder={importLoading ? "Loading current document…" : "Paste an OpenAPI document"}
               value={importDoc}
               onChange={(e) => setImportDoc(e.target.value)}
               rows={18}
@@ -298,11 +338,12 @@ function ApiSpecsWorkspace() {
               spellCheck={false}
             />
             <div className="flex justify-end gap-2">
-              <Button variant="secondary" onClick={() => setImportOpen(false)}>
+              <Button variant="secondary" onClick={closeImport}>
                 Cancel
               </Button>
               <Button
                 onClick={handleImport}
+                disabled={importLoading}
                 loading={importSpec.isPending || updateSpec.isPending}
               >
                 {replaceTarget ? "Replace Spec" : "Import Spec"}
@@ -313,7 +354,7 @@ function ApiSpecsWorkspace() {
       </Dialog>
 
       {/* View dialog */}
-      <Dialog open={!!viewTarget} onOpenChange={(open) => !open && setViewTarget(null)}>
+      <Dialog open={!!viewTarget} onOpenChange={(open) => !open && closeView()}>
         <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
           <DialogTitle>{viewTarget?.title ?? viewTarget?.id ?? "Spec"}</DialogTitle>
           <pre className="mt-4 text-xs font-mono text-text-secondary bg-code-bg rounded-lg p-4 overflow-x-auto whitespace-pre-wrap max-h-[60vh]">
