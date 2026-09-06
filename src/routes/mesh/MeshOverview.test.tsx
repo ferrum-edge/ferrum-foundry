@@ -27,14 +27,16 @@ let host: HTMLDivElement;
 let client: QueryClient;
 let failConfig: boolean;
 let failSlices: boolean;
+let failureStatus: number;
 
 beforeEach(() => {
   failConfig = false;
   failSlices = false;
+  failureStatus = 503;
   vi.stubGlobal("Request", BasedRequest);
   vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
     const isConfig = new URL(request.url).pathname.endsWith("/config-drift");
-    if (isConfig ? failConfig : failSlices) return new Response("Unavailable", { status: 404 });
+    if (isConfig ? failConfig : failSlices) return new Response("Unavailable", { status: failureStatus, headers: { "retry-after": "0" } });
     return Response.json(isConfig ? config : slices);
   }));
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -98,6 +100,7 @@ describe("Mesh Overview observation failures", () => {
   it("distinguishes a first-load feature miss from a successful empty CP inventory", async () => {
     failConfig = true;
     failSlices = true;
+    failureStatus = 404;
     await mount();
     await settle(() => expect(host.textContent).toContain("Mesh configuration state unavailable"));
     expect(host.textContent).toContain("Data plane convergence unavailable");
