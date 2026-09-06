@@ -17,7 +17,8 @@ import {
 import { isCpStatus, isDpStatus } from "@/api/ops";
 import type { ProtocolSupport } from "@/api/ops";
 
-function supportBadge(support: ProtocolSupport) {
+function supportBadge(support: ProtocolSupport, stale = false) {
+  if (stale) return <Badge variant="default">{support === "supported" ? "yes" : support === "unsupported" ? "no" : "?"}</Badge>;
   if (support === "supported") return <Badge variant="green">yes</Badge>;
   if (support === "unsupported") return <Badge variant="red">no</Badge>;
   return <Badge variant="default">?</Badge>;
@@ -30,8 +31,10 @@ function formatDate(iso?: string | null): string {
 
 export default function ClusterPage() {
   const { toast } = useToast();
-  const { data: cluster, isLoading: clusterLoading } = useClusterStatus();
-  const { data: capabilities, isLoading: capsLoading } = useBackendCapabilities();
+  const clusterQuery = useClusterStatus();
+  const capsQuery = useBackendCapabilities();
+  const { data: cluster, isLoading: clusterLoading, isError: clusterError } = clusterQuery;
+  const { data: capabilities, isLoading: capsLoading, isError: capsError } = capsQuery;
   const refresh = useRefreshBackendCapabilities();
 
   return (
@@ -46,6 +49,19 @@ export default function ClusterPage() {
 
       {/* Cluster status */}
       {clusterLoading && <SkeletonCard />}
+      {clusterError && (
+        <div role="alert" className="rounded-lg border border-danger/50 p-4 text-sm">
+          <p>{cluster ? "Topology refresh failed. Showing last known topology; current node status is unavailable." : "Cluster topology unavailable. The request failed."}</p>
+          <Button variant="secondary" size="sm" loading={clusterQuery.isFetching} onClick={() => void clusterQuery.refetch()}>
+            Retry topology
+          </Button>
+        </div>
+      )}
+      {cluster && (
+        <p className="text-xs text-text-muted">
+          Topology observed: {formatDate(new Date(clusterQuery.dataUpdatedAt).toISOString())}
+        </p>
+      )}
       {cluster && isCpStatus(cluster) && (
         <div className="space-y-4">
           <Card>
@@ -53,7 +69,7 @@ export default function ClusterPage() {
               <Badge variant="blue" className="px-3 py-1">CONTROL PLANE</Badge>
               <span className="text-sm text-text-secondary">
                 {cluster.connected_data_planes} data plane(s) ·{" "}
-                {cluster.connected_mesh_nodes} mesh node(s) connected
+                {cluster.connected_mesh_nodes} mesh node(s) connected{clusterError ? " in last known snapshot" : ""}
               </span>
             </div>
           </Card>
@@ -66,7 +82,7 @@ export default function ClusterPage() {
                 <h2 className="text-sm font-semibold text-text-primary">{title}</h2>
               </div>
               {nodes.length === 0 && (
-                <EmptyState title={`No ${title.toLowerCase()} connected`} description="" />
+                <EmptyState title={`No ${title.toLowerCase()} connected${clusterError ? " in last known snapshot" : ""}`} description="" />
               )}
               {nodes.map((node) => (
                 <div
@@ -80,7 +96,7 @@ export default function ClusterPage() {
                       {formatDate(node.connected_at)} · last sync {formatDate(node.last_sync_at)}
                     </p>
                   </div>
-                  <Badge variant="green">online</Badge>
+                  <Badge variant={clusterError ? "default" : "green"}>{clusterError ? "last known online" : "online"}</Badge>
                 </div>
               ))}
             </Card>
@@ -91,11 +107,11 @@ export default function ClusterPage() {
         <Card>
           <div className="flex items-center gap-4 mb-3">
             <Badge variant="purple" className="px-3 py-1">DATA PLANE</Badge>
-            <Badge variant={cluster.control_plane.status === "online" ? "green" : "red"}>
-              CP {cluster.control_plane.status}
+            <Badge variant={clusterError ? "default" : cluster.control_plane.status === "online" ? "green" : "red"}>
+              {clusterError ? "Last known CP" : "CP"} {cluster.control_plane.status}
             </Badge>
             {cluster.control_plane.config_diverged && (
-              <Badge variant="red">config diverged</Badge>
+              <Badge variant={clusterError ? "default" : "red"}>{clusterError ? "last known config diverged" : "config diverged"}</Badge>
             )}
           </div>
           <div className="space-y-1 text-sm text-text-secondary">
@@ -154,18 +170,32 @@ export default function ClusterPage() {
           </Button>
         </div>
 
-        <Card className="overflow-hidden p-0">
-          <div className="grid grid-cols-[2fr_4rem_4rem_4rem_5rem_4rem_4rem] gap-3 px-6 py-3 border-b border-border text-text-muted text-xs font-semibold uppercase tracking-wider">
+        {capsError && (
+          <div role="alert" className="rounded-lg border border-danger/50 p-4 text-sm">
+            <p>{capabilities ? "Capabilities refresh failed. Showing last known probe results; current support is unavailable." : "Backend capabilities unavailable. The request failed."}</p>
+            <Button variant="secondary" size="sm" loading={capsQuery.isFetching} onClick={() => void capsQuery.refetch()}>
+              Retry capabilities
+            </Button>
+          </div>
+        )}
+        {capabilities && (
+          <p className="text-xs text-text-muted">
+            {capsError ? "Last known capabilities" : "Capabilities"} observed: {formatDate(new Date(capsQuery.dataUpdatedAt).toISOString())}
+          </p>
+        )}
+        <Card className="overflow-x-auto p-0">
+          <div className="grid min-w-[48rem] grid-cols-[2fr_4rem_4rem_4rem_6rem_5rem_4rem_5rem] gap-3 px-6 py-3 border-b border-border text-text-muted text-xs font-semibold uppercase tracking-wider">
             <span>Backend</span>
             <span>H1</span>
             <span>H2/TLS</span>
             <span>H3</span>
+            <span>gRPC H2/TLS</span>
             <span>gRPC h2c</span>
             <span>HBONE</span>
             <span>Probed</span>
           </div>
           {capsLoading && <div className="px-6 py-8 text-text-muted text-sm">Loading…</div>}
-          {!capsLoading && (capabilities?.entries ?? []).length === 0 && (
+          {!capsLoading && !capsError && capabilities?.entries.length === 0 && (
             <EmptyState
               title="No backend probes yet"
               description="Capabilities are collected as proxies dispatch to backends, or on demand via Re-probe All."
@@ -174,7 +204,7 @@ export default function ClusterPage() {
           {(capabilities?.entries ?? []).map((entry) => (
             <div
               key={entry.key}
-              className="grid grid-cols-[2fr_4rem_4rem_4rem_5rem_4rem_4rem] gap-3 px-6 py-3 border-b border-border/50 last:border-b-0 items-center"
+              className="grid min-w-[48rem] grid-cols-[2fr_4rem_4rem_4rem_6rem_5rem_4rem_5rem] gap-3 px-6 py-3 border-b border-border/50 last:border-b-0 items-center"
             >
               <div className="min-w-0">
                 <p className="text-xs font-mono text-text-primary truncate">
@@ -184,11 +214,12 @@ export default function ClusterPage() {
                   <p className="text-xs text-danger truncate">{entry.last_probe_error}</p>
                 )}
               </div>
-              <span>{supportBadge(entry.plain_http.h1)}</span>
-              <span>{supportBadge(entry.plain_http.h2_tls)}</span>
-              <span>{supportBadge(entry.plain_http.h3)}</span>
-              <span>{supportBadge(entry.grpc_transport.h2c)}</span>
-              <span>{supportBadge(entry.hbone)}</span>
+              <span>{supportBadge(entry.plain_http.h1, capsError)}</span>
+              <span>{supportBadge(entry.plain_http.h2_tls, capsError)}</span>
+              <span>{supportBadge(entry.plain_http.h3, capsError)}</span>
+              <span>{supportBadge(entry.grpc_transport.h2_tls, capsError)}</span>
+              <span>{supportBadge(entry.grpc_transport.h2c, capsError)}</span>
+              <span>{supportBadge(entry.hbone, capsError)}</span>
               <span className="text-xs text-text-muted">
                 {entry.last_probe_at_unix_secs
                   ? new Date(entry.last_probe_at_unix_secs * 1000).toLocaleTimeString()
