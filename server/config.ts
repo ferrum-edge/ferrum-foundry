@@ -339,8 +339,8 @@ export function getRuntimeConfig(): RuntimeConfig {
   };
 }
 
-export function getPublicRuntimeConfig(): PublicRuntimeConfig {
-  const { tlsCaPath, ...runtime } = getRuntimeConfig();
+export function getPublicRuntimeConfig(accepted = getRuntimeConfig()): PublicRuntimeConfig {
+  const { tlsCaPath, ...runtime } = accepted;
   return {
     ...runtime,
     authMode: loadConfig().authMode,
@@ -421,6 +421,9 @@ export async function updateRuntimeConfig(updates: Partial<RuntimeConfig>): Prom
   }
 
   Object.assign(runtimeOverrides, nextOverrides);
+  // Each caller owns the generation it accepted, even if a later update
+  // publishes while asynchronous listeners are still completing.
+  const accepted = getRuntimeConfig();
   await Promise.all([...runtimeListeners].map((listener) => listener()));
-  return getRuntimeConfig();
+  return accepted;
 }
