@@ -43,6 +43,17 @@ surface accordingly. Map roles with that blast radius in mind, and restrict
 fleet-global routes at the identity proxy when scoped identities must not use
 them.
 
+### Runtime identity defaults
+
+`GET /api/settings` includes the active `authMode`. In `trusted-proxy` mode,
+Settings disables the role and namespace defaults and omits them from saves.
+`PUT /api/settings` rejects `jwtRole` or `jwtNamespaces` with
+`FERRUM_BFF_PROXY_MANAGED_IDENTITY` before applying any part of the update.
+Change the identity proxy's role and namespace policy to change user access.
+These defaults remain editable in static development mode and apply to its
+principal on subsequent logins. Existing static sessions retain their original grants. Issuer, audience, and token lifetime remain
+separate signing settings in both modes.
+
 ### Namespace binding
 
 Consumer, proxy, upstream, and plugin create forms discard their drafts when
