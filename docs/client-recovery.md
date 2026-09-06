@@ -76,3 +76,18 @@ copy. Authentication or grant changes clear metadata and invalidate older in-fli
 responses and polls. Configured-client coverage exercises delayed headers, reused
 request options, failed writes during monitoring, malformed envelopes, namespace
 labels, and session boundaries in GitHub-hosted CI.
+
+Consumer creation and credential append retain submitted API keys, JWT/HMAC
+secrets, and Basic auth passwords in a one-time copy panel after success. The
+panel uses the submitted values, never a redacted response. Saving with secrets
+pauses navigation until “I have saved these credentials”; appending clears the
+entry form and keeps the copy panel until that acknowledgement. A failed write
+keeps the editable input and does not claim a successful credential save.
+Clipboard failure leaves the value available for manual copying.
+
+The copy panel lives only in the mounted editor. A namespace change, navigation,
+or logout discards it. Nothing from that panel is written to browser storage or
+query data; completed create/append mutation state is reset and has zero inactive
+cache retention. Later gateway reads continue to redact secrets or omit Basic
+auth credentials. Copy secrets to an appropriate credential store before leaving
+this view; Foundry cannot recover them afterward.

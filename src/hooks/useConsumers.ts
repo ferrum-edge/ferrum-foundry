@@ -56,6 +56,8 @@ export function useCreateConsumer() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
   return useMutation({
+    // Discard submitted secret variables as soon as the form resets/unmounts.
+    gcTime: 0,
     mutationFn: (data: ConsumerCreate) => consumers.create(scope, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["consumers"] });
@@ -125,6 +127,7 @@ export function useAppendCredential() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
   return useMutation({
+    gcTime: 0,
     mutationFn: ({
       consumerId,
       credType,
