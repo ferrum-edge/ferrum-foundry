@@ -441,6 +441,10 @@ describe("consumer editor identity across a namespace switch", () => {
     await act(async () => {
       await queryClient.refetchQueries({ queryKey: ["consumer", "tenant-a", "shared"] });
     });
+    // Query observers render the completed refresh after the GET promise settles.
+    await waitFor(() => [...dialog()!.querySelectorAll("button")].some(
+      (button) => button.textContent === "Delete Credential" && !button.disabled,
+    ));
     await act(async () => {
       [...dialog()!.querySelectorAll("button")].find((button) => button.textContent === "Delete Credential")!.click();
     });
