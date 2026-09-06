@@ -86,6 +86,13 @@ one namespace should still grant exactly that namespace at the identity
 proxy; the binding rule keeps the UI honest, and the BFF's grant check keeps
 the gateway honest.
 
+### Proxy form updates
+
+Saving proxy settings omits the `plugins` field from the request, so Edge
+preserves the current live plugin associations. A cached association list is
+never replayed by an unrelated name, routing, or timeout edit. Plugin membership
+operations still send an explicit list when changing or clearing associations.
+
 ### Editor identity
 
 Binding the request is not enough on its own. A detail page whose data for
