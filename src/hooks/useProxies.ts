@@ -7,6 +7,7 @@
 /*  after the click cannot retarget the write.                        */
 /* ------------------------------------------------------------------ */
 
+import { queryScope } from "@/api/client";
 import {
   useMutation,
   useQuery,
@@ -24,7 +25,7 @@ export function useProxies(params: PaginationParams = {}, enabled = true) {
       scope.namespace,
       { offset: params.offset, limit: params.limit },
     ],
-    queryFn: () => proxies.list(scope, params),
+    queryFn: () => proxies.list(queryScope(scope), params),
     enabled,
   });
 }
@@ -33,7 +34,7 @@ export function useAllProxies(enabled = true) {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["proxies", scope.namespace, "all"],
-    queryFn: () => proxies.listAll(scope),
+    queryFn: () => proxies.listAll(queryScope(scope)),
     enabled,
   });
 }
@@ -42,7 +43,7 @@ export function useProxy(id: string) {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["proxy", scope.namespace, id],
-    queryFn: () => proxies.get(scope, id),
+    queryFn: () => proxies.get(queryScope(scope), id),
     enabled: !!id,
   });
 }

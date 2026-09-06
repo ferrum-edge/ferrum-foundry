@@ -8,6 +8,7 @@
 /*  the plan (or its compensation) across namespaces.                 */
 /* ------------------------------------------------------------------ */
 
+import { queryScope } from "@/api/client";
 import {
   useMutation,
   useQuery,
@@ -27,7 +28,7 @@ export function useAvailablePlugins() {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["plugins", "available", scope.namespace],
-    queryFn: () => plugins.listAvailable(scope),
+    queryFn: () => plugins.listAvailable(queryScope(scope)),
   });
 }
 
@@ -39,7 +40,7 @@ export function usePluginConfigs(params: PaginationParams = {}, enabled = true) 
       scope.namespace,
       { offset: params.offset, limit: params.limit },
     ],
-    queryFn: () => plugins.listConfigs(scope, params),
+    queryFn: () => plugins.listConfigs(queryScope(scope), params),
     enabled,
   });
 }
@@ -48,7 +49,7 @@ export function useAllPluginConfigs(enabled = true) {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["pluginConfigs", scope.namespace, "all"],
-    queryFn: () => plugins.listAllConfigs(scope),
+    queryFn: () => plugins.listAllConfigs(queryScope(scope)),
     enabled,
   });
 }
@@ -57,7 +58,7 @@ export function usePluginConfig(id: string) {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["pluginConfig", scope.namespace, id],
-    queryFn: () => plugins.getConfig(scope, id),
+    queryFn: () => plugins.getConfig(queryScope(scope), id),
     enabled: !!id,
   });
 }

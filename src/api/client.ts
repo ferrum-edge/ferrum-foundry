@@ -131,6 +131,23 @@ export async function getApiErrorMessage(
   return detail ? `${error.message}: ${detail}` : error.message;
 }
 
+// Deferred notifications follow the actual rejected Error, not a URL shared
+// with concurrent operations. Only the terminal Query error consumes one.
+const deferredQueryErrors = new WeakMap<object, ApiError>();
+
+export function reportRequestError(error: unknown, detail: ApiError, defer = false): void {
+  if (defer && error instanceof Error) deferredQueryErrors.set(error, detail);
+  else onApiError(detail);
+}
+
+export function reportDeferredQueryError(error: unknown): void {
+  if (!error || typeof error !== "object") return;
+  const detail = deferredQueryErrors.get(error);
+  if (!detail) return;
+  deferredQueryErrors.delete(error);
+  onApiError(detail);
+}
+
 // ── BFF session / CSRF state (set by AuthProvider) ───────────────
 
 let csrfToken: string | null = null;
@@ -157,6 +174,9 @@ export function setOnUnauthorized(handler: (() => void) | undefined): void {
 export const NAMESPACE_HEADER = "X-Ferrum-Namespace";
 /** Mark a documented fleet-global gateway operation so no tenant header is implied. */
 export const FLEET_GLOBAL = "fleetGlobal";
+/** The enclosing Query owns notification after all of its retries finish. */
+export const DEFER_QUERY_ERRORS = "deferQueryErrors";
+export const QUERY_ERROR_CONTEXT = { [DEFER_QUERY_ERRORS]: true };
 
 /**
  * The namespace an operation is bound to.
@@ -172,6 +192,11 @@ export const FLEET_GLOBAL = "fleetGlobal";
  */
 export interface NamespaceScope {
   readonly namespace: string;
+  readonly [DEFER_QUERY_ERRORS]?: boolean;
+}
+
+export function queryScope(scope: NamespaceScope): NamespaceScope {
+  return { ...scope, [DEFER_QUERY_ERRORS]: true };
 }
 
 type ScopedOptions = Omit<Options, "headers"> & {
@@ -193,6 +218,7 @@ export function scoped(
   const { headers, ...rest } = options;
   return {
     ...rest,
+    context: { ...rest.context, ...(scope[DEFER_QUERY_ERRORS] && { [DEFER_QUERY_ERRORS]: true }) },
     headers: { ...headers, [NAMESPACE_HEADER]: scope.namespace },
   };
 }
@@ -242,11 +268,11 @@ const SILENT_PROBE_PATTERNS = [
  */
 export const SILENT_ERRORS = "silentErrors";
 
-function isExpectedProbeFailure(response: Response): boolean {
+function isExpectedProbeFailure(response: Response, requestUrl: string): boolean {
   if (response.status !== 404 && response.status !== 503 && response.status !== 501) {
     return false;
   }
-  return SILENT_PROBE_PATTERNS.some((pattern) => pattern.test(response.url));
+  return SILENT_PROBE_PATTERNS.some((pattern) => pattern.test(requestUrl));
 }
 
 // ── Configured ky instance ───────────────────────────────────────
@@ -322,16 +348,19 @@ export const api = ky.create({
         ) {
           unauthorizedHandler?.();
         }
-        if (!response.ok) {
-          if (options.context?.[SILENT_ERRORS]) return;
-          if (isExpectedProbeFailure(response)) return;
-          const body = await response.clone().text().catch(() => "");
-          onApiError({
-            statusCode: response.status,
-            body,
-            url: response.url,
-          });
-        }
+      },
+    ],
+    beforeError: [
+      ({ request, options, error }) => {
+        if (options.context[SILENT_ERRORS] || error.name === "AbortError") return error;
+        if (isHTTPError(error) && isExpectedProbeFailure(error.response, request.url)) return error;
+        const data = isHTTPError(error) ? error.data : error.message;
+        reportRequestError(error, {
+          statusCode: isHTTPError(error) ? error.response.status : 0,
+          body: typeof data === "string" ? data : data === undefined ? "" : JSON.stringify(data),
+          url: request.url,
+        }, Boolean(options.context[DEFER_QUERY_ERRORS]));
+        return error;
       },
     ],
   },

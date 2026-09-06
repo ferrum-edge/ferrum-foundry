@@ -381,17 +381,19 @@ const FLEET_GLOBAL_SILENT_CONTEXT = {
 
 export async function listInventory(
   params: PaginationParams = {},
+  context: Record<string, unknown> = {},
 ): Promise<PaginatedResponse<TlsInventoryEntry>> {
   return proxyApi
     .get("admin/tls/inventory", {
       searchParams: paginationSearch(params),
-      context: FLEET_GLOBAL_CONTEXT,
+      context: { ...context, ...FLEET_GLOBAL_CONTEXT },
     })
     .json<PaginatedResponse<TlsInventoryEntry>>();
 }
 
 export async function listEvents(
   params: TlsEventsParams = {},
+  context: Record<string, unknown> = {},
 ): Promise<PaginatedResponse<TlsSourceEvent>> {
   const searchParams = paginationSearch(params);
   if (params.cert_id) searchParams.cert_id = params.cert_id;
@@ -400,7 +402,7 @@ export async function listEvents(
   if (params.outcome) searchParams.outcome = params.outcome;
   if (params.since) searchParams.since = params.since;
   return proxyApi
-    .get("admin/tls/events", { searchParams, context: FLEET_GLOBAL_CONTEXT })
+    .get("admin/tls/events", { searchParams, context: { ...context, ...FLEET_GLOBAL_CONTEXT } })
     .json<PaginatedResponse<TlsSourceEvent>>();
 }
 
@@ -409,20 +411,22 @@ export async function listEvents(
 export async function listManagedRecords(
   collection: ManagedTlsCollection,
   params: PaginationParams = {},
+  context: Record<string, unknown> = {},
 ): Promise<PaginatedResponse<ManagedTlsRecord>> {
   return proxyApi
     .get(`admin/tls/${collection}`, {
       searchParams: paginationSearch(params),
-      context: FLEET_GLOBAL_CONTEXT,
+      context: { ...context, ...FLEET_GLOBAL_CONTEXT },
     })
     .json<PaginatedResponse<ManagedTlsRecord>>();
 }
 
 export async function listAllManagedRecords(
   collection: ManagedTlsCollection,
+  context: Record<string, unknown> = {},
 ): Promise<ManagedTlsRecord[]> {
   return collectAllPages((offset, limit) =>
-    listManagedRecords(collection, { offset, limit }),
+    listManagedRecords(collection, { offset, limit }, context),
   );
 }
 
@@ -459,18 +463,19 @@ export async function removeManagedRecord(
 
 export async function listAcmeCertificates(
   params: PaginationParams = {},
+  context: Record<string, unknown> = {},
 ): Promise<PaginatedResponse<AcmeCertificateRecord>> {
   return proxyApi
     .get("admin/tls/acme/certificates", {
       searchParams: paginationSearch(params),
-      context: FLEET_GLOBAL_CONTEXT,
+      context: { ...context, ...FLEET_GLOBAL_CONTEXT },
     })
     .json<PaginatedResponse<AcmeCertificateRecord>>();
 }
 
-export async function listAllAcmeCertificates(): Promise<AcmeCertificateRecord[]> {
+export async function listAllAcmeCertificates(context: Record<string, unknown> = {}): Promise<AcmeCertificateRecord[]> {
   return collectAllPages((offset, limit) =>
-    listAcmeCertificates({ offset, limit }),
+    listAcmeCertificates({ offset, limit }, context),
   );
 }
 
@@ -487,10 +492,11 @@ export async function createAcmeCertificate(
 
 export async function getAcmeCertificate(
   id: string,
+  context: Record<string, unknown> = {},
 ): Promise<AcmeCertificateRecord> {
   return proxyApi
     .get(`admin/tls/acme/certificates/${id}`, {
-      context: FLEET_GLOBAL_CONTEXT,
+      context: { ...context, ...FLEET_GLOBAL_CONTEXT },
     })
     .json<AcmeCertificateRecord>();
 }
@@ -517,17 +523,18 @@ export async function removeAcmeCertificate(
 
 export async function listAcmeOrders(
   params: PaginationParams = {},
+  context: Record<string, unknown> = {},
 ): Promise<PaginatedResponse<AcmeOrder>> {
   return proxyApi
     .get("admin/tls/acme/orders", {
       searchParams: paginationSearch(params),
-      context: FLEET_GLOBAL_CONTEXT,
+      context: { ...context, ...FLEET_GLOBAL_CONTEXT },
     })
     .json<PaginatedResponse<AcmeOrder>>();
 }
 
-export async function listAllAcmeOrders(): Promise<AcmeOrder[]> {
-  return collectAllPages((offset, limit) => listAcmeOrders({ offset, limit }));
+export async function listAllAcmeOrders(context: Record<string, unknown> = {}): Promise<AcmeOrder[]> {
+  return collectAllPages((offset, limit) => listAcmeOrders({ offset, limit }, context));
 }
 
 export async function createAcmeOrder(
@@ -600,17 +607,18 @@ export async function renewAcmeCertificate(
 
 export async function listAcmeAccounts(
   params: PaginationParams = {},
+  context: Record<string, unknown> = {},
 ): Promise<PaginatedResponse<AcmeAccount>> {
   return proxyApi
     .get("admin/tls/acme/accounts", {
       searchParams: paginationSearch(params),
-      context: FLEET_GLOBAL_CONTEXT,
+      context: { ...context, ...FLEET_GLOBAL_CONTEXT },
     })
     .json<PaginatedResponse<AcmeAccount>>();
 }
 
-export async function listAllAcmeAccounts(): Promise<AcmeAccount[]> {
-  return collectAllPages((offset, limit) => listAcmeAccounts({ offset, limit }));
+export async function listAllAcmeAccounts(context: Record<string, unknown> = {}): Promise<AcmeAccount[]> {
+  return collectAllPages((offset, limit) => listAcmeAccounts({ offset, limit }, context));
 }
 
 /* ---------- Rotate / validate ---------- */

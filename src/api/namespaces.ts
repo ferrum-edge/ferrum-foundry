@@ -151,7 +151,7 @@ export async function getOccupancy(name: string): Promise<NamespaceOccupancy> {
     OCCUPANCY_ENDPOINTS.map(async (endpoint): Promise<OccupancyEntry | null> => {
       try {
         const response = await proxyApi
-          .get(endpoint.path, scoped(target, { searchParams: { limit: "1" } }))
+          .get(endpoint.path, scoped(target, { searchParams: { limit: "1" }, context: { [SILENT_ERRORS]: true } }))
           .json<unknown>();
         const count = endpoint.count(response);
         return count === null ? null : { label: endpoint.label, count };

@@ -3,20 +3,21 @@
 /* ------------------------------------------------------------------ */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { QUERY_ERROR_CONTEXT } from "@/api/client";
 import * as tls from "@/api/tls";
 import type { PaginationParams } from "@/api/types";
 
 export function useTlsInventory(params: PaginationParams = {}) {
   return useQuery({
     queryKey: ["tls", "inventory", params],
-    queryFn: () => tls.listInventory(params),
+    queryFn: () => tls.listInventory(params, QUERY_ERROR_CONTEXT),
   });
 }
 
 export function useTlsEvents(params: tls.TlsEventsParams = {}) {
   return useQuery({
     queryKey: ["tls", "events", params],
-    queryFn: () => tls.listEvents(params),
+    queryFn: () => tls.listEvents(params, QUERY_ERROR_CONTEXT),
   });
 }
 
@@ -26,14 +27,14 @@ export function useManagedTlsRecords(
 ) {
   return useQuery({
     queryKey: ["tls", "managed", collection, params],
-    queryFn: () => tls.listManagedRecords(collection, params),
+    queryFn: () => tls.listManagedRecords(collection, params, QUERY_ERROR_CONTEXT),
   });
 }
 
 export function useAllManagedTlsRecords(collection: tls.ManagedTlsCollection) {
   return useQuery({
     queryKey: ["tls", "managed", collection, "all"],
-    queryFn: () => tls.listAllManagedRecords(collection),
+    queryFn: () => tls.listAllManagedRecords(collection, QUERY_ERROR_CONTEXT),
   });
 }
 
@@ -74,21 +75,21 @@ export function useDeleteManagedTlsRecord(collection: tls.ManagedTlsCollection) 
 export function useAcmeCertificates(params: PaginationParams = {}) {
   return useQuery({
     queryKey: ["tls", "acme", "certificates", params],
-    queryFn: () => tls.listAcmeCertificates(params),
+    queryFn: () => tls.listAcmeCertificates(params, QUERY_ERROR_CONTEXT),
   });
 }
 
 export function useAllAcmeCertificates() {
   return useQuery({
     queryKey: ["tls", "acme", "certificates", "all"],
-    queryFn: () => tls.listAllAcmeCertificates(),
+    queryFn: () => tls.listAllAcmeCertificates(QUERY_ERROR_CONTEXT),
   });
 }
 
 export function useAcmeCertificate(id: string) {
   return useQuery({
     queryKey: ["tls", "acme", "certificate", id],
-    queryFn: () => tls.getAcmeCertificate(id),
+    queryFn: () => tls.getAcmeCertificate(id, QUERY_ERROR_CONTEXT),
     enabled: Boolean(id),
   });
 }
@@ -123,7 +124,7 @@ export function useUpdateAcmeCertificate() {
 export function useAcmeOrders(params: PaginationParams = {}) {
   return useQuery({
     queryKey: ["tls", "acme", "orders", params],
-    queryFn: () => tls.listAcmeOrders(params),
+    queryFn: () => tls.listAcmeOrders(params, QUERY_ERROR_CONTEXT),
     refetchInterval: 15000,
   });
 }
@@ -131,7 +132,7 @@ export function useAcmeOrders(params: PaginationParams = {}) {
 export function useAllAcmeOrders() {
   return useQuery({
     queryKey: ["tls", "acme", "orders", "all"],
-    queryFn: () => tls.listAllAcmeOrders(),
+    queryFn: () => tls.listAllAcmeOrders(QUERY_ERROR_CONTEXT),
     refetchInterval: 15000,
   });
 }
@@ -139,14 +140,14 @@ export function useAllAcmeOrders() {
 export function useAcmeAccounts(params: PaginationParams = {}) {
   return useQuery({
     queryKey: ["tls", "acme", "accounts", params],
-    queryFn: () => tls.listAcmeAccounts(params),
+    queryFn: () => tls.listAcmeAccounts(params, QUERY_ERROR_CONTEXT),
   });
 }
 
 export function useAllAcmeAccounts() {
   return useQuery({
     queryKey: ["tls", "acme", "accounts", "all"],
-    queryFn: () => tls.listAllAcmeAccounts(),
+    queryFn: () => tls.listAllAcmeAccounts(QUERY_ERROR_CONTEXT),
   });
 }
 

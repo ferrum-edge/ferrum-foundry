@@ -7,7 +7,8 @@ import {
   type ReactNode,
 } from "react";
 import { ErrorPopup } from "@/components/shared/ErrorPopup";
-import { setApiErrorHandler } from "@/api/client";
+import { useQueryClient } from "@tanstack/react-query";
+import { reportDeferredQueryError, setApiErrorHandler } from "@/api/client";
 
 interface ErrorState {
   open: boolean;
@@ -39,6 +40,7 @@ const initialState: ErrorState = {
 
 export function ErrorPopupProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<ErrorState>(initialState);
+  const queryClient = useQueryClient();
 
   const showError = useCallback((params: ShowErrorParams) => {
     setState({ open: true, ...params });
@@ -50,8 +52,15 @@ export function ErrorPopupProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     setApiErrorHandler(showError);
-    return () => setApiErrorHandler(undefined);
-  }, [showError]);
+    const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
+      // `failed` is an intermediate retry; `error` is the exhausted operation.
+      // A cache event fires once even when several components observe a query.
+      if (event.type === "updated" && event.action.type === "error") {
+        reportDeferredQueryError(event.action.error);
+      }
+    });
+    return () => { unsubscribe(); setApiErrorHandler(undefined); };
+  }, [queryClient, showError]);
 
   return (
     <ErrorPopupContext.Provider value={{ state, showError, hideError }}>
