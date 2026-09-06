@@ -212,14 +212,16 @@ export default function PluginsPage() {
 
         {!isLoading && !isError && configs.length === 0 && (
           <EmptyState
-            title={search ? "No matching plugins" : "No plugin configs yet"}
+            title={total > 0 ? "No results on this page" : search ? "No matching plugins" : "No plugin configs yet"}
             description={
-              search
+              total > 0
+                ? "Use Go to last page below to return to the available results."
+                : search
                 ? "Try adjusting your search terms."
                 : "Create your first plugin configuration to extend gateway functionality."
             }
             action={
-              !search ? (
+              total === 0 && !search ? (
                 <Button size="sm" onClick={() => navigate({ to: "/plugins/new" })}>
                   Create Plugin
                 </Button>
