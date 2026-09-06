@@ -130,8 +130,13 @@ export function useDeletePluginConfig() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
   return useMutation({
-    mutationFn: (id: string) => plugins.removeConfig(scope, id),
-    onSuccess: () => {
+    mutationFn: async (id: string) => {
+      await plugins.removeConfig(scope, id);
+      // Carry the mutation's namespace through completion, even after a switch.
+      return { namespace: scope.namespace, id };
+    },
+    onSuccess: (retired) => {
+      qc.removeQueries({ queryKey: ["pluginConfig", retired.namespace, retired.id], exact: true });
       qc.invalidateQueries({ queryKey: ["pluginConfigs"] });
     },
   });
@@ -141,9 +146,13 @@ export function useDeletePluginWithMembership() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
   return useMutation({
-    mutationFn: (id: string) =>
-      deletePluginWithMembership(id, bindPluginMembership(scope)),
-    onSuccess: () => {
+    mutationFn: async (id: string) => {
+      await deletePluginWithMembership(id, bindPluginMembership(scope));
+      // Carry the mutation's namespace through completion, even after a switch.
+      return { namespace: scope.namespace, id };
+    },
+    onSuccess: (retired) => {
+      qc.removeQueries({ queryKey: ["pluginConfig", retired.namespace, retired.id], exact: true });
       qc.invalidateQueries({ queryKey: ["pluginConfigs"] });
       qc.invalidateQueries({ queryKey: ["proxies"] });
     },
