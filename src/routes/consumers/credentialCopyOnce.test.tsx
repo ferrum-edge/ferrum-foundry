@@ -125,7 +125,7 @@ describe("submitted credential recovery", () => {
     await typeInto(host.querySelector<HTMLInputElement>("#username")!, "new-user");
     await click("Credentials");
     const field = host.querySelector<HTMLInputElement>(`#${id}`)!;
-    await act(async () => { field.parentElement!.parentElement!.querySelector<HTMLButtonElement>("button")!.click(); });
+    await act(async () => { field.closest(".items-end")!.querySelector<HTMLButtonElement>("button")!.click(); });
     const secret = field.value;
     expect(secret).toHaveLength(32);
     await submit();
@@ -181,7 +181,7 @@ describe("submitted credential recovery", () => {
     expect(writes).toHaveLength(1);
   });
 
-  it("clears an acknowledged-scope receipt on namespace change", async () => {
+  it("clears the originating namespace receipt on namespace change", async () => {
     type = "keyauth";
     await mount("/append");
     await click("Add");
