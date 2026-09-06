@@ -1,5 +1,6 @@
 import { mkdirSync, mkdtempSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { rootCertificates } from 'node:tls';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from './config.js';
@@ -77,7 +78,7 @@ describe('managed Undici dispatchers', () => {
     vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
     const root = tempDirectory();
     const caPath = join(root, 'ca.pem');
-    writeFileSync(caPath, '-----BEGIN CERTIFICATE-----\nfirst\n-----END CERTIFICATE-----\n');
+    writeFileSync(caPath, rootCertificates[0]!);
     const config = makeConfig({
       adminUrl: 'https://gateway.example',
       initialAdminOrigin: 'https://gateway.example',
@@ -86,7 +87,7 @@ describe('managed Undici dispatchers', () => {
     });
 
     const first = getDispatcher(config);
-    writeFileSync(caPath, '-----BEGIN CERTIFICATE-----\nrotated-material\n-----END CERTIFICATE-----\n');
+    writeFileSync(caPath, rootCertificates[1]!);
     expect(getDispatcher(config)).toBe(first);
     vi.advanceTimersByTime(1_001);
     const second = getDispatcher(config);
@@ -103,8 +104,8 @@ describe('managed Undici dispatchers', () => {
     const secondData = join(root, '..data-2');
     mkdirSync(firstData);
     mkdirSync(secondData);
-    writeFileSync(join(firstData, 'ca.pem'), '-----BEGIN CERTIFICATE-----\nfirst\n-----END CERTIFICATE-----\n');
-    writeFileSync(join(secondData, 'ca.pem'), '-----BEGIN CERTIFICATE-----\nsecond\n-----END CERTIFICATE-----\n');
+    writeFileSync(join(firstData, 'ca.pem'), rootCertificates[0]!);
+    writeFileSync(join(secondData, 'ca.pem'), rootCertificates[1]!);
     symlinkSync('..data-1', join(root, '..data'));
     symlinkSync('..data/ca.pem', join(root, 'ca.pem'));
     const config = makeConfig({
