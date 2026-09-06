@@ -66,6 +66,38 @@ describe("configured client server-side waiting calls", () => {
     metadata.resetGatewayMetadata();
   });
 
+  it("accepts an eleven-second backup without replaying the export", async () => {
+    const fetcher = vi.fn(() => delayedResponse({ version: "1", proxies: [] }, 11_000));
+    vi.stubGlobal("fetch", fetcher);
+    const { getBackup } = await import("./ops");
+    const result = getBackup({ namespace: "default" }, ["proxies"]);
+    await vi.advanceTimersByTimeAsync(11_000);
+    await expect(result).resolves.toMatchObject({ version: "1", proxies: [] });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("bounds backup at 120 seconds without retrying an unknown export", async () => {
+    const fetcher = vi.fn((request: Request) => new Promise<Response>((_resolve, reject) => {
+      request.signal.addEventListener("abort", () => reject(request.signal.reason));
+    }));
+    vi.stubGlobal("fetch", fetcher);
+    const { getBackup } = await import("./ops");
+    const result = getBackup({ namespace: "default" }).catch((error) => error);
+    await vi.advanceTimersByTimeAsync(119_999);
+    expect(fetcher.mock.calls[0]![0].signal.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect((await result).name).toBe("TimeoutError");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not automatically repeat a failed backup GET", async () => {
+    const fetcher = vi.fn(async () => Response.json({ error: "busy" }, { status: 503 }));
+    vi.stubGlobal("fetch", fetcher);
+    const { getBackup } = await import("./ops");
+    await expect(getBackup({ namespace: "default" })).rejects.toThrow();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
   it("accepts an ACME finalization after the old ten-second deadline", async () => {
     const fetcher = vi.fn(() => delayedResponse({ order: { status: "valid" } }, 15_000));
     vi.stubGlobal("fetch", fetcher);
