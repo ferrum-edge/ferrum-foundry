@@ -62,11 +62,19 @@ export function useUpdateUpstream() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: UpstreamCreate }) =>
-      upstreams.update(scope, id, data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["upstreams"] });
-      qc.invalidateQueries({ queryKey: ["upstream"] });
+    mutationFn: (input: { id: string; data: UpstreamCreate } | {
+      id: string; targets: UpstreamCreate["targets"];
+    }) => "targets" in input
+      ? upstreams.updateTargets(scope, input.id, input.targets)
+      : upstreams.update(scope, input.id, input.data),
+    onSuccess: async (upstream, { id }) => {
+      const queryKey = ["upstream", scope.namespace, id];
+      await qc.cancelQueries({ queryKey, exact: true });
+      qc.setQueryData(queryKey, upstream);
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["upstreams", scope.namespace] }),
+        qc.invalidateQueries({ queryKey, exact: true }),
+      ]);
     },
   });
 }

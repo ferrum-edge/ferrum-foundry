@@ -58,7 +58,7 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
   /* ---------- Handlers ---------- */
 
   const handleSubmit = session.bind(async (data: UpstreamCreate) => {
-    if (!upstream) return;
+    if (!upstream || updateUpstream.isPending) return;
     try {
       await updateUpstream.mutateAsync({
         id: upstreamId,
@@ -86,14 +86,11 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
 
   // Every target edit funnels through this one bound write.
   const saveTargets = session.bind(async (newTargets: UpstreamTarget[]) => {
-    if (!upstream) return;
+    if (!upstream || updateUpstream.isPending) return;
     try {
       await updateUpstream.mutateAsync({
         id: upstreamId,
-        data: {
-          ...upstreamsApi.toUpdatePayload(upstream),
-          targets: newTargets,
-        },
+        targets: newTargets,
       });
       toast("success", "Targets updated successfully");
     } catch (err: unknown) {
@@ -103,13 +100,13 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
   });
 
   const handleAddTarget = async (target: UpstreamTarget) => {
-    if (!upstream) return;
+    if (!upstream || updateUpstream.isPending) return;
     await saveTargets([...upstream.targets, target]);
     setShowTargetForm(false);
   };
 
   const handleUpdateTarget = async (target: UpstreamTarget) => {
-    if (!upstream || editingTargetIndex === null) return;
+    if (!upstream || updateUpstream.isPending || editingTargetIndex === null) return;
     const newTargets = upstream.targets.map((t, i) =>
       i === editingTargetIndex ? target : t,
     );
@@ -118,7 +115,7 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
   };
 
   const handleRemoveTarget = async (index: number) => {
-    if (!upstream) return;
+    if (!upstream || updateUpstream.isPending) return;
     const newTargets = upstream.targets.filter((_, i) => i !== index);
     await saveTargets(newTargets);
     if (editingTargetIndex === index) setEditingTargetIndex(null);
@@ -200,6 +197,7 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
 
         {/* Targets tab */}
         <TabsContent value="targets">
+          <fieldset disabled={updateUpstream.isPending} className="min-w-0">
           <Card>
             <div className="space-y-4">
               <div className="flex items-center justify-between">
@@ -302,6 +300,7 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
               )}
             </div>
           </Card>
+          </fieldset>
         </TabsContent>
       </Tabs>
 

@@ -48,3 +48,11 @@ cache and the editor remains pending through refetch. Subsequent ACL changes use
 that accepted group list. A credential-list refresh invalidates an open indexed
 delete selection, even when redacted entries look identical; select it again
 before confirming. Namespace/consumer changes still discard the entire editor.
+
+Upstream target edits also read the latest upstream before their full-replace
+PUT and change only `targets`. Settings, target, and delete writes share a
+namespace/upstream queue, so target updates preserve health checks, service
+discovery, subsets, and TLS accepted by an earlier Settings save. The accepted
+upstream seeds its scoped cache and editing stays pending through reconciliation.
+As with consumers, this client queue cannot protect against external writers
+without a gateway conditional-write contract.
