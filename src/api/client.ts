@@ -32,6 +32,25 @@ export function onApiError(error: ApiError): void {
   errorHandler?.(error);
 }
 
+/** Preserve structured resource validation failures alongside their heading. */
+function errorRecordDetail(record: Record<string, unknown>): string | null {
+  const detail = record.error ?? record.message ?? record.detail;
+  if (typeof detail !== "string") return null;
+  const lines = [detail];
+  if (Array.isArray(record.failures)) {
+    for (const failure of record.failures) {
+      if (!failure || typeof failure !== "object") continue;
+      const item = failure as Record<string, unknown>;
+      if (typeof item.resource_type !== "string" || !Array.isArray(item.errors)) continue;
+      const label = item.resource_type + (typeof item.id === "string" ? ` (${item.id})` : "");
+      for (const message of item.errors) {
+        if (typeof message === "string" && message.trim()) lines.push(`${label}: ${message}`);
+      }
+    }
+  }
+  return lines.join("\n");
+}
+
 export function extractApiErrorDetail(body: string): string {
   if (!body.trim()) return "";
 
@@ -39,8 +58,8 @@ export function extractApiErrorDetail(body: string): string {
     const parsed = JSON.parse(body) as unknown;
     if (parsed && typeof parsed === "object") {
       const record = parsed as Record<string, unknown>;
-      const detail = record.error ?? record.message ?? record.detail;
-      if (typeof detail === "string") return detail;
+      const detail = errorRecordDetail(record);
+      if (detail !== null) return detail;
     }
   } catch {
     // Plain text responses are fine; fall through to the raw body.
@@ -62,8 +81,8 @@ export function extractApiErrorData(data: unknown): string {
   if (typeof data === "string") return extractApiErrorDetail(data);
   if (data && typeof data === "object") {
     const record = data as Record<string, unknown>;
-    const detail = record.error ?? record.message ?? record.detail;
-    if (typeof detail === "string") return detail;
+    const detail = errorRecordDetail(record);
+    if (detail !== null) return detail;
     try {
       return JSON.stringify(data);
     } catch {

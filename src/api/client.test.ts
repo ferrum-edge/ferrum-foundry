@@ -156,6 +156,39 @@ function consumedResponse(body: string, status: number): Response {
   return response;
 }
 
+describe("API spec validation details", () => {
+  const data = {
+    error: "validation failed",
+    failures: [
+      { resource_type: "proxy", errors: ["listen_path required"] },
+      { resource_type: "upstream", id: "upstream-1", errors: ["target required", "invalid port"] },
+    ],
+  };
+  const detail = "validation failed\nproxy: listen_path required\nupstream (upstream-1): target required\nupstream (upstream-1): invalid port";
+
+  it("preserves failures in both raw JSON and pre-parsed ky data", () => {
+    expect(extractApiErrorDetail(JSON.stringify(data))).toBe(detail);
+    expect(extractApiErrorData(data)).toBe(detail);
+  });
+
+  it("carries the resource details into the import/replace toast message", async () => {
+    const error = Object.assign(new Error("HTTP 422"), {
+      response: consumedResponse(JSON.stringify(data), 422),
+      data,
+    });
+    await expect(getApiErrorMessage(error, "Spec import failed")).resolves.toBe(`HTTP 422: ${detail}`);
+  });
+
+  it("ignores malformed failure entries and preserves ordinary errors", () => {
+    expect(extractApiErrorData({
+      error: "validation failed",
+      failures: [null, "bad", {}, { resource_type: "proxy", errors: [null, {}, ""] }],
+    })).toBe("validation failed");
+    expect(extractApiErrorData({ error: "not found" })).toBe("not found");
+    expect(extractApiErrorData({ error: "not found", failures: [] })).toBe("not found");
+  });
+});
+
 describe("extractApiErrorData", () => {
   it("reads `error` from a parsed JSON object", () => {
     expect(extractApiErrorData({ error: "namespace not empty" })).toBe(
