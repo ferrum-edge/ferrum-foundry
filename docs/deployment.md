@@ -540,7 +540,14 @@ Notes:
 - `FERRUM_TLS_CA_PATH` points at a file inside the Secret mount and
   `FERRUM_TLS_CA_ROOT` at the mount directory. Kubernetes projects Secret keys
   through a rotating `..data` symlink; the BFF resolves the symlink inside the
-  approved root and reloads the bundle after a rotation.
+  approved root and reloads the bundle after a rotation, including when an
+  administrator selected that projected path through runtime settings. The
+  selected absolute path is retained; each read revalidates the resolved target.
+  Startup and runtime selection require one or more parseable PEM X.509
+  certificates (whitespace and `#` comment lines are accepted). Invalid material
+  is rejected before publishing runtime settings and preserves the prior
+  connection configuration. Parsing validates certificate encoding, not whether
+  the bundle trusts a reachable gateway.
 - `terminationGracePeriodSeconds` must be larger than `FERRUM_SHUTDOWN_TIMEOUT`
   so the process finishes its own bounded drain before the kubelet sends
   `SIGKILL`. 30 seconds against a 10000 ms timeout leaves room.

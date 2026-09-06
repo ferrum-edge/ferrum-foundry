@@ -1,4 +1,4 @@
-import { dirname } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { isIP } from 'node:net';
 import { loadCaBundle } from './ca.js';
 
@@ -401,7 +401,10 @@ export async function updateRuntimeConfig(updates: Partial<RuntimeConfig>): Prom
   if (updates.tlsCaPath !== undefined) {
     if (typeof updates.tlsCaPath !== 'string') throw new Error('tlsCaPath must be a string');
     if (!current.tlsCaRoot) throw new Error('FERRUM_TLS_CA_ROOT is required for runtime CA changes');
-    nextOverrides.tlsCaPath = loadCaBundle(updates.tlsCaPath, current.tlsCaRoot).path;
+    loadCaBundle(updates.tlsCaPath, current.tlsCaRoot);
+    // Keep the selected link, so future reads follow projected-volume rotation.
+    // loadCaBundle resolves and checks the canonical target on every read.
+    nextOverrides.tlsCaPath = resolve(updates.tlsCaPath);
   }
   if (updates.tlsVerify !== undefined) {
     if (typeof updates.tlsVerify !== 'boolean') throw new Error('tlsVerify must be a boolean');
