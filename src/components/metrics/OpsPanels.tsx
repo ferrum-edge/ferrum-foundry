@@ -4,6 +4,9 @@
 
 import { Badge } from "@/components/ui/Badge";
 import { StatCard } from "./StatCard";
+import { MetricsSampleTime } from "./MetricsSampleTime";
+
+interface RefreshPolicy { refetchInterval?: number | false; }
 import { useOverload, useRuntimeMetrics, useCharges } from "@/hooks/useOps";
 
 function ratioBar(label: string, current: number, max: number) {
@@ -27,18 +30,19 @@ function ratioBar(label: string, current: number, max: number) {
 
 /* ---------- Overload ---------- */
 
-export function OverloadPanel() {
-  const { data, isLoading, isError } = useOverload();
+export function OverloadPanel({ refetchInterval }: RefreshPolicy = {}) {
+  const { data, isLoading, isError, dataUpdatedAt } = useOverload(refetchInterval);
 
   if (isLoading) return <p className="text-text-muted text-sm">Loading…</p>;
   if (isError || !data)
-    return <p className="text-text-muted text-sm">Overload state unavailable.</p>;
+    return <><MetricsSampleTime timestamp={dataUpdatedAt} /><p className="text-text-muted text-sm">Overload state unavailable.</p></>;
 
   const levelVariant =
     data.level === "normal" ? "green" : data.level === "pressure" ? "yellow" : "red";
 
   return (
     <div className="space-y-4">
+      <MetricsSampleTime timestamp={dataUpdatedAt} />
       <div className="flex items-center gap-3 flex-wrap">
         <Badge variant={levelVariant} className="px-3 py-1">
           {data.level.toUpperCase()}
@@ -97,15 +101,16 @@ function formatBytes(bytes?: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
-export function RuntimePanel() {
-  const { data, isLoading, isError } = useRuntimeMetrics();
+export function RuntimePanel({ refetchInterval }: RefreshPolicy = {}) {
+  const { data, isLoading, isError, dataUpdatedAt } = useRuntimeMetrics(refetchInterval);
 
   if (isLoading) return <p className="text-text-muted text-sm">Loading…</p>;
   if (isError || !data)
-    return <p className="text-text-muted text-sm">Runtime metrics unavailable.</p>;
+    return <><MetricsSampleTime timestamp={dataUpdatedAt} /><p className="text-text-muted text-sm">Runtime metrics unavailable.</p></>;
 
   return (
     <div className="space-y-4">
+      <MetricsSampleTime timestamp={dataUpdatedAt} />
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatCard
           label="CPU (process)"
@@ -163,24 +168,25 @@ function formatCharge(amount: number): string {
   });
 }
 
-export function ChargesPanel() {
-  const { data, isLoading, isError } = useCharges();
+export function ChargesPanel({ refetchInterval }: RefreshPolicy = {}) {
+  const { data, isLoading, isError, dataUpdatedAt } = useCharges(refetchInterval);
 
   if (isLoading) return <p className="text-text-muted text-sm">Loading…</p>;
   if (isError || !data)
     return (
-      <p className="text-text-muted text-sm">
+      <><MetricsSampleTime timestamp={dataUpdatedAt} /><p className="text-text-muted text-sm">
         No chargeback data — enable the api_chargeback plugin to meter API usage.
-      </p>
+      </p></>
     );
 
   const consumers = Object.entries(data.consumers ?? {});
   if (consumers.length === 0) {
-    return <p className="text-text-muted text-sm">No metered usage recorded yet.</p>;
+    return <><MetricsSampleTime timestamp={dataUpdatedAt} /><p className="text-text-muted text-sm">No metered usage recorded yet.</p></>;
   }
 
   return (
     <div className="overflow-x-auto">
+      <MetricsSampleTime timestamp={dataUpdatedAt} />
       <table className="w-full text-sm">
         <thead>
           <tr className="text-text-secondary text-xs border-b border-border">

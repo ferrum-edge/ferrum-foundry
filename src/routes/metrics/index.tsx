@@ -2,7 +2,9 @@
 /*  Ferrum Foundry – Metrics dashboard page                            */
 /* ------------------------------------------------------------------ */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useState } from "react";
+import { useIsFetching, useQueryClient } from "@tanstack/react-query";
+import { MetricsSampleTime } from "@/components/metrics/MetricsSampleTime";
 import { useAdminMetrics, usePrometheusMetrics } from "@/hooks/useMetrics";
 import { useGatewayRequestStats } from "@/hooks/useGatewayRequestStats";
 import { Card } from "@/components/ui/Card";
@@ -23,9 +25,7 @@ import {
   ChargesPanel,
 } from "@/components/metrics/OpsPanels";
 import {
-  getStoredMetricsLastUpdated,
   getStoredMetricsRefreshInterval,
-  setStoredMetricsLastUpdated,
   setStoredMetricsRefreshInterval,
 } from "@/utils/metricsRefresh";
 
@@ -37,11 +37,11 @@ export default function MetricsPage() {
   const [refreshInterval, setRefreshInterval] = useState(
     getStoredMetricsRefreshInterval,
   );
-  const [lastUpdatedAt, setLastUpdatedAt] = useState(
-    getStoredMetricsLastUpdated,
-  );
-  const hasSeenInitialFetch = useRef(false);
-  const lastSyncedDataUpdatedAt = useRef(0);
+  const queryClient = useQueryClient();
+  const opsInterval = refreshInterval > 0 ? refreshInterval : false;
+  const isOpsFetching = useIsFetching({ predicate: (query) =>
+    ["overload", "runtimeMetrics", "charges"].includes(String(query.queryKey[0])),
+  }) > 0;
 
   const {
     data: metrics,
@@ -55,38 +55,13 @@ export default function MetricsPage() {
 
   const {
     data: prometheusText,
+    dataUpdatedAt: prometheusUpdatedAt,
+    isError: isPrometheusError,
     isFetching: isPrometheusFetching,
     refetch: refetchPrometheusMetrics,
-  } = usePrometheusMetrics();
+  } = usePrometheusMetrics(refreshInterval);
 
   const requestStats = useGatewayRequestStats(metrics?.gateway, dataUpdatedAt);
-
-  const syncLastUpdated = useCallback((timestamp: number) => {
-    setLastUpdatedAt(timestamp);
-    try {
-      setStoredMetricsLastUpdated(timestamp);
-    } catch {
-      // Ignore storage failures; the in-page timestamp still updates.
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!dataUpdatedAt || lastSyncedDataUpdatedAt.current === dataUpdatedAt) {
-      return;
-    }
-
-    lastSyncedDataUpdatedAt.current = dataUpdatedAt;
-
-    if (!hasSeenInitialFetch.current) {
-      hasSeenInitialFetch.current = true;
-      if (!lastUpdatedAt) {
-        syncLastUpdated(dataUpdatedAt);
-      }
-      return;
-    }
-
-    syncLastUpdated(dataUpdatedAt);
-  }, [dataUpdatedAt, lastUpdatedAt, syncLastUpdated]);
 
   const handleIntervalChange = (intervalMs: number) => {
     setRefreshInterval(intervalMs);
@@ -98,14 +73,14 @@ export default function MetricsPage() {
   };
 
   const handleRefreshNow = async () => {
-    const [adminMetricsResult] = await Promise.all([
-      refetchAdminMetrics(),
-      refetchPrometheusMetrics(),
+    // Join a running read instead of cancelling and duplicating it.
+    await Promise.all([
+      refetchAdminMetrics({ cancelRefetch: false }),
+      refetchPrometheusMetrics({ cancelRefetch: false }),
+      queryClient.refetchQueries({ type: "active", predicate: (query) =>
+        ["overload", "runtimeMetrics", "charges"].includes(String(query.queryKey[0])),
+      }, { cancelRefetch: false }),
     ]);
-
-    if (adminMetricsResult.isSuccess && adminMetricsResult.dataUpdatedAt) {
-      syncLastUpdated(adminMetricsResult.dataUpdatedAt);
-    }
   };
 
   /* ---------------------------------------------------------------- */
@@ -152,8 +127,8 @@ export default function MetricsPage() {
 
   if (!metrics) return null;
 
-  const lastUpdated = lastUpdatedAt
-    ? new Date(lastUpdatedAt).toISOString()
+  const lastUpdated = dataUpdatedAt
+    ? new Date(dataUpdatedAt).toISOString()
     : undefined;
 
   /* ---------------------------------------------------------------- */
@@ -172,7 +147,8 @@ export default function MetricsPage() {
           onIntervalChange={handleIntervalChange}
           onRefreshNow={handleRefreshNow}
           lastUpdated={lastUpdated}
-          isRefreshing={isAdminMetricsFetching || isPrometheusFetching}
+          lastUpdatedLabel="Admin metrics updated"
+          isRefreshing={isAdminMetricsFetching || isPrometheusFetching || isOpsFetching}
         />
       </div>
 
@@ -190,14 +166,14 @@ export default function MetricsPage() {
           <h3 className="text-sm font-semibold text-text-primary mb-3">
             Overload Protection
           </h3>
-          <OverloadPanel />
+          <OverloadPanel refetchInterval={opsInterval} />
         </Card>
 
         <Card>
           <h3 className="text-sm font-semibold text-text-primary mb-3">
             Host Runtime
           </h3>
-          <RuntimePanel />
+          <RuntimePanel refetchInterval={opsInterval} />
         </Card>
 
         <Card>
@@ -263,7 +239,7 @@ export default function MetricsPage() {
           <h3 className="text-sm font-semibold text-text-primary mb-3">
             API Chargeback
           </h3>
-          <ChargesPanel />
+          <ChargesPanel refetchInterval={opsInterval} />
         </Card>
       </div>
 
@@ -272,7 +248,9 @@ export default function MetricsPage() {
         <h2 className="text-lg font-semibold text-text-primary mb-3">
           Per-Route Metrics
         </h2>
-        <PrometheusStatsPanel text={prometheusText ?? ""} />
+        <MetricsSampleTime timestamp={prometheusUpdatedAt} />
+        {isPrometheusError && <p className="text-danger text-sm mb-3">Per-route metrics unavailable. Any values below are from the last successful sample.</p>}
+        {(!isPrometheusError || prometheusText) && <PrometheusStatsPanel text={prometheusText ?? ""} />}
       </section>
     </div>
   );

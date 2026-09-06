@@ -18,6 +18,8 @@ export function useOverload(refetchInterval?: number | false) {
     queryKey: ["overload"],
     queryFn: () => ops.getOverload(scope),
     refetchInterval: refetchInterval ?? 10000,
+    refetchOnWindowFocus: refetchInterval === undefined ? undefined : false,
+    refetchOnReconnect: refetchInterval === false ? false : undefined,
   });
 }
 
@@ -27,6 +29,8 @@ export function useRuntimeMetrics(refetchInterval?: number | false) {
     queryKey: ["runtimeMetrics"],
     queryFn: () => ops.getRuntimeMetrics(scope),
     refetchInterval: refetchInterval ?? 10000,
+    refetchOnWindowFocus: refetchInterval === undefined ? undefined : false,
+    refetchOnReconnect: refetchInterval === false ? false : undefined,
   });
 }
 
@@ -36,6 +40,8 @@ export function useCharges(refetchInterval?: number | false) {
     queryKey: ["charges"],
     queryFn: () => ops.getCharges(scope),
     refetchInterval: refetchInterval ?? 30000,
+    refetchOnWindowFocus: refetchInterval === undefined ? undefined : false,
+    refetchOnReconnect: refetchInterval === false ? false : undefined,
     retry: false,
   });
 }

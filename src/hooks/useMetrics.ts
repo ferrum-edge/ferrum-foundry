@@ -25,14 +25,17 @@ export function useAdminMetrics(refreshInterval: number = FIVE_MINUTES) {
     queryFn: () => metrics.getAdminMetrics(scope),
     refetchInterval: refreshInterval > 0 ? refreshInterval : false,
     refetchOnWindowFocus: false,
+    refetchOnReconnect: refreshInterval > 0,
   });
 }
 
-export function usePrometheusMetrics() {
+export function usePrometheusMetrics(refreshInterval: number = 0) {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["prometheusMetrics", scope.namespace],
     queryFn: () => metrics.getPrometheusMetrics(scope),
+    refetchInterval: refreshInterval > 0 ? refreshInterval : false,
     refetchOnWindowFocus: false,
+    refetchOnReconnect: refreshInterval > 0,
   });
 }
