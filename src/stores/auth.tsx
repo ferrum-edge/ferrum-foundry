@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { api, setCsrfToken, setOnUnauthorized, SILENT_ERRORS } from "@/api/client";
+import { clearGatewayMetadata } from "@/api/gatewayMetadata";
 
 export type AuthMode = "static" | "trusted-proxy";
 export type AuthStatus = "loading" | "authenticated" | "unauthenticated";
@@ -87,12 +88,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setPrincipal(null);
     setStatus("unauthenticated");
     queryClient.clear();
+    clearGatewayMetadata();
   }, [queryClient]);
 
   const acceptSession = useCallback((session: SessionResponse) => {
     const previous = principalRef.current;
     if (previous && authorizationKey(previous) !== authorizationKey(session.principal)) {
       queryClient.clear();
+    }
+    if (!previous || authorizationKey(previous) !== authorizationKey(session.principal)) {
+      clearGatewayMetadata();
     }
     principalRef.current = session.principal;
     setPrincipal(session.principal);

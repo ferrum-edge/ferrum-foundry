@@ -4,6 +4,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { AuthProvider, useAuth, type AuthPrincipal } from "./auth";
 
+import { getGatewayMetadataSnapshot, observeGatewayResponse, resetGatewayMetadata } from "@/api/gatewayMetadata";
+
 const transport = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }));
 vi.mock("@/api/client", () => ({
   api: transport,
@@ -63,12 +65,17 @@ describe("session authorization refresh", () => {
     });
     expect(auth.status).toBe("authenticated");
     expect(host.textContent).toBe("old-admin-settings");
+    await observeGatewayResponse(
+      new Request("http://localhost/api/proxy/proxies/p-1", { method: "PUT", headers: { "X-Ferrum-Namespace": "tenant-b" } }),
+      new Response(null, { status: 200, headers: { "X-Ferrum-Config-Cursor": "1:2" } }),
+    );
   });
 
   afterEach(async () => {
     await act(async () => { root.unmount(); });
     queryClient.clear();
     host.remove();
+    resetGatewayMetadata();
     vi.clearAllMocks();
   });
 
@@ -83,6 +90,7 @@ describe("session authorization refresh", () => {
     nextPrincipal = { ...nextPrincipal, ...change };
     await act(async () => { await auth.refreshSession(); });
     expect(queryClient.getQueryData(["privileged"])).toBeUndefined();
+    expect(getGatewayMetadataSnapshot().apply.state).toBe("idle");
     expect(host.textContent).toBe("empty");
     expect(host.querySelector("span")!.dataset.mount).not.toBe(previousMount);
     expect(auth.principal).toEqual(nextPrincipal);
@@ -100,6 +108,7 @@ describe("session authorization refresh", () => {
     expect(host.textContent).toBe("old-admin-settings");
     expect(host.querySelector("span")!.dataset.mount).toBe(previousMount);
     expect(auth.principal?.displayName).toBe("Updated name");
+    expect(getGatewayMetadataSnapshot().apply).toMatchObject({ state: "applied", namespace: "tenant-b" });
   });
 
   it("distinguishes unrestricted namespaces from an empty grant set", async () => {
@@ -109,12 +118,14 @@ describe("session authorization refresh", () => {
     nextPrincipal = { ...nextPrincipal, namespaces: [] };
     await act(async () => { await auth.refreshSession(); });
     expect(queryClient.getQueryData(["privileged"])).toBeUndefined();
+    expect(getGatewayMetadataSnapshot().apply.state).toBe("idle");
   });
 
   it("discards cached data and mounted form state on logout", async () => {
     await act(async () => { await auth.logout(); });
     expect(auth.status).toBe("unauthenticated");
     expect(queryClient.getQueryData(["privileged"])).toBeUndefined();
+    expect(getGatewayMetadataSnapshot().apply.state).toBe("idle");
     expect(host.textContent).toBe("empty");
   });
 });

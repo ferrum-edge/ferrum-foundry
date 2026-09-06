@@ -43,6 +43,9 @@ export function GatewayMetadataBanner() {
                   : "border-danger/40 bg-danger/10"
           }`}
         >
+          <p className="text-xs mb-1">
+            {apply.namespace === null ? "Fleet-global" : `Namespace: ${apply.namespace}`} · {pathFromUrl(apply.requestUrl)}
+          </p>
           {apply.state === "nothing_applied" && (
             <>
               <strong className="text-warning">Change was not committed.</strong>{" "}
