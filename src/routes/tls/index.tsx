@@ -5,6 +5,7 @@
 /* ------------------------------------------------------------------ */
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -617,7 +618,10 @@ interface AcmeCertificateEditor {
   target: AcmeCertificateRecord | null;
 }
 
+const ACME_ORDERS_KEY = ["tls", "acme", "orders", "all"] as const;
+
 function AcmeTab() {
+  const queryClient = useQueryClient();
   const { toast } = useToast();
   const { data: certs, isLoading: certsLoading } = useAllAcmeCertificates();
   const { data: orders, isLoading: ordersLoading } = useAllAcmeOrders();
@@ -628,7 +632,6 @@ function AcmeTab() {
   const deleteOrder = useDeleteAcmeOrder();
   const finalizeOrder = useFinalizeAcmeOrder();
   const [unknownOrders, setUnknownOrders] = useState<ReadonlySet<string>>(new Set());
-  const [checkedOrders, setCheckedOrders] = useState<Record<string, AcmeOrder>>({});
   const renewCert = useRenewAcmeCertificate();
   const deleteCert = useDeleteAcmeCertificate();
 
@@ -726,9 +729,10 @@ function AcmeTab() {
     certificateOffset,
     certificateOffset + ACME_PAGE_SIZE,
   );
-  const visibleOrders = (orders ?? [])
-    .slice(orderOffset, orderOffset + ACME_PAGE_SIZE)
-    .map((order) => checkedOrders[order.id] ?? order);
+  const visibleOrders = (orders ?? []).slice(orderOffset, orderOffset + ACME_PAGE_SIZE);
+  // A terminal observation resolves an ambiguous finalization without replaying it.
+  const orderIsUnknown = (order: AcmeOrder) =>
+    unknownOrders.has(order.id) && !["valid", "failed", "cancelled"].includes(order.status);
 
   const handleCreateOrder = async () => {
     const domains = orderForm.domains
@@ -891,14 +895,14 @@ function AcmeTab() {
                   </div>
                   <Mono>{order.id}</Mono>
                   {order.error && <p className="text-xs text-danger mt-1">{order.error}</p>}
-                  {unknownOrders.has(order.id) && (
+                  {orderIsUnknown(order) && (
                     <p className="text-xs text-warning mt-1">
                       Finalization in progress / unknown. Re-check status; do not repeat finalization.
                     </p>
                   )}
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  {(unknownOrders.has(order.id) ||
+                  {(orderIsUnknown(order) ||
                     order.status === "ready" ||
                     order.status === "pending_challenges" ||
                     order.status === "processing") && (
@@ -909,9 +913,15 @@ function AcmeTab() {
                       onClick={() =>
                         void runRowAction(`finalize:${order.id}`, async () => {
                           try {
-                            if (unknownOrders.has(order.id) || order.status === "processing") {
+                            if (orderIsUnknown(order) || order.status === "processing") {
+                              const observed = queryClient.getQueryState(ACME_ORDERS_KEY)?.dataUpdateCount;
                               const checked = await getAcmeOrder(order.id);
-                              setCheckedOrders((previous) => ({ ...previous, [order.id]: checked }));
+                              // A collection observation completed during this read. It
+                              // owns the current state; a late detail must not rewind it.
+                              if (queryClient.getQueryState(ACME_ORDERS_KEY)?.dataUpdateCount !== observed) return;
+                              queryClient.setQueryData<AcmeOrder[]>(ACME_ORDERS_KEY, (previous) =>
+                                previous?.map((entry) => entry.id === order.id ? checked : entry),
+                              );
                               if (["valid", "failed", "cancelled"].includes(checked.status)) {
                                 setUnknownOrders((previous) => {
                                   const next = new Set(previous);
@@ -933,7 +943,7 @@ function AcmeTab() {
                         })
                       }
                     >
-                      {unknownOrders.has(order.id) || order.status === "processing"
+                      {orderIsUnknown(order) || order.status === "processing"
                         ? "Re-check status"
                         : "Finalize"}
                     </Button>
