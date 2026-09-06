@@ -10,17 +10,20 @@ interface ConnectionPoolPanelProps {
 }
 
 export function ConnectionPoolPanel({ pools }: ConnectionPoolPanelProps) {
-  const httpEntries = Object.entries(pools.http.entries_per_host);
+  if (!pools.http && !pools.grpc && !pools.http2 && !pools.http3) {
+    return <p className="text-text-muted text-sm">Connection pool metrics are not reported by this gateway mode.</p>;
+  }
+  const httpEntries = Object.entries(pools.http?.entries_per_host ?? {});
 
   return (
     <div className="space-y-4">
       {/* HTTP pool overview */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        <StatCard label="HTTP Pools" value={pools.http.total_pools} />
-        <StatCard label="Max Idle/Host" value={pools.http.max_idle_per_host} />
+        <StatCard label="HTTP Pools" value={pools.http?.total_pools ?? "Not reported"} />
+        <StatCard label="Max Idle/Host" value={pools.http?.max_idle_per_host ?? "Not reported"} />
         <StatCard
           label="Idle Timeout"
-          value={`${pools.http.idle_timeout_seconds}s`}
+          value={pools.http ? `${pools.http.idle_timeout_seconds}s` : "Not reported"}
         />
       </div>
 
@@ -57,9 +60,9 @@ export function ConnectionPoolPanel({ pools }: ConnectionPoolPanelProps) {
 
       {/* Other protocol connections */}
       <div className="grid grid-cols-3 gap-3">
-        <StatCard label="gRPC Connections" value={pools.grpc.total_connections} />
-        <StatCard label="HTTP/2 Connections" value={pools.http2.total_connections} />
-        <StatCard label="HTTP/3 Connections" value={pools.http3.total_connections} />
+        <StatCard label="gRPC Connections" value={pools.grpc?.total_connections ?? "Not reported"} />
+        <StatCard label="HTTP/2 Connections" value={pools.http2?.total_connections ?? "Not reported"} />
+        <StatCard label="HTTP/3 Connections" value={pools.http3?.total_connections ?? "Not reported"} />
       </div>
     </div>
   );

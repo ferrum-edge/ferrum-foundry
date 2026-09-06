@@ -541,15 +541,15 @@ export interface AdminMetrics {
     plugin_config_count: number;
   };
   connection_pools: {
-    http: {
+    http?: {
       total_pools: number;
       max_idle_per_host: number;
       idle_timeout_seconds: number;
       entries_per_host: Record<string, number>;
     };
-    grpc: { total_connections: number };
-    http2: { total_connections: number };
-    http3: { total_connections: number };
+    grpc?: { total_connections: number };
+    http2?: { total_connections: number };
+    http3?: { total_connections: number };
   };
   circuit_breakers: AdminMetricsCircuitBreaker[];
   health_check: {
@@ -560,14 +560,14 @@ export interface AdminMetrics {
     active_connections: AdminMetricsUpstreamConnections[];
   };
   caches: {
-    router: {
+    router?: {
       prefix_cache_entries: number;
       regex_cache_entries: number;
       prefix_eviction_count: number;
       regex_eviction_count: number;
       max_cache_entries: number;
     };
-    dns: { cache_entries: number };
+    dns?: { cache_entries: number };
   };
   consumer_index: {
     total_consumers: number;
