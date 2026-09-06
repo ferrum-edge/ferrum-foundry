@@ -271,7 +271,9 @@ export const api = ky.create({
       if (
         isHTTPError(error) &&
         error.response.status === 503 &&
-        error.response.headers.has("x-ferrum-config-cursor")
+        (error.response.headers.has("x-ferrum-config-cursor") ||
+          (error.data && typeof error.data === "object" &&
+            "applied" in error.data && error.data.applied === false))
       ) {
         return false;
       }

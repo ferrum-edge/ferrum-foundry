@@ -155,6 +155,15 @@ describe("configured client apply ownership", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
+  it("does not retry a committed read without a cursor", async () => {
+    const fetcher = vi.fn(async () => Response.json({ applied: false }, {
+      status: 503, headers: { "retry-after": "0" },
+    }));
+    vi.stubGlobal("fetch", fetcher);
+    await expect(api.get(path, scoped(scope))).rejects.toThrow();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     {}, null, { ...status("applied"), state: "unknown" },
     { ...status("applied"), state: ["applied"] },
