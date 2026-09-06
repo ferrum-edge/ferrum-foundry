@@ -30,6 +30,7 @@ export interface GatewayMetadataSnapshot {
   contentDisposition: string | null;
   apply: {
     state: ApplyState;
+    namespace: string | null;
     cursor: string | null;
     requestUrl: string | null;
     reason: string | null;
@@ -55,6 +56,7 @@ const NAMESPACE_HEADER = "x-ferrum-namespace";
 
 const IDLE_APPLY: GatewayMetadataSnapshot["apply"] = {
   state: "idle",
+  namespace: null,
   cursor: null,
   requestUrl: null,
   reason: null,
@@ -71,6 +73,15 @@ let snapshot: GatewayMetadataSnapshot = {
 };
 let statusFetcher: ApplyStatusFetcher | undefined;
 let pollGeneration = 0;
+let latestMutationOrder = 0;
+let sessionGeneration = 0;
+
+export interface GatewayRequestIdentity {
+  session: number;
+  mutationOrder?: number;
+}
+
+export const GATEWAY_REQUEST_IDENTITY = "ferrum.gatewayRequestIdentity";
 const listeners = new Set<() => void>();
 
 export function getGatewayMetadataSnapshot(): GatewayMetadataSnapshot {
@@ -90,6 +101,7 @@ function publish(next: GatewayMetadataSnapshot): void {
 export function parseConfigCursor(value: string | null): ConfigCursor | null {
   if (!value || !/^\d+:\d+$/.test(value)) return null;
   const [epoch, sequence] = value.split(":");
+  if (uint64(epoch) === null || uint64(sequence) === null) return null;
   return { raw: value, epoch, sequence };
 }
 
@@ -99,6 +111,38 @@ export function setApplyStatusFetcher(fetcher?: ApplyStatusFetcher): void {
 
 function isMutation(method: string): boolean {
   return method !== "GET" && method !== "HEAD" && method !== "OPTIONS";
+}
+
+/** Allocate ownership before headers can race; never cancel a known commit here. */
+export function beginGatewayRequest(request: Request): GatewayRequestIdentity {
+  const identity: GatewayRequestIdentity = { session: sessionGeneration };
+  if (!request.url.includes("/api/proxy/") || !isMutation(request.method)) return identity;
+  latestMutationOrder += 1;
+  if (["applied", "succeeded", "nothing_applied"].includes(snapshot.apply.state)) {
+    publish({ ...snapshot, apply: IDLE_APPLY });
+  }
+  return { ...identity, mutationOrder: latestMutationOrder };
+}
+
+function uint64(value: unknown): string | null {
+  if (typeof value === "number" && (!Number.isSafeInteger(value) || value < 0)) return null;
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  const text = String(value);
+  if (!/^\d+$/.test(text) || text.length > 20 || BigInt(text) > 18446744073709551615n) return null;
+  return BigInt(text).toString();
+}
+
+function validApplyStatus(value: unknown, cursor: ConfigCursor): value is ApplyStatusResponse {
+  if (!value || typeof value !== "object") return false;
+  const result = value as Record<string, unknown>;
+  if (typeof result.state !== "string" || !["applied", "pending", "rejected", "unverifiable"].includes(result.state)) return false;
+  const epoch = uint64(result.topology_epoch);
+  const sequence = uint64(result.sequence);
+  const acceptedEpoch = uint64(result.accepted_topology_epoch);
+  const acceptedSequence = uint64(result.accepted_sequence);
+  if (epoch === null || sequence === null || acceptedEpoch === null || acceptedSequence === null) return false;
+  if (epoch !== uint64(cursor.epoch) || sequence !== uint64(cursor.sequence)) return false;
+  return result.state !== "applied" || (acceptedEpoch === epoch && BigInt(acceptedSequence) >= BigInt(sequence));
 }
 
 function responseReason(body: unknown): string | null {
@@ -140,6 +184,10 @@ async function pollApplyStatus(
         namespace,
       );
       if (generation !== pollGeneration) return;
+      if (!validApplyStatus(result, cursor)) {
+        publish({ ...snapshot, apply: { ...snapshot.apply, state: "unverifiable", reason: "invalid_apply_status", polling: false } });
+        return;
+      }
       if (result.state === "pending") continue;
       publish({
         ...snapshot,
@@ -182,8 +230,11 @@ async function pollApplyStatus(
 export async function observeGatewayResponse(
   request: Request,
   response: Response,
+  identity?: GatewayRequestIdentity,
 ): Promise<void> {
   if (!request.url.includes("/api/proxy/")) return;
+  const owner = identity ?? beginGatewayRequest(request);
+  if (owner.session !== sessionGeneration) return;
 
   const dataSource = response.headers.get("x-data-source");
   const cachedResponse = dataSource === "cached"
@@ -205,11 +256,9 @@ export async function observeGatewayResponse(
     return;
   }
 
-  // Any newer mutation supersedes an older cursor monitor. This prevents a
-  // late status response from overwriting the classification of the request
-  // the user most recently made.
-  pollGeneration += 1;
-  const generation = pollGeneration;
+  const order = owner.mutationOrder;
+  if (owner.session !== sessionGeneration || order !== latestMutationOrder) return;
+  const namespace = request.headers.get(NAMESPACE_HEADER);
 
   const cursor = parseConfigCursor(
     response.headers.get("x-ferrum-config-cursor"),
@@ -221,12 +270,23 @@ export async function observeGatewayResponse(
   }
   // A newer mutation may have superseded this response during the body read.
   // Discard every stale classification before publishing or starting a poll.
-  if (generation !== pollGeneration) return;
+  if (owner.session !== sessionGeneration || order !== latestMutationOrder) return;
+  // Body reads and status polls may both have completed since this observer
+  // started. Base publication on the current monitor, never its earlier copy.
+  next = { ...snapshot, cachedResponse, etag: next.etag, cacheControl: next.cacheControl, contentDisposition: next.contentDisposition };
+  const committed = response.ok || (response.status === 503 && (cursor !== null || isCommittedNotLive(body)));
+  if (!committed && ["pending", "rejected", "unverifiable"].includes(snapshot.apply.state)) {
+    publish(next);
+    return;
+  }
+  if (committed) pollGeneration += 1;
+  const generation = pollGeneration;
 
-  if (response.status === 503 && isCommittedNotLive(body)) {
+  if (response.status === 503 && (cursor || isCommittedNotLive(body))) {
     next = {
       ...next,
       apply: {
+        namespace,
         state: cursor ? "pending" : "unverifiable",
         cursor: cursor?.raw ?? null,
         requestUrl: request.url,
@@ -239,6 +299,7 @@ export async function observeGatewayResponse(
     next = {
       ...next,
       apply: {
+        namespace,
         state: "nothing_applied",
         cursor: null,
         requestUrl: request.url,
@@ -251,6 +312,7 @@ export async function observeGatewayResponse(
     next = {
       ...next,
       apply: {
+        namespace,
         state: cursor ? "pending" : "unverifiable",
         cursor: cursor?.raw ?? null,
         requestUrl: request.url,
@@ -263,6 +325,7 @@ export async function observeGatewayResponse(
     next = {
       ...next,
       apply: {
+        namespace,
         state: "applied",
         cursor: cursor.raw,
         requestUrl: request.url,
@@ -278,6 +341,7 @@ export async function observeGatewayResponse(
     next = {
       ...next,
       apply: {
+        namespace,
         state: "succeeded",
         cursor: null,
         requestUrl: request.url,
@@ -287,9 +351,7 @@ export async function observeGatewayResponse(
       },
     };
   } else {
-    // The ordinary error surface owns other failures. The generation was
-    // still superseded above, so never leave the retired cursor marked as if
-    // its poll were continuing.
+    // The ordinary error surface owns failures that did not commit.
     next = { ...next, apply: IDLE_APPLY };
   }
 
@@ -298,20 +360,27 @@ export async function observeGatewayResponse(
     void pollApplyStatus(
       cursor,
       generation,
-      request.headers.get(NAMESPACE_HEADER),
+      namespace,
     );
   }
 }
 
-/** Test-only reset; not used by application code. */
-export function resetGatewayMetadata(): void {
+/** Retire metadata when the authenticated authorization boundary changes. */
+export function clearGatewayMetadata(): void {
+  sessionGeneration += 1;
   pollGeneration += 1;
-  statusFetcher = undefined;
-  snapshot = {
+  latestMutationOrder += 1;
+  publish({
     cachedResponse: null,
     etag: null,
     cacheControl: null,
     contentDisposition: null,
     apply: IDLE_APPLY,
-  };
+  });
+}
+
+/** Test-only reset, including the configured status transport. */
+export function resetGatewayMetadata(): void {
+  clearGatewayMetadata();
+  statusFetcher = undefined;
 }

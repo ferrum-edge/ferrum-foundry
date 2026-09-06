@@ -21,8 +21,10 @@ state, and decide whether another edit is needed. For credential deletion,
 refresh the consumer and select the intended remaining credential again; do not
 resubmit an index from the stale rotation list.
 
-A 503 with `applied: false` and `X-Ferrum-Config-Cursor` identifies committed
-configuration that is not yet proven live. It is never retried, even if received
+A 503 with a valid `X-Ferrum-Config-Cursor` identifies committed configuration
+that is not yet proven live, even when its body is missing, malformed, or does not
+contain the boolean `applied: false`. A body with `applied: false` but no valid
+cursor is committed but unverifiable. It is never retried, even if received
 on a read. Foundry monitors the cursor through read-only apply-status requests;
 it does not resubmit the mutation. Runtime rejection or unavailable status needs
 inspection of the gateway configuration and runtime logs before another change.
@@ -56,6 +58,24 @@ discovery, subsets, and TLS accepted by an earlier Settings save. The accepted
 upstream seeds its scoped cache and editing stays pending through reconciliation.
 As with consumers, this client queue cannot protect against external writers
 without a gateway conditional-write contract.
+
+Live-apply response ownership is allocated when a gateway mutation is dispatched,
+before its headers arrive. A delayed older response or body cannot replace the
+newest started mutation's result. Starting a write clears a previous terminal
+success, but preserves a known committed change that still needs inspection.
+A later non-committing 4xx or 5xx leaves that monitor running; the ordinary error
+surface reports the failed write. A newer committed result retires the old poll.
+
+The banner always names its originating namespace (or Fleet-global) and request
+path, even after the selected namespace changes. Status responses must contain a
+recognized state and valid uint64 cursor fields matching the requested cursor;
+an applied result must also prove acceptance of that sequence in the same epoch.
+Malformed responses become visibly unverifiable. Pending monitoring is bounded
+to eight reads; exhaustion leaves the cursor visible with “Monitoring ended”
+copy. Authentication or grant changes clear metadata and invalidate older in-flight
+responses and polls. Configured-client coverage exercises delayed headers, reused
+request options, failed writes during monitoring, malformed envelopes, namespace
+labels, and session boundaries in GitHub-hosted CI.
 
 Consumer creation and credential append retain submitted API keys, JWT/HMAC
 secrets, and Basic auth passwords in a one-time copy panel after success. The

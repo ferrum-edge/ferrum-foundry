@@ -26,7 +26,7 @@ describe("parseConfigCursor", () => {
     });
   });
 
-  it.each([null, "", "1", "1:2:3", "-1:2", "1.5:2", "a:b"])(
+  it.each([null, "", "1", "1:2:3", "-1:2", "1.5:2", "a:b", "18446744073709551616:1", "1:18446744073709551616"])(
     "rejects malformed cursor %j",
     (value) => expect(parseConfigCursor(value)).toBeNull(),
   );
@@ -36,7 +36,7 @@ describe("observeGatewayResponse", () => {
   it.each([
     { status: 200, state: "applied", cursor: "1:2", polling: false },
     { status: 400, state: "idle", cursor: null, polling: false },
-    { status: 503, state: "nothing_applied", cursor: null, polling: false },
+    { status: 503, state: "pending", cursor: "1:2", polling: true },
     { status: 202, state: "pending", cursor: "1:2", polling: true },
   ])(
     "discards an older delayed 503 after a newer $status mutation",
@@ -225,8 +225,8 @@ describe("observeGatewayResponse", () => {
   it("continues a deferred cursor through pending to rejection", async () => {
     const fetchStatus = vi
       .fn()
-      .mockResolvedValueOnce({ state: "pending" })
-      .mockResolvedValueOnce({ state: "rejected" });
+      .mockResolvedValueOnce({ state: "pending", topology_epoch: "5", sequence: "12", accepted_topology_epoch: "5", accepted_sequence: "11" })
+      .mockResolvedValueOnce({ state: "rejected", topology_epoch: "5", sequence: "12", accepted_topology_epoch: "5", accepted_sequence: "11" });
     setApplyStatusFetcher(fetchStatus);
     await observeGatewayResponse(
       mutationRequest(),
@@ -242,7 +242,7 @@ describe("observeGatewayResponse", () => {
     expect(fetchStatus).toHaveBeenCalledTimes(2);
   });
 
-  it("does not let an older poll overwrite a newer mutation result", async () => {
+  it("keeps a known commit monitor through a later pre-commit failure", async () => {
     let resolveStatus!: (value: {
       topology_epoch: string;
       sequence: string;
@@ -279,7 +279,7 @@ describe("observeGatewayResponse", () => {
     });
     await Promise.resolve();
 
-    expect(getGatewayMetadataSnapshot().apply.state).toBe("nothing_applied");
+    expect(getGatewayMetadataSnapshot().apply).toMatchObject({ state: "applied", cursor: "6:14" });
   });
 
   it("retires an older poll when a later success has no apply cursor", async () => {
