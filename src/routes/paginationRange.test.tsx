@@ -1,4 +1,4 @@
-import { act, type ComponentType } from "react";
+import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
@@ -63,7 +63,7 @@ async function settle(check: () => void) {
   });
 }
 
-async function mount(Page: ComponentType) {
+async function mount(Page: () => ReactElement) {
   const parent = createRootRoute();
   const route = createRoute({ getParentRoute: () => parent, path: "/list", component: Page });
   const router = createRouter({

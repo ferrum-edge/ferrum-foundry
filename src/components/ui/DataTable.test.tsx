@@ -276,7 +276,7 @@ describe("DataTable out-of-range recovery", () => {
     const data = Array.from({ length: 25 }, (_, index) => ({ id: String(index), name: `Item ${index}` }));
     function CollectionTable() {
       const [page, setPage] = useState({ offset: 100, limit: 20 });
-      return <DataTable columns={sortingColumns} data={data} paginationMode="client" pagination={{ ...page, total: data.length }} onPaginationChange={setPage} emptyMessage="No resources yet" />;
+      return <DataTable columns={sortingColumns} data={data} isLoading={false} paginationMode="client" pagination={{ ...page, total: data.length }} onPaginationChange={setPage} emptyMessage="No resources yet" />;
     }
     const host = await render(<CollectionTable />);
     expect(host.textContent).toContain("Page out of range");
