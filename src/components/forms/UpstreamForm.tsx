@@ -226,6 +226,14 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
     if (algorithm === "consistent_hashing" && !hashOn.trim()) {
       errs.hash_on = "Hash key is required for consistent hashing";
     }
+    if (sdEnabled && sdProvider === "consul") {
+      if (!String(sdConfig.address ?? "").trim()) {
+        errs.consul_address = "Consul address is required";
+      }
+      if (!sdServiceName.trim()) {
+        errs.sd_service_name = "Consul service name is required";
+      }
+    }
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -277,8 +285,8 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
           }),
           ...(sdProvider === "consul" && {
             consul: {
-              address: (sdConfig.address as string) ?? "",
-              service_name: sdServiceName,
+              address: String(sdConfig.address ?? "").trim(),
+              service_name: sdServiceName.trim(),
               datacenter: (sdConfig.datacenter as string) || undefined,
               tag: (sdConfig.tag as string) || undefined,
               healthy_only: (sdConfig.healthy_only as boolean) ?? true,
@@ -750,6 +758,7 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
               value={sdServiceName}
               onChange={(e) => setSdServiceName(e.target.value)}
               placeholder="my-service"
+              error={errors.sd_service_name}
               required
             />
             {/* Provider-specific fields */}
@@ -834,6 +843,7 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
                   value={String(sdConfig.address ?? "")}
                   onChange={(e) => updateSdConfig("address", e.target.value)}
                   placeholder="http://consul.local:8500"
+                  error={errors.consul_address}
                 />
                 <Input
                   label="Datacenter"
