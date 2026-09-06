@@ -170,7 +170,7 @@ export function ChargesPanel() {
   if (isError || !data)
     return (
       <p className="text-text-muted text-sm">
-        No chargeback data — enable the api_chargeback plugin to meter API usage.
+        Chargeback unavailable. The latest usage totals could not be retrieved.
       </p>
     );
 
