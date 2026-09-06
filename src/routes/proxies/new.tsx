@@ -8,14 +8,25 @@ import { useToast } from "@/components/ui/Toast";
 import { Card } from "@/components/ui/Card";
 import { ProxyForm } from "@/components/forms/ProxyForm";
 import { getApiErrorMessage } from "@/api/client";
+import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
+import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
 import type { ProxyCreate } from "@/api/types";
 
 export default function ProxyNewPage() {
+  const { toast } = useToast();
+  const session = useEditorIdentity("new-proxies", {
+    onStale: () => toast("warning", STALE_EDITOR_MESSAGE),
+  });
+
+  return <ProxyCreateEditor key={session.key} session={session} />;
+}
+
+function ProxyCreateEditor({ session }: { session: EditorSession }) {
   const navigate = useNavigate();
   const createProxy = useCreateProxy();
   const { toast } = useToast();
 
-  const handleSubmit = async (data: ProxyCreate) => {
+  const handleSubmit = session.bind(async (data: ProxyCreate) => {
     try {
       const created = await createProxy.mutateAsync(data);
       toast("success", "Proxy created successfully");
@@ -27,7 +38,7 @@ export default function ProxyNewPage() {
       const message = await getApiErrorMessage(err, "Failed to create proxy");
       toast("error", message);
     }
-  };
+  });
 
   return (
     <div className="space-y-6 max-w-3xl">

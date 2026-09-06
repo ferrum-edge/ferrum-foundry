@@ -45,6 +45,12 @@ them.
 
 ### Namespace binding
 
+Consumer, proxy, upstream, and plugin create forms discard their drafts when
+this tab switches namespaces. This also clears plugin membership selections;
+a proxy ID supplied by the create link is only used in the namespace where
+that link opened. Returning to a namespace starts a fresh draft. Background
+refreshes within the same namespace leave an in-progress draft intact.
+
 The namespace shown in the header selector is the namespace every gateway
 request from that tab carries. Foundry enforces this with one rule: **an
 operation is bound to the namespace that was active when it started, and every

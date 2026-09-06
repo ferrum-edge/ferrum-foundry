@@ -8,14 +8,25 @@ import { useToast } from "@/components/ui/Toast";
 import { Card } from "@/components/ui/Card";
 import { ConsumerForm } from "@/components/forms/ConsumerForm";
 import { getApiErrorMessage } from "@/api/client";
+import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
+import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
 import type { ConsumerCreate } from "@/api/types";
 
 export default function ConsumerNewPage() {
+  const { toast } = useToast();
+  const session = useEditorIdentity("new-consumers", {
+    onStale: () => toast("warning", STALE_EDITOR_MESSAGE),
+  });
+
+  return <ConsumerCreateEditor key={session.key} session={session} />;
+}
+
+function ConsumerCreateEditor({ session }: { session: EditorSession }) {
   const navigate = useNavigate();
   const createConsumer = useCreateConsumer();
   const { toast } = useToast();
 
-  const handleSubmit = async (data: ConsumerCreate) => {
+  const handleSubmit = session.bind(async (data: ConsumerCreate) => {
     try {
       const created = await createConsumer.mutateAsync(data);
       toast("success", "Consumer created successfully");
@@ -27,7 +38,7 @@ export default function ConsumerNewPage() {
       const message = await getApiErrorMessage(err, "Failed to create consumer");
       toast("error", message);
     }
-  };
+  });
 
   return (
     <div className="space-y-6 max-w-3xl">
