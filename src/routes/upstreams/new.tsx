@@ -8,14 +8,25 @@ import { useToast } from "@/components/ui/Toast";
 import { Card } from "@/components/ui/Card";
 import { UpstreamForm } from "@/components/forms/UpstreamForm";
 import { getApiErrorMessage } from "@/api/client";
+import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
+import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
 import type { UpstreamCreate } from "@/api/types";
 
 export default function UpstreamNewPage() {
+  const { toast } = useToast();
+  const session = useEditorIdentity("new-upstreams", {
+    onStale: () => toast("warning", STALE_EDITOR_MESSAGE),
+  });
+
+  return <UpstreamCreateEditor key={session.key} session={session} />;
+}
+
+function UpstreamCreateEditor({ session }: { session: EditorSession }) {
   const navigate = useNavigate();
   const createUpstream = useCreateUpstream();
   const { toast } = useToast();
 
-  const handleSubmit = async (data: UpstreamCreate) => {
+  const handleSubmit = session.bind(async (data: UpstreamCreate) => {
     try {
       const created = await createUpstream.mutateAsync(data);
       toast("success", "Upstream created successfully");
@@ -27,7 +38,7 @@ export default function UpstreamNewPage() {
       const message = await getApiErrorMessage(err, "Failed to create upstream");
       toast("error", message);
     }
-  };
+  });
 
   return (
     <div className="space-y-6 max-w-3xl">

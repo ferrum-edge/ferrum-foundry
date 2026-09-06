@@ -2,6 +2,7 @@
 /*  Ferrum Foundry – Create Plugin Config page                         */
 /* ------------------------------------------------------------------ */
 
+import { useState } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import {
   useAvailablePlugins,
@@ -14,16 +15,39 @@ import { PluginConfigForm } from "@/components/forms/PluginConfigForm";
 import { PluginMembershipRecovery } from "@/components/forms/PluginMembershipRecovery";
 import type { PluginFormDefaults } from "@/components/forms/PluginConfigForm";
 import { getApiErrorMessage } from "@/api/client";
+import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
+import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
 import type { PluginConfigCreate } from "@/api/types";
 
 export default function PluginNewPage() {
+  const { toast } = useToast();
+  const session = useEditorIdentity("new-plugins", {
+    onStale: () => toast("warning", STALE_EDITOR_MESSAGE),
+  });
+
+  const [initialNamespace] = useState(session.identity.namespace);
+
+  return (
+    <PluginCreateEditor
+      key={session.key}
+      session={session}
+      allowProxyDefault={session.identity.namespace === initialNamespace}
+    />
+  );
+}
+
+function PluginCreateEditor({ session, allowProxyDefault }: {
+  session: EditorSession;
+  allowProxyDefault: boolean;
+}) {
   const navigate = useNavigate();
   const search = useSearch({ strict: false }) as Record<string, string | undefined>;
+  const proxyId = allowProxyDefault ? search.proxyId : undefined;
   const createPlugin = useCreatePluginWithMembership();
   const { toast } = useToast();
   const { data: availablePlugins, isLoading: pluginsLoading } = useAvailablePlugins();
 
-  const handleSubmit = async (data: PluginConfigCreate, proxyGroupIds?: string[]) => {
+  const handleSubmit = session.bind(async (data: PluginConfigCreate, proxyGroupIds?: string[]) => {
     try {
       const created = await createPlugin.mutateAsync({
         data,
@@ -42,7 +66,7 @@ export default function PluginNewPage() {
       );
       toast("error", message);
     }
-  };
+  });
 
   if (pluginsLoading) {
     return (
@@ -73,10 +97,10 @@ export default function PluginNewPage() {
               ? "proxy_group"
               : search.scope === "proxy"
                 ? "proxy"
-                : search.proxyId
+                : proxyId
                   ? "proxy"
                   : undefined,
-            proxyId: search.proxyId ?? undefined,
+            proxyId,
           } satisfies PluginFormDefaults}
         />
       </Card>
