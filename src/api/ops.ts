@@ -6,6 +6,7 @@
 
 import {
   SILENT_ERRORS,
+  onApiError,
   proxyApi,
   scoped,
   type NamespaceScope,
@@ -53,18 +54,43 @@ export interface OverloadSnapshot {
   [extra: string]: unknown;
 }
 
+function isOverloadSnapshot(value: unknown): value is OverloadSnapshot {
+  if (!value || typeof value !== "object" || !("level" in value)) return false;
+  return value.level === "normal" || value.level === "pressure" || value.level === "critical";
+}
+
 /** GET /overload returns 503 with the same body at critical level. */
 export async function getOverload(
   scope: NamespaceScope,
 ): Promise<OverloadSnapshot> {
-  const response = await proxyApi.get(
-    "overload",
-    scoped(scope, { throwHttpErrors: false }),
-  );
-  if (response.status === 503 || response.ok) {
-    return response.json<OverloadSnapshot>();
+  let response: Response | undefined;
+  try {
+    // Classify this endpoint's body before reporting an error: its critical
+    // snapshot is a successful observation despite the HTTP 503 status.
+    response = await proxyApi.get(
+      "overload",
+      scoped(scope, { throwHttpErrors: false, context: { [SILENT_ERRORS]: true } }),
+    );
+    const snapshot: unknown = await response.clone().json().catch(() => null);
+    if (
+      isOverloadSnapshot(snapshot) &&
+      (response.ok || (response.status === 503 && snapshot.level === "critical"))
+    ) {
+      return snapshot;
+    }
+    throw new Error(`Overload endpoint returned ${response.status} without a valid snapshot`);
+  } catch (error) {
+    // The shared hook was silent, so report genuine HTTP/body/network errors
+    // exactly once here and still reject for the panel's unavailable state.
+    onApiError({
+      statusCode: response?.status ?? 0,
+      body: response
+        ? await response.text().catch(() => "")
+        : error instanceof Error ? error.message : "Overload request failed",
+      url: response?.url || "/api/proxy/overload",
+    });
+    throw error;
   }
-  throw new Error(`Overload endpoint returned ${response.status}`);
 }
 
 /* ---------- Runtime metrics ---------- */
