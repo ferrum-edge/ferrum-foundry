@@ -2,7 +2,8 @@
 /*  Ferrum Foundry – Credential management per type                   */
 /* ------------------------------------------------------------------ */
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { CredentialCopyOnce, submittedSecrets, type SubmittedSecret } from "./CredentialCopyOnce";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Card } from "@/components/ui/Card";
@@ -191,6 +192,12 @@ export function CredentialForm({
   const [formValues, setFormValues] = useState<Record<string, string>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [showForm, setShowForm] = useState(false);
+  const [receipt, setReceipt] = useState<SubmittedSecret[] | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   const [deleteSelection, setDeleteSelection] = useState<{
     index: number; revision: number; snapshot: unknown;
   } | null>(null);
@@ -232,13 +239,18 @@ export function CredentialForm({
         credType: credentialType,
         data,
       });
+      if (!mounted.current) return;
+      const secrets = submittedSecrets({ [credentialType]: [data] });
+      if (secrets.length > 0) setReceipt(secrets);
       toast("success", `${config.label} credential added`);
       setFormValues({});
       setErrors({});
       setShowForm(false);
     } catch (err: unknown) {
       const message = await getApiErrorMessage(err, "Failed to add credential");
-      toast("error", message);
+      if (mounted.current) toast("error", message);
+    } finally {
+      appendCredential.reset();
     }
   });
 
@@ -280,7 +292,7 @@ export function CredentialForm({
           </h4>
           <Badge variant={badgeVariant}>{credentials.length}</Badge>
         </div>
-        {!showForm && (
+        {!showForm && !receipt && (
           <Button
             size="sm"
             variant="secondary"
@@ -346,6 +358,8 @@ export function CredentialForm({
           No {config.label.toLowerCase()} credentials configured.
         </p>
       )}
+
+      {receipt && <CredentialCopyOnce secrets={receipt} onDone={() => setReceipt(null)} />}
 
       {/* Add credential form */}
       {showForm && (
