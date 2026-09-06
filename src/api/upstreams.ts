@@ -11,6 +11,20 @@ import type {
 } from "./types";
 import { collectAllPages } from "./pagination";
 
+const upstreamWrites = new Map<string, Promise<void>>();
+
+async function serializeWrite<T>(scope: NamespaceScope, id: string, write: () => Promise<T>): Promise<T> {
+  const key = JSON.stringify([scope.namespace, id]);
+  const result = (upstreamWrites.get(key) ?? Promise.resolve()).then(write);
+  const tail = result.then(() => undefined, () => undefined);
+  upstreamWrites.set(key, tail);
+  try {
+    return await result;
+  } finally {
+    if (upstreamWrites.get(key) === tail) upstreamWrites.delete(key);
+  }
+}
+
 function withUpstreamId(data: UpstreamCreate, id?: string): UpstreamCreate {
   const resolvedId = id ?? data.id;
   return resolvedId ? { ...data, id: resolvedId } : data;
@@ -118,11 +132,29 @@ export async function update(
   id: string,
   data: UpstreamCreate,
 ): Promise<Upstream> {
+  return serializeWrite(scope, id, () => put(scope, id, data));
+}
+
+function put(scope: NamespaceScope, id: string, data: UpstreamCreate): Promise<Upstream> {
   return proxyApi
     .put(`upstreams/${id}`, scoped(scope, { json: withUpstreamId(data, id) }))
     .json<Upstream>();
 }
 
+/** Targets own only the target list; all settings come from a current read. */
+export async function updateTargets(
+  scope: NamespaceScope,
+  id: string,
+  targets: UpstreamCreate["targets"],
+): Promise<Upstream> {
+  return serializeWrite(scope, id, async () => {
+    const current = await get(scope, id);
+    return put(scope, id, { ...toUpdatePayload(current), targets });
+  });
+}
+
 export async function remove(scope: NamespaceScope, id: string): Promise<void> {
-  await proxyApi.delete(`upstreams/${id}`, scoped(scope));
+  await serializeWrite(scope, id, async () => {
+    await proxyApi.delete(`upstreams/${id}`, scoped(scope));
+  });
 }
