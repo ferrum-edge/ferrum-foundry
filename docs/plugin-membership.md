@@ -9,6 +9,11 @@ The group editor waits for the complete proxy list, including every page, before
 showing the current membership. A failed list request shows a load error instead
 of an editable empty group. Initial membership is applied once when it becomes
 available; later successful refreshes do not overwrite selections you have edited.
+While editing, switching Scope away and back preserves the draft selections;
+only saving applies the chosen scope. A selected ID omitted from the current
+catalog remains visible with its ID and can be removed explicitly. Foundry never
+silently drops missing IDs, and saving still validates the desired membership
+against a complete fresh proxy list.
 
 Foundry attaches all selected destinations before detaching any previous members.
 During a move, both source and destination can briefly use the configuration.
