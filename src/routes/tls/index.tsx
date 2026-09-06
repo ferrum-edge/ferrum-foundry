@@ -467,8 +467,10 @@ function InventoryTab() {
         )}
         {!isLoading && entries.length === 0 && (
           <EmptyState
-            title="No TLS material found"
-            description="The gateway reports no configured TLS sources."
+            title={(data?.pagination.total ?? 0) > 0 ? "No results on this page" : "No TLS material found"}
+            description={(data?.pagination.total ?? 0) > 0
+              ? "Use Go to last page below to return to the available results."
+              : "The gateway reports no configured TLS sources."}
           />
         )}
         {!isLoading &&
@@ -552,8 +554,10 @@ function EventsTab() {
         )}
         {!isLoading && events.length === 0 && (
           <EmptyState
-            title="No TLS events"
-            description="Rotations and load failures will appear here. No-op polls are not recorded."
+            title={(data?.pagination.total ?? 0) > 0 ? "No results on this page" : "No TLS events"}
+            description={(data?.pagination.total ?? 0) > 0
+              ? "Use Go to last page below to return to the available results."
+              : "Rotations and load failures will appear here. No-op polls are not recorded."}
           />
         )}
         {!isLoading &&

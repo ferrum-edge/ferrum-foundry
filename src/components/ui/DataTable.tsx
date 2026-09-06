@@ -157,7 +157,9 @@ export function DataTable<T extends { id: string }>({
         colSpan={columns.length}
         className="px-4 py-16 text-center text-text-muted text-sm"
       >
-        {emptyMessage}
+        {pagination && (serverPage ? pagination.total : data.length) > 0
+          ? "No results on this page. Use Go to last page below to return to the available results."
+          : emptyMessage}
       </td>
     </tr>
   );

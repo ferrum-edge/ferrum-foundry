@@ -270,3 +270,21 @@ describe("DataTable header sizing", () => {
     }
   });
 });
+
+describe("DataTable out-of-range recovery", () => {
+  it("returns to the last page of the complete client collection", async () => {
+    const data = Array.from({ length: 25 }, (_, index) => ({ id: String(index), name: `Item ${index}` }));
+    function CollectionTable() {
+      const [page, setPage] = useState({ offset: 100, limit: 20 });
+      return <DataTable columns={sortingColumns} data={data} paginationMode="client" pagination={{ ...page, total: data.length }} onPaginationChange={setPage} emptyMessage="No resources yet" />;
+    }
+    const host = await render(<CollectionTable />);
+    expect(host.textContent).toContain("Page out of range");
+    expect(host.textContent).not.toContain("No resources yet");
+    const button = [...host.querySelectorAll("button")].find((entry) => entry.textContent === "Go to last page")!;
+    await click(button);
+    expect(bodyValues(host)).toEqual(["Item 20", "Item 21", "Item 22", "Item 23", "Item 24"]);
+    expect(host.textContent).toContain("Showing 21-25 of 25");
+    expect(host.textContent).toContain("Page 2 of 2");
+  });
+});
