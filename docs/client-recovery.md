@@ -76,3 +76,12 @@ copy. Authentication or grant changes clear metadata and invalidate older in-fli
 responses and polls. Configured-client coverage exercises delayed headers, reused
 request options, failed writes during monitoring, malformed envelopes, namespace
 labels, and session boundaries in GitHub-hosted CI.
+
+Restore also distinguishes HTTP 503 recovery outcomes. A valid commit cursor or
+`applied: false` produces a “Restore committed” warning, clears the restore
+confirmation, and refreshes cached resource reads. The shared live-apply banner
+monitors a valid cursor; a committed response without a valid cursor remains
+unverifiable. Foundry never resubmits the restore automatically. Pre-commit
+connectivity failures retain the gateway's structured `restore_errors` and
+`failure_class` in the recovery panel. Typed API-spec deletion confirmation and
+HTTP 500 rollback outcomes keep their existing handling.

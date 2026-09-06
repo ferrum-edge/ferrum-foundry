@@ -20,6 +20,7 @@ import { useNamespace } from "@/stores/namespace";
 import {
   getRestoreApiSpecConfirmation,
   getRestoreFailure,
+  getRestoreCommitted,
   type RestoreFailure,
 } from "@/api/ops";
 
@@ -91,7 +92,16 @@ export function BackupRestoreCard() {
     setRiskPhrase("");
   };
 
-  const showRestoreFailure = (error: unknown): boolean => {
+  const showRestoreOutcome = (error: unknown, namespace: string): boolean => {
+    const committed = getRestoreCommitted(error);
+    if (committed) {
+      clearRestore();
+      setRestoreFailure(null);
+      toast("warning", `Restore committed in namespace "${namespace}". ${committed.cursor
+        ? `See the live-apply banner for cursor ${committed.cursor} and runtime status.`
+        : "No valid apply cursor was provided; verify the live gateway configuration before another restore."}`);
+      return true;
+    }
     const failure = getRestoreFailure(error);
     if (!failure) return false;
     clearRestore();
@@ -128,7 +138,7 @@ export function BackupRestoreCard() {
         setRiskPhrase("");
         return;
       }
-      if (showRestoreFailure(err)) return;
+      if (showRestoreOutcome(err, pendingRestore.namespace)) return;
       toast("error", await getApiErrorMessage(err, "Restore failed"));
     }
   };
@@ -148,7 +158,7 @@ export function BackupRestoreCard() {
       showRestoreSuccess(result);
     } catch (err) {
       // A confirmed restore is never offered a third attempt automatically.
-      if (showRestoreFailure(err)) return;
+      if (showRestoreOutcome(err, apiSpecRisk.pending.namespace)) return;
       toast("error", await getApiErrorMessage(err, "Confirmed restore failed"));
       clearRestore();
     }
@@ -207,7 +217,9 @@ export function BackupRestoreCard() {
                   ? "Restore failed — manual recovery required"
                   : restoreFailure.failure_class === "data_integrity"
                     ? "Restore blocked by a data-integrity failure"
-                    : "Restore failed; review the rollback outcome"}
+                    : restoreFailure.failure_class === "connectivity"
+                      ? "Restore blocked by a connectivity failure"
+                      : "Restore could not complete; review the recovery details"}
               </p>
               <p className="text-sm text-text-secondary mt-1">{restoreFailure.error}</p>
             </div>

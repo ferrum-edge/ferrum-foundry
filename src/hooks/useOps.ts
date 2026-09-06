@@ -113,6 +113,10 @@ export function useRestore() {
       namespace: string;
       confirmApiSpecDeletion?: boolean;
     }) => ops.restore({ namespace }, data, { confirmApiSpecDeletion }),
+    onError: (error) => {
+      // The durable configuration changed even when runtime application is pending.
+      if (ops.getRestoreCommitted(error)) qc.invalidateQueries();
+    },
     onSuccess: () => {
       qc.invalidateQueries();
     },
