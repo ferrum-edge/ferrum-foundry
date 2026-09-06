@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useEffect, useId, useMemo } from "react";
 import { Select } from "@/components/ui/Select";
 import { useNamespace } from "@/stores/namespace";
 import { useNamespaces } from "@/hooks/useNamespaces";
@@ -13,7 +13,7 @@ interface HeaderProps {
 export function Header({ onToggleSidebar }: HeaderProps) {
   const namespaceLabelId = useId();
   const { selectedNamespace, setNamespace } = useNamespace();
-  const { data: namespaces } = useNamespaces();
+  const registry = useNamespaces();
   const { theme, toggleTheme } = useTheme();
   const { logout, principal } = useAuth();
   const readiness = useBffReadiness();
@@ -41,15 +41,26 @@ export function Header({ onToggleSidebar }: HeaderProps) {
         ? "bg-danger"
         : "bg-text-muted";
 
-  // Always offer the full namespace set from GET /namespaces; include the
-  // selected namespace even if the list hasn't loaded (or omits it) so the
-  // control never collapses to fewer options after a switch.
-  const namespaceList = namespaces ?? [];
+  const namespaceList = useMemo(() => {
+    const listed = registry.data ?? [];
+    const grants = principal?.namespaces;
+    return grants?.length ? listed.filter((ns) => grants.includes(ns)) : listed;
+  }, [registry.data, principal?.namespaces]);
+  // Only a completed successful list may retire a selection. During loading,
+  // failed refreshes, or invalidation after a create, retain the current binding.
+  const registryReady = registry.isSuccess && !registry.isFetching;
+  useEffect(() => {
+    if (registryReady && namespaceList.length > 0 && !namespaceList.includes(selectedNamespace)) {
+      setNamespace(namespaceList[0]);
+    }
+  }, [registryReady, namespaceList, selectedNamespace, setNamespace]);
+
   const displayOptions = (
-    namespaceList.includes(selectedNamespace)
+    registryReady || namespaceList.includes(selectedNamespace)
       ? namespaceList
       : [selectedNamespace, ...namespaceList]
   ).map((ns) => ({ value: ns, label: ns }));
+  const noNamespaces = registryReady && namespaceList.length === 0;
 
   return (
     <header className="fixed top-0 right-0 left-0 md:left-[var(--sidebar-width)] h-[var(--nav-height)] bg-bg-card border-b border-border z-20 flex items-center justify-between px-4">
@@ -90,10 +101,11 @@ export function Header({ onToggleSidebar }: HeaderProps) {
           <div className="w-36 min-w-0 sm:w-44 md:w-52">
             <Select
               aria-labelledby={namespaceLabelId}
-              value={selectedNamespace}
+              value={noNamespaces ? "" : selectedNamespace}
+              disabled={noNamespaces}
               onValueChange={setNamespace}
               options={displayOptions}
-              placeholder="Namespace"
+              placeholder={noNamespaces ? "No namespaces available" : "Namespace"}
             />
           </div>
         </div>
