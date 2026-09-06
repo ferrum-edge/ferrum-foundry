@@ -6,6 +6,7 @@ import { useHealth } from "@/hooks/useMetrics";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { SkeletonCard } from "@/components/ui/Skeleton";
+import { BffConnectionCard } from "@/components/shared/BffConnectionCard";
 
 function statusVariant(
   status: string,
@@ -37,6 +38,7 @@ export default function StatusPage() {
     return (
       <div className="space-y-6 max-w-3xl">
         <h1 className="text-2xl font-bold text-text-primary">Health Status</h1>
+        <BffConnectionCard />
         <SkeletonCard />
         <SkeletonCard />
       </div>
@@ -47,6 +49,7 @@ export default function StatusPage() {
     return (
       <div className="space-y-6 max-w-3xl">
         <h1 className="text-2xl font-bold text-text-primary">Health Status</h1>
+        <BffConnectionCard />
         <Card>
           <p className="text-danger font-medium">Failed to fetch health status</p>
           <p className="text-text-muted text-sm mt-1">
@@ -57,14 +60,21 @@ export default function StatusPage() {
     );
   }
 
-  if (!health) return null;
+  if (!health) return (
+    <div className="space-y-6 max-w-3xl">
+      <h1 className="text-2xl font-bold text-text-primary">Health Status</h1>
+      <BffConnectionCard />
+    </div>
+  );
 
   return (
     <div className="space-y-6 max-w-3xl">
       <h1 className="text-2xl font-bold text-text-primary">Health Status</h1>
+      <BffConnectionCard />
 
-      {/* Overall status */}
+      {/* Gateway process details are separate from Foundry connectivity. */}
       <Card>
+        <h2 className="text-sm font-semibold text-text-primary mb-3">Gateway process health</h2>
         <div className="flex flex-wrap items-center gap-4">
           <Badge
             variant={statusVariant(health.status)}

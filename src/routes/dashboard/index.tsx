@@ -7,7 +7,7 @@ import { useHealth, useAdminMetrics } from "@/hooks/useMetrics";
 import { useGatewayRequestStats } from "@/hooks/useGatewayRequestStats";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
+import { BffConnectionCard } from "@/components/shared/BffConnectionCard";
 import { StatCard } from "@/components/metrics/StatCard";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { getStoredMetricsRefreshInterval } from "@/utils/metricsRefresh";
@@ -65,8 +65,6 @@ export default function DashboardPage() {
     metrics.dataUpdatedAt,
   );
 
-  const isConnected = !health.isError && !metrics.isError;
-
   /* ── Render ─────────────────────────────────────────────────────── */
 
   return (
@@ -108,40 +106,7 @@ export default function DashboardPage() {
         />
       </div>
 
-      {/* ── Connection error prompt ────────────────────────────────── */}
-      {!isConnected && (
-        <Card className="border-warning/30 bg-warning/5">
-          <div className="flex items-start gap-3">
-            <svg
-              className="w-5 h-5 text-warning mt-0.5 shrink-0"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={1.5}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"
-              />
-            </svg>
-            <div className="flex-1">
-              <p className="text-text-primary font-medium text-sm">
-                Unable to connect to the Ferrum gateway
-              </p>
-              <p className="text-text-secondary text-xs mt-1">
-                Check that the Admin API is running and verify your connection
-                settings.
-              </p>
-              <Link to="/settings">
-                <Button variant="secondary" size="sm" className="mt-3">
-                  Go to Settings
-                </Button>
-              </Link>
-            </div>
-          </div>
-        </Card>
-      )}
+      <BffConnectionCard />
 
       {/* ── Gateway status card ────────────────────────────────────── */}
       {health.isLoading ? (
@@ -149,7 +114,7 @@ export default function DashboardPage() {
       ) : health.data ? (
         <Card>
           <h2 className="text-sm font-semibold text-text-primary mb-3">
-            Gateway Status
+            Gateway process health
           </h2>
           <div className="flex flex-wrap items-center gap-4">
             <Badge
