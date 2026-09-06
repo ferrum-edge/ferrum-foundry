@@ -92,17 +92,33 @@ export function buildNamespaceUpdate(
 
 // ── Occupancy ────────────────────────────────────────────────────
 
+function validCount(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value : null;
+}
+
+function topLevelCount(response: unknown): number | null {
+  if (!response || typeof response !== "object" || !("total" in response)) return null;
+  return validCount(response.total);
+}
+
+function paginatedCount(response: unknown): number | null {
+  if (!response || typeof response !== "object" || !("pagination" in response)) return null;
+  return topLevelCount(response.pagination);
+}
+
 /**
  * Resource kinds that keep a namespace "non-empty" for the purposes of
  * `DELETE /namespaces/{name}` — i.e. the rows a `?confirm=true` cascade
  * deletes. Ordered for display.
  */
 const OCCUPANCY_ENDPOINTS = [
-  { key: "proxies", label: "proxies", path: "proxies" },
-  { key: "consumers", label: "consumers", path: "consumers" },
-  { key: "plugin_configs", label: "plugin configs", path: "plugins/config" },
-  { key: "upstreams", label: "upstreams", path: "upstreams" },
-  { key: "api_specs", label: "API specs", path: "api-specs" },
+  { label: "proxies", path: "proxies", count: paginatedCount },
+  { label: "consumers", path: "consumers", count: paginatedCount },
+  { label: "plugin configs", path: "plugins/config", count: paginatedCount },
+  { label: "upstreams", path: "upstreams", count: paginatedCount },
+  { label: "API specs", path: "api-specs", count: topLevelCount },
+  { label: "gateway trust bundles", path: "gateway-trust-bundles", count: paginatedCount },
 ] as const;
 
 export interface OccupancyEntry {
@@ -124,8 +140,8 @@ export interface NamespaceOccupancy {
 /**
  * Count the resources a cascade delete of `name` would destroy.
  *
- * Each list is fetched with `limit=1` — only `pagination.total` is used, so
- * this stays cheap regardless of namespace size. Requests are scoped to
+ * Each list is fetched with `limit=1` — only the endpoint-specific total is
+ * used, so this stays cheap regardless of namespace size. Requests are scoped to
  * `name` itself rather than the active namespace, since the delete target is
  * usually not the namespace being viewed.
  */
@@ -136,8 +152,9 @@ export async function getOccupancy(name: string): Promise<NamespaceOccupancy> {
       try {
         const response = await proxyApi
           .get(endpoint.path, scoped(target, { searchParams: { limit: "1" } }))
-          .json<PaginatedResponse<unknown>>();
-        return { label: endpoint.label, count: response.pagination?.total ?? 0 };
+          .json<unknown>();
+        const count = endpoint.count(response);
+        return count === null ? null : { label: endpoint.label, count };
       } catch {
         // Mode-dependent surfaces legitimately 404/503 on gateways without
         // the feature; treat them as uncountable rather than as zero.

@@ -434,6 +434,11 @@ describe("getOccupancy", () => {
       { status: 200, headers: { "content-type": "application/json" } },
     );
 
+  const apiSpecs = (total: number) => Response.json({
+    items: [], total, offset: 0, limit: 1, next_offset: null,
+  });
+  const empty = (url: string) => url.includes("/api-specs") ? apiSpecs(0) : paginated(0);
+
   beforeEach(() => {
     captured.length = 0;
   });
@@ -446,7 +451,7 @@ describe("getOccupancy", () => {
     stub((url) => {
       if (url.includes("/proxies")) return paginated(12);
       if (url.includes("/consumers")) return paginated(4);
-      return paginated(0);
+      return empty(url);
     });
 
     const result = await getOccupancy("qa");
@@ -460,19 +465,19 @@ describe("getOccupancy", () => {
   });
 
   it("pins every count to the target namespace, not the active one", async () => {
-    stub(() => paginated(0));
+    stub(empty);
 
     await getOccupancy("other-tenant");
 
-    expect(captured).toHaveLength(5);
+    expect(captured).toHaveLength(6);
     // `body` carries the X-Ferrum-Namespace header for this suite.
     expect(captured.map((r) => r.body)).toEqual(
-      Array(5).fill("other-tenant"),
+      Array(6).fill("other-tenant"),
     );
   });
 
   it("requests only one row per kind — totals come from pagination", async () => {
-    stub(() => paginated(9999));
+    stub((url) => url.includes("/api-specs") ? apiSpecs(9999) : paginated(9999));
 
     await getOccupancy("qa");
 
@@ -491,7 +496,40 @@ describe("getOccupancy", () => {
     // api-specs legitimately 404s on gateways without the feature; it must
     // count as uncountable rather than as zero, so the UI can say so.
     expect(result.partial).toBe(true);
-    expect(result.total).toBe(8);
+    expect(result.total).toBe(10);
+  });
+
+  it("counts the API-spec envelope and gateway trust bundles", async () => {
+    stub((url) => {
+      if (url.includes("/api-specs")) return apiSpecs(3);
+      if (url.includes("/gateway-trust-bundles")) return paginated(1);
+      return empty(url);
+    });
+    expect(await getOccupancy("qa")).toEqual({
+      entries: [{ label: "API specs", count: 3 }, { label: "gateway trust bundles", count: 1 }],
+      total: 4, partial: false,
+    });
+  });
+
+  it.each([404, 503])("marks unavailable trust bundles partial (%s)", async (status) => {
+    stub((url) => url.includes("/gateway-trust-bundles")
+      ? new Response("unavailable", { status }) : empty(url));
+    expect(await getOccupancy("qa")).toEqual({ entries: [], total: 0, partial: true });
+  });
+
+  it.each([null, {}, { total: "2" }, { total: -1 }, { total: 1.5 }, { total: 1e20 }])(
+    "marks malformed totals partial: %j", async (body) => {
+      stub((url) => url.includes("/api-specs") ? Response.json(body) : empty(url));
+      expect(await getOccupancy("qa")).toEqual({ entries: [], total: 0, partial: true });
+      stub((url) => url.includes("/gateway-trust-bundles")
+        ? Response.json({ pagination: body }) : empty(url));
+      expect(await getOccupancy("qa")).toEqual({ entries: [], total: 0, partial: true });
+    },
+  );
+
+  it("reports valid zero totals as complete", async () => {
+    stub(empty);
+    expect(await getOccupancy("qa")).toEqual({ entries: [], total: 0, partial: false });
   });
 
   it("does not treat an uncountable kind as empty", async () => {
