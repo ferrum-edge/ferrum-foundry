@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, X509Certificate } from 'node:crypto';
 import {
   closeSync,
   constants,
@@ -82,6 +82,19 @@ export function loadCaBundle(
     }
 
     const pem = contents.toString('utf8');
+    const certificates = pem.match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g) ?? [];
+    const remainder = pem
+      .replace(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g, '')
+      .replace(/^\s*#.*$/gm, '')
+      .trim();
+    if (certificates.length === 0 || remainder.length > 0) {
+      throw new Error('TLS CA bundle must contain valid PEM certificates');
+    }
+    try {
+      for (const certificate of certificates) new X509Certificate(certificate);
+    } catch {
+      throw new Error('TLS CA bundle must contain valid PEM certificates');
+    }
     return {
       path: canonicalPath,
       pem,
