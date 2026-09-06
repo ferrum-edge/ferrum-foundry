@@ -12,6 +12,7 @@ export interface RefreshControlProps {
   onIntervalChange: (ms: number) => void;
   onRefreshNow: () => void | Promise<void>;
   lastUpdated?: string;
+  lastUpdatedLabel?: string;
   isRefreshing?: boolean;
 }
 
@@ -30,6 +31,7 @@ export function RefreshControl({
   onIntervalChange,
   onRefreshNow,
   lastUpdated,
+  lastUpdatedLabel = "Last updated",
   isRefreshing = false,
 }: RefreshControlProps) {
   const [now, setNow] = useState(Date.now());
@@ -48,7 +50,7 @@ export function RefreshControl({
     <div className="flex items-center gap-3">
       {agoText && (
         <span className="text-text-muted text-xs whitespace-nowrap">
-          Last updated: {agoText}
+          {lastUpdatedLabel}: {agoText}
         </span>
       )}
       <div className="w-28">

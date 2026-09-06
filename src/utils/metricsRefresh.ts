@@ -15,7 +15,8 @@ export const METRICS_REFRESH_OPTIONS = [
 export function getStoredMetricsRefreshInterval(): number {
   try {
     const stored = localStorage.getItem(METRICS_REFRESH_INTERVAL_KEY);
-    return stored ? Number(stored) : DEFAULT_METRICS_REFRESH_INTERVAL;
+    return stored && METRICS_REFRESH_OPTIONS.some((option) => option.value === stored)
+      ? Number(stored) : DEFAULT_METRICS_REFRESH_INTERVAL;
   } catch {
     return DEFAULT_METRICS_REFRESH_INTERVAL;
   }
