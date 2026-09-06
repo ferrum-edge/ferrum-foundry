@@ -2,6 +2,8 @@
 /*  Ferrum Foundry – Create Consumer page                              */
 /* ------------------------------------------------------------------ */
 
+import { useEffect, useRef, useState } from "react";
+import { CredentialCopyOnce, submittedSecrets, type SubmittedSecret } from "@/components/forms/CredentialCopyOnce";
 import { useNavigate } from "@tanstack/react-router";
 import { useCreateConsumer } from "@/hooks/useConsumers";
 import { useToast } from "@/components/ui/Toast";
@@ -24,19 +26,33 @@ export default function ConsumerNewPage() {
 function ConsumerCreateEditor({ session }: { session: EditorSession }) {
   const navigate = useNavigate();
   const createConsumer = useCreateConsumer();
+  const [receipt, setReceipt] = useState<{ id: string; secrets: SubmittedSecret[] } | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   const { toast } = useToast();
 
   const handleSubmit = session.bind(async (data: ConsumerCreate) => {
+    const secrets = submittedSecrets(data.credentials);
     try {
       const created = await createConsumer.mutateAsync(data);
+      if (!mounted.current) return;
       toast("success", "Consumer created successfully");
+      if (secrets.length > 0) {
+        setReceipt({ id: created.id, secrets });
+        return;
+      }
       navigate({
         to: "/consumers/$consumerId",
         params: { consumerId: created.id },
       });
     } catch (err: unknown) {
       const message = await getApiErrorMessage(err, "Failed to create consumer");
-      toast("error", message);
+      if (mounted.current) toast("error", message);
+    } finally {
+      createConsumer.reset?.();
     }
   });
 
@@ -52,10 +68,15 @@ function ConsumerCreateEditor({ session }: { session: EditorSession }) {
       </div>
 
       <Card>
-        <ConsumerForm
-          onSubmit={handleSubmit}
-          isLoading={createConsumer.isPending}
-        />
+        {receipt ? (
+          <CredentialCopyOnce secrets={receipt.secrets} onDone={() => {
+            const id = receipt.id;
+            setReceipt(null);
+            navigate({ to: "/consumers/$consumerId", params: { consumerId: id } });
+          }} />
+        ) : (
+          <ConsumerForm onSubmit={handleSubmit} isLoading={createConsumer.isPending} />
+        )}
       </Card>
     </div>
   );
