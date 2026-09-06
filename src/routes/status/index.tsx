@@ -38,7 +38,7 @@ export default function StatusPage() {
     return (
       <div className="space-y-6 max-w-3xl">
         <h1 className="text-2xl font-bold text-text-primary">Health Status</h1>
-      <BffConnectionCard />
+        <BffConnectionCard />
         <SkeletonCard />
         <SkeletonCard />
       </div>
@@ -49,7 +49,7 @@ export default function StatusPage() {
     return (
       <div className="space-y-6 max-w-3xl">
         <h1 className="text-2xl font-bold text-text-primary">Health Status</h1>
-      <BffConnectionCard />
+        <BffConnectionCard />
         <Card>
           <p className="text-danger font-medium">Failed to fetch health status</p>
           <p className="text-text-muted text-sm mt-1">
