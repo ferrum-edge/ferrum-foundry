@@ -70,10 +70,10 @@ describe("overload response classification", () => {
 
   it("reports an exhausted network failure once and rejects", async () => {
     fetcher.mockRejectedValue(new TypeError("Failed to fetch"));
-    await expect(getOverload(scope)).rejects.toThrow("Failed to fetch");
+    await expect(getOverload(scope)).rejects.toThrow(/network error/i);
     expect(report).toHaveBeenCalledTimes(1);
     expect(report).toHaveBeenCalledWith(expect.objectContaining({
-      statusCode: 0, body: "Failed to fetch",
+      statusCode: 0, body: expect.stringMatching(/network error/i),
     }));
   });
 });
