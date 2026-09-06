@@ -13,8 +13,10 @@ let pollEntered: Promise<void>;
 let entered: () => void;
 let headers: Record<string, string>;
 let base: string;
+let holdReadiness: boolean;
 
 beforeEach(async () => {
+  holdReadiness = false;
   vi.resetModules();
   for (const key of Object.keys(process.env)) {
     if (key.startsWith('FERRUM_')) vi.stubEnv(key, undefined);
@@ -22,9 +24,14 @@ beforeEach(async () => {
   pollEntered = new Promise((resolve) => { entered = resolve; });
   upstream = createServer((request, response) => {
     response.setHeader('content-type', 'application/json');
-    if (request.url === '/config/apply-status') {
+    if (request.url === '/config/apply-status' || (request.url === '/health' && holdReadiness)) {
+      holdReadiness = false;
       held = response;
       entered();
+      return;
+    }
+    if (request.url === '/health') {
+      response.end('{"ready":false}');
       return;
     }
     const token = request.headers.authorization?.replace(/^Bearer /, '') ?? '';
@@ -112,6 +119,22 @@ describe('settings publication and dispatcher retirement', () => {
       await poll;
     }
   }, 20_000);
+
+  it('isolates readiness probes and caches across settings generations', async () => {
+    holdReadiness = true;
+    const oldProbe = app!.inject({ method: 'GET', url: '/api/health/ready' }).then((response) => response);
+    await pollEntered;
+    const saved = await app!.inject({ method: 'PUT', url: '/api/settings', headers, payload: { jwtIssuer: 'new-generation' } });
+    expect(saved.statusCode).toBe(200);
+    const current = await app!.inject({ method: 'GET', url: '/api/health/ready' });
+    expect(current.statusCode).toBe(503);
+    expect(current.json().ready).toBe(false);
+    held!.end('{"ready":true}');
+    expect((await oldProbe).statusCode).toBe(200);
+    const cached = await app!.inject({ method: 'GET', url: '/api/health/ready' });
+    expect(cached.statusCode).toBe(503);
+    expect(cached.json()).toEqual(current.json());
+  });
 
   it('returns each accepted generation when concurrent completion order differs', async () => {
     const { registerRuntimeConfigListener, loadConfig } = await import('./config.js');

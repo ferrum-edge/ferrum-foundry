@@ -23,9 +23,12 @@ interface ReadinessResult {
 const CACHE_TTL_MS = 5000;
 let cached: { expiresAt: number; result: ReadinessResult } | undefined;
 let inFlight: Promise<ReadinessResult> | undefined;
+let generation = 0;
 
 registerRuntimeConfigListener(() => {
+  generation += 1;
   cached = undefined;
+  inFlight = undefined;
 });
 
 async function boundedJson(response: Awaited<ReturnType<typeof fetch>>): Promise<Record<string, unknown> | undefined> {
@@ -136,12 +139,16 @@ async function readiness(): Promise<ReadinessResult> {
   const now = Date.now();
   if (cached && cached.expiresAt > now) return cached.result;
   if (!inFlight) {
-    inFlight = probeReadiness().then((result) => {
-      cached = { result, expiresAt: Date.now() + CACHE_TTL_MS };
+    const acceptedGeneration = generation;
+    const probe = probeReadiness().then((result) => {
+      if (generation === acceptedGeneration) {
+        cached = { result, expiresAt: Date.now() + CACHE_TTL_MS };
+      }
       return result;
     }).finally(() => {
-      inFlight = undefined;
+      if (inFlight === probe) inFlight = undefined;
     });
+    inFlight = probe;
   }
   return inFlight;
 }
