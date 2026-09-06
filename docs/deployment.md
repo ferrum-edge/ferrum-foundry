@@ -541,6 +541,13 @@ Notes:
   `FERRUM_TLS_CA_ROOT` at the mount directory. Kubernetes projects Secret keys
   through a rotating `..data` symlink; the BFF resolves the symlink inside the
   approved root and reloads the bundle after a rotation.
+- Accepted runtime settings return their own canonical values without waiting
+  for unrelated gateway calls to drain. Signing-only changes reuse the existing
+  transport. A subsequent request with changed connection settings selects a
+  new dispatcher while the previous one drains its captured requests. Shutdown
+  waits for active and retired dispatchers within the existing process deadline.
+  Concurrent saves publish when validation completes; responses may finish in
+  a different order and each describes the settings that request accepted.
 - `terminationGracePeriodSeconds` must be larger than `FERRUM_SHUTDOWN_TIMEOUT`
   so the process finishes its own bounded drain before the kubelet sends
   `SIGKILL`. 30 seconds against a 10000 ms timeout leaves room.
