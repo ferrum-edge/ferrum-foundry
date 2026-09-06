@@ -13,6 +13,30 @@ import type {
 } from "./types";
 import { collectAllPages } from "./pagination";
 
+// Coordinate this UI's writes by their explicit namespace and consumer id.
+// A metadata PUT reads credentials only after earlier rotation writes finish.
+const consumerWrites = new Map<string, Promise<void>>();
+
+async function serializeWrite<T>(scope: NamespaceScope, id: string, write: () => Promise<T>): Promise<T> {
+  const key = JSON.stringify([scope.namespace, id]);
+  const previous = consumerWrites.get(key) ?? Promise.resolve();
+  const result = previous.then(write);
+  const tail = result.then(() => undefined, () => undefined);
+  consumerWrites.set(key, tail);
+  try {
+    return await result;
+  } finally {
+    if (consumerWrites.get(key) === tail) consumerWrites.delete(key);
+  }
+}
+
+/** Ordinary editor writes cannot replay a render-time credential projection. */
+export function toUpdatePayload(data: ConsumerCreate): ConsumerCreate {
+  const payload = { ...data };
+  delete payload.credentials;
+  return payload;
+}
+
 function withConsumerId(data: ConsumerCreate, id?: string): ConsumerCreate {
   const resolvedId = id ?? data.id;
   return resolvedId ? { ...data, id: resolvedId } : data;
@@ -54,13 +78,23 @@ export async function update(
   id: string,
   data: ConsumerCreate,
 ): Promise<Consumer> {
-  return proxyApi
-    .put(`consumers/${id}`, scoped(scope, { json: withConsumerId(data, id) }))
-    .json<Consumer>();
+  return serializeWrite(scope, id, async () => {
+    // Consumer PUT replaces represented credential types even when the whole
+    // credentials field is omitted. Read the latest projection inside this
+    // write queue; only dedicated credential endpoints should edit secrets.
+    const current = await get(scope, id);
+    return proxyApi
+      .put(`consumers/${id}`, scoped(scope, {
+        json: withConsumerId({ ...toUpdatePayload(data), credentials: current.credentials }, id),
+      }))
+      .json<Consumer>();
+  });
 }
 
 export async function remove(scope: NamespaceScope, id: string): Promise<void> {
-  await proxyApi.delete(`consumers/${id}`, scoped(scope));
+  await serializeWrite(scope, id, async () => {
+    await proxyApi.delete(`consumers/${id}`, scoped(scope));
+  });
 }
 
 // ── Credential sub-endpoints ─────────────────────────────────────
@@ -71,12 +105,14 @@ export async function updateCredentials(
   credType: BuiltInCredentialType,
   data: ConsumerCredentialInput | ConsumerCredentialInput[],
 ): Promise<Consumer> {
-  return proxyApi
-    .put(
-      `consumers/${consumerId}/credentials/${credType}`,
-      scoped(scope, { json: data }),
-    )
-    .json<Consumer>();
+  return serializeWrite(scope, consumerId, async () => {
+    return proxyApi
+      .put(
+        `consumers/${consumerId}/credentials/${credType}`,
+        scoped(scope, { json: data }),
+      )
+      .json<Consumer>();
+  });
 }
 
 export async function appendCredential(
@@ -85,12 +121,14 @@ export async function appendCredential(
   credType: BuiltInCredentialType,
   data: ConsumerCredentialInput,
 ): Promise<Consumer> {
-  return proxyApi
-    .post(
-      `consumers/${consumerId}/credentials/${credType}`,
-      scoped(scope, { json: data }),
-    )
-    .json<Consumer>();
+  return serializeWrite(scope, consumerId, async () => {
+    return proxyApi
+      .post(
+        `consumers/${consumerId}/credentials/${credType}`,
+        scoped(scope, { json: data }),
+      )
+      .json<Consumer>();
+  });
 }
 
 export async function deleteCredentials(
@@ -98,10 +136,12 @@ export async function deleteCredentials(
   consumerId: string,
   credType: string,
 ): Promise<void> {
-  await proxyApi.delete(
-    `consumers/${consumerId}/credentials/${credType}`,
-    scoped(scope),
-  );
+  await serializeWrite(scope, consumerId, async () => {
+    await proxyApi.delete(
+      `consumers/${consumerId}/credentials/${credType}`,
+      scoped(scope),
+    );
+  });
 }
 
 export async function deleteCredentialByIndex(
@@ -110,8 +150,10 @@ export async function deleteCredentialByIndex(
   credType: string,
   index: number,
 ): Promise<void> {
-  await proxyApi.delete(
-    `consumers/${consumerId}/credentials/${credType}/${index}`,
-    scoped(scope),
-  );
+  await serializeWrite(scope, consumerId, async () => {
+    await proxyApi.delete(
+      `consumers/${consumerId}/credentials/${credType}/${index}`,
+      scoped(scope),
+    );
+  });
 }

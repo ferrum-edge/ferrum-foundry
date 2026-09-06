@@ -33,3 +33,18 @@ popup suppression.
 Configured-client tests in `src/api/client.retry.test.ts` inject fetch failures
 and count actual requests, including the surviving credential rotation entry.
 GitHub-hosted CI runs these tests together with the existing frontend suite.
+
+Consumer Details and ACL updates never reuse the editor's credential snapshot.
+The client serializes consumer and credential writes by namespace and consumer
+id, then reads the current credential projection immediately before a metadata
+PUT. This is required because the gateway's consumer PUT is a full replacement:
+omitting credentials can remove represented credential types. A failed fresh
+read prevents the PUT. A failed write releases the queue without replaying it.
+This queue coordinates one client instance; it cannot make GET/PUT atomic against
+other browsers or external writers without a gateway conditional-write contract.
+
+After a metadata write, the accepted consumer seeds its namespace-specific query
+cache and the editor remains pending through refetch. Subsequent ACL changes use
+that accepted group list. A credential-list refresh invalidates an open indexed
+delete selection, even when redacted entries look identical; select it again
+before confirming. Namespace/consumer changes still discard the entire editor.
