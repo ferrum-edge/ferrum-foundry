@@ -7,7 +7,6 @@ import { useHealth, useAdminMetrics } from "@/hooks/useMetrics";
 import { useGatewayRequestStats } from "@/hooks/useGatewayRequestStats";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
 import { BffConnectionCard } from "@/components/shared/BffConnectionCard";
 import { StatCard } from "@/components/metrics/StatCard";
 import { SkeletonCard } from "@/components/ui/Skeleton";
