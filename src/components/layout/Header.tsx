@@ -5,6 +5,7 @@ import { useNamespaces } from "@/hooks/useNamespaces";
 import { useTheme } from "@/stores/theme";
 import { useAuth } from "@/stores/auth";
 import { useBffReadiness } from "@/hooks/useBffHealth";
+import { readinessPresentation } from "@/lib/readiness";
 
 interface HeaderProps {
   onToggleSidebar: () => void;
@@ -18,21 +19,7 @@ export function Header({ onToggleSidebar }: HeaderProps) {
   const { logout, principal } = useAuth();
   const readiness = useBffReadiness();
 
-  // A failed background check retains the last successful data in React Query.
-  const unreachable =
-    readiness.isError || (readiness.isFetching && readiness.failureCount > 0);
-  const connection = unreachable
-    ? "unavailable"
-    : (readiness.data?.status ?? "unknown");
-  const connectionLabel = unreachable
-    ? "Unreachable"
-    : connection === "ready"
-      ? "Connected"
-      : connection === "degraded"
-        ? "Degraded"
-        : connection === "unavailable"
-          ? "Disconnected"
-          : "Checking";
+  const { status: connection, label: connectionLabel } = readinessPresentation(readiness);
   const connectionColor = connection === "ready"
     ? "bg-success"
     : connection === "degraded"
