@@ -192,6 +192,7 @@ describe("proxy group membership loading", () => {
     expect(get).toHaveBeenCalledWith("proxies", {
       searchParams: { offset: "0", limit: "250" },
       headers: { "X-Ferrum-Namespace": "default" },
+      context: { deferQueryErrors: true },
     });
     pluginResponse.resolve(plugin);
     firstPage.resolve(page([member("source")], 0, 2));
@@ -199,6 +200,7 @@ describe("proxy group membership loading", () => {
     expect(get).toHaveBeenCalledWith("proxies", {
       searchParams: { offset: "1", limit: "250" },
       headers: { "X-Ferrum-Namespace": "default" },
+      context: { deferQueryErrors: true },
     });
     expect(host.querySelector("form")).toBeNull();
     secondPage.resolve(page([member("destination")], 1, 2));
