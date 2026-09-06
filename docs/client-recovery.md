@@ -100,3 +100,20 @@ unverifiable. Foundry never resubmits the restore automatically. Pre-commit
 connectivity failures retain the gateway's structured `restore_errors` and
 `failure_class` in the recovery panel. Typed API-spec deletion confirmation and
 HTTP 500 rollback outcomes keep their existing handling.
+
+The global error dialog reports terminal failures. Direct HTTP calls notify from
+ky's final-error hook after its retry budget is exhausted. Query hooks explicitly
+pass `queryScope(scope)` (or `QUERY_ERROR_CONTEXT` for fleet-global reads), so
+their HTTP errors are deferred until TanStack Query emits its final `error`
+cache event. Intermediate retry failures never open a dialog. The retry counts
+and backoff policies are unchanged; a default permanently failing read can still
+make four Query attempts with up to three HTTP attempts each.
+
+Deferred details are associated with the rejected Error object and consumed once,
+so multiple observers do not duplicate a notification. Success does not dismiss
+an unrelated operation's error. `SILENT_ERRORS`, optional feature probes, and
+locally interpreted readiness/occupancy observations remain quiet while preserving
+their normal result or rejection semantics. New query functions must pass the
+query notification context through every page and follow-up read; direct callers
+retain ordinary terminal notification behavior. HTTP error data remains available
+to forms after ky consumes the response body.

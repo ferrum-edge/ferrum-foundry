@@ -7,6 +7,7 @@
 /*  after the click cannot retarget the write.                        */
 /* ------------------------------------------------------------------ */
 
+import { queryScope } from "@/api/client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as apiSpecs from "@/api/apiSpecs";
 import { useNamespace } from "@/stores/namespace";
@@ -18,7 +19,7 @@ export function useApiSpecs(
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["apiSpecs", scope.namespace, params],
-    queryFn: () => apiSpecs.list(scope, params),
+    queryFn: () => apiSpecs.list(queryScope(scope), params),
     retry: false,
     enabled,
   });
@@ -28,7 +29,7 @@ export function useAllApiSpecs(enabled = true) {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["apiSpecs", scope.namespace, "all"],
-    queryFn: () => apiSpecs.listAll(scope),
+    queryFn: () => apiSpecs.listAll(queryScope(scope)),
     enabled,
     retry: false,
   });
@@ -38,7 +39,7 @@ export function useApiSpecDocument(id: string) {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["apiSpecDocument", scope.namespace, id],
-    queryFn: () => apiSpecs.getDocument(scope, id),
+    queryFn: () => apiSpecs.getDocument(queryScope(scope), id),
     enabled: !!id,
     retry: false,
   });

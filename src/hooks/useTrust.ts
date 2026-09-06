@@ -6,6 +6,7 @@
 /*  in the namespace the dialog names even if the selector moved.     */
 /* ------------------------------------------------------------------ */
 
+import { queryScope } from "@/api/client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as trust from "@/api/trust";
 import { useNamespace } from "@/stores/namespace";
@@ -14,7 +15,7 @@ export function useTrustBundles() {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["trustBundles", scope.namespace],
-    queryFn: () => trust.list(scope),
+    queryFn: () => trust.list(queryScope(scope)),
     retry: false,
   });
 }
@@ -23,7 +24,7 @@ export function useTrustStatus() {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["trustStatus", scope.namespace],
-    queryFn: () => trust.status(scope),
+    queryFn: () => trust.status(queryScope(scope)),
     retry: false,
   });
 }

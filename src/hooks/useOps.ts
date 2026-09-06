@@ -8,6 +8,7 @@
 /*  started. Tenant surfaces (audit, backup, restore) key on it too.  */
 /* ------------------------------------------------------------------ */
 
+import { queryScope } from "@/api/client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as ops from "@/api/ops";
 import { useNamespace } from "@/stores/namespace";
@@ -16,7 +17,7 @@ export function useOverload(refetchInterval?: number | false) {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["overload"],
-    queryFn: () => ops.getOverload(scope),
+    queryFn: () => ops.getOverload(queryScope(scope)),
     refetchInterval: refetchInterval ?? 10000,
     refetchOnWindowFocus: refetchInterval === undefined ? undefined : false,
     refetchOnReconnect: refetchInterval === false ? false : undefined,
@@ -27,7 +28,7 @@ export function useRuntimeMetrics(refetchInterval?: number | false) {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["runtimeMetrics"],
-    queryFn: () => ops.getRuntimeMetrics(scope),
+    queryFn: () => ops.getRuntimeMetrics(queryScope(scope)),
     refetchInterval: refetchInterval ?? 10000,
     refetchOnWindowFocus: refetchInterval === undefined ? undefined : false,
     refetchOnReconnect: refetchInterval === false ? false : undefined,
@@ -38,7 +39,7 @@ export function useCharges(refetchInterval?: number | false) {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["charges"],
-    queryFn: () => ops.getCharges(scope),
+    queryFn: () => ops.getCharges(queryScope(scope)),
     refetchInterval: refetchInterval ?? 30000,
     refetchOnWindowFocus: refetchInterval === undefined ? undefined : false,
     refetchOnReconnect: refetchInterval === false ? false : undefined,
@@ -50,7 +51,7 @@ export function useChargesSinkStatus() {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["chargesSinkStatus"],
-    queryFn: () => ops.getChargesSinkStatus(scope),
+    queryFn: () => ops.getChargesSinkStatus(queryScope(scope)),
     retry: false,
   });
 }
@@ -59,7 +60,7 @@ export function useClusterStatus() {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["cluster"],
-    queryFn: () => ops.getClusterStatus(scope),
+    queryFn: () => ops.getClusterStatus(queryScope(scope)),
     refetchInterval: 15000,
   });
 }
@@ -68,7 +69,7 @@ export function useBackendCapabilities() {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["backendCapabilities"],
-    queryFn: () => ops.getBackendCapabilities(scope),
+    queryFn: () => ops.getBackendCapabilities(queryScope(scope)),
     retry: false,
   });
 }
@@ -88,7 +89,7 @@ export function useAuditEvents(params: ops.AuditListParams = {}) {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["audit", scope.namespace, params],
-    queryFn: () => ops.listAuditEvents(scope, params),
+    queryFn: () => ops.listAuditEvents(queryScope(scope), params),
   });
 }
 

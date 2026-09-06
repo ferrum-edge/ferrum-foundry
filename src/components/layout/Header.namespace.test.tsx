@@ -78,7 +78,7 @@ describe("Header namespace registry reconciliation", () => {
     await waitFor(() => expect(current.scope.namespace).toBe("active"));
     expect(combobox().textContent).toContain("active");
     expect(localStorage.getItem(NAMESPACE_STORAGE_KEY)).toBe("active");
-    expect(list).toHaveBeenCalledWith({ namespace: "retired" });
+    expect(list).toHaveBeenCalledWith({ namespace: "retired", deferQueryErrors: true });
   });
 
   it("chooses a grant-allowed namespace instead of the first global registry name", async () => {

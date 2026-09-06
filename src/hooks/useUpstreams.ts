@@ -7,6 +7,7 @@
 /*  after the click cannot retarget the write.                        */
 /* ------------------------------------------------------------------ */
 
+import { queryScope } from "@/api/client";
 import {
   useMutation,
   useQuery,
@@ -24,7 +25,7 @@ export function useUpstreams(params: PaginationParams = {}, enabled = true) {
       scope.namespace,
       { offset: params.offset, limit: params.limit },
     ],
-    queryFn: () => upstreams.list(scope, params),
+    queryFn: () => upstreams.list(queryScope(scope), params),
     enabled,
   });
 }
@@ -33,7 +34,7 @@ export function useAllUpstreams(enabled = true) {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["upstreams", scope.namespace, "all"],
-    queryFn: () => upstreams.listAll(scope),
+    queryFn: () => upstreams.listAll(queryScope(scope)),
     enabled,
   });
 }
@@ -42,7 +43,7 @@ export function useUpstream(id: string) {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["upstream", scope.namespace, id],
-    queryFn: () => upstreams.get(scope, id),
+    queryFn: () => upstreams.get(queryScope(scope), id),
     enabled: !!id,
   });
 }

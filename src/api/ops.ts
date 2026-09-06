@@ -7,7 +7,8 @@
 import { parseConfigCursor } from "./gatewayMetadata";
 import {
   SILENT_ERRORS,
-  onApiError,
+  reportRequestError,
+  DEFER_QUERY_ERRORS,
   proxyApi,
   scoped,
   type NamespaceScope,
@@ -83,13 +84,13 @@ export async function getOverload(
   } catch (error) {
     // The shared hook was silent, so report genuine HTTP/body/network errors
     // exactly once here and still reject for the panel's unavailable state.
-    onApiError({
+    reportRequestError(error, {
       statusCode: response?.status ?? 0,
       body: response
         ? await response.text().catch(() => "")
         : error instanceof Error ? error.message : "Overload request failed",
       url: response?.url || "/api/proxy/overload",
-    });
+    }, Boolean(scope[DEFER_QUERY_ERRORS]));
     throw error;
   }
 }

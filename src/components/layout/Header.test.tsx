@@ -6,7 +6,10 @@ import type { BffReadiness } from "@/hooks/useBffHealth";
 import { Header } from "./Header";
 
 const { get } = vi.hoisted(() => ({ get: vi.fn() }));
-vi.mock("@/api/client", () => ({ api: { get } }));
+vi.mock("@/api/client", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/api/client")>(),
+  api: { get },
+}));
 vi.mock("@/stores/namespace", () => ({
   useNamespace: () => ({ selectedNamespace: "default", setNamespace: vi.fn() }),
 }));

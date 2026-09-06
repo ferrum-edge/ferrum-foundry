@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { api } from "@/api/client";
+import { api, SILENT_ERRORS } from "@/api/client";
 
 export interface BffReadiness {
   status: "ready" | "degraded" | "unavailable";
@@ -16,7 +16,7 @@ export function useBffReadiness() {
   return useQuery({
     queryKey: ["bff-readiness"],
     queryFn: async () => {
-      const response = await api.get("api/health/ready", { throwHttpErrors: false });
+      const response = await api.get("api/health/ready", { throwHttpErrors: false, context: { [SILENT_ERRORS]: true } });
       return response.json<BffReadiness>();
     },
     refetchInterval: 15_000,

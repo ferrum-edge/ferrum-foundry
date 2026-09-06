@@ -2,6 +2,7 @@
 /*  Ferrum Foundry – TanStack Query hooks for Namespaces              */
 /* ------------------------------------------------------------------ */
 
+import { queryScope } from "@/api/client";
 import {
   useMutation,
   useQuery,
@@ -43,7 +44,7 @@ export function useNamespaces() {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["namespaces"],
-    queryFn: () => namespaces.list(scope),
+    queryFn: () => namespaces.list(queryScope(scope)),
     refetchOnWindowFocus: false,
   });
 }
@@ -52,7 +53,7 @@ export function useNamespaceDetail(name: string) {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["namespace", name],
-    queryFn: () => namespaces.get(scope, name),
+    queryFn: () => namespaces.get(queryScope(scope), name),
     enabled: !!name,
     refetchOnWindowFocus: false,
   });

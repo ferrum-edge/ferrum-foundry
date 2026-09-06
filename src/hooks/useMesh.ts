@@ -9,6 +9,7 @@
 /*  started because the BFF authorizes it against namespace grants.   */
 /* ------------------------------------------------------------------ */
 
+import { queryScope } from "@/api/client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as mesh from "@/api/mesh";
 import { useNamespace } from "@/stores/namespace";
@@ -19,7 +20,7 @@ export function useServiceGraph() {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["mesh", "serviceGraph"],
-    queryFn: () => mesh.getServiceGraph(scope),
+    queryFn: () => mesh.getServiceGraph(queryScope(scope)),
     ...MESH_QUERY_OPTS,
   });
 }
@@ -28,7 +29,7 @@ export function useEgressScope() {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["mesh", "egressScope"],
-    queryFn: () => mesh.getEgressScope(scope),
+    queryFn: () => mesh.getEgressScope(queryScope(scope)),
     retry: false,
   });
 }
@@ -45,7 +46,7 @@ export function useFederation() {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["mesh", "federation"],
-    queryFn: () => mesh.getFederation(scope),
+    queryFn: () => mesh.getFederation(queryScope(scope)),
     retry: false,
   });
 }
@@ -54,7 +55,7 @@ export function useRemoteClusters() {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["mesh", "remoteClusters"],
-    queryFn: () => mesh.getRemoteClusters(scope),
+    queryFn: () => mesh.getRemoteClusters(queryScope(scope)),
     ...MESH_QUERY_OPTS,
   });
 }
@@ -63,7 +64,7 @@ export function useConfigDrift() {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["mesh", "configDrift"],
-    queryFn: () => mesh.getConfigDrift(scope),
+    queryFn: () => mesh.getConfigDrift(queryScope(scope)),
     ...MESH_QUERY_OPTS,
   });
 }
@@ -83,7 +84,7 @@ export function useSliceDrift() {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["mesh", "sliceDrift"],
-    queryFn: () => mesh.getSliceDrift(scope),
+    queryFn: () => mesh.getSliceDrift(queryScope(scope)),
     ...MESH_QUERY_OPTS,
   });
 }
@@ -92,7 +93,7 @@ export function usePolicyDenies(window = "5m", limit = 50) {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["mesh", "policyDenies", window, limit],
-    queryFn: () => mesh.getPolicyDenies(scope, window, limit),
+    queryFn: () => mesh.getPolicyDenies(queryScope(scope), window, limit),
     ...MESH_QUERY_OPTS,
   });
 }
@@ -101,7 +102,7 @@ export function useNodeWaypointIdentities() {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["mesh", "nodeWaypointIdentities"],
-    queryFn: () => mesh.getNodeWaypointIdentities(scope),
+    queryFn: () => mesh.getNodeWaypointIdentities(queryScope(scope)),
     retry: false,
   });
 }
@@ -110,7 +111,7 @@ export function useServiceWaypointServices() {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["mesh", "serviceWaypointServices"],
-    queryFn: () => mesh.getServiceWaypointServices(scope),
+    queryFn: () => mesh.getServiceWaypointServices(queryScope(scope)),
     retry: false,
   });
 }
