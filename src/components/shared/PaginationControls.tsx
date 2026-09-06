@@ -18,12 +18,12 @@ export function PaginationControls({
   total,
   onChange,
 }: PaginationControlsProps) {
-  const currentPage = Math.floor(offset / limit) + 1;
+  const currentPage = total === 0 ? 1 : Math.floor(offset / limit) + 1;
   const totalPages = Math.max(1, Math.ceil(total / limit));
   const rangeStart = total === 0 ? 0 : offset + 1;
   const rangeEnd = Math.min(offset + limit, total);
 
-  const canGoPrev = offset > 0;
+  const canGoPrev = total > 0 && offset > 0;
   const canGoNext = offset + limit < total;
 
   const goToPrev = () => {
@@ -37,6 +37,23 @@ export function PaginationControls({
       onChange({ offset: offset + limit, limit });
     }
   };
+
+  if (total > 0 && offset >= total) {
+    return (
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-text-muted text-sm">
+          Page out of range — {total} results available
+        </span>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => onChange({ offset: (totalPages - 1) * limit, limit })}
+        >
+          Go to last page
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className="flex items-center justify-between">

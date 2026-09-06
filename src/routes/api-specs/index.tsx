@@ -241,9 +241,11 @@ function ApiSpecsWorkspace() {
         )}
         {!isLoading && !isError && specs.length === 0 && (
           <EmptyState
-            title={search ? "No matching specs" : "No API specs yet"}
+            title={total > 0 ? "No results on this page" : search ? "No matching specs" : "No API specs yet"}
             description={
-              search
+              total > 0
+                ? "Use Go to last page below to return to the available results."
+                : search
                 ? "Try adjusting your search terms."
                 : "Import an OpenAPI document with an x-ferrum-proxy extension to create a spec-managed proxy."
             }

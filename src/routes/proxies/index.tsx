@@ -254,14 +254,16 @@ export default function ProxiesPage() {
 
         {!isLoading && !isError && proxies.length === 0 && (
           <EmptyState
-            title={search ? "No matching proxies" : "No proxies yet"}
+            title={total > 0 ? "No results on this page" : search ? "No matching proxies" : "No proxies yet"}
             description={
-              search
+              total > 0
+                ? "Use Go to last page below to return to the available results."
+                : search
                 ? "Try adjusting your search terms."
                 : "Create your first proxy to start routing traffic."
             }
             action={
-              !search ? (
+              total === 0 && !search ? (
                 <Button size="sm" onClick={() => navigate({ to: "/proxies/new" })}>
                   Create Proxy
                 </Button>

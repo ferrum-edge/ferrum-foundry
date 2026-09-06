@@ -181,14 +181,16 @@ export default function UpstreamsPage() {
 
         {!isLoading && !isError && upstreams.length === 0 && (
           <EmptyState
-            title={search ? "No matching upstreams" : "No upstreams yet"}
+            title={total > 0 ? "No results on this page" : search ? "No matching upstreams" : "No upstreams yet"}
             description={
-              search
+              total > 0
+                ? "Use Go to last page below to return to the available results."
+                : search
                 ? "Try adjusting your search terms."
                 : "Create your first upstream to define backend targets and load balancing."
             }
             action={
-              !search ? (
+              total === 0 && !search ? (
                 <Button size="sm" onClick={() => navigate({ to: "/upstreams/new" })}>
                   Create Upstream
                 </Button>
