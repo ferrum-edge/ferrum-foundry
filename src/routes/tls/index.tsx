@@ -918,8 +918,12 @@ function AcmeTab() {
                         void runRowAction(`finalize:${order.id}`, async () => {
                           try {
                             if (orderIsUnknown(order) || order.status === "processing") {
+                              await queryClient.cancelQueries({ queryKey: ACME_ORDERS_KEY, exact: true });
                               const observed = queryClient.getQueryState(ACME_ORDERS_KEY)?.dataUpdateCount;
                               const checked = await getAcmeOrder(order.id);
+                              // Do not let a collection request that captured an older
+                              // status overwrite the accepted detail observation.
+                              await queryClient.cancelQueries({ queryKey: ACME_ORDERS_KEY, exact: true });
                               // A collection observation completed during this read. It
                               // owns the current state; a late detail must not rewind it.
                               if (queryClient.getQueryState(ACME_ORDERS_KEY)?.dataUpdateCount !== observed) return;
