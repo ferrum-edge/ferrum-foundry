@@ -29,7 +29,8 @@ import {
   buildNamespaceUpdate,
   isCascadableDeleteError,
   validateNamespaceName,
-  NAMESPACE_DESCRIPTION_MAX_LENGTH,
+  normalizeNamespaceDescription,
+  validateNamespaceDescription,
 } from "@/api/namespaces";
 import { getApiErrorDetail, getApiErrorMessage } from "@/api/client";
 
@@ -52,12 +53,14 @@ function CreateNamespaceDialog({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [nameError, setNameError] = useState<string | null>(null);
+  const [descriptionError, setDescriptionError] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) {
       setName("");
       setDescription("");
       setNameError(null);
+      setDescriptionError(null);
     }
   }, [open]);
 
@@ -66,12 +69,15 @@ function CreateNamespaceDialog({
     const error = validateNamespaceName(name.trim())
       ?? (namespaceGranted(principal.namespaces, name.trim()) ? null : "Namespace access denied");
     setNameError(error);
-    if (error) return;
+    const descriptionValidation = validateNamespaceDescription(description);
+    setDescriptionError(descriptionValidation);
+    if (error || descriptionValidation) return;
 
+    const normalizedDescription = normalizeNamespaceDescription(description);
     try {
       await createNamespace.mutateAsync({
         name: name.trim(),
-        ...(description.trim() ? { description: description.trim() } : {}),
+        ...(normalizedDescription ? { description: normalizedDescription } : {}),
       });
       toast("success", `Namespace "${name.trim()}" created`);
       onOpenChange(false);
@@ -103,8 +109,11 @@ function CreateNamespaceDialog({
           <Input
             label="Description (optional)"
             value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            maxLength={NAMESPACE_DESCRIPTION_MAX_LENGTH}
+            onChange={(e) => {
+              setDescription(e.target.value);
+              if (descriptionError) setDescriptionError(validateNamespaceDescription(e.target.value));
+            }}
+            error={descriptionError ?? undefined}
             placeholder="What this tenant is for"
           />
         </div>
@@ -137,7 +146,7 @@ function EditNamespaceDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const { toast } = useToast();
-  const { selectedNamespace, setNamespace } = useNamespace();
+  const { replaceNamespaceIfCurrent } = useNamespace();
   const updateNamespace = useUpdateNamespace();
   const { principal } = useAuth();
 
@@ -145,6 +154,7 @@ function EditNamespaceDialog({
   const [description, setDescription] = useState("");
   const [originalDescription, setOriginalDescription] = useState("");
   const [nameError, setNameError] = useState<string | null>(null);
+  const [descriptionError, setDescriptionError] = useState<string | null>(null);
   // Stop observing the detail once a save is submitted. On a rename the old
   // key stops resolving the moment the gateway commits, and a still-active
   // observer would refetch it into a spurious 404 popup.
@@ -168,6 +178,7 @@ function EditNamespaceDialog({
 
     setName(target);
     setNameError(null);
+    setDescriptionError(null);
     // Wait for the detail before seeding the description, so the field is
     // not briefly empty and then overwritten under the user's cursor.
     if (detail.isSuccess) {
@@ -186,7 +197,9 @@ function EditNamespaceDialog({
     const error = validateNamespaceName(name.trim())
       ?? (namespaceGranted(principal.namespaces, name.trim()) ? null : "Namespace access denied");
     setNameError(error);
-    if (error) return;
+    const descriptionValidation = validateNamespaceDescription(description);
+    setDescriptionError(descriptionValidation);
+    if (error || descriptionValidation) return;
 
     const payload = buildNamespaceUpdate(
       { name: target, description: originalDescription },
@@ -204,8 +217,8 @@ function EditNamespaceDialog({
         data: payload,
       });
       // Follow a rename of the namespace the UI is currently scoped to.
-      if (payload.name && target === selectedNamespace) {
-        setNamespace(updated.name);
+      if (payload.name) {
+        replaceNamespaceIfCurrent(target, updated.name);
       }
       toast("success", `Namespace "${updated.name}" updated`);
       onOpenChange(false);
@@ -237,8 +250,11 @@ function EditNamespaceDialog({
           <Input
             label="Description"
             value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            maxLength={NAMESPACE_DESCRIPTION_MAX_LENGTH}
+            onChange={(e) => {
+              setDescription(e.target.value);
+              if (descriptionError) setDescriptionError(validateNamespaceDescription(e.target.value));
+            }}
+            error={descriptionError ?? undefined}
             helpText="Leave empty to clear the description"
           />
         </div>
@@ -281,7 +297,7 @@ function DeleteNamespaceDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const { toast } = useToast();
-  const { selectedNamespace, setNamespace } = useNamespace();
+  const { replaceNamespaceIfCurrent } = useNamespace();
   const deleteNamespace = useDeleteNamespace();
 
   // Set only once the gateway refuses an unconfirmed delete for occupancy.
@@ -298,7 +314,7 @@ function DeleteNamespaceDialog({
 
   function finish(name: string) {
     // The deleted namespace can no longer be the active scope.
-    if (name === selectedNamespace) setNamespace(DEFAULT_NAMESPACE);
+    replaceNamespaceIfCurrent(name, DEFAULT_NAMESPACE);
     toast("success", `Namespace "${name}" deleted`);
     onOpenChange(false);
   }

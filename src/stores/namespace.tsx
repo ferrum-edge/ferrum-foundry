@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -36,6 +37,8 @@ import { useAuth } from "@/stores/auth";
 interface NamespaceContextValue {
   selectedNamespace: string;
   setNamespace: (ns: string) => void;
+  /** Replace only if the provider still selects the mutation's target. */
+  replaceNamespaceIfCurrent: (target: string, replacement: string) => void;
   /**
    * The current selection as an immutable binding. Capture it when an
    * operation starts and pass it to the API layer; the object identity only
@@ -72,26 +75,34 @@ export function NamespaceProvider({ children }: { children: ReactNode }) {
   const [selectedNamespace, setSelectedNamespace] = useState<string>(
     loadPersistedNamespace,
   );
+  // Updated synchronously by every selection writer, including before React
+  // commits a batched render. Async continuations must not compare snapshots.
+  const currentNamespace = useRef(selectedNamespace);
 
   const setNamespace = useCallback((ns: string) => {
+    currentNamespace.current = ns;
     persistNamespace(ns);
     setSelectedNamespace(ns);
   }, []);
 
+  const replaceNamespaceIfCurrent = useCallback((target: string, replacement: string) => {
+    if (currentNamespace.current === target) setNamespace(replacement);
+  }, [setNamespace]);
+
   useEffect(() => {
     if (!principal?.namespaces?.length || principal.namespaces.includes(selectedNamespace)) return;
     const firstAllowed = principal.namespaces[0];
-    persistNamespace(firstAllowed);
-    setSelectedNamespace(firstAllowed);
-  }, [principal, selectedNamespace]);
+    setNamespace(firstAllowed);
+  }, [principal, selectedNamespace, setNamespace]);
 
   const value = useMemo<NamespaceContextValue>(
     () => ({
       selectedNamespace,
       setNamespace,
+      replaceNamespaceIfCurrent,
       scope: { namespace: selectedNamespace },
     }),
-    [selectedNamespace, setNamespace],
+    [selectedNamespace, setNamespace, replaceNamespaceIfCurrent],
   );
 
   return (

@@ -10,7 +10,7 @@ const { state, create, update, remove } = vi.hoisted(() => ({
   create: vi.fn(), update: vi.fn(), remove: vi.fn(),
 }));
 vi.mock('@/stores/auth', () => ({ useAuth: () => ({ principal: state.principal, logout: vi.fn() }) }));
-vi.mock('@/stores/namespace', () => ({ useNamespace: () => ({ selectedNamespace: 'tenant-a', setNamespace: vi.fn() }) }));
+vi.mock('@/stores/namespace', () => ({ useNamespace: () => ({ selectedNamespace: 'tenant-a', setNamespace: vi.fn(), replaceNamespaceIfCurrent: vi.fn() }) }));
 vi.mock('@/stores/theme', () => ({ useTheme: () => ({ theme: 'dark', toggleTheme: vi.fn() }) }));
 vi.mock('@/hooks/useBffHealth', () => ({ useBffReadiness: () => ({ data: { status: 'ready' } }) }));
 vi.mock('@/components/ui/Toast', () => ({ useToast: () => ({ toast: vi.fn() }) }));

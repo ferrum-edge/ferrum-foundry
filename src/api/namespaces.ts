@@ -17,7 +17,8 @@ export interface Namespace {
   name: string;
   /**
    * Optional operator-facing description. Absent (not empty-string) when
-   * unset — the gateway trims on write and stores whitespace-only as absent.
+   * unset — the gateway trims Unicode White_Space on write and stores
+   * whitespace-only as absent. Limit: 1024 Unicode scalar values after trim.
    */
   description?: string | null;
   /**
@@ -46,6 +47,24 @@ export interface NamespaceUpdate {
 export const NAMESPACE_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 export const NAMESPACE_NAME_MAX_LENGTH = 254;
 export const NAMESPACE_DESCRIPTION_MAX_LENGTH = 1024;
+
+/** Match Edge's str::trim and the BFF, including NEXT LINE but excluding BOM. */
+export function normalizeNamespaceDescription(description: string): string {
+  return description.replace(/^\p{White_Space}+|\p{White_Space}+$/gu, "");
+}
+
+/** The limit counts Unicode scalar values, not native input UTF-16 units. */
+export function validateNamespaceDescription(description: string): string | null {
+  const characters = [...normalizeNamespaceDescription(description)];
+  if (characters.some((character) => {
+    const code = character.codePointAt(0)!;
+    return code >= 0xd800 && code <= 0xdfff;
+  })) return "Namespace description must contain valid Unicode characters";
+  if (characters.length > NAMESPACE_DESCRIPTION_MAX_LENGTH) {
+    return `Namespace description must be at most ${NAMESPACE_DESCRIPTION_MAX_LENGTH} characters`;
+  }
+  return null;
+}
 
 /**
  * Validate a namespace name against the gateway's schema
@@ -81,9 +100,9 @@ export function buildNamespaceUpdate(
     payload.name = nextName;
   }
 
-  const currentDescription = current.description ?? "";
-  const nextDescription = next.description.trim();
-  if (nextDescription !== currentDescription.trim()) {
+  const currentDescription = normalizeNamespaceDescription(current.description ?? "");
+  const nextDescription = normalizeNamespaceDescription(next.description);
+  if (nextDescription !== currentDescription) {
     payload.description = nextDescription === "" ? null : nextDescription;
   }
 

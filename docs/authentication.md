@@ -104,6 +104,11 @@ request it makes carries that binding.** In practice:
   namespace restore, and the apply-status poll that follows a mutation. A
   switch made after an operation has started, in this tab or any other,
   does not retarget it.
+- Registry rename/delete completion reconciles the affected cache entries
+  even if its dialog has closed. It follows the renamed namespace (or leaves
+  the deleted namespace) only if that target is still the provider's current
+  selection. A later user selection is preserved, including its request scope
+  and persisted preference.
 - `localStorage` (`ferrum:namespace`) stores a *preference*, not the active
   namespace. It is read once when a tab loads, so a new tab opens on the
   namespace last chosen anywhere, and it is written when the user switches.
