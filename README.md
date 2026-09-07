@@ -8,7 +8,7 @@
   <a href="https://github.com/ferrum-edge/ferrum-foundry/actions/workflows/ci.yml"><img src="https://github.com/ferrum-edge/ferrum-foundry/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
   <a href="https://github.com/ferrum-edge/ferrum-foundry/actions/workflows/release.yml"><img src="https://github.com/ferrum-edge/ferrum-foundry/actions/workflows/release.yml/badge.svg" alt="Release" /></a>
   <a href="https://github.com/ferrum-edge/ferrum-foundry/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue" alt="License" /></a>
-  <img src="https://img.shields.io/badge/node-%3E%3D22%20%28image%3A%2024%20LTS%29-brightgreen" alt="Node.js 22+ (image: 24 LTS)" />
+  <img src="https://img.shields.io/badge/node-22.19%2B%20%7C%2024%20%7C%2026%2B-brightgreen" alt="Node.js 22.19+, 24.x, or 26+ (image: 24 LTS)" />
   <img src="https://img.shields.io/badge/TypeScript-6-blue" alt="TypeScript" />
 </p>
 
@@ -46,7 +46,7 @@ The BFF (Backend-for-Frontend) handles TLS trust stores, connection/read/write t
 
 ### Prerequisites
 
-- Node.js 22 or newer. The published container image runs Node.js 24 LTS.
+- Node.js 22.19+ within 22.x, 24.x, or 26+. The published container image runs Node.js 24 LTS. This range satisfies both Undici's runtime floor and Vitest 5's supported Node versions.
 - npm 10+
 
 ### Local Development
