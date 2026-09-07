@@ -15,6 +15,8 @@ import {
 } from "@/components/ui/Dialog";
 import { useToast } from "@/components/ui/Toast";
 import { useNamespace } from "@/stores/namespace";
+import { useAuth } from "@/stores/auth";
+import { namespaceGranted } from "@/lib/namespaceGrants";
 import {
   useNamespaces,
   useNamespaceDetail,
@@ -27,7 +29,8 @@ import {
   buildNamespaceUpdate,
   isCascadableDeleteError,
   validateNamespaceName,
-  NAMESPACE_DESCRIPTION_MAX_LENGTH,
+  normalizeNamespaceDescription,
+  validateNamespaceDescription,
 } from "@/api/namespaces";
 import { getApiErrorDetail, getApiErrorMessage } from "@/api/client";
 
@@ -46,27 +49,35 @@ function CreateNamespaceDialog({
 }) {
   const { toast } = useToast();
   const createNamespace = useCreateNamespace();
+  const { principal } = useAuth();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [nameError, setNameError] = useState<string | null>(null);
+  const [descriptionError, setDescriptionError] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) {
       setName("");
       setDescription("");
       setNameError(null);
+      setDescriptionError(null);
     }
   }, [open]);
 
   async function handleSubmit() {
-    const error = validateNamespaceName(name.trim());
+    if (principal?.role !== "admin") return;
+    const error = validateNamespaceName(name.trim())
+      ?? (namespaceGranted(principal.namespaces, name.trim()) ? null : "Namespace access denied");
     setNameError(error);
-    if (error) return;
+    const descriptionValidation = validateNamespaceDescription(description);
+    setDescriptionError(descriptionValidation);
+    if (error || descriptionValidation) return;
 
+    const normalizedDescription = normalizeNamespaceDescription(description);
     try {
       await createNamespace.mutateAsync({
         name: name.trim(),
-        ...(description.trim() ? { description: description.trim() } : {}),
+        ...(normalizedDescription ? { description: normalizedDescription } : {}),
       });
       toast("success", `Namespace "${name.trim()}" created`);
       onOpenChange(false);
@@ -98,8 +109,11 @@ function CreateNamespaceDialog({
           <Input
             label="Description (optional)"
             value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            maxLength={NAMESPACE_DESCRIPTION_MAX_LENGTH}
+            onChange={(e) => {
+              setDescription(e.target.value);
+              if (descriptionError) setDescriptionError(validateNamespaceDescription(e.target.value));
+            }}
+            error={descriptionError ?? undefined}
             placeholder="What this tenant is for"
           />
         </div>
@@ -132,13 +146,15 @@ function EditNamespaceDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const { toast } = useToast();
-  const { selectedNamespace, setNamespace } = useNamespace();
+  const { replaceNamespaceIfCurrent } = useNamespace();
   const updateNamespace = useUpdateNamespace();
+  const { principal } = useAuth();
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [originalDescription, setOriginalDescription] = useState("");
   const [nameError, setNameError] = useState<string | null>(null);
+  const [descriptionError, setDescriptionError] = useState<string | null>(null);
   // Stop observing the detail once a save is submitted. On a rename the old
   // key stops resolving the moment the gateway commits, and a still-active
   // observer would refetch it into a spurious 404 popup.
@@ -162,6 +178,7 @@ function EditNamespaceDialog({
 
     setName(target);
     setNameError(null);
+    setDescriptionError(null);
     // Wait for the detail before seeding the description, so the field is
     // not briefly empty and then overwritten under the user's cursor.
     if (detail.isSuccess) {
@@ -175,11 +192,14 @@ function EditNamespaceDialog({
   }, [target, detail.isSuccess, loadedDescription]);
 
   async function handleSubmit() {
-    if (!target) return;
+    if (!target || principal?.role !== "admin" || !namespaceGranted(principal.namespaces, target)) return;
 
-    const error = validateNamespaceName(name.trim());
+    const error = validateNamespaceName(name.trim())
+      ?? (namespaceGranted(principal.namespaces, name.trim()) ? null : "Namespace access denied");
     setNameError(error);
-    if (error) return;
+    const descriptionValidation = validateNamespaceDescription(description);
+    setDescriptionError(descriptionValidation);
+    if (error || descriptionValidation) return;
 
     const payload = buildNamespaceUpdate(
       { name: target, description: originalDescription },
@@ -197,8 +217,8 @@ function EditNamespaceDialog({
         data: payload,
       });
       // Follow a rename of the namespace the UI is currently scoped to.
-      if (payload.name && target === selectedNamespace) {
-        setNamespace(updated.name);
+      if (payload.name) {
+        replaceNamespaceIfCurrent(target, updated.name);
       }
       toast("success", `Namespace "${updated.name}" updated`);
       onOpenChange(false);
@@ -230,8 +250,11 @@ function EditNamespaceDialog({
           <Input
             label="Description"
             value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            maxLength={NAMESPACE_DESCRIPTION_MAX_LENGTH}
+            onChange={(e) => {
+              setDescription(e.target.value);
+              if (descriptionError) setDescriptionError(validateNamespaceDescription(e.target.value));
+            }}
+            error={descriptionError ?? undefined}
             helpText="Leave empty to clear the description"
           />
         </div>
@@ -274,7 +297,7 @@ function DeleteNamespaceDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const { toast } = useToast();
-  const { selectedNamespace, setNamespace } = useNamespace();
+  const { replaceNamespaceIfCurrent } = useNamespace();
   const deleteNamespace = useDeleteNamespace();
 
   // Set only once the gateway refuses an unconfirmed delete for occupancy.
@@ -291,7 +314,7 @@ function DeleteNamespaceDialog({
 
   function finish(name: string) {
     // The deleted namespace can no longer be the active scope.
-    if (name === selectedNamespace) setNamespace(DEFAULT_NAMESPACE);
+    replaceNamespaceIfCurrent(name, DEFAULT_NAMESPACE);
     toast("success", `Namespace "${name}" deleted`);
     onOpenChange(false);
   }
@@ -439,10 +462,19 @@ function DeleteNamespaceDialog({
 export function NamespaceManagerCard() {
   const { selectedNamespace } = useNamespace();
   const { data: namespaces, isLoading } = useNamespaces();
+  const { principal } = useAuth();
+  const visibleNamespaces = principal
+    ? namespaces?.filter((name) => namespaceGranted(principal.namespaces, name))
+    : [];
+  const canManage = principal?.role === "admin";
 
-  const [createOpen, setCreateOpen] = useState(false);
-  const [editTarget, setEditTarget] = useState<string | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  // Each opening owns its form and mutation observer, even for the same name.
+  // A completed mutation still reconciles global state, but can only close
+  // the opening that submitted it, never a newer draft.
+  const generation = useRef(0);
+  const [createSession, setCreateSession] = useState<number | null>(null);
+  const [editSession, setEditSession] = useState<{ id: number; target: string } | null>(null);
+  const [deleteSession, setDeleteSession] = useState<{ id: number; target: string } | null>(null);
 
   return (
     <Card>
@@ -450,20 +482,20 @@ export function NamespaceManagerCard() {
         <h3 className="text-sm font-semibold text-text-primary">
           Manage Namespaces
         </h3>
-        <Button size="sm" onClick={() => setCreateOpen(true)}>
+        {canManage && <Button size="sm" onClick={() => setCreateSession(++generation.current)}>
           New Namespace
-        </Button>
+        </Button>}
       </div>
 
       {isLoading ? (
         <div className="h-24 bg-bg-card-hover rounded animate-pulse" />
-      ) : !namespaces || namespaces.length === 0 ? (
+      ) : !visibleNamespaces || visibleNamespaces.length === 0 ? (
         <p className="text-sm text-text-muted">
           No namespaces returned from the gateway.
         </p>
       ) : (
         <ul className="divide-y divide-border">
-          {namespaces.map((ns) => (
+          {visibleNamespaces.map((ns) => (
             <li key={ns} className="flex items-center justify-between py-2.5">
               <div className="flex min-w-0 items-center gap-2">
                 <span className="truncate text-sm text-text-primary">{ns}</span>
@@ -471,11 +503,11 @@ export function NamespaceManagerCard() {
                   <Badge variant="orange">active</Badge>
                 )}
               </div>
-              <div className="flex shrink-0 items-center gap-2">
+              {canManage && <div className="flex shrink-0 items-center gap-2">
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => setEditTarget(ns)}
+                  onClick={() => setEditSession({ id: ++generation.current, target: ns })}
                 >
                   Edit
                 </Button>
@@ -483,11 +515,11 @@ export function NamespaceManagerCard() {
                   variant="ghost"
                   size="sm"
                   className="text-danger hover:text-danger"
-                  onClick={() => setDeleteTarget(ns)}
+                  onClick={() => setDeleteSession({ id: ++generation.current, target: ns })}
                 >
                   Delete
                 </Button>
-              </div>
+              </div>}
             </li>
           ))}
         </ul>
@@ -499,15 +531,23 @@ export function NamespaceManagerCard() {
         or deleted.
       </p>
 
-      <CreateNamespaceDialog open={createOpen} onOpenChange={setCreateOpen} />
-      <EditNamespaceDialog
-        target={editTarget}
-        onOpenChange={(open) => !open && setEditTarget(null)}
-      />
-      <DeleteNamespaceDialog
-        target={deleteTarget}
-        onOpenChange={(open) => !open && setDeleteTarget(null)}
-      />
+      {canManage && createSession !== null && <CreateNamespaceDialog
+        key={createSession}
+        open
+        onOpenChange={(open) => !open && setCreateSession((current) => current === createSession ? null : current)}
+      />}
+      {/* Registry refreshes may retire a name while a newer draft is open.
+          Keep that draft mounted while still enforcing current grants. */}
+      {canManage && editSession && namespaceGranted(principal.namespaces, editSession.target) && <EditNamespaceDialog
+        key={editSession.id}
+        target={editSession.target}
+        onOpenChange={(open) => !open && setEditSession((current) => current === editSession ? null : current)}
+      />}
+      {canManage && deleteSession && namespaceGranted(principal.namespaces, deleteSession.target) && <DeleteNamespaceDialog
+        key={deleteSession.id}
+        target={deleteSession.target}
+        onOpenChange={(open) => !open && setDeleteSession((current) => current === deleteSession ? null : current)}
+      />}
     </Card>
   );
 }

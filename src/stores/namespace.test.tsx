@@ -216,4 +216,35 @@ describe("NamespaceProvider binding", () => {
     await mount();
     expect(displayed()).toBe(DEFAULT_NAMESPACE);
   });
+
+  it("compares against the latest selection even before a batched render", async () => {
+    localStorage.setItem(NAMESPACE_STORAGE_KEY, "tenant-a");
+    await mount();
+    const startedUnderA = latest!;
+    await act(async () => {
+      startedUnderA.setNamespace("tenant-c");
+      startedUnderA.replaceNamespaceIfCurrent("tenant-a", "tenant-b");
+    });
+    expect(displayed()).toBe("tenant-c");
+    expect(localStorage.getItem(NAMESPACE_STORAGE_KEY)).toBe("tenant-c");
+    expect(latest!.scope.namespace).toBe("tenant-c");
+    expect(latest!.replaceNamespaceIfCurrent).toBe(startedUnderA.replaceNamespaceIfCurrent);
+    await consumers.create(startedUnderA.scope, { username: "alice" });
+    await consumers.create(latest!.scope, { username: "bob" });
+    expect(captured.map((request) => request.namespace)).toEqual(["tenant-a", "tenant-c"]);
+  });
+
+  it("follows only the current target through consecutive conditional replacements", async () => {
+    localStorage.setItem(NAMESPACE_STORAGE_KEY, "tenant-a");
+    await mount();
+    const replace = latest!.replaceNamespaceIfCurrent;
+    await act(async () => {
+      replace("tenant-a", "tenant-b");
+      replace("tenant-a", "wrong");
+      replace("tenant-b", "tenant-c");
+    });
+    expect(displayed()).toBe("tenant-c");
+    expect(localStorage.getItem(NAMESPACE_STORAGE_KEY)).toBe("tenant-c");
+    expect(latest!.scope.namespace).toBe("tenant-c");
+  });
 });

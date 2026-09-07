@@ -34,6 +34,22 @@ The trusted proxy must remove client-supplied copies and inject these headers:
 Non-admin identities are rejected when the namespace header is missing. An
 admin may omit it only when policy deliberately grants global administration.
 Header names can be changed with `FERRUM_TRUSTED_PROXY_*_HEADER` variables.
+Each identity/proof header may occur only once on the wire, including configured
+header names. A single namespace header may contain multiple comma-separated
+exact grants. Literal `*` and namespace glob patterns are invalid; unrestricted
+administration uses the deliberately omitted header described above.
+
+The namespace registry is authorized by its actual target: GET/PUT/DELETE
+require the path name, POST requires the body's name, and rename requires both
+old and new names. Registry writes require admin role. The selected
+`X-Ferrum-Namespace` cannot grant access to another registry target. Foundry
+validates registry JSON within the ordinary 2 MiB upload limit before forwarding;
+bulk import/restore routes retain their separate streaming limits and deadlines.
+Registry lists are filtered to exact grants before pagination, including totals,
+under one response deadline. The manager and header selector use the same grants.
+These BFF checks apply even when gateway namespace-claim enforcement is disabled.
+For another enforcement layer on multi-tenant deployments, configure Ferrum Edge
+with `FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM=true` as well.
 
 Namespace grants constrain Ferrum operations that declare
 `X-Ferrum-Namespace`; they do not turn fleet-global process/runtime APIs into
@@ -88,6 +104,11 @@ request it makes carries that binding.** In practice:
   namespace restore, and the apply-status poll that follows a mutation. A
   switch made after an operation has started, in this tab or any other,
   does not retarget it.
+- Registry rename/delete completion reconciles the affected cache entries
+  even if its dialog has closed. It follows the renamed namespace (or leaves
+  the deleted namespace) only if that target is still the provider's current
+  selection. A later user selection is preserved, including its request scope
+  and persisted preference.
 - `localStorage` (`ferrum:namespace`) stores a *preference*, not the active
   namespace. It is read once when a tab loads, so a new tab opens on the
   namespace last chosen anywhere, and it is written when the user switches.

@@ -56,6 +56,21 @@ describe("validateNamespaceName", () => {
   });
 });
 
+it("compares descriptions using Edge whitespace rules without losing omission or BOM", () => {
+  expect(buildNamespaceUpdate(
+    { name: "staging", description: "\u0085kept\u2003" },
+    { name: "staging", description: "kept" },
+  )).toBeNull();
+  expect(buildNamespaceUpdate(
+    { name: "staging", description: "\ufeff" },
+    { name: "staging", description: "" },
+  )).toEqual({ description: null });
+  expect(buildNamespaceUpdate(
+    { name: "staging", description: "" },
+    { name: "staging", description: "\ufeff" },
+  )).toEqual({ description: "\ufeff" });
+});
+
 /* ================================================================== */
 /*  buildNamespaceUpdate                                              */
 /* ================================================================== */
