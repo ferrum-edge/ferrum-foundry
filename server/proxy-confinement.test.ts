@@ -205,12 +205,12 @@ describe('raw BFF path confinement', () => {
       expect(response.status).toBe(200);
       expect(response.wire).toContain(TENANT_DATA);
       expect(arrivals.at(-1)).toMatchObject({ url: upstream, method: 'GET', namespace: 'tenant-a' });
-      expect(decodeJwt(arrivals.at(-1)!.token)).toMatchObject({ sub: 'path-test-user', role: 'viewer', ns: ['tenant-a'] });
+      expect(decodeJwt(arrivals.at(-1)!.token)).toMatchObject({ sub: 'path-test-user', role: 'viewer', ns: 'tenant-a' });
     }
     const body = '{ "id": "normal-write" }';
     expect((await rawRequest('/api/proxy/proxies', 'POST', identity(), body)).status).toBe(200);
     expect(publications.at(-1)).toEqual({ url: '/proxies', body });
-    expect(decodeJwt(arrivals.at(-1)!.token)).toMatchObject({ role: 'operator', ns: ['tenant-a'] });
+    expect(decodeJwt(arrivals.at(-1)!.token)).toMatchObject({ role: 'operator', ns: 'tenant-a' });
   });
 
   it('exempts real fleet operations and refuses unsupported method/path combinations', async () => {
