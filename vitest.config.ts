@@ -47,19 +47,25 @@ export default defineConfig({
     },
     projects: [
       {
+        // Preserve the independent project configuration used with Vitest 4.
+        extends: false,
         resolve: {
           alias: sharedAlias,
         },
         test: {
           name: "frontend",
+          // Vitest 5 clears mock history by default, including beforeAll calls.
+          clearMocks: false,
           environment: "jsdom",
           globals: false,
           include: ["src/**/*.test.{ts,tsx}"],
         },
       },
       {
+        extends: false,
         test: {
           name: "server",
+          clearMocks: false,
           environment: "node",
           globals: false,
           include: ["server/**/*.test.ts"],
