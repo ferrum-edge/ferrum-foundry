@@ -5,7 +5,7 @@ import { fetch, type RequestInit } from 'undici';
 import { requireAdminAuth } from './auth.js';
 import { loadConfig } from './config.js';
 import { generateToken } from './jwt.js';
-import { proxyTargetPath, UnsafeProxyPathError } from './proxy-path.js';
+import { proxyTargetPath, proxyTargetUrl, UnsafeProxyPathError } from './proxy-path.js';
 import { getDispatcher } from './tls.js';
 import { waitingRouteTimeout } from './waitBudget.js';
 
@@ -245,11 +245,8 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
     const principal = request.authPrincipal;
     if (!principal) return reply.status(401).send({ error: 'Unauthorized' });
 
-    const targetPath = proxyTargetPath(request);
-    const target = new URL(config.adminUrl);
-    target.pathname = targetPath;
-    const queryIndex = request.url.indexOf('?');
-    if (queryIndex >= 0) target.search = request.url.slice(queryIndex + 1);
+    const target = proxyTargetUrl(request, config.adminUrl);
+    const targetPath = target.pathname;
 
     const declaredLength = Number(request.headers['content-length']);
     const routeBodyLimit = bodyLimitFor(targetPath);

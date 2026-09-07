@@ -43,6 +43,15 @@ surface accordingly. Map roles with that blast radius in mind, and restrict
 fleet-global routes at the identity proxy when scoped identities must not use
 them.
 
+The BFF validates proxy paths from the raw request target before forwarding.
+Path segments are decoded once; controls, dot segments, encoded separators,
+repeated separators, malformed escapes, and nested escapes are refused.
+Ordinary escaped identifiers remain supported, and query parameters are handled
+separately. Namespace authorization, body limits, upload admission, and deadlines
+all use the same serialized pathname sent upstream. Only the known TLS operation
+paths and methods receive the fleet-global namespace exemption; new upstream TLS
+operations must be added to the BFF's explicit route list.
+
 ### Runtime identity defaults
 
 `GET /api/settings` includes the active `authMode`. In `trusted-proxy` mode,
