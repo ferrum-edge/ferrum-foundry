@@ -138,6 +138,17 @@ function containsControlCharacter(value: string): boolean {
 }
 
 function trustedProxyPrincipal(request: FastifyRequest, config: Config): AuthPrincipal | undefined {
+  const identityHeaders = new Set([
+    TRUSTED_PROXY_SECRET_HEADER, config.trustedProxyUserHeader,
+    config.trustedProxyRoleHeader, config.trustedProxyNamespacesHeader,
+  ]);
+  const seen = new Set<string>();
+  for (let index = 0; index < request.raw.rawHeaders.length; index += 2) {
+    const name = request.raw.rawHeaders[index].toLowerCase();
+    if (!identityHeaders.has(name)) continue;
+    if (seen.has(name)) return undefined;
+    seen.add(name);
+  }
   const suppliedSecret = singleHeader(request, TRUSTED_PROXY_SECRET_HEADER);
   if (!suppliedSecret || !config.trustedProxySecret || !safeEqual(suppliedSecret, config.trustedProxySecret)) {
     return undefined;

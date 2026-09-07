@@ -15,6 +15,8 @@ import {
 } from "@/components/ui/Dialog";
 import { useToast } from "@/components/ui/Toast";
 import { useNamespace } from "@/stores/namespace";
+import { useAuth } from "@/stores/auth";
+import { namespaceGranted } from "@/lib/namespaceGrants";
 import {
   useNamespaces,
   useNamespaceDetail,
@@ -46,6 +48,7 @@ function CreateNamespaceDialog({
 }) {
   const { toast } = useToast();
   const createNamespace = useCreateNamespace();
+  const { principal } = useAuth();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [nameError, setNameError] = useState<string | null>(null);
@@ -59,7 +62,9 @@ function CreateNamespaceDialog({
   }, [open]);
 
   async function handleSubmit() {
-    const error = validateNamespaceName(name.trim());
+    if (principal?.role !== "admin") return;
+    const error = validateNamespaceName(name.trim())
+      ?? (namespaceGranted(principal.namespaces, name.trim()) ? null : "Namespace access denied");
     setNameError(error);
     if (error) return;
 
@@ -134,6 +139,7 @@ function EditNamespaceDialog({
   const { toast } = useToast();
   const { selectedNamespace, setNamespace } = useNamespace();
   const updateNamespace = useUpdateNamespace();
+  const { principal } = useAuth();
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -175,9 +181,10 @@ function EditNamespaceDialog({
   }, [target, detail.isSuccess, loadedDescription]);
 
   async function handleSubmit() {
-    if (!target) return;
+    if (!target || principal?.role !== "admin" || !namespaceGranted(principal.namespaces, target)) return;
 
-    const error = validateNamespaceName(name.trim());
+    const error = validateNamespaceName(name.trim())
+      ?? (namespaceGranted(principal.namespaces, name.trim()) ? null : "Namespace access denied");
     setNameError(error);
     if (error) return;
 
@@ -439,6 +446,11 @@ function DeleteNamespaceDialog({
 export function NamespaceManagerCard() {
   const { selectedNamespace } = useNamespace();
   const { data: namespaces, isLoading } = useNamespaces();
+  const { principal } = useAuth();
+  const visibleNamespaces = principal
+    ? namespaces?.filter((name) => namespaceGranted(principal.namespaces, name))
+    : [];
+  const canManage = principal?.role === "admin";
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<string | null>(null);
@@ -450,20 +462,20 @@ export function NamespaceManagerCard() {
         <h3 className="text-sm font-semibold text-text-primary">
           Manage Namespaces
         </h3>
-        <Button size="sm" onClick={() => setCreateOpen(true)}>
+        {canManage && <Button size="sm" onClick={() => setCreateOpen(true)}>
           New Namespace
-        </Button>
+        </Button>}
       </div>
 
       {isLoading ? (
         <div className="h-24 bg-bg-card-hover rounded animate-pulse" />
-      ) : !namespaces || namespaces.length === 0 ? (
+      ) : !visibleNamespaces || visibleNamespaces.length === 0 ? (
         <p className="text-sm text-text-muted">
           No namespaces returned from the gateway.
         </p>
       ) : (
         <ul className="divide-y divide-border">
-          {namespaces.map((ns) => (
+          {visibleNamespaces.map((ns) => (
             <li key={ns} className="flex items-center justify-between py-2.5">
               <div className="flex min-w-0 items-center gap-2">
                 <span className="truncate text-sm text-text-primary">{ns}</span>
@@ -471,7 +483,7 @@ export function NamespaceManagerCard() {
                   <Badge variant="orange">active</Badge>
                 )}
               </div>
-              <div className="flex shrink-0 items-center gap-2">
+              {canManage && <div className="flex shrink-0 items-center gap-2">
                 <Button
                   variant="ghost"
                   size="sm"
@@ -487,7 +499,7 @@ export function NamespaceManagerCard() {
                 >
                   Delete
                 </Button>
-              </div>
+              </div>}
             </li>
           ))}
         </ul>
@@ -499,15 +511,15 @@ export function NamespaceManagerCard() {
         or deleted.
       </p>
 
-      <CreateNamespaceDialog open={createOpen} onOpenChange={setCreateOpen} />
-      <EditNamespaceDialog
+      {canManage && <CreateNamespaceDialog open={createOpen} onOpenChange={setCreateOpen} />}
+      {canManage && editTarget && visibleNamespaces?.includes(editTarget) && <EditNamespaceDialog
         target={editTarget}
         onOpenChange={(open) => !open && setEditTarget(null)}
-      />
-      <DeleteNamespaceDialog
+      />}
+      {canManage && deleteTarget && visibleNamespaces?.includes(deleteTarget) && <DeleteNamespaceDialog
         target={deleteTarget}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
-      />
+      />}
     </Card>
   );
 }

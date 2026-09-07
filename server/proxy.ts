@@ -8,6 +8,7 @@ import { generateToken } from './jwt.js';
 import { proxyTargetPath, proxyTargetUrl, UnsafeProxyPathError } from './proxy-path.js';
 import { getDispatcher } from './tls.js';
 import { waitingRouteTimeout } from './waitBudget.js';
+import { authorizeRegistryBody, authorizeRegistryPath, isRegistryPath, RegistryRequestError, scopedRegistryList } from './namespace-registry.js';
 
 const DEFAULT_BODY_LIMIT = 2 * 1024 * 1024;
 const API_SPEC_BODY_LIMIT = 30 * 1024 * 1024;
@@ -203,11 +204,15 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
     }
     activeUploads += 1;
     reservedUploads.add(request);
+    // A completed request body can lose its response socket without triggering
+    // either Fastify terminal hook. Install this at reservation lifetime, not
+    // inside forwarding, and retain it through every handler cleanup path.
+    reply.raw.once('close', () => releaseUpload(request));
   };
 
   // Both releases are keyed off a WeakSet membership test, so a request that
   // holds one or both permits gives back exactly what it took, exactly once,
-  // whichever of the two terminal hooks fires.
+  // whichever terminal hook or raw response close fires first.
   const releaseUpload = (request: FastifyRequest) => {
     if (reservedLargeUploads.delete(request)) {
       activeLargeUploads = Math.max(0, activeLargeUploads - 1);
@@ -225,8 +230,12 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
     reply: Parameters<typeof requireAdminAuth>[1],
   ) => {
     try {
-      proxyTargetPath(request);
+      const path = proxyTargetPath(request);
+      if (request.authPrincipal) authorizeRegistryPath(path, request.method, request.authPrincipal);
     } catch (error) {
+      if (error instanceof RegistryRequestError) {
+        return reply.status(error.status).send({ error: error.message });
+      }
       if (error instanceof UnsafeProxyPathError) {
         return reply.status(400).send({
           error: 'Bad Request',
@@ -282,12 +291,15 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
       if (!reply.raw.writableEnded) controller.abort(new Error('Downstream client disconnected'));
     };
     reply.raw.once('close', abortOnDisconnect);
+    // Covers a peer that closed while signing/initializing the handler.
+    if (reply.raw.destroyed) abortOnDisconnect();
 
     try {
       const token = await generateToken(config, principal);
+      controller.signal.throwIfAborted();
       const method = request.method;
       const hasBody = carriesRequestBody(request);
-      let body: GuardedUpload | undefined;
+      let body: GuardedUpload | string | undefined;
       if (hasBody && request.body && typeof (request.body as NodeJS.ReadableStream).pipe === 'function') {
         timeoutPhase = 'upload';
         // The large-upload routes get their own, longer wall-clock budget. A
@@ -296,24 +308,49 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
         const uploadDeadline = routeBodyLimit > DEFAULT_BODY_LIMIT
           ? config.uploadTimeout
           : config.writeTimeout;
-        body = (request.body as Readable).pipe(
+        const guarded = (request.body as Readable).pipe(
           new GuardedUpload(routeBodyLimit, config.writeTimeout, uploadDeadline, controller),
         );
-        body.once('end', startResponseDeadline);
+        body = guarded;
+        const cancelUpload = () => guarded.destroy(controller.signal.reason as Error);
+        controller.signal.addEventListener('abort', cancelUpload, { once: true });
+        guarded.once('close', () => controller.signal.removeEventListener('abort', cancelUpload));
+        guarded.once('end', startResponseDeadline);
+        if (isRegistryPath(targetPath)) {
+          const chunks: Buffer[] = [];
+          for await (const chunk of guarded) chunks.push(Buffer.from(chunk));
+          body = authorizeRegistryBody(Buffer.concat(chunks), method, principal);
+        }
       } else {
         startResponseDeadline();
+        if (isRegistryPath(targetPath) && hasBody) {
+          body = authorizeRegistryBody(Buffer.alloc(0), method, principal);
+        }
       }
 
+      const headers = copyRequestHeaders(request, `Bearer ${token}`);
+      if (typeof body === 'string') {
+        headers['content-type'] = 'application/json';
+        headers['content-length'] = String(Buffer.byteLength(body));
+      }
       const init: RequestInit = {
         method,
-        headers: copyRequestHeaders(request, `Bearer ${token}`),
+        headers,
         body,
         signal: controller.signal,
         dispatcher: getDispatcher(waitTimeout ? { ...config, readTimeout: responseTimeout } : config),
         redirect: 'error',
         ...(body && { duplex: 'half' }),
       };
-      const response = await fetch(target, init);
+      const scopedList = targetPath === '/namespaces' && method === 'GET' && principal.namespaces !== undefined;
+      if (scopedList) {
+        // Conditional/range headers address the original fleet representation.
+        for (const name of ['if-match', 'if-none-match', 'range']) delete headers[name];
+      }
+      controller.signal.throwIfAborted();
+      const response = scopedList
+        ? await scopedRegistryList(target, principal, (url) => fetch(url, init))
+        : await fetch(target, init);
       // An upstream may answer before consuming the entire request body. Once
       // response headers exist, bound the downstream phase immediately.
       startResponseDeadline();
@@ -351,6 +388,9 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
     } catch (error: unknown) {
       clearResponseDeadline();
       reply.raw.off('close', abortOnDisconnect);
+      if (error instanceof RegistryRequestError) {
+        return reply.status(error.status).send({ error: error.message });
+      }
       if (error instanceof PayloadTooLargeError || controller.signal.reason instanceof PayloadTooLargeError) {
         return reply.status(413).send({ error: 'Payload Too Large', code: 'FERRUM_BFF_BODY_LIMIT' });
       }

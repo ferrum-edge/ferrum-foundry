@@ -189,9 +189,9 @@ export function isCascadableDeleteError(status: number, body: string): boolean {
 
 // ── API functions ────────────────────────────────────────────────
 //
-// The registry itself is not tenant data, but the BFF still authorizes every
-// gateway request against the caller's namespace grants, so registry calls
-// carry the scope of the operation that made them like any other request.
+// Registry calls carry the operation's scope like other gateway requests. The
+// BFF additionally authorizes actual path/body targets and filters list results
+// before pagination; the selected scope alone never grants registry authority.
 
 export async function list(scope: NamespaceScope): Promise<string[]> {
   // GET /namespaces returns the standard { data, pagination } envelope of
