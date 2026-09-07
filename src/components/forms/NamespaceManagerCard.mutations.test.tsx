@@ -6,7 +6,8 @@ import { NamespaceManagerCard } from "./NamespaceManagerCard";
 import { NamespaceProvider, NAMESPACE_STORAGE_KEY, useNamespace } from "@/stores/namespace";
 
 vi.mock("@/stores/auth", () => ({ useAuth: () => ({ principal: { role: "admin" } }) }));
-vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
+const { toast } = vi.hoisted(() => ({ toast: vi.fn() }));
+vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 class BasedRequest extends Request {
@@ -34,7 +35,8 @@ let client: QueryClient;
 let names: string[];
 let writes: { url: URL; method: string; namespace: string | null; body: Record<string, unknown> }[];
 let delayMutation: boolean;
-let completeMutation: (() => void) | undefined;
+let completeMutation: ((response?: Response) => void) | undefined;
+let nextMutationResponse: Response | undefined;
 let listReads: number;
 
 beforeEach(() => {
@@ -42,6 +44,8 @@ beforeEach(() => {
   writes = [];
   delayMutation = false;
   completeMutation = undefined;
+  nextMutationResponse = undefined;
+  toast.mockClear();
   listReads = 0;
   localStorage.setItem(NAMESPACE_STORAGE_KEY, "tenant-a");
   vi.stubGlobal("Request", BasedRequest);
@@ -56,7 +60,10 @@ beforeEach(() => {
     }
     const body: Record<string, unknown> = request.method === "DELETE" ? {} : await request.json();
     writes.push({ url, method: request.method, namespace: request.headers.get("X-Ferrum-Namespace"), body });
+    const response = nextMutationResponse;
+    nextMutationResponse = undefined;
     const finish = () => {
+      if (response) return response;
       if (request.method === "DELETE") {
         names = names.filter((name) => name !== "tenant-a");
         return new Response(null, { status: 204 });
@@ -66,7 +73,7 @@ beforeEach(() => {
       else names = [...names, nextName];
       return Response.json(record(nextName, typeof body.description === "string" ? body.description : ""));
     };
-    if (delayMutation) return new Promise<Response>((resolve) => { completeMutation = () => resolve(finish()); });
+    if (delayMutation) return new Promise<Response>((resolve) => { completeMutation = (override) => resolve(override ?? finish()); });
     return finish();
   }));
   client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } } });
@@ -104,8 +111,8 @@ function button(text: string, within: ParentNode = document): HTMLButtonElement 
 async function click(text: string, within: ParentNode = document) {
   await act(async () => button(text, within).click());
 }
-function row() {
-  return [...host.querySelectorAll("li")].find((entry) => entry.querySelector("span")?.textContent === "tenant-a")!;
+function row(name = "tenant-a") {
+  return [...host.querySelectorAll("li")].find((entry) => entry.querySelector("span")?.textContent === name)!;
 }
 async function input(index: number, value: string) {
   await act(async () => {
@@ -157,6 +164,114 @@ describe("pending namespace completion", () => {
       }
     });
   }
+});
+
+async function closeDialog() {
+  await act(async () => document.querySelector<HTMLButtonElement>('[role="dialog"] [aria-label="Close"]')!.click());
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+}
+
+const conflict = () => Response.json({ message: "Namespace is not empty" }, { status: 409 });
+const fields = () => [...document.querySelectorAll<HTMLInputElement>('[role="dialog"] input')].map((field) => field.value);
+
+describe("namespace dialog opening identity", () => {
+  for (const target of ["tenant-a", "tenant-c"]) {
+    it.each(["success", "error"] as const)(`old edit %s preserves a reopened ${target} draft`, async (outcome) => {
+      delayMutation = true;
+      await render();
+      await click("Edit", row());
+      await input(0, "tenant-b");
+      await click("Save");
+      await settle(() => expect(completeMutation).toBeTypeOf("function"));
+      await closeDialog();
+      await click("Edit", row(target));
+      await input(0, "new-name");
+      await input(1, "new description");
+      expect(button("Save").disabled).toBe(false);
+
+      await act(async () => completeMutation!(outcome === "error" ? conflict() : undefined));
+      await settle(() => {
+        expect(client.isMutating()).toBe(0);
+        expect(toast).toHaveBeenCalledWith(outcome, expect.any(String));
+        if (outcome === "success") expect(client.getQueryData(["namespaces"])).toEqual(names);
+      });
+      expect(fields()).toEqual(["new-name", "new description"]);
+      expect(button("Save").disabled).toBe(false);
+      expect(host.querySelector("select")!.value).toBe(outcome === "success" ? "tenant-b" : "tenant-a");
+      expect(writes).toHaveLength(1);
+    });
+
+    it(`old delete success preserves a reopened ${target} cascade draft`, async () => {
+      delayMutation = true;
+      await render();
+      await click("Delete", row());
+      await click("Delete Namespace");
+      await settle(() => expect(completeMutation).toBeTypeOf("function"));
+      const finishOld = completeMutation!;
+      await closeDialog();
+      await click("Delete", row(target));
+      // The new opening independently reaches the gateway-driven second stage.
+      delayMutation = false;
+      nextMutationResponse = conflict();
+      await click("Delete Namespace");
+      await settle(() => expect(document.body.textContent).toContain("Namespace is not empty"));
+      await input(0, target);
+      expect(button("Permanently Delete Everything").disabled).toBe(false);
+      await act(async () => finishOld());
+      await settle(() => {
+        expect(client.isMutating()).toBe(0);
+        expect(client.getQueryData(["namespaces"])).toEqual(names);
+        expect(host.querySelector("select")!.value).toBe("ferrum");
+        expect(toast).toHaveBeenCalledWith("success", 'Namespace "tenant-a" deleted');
+      });
+      expect(fields()).toEqual([target]);
+      expect(button("Permanently Delete Everything").disabled).toBe(false);
+      expect(writes).toHaveLength(2);
+      expect(writes[1].url.pathname).toMatch(new RegExp(`/namespaces/${target}$`));
+      expect(writes[1].url.search).toBe("");
+    });
+
+    it(`old occupancy error cannot promote a reopened ${target} delete`, async () => {
+      delayMutation = true;
+      await render();
+      await click("Delete", row());
+      await click("Delete Namespace");
+      await settle(() => expect(completeMutation).toBeTypeOf("function"));
+      await closeDialog();
+      await click("Delete", row(target));
+      await act(async () => completeMutation!(conflict()));
+      await settle(() => expect(client.isMutating()).toBe(0));
+      expect(document.querySelector('[role="dialog"]')!.textContent).toContain(`Delete namespace "${target}"?`);
+      expect(document.body.textContent).not.toContain("Namespace is not empty");
+      expect(button("Delete Namespace").disabled).toBe(false);
+      expect(writes).toHaveLength(1);
+    });
+  }
+
+  it.each(["success", "error"] as const)("old create %s preserves a new create draft and observer", async (outcome) => {
+    delayMutation = true;
+    await render();
+    await click("New Namespace");
+    await input(0, "tenant-b");
+    await click("Create");
+    await settle(() => expect(completeMutation).toBeTypeOf("function"));
+    await closeDialog();
+    await click("New Namespace");
+    expect(fields()).toEqual(["", ""]);
+    await input(0, "new-tenant");
+    await input(1, "new description");
+    expect(button("Create").disabled).toBe(false);
+    await act(async () => completeMutation!(outcome === "error" ? conflict() : undefined));
+    await settle(() => {
+      expect(client.isMutating()).toBe(0);
+      expect(toast).toHaveBeenCalledWith(outcome, expect.any(String));
+      if (outcome === "success") expect(client.getQueryData(["namespaces"])).toEqual(names);
+    });
+    expect(fields()).toEqual(["new-tenant", "new description"]);
+    expect(button("Create").disabled).toBe(false);
+    expect(writes).toHaveLength(1);
+    expect(host.querySelector("select")!.value).toBe("tenant-a");
+  });
 });
 
 describe.each(["create", "edit"] as const)("%s description submission", (mode) => {

@@ -468,9 +468,13 @@ export function NamespaceManagerCard() {
     : [];
   const canManage = principal?.role === "admin";
 
-  const [createOpen, setCreateOpen] = useState(false);
-  const [editTarget, setEditTarget] = useState<string | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  // Each opening owns its form and mutation observer, even for the same name.
+  // A completed mutation still reconciles global state, but can only close
+  // the opening that submitted it, never a newer draft.
+  const generation = useRef(0);
+  const [createSession, setCreateSession] = useState<number | null>(null);
+  const [editSession, setEditSession] = useState<{ id: number; target: string } | null>(null);
+  const [deleteSession, setDeleteSession] = useState<{ id: number; target: string } | null>(null);
 
   return (
     <Card>
@@ -478,7 +482,7 @@ export function NamespaceManagerCard() {
         <h3 className="text-sm font-semibold text-text-primary">
           Manage Namespaces
         </h3>
-        {canManage && <Button size="sm" onClick={() => setCreateOpen(true)}>
+        {canManage && <Button size="sm" onClick={() => setCreateSession(++generation.current)}>
           New Namespace
         </Button>}
       </div>
@@ -503,7 +507,7 @@ export function NamespaceManagerCard() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => setEditTarget(ns)}
+                  onClick={() => setEditSession({ id: ++generation.current, target: ns })}
                 >
                   Edit
                 </Button>
@@ -511,7 +515,7 @@ export function NamespaceManagerCard() {
                   variant="ghost"
                   size="sm"
                   className="text-danger hover:text-danger"
-                  onClick={() => setDeleteTarget(ns)}
+                  onClick={() => setDeleteSession({ id: ++generation.current, target: ns })}
                 >
                   Delete
                 </Button>
@@ -527,14 +531,22 @@ export function NamespaceManagerCard() {
         or deleted.
       </p>
 
-      {canManage && <CreateNamespaceDialog open={createOpen} onOpenChange={setCreateOpen} />}
-      {canManage && editTarget && visibleNamespaces?.includes(editTarget) && <EditNamespaceDialog
-        target={editTarget}
-        onOpenChange={(open) => !open && setEditTarget(null)}
+      {canManage && createSession !== null && <CreateNamespaceDialog
+        key={createSession}
+        open
+        onOpenChange={(open) => !open && setCreateSession((current) => current === createSession ? null : current)}
       />}
-      {canManage && deleteTarget && visibleNamespaces?.includes(deleteTarget) && <DeleteNamespaceDialog
-        target={deleteTarget}
-        onOpenChange={(open) => !open && setDeleteTarget(null)}
+      {/* Registry refreshes may retire a name while a newer draft is open.
+          Keep that draft mounted while still enforcing current grants. */}
+      {canManage && editSession && namespaceGranted(principal.namespaces, editSession.target) && <EditNamespaceDialog
+        key={editSession.id}
+        target={editSession.target}
+        onOpenChange={(open) => !open && setEditSession((current) => current === editSession ? null : current)}
+      />}
+      {canManage && deleteSession && namespaceGranted(principal.namespaces, deleteSession.target) && <DeleteNamespaceDialog
+        key={deleteSession.id}
+        target={deleteSession.target}
+        onOpenChange={(open) => !open && setDeleteSession((current) => current === deleteSession ? null : current)}
       />}
     </Card>
   );
