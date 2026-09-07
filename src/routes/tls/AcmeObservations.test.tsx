@@ -20,6 +20,8 @@ let host: HTMLDivElement;
 let client: QueryClient;
 let status: AcmeOrder["status"];
 let details: ((response: Response) => void)[];
+let collections: ((response: Response) => void)[];
+let holdCollections: boolean;
 let posts: number;
 
 function order(nextStatus = status): AcmeOrder {
@@ -33,6 +35,8 @@ function order(nextStatus = status): AcmeOrder {
 beforeEach(() => {
   status = "processing";
   details = [];
+  collections = [];
+  holdCollections = false;
   posts = 0;
   vi.stubGlobal("Request", BasedRequest);
   vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
@@ -45,7 +49,11 @@ beforeEach(() => {
       return new Promise<Response>((resolve) => details.push(resolve));
     }
     const data = path.endsWith("/orders") ? [order()] : [];
-    return Response.json({ data, pagination: { offset: 0, limit: 250, total: data.length } });
+    const response = Response.json({ data, pagination: { offset: 0, limit: 250, total: data.length } });
+    if (path.endsWith("/orders") && holdCollections) {
+      return new Promise<Response>((resolve) => collections.push(resolve));
+    }
+    return response;
   }));
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   host = document.createElement("div");
@@ -141,6 +149,30 @@ describe("ACME order observations", () => {
     await act(async () => details[0]!(Response.json(order("processing"))));
     await refresh("valid");
     await settle(() => expectTerminal("valid"));
+    expect(posts).toBe(1);
+  });
+
+  it("keeps a terminal detail result when an older collection request finishes later", async () => {
+    status = "ready";
+    await mount();
+    await click("Finalize");
+    await settle(() => expect(panel().textContent).toContain("Finalization in progress / unknown"));
+
+    holdCollections = true;
+    const staleCollection = client.refetchQueries({ queryKey: key });
+    await settle(() => expect(collections).toHaveLength(1));
+    await click("Re-check status");
+    await settle(() => expect(details).toHaveLength(1));
+    await act(async () => details[0]!(Response.json(order("valid"))));
+    await settle(() => expectTerminal("valid"));
+
+    await act(async () => collections[0]!(Response.json({
+      data: [order("ready")],
+      pagination: { offset: 0, limit: 250, total: 1 },
+    })));
+    await staleCollection;
+    await settle(() => expectTerminal("valid"));
+    expect(client.getQueryData<AcmeOrder[]>(key)?.[0]?.status).toBe("valid");
     expect(posts).toBe(1);
   });
 });
