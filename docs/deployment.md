@@ -134,6 +134,14 @@ strings `true` and `false`. Duration variables are integers.
 | `FERRUM_ADMIN_ALLOWED_ORIGINS` | Required when runtime settings are enabled | - | comma-separated `http`/`https` origins | Origins a runtime `adminUrl` change may select |
 | `FERRUM_ADMIN_ALLOWED_CIDRS` | No | - | comma-separated CIDRs | Private or special-purpose ranges a changed admin URL may resolve to; the startup origin is always permitted |
 
+CIDRs require a literal IPv4 or IPv6 address and an explicit decimal prefix:
+`0`–`32` for IPv4, `0`–`128` for IPv6. Prefixes use ASCII digits without signs,
+leading zeros, or internal whitespace; whitespace around each comma-separated
+entry is allowed. Explicit `/0` permits the entire address family, while `/32`
+and `/128` select individual addresses. The origin allowlist still applies to
+runtime changes, and the initial environment origin retains its network-policy
+exemption. Hostnames are checked against the network policy on DNS resolution.
+
 With `FERRUM_ALLOW_RUNTIME_SETTINGS=true`, clearing **JWT Audience** and saving
 removes the `aud` claim from subsequent BFF-generated JWTs. The Settings form
 displays the canonical values returned by the BFF after each successful save.
@@ -543,6 +551,10 @@ Notes:
   approved root and reloads the bundle after a rotation, including when an
   administrator selected that projected path through runtime settings. The
   selected absolute path is retained; each read revalidates the resolved target.
+  CA files are opened nonblocking and validated through the descriptor as
+  regular files before reading at most the validated size plus one byte, with
+  a 1 MiB bundle limit. Non-regular files are rejected at startup and runtime
+  selection; failed validation closes the descriptor.
   Startup and runtime selection require one or more parseable PEM X.509
   certificates (whitespace and `#` comment lines are accepted). Invalid material
   is rejected before publishing runtime settings and preserves the prior
