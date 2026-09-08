@@ -2,11 +2,13 @@
 /*  Ferrum Foundry – Plugin Config create / edit form                  */
 /* ------------------------------------------------------------------ */
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Select, type SelectOptionGroup } from "@/components/ui/Select";
+import { FormValidationSummary } from "./FormValidationSummary";
+import { useFormValidationSummary } from "@/lib/collapsedFormValidation";
 import type {
   PluginConfig,
   PluginConfigCreate,
@@ -99,6 +101,8 @@ function PluginConfigFormFields({
 }: PluginConfigFormProps) {
   const navigate = useNavigate();
   const isEdit = !!initialData;
+  const formRef = useRef<HTMLFormElement>(null);
+  const validationSummary = useFormValidationSummary();
 
   /* ---------- State ---------- */
   // Seeded once per editor identity: the parent keys this form on
@@ -164,7 +168,13 @@ function PluginConfigFormFields({
       }
     }
     setErrors(errs);
-    return Object.keys(errs).length === 0;
+    const ok = Object.keys(errs).length === 0;
+    if (!ok) {
+      validationSummary.onValidationFailed(errs, formRef.current);
+    } else {
+      validationSummary.clearValidationSummary();
+    }
+    return ok;
   };
 
   /* ---------- Submit ---------- */
@@ -239,7 +249,7 @@ function PluginConfigFormFields({
   /* ================================================================ */
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-0">
+    <form ref={formRef} onSubmit={handleSubmit} className="space-y-0">
       {/* ── Basic Fields ── */}
       <div className="border-b border-border/50 py-4">
         <h3 className="text-sm font-semibold text-text-primary mb-4">Plugin Configuration</h3>
@@ -331,12 +341,15 @@ function PluginConfigFormFields({
         </div>
         <div className="flex flex-col gap-1.5">
           <textarea
+            aria-label="Plugin config JSON"
             value={configJson}
             onChange={(e) => {
               setUserEditedConfig(true);
               setConfigJson(e.target.value);
             }}
             rows={12}
+            aria-invalid={errors.config ? true : undefined}
+            aria-describedby={errors.config ? "plugin-config-error" : undefined}
             className={`bg-code-bg border rounded-lg px-3 py-2 text-text-primary text-sm font-mono placeholder:text-text-muted transition-colors duration-150 resize-y min-h-[120px] ${
               errors.config
                 ? "border-danger focus:border-danger focus:ring-1 focus:ring-danger/30"
@@ -349,7 +362,11 @@ function PluginConfigFormFields({
               Defaults are editable templates for the selected plugin.
             </p>
           )}
-          {errors.config && <p className="text-danger text-xs">{errors.config}</p>}
+          {errors.config && (
+            <p id="plugin-config-error" className="text-danger text-xs">
+              {errors.config}
+            </p>
+          )}
         </div>
       </div>
 
@@ -369,9 +386,12 @@ function PluginConfigFormFields({
         {triggerEnabled && (
           <div className="flex flex-col gap-1.5">
             <textarea
+              aria-label="Execution trigger JSON"
               value={triggerJson}
               onChange={(e) => setTriggerJson(e.target.value)}
               rows={8}
+              aria-invalid={errors.trigger ? true : undefined}
+              aria-describedby={errors.trigger ? "plugin-trigger-error" : undefined}
               className={`bg-code-bg border rounded-lg px-3 py-2 text-text-primary text-sm font-mono placeholder:text-text-muted transition-colors duration-150 resize-y min-h-[100px] ${
                 errors.trigger
                   ? "border-danger focus:border-danger focus:ring-1 focus:ring-danger/30"
@@ -379,13 +399,21 @@ function PluginConfigFormFields({
               }`}
               spellCheck={false}
             />
-            {errors.trigger && <p className="text-danger text-xs">{errors.trigger}</p>}
+            {errors.trigger && (
+              <p id="plugin-trigger-error" className="text-danger text-xs">
+                {errors.trigger}
+              </p>
+            )}
           </div>
         )}
       </div>
 
       {/* ── Actions ── */}
-      <div className="flex items-center justify-end gap-3 pt-6">
+      <div className="flex flex-col items-end gap-3 pt-6">
+        {validationSummary.showSummary && (
+          <FormValidationSummary count={validationSummary.errorCount} />
+        )}
+        <div className="flex items-center justify-end gap-3 w-full">
         <Button
           type="button"
           variant="secondary"
@@ -397,6 +425,7 @@ function PluginConfigFormFields({
         <Button type="submit" loading={isLoading}>
           {isEdit ? "Update Plugin" : "Create Plugin"}
         </Button>
+        </div>
       </div>
     </form>
   );

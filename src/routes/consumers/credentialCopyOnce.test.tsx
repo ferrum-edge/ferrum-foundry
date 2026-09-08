@@ -9,6 +9,7 @@ import { CredentialForm } from "@/components/forms/CredentialForm";
 import { useEditorIdentity } from "@/hooks/useEditorIdentity";
 import { get as getConsumer } from "@/api/consumers";
 import type { BuiltInCredentialType } from "@/api/types";
+import { inputByLabel } from "@/test/fields";
 import ConsumerNewPage from "./new";
 
 vi.mock("@/stores/auth", () => ({ useAuth: () => ({ principal: null }) }));
@@ -120,11 +121,13 @@ afterEach(async () => {
 });
 
 describe("submitted credential recovery", () => {
-  it.each(["key-auth", "jwt", "hmac-auth", "basic-auth"])("retains generated %s after create until explicitly acknowledged", async (id) => {
+  it.each(["Key Auth", "JWT", "HMAC Auth", "Basic Auth"])(
+    "retains generated %s after create until explicitly acknowledged",
+    async (label) => {
     await mount("/consumers/new");
-    await typeInto(host.querySelector<HTMLInputElement>("#username")!, "new-user");
+    await typeInto(inputByLabel(host, "Username"), "new-user");
     await click("Credentials");
-    const field = host.querySelector<HTMLInputElement>(`#${id}`)!;
+    const field = inputByLabel(host, label);
     await act(async () => { field.closest(".items-end")!.querySelector<HTMLButtonElement>("button")!.click(); });
     const secret = field.value;
     expect(secret).toHaveLength(32);
@@ -143,7 +146,8 @@ describe("submitted credential recovery", () => {
     expect(host.querySelector("textarea")).toBeNull();
     expect(JSON.stringify(await getConsumer({ namespace: "tenant-a" }, "new-user"))).not.toContain(secret);
     expect(writes).toHaveLength(1);
-  });
+    },
+  );
 
   it.each<BuiltInCredentialType>(["keyauth", "jwt", "hmac_auth", "basicauth"])("shows appended %s once and handles unavailable clipboard", async (kind) => {
     type = kind;

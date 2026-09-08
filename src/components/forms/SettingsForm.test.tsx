@@ -46,16 +46,21 @@ async function renderForm() {
   });
 }
 
-function input(id: string): HTMLInputElement {
-  const element = host.querySelector<HTMLInputElement>(`#${id}`);
-  if (!element) throw new Error(`Missing input: ${id}`);
+function inputByLabel(labelText: string): HTMLInputElement {
+  const label = Array.from(host.querySelectorAll("label")).find(
+    (element) => element.textContent?.trim() === labelText,
+  );
+  if (!label) throw new Error(`Missing label: ${labelText}`);
+  const id = label.getAttribute("for");
+  if (!id) throw new Error(`Label ${labelText} has no for attribute`);
+  const element = host.querySelector<HTMLInputElement>(`#${CSS.escape(id)}`);
+  if (!element) throw new Error(`Missing input for label: ${labelText}`);
   return element;
 }
 
-async function change(id: string, value: string) {
+async function change(labelText: string, value: string) {
   await act(async () => {
-    const element = input(id);
-    // Use the native setter so React observes a real DOM input change.
+    const element = inputByLabel(labelText);
     const setter = Object.getOwnPropertyDescriptor(
       HTMLInputElement.prototype,
       "value",
@@ -112,22 +117,22 @@ afterEach(async () => {
 describe("SettingsForm runtime saves", () => {
   it("serializes explicit clears and adopts the canonical response", async () => {
     await renderForm();
-    expect(input("jwt-audience").value).toBe("old-audience");
-    await change("jwt-audience", "");
-    await change("namespace-grants", "");
+    expect(inputByLabel("JWT Audience").value).toBe("old-audience");
+    await change("JWT Audience", "");
+    await change("Namespace grants", "");
     await save();
 
     expect(put).toHaveBeenCalledWith("api/settings", expect.any(Object));
     expect(submitted).toMatchObject({ jwtAudience: "", jwtNamespaces: [] });
     expect(toast).toHaveBeenCalledWith("success", "Settings saved successfully");
     expect(queryClient.getQueryData(["settings"])).toEqual(savedSettings);
-    expect(input("jwt-audience").value).toBe("");
-    expect(input("namespace-grants").value).toBe("");
+    expect(inputByLabel("JWT Audience").value).toBe("");
+    expect(inputByLabel("Namespace grants").value).toBe("");
 
     await act(async () => root.render(null));
     await renderForm();
-    expect(input("jwt-audience").value).toBe("");
-    expect(input("namespace-grants").value).toBe("");
+    expect(inputByLabel("JWT Audience").value).toBe("");
+    expect(inputByLabel("Namespace grants").value).toBe("");
   });
 
   it("replaces the draft and cached settings with the canonical save response", async () => {
@@ -138,12 +143,12 @@ describe("SettingsForm runtime saves", () => {
       jwtNamespaces: ["tenant-a"],
     };
     await renderForm();
-    await change("jwt-issuer", "  canonical-issuer  ");
-    await change("jwt-audience", " edge-admin , edge-ops ");
+    await change("JWT Issuer", "  canonical-issuer  ");
+    await change("JWT Audience", " edge-admin , edge-ops ");
     await save();
 
-    expect(input("jwt-issuer").value).toBe("canonical-issuer");
-    expect(input("jwt-audience").value).toBe("edge-admin, edge-ops");
+    expect(inputByLabel("JWT Issuer").value).toBe("canonical-issuer");
+    expect(inputByLabel("JWT Audience").value).toBe("edge-admin, edge-ops");
     expect(queryClient.getQueryData(["settings"])).toEqual(savedSettings);
     expect(queryClient.getQueryData(["settings"])).toMatchObject({
       jwtIssuer: "canonical-issuer",
@@ -158,9 +163,9 @@ describe("SettingsForm runtime saves", () => {
 
     expect(host.textContent).toContain("Your identity proxy manages gateway roles");
     expect(host.querySelector<HTMLButtonElement>('[role="combobox"]')?.disabled).toBe(true);
-    expect(input("namespace-grants").disabled).toBe(true);
-    expect(input("jwt-audience").disabled).toBe(false);
-    await change("jwt-audience", "updated-audience");
+    expect(inputByLabel("Namespace grants").disabled).toBe(true);
+    expect(inputByLabel("JWT Audience").disabled).toBe(false);
+    await change("JWT Audience", "updated-audience");
     await save();
 
     expect(submitted).toMatchObject({ jwtAudience: "updated-audience" });
@@ -174,7 +179,7 @@ describe("SettingsForm runtime saves", () => {
     currentSettings.runtimeSettingsEnabled = false;
     await renderForm();
 
-    expect(input("jwt-audience").disabled).toBe(true);
+    expect(inputByLabel("JWT Audience").disabled).toBe(true);
     expect(host.textContent).not.toContain("Save Settings");
     expect(put).not.toHaveBeenCalled();
   });

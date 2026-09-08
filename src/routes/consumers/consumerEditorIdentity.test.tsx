@@ -17,6 +17,7 @@ import {
   NamespaceProvider,
   useNamespace,
 } from "@/stores/namespace";
+import { inputByLabelOrNull } from "@/test/fields";
 import ConsumerDetailPage from "./$consumerId";
 
 vi.mock("@/stores/auth", () => ({
@@ -147,9 +148,8 @@ describe("consumer editor identity across a namespace switch", () => {
     return host?.querySelector("h1")?.textContent ?? "";
   }
 
-  /** `Input` derives the element id from its label: "Custom ID" → `custom-id`. */
-  function field(id: string): HTMLInputElement | null {
-    return host?.querySelector<HTMLInputElement>(`#${id}`) ?? null;
+  function field(label: string): HTMLInputElement | null {
+    return inputByLabelOrNull(host, label);
   }
 
   function pageText(): string {
@@ -298,7 +298,7 @@ describe("consumer editor identity across a namespace switch", () => {
 
   it("re-seeds the editor from the newly selected tenant on a cached switch and submits only that tenant's fields", async () => {
     await mountWithBothTenantsCached();
-    expect(field("username")?.value).toBe("tenant-a-user");
+    expect(field("Username")?.value).toBe("tenant-a-user");
     const detailGetsBefore = captured.filter((r) => r.url.endsWith(DETAIL_PATH)).length;
 
     await switchTo("tenant-b");
@@ -307,8 +307,8 @@ describe("consumer editor identity across a namespace switch", () => {
     // survives in the editor.
     expect(captured.filter((r) => r.url.endsWith(DETAIL_PATH))).toHaveLength(detailGetsBefore);
     expect(heading()).toBe("tenant-b-user");
-    expect(field("username")?.value).toBe("tenant-b-user");
-    expect(field("custom-id")?.value).toBe("tenant-b-custom");
+    expect(field("Username")?.value).toBe("tenant-b-user");
+    expect(field("Custom ID")?.value).toBe("tenant-b-custom");
     expect(pageText()).toContain("tenant-b-group");
     expect(pageText()).not.toContain("tenant-a");
 
@@ -356,8 +356,8 @@ describe("consumer editor identity across a namespace switch", () => {
 
     release();
     await waitFor(() => heading() === "tenant-b-user");
-    expect(field("username")?.value).toBe("tenant-b-user");
-    expect(field("custom-id")?.value).toBe("tenant-b-custom");
+    expect(field("Username")?.value).toBe("tenant-b-user");
+    expect(field("Custom ID")?.value).toBe("tenant-b-custom");
     expect(pageText()).toContain("tenant-b-group");
     expect(pageText()).not.toContain("tenant-a");
   });
@@ -367,9 +367,9 @@ describe("consumer editor identity across a namespace switch", () => {
     await waitFor(() => heading() === "tenant-a-user");
 
     await act(async () => {
-      typeInto(field("username")!, "edited-locally");
+      typeInto(field("Username")!, "edited-locally");
     });
-    expect(field("username")?.value).toBe("edited-locally");
+    expect(field("Username")?.value).toBe("edited-locally");
 
     // The gateway now reports a change made elsewhere to the same consumer.
     records.set("tenant-a", {
@@ -384,8 +384,8 @@ describe("consumer editor identity across a namespace switch", () => {
     await waitFor(() => heading() === "tenant-a-user-renamed");
 
     // Live data drives the heading; the editor keeps its seed and the edit.
-    expect(field("username")?.value).toBe("edited-locally");
-    expect(field("custom-id")?.value).toBe("tenant-a-custom");
+    expect(field("Username")?.value).toBe("edited-locally");
+    expect(field("Custom ID")?.value).toBe("tenant-a-custom");
 
     await submitForm();
     await waitFor(() => puts().length === 1);
@@ -421,7 +421,7 @@ describe("consumer editor identity across a namespace switch", () => {
     const release = hold("PUT tenant-a");
 
     await act(async () => {
-      typeInto(field("username")!, "tenant-a-edit");
+      typeInto(field("Username")!, "tenant-a-edit");
     });
     await submitForm();
     await waitFor(() => puts().length === 1);
@@ -430,7 +430,7 @@ describe("consumer editor identity across a namespace switch", () => {
     // The operator switches while that write is still in flight.
     await switchTo("tenant-b");
     expect(heading()).toBe("tenant-b-user");
-    expect(field("username")?.value).toBe("tenant-b-user");
+    expect(field("Username")?.value).toBe("tenant-b-user");
 
     release();
     // The write reconciles its captured tenant, without invalidating tenant-b.
@@ -441,7 +441,7 @@ describe("consumer editor identity across a namespace switch", () => {
     expect(records.get("tenant-a")?.username).toBe("tenant-a-edit");
     expect(records.get("tenant-b")?.username).toBe("tenant-b-user");
     expect(heading()).toBe("tenant-b-user");
-    expect(field("username")?.value).toBe("tenant-b-user");
+    expect(field("Username")?.value).toBe("tenant-b-user");
   });
 
   it("invalidates an indexed delete confirmation after the credential list refreshes", async () => {
