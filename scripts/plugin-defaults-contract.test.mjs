@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { DEFAULT_PLUGIN_CONFIGS, getPluginConfigDefault } from "../src/lib/pluginConfigDefaults.ts";
 import { OPERATOR_INPUT_REJECTIONS, verifyPluginDefaults } from "./plugin-defaults-contract.mjs";
@@ -37,6 +38,17 @@ function transport(override = () => undefined) {
 }
 
 const quiet = { report: () => {} };
+
+test("hosted lifecycle admits the catalog before seeding the process-wide metrics owner", () => {
+  const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  assert.deepEqual(manifest.scripts["test:gateway-contract"].split(" && "), [
+    "node scripts/gateway-contract-smoke.mjs",
+    "node scripts/seed-demo-gateway.mjs",
+    "node scripts/seed-demo-gateway.mjs",
+    "node scripts/verify-demo-gateway.mjs",
+    "node scripts/demo-route-smoke.mjs",
+  ]);
+});
 
 test("submits all 81 actual enabled defaults unchanged, in the required scope, and cleans up", async () => {
   const fixture = transport();
@@ -95,10 +107,42 @@ test("gateway catalog drift fails before any submission", async () => {
   assert.equal(fixture.writes.length, 0);
 });
 
+test("a Prometheus registry conflict fails rather than exempting the template", async () => {
+  const fixture = transport((body) => body.plugin_name === "prometheus_metrics"
+    ? { status: 409, body: { error: "prometheus_metrics permits at most one enabled global instance; another config already owns the process registry" } }
+    : undefined);
+  await assert.rejects(verifyPluginDefaults(fixture.exchange, quiet), /prometheus_metrics: expected 201, received 409/);
+  assert.equal(fixture.writes.length, 81);
+});
+
+test("Kafka's constructor-error prefix cannot substitute for the egress field-validation error", async () => {
+  const fixture = transport((body) => body.plugin_name === "kafka_logging"
+    ? { status: 400, body: { error: OPERATOR_INPUT_REJECTIONS.kafka_logging.error.replace("Invalid plugin config fields:", "Invalid plugin config:") } }
+    : undefined);
+  await assert.rejects(verifyPluginDefaults(fixture.exchange, quiet), /kafka_logging: rejection reason drift/);
+  assert.equal(fixture.writes.length, 81);
+});
+
 test("cleanup failure fails the gate and stops potentially contaminated submissions", async () => {
   const fixture = transport();
   await assert.rejects(verifyPluginDefaults((path, options) => options?.method === "DELETE"
     ? { status: 503, body: { error: "cleanup unavailable" } }
     : fixture.exchange(path, options), quiet), /cleanup:.*expected 200\/204\/404, received 503/);
   assert.equal(fixture.writes.length, 1);
+});
+
+test("admission and thrown cleanup failures are both reported before stopping", async () => {
+  const fixture = transport(() => ({ status: 400, body: { error: "admission failed" } }));
+  let report;
+  await assert.rejects(verifyPluginDefaults((path, options) => {
+    if (options?.method === "DELETE") throw new Error("cleanup transport failed");
+    return fixture.exchange(path, options);
+  }, { report: (value) => { report = JSON.parse(value); } }), (error) => {
+    assert.equal(error.errors.length, 2);
+    assert.match(error.errors[0].message, /expected 201, received 400/);
+    assert.match(error.errors[1].message, /cleanup transport failed/);
+    return true;
+  });
+  assert.equal(fixture.writes.length, 1);
+  assert.equal(report.pluginDefaults.length, 1);
 });

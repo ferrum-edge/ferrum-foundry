@@ -20,8 +20,8 @@ The following templates use the current constructor fields:
 | `loki_logging` | `include_proxy_id_label` identifies the proxy instead of using the removed listen-path label. |
 | `transaction_debugger` | `redacted_headers` adds sensitive-header redaction; body capture remains off. It is not a header-capture allowlist. |
 | `ai_federation` | The removed `preserve_original_model` switch is omitted. Provider `default_model`/`model_mapping` govern model selection. |
-| `ai_prompt_shield` | `patterns`, `redaction_placeholder`, and `exclude_roles` configure detection and redaction. |
-| `ai_response_guard` | `pii_patterns` and `redaction_placeholder` configure response PII redaction. |
+| `ai_prompt_shield` | `patterns`, `redaction_placeholder`, and `exclude_roles` configure detection and redaction. The built-in US phone token is `phone_us`; `phone` is invalid. |
+| `ai_response_guard` | `pii_patterns` and `redaction_placeholder` configure response PII redaction, using the same `phone_us` token. |
 | `ai_request_guard` | The unsupported `required_fields` key is omitted; model, token, message, prompt-length, and temperature restrictions remain. |
 | `ws_message_size_limiting`, `ws_rate_limiting` | `close_reason` supplies the WebSocket close text. |
 
@@ -36,7 +36,7 @@ The contract gate records each entire error and its HTTP 400 status separately:
 | `load_testing` | Replace the example trigger key with a key of at least 32 characters. |
 | `mesh_authz` | Replace the example Kubernetes AuthorizationPolicy document with native Edge `MeshPolicy` input. The first diagnostic is `missing field name`; this is a known input-shape limitation, not evidence that the remaining policy is validated. |
 | `proxy_alerts` | Set `FERRUM_ALERTS_SLACK_WEBHOOK` in the gateway environment. |
-| `kafka_logging` | The default restrictive backend egress policy prevents admission of librdkafka. A missing broker is not the rejection reason. Prefer another log sink when egress must remain restricted. |
+| `kafka_logging` | The default restrictive backend egress policy prevents admission of librdkafka during field validation. Its exact error starts with `Invalid plugin config fields: kafka_logging:`, before plugin construction or broker contact. Prefer another log sink when egress must remain restricted. |
 | `openapi_validator` | Select proxy scope and a proxy with an attached API spec. The gate uses proxy scope and checks the missing attached-spec diagnostic. |
 
 ## Hosted contract coverage
@@ -45,9 +45,13 @@ The existing **Pinned Gateway Contract** job runs
 `scripts/gateway-contract-smoke.mjs`, which imports the real TypeScript templates
 directly through Node's type stripping. It checks all 81 catalog names against
 `GET /plugins`, then submits every unmodified default with `enabled: true` in a
-separate disposable namespace. Each template is deleted before the next is
-submitted, avoiding composition with the demo seed or another template. TCP
+separate disposable namespace. The smoke runs **before both demo seeds**, because
+the enabled demo `prometheus_metrics` fixture owns a process-wide registry even
+across namespaces. Each template is deleted before the next is submitted. TCP
 throttling gets a TCP proxy fixture; OpenAPI validation gets an HTTP proxy fixture.
+After catalog cleanup, the job still seeds twice, verifies canonical backup state
+(including the exact enabled demo Prometheus fixture), and checks demo routes.
+It never disables or deletes unknown fixtures to make room for the catalog.
 
 The expected result is 73 HTTP 201 admissions (the previous 60 controls plus the
 13 repaired defaults) and the eight exact prerequisite rejections above. Accepted
@@ -55,14 +59,25 @@ plugins are read back as enabled. Unexpected success, a changed error body or
 status, a missing/extra catalog member, or failed cleanup fails the gate. Admission
 failures are collected across the catalog; cleanup failure stops further probes
 because isolation is no longer assured. The contract transport tests exercise
-unexpected acceptance, unknown-key diagnostics, status changes, and cleanup.
+unexpected acceptance, unknown-key diagnostics, status changes, and cleanup,
+including simultaneous admission/cleanup failures and rejecting Prometheus 409s.
 
 The job retains its existing image digest
 `sha256:fb0f05b0392a272ba36a493584bced171655ce8ebd36b2ae0818bb5c3c25ef2d`.
 Issue #291's reproduction used a different digest (`sha256:f2c3eb7696677fed4a90551c7c8adfccae547c0e540452011f98a53b34233c2d`).
-Constructor/schema inspection used Edge main revision
-`b89d132fbddb1ed7b705e32332d7c606ea8a69c0`; it does not establish the source
-identity of either image. Hosted results establish compatibility with the pinned
+The pinned digest was published from Edge revision
+`b96cfaadd41a676d39a409d47b48e0b0588fa86e`: the
+[Docker Manifest job](https://github.com/ferrum-edge/ferrum-edge/actions/runs/33094251786/job/98636370391)
+records that digest for the corresponding `main-b96cfa...` tag. At that revision,
+both guards call the shared
+[built-in PII pattern table](https://github.com/ferrum-edge/ferrum-edge/blob/b96cfaadd41a676d39a409d47b48e0b0588fa86e/src/plugins/utils/ai_pii.rs#L45),
+which defines `phone_us`. Kafka's
+[egress screening](https://github.com/ferrum-edge/ferrum-edge/blob/b96cfaadd41a676d39a409d47b48e0b0588fa86e/src/plugins/kafka_logging.rs#L339)
+returns the restrictive-policy diagnostic through the admin
+[field-validation boundary](https://github.com/ferrum-edge/ferrum-edge/blob/b96cfaadd41a676d39a409d47b48e0b0588fa86e/src/admin/crud.rs#L3827).
+The [initial Foundry contract run](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/34172111334/job/101894263227)
+confirmed the complete Kafka diagnostic and exposed the invalid phone tokens and
+seeded Prometheus conflict. Hosted results establish compatibility with the pinned
 image, not with every newer Edge release. Any divergence must be reviewed as a
 compatibility dependency; do not broaden the rejection table or silently change
 the image pin to make a failure disappear.

@@ -328,7 +328,7 @@ export const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
   ai_prompt_shield: {
     action: "reject",
     scan_fields: "content",
-    patterns: ["email", "phone", "credit_card", "ssn"],
+    patterns: ["email", "phone_us", "credit_card", "ssn"],
     redaction_placeholder: "[REDACTED:{type}]",
     max_scan_bytes: 1048576,
     exclude_roles: ["system"],
@@ -364,7 +364,7 @@ export const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
     scan_fields: "content",
     redaction_placeholder: "[REDACTED:{type}]",
     max_scan_bytes: 1048576,
-    pii_patterns: ["email", "phone", "credit_card", "ssn"],
+    pii_patterns: ["email", "phone_us", "credit_card", "ssn"],
     blocked_phrases: ["internal only"],
     require_json: false,
     required_fields: [],

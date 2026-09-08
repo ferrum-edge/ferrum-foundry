@@ -127,8 +127,10 @@ await request(`/consumers/${consumerId}?apply=sync`, { method: "DELETE", expecte
 // proxy is deleted; current gateways honor cleanup_orphaned_upstream=false.
 await request(`/upstreams/${upstreamId}?apply=sync`, { method: "DELETE", expected: [200, 204, 404] });
 
-// Separate from seeded demo policy; only one enabled template is present at a
-// time. Bind both JWT and namespace header to the same disposable namespace.
+// Run this smoke before either demo seed: prometheus_metrics owns a process-wide
+// registry, so a separate namespace alone cannot isolate it from seeded policy.
+// Only one enabled template is present at a time. Bind both JWT and namespace
+// header to the same disposable namespace.
 const defaultsConfig = { ...config, namespace: `${config.namespace}-plugin-defaults` };
 const defaults = await verifyPluginDefaults((path, options) => exchange(path, options, defaultsConfig));
 

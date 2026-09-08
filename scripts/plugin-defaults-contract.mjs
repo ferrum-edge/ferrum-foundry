@@ -61,7 +61,7 @@ export const OPERATOR_INPUT_REJECTIONS = {
   },
   kafka_logging: {
     status: 400,
-    error: "Invalid plugin config: kafka_logging: cannot be admitted while a restrictive backend egress policy is in force: the pinned librdkafka client resolves bootstrap hostnames itself and dials brokers advertised by cluster metadata, and rdkafka 0.39 exposes no connect/resolve callback, so those addresses cannot be screened. Ferrum fails closed rather than leaving an unenforced egress path. Use a different log sink (http_logging, tcp_logging, ws_logging, loki_logging), or accept an unrestricted backend egress policy (FERRUM_BACKEND_ALLOW_IPS=both, no FERRUM_BACKEND_DENY_CIDRS, FERRUM_BACKEND_BLOCK_DANGEROUS_RANGES=false)",
+    error: "Invalid plugin config fields: kafka_logging: cannot be admitted while a restrictive backend egress policy is in force: the pinned librdkafka client resolves bootstrap hostnames itself and dials brokers advertised by cluster metadata, and rdkafka 0.39 exposes no connect/resolve callback, so those addresses cannot be screened. Ferrum fails closed rather than leaving an unenforced egress path. Use a different log sink (http_logging, tcp_logging, ws_logging, loki_logging), or accept an unrestricted backend egress policy (FERRUM_BACKEND_ALLOW_IPS=both, no FERRUM_BACKEND_DENY_CIDRS, FERRUM_BACKEND_BLOCK_DANGEROUS_RANGES=false)",
   },
   openapi_validator: {
     status: 400,
@@ -95,6 +95,7 @@ export async function verifyPluginDefaults(exchange, { report = console.log } = 
     const needsProxy = name === "openapi_validator" || name === "tcp_connection_throttle";
     const proxyId = `${id}-proxy`;
     const pluginPath = `/plugins/config/${id}`;
+    let isolationLost = false;
     try {
       if (needsProxy) {
         const proxy = {
@@ -148,9 +149,10 @@ export async function verifyPluginDefaults(exchange, { report = console.log } = 
       } catch (error) {
         // Isolation is lost; subsequent submissions would no longer be valid controls.
         failures.push(new Error(`${name} cleanup: ${error.message}`, { cause: error }));
-        break;
+        isolationLost = true;
       }
     }
+    if (isolationLost) break;
   }
   report(JSON.stringify({ pluginDefaults: results }));
   if (failures.length) throw new AggregateError(failures, failures.map((error) => error.message).join("\n"));

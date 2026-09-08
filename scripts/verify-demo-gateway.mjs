@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { statSync } from "node:fs";
-import { adminToken, readSeedConfig } from "./seed-demo-gateway.mjs";
+import { adminToken, buildRestorePayload, readSeedConfig } from "./seed-demo-gateway.mjs";
 
 const config = readSeedConfig();
 assert.equal(statSync(config.manifestPath).mode & 0o777, 0o600);
@@ -22,6 +22,14 @@ assert.equal(backup.counts.upstreams, 18);
 assert.equal(backup.proxies.length, 18);
 assert.equal(backup.consumers.length, 18);
 assert.equal(backup.upstreams.length, 18);
+// The catalog probe must release the process-wide Prometheus owner before both
+// seeds. Verify that the known demo fixture now owns it with its exact config.
+const expectedMetrics = buildRestorePayload().plugin_configs.find((plugin) => plugin.id === "demo-global-prometheus");
+const metrics = backup.plugin_configs.filter((plugin) => plugin.plugin_name === "prometheus_metrics" && plugin.enabled);
+assert.equal(metrics.length, 1);
+assert.equal(metrics[0].id, expectedMetrics.id);
+assert.equal(metrics[0].scope, "global");
+assert.deepEqual(metrics[0].config, expectedMetrics.config);
 // Compatible gateway builds may omit an empty API-spec section on export even
 // though restore accepts the versioned section. The fixture test asserts the
 // request always carries it; when export returns it, verify the exact version.
