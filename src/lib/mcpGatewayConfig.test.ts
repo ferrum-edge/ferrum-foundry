@@ -128,11 +128,14 @@ describe("mcpGatewayConfig", () => {
     );
     expect(restored.config.endpoint).toEqual(customized.endpoint);
     expect(restored.config.policy).toEqual(customized.policy);
+    expect(restored.config.discovery).toEqual(customized.discovery);
+    // Stripping the aggregate-only keys again leaves exactly the operator's
+    // shared edits: `discovery.aggregate_tools` is itself aggregate-only.
     expect(omitMcpGatewayAggregateOnlyFields(restored.config)).toEqual({
       mode: "aggregate_router",
       endpoint: customized.endpoint,
       servers: customized.servers,
-      discovery: customized.discovery,
+      discovery: { public_base_url: "https://mcp.example.com" },
     });
   });
 });
