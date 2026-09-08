@@ -172,6 +172,29 @@ describe("API spec dialog generations", () => {
     expect(document.querySelector('[role="dialog"]')!.textContent).toContain("Replace API B");
   });
 
+  it("shows the parse code and details when the gateway rejects a replacement", async () => {
+    await mount();
+    await openReplace(0, 1);
+    await resolveRead(0, "current A");
+    await settle(() => expect(editor().disabled).toBe(false));
+    await click("Replace Spec");
+    await settle(() => expect(writes).toHaveLength(1));
+
+    const details =
+      "x-ferrum-proxy: unknown field `backend_protocol` at line 6 column 3";
+    await act(async () =>
+      writes[0]!.resolve(
+        Response.json(
+          { error: "Spec parse failed", code: "MalformedExtension", details },
+          { status: 400 },
+        ),
+      ),
+    );
+
+    await settle(() => expect(document.body.textContent).toContain("MalformedExtension"));
+    expect(document.body.textContent).toContain(details);
+  });
+
   it("keeps a newer view paired with its own document", async () => {
     await mount();
     await click("View", 0);
