@@ -3,6 +3,17 @@
 /* ------------------------------------------------------------------ */
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import {
+  MCP_GATEWAY_AGGREGATE_ONLY_PATHS,
+  MCP_GATEWAY_TRANSPARENT_NOTE,
+  mcpGatewayConfigHasAggregateOnlyFields,
+  omitMcpGatewayAggregateOnlyFields,
+  pickMcpGatewayAggregateOnlyFields,
+  readMcpGatewayMode,
+  sanitizeMcpGatewayConfigForSubmit,
+  switchMcpGatewayMode,
+  type McpGatewayMode,
+} from "@/lib/mcpGatewayConfig";
 import { useNavigate } from "@tanstack/react-router";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -126,6 +137,7 @@ function PluginConfigFormFields({
   const [configJson, setConfigJson] = useState(initialConfigJson);
   // Track whether the user has manually edited the config textarea
   const [userEditedConfig, setUserEditedConfig] = useState(false);
+  const mcpAggregateStashRef = useRef<Record<string, unknown>>({});
 
   /* ---------- Trigger (optional per-instance execution predicate) --- */
   const [triggerEnabled, setTriggerEnabled] = useState(!!initialData?.trigger);
@@ -183,10 +195,15 @@ function PluginConfigFormFields({
     e.preventDefault();
     if (!validate()) return;
 
+    let parsedConfig = JSON.parse(configJson) as Record<string, unknown>;
+    if (pluginName === "mcp_gateway") {
+      parsedConfig = sanitizeMcpGatewayConfigForSubmit(parsedConfig);
+    }
+
     const data: PluginConfigCreate = {
       plugin_name: pluginName,
       scope,
-      config: JSON.parse(configJson),
+      config: parsedConfig,
       enabled,
       ...(scope === "proxy" && proxyId && { proxy_id: proxyId }),
       ...(priorityOverride !== "" && { priority_override: Number(priorityOverride) }),
@@ -231,14 +248,59 @@ function PluginConfigFormFields({
   const configMatchesDefault = configJson === currentDefault;
 
   const resetConfigToPluginDefault = () => {
+    mcpAggregateStashRef.current = {};
     setConfigJson(currentDefault);
     setUserEditedConfig(false);
     setErrors(({ config: _config, ...remainingErrors }) => remainingErrors);
   };
 
+  const parsedMcpGatewayConfig = useMemo(() => {
+    if (pluginName !== "mcp_gateway") return null;
+    try {
+      return JSON.parse(configJson) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }, [configJson, pluginName]);
+
+  const mcpGatewayMode = parsedMcpGatewayConfig
+    ? readMcpGatewayMode(parsedMcpGatewayConfig)
+    : "aggregate_router";
+
+  const handleMcpGatewayModeChange = (nextMode: McpGatewayMode) => {
+    if (!parsedMcpGatewayConfig || nextMode === mcpGatewayMode) return;
+    const { config, stash } = switchMcpGatewayMode(
+      parsedMcpGatewayConfig,
+      nextMode,
+      mcpAggregateStashRef.current,
+    );
+    mcpAggregateStashRef.current = stash;
+    setConfigJson(JSON.stringify(config, null, 2));
+    setUserEditedConfig(true);
+    setErrors(({ config: _config, ...remainingErrors }) => remainingErrors);
+  };
+
+  useEffect(() => {
+    if (pluginName !== "mcp_gateway" || !parsedMcpGatewayConfig) return;
+    if (readMcpGatewayMode(parsedMcpGatewayConfig) !== "transparent_proxy") return;
+    if (!mcpGatewayConfigHasAggregateOnlyFields(parsedMcpGatewayConfig)) return;
+
+    mcpAggregateStashRef.current = {
+      ...mcpAggregateStashRef.current,
+      ...pickMcpGatewayAggregateOnlyFields(parsedMcpGatewayConfig),
+    };
+    const stripped = omitMcpGatewayAggregateOnlyFields(parsedMcpGatewayConfig);
+    stripped.mode = "transparent_proxy";
+    const nextJson = JSON.stringify(stripped, null, 2);
+    if (nextJson !== configJson) {
+      setConfigJson(nextJson);
+    }
+  }, [configJson, parsedMcpGatewayConfig, pluginName]);
+
   // When plugin name changes in create mode, always update config to the new default
   useEffect(() => {
     if (isEdit || !pluginName) return;
+    mcpAggregateStashRef.current = {};
     const nextConfigJson = formatPluginConfigDefault(pluginName);
     setConfigJson(nextConfigJson);
     setUserEditedConfig(false);
@@ -323,6 +385,33 @@ function PluginConfigFormFields({
           />
         </div>
       </div>
+
+      {pluginName === "mcp_gateway" && parsedMcpGatewayConfig && (
+        <div className="border-b border-border/50 py-4">
+          <h3 className="text-sm font-semibold text-text-primary mb-4">MCP Gateway Mode</h3>
+          <div className="space-y-3">
+            <Select
+              label="Mode"
+              value={mcpGatewayMode}
+              onValueChange={(value) => handleMcpGatewayModeChange(value as McpGatewayMode)}
+              options={[
+                { value: "aggregate_router", label: "Aggregate router" },
+                { value: "transparent_proxy", label: "Transparent proxy" },
+              ]}
+              helpText="Aggregate mode exposes a merged catalog with policy controls. Transparent mode proxies upstream MCP servers directly."
+            />
+            {mcpGatewayMode === "transparent_proxy" && (
+              <p className="text-xs text-text-muted">{MCP_GATEWAY_TRANSPARENT_NOTE}</p>
+            )}
+            {mcpGatewayMode === "transparent_proxy" && (
+              <p className="text-xs text-text-muted">
+                Omitted in transparent mode:{" "}
+                {MCP_GATEWAY_AGGREGATE_ONLY_PATHS.join(", ")}.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ── Config JSON ── */}
       <div className="border-b border-border/50 py-4">
