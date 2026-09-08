@@ -101,6 +101,7 @@ describe("consumer editor identity across a namespace switch", () => {
   let host: HTMLDivElement | null = null;
   let root: Root | null = null;
   let handle: NamespaceHandle | undefined;
+  let basicPolicy = false;
 
   /** Hold every `<METHOD> <namespace>` detail request until released. */
   function hold(key: string): () => void {
@@ -214,6 +215,7 @@ describe("consumer editor identity across a namespace switch", () => {
     captured.length = 0;
     holds.clear();
     handle = undefined;
+    basicPolicy = false;
     records.clear();
     records.set("tenant-a", consumerFixture("tenant-a"));
     records.set("tenant-b", consumerFixture("tenant-b"));
@@ -263,6 +265,14 @@ describe("consumer editor identity across a namespace switch", () => {
             url.pathname,
           )
         ) {
+          if (basicPolicy && url.pathname === "/api/proxy/proxies") {
+            return json({ data: [{ id: "basic-proxy", name: "Basic proxy", backend_scheme: "http", listen_path: "/basic", plugins: [] }],
+              pagination: { offset: 0, limit: 250, total: 1 } });
+          }
+          if (basicPolicy && url.pathname === "/api/proxy/plugins/config") {
+            return json({ data: [{ id: "basic", plugin_name: "basic_auth", scope: "global", enabled: true, config: {} }],
+              pagination: { offset: 0, limit: 250, total: 1 } });
+          }
           return emptyPage();
         }
         return json({ error: `unexpected ${method} ${url.pathname}` }, 500);
@@ -315,6 +325,21 @@ describe("consumer editor identity across a namespace switch", () => {
     });
     expect(JSON.stringify(put.body)).not.toContain("tenant-a");
     expect(records.get("tenant-a")).toEqual(consumerFixture("tenant-a"));
+  });
+
+  it("shows an omitted basic credential as a conditional proxy match without fetching backups", async () => {
+    basicPolicy = true;
+    await mount();
+    await waitFor(() => pageText().includes("Matched Proxies (1)"));
+    await act(async () => {
+      [...host!.querySelectorAll("button")].find((button) => button.textContent === "Matched Proxies (1)")!
+        .dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    await waitFor(() => pageText().includes("ordinary Consumer responses omit basicauth"));
+    expect(pageText()).toContain("Basic proxy");
+    expect(pageText()).toContain("conditional");
+    expect(pageText()).not.toContain("not authorized");
+    expect(captured.some((request) => request.url.includes("/backup"))).toBe(false);
   });
 
   it("shows the loading branch, never tenant-a's fields, on an uncached switch", async () => {

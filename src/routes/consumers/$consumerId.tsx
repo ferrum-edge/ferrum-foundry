@@ -192,7 +192,7 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
           <TabsTrigger value="credentials">Credentials</TabsTrigger>
           <TabsTrigger value="acl">ACL Groups</TabsTrigger>
           <TabsTrigger value="proxies">
-            Authorized Proxies ({authorizedProxies.length})
+            Matched Proxies ({authorizedProxies.length})
           </TabsTrigger>
         </TabsList>
 
@@ -237,15 +237,19 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
 
         {/* ── Authorized Proxies Tab ── */}
         <TabsContent value="proxies">
+          <p className="text-text-muted text-sm mb-3">
+            Includes allowed and conditional matches. Basic-auth matches are conditional
+            when no other matching credential is observable.
+          </p>
           {authorizedProxies.length === 0 ? (
             <Card>
               <div className="flex flex-col items-center text-center py-8">
                 <p className="text-text-secondary">
-                  This consumer is not authorized on any proxy.
+                  No proxy is conclusively or conditionally matched for this consumer.
                 </p>
                 <p className="text-text-muted text-sm mt-2 max-w-md">
-                  Add a credential on the Credentials tab and attach a matching
-                  authentication plugin to a proxy.
+                  Review effective authentication plugins and ACL rules.
+                  Basic credential presence cannot be determined from consumer responses.
                 </p>
               </div>
             </Card>

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { adminToken, buildRestorePayload, readSeedConfig } from "./seed-demo-gateway.mjs";
 import { verifyPluginDefaults } from "./plugin-defaults-contract.mjs";
+import { verifyBasicAuthContract } from "./basic-auth-contract.mjs";
 
 const config = readSeedConfig();
 
@@ -133,10 +134,12 @@ await request(`/upstreams/${upstreamId}?apply=sync`, { method: "DELETE", expecte
 // header to the same disposable namespace.
 const defaultsConfig = { ...config, namespace: `${config.namespace}-plugin-defaults` };
 const defaults = await verifyPluginDefaults((path, options) => exchange(path, options, defaultsConfig));
+const basicAuth = await verifyBasicAuthContract(exchange);
 
 console.log(JSON.stringify({
   verified: true,
   defaults,
+  basicAuth,
   operations: ["read", "create", "full-replace update", "credential rotation", "delete"],
   resources: ["upstreams", "consumers", "proxies", "plugin configs", "namespaces"],
 }));

@@ -77,7 +77,7 @@ responses and polls. Configured-client coverage exercises delayed headers, reuse
 request options, failed writes during monitoring, malformed envelopes, namespace
 labels, and session boundaries in GitHub-hosted CI.
 
-Consumer creation and credential append retain submitted API keys, JWT/HMAC
+Consumer creation, credential append, and basic credential replacement retain submitted API keys, JWT/HMAC
 secrets, and Basic auth passwords in a one-time copy panel after success. The
 panel uses the submitted values, never a redacted response. Saving with secrets
 pauses navigation until “I have saved these credentials”; appending clears the
@@ -87,10 +87,30 @@ Clipboard failure leaves the value available for manual copying.
 
 The copy panel lives only in the mounted editor. A namespace change, navigation,
 or logout discards it. Nothing from that panel is written to browser storage or
-query data; completed create/append mutation state is reset and has zero inactive
+query data; completed create/append/replace mutation state is reset and has zero inactive
 cache retention. Later gateway reads continue to redact secrets or omit Basic
 auth credentials. Copy secrets to an appropriate credential store before leaving
 this view; Foundry cannot recover them afterward.
+
+The [upstream Consumer contract](https://github.com/ferrum-edge/ferrum-edge/blob/main/openapi.yaml)
+omits the entire `basicauth` type from ordinary responses, regardless of
+whether passwords exist. The Basic Authentication card always shows unknown
+presence and count. Add appends a password, Replace basic credentials replaces
+all existing basic passwords with the submitted password, and Delete all basic
+credentials confirms removal of the entire type. The login identity is the
+consumer's username; no credential-level username is submitted. Replacement
+failures use a generic message so echoed passwords and request objects are not
+retained in mutation errors. Completion refreshes only the originating namespace
+and consumer, and cannot populate another editor's copy panel or close its dialog.
+
+Effective policy treats basic-auth credential knowledge as unobservable: when
+no other matching local credential is observed, access is conditional with an
+omission reason. Explicit ACL denials still apply. Observed matching credentials
+keep their existing decisions, including request triggers, external identity
+mapping, and unknown execution order. Pure key-auth policies still distinguish
+observed credentials from missing credentials. Foundry never reads backup secrets
+to determine access. The hosted pinned-gateway smoke separately verifies ordinary
+response omission and canonical backup hashes with disposable synthetic credentials.
 
 Restore also distinguishes HTTP 503 recovery outcomes. A valid commit cursor or
 `applied: false` produces a “Restore committed” warning, clears the restore

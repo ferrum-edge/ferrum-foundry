@@ -18,7 +18,7 @@ Admin panel UI for managing and observing the [Ferrum Edge](https://github.com/f
 
 - **Resource Management** - Full CRUD for Proxies (HTTP + TCP/UDP/DTLS stream routes), Consumers, Plugins, and Upstreams with server-paginated tables and complete-collection search
 - **Relational Browsing** - Navigate Proxy -> Plugins -> Upstream -> Targets (with subsets and locality) via tabs and breadcrumbs
-- **Consumer Credentials** - Manage key-auth, basic-auth, JWT, HMAC, and mTLS credential rotation arrays with ACL groups
+- **Consumer Credentials** - Manage key-auth, JWT, HMAC, and mTLS rotation arrays with ACL groups; append, replace, or delete all basic passwords while showing their presence as unknown (the gateway omits basic credentials from ordinary responses)
 - **Plugin Configuration** - Category-grouped catalog of 80+ gateway plugins (auth, security/WAF, traffic control, AI gateway, mesh, observability, billing) with default config templates, per-instance execution triggers, and scope (global/proxy/group) support
 - **TLS Management** - Fleet-global certificate/CA/CRL/OCSP/JWKS stores, ACME order automation (HTTP-01/TLS-ALPN-01/DNS-01), material inventory with expiry tracking, surface rotation, and PEM validation. [Waiting-operation deadlines](docs/deployment.md#live-apply-monitoring-and-acme-issuance-deadlines) cover live-apply monitoring and safe status re-checks after interrupted issuance.
 - **API Spec Import** - Create spec-managed proxies, upstreams, and plugins from OpenAPI documents (`x-ferrum-proxy` extensions) with replace/delete lifecycle

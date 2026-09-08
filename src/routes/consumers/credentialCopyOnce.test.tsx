@@ -179,6 +179,8 @@ describe("submitted credential recovery", () => {
     expect(host.querySelector("textarea")).toBeNull();
     expect(host.querySelector("input")?.value).toBe("synthetic-key");
     expect(writes).toHaveLength(1);
+    await act(async () => { await vi.waitFor(() => expect(qc.getMutationCache().getAll()).toHaveLength(0)); });
+    assertNoPersistence("synthetic-key");
   });
 
   it("clears the originating namespace receipt on namespace change", async () => {
