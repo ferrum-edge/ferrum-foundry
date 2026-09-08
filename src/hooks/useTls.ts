@@ -154,6 +154,7 @@ export function useAllAcmeAccounts() {
 export function useCreateAcmeOrder() {
   const qc = useQueryClient();
   return useMutation({
+    retry: false,
     mutationFn: (data: tls.AcmeOrderRequest) => tls.createAcmeOrder(data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["tls", "acme"] });
@@ -191,6 +192,7 @@ export function useFinalizeAcmeOrder() {
 export function useRenewAcmeCertificate() {
   const qc = useQueryClient();
   return useMutation({
+    retry: false,
     mutationFn: ({ id, data }: { id: string; data?: tls.AcmeRenewRequest }) =>
       tls.renewAcmeCertificate(id, data),
     onSuccess: () => {

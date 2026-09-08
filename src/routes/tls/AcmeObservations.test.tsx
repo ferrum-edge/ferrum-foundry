@@ -176,3 +176,48 @@ describe("ACME order observations", () => {
     expect(posts).toBe(1);
   });
 });
+
+it('keeps uncertain order creation disarmed after closing and reopening', async () => {
+  await mount();
+  await click('New ACME Order');
+  const domains = document.querySelector<HTMLInputElement>('#domains')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+      .call(domains, 'example.test');
+    domains.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  const submit = () => [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
+    .find((button) => button.textContent?.trim() === 'Create Order')!;
+  await act(async () => submit().click());
+  await settle(() => {
+    expect(document.querySelector('[role="dialog"]')!.textContent).toContain('outcome unknown');
+    expect(submit().disabled).toBe(true);
+  });
+  await act(async () => submit().click());
+  expect(posts).toBe(1);
+  const cancel = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
+    .find((button) => button.textContent?.trim() === 'Cancel')!;
+  await act(async () => cancel.click());
+  await click('New ACME Order');
+  expect(submit().disabled).toBe(true);
+});
+
+it('blocks renewal after an uncertain response', async () => {
+  await mount();
+  await act(async () => {
+    client.setQueryData(['tls', 'acme', 'certificates', 'all'], [{
+      id: 'fixture-cert', domains: ['example.test'], status: 'issued',
+      directory_url: 'https://ca.example.test/directory', source_uri: 'acme://fixture-cert',
+      created_at: '2026-09-06T00:00:00Z', updated_at: '2026-09-06T00:00:00Z',
+    }]);
+  });
+  await click('Renew');
+  const renew = () => [...panel().querySelectorAll<HTMLButtonElement>('button')]
+    .find((button) => button.textContent?.trim() === 'Renew')!;
+  await settle(() => {
+    expect(panel().textContent).toContain('Renewal outcome unknown');
+    expect(renew().disabled).toBe(true);
+  });
+  await act(async () => renew().click());
+  expect(posts).toBe(1);
+});

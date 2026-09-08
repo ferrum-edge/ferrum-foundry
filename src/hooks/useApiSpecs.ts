@@ -49,6 +49,7 @@ export function useImportApiSpec() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
   return useMutation({
+    retry: false,
     mutationFn: (document: string) => apiSpecs.create(scope, document),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["apiSpecs"] });
@@ -63,6 +64,7 @@ export function useUpdateApiSpec() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
   return useMutation({
+    retry: false,
     mutationFn: ({ id, document }: { id: string; document: string }) =>
       apiSpecs.update(scope, id, document),
     onSuccess: () => {
