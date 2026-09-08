@@ -3,6 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MCP_GATEWAY_AGGREGATE_ONLY_PATHS } from "@/lib/mcpGatewayConfig";
 import { PluginConfigForm } from "./PluginConfigForm";
+import type { PluginConfigCreate } from "@/api/types";
 
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn() }));
 
@@ -12,7 +13,9 @@ vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn() }));
 
 let host: HTMLDivElement;
 let root: Root;
-const onSubmit = vi.fn(async () => {});
+const onSubmit = vi.fn<(data: PluginConfigCreate, proxyGroupIds?: string[]) => Promise<void>>(
+  async () => {},
+);
 
 beforeEach(() => {
   onSubmit.mockClear();
