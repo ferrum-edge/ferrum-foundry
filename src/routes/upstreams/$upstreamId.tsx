@@ -9,6 +9,7 @@ import {
   useUpdateUpstream,
   useDeleteUpstream,
 } from "@/hooks/useUpstreams";
+import { ReadStateNotice } from '@/components/shared/ReadState';
 import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -45,7 +46,8 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const { data: upstream, isLoading, isError } = useUpstream(upstreamId);
+  const resourceQuery = useUpstream(upstreamId);
+  const { data: upstream, isLoading } = resourceQuery;
   const updateUpstream = useUpdateUpstream();
   const deleteUpstream = useDeleteUpstream();
 
@@ -132,7 +134,7 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
     );
   }
 
-  if (isError || !upstream) {
+  if (!upstream) {
     return (
       <div className="max-w-2xl">
         <Card>
@@ -155,6 +157,9 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
 
   return (
     <div className="space-y-6 max-w-3xl">
+      {resourceQuery.isError && (
+        <ReadStateNotice query={resourceQuery} label="Upstream configuration" />
+      )}
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

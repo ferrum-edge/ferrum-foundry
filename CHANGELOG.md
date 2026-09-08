@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Keep proxy, consumer, upstream, and plugin editors mounted through failed background reads, preserving unsaved fields and group membership with a retry notice (#299).
+- Distinguish unknown reads from empty or current data across policy relationships, SPIFFE trust, federation, remote clusters, waypoints, dashboard, audit, and API specs. Hide unavailable collection actions and add dashboard refresh controls and observation times (#298).
 - The active namespace is resolved against the principal's grants during render, so the first request after a load or an identity-grant change no longer carries an ungranted namespace and is no longer refused `403 Namespace access denied` behind a modal error dialog (#296).
 - A restore whose outcome Foundry could not observe — a response-phase BFF timeout, a `502 FERRUM_BFF_UPSTREAM_FAILURE`, a client timeout, or a dropped connection — is reported as an unknown outcome that clears the pinned backup and refreshes cached reads, instead of a generic failure toast that left the destructive confirmation armed for a one-click replay. An upload-phase timeout still proves the restore did not run and stays retryable (#295).
 

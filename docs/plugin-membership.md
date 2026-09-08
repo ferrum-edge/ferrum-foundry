@@ -12,6 +12,10 @@ The group editor waits for the complete proxy list, including every page, before
 showing the current membership. A failed list request shows a load error instead
 of an editable empty group. Initial membership is applied once when it becomes
 available; later successful refreshes do not overwrite selections you have edited.
+Failed background refreshes also preserve the mounted editor and all its drafts.
+The proxy picker is disabled until its catalog recovers; a retry notice identifies
+the last successful read. Retained complete membership still counts as initialized,
+so an error or its recovery cannot remount the form and reset selections.
 While editing, switching Scope away and back preserves the draft selections;
 only saving applies the chosen scope. A selected ID omitted from the current
 catalog remains visible with its ID and can be removed explicitly. Foundry never

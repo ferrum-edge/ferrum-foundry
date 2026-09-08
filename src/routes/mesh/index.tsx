@@ -4,6 +4,7 @@
 /*  404s outside mesh mode, which renders as a friendly empty state.  */
 /* ------------------------------------------------------------------ */
 
+import { ReadState } from '@/components/shared/ReadState';
 import { useState } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
 import { Card } from "@/components/ui/Card";
@@ -299,85 +300,89 @@ function PolicyDeniesTab() {
 /* ---------- Clusters & federation ---------- */
 
 function ClustersTab() {
-  const { data: remote, isError: remoteErr } = useRemoteClusters();
-  const { data: federation } = useFederation();
-
-  if (remoteErr && !federation) return <NotMeshEmpty what="Multicluster state" />;
+  const remoteQuery = useRemoteClusters();
+  const federationQuery = useFederation();
+  const { data: remote } = remoteQuery;
+  const { data: federation } = federationQuery;
 
   return (
     <div className="space-y-6">
-      {remote && (
-        <>
-          <div className="flex items-center gap-3">
-            <h3 className="text-sm font-semibold text-text-primary">Remote Clusters</h3>
-            <Badge variant={remote.discovery_enabled ? "green" : "default"}>
-              discovery {remote.discovery_enabled ? "on" : "off"}
-            </Badge>
-          </div>
-          <Card className="overflow-hidden p-0">
-            {remote.configured.length === 0 && remote.discovered.length === 0 && (
-              <EmptyState title="No remote clusters" description="Configured and discovered clusters appear here." />
-            )}
-            {remote.configured.map((cluster) => (
-              <div key={cluster.cluster_name} className="px-6 py-3.5 border-b border-border/50 last:border-b-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-sm font-medium text-text-primary">{cluster.cluster_name}</span>
-                  <Badge variant={cluster.discovered ? "green" : "yellow"}>
-                    {cluster.discovered ? "discovered" : "not discovered"}
-                  </Badge>
-                  <Badge variant={cluster.outbound_trust_active ? "green" : "red"}>
-                    outbound trust {cluster.outbound_trust_active ? "active" : "inactive"}
-                  </Badge>
-                  <Badge variant={cluster.inbound_trust_active ? "green" : "red"}>
-                    inbound trust {cluster.inbound_trust_active ? "active" : "inactive"}
-                  </Badge>
-                </div>
-                <p className="text-xs text-text-muted mt-1">
-                  {cluster.trust_domain} · trust via {cluster.trust_source.replace(/_/g, " ")}
-                  {cluster.network ? ` · network ${cluster.network}` : ""}
-                </p>
-              </div>
-            ))}
-            {remote.discovered
-              .filter((d) => !remote.configured.some((c) => c.cluster_name === d.cluster_name))
-              .map((cluster) => (
+      <ReadState queries={[remoteQuery]} label="Remote clusters" optionalFeature>
+        {remote && (
+          <>
+            <div className="flex items-center gap-3">
+              <h3 className="text-sm font-semibold text-text-primary">Remote Clusters</h3>
+              <Badge variant={remote.discovery_enabled ? "green" : "default"}>
+                discovery {remote.discovery_enabled ? "on" : "off"}
+              </Badge>
+            </div>
+            <Card className="overflow-hidden p-0">
+              {remote.configured.length === 0 && remote.discovered.length === 0 && (
+                <EmptyState title="No remote clusters" description="Configured and discovered clusters appear here." />
+              )}
+              {remote.configured.map((cluster) => (
                 <div key={cluster.cluster_name} className="px-6 py-3.5 border-b border-border/50 last:border-b-0">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-medium text-text-primary">{cluster.cluster_name}</span>
-                    <Badge variant="blue">discovered only</Badge>
+                    <Badge variant={cluster.discovered ? "green" : "yellow"}>
+                      {cluster.discovered ? "discovered" : "not discovered"}
+                    </Badge>
+                    <Badge variant={cluster.outbound_trust_active ? "green" : "red"}>
+                      outbound trust {cluster.outbound_trust_active ? "active" : "inactive"}
+                    </Badge>
+                    <Badge variant={cluster.inbound_trust_active ? "green" : "red"}>
+                      inbound trust {cluster.inbound_trust_active ? "active" : "inactive"}
+                    </Badge>
                   </div>
                   <p className="text-xs text-text-muted mt-1">
-                    {cluster.trust_domain} · {cluster.workload_count} workloads ·{" "}
-                    {cluster.service_count} services · fetched {cluster.age_seconds}s ago
+                    {cluster.trust_domain} · trust via {cluster.trust_source.replace(/_/g, " ")}
+                    {cluster.network ? ` · network ${cluster.network}` : ""}
                   </p>
                 </div>
               ))}
-          </Card>
-        </>
-      )}
+              {remote.discovered
+                .filter((d) => !remote.configured.some((c) => c.cluster_name === d.cluster_name))
+                .map((cluster) => (
+                  <div key={cluster.cluster_name} className="px-6 py-3.5 border-b border-border/50 last:border-b-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-text-primary">{cluster.cluster_name}</span>
+                      <Badge variant="blue">discovered only</Badge>
+                    </div>
+                    <p className="text-xs text-text-muted mt-1">
+                      {cluster.trust_domain} · {cluster.workload_count} workloads ·{" "}
+                      {cluster.service_count} services · fetched {cluster.age_seconds}s ago
+                    </p>
+                  </div>
+                ))}
+            </Card>
+          </>
+        )}
+      </ReadState>
 
-      {federation && federation.bundles.length > 0 && (
-        <>
-          <h3 className="text-sm font-semibold text-text-primary">Federated Trust Bundles</h3>
-          <Card className="overflow-hidden p-0">
-            {federation.bundles.map((bundle) => (
-              <div key={bundle.cluster} className="px-6 py-3 border-b border-border/50 last:border-b-0 flex items-center justify-between gap-4">
-                <div className="min-w-0">
-                  <p className="text-sm text-text-primary font-medium">{bundle.cluster}</p>
-                  <p className="text-xs text-text-muted truncate">
-                    {bundle.trust_domain} · {bundle.endpoint}
-                  </p>
+      <ReadState queries={[federationQuery]} label="Federated trust bundles" optionalFeature>
+        {federation && federation.bundles.length > 0 && (
+          <>
+            <h3 className="text-sm font-semibold text-text-primary">Federated Trust Bundles</h3>
+            <Card className="overflow-hidden p-0">
+              {federation.bundles.map((bundle) => (
+                <div key={bundle.cluster} className="px-6 py-3 border-b border-border/50 last:border-b-0 flex items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-sm text-text-primary font-medium">{bundle.cluster}</p>
+                    <p className="text-xs text-text-muted truncate">
+                      {bundle.trust_domain} · {bundle.endpoint}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Badge variant="blue">{bundle.x509_authorities} x509</Badge>
+                    <Badge variant="purple">{bundle.jwt_authorities} jwt</Badge>
+                    <span className="text-xs text-text-muted">{bundle.bundle_age_seconds}s old</span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <Badge variant="blue">{bundle.x509_authorities} x509</Badge>
-                  <Badge variant="purple">{bundle.jwt_authorities} jwt</Badge>
-                  <span className="text-xs text-text-muted">{bundle.bundle_age_seconds}s old</span>
-                </div>
-              </div>
-            ))}
-          </Card>
-        </>
-      )}
+              ))}
+            </Card>
+          </>
+        )}
+      </ReadState>
     </div>
   );
 }
@@ -465,63 +470,67 @@ function EgressTab() {
 /* ---------- Waypoints ---------- */
 
 function WaypointsTab() {
-  const { data: nodeIdentities, isError: nodeErr } = useNodeWaypointIdentities();
-  const { data: services, isError: svcErr } = useServiceWaypointServices();
-
-  if (nodeErr && svcErr) return <NotMeshEmpty what="Waypoint topology" />;
+  const nodeQuery = useNodeWaypointIdentities();
+  const servicesQuery = useServiceWaypointServices();
+  const { data: nodeIdentities } = nodeQuery;
+  const { data: services } = servicesQuery;
 
   return (
     <div className="space-y-6">
-      {nodeIdentities && (
-        <>
-          <div className="flex items-center gap-3">
-            <h3 className="text-sm font-semibold text-text-primary">Node Waypoint Identities</h3>
-            <Badge variant="blue">{nodeIdentities.identity_count}</Badge>
-          </div>
-          <Card className="overflow-hidden p-0">
-            {nodeIdentities.identities.map((identity) => (
-              <div key={identity.pod_uid} className="px-6 py-3 border-b border-border/50 last:border-b-0 flex items-center justify-between gap-4">
-                <div className="min-w-0">
-                  <p className="text-xs font-mono text-text-primary truncate">{identity.spiffe_id}</p>
-                  <p className="text-xs text-text-muted">pod {identity.pod_uid}</p>
+      <ReadState queries={[nodeQuery]} label="Node waypoint identities" optionalFeature>
+        {nodeIdentities && (
+          <>
+            <div className="flex items-center gap-3">
+              <h3 className="text-sm font-semibold text-text-primary">Node Waypoint Identities</h3>
+              <Badge variant="blue">{nodeIdentities.identity_count}</Badge>
+            </div>
+            <Card className="overflow-hidden p-0">
+              {nodeIdentities.identities.map((identity) => (
+                <div key={identity.pod_uid} className="px-6 py-3 border-b border-border/50 last:border-b-0 flex items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-xs font-mono text-text-primary truncate">{identity.spiffe_id}</p>
+                    <p className="text-xs text-text-muted">pod {identity.pod_uid}</p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Badge variant="default">
+                      {identity.orig_dst4_cookies + identity.orig_dst6_cookies} cookies
+                    </Badge>
+                    {identity.has_policy_scope && <Badge variant="green">policy scope</Badge>}
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <Badge variant="default">
-                    {identity.orig_dst4_cookies + identity.orig_dst6_cookies} cookies
-                  </Badge>
-                  {identity.has_policy_scope && <Badge variant="green">policy scope</Badge>}
-                </div>
-              </div>
-            ))}
-          </Card>
-        </>
-      )}
+              ))}
+            </Card>
+          </>
+        )}
+      </ReadState>
 
-      {services && (
-        <>
-          <div className="flex items-center gap-3">
-            <h3 className="text-sm font-semibold text-text-primary">
-              Service Waypoint · {services.waypoint_name}
-            </h3>
-            <Badge variant="blue">{services.service_count} services</Badge>
-          </div>
-          <Card className="overflow-hidden p-0">
-            {services.services.map((service) => (
-              <div key={`${service.namespace}/${service.name}`} className="px-6 py-3 border-b border-border/50 last:border-b-0 flex items-center justify-between gap-4">
-                <span className="text-sm text-text-primary">
-                  {service.namespace}/{service.name}
-                </span>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-text-muted">
-                    ports {service.ports.join(", ")}
+      <ReadState queries={[servicesQuery]} label="Service waypoint services" optionalFeature>
+        {services && (
+          <>
+            <div className="flex items-center gap-3">
+              <h3 className="text-sm font-semibold text-text-primary">
+                Service Waypoint · {services.waypoint_name}
+              </h3>
+              <Badge variant="blue">{services.service_count} services</Badge>
+            </div>
+            <Card className="overflow-hidden p-0">
+              {services.services.map((service) => (
+                <div key={`${service.namespace}/${service.name}`} className="px-6 py-3 border-b border-border/50 last:border-b-0 flex items-center justify-between gap-4">
+                  <span className="text-sm text-text-primary">
+                    {service.namespace}/{service.name}
                   </span>
-                  <Badge variant="default">{service.workload_count} workloads</Badge>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-text-muted">
+                      ports {service.ports.join(", ")}
+                    </span>
+                    <Badge variant="default">{service.workload_count} workloads</Badge>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </Card>
-        </>
-      )}
+              ))}
+            </Card>
+          </>
+        )}
+      </ReadState>
     </div>
   );
 }

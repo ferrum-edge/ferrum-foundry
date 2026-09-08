@@ -2,6 +2,7 @@
 /*  Ferrum Foundry – Audit log page                                    */
 /* ------------------------------------------------------------------ */
 
+import { ReadState } from '@/components/shared/ReadState';
 import { useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -9,7 +10,6 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { SkeletonRow } from "@/components/ui/Skeleton";
 import { useAuditEvents } from "@/hooks/useOps";
 import type { AuditEvent } from "@/api/ops";
 
@@ -39,7 +39,7 @@ export default function AuditPage() {
   const [offset, setOffset] = useState(0);
   const [expanded, setExpanded] = useState<string | null>(null);
 
-  const { data, isLoading, isError } = useAuditEvents({
+  const query = useAuditEvents({
     ...(actor && { actor }),
     ...(action && { action }),
     ...(resourceType && { resource_type: resourceType }),
@@ -47,6 +47,7 @@ export default function AuditPage() {
     offset,
   });
 
+  const { data } = query;
   const events = data?.items ?? [];
 
   return (
@@ -96,28 +97,15 @@ export default function AuditPage() {
         </div>
       </div>
 
-      <Card className="overflow-hidden p-0">
-        {isLoading && (
-          <div className="px-6 divide-y divide-border/50">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <SkeletonRow key={i} />
-            ))}
-          </div>
-        )}
-        {!isLoading && isError && (
-          <EmptyState
-            title="Audit log unavailable"
-            description="Audit persistence may be disabled on this gateway."
-          />
-        )}
-        {!isLoading && !isError && events.length === 0 && (
-          <EmptyState
-            title="No audit events"
-            description="Admin API mutations will appear here."
-          />
-        )}
-        {!isLoading &&
-          events.map((event) => (
+      <ReadState queries={[query]} label="Audit log" optionalFeature>
+        <Card className="overflow-hidden p-0">
+          {events.length === 0 && (
+            <EmptyState
+              title="No audit events"
+              description="Admin API mutations will appear here."
+            />
+          )}
+          {events.map((event) => (
             <button
               key={event.id}
               type="button"
@@ -149,34 +137,35 @@ export default function AuditPage() {
               )}
             </button>
           ))}
-      </Card>
+        </Card>
 
-      {/* Pagination */}
-      {data && data.total > PAGE_SIZE && (
-        <div className="flex items-center justify-between">
-          <span className="text-sm text-text-muted">
-            {offset + 1}–{Math.min(offset + PAGE_SIZE, data.total)} of {data.total}
-          </span>
-          <div className="flex gap-2">
-            <Button
-              variant="secondary"
-              size="sm"
-              disabled={offset === 0}
-              onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              disabled={data.next_offset == null}
-              onClick={() => setOffset(data.next_offset ?? offset)}
-            >
-              Next
-            </Button>
+        {/* Pagination */}
+        {data && data.total > PAGE_SIZE && (
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-text-muted">
+              {offset + 1}–{Math.min(offset + PAGE_SIZE, data.total)} of {data.total}
+            </span>
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={offset === 0}
+                onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+              >
+                Previous
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={data.next_offset == null}
+                onClick={() => setOffset(data.next_offset ?? offset)}
+              >
+                Next
+              </Button>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </ReadState>
     </div>
   );
 }

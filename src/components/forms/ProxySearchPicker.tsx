@@ -3,6 +3,8 @@
 /* ------------------------------------------------------------------ */
 
 import { useState, useMemo, useRef, useEffect } from "react";
+import { ReadStateNotice } from '@/components/shared/ReadState';
+import { resolveReadState } from '@/lib/readState';
 import { useAllProxies } from "@/hooks/useProxies";
 import type { Proxy } from "@/api/types";
 
@@ -49,7 +51,9 @@ export function ProxySearchPicker(props: ProxySearchPickerProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const { data, isLoading } = useAllProxies();
+  const query = useAllProxies();
+  const { data, isLoading } = query;
+  const disabled = resolveReadState(query) !== 'loaded';
   const proxies = useMemo(() => data ?? [], [data]);
 
   // Filter by search term
@@ -90,6 +94,7 @@ export function ProxySearchPicker(props: ProxySearchPickerProps) {
   /* ---------- Handlers ---------- */
 
   const handleSelect = (proxy: Proxy) => {
+    if (disabled) return;
     if (mode === "single") {
       (onChange as SingleProps["onChange"])(proxy.id);
       setOpen(false);
@@ -105,6 +110,7 @@ export function ProxySearchPicker(props: ProxySearchPickerProps) {
   };
 
   const handleRemove = (proxyId: string) => {
+    if (disabled) return;
     if (mode === "single") {
       (onChange as SingleProps["onChange"])("");
     } else {
@@ -136,6 +142,7 @@ export function ProxySearchPicker(props: ProxySearchPickerProps) {
               <span className="truncate max-w-[200px]" title={p.label}>{p.label}</span>
               <button
                 type="button"
+                disabled={disabled}
                 onClick={() => handleRemove(p.id)}
                 className="shrink-0 hover:text-danger transition-colors"
                 aria-label={`Remove ${p.label}`}
@@ -153,6 +160,7 @@ export function ProxySearchPicker(props: ProxySearchPickerProps) {
       <div className="relative">
         <input
           type="text"
+          disabled={disabled}
           value={search}
           onChange={(e) => {
             setSearch(e.target.value);
@@ -174,7 +182,7 @@ export function ProxySearchPicker(props: ProxySearchPickerProps) {
         />
 
         {/* Dropdown */}
-        {open && (
+        {open && !disabled && (
           <div className="absolute z-50 mt-1 w-full bg-bg-card border border-border rounded-lg shadow-xl overflow-hidden">
             <div className="max-h-[16rem] overflow-y-auto p-1">
               {isLoading && (
@@ -243,6 +251,7 @@ export function ProxySearchPicker(props: ProxySearchPickerProps) {
         )}
       </div>
 
+      {query.isError && <ReadStateNotice query={query} label="Proxy catalog" />}
       {error && <p className="text-danger text-xs">{error}</p>}
       {!error && helpText && <p className="text-text-muted text-xs">{helpText}</p>}
     </div>

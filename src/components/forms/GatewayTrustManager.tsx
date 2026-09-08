@@ -1,3 +1,5 @@
+import { ReadState, ReadStateNotice } from '@/components/shared/ReadState';
+import { resolveReadState } from '@/lib/readState';
 import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -11,7 +13,6 @@ import {
 } from "@/components/ui/Dialog";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { Input } from "@/components/ui/Input";
-import { SkeletonCard } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
 import { getApiErrorMessage } from "@/api/client";
 import {
@@ -148,15 +149,10 @@ export function GatewayTrustManager() {
   const bundle = bundlesQuery.data?.data?.[0];
   const status = statusQuery.data;
 
-  if (bundlesQuery.isLoading && statusQuery.isLoading) return <SkeletonCard />;
-  if (bundlesQuery.isError && statusQuery.isError && !status) {
-    return (
-      <EmptyState
-        title="Gateway trust unavailable"
-        description="This endpoint is unavailable outside supported mesh/database modes."
-      />
-    );
-  }
+  const bundlesAvailable = resolveReadState(bundlesQuery) === 'loaded';
+  const canCreate =
+    bundlesAvailable && !bundle && resolveReadState(statusQuery) === 'loaded' &&
+    !status?.bundle && !status?.configured;
 
   const openCreate = () => {
     setForm(EMPTY_TRUST_BUNDLE_FORM);
@@ -169,7 +165,7 @@ export function GatewayTrustManager() {
   };
 
   const save = async () => {
-    if (!editor) return;
+    if (!editor || !bundlesAvailable || (editor.mode === 'create' && !canCreate)) return;
     try {
       if (
         editor.mode === "edit" &&
@@ -219,98 +215,124 @@ export function GatewayTrustManager() {
   // "no gateway trust bundle" state they were rendered above, so nothing is
   // shown but the empty state and its Create button.
   const hasTrustDetail = Boolean(bundle) || status?.configured === true;
-  const emptyCopy = emptyTrustCopy(selectedNamespace, healthQuery.data?.mode);
+  const emptyCopy = emptyTrustCopy(
+    selectedNamespace,
+    resolveReadState(healthQuery) === 'loaded' ? healthQuery.data?.mode : undefined,
+  );
 
   return (
     <div className="space-y-4">
-      {status && hasTrustDetail && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <Card>
-            <p className="text-xs text-text-muted uppercase tracking-wider">Configured</p>
-            <p className={`text-xl font-bold mt-1 ${status.configured ? "text-success" : "text-warning"}`}>
-              {status.configured ? "yes" : "no"}
-            </p>
-          </Card>
-          <Card>
-            <p className="text-xs text-text-muted uppercase tracking-wider">Authority</p>
-            <p className={`text-xl font-bold mt-1 ${status.authority_unresolved ? "text-danger" : "text-success"}`}>
-              {status.authority_unresolved ? "unresolved" : "resolved"}
-            </p>
-          </Card>
-          <Card>
-            <p className="text-xs text-text-muted uppercase tracking-wider">Published</p>
-            <p className="text-xl font-bold mt-1 text-text-primary">
-              {status.process.published_generations_total}
-            </p>
-          </Card>
-          <Card>
-            <p className="text-xs text-text-muted uppercase tracking-wider">Load rejections</p>
-            <p className={`text-xl font-bold mt-1 ${status.process.load_rejections_total > 0 ? "text-warning" : "text-success"}`}>
-              {status.process.load_rejections_total}
-            </p>
-          </Card>
-        </div>
-      )}
-
-      {status && hasTrustDetail && (
-        <Card className={status.process.last_failure_reason === "none" ? "" : "border-warning/40"}>
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-semibold text-text-primary">Publication status</span>
-            <Badge variant={status.authority_unresolved ? "red" : "green"}>
-              {status.authority_unresolved ? "unresolved" : "published"}
-            </Badge>
-            <span className="text-xs text-text-muted font-mono break-all">
-              generation {status.generation || "not published"}
-            </span>
+      <ReadState queries={[statusQuery]} label="Trust publication status" optionalFeature>
+        {status && hasTrustDetail && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Card>
+              <p className="text-xs text-text-muted uppercase tracking-wider">Configured</p>
+              <p className={`text-xl font-bold mt-1 ${status.configured ? "text-success" : "text-warning"}`}>
+                {status.configured ? "yes" : "no"}
+              </p>
+            </Card>
+            <Card>
+              <p className="text-xs text-text-muted uppercase tracking-wider">Authority</p>
+              <p className={`text-xl font-bold mt-1 ${status.authority_unresolved ? "text-danger" : "text-success"}`}>
+                {status.authority_unresolved ? "unresolved" : "resolved"}
+              </p>
+            </Card>
+            <Card>
+              <p className="text-xs text-text-muted uppercase tracking-wider">Published</p>
+              <p className="text-xl font-bold mt-1 text-text-primary">
+                {status.process.published_generations_total}
+              </p>
+            </Card>
+            <Card>
+              <p className="text-xs text-text-muted uppercase tracking-wider">Load rejections</p>
+              <p className={`text-xl font-bold mt-1 ${status.process.load_rejections_total > 0 ? "text-warning" : "text-success"}`}>
+                {status.process.load_rejections_total}
+              </p>
+            </Card>
           </div>
-          {status.process.last_failure_reason !== "none" && (
-            <p className="text-xs text-warning mt-2">
-              Last rejection: {status.process.last_failure_reason.replace(/_/g, " ")}
-            </p>
-          )}
-        </Card>
-      )}
+        )}
 
-      {bundle && counts ? (
-        <Card>
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="text-sm font-semibold text-text-primary font-mono">
-                  {bundle.trust_domain}
-                </h3>
-                <Badge variant="blue">revision {bundle.revision}</Badge>
+        {status && hasTrustDetail && (
+          <Card className={status.process.last_failure_reason === "none" ? "" : "border-warning/40"}>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-semibold text-text-primary">Publication status</span>
+              <Badge variant={status.authority_unresolved ? "red" : "green"}>
+                {status.authority_unresolved ? "unresolved" : "published"}
+              </Badge>
+              <span className="text-xs text-text-muted font-mono break-all">
+                generation {status.generation || "not published"}
+              </span>
+            </div>
+            {status.process.last_failure_reason !== "none" && (
+              <p className="text-xs text-warning mt-2">
+                Last rejection: {status.process.last_failure_reason.replace(/_/g, " ")}
+              </p>
+            )}
+          </Card>
+        )}
+      </ReadState>
+
+      <ReadState queries={[bundlesQuery]} label="SPIFFE trust bundle" optionalFeature>
+        {bundle && counts ? (
+          <Card>
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-sm font-semibold text-text-primary font-mono">
+                    {bundle.trust_domain}
+                  </h3>
+                  <Badge variant="blue">revision {bundle.revision}</Badge>
+                </div>
+                <p className="text-xs text-text-muted mt-2">
+                  {counts.x509} X.509 · {counts.jwt} JWT · {counts.federated} federated
+                  {bundle.updated_at ? ` · updated ${new Date(bundle.updated_at).toLocaleString()}` : ""}
+                </p>
+                <p className="text-xs text-text-muted mt-1">
+                  namespace <span className="font-mono">{bundle.namespace}</span> · id {" "}
+                  <span className="font-mono">{bundle.id}</span>
+                </p>
               </div>
-              <p className="text-xs text-text-muted mt-2">
-                {counts.x509} X.509 · {counts.jwt} JWT · {counts.federated} federated
-                {bundle.updated_at ? ` · updated ${new Date(bundle.updated_at).toLocaleString()}` : ""}
-              </p>
-              <p className="text-xs text-text-muted mt-1">
-                namespace <span className="font-mono">{bundle.namespace}</span> · id {" "}
-                <span className="font-mono">{bundle.id}</span>
-              </p>
+              <div className="flex items-center gap-2 shrink-0">
+                <Button variant="secondary" size="sm" onClick={() => openEdit(bundle)}>
+                  Edit / Rotate
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setDeleteTarget({ bundle, namespace: selectedNamespace })}
+                >
+                  <span className="text-danger">Delete</span>
+                </Button>
+              </div>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <Button variant="secondary" size="sm" onClick={() => openEdit(bundle)}>
-                Edit / Rotate
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setDeleteTarget({ bundle, namespace: selectedNamespace })}
-              >
-                <span className="text-danger">Delete</span>
-              </Button>
-            </div>
-          </div>
-        </Card>
-      ) : (
-        <EmptyState
-          title={emptyCopy.title}
-          description={emptyCopy.description}
-          action={<Button size="sm" onClick={openCreate}>Create Trust Bundle</Button>}
-        />
-      )}
+          </Card>
+        ) : resolveReadState(statusQuery) !== 'loaded' ? (
+          <ReadStateNotice query={statusQuery} label="SPIFFE trust bundle presence" optionalFeature />
+        ) : status?.bundle || status?.configured ? (
+          <Card role="status">
+            <p className="text-sm text-warning">SPIFFE trust bundle presence is unknown.</p>
+            <p className="text-xs text-text-muted mt-1">
+              Publication status reports configured trust but the bundle list is empty. Refresh both reads.
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                void Promise.all([bundlesQuery.refetch(), statusQuery.refetch()]);
+              }}
+            >
+              Retry trust reads
+            </Button>
+          </Card>
+        ) : (
+          <EmptyState
+            title={emptyCopy.title}
+            description={emptyCopy.description}
+            action={<Button size="sm" onClick={openCreate}>Create Trust Bundle</Button>}
+          />
+        )}
+      </ReadState>
 
       <Dialog
         open={!!editor && !conflict}
@@ -379,6 +401,7 @@ export function GatewayTrustManager() {
             <div className="flex justify-end gap-2">
               <Button variant="secondary" onClick={clearEditor}>Cancel</Button>
               <Button
+                disabled={!bundlesAvailable || (editor?.mode === 'create' && !canCreate)}
                 onClick={() => void save()}
                 loading={createBundle.isPending || updateBundle.isPending}
               >
@@ -415,14 +438,14 @@ export function GatewayTrustManager() {
       </Dialog>
 
       <ConfirmDialog
-        open={!!deleteTarget}
+        open={!!deleteTarget && bundlesAvailable}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
         title={`Delete trust for ${deleteTarget?.bundle.trust_domain ?? "this domain"}?`}
         description={`This explicitly revokes namespace "${deleteTarget?.namespace ?? selectedNamespace}" trust roots and tells subscribed data planes to withdraw them. Mesh authentication may fail immediately.`}
         confirmLabel="Revoke Trust Bundle"
         loading={deleteBundle.isPending}
         onConfirm={async () => {
-          if (!deleteTarget) return;
+          if (!deleteTarget || !bundlesAvailable) return;
           try {
             await deleteBundle.mutateAsync({
               id: deleteTarget.bundle.id,

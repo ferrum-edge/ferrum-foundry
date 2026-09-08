@@ -2,6 +2,8 @@
 /*  Ferrum Foundry – API spec import & management page                 */
 /* ------------------------------------------------------------------ */
 
+import { ReadState } from '@/components/shared/ReadState';
+import { resolveReadState } from '@/lib/readState';
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -10,7 +12,6 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/Dialog";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { SearchBar } from "@/components/shared/SearchBar";
-import { SkeletonRow } from "@/components/ui/Skeleton";
 import { PaginationControls } from "@/components/shared/PaginationControls";
 import { useToast } from "@/components/ui/Toast";
 import { getApiErrorMessage } from "@/api/client";
@@ -117,8 +118,8 @@ function ApiSpecsWorkspace() {
   );
   const specs = searching ? searchPage.items : (pageQuery.data?.items ?? []);
   const total = searching ? searchPage.total : (pageQuery.data?.total ?? 0);
-  const isLoading = searching ? allQuery.isLoading : pageQuery.isLoading;
-  const isError = searching ? allQuery.isError : pageQuery.isError;
+  const collectionQuery = searching ? allQuery : pageQuery;
+  const collectionAvailable = resolveReadState(collectionQuery) === 'loaded';
 
   // Each opening is a new session, even when the same spec is reopened.
   const closeImport = () => {
@@ -145,7 +146,15 @@ function ApiSpecsWorkspace() {
   };
 
   const handleImport = async () => {
-    if (importLoading || unknownWrite || importSpec.isPending || updateSpec.isPending) return;
+    if (
+      importLoading ||
+      unknownWrite ||
+      importSpec.isPending ||
+      updateSpec.isPending ||
+      (replaceTarget && !collectionAvailable)
+    ) {
+      return;
+    }
     if (!importDoc.trim()) {
       toast("error", "Paste an OpenAPI document first");
       return;
@@ -229,34 +238,21 @@ function ApiSpecsWorkspace() {
         className="max-w-md"
       />
 
-      <Card className="overflow-hidden p-0">
-        {isLoading && (
-          <div className="px-6 divide-y divide-border/50">
-            {Array.from({ length: 3 }).map((_, i) => (
-              <SkeletonRow key={i} />
-            ))}
-          </div>
-        )}
-        {!isLoading && isError && (
-          <EmptyState
-            title="API specs unavailable"
-            description="The spec-import API requires database or control-plane mode."
-          />
-        )}
-        {!isLoading && !isError && specs.length === 0 && (
-          <EmptyState
-            title={total > 0 ? "No results on this page" : search ? "No matching specs" : "No API specs yet"}
-            description={
-              total > 0
-                ? "Use Go to last page below to return to the available results."
-                : search
-                ? "Try adjusting your search terms."
-                : "Import an OpenAPI document with an x-ferrum-proxy extension to create a spec-managed proxy."
-            }
-          />
-        )}
-        {!isLoading &&
-          specs.map((spec) => (
+      <ReadState queries={[collectionQuery]} label="API specs" optionalFeature>
+        <Card className="overflow-hidden p-0">
+          {specs.length === 0 && (
+            <EmptyState
+              title={total > 0 ? "No results on this page" : search ? "No matching specs" : "No API specs yet"}
+              description={
+                total > 0
+                  ? "Use Go to last page below to return to the available results."
+                  : search
+                  ? "Try adjusting your search terms."
+                  : "Import an OpenAPI document with an x-ferrum-proxy extension to create a spec-managed proxy."
+              }
+            />
+          )}
+          {specs.map((spec) => (
             <div
               key={spec.id}
               className="px-6 py-4 border-b border-border/50 last:border-b-0 flex items-center justify-between gap-4"
@@ -306,16 +302,17 @@ function ApiSpecsWorkspace() {
               </div>
             </div>
           ))}
-      </Card>
+        </Card>
 
-      {total > 0 && (
-        <PaginationControls
-          offset={pagination.offset}
-          limit={pagination.limit}
-          total={total}
-          onChange={pagination.setParams}
-        />
-      )}
+        {total > 0 && (
+          <PaginationControls
+            offset={pagination.offset}
+            limit={pagination.limit}
+            total={total}
+            onChange={pagination.setParams}
+          />
+        )}
+      </ReadState>
 
       {/* Import / replace dialog */}
       <Dialog open={importOpen} onOpenChange={(open) => !open && closeImport()}>
@@ -350,7 +347,9 @@ function ApiSpecsWorkspace() {
               </Button>
               <Button
                 onClick={handleImport}
-                disabled={importLoading || Boolean(unknownWrite)}
+                disabled={
+                  importLoading || Boolean(unknownWrite) || (!!replaceTarget && !collectionAvailable)
+                }
                 loading={importSpec.isPending || updateSpec.isPending}
               >
                 {replaceTarget ? "Replace Spec" : "Import Spec"}
@@ -372,14 +371,14 @@ function ApiSpecsWorkspace() {
 
       {/* Delete confirm */}
       <ConfirmDialog
-        open={!!deleteTarget}
+        open={!!deleteTarget && collectionAvailable}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
         title={`Delete spec ${deleteTarget?.title ?? deleteTarget?.id}?`}
         description="This cascades: the spec's proxy, ALL of that proxy's plugins, and any spec-owned upstream are deleted."
         confirmLabel="Delete Spec"
         loading={deleteSpec.isPending}
         onConfirm={async () => {
-          if (!deleteTarget) return;
+          if (!deleteTarget || !collectionAvailable) return;
           try {
             await deleteSpec.mutateAsync(deleteTarget.id);
             toast("success", "Spec and owned resources deleted");
