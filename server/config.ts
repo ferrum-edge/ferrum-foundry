@@ -1,6 +1,7 @@
 import { dirname, resolve } from 'node:path';
 import { isIP } from 'node:net';
 import { loadCaBundle } from './ca.js';
+import { parseCidr } from './cidr.js';
 
 export type GatewayRole = 'viewer' | 'operator' | 'admin';
 export type AuthMode = 'static' | 'trusted-proxy';
@@ -156,15 +157,7 @@ function parseOrigins(value: string | undefined): string[] {
 
 function parseCidrs(value: string | undefined): string[] {
   const cidrs = parseList(value) ?? [];
-  for (const cidr of cidrs) {
-    const [address, rawPrefix, ...extra] = cidr.split('/');
-    const family = isIP(address);
-    const prefix = Number(rawPrefix);
-    const maximum = family === 4 ? 32 : 128;
-    if (extra.length > 0 || family === 0 || !Number.isInteger(prefix) || prefix < 0 || prefix > maximum) {
-      throw new Error('FERRUM_ADMIN_ALLOWED_CIDRS contains an invalid CIDR');
-    }
-  }
+  for (const cidr of cidrs) parseCidr(cidr);
   return cidrs;
 }
 
