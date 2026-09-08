@@ -266,7 +266,7 @@ export function formatPluginName(pluginName: string): string {
 /*  Default (template) configs per plugin                             */
 /* ------------------------------------------------------------------ */
 
-const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
+export const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
   access_control: {
     allowed_groups: ["demo"],
     disallowed_groups: ["blocked"],
@@ -318,7 +318,6 @@ const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
     ],
     fallback_enabled: true,
     fallback_on_status_codes: [429, 500, 502, 503],
-    preserve_original_model: true,
   },
   ai_prompt_compressor: {
     compress_roles: ["user"],
@@ -329,10 +328,10 @@ const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
   ai_prompt_shield: {
     action: "reject",
     scan_fields: "content",
-    detectors: ["email", "phone", "credit_card", "ssn"],
-    placeholder: "[REDACTED:{type}]",
+    patterns: ["email", "phone_us", "credit_card", "ssn"],
+    redaction_placeholder: "[REDACTED:{type}]",
     max_scan_bytes: 1048576,
-    ignore_roles: ["system"],
+    exclude_roles: ["system"],
     custom_patterns: [
       {
         name: "internal_ticket",
@@ -359,14 +358,13 @@ const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
     max_prompt_characters: 50000,
     temperature_range: [0, 1.2],
     block_system_prompts: false,
-    required_fields: ["model", "messages"],
   },
   ai_response_guard: {
     action: "redact",
     scan_fields: "content",
-    placeholder: "[REDACTED:{type}]",
+    redaction_placeholder: "[REDACTED:{type}]",
     max_scan_bytes: 1048576,
-    detectors: ["email", "phone", "credit_card", "ssn"],
+    pii_patterns: ["email", "phone_us", "credit_card", "ssn"],
     blocked_phrases: ["internal only"],
     require_json: false,
     required_fields: [],
@@ -536,7 +534,6 @@ const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
     algorithms: ["gzip", "br"],
     min_content_length: 128,
     content_types: ["application/json", "text/plain", "text/html"],
-    disable_on_etag: true,
     remove_accept_encoding: true,
     decompress_request: false,
     max_decompressed_request_size: 10485760,
@@ -664,12 +661,8 @@ const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
     key_location: "header:X-API-Key",
   },
   ldap_auth: {
-    url: "ldap://127.0.0.1:389",
-    bind_dn: "cn=readonly,dc=example,dc=org",
-    bind_password: "replace-with-bind-password",
-    user_base_dn: "ou=people,dc=example,dc=org",
-    user_filter: "(uid={username})",
-    username_field: "username",
+    ldap_url: "ldap://127.0.0.1:389",
+    bind_dn_template: "uid={username},ou=people,dc=example,dc=org",
   },
   load_testing: {
     key: "dev-load-test",
@@ -687,7 +680,7 @@ const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
       service: "ferrum-edge",
       environment: "dev",
     },
-    include_listen_path_label: true,
+    include_proxy_id_label: true,
     include_status_class_label: true,
     batch_size: 100,
     flush_interval_ms: 1000,
@@ -948,8 +941,8 @@ const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
     max_entries: 10000,
     max_entry_size_bytes: 1048576,
     max_total_size_bytes: 104857600,
-    cache_methods: ["GET", "HEAD"],
-    cache_status_codes: [200, 301, 404],
+    cacheable_methods: ["GET", "HEAD"],
+    cacheable_status_codes: [200, 301, 404],
     respect_cache_control: true,
     respect_no_cache: true,
     cache_key_include_query: true,
@@ -1016,18 +1009,17 @@ const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
     username_token: {
       enabled: false,
       password_type: "PasswordDigest",
-      users: [],
+      credentials: [],
     },
-    x509: {
+    x509_signature: {
       enabled: false,
-      trusted_cert_paths: [],
+      trusted_certs: [],
     },
     saml: {
       enabled: false,
       audience: "ferrum-edge",
     },
-    nonce_cache: {
-      cache_ttl_seconds: 300,
+    nonce: {
       max_cache_size: 10000,
     },
   },
@@ -1061,7 +1053,7 @@ const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
   },
   stdout_logging: {},
   tcp_connection_throttle: {
-    max_connections_per_ip: 100,
+    max_connections_per_key: 100,
   },
   tcp_logging: {
     host: "127.0.0.1",
@@ -1075,7 +1067,7 @@ const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
     retry_delay_ms: 1000,
   },
   transaction_debugger: {
-    capture_headers: ["authorization", "x-api-key", "x-correlation-id"],
+    redacted_headers: ["authorization", "x-api-key"],
     log_request_body: false,
     log_response_body: false,
   },
@@ -1140,12 +1132,12 @@ const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
   },
   ws_message_size_limiting: {
     max_frame_bytes: 1048576,
-    close_message: "Message too large",
+    close_reason: "Message too large",
   },
   ws_rate_limiting: {
     frames_per_second: 100,
     burst_size: 200,
-    close_message: "Frame rate exceeded",
+    close_reason: "Frame rate exceeded",
   },
 };
 

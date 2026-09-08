@@ -6,6 +6,17 @@ import {
 } from "./pluginConfigDefaults";
 
 describe("canonical plugin defaults", () => {
+  it.each([
+    ["ai_prompt_shield", "patterns"],
+    ["ai_response_guard", "pii_patterns"],
+  ])("%s uses the pinned gateway's US phone pattern token", (name, field) => {
+    // Edge b96cfaad: src/plugins/utils/ai_pii.rs::builtin_pii_pattern.
+    // `phone` is rejected by both constructors, rather than ignored.
+    expect(getPluginConfigDefault(name)[field]).toEqual([
+      "email", "phone_us", "credit_card", "ssn",
+    ]);
+  });
+
   it("uses the closed correlation_id shape", () => {
     expect(getPluginConfigDefault("correlation_id")).toEqual({
       header_name: "X-Correlation-ID",
