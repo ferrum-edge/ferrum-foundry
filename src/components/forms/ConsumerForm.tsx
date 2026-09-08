@@ -2,14 +2,16 @@
 /*  Ferrum Foundry – Consumer create / edit form                      */
 /* ------------------------------------------------------------------ */
 
-import { useState, type FormEvent, type KeyboardEvent } from "react";
+import { useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
 import { CollapsibleSection } from "./CollapsibleSection";
+import { FormValidationSummary } from "./FormValidationSummary";
 import type { Consumer, ConsumerCreate, ConsumerCredentials } from "@/api/types";
 import { buildCredentialInput, CredentialInputError } from "@/lib/credentials";
+import { useCollapsibleFormValidation } from "@/lib/collapsedFormValidation";
 
 /* ------------------------------------------------------------------ */
 /*  Props                                                              */
@@ -122,6 +124,13 @@ const CREDENTIAL_TYPES = [
   { value: "mtls_auth", label: "mTLS Auth", field: "identity", placeholder: "CN=client.example.com", helpText: "Certificate field value to match against the client certificate", generatable: false },
 ] as const;
 
+const CONSUMER_COLLAPSIBLE_SECTIONS = [
+  {
+    id: "credentials",
+    errorKeys: CREDENTIAL_TYPES.map((type) => `credential.${type.value}`),
+  },
+] as const;
+
 function generateSecret(length = 32): string {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
   const array = new Uint8Array(length);
@@ -140,6 +149,8 @@ export function ConsumerForm({
 }: ConsumerFormProps) {
   const navigate = useNavigate();
   const isEdit = !!initialData;
+  const formRef = useRef<HTMLFormElement>(null);
+  const collapsible = useCollapsibleFormValidation(CONSUMER_COLLAPSIBLE_SECTIONS);
 
   /* ---------- Form state ---------- */
   // Seeded once per editor identity: the parent keys this form on
@@ -184,7 +195,13 @@ export function ConsumerForm({
       }
     }
     setErrors(errs);
-    return Object.keys(errs).length === 0;
+    const ok = Object.keys(errs).length === 0;
+    if (!ok) {
+      collapsible.onValidationFailed(errs, formRef.current);
+    } else {
+      collapsible.clearValidationSummary();
+    }
+    return ok;
   };
 
   /* ---------- Submit ---------- */
@@ -221,7 +238,7 @@ export function ConsumerForm({
   /* ---------- Render ---------- */
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-0">
+    <form ref={formRef} onSubmit={handleSubmit} className="space-y-0">
       <div className="py-4 space-y-4">
         <h3 className="text-sm font-semibold text-text-primary mb-4">
           Consumer Details
@@ -277,6 +294,7 @@ export function ConsumerForm({
         <CollapsibleSection
           title="Credentials"
           badge={credentialCount > 0 ? String(credentialCount) : undefined}
+          {...collapsible.sectionProps("credentials")}
         >
           <p className="text-text-muted text-xs mb-4">
             Fill in any credentials to attach to this consumer. Leave blank to skip.
@@ -316,7 +334,11 @@ export function ConsumerForm({
       )}
 
       {/* Actions */}
-      <div className="flex items-center justify-end gap-3 pt-6 border-t border-border/50">
+      <div className="flex flex-col items-end gap-3 pt-6 border-t border-border/50">
+        {collapsible.showSummary && (
+          <FormValidationSummary count={collapsible.errorCount} />
+        )}
+        <div className="flex items-center justify-end gap-3 w-full">
         <Button
           type="button"
           variant="secondary"
@@ -328,6 +350,7 @@ export function ConsumerForm({
         <Button type="submit" loading={isLoading}>
           {isEdit ? "Update Consumer" : "Create Consumer"}
         </Button>
+        </div>
       </div>
     </form>
   );

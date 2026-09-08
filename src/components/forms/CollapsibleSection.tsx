@@ -3,6 +3,8 @@ import { useState, type ReactNode } from "react";
 export interface CollapsibleSectionProps {
   title: string;
   defaultOpen?: boolean;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   children: ReactNode;
   badge?: string;
 }
@@ -10,17 +12,29 @@ export interface CollapsibleSectionProps {
 export function CollapsibleSection({
   title,
   defaultOpen = false,
+  open: controlledOpen,
+  onOpenChange,
   children,
   badge,
 }: CollapsibleSectionProps) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen);
+  const isControlled = controlledOpen !== undefined;
+  const open = isControlled ? controlledOpen : uncontrolledOpen;
+
+  const setOpen = (next: boolean) => {
+    if (isControlled) {
+      onOpenChange?.(next);
+    } else {
+      setUncontrolledOpen(next);
+    }
+  };
 
   return (
     <div className="border-b border-border/50 py-4">
       <button
         type="button"
         className="flex items-center justify-between w-full text-left cursor-pointer group"
-        onClick={() => setOpen((prev) => !prev)}
+        onClick={() => setOpen(!open)}
       >
         <div className="flex items-center gap-2">
           <h3 className="text-sm font-semibold text-text-primary group-hover:text-orange transition-colors">
