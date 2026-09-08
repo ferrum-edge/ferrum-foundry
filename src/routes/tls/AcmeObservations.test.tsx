@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "@/components/ui/Toast";
 import type { AcmeOrder } from "@/api/tls";
 import TlsPage from "./index";
+import { inputByLabel } from "@/test/fields";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 class BasedRequest extends Request {
@@ -180,7 +181,7 @@ describe("ACME order observations", () => {
 it('keeps uncertain order creation disarmed after closing and reopening', async () => {
   await mount();
   await click('New ACME Order');
-  const domains = document.querySelector<HTMLInputElement>('#domains')!;
+  const domains = inputByLabel(document.querySelector('[role="dialog"]')!, 'Domains');
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
       .call(domains, 'example.test');
