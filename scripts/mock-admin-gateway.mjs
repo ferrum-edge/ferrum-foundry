@@ -99,7 +99,7 @@ const pluginConfigs = [
   },
   {
     id: 'plg-ai-guard', namespace: 'ferrum', plugin_name: 'ai_prompt_shield',
-    config: { action: 'reject', detectors: ['email', 'credit_card'] },
+    config: { action: 'reject', patterns: ['email', 'credit_card'] },
     scope: 'global', proxy_id: null, enabled: false, priority_override: 2000,
     trigger: null, api_spec_id: null, created_at: ago(300), updated_at: ago(300),
   },

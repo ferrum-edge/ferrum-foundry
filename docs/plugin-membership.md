@@ -1,5 +1,8 @@
 # Plugin membership and cascade deletion
 
+See [plugin configuration templates](plugin-defaults.md) for defaults, scope
+requirements, operator prerequisites, and exhaustive pinned-gateway admission coverage.
+
 A `proxy_group` plugin is one configuration shared by its associated proxies.
 Ferrum Edge deletes that configuration when a proxy update removes its final
 reference. An empty selection is therefore not a membership edit: use Delete

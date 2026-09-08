@@ -1,28 +1,32 @@
 import assert from "node:assert/strict";
 import { adminToken, buildRestorePayload, readSeedConfig } from "./seed-demo-gateway.mjs";
+import { verifyPluginDefaults } from "./plugin-defaults-contract.mjs";
 
 const config = readSeedConfig();
 
-async function request(path, { method = "GET", body, expected = [200, 201] } = {}) {
-  const token = await adminToken(config);
+async function exchange(path, { method = "GET", body } = {}, requestConfig = config) {
+  const token = await adminToken(requestConfig);
   const response = await fetch(`${config.adminUrl}${path}`, {
     method,
     signal: AbortSignal.timeout(30_000),
     headers: {
       authorization: `Bearer ${token}`,
       "content-type": "application/json",
-      "x-ferrum-namespace": config.namespace,
+      "x-ferrum-namespace": requestConfig.namespace,
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await response.text();
-  assert.ok(
-    expected.includes(response.status),
-    `${method} ${path} returned ${response.status}: ${text}`,
-  );
   const cursor = response.headers.get("x-ferrum-config-cursor");
   if (cursor !== null) assert.match(cursor, /^\d+:\d+$/);
-  return text ? JSON.parse(text) : undefined;
+  return { status: response.status, body: text ? JSON.parse(text) : undefined };
+}
+
+async function request(path, { expected = [200, 201], ...options } = {}) {
+  const response = await exchange(path, options);
+  assert.ok(expected.includes(response.status),
+    `${options.method ?? "GET"} ${path} returned ${response.status}: ${JSON.stringify(response.body)}`);
+  return response.body;
 }
 
 const fixture = buildRestorePayload("2026-08-30T00:00:00.000Z");
@@ -123,8 +127,14 @@ await request(`/consumers/${consumerId}?apply=sync`, { method: "DELETE", expecte
 // proxy is deleted; current gateways honor cleanup_orphaned_upstream=false.
 await request(`/upstreams/${upstreamId}?apply=sync`, { method: "DELETE", expected: [200, 204, 404] });
 
+// Separate from seeded demo policy; only one enabled template is present at a
+// time. Bind both JWT and namespace header to the same disposable namespace.
+const defaultsConfig = { ...config, namespace: `${config.namespace}-plugin-defaults` };
+const defaults = await verifyPluginDefaults((path, options) => exchange(path, options, defaultsConfig));
+
 console.log(JSON.stringify({
   verified: true,
+  defaults,
   operations: ["read", "create", "full-replace update", "credential rotation", "delete"],
   resources: ["upstreams", "consumers", "proxies", "plugin configs", "namespaces"],
 }));
