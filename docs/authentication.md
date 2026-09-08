@@ -171,6 +171,20 @@ them, correctly addressed, to the wrong consumer. Foundry therefore binds the
   because they are what the gateway now holds; to pick up a change made
   elsewhere, leave and reopen the resource. Only an identity change resets
   the editor.
+- **Cache retirement after a cascade.** Because fields are seeded once, a
+  superseded cache entry is what the operator edits and submits. A mutation
+  must therefore *retire* (`removeQueries`) the scoped detail entry of every
+  resource it deleted or re-created, not merely invalidate it — invalidation
+  leaves the stale entry resident and an editor mounting against it seeds from
+  the old values. Deletions that cascade across resource *types* — spec
+  import/replace/delete, and `DELETE /proxies/{id}`, which also removes the
+  proxy's plugin configs, the owning API-spec row, and an orphaned hand-owned
+  upstream — go through `retireCascade()` (`src/hooks/retireCascade.ts`). The
+  destroyed ids are not all known client-side, so those kinds are retired by
+  namespace prefix: over-retiring a detail entry costs a refetch, while
+  under-retiring is the defect. The namespace is the one the mutation was
+  *issued* under, carried through completion, so a switch after the click
+  cannot retire another tenant's cache.
 
 Do not expose the BFF port directly to an untrusted network. Terminate TLS at
 the identity proxy, strip every identity/proof header supplied by the client,

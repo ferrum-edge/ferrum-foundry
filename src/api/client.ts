@@ -35,11 +35,53 @@ export function onApiError(error: ApiError): void {
   errorHandler?.(error);
 }
 
-/** Preserve structured resource validation failures alongside their heading. */
+/**
+ * Gateway summaries that are contract constants and carry no information, so a
+ * structured `code` supersedes rather than repeats them. `ApiSpecParseError`
+ * documents `error` as *always* the literal below.
+ */
+const CONTENT_FREE_SUMMARIES = new Set(["Spec parse failed"]);
+
+/** Ceiling for a single gateway-supplied field carried into an operator toast. */
+const MAX_FIELD_LENGTH = 600;
+
+/**
+ * Bound one gateway-supplied string: strip control characters that would let a
+ * rejected document smuggle terminal or layout escapes into the toast, and cap
+ * the length so a parser dump cannot fill the screen. Newlines and tabs are
+ * kept — they are how multi-part details stay readable.
+ */
+function boundField(value: string): string {
+  // eslint-disable-next-line no-control-regex
+  const cleaned = value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ").trim();
+  return cleaned.length > MAX_FIELD_LENGTH
+    ? `${cleaned.slice(0, MAX_FIELD_LENGTH)}…`
+    : cleaned;
+}
+
+/**
+ * Flatten one gateway error body into operator-facing text.
+ *
+ * The field list is the union of the upstream error schemas Foundry can
+ * receive: the generic `Error` (`error`, with `message`/`detail` accepted from
+ * non-gateway layers), `ApiSpecValidationError` (`failures[]`), and
+ * `ApiSpecParseError` (`code` + `details`). Add a branch here — not at a call
+ * site — when a new shape appears, or its content is silently discarded.
+ */
 function errorRecordDetail(record: Record<string, unknown>): string | null {
-  const detail = record.error ?? record.message ?? record.detail;
-  if (typeof detail !== "string") return null;
-  const lines = [detail];
+  const heading = record.error ?? record.message ?? record.detail;
+  const summary = typeof heading === "string" ? heading : null;
+  const code = typeof record.code === "string" ? boundField(record.code) : "";
+  const details = typeof record.details === "string" ? boundField(record.details) : "";
+  if (summary === null && !code && !details) return null;
+
+  const lines: string[] = [];
+  if (summary !== null && !(code && CONTENT_FREE_SUMMARIES.has(summary.trim()))) {
+    lines.push(summary);
+  }
+  if (code) lines.push(details ? `${code}: ${details}` : code);
+  else if (details) lines.push(details);
+
   if (Array.isArray(record.failures)) {
     for (const failure of record.failures) {
       if (!failure || typeof failure !== "object") continue;
