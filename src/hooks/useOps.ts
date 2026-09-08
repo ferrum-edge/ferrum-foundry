@@ -116,7 +116,11 @@ export function useRestore() {
     }) => ops.restore({ namespace }, data, { confirmApiSpecDeletion }),
     onError: (error) => {
       // The durable configuration changed even when runtime application is pending.
-      if (ops.getRestoreCommitted(error)) qc.invalidateQueries();
+      // An unobservable outcome may have changed it too, so cached rows are
+      // refreshed there as well and the operator reads back real state.
+      if (ops.getRestoreCommitted(error) || ops.getRestoreUnknownOutcome(error)) {
+        qc.invalidateQueries();
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries();
