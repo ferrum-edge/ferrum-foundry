@@ -11,8 +11,11 @@ import {
 
 // The provider only reads `principal` from the auth store; a real
 // AuthProvider would need a query client and a session round-trip.
+const auth = vi.hoisted(() => ({
+  principal: null as { namespaces?: string[] } | null,
+}));
 vi.mock("@/stores/auth", () => ({
-  useAuth: () => ({ principal: null }),
+  useAuth: () => ({ principal: auth.principal }),
 }));
 
 // React requires this flag before `act()` will flush updates synchronously.
@@ -29,6 +32,20 @@ function Probe({ onValue }: { onValue: (value: NamespaceHandle) => void }) {
     onValue(value);
   });
   return <span data-testid="active">{value.selectedNamespace}</span>;
+}
+
+/**
+ * A child that records the namespace at the instant its mount effect runs —
+ * the point where a data hook would dispatch its first request. React flushes
+ * child effects before the parent's, so anything the provider only corrects
+ * in its own effect is observed here first.
+ */
+function FirstRequest({ onDispatch }: { onDispatch: (namespace: string) => void }) {
+  const { scope } = useNamespace();
+  useEffect(() => {
+    onDispatch(scope.namespace);
+  }, [onDispatch, scope]);
+  return null;
 }
 
 class BasedRequest extends Request {
@@ -90,6 +107,7 @@ describe("NamespaceProvider binding", () => {
   beforeEach(() => {
     captured.length = 0;
     latest = undefined;
+    auth.principal = null;
     localStorage.removeItem(NAMESPACE_STORAGE_KEY);
     vi.stubGlobal("Request", BasedRequest);
     vi.stubGlobal(
@@ -246,5 +264,93 @@ describe("NamespaceProvider binding", () => {
     expect(displayed()).toBe("tenant-c");
     expect(localStorage.getItem(NAMESPACE_STORAGE_KEY)).toBe("tenant-c");
     expect(latest!.scope.namespace).toBe("tenant-c");
+  });
+
+  const staleSeeds: Array<[string, string | null, string]> = [
+    ["an empty storage", null, DEFAULT_NAMESPACE],
+    ["a stale preference", "tenant-b", "tenant-b"],
+  ];
+
+  it.each(staleSeeds)("never dispatches under an ungranted namespace with %s", async (_label, stored, ungranted) => {
+    if (stored) localStorage.setItem(NAMESPACE_STORAGE_KEY, stored);
+    auth.principal = { namespaces: ["tenant-a"] };
+    const dispatched: string[] = [];
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const created = createRoot(container);
+    await act(async () => {
+      created.render(
+        <NamespaceProvider>
+          <Probe onValue={(value) => { latest = value; }} />
+          <FirstRequest onDispatch={(namespace) => dispatched.push(namespace)} />
+        </NamespaceProvider>,
+      );
+    });
+    host = container;
+    root = created;
+
+    // The first observation used to be the ungranted name, which the BFF
+    // refuses with 403 before the effect-time correction lands.
+    expect(dispatched).not.toContain(ungranted);
+    expect(dispatched.length).toBeGreaterThan(0);
+    expect(dispatched.every((namespace) => namespace === "tenant-a")).toBe(true);
+    expect(displayed()).toBe("tenant-a");
+
+    // The retired preference is not left in storage for the next load.
+    expect(localStorage.getItem(NAMESPACE_STORAGE_KEY)).toBe("tenant-a");
+    await consumers.create(latest!.scope, { username: "alice" });
+    expect(captured.map((request) => request.namespace)).toEqual(["tenant-a"]);
+  });
+
+  it("binds a granted namespace on the first render after a grant change remounts", async () => {
+    localStorage.setItem(NAMESPACE_STORAGE_KEY, "tenant-a");
+    auth.principal = { namespaces: ["tenant-a", "tenant-b"] };
+    const dispatched: string[] = [];
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const created = createRoot(container);
+    const tree = (key: string) => (
+      <NamespaceProvider key={key}>
+        <Probe onValue={(value) => { latest = value; }} />
+        <FirstRequest onDispatch={(namespace) => dispatched.push(namespace)} />
+      </NamespaceProvider>
+    );
+    await act(async () => { created.render(tree("grant-a")); });
+    host = container;
+    root = created;
+    expect(displayed()).toBe("tenant-a");
+
+    // The grants shrink to tenant-b and AuthProvider remounts the subtree, so
+    // the provider re-reads a preference the principal no longer holds.
+    dispatched.length = 0;
+    auth.principal = { namespaces: ["tenant-b"] };
+    await act(async () => { created.render(tree("grant-b")); });
+
+    expect(dispatched).not.toContain("tenant-a");
+    expect(dispatched.length).toBeGreaterThan(0);
+    expect(dispatched.every((namespace) => namespace === "tenant-b")).toBe(true);
+    expect(displayed()).toBe("tenant-b");
+    await consumers.create(latest!.scope, { username: "alice" });
+    expect(captured.map((request) => request.namespace)).toEqual(["tenant-b"]);
+  });
+
+  it("leaves the persisted preference alone for a principal with no grants", async () => {
+    localStorage.setItem(NAMESPACE_STORAGE_KEY, "tenant-z");
+    auth.principal = { namespaces: [] };
+    await mount();
+    expect(displayed()).toBe("tenant-z");
+    expect(latest!.scope.namespace).toBe("tenant-z");
+    expect(localStorage.getItem(NAMESPACE_STORAGE_KEY)).toBe("tenant-z");
+  });
+
+  it("keeps an explicit switch to another granted namespace", async () => {
+    localStorage.setItem(NAMESPACE_STORAGE_KEY, "tenant-a");
+    auth.principal = { namespaces: ["tenant-a", "tenant-b"] };
+    await mount();
+    await act(async () => { latest!.setNamespace("tenant-b"); });
+    expect(displayed()).toBe("tenant-b");
+    expect(localStorage.getItem(NAMESPACE_STORAGE_KEY)).toBe("tenant-b");
   });
 });
