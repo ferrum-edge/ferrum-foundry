@@ -25,7 +25,7 @@ function Page() {
   const [id, setId] = useState("first");
   const session = useEditorIdentity(id);
   const query = useConsumer(id);
-  useEffect(() => { namespace = value; changeConsumer = setId; });
+  useEffect(() => { namespace = value; changeConsumer = setId; }, [value]);
   return query.data ? <div data-revision={query.dataUpdatedAt}><CredentialForm key={session.key} session={session}
     credentialType="basicauth" existingCredentials={query.data.credentials.basicauth}
     revision={query.dataUpdatedAt} isRefreshing={query.isFetching} /></div> : null;
