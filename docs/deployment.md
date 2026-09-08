@@ -355,6 +355,24 @@ reports a terminal status. Do not blindly retry issuance after navigating away
 or reloading the page; the interrupted-operation warning is local to the open
 ACME view. Finalization has no automatic HTTP or mutation retries.
 
+API-spec imports and replacements allow 365 seconds in the browser: the
+shipped 300-second upload budget, 60-second response budget, and five seconds
+of transport margin. Spec reads (including document downloads) allow 65 seconds.
+ACME order creation and renewal allow 125 seconds, covering the ordinary
+60-second upload and 60-second response budgets plus transport margin. These
+calls disable automatic retries. Their defaults share the BFF policy module;
+runtime timeout overrides are not visible to the SPA, so a deployment with
+larger budgets can still outlast these browser deadlines.
+
+An interrupted spec import/replacement or ACME creation/renewal reports
+**outcome unknown** and disables resubmission in the current view, including
+when its dialog is closed and reopened. Inspect the spec resources or ACME
+orders/certificates before navigating away or reloading to retry; these warnings
+are not durable across page loads. Only an explicit BFF timeout with
+`phase: "upload"` proves the complete request was not admitted and permits a
+retry. A response-phase timeout, bare 504, network interruption, or upstream
+server error cannot prove that remote state was not created.
+
 ## 4. Docker Compose example
 
 The BFF publishes no host port. Only the proxy does.
@@ -562,7 +580,12 @@ Notes:
   the bundle trusts a reachable gateway.
 - Accepted runtime settings return their own canonical values without waiting
   for unrelated gateway calls to drain. Signing-only changes reuse the existing
-  transport. A subsequent request with changed connection settings selects a
+  transport. Per-request read deadlines also reuse that transport: the
+  dispatcher fingerprint includes origin, connect timeout, TLS verification,
+  CA identity/material and allowed CIDRs, but excludes response/upload deadlines.
+  Agent-level header/body timers are disabled; each request's upload guard and
+  response controller enforce its own bounds, including waiting routes.
+  A subsequent request with changed connection settings selects a
   new dispatcher while the previous one drains its captured requests. Shutdown
   waits for active and retired dispatchers within the existing process deadline.
   Concurrent saves publish when validation completes; responses may finish in

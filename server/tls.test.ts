@@ -59,6 +59,12 @@ afterEach(async () => {
 });
 
 describe('managed Undici dispatchers', () => {
+  it('reuses the transport when only response deadlines change', () => {
+    const first = getDispatcher(makeConfig({ readTimeout: 610_000 }));
+    expect(getDispatcher(makeConfig({ readTimeout: 30_000 }))).toBe(first);
+    expect(first.closed).toBe(false);
+  });
+
   it('reuses one dispatcher for an unchanged effective connection configuration', () => {
     const config = makeConfig();
     expect(getDispatcher(config)).toBe(getDispatcher({ ...config }));

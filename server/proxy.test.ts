@@ -229,6 +229,39 @@ afterAll(async () => {
 });
 
 describe('streaming gateway proxy', () => {
+  it.each([60_000, 30_000])(
+    'reuses the same dispatcher across waiting and ordinary requests at %s ms',
+    async (readTimeout) => {
+      const configModule = await import('./config.js');
+      const transport = await import('./tls.js');
+      const config = { ...configModule.loadConfig(), readTimeout };
+      const configSpy = vi.spyOn(configModule, 'loadConfig').mockReturnValue(config);
+      const dispatcher = transport.getDispatcher(config);
+      const spy = vi.spyOn(transport, 'getDispatcher');
+      try {
+        for (const [method, path] of [
+          ['POST', '/admin/tls/acme/orders/fixture/finalize'],
+          ['GET', '/proxies'],
+          ['GET', '/config/apply-status'],
+          ['GET', '/proxies'],
+        ] as const) {
+          const response = await app.inject({
+            method,
+            url: `/api/proxy${path}`,
+            headers: sessionHeaders,
+          });
+          expect(response.statusCode).toBe(200);
+        }
+        expect(spy).toHaveBeenCalledTimes(4);
+        for (const result of spy.mock.results) expect(result.value).toBe(dispatcher);
+        expect(dispatcher.closed).toBe(false);
+      } finally {
+        spy.mockRestore();
+        configSpy.mockRestore();
+      }
+    },
+  );
+
   it('separates liveness from authenticated downstream readiness', async () => {
     const live = await app.inject({ method: 'GET', url: '/api/health/live' });
     expect(live.statusCode).toBe(200);

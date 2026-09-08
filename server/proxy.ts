@@ -338,7 +338,7 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
         headers,
         body,
         signal: controller.signal,
-        dispatcher: getDispatcher(waitTimeout ? { ...config, readTimeout: responseTimeout } : config),
+        dispatcher: getDispatcher(config),
         redirect: 'error',
         ...(body && { duplex: 'half' }),
       };

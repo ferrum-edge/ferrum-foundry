@@ -63,6 +63,7 @@ export function useImportApiSpec() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
   return useMutation({
+    retry: false,
     mutationFn: async (document: string) => {
       const created = await apiSpecs.create(scope, document);
       // Carry the mutation's namespace through completion, even after a switch.
@@ -78,6 +79,7 @@ export function useUpdateApiSpec() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
   return useMutation({
+    retry: false,
     mutationFn: async ({ id, document }: { id: string; document: string }) => {
       const replaced = await apiSpecs.update(scope, id, document);
       return { ...replaced, namespace: scope.namespace };
