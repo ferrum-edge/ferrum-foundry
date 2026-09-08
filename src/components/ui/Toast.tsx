@@ -128,8 +128,9 @@ function ToastNotification({
           />
         </svg>
         {/* An API detail can carry an unbroken URL or fingerprint; wrap it
-            anywhere rather than let it overflow the toast. */}
-        <p className="text-sm text-text-primary flex-1 min-w-0 break-words [overflow-wrap:anywhere]">
+            anywhere rather than let it overflow the toast. Structured gateway
+            rejections are newline-separated, so keep those breaks. */}
+        <p className="text-sm text-text-primary flex-1 min-w-0 break-words whitespace-pre-line [overflow-wrap:anywhere]">
           {item.message}
         </p>
         <button
