@@ -1,4 +1,4 @@
-import { act, type ComponentType, type ReactNode } from 'react';
+import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider, type QueryKey } from '@tanstack/react-query';
 import {
@@ -7,7 +7,7 @@ import {
   createRoute,
   createRouter,
   RouterProvider,
-} from '@tanstack/react-router';
+ type RouteComponent } from '@tanstack/react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider, useAuth } from '@/stores/auth';
 import { NamespaceProvider } from '@/stores/namespace';
@@ -163,7 +163,7 @@ async function settle(check: () => void) {
 function Authenticated({ children }: { children: ReactNode }) {
   return useAuth().status === 'authenticated' ? children : null;
 }
-async function mount(Page: ComponentType, path = '/view') {
+async function mount(Page: RouteComponent, path = '/view') {
   const parent = createRootRoute();
   const route = createRoute({ getParentRoute: () => parent, path, component: Page });
   const router = createRouter({
