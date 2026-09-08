@@ -189,6 +189,94 @@ describe("API spec validation details", () => {
   });
 });
 
+/**
+ * `ApiSpecParseError` — the sibling schema of `ApiSpecValidationError`. Its
+ * `error` is by contract always the literal "Spec parse failed"; `code` (a
+ * 16-value discriminator) and `details` carry every bit of diagnostic content.
+ * Bodies below are shaped as the gateway emits them.
+ */
+describe("API spec parse rejection details", () => {
+  const structural = {
+    error: "Spec parse failed",
+    code: "MalformedExtension",
+    details:
+      "x-ferrum-proxy: unknown field `backend_protocol`, expected one of `backend_scheme`, " +
+      "`hosts`, `listen_path` at line 6 column 3",
+  };
+  const semantic = {
+    error: "Spec parse failed",
+    code: "PluginContainsCredentials",
+    details: "plugin `rate-limit-1`: config contains forbidden key `consumer_id`",
+  };
+
+  it("surfaces the code and details of a 400 structural rejection", () => {
+    const detail = `MalformedExtension: ${structural.details}`;
+    expect(extractApiErrorDetail(JSON.stringify(structural))).toBe(detail);
+    expect(extractApiErrorData(structural)).toBe(detail);
+  });
+
+  it("surfaces the code and details of a 422 semantic rejection", () => {
+    const detail = `PluginContainsCredentials: ${semantic.details}`;
+    expect(extractApiErrorDetail(JSON.stringify(semantic))).toBe(detail);
+    expect(extractApiErrorData(semantic)).toBe(detail);
+  });
+
+  it("carries the parse detail into the import/replace toast message", async () => {
+    const error = Object.assign(new Error("Request failed with status code 400"), {
+      response: consumedResponse(JSON.stringify(structural), 400),
+      data: structural,
+    });
+    await expect(getApiErrorMessage(error, "Spec import failed")).resolves.toBe(
+      `Request failed with status code 400: MalformedExtension: ${structural.details}`,
+    );
+  });
+
+  it("drops the content-free summary only when a code supersedes it", () => {
+    expect(extractApiErrorData({ error: "Spec parse failed" })).toBe("Spec parse failed");
+    expect(extractApiErrorData({ error: "Spec parse failed", code: "InvalidYaml" })).toBe(
+      "InvalidYaml",
+    );
+    // An informative summary is kept alongside its code.
+    expect(extractApiErrorData({ error: "still has resources", code: "Occupied" })).toBe(
+      "still has resources\nOccupied",
+    );
+  });
+
+  it("reports details even when the body omits a summary or a code", () => {
+    expect(extractApiErrorData({ code: "UnknownVersion", details: "no openapi root key" })).toBe(
+      "UnknownVersion: no openapi root key",
+    );
+    expect(extractApiErrorData({ details: "no openapi root key" })).toBe("no openapi root key");
+  });
+
+  it("bounds a runaway details string", () => {
+    const detail = extractApiErrorData({
+      error: "Spec parse failed",
+      code: "SchemaTooLarge",
+      details: "x".repeat(5000),
+    });
+    expect(detail.startsWith("SchemaTooLarge: xxx")).toBe(true);
+    expect(detail.endsWith("\u2026")).toBe(true);
+    expect(detail.length).toBeLessThan(700);
+  });
+
+  it("strips control characters a rejected document could smuggle in", () => {
+    expect(
+      extractApiErrorData({
+        error: "Spec parse failed",
+        code: "InvalidTagName",
+        details: "tag \u001b[31m<img src=x onerror=alert(1)>\u0000 rejected",
+      }),
+    ).toBe("InvalidTagName: tag  [31m<img src=x onerror=alert(1)>  rejected");
+  });
+
+  it("ignores non-string code and details", () => {
+    expect(extractApiErrorData({ error: "Spec parse failed", code: 400, details: null })).toBe(
+      "Spec parse failed",
+    );
+  });
+});
+
 describe("extractApiErrorData", () => {
   it("reads `error` from a parsed JSON object", () => {
     expect(extractApiErrorData({ error: "namespace not empty" })).toBe(
