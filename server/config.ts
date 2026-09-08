@@ -2,6 +2,11 @@ import { dirname, resolve } from 'node:path';
 import { isIP } from 'node:net';
 import { loadCaBundle } from './ca.js';
 import { parseCidr } from './cidr.js';
+import {
+  DEFAULT_RESPONSE_TIMEOUT,
+  DEFAULT_UPLOAD_TIMEOUT,
+  DEFAULT_WRITE_TIMEOUT,
+} from './waitBudget.js';
 
 export type GatewayRole = 'viewer' | 'operator' | 'admin';
 export type AuthMode = 'static' | 'trusted-proxy';
@@ -267,9 +272,9 @@ function parseBaseConfig(): Config {
     tlsCaRoot,
     tlsVerify: parseBoolean('FERRUM_TLS_VERIFY', true),
     connectTimeout: parseInteger('FERRUM_CONNECT_TIMEOUT', 5000, 100, 300_000),
-    readTimeout: parseInteger('FERRUM_READ_TIMEOUT', 60_000, 100, 3_600_000),
-    writeTimeout: parseInteger('FERRUM_WRITE_TIMEOUT', 60_000, 100, 3_600_000),
-    uploadTimeout: parseInteger('FERRUM_UPLOAD_TIMEOUT', 300_000, 1000, 3_600_000),
+    readTimeout: parseInteger('FERRUM_READ_TIMEOUT', DEFAULT_RESPONSE_TIMEOUT, 100, 3_600_000),
+    writeTimeout: parseInteger('FERRUM_WRITE_TIMEOUT', DEFAULT_WRITE_TIMEOUT, 100, 3_600_000),
+    uploadTimeout: parseInteger('FERRUM_UPLOAD_TIMEOUT', DEFAULT_UPLOAD_TIMEOUT, 1000, 3_600_000),
     port: parseInteger('PORT', 3001, 1, 65_535),
     bindAddress: parseBindAddress(optionalEnv('FERRUM_BIND_ADDRESS')),
     shutdownTimeout: parseInteger('FERRUM_SHUTDOWN_TIMEOUT', 10_000, 1000, 300_000),

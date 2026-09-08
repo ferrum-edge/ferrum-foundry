@@ -163,3 +163,79 @@ describe("configured client server-side waiting calls", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 });
+
+// Exercise real ky deadlines so accidentally omitting an option fails at 10 s.
+describe('spec and ACME mutation deadlines', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.useFakeTimers();
+    vi.stubGlobal('Request', BasedRequest);
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  async function invoke(operation: string) {
+    const specs = await import('./apiSpecs');
+    const tls = await import('./tls');
+    const scope = { namespace: 'default' };
+    switch (operation) {
+      case 'import': return specs.create(scope, '{}');
+      case 'replace': return specs.update(scope, 'fixture', '{}');
+      case 'document': return specs.getDocument(scope, 'fixture');
+      case 'create': return tls.createAcmeOrder({
+        domains: ['example.test'], directory_url: 'https://ca.example.test/directory',
+      });
+      default: return tls.renewAcmeCertificate('fixture');
+    }
+  }
+
+  it.each([
+    ['import', 365_000],
+    ['replace', 365_000],
+    ['document', 65_000],
+    ['create', 125_000],
+    ['renew', 125_000],
+  ] as const)('allows the full BFF budget for %s without replay', async (operation, timeout) => {
+    const fetcher = vi.fn((request: Request) => new Promise<Response>((_resolve, reject) => {
+      request.signal.addEventListener('abort', () => reject(request.signal.reason));
+    }));
+    vi.stubGlobal('fetch', fetcher);
+    // Load modules before advancing virtual time.
+    await import('./apiSpecs');
+    await import('./tls');
+    const result = invoke(operation).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(timeout - 1);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls[0]![0].signal.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    const error = await result;
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).name).toBe(
+      operation === 'document' ? 'TimeoutError' : 'MutationOutcomeUnknownError',
+    );
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['import', 'replace', 'create', 'renew'])(
+    'distinguishes upload rejection from an uncertain %s response',
+    async (operation) => {
+      const fetcher = vi.fn(async () => Response.json({
+        code: 'FERRUM_BFF_TIMEOUT', phase: 'upload',
+      }, { status: 504 }));
+      vi.stubGlobal('fetch', fetcher);
+      await expect(invoke(operation)).rejects.toMatchObject({ name: 'HTTPError' });
+      fetcher.mockImplementation(async () => Response.json({
+        code: 'FERRUM_BFF_TIMEOUT', phase: 'response',
+      }, { status: 504 }));
+      await expect(invoke(operation)).rejects.toMatchObject({
+        name: 'MutationOutcomeUnknownError',
+        message: expect.stringContaining('outcome unknown'),
+      });
+      expect(fetcher).toHaveBeenCalledTimes(2);
+    },
+  );
+});

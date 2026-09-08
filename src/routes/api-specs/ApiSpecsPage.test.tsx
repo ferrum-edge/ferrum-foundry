@@ -45,7 +45,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
     const path = new URL(request.url).pathname;
     const id = path.split("/").at(-1)!;
-    if (request.method === "PUT") {
+    if (request.method === "PUT" || request.method === "POST") {
       const document = await request.text();
       return new Promise<Response>((resolve) => writes.push({ id, document, resolve }));
     }
@@ -207,4 +207,35 @@ describe("API spec dialog generations", () => {
     expect(document.querySelector('[role="dialog"]')!.textContent).toContain("view B");
     expect(document.querySelector('[role="dialog"]')!.textContent).not.toContain("view A");
   });
+});
+
+it.each(['import', 'replace'])('blocks repeating an uncertain spec %s across dialog reopen', async (mode) => {
+  await mount();
+  if (mode === 'replace') {
+    await openReplace(0, 1);
+    await resolveRead(0, 'document A');
+    await settle(() => expect(editor().disabled).toBe(false));
+  } else {
+    await click('Import Spec');
+    await edit('document A');
+  }
+  const label = mode === 'replace' ? 'Replace Spec' : 'Import Spec';
+  // The page and dialog can both have an Import Spec button.
+  const submit = () => [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
+    .find((button) => button.textContent?.trim() === label)!;
+  await act(async () => submit().click());
+  await settle(() => expect(writes).toHaveLength(1));
+  await act(async () => writes[0]!.resolve(Response.json({
+    code: 'FERRUM_BFF_TIMEOUT', phase: 'response',
+  }, { status: 504 })));
+  await settle(() => {
+    expect(document.querySelector('[role="dialog"]')!.textContent).toContain('outcome unknown');
+    expect(submit().disabled).toBe(true);
+  });
+  await act(async () => submit().click());
+  expect(writes).toHaveLength(1);
+  await click('Cancel');
+  await click('Import Spec');
+  expect(document.querySelector('[role="dialog"]')!.textContent).toContain('outcome unknown');
+  expect(editor().disabled).toBe(true);
 });

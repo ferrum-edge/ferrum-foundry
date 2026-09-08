@@ -21,6 +21,7 @@ import {
   useUpdateApiSpec,
   useDeleteApiSpec,
 } from "@/hooks/useApiSpecs";
+import { MutationOutcomeUnknownError } from '@/api/mutationOutcome';
 import * as apiSpecsApi from "@/api/apiSpecs";
 import type { ApiSpecSummary } from "@/api/apiSpecs";
 import { usePaginationParams } from "@/hooks/usePagination";
@@ -84,6 +85,7 @@ function ApiSpecsWorkspace() {
   const updateSpec = useUpdateApiSpec();
   const deleteSpec = useDeleteApiSpec();
 
+  const [unknownWrite, setUnknownWrite] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [importDoc, setImportDoc] = useState("");
   const [importLoading, setImportLoading] = useState(false);
@@ -143,7 +145,7 @@ function ApiSpecsWorkspace() {
   };
 
   const handleImport = async () => {
-    if (importLoading) return;
+    if (importLoading || unknownWrite || importSpec.isPending || updateSpec.isPending) return;
     if (!importDoc.trim()) {
       toast("error", "Paste an OpenAPI document first");
       return;
@@ -164,6 +166,8 @@ function ApiSpecsWorkspace() {
       setImportDoc("");
       setReplaceTarget(null);
     } catch (err) {
+      // Retain the warning even if the operator closed/reopened the dialog.
+      if (err instanceof MutationOutcomeUnknownError) setUnknownWrite(err.message);
       const message = await getApiErrorMessage(err, "Spec import failed");
       if (generation === importGeneration.current) toast("error", message);
     }
@@ -329,9 +333,10 @@ function ApiSpecsWorkspace() {
               <code className="font-mono">x-ferrum-plugins</code>, and{" "}
               <code className="font-mono">x-ferrum-validate</code> are optional.
             </p>
+            {unknownWrite && <p role="alert">{unknownWrite}</p>}
             <textarea
               aria-label="OpenAPI document"
-              disabled={importLoading}
+              disabled={importLoading || Boolean(unknownWrite)}
               placeholder={importLoading ? "Loading current document…" : "Paste an OpenAPI document"}
               value={importDoc}
               onChange={(e) => setImportDoc(e.target.value)}
@@ -345,7 +350,7 @@ function ApiSpecsWorkspace() {
               </Button>
               <Button
                 onClick={handleImport}
-                disabled={importLoading}
+                disabled={importLoading || Boolean(unknownWrite)}
                 loading={importSpec.isPending || updateSpec.isPending}
               >
                 {replaceTarget ? "Replace Spec" : "Import Spec"}
