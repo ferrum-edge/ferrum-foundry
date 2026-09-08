@@ -475,7 +475,7 @@ export type UpstreamCreate = Partial<
 // ── Health / Metrics ──────────────────────────────────────────────
 
 export interface HealthResponse {
-  status: "ok" | "degraded" | "starting" | "unavailable";
+  status: 'ok' | 'degraded' | 'starting' | 'unavailable' | 'draining';
   ready: boolean;
   // Authenticated-tier detail fields
   admin_writes_enabled?: boolean;
