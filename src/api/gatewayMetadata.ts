@@ -109,14 +109,26 @@ export function setApplyStatusFetcher(fetcher?: ApplyStatusFetcher): void {
   statusFetcher = fetcher;
 }
 
-function isMutation(method: string): boolean {
-  return method !== "GET" && method !== "HEAD" && method !== "OPTIONS";
+// Non-persisting operations documented in upstream docs/admin_api.md and openapi.yaml.
+// Keep this method/path allowlist narrow: managed TLS writes and unknown mutations
+// must retain the ordinary apply-cursor checks, regardless of their response status.
+const OPERATIONAL_POST_PATHS = [
+  /^\/api\/proxy\/admin\/tls\/rotate\/[^/]+$/,
+  /^\/api\/proxy\/admin\/tls\/validate$/,
+  /^\/api\/proxy\/mesh\/egress-scope\/test$/,
+  /^\/api\/proxy\/backend-capabilities\/refresh$/,
+];
+
+function isConfigurationMutation(request: Request): boolean {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(request.method)) return false;
+  const path = new URL(request.url).pathname;
+  return request.method !== 'POST' || !OPERATIONAL_POST_PATHS.some((pattern) => pattern.test(path));
 }
 
 /** Allocate ownership before headers can race; never cancel a known commit here. */
 export function beginGatewayRequest(request: Request): GatewayRequestIdentity {
   const identity: GatewayRequestIdentity = { session: sessionGeneration };
-  if (!request.url.includes("/api/proxy/") || !isMutation(request.method)) return identity;
+  if (!request.url.includes("/api/proxy/") || !isConfigurationMutation(request)) return identity;
   latestMutationOrder += 1;
   if (["applied", "succeeded", "nothing_applied"].includes(snapshot.apply.state)) {
     publish({ ...snapshot, apply: IDLE_APPLY });
@@ -251,7 +263,7 @@ export async function observeGatewayResponse(
     contentDisposition: response.headers.get("content-disposition"),
   };
 
-  if (!isMutation(request.method)) {
+  if (!isConfigurationMutation(request)) {
     publish(next);
     return;
   }

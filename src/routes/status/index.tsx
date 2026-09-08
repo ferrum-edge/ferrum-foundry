@@ -12,7 +12,7 @@ function statusVariant(
   status: string,
 ): "green" | "yellow" | "red" {
   if (status === "ok") return "green";
-  if (status === "degraded" || status === "starting") return "yellow";
+  if (status === 'degraded' || status === 'starting' || status === 'draining') return 'yellow';
   return "red";
 }
 
