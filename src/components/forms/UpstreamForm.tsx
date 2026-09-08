@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – Upstream create / edit form                       */
 /* ------------------------------------------------------------------ */
 
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -10,7 +10,9 @@ import { Select } from "@/components/ui/Select";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { CollapsibleSection } from "./CollapsibleSection";
+import { FormValidationSummary } from "./FormValidationSummary";
 import { TargetForm } from "./TargetForm";
+import { useCollapsibleFormValidation } from "@/lib/collapsedFormValidation";
 import type {
   Upstream,
   UpstreamCreate,
@@ -21,6 +23,17 @@ import type {
   HashOnCookieConfig,
   ServiceDiscoveryConfig,
 } from "@/api/types";
+
+const UPSTREAM_COLLAPSIBLE_SECTIONS = [
+  { id: "health-checks", errorKeys: [] },
+  { id: "hash-cookie", errorKeys: [] },
+  {
+    id: "service-discovery",
+    errorKeys: ["consul_address", "sd_service_name"],
+  },
+  { id: "subsets", errorKeys: [] },
+  { id: "backend-tls", errorKeys: [] },
+] as const;
 
 /* ------------------------------------------------------------------ */
 /*  Props                                                              */
@@ -123,6 +136,8 @@ function defaultPassiveHealthCheck(): PassiveHealthCheck {
 export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormProps) {
   const navigate = useNavigate();
   const isEdit = !!initialData;
+  const formRef = useRef<HTMLFormElement>(null);
+  const collapsible = useCollapsibleFormValidation(UPSTREAM_COLLAPSIBLE_SECTIONS);
 
   /* ---------- Basic ---------- */
   // Seeded once per editor identity: the parent keys this form on
@@ -235,7 +250,13 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
       }
     }
     setErrors(errs);
-    return Object.keys(errs).length === 0;
+    const ok = Object.keys(errs).length === 0;
+    if (!ok) {
+      collapsible.onValidationFailed(errs, formRef.current);
+    } else {
+      collapsible.clearValidationSummary();
+    }
+    return ok;
   };
 
   /* ---------- Submit ---------- */
@@ -391,7 +412,7 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
   /* ================================================================ */
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-0">
+    <form ref={formRef} onSubmit={handleSubmit} className="space-y-0">
       {/* ── Basic ── */}
       <div className="border-b border-border/50 py-4">
         <h3 className="text-sm font-semibold text-text-primary mb-4">Basic Configuration</h3>
@@ -527,6 +548,7 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
       <CollapsibleSection
         title="Health Checks"
         badge={activeHcEnabled || passiveHcEnabled ? "ON" : undefined}
+        {...collapsible.sectionProps("health-checks")}
       >
         {/* Active */}
         <Checkbox
@@ -689,7 +711,10 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
 
       {/* ── Hash Cookie Config ── */}
       {showHashCookie && (
-        <CollapsibleSection title="Hash Cookie Config">
+        <CollapsibleSection
+          title="Hash Cookie Config"
+          {...collapsible.sectionProps("hash-cookie")}
+        >
           <Input
             label="Path"
             value={cookieConfig.path ?? ""}
@@ -736,6 +761,7 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
       <CollapsibleSection
         title="Service Discovery"
         badge={sdEnabled ? sdProvider.toUpperCase() : undefined}
+        {...collapsible.sectionProps("service-discovery")}
       >
         <Checkbox
           label="Enable service discovery"
@@ -914,6 +940,7 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
       <CollapsibleSection
         title="Subsets"
         badge={subsets.length > 0 ? String(subsets.length) : undefined}
+        {...collapsible.sectionProps("subsets")}
       >
         <p className="text-text-muted text-xs">
           Named target subsets for DestinationRule-style routing. A proxy's
@@ -999,6 +1026,7 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
       <CollapsibleSection
         title="Backend TLS"
         badge={tlsCertPath || tlsSni ? "ON" : undefined}
+        {...collapsible.sectionProps("backend-tls")}
       >
         <p className="text-text-muted text-xs">
           TLS settings for backend connections. When this upstream is linked to
@@ -1042,7 +1070,11 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
       </CollapsibleSection>
 
       {/* ── Actions ── */}
-      <div className="flex items-center justify-end gap-3 pt-6">
+      <div className="flex flex-col items-end gap-3 pt-6">
+        {collapsible.showSummary && (
+          <FormValidationSummary count={collapsible.errorCount} />
+        )}
+        <div className="flex items-center justify-end gap-3 w-full">
         <Button
           type="button"
           variant="secondary"
@@ -1054,6 +1086,7 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
         <Button type="submit" loading={isLoading}>
           {isEdit ? "Update Upstream" : "Create Upstream"}
         </Button>
+        </div>
       </div>
     </form>
   );
