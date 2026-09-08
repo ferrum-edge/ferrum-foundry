@@ -7,7 +7,8 @@ import {
   createRoute,
   createRouter,
   RouterProvider,
- type RouteComponent } from '@tanstack/react-router';
+  type RouteComponent,
+} from '@tanstack/react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider, useAuth } from '@/stores/auth';
 import { NamespaceProvider } from '@/stores/namespace';
