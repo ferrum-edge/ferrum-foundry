@@ -178,7 +178,6 @@ function dispatcherFingerprint(config: Config, caBundle: CaBundle | undefined): 
   return JSON.stringify({
     origin: config.adminUrl,
     connectTimeout: config.connectTimeout,
-    readTimeout: config.readTimeout,
     tlsVerify: config.tlsVerify,
     caPath: caBundle?.path,
     caFingerprint: caBundle?.fingerprint,
@@ -203,8 +202,10 @@ function createDispatcher(
         ...(caBundle && { ca: caBundle.pem }),
       }),
     },
-    headersTimeout: Math.max(config.readTimeout, 120_000),
-    bodyTimeout: config.readTimeout,
+    // Upload and response deadlines are enforced by the request controller.
+    // Agent timers must not cap waiting routes or vary the connection identity.
+    headersTimeout: 0,
+    bodyTimeout: 0,
     keepAliveTimeout: 10_000,
     keepAliveMaxTimeout: 60_000,
   });
