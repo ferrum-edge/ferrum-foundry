@@ -121,6 +121,20 @@ connectivity failures retain the gateway's structured `restore_errors` and
 `failure_class` in the recovery panel. Typed API-spec deletion confirmation and
 HTTP 500 rollback outcomes keep their existing handling.
 
+Restore also classifies the outcomes Foundry never observed, using the BFF's
+`phase` as the discriminator. A `504 FERRUM_BFF_TIMEOUT` with `phase: "upload"`
+means the request body never finished streaming: the restore provably did not
+run, so it stays on the ordinary retryable path with the confirmation armed.
+Every other transport outcome — a `504` once the body has been sent, a `502`
+`FERRUM_BFF_UPSTREAM_FAILURE`, ky's own `TimeoutError`, a dropped connection —
+may already have replaced the namespace. Those produce an "outcome unknown"
+panel that names the cause, clears the pinned backup so the destructive action
+is no longer one click away, and invalidates cached reads so the operator reads
+real state back. The same backup can be put back under an explicit "Re-arm this
+restore" action. The admin API exposes no restore operation id or idempotency
+key, so the ambiguity is reported rather than resolved; Foundry never resubmits
+a restore automatically.
+
 The global error dialog reports terminal failures. Direct HTTP calls notify from
 ky's final-error hook after its retry budget is exhausted. Query hooks explicitly
 pass `queryScope(scope)` (or `QUERY_ERROR_CONTEXT` for fleet-global reads), so

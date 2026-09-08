@@ -109,6 +109,17 @@ request it makes carries that binding.** In practice:
   the deleted namespace) only if that target is still the provider's current
   selection. A later user selection is preserved, including its request scope
   and persisted preference.
+- The active namespace is resolved against the principal's grants **during
+  render**, not in an effect. React flushes a child's effects before its
+  parent's, so a correction made in the provider's effect would arrive only
+  after the subtree had already mounted and dispatched its first queries under
+  a stored — possibly retired — name, collecting a `403 Namespace access
+  denied` from the BFF. Resolving during render means the first request of a
+  load, and the first request after the authorization-key remount that follows
+  a grant change, already carry a granted namespace. The corrected value is
+  then written back to the preference, so a retired name is not re-read on the
+  next load. A principal with no namespace grants (a global admin) is not
+  restricted and keeps its stored preference.
 - `localStorage` (`ferrum:namespace`) stores a *preference*, not the active
   namespace. It is read once when a tab loads, so a new tab opens on the
   namespace last chosen anywhere, and it is written when the user switches.
