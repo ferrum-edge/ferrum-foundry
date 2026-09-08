@@ -36,6 +36,12 @@ describe("canonical plugin defaults", () => {
       sync_mode: "local",
     });
   });
+
+  it("includes discovery.public_base_url in the mcp_gateway aggregate template", () => {
+    expect(getPluginConfigDefault("mcp_gateway").discovery).toEqual({
+      public_base_url: "https://mcp.example.com",
+    });
+  });
 });
 
 describe("formatPluginName", () => {

@@ -702,6 +702,9 @@ export const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
         expose_tools: true,
       },
     },
+    discovery: {
+      public_base_url: "https://mcp.example.com",
+    },
     policy: {
       default_action: "deny",
       tools: {
