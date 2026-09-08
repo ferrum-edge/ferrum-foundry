@@ -3,6 +3,7 @@ import { lstatSync, realpathSync, statSync } from 'node:fs';
 import { BlockList, isIP, type LookupFunction } from 'node:net';
 import { Agent } from 'undici';
 import { loadCaBundle, type CaBundle } from './ca.js';
+import { parseCidr } from './cidr.js';
 import type { Config } from './config.js';
 
 interface ManagedDispatcher {
@@ -52,14 +53,8 @@ let cachedCaBundle: CachedCaBundle | undefined;
 function parseAllowedCidrs(values: string[]): BlockList {
   const list = new BlockList();
   for (const value of values) {
-    const [address, rawPrefix, ...extra] = value.split('/');
-    const ipFamily = isIP(address);
-    const prefix = Number(rawPrefix);
-    const maxPrefix = ipFamily === 4 ? 32 : 128;
-    if (extra.length > 0 || ipFamily === 0 || !Number.isInteger(prefix) || prefix < 0 || prefix > maxPrefix) {
-      throw new Error('FERRUM_ADMIN_ALLOWED_CIDRS contains an invalid CIDR');
-    }
-    list.addSubnet(address, prefix, ipFamily === 4 ? 'ipv4' : 'ipv6');
+    const { address, prefix, family } = parseCidr(value);
+    list.addSubnet(address, prefix, family);
   }
   return list;
 }
