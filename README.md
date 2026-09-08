@@ -42,6 +42,23 @@ Browser <-> Fastify BFF (Node.js) <-> Ferrum Admin API
 
 The BFF (Backend-for-Frontend) handles TLS trust stores, connection/read/write timeouts, and JWT generation server-side - capabilities browsers cannot provide.
 
+Read truthfulness is an explicit UI invariant: a failed read cannot establish an
+empty collection, current health, or an authorization conclusion. Shared
+`ReadState` handling distinguishes loading, successful reads, unavailable reads,
+and failed refreshes with retained data. Each independent input reports its own
+failure and retry; failed refreshes identify the last successful observation.
+Policy and trust conclusions become **unknown**, and unavailable audit/API-spec
+collections hide their rows and row actions. Pending spec replacement and deletion
+also require an available collection. The dashboard offers manual refresh and
+labels its observation times.
+
+Detail editors follow a separate draft-preservation rule: a failed refresh with
+cached data keeps the editor mounted and shows a non-blocking retry notice. Plugin
+membership must load completely before the first edit; subsequent failures disable
+the picker without clearing selections or other fields. Recovery never reseeds a
+draft for the same identity. See [editor identity](docs/authentication.md#editor-identity)
+and [plugin membership](docs/plugin-membership.md).
+
 ## Quick Start
 
 ### Prerequisites

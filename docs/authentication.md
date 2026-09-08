@@ -170,7 +170,11 @@ them, correctly addressed, to the wrong consumer. Foundry therefore binds the
   read-only panels. A successful save leaves the submitted values in place
   because they are what the gateway now holds; to pick up a change made
   elsewhere, leave and reopen the resource. Only an identity change resets
-  the editor.
+  the editor. A failed refetch with retained data keeps the form mounted and
+  shows a retry notice; it cannot reset an unsaved draft. Supplementary plugin
+  membership failures disable the picker after initialization without changing
+  its selections. Read-only policy conclusions require all inputs to have
+  succeeded and otherwise report unknown rather than absence.
 - **Cache retirement after a cascade.** Because fields are seeded once, a
   superseded cache entry is what the operator edits and submits. A mutation
   must therefore *retire* (`removeQueries`) the scoped detail entry of every

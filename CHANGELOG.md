@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep proxy, consumer, upstream, and plugin editors mounted through failed background reads, preserving unsaved fields and group membership with a retry notice (#299).
+- Distinguish unknown reads from empty or current data across policy relationships, SPIFFE trust, federation, remote clusters, waypoints, dashboard, audit, and API specs. Hide unavailable collection actions and add dashboard refresh controls and observation times (#298).
+
 ### Security
 
 - Request bodies proxied to the gateway are bounded by an absolute upload deadline (`FERRUM_UPLOAD_TIMEOUT`) and a global in-flight upload cap (`FERRUM_MAX_ACTIVE_UPLOADS`) in addition to the idle write timeout, so a slowly progressing upload can no longer hold sockets, upstream requests, or upload permits indefinitely.

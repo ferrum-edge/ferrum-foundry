@@ -12,6 +12,8 @@ import {
 } from "@/hooks/useConsumers";
 import { useAllProxies } from "@/hooks/useProxies";
 import { useAllPluginConfigs } from "@/hooks/usePlugins";
+import { ReadState, ReadStateNotice } from '@/components/shared/ReadState';
+import { resolveReadState } from '@/lib/readState';
 import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -59,18 +61,24 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const { data: consumer, isLoading, isError, isFetching, dataUpdatedAt } = useConsumer(consumerId);
+  const resourceQuery = useConsumer(consumerId);
+  const { data: consumer, isLoading, isFetching, dataUpdatedAt } = resourceQuery;
   const updateConsumer = useUpdateConsumer();
   const deleteConsumer = useDeleteConsumer();
 
   const [deleteOpen, setDeleteOpen] = useState(false);
 
-  const { data: allProxies } = useAllProxies();
-  const { data: allPluginConfigs } = useAllPluginConfigs();
-  const { data: allConsumers } = useAllConsumers();
+  const proxiesQuery = useAllProxies();
+  const pluginsQuery = useAllPluginConfigs();
+  const consumersQuery = useAllConsumers();
+  const { data: allProxies } = proxiesQuery;
+  const { data: allPluginConfigs } = pluginsQuery;
+  const { data: allConsumers } = consumersQuery;
+  const policyQueries = [resourceQuery, proxiesQuery, pluginsQuery, consumersQuery];
+  const policyKnown = policyQueries.every((query) => resolveReadState(query) === 'loaded');
 
   const authorizedProxies = useMemo(() => {
-    if (!consumer || !allProxies || !allPluginConfigs) return [];
+    if (!policyKnown || !consumer || !allProxies || !allPluginConfigs) return [];
     const consumers = allConsumers?.some((candidate) => candidate.id === consumer.id)
       ? allConsumers
       : [...(allConsumers ?? []), consumer];
@@ -92,7 +100,7 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
         };
       })
       .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
-  }, [consumer, allProxies, allPluginConfigs, allConsumers]);
+  }, [consumer, allProxies, allPluginConfigs, allConsumers, policyKnown]);
 
   /* ---------- Handlers ---------- */
 
@@ -134,7 +142,7 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
     );
   }
 
-  if (isError || !consumer) {
+  if (!consumer) {
     return (
       <div className="max-w-2xl">
         <Card>
@@ -157,6 +165,9 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
 
   return (
     <div className="space-y-6 max-w-3xl">
+      {resourceQuery.isError && (
+        <ReadStateNotice query={resourceQuery} label="Consumer configuration" />
+      )}
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -192,7 +203,7 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
           <TabsTrigger value="credentials">Credentials</TabsTrigger>
           <TabsTrigger value="acl">ACL Groups</TabsTrigger>
           <TabsTrigger value="proxies">
-            Matched Proxies ({authorizedProxies.length})
+            Matched Proxies ({policyKnown ? authorizedProxies.length : 'unknown'})
           </TabsTrigger>
         </TabsList>
 
@@ -237,74 +248,76 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
 
         {/* ── Authorized Proxies Tab ── */}
         <TabsContent value="proxies">
-          <p className="text-text-muted text-sm mb-3">
-            Includes allowed and conditional matches. Basic-auth matches are conditional
-            when no other matching credential is observable.
-          </p>
-          {authorizedProxies.length === 0 ? (
-            <Card>
-              <div className="flex flex-col items-center text-center py-8">
-                <p className="text-text-secondary">
-                  No proxy is conclusively or conditionally matched for this consumer.
-                </p>
-                <p className="text-text-muted text-sm mt-2 max-w-md">
-                  Review effective authentication plugins and ACL rules.
-                  Basic credential presence cannot be determined from consumer responses.
-                </p>
-              </div>
-            </Card>
-          ) : (
-            <Card className="p-0 overflow-hidden">
-              <div className="grid grid-cols-[2fr_1.5fr_1fr_2fr] gap-4 px-5 py-2.5 border-b border-border text-text-muted text-xs font-semibold uppercase tracking-wider">
-                <span>Proxy</span>
-                <span>Listen Path</span>
-                <span>Auth Type</span>
-                <span>Decision / Evidence</span>
-              </div>
-              <div className="max-h-[400px] overflow-y-auto divide-y divide-border/50">
-                {authorizedProxies.map(({ proxy, authTypes, result, evaluatedAt }) => (
-                  <Link
-                    key={proxy.id}
-                    to="/proxies/$proxyId"
-                    params={{ proxyId: proxy.id }}
-                    className="grid grid-cols-[2fr_1.5fr_1fr_2fr] gap-4 px-5 py-3 text-sm hover:bg-bg-card-hover transition-colors"
-                  >
-                    <div className="min-w-0">
-                      <span className="text-text-primary font-medium break-all block">
-                        {proxy.name || proxy.id}
-                      </span>
-                      {proxy.name && (
-                        <span className="text-text-muted text-xs font-mono break-all block">
-                          {proxy.id}
+          <ReadState queries={policyQueries} label="Authorized proxies">
+            <p className="text-text-muted text-sm mb-3">
+              Includes allowed and conditional matches. Basic-auth matches are conditional
+              when no other matching credential is observable.
+            </p>
+            {authorizedProxies.length === 0 ? (
+              <Card>
+                <div className="flex flex-col items-center text-center py-8">
+                  <p className="text-text-secondary">
+                    No proxy is conclusively or conditionally matched for this consumer.
+                  </p>
+                  <p className="text-text-muted text-sm mt-2 max-w-md">
+                    Review effective authentication plugins and ACL rules.
+                    Basic credential presence cannot be determined from consumer responses.
+                  </p>
+                </div>
+              </Card>
+            ) : (
+              <Card className="p-0 overflow-hidden">
+                <div className="grid grid-cols-[2fr_1.5fr_1fr_2fr] gap-4 px-5 py-2.5 border-b border-border text-text-muted text-xs font-semibold uppercase tracking-wider">
+                  <span>Proxy</span>
+                  <span>Listen Path</span>
+                  <span>Auth Type</span>
+                  <span>Decision / Evidence</span>
+                </div>
+                <div className="max-h-[400px] overflow-y-auto divide-y divide-border/50">
+                  {authorizedProxies.map(({ proxy, authTypes, result, evaluatedAt }) => (
+                    <Link
+                      key={proxy.id}
+                      to="/proxies/$proxyId"
+                      params={{ proxyId: proxy.id }}
+                      className="grid grid-cols-[2fr_1.5fr_1fr_2fr] gap-4 px-5 py-3 text-sm hover:bg-bg-card-hover transition-colors"
+                    >
+                      <div className="min-w-0">
+                        <span className="text-text-primary font-medium break-all block">
+                          {proxy.name || proxy.id}
                         </span>
-                      )}
-                    </div>
-                    <span className="text-text-secondary font-mono break-all">
-                      {proxy.listen_path}
-                    </span>
-                    <div className="flex flex-wrap gap-1">
-                      {authTypes.map((t) => (
-                        <Badge key={t} variant="blue">
-                          {t.replace(/_/g, " ")}
+                        {proxy.name && (
+                          <span className="text-text-muted text-xs font-mono break-all block">
+                            {proxy.id}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-text-secondary font-mono break-all">
+                        {proxy.listen_path}
+                      </span>
+                      <div className="flex flex-wrap gap-1">
+                        {authTypes.map((t) => (
+                          <Badge key={t} variant="blue">
+                            {t.replace(/_/g, " ")}
+                          </Badge>
+                        ))}
+                      </div>
+                      <div>
+                        <Badge variant={result.decision === "allowed" ? "green" : "yellow"}>
+                          {result.decision}
                         </Badge>
-                      ))}
-                    </div>
-                    <div>
-                      <Badge variant={result.decision === "allowed" ? "green" : "yellow"}>
-                        {result.decision}
-                      </Badge>
-                      <p className="text-text-muted text-xs mt-1">
-                        {result.reasons.join("; ")}
-                      </p>
-                      <p className="text-text-muted text-[11px] mt-1">
-                        evaluated {new Date(evaluatedAt).toLocaleString()}
-                      </p>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            </Card>
-          )}
+                        <p className="text-text-muted text-xs mt-1">
+                          {result.reasons.join("; ")}
+                        </p>
+                        <p className="text-text-muted text-[11px] mt-1">
+                          evaluated {new Date(evaluatedAt).toLocaleString()}
+                        </p>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              </Card>
+            )}
+          </ReadState>
         </TabsContent>
       </Tabs>
 
