@@ -67,6 +67,68 @@ function consumer(
 }
 
 describe("effective authorization policy", () => {
+  it.each([{}, { keyauth: [] }, { jwt: [{ secret: "[REDACTED]" }] }])(
+    "treats omitted basic credentials as unobservable, including unrelated credentials: %j",
+    (credentials) => {
+      const analysis = analyzeProxyPolicy(proxy(), [
+        plugin("basic", "basic_auth", "global"),
+      ], [consumer("1", "alice", [], credentials)]);
+      expect(analysis.authPlugins.map((p) => p.plugin_name)).toEqual(["basic_auth"]);
+      expect(analysis.conditional).toBe(true);
+      expect(analysis.reasons.join(" ")).toContain("ordinary Consumer responses omit basicauth");
+      expect(analysis.consumers[0]?.decision).toBe("conditional");
+      expect(analysis.consumers[0]?.reasons.join(" ")).toContain("presence is unknown");
+    },
+  );
+
+  it("preserves observed key-auth decisions and treats mixed missing auth as unknown", () => {
+    const people = [
+      consumer("1", "alice", [], { keyauth: [{ key: "[REDACTED]" }] }),
+      consumer("2", "bob", [], {}),
+    ];
+    const key = plugin("key", "key_auth", "global", {}, { priority_override: 10 });
+    const basic = plugin("basic", "basic_auth", "global", {}, { priority_override: 20 });
+    expect(analyzeProxyPolicy(proxy(), [key], people).consumers.map((c) => c.decision))
+      .toEqual(["allowed", "denied"]);
+    const mixed = analyzeProxyPolicy(proxy(), [key, basic], people);
+    expect(mixed.consumers.map((c) => c.decision)).toEqual(["allowed", "conditional"]);
+    expect(mixed.consumers[0]?.reasons).toEqual(["Matching credential for key_auth"]);
+
+    const unordered = analyzeProxyPolicy(proxy(), [key, { ...basic, priority_override: null }], people);
+    expect(unordered.consumers[0]?.decision).toBe("conditional");
+    expect(unordered.consumers[0]?.reasons.join(" ")).toContain("execution order");
+  });
+
+  it.each([
+    { disallowed_consumers: ["alice"] },
+    { disallowed_groups: ["blocked"] },
+    { allowed_consumers: ["bob"] },
+  ])("keeps explicit ACL denial ahead of unknown basic auth: %j", (acl) => {
+    const analysis = analyzeProxyPolicy(proxy(), [
+      plugin("basic", "basic_auth", "global"),
+      plugin("acl", "access_control", "global", acl),
+    ], [consumer("1", "alice", ["blocked"], {})]);
+    expect(analysis.consumers[0]?.decision).toBe("denied");
+    expect(analysis.consumers[0]?.reasons.join(" ")).not.toContain("credential");
+  });
+
+  it("retains trigger and external reasons alongside unknown local knowledge", () => {
+    const analysis = analyzeProxyPolicy(proxy(), [
+      plugin("basic", "basic_auth", "global", {}, {
+        trigger: { when: { match: { path: { prefix: ["/private"] } } } },
+      }),
+      plugin("external", "jwks_auth", "global"),
+      plugin("acl", "access_control", "global", { disallowed_consumers: ["alice"] }, {
+        trigger: { when: { match: { path: { prefix: ["/admin"] } } } },
+      }),
+    ], [consumer("1", "alice", [], {})]);
+    const result = analysis.consumers[0]!;
+    expect(result.decision).toBe("conditional");
+    for (const reason of ["omit basicauth", "External identity", "authentication plugins have request-dependent", "access-control trigger", "execution order"]) {
+      expect(result.reasons.join(" ")).toContain(reason);
+    }
+  });
+
   it("includes enabled global, direct, and associated group plugins", () => {
     const plugins = [
       plugin("global-auth", "key_auth", "global"),

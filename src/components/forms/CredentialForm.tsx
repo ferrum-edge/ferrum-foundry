@@ -14,6 +14,8 @@ import { getApiErrorMessage } from "@/api/client";
 import {
   useAppendCredential,
   useDeleteCredentialByIndex,
+  useDeleteCredentials,
+  useUpdateCredentials,
 } from "@/hooks/useConsumers";
 import { buildCredentialInput, CredentialInputError } from "@/lib/credentials";
 import type { EditorSession } from "@/hooks/useEditorIdentity";
@@ -139,8 +141,6 @@ function renderCredentialSummary(
   switch (credType) {
     case "keyauth":
       return cred.key ? `Key: ${maskString(String(cred.key))}` : "Key (auto-generated)";
-    case "basicauth":
-      return cred.username ? `User: ${String(cred.username)}` : "Basic auth credential";
     case "jwt":
       return cred.secret ? `Secret: ${maskString(String(cred.secret))}` : "JWT credential";
     case "hmac_auth":
@@ -188,10 +188,15 @@ export function CredentialForm({
   const { toast } = useToast();
   const appendCredential = useAppendCredential();
   const deleteCredentialByIndex = useDeleteCredentialByIndex();
+  const updateCredentials = useUpdateCredentials();
+  const deleteCredentials = useDeleteCredentials();
+  const isBasic = credentialType === "basicauth";
 
   const [formValues, setFormValues] = useState<Record<string, string>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [showForm, setShowForm] = useState(false);
+  const [writeMode, setWriteMode] = useState<"append" | "replace">("append");
+  const [deleteAllRevision, setDeleteAllRevision] = useState<number | null>(null);
   const [receipt, setReceipt] = useState<SubmittedSecret[] | null>(null);
   const mounted = useRef(true);
   useEffect(() => {
@@ -202,7 +207,9 @@ export function CredentialForm({
     index: number; revision: number; snapshot: unknown;
   } | null>(null);
 
-  const credentials = normalizeCredentials(existingCredentials);
+  const credentials = isBasic ? [] : normalizeCredentials(existingCredentials);
+  const writePending = appendCredential.isPending || updateCredentials.isPending;
+  const busy = writePending || deleteCredentials.isPending;
   const badgeVariant = CRED_BADGE_VARIANT[credentialType] ?? "default";
 
   if (!config) {
@@ -218,6 +225,7 @@ export function CredentialForm({
   /* ---------- Handlers ---------- */
 
   const addCredential = session.bind(async () => {
+    if (busy) return;
     let data;
     try {
       data = buildCredentialInput(credentialType, formValues);
@@ -234,7 +242,8 @@ export function CredentialForm({
     }
 
     try {
-      await appendCredential.mutateAsync({
+      const mutation = writeMode === "replace" ? updateCredentials : appendCredential;
+      await mutation.mutateAsync({
         consumerId,
         credType: credentialType,
         data,
@@ -242,7 +251,7 @@ export function CredentialForm({
       if (!mounted.current) return;
       const secrets = submittedSecrets({ [credentialType]: [data] });
       if (secrets.length > 0) setReceipt(secrets);
-      toast("success", `${config.label} credential added`);
+      toast("success", writeMode === "replace" ? "Basic credentials replaced" : `${config.label} credential added`);
       setFormValues({});
       setErrors({});
       setShowForm(false);
@@ -251,6 +260,7 @@ export function CredentialForm({
       if (mounted.current) toast("error", message);
     } finally {
       appendCredential.reset();
+      updateCredentials.reset();
     }
   });
 
@@ -272,11 +282,36 @@ export function CredentialForm({
         credType: credentialType,
         index: deleteSelection.index,
       });
+      if (!mounted.current) return;
       toast("success", `${config.label} credential removed`);
       setDeleteSelection(null);
     } catch (err: unknown) {
       const message = await getApiErrorMessage(err, "Failed to delete credential");
-      toast("error", message);
+      if (mounted.current) toast("error", message);
+    } finally {
+      deleteCredentialByIndex.reset();
+    }
+  });
+
+  const handleDeleteAll = session.bind(async () => {
+    if (deleteAllRevision === null || busy) return;
+    if (isRefreshing || deleteAllRevision !== revision) {
+      setDeleteAllRevision(null);
+      toast("warning", "The consumer refreshed. Confirm deletion of all basic credentials again.");
+      return;
+    }
+    try {
+      await deleteCredentials.mutateAsync({ consumerId, credType: "basicauth" });
+      if (!mounted.current) return;
+      setDeleteAllRevision(null);
+      setReceipt(null);
+      setFormValues({});
+      toast("success", "All basic credentials deleted");
+    } catch (err: unknown) {
+      const message = await getApiErrorMessage(err, "Failed to delete basic credentials");
+      if (mounted.current) toast("error", message);
+    } finally {
+      deleteCredentials.reset();
     }
   });
 
@@ -290,13 +325,14 @@ export function CredentialForm({
           <h4 className="text-sm font-semibold text-text-primary">
             {config.label}
           </h4>
-          <Badge variant={badgeVariant}>{credentials.length}</Badge>
+          <Badge variant={badgeVariant}>{isBasic ? "Unknown" : credentials.length}</Badge>
         </div>
         {!showForm && !receipt && (
           <Button
             size="sm"
             variant="secondary"
-            onClick={() => setShowForm(true)}
+            disabled={busy}
+            onClick={() => { setWriteMode("append"); setShowForm(true); }}
           >
             <svg
               className="w-3.5 h-3.5"
@@ -315,6 +351,28 @@ export function CredentialForm({
           </Button>
         )}
       </div>
+
+      {isBasic && (
+        <>
+          <p className="text-text-muted text-sm py-2">
+            Basic credential presence and count are unknown. The gateway omits
+            basic credentials from ordinary consumer responses, even when configured.
+            Basic authentication uses this consumer’s username; enter only a password.
+          </p>
+          {!showForm && !receipt && (
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="secondary" disabled={busy}
+                onClick={() => { setWriteMode("replace"); setShowForm(true); }}>
+                Replace basic credentials
+              </Button>
+              <Button size="sm" variant="danger" disabled={busy || isRefreshing}
+                onClick={() => setDeleteAllRevision(revision)}>
+                Delete all basic credentials
+              </Button>
+            </div>
+          )}
+        </>
+      )}
 
       {/* Existing credentials */}
       {credentials.length > 0 && (
@@ -353,7 +411,7 @@ export function CredentialForm({
         </div>
       )}
 
-      {credentials.length === 0 && !showForm && (
+      {!isBasic && credentials.length === 0 && !showForm && (
         <p className="text-text-muted text-sm py-2">
           No {config.label.toLowerCase()} credentials configured.
         </p>
@@ -367,6 +425,13 @@ export function CredentialForm({
           onSubmit={handleAdd}
           className="border border-border rounded-lg p-4 space-y-4 bg-bg-primary/30"
         >
+          {isBasic && (
+            <p className="text-sm text-text-secondary">
+              {writeMode === "replace"
+                ? "Replaces every existing basic password for this consumer with this password. Existing passwords will stop working."
+                : "Adds another basic password while preserving existing passwords. Their count is not observable."}
+            </p>
+          )}
           {config.fields.map((field) => (
             <Input
               key={field.name}
@@ -382,15 +447,16 @@ export function CredentialForm({
               placeholder={field.placeholder}
               helpText={field.helpText}
               error={errors[field.name]}
+              disabled={writePending}
             />
           ))}
           <div className="flex items-center gap-2 pt-1">
             <Button
               type="submit"
               size="sm"
-              loading={appendCredential.isPending}
+              loading={writePending}
             >
-              Add Credential
+              {writeMode === "replace" ? "Replace basic credentials" : "Add Credential"}
             </Button>
             <Button
               type="button"
@@ -401,7 +467,7 @@ export function CredentialForm({
                 setFormValues({});
                 setErrors({});
               }}
-              disabled={appendCredential.isPending}
+              disabled={writePending}
             >
               Cancel
             </Button>
@@ -421,6 +487,16 @@ export function CredentialForm({
         variant="danger"
         onConfirm={handleDelete}
         loading={deleteCredentialByIndex.isPending || isRefreshing}
+      />
+      <ConfirmDialog
+        open={deleteAllRevision !== null}
+        onOpenChange={(open) => { if (!open) setDeleteAllRevision(null); }}
+        title="Delete all basic credentials"
+        description={`Delete every basic password for consumer ${consumerId} in namespace ${session.identity.namespace}? The gateway does not reveal how many exist. All existing basic passwords will stop working. Other credential types are preserved. This cannot be undone.`}
+        confirmLabel="Delete all basic credentials"
+        variant="danger"
+        onConfirm={handleDeleteAll}
+        loading={deleteCredentials.isPending || isRefreshing}
       />
     </div>
   );

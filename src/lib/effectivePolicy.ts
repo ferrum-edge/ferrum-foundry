@@ -8,11 +8,16 @@ import { pluginAppliesToProxy } from "@/lib/pluginProtocols";
 
 const LOCAL_AUTH_CREDENTIALS: Readonly<Record<string, BuiltInCredentialType>> = {
   key_auth: "keyauth",
-  basic_auth: "basicauth",
   jwt_auth: "jwt",
   hmac_auth: "hmac_auth",
   mtls_auth: "mtls_auth",
 };
+
+// Ordinary Consumer responses cannot express this type, even when configured.
+// Never use its omission (or backup secrets) as evidence of access or absence.
+const UNOBSERVABLE_LOCAL_AUTH = new Set(["basic_auth"]);
+const BASIC_AUTH_UNKNOWN_REASON =
+  "Basic-auth credential presence is unknown: ordinary Consumer responses omit basicauth";
 
 const EXTERNAL_AUTH_PLUGINS = new Set([
   "jwks_auth",
@@ -33,6 +38,7 @@ function soapEstablishesIdentity(plugin: PluginConfig): boolean {
 }
 
 function isAuthPlugin(plugin: PluginConfig): boolean {
+  if (UNOBSERVABLE_LOCAL_AUTH.has(plugin.plugin_name)) return true;
   if (plugin.plugin_name in LOCAL_AUTH_CREDENTIALS) return true;
   return EXTERNAL_AUTH_PLUGINS.has(plugin.plugin_name) && soapEstablishesIdentity(plugin);
 }
@@ -216,12 +222,15 @@ export function resolveConsumerAccess(
   const external = authPlugins.filter((plugin) =>
     EXTERNAL_AUTH_PLUGINS.has(plugin.plugin_name),
   );
+  const unknownLocal = matchingLocal.length === 0 && authPlugins.some((plugin) =>
+    UNOBSERVABLE_LOCAL_AUTH.has(plugin.plugin_name),
+  );
   const triggered = authPlugins.filter((plugin) => plugin.trigger != null);
   const priorityIndeterminate = authPlugins.length > 1 && authPlugins.some(
     (plugin) => plugin.priority_override == null,
   );
 
-  if (matchingLocal.length === 0 && external.length === 0) {
+  if (matchingLocal.length === 0 && external.length === 0 && !unknownLocal) {
     return {
       consumer,
       decision: "denied",
@@ -229,8 +238,9 @@ export function resolveConsumerAccess(
     };
   }
 
-  if (external.length > 0 || triggered.length > 0 || acl.conditional || priorityIndeterminate) {
+  if (unknownLocal || external.length > 0 || triggered.length > 0 || acl.conditional || priorityIndeterminate) {
     const reasons = [...acl.reasons];
+    if (unknownLocal) reasons.push(BASIC_AUTH_UNKNOWN_REASON);
     if (external.length > 0) {
       reasons.push(
         `External identity mapping must be evaluated at request time (${external.map((p) => p.plugin_name).join(", ")})`,
@@ -273,6 +283,9 @@ export function analyzeProxyPolicy(
   );
   const reasons: string[] = [];
 
+  if (authPlugins.some((plugin) => UNOBSERVABLE_LOCAL_AUTH.has(plugin.plugin_name))) {
+    reasons.push(BASIC_AUTH_UNKNOWN_REASON);
+  }
   if (effectivePlugins.some((plugin) => plugin.trigger != null)) {
     reasons.push("Request-dependent plugin triggers make access conditional");
   }

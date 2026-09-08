@@ -14,7 +14,7 @@ import {
   type NamespaceScope,
 } from "./client";
 import type {
-  Consumer,
+  ConsumerBackup,
   ConsumerCreate,
   PluginConfig,
   PluginConfigCreate,
@@ -451,7 +451,7 @@ export interface BackupResponse {
     gateway_trust_bundles?: number;
   };
   proxies: Proxy[];
-  consumers: Consumer[];
+  consumers: ConsumerBackup[];
   plugin_configs: PluginConfig[];
   upstreams: Upstream[];
   gateway_trust_bundles?: unknown[];
