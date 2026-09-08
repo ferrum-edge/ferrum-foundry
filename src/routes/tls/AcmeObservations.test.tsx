@@ -211,9 +211,14 @@ it('blocks renewal after an uncertain response', async () => {
       created_at: '2026-09-06T00:00:00Z', updated_at: '2026-09-06T00:00:00Z',
     }]);
   });
-  await click('Renew');
   const renew = () => [...panel().querySelectorAll<HTMLButtonElement>('button')]
     .find((button) => button.textContent?.trim() === 'Renew')!;
+  // Query observers notify asynchronously after the certificate cache update.
+  await settle(() => {
+    expect(renew()).toBeTruthy();
+    expect(renew().disabled).toBe(false);
+  });
+  await click('Renew');
   await settle(() => {
     expect(panel().textContent).toContain('Renewal outcome unknown');
     expect(renew().disabled).toBe(true);
