@@ -20,7 +20,6 @@ const aggregateConfig = {
     },
   },
   discovery: {
-    public_base_url: "https://mcp.example.com",
     aggregate_tools: true,
   },
   policy: {
@@ -33,7 +32,7 @@ const aggregateConfig = {
 };
 
 describe("mcpGatewayConfig", () => {
-  it("keeps the aggregate palette default with discovery.public_base_url", () => {
+  it("keeps the aggregate palette default without A2A-only discovery keys", () => {
     expect(getPluginConfigDefault("mcp_gateway")).toEqual({
       mode: "aggregate_router",
       endpoint: {
@@ -46,9 +45,6 @@ describe("mcpGatewayConfig", () => {
           namespace: "github",
           expose_tools: true,
         },
-      },
-      discovery: {
-        public_base_url: "https://mcp.example.com",
       },
       policy: {
         default_action: "deny",
@@ -80,15 +76,12 @@ describe("mcpGatewayConfig", () => {
       },
       discovery: {
         aggregate_tools: true,
-        public_base_url: "https://mcp.example.com",
       },
     });
 
     expect(submitted.mode).toBe("transparent_proxy");
     expect(submitted.policy).toBeUndefined();
-    expect(submitted.discovery).toEqual({
-      public_base_url: "https://mcp.example.com",
-    });
+    expect(submitted.discovery).toBeUndefined();
     expect(mcpGatewayConfigHasAggregateOnlyFields(submitted)).toBe(false);
   });
 
@@ -116,9 +109,7 @@ describe("mcpGatewayConfig", () => {
       protocol_versions: ["2025-11-25"],
     });
     expect(transparent.config.policy).toBeUndefined();
-    expect(transparent.config.discovery).toEqual({
-      public_base_url: "https://mcp.example.com",
-    });
+    expect(transparent.config.discovery).toBeUndefined();
     expect(transparent.stash.policy).toEqual(customized.policy);
 
     const restored = switchMcpGatewayMode(
@@ -135,7 +126,6 @@ describe("mcpGatewayConfig", () => {
       mode: "aggregate_router",
       endpoint: customized.endpoint,
       servers: customized.servers,
-      discovery: { public_base_url: "https://mcp.example.com" },
     });
   });
 });

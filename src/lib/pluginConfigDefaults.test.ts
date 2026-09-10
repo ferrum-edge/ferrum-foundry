@@ -37,10 +37,16 @@ describe("canonical plugin defaults", () => {
     });
   });
 
-  it("includes discovery.public_base_url in the mcp_gateway aggregate template", () => {
-    expect(getPluginConfigDefault("mcp_gateway").discovery).toEqual({
-      public_base_url: "https://mcp.example.com",
+  it("requires canonical_identity_attribute in the ldap_auth template", () => {
+    expect(getPluginConfigDefault("ldap_auth")).toEqual({
+      ldap_url: "ldap://127.0.0.1:389",
+      bind_dn_template: "uid={username},ou=people,dc=example,dc=org",
+      canonical_identity_attribute: "uid",
     });
+  });
+
+  it("omits A2A-only discovery.public_base_url from the mcp_gateway template", () => {
+    expect(getPluginConfigDefault("mcp_gateway")).not.toHaveProperty("discovery");
   });
 });
 
