@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
-import { adminToken, buildRestorePayload, readSeedConfig } from "./seed-demo-gateway.mjs";
+import {
+  adminToken,
+  buildRestorePayload,
+  confirmDestructiveTarget,
+  readSeedConfig,
+} from "./seed-demo-gateway.mjs";
 import { verifyPluginDefaults } from "./plugin-defaults-contract.mjs";
 import { verifyBasicAuthContract } from "./basic-auth-contract.mjs";
 
 const config = readSeedConfig();
+confirmDestructiveTarget(config);
 
 async function exchange(path, { method = "GET", body } = {}, requestConfig = config) {
   const token = await adminToken(requestConfig);
