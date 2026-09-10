@@ -28,9 +28,6 @@ const AGGREGATE_FIELD_DEFAULTS: JsonObject = {
       "github.search_issues": { action: "allow" },
     },
   },
-  discovery: {
-    public_base_url: "https://mcp.example.com",
-  },
 };
 
 const SHARED_TEMPLATE: JsonObject = {

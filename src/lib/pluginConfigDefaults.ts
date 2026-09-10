@@ -663,6 +663,8 @@ export const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
   ldap_auth: {
     ldap_url: "ldap://127.0.0.1:389",
     bind_dn_template: "uid={username},ou=people,dc=example,dc=org",
+    // Set to your directory's authoritative identity attribute (e.g. uid, sAMAccountName).
+    canonical_identity_attribute: "uid",
   },
   load_testing: {
     key: "dev-load-test",
@@ -701,9 +703,6 @@ export const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
         namespace: "github",
         expose_tools: true,
       },
-    },
-    discovery: {
-      public_base_url: "https://mcp.example.com",
     },
     policy: {
       default_action: "deny",

@@ -116,7 +116,6 @@ describe("PluginConfigForm mcp_gateway", () => {
     const submitted = onSubmit.mock.calls[0][0].config as Record<string, unknown>;
     expect(submitted).toMatchObject({
       mode: "aggregate_router",
-      discovery: { public_base_url: "https://mcp.example.com" },
       policy: {
         default_action: "deny",
         tools: { "github.search_issues": { action: "allow" } },
@@ -135,7 +134,7 @@ describe("PluginConfigForm mcp_gateway", () => {
           expose_tools: true,
         },
       },
-      discovery: { public_base_url: "https://mcp.example.com" },
+      discovery: { aggregate_tools: true },
       policy: {
         default_action: "allow",
         tools: {
