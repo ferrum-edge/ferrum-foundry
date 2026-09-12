@@ -2,6 +2,9 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
+import { resolveViteDevServer } from "./src/lib/viteDevServer";
+
+const { port, proxyTarget } = resolveViteDevServer(process.env);
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -11,12 +14,12 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    port,
     proxy: {
       // Match only /api/ (with slash) so SPA routes like /api-specs are
       // served by the router rather than proxied to the BFF.
       "^/api/": {
-        target: "http://localhost:3001",
+        target: proxyTarget,
         changeOrigin: true,
       },
     },
