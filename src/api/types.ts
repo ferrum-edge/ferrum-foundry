@@ -81,6 +81,7 @@ export interface StreamMatchCriteria {
 }
 
 export interface Proxy {
+  labels?: Record<string, string>;
   id: string;
   namespace?: string;
   name?: string | null;
@@ -201,6 +202,7 @@ export interface ConsumerCredentialsRedacted extends ConsumerCredentials {
 }
 
 export interface Consumer {
+  labels?: Record<string, string>;
   id: string;
   namespace?: string;
   username: string;
@@ -219,6 +221,7 @@ export interface ConsumerBackup extends Omit<Consumer, "credentials"> {
 }
 
 export interface ConsumerCreate {
+  labels?: Record<string, string>;
   id?: string;
   username: string;
   custom_id?: string | null;
@@ -299,6 +302,7 @@ export interface PluginTrigger {
 }
 
 export interface PluginConfig {
+  labels?: Record<string, string>;
   id: string;
   namespace?: string;
   plugin_name: string;
@@ -314,6 +318,7 @@ export interface PluginConfig {
 }
 
 export interface PluginConfigCreate {
+  labels?: Record<string, string>;
   id?: string;
   plugin_name: string;
   config?: Record<string, unknown>;
@@ -428,6 +433,7 @@ export interface ServiceDiscoveryConfig {
 }
 
 export interface Upstream {
+  labels?: Record<string, string>;
   id: string;
   namespace?: string;
   name?: string | null;

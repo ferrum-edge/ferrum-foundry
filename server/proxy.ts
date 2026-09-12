@@ -136,7 +136,11 @@ function copyRequestHeaders(request: FastifyRequest, authorization: string): Rec
   // Undici transparently decodes compressed fetch responses while preserving
   // the upstream content-length. Prefer an identity response so downstream
   // framing describes the bytes Foundry actually streams.
-  const headers: Record<string, string> = { authorization, 'accept-encoding': 'identity' };
+  const headers: Record<string, string> = {
+    authorization,
+    'accept-encoding': 'identity',
+    'x-ferrum-provisioned-by': 'ferrum-foundry',
+  };
   for (const name of REQUEST_HEADER_ALLOWLIST) {
     const value = request.headers[name];
     if (typeof value === 'string') headers[name] = value;
