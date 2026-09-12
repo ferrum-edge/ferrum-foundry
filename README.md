@@ -110,14 +110,27 @@ npm run dev
 This starts Vite (port 5173) and Fastify (port 3001) concurrently. Open http://localhost:5173.
 
 No gateway handy? Run the bundled mock admin API, which serves realistic
-sample data for every admin surface (CRUD, TLS/ACME, audit, cluster, mesh,
-chargeback). Write paths follow the live Edge contract: proxy `auth_mode` is
-only `single` or `multi` (not `none`), and plugin configs require `plugin_name`
-and `scope` — a top-level `name` field is unknown:
+sample data for most admin surfaces (CRUD, TLS/ACME, audit, cluster,
+overload/chargeback, gateway trust bundles). Write paths follow the live Edge
+contract: proxy `auth_mode` is only `single` or `multi` (not `none`), and plugin
+configs require `plugin_name` and `scope` — a top-level `name` field is unknown:
 
 ```bash
 node scripts/mock-admin-gateway.mjs   # listens on :9000
 ```
+
+For mesh observability the mock emulates a **non-mesh** gateway: only
+`GET /mesh/service-graph` returns sample data. These mesh routes respond
+404 `{error:"mesh mode not active"}` (the UI shows empty states):
+
+- `/mesh/federation`, `/mesh/remote-clusters`
+- `/mesh/config-drift`, `/mesh/slice-drift`, `/mesh/config-revision/reset`
+- `/mesh/policy-denies/recent`
+- `/mesh/egress-scope`, `/mesh/egress-scope/test`
+- `/node-waypoint/identities`, `/service-waypoint/services`
+
+Use a live mesh-mode Ferrum Edge gateway for the full mesh observability
+surfaces above.
 
 To seed a real gateway, use a dedicated namespace. Seeding performs a full
 replacement of that namespace, so it refuses to run without an explicit opt-in.
