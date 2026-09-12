@@ -4,7 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import { resolveViteDevServer } from "./src/lib/viteDevServer";
 
-const { port, proxyTarget } = resolveViteDevServer();
+const { port, proxyTarget } = resolveViteDevServer(process.env);
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],

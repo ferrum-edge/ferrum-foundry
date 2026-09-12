@@ -57,9 +57,14 @@ function parseBffUrl(env: Record<string, string | undefined>): string {
   return parsed.origin;
 }
 
-/** Resolve Vite's listen port and `/api` proxy target from the process environment. */
+/**
+ * Resolve Vite's listen port and `/api` proxy target from an environment map.
+ *
+ * The caller passes `process.env`; this module lives under `src/` (browser
+ * typings) so it must not touch Node globals itself.
+ */
 export function resolveViteDevServer(
-  env: Record<string, string | undefined> = process.env,
+  env: Record<string, string | undefined>,
 ): ViteDevServerSettings {
   return {
     port: parsePort(env, "VITE_DEV_PORT", DEFAULT_DEV_PORT),
