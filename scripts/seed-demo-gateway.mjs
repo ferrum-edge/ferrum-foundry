@@ -10,6 +10,8 @@ import { pathToFileURL } from "node:url";
 import { signAdminJwt } from "../shared/admin-jwt.js";
 
 const CONTRACT_REVISION = "50e65b5798555209114cbe08ab2d011b3896ad00";
+const COLLECTION_PAGE_SIZE = 100;
+const BASIC_AUTH_PROBE_ID = "ff-demo-basic-auth-hmac-probe";
 
 const backendPorts = [9101, 9102, 9103, 9104, 9105];
 const algorithms = [
@@ -121,6 +123,7 @@ export function readSeedConfig(env = process.env) {
     namespace: env.FERRUM_NAMESPACE?.trim() || "ferrum-foundry-demo",
     manifestPath: env.FERRUM_DEMO_MANIFEST?.trim() || "/tmp/ferrum-foundry-demo-manifest.json",
     destructiveConfirmation: env.FERRUM_DEMO_CONFIRM_TARGET?.trim(),
+    includeBasicAuth: env.FERRUM_DEMO_INCLUDE_BASIC_AUTH?.trim() === "true",
   };
 }
 
@@ -148,26 +151,169 @@ export async function adminToken(config, options = {}) {
 }
 
 async function adminRequest(config, path, options = {}) {
-  const token = await adminToken(config);
+  const {
+    namespace = config.namespace,
+    okStatuses,
+    signal,
+    headers,
+    ...fetchOptions
+  } = options;
+  const token = await adminToken({ ...config, namespace });
   const response = await fetch(`${config.adminUrl}${path}`, {
-    ...options,
-    signal: options.signal ?? AbortSignal.timeout(30_000),
+    ...fetchOptions,
+    signal: signal ?? AbortSignal.timeout(30_000),
     headers: {
       authorization: `Bearer ${token}`,
       "content-type": "application/json",
-      "x-ferrum-namespace": config.namespace,
-      ...(options.headers ?? {}),
+      "x-ferrum-namespace": namespace,
+      ...(headers ?? {}),
     },
   });
   const text = await response.text();
   const body = text ? JSON.parse(text) : {};
-  if (!response.ok || body.errors) {
-    throw new Error(`${options.method ?? "GET"} ${path} failed: ${response.status} ${text}`);
+  const allowed = okStatuses ?? (response.ok ? [response.status] : []);
+  if (!allowed.includes(response.status) || body.errors) {
+    throw new Error(`${fetchOptions.method ?? "GET"} ${path} failed: ${response.status} ${text}`);
   }
   return body;
 }
 
-function makeConsumers(now) {
+export async function collectCollection(request, config, path) {
+  const items = [];
+  let offset = 0;
+  let expectedTotal;
+  const separator = path.includes("?") ? "&" : "?";
+
+  for (;;) {
+    const page = await request(
+      config,
+      `${path}${separator}offset=${offset}&limit=${COLLECTION_PAGE_SIZE}`,
+    );
+    if (Array.isArray(page)) {
+      if (offset !== 0) {
+        throw new Error(`GET ${path} changed pagination format mid-request`);
+      }
+      return page;
+    }
+    if (!page || !Array.isArray(page.data) || !page.pagination) {
+      throw new Error(`GET ${path} returned an unexpected collection envelope`);
+    }
+    const { pagination } = page;
+    if (
+      !Number.isSafeInteger(pagination.total)
+      || pagination.total < 0
+      || !Number.isSafeInteger(pagination.offset)
+      || pagination.offset !== offset
+    ) {
+      throw new Error(`GET ${path} returned inconsistent pagination metadata`);
+    }
+    if (expectedTotal === undefined) {
+      expectedTotal = pagination.total;
+    } else if (pagination.total !== expectedTotal) {
+      throw new Error(`GET ${path} changed pagination total while collecting pages`);
+    }
+    items.push(...page.data);
+    if (items.length >= expectedTotal) {
+      if (items.length !== expectedTotal) {
+        throw new Error(`GET ${path} returned more resources than its pagination total`);
+      }
+      return items;
+    }
+    if (page.data.length === 0) {
+      throw new Error(`GET ${path} pagination stopped advancing before completion`);
+    }
+    offset += page.data.length;
+  }
+}
+
+export function foreignEnabledGlobalPrometheus(pluginConfigs, targetNamespace) {
+  return pluginConfigs.filter((plugin) => (
+    plugin.plugin_name === "prometheus_metrics"
+    && plugin.enabled === true
+    && plugin.scope === "global"
+    && (plugin.namespace ?? targetNamespace) !== targetNamespace
+  ));
+}
+
+function prometheusOmitNotice(owners) {
+  const named = owners.map((owner) => (
+    `${JSON.stringify(owner.namespace)} (${owner.id ?? "unknown id"})`
+  ));
+  return (
+    `Omitting demo global prometheus_metrics; enabled global instance already owns `
+    + `the process registry in ${named.join(", ")}. Demo routes do not depend on it.`
+  );
+}
+
+export async function listEnabledGlobalPrometheus(request, config) {
+  const names = await collectCollection(request, config, "/namespaces");
+  if (names.some((name) => typeof name !== "string" || name.length === 0)) {
+    throw new Error("GET /namespaces returned a non-string namespace name");
+  }
+
+  const owners = [];
+  for (const name of names) {
+    const plugins = await collectCollection(request, { ...config, namespace: name }, "/plugins/config");
+    for (const plugin of plugins) {
+      if (
+        plugin.plugin_name === "prometheus_metrics"
+        && plugin.enabled === true
+        && plugin.scope === "global"
+      ) {
+        owners.push({
+          ...plugin,
+          namespace: typeof plugin.namespace === "string" && plugin.namespace
+            ? plugin.namespace
+            : name,
+        });
+      }
+    }
+  }
+  return owners;
+}
+
+export async function probeBasicAuthPrerequisite(request, config) {
+  const probePath = `/consumers/${BASIC_AUTH_PROBE_ID}?apply=sync`;
+  await request(config, probePath, { method: "DELETE", okStatuses: [200, 204, 404] });
+  let probeError;
+  let cleanupError;
+  try {
+    await request(config, "/consumers?apply=sync", {
+      method: "POST",
+      body: JSON.stringify({
+        id: BASIC_AUTH_PROBE_ID,
+        username: BASIC_AUTH_PROBE_ID,
+        credentials: {
+          basicauth: [{ password: "ff-demo-basic-auth-hmac-probe-password" }],
+        },
+      }),
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "basic-auth HMAC probe failed";
+    probeError = new Error(
+      "Refusing to restore: FERRUM_DEMO_INCLUDE_BASIC_AUTH=true requires Edge "
+      + "FERRUM_BASIC_AUTH_HMAC_SECRET (>= 32 bytes) before any namespace replacement. "
+      + detail,
+    );
+  } finally {
+    try {
+      await request(config, probePath, { method: "DELETE", okStatuses: [200, 204, 404] });
+    } catch (error) {
+      cleanupError = error;
+    }
+  }
+  if (probeError) throw probeError;
+  if (cleanupError) throw cleanupError;
+}
+
+export function effectiveProxyPlans(includeBasicAuth) {
+  if (includeBasicAuth) return proxyPlans;
+  return proxyPlans.map((plan) => (
+    plan.auth === "basic" ? { ...plan, auth: "public" } : plan
+  ));
+}
+
+function makeConsumers(now, { includeBasicAuth = false } = {}) {
   const keyConsumers = Array.from({ length: 6 }, (_, index) => ({
     id: `demo-key-consumer-${index + 1}`,
     username: `demo-key-${index + 1}`,
@@ -198,6 +344,7 @@ function makeConsumers(now) {
     updated_at: now,
   }));
 
+  if (!includeBasicAuth) return [...keyConsumers, ...jwtConsumers];
   return [...keyConsumers, ...basicConsumers, ...jwtConsumers];
 }
 
@@ -254,21 +401,23 @@ function makeUpstreams(now, backendHost) {
   });
 }
 
-function globalPluginConfigs(now) {
-  return [
-    {
-      id: "demo-global-prometheus",
-      plugin_name: "prometheus_metrics",
-      scope: "global",
-      enabled: true,
-      config: {
-        render_cache_ttl_seconds: 1,
-        stale_entry_ttl_seconds: 3600,
-        cache_invalidation_min_age_ms: 250,
-      },
-      created_at: now,
-      updated_at: now,
+function globalPluginConfigs(now, { omitGlobalPrometheus = false } = {}) {
+  const prometheus = omitGlobalPrometheus ? [] : [{
+    id: "demo-global-prometheus",
+    plugin_name: "prometheus_metrics",
+    scope: "global",
+    enabled: true,
+    config: {
+      render_cache_ttl_seconds: 1,
+      stale_entry_ttl_seconds: 3600,
+      cache_invalidation_min_age_ms: 250,
     },
+    created_at: now,
+    updated_at: now,
+  }];
+
+  return [
+    ...prometheus,
     {
       id: "demo-global-stdout",
       plugin_name: "stdout_logging",
@@ -440,8 +589,8 @@ function authPluginForProxy(plan, now) {
   return [];
 }
 
-function makeProxyScopedPluginConfigs(now) {
-  return proxyPlans.flatMap((plan) => {
+function makeProxyScopedPluginConfigs(now, plans = proxyPlans) {
+  return plans.flatMap((plan) => {
     const proxyId = `demo-proxy-${plan.slug}`;
     const pluginConfigs = [
       ...authPluginForProxy(plan, now),
@@ -515,11 +664,12 @@ function makeProxyScopedPluginConfigs(now) {
   });
 }
 
-function makeProxies(now, backendHost) {
-  return proxyPlans.map((plan) => {
+function makeProxies(now, backendHost, plans = proxyPlans) {
+  const proxyScopedPluginConfigs = makeProxyScopedPluginConfigs(now, plans);
+  return plans.map((plan) => {
     const proxyId = `demo-proxy-${plan.slug}`;
     const upstreamId = `demo-upstream-${plan.slug}`;
-    const pluginIds = makeProxyScopedPluginConfigs(now)
+    const pluginIds = proxyScopedPluginConfigs
       .filter((pluginConfig) => pluginConfig.proxy_id === proxyId)
       .map((pluginConfig) => ({ plugin_config_id: pluginConfig.id }));
 
@@ -570,15 +720,24 @@ function makeProxies(now, backendHost) {
   });
 }
 
-function buildManifest(proxyBaseUrl) {
+export const BASIC_AUTH_NOT_SEEDED_NOTICE = "skipped: basic auth demo resources not seeded";
+
+export function buildManifest(proxyBaseUrl, {
+  includeBasicAuth = false,
+  omitGlobalPrometheus = false,
+  counts = buildRestorePayload(undefined, { includeBasicAuth, omitGlobalPrometheus }).counts,
+} = {}) {
+  const plans = effectiveProxyPlans(includeBasicAuth);
   const keyConsumers = Array.from({ length: 6 }, (_, index) => ({
     username: `demo-key-${index + 1}`,
     key: `ff-key-${index + 1}`,
   }));
-  const basicConsumers = Array.from({ length: 6 }, (_, index) => ({
-    username: `demo-basic-${index + 1}`,
-    password: `basic-pass-${index + 1}`,
-  }));
+  const basicConsumers = includeBasicAuth
+    ? Array.from({ length: 6 }, (_, index) => ({
+      username: `demo-basic-${index + 1}`,
+      password: `basic-pass-${index + 1}`,
+    }))
+    : [];
   const jwtConsumers = Array.from({ length: 6 }, (_, index) => ({
     username: `demo-jwt-${index + 1}`,
     secret: `jwt-demo-consumer-${index + 1}-secret-at-least-32-characters`,
@@ -587,10 +746,13 @@ function buildManifest(proxyBaseUrl) {
   return {
     generated_at: new Date().toISOString(),
     proxy_base_url: proxyBaseUrl,
+    include_basic_auth: Boolean(includeBasicAuth),
+    omit_global_prometheus: Boolean(omitGlobalPrometheus),
+    counts,
     key_consumers: keyConsumers,
     basic_consumers: basicConsumers,
     jwt_consumers: jwtConsumers,
-    routes: proxyPlans.map((plan) => ({
+    routes: plans.map((plan) => ({
       path: `/demo/${plan.slug}`,
       auth: plan.auth,
       group: plan.group,
@@ -598,13 +760,18 @@ function buildManifest(proxyBaseUrl) {
   };
 }
 
-export function buildRestorePayload(now = isoNow(), { backendHost = "127.0.0.1" } = {}) {
-  const consumers = makeConsumers(now);
+export function buildRestorePayload(now = isoNow(), {
+  backendHost = "127.0.0.1",
+  includeBasicAuth = false,
+  omitGlobalPrometheus = false,
+} = {}) {
+  const plans = effectiveProxyPlans(includeBasicAuth);
+  const consumers = makeConsumers(now, { includeBasicAuth });
   const upstreams = makeUpstreams(now, backendHost);
-  const proxyScopedPluginConfigs = makeProxyScopedPluginConfigs(now);
-  const proxies = makeProxies(now, backendHost);
+  const proxyScopedPluginConfigs = makeProxyScopedPluginConfigs(now, plans);
+  const proxies = makeProxies(now, backendHost, plans);
   const pluginConfigs = [
-    ...globalPluginConfigs(now),
+    ...globalPluginConfigs(now, { omitGlobalPrometheus }),
     ...proxyScopedPluginConfigs,
   ];
 
@@ -629,16 +796,80 @@ export function buildRestorePayload(now = isoNow(), { backendHost = "127.0.0.1" 
   };
 }
 
-export async function runSeed(config = readSeedConfig()) {
+export function restoreOptionsFromManifest(manifest) {
+  return {
+    includeBasicAuth: Boolean(manifest.include_basic_auth),
+    omitGlobalPrometheus: Boolean(manifest.omit_global_prometheus),
+  };
+}
+
+export function expectedBackupFromManifest(manifest) {
+  const options = restoreOptionsFromManifest(manifest);
+  const expected = buildRestorePayload(undefined, options);
+  return {
+    counts: expected.counts,
+    omitGlobalPrometheus: options.omitGlobalPrometheus,
+    prometheus: options.omitGlobalPrometheus
+      ? null
+      : expected.plugin_configs.find((plugin) => plugin.id === "demo-global-prometheus") ?? null,
+  };
+}
+
+export function basicAuthSmokePlan(manifest) {
+  const consumers = Array.isArray(manifest.basic_consumers) ? manifest.basic_consumers : [];
+  if (consumers.length === 0) {
+    return { skipped: true, notice: BASIC_AUTH_NOT_SEEDED_NOTICE };
+  }
+  return { skipped: false, consumer: consumers[0] };
+}
+
+export async function prepareRestorePayload(config, { request = adminRequest, report = console.error } = {}) {
+  const skipped = [];
+  const owners = await listEnabledGlobalPrometheus(request, config);
+  const foreign = foreignEnabledGlobalPrometheus(owners, config.namespace);
+  const omitGlobalPrometheus = foreign.length > 0;
+  if (omitGlobalPrometheus) {
+    const notice = prometheusOmitNotice(foreign);
+    skipped.push(notice);
+    report(notice);
+  }
+
+  if (config.includeBasicAuth) {
+    await probeBasicAuthPrerequisite(request, config);
+  } else {
+    const notice = (
+      "Omitting basic_auth demo resources. Set FERRUM_DEMO_INCLUDE_BASIC_AUTH=true "
+      + "after configuring Edge FERRUM_BASIC_AUTH_HMAC_SECRET (>= 32 bytes)."
+    );
+    skipped.push(notice);
+    report(notice);
+  }
+
+  const payload = buildRestorePayload(undefined, {
+    backendHost: config.backendHost,
+    includeBasicAuth: Boolean(config.includeBasicAuth),
+    omitGlobalPrometheus,
+  });
+  return { payload, skipped, omitGlobalPrometheus };
+}
+
+export async function runSeed(config = readSeedConfig(), { request = adminRequest, report = console.error } = {}) {
   confirmDestructiveTarget(config);
 
-  const restorePayload = buildRestorePayload(undefined, { backendHost: config.backendHost });
-  const restored = await adminRequest(config, "/restore?confirm=true", {
+  const { payload: restorePayload, skipped, omitGlobalPrometheus } = await prepareRestorePayload(
+    config,
+    { request, report },
+  );
+  const restored = await request(config, "/restore?confirm=true", {
     method: "POST",
     body: JSON.stringify(restorePayload),
   });
 
-  const manifest = buildManifest(config.proxyBaseUrl);
+  const manifest = buildManifest(config.proxyBaseUrl, {
+    includeBasicAuth: Boolean(config.includeBasicAuth),
+    omitGlobalPrometheus,
+    counts: restorePayload.counts,
+  });
   const manifestFd = openSync(
     config.manifestPath,
     fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | fsConstants.O_NOFOLLOW,
@@ -656,6 +887,7 @@ export async function runSeed(config = readSeedConfig()) {
     manifest_path: config.manifestPath,
     namespace: config.namespace,
     counts: restorePayload.counts,
+    skipped,
   };
 }
 

@@ -145,6 +145,7 @@ jobs:
           FERRUM_DEMO_CONFIRM_TARGET: 'http://127.0.0.1:9000#ferrum-foundry-demo'
           FERRUM_DEMO_BACKEND_HOST: host.docker.internal
           FERRUM_DEMO_PROXY_URL: http://127.0.0.1:8000
+          FERRUM_DEMO_INCLUDE_BASIC_AUTH: "true"
         run: npm run test:gateway-contract
 
       - name: Show gateway logs on failure
