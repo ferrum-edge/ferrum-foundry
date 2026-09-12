@@ -46,7 +46,10 @@ function PluginEditor({ session }: { session: EditorSession }) {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const resourceQuery = usePluginConfig(pluginId);
+  const updatePlugin = useUpdatePluginWithMembership();
+  const deletePlugin = useDeletePluginWithMembership();
+  const detailLive = !deletePlugin.isPending && !deletePlugin.isSuccess;
+  const resourceQuery = usePluginConfig(pluginId, detailLive);
   const { data: plugin, isLoading } = resourceQuery;
   const { data: availablePlugins, isLoading: pluginsLoading } = useAvailablePlugins();
   const proxiesQuery = useAllProxies();
@@ -55,8 +58,6 @@ function PluginEditor({ session }: { session: EditorSession }) {
     isPending: proxiesPending,
     isError: proxiesError,
   } = proxiesQuery;
-  const updatePlugin = useUpdatePluginWithMembership();
-  const deletePlugin = useDeletePluginWithMembership();
 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [membershipError, setMembershipError] = useState<unknown>(null);
@@ -126,6 +127,9 @@ function PluginEditor({ session }: { session: EditorSession }) {
   }
 
   if (!plugin || (needsMembership && !allProxies)) {
+    if (deletePlugin.isPending || deletePlugin.isSuccess) {
+      return null;
+    }
     return (
       <div className="max-w-2xl">
         <PluginMembershipRecovery error={membershipError} />

@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useDeletePluginConfig, useDeletePluginWithMembership } from "./usePlugins";
 import { useDeleteConsumer } from "./useConsumers";
-import { useDeleteProxy } from "./useProxies";
+import { useDeleteProxy, useProxy } from "./useProxies";
 import { useDeleteUpstream } from "./useUpstreams";
 import type { PluginConfig } from "@/api/types";
 import PluginDetailPage from "@/routes/plugins/$pluginId";
@@ -154,4 +154,53 @@ it("reopens and submits a recreated plugin without retired configuration", async
   await settle(() => expect(updates).toHaveLength(1));
   expect(updates[0]).toMatchObject({ config: { ordinary: "recreated" } });
   expect(serverPlugin.config).toEqual({ ordinary: "recreated" });
+});
+
+function ObservedProxyDelete() {
+  const mutation = useDeleteProxy();
+  const query = useProxy("same-id", !mutation.isPending && !mutation.isSuccess);
+  useEffect(() => { remove = mutation.mutateAsync; });
+  return <span data-status={query.status} data-fetch={query.fetchStatus} />;
+}
+
+function detailGets(): number {
+  return vi.mocked(fetch).mock.calls.filter(([input]) => {
+    const request = input as Request;
+    return request.method === "GET" && new URL(request.url).pathname.endsWith("/proxies/same-id");
+  }).length;
+}
+
+it("does not refetch a still-mounted proxy detail after a successful delete", async () => {
+  client.setQueryData(["proxy", "tenant-a", "same-id"], { id: "same-id" });
+  await render(<ObservedProxyDelete />);
+  const cancel = vi.spyOn(client, "cancelQueries");
+  const removeQueries = vi.spyOn(client, "removeQueries");
+  const invalidate = vi.spyOn(client, "invalidateQueries");
+  const pending = remove("same-id");
+  await settle(() => expect(deletion).toHaveLength(1));
+  expect(detailGets()).toBe(0);
+  await act(async () => {
+    deletion[0]!.resolve(new Response(null, { status: 204 }));
+    await pending;
+  });
+  expect(detailGets()).toBe(0);
+  expect(client.getQueryData(["proxy", "tenant-a", "same-id"])).toBeUndefined();
+  expect(cancel).toHaveBeenCalledWith({
+    queryKey: ["proxy", "tenant-a", "same-id"],
+    exact: true,
+  });
+  expect(removeQueries).toHaveBeenCalledWith({
+    queryKey: ["proxy", "tenant-a", "same-id"],
+    exact: true,
+  });
+  expect(cancel.mock.invocationCallOrder[0]).toBeLessThan(
+    removeQueries.mock.invocationCallOrder[0]!,
+  );
+  const listInvalidation = invalidate.mock.calls.findIndex(
+    (call) => call[0]?.queryKey?.[0] === "proxies",
+  );
+  expect(listInvalidation).toBeGreaterThanOrEqual(0);
+  expect(removeQueries.mock.invocationCallOrder[0]).toBeLessThan(
+    invalidate.mock.invocationCallOrder[listInvalidation]!,
+  );
 });

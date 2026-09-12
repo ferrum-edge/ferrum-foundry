@@ -21,6 +21,7 @@ import type {
   PaginationParams,
 } from "@/api/types";
 import { useNamespace } from "@/stores/namespace";
+import { retireDeletedDetail } from "./retireDeletedDetail";
 
 export function useConsumers(params: PaginationParams = {}, enabled = true) {
   const { scope } = useNamespace();
@@ -44,12 +45,12 @@ export function useAllConsumers(enabled = true) {
   });
 }
 
-export function useConsumer(id: string) {
+export function useConsumer(id: string, enabled = true) {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["consumer", scope.namespace, id],
     queryFn: () => consumers.get(queryScope(scope), id),
-    enabled: !!id,
+    enabled: enabled && !!id,
   });
 }
 
@@ -95,8 +96,8 @@ export function useDeleteConsumer() {
       // Carry the mutation's namespace through completion, even after a switch.
       return { namespace: scope.namespace, id };
     },
-    onSuccess: (retired) => {
-      qc.removeQueries({ queryKey: ["consumer", retired.namespace, retired.id], exact: true });
+    onSuccess: async (retired) => {
+      await retireDeletedDetail(qc, ["consumer", retired.namespace, retired.id]);
       qc.invalidateQueries({ queryKey: ["consumers"] });
     },
   });

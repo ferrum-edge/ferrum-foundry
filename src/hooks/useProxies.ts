@@ -17,6 +17,7 @@ import * as proxies from "@/api/proxies";
 import type { PaginationParams, ProxyCreate } from "@/api/types";
 import { useNamespace } from "@/stores/namespace";
 import { retireCascade, type CascadeKind } from "./retireCascade";
+import { retireDeletedDetail } from "./retireDeletedDetail";
 
 /**
  * `DELETE /proxies/{id}` cascades: the proxy's plugin configs (spec-owned and
@@ -52,12 +53,12 @@ export function useAllProxies(enabled = true) {
   });
 }
 
-export function useProxy(id: string) {
+export function useProxy(id: string, enabled = true) {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["proxy", scope.namespace, id],
     queryFn: () => proxies.get(queryScope(scope), id),
-    enabled: !!id,
+    enabled: enabled && !!id,
   });
 }
 
@@ -94,8 +95,8 @@ export function useDeleteProxy() {
       // Carry the mutation's namespace through completion, even after a switch.
       return { namespace: scope.namespace, id };
     },
-    onSuccess: (retired) => {
-      qc.removeQueries({ queryKey: ["proxy", retired.namespace, retired.id], exact: true });
+    onSuccess: async (retired) => {
+      await retireDeletedDetail(qc, ["proxy", retired.namespace, retired.id]);
       qc.invalidateQueries({ queryKey: ["proxies"] });
       retireCascade(qc, retired.namespace, PROXY_DELETE_CASCADE);
     },
