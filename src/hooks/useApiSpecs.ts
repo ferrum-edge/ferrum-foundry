@@ -12,6 +12,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as apiSpecs from "@/api/apiSpecs";
 import { useNamespace } from "@/stores/namespace";
 import { retireCascade, type CascadeKind } from "./retireCascade";
+import { retireDeletedDetail } from "./retireDeletedDetail";
 
 /**
  * `POST /api-specs` creates, `PUT /api-specs/{id}` deletes and re-creates
@@ -49,12 +50,12 @@ export function useAllApiSpecs(enabled = true) {
   });
 }
 
-export function useApiSpecDocument(id: string) {
+export function useApiSpecDocument(id: string, enabled = true) {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["apiSpecDocument", scope.namespace, id],
     queryFn: () => apiSpecs.getDocument(queryScope(scope), id),
-    enabled: !!id,
+    enabled: enabled && !!id,
     retry: false,
   });
 }
@@ -98,7 +99,12 @@ export function useDeleteApiSpec() {
       await apiSpecs.remove(scope, id);
       return { namespace: scope.namespace, id };
     },
-    onSuccess: (retired) => {
+    onSuccess: async (retired) => {
+      await retireDeletedDetail(qc, [
+        "apiSpecDocument",
+        retired.namespace,
+        retired.id,
+      ]);
       retireCascade(qc, retired.namespace, SPEC_CASCADE);
     },
   });

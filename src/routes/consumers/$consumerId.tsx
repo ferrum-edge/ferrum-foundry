@@ -61,10 +61,11 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const resourceQuery = useConsumer(consumerId);
-  const { data: consumer, isLoading, isFetching, dataUpdatedAt } = resourceQuery;
   const updateConsumer = useUpdateConsumer();
   const deleteConsumer = useDeleteConsumer();
+  const detailLive = !deleteConsumer.isPending && !deleteConsumer.isSuccess;
+  const resourceQuery = useConsumer(consumerId, detailLive);
+  const { data: consumer, isLoading, isFetching, dataUpdatedAt } = resourceQuery;
 
   const [deleteOpen, setDeleteOpen] = useState(false);
 
@@ -143,6 +144,9 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
   }
 
   if (!consumer) {
+    if (deleteConsumer.isPending || deleteConsumer.isSuccess) {
+      return null;
+    }
     return (
       <div className="max-w-2xl">
         <Card>

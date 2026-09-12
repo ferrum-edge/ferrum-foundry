@@ -16,6 +16,7 @@ import {
 import * as upstreams from "@/api/upstreams";
 import type { PaginationParams, UpstreamCreate } from "@/api/types";
 import { useNamespace } from "@/stores/namespace";
+import { retireDeletedDetail } from "./retireDeletedDetail";
 
 export function useUpstreams(params: PaginationParams = {}, enabled = true) {
   const { scope } = useNamespace();
@@ -39,12 +40,12 @@ export function useAllUpstreams(enabled = true) {
   });
 }
 
-export function useUpstream(id: string) {
+export function useUpstream(id: string, enabled = true) {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["upstream", scope.namespace, id],
     queryFn: () => upstreams.get(queryScope(scope), id),
-    enabled: !!id,
+    enabled: enabled && !!id,
   });
 }
 
@@ -89,8 +90,8 @@ export function useDeleteUpstream() {
       // Carry the mutation's namespace through completion, even after a switch.
       return { namespace: scope.namespace, id };
     },
-    onSuccess: (retired) => {
-      qc.removeQueries({ queryKey: ["upstream", retired.namespace, retired.id], exact: true });
+    onSuccess: async (retired) => {
+      await retireDeletedDetail(qc, ["upstream", retired.namespace, retired.id]);
       qc.invalidateQueries({ queryKey: ["upstreams"] });
     },
   });
