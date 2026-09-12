@@ -124,6 +124,16 @@ export function readSeedConfig(env = process.env) {
   };
 }
 
+export function confirmDestructiveTarget(config) {
+  const destructiveTarget = `${config.adminUrl}#${config.namespace}`;
+  if (config.destructiveConfirmation !== destructiveTarget) {
+    throw new Error(
+      `Refusing to replace namespace ${JSON.stringify(config.namespace)}. `
+      + `FERRUM_DEMO_CONFIRM_TARGET must exactly equal ${JSON.stringify(destructiveTarget)}.`,
+    );
+  }
+}
+
 export async function adminToken(config, options = {}) {
   return signAdminJwt({
     secret: config.jwtSecret,
@@ -620,13 +630,7 @@ export function buildRestorePayload(now = isoNow(), { backendHost = "127.0.0.1" 
 }
 
 export async function runSeed(config = readSeedConfig()) {
-  const destructiveTarget = `${config.adminUrl}#${config.namespace}`;
-  if (config.destructiveConfirmation !== destructiveTarget) {
-    throw new Error(
-      `Refusing to replace namespace ${JSON.stringify(config.namespace)}. `
-      + `FERRUM_DEMO_CONFIRM_TARGET must exactly equal ${JSON.stringify(destructiveTarget)}.`,
-    );
-  }
+  confirmDestructiveTarget(config);
 
   const restorePayload = buildRestorePayload(undefined, { backendHost: config.backendHost });
   const restored = await adminRequest(config, "/restore?confirm=true", {
