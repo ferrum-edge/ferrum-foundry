@@ -90,7 +90,9 @@ The most commonly adjusted optional variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `PORT` | `3001` | BFF server port |
+| `PORT` | `3001` | BFF server port. Vite also uses this as the `/api` proxy port when `VITE_BFF_URL` is unset |
+| `VITE_DEV_PORT` | `5173` | Vite dev-server listen port (1-65535) |
+| `VITE_BFF_URL` | `http://localhost:$PORT` | Absolute `http`/`https` origin Vite proxies `/api` to; wins over `PORT` when set |
 | `FERRUM_JWT_TTL` | `900` | JWT token TTL (seconds) |
 | `FERRUM_JWT_ROLE` | `admin` | Static development role: viewer/operator/admin |
 | `FERRUM_JWT_AUDIENCE` | - | Optional exact audience claim(s), comma separated |
@@ -108,6 +110,21 @@ npm run dev
 ```
 
 This starts Vite (port 5173) and Fastify (port 3001) concurrently. Open http://localhost:5173.
+
+Those ports are defaults. Set `VITE_DEV_PORT` and `PORT` (or `VITE_BFF_URL`) to
+run Foundry next to another Vite app such as Nexus, which uses 5173 for its UI
+and 8787 for its API. Invalid values fail Vite startup rather than being coerced.
+`npm run dev` starts both processes, so a single `PORT` value keeps the BFF
+listen port and the Vite `/api` proxy aligned:
+
+```bash
+export VITE_DEV_PORT=5174
+export PORT=3002
+npm run dev
+```
+
+To point Vite at a BFF that is already listening elsewhere, set `VITE_BFF_URL`
+to that origin (`http://127.0.0.1:3002`, for example) instead of `PORT`.
 
 No gateway handy? Run the bundled mock admin API, which serves realistic
 sample data for every admin surface (CRUD, TLS/ACME, audit, cluster, mesh,
