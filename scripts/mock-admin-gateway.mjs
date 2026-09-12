@@ -12,6 +12,7 @@
 
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 
 const PORT = Number(process.env.MOCK_ADMIN_PORT ?? 9000);
 const now = () => new Date().toISOString();
@@ -255,7 +256,67 @@ function readBody(req) {
   });
 }
 
-function crud(list, url, method, id, body, defaults = {}, ns = 'ferrum') {
+const AUTH_MODES = ['single', 'multi'];
+const PLUGIN_SCOPES = ['global', 'proxy', 'proxy_group'];
+// Field order matches ferrum-edge `PluginConfig` (`#[serde(deny_unknown_fields)]`).
+const PLUGIN_CONFIG_FIELDS = [
+  'id', 'plugin_name', 'namespace', 'config', 'scope', 'proxy_id',
+  'enabled', 'priority_override', 'trigger', 'api_spec_id', 'created_at', 'updated_at',
+];
+
+function invalidBody(message) {
+  return { error: `Invalid body: ${message}` };
+}
+
+function variantLabel(value) {
+  return typeof value === 'string' ? value : JSON.stringify(value);
+}
+
+/** Edge `AuthMode`: only `single` | `multi`. Omitted defaults to `single`. */
+export function validateProxyWrite(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+  if (!Object.hasOwn(body, 'auth_mode')) return null;
+  if (AUTH_MODES.includes(body.auth_mode)) return null;
+  return invalidBody(
+    `unknown variant \`${variantLabel(body.auth_mode)}\`, expected \`single\` or \`multi\``,
+  );
+}
+
+/** Edge `PluginConfigCreate` / `PluginConfigReplace` wire contract. */
+export function validatePluginConfigWrite(body, method) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return invalidBody('invalid type: expected a JSON object');
+  }
+  for (const key of Object.keys(body)) {
+    if (!PLUGIN_CONFIG_FIELDS.includes(key)) {
+      const expected = PLUGIN_CONFIG_FIELDS.map((name) => `\`${name}\``).join(', ');
+      return invalidBody(`unknown field \`${key}\`, expected one of ${expected}`);
+    }
+  }
+  if (!Object.hasOwn(body, 'plugin_name')) {
+    return invalidBody('missing field `plugin_name`');
+  }
+  if (!Object.hasOwn(body, 'scope')) {
+    return invalidBody('missing field `scope`');
+  }
+  if (typeof body.plugin_name !== 'string') {
+    return invalidBody('invalid type: expected a string');
+  }
+  if (!PLUGIN_SCOPES.includes(body.scope)) {
+    return invalidBody(
+      `unknown variant \`${variantLabel(body.scope)}\`, expected one of \`global\`, \`proxy\`, \`proxy_group\``,
+    );
+  }
+  // Edge rejects PUT before serde when `enabled` is omitted (`validate_raw_body`).
+  if (method === 'PUT' && !Object.hasOwn(body, 'enabled')) {
+    return {
+      error: "PUT is a full replace: 'enabled' is required (openapi.yaml declares it required). Send the field explicitly.",
+    };
+  }
+  return null;
+}
+
+export function crud(list, url, method, id, body, defaults = {}, ns = 'ferrum', validate) {
   // The real gateway isolates resources per namespace; list responses must
   // reflect that or namespace occupancy counts are meaningless.
   if (method === 'GET' && !id) {
@@ -264,6 +325,10 @@ function crud(list, url, method, id, body, defaults = {}, ns = 'ferrum') {
   if (method === 'GET') {
     const item = list.find((x) => x.id === id);
     return item ? [200, item] : [404, { error: 'not found' }];
+  }
+  if (method === 'POST' || method === 'PUT') {
+    const rejection = validate?.(body, method);
+    if (rejection) return [400, rejection];
   }
   if (method === 'POST') {
     const item = { id: randomUUID(), namespace: ns, ...defaults, ...body, created_at: now(), updated_at: now() };
@@ -665,16 +730,17 @@ const server = createServer(async (req, res) => {
   /* core CRUD */
   const routes = [
     // The real gateway always returns a plugins association array on proxies;
-    // default it on create so upstream-only proxies match that shape.
-    [/^\/proxies(?:\/([^/]+))?$/, proxies, { plugins: [] }],
+    // default it on create so upstream-only proxies match that shape. `auth_mode`
+    // defaults to `single` the same way Edge's serde Default does.
+    [/^\/proxies(?:\/([^/]+))?$/, proxies, { plugins: [], auth_mode: 'single' }, validateProxyWrite],
     [/^\/consumers(?:\/([^/]+))?$/, consumers],
-    [/^\/plugins\/config(?:\/([^/]+))?$/, pluginConfigs],
+    [/^\/plugins\/config(?:\/([^/]+))?$/, pluginConfigs, {}, validatePluginConfigWrite],
     [/^\/upstreams(?:\/([^/]+))?$/, upstreams],
   ];
-  for (const [pattern, list, defaults] of routes) {
+  for (const [pattern, list, defaults, validate] of routes) {
     const match = path.match(pattern);
     if (match) {
-      const [status, payload] = crud(list, url, method, match[1], body, defaults, ns);
+      const [status, payload] = crud(list, url, method, match[1], body, defaults, ns, validate);
       return send(status, payload);
     }
   }
@@ -691,6 +757,8 @@ const server = createServer(async (req, res) => {
   send(404, { error: `mock: no handler for ${method} ${path}` });
 });
 
-server.listen(PORT, () => {
-  console.log(`Mock Ferrum Edge admin API listening on http://127.0.0.1:${PORT}`);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  server.listen(PORT, () => {
+    console.log(`Mock Ferrum Edge admin API listening on http://127.0.0.1:${PORT}`);
+  });
+}
