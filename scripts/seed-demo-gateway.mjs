@@ -276,6 +276,7 @@ export async function probeBasicAuthPrerequisite(request, config) {
   const probePath = `/consumers/${BASIC_AUTH_PROBE_ID}?apply=sync`;
   await request(config, probePath, { method: "DELETE", okStatuses: [200, 204, 404] });
   let probeError;
+  let cleanupError;
   try {
     await request(config, "/consumers?apply=sync", {
       method: "POST",
@@ -297,11 +298,12 @@ export async function probeBasicAuthPrerequisite(request, config) {
   } finally {
     try {
       await request(config, probePath, { method: "DELETE", okStatuses: [200, 204, 404] });
-    } catch (cleanupError) {
-      if (!probeError) throw cleanupError;
+    } catch (error) {
+      cleanupError = error;
     }
   }
   if (probeError) throw probeError;
+  if (cleanupError) throw cleanupError;
 }
 
 export function effectiveProxyPlans(includeBasicAuth) {
