@@ -12,7 +12,8 @@ The following templates use the current constructor fields:
 
 | Plugin | Configuration and behavior |
 | --- | --- |
-| `ldap_auth` | `ldap_url` and `bind_dn_template` configure direct bind, with `{username}` in the DN. The loopback LDAP example needs a directory; use LDAPS or STARTTLS for a remote directory. Search-then-bind is a different configuration with service-account and canonical-identity fields. |
+| `ldap_auth` | `ldap_url`, `bind_dn_template`, and `canonical_identity_attribute` configure direct bind, with `{username}` in the DN. Set `canonical_identity_attribute` to your directory's authoritative attribute (`uid` in the example). The loopback LDAP example needs a directory; use LDAPS or STARTTLS for a remote directory. Search-then-bind is a different configuration with service-account fields. |
+| `mcp_gateway` | Aggregate-router mode exposes endpoint, upstream `servers`, and tool `policy`. `discovery.public_base_url` belongs to the A2A gateway schema and is omitted from the MCP template. |
 | `soap_ws_security` | `username_token.credentials`, `x509_signature.trusted_certs`, and `nonce.max_cache_size` replace the old nested shapes. Timestamp checking remains enabled; credential-based modes remain disabled. Before enabling PasswordDigest or SAML, supply credentials/trust and explicitly choose the documented replay scope. Nonce retention is gateway-controlled; there is no configurable `cache_ttl_seconds`. |
 | `tcp_connection_throttle` | `max_connections_per_key: 100` limits each consumer, falling back to client IP, per gateway process. Use TCP/TCP+TLS proxy scope or a global policy covering a TCP listener. |
 | `response_caching` | `cacheable_methods` and `cacheable_status_codes` retain the GET/HEAD and 200/301/404 example policy. |
