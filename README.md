@@ -111,7 +111,9 @@ This starts Vite (port 5173) and Fastify (port 3001) concurrently. Open http://l
 
 No gateway handy? Run the bundled mock admin API, which serves realistic
 sample data for most admin surfaces (CRUD, TLS/ACME, audit, cluster,
-overload/chargeback, gateway trust bundles):
+overload/chargeback, gateway trust bundles). Write paths follow the live Edge
+contract: proxy `auth_mode` is only `single` or `multi` (not `none`), and plugin
+configs require `plugin_name` and `scope` — a top-level `name` field is unknown:
 
 ```bash
 node scripts/mock-admin-gateway.mjs   # listens on :9000
