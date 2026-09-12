@@ -1,3 +1,4 @@
+import { ResourceLabels } from "@/components/shared/ResourceLabels";
 /* ------------------------------------------------------------------ */
 /*  Ferrum Foundry – Proxy detail / edit page                          */
 /* ------------------------------------------------------------------ */
@@ -187,6 +188,8 @@ function ProxyEditor({ session }: { session: EditorSession }) {
           Delete
         </Button>
       </div>
+
+      <ResourceLabels labels={proxy.labels} />
 
       {/* Tabs */}
       <Tabs defaultValue="config">

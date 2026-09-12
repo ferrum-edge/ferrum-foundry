@@ -1,3 +1,4 @@
+import { ResourceLabels } from "@/components/shared/ResourceLabels";
 /* ------------------------------------------------------------------ */
 /*  Ferrum Foundry – Plugin Config detail / edit page                  */
 /* ------------------------------------------------------------------ */
@@ -187,6 +188,7 @@ function PluginEditor({ session }: { session: EditorSession }) {
       {/* Form */}
       <PluginMembershipRecovery error={membershipError} />
       <Card>
+        <ResourceLabels labels={plugin.labels} />
         <PluginConfigForm
           initialData={plugin}
           onSubmit={handleSubmit}

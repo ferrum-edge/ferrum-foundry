@@ -1,3 +1,4 @@
+import { ResourceLabels } from "@/components/shared/ResourceLabels";
 /* ------------------------------------------------------------------ */
 /*  Ferrum Foundry – Upstream detail / edit page                       */
 /* ------------------------------------------------------------------ */
@@ -183,6 +184,8 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
           Delete
         </Button>
       </div>
+
+      <ResourceLabels labels={upstream.labels} />
 
       {/* Tabs */}
       <Tabs defaultValue="config">
