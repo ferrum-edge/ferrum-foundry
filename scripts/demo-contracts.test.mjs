@@ -4,7 +4,11 @@ import { readFileSync } from "node:fs";
 import { jwtVerify } from "jose";
 import {
   adminToken,
+  BASIC_AUTH_NOT_SEEDED_NOTICE,
+  basicAuthSmokePlan,
+  buildManifest,
   buildRestorePayload,
+  expectedBackupFromManifest,
   foreignEnabledGlobalPrometheus,
   prepareRestorePayload,
   readSeedConfig,
@@ -355,6 +359,14 @@ test("runSeed posts restore only after preflight and omits a foreign prometheus 
   );
   assert.equal(result.skipped.length, 2);
   assert.match(result.skipped[0], /payments/);
+
+  const written = JSON.parse(readFileSync(config.manifestPath, "utf8"));
+  assert.equal(written.include_basic_auth, false);
+  assert.equal(written.omit_global_prometheus, true);
+  assert.deepEqual(written.counts, restored.counts);
+  assert.deepEqual(written.counts, result.counts);
+  assert.equal(written.basic_consumers.length, 0);
+  assert.equal(written.counts.consumers, 12);
 });
 
 test("preflight keeps the demo prometheus owner when only the target namespace has it", async () => {
@@ -395,4 +407,85 @@ test("seed confirmation still happens before any Admin API request", () => {
   assert.ok(confirmAt >= 0 && prepareAt >= 0 && restoreAt >= 0);
   assert.ok(confirmAt < prepareAt);
   assert.ok(prepareAt < restoreAt);
+});
+
+test("seed manifest records restore flags and counts for verify and smoke", () => {
+  const defaultManifest = buildManifest("http://127.0.0.1:8000");
+  assert.equal(defaultManifest.include_basic_auth, false);
+  assert.equal(defaultManifest.omit_global_prometheus, false);
+  assert.equal(defaultManifest.basic_consumers.length, 0);
+  assert.deepEqual(
+    defaultManifest.counts,
+    buildRestorePayload(undefined, {
+      includeBasicAuth: false,
+      omitGlobalPrometheus: false,
+    }).counts,
+  );
+  assert.equal(defaultManifest.counts.consumers, 12);
+  assert.equal(defaultManifest.counts.proxies, 18);
+  assert.equal(defaultManifest.counts.upstreams, 18);
+
+  const omitted = buildManifest("http://127.0.0.1:8000", { omitGlobalPrometheus: true });
+  assert.equal(omitted.omit_global_prometheus, true);
+  assert.deepEqual(
+    omitted.counts,
+    buildRestorePayload(undefined, { omitGlobalPrometheus: true }).counts,
+  );
+  assert.equal(
+    omitted.counts.plugin_configs,
+    defaultManifest.counts.plugin_configs - 1,
+  );
+
+  const hosted = buildManifest("http://127.0.0.1:8000", { includeBasicAuth: true });
+  assert.equal(hosted.include_basic_auth, true);
+  assert.equal(hosted.omit_global_prometheus, false);
+  assert.equal(hosted.basic_consumers.length, 6);
+  assert.equal(hosted.counts.consumers, 18);
+  assert.deepEqual(
+    hosted.counts,
+    buildRestorePayload(undefined, { includeBasicAuth: true }).counts,
+  );
+});
+
+test("backup expectations follow the seed manifest instead of the always-on fixture", () => {
+  const defaultExpected = expectedBackupFromManifest(buildManifest("http://127.0.0.1:8000"));
+  assert.equal(defaultExpected.omitGlobalPrometheus, false);
+  assert.equal(defaultExpected.counts.consumers, 12);
+  assert.equal(defaultExpected.prometheus.id, "demo-global-prometheus");
+  assert.equal(defaultExpected.prometheus.scope, "global");
+
+  const omitted = expectedBackupFromManifest(buildManifest("http://127.0.0.1:8000", {
+    omitGlobalPrometheus: true,
+  }));
+  assert.equal(omitted.omitGlobalPrometheus, true);
+  assert.equal(omitted.prometheus, null);
+  assert.equal(
+    omitted.counts.plugin_configs,
+    buildRestorePayload(undefined, { omitGlobalPrometheus: true }).counts.plugin_configs,
+  );
+
+  const hosted = expectedBackupFromManifest(buildManifest("http://127.0.0.1:8000", {
+    includeBasicAuth: true,
+  }));
+  assert.equal(hosted.omitGlobalPrometheus, false);
+  assert.equal(hosted.counts.consumers, 18);
+  assert.equal(hosted.prometheus.id, "demo-global-prometheus");
+});
+
+test("route smoke skips basic auth when the manifest has no basic consumers", () => {
+  const skipped = basicAuthSmokePlan(buildManifest("http://127.0.0.1:8000"));
+  assert.equal(skipped.skipped, true);
+  assert.equal(skipped.notice, BASIC_AUTH_NOT_SEEDED_NOTICE);
+  assert.equal(skipped.notice, "skipped: basic auth demo resources not seeded");
+
+  const missing = basicAuthSmokePlan({ basic_consumers: undefined });
+  assert.equal(missing.skipped, true);
+  assert.equal(missing.notice, BASIC_AUTH_NOT_SEEDED_NOTICE);
+
+  const hosted = basicAuthSmokePlan(buildManifest("http://127.0.0.1:8000", {
+    includeBasicAuth: true,
+  }));
+  assert.equal(hosted.skipped, false);
+  assert.equal(hosted.consumer.username, "demo-basic-1");
+  assert.equal(hosted.consumer.password, "basic-pass-1");
 });

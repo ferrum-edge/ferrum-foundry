@@ -720,7 +720,13 @@ function makeProxies(now, backendHost, plans = proxyPlans) {
   });
 }
 
-function buildManifest(proxyBaseUrl, { includeBasicAuth = false } = {}) {
+export const BASIC_AUTH_NOT_SEEDED_NOTICE = "skipped: basic auth demo resources not seeded";
+
+export function buildManifest(proxyBaseUrl, {
+  includeBasicAuth = false,
+  omitGlobalPrometheus = false,
+  counts = buildRestorePayload(undefined, { includeBasicAuth, omitGlobalPrometheus }).counts,
+} = {}) {
   const plans = effectiveProxyPlans(includeBasicAuth);
   const keyConsumers = Array.from({ length: 6 }, (_, index) => ({
     username: `demo-key-${index + 1}`,
@@ -740,6 +746,9 @@ function buildManifest(proxyBaseUrl, { includeBasicAuth = false } = {}) {
   return {
     generated_at: new Date().toISOString(),
     proxy_base_url: proxyBaseUrl,
+    include_basic_auth: Boolean(includeBasicAuth),
+    omit_global_prometheus: Boolean(omitGlobalPrometheus),
+    counts,
     key_consumers: keyConsumers,
     basic_consumers: basicConsumers,
     jwt_consumers: jwtConsumers,
@@ -787,6 +796,33 @@ export function buildRestorePayload(now = isoNow(), {
   };
 }
 
+export function restoreOptionsFromManifest(manifest) {
+  return {
+    includeBasicAuth: Boolean(manifest.include_basic_auth),
+    omitGlobalPrometheus: Boolean(manifest.omit_global_prometheus),
+  };
+}
+
+export function expectedBackupFromManifest(manifest) {
+  const options = restoreOptionsFromManifest(manifest);
+  const expected = buildRestorePayload(undefined, options);
+  return {
+    counts: expected.counts,
+    omitGlobalPrometheus: options.omitGlobalPrometheus,
+    prometheus: options.omitGlobalPrometheus
+      ? null
+      : expected.plugin_configs.find((plugin) => plugin.id === "demo-global-prometheus") ?? null,
+  };
+}
+
+export function basicAuthSmokePlan(manifest) {
+  const consumers = Array.isArray(manifest.basic_consumers) ? manifest.basic_consumers : [];
+  if (consumers.length === 0) {
+    return { skipped: true, notice: BASIC_AUTH_NOT_SEEDED_NOTICE };
+  }
+  return { skipped: false, consumer: consumers[0] };
+}
+
 export async function prepareRestorePayload(config, { request = adminRequest, report = console.error } = {}) {
   const skipped = [];
   const owners = await listEnabledGlobalPrometheus(request, config);
@@ -820,7 +856,10 @@ export async function prepareRestorePayload(config, { request = adminRequest, re
 export async function runSeed(config = readSeedConfig(), { request = adminRequest, report = console.error } = {}) {
   confirmDestructiveTarget(config);
 
-  const { payload: restorePayload, skipped } = await prepareRestorePayload(config, { request, report });
+  const { payload: restorePayload, skipped, omitGlobalPrometheus } = await prepareRestorePayload(
+    config,
+    { request, report },
+  );
   const restored = await request(config, "/restore?confirm=true", {
     method: "POST",
     body: JSON.stringify(restorePayload),
@@ -828,6 +867,8 @@ export async function runSeed(config = readSeedConfig(), { request = adminReques
 
   const manifest = buildManifest(config.proxyBaseUrl, {
     includeBasicAuth: Boolean(config.includeBasicAuth),
+    omitGlobalPrometheus,
+    counts: restorePayload.counts,
   });
   const manifestFd = openSync(
     config.manifestPath,

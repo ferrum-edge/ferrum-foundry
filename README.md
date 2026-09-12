@@ -150,7 +150,9 @@ node scripts/seed-demo-gateway.mjs
 
 The confirmation must exactly match `<FERRUM_ADMIN_URL>#<FERRUM_NAMESPACE>`;
 changing either target invalidates a previously copied confirmation before any
-HTTP request is made.
+HTTP request is made. `scripts/verify-demo-gateway.mjs` and
+`scripts/demo-route-smoke.mjs` follow the written seed manifest so they assert
+the same optional basic-auth and prometheus choices the seeder actually restored.
 
 The payload uses deterministic resource IDs and can be run repeatedly. It
 includes the current versioned API-spec backup section, current credential-array
