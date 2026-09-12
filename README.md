@@ -118,12 +118,31 @@ node scripts/mock-admin-gateway.mjs   # listens on :9000
 ```
 
 To seed a real gateway, use a dedicated namespace. Seeding performs a full
-replacement of that namespace, so it refuses to run without an explicit opt-in:
+replacement of that namespace, so it refuses to run without an explicit opt-in.
+Preflight checks run after that confirmation and **before** `POST /restore`:
+
+- **Global `prometheus_metrics`**: Ferrum Edge permits only one enabled
+  global instance process-wide. The seeder lists plugin configs in every
+  namespace it can see. If another namespace already owns that registry, the
+  seed **omits** its own `demo-global-prometheus` fixture and prints the
+  owning namespace. Demo routes do not depend on that plugin. A previous seed
+  in the *target* namespace is replaced as usual.
+- **Basic auth**: demo `basic_auth` plugins and `basicauth` consumers need
+  Edge `FERRUM_BASIC_AUTH_HMAC_SECRET` (>= 32 bytes). They are **off by
+  default**. Set `FERRUM_DEMO_INCLUDE_BASIC_AUTH=true` to include them; the
+  seeder then creates and deletes a probe credential in the target namespace
+  and aborts with exit status 1 if the secret is missing, still before restore.
 
 ```bash
 # FERRUM_JWT_SECRET is the same 32+ character admin signing key used by Ferrum.
 FERRUM_NAMESPACE=ferrum-foundry-demo \
 FERRUM_DEMO_CONFIRM_TARGET='http://127.0.0.1:9000#ferrum-foundry-demo' \
+node scripts/seed-demo-gateway.mjs
+
+# Optional: include basic-auth demo routes (requires the HMAC secret on Edge).
+FERRUM_NAMESPACE=ferrum-foundry-demo \
+FERRUM_DEMO_CONFIRM_TARGET='http://127.0.0.1:9000#ferrum-foundry-demo' \
+FERRUM_DEMO_INCLUDE_BASIC_AUTH=true \
 node scripts/seed-demo-gateway.mjs
 ```
 
