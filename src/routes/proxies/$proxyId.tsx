@@ -62,10 +62,13 @@ function ProxyEditor({ session }: { session: EditorSession }) {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const resourceQuery = useProxy(proxyId);
-  const { data: proxy, isLoading } = resourceQuery;
   const updateProxy = useUpdateProxy();
   const deleteProxy = useDeleteProxy();
+  // Disable before cache retirement so removeQueries cannot refetch the
+  // deleted id and pop a 404 modal on top of the success toast (#328).
+  const detailLive = !deleteProxy.isPending && !deleteProxy.isSuccess;
+  const resourceQuery = useProxy(proxyId, detailLive);
+  const { data: proxy, isLoading } = resourceQuery;
 
   const [deleteOpen, setDeleteOpen] = useState(false);
 
@@ -79,6 +82,7 @@ function ProxyEditor({ session }: { session: EditorSession }) {
   // Fetch upstream if the proxy has one linked
   const { data: upstream, isLoading: upstreamLoading } = useUpstream(
     proxy?.upstream_id ?? "",
+    detailLive,
   );
 
   const policy = useMemo(
@@ -136,6 +140,9 @@ function ProxyEditor({ session }: { session: EditorSession }) {
   }
 
   if (!proxy) {
+    if (deleteProxy.isPending || deleteProxy.isSuccess) {
+      return null;
+    }
     return (
       <div className="max-w-2xl">
         <Card>

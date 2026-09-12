@@ -46,10 +46,11 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const resourceQuery = useUpstream(upstreamId);
-  const { data: upstream, isLoading } = resourceQuery;
   const updateUpstream = useUpdateUpstream();
   const deleteUpstream = useDeleteUpstream();
+  const detailLive = !deleteUpstream.isPending && !deleteUpstream.isSuccess;
+  const resourceQuery = useUpstream(upstreamId, detailLive);
+  const { data: upstream, isLoading } = resourceQuery;
 
   const [deleteOpen, setDeleteOpen] = useState(false);
 
@@ -135,6 +136,9 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
   }
 
   if (!upstream) {
+    if (deleteUpstream.isPending || deleteUpstream.isSuccess) {
+      return null;
+    }
     return (
       <div className="max-w-2xl">
         <Card>
