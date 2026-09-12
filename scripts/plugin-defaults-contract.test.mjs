@@ -48,6 +48,12 @@ test("hosted lifecycle admits the catalog before seeding the process-wide metric
     "node scripts/verify-demo-gateway.mjs",
     "node scripts/demo-route-smoke.mjs",
   ]);
+
+  const smoke = readFileSync(new URL("./gateway-contract-smoke.mjs", import.meta.url), "utf8");
+  assert.ok(
+    smoke.indexOf("confirmDestructiveTarget(config)") < smoke.indexOf("await request("),
+    "the target confirmation must run before the smoke's first Admin API request",
+  );
 });
 
 test("submits all 81 actual enabled defaults unchanged, in the required scope, and cleans up", async () => {
