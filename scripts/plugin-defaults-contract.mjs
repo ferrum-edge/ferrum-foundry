@@ -6,9 +6,9 @@ import {
   isInternalPlugin,
 } from "../src/lib/pluginConfigDefaults.ts";
 
-// Preserve the previously accepted controls as well as the 13 repaired defaults.
-// Membership is deliberate: adding/removing a template requires reviewing its
-// admission expectation against the pinned gateway, not silently skipping it.
+// Preserve previously reviewed admissions. Adding/removing a template requires
+// reviewing its expectation against the pinned gateway, not silently skipping it.
+// mesh_authz is admitted as native MeshPolicy input, not a Kubernetes CRD envelope.
 export const ACCEPTED_PLUGIN_DEFAULTS = [
   "access_control", "adaptive_concurrency", "a2a_gateway", "ai_federation",
   "ai_prompt_compressor", "ai_prompt_shield", "ai_rate_limiter", "ai_request_guard",
@@ -18,7 +18,7 @@ export const ACCEPTED_PLUGIN_DEFAULTS = [
   "cors", "fault_injection", "geo_restriction", "graphql", "grpc_deadline",
   "grpc_method_router", "grpc_web", "http_logging", "ip_restriction", "jwks_auth",
   "jwt_auth", "key_auth", "ldap_auth", "loki_logging", "mcp_gateway",
-  "mesh_outbound_registry", "mesh_route_dispatch", "oauth2_introspection",
+  "mesh_authz", "mesh_outbound_registry", "mesh_route_dispatch", "oauth2_introspection",
   "oidc_relying_party", "opa", "otel_tracing", "prometheus_metrics", "rate_limiting",
   "request_deduplication", "request_mirror", "request_size_limiting",
   "request_termination", "request_transformer", "response_caching", "response_mock",
@@ -32,8 +32,7 @@ export const ACCEPTED_PLUGIN_DEFAULTS = [
 
 // Exact whole diagnostics, not substrings or a general 400 allowance. A changed
 // reason or unexpected acceptance is a failure requiring contract review.
-// mesh_authz is a known native-policy input boundary (the sample is a K8s CRD),
-// and kafka_logging is a gateway egress-policy boundary, not a missing broker.
+// kafka_logging is a gateway egress-policy boundary, not a missing broker.
 export const OPERATOR_INPUT_REJECTIONS = {
   hmac_auth: {
     status: 400,
@@ -50,10 +49,6 @@ export const OPERATOR_INPUT_REJECTIONS = {
   load_testing: {
     status: 400,
     error: "Invalid plugin config: load_testing: 'key' must be at least 32 characters",
-  },
-  mesh_authz: {
-    status: 400,
-    error: "Invalid plugin config: mesh_authz: invalid mesh_policies: missing field `name`",
   },
   proxy_alerts: {
     status: 400,
