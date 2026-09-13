@@ -308,9 +308,7 @@ export async function probeBasicAuthPrerequisite(request, config) {
 
 export function effectiveProxyPlans(includeBasicAuth) {
   if (includeBasicAuth) return proxyPlans;
-  return proxyPlans.map((plan) => (
-    plan.auth === "basic" ? { ...plan, auth: "public" } : plan
-  ));
+  return proxyPlans.filter((plan) => plan.auth !== "basic");
 }
 
 function makeConsumers(now, { includeBasicAuth = false } = {}) {
@@ -348,8 +346,10 @@ function makeConsumers(now, { includeBasicAuth = false } = {}) {
   return [...keyConsumers, ...basicConsumers, ...jwtConsumers];
 }
 
-function makeUpstreams(now, backendHost) {
-  return upstreamNames.map((name, index) => {
+function makeUpstreams(now, backendHost, plans = proxyPlans) {
+  return plans.map((plan) => {
+    const name = plan.slug;
+    const index = upstreamNames.indexOf(name);
     const algorithm = algorithms[index % algorithms.length];
     const upstream = {
       id: `demo-upstream-${name}`,
@@ -767,7 +767,7 @@ export function buildRestorePayload(now = isoNow(), {
 } = {}) {
   const plans = effectiveProxyPlans(includeBasicAuth);
   const consumers = makeConsumers(now, { includeBasicAuth });
-  const upstreams = makeUpstreams(now, backendHost);
+  const upstreams = makeUpstreams(now, backendHost, plans);
   const proxyScopedPluginConfigs = makeProxyScopedPluginConfigs(now, plans);
   const proxies = makeProxies(now, backendHost, plans);
   const pluginConfigs = [
