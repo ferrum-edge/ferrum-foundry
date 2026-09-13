@@ -91,6 +91,7 @@ The most commonly adjusted optional variables:
 | Variable | Default | Description |
 |---|---|---|
 | `PORT` | `3001` | BFF server port. Vite also uses this as the `/api` proxy port when `VITE_BFF_URL` is unset |
+| `VITE_DEV_HOST` | `localhost` | Vite listen address: `localhost`, `127.0.0.1`, `::1`, or an explicit IP. Binding a non-loopback address (`0.0.0.0`, `::`) is an operator opt-in. Invalid values fail Vite startup |
 | `VITE_DEV_PORT` | `5173` | Vite dev-server listen port (1-65535) |
 | `VITE_BFF_URL` | `http://localhost:$PORT` | Absolute `http`/`https` origin Vite proxies `/api` to; wins over `PORT` when set |
 | `FERRUM_JWT_TTL` | `900` | JWT token TTL (seconds) |
@@ -109,7 +110,20 @@ Start the dev server:
 npm run dev
 ```
 
-This starts Vite (port 5173) and Fastify (port 3001) concurrently. Open http://localhost:5173.
+This starts Vite (port 5173) and Fastify (port 3001) concurrently. Open
+http://localhost:5173.
+
+Open the SPA at the same hostname the BFF session cookie was issued for.
+`localhost` and `127.0.0.1` are different hosts: a cookie from
+`http://127.0.0.1:3001` is not sent to `http://localhost:5173`. Dev examples
+use `localhost` for Vite, `PORT`, and `VITE_BFF_URL`.
+
+On dual-stack hosts, Vite's default `localhost` bind follows whatever
+`localhost` resolves to (often `[::1]` only), so `http://127.0.0.1:5173` is
+refused while `http://localhost:5173` works. Force IPv4 loopback with
+`VITE_DEV_HOST=127.0.0.1` and use that same host in `VITE_BFF_URL` if you
+reach the BFF by IPv4. Foundry does not bind all interfaces unless you set
+an explicit non-loopback address.
 
 Those ports are defaults. Set `VITE_DEV_PORT` and `PORT` (or `VITE_BFF_URL`) to
 run Foundry next to another Vite app such as Nexus, which uses 5173 for its UI
@@ -124,7 +138,7 @@ npm run dev
 ```
 
 To point Vite at a BFF that is already listening elsewhere, set `VITE_BFF_URL`
-to that origin (`http://127.0.0.1:3002`, for example) instead of `PORT`.
+to that origin (`http://localhost:3002`, for example) instead of `PORT`.
 
 No gateway handy? Run the bundled mock admin API, which serves realistic
 sample data for most admin surfaces (CRUD, TLS/ACME, audit, cluster,
