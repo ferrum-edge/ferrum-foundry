@@ -1,3 +1,4 @@
+import { ResourceLabels } from "@/components/shared/ResourceLabels";
 /* ------------------------------------------------------------------ */
 /*  Ferrum Foundry – Consumer detail / edit page                       */
 /* ------------------------------------------------------------------ */
@@ -199,6 +200,8 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
           Delete
         </Button>
       </div>
+
+      <ResourceLabels labels={consumer.labels} />
 
       {/* Tabs */}
       <Tabs defaultValue="details">

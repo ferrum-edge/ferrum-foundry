@@ -164,6 +164,7 @@ async function adminRequest(config, path, options = {}) {
     signal: signal ?? AbortSignal.timeout(30_000),
     headers: {
       authorization: `Bearer ${token}`,
+      "x-ferrum-provisioned-by": "ferrum-foundry",
       "content-type": "application/json",
       "x-ferrum-namespace": namespace,
       ...(headers ?? {}),
