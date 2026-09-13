@@ -14,6 +14,7 @@ The following templates use the current constructor fields:
 | --- | --- |
 | `ldap_auth` | `ldap_url`, `bind_dn_template`, and `canonical_identity_attribute` configure direct bind, with `{username}` in the DN. Set `canonical_identity_attribute` to your directory's authoritative attribute (`uid` in the example). The loopback LDAP example needs a directory; use LDAPS or STARTTLS for a remote directory. Search-then-bind is a different configuration with service-account fields. |
 | `mcp_gateway` | Aggregate-router mode exposes endpoint, upstream `servers`, and tool `policy`. `discovery.public_base_url` belongs to the A2A gateway schema and is omitted from the MCP template. |
+| `mesh_authz` | Native Edge `MeshPolicy` documents under `mesh_policies` (`name`, `namespace`, `scope`, `rules`). The example is the documented direct-config shape: a namespace-scoped DENY of `/admin/*` plus ALLOW for one SPIFFE service account, with proxy `namespace`/`labels` for construction-time `PolicyScope` filtering. Direct config does not require mesh mode. |
 | `soap_ws_security` | `username_token.credentials`, `x509_signature.trusted_certs`, and `nonce.max_cache_size` replace the old nested shapes. Timestamp checking remains enabled; credential-based modes remain disabled. Before enabling PasswordDigest or SAML, supply credentials/trust and explicitly choose the documented replay scope. Nonce retention is gateway-controlled; there is no configurable `cache_ttl_seconds`. |
 | `tcp_connection_throttle` | `max_connections_per_key: 100` limits each consumer, falling back to client IP, per gateway process. Use TCP/TCP+TLS proxy scope or a global policy covering a TCP listener. |
 | `response_caching` | `cacheable_methods` and `cacheable_status_codes` retain the GET/HEAD and 200/301/404 example policy. |
@@ -26,7 +27,7 @@ The following templates use the current constructor fields:
 | `ai_request_guard` | The unsupported `required_fields` key is omitted; model, token, message, prompt-length, and temperature restrictions remain. |
 | `ws_message_size_limiting`, `ws_rate_limiting` | `close_reason` supplies the WebSocket close text. |
 
-Eight templates still require explicit operator configuration or gateway policy.
+Seven templates still require explicit operator configuration or gateway policy.
 The contract gate records each entire error and its HTTP 400 status separately:
 
 | Template | Expected prerequisite in the disposable gateway |
@@ -35,7 +36,6 @@ The contract gate records each entire error and its HTTP 400 status separately:
 | `mtls_auth` | Supply `allowed_issuers[0].ca_certificate_pem`; an issuer name alone cannot pin trust. |
 | `ai_stream_router` | Set `OPENAI_API_KEY` (then the other configured provider credentials) in the gateway environment. |
 | `load_testing` | Replace the example trigger key with a key of at least 32 characters. |
-| `mesh_authz` | Replace the example Kubernetes AuthorizationPolicy document with native Edge `MeshPolicy` input. The first diagnostic is `missing field name`; this is a known input-shape limitation, not evidence that the remaining policy is validated. |
 | `proxy_alerts` | Set `FERRUM_ALERTS_SLACK_WEBHOOK` in the gateway environment. |
 | `kafka_logging` | The default restrictive backend egress policy prevents admission of librdkafka during field validation. Its exact error starts with `Invalid plugin config fields: kafka_logging:`, before plugin construction or broker contact. Prefer another log sink when egress must remain restricted. |
 | `openapi_validator` | Select proxy scope and a proxy with an attached API spec. The gate uses proxy scope and checks the missing attached-spec diagnostic. |
@@ -54,8 +54,8 @@ After catalog cleanup, the job still seeds twice, verifies canonical backup stat
 (including the exact enabled demo Prometheus fixture), and checks demo routes.
 It never disables or deletes unknown fixtures to make room for the catalog.
 
-The expected result is 73 HTTP 201 admissions (the previous 60 controls plus the
-13 repaired defaults) and the eight exact prerequisite rejections above. Accepted
+The expected result is 74 HTTP 201 admissions (the previous 73 admitted templates
+plus native `mesh_authz`) and the seven exact prerequisite rejections above. Accepted
 plugins are read back as enabled. Unexpected success, a changed error body or
 status, a missing/extra catalog member, or failed cleanup fails the gate. Admission
 failures are collected across the catalog; cleanup failure stops further probes
@@ -69,8 +69,13 @@ Issue #291's reproduction used a different digest (`sha256:f2c3eb7696677fed4a905
 The pinned digest was published from Edge revision
 `b96cfaadd41a676d39a409d47b48e0b0588fa86e`: the
 [Docker Manifest job](https://github.com/ferrum-edge/ferrum-edge/actions/runs/33094251786/job/98636370391)
-records that digest for the corresponding `main-b96cfa...` tag. At that revision,
-both guards call the shared
+records that digest for the corresponding `main-b96cfa...` tag. Native `mesh_authz`
+`MeshPolicy` input (`name`, `namespace`, `scope`, `rules`, plus required per-rule
+`action`) is the same document on that pinned revision and on current Edge `main`;
+mesh mode is not required for admission. The previous Kubernetes CRD envelope is
+not that document: the pinned image ignored unknown members and then reported
+`missing field name`, while current `main` rejects `apiVersion` first under
+`deny_unknown_fields`. At that revision, both guards call the shared
 [built-in PII pattern table](https://github.com/ferrum-edge/ferrum-edge/blob/b96cfaadd41a676d39a409d47b48e0b0588fa86e/src/plugins/utils/ai_pii.rs#L45),
 which defines `phone_us`. Kafka's
 [egress screening](https://github.com/ferrum-edge/ferrum-edge/blob/b96cfaadd41a676d39a409d47b48e0b0588fa86e/src/plugins/kafka_logging.rs#L339)
