@@ -146,7 +146,16 @@ test("restore fixture uses current resource names and versioned API-spec semanti
   )));
 
   assert.equal(payload.consumers.length, 12);
-  assert.equal(payload.proxies.length, 18);
+  assert.equal(payload.proxies.length, 14);
+  assert.equal(payload.upstreams.length, 14);
+  for (const slug of ["identity", "profiles", "search", "notifications"]) {
+    assert.equal(payload.proxies.some((proxy) => proxy.id === `demo-proxy-${slug}`), false);
+    assert.equal(payload.upstreams.some((upstream) => upstream.id === `demo-upstream-${slug}`), false);
+    assert.equal(
+      payload.plugin_configs.some((plugin) => plugin.proxy_id === `demo-proxy-${slug}`),
+      false,
+    );
+  }
   assert.equal(
     payload.plugin_configs.some((plugin) => plugin.plugin_name === "basic_auth"),
     false,
@@ -422,8 +431,12 @@ test("seed manifest records restore flags and counts for verify and smoke", () =
     }).counts,
   );
   assert.equal(defaultManifest.counts.consumers, 12);
-  assert.equal(defaultManifest.counts.proxies, 18);
-  assert.equal(defaultManifest.counts.upstreams, 18);
+  assert.equal(defaultManifest.counts.proxies, 14);
+  assert.equal(defaultManifest.counts.upstreams, 14);
+  assert.equal(
+    defaultManifest.routes.some((route) => route.auth === "basic" || route.path === "/demo/identity"),
+    false,
+  );
 
   const omitted = buildManifest("http://127.0.0.1:8000", { omitGlobalPrometheus: true });
   assert.equal(omitted.omit_global_prometheus, true);
