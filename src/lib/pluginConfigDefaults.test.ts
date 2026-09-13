@@ -48,6 +48,42 @@ describe("canonical plugin defaults", () => {
   it("omits A2A-only discovery.public_base_url from the mcp_gateway template", () => {
     expect(getPluginConfigDefault("mcp_gateway")).not.toHaveProperty("discovery");
   });
+
+  it("uses native MeshPolicy documents instead of a Kubernetes CRD envelope", () => {
+    // Edge MeshPolicy (pinned b96cfaad and current main): name, namespace, scope, rules.
+    // A CRD envelope fails current main first on unknown field `apiVersion`.
+    expect(getPluginConfigDefault("mesh_authz")).toEqual({
+      namespace: "default",
+      labels: { app: "payments" },
+      mesh_policies: [
+        {
+          name: "deny-admin",
+          namespace: "default",
+          scope: { kind: "namespace", namespace: "default" },
+          rules: [
+            {
+              action: "deny",
+              to: [{ paths: ["/admin/*"] }],
+            },
+          ],
+        },
+        {
+          name: "allow-checkout",
+          namespace: "default",
+          scope: { kind: "namespace", namespace: "default" },
+          rules: [
+            {
+              action: "allow",
+              from: [
+                { spiffe_id_pattern: "spiffe://cluster.local/ns/default/sa/checkout" },
+              ],
+            },
+          ],
+        },
+      ],
+      trusted_hbone_assertors: ["ztunnel", "waypoint"],
+    });
+  });
 });
 
 describe("formatPluginName", () => {

@@ -711,23 +711,35 @@ export const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
       },
     },
   },
+  // Native MeshPolicy documents (name/namespace/scope/rules), not a K8s CRD envelope.
+  // Direct config is admitted in database mode; mesh injection is not required.
   mesh_authz: {
     namespace: "default",
+    labels: { app: "payments" },
     mesh_policies: [
       {
-        apiVersion: "security.istio.io/v1",
-        kind: "AuthorizationPolicy",
-        metadata: { name: "allow-frontend", namespace: "default" },
-        spec: {
-          action: "ALLOW",
-          rules: [
-            {
-              from: [
-                { source: { principals: ["cluster.local/ns/default/sa/frontend"] } },
-              ],
-            },
-          ],
-        },
+        name: "deny-admin",
+        namespace: "default",
+        scope: { kind: "namespace", namespace: "default" },
+        rules: [
+          {
+            action: "deny",
+            to: [{ paths: ["/admin/*"] }],
+          },
+        ],
+      },
+      {
+        name: "allow-checkout",
+        namespace: "default",
+        scope: { kind: "namespace", namespace: "default" },
+        rules: [
+          {
+            action: "allow",
+            from: [
+              { spiffe_id_pattern: "spiffe://cluster.local/ns/default/sa/checkout" },
+            ],
+          },
+        ],
       },
     ],
     trusted_hbone_assertors: ["ztunnel", "waypoint"],

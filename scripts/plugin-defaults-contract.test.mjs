@@ -59,7 +59,7 @@ test("hosted lifecycle admits the catalog before seeding the process-wide metric
 test("submits all 81 actual enabled defaults unchanged, in the required scope, and cleans up", async () => {
   const fixture = transport();
   assert.deepEqual(await verifyPluginDefaults(fixture.exchange, quiet), {
-    templates: 81, accepted: 73, operatorInput: 8,
+    templates: 81, accepted: 74, operatorInput: 7,
   });
   assert.equal(fixture.writes.length, 81);
   for (const write of fixture.writes) {
@@ -71,6 +71,28 @@ test("submits all 81 actual enabled defaults unchanged, in the required scope, a
   }
   assert.equal(fixture.plugins.size, 0);
   assert.equal(fixture.proxies.size, 0);
+});
+
+test("mesh_authz template is native MeshPolicy input rather than a CRD rejection", () => {
+  assert.equal(OPERATOR_INPUT_REJECTIONS.mesh_authz, undefined);
+  const config = getPluginConfigDefault("mesh_authz");
+  assert.equal(config.namespace, "default");
+  assert.deepEqual(config.labels, { app: "payments" });
+  assert.ok(Array.isArray(config.mesh_policies));
+  assert.equal(config.mesh_policies.length, 2);
+  for (const policy of config.mesh_policies) {
+    assert.equal(typeof policy.name, "string");
+    assert.equal(typeof policy.namespace, "string");
+    assert.equal(typeof policy.scope.kind, "string");
+    assert.ok(Array.isArray(policy.rules));
+    for (const rule of policy.rules) {
+      assert.equal(typeof rule.action, "string");
+    }
+    assert.equal(policy.apiVersion, undefined);
+    assert.equal(policy.kind, undefined);
+    assert.equal(policy.metadata, undefined);
+    assert.equal(policy.spec, undefined);
+  }
 });
 
 for (const name of Object.keys(OPERATOR_INPUT_REJECTIONS)) {
