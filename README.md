@@ -143,8 +143,12 @@ to that origin (`http://localhost:3002`, for example) instead of `PORT`.
 No gateway handy? Run the bundled mock admin API, which serves realistic
 sample data for most admin surfaces (CRUD, TLS/ACME, audit, cluster,
 overload/chargeback, gateway trust bundles). Write paths follow the live Edge
-contract: proxy `auth_mode` is only `single` or `multi` (not `none`), and plugin
-configs require `plugin_name` and `scope` — a top-level `name` field is unknown:
+contract: proxy `auth_mode` is only `single` or `multi` (not `none`); plugin
+configs require `plugin_name` and `scope` — a top-level `name` field is unknown;
+and CRUD creates of proxies, consumers, upstreams, and plugin configs record
+`labels.provisioned-by` from `X-Ferrum-Provisioned-By` when the body omits that
+key (explicit values win). Empty label maps are omitted from responses, matching
+Edge. PUT does not stamp the header: omitting `labels` preserves the stored map.
 
 ```bash
 node scripts/mock-admin-gateway.mjs   # listens on :9000

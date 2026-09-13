@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   crud,
+  provisionerFromHeaders,
+  stampProvisionedBy,
   validatePluginConfigWrite,
   validateProxyWrite,
 } from "./mock-admin-gateway.mjs";
@@ -179,4 +181,211 @@ test("generic crud still accepts other resources without those write hooks", () 
   assert.equal(status, 201);
   assert.equal(item.username, "mobile-app");
   assert.equal(list.length, 1);
+  assert.equal(item.labels, undefined);
+});
+
+test("provisionerFromHeaders trims a single header and ignores blanks", () => {
+  assert.equal(
+    provisionerFromHeaders({ "x-ferrum-provisioned-by": "  ferrum-foundry  " }),
+    "ferrum-foundry",
+  );
+  assert.equal(provisionerFromHeaders({}), null);
+  assert.equal(provisionerFromHeaders({ "x-ferrum-provisioned-by": "   " }), null);
+  assert.equal(
+    provisionerFromHeaders({ "x-ferrum-provisioned-by": ["ferrum-nexus", "other"] }),
+    "ferrum-nexus",
+  );
+});
+
+test("stampProvisionedBy fills absent provisioned-by and keeps an explicit value", () => {
+  assert.deepEqual(
+    stampProvisionedBy({ team: "platform" }, "ferrum-foundry"),
+    { team: "platform", "provisioned-by": "ferrum-foundry" },
+  );
+  assert.deepEqual(
+    stampProvisionedBy({ "provisioned-by": "ferrum-nexus", team: "platform" }, "ferrum-foundry"),
+    { "provisioned-by": "ferrum-nexus", team: "platform" },
+  );
+  assert.deepEqual(stampProvisionedBy({}, null), {});
+});
+
+test("POST create records provisioned-by from the header when the body omits it", () => {
+  const list = [];
+  const provisioner = provisionerFromHeaders({
+    "x-ferrum-provisioned-by": "ferrum-foundry",
+  });
+  const [status, item] = crud(
+    list,
+    url,
+    "POST",
+    undefined,
+    { name: "Orders", listen_path: "/orders" },
+    proxyDefaults,
+    "ferrum",
+    validateProxyWrite,
+    provisioner,
+  );
+  assert.equal(status, 201);
+  assert.deepEqual(item.labels, { "provisioned-by": "ferrum-foundry" });
+  assert.deepEqual(list[0].labels, { "provisioned-by": "ferrum-foundry" });
+
+  const [getStatus, got] = crud(list, url, "GET", item.id);
+  assert.equal(getStatus, 200);
+  assert.deepEqual(got.labels, { "provisioned-by": "ferrum-foundry" });
+
+  const [listStatus, page] = crud(list, url, "GET");
+  assert.equal(listStatus, 200);
+  assert.deepEqual(page.data[0].labels, { "provisioned-by": "ferrum-foundry" });
+});
+
+test("POST create keeps an explicit provisioned-by over the header and retains other labels", () => {
+  const list = [];
+  const [status, item] = crud(
+    list,
+    url,
+    "POST",
+    undefined,
+    {
+      username: "mobile-app",
+      labels: { "provisioned-by": "ferrum-nexus", team: "platform" },
+    },
+    {},
+    "ferrum",
+    undefined,
+    "ferrum-foundry",
+  );
+  assert.equal(status, 201);
+  assert.deepEqual(item.labels, {
+    "provisioned-by": "ferrum-nexus",
+    team: "platform",
+  });
+});
+
+test("POST create with header fills provisioned-by while retaining other body labels", () => {
+  const list = [];
+  const [status, item] = crud(
+    list,
+    url,
+    "POST",
+    undefined,
+    { name: "Orders Pool", labels: { team: "platform" } },
+    {},
+    "ferrum",
+    undefined,
+    "ferrum-foundry",
+  );
+  assert.equal(status, 201);
+  assert.deepEqual(item.labels, {
+    team: "platform",
+    "provisioned-by": "ferrum-foundry",
+  });
+});
+
+test("POST create without header or labels omits the labels key", () => {
+  const list = [];
+  const [status, item] = crud(
+    list,
+    url,
+    "POST",
+    undefined,
+    { plugin_name: "compression", enabled: true, config: {}, scope: "global" },
+    {},
+    "ferrum",
+    validatePluginConfigWrite,
+  );
+  assert.equal(status, 201);
+  assert.equal(Object.hasOwn(item, "labels"), false);
+  assert.equal(Object.hasOwn(list[0], "labels"), false);
+});
+
+test("POST create with empty labels and no header omits the labels key", () => {
+  const list = [];
+  const [status, item] = crud(
+    list,
+    url,
+    "POST",
+    undefined,
+    { username: "alice", labels: {} },
+  );
+  assert.equal(status, 201);
+  assert.equal(Object.hasOwn(item, "labels"), false);
+});
+
+test("PUT does not stamp the header; absent labels preserves the stored map", () => {
+  const list = [{
+    id: "proxy-1",
+    namespace: "ferrum",
+    name: "Orders",
+    labels: { "provisioned-by": "ferrum-foundry", team: "platform" },
+  }];
+  const [status, item] = crud(
+    list,
+    url,
+    "PUT",
+    "proxy-1",
+    { name: "Orders API", auth_mode: "single" },
+    proxyDefaults,
+    "ferrum",
+    validateProxyWrite,
+    "ferrum-nexus",
+  );
+  assert.equal(status, 200);
+  assert.equal(item.name, "Orders API");
+  assert.deepEqual(item.labels, {
+    "provisioned-by": "ferrum-foundry",
+    team: "platform",
+  });
+});
+
+test("PUT with an empty labels map clears labels from the response", () => {
+  const list = [{
+    id: "upstream-1",
+    namespace: "ferrum",
+    name: "Orders Pool",
+    labels: { "provisioned-by": "ferrum-foundry" },
+  }];
+  const [status, item] = crud(
+    list,
+    url,
+    "PUT",
+    "upstream-1",
+    { name: "Orders Pool", labels: {} },
+    {},
+    "ferrum",
+    undefined,
+    "ferrum-foundry",
+  );
+  assert.equal(status, 200);
+  assert.equal(Object.hasOwn(item, "labels"), false);
+});
+
+test("PUT supplied labels replace the map without filling from the header", () => {
+  const list = [{
+    id: "plg-1",
+    namespace: "ferrum",
+    plugin_name: "cors",
+    scope: "global",
+    enabled: true,
+    config: {},
+    labels: { "provisioned-by": "ferrum-foundry" },
+  }];
+  const [status, item] = crud(
+    list,
+    url,
+    "PUT",
+    "plg-1",
+    {
+      plugin_name: "cors",
+      scope: "global",
+      enabled: true,
+      config: {},
+      labels: { team: "platform" },
+    },
+    {},
+    "ferrum",
+    validatePluginConfigWrite,
+    "ferrum-foundry",
+  );
+  assert.equal(status, 200);
+  assert.deepEqual(item.labels, { team: "platform" });
 });
