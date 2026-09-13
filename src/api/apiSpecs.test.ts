@@ -3,7 +3,7 @@ import { isHTTPError } from "ky";
 import * as specs from "./apiSpecs";
 import { getApiErrorDetail, setApiErrorHandler, setCsrfToken } from "./client";
 import { MutationOutcomeUnknownError } from "./mutationOutcome";
-import { BasedRequest } from "@/test/__tests__/harness";
+import { stubFetch } from "@/test/__tests__/harness";
 
 const scope = { namespace: "tenant-a" };
 const summary: specs.ApiSpecSummary = {
@@ -24,11 +24,10 @@ beforeEach(() => {
   popup.mockClear();
   setApiErrorHandler(popup);
   setCsrfToken("fixture-csrf");
-  vi.stubGlobal("Request", BasedRequest);
-  vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
+  stubFetch((request) => {
     requests.push(request);
     return respond(request);
-  }));
+  });
 });
 afterEach(() => {
   setApiErrorHandler(undefined);

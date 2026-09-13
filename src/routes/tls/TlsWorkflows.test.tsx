@@ -8,7 +8,7 @@ import type {
 import { setApiErrorHandler } from "@/api/client";
 import { inputByLabel } from "@/test/fields";
 import {
-  BasedRequest, button, click, createHarness, fill, page, panel, selectOption, selectTab, settle,
+  button, click, createHarness, fill, page, panel, selectOption, selectTab, settle, stubFetch,
 } from "@/test/__tests__/harness";
 import TlsPage from "./index";
 
@@ -64,8 +64,7 @@ beforeEach(() => {
   localStorage.setItem("ferrum:namespace", "tenant-a");
   vi.spyOn(Date, "now").mockReturnValue(Date.parse(at));
   Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
-  vi.stubGlobal("Request", BasedRequest);
-  vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
+  stubFetch(async (request) => {
     requests.push(request);
     if (request.method !== "GET") return mutate(request);
     if (readStatus) return Response.json({ error: "TLS unavailable" }, { status: readStatus, headers: { "retry-after": "0" } });
@@ -73,7 +72,7 @@ beforeEach(() => {
     if (path === "acme/certificates/acme-edge") return Response.json(certificate);
     if (!(path in collections)) throw new Error(`Unexpected TLS read: ${path}`);
     return Response.json(page(collections[path]));
-  }));
+  });
 });
 
 afterEach(async () => {
@@ -242,11 +241,11 @@ describe("managed TLS material", () => {
     await fill(dialog().querySelectorAll("textarea")[0], "bad cert");
     await fill(dialog().querySelectorAll("textarea")[1], "bad key");
     await click("Create", dialog());
-    await settle(() => expect(dialog().textContent).toContain("no PEM certificates found"));
+    await settle(() => expect(dialog().textContent).toContain("No PEM certificates found"));
     expect(dialog().querySelector("textarea")?.getAttribute("aria-invalid")).toBe("true");
     expect(popup).not.toHaveBeenCalled();
     await fill(dialog().querySelector("textarea")!, certPem);
-    expect(dialog().textContent).not.toContain("no PEM certificates found");
+    expect(dialog().textContent).not.toContain("No PEM certificates found");
     await click("Cancel", dialog());
     const remove = [...panel().querySelectorAll<HTMLButtonElement>("button")]
       .find((entry) => entry.textContent?.trim() === "")!;
@@ -280,18 +279,22 @@ describe("TLS validation", () => {
     expect(writes().every((request) => !request.headers.has("X-Ferrum-Namespace"))).toBe(true);
   });
 
-  it.each(["cert_pem: no certificates", "crl_pem: no revocations", "validation unavailable"])(
-    "renders %s without losing the gateway detail", async (error) => {
+  it.each([
+    ["cert_pem: no certificates", "No certificates"],
+    ["crl_pem: no revocations", "No revocations"],
+    ["validation unavailable", "validation unavailable"],
+  ])(
+    "renders %s without losing the gateway detail", async (error, message) => {
       mutate.mockResolvedValue(Response.json({ error }, { status: 400 }));
       await mount("Validate");
       await click("Validate", panel());
-      await settle(() => expect(document.body.textContent).toContain(error.replace(/^(cert_pem|crl_pem): /, "")));
+      await settle(() => expect(document.body.textContent).toContain(message));
       expect(popup).not.toHaveBeenCalled();
       if (error.startsWith("cert_pem")) {
         expect(panel().querySelector("textarea")?.getAttribute("aria-invalid")).toBe("true");
         await fill(panel().querySelector("textarea")!, certPem);
         expect(panel().querySelector("textarea")?.hasAttribute("aria-invalid")).toBe(false);
-        expect(panel().textContent).not.toContain("no certificates");
+        expect(panel().textContent).not.toContain(message);
       } else {
         expect(panel().querySelector('[aria-invalid="true"]')).toBeNull();
       }

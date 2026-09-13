@@ -2,7 +2,7 @@ import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setApiErrorHandler } from "@/api/client";
 import { inputByLabel } from "@/test/fields";
-import { BasedRequest, click, createHarness, fill, page, panel, selectTab, settle } from "@/test/__tests__/harness";
+import { click, createHarness, fill, page, panel, selectTab, settle, stubFetch } from "@/test/__tests__/harness";
 import { config, denies, graph, meshResponses } from "@/test/__tests__/meshFixtures";
 import MeshPage from "./index";
 
@@ -27,8 +27,7 @@ beforeEach(() => {
   decision = "admit";
   popup.mockClear();
   setApiErrorHandler(popup);
-  vi.stubGlobal("Request", BasedRequest);
-  vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
+  stubFetch(async (request) => {
     requests.push(request);
     const path = new URL(request.url).pathname.replace("/api/proxy/", "");
     if (failure) return Response.json({ error: "Feature unavailable" }, { status: failure, headers: { "retry-after": "0" } });
@@ -43,7 +42,7 @@ beforeEach(() => {
     if (path === "gateway-trust/status") return Response.json({ configured: false });
     if (!(path in responses)) throw new Error(`Unexpected request: ${path}`);
     return Response.json(responses[path]);
-  }));
+  });
 });
 afterEach(async () => {
   await ui.dispose();

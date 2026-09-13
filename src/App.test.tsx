@@ -7,7 +7,7 @@ import { router } from "./router";
 import { setCsrfToken } from "@/api/client";
 import { resetGatewayMetadata } from "@/api/gatewayMetadata";
 import { inputByLabel } from "@/test/fields";
-import { BasedRequest, click, createHarness, fill, page, selectOption, settle } from "@/test/__tests__/harness";
+import { click, createHarness, fill, page, selectOption, settle, stubFetch } from "@/test/__tests__/harness";
 import { meshResponses } from "@/test/__tests__/meshFixtures";
 
 let ui: ReturnType<typeof createHarness>;
@@ -30,8 +30,7 @@ beforeEach(() => {
   requests = [];
   localStorage.clear();
   Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
-  vi.stubGlobal("Request", BasedRequest);
-  vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
+  stubFetch(async (request) => {
     requests.push(request);
     const path = new URL(request.url).pathname;
     if (path === "/api/auth/config") return Response.json({ mode: "static" });
@@ -56,7 +55,7 @@ beforeEach(() => {
     }
     if (gatewayPath === "api-specs") return Response.json({ items: [], offset: 0, limit: 250, total: 0, next_offset: null });
     throw new Error(`Unexpected application request: ${request.method} ${path}`);
-  }));
+  });
   router.update({ history: createMemoryHistory({ initialEntries: ["/tls"] }) });
 });
 

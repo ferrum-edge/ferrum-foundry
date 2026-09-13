@@ -3,7 +3,7 @@ import { createMemoryHistory, createRootRoute, createRoute, createRouter, Router
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Upstream, UpstreamCreate } from "@/api/types";
 import { inputByLabel } from "@/test/fields";
-import { BasedRequest, button, click, createHarness, fill, page, panel, selectTab, settle } from "@/test/__tests__/harness";
+import { button, click, createHarness, fill, page, panel, selectTab, settle, stubFetch } from "@/test/__tests__/harness";
 import UpstreamDetailPage from "./$upstreamId";
 import UpstreamNewPage from "./new";
 import UpstreamsPage from "./index";
@@ -26,8 +26,7 @@ beforeEach(() => {
   failure = false;
   writes = [];
   Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
-  vi.stubGlobal("Request", BasedRequest);
-  vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
+  stubFetch(async (request) => {
     const path = new URL(request.url).pathname;
     if (request.method === "GET") {
       if (path === "/api/proxy/upstreams") return Response.json(page(current ? [current] : []));
@@ -44,7 +43,7 @@ beforeEach(() => {
     const payload = await request.clone().json() as UpstreamCreate;
     current = { ...initial, ...payload, id: "orders" };
     return Response.json(current);
-  }));
+  });
 });
 afterEach(async () => {
   await ui.dispose();

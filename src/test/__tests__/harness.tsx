@@ -13,6 +13,21 @@ export class BasedRequest extends Request {
   }
 }
 
+/** Stub ky's fetch boundary with bodies owned independently by tests and the client. */
+export function stubFetch(respond: (request: Request) => Response | Promise<Response>) {
+  vi.stubGlobal("Request", BasedRequest);
+  const fetchMock = vi.fn(async (request: Request) => {
+    // ky cancels its request body on completion. Give the handler a clone now
+    // so captured requests remain readable after the application finishes.
+    // Handlers that inspect a body and retain it must read request.clone().
+    const response = await respond(request.clone());
+    // A fixed mockReturnValue/mockResolvedValue must support later calls too.
+    return response.clone();
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
 export function createHarness() {
   const host = document.createElement("div");
   document.body.appendChild(host);

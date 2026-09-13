@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { isHTTPError } from "ky";
 import * as mesh from "./mesh";
 import { getApiErrorDetail, setApiErrorHandler, setCsrfToken } from "./client";
-import { BasedRequest } from "@/test/__tests__/harness";
+import { stubFetch } from "@/test/__tests__/harness";
 import { meshResponses } from "@/test/__tests__/meshFixtures";
 
 const scope = { namespace: "tenant-a" };
@@ -14,8 +14,7 @@ beforeEach(() => {
   popup.mockClear();
   setApiErrorHandler(popup);
   setCsrfToken("fixture-csrf");
-  vi.stubGlobal("Request", BasedRequest);
-  vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
+  stubFetch(async (request) => {
     requests.push(request);
     const path = new URL(request.url).pathname.replace("/api/proxy/", "");
     if (path in meshResponses) return Response.json(meshResponses[path]);
@@ -25,7 +24,7 @@ beforeEach(() => {
       return Response.json({ allowed: true, decision: "admit", host: body.host, port: body.port ?? null, dry_run: true });
     }
     throw new Error(`Unexpected request: ${path}`);
-  }));
+  });
 });
 afterEach(() => {
   setApiErrorHandler(undefined);

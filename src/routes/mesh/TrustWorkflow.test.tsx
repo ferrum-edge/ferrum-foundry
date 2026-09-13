@@ -2,7 +2,7 @@ import { act } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { GatewayTrustBundle, GatewayTrustBundleCreate, GatewayTrustStatus } from "@/api/trust";
 import { inputByLabel } from "@/test/fields";
-import { BasedRequest, click, createHarness, fill, page, panel, selectTab, settle } from "@/test/__tests__/harness";
+import { click, createHarness, fill, page, panel, selectTab, settle, stubFetch } from "@/test/__tests__/harness";
 import { meshResponses } from "@/test/__tests__/meshFixtures";
 import MeshPage from "./index";
 
@@ -25,8 +25,7 @@ beforeEach(() => {
   conflict = false;
   failure = false;
   writes = [];
-  vi.stubGlobal("Request", BasedRequest);
-  vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
+  stubFetch(async (request) => {
     const path = new URL(request.url).pathname.replace("/api/proxy/", "");
     if (request.method !== "GET") {
       writes.push(request);
@@ -52,7 +51,7 @@ beforeEach(() => {
       return Response.json(status);
     }
     throw new Error(`Unexpected trust request: ${path}`);
-  }));
+  });
 });
 afterEach(async () => {
   await ui.dispose();
