@@ -161,9 +161,11 @@ Preflight checks run after that confirmation and **before** `POST /restore`:
   in the *target* namespace is replaced as usual.
 - **Basic auth**: demo `basic_auth` plugins and `basicauth` consumers need
   Edge `FERRUM_BASIC_AUTH_HMAC_SECRET` (>= 32 bytes). They are **off by
-  default**. Set `FERRUM_DEMO_INCLUDE_BASIC_AUTH=true` to include them; the
-  seeder then creates and deletes a probe credential in the target namespace
-  and aborts with exit status 1 if the secret is missing, still before restore.
+  default**, and the corresponding routes and upstreams are omitted rather
+  than exposed without authentication. Set
+  `FERRUM_DEMO_INCLUDE_BASIC_AUTH=true` to include them; the seeder then creates
+  and deletes a probe credential in the target namespace and aborts with exit
+  status 1 if the secret is missing, still before restore.
 
 ```bash
 # FERRUM_JWT_SECRET is the same 32+ character admin signing key used by Ferrum.
