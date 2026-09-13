@@ -260,9 +260,10 @@ const AUTH_MODES = ['single', 'multi'];
 const PLUGIN_SCOPES = ['global', 'proxy', 'proxy_group'];
 // Field order matches ferrum-edge `PluginConfig` (`#[serde(deny_unknown_fields)]`).
 const PLUGIN_CONFIG_FIELDS = [
-  'id', 'plugin_name', 'namespace', 'config', 'scope', 'proxy_id',
+  'labels', 'id', 'plugin_name', 'namespace', 'config', 'scope', 'proxy_id',
   'enabled', 'priority_override', 'trigger', 'api_spec_id', 'created_at', 'updated_at',
 ];
+const PROVISIONED_BY_LABEL = 'provisioned-by';
 
 function invalidBody(message) {
   return { error: `Invalid body: ${message}` };
@@ -316,7 +317,56 @@ export function validatePluginConfigWrite(body, method) {
   return null;
 }
 
-export function crud(list, url, method, id, body, defaults = {}, ns = 'ferrum', validate) {
+/** Edge `provisioner()`: first `X-Ferrum-Provisioned-By` value, trimmed. */
+export function provisionerFromHeaders(headers) {
+  const raw = headers?.['x-ferrum-provisioned-by'];
+  if (raw == null) return null;
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed === '' ? null : trimmed;
+}
+
+/** Edge `stamp()`: fill absent `provisioned-by`; keep an explicit body value. */
+export function stampProvisionedBy(labels, provisioner) {
+  if (provisioner && !Object.hasOwn(labels, PROVISIONED_BY_LABEL)) {
+    labels[PROVISIONED_BY_LABEL] = provisioner;
+  }
+  return labels;
+}
+
+function cloneLabels(body) {
+  const source = body?.labels;
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return {};
+  return { ...source };
+}
+
+function omitEmptyLabels(item) {
+  if (
+    item.labels &&
+    typeof item.labels === 'object' &&
+    !Array.isArray(item.labels) &&
+    Object.keys(item.labels).length === 0
+  ) {
+    delete item.labels;
+  }
+  return item;
+}
+
+function applyCreateLabels(body, provisioner) {
+  const labels = stampProvisionedBy(cloneLabels(body), provisioner);
+  if (Object.keys(labels).length === 0) {
+    if (body && Object.hasOwn(body, 'labels')) {
+      const next = { ...body };
+      delete next.labels;
+      return next;
+    }
+    return body;
+  }
+  return { ...body, labels };
+}
+
+export function crud(list, url, method, id, body, defaults = {}, ns = 'ferrum', validate, provisioner) {
   // The real gateway isolates resources per namespace; list responses must
   // reflect that or namespace occupancy counts are meaningless.
   if (method === 'GET' && !id) {
@@ -331,14 +381,20 @@ export function crud(list, url, method, id, body, defaults = {}, ns = 'ferrum', 
     if (rejection) return [400, rejection];
   }
   if (method === 'POST') {
-    const item = { id: randomUUID(), namespace: ns, ...defaults, ...body, created_at: now(), updated_at: now() };
+    // Edge stamps the header on Create only (`handle_create` → `stamp`).
+    const attributed = applyCreateLabels(body, provisioner);
+    const item = omitEmptyLabels({
+      id: randomUUID(), namespace: ns, ...defaults, ...attributed, created_at: now(), updated_at: now(),
+    });
     list.push(item);
     return [201, item];
   }
   if (method === 'PUT') {
     const index = list.findIndex((x) => x.id === id);
     if (index < 0) return [404, { error: 'not found' }];
-    list[index] = { ...list[index], ...body, id, updated_at: now() };
+    // Edge PUT does not stamp the header (`handle_update` passes provisioner None).
+    // Absent `labels` preserves the stored map; a supplied map replaces it; `{}` clears.
+    list[index] = omitEmptyLabels({ ...list[index], ...body, id, updated_at: now() });
     return [200, list[index]];
   }
   if (method === 'DELETE') {
@@ -488,6 +544,7 @@ const server = createServer(async (req, res) => {
   const ns = (Array.isArray(req.headers['x-ferrum-namespace'])
     ? req.headers['x-ferrum-namespace'][0]
     : req.headers['x-ferrum-namespace']) || 'ferrum';
+  const provisioner = provisionerFromHeaders(req.headers);
 
   const send = (status, payload, contentType = 'application/json') => {
     res.writeHead(status, { 'content-type': contentType });
@@ -740,7 +797,7 @@ const server = createServer(async (req, res) => {
   for (const [pattern, list, defaults, validate] of routes) {
     const match = path.match(pattern);
     if (match) {
-      const [status, payload] = crud(list, url, method, match[1], body, defaults, ns, validate);
+      const [status, payload] = crud(list, url, method, match[1], body, defaults, ns, validate, provisioner);
       return send(status, payload);
     }
   }

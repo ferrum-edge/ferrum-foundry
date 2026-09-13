@@ -237,6 +237,16 @@ is not stored in `localStorage` or sent on later requests. Static mode is
 refused when `NODE_ENV=production` unless the deliberately unsafe
 `FERRUM_ALLOW_INSECURE_STATIC_AUTH=true` escape hatch is present.
 
+The session cookie is host-scoped. The SPA origin host must match the host
+the BFF issued the cookie for. `localhost` and `127.0.0.1` are different
+hosts, so a login against `http://127.0.0.1:$PORT` is not sent on later
+requests to `http://localhost:$VITE_DEV_PORT`. Development examples use
+`localhost` for both. On dual-stack hosts Vite's default `localhost` bind
+follows DNS (`[::1]` is common), so `http://127.0.0.1:$VITE_DEV_PORT` is
+refused. Set `VITE_DEV_HOST=127.0.0.1` to force IPv4 loopback, and use that
+same host for `VITE_BFF_URL`. Binding a non-loopback address is an operator
+opt-in; see the [Quick Start](../README.md#local-development) env table.
+
 ## Downstream claims
 
 Foundry JWTs contain `iss`, `sub`, `exp`, `iat`, `nbf`, `jti`, and `role`.
