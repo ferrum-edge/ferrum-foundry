@@ -3,10 +3,20 @@ import { Card } from "@/components/ui/Card";
 
 export interface ErrorFallbackProps {
   /** The caught error, if any. Only its message is shown to the user. */
-  error?: Error | null;
+  error?: unknown;
   /** Optional recovery action, for example the router's `reset`. */
   onRetry?: () => void;
   retryLabel?: string;
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  if (typeof error === "string" && error) {
+    return error;
+  }
+  return "An unexpected error occurred.";
 }
 
 /**
@@ -37,7 +47,7 @@ export function ErrorFallback({ error, onRetry, retryLabel = "Reload" }: ErrorFa
           </div>
           <h2 className="text-lg font-semibold text-text-primary">Something went wrong</h2>
           <p className="text-sm text-text-secondary" role="alert">
-            {error?.message || "An unexpected error occurred."}
+            {errorMessage(error)}
           </p>
           <Button variant="danger" onClick={onRetry ?? (() => window.location.reload())}>
             {retryLabel}
