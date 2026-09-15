@@ -1,6 +1,7 @@
 ## Description
 
-<!-- Provide a brief summary of the changes in this PR -->
+<!-- Provide a brief summary of the changes in this PR. Foundry is in buildout
+with no users; breaking changes are allowed. See README.md#development-status. -->
 
 Fixes # (issue number)
 
@@ -8,9 +9,9 @@ Fixes # (issue number)
 
 <!-- Mark the relevant option with an x -->
 
-- [ ] Bug fix (non-breaking change which fixes an issue)
-- [ ] New feature (non-breaking change which adds functionality)
-- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
+- [ ] Bug fix
+- [ ] New feature
+- [ ] Breaking change (allowed during buildout; describe the changed behavior)
 - [ ] Documentation update
 - [ ] Performance improvement
 - [ ] Code refactoring
@@ -48,7 +49,7 @@ Fixes # (issue number)
 - [ ] I have updated the documentation accordingly (if applicable)
 - [ ] My changes don't introduce new TypeScript errors
 - [ ] My code follows the project's style guidelines
-- [ ] I have checked that my changes don't break backward compatibility
+- [ ] I have described any breaking changes and updated affected callers, fixtures, and docs
 
 ## Performance Impact
 

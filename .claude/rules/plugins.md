@@ -3,7 +3,6 @@ paths:
   - "src/plugins/**"
   - "src/plugin_cache.rs"
   - "src/notifications/**"
-  - "custom_plugins/**"
   - "docs/plugins.md"
   - "docs/plugin_execution_order.md"
   - "docs/log_schema.md"
@@ -21,6 +20,12 @@ paths:
 ---
 
 # Plugin Rules
+
+These implementation notes describe the upstream Ferrum Edge gateway. Foundry
+edits plugin configuration through its BFF and does not contain the Rust plugin
+runtime or custom-plugin storage. Consult the
+[gateway repository](https://github.com/ferrum-edge/ferrum-edge) for current
+runtime details; the Rust paths below are not Foundry paths.
 
 ## Model And Scopes
 
@@ -651,11 +656,9 @@ on a native-gRPC request.
 - Plugin file dependencies, such as MaxMind `.mmdb`, belong to `validate_plugin_file_dependencies()`: file fatal; DB warns for absent/unreadable files; CP admin validates structure but skips node-local files; DP validates and refreshes its node-local files off the runtime worker for full snapshots and affected incremental rebuilds. On DB/DP runtime nodes, absent/unreadable files use the configured request-time fallback, while readable invalid files reject the new plugin generation. Exception: a DP forced node-local refresh retains the live generation's last-known-good MMDB snapshot for a temporarily unavailable path instead of degrading. Retention is keyed on `db_path` and the instance is still rebuilt from the incoming config, so a concurrent geo policy change applies and a repointed `db_path` never inherits the old snapshot.
 - Plugin constructors with file deps should tolerate missing files, log a warning, store `None`, and apply configured request-time fallback policy.
 - Frontend TLS cert failure is always fatal.
-- Custom plugins live under `custom_plugins/` and may export `plugin_migrations() -> Vec<CustomPluginMigration>`.
-- SQL plugin migrations are tracked in `_ferrum_plugin_migrations` by `(plugin_name, version)`.
-- `FERRUM_AUTO_APPLY_PLUGIN_MIGRATIONS=false` warns on pending plugin migrations at database/cp startup; it does not mutate schema.
-- `FERRUM_AUTO_APPLY_PLUGIN_MIGRATIONS=true` applies pending plugin migrations before `load_full_config`; failure is fatal.
-- Standalone migrate mode always applies plugin migrations. MongoDB custom plugin migration support is constructor-created collections/indexes only.
+- Custom-plugin persistence is owned by Ferrum Edge. Foundry has no plugin
+  database or migration runner; follow the local [configuration and storage
+  rules](config-database.md) when editing Foundry.
 
 ## Notifications
 
