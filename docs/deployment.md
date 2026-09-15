@@ -5,6 +5,12 @@ single-page application served by a Fastify BFF (backend-for-frontend). The BFF
 holds the Ferrum Edge admin signing key, mints short-lived admin JWTs, and
 proxies admin API calls to the gateway.
 
+Foundry is in [active buildout](../README.md#development-status) with no users
+yet. These deployment instructions describe the intended production setup;
+development versions may introduce breaking changes without an upgrade path.
+Foundry has no application database or schema migration step. Gateway database
+setup belongs to Ferrum Edge.
+
 Foundry does not authenticate people. An identity-aware reverse proxy in front
 of it does. Read [Production authentication](authentication.md) before
 deploying.
@@ -657,9 +663,10 @@ docker image inspect --format '{{index .RepoDigests 0}}' ferrumedge/ferrum-found
 
 Roll back by redeploying the previous immutable tag or digest. Foundry keeps no
 persistent state of its own, so a rollback is a pod or container replacement.
-Confirm that the previous version's `FERRUM_JWT_AUDIENCE` and
-`FERRUM_JWT_SECRET` still match the gateway before rolling back across a
-gateway change.
+Confirm that the previous version's admin API contract, `FERRUM_JWT_AUDIENCE`,
+and `FERRUM_JWT_SECRET` still match the gateway before rolling back across a
+gateway change. Compatibility between development versions is not guaranteed
+during buildout.
 
 Images are built for `linux/amd64` and `linux/arm64`, and published images carry
 build provenance and SBOM attestations. See

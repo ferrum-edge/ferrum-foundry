@@ -14,6 +14,19 @@
 
 Admin panel UI for managing and observing the [Ferrum Edge](https://github.com/ferrum-edge/ferrum-edge) Proxy/Gateway.
 
+## Development status
+
+Ferrum Foundry is in active buildout and has no users yet. Breaking changes are
+expected; backward compatibility and upgrade paths for earlier development
+versions are not required. Update the implementation, tests, demo data, and docs
+together when a contract changes.
+
+Foundry has no application database, SQL schema, or database migrations. Gateway
+data and its schema belong to Ferrum Edge. If Foundry introduces its own database
+during buildout, keep one canonical initial schema and fold schema changes into
+it instead of accumulating incremental migrations. Recreate disposable local
+data as needed. Revisit this policy before onboarding users.
+
 ## Features
 
 - **Resource Management** - Full CRUD for Proxies (HTTP + TCP/UDP/DTLS stream routes), Consumers, Plugins, and Upstreams with server-paginated tables and complete-collection search
