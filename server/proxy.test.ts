@@ -14,6 +14,7 @@ const observed: Array<{
   body: string;
   authorization?: string;
   acceptEncoding?: string;
+  provisionedBy?: string | string[];
 }> = [];
 const GZIP_RESPONSE = JSON.stringify({ ok: true, payload: 'x'.repeat(4096) });
 // Upstream requests whose body never finished arriving because the BFF cut them
@@ -37,6 +38,7 @@ function gatewayHandler(request: IncomingMessage, response: ServerResponse): voi
       body: await readBody(request),
       authorization: request.headers.authorization,
       acceptEncoding: request.headers['accept-encoding'],
+      provisionedBy: request.headers['x-ferrum-provisioned-by'],
     });
     if (request.url?.startsWith('/slow-headers')) {
       setTimeout(() => response.end('{"ok":true}'), 250);
@@ -229,6 +231,39 @@ afterAll(async () => {
 });
 
 describe('streaming gateway proxy', () => {
+  it.each([60_000, 30_000])(
+    'reuses the same dispatcher across waiting and ordinary requests at %s ms',
+    async (readTimeout) => {
+      const configModule = await import('./config.js');
+      const transport = await import('./tls.js');
+      const config = { ...configModule.loadConfig(), readTimeout };
+      const configSpy = vi.spyOn(configModule, 'loadConfig').mockReturnValue(config);
+      const dispatcher = transport.getDispatcher(config);
+      const spy = vi.spyOn(transport, 'getDispatcher');
+      try {
+        for (const [method, path] of [
+          ['POST', '/admin/tls/acme/orders/fixture/finalize'],
+          ['GET', '/proxies'],
+          ['GET', '/config/apply-status'],
+          ['GET', '/proxies'],
+        ] as const) {
+          const response = await app.inject({
+            method,
+            url: `/api/proxy${path}`,
+            headers: sessionHeaders,
+          });
+          expect(response.statusCode).toBe(200);
+        }
+        expect(spy).toHaveBeenCalledTimes(4);
+        for (const result of spy.mock.results) expect(result.value).toBe(dispatcher);
+        expect(dispatcher.closed).toBe(false);
+      } finally {
+        spy.mockRestore();
+        configSpy.mockRestore();
+      }
+    },
+  );
+
   it('separates liveness from authenticated downstream readiness', async () => {
     const live = await app.inject({ method: 'GET', url: '/api/health/live' });
     expect(live.statusCode).toBe(200);
@@ -321,6 +356,30 @@ describe('streaming gateway proxy', () => {
       role: 'admin',
     });
   });
+
+  it.each([
+    ['POST', '/proxies', '{"labels":{"team":"platform"}}'],
+    ['POST', '/batch', '{"proxies":[]}'],
+    ['POST', '/restore?confirm=true', '{"version":"1"}'],
+    ['POST', '/api-specs', 'openapi: 3.1.0\n'],
+    ['PUT', '/api-specs/spec-id', 'openapi: 3.1.0\n'],
+  ] as const)(
+    'attributes %s %s without changing upload bytes or accepting a spoofed header',
+    async (method, path, payload) => {
+      const response = await app.inject({
+        method,
+        url: `/api/proxy${path}`,
+        headers: {
+          ...sessionHeaders,
+          'content-type': 'application/yaml',
+          'x-ferrum-provisioned-by': 'spoofed-client',
+        },
+        payload,
+      });
+      expect(response.statusCode).toBe(200);
+      expect(observed.at(-1)).toMatchObject({ body: payload, provisionedBy: 'ferrum-foundry' });
+    },
+  );
 
   it('preserves reviewed response metadata while stripping upstream cookies', async () => {
     const response = await app.inject({

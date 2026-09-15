@@ -1,4 +1,4 @@
-import { forwardRef, type InputHTMLAttributes } from "react";
+import { forwardRef, useId, type InputHTMLAttributes } from "react";
 
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string;
@@ -8,7 +8,9 @@ export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(
   ({ label, error, helpText, className = "", id, ...props }, ref) => {
-    const inputId = id || label?.toLowerCase().replace(/\s+/g, "-");
+    const generatedId = useId();
+    const inputId = id ?? generatedId;
+    const descriptionId = `${inputId}-description`;
 
     return (
       <div className="flex min-w-0 flex-col gap-1.5">
@@ -23,12 +25,20 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
         <input
           ref={ref}
           id={inputId}
+          aria-describedby={error || helpText ? descriptionId : undefined}
+          aria-invalid={error ? true : undefined}
           className={`w-full min-w-0 bg-bg-input border rounded-lg px-3 py-2 text-text-primary text-sm placeholder:text-text-muted transition-colors duration-150 ${error ? "border-danger focus:border-danger focus:ring-1 focus:ring-danger/30" : "border-border focus:border-orange focus:ring-1 focus:ring-orange/30"} ${className}`}
           {...props}
         />
-        {error && <p className="text-danger text-xs">{error}</p>}
-        {!error && helpText && (
-          <p className="text-text-muted text-xs">{helpText}</p>
+        {helpText && !error && (
+          <p id={descriptionId} className="text-text-muted text-xs">
+            {helpText}
+          </p>
+        )}
+        {error && (
+          <p id={descriptionId} className="text-danger text-xs">
+            {error}
+          </p>
         )}
       </div>
     );

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { getRestoreApiSpecConfirmation, getRestoreFailure, getRestoreCommitted } from "./ops";
+import {
+  getRestoreApiSpecConfirmation,
+  getRestoreFailure,
+  getRestoreCommitted,
+  getRestoreUnknownOutcome,
+} from "./ops";
 
 function httpError(status: number, data: unknown): Error {
   return Object.assign(new Error(`HTTP ${status}`), {
@@ -109,5 +114,47 @@ describe("restore 503 recovery", () => {
       response: { status: 503, headers: new Headers({ "x-ferrum-config-cursor": cursor }) },
     });
     expect(getRestoreCommitted(error)).toBeNull();
+  });
+});
+
+describe("getRestoreUnknownOutcome", () => {
+  const unobservable: Array<[number, Record<string, unknown> & { error: string }, string]> = [
+    [504, { error: "Gateway Timeout", code: "FERRUM_BFF_TIMEOUT", phase: "response" }, "gateway_timeout"],
+    [504, { error: "Gateway Timeout" }, "gateway_timeout"],
+    [502, { error: "Bad Gateway", code: "FERRUM_BFF_UPSTREAM_FAILURE" }, "upstream_failure"],
+  ];
+
+  it.each(unobservable)("treats %d as unobservable", (status, data, reason) => {
+    expect(getRestoreUnknownOutcome(httpError(status, data))).toEqual({
+      reason,
+      detail: data.error,
+    });
+  });
+
+  it("keeps an upload-phase timeout a definite, retryable failure", () => {
+    const error = httpError(504, {
+      error: "Gateway Timeout", code: "FERRUM_BFF_TIMEOUT", phase: "upload", reason: "idle",
+    });
+    expect(getRestoreUnknownOutcome(error)).toBeNull();
+  });
+
+  it("classifies a client timeout and a dropped connection", () => {
+    const timeout = Object.assign(new Error("Request timed out"), { name: "TimeoutError" });
+    expect(getRestoreUnknownOutcome(timeout)).toEqual({ reason: "client_timeout", detail: null });
+    expect(getRestoreUnknownOutcome(new TypeError("Failed to fetch"))).toEqual({
+      reason: "transport",
+      detail: "Failed to fetch",
+    });
+  });
+
+  it("leaves gateway answers and pre-send refusals to their own classifiers", () => {
+    const unbound = Object.assign(new Error("no namespace binding"), {
+      name: "UnboundNamespaceError",
+    });
+    expect(getRestoreUnknownOutcome(unbound)).toBeNull();
+    expect(getRestoreUnknownOutcome(httpError(500, { error: "restore failed" }))).toBeNull();
+    expect(getRestoreUnknownOutcome(httpError(503, { error: "database unreachable" }))).toBeNull();
+    expect(getRestoreUnknownOutcome(httpError(409, { error: "specs at risk" }))).toBeNull();
+    expect(getRestoreUnknownOutcome("not an error")).toBeNull();
   });
 });

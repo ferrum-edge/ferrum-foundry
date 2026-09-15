@@ -70,6 +70,7 @@ export function SearchBar({
         value={localValue}
         onChange={handleChange}
         placeholder={placeholder}
+        aria-label={placeholder}
         className="w-full bg-bg-input border border-border rounded-lg pl-9 pr-3 py-2 text-text-primary text-sm placeholder:text-text-muted transition-colors duration-150 focus:border-orange focus:ring-1 focus:ring-orange/30 outline-none"
       />
     </div>

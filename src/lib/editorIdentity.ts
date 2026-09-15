@@ -39,6 +39,11 @@
  * read-only panels), and a successful save leaves the submitted values in
  * place because they are what the gateway now holds. To pick up a change
  * made elsewhere, leave and reopen the resource.
+ * A failed background read with retained data must also keep the form mounted:
+ * render a non-blocking refresh notice, never gate the editor on `isError`.
+ * Supplementary membership reads initialize once; failure disables the picker
+ * without changing the form's identity or its initialized state. Read-only
+ * conclusions use ReadState to avoid presenting retained data as current.
  */
 export interface EditorIdentity {
   readonly namespace: string;

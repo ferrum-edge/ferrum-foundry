@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { Buffer } from "node:buffer";
 import { SignJWT } from "jose";
-import { readSeedConfig } from "./seed-demo-gateway.mjs";
+import { basicAuthSmokePlan, readSeedConfig } from "./seed-demo-gateway.mjs";
 
 const config = readSeedConfig();
 const manifest = JSON.parse(readFileSync(config.manifestPath, "utf8"));
@@ -68,10 +68,16 @@ await requireSuccess("/demo/catalog/v1/items/1", {
   "x-api-key": manifest.key_consumers[0].key,
 });
 
-const basicConsumer = manifest.basic_consumers[0];
-await requireSuccess("/demo/identity/v1/items/1", {
-  authorization: `Basic ${Buffer.from(`${basicConsumer.username}:${basicConsumer.password}`).toString("base64")}`,
-});
+const smoked = ["public", "key"];
+const basicPlan = basicAuthSmokePlan(manifest);
+if (basicPlan.skipped) {
+  console.log(basicPlan.notice);
+} else {
+  await requireSuccess("/demo/identity/v1/items/1", {
+    authorization: `Basic ${Buffer.from(`${basicPlan.consumer.username}:${basicPlan.consumer.password}`).toString("base64")}`,
+  });
+  smoked.push("basic");
+}
 
 const bearer = `Bearer ${await makeConsumerJwt()}`;
 await requireSuccess("/demo/reporting/v1/items/1", { authorization: bearer });
@@ -80,9 +86,10 @@ await requireSuccess("/demo/fulfillment/v1/items/1", {
 });
 await requireSuccess("/demo/support/v1/items/1", { authorization: bearer });
 await requireSuccess("/demo/sandbox/fixtures", {}, { expectBackend: false });
+smoked.push("jwt", "multi-key", "multi-jwt", "response-mock");
 
 console.log(JSON.stringify({
   verified: true,
-  routes: ["public", "key", "basic", "jwt", "multi-key", "multi-jwt", "response-mock"],
+  routes: smoked,
   negative_auth: "missing key credential rejected",
 }));

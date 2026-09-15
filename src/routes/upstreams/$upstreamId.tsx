@@ -1,3 +1,4 @@
+import { ResourceLabels } from "@/components/shared/ResourceLabels";
 /* ------------------------------------------------------------------ */
 /*  Ferrum Foundry – Upstream detail / edit page                       */
 /* ------------------------------------------------------------------ */
@@ -9,6 +10,7 @@ import {
   useUpdateUpstream,
   useDeleteUpstream,
 } from "@/hooks/useUpstreams";
+import { ReadStateNotice } from '@/components/shared/ReadState';
 import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -45,9 +47,11 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const { data: upstream, isLoading, isError } = useUpstream(upstreamId);
   const updateUpstream = useUpdateUpstream();
   const deleteUpstream = useDeleteUpstream();
+  const detailLive = !deleteUpstream.isPending && !deleteUpstream.isSuccess;
+  const resourceQuery = useUpstream(upstreamId, detailLive);
+  const { data: upstream, isLoading } = resourceQuery;
 
   const [deleteOpen, setDeleteOpen] = useState(false);
 
@@ -132,7 +136,10 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
     );
   }
 
-  if (isError || !upstream) {
+  if (!upstream) {
+    if (deleteUpstream.isPending || deleteUpstream.isSuccess) {
+      return null;
+    }
     return (
       <div className="max-w-2xl">
         <Card>
@@ -155,6 +162,9 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
 
   return (
     <div className="space-y-6 max-w-3xl">
+      {resourceQuery.isError && (
+        <ReadStateNotice query={resourceQuery} label="Upstream configuration" />
+      )}
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -174,6 +184,8 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
           Delete
         </Button>
       </div>
+
+      <ResourceLabels labels={upstream.labels} />
 
       {/* Tabs */}
       <Tabs defaultValue="config">

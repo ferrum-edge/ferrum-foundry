@@ -2,6 +2,9 @@
 /*  Ferrum Foundry – Dashboard landing page                            */
 /* ------------------------------------------------------------------ */
 
+import { useState } from 'react';
+import { ReadState } from '@/components/shared/ReadState';
+import { RefreshControl } from '@/components/metrics/RefreshControl';
 import { Link } from "@tanstack/react-router";
 import { useHealth, useAdminMetrics } from "@/hooks/useMetrics";
 import { useGatewayRequestStats } from "@/hooks/useGatewayRequestStats";
@@ -9,8 +12,10 @@ import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { BffConnectionCard } from "@/components/shared/BffConnectionCard";
 import { StatCard } from "@/components/metrics/StatCard";
-import { SkeletonCard } from "@/components/ui/Skeleton";
-import { getStoredMetricsRefreshInterval } from "@/utils/metricsRefresh";
+import {
+  getStoredMetricsRefreshInterval,
+  setStoredMetricsRefreshInterval,
+} from '@/utils/metricsRefresh';
 
 /* ── Helpers ───────────────────────────────────────────────────────── */
 
@@ -57,7 +62,7 @@ const NAV_CARDS = [
 /* ================================================================== */
 
 export default function DashboardPage() {
-  const refreshInterval = getStoredMetricsRefreshInterval();
+  const [refreshInterval, setRefreshInterval] = useState(getStoredMetricsRefreshInterval);
   const health = useHealth();
   const metrics = useAdminMetrics(refreshInterval);
   const requestStats = useGatewayRequestStats(
@@ -107,223 +112,229 @@ export default function DashboardPage() {
       </div>
 
       <BffConnectionCard />
+      <RefreshControl
+        refreshInterval={refreshInterval}
+        onIntervalChange={(interval) => {
+          setRefreshInterval(interval);
+          setStoredMetricsRefreshInterval(interval);
+        }}
+        onRefreshNow={async () => {
+          await Promise.all([health.refetch(), metrics.refetch()]);
+        }}
+        isRefreshing={health.isFetching || metrics.isFetching}
+        lastUpdated={metrics.dataUpdatedAt ? new Date(metrics.dataUpdatedAt).toISOString() : undefined}
+        lastUpdatedLabel="Admin metrics last updated"
+      />
 
-      {/* ── Gateway status card ────────────────────────────────────── */}
-      {health.isLoading ? (
-        <SkeletonCard />
-      ) : health.data ? (
-        <Card>
-          <h2 className="text-sm font-semibold text-text-primary mb-3">
-            Gateway process health
-          </h2>
-          <div className="flex flex-wrap items-center gap-4">
-            <Badge
-              variant={health.data.status === "ok" ? "green" : "yellow"}
-              className="text-sm px-3 py-1"
-            >
-              {health.data.status.toUpperCase()}
-            </Badge>
-            <span className="text-text-secondary text-sm">
-              Mode:{" "}
-              <span className="text-text-primary font-medium">
-                {health.data.mode}
-              </span>
-            </span>
-            {health.data.database && (
-              <span className="text-text-secondary text-sm">
-                Database:{" "}
-                <Badge
-                  variant={
-                    health.data.database.status === "connected" ? "green" : "red"
-                  }
-                >
-                  {health.data.database.status}
-                </Badge>
-              </span>
-            )}
-          </div>
-        </Card>
-      ) : null}
-
-      {/* ── Quick stats ────────────────────────────────────────────── */}
-      {metrics.isLoading ? (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div
-              key={i}
-              className="bg-bg-card border border-border rounded-lg p-4 space-y-2"
-            >
-              <div className="h-3 w-16 bg-bg-card-hover rounded animate-pulse" />
-              <div className="h-7 w-12 bg-bg-card-hover rounded animate-pulse" />
-            </div>
-          ))}
-        </div>
-      ) : metrics.data ? (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard
-            label="Proxies"
-            value={metrics.data.gateway.proxy_count}
-            icon={
-              <svg
-                className="w-4 h-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={1.5}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101"
-                />
-              </svg>
-            }
-          />
-          <StatCard
-            label="Consumers"
-            value={metrics.data.gateway.consumer_count}
-            icon={
-              <svg
-                className="w-4 h-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={1.5}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"
-                />
-              </svg>
-            }
-          />
-          <StatCard
-            label="Upstreams"
-            value={metrics.data.gateway.upstream_count}
-            icon={
-              <svg
-                className="w-4 h-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={1.5}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"
-                />
-              </svg>
-            }
-          />
-          <StatCard
-            label="Plugins"
-            value={metrics.data.gateway.plugin_config_count}
-            icon={
-              <svg
-                className="w-4 h-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={1.5}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M17 14v6m-3-3h6M6 10h2a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v2a2 2 0 002 2z"
-                />
-              </svg>
-            }
-          />
-        </div>
-      ) : null}
-
-      {/* ── Additional stats row ───────────────────────────────────── */}
-      {metrics.data && (
-        <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-          <StatCard
-            label="Requests / sec"
-            value={
-              requestStats.requestsPerSecond === undefined
-                ? "Collecting"
-                : requestStats.requestsPerSecond >= 10
-                  ? requestStats.requestsPerSecond.toFixed(0)
-                  : requestStats.requestsPerSecond.toFixed(1)
-            }
-            subtitle={`${requestStats.totalRequests.toLocaleString()} total`}
-            variant="success"
-          />
-          <StatCard
-            label="Uptime"
-            value={formatUptime(metrics.data.gateway.uptime_seconds)}
-          />
-          <StatCard
-            label="Ferrum Version"
-            value={metrics.data.gateway.ferrum_version}
-          />
-        </div>
-      )}
-
-      {/* ── Circuit breaker alerts ─────────────────────────────────── */}
-      {metrics.data &&
-        metrics.data.circuit_breakers.some((cb) => cb.state !== "closed") && (
-          <Card className="border-warning/30">
-            <h2 className="text-sm font-semibold text-warning mb-3">
-              Circuit Breaker Alerts
+      <ReadState queries={[health]} label="Gateway process health">
+        {/* ── Gateway status card ────────────────────────────────────── */}
+        {health.data ? (
+          <Card>
+            <h2 className="text-sm font-semibold text-text-primary mb-3">
+              Gateway process health
             </h2>
-            <div className="space-y-2">
-              {metrics.data.circuit_breakers
-                .filter((cb) => cb.state !== "closed")
-                .map((cb) => (
+            <p className="text-xs text-text-muted mb-3">
+              Last successful observation: {new Date(health.dataUpdatedAt).toLocaleString()}
+            </p>
+            <div className="flex flex-wrap items-center gap-4">
+              <Badge
+                variant={health.data.status === "ok" ? "green" : "yellow"}
+                className="text-sm px-3 py-1"
+              >
+                {health.data.status.toUpperCase()}
+              </Badge>
+              <span className="text-text-secondary text-sm">
+                Mode:{" "}
+                <span className="text-text-primary font-medium">
+                  {health.data.mode}
+                </span>
+              </span>
+              {health.data.database && (
+                <span className="text-text-secondary text-sm">
+                  Database:{" "}
+                  <Badge
+                    variant={
+                      health.data.database.status === "connected" ? "green" : "red"
+                    }
+                  >
+                    {health.data.database.status}
+                  </Badge>
+                </span>
+              )}
+            </div>
+          </Card>
+        ) : null}
+      </ReadState>
+
+      <ReadState queries={[metrics]} label="Admin metrics">
+        {/* ── Quick stats ────────────────────────────────────────────── */}
+        {metrics.data ? (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <StatCard
+              label="Proxies"
+              value={metrics.data.gateway.proxy_count}
+              icon={
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={1.5}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101"
+                  />
+                </svg>
+              }
+            />
+            <StatCard
+              label="Consumers"
+              value={metrics.data.gateway.consumer_count}
+              icon={
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={1.5}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"
+                  />
+                </svg>
+              }
+            />
+            <StatCard
+              label="Upstreams"
+              value={metrics.data.gateway.upstream_count}
+              icon={
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={1.5}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"
+                  />
+                </svg>
+              }
+            />
+            <StatCard
+              label="Plugins"
+              value={metrics.data.gateway.plugin_config_count}
+              icon={
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={1.5}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M17 14v6m-3-3h6M6 10h2a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v2a2 2 0 002 2z"
+                  />
+                </svg>
+              }
+            />
+          </div>
+        ) : null}
+
+        {/* ── Additional stats row ───────────────────────────────────── */}
+        {metrics.data && (
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+            <StatCard
+              label="Requests / sec"
+              value={
+                requestStats.requestsPerSecond === undefined
+                  ? "Collecting"
+                  : requestStats.requestsPerSecond >= 10
+                    ? requestStats.requestsPerSecond.toFixed(0)
+                    : requestStats.requestsPerSecond.toFixed(1)
+              }
+              subtitle={`${requestStats.totalRequests.toLocaleString()} total`}
+              variant="success"
+            />
+            <StatCard
+              label="Uptime"
+              value={formatUptime(metrics.data.gateway.uptime_seconds)}
+            />
+            <StatCard
+              label="Ferrum Version"
+              value={metrics.data.gateway.ferrum_version}
+            />
+          </div>
+        )}
+
+        {/* ── Circuit breaker alerts ─────────────────────────────────── */}
+        {metrics.data &&
+          metrics.data.circuit_breakers.some((cb) => cb.state !== "closed") && (
+            <Card className="border-warning/30">
+              <h2 className="text-sm font-semibold text-warning mb-3">
+                Circuit Breaker Alerts
+              </h2>
+              <div className="space-y-2">
+                {metrics.data.circuit_breakers
+                  .filter((cb) => cb.state !== "closed")
+                  .map((cb) => (
+                    <div
+                      key={cb.proxy_id}
+                      className="flex items-center justify-between text-sm"
+                    >
+                      <span className="text-text-primary font-mono text-xs">
+                        {cb.proxy_id}
+                      </span>
+                      <div className="flex items-center gap-3">
+                        <Badge
+                          variant={cb.state === "open" ? "red" : "yellow"}
+                        >
+                          {cb.state}
+                        </Badge>
+                        <span className="text-text-muted text-xs">
+                          {cb.failure_count} failures
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </Card>
+          )}
+
+        {/* ── Unhealthy targets ──────────────────────────────────────── */}
+        {metrics.data &&
+          metrics.data.health_check.unhealthy_targets.length > 0 && (
+            <Card className="border-danger/30">
+              <h2 className="text-sm font-semibold text-danger mb-3">
+                Unhealthy Targets
+              </h2>
+              <div className="space-y-2">
+                {metrics.data.health_check.unhealthy_targets.map((t) => (
                   <div
-                    key={cb.proxy_id}
+                    key={t.target}
                     className="flex items-center justify-between text-sm"
                   >
                     <span className="text-text-primary font-mono text-xs">
-                      {cb.proxy_id}
+                      {t.target}
                     </span>
-                    <div className="flex items-center gap-3">
-                      <Badge
-                        variant={cb.state === "open" ? "red" : "yellow"}
-                      >
-                        {cb.state}
-                      </Badge>
-                      <span className="text-text-muted text-xs">
-                        {cb.failure_count} failures
-                      </span>
-                    </div>
+                    <span className="text-text-muted text-xs">
+                      since{" "}
+                      {new Date(t.since_epoch_ms).toLocaleString()}
+                    </span>
                   </div>
                 ))}
-            </div>
-          </Card>
-        )}
-
-      {/* ── Unhealthy targets ──────────────────────────────────────── */}
-      {metrics.data &&
-        metrics.data.health_check.unhealthy_targets.length > 0 && (
-          <Card className="border-danger/30">
-            <h2 className="text-sm font-semibold text-danger mb-3">
-              Unhealthy Targets
-            </h2>
-            <div className="space-y-2">
-              {metrics.data.health_check.unhealthy_targets.map((t) => (
-                <div
-                  key={t.target}
-                  className="flex items-center justify-between text-sm"
-                >
-                  <span className="text-text-primary font-mono text-xs">
-                    {t.target}
-                  </span>
-                  <span className="text-text-muted text-xs">
-                    since{" "}
-                    {new Date(t.since_epoch_ms).toLocaleString()}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </Card>
-        )}
+              </div>
+            </Card>
+          )}
+      </ReadState>
 
       {/* ── Quick navigation ───────────────────────────────────────── */}
       <div>

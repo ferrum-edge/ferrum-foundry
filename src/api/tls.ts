@@ -5,7 +5,12 @@
 import { FLEET_GLOBAL, SILENT_ERRORS, proxyApi } from "./client";
 import type { PaginatedResponse, PaginationParams } from "./types";
 import { collectAllPages } from "./pagination";
-import { ACME_MAX_WAIT_MS, serverWaitTimeout } from "../../server/waitBudget";
+import {
+  ACME_MAX_WAIT_MS,
+  longRunningClientTimeout,
+  serverWaitTimeout,
+} from '../../server/waitBudget';
+import { observeMutation } from './mutationOutcome';
 
 /* ---------- Inventory ---------- */
 
@@ -540,9 +545,17 @@ export async function listAllAcmeOrders(context: Record<string, unknown> = {}): 
 export async function createAcmeOrder(
   data: AcmeOrderRequest,
 ): Promise<AcmeOrder> {
-  return proxyApi
-    .post("admin/tls/acme/orders", { json: data, context: FLEET_GLOBAL_CONTEXT })
-    .json<AcmeOrder>();
+  return observeMutation(
+    'ACME order creation',
+    proxyApi
+      .post('admin/tls/acme/orders', {
+        json: data,
+        timeout: longRunningClientTimeout('POST', '/admin/tls/acme/orders'),
+        retry: 0,
+        context: FLEET_GLOBAL_SILENT_CONTEXT,
+      })
+      .json<AcmeOrder>(),
+  );
 }
 
 export async function removeAcmeOrder(id: string): Promise<void> {
@@ -600,9 +613,17 @@ export async function renewAcmeCertificate(
   id: string,
   data: AcmeRenewRequest = {},
 ): Promise<AcmeOrder> {
-  return proxyApi
-    .post(`admin/tls/acme/renew/${id}`, { json: data, context: FLEET_GLOBAL_CONTEXT })
-    .json<AcmeOrder>();
+  return observeMutation(
+    'ACME renewal',
+    proxyApi
+      .post(`admin/tls/acme/renew/${id}`, {
+        json: data,
+        timeout: longRunningClientTimeout('POST', `/admin/tls/acme/renew/${id}`),
+        retry: 0,
+        context: FLEET_GLOBAL_SILENT_CONTEXT,
+      })
+      .json<AcmeOrder>(),
+  );
 }
 
 export async function listAcmeAccounts(

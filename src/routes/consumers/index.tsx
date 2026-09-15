@@ -54,6 +54,7 @@ function getCredentialTypes(consumer: Consumer): string[] {
     return [];
   }
   return Object.keys(consumer.credentials).filter((key) => {
+    if (key === "basicauth") return false;
     const val = consumer.credentials[key];
     if (Array.isArray(val)) return val.length > 0;
     return val !== null && val !== undefined;
@@ -129,6 +130,7 @@ export default function ConsumersPage() {
           <p className="text-text-muted text-sm mt-1">
             Manage API consumers, their credentials, and access control
             policies.
+            {" "}Basic credential presence is unknown because the gateway omits it.
           </p>
         </div>
         <Button onClick={() => navigate({ to: "/consumers/new" })}>
@@ -271,20 +273,15 @@ export default function ConsumersPage() {
 
                   {/* Credential types */}
                   <div className="flex flex-wrap items-center gap-1">
-                    {credTypes.length > 0 ? (
-                      credTypes.map((type) => (
-                        <Badge
-                          key={type}
-                          variant={CREDENTIAL_BADGE_VARIANT[type] ?? "default"}
-                        >
-                          {CREDENTIAL_TYPE_LABELS[type] ?? type}
-                        </Badge>
-                      ))
-                    ) : (
-                      <span className="text-text-muted text-sm italic">
-                        None
-                      </span>
-                    )}
+                    {credTypes.map((type) => (
+                      <Badge
+                        key={type}
+                        variant={CREDENTIAL_BADGE_VARIANT[type] ?? "default"}
+                      >
+                        {CREDENTIAL_TYPE_LABELS[type] ?? type}
+                      </Badge>
+                    ))}
+                    <Badge variant="blue">Basic: unknown</Badge>
                   </div>
 
                   {/* Created at */}

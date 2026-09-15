@@ -6,6 +6,17 @@ import {
 } from "./pluginConfigDefaults";
 
 describe("canonical plugin defaults", () => {
+  it.each([
+    ["ai_prompt_shield", "patterns"],
+    ["ai_response_guard", "pii_patterns"],
+  ])("%s uses the pinned gateway's US phone pattern token", (name, field) => {
+    // Edge b96cfaad: src/plugins/utils/ai_pii.rs::builtin_pii_pattern.
+    // `phone` is rejected by both constructors, rather than ignored.
+    expect(getPluginConfigDefault(name)[field]).toEqual([
+      "email", "phone_us", "credit_card", "ssn",
+    ]);
+  });
+
   it("uses the closed correlation_id shape", () => {
     expect(getPluginConfigDefault("correlation_id")).toEqual({
       header_name: "X-Correlation-ID",
@@ -23,6 +34,54 @@ describe("canonical plugin defaults", () => {
         requests_per_minute: 20000,
       }],
       sync_mode: "local",
+    });
+  });
+
+  it("requires canonical_identity_attribute in the ldap_auth template", () => {
+    expect(getPluginConfigDefault("ldap_auth")).toEqual({
+      ldap_url: "ldap://127.0.0.1:389",
+      bind_dn_template: "uid={username},ou=people,dc=example,dc=org",
+      canonical_identity_attribute: "uid",
+    });
+  });
+
+  it("omits A2A-only discovery.public_base_url from the mcp_gateway template", () => {
+    expect(getPluginConfigDefault("mcp_gateway")).not.toHaveProperty("discovery");
+  });
+
+  it("uses native MeshPolicy documents instead of a Kubernetes CRD envelope", () => {
+    // Edge MeshPolicy (pinned b96cfaad and current main): name, namespace, scope, rules.
+    // A CRD envelope fails current main first on unknown field `apiVersion`.
+    expect(getPluginConfigDefault("mesh_authz")).toEqual({
+      namespace: "default",
+      labels: { app: "payments" },
+      mesh_policies: [
+        {
+          name: "deny-admin",
+          namespace: "default",
+          scope: { kind: "namespace", namespace: "default" },
+          rules: [
+            {
+              action: "deny",
+              to: [{ paths: ["/admin/*"] }],
+            },
+          ],
+        },
+        {
+          name: "allow-checkout",
+          namespace: "default",
+          scope: { kind: "namespace", namespace: "default" },
+          rules: [
+            {
+              action: "allow",
+              from: [
+                { spiffe_id_pattern: "spiffe://cluster.local/ns/default/sa/checkout" },
+              ],
+            },
+          ],
+        },
+      ],
+      trusted_hbone_assertors: ["ztunnel", "waypoint"],
     });
   });
 });

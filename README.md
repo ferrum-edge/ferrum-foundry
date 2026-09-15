@@ -8,7 +8,7 @@
   <a href="https://github.com/ferrum-edge/ferrum-foundry/actions/workflows/ci.yml"><img src="https://github.com/ferrum-edge/ferrum-foundry/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
   <a href="https://github.com/ferrum-edge/ferrum-foundry/actions/workflows/release.yml"><img src="https://github.com/ferrum-edge/ferrum-foundry/actions/workflows/release.yml/badge.svg" alt="Release" /></a>
   <a href="https://github.com/ferrum-edge/ferrum-foundry/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue" alt="License" /></a>
-  <img src="https://img.shields.io/badge/node-%3E%3D22%20%28image%3A%2024%20LTS%29-brightgreen" alt="Node.js 22+ (image: 24 LTS)" />
+  <img src="https://img.shields.io/badge/node-22.19%2B%20%7C%2024%20%7C%2026%2B-brightgreen" alt="Node.js 22.19+, 24.x, or 26+ (image: 24 LTS)" />
   <img src="https://img.shields.io/badge/TypeScript-6-blue" alt="TypeScript" />
 </p>
 
@@ -31,7 +31,7 @@ data as needed. Revisit this policy before onboarding users.
 
 - **Resource Management** - Full CRUD for Proxies (HTTP + TCP/UDP/DTLS stream routes), Consumers, Plugins, and Upstreams with server-paginated tables and complete-collection search
 - **Relational Browsing** - Navigate Proxy -> Plugins -> Upstream -> Targets (with subsets and locality) via tabs and breadcrumbs
-- **Consumer Credentials** - Manage key-auth, basic-auth, JWT, HMAC, and mTLS credential rotation arrays with ACL groups
+- **Consumer Credentials** - Manage key-auth, JWT, HMAC, and mTLS rotation arrays with ACL groups; append, replace, or delete all basic passwords while showing their presence as unknown (the gateway omits basic credentials from ordinary responses)
 - **Plugin Configuration** - Category-grouped catalog of 80+ gateway plugins (auth, security/WAF, traffic control, AI gateway, mesh, observability, billing) with default config templates, per-instance execution triggers, and scope (global/proxy/group) support
 - **TLS Management** - Fleet-global certificate/CA/CRL/OCSP/JWKS stores, ACME order automation (HTTP-01/TLS-ALPN-01/DNS-01), material inventory with expiry tracking, surface rotation, and PEM validation. [Waiting-operation deadlines](docs/deployment.md#live-apply-monitoring-and-acme-issuance-deadlines) cover live-apply monitoring and safe status re-checks after interrupted issuance.
 - **API Spec Import** - Create spec-managed proxies, upstreams, and plugins from OpenAPI documents (`x-ferrum-proxy` extensions) with replace/delete lifecycle
@@ -55,11 +55,28 @@ Browser <-> Fastify BFF (Node.js) <-> Ferrum Admin API
 
 The BFF (Backend-for-Frontend) handles TLS trust stores, connection/read/write timeouts, and JWT generation server-side - capabilities browsers cannot provide.
 
+Read truthfulness is an explicit UI invariant: a failed read cannot establish an
+empty collection, current health, or an authorization conclusion. Shared
+`ReadState` handling distinguishes loading, successful reads, unavailable reads,
+and failed refreshes with retained data. Each independent input reports its own
+failure and retry; failed refreshes identify the last successful observation.
+Policy and trust conclusions become **unknown**, and unavailable audit/API-spec
+collections hide their rows and row actions. Pending spec replacement and deletion
+also require an available collection. The dashboard offers manual refresh and
+labels its observation times.
+
+Detail editors follow a separate draft-preservation rule: a failed refresh with
+cached data keeps the editor mounted and shows a non-blocking retry notice. Plugin
+membership must load completely before the first edit; subsequent failures disable
+the picker without clearing selections or other fields. Recovery never reseeds a
+draft for the same identity. See [editor identity](docs/authentication.md#editor-identity)
+and [plugin membership](docs/plugin-membership.md).
+
 ## Quick Start
 
 ### Prerequisites
 
-- Node.js 22 or newer. The published container image runs Node.js 24 LTS.
+- Node.js 22.19+ within 22.x, 24.x, or 26+. The published container image runs Node.js 24 LTS. This range satisfies both Undici's runtime floor and Vitest 5's supported Node versions.
 - npm 10+
 
 ### Local Development
@@ -86,7 +103,10 @@ The most commonly adjusted optional variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `PORT` | `3001` | BFF server port |
+| `PORT` | `3001` | BFF server port. Vite also uses this as the `/api` proxy port when `VITE_BFF_URL` is unset |
+| `VITE_DEV_HOST` | `localhost` | Vite listen address: `localhost`, `127.0.0.1`, `::1`, or an explicit IP. Binding a non-loopback address (`0.0.0.0`, `::`) is an operator opt-in. Invalid values fail Vite startup |
+| `VITE_DEV_PORT` | `5173` | Vite dev-server listen port (1-65535) |
+| `VITE_BFF_URL` | `http://localhost:$PORT` | Absolute `http`/`https` origin Vite proxies `/api` to; wins over `PORT` when set |
 | `FERRUM_JWT_TTL` | `900` | JWT token TTL (seconds) |
 | `FERRUM_JWT_ROLE` | `admin` | Static development role: viewer/operator/admin |
 | `FERRUM_JWT_AUDIENCE` | - | Optional exact audience claim(s), comma separated |
@@ -103,29 +123,99 @@ Start the dev server:
 npm run dev
 ```
 
-This starts Vite (port 5173) and Fastify (port 3001) concurrently. Open http://localhost:5173.
+This starts Vite (port 5173) and Fastify (port 3001) concurrently. Open
+http://localhost:5173.
+
+Open the SPA at the same hostname the BFF session cookie was issued for.
+`localhost` and `127.0.0.1` are different hosts: a cookie from
+`http://127.0.0.1:3001` is not sent to `http://localhost:5173`. Dev examples
+use `localhost` for Vite, `PORT`, and `VITE_BFF_URL`.
+
+On dual-stack hosts, Vite's default `localhost` bind follows whatever
+`localhost` resolves to (often `[::1]` only), so `http://127.0.0.1:5173` is
+refused while `http://localhost:5173` works. Force IPv4 loopback with
+`VITE_DEV_HOST=127.0.0.1` and use that same host in `VITE_BFF_URL` if you
+reach the BFF by IPv4. Foundry does not bind all interfaces unless you set
+an explicit non-loopback address.
+
+Those ports are defaults. Set `VITE_DEV_PORT` and `PORT` (or `VITE_BFF_URL`) to
+run Foundry next to another Vite app such as Nexus, which uses 5173 for its UI
+and 8787 for its API. Invalid values fail Vite startup rather than being coerced.
+`npm run dev` starts both processes, so a single `PORT` value keeps the BFF
+listen port and the Vite `/api` proxy aligned:
+
+```bash
+export VITE_DEV_PORT=5174
+export PORT=3002
+npm run dev
+```
+
+To point Vite at a BFF that is already listening elsewhere, set `VITE_BFF_URL`
+to that origin (`http://localhost:3002`, for example) instead of `PORT`.
 
 No gateway handy? Run the bundled mock admin API, which serves realistic
-sample data for every admin surface (CRUD, TLS/ACME, audit, cluster, mesh,
-chargeback):
+sample data for most admin surfaces (CRUD, TLS/ACME, audit, cluster,
+overload/chargeback, gateway trust bundles). Write paths follow the live Edge
+contract: proxy `auth_mode` is only `single` or `multi` (not `none`); plugin
+configs require `plugin_name` and `scope` — a top-level `name` field is unknown;
+and CRUD creates of proxies, consumers, upstreams, and plugin configs record
+`labels.provisioned-by` from `X-Ferrum-Provisioned-By` when the body omits that
+key (explicit values win). Empty label maps are omitted from responses, matching
+Edge. PUT does not stamp the header: omitting `labels` preserves the stored map.
 
 ```bash
 node scripts/mock-admin-gateway.mjs   # listens on :9000
 ```
 
+For mesh observability the mock emulates a **non-mesh** gateway: only
+`GET /mesh/service-graph` returns sample data. These mesh routes respond
+404 `{error:"mesh mode not active"}` (the UI shows empty states):
+
+- `/mesh/federation`, `/mesh/remote-clusters`
+- `/mesh/config-drift`, `/mesh/slice-drift`, `/mesh/config-revision/reset`
+- `/mesh/policy-denies/recent`
+- `/mesh/egress-scope`, `/mesh/egress-scope/test`
+- `/node-waypoint/identities`, `/service-waypoint/services`
+
+Use a live mesh-mode Ferrum Edge gateway for the full mesh observability
+surfaces above.
+
 To seed a real gateway, use a dedicated namespace. Seeding performs a full
-replacement of that namespace, so it refuses to run without an explicit opt-in:
+replacement of that namespace, so it refuses to run without an explicit opt-in.
+Preflight checks run after that confirmation and **before** `POST /restore`:
+
+- **Global `prometheus_metrics`**: Ferrum Edge permits only one enabled
+  global instance process-wide. The seeder lists plugin configs in every
+  namespace it can see. If another namespace already owns that registry, the
+  seed **omits** its own `demo-global-prometheus` fixture and prints the
+  owning namespace. Demo routes do not depend on that plugin. A previous seed
+  in the *target* namespace is replaced as usual.
+- **Basic auth**: demo `basic_auth` plugins and `basicauth` consumers need
+  Edge `FERRUM_BASIC_AUTH_HMAC_SECRET` (>= 32 bytes). They are **off by
+  default**, and the corresponding routes and upstreams are omitted rather
+  than exposed without authentication. Set
+  `FERRUM_DEMO_INCLUDE_BASIC_AUTH=true` to include them; the seeder then creates
+  and deletes a probe credential in the target namespace and aborts with exit
+  status 1 if the secret is missing, still before restore.
 
 ```bash
 # FERRUM_JWT_SECRET is the same 32+ character admin signing key used by Ferrum.
 FERRUM_NAMESPACE=ferrum-foundry-demo \
 FERRUM_DEMO_CONFIRM_TARGET='http://127.0.0.1:9000#ferrum-foundry-demo' \
 node scripts/seed-demo-gateway.mjs
+
+# Optional: include basic-auth demo routes (requires the HMAC secret on Edge).
+FERRUM_NAMESPACE=ferrum-foundry-demo \
+FERRUM_DEMO_CONFIRM_TARGET='http://127.0.0.1:9000#ferrum-foundry-demo' \
+FERRUM_DEMO_INCLUDE_BASIC_AUTH=true \
+node scripts/seed-demo-gateway.mjs
 ```
 
 The confirmation must exactly match `<FERRUM_ADMIN_URL>#<FERRUM_NAMESPACE>`;
 changing either target invalidates a previously copied confirmation before any
-HTTP request is made.
+HTTP request is made. `scripts/verify-demo-gateway.mjs` and
+`scripts/demo-route-smoke.mjs` follow the written seed manifest so they assert
+the same optional basic-auth and prometheus choices the seeder actually restored.
 
 The payload uses deterministic resource IDs and can be run repeatedly. It
 includes the current versioned API-spec backup section, current credential-array
@@ -186,6 +276,23 @@ attestations. See [Release and supply-chain gates](docs/release-security.md).
 | Backend | Node.js, Fastify 5 |
 | JWT | jose (HS256) |
 | Docker | Distroless Node.js 24 |
+
+## Resource attribution
+
+Foundry's authenticated BFF sends `X-Ferrum-Provisioned-By: ferrum-foundry`.
+A gateway with resource-label support records `labels.provisioned-by` on newly
+created proxies, consumers, upstreams and plugin configurations, including
+batch creates and resources generated by JSON/YAML API-spec imports. This
+keeps streamed upload bodies unchanged. The demo seeder sends the same header.
+Resource detail pages display all labels, including attribution recorded by
+Git Forge Ops and Nexus. Existing labels survive edits; restore preserves
+recorded origins and spec-owned graphs. Labels are informational, not a change
+to authentication, resource ownership or routing.
+
+Deploy Ferrum Edge's resource-label feature first. Older gateways ignore the
+header and do not record attribution. This does not retroactively identify the
+creator of already-unlabeled resources.
+
 
 ## License
 

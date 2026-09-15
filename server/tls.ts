@@ -3,6 +3,7 @@ import { lstatSync, realpathSync, statSync } from 'node:fs';
 import { BlockList, isIP, type LookupFunction } from 'node:net';
 import { Agent } from 'undici';
 import { loadCaBundle, type CaBundle } from './ca.js';
+import { parseCidr } from './cidr.js';
 import type { Config } from './config.js';
 
 interface ManagedDispatcher {
@@ -52,14 +53,8 @@ let cachedCaBundle: CachedCaBundle | undefined;
 function parseAllowedCidrs(values: string[]): BlockList {
   const list = new BlockList();
   for (const value of values) {
-    const [address, rawPrefix, ...extra] = value.split('/');
-    const ipFamily = isIP(address);
-    const prefix = Number(rawPrefix);
-    const maxPrefix = ipFamily === 4 ? 32 : 128;
-    if (extra.length > 0 || ipFamily === 0 || !Number.isInteger(prefix) || prefix < 0 || prefix > maxPrefix) {
-      throw new Error('FERRUM_ADMIN_ALLOWED_CIDRS contains an invalid CIDR');
-    }
-    list.addSubnet(address, prefix, ipFamily === 4 ? 'ipv4' : 'ipv6');
+    const { address, prefix, family } = parseCidr(value);
+    list.addSubnet(address, prefix, family);
   }
   return list;
 }
@@ -183,7 +178,6 @@ function dispatcherFingerprint(config: Config, caBundle: CaBundle | undefined): 
   return JSON.stringify({
     origin: config.adminUrl,
     connectTimeout: config.connectTimeout,
-    readTimeout: config.readTimeout,
     tlsVerify: config.tlsVerify,
     caPath: caBundle?.path,
     caFingerprint: caBundle?.fingerprint,
@@ -208,8 +202,10 @@ function createDispatcher(
         ...(caBundle && { ca: caBundle.pem }),
       }),
     },
-    headersTimeout: Math.max(config.readTimeout, 120_000),
-    bodyTimeout: config.readTimeout,
+    // Upload and response deadlines are enforced by the request controller.
+    // Agent timers must not cap waiting routes or vary the connection identity.
+    headersTimeout: 0,
+    bodyTimeout: 0,
     keepAliveTimeout: 10_000,
     keepAliveMaxTimeout: 60_000,
   });

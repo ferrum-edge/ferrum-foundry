@@ -19,7 +19,7 @@ class BasedRequest extends Request {
 let root: Root;
 let host: HTMLDivElement;
 let qc: QueryClient;
-let responses: Response[];
+let responses: (Response | Error)[];
 const requests: Request[] = [];
 
 async function click(label: string) {
@@ -54,7 +54,13 @@ beforeEach(async () => {
   vi.stubGlobal("Request", BasedRequest);
   vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
     requests.push(request.clone());
-    if (request.method === "POST") return responses.shift()!;
+    if (request.method === "POST") {
+      const next = responses.shift()!;
+      // A rejected fetch is the transport dropping mid-operation, which is
+      // exactly the outcome Foundry cannot observe.
+      if (next instanceof Error) throw next;
+      return next;
+    }
     expect(new URL(request.url).pathname).toBe("/api/proxy/config/apply-status");
     expect(request.headers.get("x-ferrum-namespace")).toBe("tenant-a");
     return Response.json({
@@ -135,6 +141,94 @@ describe("restore recovery presentation", () => {
     expect(requests).toHaveLength(1);
     expect(qc.getQueryState(["consumer", "tenant-a", "old"])?.isInvalidated).toBe(false);
     expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  const unknownOutcomes: Array<[string, () => Response | Error, string]> = [
+    [
+      "a response-phase BFF timeout",
+      () => Response.json(
+        { error: "Gateway Timeout", code: "FERRUM_BFF_TIMEOUT", phase: "response" },
+        { status: 504 },
+      ),
+      "The gateway did not answer within the restore budget",
+    ],
+    [
+      "an unlabelled gateway timeout",
+      () => Response.json({ error: "Gateway Timeout" }, { status: 504 }),
+      "The gateway did not answer within the restore budget",
+    ],
+    [
+      "a BFF upstream failure",
+      () => Response.json(
+        { error: "Bad Gateway", code: "FERRUM_BFF_UPSTREAM_FAILURE" },
+        { status: 502 },
+      ),
+      "The connection to the gateway failed",
+    ],
+    [
+      "a dropped connection",
+      () => new TypeError("Failed to fetch"),
+      "The request to the gateway ended without an answer",
+    ],
+  ];
+
+  it.each(unknownOutcomes)("reports an unknown outcome and disarms the confirmation after %s", async (_label, answer, cause) => {
+    responses.push(answer());
+    await chooseBackup();
+    await click("Restore");
+    await settle(() => expect(document.body.textContent).toContain("Restore outcome unknown"));
+
+    // The operator is told to read the gateway back rather than being offered
+    // a one-click replay of a restore that may already have committed.
+    expect(document.body.textContent).toContain(cause);
+    expect(document.body.textContent).toContain("verify the gateway before retrying");
+    expect(document.body.textContent).not.toContain("Restore failed");
+    expect(document.body.textContent).not.toContain("Restore committed in namespace");
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect([...document.querySelectorAll("button")].some(
+      (button) => button.textContent?.trim() === "Restore",
+    )).toBe(false);
+    expect(requests.filter((request) => request.method === "POST")).toHaveLength(1);
+    expect(qc.getQueryState(["consumer", "tenant-a", "old"])?.isInvalidated).toBe(true);
+  });
+
+  it("keeps the confirmation armed when the upload phase proves the restore did not run", async () => {
+    responses.push(Response.json(
+      { error: "Gateway Timeout", code: "FERRUM_BFF_TIMEOUT", phase: "upload", reason: "idle" },
+      { status: 504 },
+    ));
+    await chooseBackup();
+    await click("Restore");
+    await settle(() => expect(document.body.textContent).toContain("504"));
+
+    // The body never finished streaming, so this outcome is safe to retry.
+    expect(document.body.textContent).not.toContain("Restore outcome unknown");
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(qc.getQueryState(["consumer", "tenant-a", "old"])?.isInvalidated).toBe(false);
+  });
+
+  it("replays an unknown-outcome restore only after an explicit re-arm", async () => {
+    responses.push(Response.json(
+      { error: "Gateway Timeout", code: "FERRUM_BFF_TIMEOUT", phase: "response" },
+      { status: 504 },
+    ));
+    responses.push(Response.json({
+      restored: {
+        proxies: 1, consumers: 0, plugin_configs: 0, upstreams: 0,
+        api_specs: 0, gateway_trust_bundles: 0,
+      },
+    }));
+    await chooseBackup();
+    await click("Restore");
+    await settle(() => expect(document.body.textContent).toContain("Restore outcome unknown"));
+    expect(requests.filter((request) => request.method === "POST")).toHaveLength(1);
+
+    await click("Re-arm this restore");
+    await settle(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull());
+    expect(document.body.textContent).not.toContain("Restore outcome unknown");
+    await click("Restore");
+    await settle(() => expect(document.body.textContent).toContain("Restored 1 proxies"));
+    expect(requests.filter((request) => request.method === "POST")).toHaveLength(2);
   });
 
   it("preserves a canonical 500 incomplete-rollback recovery panel", async () => {

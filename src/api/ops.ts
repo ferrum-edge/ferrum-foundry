@@ -14,7 +14,7 @@ import {
   type NamespaceScope,
 } from "./client";
 import type {
-  Consumer,
+  ConsumerBackup,
   ConsumerCreate,
   PluginConfig,
   PluginConfigCreate,
@@ -451,7 +451,7 @@ export interface BackupResponse {
     gateway_trust_bundles?: number;
   };
   proxies: Proxy[];
-  consumers: Consumer[];
+  consumers: ConsumerBackup[];
   plugin_configs: PluginConfig[];
   upstreams: Upstream[];
   gateway_trust_bundles?: unknown[];
@@ -599,6 +599,64 @@ export function getRestoreFailure(error: unknown): RestoreFailure | null {
     }),
     ...(body.api_specs_note !== undefined && { api_specs_note: body.api_specs_note }),
   };
+}
+
+export type RestoreUnknownOutcomeReason =
+  | "gateway_timeout"
+  | "upstream_failure"
+  | "client_timeout"
+  | "transport";
+
+export interface RestoreUnknownOutcome {
+  reason: RestoreUnknownOutcomeReason;
+  detail: string | null;
+}
+
+function bffErrorBody(candidate: { data?: unknown }): Record<string, unknown> | undefined {
+  return candidate.data && typeof candidate.data === "object"
+    ? (candidate.data as Record<string, unknown>)
+    : undefined;
+}
+
+/**
+ * Classify a restore failure Foundry could not observe the outcome of.
+ *
+ * The gateway's own answers say what happened; these do not. The BFF's
+ * `phase` is the discriminator and the only proof available: `'upload'` means
+ * the request body never finished streaming, so the restore provably did not
+ * run and re-arming the confirmation is correct. Every other transport
+ * outcome — a `504` once the body has been sent, a `502`
+ * `FERRUM_BFF_UPSTREAM_FAILURE`, ky's own `TimeoutError`, a dropped
+ * connection — leaves a destructive full replacement that may already have
+ * committed on the gateway. The admin API offers no restore operation id or
+ * idempotency key, so nothing can resolve that automatically; the honest
+ * report is "outcome unknown, read the gateway back".
+ *
+ * The non-HTTP branch is deliberately fail-safe: an unrecognized rejection
+ * from a request that was already issued is treated as unobservable rather
+ * than as a definite failure. `UnboundNamespaceError` is the one exclusion —
+ * the client raises it before a byte goes on the wire.
+ */
+export function getRestoreUnknownOutcome(error: unknown): RestoreUnknownOutcome | null {
+  if (!(error instanceof Error)) return null;
+  if (error.name === "UnboundNamespaceError") return null;
+
+  const candidate = error as { response?: { status?: unknown }; data?: unknown };
+  const status = candidate.response?.status;
+  if (typeof status !== "number") {
+    if (error.name === "TimeoutError") return { reason: "client_timeout", detail: null };
+    return { reason: "transport", detail: error.message || null };
+  }
+
+  const body = bffErrorBody(candidate);
+  const detail = typeof body?.error === "string" ? body.error : null;
+  if (status === 504) {
+    // Only the BFF's own upload phase proves the body never landed.
+    if (body?.phase === "upload") return null;
+    return { reason: "gateway_timeout", detail };
+  }
+  if (status === 502) return { reason: "upstream_failure", detail };
+  return null;
 }
 
 /**

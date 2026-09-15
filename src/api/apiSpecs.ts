@@ -2,7 +2,11 @@
 /*  Ferrum Foundry – API spec import endpoints (types + functions)    */
 /* ------------------------------------------------------------------ */
 
-import { proxyApi, scoped, type NamespaceScope } from "./client";
+import { proxyApi, scoped, SILENT_ERRORS, type NamespaceScope } from "./client";
+import { longRunningClientTimeout } from '../../server/waitBudget';
+import { observeMutation } from './mutationOutcome';
+
+const readOptions = { timeout: longRunningClientTimeout('GET', '/api-specs'), retry: 0 };
 
 export interface ApiSpecSummary {
   id: string;
@@ -83,7 +87,7 @@ export async function list(
     if (value !== undefined && value !== "") searchParams[key] = String(value);
   }
   return proxyApi
-    .get("api-specs", scoped(scope, { searchParams }))
+    .get("api-specs", scoped(scope, { ...readOptions, searchParams }))
     .json<ApiSpecListResponse>();
 }
 
@@ -137,7 +141,7 @@ export async function getDocument(
   return proxyApi
     .get(
       `api-specs/${id}`,
-      scoped(scope, { headers: { accept: "application/yaml" } }),
+      scoped(scope, { ...readOptions, headers: { accept: "application/yaml" } }),
     )
     .text();
 }
@@ -145,10 +149,16 @@ export async function getDocument(
 function specBodyOptions(document: string): {
   body: string;
   headers: Record<string, string>;
+  timeout: number;
+  retry: number;
+  context: Record<string, unknown>;
 } {
   const isJson = document.trimStart().startsWith("{");
   return {
     body: document,
+    timeout: longRunningClientTimeout('POST', '/api-specs'),
+    retry: 0,
+    context: { [SILENT_ERRORS]: true },
     headers: {
       "content-type": isJson ? "application/json" : "application/yaml",
     },
@@ -160,9 +170,12 @@ export async function create(
   scope: NamespaceScope,
   document: string,
 ): Promise<ApiSpecCreateResponse> {
-  return proxyApi
-    .post("api-specs", scoped(scope, specBodyOptions(document)))
-    .json<ApiSpecCreateResponse>();
+  return observeMutation(
+    'Spec import',
+    proxyApi
+      .post('api-specs', scoped(scope, specBodyOptions(document)))
+      .json<ApiSpecCreateResponse>(),
+  );
 }
 
 /** Replace a spec's document and its spec-owned resources. */
@@ -171,12 +184,15 @@ export async function update(
   id: string,
   document: string,
 ): Promise<ApiSpecCreateResponse> {
-  return proxyApi
-    .put(`api-specs/${id}`, scoped(scope, specBodyOptions(document)))
-    .json<ApiSpecCreateResponse>();
+  return observeMutation(
+    'Spec replacement',
+    proxyApi
+      .put(`api-specs/${id}`, scoped(scope, specBodyOptions(document)))
+      .json<ApiSpecCreateResponse>(),
+  );
 }
 
 /** Delete the spec and cascade its proxy, plugins, and spec-owned upstream. */
 export async function remove(scope: NamespaceScope, id: string): Promise<void> {
-  await proxyApi.delete(`api-specs/${id}`, scoped(scope));
+  await proxyApi.delete(`api-specs/${id}`, scoped(scope, readOptions));
 }

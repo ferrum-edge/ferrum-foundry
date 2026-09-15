@@ -34,6 +34,22 @@ The trusted proxy must remove client-supplied copies and inject these headers:
 Non-admin identities are rejected when the namespace header is missing. An
 admin may omit it only when policy deliberately grants global administration.
 Header names can be changed with `FERRUM_TRUSTED_PROXY_*_HEADER` variables.
+Each identity/proof header may occur only once on the wire, including configured
+header names. A single namespace header may contain multiple comma-separated
+exact grants. Literal `*` and namespace glob patterns are invalid; unrestricted
+administration uses the deliberately omitted header described above.
+
+The namespace registry is authorized by its actual target: GET/PUT/DELETE
+require the path name, POST requires the body's name, and rename requires both
+old and new names. Registry writes require admin role. The selected
+`X-Ferrum-Namespace` cannot grant access to another registry target. Foundry
+validates registry JSON within the ordinary 2 MiB upload limit before forwarding;
+bulk import/restore routes retain their separate streaming limits and deadlines.
+Registry lists are filtered to exact grants before pagination, including totals,
+under one response deadline. The manager and header selector use the same grants.
+These BFF checks apply even when gateway namespace-claim enforcement is disabled.
+For another enforcement layer on multi-tenant deployments, configure Ferrum Edge
+with `FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM=true` as well.
 
 Namespace grants constrain Ferrum operations that declare
 `X-Ferrum-Namespace`; they do not turn fleet-global process/runtime APIs into
@@ -42,6 +58,15 @@ are fleet-global, so Foundry deliberately omits the tenant header and labels the
 surface accordingly. Map roles with that blast radius in mind, and restrict
 fleet-global routes at the identity proxy when scoped identities must not use
 them.
+
+The BFF validates proxy paths from the raw request target before forwarding.
+Path segments are decoded once; controls, dot segments, encoded separators,
+repeated separators, malformed escapes, and nested escapes are refused.
+Ordinary escaped identifiers remain supported, and query parameters are handled
+separately. Namespace authorization, body limits, upload admission, and deadlines
+all use the same serialized pathname sent upstream. Only the known TLS operation
+paths and methods receive the fleet-global namespace exemption; new upstream TLS
+operations must be added to the BFF's explicit route list.
 
 ### Runtime identity defaults
 
@@ -79,6 +104,22 @@ request it makes carries that binding.** In practice:
   namespace restore, and the apply-status poll that follows a mutation. A
   switch made after an operation has started, in this tab or any other,
   does not retarget it.
+- Registry rename/delete completion reconciles the affected cache entries
+  even if its dialog has closed. It follows the renamed namespace (or leaves
+  the deleted namespace) only if that target is still the provider's current
+  selection. A later user selection is preserved, including its request scope
+  and persisted preference.
+- The active namespace is resolved against the principal's grants **during
+  render**, not in an effect. React flushes a child's effects before its
+  parent's, so a correction made in the provider's effect would arrive only
+  after the subtree had already mounted and dispatched its first queries under
+  a stored — possibly retired — name, collecting a `403 Namespace access
+  denied` from the BFF. Resolving during render means the first request of a
+  load, and the first request after the authorization-key remount that follows
+  a grant change, already carry a granted namespace. The corrected value is
+  then written back to the preference, so a retired name is not re-read on the
+  next load. A principal with no namespace grants (a global admin) is not
+  restricted and keeps its stored preference.
 - `localStorage` (`ferrum:namespace`) stores a *preference*, not the active
   namespace. It is read once when a tab loads, so a new tab opens on the
   namespace last chosen anywhere, and it is written when the user switches.
@@ -140,7 +181,25 @@ them, correctly addressed, to the wrong consumer. Foundry therefore binds the
   read-only panels. A successful save leaves the submitted values in place
   because they are what the gateway now holds; to pick up a change made
   elsewhere, leave and reopen the resource. Only an identity change resets
-  the editor.
+  the editor. A failed refetch with retained data keeps the form mounted and
+  shows a retry notice; it cannot reset an unsaved draft. Supplementary plugin
+  membership failures disable the picker after initialization without changing
+  its selections. Read-only policy conclusions require all inputs to have
+  succeeded and otherwise report unknown rather than absence.
+- **Cache retirement after a cascade.** Because fields are seeded once, a
+  superseded cache entry is what the operator edits and submits. A mutation
+  must therefore *retire* (`removeQueries`) the scoped detail entry of every
+  resource it deleted or re-created, not merely invalidate it — invalidation
+  leaves the stale entry resident and an editor mounting against it seeds from
+  the old values. Deletions that cascade across resource *types* — spec
+  import/replace/delete, and `DELETE /proxies/{id}`, which also removes the
+  proxy's plugin configs, the owning API-spec row, and an orphaned hand-owned
+  upstream — go through `retireCascade()` (`src/hooks/retireCascade.ts`). The
+  destroyed ids are not all known client-side, so those kinds are retired by
+  namespace prefix: over-retiring a detail entry costs a refetch, while
+  under-retiring is the defect. The namespace is the one the mutation was
+  *issued* under, carried through completion, so a switch after the click
+  cannot retire another tenant's cache.
 
 Do not expose the BFF port directly to an untrusted network. Terminate TLS at
 the identity proxy, strip every identity/proof header supplied by the client,
@@ -177,6 +236,16 @@ session in an HttpOnly, SameSite cookie plus a non-secret CSRF value. The token
 is not stored in `localStorage` or sent on later requests. Static mode is
 refused when `NODE_ENV=production` unless the deliberately unsafe
 `FERRUM_ALLOW_INSECURE_STATIC_AUTH=true` escape hatch is present.
+
+The session cookie is host-scoped. The SPA origin host must match the host
+the BFF issued the cookie for. `localhost` and `127.0.0.1` are different
+hosts, so a login against `http://127.0.0.1:$PORT` is not sent on later
+requests to `http://localhost:$VITE_DEV_PORT`. Development examples use
+`localhost` for both. On dual-stack hosts Vite's default `localhost` bind
+follows DNS (`[::1]` is common), so `http://127.0.0.1:$VITE_DEV_PORT` is
+refused. Set `VITE_DEV_HOST=127.0.0.1` to force IPv4 loopback, and use that
+same host for `VITE_BFF_URL`. Binding a non-loopback address is an operator
+opt-in; see the [Quick Start](../README.md#local-development) env table.
 
 ## Downstream claims
 

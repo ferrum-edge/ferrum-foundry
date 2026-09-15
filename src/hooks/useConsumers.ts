@@ -21,6 +21,7 @@ import type {
   PaginationParams,
 } from "@/api/types";
 import { useNamespace } from "@/stores/namespace";
+import { retireDeletedDetail } from "./retireDeletedDetail";
 
 export function useConsumers(params: PaginationParams = {}, enabled = true) {
   const { scope } = useNamespace();
@@ -44,12 +45,12 @@ export function useAllConsumers(enabled = true) {
   });
 }
 
-export function useConsumer(id: string) {
+export function useConsumer(id: string, enabled = true) {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["consumer", scope.namespace, id],
     queryFn: () => consumers.get(queryScope(scope), id),
-    enabled: !!id,
+    enabled: enabled && !!id,
   });
 }
 
@@ -95,8 +96,8 @@ export function useDeleteConsumer() {
       // Carry the mutation's namespace through completion, even after a switch.
       return { namespace: scope.namespace, id };
     },
-    onSuccess: (retired) => {
-      qc.removeQueries({ queryKey: ["consumer", retired.namespace, retired.id], exact: true });
+    onSuccess: async (retired) => {
+      await retireDeletedDetail(qc, ["consumer", retired.namespace, retired.id]);
       qc.invalidateQueries({ queryKey: ["consumers"] });
     },
   });
@@ -108,7 +109,8 @@ export function useUpdateCredentials() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
   return useMutation({
-    mutationFn: ({
+    gcTime: 0,
+    mutationFn: async ({
       consumerId,
       credType,
       data,
@@ -116,11 +118,20 @@ export function useUpdateCredentials() {
       consumerId: string;
       credType: BuiltInCredentialType;
       data: ConsumerCredentialInput | ConsumerCredentialInput[];
-    }) => consumers.updateCredentials(scope, consumerId, credType, data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["consumer"] });
-      qc.invalidateQueries({ queryKey: ["consumers"] });
+    }) => {
+      try {
+        await consumers.updateCredentials(scope, consumerId, credType, data);
+      } catch {
+        // Do not retain a ky error containing the password-bearing Request or
+        // an echoed response body in the mutation cache.
+        throw new Error("Credential replacement failed. Check the gateway state before retrying.");
+      }
+      return { namespace: scope.namespace, consumerId };
     },
+    onSuccess: ({ namespace, consumerId }) => Promise.all([
+      qc.invalidateQueries({ queryKey: ["consumer", namespace, consumerId], exact: true }),
+      qc.invalidateQueries({ queryKey: ["consumers", namespace] }),
+    ]).then(() => undefined),
   });
 }
 
@@ -129,7 +140,7 @@ export function useAppendCredential() {
   const { scope } = useNamespace();
   return useMutation({
     gcTime: 0,
-    mutationFn: ({
+    mutationFn: async ({
       consumerId,
       credType,
       data,
@@ -137,11 +148,14 @@ export function useAppendCredential() {
       consumerId: string;
       credType: BuiltInCredentialType;
       data: ConsumerCredentialInput;
-    }) => consumers.appendCredential(scope, consumerId, credType, data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["consumer"] });
-      qc.invalidateQueries({ queryKey: ["consumers"] });
+    }) => {
+      await consumers.appendCredential(scope, consumerId, credType, data);
+      return { namespace: scope.namespace, consumerId };
     },
+    onSuccess: ({ namespace, consumerId }) => Promise.all([
+      qc.invalidateQueries({ queryKey: ["consumer", namespace, consumerId], exact: true }),
+      qc.invalidateQueries({ queryKey: ["consumers", namespace] }),
+    ]).then(() => undefined),
   });
 }
 
@@ -149,17 +163,21 @@ export function useDeleteCredentials() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
   return useMutation({
-    mutationFn: ({
+    gcTime: 0,
+    mutationFn: async ({
       consumerId,
       credType,
     }: {
       consumerId: string;
       credType: string;
-    }) => consumers.deleteCredentials(scope, consumerId, credType),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["consumer"] });
-      qc.invalidateQueries({ queryKey: ["consumers"] });
+    }) => {
+      await consumers.deleteCredentials(scope, consumerId, credType);
+      return { namespace: scope.namespace, consumerId };
     },
+    onSuccess: ({ namespace, consumerId }) => Promise.all([
+      qc.invalidateQueries({ queryKey: ["consumer", namespace, consumerId], exact: true }),
+      qc.invalidateQueries({ queryKey: ["consumers", namespace] }),
+    ]).then(() => undefined),
   });
 }
 
@@ -167,7 +185,8 @@ export function useDeleteCredentialByIndex() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
   return useMutation({
-    mutationFn: ({
+    gcTime: 0,
+    mutationFn: async ({
       consumerId,
       credType,
       index,
@@ -175,10 +194,13 @@ export function useDeleteCredentialByIndex() {
       consumerId: string;
       credType: string;
       index: number;
-    }) => consumers.deleteCredentialByIndex(scope, consumerId, credType, index),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["consumer"] });
-      qc.invalidateQueries({ queryKey: ["consumers"] });
+    }) => {
+      await consumers.deleteCredentialByIndex(scope, consumerId, credType, index);
+      return { namespace: scope.namespace, consumerId };
     },
+    onSuccess: ({ namespace, consumerId }) => Promise.all([
+      qc.invalidateQueries({ queryKey: ["consumer", namespace, consumerId], exact: true }),
+      qc.invalidateQueries({ queryKey: ["consumers", namespace] }),
+    ]).then(() => undefined),
   });
 }

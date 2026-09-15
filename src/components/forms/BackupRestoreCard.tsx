@@ -21,7 +21,9 @@ import {
   getRestoreApiSpecConfirmation,
   getRestoreFailure,
   getRestoreCommitted,
+  getRestoreUnknownOutcome,
   type RestoreFailure,
+  type RestoreUnknownOutcome,
 } from "@/api/ops";
 
 interface PendingRestore {
@@ -36,6 +38,27 @@ interface ApiSpecRisk {
   serverMessage: string;
 }
 
+/**
+ * A restore whose result Foundry never observed. The payload is retained so
+ * the operator can deliberately re-arm the same backup after reading the
+ * gateway back, but the confirmation itself is disarmed: a restore that may
+ * already have run must never be one click from running again.
+ */
+interface UnknownRestore {
+  pending: PendingRestore;
+  outcome: RestoreUnknownOutcome;
+  confirmedApiSpecDeletion: boolean;
+}
+
+const UNKNOWN_RESTORE_CAUSE: Record<RestoreUnknownOutcome["reason"], string> = {
+  gateway_timeout:
+    "The gateway did not answer within the restore budget after Foundry finished sending the backup.",
+  upstream_failure:
+    "The connection to the gateway failed after Foundry finished sending the backup.",
+  client_timeout: "Foundry stopped waiting for the gateway's answer.",
+  transport: "The request to the gateway ended without an answer.",
+};
+
 export function BackupRestoreCard() {
   const { toast } = useToast();
   const { selectedNamespace } = useNamespace();
@@ -46,6 +69,7 @@ export function BackupRestoreCard() {
   const [apiSpecRisk, setApiSpecRisk] = useState<ApiSpecRisk | null>(null);
   const [riskPhrase, setRiskPhrase] = useState("");
   const [restoreFailure, setRestoreFailure] = useState<RestoreFailure | null>(null);
+  const [unknownRestore, setUnknownRestore] = useState<UnknownRestore | null>(null);
 
   const handleDownload = async () => {
     try {
@@ -71,6 +95,7 @@ export function BackupRestoreCard() {
   const handleFileSelected = async (file: File) => {
     try {
       setRestoreFailure(null);
+      setUnknownRestore(null);
       const text = await file.text();
       const parsed = JSON.parse(text) as unknown;
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -92,20 +117,34 @@ export function BackupRestoreCard() {
     setRiskPhrase("");
   };
 
-  const showRestoreOutcome = (error: unknown, namespace: string): boolean => {
+  const showRestoreOutcome = (
+    error: unknown,
+    pending: PendingRestore,
+    confirmedApiSpecDeletion: boolean,
+  ): boolean => {
+    const namespace = pending.namespace;
     const committed = getRestoreCommitted(error);
     if (committed) {
       clearRestore();
       setRestoreFailure(null);
+      setUnknownRestore(null);
       toast("warning", `Restore committed in namespace "${namespace}". ${committed.cursor
         ? `See the live-apply banner for cursor ${committed.cursor} and runtime status.`
         : "No valid apply cursor was provided; verify the live gateway configuration before another restore."}`);
       return true;
     }
     const failure = getRestoreFailure(error);
-    if (!failure) return false;
+    if (failure) {
+      clearRestore();
+      setUnknownRestore(null);
+      setRestoreFailure(failure);
+      return true;
+    }
+    const unknown = getRestoreUnknownOutcome(error);
+    if (!unknown) return false;
     clearRestore();
-    setRestoreFailure(failure);
+    setRestoreFailure(null);
+    setUnknownRestore({ pending, outcome: unknown, confirmedApiSpecDeletion });
     return true;
   };
 
@@ -116,6 +155,7 @@ export function BackupRestoreCard() {
       `Restored ${counts.proxies} proxies, ${counts.consumers} consumers, ${counts.plugin_configs} plugins, ${counts.upstreams} upstreams, ${counts.api_specs ?? 0} API specs, and ${counts.gateway_trust_bundles ?? 0} trust bundles.`,
     );
     setRestoreFailure(null);
+    setUnknownRestore(null);
     clearRestore();
   };
 
@@ -138,7 +178,7 @@ export function BackupRestoreCard() {
         setRiskPhrase("");
         return;
       }
-      if (showRestoreOutcome(err, pendingRestore.namespace)) return;
+      if (showRestoreOutcome(err, pendingRestore, false)) return;
       toast("error", await getApiErrorMessage(err, "Restore failed"));
     }
   };
@@ -158,7 +198,7 @@ export function BackupRestoreCard() {
       showRestoreSuccess(result);
     } catch (err) {
       // A confirmed restore is never offered a third attempt automatically.
-      if (showRestoreOutcome(err, apiSpecRisk.pending.namespace)) return;
+      if (showRestoreOutcome(err, apiSpecRisk.pending, true)) return;
       toast("error", await getApiErrorMessage(err, "Confirmed restore failed"));
       clearRestore();
     }
@@ -264,6 +304,54 @@ export function BackupRestoreCard() {
             <Button size="sm" variant="secondary" onClick={() => setRestoreFailure(null)}>
               Dismiss
             </Button>
+          </div>
+        )}
+        {unknownRestore && (
+          <div
+            role="alert"
+            className="rounded-lg border border-warning/40 bg-warning/5 p-4 space-y-3"
+          >
+            <div>
+              <p className="text-sm font-semibold text-warning">
+                Restore outcome unknown — verify the gateway before retrying
+              </p>
+              <p className="text-sm text-text-secondary mt-1">
+                {UNKNOWN_RESTORE_CAUSE[unknownRestore.outcome.reason]} The restore of
+                namespace &quot;{unknownRestore.pending.namespace}&quot; from{" "}
+                {unknownRestore.pending.fileName} may already have run, in full or in
+                part. Foundry cannot tell: the gateway offers no restore operation id
+                to read back.
+              </p>
+            </div>
+            {unknownRestore.outcome.detail && (
+              <p className="text-sm text-text-secondary">{unknownRestore.outcome.detail}</p>
+            )}
+            {unknownRestore.confirmedApiSpecDeletion && (
+              <p className="text-sm text-text-secondary">
+                This attempt already carried the API-spec deletion confirmation.
+              </p>
+            )}
+            <p className="text-xs text-text-muted">
+              The confirmation was cleared and cached reads were refreshed. Inspect the
+              live configuration of the namespace before deciding; restoring again
+              replaces it a second time. Re-arm only once you have read the gateway
+              back.
+            </p>
+            <div className="flex flex-wrap gap-3">
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => {
+                  setPendingRestore(unknownRestore.pending);
+                  setUnknownRestore(null);
+                }}
+              >
+                Re-arm this restore
+              </Button>
+              <Button size="sm" variant="secondary" onClick={() => setUnknownRestore(null)}>
+                Dismiss
+              </Button>
+            </div>
           </div>
         )}
       </div>

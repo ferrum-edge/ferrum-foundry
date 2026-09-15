@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – Consumer API functions                           */
 /* ------------------------------------------------------------------ */
 
-import { proxyApi, scoped, type NamespaceScope } from "./client";
+import { proxyApi, scoped, SILENT_ERRORS, type NamespaceScope } from "./client";
 import type {
   BuiltInCredentialType,
   Consumer,
@@ -109,7 +109,8 @@ export async function updateCredentials(
     return proxyApi
       .put(
         `consumers/${consumerId}/credentials/${credType}`,
-        scoped(scope, { json: data }),
+        // The replacement form handles failure without retaining echoed secrets.
+        scoped(scope, { json: data, context: { [SILENT_ERRORS]: true } }),
       )
       .json<Consumer>();
   });

@@ -63,6 +63,57 @@ afterEach(async () => {
 });
 
 describe("configured client apply ownership", () => {
+  it.each([
+    ['admin/tls/rotate/proxy_https', 202],
+    ['admin/tls/rotate/all?source=ui', 202],
+    ['admin/tls/validate', 200],
+    ['mesh/egress-scope/test', 200],
+    ['backend-capabilities/refresh', 200],
+  ] as const)('keeps a pending config monitor through POST %s', async (operation, code) => {
+    const pending = deferred<ApplyStatusResponse>();
+    setApplyStatusFetcher(() => pending.promise);
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(committed())
+      .mockResolvedValueOnce(Response.json({}, { status: code })));
+    await api.put(path, scoped(scope));
+    const apply = getGatewayMetadataSnapshot().apply;
+    expect(apply).toMatchObject({ state: 'pending', polling: true });
+    await api.post(`api/proxy/${operation}`, scoped(scope));
+    expect(getGatewayMetadataSnapshot().apply).toBe(apply);
+    pending.resolve(status('applied'));
+    await vi.waitFor(() => {
+      expect(getGatewayMetadataSnapshot().apply).toMatchObject({
+        state: 'applied', cursor: '1:2', polling: false,
+      });
+    });
+  });
+
+  it('does not let an operational request steal ownership before config headers arrive', async () => {
+    const headers = deferred<Response>();
+    vi.stubGlobal('fetch', vi.fn()
+      .mockReturnValueOnce(headers.promise)
+      .mockResolvedValueOnce(Response.json({}, { status: 202 })));
+    const write = api.put(path, scoped(scope));
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+    await api.post('api/proxy/admin/tls/rotate/all', { context: { [FLEET_GLOBAL]: true } });
+    headers.resolve(committed(200));
+    await write;
+    expect(getGatewayMetadataSnapshot().apply).toMatchObject({ state: 'applied', cursor: '1:2' });
+  });
+
+  it.each([
+    ['POST', 'proxies'],
+    ['POST', 'admin/tls/validate/extra'],
+    ['PUT', 'admin/tls/validate'],
+    ['POST', 'admin/tls/acme/renew/cert-1'],
+  ])('retains missing-cursor warnings for %s %s', async (method, endpoint) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({}, { status: 202 })));
+    await api(`api/proxy/${endpoint}`, scoped(scope, { method }));
+    expect(getGatewayMetadataSnapshot().apply).toMatchObject({
+      state: 'unverifiable', reason: 'missing_apply_cursor', polling: false,
+    });
+  });
+
   it.each([200, 503])("discards delayed older headers after the newer %s result with reused options", async (newerCode) => {
     const olderHeaders = deferred<Response>();
     const fetcher = vi.fn().mockReturnValueOnce(olderHeaders.promise)

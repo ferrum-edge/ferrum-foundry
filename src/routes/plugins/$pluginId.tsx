@@ -1,3 +1,4 @@
+import { ResourceLabels } from "@/components/shared/ResourceLabels";
 /* ------------------------------------------------------------------ */
 /*  Ferrum Foundry – Plugin Config detail / edit page                  */
 /* ------------------------------------------------------------------ */
@@ -11,6 +12,7 @@ import {
   useAvailablePlugins,
 } from "@/hooks/usePlugins";
 import { useAllProxies } from "@/hooks/useProxies";
+import { ReadStateNotice } from '@/components/shared/ReadState';
 import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -45,16 +47,18 @@ function PluginEditor({ session }: { session: EditorSession }) {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const { data: plugin, isLoading, isError } = usePluginConfig(pluginId);
+  const updatePlugin = useUpdatePluginWithMembership();
+  const deletePlugin = useDeletePluginWithMembership();
+  const detailLive = !deletePlugin.isPending && !deletePlugin.isSuccess;
+  const resourceQuery = usePluginConfig(pluginId, detailLive);
+  const { data: plugin, isLoading } = resourceQuery;
   const { data: availablePlugins, isLoading: pluginsLoading } = useAvailablePlugins();
+  const proxiesQuery = useAllProxies();
   const {
     data: allProxies,
     isPending: proxiesPending,
     isError: proxiesError,
-    isSuccess: proxiesLoaded,
-  } = useAllProxies();
-  const updatePlugin = useUpdatePluginWithMembership();
-  const deletePlugin = useDeletePluginWithMembership();
+  } = proxiesQuery;
 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [membershipError, setMembershipError] = useState<unknown>(null);
@@ -114,7 +118,7 @@ function PluginEditor({ session }: { session: EditorSession }) {
 
   // listAll resolves only after every page succeeds; partial membership must
   // never become the initial selection for a full membership replacement.
-  if (isLoading || pluginsLoading || (needsMembership && proxiesPending)) {
+  if (isLoading || pluginsLoading || (needsMembership && !allProxies && proxiesPending)) {
     return (
       <div className="space-y-6 max-w-3xl">
         <SkeletonCard />
@@ -123,7 +127,10 @@ function PluginEditor({ session }: { session: EditorSession }) {
     );
   }
 
-  if (isError || !plugin || (needsMembership && proxiesError)) {
+  if (!plugin || (needsMembership && !allProxies)) {
+    if (deletePlugin.isPending || deletePlugin.isSuccess) {
+      return null;
+    }
     return (
       <div className="max-w-2xl">
         <PluginMembershipRecovery error={membershipError} />
@@ -133,6 +140,9 @@ function PluginEditor({ session }: { session: EditorSession }) {
               ? "Failed to load proxy group membership. Reload to try again."
               : "Failed to load plugin configuration."}
           </p>
+          {needsMembership && proxiesError && (
+            <ReadStateNotice query={proxiesQuery} label="Proxy group membership" />
+          )}
           <Button
             variant="secondary"
             className="mt-4"
@@ -149,6 +159,9 @@ function PluginEditor({ session }: { session: EditorSession }) {
 
   return (
     <div className="space-y-6 max-w-3xl">
+      {resourceQuery.isError && (
+        <ReadStateNotice query={resourceQuery} label="Plugin configuration" />
+      )}
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -169,16 +182,20 @@ function PluginEditor({ session }: { session: EditorSession }) {
         </Button>
       </div>
 
+      {needsMembership && proxiesError && (
+        <ReadStateNotice query={proxiesQuery} label="Proxy group membership" />
+      )}
       {/* Form */}
       <PluginMembershipRecovery error={membershipError} />
       <Card>
+        <ResourceLabels labels={plugin.labels} />
         <PluginConfigForm
           initialData={plugin}
           onSubmit={handleSubmit}
           isLoading={updatePlugin.isPending}
           availablePlugins={availablePlugins ?? []}
           initialProxyGroupIds={initialProxyGroupIds}
-          initialProxyGroupIdsLoaded={!needsMembership || proxiesLoaded}
+          initialProxyGroupIdsLoaded={!needsMembership || allProxies !== undefined}
         />
       </Card>
 

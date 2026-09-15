@@ -4,7 +4,7 @@ import {
   constants,
   fstatSync,
   openSync,
-  readFileSync,
+  readSync,
   realpathSync,
   statSync,
 } from 'node:fs';
@@ -50,7 +50,9 @@ export function loadCaBundle(
 
   let fd: number | undefined;
   try {
-    fd = openSync(canonicalPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    // Nonblocking open lets descriptor validation reject special files before
+    // reading. Keep NOFOLLOW for a final-component swap after realpath.
+    fd = openSync(canonicalPath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     const before = fstatSync(fd, { bigint: true });
     if (!before.isFile()) {
       throw new Error('TLS CA bundle must be a regular file');
@@ -59,7 +61,16 @@ export function loadCaBundle(
       throw new Error(`TLS CA bundle must be between 1 and ${maxBytes} bytes`);
     }
 
-    const contents = readFileSync(fd);
+    // Bound allocation and reads even if a regular file grows after fstat.
+    // One extra byte detects growth without reading an unbounded stream.
+    const buffer = Buffer.alloc(Number(before.size) + 1);
+    let bytesRead = 0;
+    while (bytesRead < buffer.length) {
+      const count = readSync(fd, buffer, bytesRead, buffer.length - bytesRead, null);
+      if (count === 0) break;
+      bytesRead += count;
+    }
+    const contents = buffer.subarray(0, bytesRead);
     const after = fstatSync(fd, { bigint: true });
     const pathAfter = realpathSync(requestedPath);
     const rootAfter = realpathSync(configuredRoot ?? dirname(pathAfter));
@@ -74,6 +85,7 @@ export function loadCaBundle(
       || after.ino !== before.ino
       || pathStat.dev !== before.dev
       || pathStat.ino !== before.ino
+      || BigInt(contents.length) !== before.size
       || after.size !== before.size
       || after.mtimeNs !== before.mtimeNs
       || after.ctimeNs !== before.ctimeNs

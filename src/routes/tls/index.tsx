@@ -45,6 +45,7 @@ import {
   useRotateTlsSurface,
   useValidateTlsMaterial,
 } from "@/hooks/useTls";
+import { MutationOutcomeUnknownError } from '@/api/mutationOutcome';
 import { AcmeFinalizationUnknownError, getAcmeOrder, TLS_VALIDATE_FIELDS } from "@/api/tls";
 import type {
   ManagedTlsCollection,
@@ -635,6 +636,8 @@ function AcmeTab() {
   const createOrder = useCreateAcmeOrder();
   const deleteOrder = useDeleteAcmeOrder();
   const finalizeOrder = useFinalizeAcmeOrder();
+  const [unknownCreation, setUnknownCreation] = useState<string | null>(null);
+  const [unknownRenewals, setUnknownRenewals] = useState<ReadonlySet<string>>(new Set());
   const [unknownOrders, setUnknownOrders] = useState<ReadonlySet<string>>(new Set());
   const renewCert = useRenewAcmeCertificate();
   const deleteCert = useDeleteAcmeCertificate();
@@ -739,6 +742,7 @@ function AcmeTab() {
     unknownOrders.has(order.id) && !["valid", "failed", "cancelled"].includes(order.status);
 
   const handleCreateOrder = async () => {
+    if (unknownCreation || createOrder.isPending) return;
     const domains = orderForm.domains
       .split(",")
       .map((d) => d.trim())
@@ -765,6 +769,7 @@ function AcmeTab() {
       setOrderOpen(false);
       setOrderForm(EMPTY_ACME_ORDER_FORM);
     } catch (err) {
+      if (err instanceof MutationOutcomeUnknownError) setUnknownCreation(err.message);
       toast("error", await getApiErrorMessage(err, "Failed to create order"));
     }
   };
@@ -809,6 +814,11 @@ function AcmeTab() {
                   {expiryBadge(cert.not_after)}
                 </div>
                 <Mono>{cert.source_uri}</Mono>
+                {unknownRenewals.has(cert.id) && (
+                  <p role="alert">
+                    Renewal outcome unknown. Check orders and certificates before retrying.
+                  </p>
+                )}
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <Button
@@ -829,8 +839,10 @@ function AcmeTab() {
                   variant="secondary"
                   size="sm"
                   loading={pendingKeys.has(`renew:${cert.id}`)}
+                  disabled={unknownRenewals.has(cert.id)}
                   onClick={() =>
                     void runRowAction(`renew:${cert.id}`, async () => {
+                      if (unknownRenewals.has(cert.id)) return;
                       try {
                         await renewCert.mutateAsync({
                           id: cert.id,
@@ -838,6 +850,9 @@ function AcmeTab() {
                         });
                         toast("success", `Renewal order created for ${cert.domains.join(", ")}`);
                       } catch (err) {
+                        if (err instanceof MutationOutcomeUnknownError) {
+                          setUnknownRenewals((previous) => new Set([...previous, cert.id]));
+                        }
                         toast("error", await getApiErrorMessage(err, "Renewal failed"));
                       }
                     })
@@ -1249,6 +1264,7 @@ function AcmeTab() {
       >
         <DialogContent className="max-h-[85vh] overflow-y-auto">
           <DialogTitle>New ACME Order</DialogTitle>
+          {unknownCreation && <p role="alert">{unknownCreation}</p>}
           <DialogDescription className="mt-2">
             ACME orders and issued certificate material are fleet-global and can be used
             by TLS listeners in every namespace.
@@ -1305,7 +1321,11 @@ function AcmeTab() {
             >
               Cancel
             </Button>
-            <Button onClick={handleCreateOrder} loading={createOrder.isPending}>
+            <Button
+              onClick={handleCreateOrder}
+              loading={createOrder.isPending}
+              disabled={Boolean(unknownCreation)}
+            >
               Create Order
             </Button>
           </div>

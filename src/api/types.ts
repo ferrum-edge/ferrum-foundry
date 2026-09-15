@@ -81,6 +81,7 @@ export interface StreamMatchCriteria {
 }
 
 export interface Proxy {
+  labels?: Record<string, string>;
   id: string;
   namespace?: string;
   name?: string | null;
@@ -161,6 +162,7 @@ export interface KeyAuthCredential {
 }
 
 export interface BasicAuthCredential {
+  // Identity is Consumer.username; only one of password/password_hash is sent.
   password?: string;
   password_hash?: string;
 }
@@ -182,6 +184,8 @@ export interface MtlsAuthCredential {
  * ordinary responses `basicauth` is omitted and secret fields carry
  * the `[REDACTED]` placeholder; a PUT may echo the placeholder back
  * to preserve the stored entry at the same index.
+ * Omitted basicauth never establishes absence. Manage it through the dedicated
+ * append/replace/delete-by-type endpoints; never fetch backups to infer access.
  */
 export interface ConsumerCredentials {
   keyauth?: KeyAuthCredential[];
@@ -192,18 +196,32 @@ export interface ConsumerCredentials {
   [custom: string]: object[] | undefined;
 }
 
+/** Ordinary Consumer projection; basicauth is schema-forbidden, not empty. */
+export interface ConsumerCredentialsRedacted extends ConsumerCredentials {
+  basicauth?: never;
+}
+
 export interface Consumer {
+  labels?: Record<string, string>;
   id: string;
   namespace?: string;
   username: string;
   custom_id?: string | null;
-  credentials: ConsumerCredentials;
+  credentials: ConsumerCredentialsRedacted;
   acl_groups: string[];
   created_at: string;
   updated_at: string;
 }
 
+/** Authenticated export projection, kept separate from policy/editor reads. */
+export interface ConsumerBackup extends Omit<Consumer, "credentials"> {
+  credentials: ConsumerCredentials & {
+    basicauth?: { password_hash: string; password?: never }[];
+  };
+}
+
 export interface ConsumerCreate {
+  labels?: Record<string, string>;
   id?: string;
   username: string;
   custom_id?: string | null;
@@ -284,6 +302,7 @@ export interface PluginTrigger {
 }
 
 export interface PluginConfig {
+  labels?: Record<string, string>;
   id: string;
   namespace?: string;
   plugin_name: string;
@@ -299,6 +318,7 @@ export interface PluginConfig {
 }
 
 export interface PluginConfigCreate {
+  labels?: Record<string, string>;
   id?: string;
   plugin_name: string;
   config?: Record<string, unknown>;
@@ -413,6 +433,7 @@ export interface ServiceDiscoveryConfig {
 }
 
 export interface Upstream {
+  labels?: Record<string, string>;
   id: string;
   namespace?: string;
   name?: string | null;
@@ -460,7 +481,7 @@ export type UpstreamCreate = Partial<
 // ── Health / Metrics ──────────────────────────────────────────────
 
 export interface HealthResponse {
-  status: "ok" | "degraded" | "starting" | "unavailable";
+  status: 'ok' | 'degraded' | 'starting' | 'unavailable' | 'draining';
   ready: boolean;
   // Authenticated-tier detail fields
   admin_writes_enabled?: boolean;

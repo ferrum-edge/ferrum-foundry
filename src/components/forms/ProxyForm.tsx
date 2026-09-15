@@ -2,13 +2,15 @@
 /*  Ferrum Foundry – Proxy create / edit form                         */
 /* ------------------------------------------------------------------ */
 
-import { useState, type FormEvent, type KeyboardEvent } from "react";
+import { useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Badge } from "@/components/ui/Badge";
 import { CollapsibleSection } from "./CollapsibleSection";
+import { FormValidationSummary } from "./FormValidationSummary";
+import { useCollapsibleFormValidation } from "@/lib/collapsedFormValidation";
 import type {
   Proxy,
   ProxyCreate,
@@ -17,9 +19,18 @@ import type {
   BackoffStrategy,
 } from "@/api/types";
 
-/* ------------------------------------------------------------------ */
-/*  Props                                                              */
-/* ------------------------------------------------------------------ */
+const PROXY_COLLAPSIBLE_SECTIONS = [
+  { id: "routing", errorKeys: [] },
+  { id: "timeouts", errorKeys: [] },
+  { id: "tls", errorKeys: [] },
+  { id: "upstream", errorKeys: [] },
+  { id: "dns", errorKeys: [] },
+  { id: "circuit-breaker", errorKeys: [] },
+  { id: "retry", errorKeys: [] },
+  { id: "connection-pool", errorKeys: [] },
+  { id: "protocol", errorKeys: ["listen_port"] },
+] as const;
+
 
 export interface ProxyFormProps {
   initialData?: Proxy;
@@ -288,6 +299,8 @@ function getExponentialMax(b: BackoffStrategy): number {
 export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) {
   const navigate = useNavigate();
   const isEdit = !!initialData;
+  const formRef = useRef<HTMLFormElement>(null);
+  const collapsible = useCollapsibleFormValidation(PROXY_COLLAPSIBLE_SECTIONS);
 
   /* ---------- Basic Configuration ---------- */
   // Seeded once per editor identity: the parent keys this form on
@@ -440,7 +453,13 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
       errs.backend_port = "Backend port is required";
     }
     setErrors(errs);
-    return Object.keys(errs).length === 0;
+    const ok = Object.keys(errs).length === 0;
+    if (!ok) {
+      collapsible.onValidationFailed(errs, formRef.current);
+    } else {
+      collapsible.clearValidationSummary();
+    }
+    return ok;
   };
 
   /* ---------- Submit ---------- */
@@ -551,7 +570,7 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
   /* ================================================================ */
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-0">
+    <form ref={formRef} onSubmit={handleSubmit} className="space-y-0">
       {/* ── Section 1: Basic Configuration ── */}
       <div className="border-b border-border/50 py-4">
         <h3 className="text-sm font-semibold text-text-primary mb-4">Basic Configuration</h3>
@@ -631,7 +650,10 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
 
       {/* ── Section 2: Routing Options ── */}
       {showRoutingOptions && (
-        <CollapsibleSection title="Routing Options">
+        <CollapsibleSection
+          title="Routing Options"
+          {...collapsible.sectionProps("routing")}
+        >
           <Checkbox label="Strip listen path" checked={stripListenPath} onChange={setStripListenPath} />
           <Checkbox label="Preserve host header" checked={preserveHostHeader} onChange={setPreserveHostHeader} />
           <Select
@@ -684,7 +706,10 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
       )}
 
       {/* ── Section 3: Backend Timeouts ── */}
-      <CollapsibleSection title="Backend Timeouts">
+      <CollapsibleSection
+        title="Backend Timeouts"
+        {...collapsible.sectionProps("timeouts")}
+      >
         <Input
           label="Connect Timeout (ms)"
           type="number"
@@ -706,7 +731,10 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
       </CollapsibleSection>
 
       {/* ── Section 4: TLS Settings ── */}
-      <CollapsibleSection title="TLS Settings">
+      <CollapsibleSection
+        title="TLS Settings"
+        {...collapsible.sectionProps("tls")}
+      >
         <Checkbox
           label="Frontend TLS"
           checked={frontendTls}
@@ -753,7 +781,11 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
       </CollapsibleSection>
 
       {/* ── Section 5: Upstream ── */}
-      <CollapsibleSection title="Upstream" badge={upstreamId ? "LINKED" : undefined}>
+      <CollapsibleSection
+        title="Upstream"
+        badge={upstreamId ? "LINKED" : undefined}
+        {...collapsible.sectionProps("upstream")}
+      >
         <Input
           label="Upstream ID"
           value={upstreamId}
@@ -773,7 +805,7 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
       </CollapsibleSection>
 
       {/* ── Section 6: DNS ── */}
-      <CollapsibleSection title="DNS">
+      <CollapsibleSection title="DNS" {...collapsible.sectionProps("dns")}>
         <Input
           label="DNS Override"
           value={dnsOverride}
@@ -790,7 +822,11 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
 
       {/* ── Section 7: Circuit Breaker ── */}
       {showCircuitBreaker && (
-      <CollapsibleSection title="Circuit Breaker" badge={cbEnabled ? "ON" : undefined}>
+      <CollapsibleSection
+        title="Circuit Breaker"
+        badge={cbEnabled ? "ON" : undefined}
+        {...collapsible.sectionProps("circuit-breaker")}
+      >
         <Checkbox
           label="Enable circuit breaker"
           checked={cbEnabled}
@@ -841,7 +877,11 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
 
       {/* ── Section 8: Retry ── */}
       {showRetry && (
-      <CollapsibleSection title="Retry" badge={retryEnabled ? "ON" : undefined}>
+      <CollapsibleSection
+        title="Retry"
+        badge={retryEnabled ? "ON" : undefined}
+        {...collapsible.sectionProps("retry")}
+      >
         <Checkbox
           label="Enable retry"
           checked={retryEnabled}
@@ -912,7 +952,10 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
 
       {/* ── Section 9: Connection Pool ── */}
       {showConnectionPool && (
-        <CollapsibleSection title="Connection Pool">
+        <CollapsibleSection
+          title="Connection Pool"
+          {...collapsible.sectionProps("connection-pool")}
+        >
           <Input
             label="Pool Idle Timeout (seconds)"
             type="number"
@@ -1016,6 +1059,7 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
         <CollapsibleSection
           title="Protocol-Specific"
           badge={backendScheme.toUpperCase()}
+          {...collapsible.sectionProps("protocol")}
         >
           <Input
             label="Listen Port"
@@ -1084,7 +1128,11 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
       )}
 
       {/* ── Actions ── */}
-      <div className="flex items-center justify-end gap-3 pt-6">
+      <div className="flex flex-col items-end gap-3 pt-6">
+        {collapsible.showSummary && (
+          <FormValidationSummary count={collapsible.errorCount} />
+        )}
+        <div className="flex items-center justify-end gap-3 w-full">
         <Button
           type="button"
           variant="secondary"
@@ -1096,6 +1144,7 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
         <Button type="submit" loading={isLoading}>
           {isEdit ? "Update Proxy" : "Create Proxy"}
         </Button>
+        </div>
       </div>
     </form>
   );

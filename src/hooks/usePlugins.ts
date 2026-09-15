@@ -23,6 +23,7 @@ import {
   deletePluginWithMembership,
   updatePluginWithMembership,
 } from "@/lib/pluginMembership";
+import { retireDeletedDetail } from "./retireDeletedDetail";
 
 export function useAvailablePlugins() {
   const { scope } = useNamespace();
@@ -54,12 +55,12 @@ export function useAllPluginConfigs(enabled = true) {
   });
 }
 
-export function usePluginConfig(id: string) {
+export function usePluginConfig(id: string, enabled = true) {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["pluginConfig", scope.namespace, id],
     queryFn: () => plugins.getConfig(queryScope(scope), id),
-    enabled: !!id,
+    enabled: enabled && !!id,
   });
 }
 
@@ -136,8 +137,12 @@ export function useDeletePluginConfig() {
       // Carry the mutation's namespace through completion, even after a switch.
       return { namespace: scope.namespace, id };
     },
-    onSuccess: (retired) => {
-      qc.removeQueries({ queryKey: ["pluginConfig", retired.namespace, retired.id], exact: true });
+    onSuccess: async (retired) => {
+      await retireDeletedDetail(qc, [
+        "pluginConfig",
+        retired.namespace,
+        retired.id,
+      ]);
       qc.invalidateQueries({ queryKey: ["pluginConfigs"] });
     },
   });
@@ -152,8 +157,12 @@ export function useDeletePluginWithMembership() {
       // Carry the mutation's namespace through completion, even after a switch.
       return { namespace: scope.namespace, id };
     },
-    onSuccess: (retired) => {
-      qc.removeQueries({ queryKey: ["pluginConfig", retired.namespace, retired.id], exact: true });
+    onSuccess: async (retired) => {
+      await retireDeletedDetail(qc, [
+        "pluginConfig",
+        retired.namespace,
+        retired.id,
+      ]);
       qc.invalidateQueries({ queryKey: ["pluginConfigs"] });
       qc.invalidateQueries({ queryKey: ["proxies"] });
     },

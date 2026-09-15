@@ -8,7 +8,7 @@ import DashboardPage from "./dashboard";
 import StatusPage from "./status";
 
 vi.mock("@/stores/namespace", () => ({
-  useNamespace: () => ({ selectedNamespace: "ferrum", setNamespace: vi.fn() }),
+  useNamespace: () => ({ selectedNamespace: "ferrum", scope: { namespace: "ferrum" }, setNamespace: vi.fn() }),
 }));
 vi.mock("@/hooks/useNamespaces", () => ({
   useNamespaces: () => ({ data: ["ferrum"], isSuccess: true, isFetching: false }),
@@ -19,14 +19,6 @@ vi.mock("@/stores/theme", () => ({
 vi.mock("@/stores/auth", () => ({
   useAuth: () => ({ principal: null, logout: vi.fn() }),
 }));
-vi.mock("@/hooks/useMetrics", () => {
-  const health = { data: { status: "ok", ready: true, mode: "database", database: { status: "connected" } }, isLoading: false, isError: false };
-  const metrics = {
-    data: { gateway: { proxy_count: 1, consumer_count: 2, upstream_count: 3, plugin_config_count: 4, uptime_seconds: 3600, ferrum_version: "test", total_requests: 0, status_codes_total: {} }, circuit_breakers: [], health_check: { unhealthy_targets: [] } },
-    dataUpdatedAt: 1, isLoading: false, isError: false,
-  };
-  return { useHealth: () => health, useAdminMetrics: () => metrics };
-});
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 class BasedRequest extends Request {
   constructor(input: RequestInfo | URL, init?: RequestInit) {
@@ -44,7 +36,22 @@ beforeEach(() => {
   state = "unavailable";
   transportError = false;
   vi.stubGlobal("Request", BasedRequest);
-  vi.stubGlobal("fetch", vi.fn(async () => {
+  vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
+    const path = new URL(request.url).pathname;
+    if (path === '/api/proxy/health') {
+      return Response.json({
+        status: 'ok', ready: true, mode: 'database', database: { status: 'connected' },
+      });
+    }
+    if (path === '/api/proxy/admin/metrics') {
+      return Response.json({
+        gateway: {
+          proxy_count: 1, consumer_count: 2, upstream_count: 3, plugin_config_count: 4,
+          uptime_seconds: 3600, ferrum_version: 'test', total_requests: 0, status_codes_total: {},
+        },
+        circuit_breakers: [], health_check: { unhealthy_targets: [] },
+      });
+    }
     if (transportError) throw new TypeError("Failed to fetch");
     return Response.json({
       status: state, ready: state !== "unavailable", version: "test", checkedAt: "2026-09-06T00:00:00Z",
@@ -101,8 +108,8 @@ describe("shared Foundry connection status", () => {
       expect(host.querySelector("header")?.textContent).toContain("Disconnected");
       expect(connectionCard().textContent).not.toContain("Connected");
       expect(connectionCard().textContent).toContain("Go to Settings");
-      expect(host.textContent).toContain("Gateway process health");
-      expect(host.textContent).toContain("database");
+      await settle(() => expect(host.textContent).toContain("Gateway process health"));
+      await settle(() => expect(host.textContent).toContain("database"));
 
       state = "ready";
       await refresh();

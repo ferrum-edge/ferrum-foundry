@@ -6,6 +6,7 @@ import { useTheme } from "@/stores/theme";
 import { useAuth } from "@/stores/auth";
 import { useBffReadiness } from "@/hooks/useBffHealth";
 import { readinessPresentation } from "@/lib/readiness";
+import { namespaceGranted } from "@/lib/namespaceGrants";
 
 interface HeaderProps {
   onToggleSidebar: () => void;
@@ -31,7 +32,7 @@ export function Header({ onToggleSidebar }: HeaderProps) {
   const namespaceList = useMemo(() => {
     const listed = registry.data ?? [];
     const grants = principal?.namespaces;
-    return grants?.length ? listed.filter((ns) => grants.includes(ns)) : listed;
+    return listed.filter((ns) => namespaceGranted(grants, ns));
   }, [registry.data, principal?.namespaces]);
   // Only a completed successful list may retire a selection. During loading,
   // failed refreshes, or invalidation after a create, retain the current binding.
