@@ -39,7 +39,9 @@ prompt, including continuation prompts and any permitted nested delegation.
 
 ## Preflight
 
-1. Read `AGENTS.md`, the relevant `.claude/rules/*.md`, and the issue or PR before dispatching.
+1. Read `AGENTS.md`, the relevant `docs/*.md`, and the issue or PR before dispatching. The
+   `.claude/rules/*.md` files are gateway reference rules copied from ferrum-edge, not Foundry
+   build or test instructions.
 2. Confirm the standalone codex CLI is resolvable, then run `codex --version`, `codex login status`,
    and `codex exec --help` against it. The launcher resolves the binary in this order and refuses
    any candidate under `com.conductor.app`, because Conductor's bundled copy lags the standalone
