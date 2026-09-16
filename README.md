@@ -14,6 +14,39 @@
 
 Admin panel UI for managing and observing the [Ferrum Edge](https://github.com/ferrum-edge/ferrum-edge) Proxy/Gateway.
 
+## Screenshots
+
+Captured against the bundled mock admin gateway
+(`node scripts/mock-admin-gateway.mjs`) in the dark theme. Every surface below
+works the same way against a live Ferrum Edge gateway.
+
+<p align="center">
+  <img src="docs/screenshots/dashboard.png" alt="Ferrum Foundry dashboard with connection status, gateway health and resource counts" width="100%" />
+</p>
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/metrics.png" alt="Metrics dashboard with gateway stats, overload protection and host runtime" />
+      <sub><b>Metrics</b> — gateway stats, status codes, overload protection and host runtime, one refresh policy across every panel.</sub>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/plugins.png" alt="Plugin configuration list with scope, priority and execution triggers" />
+      <sub><b>Plugins</b> — category-grouped catalog of gateway plugins with scope, priority, execution triggers and enable/disable.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/tls.png" alt="TLS management inventory with rotation controls" />
+      <sub><b>TLS</b> — fleet-global inventory, managed certificate stores, ACME automation, rotation and PEM validation.</sub>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/audit.png" alt="Audit log of Admin API mutations with actor and outcome" />
+      <sub><b>Audit log</b> — every Admin API mutation with its actor, outcome and a redacted diff, filterable by action and resource.</sub>
+    </td>
+  </tr>
+</table>
+
 ## Development status
 
 Ferrum Foundry is in active buildout and has no users yet. Breaking changes are
@@ -26,6 +59,7 @@ data and its schema belong to Ferrum Edge. If Foundry introduces its own databas
 during buildout, keep one canonical initial schema and fold schema changes into
 it instead of accumulating incremental migrations. Recreate disposable local
 data as needed. Revisit this policy before onboarding users.
+
 
 ## Features
 
