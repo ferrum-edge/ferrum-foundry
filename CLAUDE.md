@@ -2,6 +2,22 @@
 
 Admin UI dashboard for [Ferrum Edge](https://github.com/ferrum-edge/ferrum-edge), a high-performance API gateway built in Rust.
 
+## Buildout policy
+
+Ferrum Foundry is in active buildout and has no users yet. Breaking changes are
+allowed. Do not add compatibility shims, deprecation periods, or upgrade paths
+solely to preserve earlier development versions. Update code, tests, fixtures,
+demo data, and documentation together, keeping Foundry aligned with the current
+Ferrum Edge admin API.
+
+Foundry has no application database, initial SQL schema, or migration runner.
+Database ownership belongs to Ferrum Edge; do not copy its schema, migration
+files, or database implementation paths into this repository. If Foundry adds
+its own persistence during buildout, maintain one canonical initial schema and
+fold subsequent schema changes into it. Recreate disposable development data
+instead of building an incremental migration history. Revisit compatibility
+and migration requirements before onboarding users.
+
 ## Architecture
 
 - **Frontend**: React 19 + TanStack Router + TanStack Query + Tailwind CSS + Radix UI
