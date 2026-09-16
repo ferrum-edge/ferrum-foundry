@@ -1,23 +1,21 @@
 ---
-name: opus-agents
-description: Dispatch and orchestrate external Claude Code Opus 5 1M agents from Codex for Ferrum Foundry issue, PR, review-feedback, CI-repair, and shepherding work, with optional fast mode only when the user explicitly requests it. Use when the user asks GPT or Codex to delegate to Claude or Opus agents, run multiple Claude Code workers, select low/medium/high/xhigh/max effort, resume interrupted Claude runs, or drive agent-owned branches and PRs. Do not use for Codex-native subagents or ordinary single-agent edits.
+name: fable-5-1-agents
+description: Dispatch and orchestrate external Claude Code Fable 5.1 agents from Codex for Ferrum Foundry issue, PR, review-feedback, CI-repair, and shepherding work. Use when the user asks GPT or Codex to delegate to Claude Fable agents, run multiple Fable workers, select low/medium/high/xhigh/max effort, resume interrupted Fable runs, or drive agent-owned branches and PRs. Do not use for other Claude models, unsupported effort levels, Codex-native subagents, or ordinary single-agent edits.
 ---
 
-# Opus agents
+# Fable agents
 
 Act as the Codex orchestrator. Treat Claude Code processes as implementation workers. Own task
-decomposition, worktree isolation, effort selection, liveness, independent diff review, and the
-final merge recommendation. Require each worker to carry its assigned scope through the stopping
-point in the prompt. Never accept a worker's report without checking the repository and GitHub
-state yourself.
+decomposition, worktree isolation, effort selection, liveness, independent diff review, safeguard
+fallback handling, and the final merge recommendation. Require each worker to carry its assigned
+scope through the stopping point in the prompt. Never accept a worker's report without checking the
+repository and GitHub state yourself.
 
-**Guard: do NOT use this skill when you are yourself a dispatched worker.** If your session
-prompt says you were dispatched by an orchestrator — it references the `astra-agents` briefs
-(`agent-brief.md` / `continuation-brief.md`), says "YOU are the implementer", or hands you an
-existing worktree and findings to fix — then this skill does not apply: implement directly in
-your session. Your model and reasoning effort were chosen deliberately by the dispatching
-orchestrator; delegating to an Opus worker silently substitutes different hands at a different
-effort. This skill is only for sessions where the USER asked Codex to delegate to Claude.
+**Guard: do not use this skill when you are yourself a dispatched worker.** If the session prompt
+says an orchestrator dispatched you, calls you the implementer, or gives you an existing worktree
+and findings to fix, implement directly in that session. The dispatching orchestrator selected the
+worker and effort deliberately. This skill applies only when the user asks Codex to delegate to
+Fable.
 
 ## Remote CI validation
 
@@ -49,15 +47,11 @@ prompt, including continuation prompts and any permitted nested delegation.
    - `CLAUDE_BIN` if it points at an executable absolute path,
    - `~/.local/bin/claude`, `/opt/homebrew/bin/claude`, `/usr/local/bin/claude`,
    - `claude` on `PATH`.
-3. Confirm that the installed CLI exposes `--effort` with `low`, `medium`, `high`, `xhigh`, and `max`.
-4. Use the pinned model `claude-opus-5[1m]`. Use `opus[1m]` only when the user explicitly asks
-   for the rolling latest Opus rather than Opus 5.
-5. If the user explicitly requests fast mode, confirm the CLI accepts the `fastMode` setting and
-   that the account and selected Opus model are eligible. Fast mode requires separate usage-credit
-   availability and can be disabled by organization policy.
-6. Stop and report the problem if authentication, 1M access, fast-mode eligibility, or credits are
-   rejected. Do not silently fall back to a smaller context window, another model, lower effort,
-   or standard mode after an explicitly requested Fast launch fails.
+3. Confirm that the installed CLI accepts `claude-fable-5-1` and exposes `--effort` with `low`, `medium`,
+   `high`, `xhigh`, and `max`.
+4. Use only the pinned model `claude-fable-5-1`. Do not expose a model override in the launcher.
+5. Stop and report the problem if authentication or Fable access is unavailable. Do not silently
+   substitute another model or effort.
 
 ## Isolate every worker
 
@@ -76,20 +70,18 @@ sandbox Claude from the rest of the host.
 
 ## Select effort deliberately
 
-- `low`: reserve for mechanical, fully specified edits — a one-line revert, a rename, a version
-  bump, or applying a formatter diff. Do not use it for anything requiring root-cause analysis.
-- `medium`: use for small, well-understood changes with a known fix location: a single-file bug
-  fix, a doc or comment update, or adding a test for behavior that is already specified.
-- `high`: default for scoped fixes, review findings, tests, documentation, and CI repairs with a
-  known failure mode.
-- `xhigh`: use for unfamiliar multi-module work, concurrency or lifecycle bugs, protocol
+- `low`: use for simple, well-scoped changes where latency matters.
+- `medium`: use for narrow fixes, review findings, tests, documentation, CI repairs with a known
+  failure mode, and other routine work where latency and cost matter.
+- `high`: default. Use for unfamiliar or multi-module work, concurrency and lifecycle bugs, protocol
   correctness, security boundaries, greenfield features, and difficult root-cause analysis.
-- `max`: reserve for the hardest deeply coupled work, repeated failure at `xhigh`, or a user
-  override. Prefer one focused `max` worker over a whole `max` fleet; it has unconstrained
-  reasoning spend and can overthink.
 
-Honor an explicit user choice. Record the selected level beside each worker. Do not mix effort
-levels accidentally between initial and continuation rounds.
+- `xhigh`: use for especially difficult reasoning and capability-sensitive coding.
+- `max`: use for the hardest long-running tasks when the additional reasoning cost is justified.
+
+Honor an explicit user choice. Use only `low`, `medium`, `high`, `xhigh`, or `max`; do not translate another requested
+level into one of them. Record the selected level beside each worker and preserve it across
+continuation rounds unless verified evidence justifies changing it.
 
 ## Dispatch with the exact model contract
 
@@ -100,8 +92,9 @@ Build a task-specific prompt after reading the appropriate reference:
   [references/continuation-brief.md](references/continuation-brief.md) and the implementer brief.
 
 Create a permission-restricted prompt file outside the repository with a file-editing tool. Do not
-construct it by interpolating issue text, CI logs, or review bodies into shell syntax. Pass that
-file to the bundled launcher from one long-lived execution session:
+construct it by interpolating issue text, CI logs, or review bodies into shell syntax. Preserve the
+user's original prompt in the orchestrator context because it controls safeguard fallback. Pass
+the prompt file to the bundled launcher from one long-lived execution session:
 
 ```bash
 <ABS_SKILL_DIR>/scripts/dispatch-agent.sh \
@@ -110,22 +103,15 @@ file to the bundled launcher from one long-lived execution session:
   --effort <low|medium|high|xhigh|max>
 ```
 
-`--fast` is an opt-in controller flag. Append it only when the user explicitly requests fast mode
-for the dispatch or fleet. Never infer it from urgency, deadlines, task size, or available credits.
-Omit it for every other run, including continuations unless they remain within the same explicit
-request. Record the selected mode beside each worker.
+The launcher pins `claude-fable-5-1`, clears environment variables that can override model, effort,
+or thinking, omits the ordinary Claude Code fallback-model option, enables verbose text output,
+and closes stdin at the prompt file's EOF. Delete the temporary prompt after the worker finishes.
 
-The launcher pins `claude-opus-5[1m]`, clears environment variables that can override effort,
-context, or thinking, omits fallback models, enables verbose text output, and closes stdin at the
-prompt file's EOF. It passes `fastMode: false` by default so user-level settings cannot enable Fast
-implicitly, and passes `fastMode: true` only with `--fast`. Pass `--model 'opus[1m]'` only for an
-explicit rolling-latest request. Delete the temporary prompt after the worker finishes.
-
-Start every worker in its own long-lived execution session and retain the exact session handle
-or PID. Prefer one tool call per worker so completions and failures remain attributable. Never
-wrap the fleet in a single shell command, use `killall claude`, or use `pkill claude`; the user may
-have unrelated Claude sessions. Cap this workflow at seven concurrent Claude workers unless the
-user sets a lower limit.
+Start every worker in its own long-lived execution session and retain the exact session handle or
+PID and full stdout/stderr. Prefer one tool call per worker so completions and failures remain
+attributable. Never wrap the fleet in a single shell command, use `killall claude`, or use
+`pkill claude`; the user may have unrelated Claude sessions. Cap this workflow at seven concurrent
+Fable workers unless the user sets a lower limit.
 
 ## Pin the worker role
 
@@ -137,7 +123,7 @@ Do not stop at analysis, partial implementation, or a handoff for someone else t
 commit, push, PR, review, and CI actions only when the prompt assigns them. Do not request or wait
 for a separate review-bot pass unless explicitly assigned. After the final requested push and
 report, exit; the controller owns post-push CI and review monitoring. Do not invoke agent-dispatch
-skills or scripts (including astra-agents, opus-agents, fable-agents, grok-agents, or any
+skills or scripts (including astra-agents, opus-agents, fable-5-1-agents, grok-agents, or any
 .agents/skills/*/scripts/dispatch-agent.sh), and do not spawn nested workers.
 ```
 
@@ -167,13 +153,40 @@ a bounded fix round with an exact implementation and validation stopping point. 
 not the worker, monitors post-push review and CI state and dispatches another round only when new
 actionable work appears. Do not add a review trigger unless the controller explicitly requests it.
 
+## Review for Fable safeguard rejection
+
+After every Fable run, review its exact output and the resulting repository and GitHub state before
+accepting the work. Fable's security guardrails can reject a request or cause the platform to route
+the affected turn to another model even though the CLI process exits normally.
+
+Treat an explicit refusal, safeguard or fallback notice, a response that identifies a non-Fable
+serving model, or structured output showing `stop_reason: "refusal"` as confirmation. Missing or
+poor work alone is not proof; inspect the transcript and state first.
+
+When a safeguard rejection or model reroute is confirmed:
+
+1. Stop using Fable for that request. Do not rephrase the prompt to evade the guardrail or keep
+   retrying Fable.
+2. Re-read the user's original prompt and select the other agent it explicitly names. Use that
+   agent's native repository skill and supported effort contract.
+3. Give the fallback agent the original task plus the verified branch, worktree, head SHA, and any
+   useful partial changes. Treat changes produced after a reroute as untrusted WIP to verify before
+   continuing, not as completed Fable work.
+4. If the original prompt names no alternate agent, do not invent one. Report the rejection and ask
+   the user which agent to use.
+
+This safeguard path is separate from capacity, transport, authentication, or model-access
+failures. For those failures, retry or stop according to the user's stated workflow; do not label
+them guardrail rejections.
+
 ## Control and verify the fleet
 
 1. Poll each retained execution session separately. Use `pgrep -x claude` only as a secondary
    fleet-wide cross-check, never as the identity of a particular worker.
 2. Give the user a concise progress update at least once a minute while workers are active.
-3. On completion, verify the claims relevant to the prompt, such as the branch, pushed head, PR,
-   requested validation, and any explicitly assigned review or CI actions.
+3. On completion, perform the safeguard check above, then verify the claims relevant to the
+   prompt, such as the branch, pushed head, PR, requested validation, and any explicitly assigned
+   review or CI actions.
 4. Fetch `origin/main` and independently inspect `git diff origin/main...HEAD` in the worker's
    worktree. Use a three-dot diff. Review fail-closed behavior, hot paths, docs/spec parity,
    production panics, tests, and scope creep.
@@ -182,7 +195,7 @@ actionable work appears. Do not add a review trigger unless the controller expli
    failures.
 6. If a worker dies, inspect its worktree and remote branch before relaunching. Preserve valid
    commits or intentional WIP, write a compact state snapshot, and launch a continuation round at
-   the same effort unless the evidence justifies escalation.
+   the same effort unless the evidence justifies escalation to a higher supported level.
 7. Merge only when the user authorized it, your independent review is complete, and every
    completion gate the user assigned is satisfied.
 
@@ -200,11 +213,17 @@ worker logs.
 
 - Capacity or transport failure: verify local and remote state before retrying; useful work may
   already be committed or pushed.
+- Safeguard refusal or model reroute: follow the original-prompt fallback procedure above.
 - Worker exits after its completed push and report: continue post-push review and CI monitoring as
   the controller. If it exits before its assigned implementation or validation stopping point,
   inspect the state and launch a continuation round; do not accept unfinished work as complete.
 - An explicitly requested review receives no response: verify the trigger, bot identity, credits
   or availability, and head SHA before posting another trigger.
-- Model, context, effort, or fast-mode mismatch: stop that worker, capture the exact diagnostic,
-  correct the launch contract, and relaunch. Never claim `max`, `xhigh`, 1M, or fast mode unless
-  the launch and resulting session evidence support it.
+- Model or effort mismatch: stop that worker, capture the exact diagnostic, correct the launch
+  contract, and relaunch. Never claim Fable 5.1 or a selected effort unless the launch and resulting
+  session evidence support it.
+
+## Model contract sources
+
+Verified 2026-09-05: [model ID](https://platform.claude.com/docs/en/models/fable-5-1/overview)
+and [supported efforts](https://platform.claude.com/docs/en/build-with-claude/effort).
