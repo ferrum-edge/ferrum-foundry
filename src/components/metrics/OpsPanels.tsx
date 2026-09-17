@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/Badge";
 import { StatCard } from "./StatCard";
 import { MetricsSampleTime } from "./MetricsSampleTime";
 
+import type { PressureGauge } from "@/api/ops";
 import { useOverload, useRuntimeMetrics, useCharges } from "@/hooks/useOps";
 
 interface RefreshPolicy { refetchInterval?: number | false; }
@@ -27,6 +28,47 @@ function ratioBar(label: string, current: number, max: number) {
       </div>
     </div>
   );
+}
+
+function pressureRow(
+  label: string,
+  gauge: PressureGauge & { enforced?: boolean },
+  copy?: { disabled?: string; unconfigured?: string },
+) {
+  if (gauge.enforced === false) {
+    return (
+      <div key={label}>
+        <div className="flex items-center justify-between gap-2 text-xs mb-1">
+          <span className="text-text-secondary">{label}</span>
+          <span className="flex items-center gap-2">
+            <Badge variant="yellow">not enforced</Badge>
+            <span className="text-text-muted tabular-nums">{gauge.current} open</span>
+          </span>
+        </div>
+        <p className="text-xs text-text-muted">
+          {copy?.disabled ??
+            "Load shedding for this limit is disabled because no enforceable ceiling could be determined."}
+        </p>
+      </div>
+    );
+  }
+  if (gauge.max === 0) {
+    return (
+      <div key={label}>
+        <div className="flex items-center justify-between gap-2 text-xs mb-1">
+          <span className="text-text-secondary">{label}</span>
+          <span className="flex items-center gap-2">
+            <Badge variant="default">no limit configured</Badge>
+            <span className="text-text-muted tabular-nums">{gauge.current}</span>
+          </span>
+        </div>
+        <p className="text-xs text-text-muted">
+          {copy?.unconfigured ?? "No capacity limit is configured for this gauge."}
+        </p>
+      </div>
+    );
+  }
+  return ratioBar(label, gauge.current, gauge.max);
 }
 
 /* ---------- Overload ---------- */
@@ -64,23 +106,18 @@ export function OverloadPanel({ refetchInterval }: RefreshPolicy = {}) {
       {data.pressure && (
         <div className="space-y-3">
           {data.pressure.file_descriptors &&
-            ratioBar(
-              "File descriptors",
-              data.pressure.file_descriptors.current,
-              data.pressure.file_descriptors.max,
-            )}
+            pressureRow("File descriptors", data.pressure.file_descriptors, {
+              disabled:
+                "FD-based load shedding is disabled because no enforceable descriptor ceiling could be determined. Connection and request limits are unaffected.",
+            })}
           {data.pressure.connections &&
-            ratioBar(
-              "Connections",
-              data.pressure.connections.current,
-              data.pressure.connections.max,
-            )}
+            pressureRow("Connections", data.pressure.connections, {
+              unconfigured: "No connection limit is configured.",
+            })}
           {data.pressure.requests &&
-            ratioBar(
-              "In-flight requests",
-              data.pressure.requests.current,
-              data.pressure.requests.max,
-            )}
+            pressureRow("In-flight requests", data.pressure.requests, {
+              unconfigured: "No in-flight request limit is configured.",
+            })}
         </div>
       )}
 
