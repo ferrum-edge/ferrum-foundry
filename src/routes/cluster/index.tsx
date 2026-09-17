@@ -15,8 +15,13 @@ import {
   useBackendCapabilities,
   useRefreshBackendCapabilities,
 } from "@/hooks/useOps";
-import { isCpStatus, isDpStatus } from "@/api/ops";
-import type { ProtocolSupport } from "@/api/ops";
+import {
+  backendProbesSupported,
+  isCpStatus,
+  isDpStatus,
+  type BackendCapabilitiesResponse,
+  type ProtocolSupport,
+} from "@/api/ops";
 
 function supportBadge(support: ProtocolSupport, stale = false) {
   if (stale) return <Badge variant="default">{support === "supported" ? "yes" : support === "unsupported" ? "no" : "?"}</Badge>;
@@ -30,11 +35,157 @@ function formatDate(iso?: string | null): string {
   return new Date(iso).toLocaleString();
 }
 
+function unsupportedProbeMessage(connectedDataPlanes: number): string {
+  const intro =
+    "Backend protocol probes belong to a data plane, not this control plane. This process does not run proxy probe state.";
+  if (connectedDataPlanes <= 0) {
+    return `${intro} Connect Foundry to a data plane to view and refresh probe results.`;
+  }
+  if (connectedDataPlanes === 1) {
+    return `${intro} The connected data plane exposes probe results on its own admin API.`;
+  }
+  return `${intro} The ${connectedDataPlanes} connected data planes expose probe results on their own admin APIs.`;
+}
+
+type BackendCapabilitiesPanelProps =
+  | { surface: "pending" }
+  | { surface: "unsupported"; connectedDataPlanes: number }
+  | {
+      surface: "probe";
+      capabilities: BackendCapabilitiesResponse | undefined;
+      isError: boolean;
+      isLoading: boolean;
+      isFetching: boolean;
+      dataUpdatedAt: number;
+      reprobePending: boolean;
+      onRetry: () => void;
+      onReprobe: () => void | Promise<void>;
+    };
+
+function BackendCapabilitiesPanel(props: BackendCapabilitiesPanelProps) {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-text-primary">
+            Backend Capabilities
+          </h2>
+          <p className="text-text-muted text-sm">
+            Probed protocol support per backend (HTTP/1.1, H2, H3, gRPC, HBONE).
+          </p>
+        </div>
+        {props.surface === "probe" ? (
+          <Button
+            variant="secondary"
+            size="sm"
+            loading={props.reprobePending}
+            onClick={() => { void props.onReprobe(); }}
+          >
+            Re-probe All
+          </Button>
+        ) : null}
+      </div>
+
+      {props.surface === "pending" ? (
+        <div className="text-text-muted text-sm">Loading…</div>
+      ) : null}
+
+      {props.surface === "unsupported" ? (
+        <Card>
+          <p className="text-sm text-text-secondary">
+            {unsupportedProbeMessage(props.connectedDataPlanes)}
+          </p>
+        </Card>
+      ) : null}
+
+      {props.surface === "probe" ? <ProbeResults {...props} /> : null}
+    </div>
+  );
+}
+
+function ProbeResults({
+  capabilities,
+  isError,
+  isLoading,
+  isFetching,
+  dataUpdatedAt,
+  onRetry,
+}: Extract<BackendCapabilitiesPanelProps, { surface: "probe" }>) {
+  return (
+    <>
+      {isError ? (
+        <div role="alert" className="rounded-lg border border-danger/50 p-4 text-sm">
+          <p>{capabilities ? "Capabilities refresh failed. Showing last known probe results; current support is unavailable." : "Backend capabilities unavailable. The request failed."}</p>
+          <Button variant="secondary" size="sm" loading={isFetching} onClick={onRetry}>
+            Retry capabilities
+          </Button>
+        </div>
+      ) : null}
+      {capabilities ? (
+        <p className="text-xs text-text-muted">
+          {isError ? "Last known capabilities" : "Capabilities"} observed: {formatDate(new Date(dataUpdatedAt).toISOString())}
+        </p>
+      ) : null}
+      <ResourceGrid
+        label="Backend capabilities"
+        minWidth="48rem"
+        emptyState={
+          !isLoading && !isError && capabilities?.entries.length === 0 ? (
+            <EmptyState
+              title="No backend probes yet"
+              description="Capabilities are collected as proxies dispatch to backends, or on demand via Re-probe All."
+            />
+          ) : null
+        }
+      >
+        <div className="grid grid-cols-[2fr_4rem_4rem_4rem_6rem_5rem_4rem_5rem] gap-3 px-6 py-3 border-b border-border text-text-muted text-xs font-semibold uppercase tracking-wider">
+          <span>Backend</span>
+          <span>H1</span>
+          <span>H2/TLS</span>
+          <span>H3</span>
+          <span>gRPC H2/TLS</span>
+          <span>gRPC h2c</span>
+          <span>HBONE</span>
+          <span>Probed</span>
+        </div>
+        {isLoading ? <div className="px-6 py-8 text-text-muted text-sm">Loading…</div> : null}
+        {(capabilities?.entries ?? []).map((entry) => (
+          <div
+            key={entry.key}
+            className="grid grid-cols-[2fr_4rem_4rem_4rem_6rem_5rem_4rem_5rem] gap-3 px-6 py-3 border-b border-border/50 last:border-b-0 items-center"
+          >
+            <div className="min-w-0">
+              <p className="text-xs font-mono text-text-primary truncate">
+                {entry.key.split("|").slice(0, 3).join(" · ")}
+              </p>
+              {entry.last_probe_error ? (
+                <p className="text-xs text-danger truncate">{entry.last_probe_error}</p>
+              ) : null}
+            </div>
+            <span>{supportBadge(entry.plain_http.h1, isError)}</span>
+            <span>{supportBadge(entry.plain_http.h2_tls, isError)}</span>
+            <span>{supportBadge(entry.plain_http.h3, isError)}</span>
+            <span>{supportBadge(entry.grpc_transport.h2_tls, isError)}</span>
+            <span>{supportBadge(entry.grpc_transport.h2c, isError)}</span>
+            <span>{supportBadge(entry.hbone, isError)}</span>
+            <span className="text-xs text-text-muted">
+              {entry.last_probe_at_unix_secs
+                ? new Date(entry.last_probe_at_unix_secs * 1000).toLocaleTimeString()
+                : "—"}
+            </span>
+          </div>
+        ))}
+      </ResourceGrid>
+    </>
+  );
+}
+
 export default function ClusterPage() {
   const { toast } = useToast();
   const clusterQuery = useClusterStatus();
-  const capsQuery = useBackendCapabilities();
   const { data: cluster, isLoading: clusterLoading, isError: clusterError } = clusterQuery;
+  const probeQueryEnabled = cluster != null ? backendProbesSupported(cluster) : clusterError;
+  const capsQuery = useBackendCapabilities(probeQueryEnabled);
   const { data: capabilities, isLoading: capsLoading, isError: capsError } = capsQuery;
   const refresh = useRefreshBackendCapabilities();
 
@@ -143,96 +294,33 @@ export default function ClusterPage() {
         </Card>
       )}
 
-      {/* Backend capabilities */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-text-primary">
-              Backend Capabilities
-            </h2>
-            <p className="text-text-muted text-sm">
-              Probed protocol support per backend (HTTP/1.1, H2, H3, gRPC, HBONE).
-            </p>
-          </div>
-          <Button
-            variant="secondary"
-            size="sm"
-            loading={refresh.isPending}
-            onClick={async () => {
-              try {
-                await refresh.mutateAsync();
-                toast("success", "Backend probes refreshed");
-              } catch (err) {
-                toast("error", await getApiErrorMessage(err, "Refresh failed"));
-              }
-            }}
-          >
-            Re-probe All
-          </Button>
-        </div>
-
-        {capsError && (
-          <div role="alert" className="rounded-lg border border-danger/50 p-4 text-sm">
-            <p>{capabilities ? "Capabilities refresh failed. Showing last known probe results; current support is unavailable." : "Backend capabilities unavailable. The request failed."}</p>
-            <Button variant="secondary" size="sm" loading={capsQuery.isFetching} onClick={() => void capsQuery.refetch()}>
-              Retry capabilities
-            </Button>
-          </div>
-        )}
-        {capabilities && (
-          <p className="text-xs text-text-muted">
-            {capsError ? "Last known capabilities" : "Capabilities"} observed: {formatDate(new Date(capsQuery.dataUpdatedAt).toISOString())}
-          </p>
-        )}
-        <ResourceGrid
-          label="Backend capabilities"
-          minWidth="48rem"
-          emptyState={!capsLoading && !capsError && capabilities?.entries.length === 0 && (
-            <EmptyState
-              title="No backend probes yet"
-              description="Capabilities are collected as proxies dispatch to backends, or on demand via Re-probe All."
-            />
-          )}
-        >
-          <div className="grid grid-cols-[2fr_4rem_4rem_4rem_6rem_5rem_4rem_5rem] gap-3 px-6 py-3 border-b border-border text-text-muted text-xs font-semibold uppercase tracking-wider">
-            <span>Backend</span>
-            <span>H1</span>
-            <span>H2/TLS</span>
-            <span>H3</span>
-            <span>gRPC H2/TLS</span>
-            <span>gRPC h2c</span>
-            <span>HBONE</span>
-            <span>Probed</span>
-          </div>
-          {capsLoading && <div className="px-6 py-8 text-text-muted text-sm">Loading…</div>}
-          {(capabilities?.entries ?? []).map((entry) => (
-            <div
-              key={entry.key}
-              className="grid grid-cols-[2fr_4rem_4rem_4rem_6rem_5rem_4rem_5rem] gap-3 px-6 py-3 border-b border-border/50 last:border-b-0 items-center"
-            >
-              <div className="min-w-0">
-                <p className="text-xs font-mono text-text-primary truncate">
-                  {entry.key.split("|").slice(0, 3).join(" · ")}
-                </p>
-                {entry.last_probe_error && (
-                  <p className="text-xs text-danger truncate">{entry.last_probe_error}</p>
-                )}
-              </div>
-              <span>{supportBadge(entry.plain_http.h1, capsError)}</span>
-              <span>{supportBadge(entry.plain_http.h2_tls, capsError)}</span>
-              <span>{supportBadge(entry.plain_http.h3, capsError)}</span>
-              <span>{supportBadge(entry.grpc_transport.h2_tls, capsError)}</span>
-              <span>{supportBadge(entry.grpc_transport.h2c, capsError)}</span>
-              <span>{supportBadge(entry.hbone, capsError)}</span>
-              <span className="text-xs text-text-muted">
-                {entry.last_probe_at_unix_secs
-                  ? new Date(entry.last_probe_at_unix_secs * 1000).toLocaleTimeString()
-                  : "—"}
-              </span>
-            </div>
-          ))}
-        </ResourceGrid>
-      </div>
+      {cluster && isCpStatus(cluster) ? (
+        <BackendCapabilitiesPanel
+          surface="unsupported"
+          connectedDataPlanes={cluster.connected_data_planes}
+        />
+      ) : !cluster && !clusterError ? (
+        <BackendCapabilitiesPanel surface="pending" />
+      ) : (
+        <BackendCapabilitiesPanel
+          surface="probe"
+          capabilities={capabilities}
+          isError={capsError}
+          isLoading={capsLoading}
+          isFetching={capsQuery.isFetching}
+          dataUpdatedAt={capsQuery.dataUpdatedAt}
+          reprobePending={refresh.isPending}
+          onRetry={() => { void capsQuery.refetch(); }}
+          onReprobe={async () => {
+            try {
+              await refresh.mutateAsync();
+              toast("success", "Backend probes refreshed");
+            } catch (err) {
+              toast("error", await getApiErrorMessage(err, "Refresh failed"));
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

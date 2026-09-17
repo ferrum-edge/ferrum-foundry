@@ -34,6 +34,11 @@ export interface PressureGauge {
   ratio: number;
 }
 
+/** Authenticated GET /overload file-descriptor pressure, including `enforced`. */
+export interface FileDescriptorGauge extends PressureGauge {
+  enforced: boolean;
+}
+
 export interface OverloadSnapshot {
   level: OverloadLevel;
   message?: string;
@@ -43,7 +48,7 @@ export interface OverloadSnapshot {
   red_drop_probability_pct?: number;
   port_exhaustion_events?: number;
   pressure?: {
-    file_descriptors?: PressureGauge;
+    file_descriptors?: FileDescriptorGauge;
     connections?: PressureGauge;
     requests?: PressureGauge;
     event_loop_latency_us?: number;
@@ -315,6 +320,14 @@ export function isCpStatus(status: ClusterStatus): status is ClusterStatusCp {
 
 export function isDpStatus(status: ClusterStatus): status is ClusterStatusDp {
   return status.mode === "dp";
+}
+
+/**
+ * Control planes never run proxy/backend probe state. Data-plane,
+ * standalone, and other process modes expose GET /backend-capabilities.
+ */
+export function backendProbesSupported(status: ClusterStatus): boolean {
+  return !isCpStatus(status);
 }
 
 export async function getClusterStatus(
