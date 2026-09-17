@@ -154,7 +154,7 @@ for (const [body, error] of [
   [{ crl_pem: "", cert_expiry_warning_days: 0 }, /^crl_pem:/],
   [{ crl_pem: "", cert_expiry_warning_days: -1 }, /Invalid JSON body/],
 ]) {
-  const response = await request("/tls/validate", { method: "POST", body, expected: [400] });
+  const response = await request("/admin/tls/validate", { method: "POST", body, expected: [400] });
   assert.equal(response.valid, false);
   assert.match(response.error, error);
 }
