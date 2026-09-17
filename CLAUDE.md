@@ -66,6 +66,11 @@ node scripts/demo-traffic-client.mjs mixed
 
 ### Running the gateway locally
 
+The `ferrumedge/ferrum-edge:latest` tag is not refreshed for releases; pick the
+current immutable tag from
+[ferrum-edge releases](https://github.com/ferrum-edge/ferrum-edge/releases)
+(here `v0.9.5`).
+
 ```bash
 docker run --rm -d --name ferrum-edge \
   --add-host host.docker.internal:host-gateway \
@@ -78,7 +83,7 @@ docker run --rm -d --name ferrum-edge \
   -e FERRUM_ADMIN_BIND_ADDRESS=0.0.0.0 \
   -e FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true \
   -p 127.0.0.1:9000:9000 -p 127.0.0.1:8000:8000 \
-  ferrumedge/ferrum-edge:latest run -m database -v
+  ferrumedge/ferrum-edge:v0.9.5 run -m database -v
 ```
 
 The public plaintext admin bind above is a local-development exception and is
