@@ -7,7 +7,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useAllConsumers, useConsumers } from "@/hooks/useConsumers";
 import { usePaginationParams } from "@/hooks/usePagination";
 import { Button } from "@/components/ui/Button";
-import { Card } from "@/components/ui/Card";
+import { ResourceGrid } from "@/components/ui/ResourceGrid";
 import { Badge } from "@/components/ui/Badge";
 import { SearchBar } from "@/components/shared/SearchBar";
 import { PaginationControls } from "@/components/shared/PaginationControls";
@@ -163,7 +163,42 @@ export default function ConsumersPage() {
       />
 
       {/* Table */}
-      <Card className="overflow-hidden p-0">
+      <ResourceGrid
+        label="Consumers"
+        emptyState={
+          <>
+            {!isLoading && isError && (
+              <EmptyState
+                title="Failed to load consumers"
+                description="An error occurred while fetching consumer data."
+              />
+            )}
+
+            {!isLoading && !isError && consumers.length === 0 && (
+              <EmptyState
+                title={total > 0 ? "No results on this page" : search ? "No matching consumers" : "No consumers yet"}
+                description={
+                  total > 0
+                    ? "Use Go to last page below to return to the available results."
+                    : search
+                    ? "Try adjusting your search terms."
+                    : "Create your first consumer to start managing API access."
+                }
+                action={
+                  total === 0 && !search ? (
+                    <Button
+                      size="sm"
+                      onClick={() => navigate({ to: "/consumers/new" })}
+                    >
+                      Create Consumer
+                    </Button>
+                  ) : undefined
+                }
+              />
+            )}
+          </>
+        }
+      >
         {/* Header row */}
         <div className={`${GRID_TEMPLATE} px-6 py-3 border-b border-border bg-bg-card text-text-muted text-xs font-semibold uppercase tracking-wider`}>
           {columns.map((col) => (
@@ -180,36 +215,6 @@ export default function ConsumersPage() {
               <SkeletonRow key={i} />
             ))}
           </div>
-        )}
-
-        {!isLoading && isError && (
-          <EmptyState
-            title="Failed to load consumers"
-            description="An error occurred while fetching consumer data."
-          />
-        )}
-
-        {!isLoading && !isError && consumers.length === 0 && (
-          <EmptyState
-            title={total > 0 ? "No results on this page" : search ? "No matching consumers" : "No consumers yet"}
-            description={
-              total > 0
-                ? "Use Go to last page below to return to the available results."
-                : search
-                ? "Try adjusting your search terms."
-                : "Create your first consumer to start managing API access."
-            }
-            action={
-              total === 0 && !search ? (
-                <Button
-                  size="sm"
-                  onClick={() => navigate({ to: "/consumers/new" })}
-                >
-                  Create Consumer
-                </Button>
-              ) : undefined
-            }
-          />
         )}
 
         {!isLoading && !isError && consumers.length > 0 && (
@@ -293,7 +298,7 @@ export default function ConsumersPage() {
             })}
           </div>
         )}
-      </Card>
+      </ResourceGrid>
 
       {/* Pagination */}
       {total > 0 && (

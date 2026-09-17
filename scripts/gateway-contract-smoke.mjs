@@ -142,10 +142,27 @@ const defaultsConfig = { ...config, namespace: `${config.namespace}-plugin-defau
 const defaults = await verifyPluginDefaults((path, options) => exchange(path, options, defaultsConfig));
 const basicAuth = await verifyBasicAuthContract(exchange);
 
+// Validation is non-persistent. Empty PEM values are present-but-invalid, so
+// Foundry must omit unused fields to support CA-only and CRL-only submissions.
+// Exercise option decoding against the pinned gateway without storing material.
+for (const [body, error] of [
+  [{}, /at least one/],
+  [{ cert_pem: "" }, /key_pem is required/],
+  [{ key_pem: "" }, /cert_pem is required/],
+  [{ ca_bundle_pem: "" }, /^ca_bundle_pem:/],
+  [{ crl_pem: "", allow_expired: true, cert_expiry_warning_days: 14 }, /^crl_pem:/],
+  [{ crl_pem: "", cert_expiry_warning_days: 0 }, /^crl_pem:/],
+  [{ crl_pem: "", cert_expiry_warning_days: -1 }, /Invalid JSON body/],
+]) {
+  const response = await request("/admin/tls/validate", { method: "POST", body, expected: [400] });
+  assert.equal(response.valid, false);
+  assert.match(response.error, error);
+}
+
 console.log(JSON.stringify({
   verified: true,
   defaults,
   basicAuth,
-  operations: ["read", "create", "full-replace update", "credential rotation", "delete"],
+  operations: ["read", "create", "full-replace update", "credential rotation", "delete", "TLS validation"],
   resources: ["upstreams", "consumers", "proxies", "plugin configs", "namespaces"],
 }));

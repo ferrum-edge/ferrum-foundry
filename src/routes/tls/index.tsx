@@ -4,10 +4,11 @@
 /*  surface rotation, and material validation.                        */
 /* ------------------------------------------------------------------ */
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
 import { Card } from "@/components/ui/Card";
+import { ResourceGrid } from "@/components/ui/ResourceGrid";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -99,6 +100,8 @@ function Mono({ children }: { children: ReactNode }) {
 interface ManagedTabConfig {
   collection: ManagedTlsCollection;
   title: string;
+  /** Singular material name for accessible record actions. */
+  recordLabel: string;
   description: string;
   /** Heading for the empty state; each store holds a different material. */
   emptyTitle: string;
@@ -122,6 +125,7 @@ const MANAGED_TABS: ManagedTabConfig[] = [
   {
     collection: "certificates",
     title: "Certificates",
+    recordLabel: "certificate",
     description:
       "Managed server/client certificates referenced as managed://certificates/{id}. Private keys are stored but never returned.",
     emptyTitle: "No certificates yet",
@@ -136,6 +140,7 @@ const MANAGED_TABS: ManagedTabConfig[] = [
   {
     collection: "ca-bundles",
     title: "CA Bundles",
+    recordLabel: "CA bundle",
     description:
       "Trust anchor bundles referenced as managed://ca-bundles/{id} for client or backend verification.",
     emptyTitle: "No CA bundles yet",
@@ -148,6 +153,7 @@ const MANAGED_TABS: ManagedTabConfig[] = [
   {
     collection: "crls",
     title: "CRLs",
+    recordLabel: "CRL",
     description: "Certificate revocation lists referenced as managed://crls/{id}.",
     emptyTitle: "No CRLs yet",
     emptyDescription:
@@ -159,6 +165,7 @@ const MANAGED_TABS: ManagedTabConfig[] = [
   {
     collection: "ocsp-responses",
     title: "OCSP",
+    recordLabel: "OCSP response",
     description: "Stapled OCSP responses referenced as managed://ocsp-responses/{id}.",
     emptyTitle: "No OCSP responses yet",
     emptyDescription:
@@ -170,6 +177,7 @@ const MANAGED_TABS: ManagedTabConfig[] = [
   {
     collection: "jwks",
     title: "JWKS",
+    recordLabel: "JWKS document",
     description: "JSON Web Key Sets referenced as managed://jwks/{id} for token verification.",
     emptyTitle: "No JWKS documents yet",
     emptyDescription: "Upload a JSON Web Key Set to verify tokens.",
@@ -180,6 +188,7 @@ const MANAGED_TABS: ManagedTabConfig[] = [
 ];
 
 function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
+  const formId = useId();
   const { toast } = useToast();
   const { data, isLoading } = useAllManagedTlsRecords(config.collection);
   const createRecord = useCreateManagedTlsRecord(config.collection);
@@ -294,6 +303,8 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
                   variant="ghost"
                   size="sm"
                   onClick={() => setDeleteTarget(record)}
+                  aria-label={`Delete ${config.recordLabel} ${record.name || record.id}`}
+                  title={`Delete ${config.recordLabel} ${record.name || record.id}`}
                 >
                   <svg className="w-4 h-4 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -327,8 +338,11 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
           {config.fields.map((field) =>
             field.textarea ? (
               <div key={field.key} className="flex flex-col gap-1.5">
-                <span className="text-text-secondary text-sm font-medium">{field.label}</span>
+                <label htmlFor={`${formId}-${field.key}`} className="text-text-secondary text-sm font-medium">
+                  {field.label}
+                </label>
                 <textarea
+                  id={`${formId}-${field.key}`}
                   value={form[field.key] ?? ""}
                   onChange={(e) => setField(field.key, e.target.value)}
                   rows={6}
@@ -336,9 +350,10 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
                   className={`bg-code-bg border rounded-lg px-3 py-2 text-text-primary text-xs font-mono placeholder:text-text-muted resize-y ${fieldErrors[field.key] ? "border-danger focus:border-danger focus:ring-1 focus:ring-danger/30" : "border-border focus:border-orange focus:ring-1 focus:ring-orange/30"}`}
                   spellCheck={false}
                   aria-invalid={fieldErrors[field.key] ? true : undefined}
+                  aria-describedby={fieldErrors[field.key] ? `${formId}-${field.key}-error` : undefined}
                 />
                 {fieldErrors[field.key] && (
-                  <p className="text-danger text-xs">{fieldErrors[field.key]}</p>
+                  <p id={`${formId}-${field.key}-error`} className="text-danger text-xs">{fieldErrors[field.key]}</p>
                 )}
               </div>
             ) : (
@@ -451,7 +466,17 @@ function InventoryTab() {
         </div>
       </Card>
 
-      <Card className="overflow-hidden p-0">
+      <ResourceGrid
+        label="TLS inventory"
+        emptyState={!isLoading && entries.length === 0 && (
+          <EmptyState
+            title={(data?.pagination.total ?? 0) > 0 ? "No results on this page" : "No TLS material found"}
+            description={(data?.pagination.total ?? 0) > 0
+              ? "Use Go to last page below to return to the available results."
+              : "The gateway reports no configured TLS sources."}
+          />
+        )}
+      >
         <div className="grid grid-cols-[1.2fr_5rem_5rem_2fr_6rem] gap-4 px-6 py-3 border-b border-border text-text-muted text-xs font-semibold uppercase tracking-wider">
           <span>Material</span>
           <span>Kind</span>
@@ -465,14 +490,6 @@ function InventoryTab() {
               <SkeletonRow key={i} />
             ))}
           </div>
-        )}
-        {!isLoading && entries.length === 0 && (
-          <EmptyState
-            title={(data?.pagination.total ?? 0) > 0 ? "No results on this page" : "No TLS material found"}
-            description={(data?.pagination.total ?? 0) > 0
-              ? "Use Go to last page below to return to the available results."
-              : "The gateway reports no configured TLS sources."}
-          />
         )}
         {!isLoading &&
           entries.map((entry) => (
@@ -501,7 +518,7 @@ function InventoryTab() {
               <span>{expiryBadge(entry.not_after) ?? <span className="text-text-muted text-xs">—</span>}</span>
             </div>
           ))}
-      </Card>
+      </ResourceGrid>
       {(data?.pagination.total ?? 0) > 0 && (
         <PaginationControls
           offset={pagination.offset}
@@ -866,6 +883,7 @@ function AcmeTab() {
                   onClick={() => setDeleteCertificateTarget(cert)}
                   disabled={pendingKeys.has(`delete-cert:${cert.id}`)}
                   aria-label={`Delete certificate for ${cert.domains.join(", ")}`}
+                  title={`Delete certificate for ${cert.domains.join(", ")}`}
                 >
                   <svg className="w-4 h-4 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -977,6 +995,7 @@ function AcmeTab() {
                     onClick={() => setDeleteOrderTarget(order)}
                     disabled={pendingKeys.has(`delete-order:${order.id}`)}
                     aria-label={`Delete ${order.status} order for ${order.domains.join(", ")}`}
+                    title={`Delete ${order.status} order for ${order.domains.join(", ")}`}
                   >
                     <svg className="w-4 h-4 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -1345,17 +1364,19 @@ const VALIDATE_FIELDS = [
   { key: "cert_pem", label: "Certificate (PEM)" },
   { key: "key_pem", label: "Private Key (PEM)" },
   { key: "ca_bundle_pem", label: "CA Bundle (PEM)" },
+  { key: "crl_pem", label: "CRL (PEM)" },
 ] as const satisfies readonly { key: keyof TlsValidateRequest; label: string }[];
 
 function ValidateTab() {
+  const formId = useId();
   const { toast } = useToast();
   const validateMaterial = useValidateTlsMaterial();
   const [values, setValues] = useState<Record<string, string>>({});
+  const [allowExpired, setAllowExpired] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [result, setResult] = useState<{ valid: boolean; validated: Record<string, unknown> } | null>(null);
 
-  const setField = (key: string, value: string) => {
-    setValues((current) => ({ ...current, [key]: value }));
+  const clearFieldError = (key: string) => {
     setFieldErrors((errors) => {
       if (!(key in errors)) return errors;
       const next = { ...errors };
@@ -1364,33 +1385,44 @@ function ValidateTab() {
     });
   };
 
+  const setField = (key: string, value: string) => {
+    setValues((current) => ({ ...current, [key]: value }));
+    clearFieldError(key);
+  };
+
   const handleValidate = async () => {
     setResult(null);
     setFieldErrors({});
     const request: TlsValidateRequest = {};
-    if (values.cert_pem?.trim()) request.cert_pem = values.cert_pem;
-    if (values.key_pem?.trim()) request.key_pem = values.key_pem;
-    if (values.ca_bundle_pem?.trim()) request.ca_bundle_pem = values.ca_bundle_pem;
+    // An empty PEM string is supplied material to the gateway, not an omitted
+    // field. Preserve populated PEM bytes, but omit blank optional controls.
+    for (const field of VALIDATE_FIELDS) {
+      if (values[field.key]?.trim()) request[field.key] = values[field.key];
+    }
+    if (allowExpired) request.allow_expired = true;
+    const warningDays = values.cert_expiry_warning_days?.trim();
+    if (warningDays) {
+      const threshold = Number(warningDays);
+      if (!Number.isSafeInteger(threshold) || threshold < 0) {
+        setFieldErrors({
+          cert_expiry_warning_days: "Enter a non-negative whole number of days within the supported range.",
+        });
+        return;
+      }
+      request.cert_expiry_warning_days = threshold;
+    }
     try {
       setResult(await validateMaterial.mutateAsync(request));
     } catch (err) {
       // A 400 here names the request key it rejected, so the message belongs
-      // under that textarea rather than in a toast quoting the request URL.
+      // under that control rather than in a toast quoting the request URL.
       const detail = await getApiErrorDetail(err);
       const fieldError = parseFieldError(detail, TLS_VALIDATE_FIELDS);
-      if (
-        fieldError &&
-        VALIDATE_FIELDS.some((field) => field.key === fieldError.field)
-      ) {
+      if (fieldError) {
         setFieldErrors({ [fieldError.field]: fieldError.message });
         return;
       }
-      // A field with no control on this tab (crl_pem, ...) still has to be
-      // readable, so fall back to the bare message.
-      toast(
-        "error",
-        fieldError?.message || detail || "Could not validate this material",
-      );
+      toast("error", detail || "Could not validate this material");
     }
   };
 
@@ -1398,24 +1430,66 @@ function ValidateTab() {
     <div className="space-y-4 max-w-3xl">
       <p className="text-text-muted text-sm">
         Validate PEM material without persisting anything — cert/key match, chain
-        integrity, and expiry are checked by the gateway.
+        integrity, certificate expiry, and CRL validity windows are checked by the
+        gateway. Supply a certificate with its private key, a CA bundle, a CRL
+        bundle, or a combination. Leave unused fields blank.
       </p>
       {VALIDATE_FIELDS.map((field) => (
         <div key={field.key} className="flex flex-col gap-1.5">
-          <span className="text-text-secondary text-sm font-medium">{field.label}</span>
+          <label htmlFor={`${formId}-${field.key}`} className="text-text-secondary text-sm font-medium">
+            {field.label}
+          </label>
           <textarea
+            id={`${formId}-${field.key}`}
             value={values[field.key] ?? ""}
             onChange={(e) => setField(field.key, e.target.value)}
             rows={5}
             className={`bg-code-bg border rounded-lg px-3 py-2 text-text-primary text-xs font-mono placeholder:text-text-muted resize-y ${fieldErrors[field.key] ? "border-danger focus:border-danger focus:ring-1 focus:ring-danger/30" : "border-border focus:border-orange focus:ring-1 focus:ring-orange/30"}`}
             spellCheck={false}
             aria-invalid={fieldErrors[field.key] ? true : undefined}
+            aria-describedby={fieldErrors[field.key] ? `${formId}-${field.key}-error` : undefined}
           />
           {fieldErrors[field.key] && (
-            <p className="text-danger text-xs">{fieldErrors[field.key]}</p>
+            <p id={`${formId}-${field.key}-error`} className="text-danger text-xs">{fieldErrors[field.key]}</p>
           )}
         </div>
       ))}
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor={`${formId}-allow-expired`} className="flex items-center gap-2 text-sm text-text-secondary">
+          <input
+            id={`${formId}-allow-expired`}
+            type="checkbox"
+            checked={allowExpired}
+            onChange={(e) => {
+              setAllowExpired(e.target.checked);
+              clearFieldError("allow_expired");
+            }}
+            aria-invalid={fieldErrors.allow_expired ? true : undefined}
+            aria-describedby={`${formId}-allow-expired-help${fieldErrors.allow_expired ? ` ${formId}-allow-expired-error` : ""}`}
+          />
+          Allow expired certificates
+        </label>
+        <p id={`${formId}-allow-expired-help`} className="text-text-muted text-xs">
+          Off by default. Skips certificate notBefore/notAfter checks, including
+          CA certificates. CRL checks always apply: future thisUpdate, missing
+          nextUpdate, or reached nextUpdate rejects the entire CRL bundle.
+        </p>
+        {fieldErrors.allow_expired && (
+          <p id={`${formId}-allow-expired-error`} className="text-danger text-xs">{fieldErrors.allow_expired}</p>
+        )}
+      </div>
+      <Input
+        label="Certificate expiry warning (days)"
+        type="number"
+        min={0}
+        max={Number.MAX_SAFE_INTEGER}
+        step={1}
+        placeholder="30"
+        value={values.cert_expiry_warning_days ?? ""}
+        onChange={(e) => setField("cert_expiry_warning_days", e.target.value)}
+        helpText="Optional non-negative whole number. Leave blank for the gateway default of 30 days."
+        error={fieldErrors.cert_expiry_warning_days}
+      />
       <Button loading={validateMaterial.isPending} onClick={handleValidate}>
         Validate
       </Button>
@@ -1426,6 +1500,7 @@ function ValidateTab() {
               {result.valid ? "VALID" : "INVALID"}
             </Badge>
           </div>
+          <p className="text-sm text-text-secondary mb-2">Gateway validation details</p>
           <pre className="text-xs font-mono text-text-secondary bg-code-bg rounded-lg p-3 overflow-x-auto">
             {JSON.stringify(result.validated, null, 2)}
           </pre>
