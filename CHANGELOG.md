@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Local gateway setup docs pin `ferrumedge/ferrum-edge:v0.9.5` instead of the stale `latest` tag and note that release images are chosen from upstream releases (#361).
+
 ### Added
 
 - Vite's dev-server port and `/api` proxy target are configurable through `VITE_DEV_PORT`, `PORT`, and `VITE_BFF_URL`, so Foundry can run alongside another Vite app such as Nexus without editing `vite.config.ts` (#327).
