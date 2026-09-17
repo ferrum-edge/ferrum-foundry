@@ -26,14 +26,15 @@ let topology: ClusterStatus;
 let capabilities: BackendCapabilitiesResponse;
 let failTopology: boolean;
 let failCapabilities: boolean;
+let fetchMock: ReturnType<typeof vi.fn>;
 
-beforeEach(() => {
-  topology = {
+function cpTopology(connectedDataPlanes = 1): ClusterStatus {
+  return {
     mode: "cp",
-    connected_data_planes: 1,
+    connected_data_planes: connectedDataPlanes,
     connected_mesh_nodes: 0,
     mesh_nodes: [],
-    data_planes: [{
+    data_planes: connectedDataPlanes === 0 ? [] : [{
       node_id: "historical-node",
       namespace: "default",
       version: "0.9.0",
@@ -42,6 +43,34 @@ beforeEach(() => {
       last_sync_at: "2026-09-06T00:00:00Z",
     }],
   };
+}
+
+function dpTopology(status: "online" | "offline" = "online"): ClusterStatus {
+  return {
+    mode: "dp",
+    control_plane: {
+      url: "https://cp.example.test",
+      status,
+      is_primary: true,
+      config_diverged: false,
+      config_divergence_recoveries_total: 0,
+    },
+  };
+}
+
+function standaloneTopology(): ClusterStatus {
+  return { mode: "standalone", message: "Standalone gateway" };
+}
+
+function capabilityRequestCount(): number {
+  return fetchMock.mock.calls.filter(([input]) => {
+    const url = input instanceof Request ? input.url : String(input);
+    return new URL(url, "http://localhost").pathname.includes("backend-capabilities");
+  }).length;
+}
+
+beforeEach(() => {
+  topology = cpTopology();
   capabilities = { entries: [{
     key: "https|backend|443",
     plain_http: { h1: "supported", h2_tls: "unsupported", h3: "unknown" },
@@ -51,14 +80,15 @@ beforeEach(() => {
   }] };
   failTopology = false;
   failCapabilities = false;
-  vi.stubGlobal("Request", BasedRequest);
-  vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
+  fetchMock = vi.fn(async (request: Request) => {
     const isTopology = new URL(request.url).pathname.endsWith("/cluster");
     if (isTopology ? failTopology : failCapabilities) {
       return new Response("Unavailable", { status: 503, headers: { "retry-after": "0" } });
     }
     return Response.json(isTopology ? topology : capabilities);
-  }));
+  });
+  vi.stubGlobal("Request", BasedRequest);
+  vi.stubGlobal("fetch", fetchMock);
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -101,6 +131,8 @@ describe("Cluster query snapshots", () => {
     await expectText("Topology refresh failed");
     expect(host.textContent).toContain("last known online");
     expect(host.textContent).toContain("connected in last known snapshot");
+    expect(host.textContent).toContain("belong to a data plane");
+    expect(host.textContent).not.toContain("Re-probe All");
     expect(client.getQueryState(["cluster"])!.dataUpdatedAt).toBe(observedAt);
     failTopology = false;
     await refetch("cluster");
@@ -117,7 +149,7 @@ describe("Cluster query snapshots", () => {
     expect(host.textContent).not.toContain("No backend probes yet");
     failTopology = false;
     failCapabilities = false;
-    topology = { mode: "standalone", message: "Standalone gateway" };
+    topology = standaloneTopology();
     capabilities = { entries: [] };
     await refetch("cluster");
     await refetch("backendCapabilities");
@@ -126,6 +158,7 @@ describe("Cluster query snapshots", () => {
   });
 
   it("retains and qualifies capability history after failed refresh", async () => {
+    topology = standaloneTopology();
     await mount();
     await expectText("https · backend · 443");
     failCapabilities = true;
@@ -140,13 +173,7 @@ describe("Cluster query snapshots", () => {
   });
 
   it.each(["online", "offline"] as const)("keeps DP %s distinct from read failures", async (status) => {
-    topology = { mode: "dp", control_plane: {
-      url: "https://cp.example.test",
-      status,
-      is_primary: true,
-      config_diverged: false,
-      config_divergence_recoveries_total: 0,
-    } };
+    topology = dpTopology(status);
     await mount();
     await expectText(`CP ${status}`);
     failTopology = true;
@@ -155,6 +182,7 @@ describe("Cluster query snapshots", () => {
   });
 
   it("shows gRPC TLS independently of plain HTTP TLS and gRPC h2c", async () => {
+    topology = standaloneTopology();
     await mount();
     await expectText("https · backend · 443");
     const grids = host.querySelectorAll('[class*="grid-cols-"]');
@@ -163,5 +191,42 @@ describe("Cluster query snapshots", () => {
     expect(cells[2]!.textContent).toBe("no");
     expect(cells[4]!.textContent).toBe("yes");
     expect(cells[5]!.textContent).toBe("no");
+  });
+});
+
+describe("Backend probe surface by gateway mode", () => {
+  it.each([
+    { count: 0, excerpt: "Connect Foundry to a data plane" },
+    { count: 1, excerpt: "The connected data plane exposes probe results" },
+    { count: 2, excerpt: "The 2 connected data planes expose probe results" },
+  ])("explains probes are unsupported on a control plane with $count data plane(s)", async ({ count, excerpt }) => {
+    topology = cpTopology(count);
+    failCapabilities = true;
+    await mount();
+    await expectText("CONTROL PLANE");
+    await expectText("Backend protocol probes belong to a data plane");
+    expect(host.textContent).toContain(excerpt);
+    expect(host.textContent).not.toContain("Backend capabilities unavailable");
+    expect(host.textContent).not.toContain("Retry");
+    expect(host.textContent).not.toContain("Re-probe All");
+    expect(host.textContent).not.toContain("gRPC H2/TLS");
+    expect(host.textContent).not.toContain("No backend probes yet");
+    expect(capabilityRequestCount()).toBe(0);
+  });
+
+  it.each([
+    { topology: standaloneTopology(), marker: "STANDALONE MODE" },
+    { topology: dpTopology(), marker: "DATA PLANE" },
+  ])("keeps the failed-read Retry state when $marker supports probing", async (variant) => {
+    topology = variant.topology;
+    failCapabilities = true;
+    await mount();
+    await expectText(variant.marker);
+    await expectText("Backend capabilities unavailable. The request failed.");
+    expect(host.textContent).toContain("Retry capabilities");
+    expect(host.textContent).toContain("Re-probe All");
+    expect(host.textContent).toContain("gRPC H2/TLS");
+    expect(host.textContent).not.toContain("belong to a data plane");
+    expect(capabilityRequestCount()).toBeGreaterThan(0);
   });
 });
