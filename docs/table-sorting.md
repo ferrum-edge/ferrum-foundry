@@ -53,6 +53,35 @@ keys. Any future server sorting integration must verify the deployed contract,
 include ordering in query keys and every page request, and establish an ID
 tie-break before enabling its headers.
 
+## Narrow resource grids
+
+Custom resource grids use `ResourceGrid` for an inner horizontal scroller. The
+header and rows share a canvas at least 52rem wide, so fixed columns and gaps
+cannot consume the space reserved for resource identity. The existing desktop
+track templates still fill the card when there is enough room. Cluster backend
+capabilities retain their 48rem minimum; the smaller authorization grids in
+proxy and consumer details use 40rem. Scrolling follows the available card width
+rather than a viewport breakpoint, including when the desktop sidebar is open.
+
+The scroller has an accessible region name and is keyboard focusable. Pass empty
+and error feedback through `emptyState` to keep messages and create buttons
+within the card width, outside the wide canvas. Keep column headers inside the
+scroller even when a collection is empty.
+
+`src/routes/resourceGrids.test.tsx` mounts all nine affected surfaces and asserts
+the inner scroller, minimum width, shared header/row template, identity cell,
+and placement of empty/error feedback. This is structural regression coverage:
+Vitest uses jsdom, which cannot calculate column bounds or prove text is visible.
+There is no browser mode or browser lane in the current CI workflow, and
+`scripts/demo-route-smoke.mjs` exercises gateway HTTP responses, not UI layout.
+
+Browser verification remains necessary at 390×844 for populated and empty lists,
+mesh service graph, TLS inventory, cluster capabilities, and the authorization
+tabs in proxy/consumer details. Check that identity text has space, horizontal
+scrolling reaches every column without page overflow, headers stay aligned with
+rows, and empty-state actions remain visible. Also check a desktop viewport in
+both themes to confirm the existing presentation.
+
 ## Regression coverage
 
 `src/components/ui/DataTable.test.tsx` mounts the real component and checks

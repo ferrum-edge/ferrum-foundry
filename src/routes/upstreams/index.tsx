@@ -7,7 +7,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useAllUpstreams, useUpstreams } from "@/hooks/useUpstreams";
 import { usePaginationParams } from "@/hooks/usePagination";
 import { Button } from "@/components/ui/Button";
-import { Card } from "@/components/ui/Card";
+import { ResourceGrid } from "@/components/ui/ResourceGrid";
 import { Badge } from "@/components/ui/Badge";
 import { SearchBar } from "@/components/shared/SearchBar";
 import { PaginationControls } from "@/components/shared/PaginationControls";
@@ -79,9 +79,9 @@ const columns = [
  * `minmax(0, …)`, none of which can disagree between the two containers. The
  * badge columns are sized off their *labels*, which are the widest thing in
  * them: "HEALTH CHECK" needs ~100px at text-xs/uppercase/tracking-wider, so
- * the old 5rem (80px) wrapped it onto two lines. The tracks sum to ~860px of
- * the ~860px available inside the card at a 1280px viewport and shrink from
- * the flexible columns below that, so nothing overflows or scrolls sideways.
+ * the old 5rem (80px) wrapped it onto two lines. ResourceGrid keeps these
+ * tracks on a shared canvas with a minimum width, scrolling inside the card
+ * when needed instead of collapsing the flexible columns on narrow screens.
  */
 const GRID_TEMPLATE =
   "grid grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_5rem_7.5rem_10rem] gap-4";
@@ -157,7 +157,41 @@ export default function UpstreamsPage() {
       />
 
       {/* Table */}
-      <Card className="overflow-hidden p-0">
+      <ResourceGrid
+        label="Upstreams"
+        emptyState={
+          <>
+            {!isLoading && isError && (
+              <EmptyState
+                title="Failed to load upstreams"
+                description="An error occurred while fetching upstream configurations."
+              />
+            )}
+
+            {!isLoading && !isError && upstreams.length === 0 && (
+              <EmptyState
+                title={total > 0 ? "No results on this page" : search ? "No matching upstreams" : "No upstreams yet"}
+                description={
+                  total > 0
+                    ? "Use Go to last page below to return to the available results."
+                    : search
+                    ? "Try adjusting your search terms."
+                    : "Create your first upstream to define backend targets and load balancing."
+                }
+                action={
+                  total === 0 && !search ? (
+                    <WriteAction verdict={canWrite} align="start">
+  <Button size="sm" onClick={() => navigate({ to: "/upstreams/new" })}>
+                        Create Upstream
+                      </Button>
+                    </WriteAction>
+                  ) : undefined
+                }
+              />
+            )}
+          </>
+        }
+      >
         {/* Header row */}
         <div
           className={`${GRID_TEMPLATE} px-6 py-3 border-b border-border bg-bg-card text-text-muted text-xs font-semibold uppercase tracking-wider`}
@@ -176,35 +210,6 @@ export default function UpstreamsPage() {
               <SkeletonRow key={i} />
             ))}
           </div>
-        )}
-
-        {!isLoading && isError && (
-          <EmptyState
-            title="Failed to load upstreams"
-            description="An error occurred while fetching upstream configurations."
-          />
-        )}
-
-        {!isLoading && !isError && upstreams.length === 0 && (
-          <EmptyState
-            title={total > 0 ? "No results on this page" : search ? "No matching upstreams" : "No upstreams yet"}
-            description={
-              total > 0
-                ? "Use Go to last page below to return to the available results."
-                : search
-                ? "Try adjusting your search terms."
-                : "Create your first upstream to define backend targets and load balancing."
-            }
-            action={
-              total === 0 && !search ? (
-                <WriteAction verdict={canWrite} align="start">
-                  <Button size="sm" onClick={() => navigate({ to: "/upstreams/new" })}>
-                    Create Upstream
-                  </Button>
-                </WriteAction>
-              ) : undefined
-            }
-          />
         )}
 
         {!isLoading && !isError && upstreams.length > 0 && (
@@ -270,7 +275,7 @@ export default function UpstreamsPage() {
             ))}
           </div>
         )}
-      </Card>
+      </ResourceGrid>
 
       {/* Pagination */}
       {total > 0 && (

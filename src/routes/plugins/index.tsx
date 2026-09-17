@@ -7,7 +7,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useAllPluginConfigs, usePluginConfigs } from "@/hooks/usePlugins";
 import { usePaginationParams } from "@/hooks/usePagination";
 import { Button } from "@/components/ui/Button";
-import { Card } from "@/components/ui/Card";
+import { ResourceGrid } from "@/components/ui/ResourceGrid";
 import { Badge } from "@/components/ui/Badge";
 import { SearchBar } from "@/components/shared/SearchBar";
 import { PaginationControls } from "@/components/shared/PaginationControls";
@@ -190,7 +190,41 @@ export default function PluginsPage() {
       />
 
       {/* Table */}
-      <Card className="overflow-hidden p-0">
+      <ResourceGrid
+        label="Plugins"
+        emptyState={
+          <>
+            {!isLoading && isError && (
+              <EmptyState
+                title="Failed to load plugins"
+                description="An error occurred while fetching plugin configurations."
+              />
+            )}
+
+            {!isLoading && !isError && configs.length === 0 && (
+              <EmptyState
+                title={total > 0 ? "No results on this page" : search ? "No matching plugins" : "No plugin configs yet"}
+                description={
+                  total > 0
+                    ? "Use Go to last page below to return to the available results."
+                    : search
+                    ? "Try adjusting your search terms."
+                    : "Create your first plugin configuration to extend gateway functionality."
+                }
+                action={
+                  total === 0 && !search ? (
+                    <WriteAction verdict={canWrite} align="start">
+  <Button size="sm" onClick={() => navigate({ to: "/plugins/new" })}>
+                        Create Plugin
+                      </Button>
+                    </WriteAction>
+                  ) : undefined
+                }
+              />
+            )}
+          </>
+        }
+      >
         {/* Header row */}
         <div className={`${GRID_TEMPLATE} px-6 py-3 border-b border-border bg-bg-card text-text-muted text-xs font-semibold uppercase tracking-wider`}>
           {columns.map((col) => (
@@ -207,35 +241,6 @@ export default function PluginsPage() {
               <SkeletonRow key={i} />
             ))}
           </div>
-        )}
-
-        {!isLoading && isError && (
-          <EmptyState
-            title="Failed to load plugins"
-            description="An error occurred while fetching plugin configurations."
-          />
-        )}
-
-        {!isLoading && !isError && configs.length === 0 && (
-          <EmptyState
-            title={total > 0 ? "No results on this page" : search ? "No matching plugins" : "No plugin configs yet"}
-            description={
-              total > 0
-                ? "Use Go to last page below to return to the available results."
-                : search
-                ? "Try adjusting your search terms."
-                : "Create your first plugin configuration to extend gateway functionality."
-            }
-            action={
-              total === 0 && !search ? (
-                <WriteAction verdict={canWrite} align="start">
-                  <Button size="sm" onClick={() => navigate({ to: "/plugins/new" })}>
-                    Create Plugin
-                  </Button>
-                </WriteAction>
-              ) : undefined
-            }
-          />
         )}
 
         {!isLoading && !isError && configs.length > 0 && (
@@ -312,7 +317,7 @@ export default function PluginsPage() {
             ))}
           </div>
         )}
-      </Card>
+      </ResourceGrid>
 
       {/* Pagination */}
       {total > 0 && (

@@ -9,7 +9,7 @@ import { useAllUpstreams } from "@/hooks/useUpstreams";
 import { useAllPluginConfigs } from "@/hooks/usePlugins";
 import { usePaginationParams } from "@/hooks/usePagination";
 import { Button } from "@/components/ui/Button";
-import { Card } from "@/components/ui/Card";
+import { ResourceGrid } from "@/components/ui/ResourceGrid";
 import { Badge } from "@/components/ui/Badge";
 import { SearchBar } from "@/components/shared/SearchBar";
 import { PaginationControls } from "@/components/shared/PaginationControls";
@@ -232,7 +232,41 @@ export default function ProxiesPage() {
       />
 
       {/* Table */}
-      <Card className="overflow-hidden p-0">
+      <ResourceGrid
+        label="Proxies"
+        emptyState={
+          <>
+            {!isLoading && isError && (
+              <EmptyState
+                title="Failed to load proxies"
+                description="An error occurred while fetching proxy configurations."
+              />
+            )}
+
+            {!isLoading && !isError && proxies.length === 0 && (
+              <EmptyState
+                title={total > 0 ? "No results on this page" : search ? "No matching proxies" : "No proxies yet"}
+                description={
+                  total > 0
+                    ? "Use Go to last page below to return to the available results."
+                    : search
+                    ? "Try adjusting your search terms."
+                    : "Create your first proxy to start routing traffic."
+                }
+                action={
+                  total === 0 && !search ? (
+                    <WriteAction verdict={canWrite} align="start">
+  <Button size="sm" onClick={() => navigate({ to: "/proxies/new" })}>
+                        Create Proxy
+                      </Button>
+                    </WriteAction>
+                  ) : undefined
+                }
+              />
+            )}
+          </>
+        }
+      >
         {/* Header row */}
         <div className={`${GRID_TEMPLATE} px-6 py-3 border-b border-border bg-bg-card text-text-muted text-xs font-semibold uppercase tracking-wider`}>
           {columns.map((col) => (
@@ -249,35 +283,6 @@ export default function ProxiesPage() {
               <SkeletonRow key={i} />
             ))}
           </div>
-        )}
-
-        {!isLoading && isError && (
-          <EmptyState
-            title="Failed to load proxies"
-            description="An error occurred while fetching proxy configurations."
-          />
-        )}
-
-        {!isLoading && !isError && proxies.length === 0 && (
-          <EmptyState
-            title={total > 0 ? "No results on this page" : search ? "No matching proxies" : "No proxies yet"}
-            description={
-              total > 0
-                ? "Use Go to last page below to return to the available results."
-                : search
-                ? "Try adjusting your search terms."
-                : "Create your first proxy to start routing traffic."
-            }
-            action={
-              total === 0 && !search ? (
-                <WriteAction verdict={canWrite} align="start">
-                  <Button size="sm" onClick={() => navigate({ to: "/proxies/new" })}>
-                    Create Proxy
-                  </Button>
-                </WriteAction>
-              ) : undefined
-            }
-          />
         )}
 
         {!isLoading && !isError && proxies.length > 0 && (
@@ -357,7 +362,7 @@ export default function ProxiesPage() {
             ))}
           </div>
         )}
-      </Card>
+      </ResourceGrid>
 
       {/* Pagination */}
       {total > 0 && (

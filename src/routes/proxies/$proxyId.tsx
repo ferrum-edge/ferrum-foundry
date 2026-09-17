@@ -14,6 +14,7 @@ import { resolveReadState } from '@/lib/readState';
 import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { ResourceGrid } from "@/components/ui/ResourceGrid";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { ProxyForm } from "@/components/forms/ProxyForm";
@@ -368,7 +369,15 @@ function ProxyEditor({ session }: { session: EditorSession }) {
                   ))}
                 </Card>
 
-                <Card className="p-0 overflow-hidden">
+                <ResourceGrid
+                  label="Authorized consumers"
+                  minWidth="40rem"
+                  emptyState={visibleConsumers.length === 0 && (
+                    <p className="px-5 py-6 text-sm text-text-muted">
+                      No stored consumer is conclusively or conditionally matched.
+                    </p>
+                  )}
+                >
                   <div className="grid grid-cols-[2fr_1fr_2fr] gap-4 px-5 py-2.5 border-b border-border text-text-muted text-xs font-semibold uppercase tracking-wider">
                     <span>Username</span>
                     <span>Decision</span>
@@ -393,13 +402,8 @@ function ProxyEditor({ session }: { session: EditorSession }) {
                         </span>
                       </Link>
                     ))}
-                    {visibleConsumers.length === 0 && (
-                      <p className="px-5 py-6 text-sm text-text-muted">
-                        No stored consumer is conclusively or conditionally matched.
-                      </p>
-                    )}
                   </div>
-                </Card>
+                </ResourceGrid>
               </div>
             )}
           </ReadState>
