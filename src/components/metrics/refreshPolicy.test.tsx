@@ -102,6 +102,16 @@ describe("Metrics page refresh policy", () => {
     for (const path of paths) expect(counts[path], path).toBe(2);
   });
 
+  it("stacks the refresh controls below the small breakpoint", async () => {
+    await mount(0);
+    const group = refreshButton().closest("div.flex");
+    expect(group?.classList.contains("min-w-0")).toBe(true);
+    expect(group?.classList.contains("flex-col")).toBe(true);
+    expect(group?.classList.contains("flex-wrap")).toBe(true);
+    expect(group?.classList.contains("sm:flex-row")).toBe(true);
+    expect(host.textContent).toContain("Refresh Now");
+  });
+
   it("stops periodic reads in Manual and Refresh Now fetches every panel once", async () => {
     await mount(0);
     await advance(61000);
