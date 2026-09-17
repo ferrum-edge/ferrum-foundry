@@ -181,7 +181,7 @@ export default function UpstreamsPage() {
                 action={
                   total === 0 && !search ? (
                     <WriteAction verdict={canWrite} align="start">
-  <Button size="sm" onClick={() => navigate({ to: "/upstreams/new" })}>
+                      <Button size="sm" onClick={() => navigate({ to: "/upstreams/new" })}>
                         Create Upstream
                       </Button>
                     </WriteAction>

@@ -256,7 +256,7 @@ export default function ProxiesPage() {
                 action={
                   total === 0 && !search ? (
                     <WriteAction verdict={canWrite} align="start">
-  <Button size="sm" onClick={() => navigate({ to: "/proxies/new" })}>
+                      <Button size="sm" onClick={() => navigate({ to: "/proxies/new" })}>
                         Create Proxy
                       </Button>
                     </WriteAction>

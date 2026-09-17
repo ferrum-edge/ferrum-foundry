@@ -194,7 +194,7 @@ export default function ConsumersPage() {
                 action={
                   total === 0 && !search ? (
                     <WriteAction verdict={canWrite} align="start">
-  <Button
+                      <Button
                         size="sm"
                         onClick={() => navigate({ to: "/consumers/new" })}
                       >

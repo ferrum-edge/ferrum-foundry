@@ -214,7 +214,7 @@ export default function PluginsPage() {
                 action={
                   total === 0 && !search ? (
                     <WriteAction verdict={canWrite} align="start">
-  <Button size="sm" onClick={() => navigate({ to: "/plugins/new" })}>
+                      <Button size="sm" onClick={() => navigate({ to: "/plugins/new" })}>
                         Create Plugin
                       </Button>
                     </WriteAction>
