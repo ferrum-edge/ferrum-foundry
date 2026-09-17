@@ -43,6 +43,13 @@ const UNGATED_SURFACES: readonly CapabilitySurface[] = [
 
 /** Modes that report `read_only: true` unconditionally. */
 const READ_ONLY_MODES: readonly string[] = ["file", "dp", "mesh", "node_agent"];
+/** The mode phrase each read-only explanation names (see `MODE_EXPLANATIONS`). */
+const MODE_PHRASE: Record<string, string> = {
+  file: "file mode",
+  dp: "data-plane (dp) mode",
+  mesh: "mesh mode",
+  node_agent: "node-agent mode",
+};
 
 function facts(
   role: GatewayRole | null,
@@ -131,7 +138,7 @@ describe("role x mode capability matrix", () => {
       for (const surface of [...CONFIG_STORE_SURFACES, ...READ_ONLY_MODE_SURFACES]) {
         expect(capabilities[surface].allowed).toBe(false);
         expect(capabilities[surface].blockedBy).toBe("gateway-read-only");
-        expect(capabilities[surface].explanation).toContain(`${mode} mode`);
+        expect(capabilities[surface].explanation).toContain(MODE_PHRASE[mode]);
       }
       for (const surface of UNGATED_SURFACES) {
         expect(capabilities[surface].allowed).toBe(true);
