@@ -317,6 +317,14 @@ export function isDpStatus(status: ClusterStatus): status is ClusterStatusDp {
   return status.mode === "dp";
 }
 
+/**
+ * Control planes never run proxy/backend probe state. Data-plane,
+ * standalone, and other process modes expose GET /backend-capabilities.
+ */
+export function backendProbesSupported(status: ClusterStatus): boolean {
+  return !isCpStatus(status);
+}
+
 export async function getClusterStatus(
   scope: NamespaceScope,
 ): Promise<ClusterStatus> {
