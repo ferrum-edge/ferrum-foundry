@@ -12,6 +12,8 @@ import { Badge } from "@/components/ui/Badge";
 import { SearchBar } from "@/components/shared/SearchBar";
 import { PaginationControls } from "@/components/shared/PaginationControls";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { WriteAction } from "@/components/shared/CapabilityGate";
+import { useCapabilities } from "@/stores/capabilities";
 import { SkeletonRow } from "@/components/ui/Skeleton";
 import type { Consumer } from "@/api/types";
 import { filterAndPage } from "@/lib/collectionSearch";
@@ -117,6 +119,9 @@ export default function ConsumersPage() {
   const isLoading = searching ? allQuery.isLoading : pageQuery.isLoading;
   const isError = searching ? allQuery.isError : pageQuery.isError;
 
+  const { capabilities } = useCapabilities();
+  const canWrite = capabilities.consumers;
+
   /* ---------------------------------------------------------------- */
   /*  Render                                                           */
   /* ---------------------------------------------------------------- */
@@ -133,22 +138,24 @@ export default function ConsumersPage() {
             {" "}Basic credential presence is unknown because the gateway omits it.
           </p>
         </div>
-        <Button onClick={() => navigate({ to: "/consumers/new" })}>
-          <svg
-            className="w-4 h-4"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M12 4v16m8-8H4"
-            />
-          </svg>
-          Create Consumer
-        </Button>
+        <WriteAction verdict={canWrite}>
+          <Button onClick={() => navigate({ to: "/consumers/new" })}>
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M12 4v16m8-8H4"
+              />
+            </svg>
+            Create Consumer
+          </Button>
+        </WriteAction>
       </div>
 
       {/* Search */}
@@ -201,12 +208,14 @@ export default function ConsumersPage() {
             }
             action={
               total === 0 && !search ? (
-                <Button
-                  size="sm"
-                  onClick={() => navigate({ to: "/consumers/new" })}
-                >
-                  Create Consumer
-                </Button>
+                <WriteAction verdict={canWrite} align="start">
+                  <Button
+                    size="sm"
+                    onClick={() => navigate({ to: "/consumers/new" })}
+                  >
+                    Create Consumer
+                  </Button>
+                </WriteAction>
               ) : undefined
             }
           />

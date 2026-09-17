@@ -56,6 +56,8 @@ import type {
   AcmeCertificateRecord,
 } from "@/api/tls";
 import { usePaginationParams } from "@/hooks/usePagination";
+import { useCapabilities } from "@/stores/capabilities";
+import { CapabilityNotice } from "@/components/shared/CapabilityGate";
 import {
   acmeCertificateToForm,
   buildAcmeCertificateRequest,
@@ -184,6 +186,8 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
   const { data, isLoading } = useAllManagedTlsRecords(config.collection);
   const createRecord = useCreateManagedTlsRecord(config.collection);
   const deleteRecord = useDeleteManagedTlsRecord(config.collection);
+  const { capabilities } = useCapabilities();
+  const canWrite = capabilities.tlsMaterial;
 
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ManagedTlsRecord | null>(null);
@@ -210,6 +214,7 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
   };
 
   const handleCreate = async () => {
+    if (!canWrite.allowed) return;
     for (const field of config.fields) {
       if (field.required && !form[field.key]?.trim()) {
         toast("error", `${field.label} is required`);
@@ -249,7 +254,7 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-4">
         <p className="text-text-muted text-sm max-w-2xl">{config.description}</p>
-        <Button size="sm" onClick={() => setCreateOpen(true)}>
+        <Button size="sm" disabled={!canWrite.allowed} onClick={() => setCreateOpen(true)}>
           Add {config.title.replace(/s$/, "")}
         </Button>
       </div>
@@ -293,6 +298,7 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
                 <Button
                   variant="ghost"
                   size="sm"
+                  disabled={!canWrite.allowed}
                   onClick={() => setDeleteTarget(record)}
                 >
                   <svg className="w-4 h-4 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -372,7 +378,7 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
         description="This is a fleet-global record shared by every namespace. Records still referenced by TLS configuration cannot be deleted (the gateway returns 409)."
         confirmLabel="Delete"
         onConfirm={async () => {
-          if (!deleteTarget) return;
+          if (!deleteTarget || !canWrite.allowed) return;
           try {
             await deleteRecord.mutateAsync(deleteTarget.id);
             toast("success", "Record deleted");
@@ -414,6 +420,8 @@ function InventoryTab() {
   const pagination = usePaginationParams({ defaultLimit: 50 });
   const { data, isLoading } = useTlsInventory(pagination.paginationParams);
   const rotate = useRotateTlsSurface();
+  const { capabilities } = useCapabilities();
+  const canRotate = capabilities.operationalActions;
   const [surface, setSurface] = useState<TlsRotateSurface>("proxy_https");
 
   const entries = data?.data ?? [];
@@ -433,7 +441,9 @@ function InventoryTab() {
           <Button
             size="sm"
             loading={rotate.isPending}
+            disabled={!canRotate.allowed}
             onClick={async () => {
+              if (!canRotate.allowed) return;
               try {
                 await rotate.mutateAsync(surface);
                 toast("success", `Rotation enqueued for ${surface}. Check Events for the outcome.`);
@@ -641,6 +651,8 @@ function AcmeTab() {
   const [unknownOrders, setUnknownOrders] = useState<ReadonlySet<string>>(new Set());
   const renewCert = useRenewAcmeCertificate();
   const deleteCert = useDeleteAcmeCertificate();
+  const { capabilities } = useCapabilities();
+  const canWrite = capabilities.tlsMaterial;
 
   const [orderOpen, setOrderOpen] = useState(false);
   const [orderForm, setOrderForm] = useState(EMPTY_ACME_ORDER_FORM);
@@ -690,16 +702,19 @@ function AcmeTab() {
   };
 
   const openCertificateImport = () => {
+    if (!canWrite.allowed) return;
     setCertificateForm(EMPTY_ACME_CERTIFICATE_FORM);
     setCertificateEditor({ mode: "import", target: null });
   };
 
   const openCertificateReplace = (target: AcmeCertificateRecord) => {
+    if (!canWrite.allowed) return;
     setCertificateForm(acmeCertificateToForm(target));
     setCertificateEditor({ mode: "replace", target });
   };
 
   const saveCertificate = async () => {
+    if (!canWrite.allowed) return;
     if (!certificateEditor) return;
     try {
       const data = {
@@ -742,6 +757,7 @@ function AcmeTab() {
     unknownOrders.has(order.id) && !["valid", "failed", "cancelled"].includes(order.status);
 
   const handleCreateOrder = async () => {
+    if (!canWrite.allowed) return;
     if (unknownCreation || createOrder.isPending) return;
     const domains = orderForm.domains
       .split(",")
@@ -781,10 +797,15 @@ function AcmeTab() {
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold text-text-primary">Certificates</h3>
           <div className="flex items-center gap-2">
-            <Button variant="secondary" size="sm" onClick={openCertificateImport}>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={!canWrite.allowed}
+              onClick={openCertificateImport}
+            >
               Import Certificate
             </Button>
-            <Button size="sm" onClick={() => setOrderOpen(true)}>
+            <Button size="sm" disabled={!canWrite.allowed} onClick={() => setOrderOpen(true)}>
               New ACME Order
             </Button>
           </div>
@@ -831,6 +852,7 @@ function AcmeTab() {
                 <Button
                   variant="secondary"
                   size="sm"
+                  disabled={!canWrite.allowed}
                   onClick={() => openCertificateReplace(cert)}
                 >
                   Replace
@@ -839,7 +861,7 @@ function AcmeTab() {
                   variant="secondary"
                   size="sm"
                   loading={pendingKeys.has(`renew:${cert.id}`)}
-                  disabled={unknownRenewals.has(cert.id)}
+                  disabled={unknownRenewals.has(cert.id) || !canWrite.allowed}
                   onClick={() =>
                     void runRowAction(`renew:${cert.id}`, async () => {
                       if (unknownRenewals.has(cert.id)) return;
@@ -864,7 +886,7 @@ function AcmeTab() {
                   variant="ghost"
                   size="sm"
                   onClick={() => setDeleteCertificateTarget(cert)}
-                  disabled={pendingKeys.has(`delete-cert:${cert.id}`)}
+                  disabled={pendingKeys.has(`delete-cert:${cert.id}`) || !canWrite.allowed}
                   aria-label={`Delete certificate for ${cert.domains.join(", ")}`}
                 >
                   <svg className="w-4 h-4 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -975,7 +997,7 @@ function AcmeTab() {
                     variant="ghost"
                     size="sm"
                     onClick={() => setDeleteOrderTarget(order)}
-                    disabled={pendingKeys.has(`delete-order:${order.id}`)}
+                    disabled={pendingKeys.has(`delete-order:${order.id}`) || !canWrite.allowed}
                     aria-label={`Delete ${order.status} order for ${order.domains.join(", ")}`}
                   >
                     <svg className="w-4 h-4 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1210,7 +1232,7 @@ function AcmeTab() {
             pendingKeys.has(`delete-cert:${deleteCertificateTarget.id}`),
         )}
         onConfirm={() => {
-          if (!deleteCertificateTarget) return;
+          if (!deleteCertificateTarget || !canWrite.allowed) return;
           const target = deleteCertificateTarget;
           void runRowAction(`delete-cert:${target.id}`, async () => {
             try {
@@ -1240,7 +1262,7 @@ function AcmeTab() {
           deleteOrderTarget && pendingKeys.has(`delete-order:${deleteOrderTarget.id}`),
         )}
         onConfirm={() => {
-          if (!deleteOrderTarget) return;
+          if (!deleteOrderTarget || !canWrite.allowed) return;
           const target = deleteOrderTarget;
           void runRowAction(`delete-order:${target.id}`, async () => {
             try {
@@ -1350,6 +1372,8 @@ const VALIDATE_FIELDS = [
 function ValidateTab() {
   const { toast } = useToast();
   const validateMaterial = useValidateTlsMaterial();
+  const { capabilities } = useCapabilities();
+  const canValidate = capabilities.operationalActions;
   const [values, setValues] = useState<Record<string, string>>({});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [result, setResult] = useState<{ valid: boolean; validated: Record<string, unknown> } | null>(null);
@@ -1365,6 +1389,7 @@ function ValidateTab() {
   };
 
   const handleValidate = async () => {
+    if (!canValidate.allowed) return;
     setResult(null);
     setFieldErrors({});
     const request: TlsValidateRequest = {};
@@ -1416,7 +1441,11 @@ function ValidateTab() {
           )}
         </div>
       ))}
-      <Button loading={validateMaterial.isPending} onClick={handleValidate}>
+      <Button
+        loading={validateMaterial.isPending}
+        disabled={!canValidate.allowed}
+        onClick={handleValidate}
+      >
         Validate
       </Button>
       {result && (
@@ -1440,6 +1469,7 @@ function ValidateTab() {
 /* ================================================================== */
 
 export default function TlsPage() {
+  const { capabilities } = useCapabilities();
   return (
     <div className="space-y-6">
       <div>
@@ -1462,6 +1492,9 @@ export default function TlsPage() {
           <span className="font-mono"> ferrum </span>namespace.
         </p>
       </div>
+
+      <CapabilityNotice verdict={capabilities.tlsMaterial} />
+      <CapabilityNotice verdict={capabilities.operationalActions} />
 
       <Tabs defaultValue="inventory">
         <TabsList>

@@ -12,6 +12,8 @@ import { FormValidationSummary } from "./FormValidationSummary";
 import type { Consumer, ConsumerCreate, ConsumerCredentials } from "@/api/types";
 import { buildCredentialInput, CredentialInputError } from "@/lib/credentials";
 import { useCollapsibleFormValidation } from "@/lib/collapsedFormValidation";
+import { ReadOnlySurface } from "@/components/shared/CapabilityGate";
+import type { CapabilityVerdict } from "@/lib/capabilities";
 
 /* ------------------------------------------------------------------ */
 /*  Props                                                              */
@@ -21,6 +23,12 @@ export interface ConsumerFormProps {
   initialData?: Consumer;
   onSubmit: (data: ConsumerCreate) => Promise<void>;
   isLoading: boolean;
+  /**
+   * Write capability for this surface. When it is denied the form renders
+   * read-only with the reason above it and refuses to submit; the gateway
+   * still enforces the same rule for anything the UI has not observed.
+   */
+  capability?: CapabilityVerdict;
 }
 
 /* ------------------------------------------------------------------ */
@@ -146,7 +154,9 @@ export function ConsumerForm({
   initialData,
   onSubmit,
   isLoading,
+  capability,
 }: ConsumerFormProps) {
+  const readOnly = capability !== undefined && !capability.allowed;
   const navigate = useNavigate();
   const isEdit = !!initialData;
   const formRef = useRef<HTMLFormElement>(null);
@@ -208,6 +218,7 @@ export function ConsumerForm({
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (readOnly) return;
     if (!validate()) return;
 
     // Build the credentials map. Each type takes an ARRAY of entries
@@ -237,7 +248,7 @@ export function ConsumerForm({
 
   /* ---------- Render ---------- */
 
-  return (
+  const body = (
     <form ref={formRef} onSubmit={handleSubmit} className="space-y-0">
       <div className="py-4 space-y-4">
         <h3 className="text-sm font-semibold text-text-primary mb-4">
@@ -354,4 +365,7 @@ export function ConsumerForm({
       </div>
     </form>
   );
+
+  if (!capability || capability.allowed) return body;
+  return <ReadOnlySurface verdict={capability}>{body}</ReadOnlySurface>;
 }

@@ -17,6 +17,8 @@ import { useToast } from "@/components/ui/Toast";
 import { getApiErrorMessage } from "@/api/client";
 import { useBackup, useRestore } from "@/hooks/useOps";
 import { useNamespace } from "@/stores/namespace";
+import { useCapabilities } from "@/stores/capabilities";
+import { CapabilityNotice } from "@/components/shared/CapabilityGate";
 import {
   getRestoreApiSpecConfirmation,
   getRestoreFailure,
@@ -64,6 +66,9 @@ export function BackupRestoreCard() {
   const { selectedNamespace } = useNamespace();
   const backup = useBackup();
   const restore = useRestore();
+  const { capabilities } = useCapabilities();
+  const canExport = capabilities.configExport;
+  const canRestore = capabilities.configBackup;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [pendingRestore, setPendingRestore] = useState<PendingRestore | null>(null);
   const [apiSpecRisk, setApiSpecRisk] = useState<ApiSpecRisk | null>(null);
@@ -72,6 +77,7 @@ export function BackupRestoreCard() {
   const [unknownRestore, setUnknownRestore] = useState<UnknownRestore | null>(null);
 
   const handleDownload = async () => {
+    if (!canExport.allowed) return;
     try {
       const data = await backup.mutateAsync(undefined);
       const blob = new Blob([JSON.stringify(data, null, 2)], {
@@ -93,6 +99,7 @@ export function BackupRestoreCard() {
   };
 
   const handleFileSelected = async (file: File) => {
+    if (!canRestore.allowed) return;
     try {
       setRestoreFailure(null);
       setUnknownRestore(null);
@@ -217,6 +224,7 @@ export function BackupRestoreCard() {
           <Button
             variant="secondary"
             loading={backup.isPending}
+            disabled={!canExport.allowed}
             onClick={handleDownload}
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -226,6 +234,7 @@ export function BackupRestoreCard() {
           </Button>
           <Button
             variant="secondary"
+            disabled={!canRestore.allowed}
             onClick={() => fileInputRef.current?.click()}
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -245,6 +254,8 @@ export function BackupRestoreCard() {
             }}
           />
         </div>
+        <CapabilityNotice verdict={canExport} />
+        {canExport.allowed && <CapabilityNotice verdict={canRestore} />}
         {restoreFailure && (
           <div
             role="alert"

@@ -49,6 +49,11 @@ beforeEach(() => {
     if (path === "/api/settings/status") return Response.json({ reachable: true, status: 200, body: { ready: true } });
     if (path === "/api/proxy/namespaces") return Response.json(page(["tenant-a"]));
     const gatewayPath = path.replace("/api/proxy/", "");
+    // The capability provider reads one authenticated health snapshot for the
+    // whole workspace; a writable database-mode gateway keeps every surface on.
+    if (gatewayPath === "health") {
+      return Response.json({ status: "ok", ready: true, mode: "database", admin_writes_enabled: true });
+    }
     if (gatewayPath in meshResponses) return Response.json(meshResponses[gatewayPath]);
     if (["admin/tls/inventory", "proxies", "consumers", "upstreams", "plugins/config"].includes(gatewayPath)) {
       return Response.json(page([]));

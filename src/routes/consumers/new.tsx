@@ -11,6 +11,7 @@ import { Card } from "@/components/ui/Card";
 import { ConsumerForm } from "@/components/forms/ConsumerForm";
 import { getApiErrorMessage } from "@/api/client";
 import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
+import { useCapabilities } from "@/stores/capabilities";
 import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
 import type { ConsumerCreate } from "@/api/types";
 
@@ -33,8 +34,11 @@ function ConsumerCreateEditor({ session }: { session: EditorSession }) {
     return () => { mounted.current = false; };
   }, []);
   const { toast } = useToast();
+  const { capabilities } = useCapabilities();
+  const capability = capabilities.consumers;
 
   const handleSubmit = session.bind(async (data: ConsumerCreate) => {
+    if (!capability.allowed) return;
     const secrets = submittedSecrets(data.credentials);
     try {
       const created = await createConsumer.mutateAsync(data);
@@ -75,7 +79,11 @@ function ConsumerCreateEditor({ session }: { session: EditorSession }) {
             navigate({ to: "/consumers/$consumerId", params: { consumerId: id } });
           }} />
         ) : (
-          <ConsumerForm onSubmit={handleSubmit} isLoading={createConsumer.isPending} />
+          <ConsumerForm
+            onSubmit={handleSubmit}
+            isLoading={createConsumer.isPending}
+            capability={capability}
+          />
         )}
       </Card>
     </div>

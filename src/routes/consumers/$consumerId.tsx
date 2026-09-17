@@ -31,6 +31,9 @@ import { getApiErrorMessage } from "@/api/client";
 import { analyzeProxyPolicy } from "@/lib/effectivePolicy";
 import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
 import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
+import { useCapabilities } from "@/stores/capabilities";
+import { ReadOnlySurface, WriteAction } from "@/components/shared/CapabilityGate";
+import type { CapabilityVerdict } from "@/lib/capabilities";
 import type { ConsumerCreate, Consumer } from "@/api/types";
 
 /* ================================================================== */
@@ -62,6 +65,9 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
   const navigate = useNavigate();
   const { toast } = useToast();
 
+  const { capabilities } = useCapabilities();
+  const capability = capabilities.consumers;
+  const credentialCapability = capabilities.consumerCredentials;
   const updateConsumer = useUpdateConsumer();
   const deleteConsumer = useDeleteConsumer();
   const detailLive = !deleteConsumer.isPending && !deleteConsumer.isSuccess;
@@ -110,6 +116,7 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
   // that outlives it is discarded with a toast rather than acting on the
   // consumer now on screen.
   const handleSubmit = session.bind(async (data: ConsumerCreate) => {
+    if (!capability.allowed) return;
     try {
       await updateConsumer.mutateAsync({
         id: consumerId,
@@ -123,6 +130,7 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
   });
 
   const handleDelete = session.bind(async () => {
+    if (!capability.allowed) return;
     try {
       await deleteConsumer.mutateAsync(consumerId);
       toast("success", "Consumer deleted successfully");
@@ -183,22 +191,24 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
             {consumer.id}
           </p>
         </div>
-        <Button variant="danger" onClick={() => setDeleteOpen(true)}>
-          <svg
-            className="w-4 h-4"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-            />
-          </svg>
-          Delete
-        </Button>
+        <WriteAction verdict={capability}>
+          <Button variant="danger" onClick={() => setDeleteOpen(true)}>
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+              />
+            </svg>
+            Delete
+          </Button>
+        </WriteAction>
       </div>
 
       <ResourceLabels labels={consumer.labels} />
@@ -221,6 +231,7 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
               initialData={consumer}
               onSubmit={handleSubmit}
               isLoading={updateConsumer.isPending}
+              capability={capability}
             />
           </Card>
         </TabsContent>
@@ -228,17 +239,23 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
         {/* ── Credentials Tab ── */}
         <TabsContent value="credentials">
           <div className="space-y-6">
-            {CREDENTIAL_TYPES.map((credType) => (
-              <Card key={credType}>
-                <CredentialForm
-                  session={session}
-                  credentialType={credType}
-                  existingCredentials={consumer.credentials?.[credType]}
-                  revision={dataUpdatedAt}
-                  isRefreshing={isFetching}
-                />
-              </Card>
-            ))}
+            <ReadOnlySurface
+              verdict={credentialCapability}
+              noticeClassName=""
+              contentClassName="space-y-6"
+            >
+              {CREDENTIAL_TYPES.map((credType) => (
+                <Card key={credType}>
+                  <CredentialForm
+                    session={session}
+                    credentialType={credType}
+                    existingCredentials={consumer.credentials?.[credType]}
+                    revision={dataUpdatedAt}
+                    isRefreshing={isFetching}
+                  />
+                </Card>
+              ))}
+            </ReadOnlySurface>
           </div>
         </TabsContent>
 
@@ -249,6 +266,7 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
               session={session}
               groups={consumer.acl_groups}
               consumer={consumer}
+              capability={capability}
             />
           </Card>
         </TabsContent>
@@ -351,10 +369,12 @@ function AclGroupsManager({
   session,
   groups,
   consumer,
+  capability,
 }: {
   session: EditorSession;
   groups: string[];
   consumer: Pick<Consumer, "username" | "custom_id">;
+  capability: CapabilityVerdict;
 }) {
   const consumerId = session.identity.resourceId;
   const { toast } = useToast();
@@ -362,7 +382,7 @@ function AclGroupsManager({
   const [newGroup, setNewGroup] = useState("");
 
   const addGroup = session.bind(async () => {
-    if (updateConsumer.isPending) return;
+    if (updateConsumer.isPending || !capability.allowed) return;
     const trimmed = newGroup.trim();
     if (!trimmed) return;
     if (groups.includes(trimmed)) {
@@ -393,7 +413,7 @@ function AclGroupsManager({
   };
 
   const handleRemoveGroup = session.bind(async (group: string) => {
-    if (updateConsumer.isPending) return;
+    if (updateConsumer.isPending || !capability.allowed) return;
     try {
       await updateConsumer.mutateAsync({
         id: consumerId,
@@ -420,6 +440,7 @@ function AclGroupsManager({
   return (
     <div className="space-y-4">
       <h3 className="text-sm font-semibold text-text-primary">ACL Groups</h3>
+      <ReadOnlySurface verdict={capability} noticeClassName="" contentClassName="space-y-4">
 
       {/* Add group form */}
       <form onSubmit={handleAddGroup} className="flex items-end gap-3">
@@ -482,6 +503,7 @@ function AclGroupsManager({
           No ACL groups assigned. Add a group above to control access.
         </p>
       )}
+      </ReadOnlySurface>
     </div>
   );
 }

@@ -16,6 +16,7 @@ import { PluginMembershipRecovery } from "@/components/forms/PluginMembershipRec
 import type { PluginFormDefaults } from "@/components/forms/PluginConfigForm";
 import { getApiErrorMessage } from "@/api/client";
 import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
+import { useCapabilities } from "@/stores/capabilities";
 import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
 import type { PluginConfigCreate } from "@/api/types";
 
@@ -46,8 +47,11 @@ function PluginCreateEditor({ session, allowProxyDefault }: {
   const createPlugin = useCreatePluginWithMembership();
   const { toast } = useToast();
   const { data: availablePlugins, isLoading: pluginsLoading } = useAvailablePlugins();
+  const { capabilities } = useCapabilities();
+  const capability = capabilities.pluginConfigs;
 
   const handleSubmit = session.bind(async (data: PluginConfigCreate, proxyGroupIds?: string[]) => {
+    if (!capability.allowed) return;
     try {
       const created = await createPlugin.mutateAsync({
         data,
@@ -90,6 +94,7 @@ function PluginCreateEditor({ session, allowProxyDefault }: {
         <PluginConfigForm
           onSubmit={handleSubmit}
           isLoading={createPlugin.isPending}
+          capability={capability}
           availablePlugins={availablePlugins ?? []}
           defaults={{
             pluginName: search.plugin ?? undefined,

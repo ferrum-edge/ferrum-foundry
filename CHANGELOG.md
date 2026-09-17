@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Vite's dev-server port and `/api` proxy target are configurable through `VITE_DEV_PORT`, `PORT`, and `VITE_BFF_URL`, so Foundry can run alongside another Vite app such as Nexus without editing `vite.config.ts` (#327).
 - `VITE_DEV_HOST` selects Vite's listen address (`localhost` by default; `127.0.0.1` forces IPv4 loopback). Dev docs use `localhost` for the SPA origin and BFF cookie host so dual-stack `localhost` vs `127.0.0.1` 401s are not the default path (#344).
+- A client-side capability model derived from the session role and the gateway's reported mode. Surfaces a session cannot write — a `viewer` on any gateway, any role on a `file`/`dp`/`mesh` gateway or one reporting `admin_writes_enabled: false` — render read-only with the reason visible before anything is edited, instead of accepting a full form and failing with `403`. Server-side authorization is unchanged, and an unread health snapshot never downgrades a surface. `MOCK_GATEWAY_MODE` reproduces a read-only admin API against `scripts/mock-admin-gateway.mjs` (#359).
 
 ### Fixed
 

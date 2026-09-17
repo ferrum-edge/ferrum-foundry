@@ -11,6 +11,8 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Select } from "@/components/ui/Select";
 import { useToast } from "@/components/ui/Toast";
+import { useCapabilities } from "@/stores/capabilities";
+import { CapabilityNotice } from "@/components/shared/CapabilityGate";
 
 /* ── Types ─────────────────────────────────────────────────────────── */
 
@@ -60,6 +62,8 @@ const DEFAULT_SETTINGS: Settings = {
 export function SettingsForm() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { capabilities } = useCapabilities();
+  const canWrite = capabilities.bffSettings;
 
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [loading, setLoading] = useState(true);
@@ -112,6 +116,7 @@ export function SettingsForm() {
   /* ── Save settings ──────────────────────────────────────────────── */
 
   async function handleSave() {
+    if (!canWrite.allowed) return;
     setSaving(true);
     try {
       const {
@@ -155,6 +160,7 @@ export function SettingsForm() {
 
   return (
     <div className="space-y-6">
+      <CapabilityNotice verdict={canWrite} />
       {/* Admin URL + TLS */}
       <Card>
         <h2 className="text-sm font-semibold text-text-primary mb-4">
@@ -339,7 +345,9 @@ export function SettingsForm() {
             : "Connection and signing settings are immutable environment/secret-mounted configuration."}
         </p>
         {settings.runtimeSettingsEnabled && (
-          <Button onClick={handleSave} loading={saving}>Save Settings</Button>
+          <Button onClick={handleSave} loading={saving} disabled={!canWrite.allowed}>
+            Save Settings
+          </Button>
         )}
       </div>
     </div>

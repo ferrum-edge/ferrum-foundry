@@ -14,6 +14,8 @@ import { Badge } from "@/components/ui/Badge";
 import { SearchBar } from "@/components/shared/SearchBar";
 import { PaginationControls } from "@/components/shared/PaginationControls";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { WriteAction } from "@/components/shared/CapabilityGate";
+import { useCapabilities } from "@/stores/capabilities";
 import { SkeletonRow } from "@/components/ui/Skeleton";
 import type { PluginConfig, Proxy } from "@/api/types";
 import { filterAndPage } from "@/lib/collectionSearch";
@@ -137,6 +139,8 @@ const GRID_TEMPLATE = "grid grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,2f
 export default function ProxiesPage() {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
+  const { capabilities } = useCapabilities();
+  const canWrite = capabilities.proxies;
 
   /* --- Data fetching with pagination --- */
   const pagination = usePaginationParams();
@@ -206,12 +210,14 @@ export default function ProxiesPage() {
             Manage API proxy configurations, routes, and upstream mappings.
           </p>
         </div>
-        <Button onClick={() => navigate({ to: "/proxies/new" })}>
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-          </svg>
-          Create Proxy
-        </Button>
+        <WriteAction verdict={canWrite}>
+          <Button onClick={() => navigate({ to: "/proxies/new" })}>
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+            Create Proxy
+          </Button>
+        </WriteAction>
       </div>
 
       {/* Search */}
@@ -264,9 +270,11 @@ export default function ProxiesPage() {
             }
             action={
               total === 0 && !search ? (
-                <Button size="sm" onClick={() => navigate({ to: "/proxies/new" })}>
-                  Create Proxy
-                </Button>
+                <WriteAction verdict={canWrite} align="start">
+                  <Button size="sm" onClick={() => navigate({ to: "/proxies/new" })}>
+                    Create Proxy
+                  </Button>
+                </WriteAction>
               ) : undefined
             }
           />

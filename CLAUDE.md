@@ -54,6 +54,9 @@ FERRUM_DEMO_BACKEND_BIND=0.0.0.0 node scripts/demo-backend.mjs
 # for every admin surface including TLS, ACME, audit, mesh, chargeback)
 node scripts/mock-admin-gateway.mjs   # listens on :9000
 
+# Reproduce a read-only admin API (file/dp/mesh mode) against the same mock
+MOCK_GATEWAY_MODE=file node scripts/mock-admin-gateway.mjs
+
 # Seed demo data (needs running Ferrum Edge gateway)
 FERRUM_NAMESPACE=ferrum-foundry-demo \
 FERRUM_DEMO_CONFIRM_TARGET='http://127.0.0.1:9000#ferrum-foundry-demo' \
@@ -95,6 +98,16 @@ SameSite cookie plus CSRF protection. No reusable administrator credential is
 stored in browser storage. Auth executes in `onRequest`, before content parsing.
 The authenticated actor/role/namespaces become downstream JWT `sub`, `role`,
 and `ns` claims. See `docs/authentication.md`.
+
+The UI mirrors that authorization matrix client-side so a surface a session
+cannot write is presented read-only with the reason visible before anything is
+edited. `src/lib/capabilities.ts` maps role x gateway mode to per-surface
+verdicts, `CapabilityProvider`/`useCapabilities()` (`src/stores/capabilities.tsx`)
+publish them from the session role plus one `/health` snapshot, and
+`src/components/shared/CapabilityGate.tsx` renders them. A fact that was never
+read is `null` and concludes nothing, so a failed health read never downgrades a
+surface; the BFF and Ferrum Edge remain the only enforcement points. See
+`docs/capabilities.md`.
 
 ## Theming
 

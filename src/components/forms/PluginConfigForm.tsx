@@ -20,6 +20,8 @@ import { Input } from "@/components/ui/Input";
 import { Select, type SelectOptionGroup } from "@/components/ui/Select";
 import { FormValidationSummary } from "./FormValidationSummary";
 import { useFormValidationSummary } from "@/lib/collapsedFormValidation";
+import { ReadOnlySurface } from "@/components/shared/CapabilityGate";
+import type { CapabilityVerdict } from "@/lib/capabilities";
 import type {
   PluginConfig,
   PluginConfigCreate,
@@ -56,6 +58,12 @@ export interface PluginConfigFormProps {
   initialProxyGroupIds?: string[];
   /** True only after all membership pages succeed; [] can then mean empty. */
   initialProxyGroupIdsLoaded?: boolean;
+  /**
+   * Write capability for this surface. When it is denied the form renders
+   * read-only with the reason above it and refuses to submit; the gateway
+   * still enforces the same rule for anything the UI has not observed.
+   */
+  capability?: CapabilityVerdict;
 }
 
 /* ------------------------------------------------------------------ */
@@ -109,7 +117,9 @@ function PluginConfigFormFields({
   isLoading,
   availablePlugins,
   initialProxyGroupIds,
+  capability,
 }: PluginConfigFormProps) {
+  const readOnly = capability !== undefined && !capability.allowed;
   const navigate = useNavigate();
   const isEdit = !!initialData;
   const formRef = useRef<HTMLFormElement>(null);
@@ -193,6 +203,7 @@ function PluginConfigFormFields({
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (readOnly) return;
     if (!validate()) return;
 
     let parsedConfig = JSON.parse(configJson) as Record<string, unknown>;
@@ -310,7 +321,7 @@ function PluginConfigFormFields({
   /*  Render                                                           */
   /* ================================================================ */
 
-  return (
+  const body = (
     <form ref={formRef} onSubmit={handleSubmit} className="space-y-0">
       {/* ── Basic Fields ── */}
       <div className="border-b border-border/50 py-4">
@@ -518,4 +529,7 @@ function PluginConfigFormFields({
       </div>
     </form>
   );
+
+  if (!capability || capability.allowed) return body;
+  return <ReadOnlySurface verdict={capability}>{body}</ReadOnlySurface>;
 }

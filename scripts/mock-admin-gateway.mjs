@@ -15,6 +15,12 @@ import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
 const PORT = Number(process.env.MOCK_ADMIN_PORT ?? 9000);
+/**
+ * Gateway operating mode the mock reports on `/health` and enforces on writes.
+ *   MOCK_GATEWAY_MODE=file node scripts/mock-admin-gateway.mjs
+ * reproduces a read-only admin API without a gateway build.
+ */
+const GATEWAY_MODE = (process.env.MOCK_GATEWAY_MODE ?? 'database').trim().toLowerCase();
 const now = () => new Date().toISOString();
 const ago = (min) => new Date(Date.now() - min * 60000).toISOString();
 
@@ -408,6 +414,32 @@ export function crud(list, url, method, id, body, defaults = {}, ns = 'ferrum', 
 
 /* ---------------- Static payloads ---------------- */
 
+/**
+ * Modes whose admin API refuses persisted configuration mutations with `403`.
+ * Upstream `openapi.yaml` calls file, DP, and mesh the "read-only" modes;
+ * their configuration is owned by a file, the control plane, or mesh policy.
+ */
+export const READ_ONLY_GATEWAY_MODES = new Set(['file', 'dp', 'mesh']);
+
+/** Paths whose non-GET methods persist configuration-database rows. */
+const CONFIG_STORE_PATHS = [
+  /^\/proxies(\/|$)/, /^\/consumers(\/|$)/, /^\/plugins\/config(\/|$)/,
+  /^\/upstreams(\/|$)/, /^\/api-specs(\/|$)/, /^\/namespaces(\/|$)/,
+  /^\/gateway-trust-bundles(\/|$)/, /^\/batch$/, /^\/restore$/,
+];
+
+/**
+ * The read-only-mode refusal Ferrum Edge returns for a persisted mutation.
+ * Managed TLS/ACME writes use independent stores and operational POSTs persist
+ * nothing, so neither is refused here.
+ */
+export function readOnlyModeRefusal(mode, method, path) {
+  if (!READ_ONLY_GATEWAY_MODES.has(mode)) return null;
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return null;
+  if (!CONFIG_STORE_PATHS.some((pattern) => pattern.test(path))) return null;
+  return [403, { error: 'Admin API is in read-only mode' }];
+}
+
 const health = {
   status: 'ok', ready: true, admin_writes_enabled: true, timestamp: now(),
   mode: 'database',
@@ -415,6 +447,16 @@ const health = {
   fips: { mode: 'off', enforcing: false, build_capable: false, build_profile: 'crypto-ring', provider: 'ring', module_self_test_passed: true, provider_algorithms_approved: false, certified: false, boundary_documentation: 'docs/fips.md' },
   cached_config: { available: true, loaded_at: ago(2), proxy_count: proxies.length, consumer_count: consumers.length },
 };
+
+/** Health snapshot for `mode`; file mode has no configured database. */
+export function buildHealth(mode, base = health) {
+  const readOnly = READ_ONLY_GATEWAY_MODES.has(mode);
+  const snapshot = { ...base, mode, admin_writes_enabled: !readOnly };
+  if (mode === 'file') delete snapshot.database;
+  return snapshot;
+}
+
+const modeHealth = buildHealth(GATEWAY_MODE);
 
 const adminMetrics = () => ({
   gateway: {
@@ -551,8 +593,13 @@ const server = createServer(async (req, res) => {
     res.end(payload == null ? '' : contentType === 'application/json' ? JSON.stringify(payload) : payload);
   };
 
+  // A read-only-mode gateway refuses persisted configuration mutations before
+  // routing, exactly as Ferrum Edge does.
+  const refusal = readOnlyModeRefusal(GATEWAY_MODE, method, path);
+  if (refusal) return send(refusal[0], refusal[1]);
+
   /* health & metrics */
-  if (path === '/health' || path === '/status') return send(200, health);
+  if (path === '/health' || path === '/status') return send(200, modeHealth);
   if (path === '/admin/metrics') return send(200, adminMetrics());
   if (path === '/metrics') {
     return send(200, [

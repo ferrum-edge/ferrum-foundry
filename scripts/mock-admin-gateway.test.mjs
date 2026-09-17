@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  buildHealth,
   crud,
   provisionerFromHeaders,
+  readOnlyModeRefusal,
   stampProvisionedBy,
   validatePluginConfigWrite,
   validateProxyWrite,
@@ -389,3 +391,50 @@ test("PUT supplied labels replace the map without filling from the header", () =
   assert.equal(status, 200);
   assert.deepEqual(item.labels, { team: "platform" });
 });
+
+test("database mode reports writable admin health and refuses nothing", () => {
+  const health = buildHealth("database");
+  assert.equal(health.mode, "database");
+  assert.equal(health.admin_writes_enabled, true);
+  assert.ok(health.database);
+  assert.equal(readOnlyModeRefusal("database", "POST", "/proxies"), null);
+});
+
+test("file mode reports a read-only admin API with no configured database", () => {
+  const health = buildHealth("file");
+  assert.equal(health.mode, "file");
+  assert.equal(health.admin_writes_enabled, false);
+  assert.equal(health.database, undefined);
+});
+
+for (const mode of ["file", "dp", "mesh"]) {
+  test(`${mode} mode refuses persisted configuration mutations`, () => {
+    for (const [method, path] of [
+      ["POST", "/proxies"],
+      ["PUT", "/proxies/proxy-1"],
+      ["DELETE", "/upstreams/upstream-1"],
+      ["POST", "/consumers"],
+      ["PUT", "/plugins/config/plg-1"],
+      ["POST", "/api-specs"],
+      ["POST", "/namespaces"],
+      ["POST", "/gateway-trust-bundles"],
+      ["POST", "/batch"],
+      ["POST", "/restore"],
+    ]) {
+      assert.deepEqual(
+        readOnlyModeRefusal(mode, method, path),
+        [403, { error: "Admin API is in read-only mode" }],
+        `${method} ${path}`,
+      );
+    }
+  });
+
+  test(`${mode} mode still serves reads and non-persisting operations`, () => {
+    assert.equal(readOnlyModeRefusal(mode, "GET", "/proxies"), null);
+    assert.equal(readOnlyModeRefusal(mode, "POST", "/admin/tls/validate"), null);
+    assert.equal(readOnlyModeRefusal(mode, "POST", "/admin/tls/rotate/proxy_https"), null);
+    assert.equal(readOnlyModeRefusal(mode, "POST", "/admin/tls/certificates"), null);
+    assert.equal(readOnlyModeRefusal(mode, "POST", "/mesh/egress-scope/test"), null);
+    assert.equal(readOnlyModeRefusal(mode, "POST", "/backend-capabilities/refresh"), null);
+  });
+}

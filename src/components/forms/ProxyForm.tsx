@@ -11,6 +11,8 @@ import { Badge } from "@/components/ui/Badge";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { FormValidationSummary } from "./FormValidationSummary";
 import { useCollapsibleFormValidation } from "@/lib/collapsedFormValidation";
+import { ReadOnlySurface } from "@/components/shared/CapabilityGate";
+import type { CapabilityVerdict } from "@/lib/capabilities";
 import type {
   Proxy,
   ProxyCreate,
@@ -36,6 +38,12 @@ export interface ProxyFormProps {
   initialData?: Proxy;
   onSubmit: (data: ProxyCreate) => Promise<void>;
   isLoading: boolean;
+  /**
+   * Write capability for this surface. When it is denied the form renders
+   * read-only with the reason above it and refuses to submit; the gateway
+   * still enforces the same rule for anything the UI has not observed.
+   */
+  capability?: CapabilityVerdict;
 }
 
 /* ------------------------------------------------------------------ */
@@ -296,7 +304,13 @@ function getExponentialMax(b: BackoffStrategy): number {
 /*  ProxyForm                                                          */
 /* ================================================================== */
 
-export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) {
+export function ProxyForm({
+  initialData,
+  onSubmit,
+  isLoading,
+  capability,
+}: ProxyFormProps) {
+  const readOnly = capability !== undefined && !capability.allowed;
   const navigate = useNavigate();
   const isEdit = !!initialData;
   const formRef = useRef<HTMLFormElement>(null);
@@ -466,6 +480,7 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (readOnly) return;
     if (!validate()) return;
 
     const buildBackoff = (): BackoffStrategy => {
@@ -569,7 +584,7 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
   /*  Render                                                           */
   /* ================================================================ */
 
-  return (
+  const body = (
     <form ref={formRef} onSubmit={handleSubmit} className="space-y-0">
       {/* ── Section 1: Basic Configuration ── */}
       <div className="border-b border-border/50 py-4">
@@ -1148,4 +1163,7 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
       </div>
     </form>
   );
+
+  if (!capability || capability.allowed) return body;
+  return <ReadOnlySurface verdict={capability}>{body}</ReadOnlySurface>;
 }

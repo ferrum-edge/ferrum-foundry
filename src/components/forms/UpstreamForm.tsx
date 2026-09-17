@@ -13,6 +13,8 @@ import { CollapsibleSection } from "./CollapsibleSection";
 import { FormValidationSummary } from "./FormValidationSummary";
 import { TargetForm } from "./TargetForm";
 import { useCollapsibleFormValidation } from "@/lib/collapsedFormValidation";
+import { ReadOnlySurface } from "@/components/shared/CapabilityGate";
+import type { CapabilityVerdict } from "@/lib/capabilities";
 import type {
   Upstream,
   UpstreamCreate,
@@ -43,6 +45,12 @@ export interface UpstreamFormProps {
   initialData?: Upstream;
   onSubmit: (data: UpstreamCreate) => Promise<void>;
   isLoading: boolean;
+  /**
+   * Write capability for this surface. When it is denied the form renders
+   * read-only with the reason above it and refuses to submit; the gateway
+   * still enforces the same rule for anything the UI has not observed.
+   */
+  capability?: CapabilityVerdict;
 }
 
 /* ------------------------------------------------------------------ */
@@ -133,7 +141,13 @@ function defaultPassiveHealthCheck(): PassiveHealthCheck {
 /*  UpstreamForm                                                       */
 /* ================================================================== */
 
-export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormProps) {
+export function UpstreamForm({
+  initialData,
+  onSubmit,
+  isLoading,
+  capability,
+}: UpstreamFormProps) {
+  const readOnly = capability !== undefined && !capability.allowed;
   const navigate = useNavigate();
   const isEdit = !!initialData;
   const formRef = useRef<HTMLFormElement>(null);
@@ -263,6 +277,7 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (readOnly) return;
     if (!validate()) return;
 
     const healthChecks: HealthCheckConfig | undefined =
@@ -411,7 +426,7 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
   /*  Render                                                           */
   /* ================================================================ */
 
-  return (
+  const body = (
     <form ref={formRef} onSubmit={handleSubmit} className="space-y-0">
       {/* ── Basic ── */}
       <div className="border-b border-border/50 py-4">
@@ -1090,4 +1105,7 @@ export function UpstreamForm({ initialData, onSubmit, isLoading }: UpstreamFormP
       </div>
     </form>
   );
+
+  if (!capability || capability.allowed) return body;
+  return <ReadOnlySurface verdict={capability}>{body}</ReadOnlySurface>;
 }

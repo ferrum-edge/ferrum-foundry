@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/Card";
 import { UpstreamForm } from "@/components/forms/UpstreamForm";
 import { getApiErrorMessage } from "@/api/client";
 import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
+import { useCapabilities } from "@/stores/capabilities";
 import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
 import type { UpstreamCreate } from "@/api/types";
 
@@ -25,8 +26,11 @@ function UpstreamCreateEditor({ session }: { session: EditorSession }) {
   const navigate = useNavigate();
   const createUpstream = useCreateUpstream();
   const { toast } = useToast();
+  const { capabilities } = useCapabilities();
+  const capability = capabilities.upstreams;
 
   const handleSubmit = session.bind(async (data: UpstreamCreate) => {
+    if (!capability.allowed) return;
     try {
       const created = await createUpstream.mutateAsync(data);
       toast("success", "Upstream created successfully");
@@ -50,7 +54,11 @@ function UpstreamCreateEditor({ session }: { session: EditorSession }) {
       </div>
 
       <Card>
-        <UpstreamForm onSubmit={handleSubmit} isLoading={createUpstream.isPending} />
+        <UpstreamForm
+          onSubmit={handleSubmit}
+          isLoading={createUpstream.isPending}
+          capability={capability}
+        />
       </Card>
     </div>
   );
