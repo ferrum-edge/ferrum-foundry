@@ -24,6 +24,8 @@ import { getApiErrorMessage } from "@/api/client";
 import * as upstreamsApi from "@/api/upstreams";
 import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
 import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
+import { useCapabilities } from "@/stores/capabilities";
+import { CapabilityNotice, WriteAction } from "@/components/shared/CapabilityGate";
 import type { UpstreamCreate, UpstreamTarget } from "@/api/types";
 
 /**
@@ -47,6 +49,8 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
   const navigate = useNavigate();
   const { toast } = useToast();
 
+  const { capabilities } = useCapabilities();
+  const capability = capabilities.upstreams;
   const updateUpstream = useUpdateUpstream();
   const deleteUpstream = useDeleteUpstream();
   const detailLive = !deleteUpstream.isPending && !deleteUpstream.isSuccess;
@@ -62,7 +66,7 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
   /* ---------- Handlers ---------- */
 
   const handleSubmit = session.bind(async (data: UpstreamCreate) => {
-    if (!upstream || updateUpstream.isPending) return;
+    if (!upstream || updateUpstream.isPending || !capability.allowed) return;
     try {
       await updateUpstream.mutateAsync({
         id: upstreamId,
@@ -76,6 +80,7 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
   });
 
   const handleDelete = session.bind(async () => {
+    if (!capability.allowed) return;
     try {
       await deleteUpstream.mutateAsync(upstreamId);
       toast("success", "Upstream deleted successfully");
@@ -90,7 +95,7 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
 
   // Every target edit funnels through this one bound write.
   const saveTargets = session.bind(async (newTargets: UpstreamTarget[]) => {
-    if (!upstream || updateUpstream.isPending) return;
+    if (!upstream || updateUpstream.isPending || !capability.allowed) return;
     try {
       await updateUpstream.mutateAsync({
         id: upstreamId,
@@ -173,16 +178,18 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
           </h1>
           <p className="text-text-muted text-sm mt-1 font-mono">{upstream.id}</p>
         </div>
-        <Button variant="danger" onClick={() => setDeleteOpen(true)}>
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-            />
-          </svg>
-          Delete
-        </Button>
+        <WriteAction verdict={capability}>
+          <Button variant="danger" onClick={() => setDeleteOpen(true)}>
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+              />
+            </svg>
+            Delete
+          </Button>
+        </WriteAction>
       </div>
 
       <ResourceLabels labels={upstream.labels} />
@@ -203,13 +210,15 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
               initialData={upstream}
               onSubmit={handleSubmit}
               isLoading={updateUpstream.isPending}
+              capability={capability}
             />
           </Card>
         </TabsContent>
 
         {/* Targets tab */}
         <TabsContent value="targets">
-          <fieldset disabled={updateUpstream.isPending} className="min-w-0">
+          <CapabilityNotice verdict={capability} className="mb-4" />
+          <fieldset disabled={updateUpstream.isPending || !capability.allowed} className="min-w-0">
           <Card>
             <div className="space-y-4">
               <div className="flex items-center justify-between">

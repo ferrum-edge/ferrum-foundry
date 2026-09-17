@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/Card";
 import { ProxyForm } from "@/components/forms/ProxyForm";
 import { getApiErrorMessage } from "@/api/client";
 import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
+import { useCapabilities } from "@/stores/capabilities";
 import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
 import type { ProxyCreate } from "@/api/types";
 
@@ -25,8 +26,11 @@ function ProxyCreateEditor({ session }: { session: EditorSession }) {
   const navigate = useNavigate();
   const createProxy = useCreateProxy();
   const { toast } = useToast();
+  const { capabilities } = useCapabilities();
+  const capability = capabilities.proxies;
 
   const handleSubmit = session.bind(async (data: ProxyCreate) => {
+    if (!capability.allowed) return;
     try {
       const created = await createProxy.mutateAsync(data);
       toast("success", "Proxy created successfully");
@@ -50,7 +54,11 @@ function ProxyCreateEditor({ session }: { session: EditorSession }) {
       </div>
 
       <Card>
-        <ProxyForm onSubmit={handleSubmit} isLoading={createProxy.isPending} />
+        <ProxyForm
+          onSubmit={handleSubmit}
+          isLoading={createProxy.isPending}
+          capability={capability}
+        />
       </Card>
     </div>
   );

@@ -16,6 +16,8 @@ import {
 import { useToast } from "@/components/ui/Toast";
 import { useNamespace } from "@/stores/namespace";
 import { useAuth } from "@/stores/auth";
+import { useCapabilities } from "@/stores/capabilities";
+import { CapabilityNotice } from "@/components/shared/CapabilityGate";
 import { namespaceGranted } from "@/lib/namespaceGrants";
 import {
   useNamespaces,
@@ -467,6 +469,8 @@ export function NamespaceManagerCard() {
     ? namespaces?.filter((name) => namespaceGranted(principal.namespaces, name))
     : [];
   const canManage = principal?.role === "admin";
+  const { capabilities } = useCapabilities();
+  const registry = capabilities.namespaceRegistry;
 
   // Each opening owns its form and mutation observer, even for the same name.
   // A completed mutation still reconciles global state, but can only close
@@ -482,10 +486,12 @@ export function NamespaceManagerCard() {
         <h3 className="text-sm font-semibold text-text-primary">
           Manage Namespaces
         </h3>
-        {canManage && <Button size="sm" onClick={() => setCreateSession(++generation.current)}>
+        {canManage && registry.allowed && <Button size="sm" onClick={() => setCreateSession(++generation.current)}>
           New Namespace
         </Button>}
       </div>
+
+      <CapabilityNotice verdict={registry} className="mb-4" />
 
       {isLoading ? (
         <div className="h-24 bg-bg-card-hover rounded animate-pulse" />
@@ -503,7 +509,7 @@ export function NamespaceManagerCard() {
                   <Badge variant="orange">active</Badge>
                 )}
               </div>
-              {canManage && <div className="flex shrink-0 items-center gap-2">
+              {canManage && registry.allowed && <div className="flex shrink-0 items-center gap-2">
                 <Button
                   variant="ghost"
                   size="sm"
@@ -531,19 +537,19 @@ export function NamespaceManagerCard() {
         or deleted.
       </p>
 
-      {canManage && createSession !== null && <CreateNamespaceDialog
+      {canManage && registry.allowed && createSession !== null && <CreateNamespaceDialog
         key={createSession}
         open
         onOpenChange={(open) => !open && setCreateSession((current) => current === createSession ? null : current)}
       />}
       {/* Registry refreshes may retire a name while a newer draft is open.
           Keep that draft mounted while still enforcing current grants. */}
-      {canManage && editSession && namespaceGranted(principal.namespaces, editSession.target) && <EditNamespaceDialog
+      {canManage && registry.allowed && editSession && namespaceGranted(principal.namespaces, editSession.target) && <EditNamespaceDialog
         key={editSession.id}
         target={editSession.target}
         onOpenChange={(open) => !open && setEditSession((current) => current === editSession ? null : current)}
       />}
-      {canManage && deleteSession && namespaceGranted(principal.namespaces, deleteSession.target) && <DeleteNamespaceDialog
+      {canManage && registry.allowed && deleteSession && namespaceGranted(principal.namespaces, deleteSession.target) && <DeleteNamespaceDialog
         key={deleteSession.id}
         target={deleteSession.target}
         onOpenChange={(open) => !open && setDeleteSession((current) => current === deleteSession ? null : current)}

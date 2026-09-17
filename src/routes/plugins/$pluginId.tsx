@@ -24,6 +24,8 @@ import { getApiErrorMessage } from "@/api/client";
 import { formatPluginName } from "@/lib/pluginConfigDefaults";
 import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
 import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
+import { useCapabilities } from "@/stores/capabilities";
+import { WriteAction } from "@/components/shared/CapabilityGate";
 import type { PluginConfigCreate } from "@/api/types";
 
 /**
@@ -47,6 +49,8 @@ function PluginEditor({ session }: { session: EditorSession }) {
   const navigate = useNavigate();
   const { toast } = useToast();
 
+  const { capabilities } = useCapabilities();
+  const capability = capabilities.pluginConfigs;
   const updatePlugin = useUpdatePluginWithMembership();
   const deletePlugin = useDeletePluginWithMembership();
   const detailLive = !deletePlugin.isPending && !deletePlugin.isSuccess;
@@ -75,6 +79,7 @@ function PluginEditor({ session }: { session: EditorSession }) {
 
   const handleSubmit = session.bind(
     async (data: PluginConfigCreate, proxyGroupIds?: string[]) => {
+      if (!capability.allowed) return;
       setMembershipError(null);
       try {
         await updatePlugin.mutateAsync({
@@ -96,6 +101,7 @@ function PluginEditor({ session }: { session: EditorSession }) {
   );
 
   const handleDelete = session.bind(async () => {
+    if (!capability.allowed) return;
     setMembershipError(null);
     try {
       await deletePlugin.mutateAsync(pluginId);
@@ -170,16 +176,18 @@ function PluginEditor({ session }: { session: EditorSession }) {
           </h1>
           <p className="text-text-muted text-sm mt-1 font-mono">{plugin.id}</p>
         </div>
-        <Button variant="danger" onClick={() => setDeleteOpen(true)}>
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-            />
-          </svg>
-          Delete
-        </Button>
+        <WriteAction verdict={capability}>
+          <Button variant="danger" onClick={() => setDeleteOpen(true)}>
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+              />
+            </svg>
+            Delete
+          </Button>
+        </WriteAction>
       </div>
 
       {needsMembership && proxiesError && (
@@ -193,6 +201,7 @@ function PluginEditor({ session }: { session: EditorSession }) {
           initialData={plugin}
           onSubmit={handleSubmit}
           isLoading={updatePlugin.isPending}
+          capability={capability}
           availablePlugins={availablePlugins ?? []}
           initialProxyGroupIds={initialProxyGroupIds}
           initialProxyGroupIdsLoaded={!needsMembership || allProxies !== undefined}

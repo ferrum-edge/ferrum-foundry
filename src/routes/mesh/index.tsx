@@ -29,6 +29,8 @@ import {
   useServiceWaypointServices,
 } from "@/hooks/useMesh";
 import { GatewayTrustManager } from "@/components/forms/GatewayTrustManager";
+import { useCapabilities } from "@/stores/capabilities";
+import { CapabilityNotice } from "@/components/shared/CapabilityGate";
 
 function NotMeshEmpty({ what }: { what: string }) {
   return (
@@ -396,6 +398,8 @@ function EgressTab() {
   const { toast } = useToast();
   const { data, isLoading, isError } = useEgressScope();
   const testEgress = useTestEgressScope();
+  const { capabilities } = useCapabilities();
+  const canTest = capabilities.operationalActions;
   const [testHost, setTestHost] = useState("");
   const [testPort, setTestPort] = useState("");
   const [testResult, setTestResult] = useState<string | null>(null);
@@ -423,6 +427,7 @@ function EgressTab() {
       {/* Dry-run tester */}
       <Card>
         <h3 className="text-sm font-semibold text-text-primary mb-3">Test a Destination</h3>
+        <CapabilityNotice verdict={canTest} className="mb-3" />
         <div className="flex flex-wrap items-end gap-3">
           <div className="w-64">
             <Input label="Host" value={testHost} onChange={(e) => setTestHost(e.target.value)} placeholder="api.external.com" />
@@ -433,7 +438,9 @@ function EgressTab() {
           <Button
             size="sm"
             loading={testEgress.isPending}
+            disabled={!canTest.allowed}
             onClick={async () => {
+              if (!canTest.allowed) return;
               setTestResult(null);
               try {
                 const res = await testEgress.mutateAsync({

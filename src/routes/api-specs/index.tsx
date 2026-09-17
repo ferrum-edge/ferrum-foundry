@@ -28,6 +28,8 @@ import type { ApiSpecSummary } from "@/api/apiSpecs";
 import { usePaginationParams } from "@/hooks/usePagination";
 import { filterAndPage } from "@/lib/collectionSearch";
 import { useNamespace } from "@/stores/namespace";
+import { useCapabilities } from "@/stores/capabilities";
+import { CapabilityNotice } from "@/components/shared/CapabilityGate";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -85,6 +87,8 @@ function ApiSpecsWorkspace() {
   const importSpec = useImportApiSpec();
   const updateSpec = useUpdateApiSpec();
   const deleteSpec = useDeleteApiSpec();
+  const { capabilities } = useCapabilities();
+  const canWrite = capabilities.apiSpecs;
 
   const [unknownWrite, setUnknownWrite] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
@@ -129,6 +133,7 @@ function ApiSpecsWorkspace() {
   };
 
   const openReplace = async (spec: ApiSpecSummary) => {
+    if (!canWrite.allowed) return;
     const generation = ++importGeneration.current;
     setReplaceTarget(spec);
     setImportDoc("");
@@ -146,6 +151,7 @@ function ApiSpecsWorkspace() {
   };
 
   const handleImport = async () => {
+    if (!canWrite.allowed) return;
     if (
       importLoading ||
       unknownWrite ||
@@ -213,6 +219,7 @@ function ApiSpecsWorkspace() {
           </p>
         </div>
         <Button
+          disabled={!canWrite.allowed}
           onClick={() => {
             importGeneration.current += 1;
             setImportLoading(false);
@@ -227,6 +234,8 @@ function ApiSpecsWorkspace() {
           Import Spec
         </Button>
       </div>
+
+      <CapabilityNotice verdict={canWrite} />
 
       <SearchBar
         value={search}
@@ -284,6 +293,7 @@ function ApiSpecsWorkspace() {
                 <Button
                   variant="secondary"
                   size="sm"
+                  disabled={!canWrite.allowed}
                   onClick={() => void openReplace(spec)}
                 >
                   Replace
@@ -291,6 +301,7 @@ function ApiSpecsWorkspace() {
                 <Button
                   variant="ghost"
                   size="sm"
+                  disabled={!canWrite.allowed}
                   onClick={() => setDeleteTarget(spec)}
                   aria-label={`Delete spec ${spec.title ?? spec.id}`}
                   title="Delete spec"
@@ -378,7 +389,7 @@ function ApiSpecsWorkspace() {
         confirmLabel="Delete Spec"
         loading={deleteSpec.isPending}
         onConfirm={async () => {
-          if (!deleteTarget || !collectionAvailable) return;
+          if (!deleteTarget || !collectionAvailable || !canWrite.allowed) return;
           try {
             await deleteSpec.mutateAsync(deleteTarget.id);
             toast("success", "Spec and owned resources deleted");

@@ -12,6 +12,8 @@ import { Badge } from "@/components/ui/Badge";
 import { SearchBar } from "@/components/shared/SearchBar";
 import { PaginationControls } from "@/components/shared/PaginationControls";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { WriteAction } from "@/components/shared/CapabilityGate";
+import { useCapabilities } from "@/stores/capabilities";
 import { SkeletonRow } from "@/components/ui/Skeleton";
 import { formatPluginName, getPluginMeta } from "@/lib/pluginConfigDefaults";
 import { filterAndPage } from "@/lib/collectionSearch";
@@ -149,6 +151,8 @@ export default function PluginsPage() {
     : (pageQuery.data?.pagination?.total ?? 0);
   const isLoading = searching ? allQuery.isLoading : pageQuery.isLoading;
   const isError = searching ? allQuery.isError : pageQuery.isError;
+  const { capabilities } = useCapabilities();
+  const canWrite = capabilities.pluginConfigs;
 
   /* ---------------------------------------------------------------- */
   /*  Render                                                           */
@@ -164,12 +168,14 @@ export default function PluginsPage() {
             Browse and configure gateway plugin instances for authentication, rate limiting, transforms, and more.
           </p>
         </div>
-        <Button onClick={() => navigate({ to: "/plugins/new" })}>
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-          </svg>
-          Create Plugin
-        </Button>
+        <WriteAction verdict={canWrite}>
+          <Button onClick={() => navigate({ to: "/plugins/new" })}>
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+            Create Plugin
+          </Button>
+        </WriteAction>
       </div>
 
       {/* Search */}
@@ -207,9 +213,11 @@ export default function PluginsPage() {
                 }
                 action={
                   total === 0 && !search ? (
-                    <Button size="sm" onClick={() => navigate({ to: "/plugins/new" })}>
-                      Create Plugin
-                    </Button>
+                    <WriteAction verdict={canWrite} align="start">
+                      <Button size="sm" onClick={() => navigate({ to: "/plugins/new" })}>
+                        Create Plugin
+                      </Button>
+                    </WriteAction>
                   ) : undefined
                 }
               />

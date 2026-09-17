@@ -15,6 +15,12 @@ import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
 const PORT = Number(process.env.MOCK_ADMIN_PORT ?? 9000);
+/**
+ * Gateway operating mode the mock reports on `/health` and enforces on writes.
+ *   MOCK_GATEWAY_MODE=file node scripts/mock-admin-gateway.mjs
+ * reproduces a read-only admin API without a gateway build.
+ */
+const GATEWAY_MODE = (process.env.MOCK_GATEWAY_MODE ?? 'database').trim().toLowerCase();
 const now = () => new Date().toISOString();
 const ago = (min) => new Date(Date.now() - min * 60000).toISOString();
 
@@ -408,6 +414,50 @@ export function crud(list, url, method, id, body, defaults = {}, ns = 'ferrum', 
 
 /* ---------------- Static payloads ---------------- */
 
+/**
+ * Modes that report `read_only: true` unconditionally, so every admin mutation
+ * behind Ferrum Edge's read-only gate is refused with `403`. Their
+ * configuration is owned by a file, the control plane, mesh policy sources, or
+ * the node agent. `node_agent` serves no admin configuration API at all, so it
+ * is not a mode this mock can usefully impersonate; it is listed only so the
+ * refusal rule matches upstream for anything that does reach it.
+ */
+export const READ_ONLY_GATEWAY_MODES = new Set(['file', 'dp', 'mesh', 'node_agent']);
+
+/**
+ * Paths whose non-GET methods reach a store behind the read-only gate.
+ *
+ * Two upstream gates land here. `/proxies` … `/restore` go through
+ * `AdminState::admit_write` (observable as `admin_writes_enabled`), while
+ * `/admin/tls/*` goes through `admit_non_config_db_write`, which applies the
+ * read-only gate to the independent managed TLS/ACME stores without the
+ * config-DB failover gate. Both are refused identically in a read-only mode.
+ */
+const READ_ONLY_GATED_PATHS = [
+  /^\/proxies(\/|$)/, /^\/consumers(\/|$)/, /^\/plugins\/config(\/|$)/,
+  /^\/upstreams(\/|$)/, /^\/api-specs(\/|$)/, /^\/namespaces(\/|$)/,
+  /^\/gateway-trust-bundles(\/|$)/, /^\/batch$/, /^\/restore$/,
+  /^\/admin\/tls\//,
+];
+
+/**
+ * Operational actions admitted by `admit_audited_operation`, which deliberately
+ * does not apply the read-only gate. TLS rotate and validate persist no store
+ * row and stay available in every read-only mode.
+ */
+const OPERATIONAL_ACTION_PATHS = [
+  /^\/admin\/tls\/rotate(\/|$)/, /^\/admin\/tls\/validate$/,
+];
+
+/** The read-only-mode refusal Ferrum Edge returns for a gated mutation. */
+export function readOnlyModeRefusal(mode, method, path) {
+  if (!READ_ONLY_GATEWAY_MODES.has(mode)) return null;
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return null;
+  if (OPERATIONAL_ACTION_PATHS.some((pattern) => pattern.test(path))) return null;
+  if (!READ_ONLY_GATED_PATHS.some((pattern) => pattern.test(path))) return null;
+  return [403, { error: 'Admin API is in read-only mode' }];
+}
+
 const health = {
   status: 'ok', ready: true, admin_writes_enabled: true, timestamp: now(),
   mode: 'database',
@@ -415,6 +465,16 @@ const health = {
   fips: { mode: 'off', enforcing: false, build_capable: false, build_profile: 'crypto-ring', provider: 'ring', module_self_test_passed: true, provider_algorithms_approved: false, certified: false, boundary_documentation: 'docs/fips.md' },
   cached_config: { available: true, loaded_at: ago(2), proxy_count: proxies.length, consumer_count: consumers.length },
 };
+
+/** Health snapshot for `mode`; file mode has no configured database. */
+export function buildHealth(mode, base = health) {
+  const readOnly = READ_ONLY_GATEWAY_MODES.has(mode);
+  const snapshot = { ...base, mode, admin_writes_enabled: !readOnly };
+  if (mode === 'file') delete snapshot.database;
+  return snapshot;
+}
+
+const modeHealth = buildHealth(GATEWAY_MODE);
 
 const adminMetrics = () => ({
   gateway: {
@@ -551,8 +611,14 @@ const server = createServer(async (req, res) => {
     res.end(payload == null ? '' : contentType === 'application/json' ? JSON.stringify(payload) : payload);
   };
 
+  // A read-only-mode gateway refuses every gated mutation before routing,
+  // exactly as Ferrum Edge does — including the independent managed TLS/ACME
+  // stores, which `admit_non_config_db_write` puts behind the same gate.
+  const refusal = readOnlyModeRefusal(GATEWAY_MODE, method, path);
+  if (refusal) return send(refusal[0], refusal[1]);
+
   /* health & metrics */
-  if (path === '/health' || path === '/status') return send(200, health);
+  if (path === '/health' || path === '/status') return send(200, modeHealth);
   if (path === '/admin/metrics') return send(200, adminMetrics());
   if (path === '/metrics') {
     return send(200, [

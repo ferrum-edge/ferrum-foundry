@@ -11,6 +11,8 @@ import { Badge } from "@/components/ui/Badge";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { FormValidationSummary } from "./FormValidationSummary";
 import { useCollapsibleFormValidation } from "@/lib/collapsedFormValidation";
+import { ReadOnlySurface } from "@/components/shared/CapabilityGate";
+import type { CapabilityVerdict } from "@/lib/capabilities";
 import type {
   Proxy,
   ProxyCreate,
@@ -36,6 +38,12 @@ export interface ProxyFormProps {
   initialData?: Proxy;
   onSubmit: (data: ProxyCreate) => Promise<void>;
   isLoading: boolean;
+  /**
+   * Write capability for this surface. When it is denied the form renders
+   * read-only with the reason above it and refuses to submit; the gateway
+   * still enforces the same rule for anything the UI has not observed.
+   */
+  capability?: CapabilityVerdict;
 }
 
 /* ------------------------------------------------------------------ */
@@ -296,11 +304,17 @@ function getExponentialMax(b: BackoffStrategy): number {
 /*  ProxyForm                                                          */
 /* ================================================================== */
 
-export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) {
+export function ProxyForm({
+  initialData,
+  onSubmit,
+  isLoading,
+  capability,
+}: ProxyFormProps) {
+  const readOnly = capability !== undefined && !capability.allowed;
   const navigate = useNavigate();
   const isEdit = !!initialData;
   const formRef = useRef<HTMLFormElement>(null);
-  const collapsible = useCollapsibleFormValidation(PROXY_COLLAPSIBLE_SECTIONS);
+  const collapsible = useCollapsibleFormValidation(PROXY_COLLAPSIBLE_SECTIONS, readOnly);
 
   /* ---------- Basic Configuration ---------- */
   // Seeded once per editor identity: the parent keys this form on
@@ -466,6 +480,7 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (readOnly) return;
     if (!validate()) return;
 
     const buildBackoff = (): BackoffStrategy => {
@@ -571,561 +586,563 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
 
   return (
     <form ref={formRef} onSubmit={handleSubmit} className="space-y-0">
-      {/* ── Section 1: Basic Configuration ── */}
-      <div className="border-b border-border/50 py-4">
-        <h3 className="text-sm font-semibold text-text-primary mb-4">Basic Configuration</h3>
-        <div className="space-y-4">
-          <Input
-            label="Name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="My API Proxy"
-          />
-          <Select
-            label="Backend Scheme"
-            value={backendScheme}
-            onValueChange={(v) => setBackendScheme(v as NonNullable<Proxy["backend_scheme"]>)}
-            options={BACKEND_SCHEMES.map((s) => ({ value: s.value, label: s.label }))}
-            helpText={
-              isStream
-                ? "Raw L4 stream proxy — bind a Listen Port (Protocol-Specific section); hosts act as SNI matchers on TLS-capable listeners."
-                : "gRPC and WebSocket are auto-detected per request — no separate scheme needed."
-            }
-          />
-          {showListenPath && (
+      <ReadOnlySurface verdict={capability}>
+        {/* ── Section 1: Basic Configuration ── */}
+        <div className="border-b border-border/50 py-4">
+          <h3 className="text-sm font-semibold text-text-primary mb-4">Basic Configuration</h3>
+          <div className="space-y-4">
             <Input
-              label="Listen Path"
-              value={listenPath}
-              onChange={(e) => setListenPath(e.target.value)}
-              placeholder="/api/v1"
-              helpText="Starts with / for prefix, =/ for exact, or ~ for regex. Optional when hosts are set."
-              error={errors.listen_path}
-            />
-          )}
-          {showHosts && (
-            <TagInput
-              label="Hosts"
-              values={hosts}
-              onChange={(v) => setHosts(v as string[])}
-              placeholder="example.com, *.example.com"
-              helpText={
-                isStream
-                  ? "SNI route predicates — only valid on opaque (passthrough / non-TLS TCP) listeners."
-                  : "Hostnames this proxy matches. Empty matches all hosts."
-              }
-            />
-          )}
-          {/* No native `required`: a proxy may reference an upstream instead
-              of a direct backend host, and validate() shows styled errors. */}
-          <Input
-            label="Backend Host"
-            value={backendHost}
-            onChange={(e) => setBackendHost(e.target.value)}
-            placeholder="upstream.example.com"
-            error={errors.backend_host}
-            helpText={
-              upstreamId.trim()
-                ? "Optional while an upstream is linked (see Upstream section)."
-                : undefined
-            }
-          />
-          <Input
-            label="Backend Port"
-            type="number"
-            value={String(backendPort)}
-            onChange={(e) => setBackendPort(Number(e.target.value))}
-            placeholder="80"
-            error={errors.backend_port}
-          />
-          {showBackendPath && (
-            <Input
-              label="Backend Path"
-              value={backendPath}
-              onChange={(e) => setBackendPath(e.target.value)}
-              placeholder="/v2"
-            />
-          )}
-        </div>
-      </div>
-
-      {/* ── Section 2: Routing Options ── */}
-      {showRoutingOptions && (
-        <CollapsibleSection
-          title="Routing Options"
-          {...collapsible.sectionProps("routing")}
-        >
-          <Checkbox label="Strip listen path" checked={stripListenPath} onChange={setStripListenPath} />
-          <Checkbox label="Preserve host header" checked={preserveHostHeader} onChange={setPreserveHostHeader} />
-          <Select
-            label="Auth Mode"
-            value={authMode}
-            onValueChange={(v) => setAuthMode(v as "single" | "multi")}
-            options={[
-              { value: "single", label: "Single (first success wins)" },
-              { value: "multi", label: "Multi (try all until success)" },
-            ]}
-          />
-          <Select
-            label="Response Body Mode"
-            value={responseBodyMode}
-            onValueChange={(v) => setResponseBodyMode(v as "stream" | "buffer")}
-            options={[
-              { value: "stream", label: "Stream" },
-              { value: "buffer", label: "Buffer" },
-            ]}
-          />
-          <Checkbox
-            label="Restrict HTTP methods"
-            checked={restrictMethods}
-            onChange={setRestrictMethods}
-          />
-          {restrictMethods && (
-            <MethodCheckboxGroup
-              label="Allowed Methods"
-              selected={allowedMethods}
-              onChange={setAllowedMethods}
-              options={ALL_HTTP_METHODS}
-            />
-          )}
-          <TagInput
-            label="Allowed WebSocket Origins"
-            values={allowedWsOrigins}
-            onChange={(v) => setAllowedWsOrigins(v as string[])}
-            placeholder="https://example.com"
-            helpText="Protects WebSocket upgrades against CSWSH. Leave empty to allow all origins."
-          />
-          <Input
-            label="WebSocket Idle Timeout (seconds)"
-            type="number"
-            value={numVal(wsIdleTimeout)}
-            onChange={setNum(setWsIdleTimeout)}
-            placeholder="300"
-            helpText="Idle timeout for upgraded WebSocket sessions. 0 disables the idle bound."
-          />
-        </CollapsibleSection>
-      )}
-
-      {/* ── Section 3: Backend Timeouts ── */}
-      <CollapsibleSection
-        title="Backend Timeouts"
-        {...collapsible.sectionProps("timeouts")}
-      >
-        <Input
-          label="Connect Timeout (ms)"
-          type="number"
-          value={String(connectTimeout)}
-          onChange={(e) => setConnectTimeout(Number(e.target.value))}
-        />
-        <Input
-          label="Read Timeout (ms)"
-          type="number"
-          value={String(readTimeout)}
-          onChange={(e) => setReadTimeout(Number(e.target.value))}
-        />
-        <Input
-          label="Write Timeout (ms)"
-          type="number"
-          value={String(writeTimeout)}
-          onChange={(e) => setWriteTimeout(Number(e.target.value))}
-        />
-      </CollapsibleSection>
-
-      {/* ── Section 4: TLS Settings ── */}
-      <CollapsibleSection
-        title="TLS Settings"
-        {...collapsible.sectionProps("tls")}
-      >
-        <Checkbox
-          label="Frontend TLS"
-          checked={frontendTls}
-          onChange={(v) => {
-            setFrontendTls(v);
-            if (v) setPassthrough(false);
-          }}
-          helpText="Terminate TLS on the gateway for incoming connections"
-        />
-        {isStream && (
-          <Checkbox
-            label="Passthrough"
-            checked={passthrough}
-            onChange={(v) => {
-              setPassthrough(v);
-              if (v) setFrontendTls(false);
-            }}
-            helpText="Forward encrypted bytes directly to backend without terminating TLS/DTLS. Mutually exclusive with Frontend TLS."
-          />
-        )}
-        <Checkbox
-          label="Verify backend TLS server certificate"
-          checked={backendTlsVerify}
-          onChange={setBackendTlsVerify}
-        />
-        <Input
-          label="Backend TLS Client Cert Path"
-          value={backendTlsCertPath}
-          onChange={(e) => setBackendTlsCertPath(e.target.value)}
-          placeholder="/path/to/cert.pem"
-        />
-        <Input
-          label="Backend TLS Client Key Path"
-          value={backendTlsKeyPath}
-          onChange={(e) => setBackendTlsKeyPath(e.target.value)}
-          placeholder="/path/to/key.pem"
-        />
-        <Input
-          label="Backend TLS Server CA Cert Path"
-          value={backendTlsCaPath}
-          onChange={(e) => setBackendTlsCaPath(e.target.value)}
-          placeholder="/path/to/ca.pem"
-        />
-      </CollapsibleSection>
-
-      {/* ── Section 5: Upstream ── */}
-      <CollapsibleSection
-        title="Upstream"
-        badge={upstreamId ? "LINKED" : undefined}
-        {...collapsible.sectionProps("upstream")}
-      >
-        <Input
-          label="Upstream ID"
-          value={upstreamId}
-          onChange={(e) => setUpstreamId(e.target.value)}
-          placeholder="upstream-uuid"
-          helpText="Link this proxy to an upstream load-balancer group. Overrides backend host/port."
-        />
-        {upstreamId && (
-          <Input
-            label="Upstream Subset"
-            value={upstreamSubset}
-            onChange={(e) => setUpstreamSubset(e.target.value)}
-            placeholder="v2"
-            helpText="Optional named subset defined on the upstream (DestinationRule-style routing)."
-          />
-        )}
-      </CollapsibleSection>
-
-      {/* ── Section 6: DNS ── */}
-      <CollapsibleSection title="DNS" {...collapsible.sectionProps("dns")}>
-        <Input
-          label="DNS Override"
-          value={dnsOverride}
-          onChange={(e) => setDnsOverride(e.target.value)}
-          placeholder="10.0.0.1"
-        />
-        <Input
-          label="DNS Cache TTL (seconds)"
-          type="number"
-          value={numVal(dnsCacheTtl)}
-          onChange={setNum(setDnsCacheTtl)}
-        />
-      </CollapsibleSection>
-
-      {/* ── Section 7: Circuit Breaker ── */}
-      {showCircuitBreaker && (
-      <CollapsibleSection
-        title="Circuit Breaker"
-        badge={cbEnabled ? "ON" : undefined}
-        {...collapsible.sectionProps("circuit-breaker")}
-      >
-        <Checkbox
-          label="Enable circuit breaker"
-          checked={cbEnabled}
-          onChange={setCbEnabled}
-        />
-        {cbEnabled && (
-          <div className="space-y-4 pl-6 border-l-2 border-border/50">
-            <Input
-              label="Failure Threshold"
-              type="number"
-              value={String(cb.failure_threshold)}
-              onChange={(e) => setCb({ ...cb, failure_threshold: Number(e.target.value) })}
-            />
-            <Input
-              label="Success Threshold"
-              type="number"
-              value={String(cb.success_threshold)}
-              onChange={(e) => setCb({ ...cb, success_threshold: Number(e.target.value) })}
-            />
-            <Input
-              label="Timeout (seconds)"
-              type="number"
-              value={String(cb.timeout_seconds)}
-              onChange={(e) => setCb({ ...cb, timeout_seconds: Number(e.target.value) })}
-            />
-            <TagInput
-              label="Failure Status Codes"
-              values={cb.failure_status_codes}
-              onChange={(v) => setCb({ ...cb, failure_status_codes: v as number[] })}
-              placeholder="500, 502, 503"
-              parseAsNumber
-            />
-            <Input
-              label="Half-Open Max Requests"
-              type="number"
-              value={String(cb.half_open_max_requests)}
-              onChange={(e) => setCb({ ...cb, half_open_max_requests: Number(e.target.value) })}
-            />
-            <Checkbox
-              label="Trip on connection errors"
-              checked={cb.trip_on_connection_errors}
-              onChange={(v) => setCb({ ...cb, trip_on_connection_errors: v })}
-            />
-          </div>
-        )}
-      </CollapsibleSection>
-      )}
-
-      {/* ── Section 8: Retry ── */}
-      {showRetry && (
-      <CollapsibleSection
-        title="Retry"
-        badge={retryEnabled ? "ON" : undefined}
-        {...collapsible.sectionProps("retry")}
-      >
-        <Checkbox
-          label="Enable retry"
-          checked={retryEnabled}
-          onChange={setRetryEnabled}
-        />
-        {retryEnabled && (
-          <div className="space-y-4 pl-6 border-l-2 border-border/50">
-            <Input
-              label="Max Retries"
-              type="number"
-              value={String(retry.max_retries)}
-              onChange={(e) => setRetry({ ...retry, max_retries: Number(e.target.value) })}
-            />
-            <TagInput
-              label="Retryable Status Codes"
-              values={retry.retryable_status_codes}
-              onChange={(v) => setRetry({ ...retry, retryable_status_codes: v as number[] })}
-              placeholder="502, 503, 504"
-              parseAsNumber
-            />
-            <MethodCheckboxGroup
-              label="Retryable Methods"
-              selected={retry.retryable_methods}
-              onChange={(v) => setRetry({ ...retry, retryable_methods: v })}
-              options={ALL_HTTP_METHODS}
+              label="Name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="My API Proxy"
             />
             <Select
-              label="Backoff Strategy"
-              value={backoffType}
-              onValueChange={(v) => setBackoffType(v as BackoffType)}
+              label="Backend Scheme"
+              value={backendScheme}
+              onValueChange={(v) => setBackendScheme(v as NonNullable<Proxy["backend_scheme"]>)}
+              options={BACKEND_SCHEMES.map((s) => ({ value: s.value, label: s.label }))}
+              helpText={
+                isStream
+                  ? "Raw L4 stream proxy — bind a Listen Port (Protocol-Specific section); hosts act as SNI matchers on TLS-capable listeners."
+                  : "gRPC and WebSocket are auto-detected per request — no separate scheme needed."
+              }
+            />
+            {showListenPath && (
+              <Input
+                label="Listen Path"
+                value={listenPath}
+                onChange={(e) => setListenPath(e.target.value)}
+                placeholder="/api/v1"
+                helpText="Starts with / for prefix, =/ for exact, or ~ for regex. Optional when hosts are set."
+                error={errors.listen_path}
+              />
+            )}
+            {showHosts && (
+              <TagInput
+                label="Hosts"
+                values={hosts}
+                onChange={(v) => setHosts(v as string[])}
+                placeholder="example.com, *.example.com"
+                helpText={
+                  isStream
+                    ? "SNI route predicates — only valid on opaque (passthrough / non-TLS TCP) listeners."
+                    : "Hostnames this proxy matches. Empty matches all hosts."
+                }
+              />
+            )}
+            {/* No native `required`: a proxy may reference an upstream instead
+                of a direct backend host, and validate() shows styled errors. */}
+            <Input
+              label="Backend Host"
+              value={backendHost}
+              onChange={(e) => setBackendHost(e.target.value)}
+              placeholder="upstream.example.com"
+              error={errors.backend_host}
+              helpText={
+                upstreamId.trim()
+                  ? "Optional while an upstream is linked (see Upstream section)."
+                  : undefined
+              }
+            />
+            <Input
+              label="Backend Port"
+              type="number"
+              value={String(backendPort)}
+              onChange={(e) => setBackendPort(Number(e.target.value))}
+              placeholder="80"
+              error={errors.backend_port}
+            />
+            {showBackendPath && (
+              <Input
+                label="Backend Path"
+                value={backendPath}
+                onChange={(e) => setBackendPath(e.target.value)}
+                placeholder="/v2"
+              />
+            )}
+          </div>
+        </div>
+
+        {/* ── Section 2: Routing Options ── */}
+        {showRoutingOptions && (
+          <CollapsibleSection
+            title="Routing Options"
+            {...collapsible.sectionProps("routing")}
+          >
+            <Checkbox label="Strip listen path" checked={stripListenPath} onChange={setStripListenPath} />
+            <Checkbox label="Preserve host header" checked={preserveHostHeader} onChange={setPreserveHostHeader} />
+            <Select
+              label="Auth Mode"
+              value={authMode}
+              onValueChange={(v) => setAuthMode(v as "single" | "multi")}
               options={[
-                { value: "fixed", label: "Fixed" },
-                { value: "exponential", label: "Exponential" },
+                { value: "single", label: "Single (first success wins)" },
+                { value: "multi", label: "Multi (try all until success)" },
               ]}
             />
-            {backoffType === "fixed" ? (
-              <Input
-                label="Delay (ms)"
-                type="number"
-                value={String(fixedDelay)}
-                onChange={(e) => setFixedDelay(Number(e.target.value))}
+            <Select
+              label="Response Body Mode"
+              value={responseBodyMode}
+              onValueChange={(v) => setResponseBodyMode(v as "stream" | "buffer")}
+              options={[
+                { value: "stream", label: "Stream" },
+                { value: "buffer", label: "Buffer" },
+              ]}
+            />
+            <Checkbox
+              label="Restrict HTTP methods"
+              checked={restrictMethods}
+              onChange={setRestrictMethods}
+            />
+            {restrictMethods && (
+              <MethodCheckboxGroup
+                label="Allowed Methods"
+                selected={allowedMethods}
+                onChange={setAllowedMethods}
+                options={ALL_HTTP_METHODS}
               />
-            ) : (
+            )}
+            <TagInput
+              label="Allowed WebSocket Origins"
+              values={allowedWsOrigins}
+              onChange={(v) => setAllowedWsOrigins(v as string[])}
+              placeholder="https://example.com"
+              helpText="Protects WebSocket upgrades against CSWSH. Leave empty to allow all origins."
+            />
+            <Input
+              label="WebSocket Idle Timeout (seconds)"
+              type="number"
+              value={numVal(wsIdleTimeout)}
+              onChange={setNum(setWsIdleTimeout)}
+              placeholder="300"
+              helpText="Idle timeout for upgraded WebSocket sessions. 0 disables the idle bound."
+            />
+          </CollapsibleSection>
+        )}
+
+        {/* ── Section 3: Backend Timeouts ── */}
+        <CollapsibleSection
+          title="Backend Timeouts"
+          {...collapsible.sectionProps("timeouts")}
+        >
+          <Input
+            label="Connect Timeout (ms)"
+            type="number"
+            value={String(connectTimeout)}
+            onChange={(e) => setConnectTimeout(Number(e.target.value))}
+          />
+          <Input
+            label="Read Timeout (ms)"
+            type="number"
+            value={String(readTimeout)}
+            onChange={(e) => setReadTimeout(Number(e.target.value))}
+          />
+          <Input
+            label="Write Timeout (ms)"
+            type="number"
+            value={String(writeTimeout)}
+            onChange={(e) => setWriteTimeout(Number(e.target.value))}
+          />
+        </CollapsibleSection>
+
+        {/* ── Section 4: TLS Settings ── */}
+        <CollapsibleSection
+          title="TLS Settings"
+          {...collapsible.sectionProps("tls")}
+        >
+          <Checkbox
+            label="Frontend TLS"
+            checked={frontendTls}
+            onChange={(v) => {
+              setFrontendTls(v);
+              if (v) setPassthrough(false);
+            }}
+            helpText="Terminate TLS on the gateway for incoming connections"
+          />
+          {isStream && (
+            <Checkbox
+              label="Passthrough"
+              checked={passthrough}
+              onChange={(v) => {
+                setPassthrough(v);
+                if (v) setFrontendTls(false);
+              }}
+              helpText="Forward encrypted bytes directly to backend without terminating TLS/DTLS. Mutually exclusive with Frontend TLS."
+            />
+          )}
+          <Checkbox
+            label="Verify backend TLS server certificate"
+            checked={backendTlsVerify}
+            onChange={setBackendTlsVerify}
+          />
+          <Input
+            label="Backend TLS Client Cert Path"
+            value={backendTlsCertPath}
+            onChange={(e) => setBackendTlsCertPath(e.target.value)}
+            placeholder="/path/to/cert.pem"
+          />
+          <Input
+            label="Backend TLS Client Key Path"
+            value={backendTlsKeyPath}
+            onChange={(e) => setBackendTlsKeyPath(e.target.value)}
+            placeholder="/path/to/key.pem"
+          />
+          <Input
+            label="Backend TLS Server CA Cert Path"
+            value={backendTlsCaPath}
+            onChange={(e) => setBackendTlsCaPath(e.target.value)}
+            placeholder="/path/to/ca.pem"
+          />
+        </CollapsibleSection>
+
+        {/* ── Section 5: Upstream ── */}
+        <CollapsibleSection
+          title="Upstream"
+          badge={upstreamId ? "LINKED" : undefined}
+          {...collapsible.sectionProps("upstream")}
+        >
+          <Input
+            label="Upstream ID"
+            value={upstreamId}
+            onChange={(e) => setUpstreamId(e.target.value)}
+            placeholder="upstream-uuid"
+            helpText="Link this proxy to an upstream load-balancer group. Overrides backend host/port."
+          />
+          {upstreamId && (
+            <Input
+              label="Upstream Subset"
+              value={upstreamSubset}
+              onChange={(e) => setUpstreamSubset(e.target.value)}
+              placeholder="v2"
+              helpText="Optional named subset defined on the upstream (DestinationRule-style routing)."
+            />
+          )}
+        </CollapsibleSection>
+
+        {/* ── Section 6: DNS ── */}
+        <CollapsibleSection title="DNS" {...collapsible.sectionProps("dns")}>
+          <Input
+            label="DNS Override"
+            value={dnsOverride}
+            onChange={(e) => setDnsOverride(e.target.value)}
+            placeholder="10.0.0.1"
+          />
+          <Input
+            label="DNS Cache TTL (seconds)"
+            type="number"
+            value={numVal(dnsCacheTtl)}
+            onChange={setNum(setDnsCacheTtl)}
+          />
+        </CollapsibleSection>
+
+        {/* ── Section 7: Circuit Breaker ── */}
+        {showCircuitBreaker && (
+        <CollapsibleSection
+          title="Circuit Breaker"
+          badge={cbEnabled ? "ON" : undefined}
+          {...collapsible.sectionProps("circuit-breaker")}
+        >
+          <Checkbox
+            label="Enable circuit breaker"
+            checked={cbEnabled}
+            onChange={setCbEnabled}
+          />
+          {cbEnabled && (
+            <div className="space-y-4 pl-6 border-l-2 border-border/50">
+              <Input
+                label="Failure Threshold"
+                type="number"
+                value={String(cb.failure_threshold)}
+                onChange={(e) => setCb({ ...cb, failure_threshold: Number(e.target.value) })}
+              />
+              <Input
+                label="Success Threshold"
+                type="number"
+                value={String(cb.success_threshold)}
+                onChange={(e) => setCb({ ...cb, success_threshold: Number(e.target.value) })}
+              />
+              <Input
+                label="Timeout (seconds)"
+                type="number"
+                value={String(cb.timeout_seconds)}
+                onChange={(e) => setCb({ ...cb, timeout_seconds: Number(e.target.value) })}
+              />
+              <TagInput
+                label="Failure Status Codes"
+                values={cb.failure_status_codes}
+                onChange={(v) => setCb({ ...cb, failure_status_codes: v as number[] })}
+                placeholder="500, 502, 503"
+                parseAsNumber
+              />
+              <Input
+                label="Half-Open Max Requests"
+                type="number"
+                value={String(cb.half_open_max_requests)}
+                onChange={(e) => setCb({ ...cb, half_open_max_requests: Number(e.target.value) })}
+              />
+              <Checkbox
+                label="Trip on connection errors"
+                checked={cb.trip_on_connection_errors}
+                onChange={(v) => setCb({ ...cb, trip_on_connection_errors: v })}
+              />
+            </div>
+          )}
+        </CollapsibleSection>
+        )}
+
+        {/* ── Section 8: Retry ── */}
+        {showRetry && (
+        <CollapsibleSection
+          title="Retry"
+          badge={retryEnabled ? "ON" : undefined}
+          {...collapsible.sectionProps("retry")}
+        >
+          <Checkbox
+            label="Enable retry"
+            checked={retryEnabled}
+            onChange={setRetryEnabled}
+          />
+          {retryEnabled && (
+            <div className="space-y-4 pl-6 border-l-2 border-border/50">
+              <Input
+                label="Max Retries"
+                type="number"
+                value={String(retry.max_retries)}
+                onChange={(e) => setRetry({ ...retry, max_retries: Number(e.target.value) })}
+              />
+              <TagInput
+                label="Retryable Status Codes"
+                values={retry.retryable_status_codes}
+                onChange={(v) => setRetry({ ...retry, retryable_status_codes: v as number[] })}
+                placeholder="502, 503, 504"
+                parseAsNumber
+              />
+              <MethodCheckboxGroup
+                label="Retryable Methods"
+                selected={retry.retryable_methods}
+                onChange={(v) => setRetry({ ...retry, retryable_methods: v })}
+                options={ALL_HTTP_METHODS}
+              />
+              <Select
+                label="Backoff Strategy"
+                value={backoffType}
+                onValueChange={(v) => setBackoffType(v as BackoffType)}
+                options={[
+                  { value: "fixed", label: "Fixed" },
+                  { value: "exponential", label: "Exponential" },
+                ]}
+              />
+              {backoffType === "fixed" ? (
+                <Input
+                  label="Delay (ms)"
+                  type="number"
+                  value={String(fixedDelay)}
+                  onChange={(e) => setFixedDelay(Number(e.target.value))}
+                />
+              ) : (
+                <>
+                  <Input
+                    label="Base (ms)"
+                    type="number"
+                    value={String(expBase)}
+                    onChange={(e) => setExpBase(Number(e.target.value))}
+                  />
+                  <Input
+                    label="Max (ms)"
+                    type="number"
+                    value={String(expMax)}
+                    onChange={(e) => setExpMax(Number(e.target.value))}
+                  />
+                </>
+              )}
+              <Checkbox
+                label="Retry on connect failure"
+                checked={retry.retry_on_connect_failure}
+                onChange={(v) => setRetry({ ...retry, retry_on_connect_failure: v })}
+              />
+            </div>
+          )}
+        </CollapsibleSection>
+        )}
+
+        {/* ── Section 9: Connection Pool ── */}
+        {showConnectionPool && (
+          <CollapsibleSection
+            title="Connection Pool"
+            {...collapsible.sectionProps("connection-pool")}
+          >
+            <Input
+              label="Pool Idle Timeout (seconds)"
+              type="number"
+              value={numVal(poolIdleTimeout)}
+              onChange={setNum(setPoolIdleTimeout)}
+            />
+            <Select
+              label="HTTP Keep-Alive Override"
+              value={poolKeepAlive === null ? "inherit" : String(poolKeepAlive)}
+              onValueChange={(value) =>
+                setPoolKeepAlive(value === "inherit" ? null : value === "true")
+              }
+              options={[
+                { value: "inherit", label: "Inherit gateway default" },
+                { value: "true", label: "Enabled" },
+                { value: "false", label: "Disabled" },
+              ]}
+            />
+            <Select
+              label="HTTP/2 Override"
+              value={poolHttp2 === null ? "inherit" : String(poolHttp2)}
+              onValueChange={(value) =>
+                setPoolHttp2(value === "inherit" ? null : value === "true")
+              }
+              options={[
+                { value: "inherit", label: "Inherit gateway default" },
+                { value: "true", label: "Enabled" },
+                { value: "false", label: "Disabled" },
+              ]}
+            />
+            <Input
+              label="TCP Keep-Alive (seconds)"
+              type="number"
+              value={numVal(poolTcpKeepAlive)}
+              onChange={setNum(setPoolTcpKeepAlive)}
+            />
+            {supportsHttp2 && (
               <>
                 <Input
-                  label="Base (ms)"
+                  label="HTTP/2 Keep-Alive Interval (seconds)"
                   type="number"
-                  value={String(expBase)}
-                  onChange={(e) => setExpBase(Number(e.target.value))}
+                  value={numVal(poolH2KeepAliveInterval)}
+                  onChange={setNum(setPoolH2KeepAliveInterval)}
                 />
                 <Input
-                  label="Max (ms)"
+                  label="HTTP/2 Keep-Alive Timeout (seconds)"
                   type="number"
-                  value={String(expMax)}
-                  onChange={(e) => setExpMax(Number(e.target.value))}
+                  value={numVal(poolH2KeepAliveTimeout)}
+                  onChange={setNum(setPoolH2KeepAliveTimeout)}
+                />
+                <Input
+                  label="HTTP/2 Initial Stream Window Size"
+                  type="number"
+                  value={numVal(poolH2InitStreamWindow)}
+                  onChange={setNum(setPoolH2InitStreamWindow)}
+                />
+                <Input
+                  label="HTTP/2 Initial Connection Window Size"
+                  type="number"
+                  value={numVal(poolH2InitConnWindow)}
+                  onChange={setNum(setPoolH2InitConnWindow)}
+                />
+                <Select
+                  label="HTTP/2 Adaptive Window Override"
+                  value={poolH2AdaptiveWindow === null ? "inherit" : String(poolH2AdaptiveWindow)}
+                  onValueChange={(value) =>
+                    setPoolH2AdaptiveWindow(value === "inherit" ? null : value === "true")
+                  }
+                  options={[
+                    { value: "inherit", label: "Inherit gateway default" },
+                    { value: "true", label: "Enabled" },
+                    { value: "false", label: "Disabled" },
+                  ]}
+                />
+                <Input
+                  label="HTTP/2 Max Frame Size"
+                  type="number"
+                  value={numVal(poolH2MaxFrameSize)}
+                  onChange={setNum(setPoolH2MaxFrameSize)}
+                />
+                <Input
+                  label="HTTP/2 Max Concurrent Streams"
+                  type="number"
+                  value={numVal(poolH2MaxConcurrentStreams)}
+                  onChange={setNum(setPoolH2MaxConcurrentStreams)}
                 />
               </>
             )}
-            <Checkbox
-              label="Retry on connect failure"
-              checked={retry.retry_on_connect_failure}
-              onChange={(v) => setRetry({ ...retry, retry_on_connect_failure: v })}
+            <Input
+              label="Max Requests per Connection"
+              type="number"
+              value={numVal(poolMaxRequests)}
+              onChange={setNum(setPoolMaxRequests)}
+              helpText="Leave blank to inherit the gateway default."
             />
-          </div>
+          </CollapsibleSection>
         )}
-      </CollapsibleSection>
-      )}
 
-      {/* ── Section 9: Connection Pool ── */}
-      {showConnectionPool && (
-        <CollapsibleSection
-          title="Connection Pool"
-          {...collapsible.sectionProps("connection-pool")}
-        >
-          <Input
-            label="Pool Idle Timeout (seconds)"
-            type="number"
-            value={numVal(poolIdleTimeout)}
-            onChange={setNum(setPoolIdleTimeout)}
-          />
-          <Select
-            label="HTTP Keep-Alive Override"
-            value={poolKeepAlive === null ? "inherit" : String(poolKeepAlive)}
-            onValueChange={(value) =>
-              setPoolKeepAlive(value === "inherit" ? null : value === "true")
-            }
-            options={[
-              { value: "inherit", label: "Inherit gateway default" },
-              { value: "true", label: "Enabled" },
-              { value: "false", label: "Disabled" },
-            ]}
-          />
-          <Select
-            label="HTTP/2 Override"
-            value={poolHttp2 === null ? "inherit" : String(poolHttp2)}
-            onValueChange={(value) =>
-              setPoolHttp2(value === "inherit" ? null : value === "true")
-            }
-            options={[
-              { value: "inherit", label: "Inherit gateway default" },
-              { value: "true", label: "Enabled" },
-              { value: "false", label: "Disabled" },
-            ]}
-          />
-          <Input
-            label="TCP Keep-Alive (seconds)"
-            type="number"
-            value={numVal(poolTcpKeepAlive)}
-            onChange={setNum(setPoolTcpKeepAlive)}
-          />
-          {supportsHttp2 && (
-            <>
-              <Input
-                label="HTTP/2 Keep-Alive Interval (seconds)"
-                type="number"
-                value={numVal(poolH2KeepAliveInterval)}
-                onChange={setNum(setPoolH2KeepAliveInterval)}
-              />
-              <Input
-                label="HTTP/2 Keep-Alive Timeout (seconds)"
-                type="number"
-                value={numVal(poolH2KeepAliveTimeout)}
-                onChange={setNum(setPoolH2KeepAliveTimeout)}
-              />
-              <Input
-                label="HTTP/2 Initial Stream Window Size"
-                type="number"
-                value={numVal(poolH2InitStreamWindow)}
-                onChange={setNum(setPoolH2InitStreamWindow)}
-              />
-              <Input
-                label="HTTP/2 Initial Connection Window Size"
-                type="number"
-                value={numVal(poolH2InitConnWindow)}
-                onChange={setNum(setPoolH2InitConnWindow)}
-              />
-              <Select
-                label="HTTP/2 Adaptive Window Override"
-                value={poolH2AdaptiveWindow === null ? "inherit" : String(poolH2AdaptiveWindow)}
-                onValueChange={(value) =>
-                  setPoolH2AdaptiveWindow(value === "inherit" ? null : value === "true")
-                }
-                options={[
-                  { value: "inherit", label: "Inherit gateway default" },
-                  { value: "true", label: "Enabled" },
-                  { value: "false", label: "Disabled" },
-                ]}
-              />
-              <Input
-                label="HTTP/2 Max Frame Size"
-                type="number"
-                value={numVal(poolH2MaxFrameSize)}
-                onChange={setNum(setPoolH2MaxFrameSize)}
-              />
-              <Input
-                label="HTTP/2 Max Concurrent Streams"
-                type="number"
-                value={numVal(poolH2MaxConcurrentStreams)}
-                onChange={setNum(setPoolH2MaxConcurrentStreams)}
-              />
-            </>
-          )}
-          <Input
-            label="Max Requests per Connection"
-            type="number"
-            value={numVal(poolMaxRequests)}
-            onChange={setNum(setPoolMaxRequests)}
-            helpText="Leave blank to inherit the gateway default."
-          />
-        </CollapsibleSection>
-      )}
-
-      {/* ── Section 10: Protocol-Specific ── */}
-      {showProtocolSection && (
-        <CollapsibleSection
-          title="Protocol-Specific"
-          badge={backendScheme.toUpperCase()}
-          {...collapsible.sectionProps("protocol")}
-        >
-          <Input
-            label="Listen Port"
-            type="number"
-            value={numVal(listenPort)}
-            onChange={setNum(setListenPort)}
-            helpText={
-              isStream
-                ? "Required — stream proxies bind and route by this port."
-                : "Optional — scopes this HTTP proxy to one frontend port."
-            }
-            error={errors.listen_port}
-          />
-          {isTcpLike && (
+        {/* ── Section 10: Protocol-Specific ── */}
+        {showProtocolSection && (
+          <CollapsibleSection
+            title="Protocol-Specific"
+            badge={backendScheme.toUpperCase()}
+            {...collapsible.sectionProps("protocol")}
+          >
             <Input
-              label="TCP Idle Timeout (seconds)"
+              label="Listen Port"
               type="number"
-              value={numVal(tcpIdleTimeout)}
-              onChange={setNum(setTcpIdleTimeout)}
+              value={numVal(listenPort)}
+              onChange={setNum(setListenPort)}
+              helpText={
+                isStream
+                  ? "Required — stream proxies bind and route by this port."
+                  : "Optional — scopes this HTTP proxy to one frontend port."
+              }
+              error={errors.listen_port}
             />
-          )}
-          {isUdpLike && (
-            <>
+            {isTcpLike && (
               <Input
-                label="UDP Idle Timeout (seconds)"
+                label="TCP Idle Timeout (seconds)"
                 type="number"
-                value={String(udpIdleTimeout)}
-                onChange={(e) => setUdpIdleTimeout(Number(e.target.value))}
+                value={numVal(tcpIdleTimeout)}
+                onChange={setNum(setTcpIdleTimeout)}
               />
+            )}
+            {isUdpLike && (
+              <>
+                <Input
+                  label="UDP Idle Timeout (seconds)"
+                  type="number"
+                  value={String(udpIdleTimeout)}
+                  onChange={(e) => setUdpIdleTimeout(Number(e.target.value))}
+                />
+                <Input
+                  label="Max Response Amplification Factor"
+                  type="number"
+                  value={numVal(udpAmplificationFactor)}
+                  onChange={setNum(setUdpAmplificationFactor)}
+                  placeholder="8"
+                  helpText="Caps backend→client bytes per request payload byte. Protects against UDP reflection attacks."
+                />
+              </>
+            )}
+            {isStream && (
+              <Checkbox
+                label="Inbound PROXY protocol"
+                checked={streamProxyProtocol}
+                onChange={setStreamProxyProtocol}
+                helpText="Read PROXY protocol v1/v2 headers from a trusted load balancer to recover client IPs."
+              />
+            )}
+            {isTcpLike && (
+              <Checkbox
+                label="Outbound PROXY protocol v2 to backend"
+                checked={backendProxyProtocol}
+                onChange={setBackendProxyProtocol}
+                helpText="Prepend a PROXY v2 header on backend connects so backends see the client IP."
+              />
+            )}
+            {backendScheme === "https" && (
               <Input
-                label="Max Response Amplification Factor"
+                label="HTTP/3 Connections Per Backend"
                 type="number"
-                value={numVal(udpAmplificationFactor)}
-                onChange={setNum(setUdpAmplificationFactor)}
-                placeholder="8"
-                helpText="Caps backend→client bytes per request payload byte. Protects against UDP reflection attacks."
+                value={numVal(poolH3ConnsPerBackend)}
+                onChange={setNum(setPoolH3ConnsPerBackend)}
+                helpText="QUIC connections per H3-capable backend (H3 is auto-selected when supported)."
               />
-            </>
-          )}
-          {isStream && (
-            <Checkbox
-              label="Inbound PROXY protocol"
-              checked={streamProxyProtocol}
-              onChange={setStreamProxyProtocol}
-              helpText="Read PROXY protocol v1/v2 headers from a trusted load balancer to recover client IPs."
-            />
-          )}
-          {isTcpLike && (
-            <Checkbox
-              label="Outbound PROXY protocol v2 to backend"
-              checked={backendProxyProtocol}
-              onChange={setBackendProxyProtocol}
-              helpText="Prepend a PROXY v2 header on backend connects so backends see the client IP."
-            />
-          )}
-          {backendScheme === "https" && (
-            <Input
-              label="HTTP/3 Connections Per Backend"
-              type="number"
-              value={numVal(poolH3ConnsPerBackend)}
-              onChange={setNum(setPoolH3ConnsPerBackend)}
-              helpText="QUIC connections per H3-capable backend (H3 is auto-selected when supported)."
-            />
-          )}
-        </CollapsibleSection>
-      )}
+            )}
+          </CollapsibleSection>
+        )}
+      </ReadOnlySurface>
 
       {/* ── Actions ── */}
       <div className="flex flex-col items-end gap-3 pt-6">
@@ -1141,7 +1158,7 @@ export function ProxyForm({ initialData, onSubmit, isLoading }: ProxyFormProps) 
         >
           Cancel
         </Button>
-        <Button type="submit" loading={isLoading}>
+        <Button type="submit" loading={isLoading} disabled={readOnly}>
           {isEdit ? "Update Proxy" : "Create Proxy"}
         </Button>
         </div>

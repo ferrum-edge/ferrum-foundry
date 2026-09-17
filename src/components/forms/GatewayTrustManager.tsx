@@ -21,6 +21,8 @@ import {
   type GatewayTrustRevisionConflict,
 } from "@/api/trust";
 import { useHealth } from "@/hooks/useMetrics";
+import { useCapabilities } from "@/stores/capabilities";
+import { CapabilityNotice } from "@/components/shared/CapabilityGate";
 import {
   useCreateTrustBundle,
   useDeleteTrustBundle,
@@ -120,6 +122,8 @@ export function GatewayTrustManager() {
   const bundlesQuery = useTrustBundles();
   const statusQuery = useTrustStatus();
   const healthQuery = useHealth();
+  const { capabilities } = useCapabilities();
+  const canWrite = capabilities.gatewayTrust;
   const createBundle = useCreateTrustBundle();
   const updateBundle = useUpdateTrustBundle();
   const deleteBundle = useDeleteTrustBundle();
@@ -151,21 +155,25 @@ export function GatewayTrustManager() {
 
   const bundlesAvailable = resolveReadState(bundlesQuery) === 'loaded';
   const canCreate =
+    canWrite.allowed &&
     bundlesAvailable && !bundle && resolveReadState(statusQuery) === 'loaded' &&
     !status?.bundle && !status?.configured;
 
   const openCreate = () => {
+    if (!canWrite.allowed) return;
     setForm(EMPTY_TRUST_BUNDLE_FORM);
     setEditor({ mode: "create", namespace: selectedNamespace, target: null });
   };
 
   const openEdit = (target: GatewayTrustBundle) => {
+    if (!canWrite.allowed) return;
     setForm(trustBundleToForm(target));
     setEditor({ mode: "edit", namespace: selectedNamespace, target });
   };
 
   const save = async () => {
-    if (!editor || !bundlesAvailable || (editor.mode === 'create' && !canCreate)) return;
+    if (!editor || !bundlesAvailable || !canWrite.allowed) return;
+    if (editor.mode === 'create' && !canCreate) return;
     try {
       if (
         editor.mode === "edit" &&
@@ -222,6 +230,7 @@ export function GatewayTrustManager() {
 
   return (
     <div className="space-y-4">
+      <CapabilityNotice verdict={canWrite} />
       <ReadState queries={[statusQuery]} label="Trust publication status" optionalFeature>
         {status && hasTrustDetail && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -293,12 +302,18 @@ export function GatewayTrustManager() {
                 </p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <Button variant="secondary" size="sm" onClick={() => openEdit(bundle)}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={!canWrite.allowed}
+                  onClick={() => openEdit(bundle)}
+                >
                   Edit / Rotate
                 </Button>
                 <Button
                   variant="ghost"
                   size="sm"
+                  disabled={!canWrite.allowed}
                   onClick={() => setDeleteTarget({ bundle, namespace: selectedNamespace })}
                 >
                   <span className="text-danger">Delete</span>
@@ -329,7 +344,11 @@ export function GatewayTrustManager() {
           <EmptyState
             title={emptyCopy.title}
             description={emptyCopy.description}
-            action={<Button size="sm" onClick={openCreate}>Create Trust Bundle</Button>}
+            action={
+              <Button size="sm" disabled={!canWrite.allowed} onClick={openCreate}>
+                Create Trust Bundle
+              </Button>
+            }
           />
         )}
       </ReadState>
@@ -445,7 +464,7 @@ export function GatewayTrustManager() {
         confirmLabel="Revoke Trust Bundle"
         loading={deleteBundle.isPending}
         onConfirm={async () => {
-          if (!deleteTarget || !bundlesAvailable) return;
+          if (!deleteTarget || !bundlesAvailable || !canWrite.allowed) return;
           try {
             await deleteBundle.mutateAsync({
               id: deleteTarget.bundle.id,

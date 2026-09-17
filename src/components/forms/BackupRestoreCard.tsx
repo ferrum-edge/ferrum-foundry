@@ -17,6 +17,8 @@ import { useToast } from "@/components/ui/Toast";
 import { getApiErrorMessage } from "@/api/client";
 import { useBackup, useRestore } from "@/hooks/useOps";
 import { useNamespace } from "@/stores/namespace";
+import { useCapabilities } from "@/stores/capabilities";
+import { CapabilityNotice, WriteAction } from "@/components/shared/CapabilityGate";
 import {
   getRestoreApiSpecConfirmation,
   getRestoreFailure,
@@ -64,6 +66,9 @@ export function BackupRestoreCard() {
   const { selectedNamespace } = useNamespace();
   const backup = useBackup();
   const restore = useRestore();
+  const { capabilities } = useCapabilities();
+  const canExport = capabilities.configExport;
+  const canRestore = capabilities.configBackup;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [pendingRestore, setPendingRestore] = useState<PendingRestore | null>(null);
   const [apiSpecRisk, setApiSpecRisk] = useState<ApiSpecRisk | null>(null);
@@ -72,6 +77,7 @@ export function BackupRestoreCard() {
   const [unknownRestore, setUnknownRestore] = useState<UnknownRestore | null>(null);
 
   const handleDownload = async () => {
+    if (!canExport.allowed) return;
     try {
       const data = await backup.mutateAsync(undefined);
       const blob = new Blob([JSON.stringify(data, null, 2)], {
@@ -93,6 +99,7 @@ export function BackupRestoreCard() {
   };
 
   const handleFileSelected = async (file: File) => {
+    if (!canRestore.allowed) return;
     try {
       setRestoreFailure(null);
       setUnknownRestore(null);
@@ -213,26 +220,32 @@ export function BackupRestoreCard() {
           (proxies, consumers with unredacted credentials, plugins, upstreams,
           API specs, trust bundles) or restore from a previous export.
         </p>
-        <div className="flex flex-wrap gap-3">
-          <Button
-            variant="secondary"
-            loading={backup.isPending}
-            onClick={handleDownload}
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
-            Download Backup
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-            </svg>
-            Restore From File…
-          </Button>
+        <div className="flex flex-wrap items-start gap-3">
+          {/* Each button carries its own reason: export and restore are
+              separate capabilities and can be denied for different causes. */}
+          <WriteAction verdict={canExport} align="start">
+            <Button
+              variant="secondary"
+              loading={backup.isPending}
+              onClick={handleDownload}
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              Download Backup
+            </Button>
+          </WriteAction>
+          <WriteAction verdict={canRestore} align="start">
+            <Button
+              variant="secondary"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+              </svg>
+              Restore From File…
+            </Button>
+          </WriteAction>
           <input
             ref={fileInputRef}
             type="file"
@@ -245,6 +258,8 @@ export function BackupRestoreCard() {
             }}
           />
         </div>
+        {/* The full explanation for whichever denial is the more fundamental. */}
+        <CapabilityNotice verdict={canExport.allowed ? canRestore : canExport} />
         {restoreFailure && (
           <div
             role="alert"

@@ -28,6 +28,8 @@ import {
 } from "@/lib/effectivePolicy";
 import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
 import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
+import { useCapabilities } from "@/stores/capabilities";
+import { WriteAction } from "@/components/shared/CapabilityGate";
 import type { ProxyCreate, PluginConfig } from "@/api/types";
 
 /**
@@ -64,6 +66,8 @@ function ProxyEditor({ session }: { session: EditorSession }) {
   const navigate = useNavigate();
   const { toast } = useToast();
 
+  const { capabilities } = useCapabilities();
+  const capability = capabilities.proxies;
   const updateProxy = useUpdateProxy();
   const deleteProxy = useDeleteProxy();
   // Disable before cache retirement so removeQueries cannot refetch the
@@ -106,7 +110,7 @@ function ProxyEditor({ session }: { session: EditorSession }) {
   /* ---------- Handlers ---------- */
 
   const handleSubmit = session.bind(async (data: ProxyCreate) => {
-    if (!proxy) return;
+    if (!proxy || !capability.allowed) return;
     try {
       await updateProxy.mutateAsync({
         id: proxyId,
@@ -120,6 +124,7 @@ function ProxyEditor({ session }: { session: EditorSession }) {
   });
 
   const handleDelete = session.bind(async () => {
+    if (!capability.allowed) return;
     try {
       await deleteProxy.mutateAsync(proxyId);
       toast("success", "Proxy deleted successfully");
@@ -178,16 +183,18 @@ function ProxyEditor({ session }: { session: EditorSession }) {
           </h1>
           <p className="text-text-muted text-sm mt-1 font-mono">{proxy.id}</p>
         </div>
-        <Button variant="danger" onClick={() => setDeleteOpen(true)}>
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-            />
-          </svg>
-          Delete
-        </Button>
+        <WriteAction verdict={capability}>
+          <Button variant="danger" onClick={() => setDeleteOpen(true)}>
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+              />
+            </svg>
+            Delete
+          </Button>
+        </WriteAction>
       </div>
 
       <ResourceLabels labels={proxy.labels} />
@@ -214,6 +221,7 @@ function ProxyEditor({ session }: { session: EditorSession }) {
               initialData={proxy}
               onSubmit={handleSubmit}
               isLoading={updateProxy.isPending}
+              capability={capability}
             />
           </Card>
         </TabsContent>

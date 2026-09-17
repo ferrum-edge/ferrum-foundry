@@ -51,6 +51,12 @@ These BFF checks apply even when gateway namespace-claim enforcement is disabled
 For another enforcement layer on multi-tenant deployments, configure Ferrum Edge
 with `FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM=true` as well.
 
+Foundry mirrors this role model in the UI: a surface whose write the current
+role or gateway mode cannot perform is presented read-only with the reason
+visible before anything is edited. See [Capabilities](capabilities.md) for the
+role x mode matrix and how to extend it. That presentation is a usability
+layer only — the BFF and Ferrum Edge remain the enforcement points.
+
 Namespace grants constrain Ferrum operations that declare
 `X-Ferrum-Namespace`; they do not turn fleet-global process/runtime APIs into
 tenant APIs. TLS inventory, managed TLS material, ACME, rotation, and validation

@@ -6,6 +6,7 @@ import { NamespaceProvider } from "@/stores/namespace";
 import { ErrorPopupProvider } from "@/stores/error";
 import { ThemeProvider } from "@/stores/theme";
 import { AuthProvider } from "@/stores/auth";
+import { CapabilityProvider } from "@/stores/capabilities";
 import { LoginGate } from "@/components/auth/LoginGate";
 import { router } from "./router";
 
@@ -28,7 +29,9 @@ export function App() {
               <NamespaceProvider>
                 <ErrorPopupProvider>
                   <LoginGate>
-                    <RouterProvider router={router} />
+                    <CapabilityProvider>
+                      <RouterProvider router={router} />
+                    </CapabilityProvider>
                   </LoginGate>
                 </ErrorPopupProvider>
               </NamespaceProvider>
