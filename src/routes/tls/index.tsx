@@ -4,7 +4,7 @@
 /*  surface rotation, and material validation.                        */
 /* ------------------------------------------------------------------ */
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
 import { Card } from "@/components/ui/Card";
@@ -99,6 +99,8 @@ function Mono({ children }: { children: ReactNode }) {
 interface ManagedTabConfig {
   collection: ManagedTlsCollection;
   title: string;
+  /** Singular material name for accessible record actions. */
+  recordLabel: string;
   description: string;
   /** Heading for the empty state; each store holds a different material. */
   emptyTitle: string;
@@ -122,6 +124,7 @@ const MANAGED_TABS: ManagedTabConfig[] = [
   {
     collection: "certificates",
     title: "Certificates",
+    recordLabel: "certificate",
     description:
       "Managed server/client certificates referenced as managed://certificates/{id}. Private keys are stored but never returned.",
     emptyTitle: "No certificates yet",
@@ -136,6 +139,7 @@ const MANAGED_TABS: ManagedTabConfig[] = [
   {
     collection: "ca-bundles",
     title: "CA Bundles",
+    recordLabel: "CA bundle",
     description:
       "Trust anchor bundles referenced as managed://ca-bundles/{id} for client or backend verification.",
     emptyTitle: "No CA bundles yet",
@@ -148,6 +152,7 @@ const MANAGED_TABS: ManagedTabConfig[] = [
   {
     collection: "crls",
     title: "CRLs",
+    recordLabel: "CRL",
     description: "Certificate revocation lists referenced as managed://crls/{id}.",
     emptyTitle: "No CRLs yet",
     emptyDescription:
@@ -159,6 +164,7 @@ const MANAGED_TABS: ManagedTabConfig[] = [
   {
     collection: "ocsp-responses",
     title: "OCSP",
+    recordLabel: "OCSP response",
     description: "Stapled OCSP responses referenced as managed://ocsp-responses/{id}.",
     emptyTitle: "No OCSP responses yet",
     emptyDescription:
@@ -170,6 +176,7 @@ const MANAGED_TABS: ManagedTabConfig[] = [
   {
     collection: "jwks",
     title: "JWKS",
+    recordLabel: "JWKS document",
     description: "JSON Web Key Sets referenced as managed://jwks/{id} for token verification.",
     emptyTitle: "No JWKS documents yet",
     emptyDescription: "Upload a JSON Web Key Set to verify tokens.",
@@ -180,6 +187,7 @@ const MANAGED_TABS: ManagedTabConfig[] = [
 ];
 
 function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
+  const formId = useId();
   const { toast } = useToast();
   const { data, isLoading } = useAllManagedTlsRecords(config.collection);
   const createRecord = useCreateManagedTlsRecord(config.collection);
@@ -294,6 +302,8 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
                   variant="ghost"
                   size="sm"
                   onClick={() => setDeleteTarget(record)}
+                  aria-label={`Delete ${config.recordLabel} ${record.name || record.id}`}
+                  title={`Delete ${config.recordLabel} ${record.name || record.id}`}
                 >
                   <svg className="w-4 h-4 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -327,8 +337,11 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
           {config.fields.map((field) =>
             field.textarea ? (
               <div key={field.key} className="flex flex-col gap-1.5">
-                <span className="text-text-secondary text-sm font-medium">{field.label}</span>
+                <label htmlFor={`${formId}-${field.key}`} className="text-text-secondary text-sm font-medium">
+                  {field.label}
+                </label>
                 <textarea
+                  id={`${formId}-${field.key}`}
                   value={form[field.key] ?? ""}
                   onChange={(e) => setField(field.key, e.target.value)}
                   rows={6}
@@ -336,9 +349,10 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
                   className={`bg-code-bg border rounded-lg px-3 py-2 text-text-primary text-xs font-mono placeholder:text-text-muted resize-y ${fieldErrors[field.key] ? "border-danger focus:border-danger focus:ring-1 focus:ring-danger/30" : "border-border focus:border-orange focus:ring-1 focus:ring-orange/30"}`}
                   spellCheck={false}
                   aria-invalid={fieldErrors[field.key] ? true : undefined}
+                  aria-describedby={fieldErrors[field.key] ? `${formId}-${field.key}-error` : undefined}
                 />
                 {fieldErrors[field.key] && (
-                  <p className="text-danger text-xs">{fieldErrors[field.key]}</p>
+                  <p id={`${formId}-${field.key}-error`} className="text-danger text-xs">{fieldErrors[field.key]}</p>
                 )}
               </div>
             ) : (
@@ -866,6 +880,7 @@ function AcmeTab() {
                   onClick={() => setDeleteCertificateTarget(cert)}
                   disabled={pendingKeys.has(`delete-cert:${cert.id}`)}
                   aria-label={`Delete certificate for ${cert.domains.join(", ")}`}
+                  title={`Delete certificate for ${cert.domains.join(", ")}`}
                 >
                   <svg className="w-4 h-4 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -977,6 +992,7 @@ function AcmeTab() {
                     onClick={() => setDeleteOrderTarget(order)}
                     disabled={pendingKeys.has(`delete-order:${order.id}`)}
                     aria-label={`Delete ${order.status} order for ${order.domains.join(", ")}`}
+                    title={`Delete ${order.status} order for ${order.domains.join(", ")}`}
                   >
                     <svg className="w-4 h-4 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -1349,6 +1365,7 @@ const VALIDATE_FIELDS = [
 ] as const satisfies readonly { key: keyof TlsValidateRequest; label: string }[];
 
 function ValidateTab() {
+  const formId = useId();
   const { toast } = useToast();
   const validateMaterial = useValidateTlsMaterial();
   const [values, setValues] = useState<Record<string, string>>({});
@@ -1416,23 +1433,28 @@ function ValidateTab() {
       </p>
       {VALIDATE_FIELDS.map((field) => (
         <div key={field.key} className="flex flex-col gap-1.5">
-          <span className="text-text-secondary text-sm font-medium">{field.label}</span>
+          <label htmlFor={`${formId}-${field.key}`} className="text-text-secondary text-sm font-medium">
+            {field.label}
+          </label>
           <textarea
+            id={`${formId}-${field.key}`}
             value={values[field.key] ?? ""}
             onChange={(e) => setField(field.key, e.target.value)}
             rows={5}
             className={`bg-code-bg border rounded-lg px-3 py-2 text-text-primary text-xs font-mono placeholder:text-text-muted resize-y ${fieldErrors[field.key] ? "border-danger focus:border-danger focus:ring-1 focus:ring-danger/30" : "border-border focus:border-orange focus:ring-1 focus:ring-orange/30"}`}
             spellCheck={false}
             aria-invalid={fieldErrors[field.key] ? true : undefined}
+            aria-describedby={fieldErrors[field.key] ? `${formId}-${field.key}-error` : undefined}
           />
           {fieldErrors[field.key] && (
-            <p className="text-danger text-xs">{fieldErrors[field.key]}</p>
+            <p id={`${formId}-${field.key}-error`} className="text-danger text-xs">{fieldErrors[field.key]}</p>
           )}
         </div>
       ))}
       <div className="flex flex-col gap-1.5">
-        <label className="flex items-center gap-2 text-sm text-text-secondary">
+        <label htmlFor={`${formId}-allow-expired`} className="flex items-center gap-2 text-sm text-text-secondary">
           <input
+            id={`${formId}-allow-expired`}
             type="checkbox"
             checked={allowExpired}
             onChange={(e) => {
@@ -1440,16 +1462,17 @@ function ValidateTab() {
               clearFieldError("allow_expired");
             }}
             aria-invalid={fieldErrors.allow_expired ? true : undefined}
+            aria-describedby={`${formId}-allow-expired-help${fieldErrors.allow_expired ? ` ${formId}-allow-expired-error` : ""}`}
           />
           Allow expired certificates
         </label>
-        <p className="text-text-muted text-xs">
+        <p id={`${formId}-allow-expired-help`} className="text-text-muted text-xs">
           Off by default. Skips certificate notBefore/notAfter checks, including
           CA certificates. CRL checks always apply: future thisUpdate, missing
           nextUpdate, or reached nextUpdate rejects the entire CRL bundle.
         </p>
         {fieldErrors.allow_expired && (
-          <p className="text-danger text-xs">{fieldErrors.allow_expired}</p>
+          <p id={`${formId}-allow-expired-error`} className="text-danger text-xs">{fieldErrors.allow_expired}</p>
         )}
       </div>
       <Input
