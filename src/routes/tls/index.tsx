@@ -8,6 +8,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
 import { Card } from "@/components/ui/Card";
+import { ResourceGrid } from "@/components/ui/ResourceGrid";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -465,7 +466,17 @@ function InventoryTab() {
         </div>
       </Card>
 
-      <Card className="overflow-hidden p-0">
+      <ResourceGrid
+        label="TLS inventory"
+        emptyState={!isLoading && entries.length === 0 && (
+          <EmptyState
+            title={(data?.pagination.total ?? 0) > 0 ? "No results on this page" : "No TLS material found"}
+            description={(data?.pagination.total ?? 0) > 0
+              ? "Use Go to last page below to return to the available results."
+              : "The gateway reports no configured TLS sources."}
+          />
+        )}
+      >
         <div className="grid grid-cols-[1.2fr_5rem_5rem_2fr_6rem] gap-4 px-6 py-3 border-b border-border text-text-muted text-xs font-semibold uppercase tracking-wider">
           <span>Material</span>
           <span>Kind</span>
@@ -479,14 +490,6 @@ function InventoryTab() {
               <SkeletonRow key={i} />
             ))}
           </div>
-        )}
-        {!isLoading && entries.length === 0 && (
-          <EmptyState
-            title={(data?.pagination.total ?? 0) > 0 ? "No results on this page" : "No TLS material found"}
-            description={(data?.pagination.total ?? 0) > 0
-              ? "Use Go to last page below to return to the available results."
-              : "The gateway reports no configured TLS sources."}
-          />
         )}
         {!isLoading &&
           entries.map((entry) => (
@@ -515,7 +518,7 @@ function InventoryTab() {
               <span>{expiryBadge(entry.not_after) ?? <span className="text-text-muted text-xs">—</span>}</span>
             </div>
           ))}
-      </Card>
+      </ResourceGrid>
       {(data?.pagination.total ?? 0) > 0 && (
         <PaginationControls
           offset={pagination.offset}

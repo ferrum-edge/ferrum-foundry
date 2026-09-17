@@ -8,6 +8,7 @@ import { ReadState } from '@/components/shared/ReadState';
 import { useState } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
 import { Card } from "@/components/ui/Card";
+import { ResourceGrid } from "@/components/ui/ResourceGrid";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -201,7 +202,12 @@ function ServiceGraphTab() {
   if (isError || !data) return <NotMeshEmpty what="Service graph" />;
 
   return (
-    <Card className="overflow-hidden p-0">
+    <ResourceGrid
+      label="Mesh service graph"
+      emptyState={data.edges.length === 0 && (
+        <EmptyState title="No traffic observed" description="Edges appear as mesh traffic flows." />
+      )}
+    >
       <div className="px-6 py-3 border-b border-border flex items-center justify-between">
         <h3 className="text-sm font-semibold text-text-primary">
           {data.edge_count} edge(s)
@@ -218,9 +224,6 @@ function ServiceGraphTab() {
         <span>Avg ms</span>
         <span>Security</span>
       </div>
-      {data.edges.length === 0 && (
-        <EmptyState title="No traffic observed" description="Edges appear as mesh traffic flows." />
-      )}
       {data.edges.map((edge, i) => (
         <div
           key={i}
@@ -250,7 +253,7 @@ function ServiceGraphTab() {
           </Badge>
         </div>
       ))}
-    </Card>
+    </ResourceGrid>
   );
 }
 
