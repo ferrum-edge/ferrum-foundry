@@ -1345,17 +1345,18 @@ const VALIDATE_FIELDS = [
   { key: "cert_pem", label: "Certificate (PEM)" },
   { key: "key_pem", label: "Private Key (PEM)" },
   { key: "ca_bundle_pem", label: "CA Bundle (PEM)" },
+  { key: "crl_pem", label: "CRL (PEM)" },
 ] as const satisfies readonly { key: keyof TlsValidateRequest; label: string }[];
 
 function ValidateTab() {
   const { toast } = useToast();
   const validateMaterial = useValidateTlsMaterial();
   const [values, setValues] = useState<Record<string, string>>({});
+  const [allowExpired, setAllowExpired] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [result, setResult] = useState<{ valid: boolean; validated: Record<string, unknown> } | null>(null);
 
-  const setField = (key: string, value: string) => {
-    setValues((current) => ({ ...current, [key]: value }));
+  const clearFieldError = (key: string) => {
     setFieldErrors((errors) => {
       if (!(key in errors)) return errors;
       const next = { ...errors };
@@ -1364,33 +1365,44 @@ function ValidateTab() {
     });
   };
 
+  const setField = (key: string, value: string) => {
+    setValues((current) => ({ ...current, [key]: value }));
+    clearFieldError(key);
+  };
+
   const handleValidate = async () => {
     setResult(null);
     setFieldErrors({});
     const request: TlsValidateRequest = {};
-    if (values.cert_pem?.trim()) request.cert_pem = values.cert_pem;
-    if (values.key_pem?.trim()) request.key_pem = values.key_pem;
-    if (values.ca_bundle_pem?.trim()) request.ca_bundle_pem = values.ca_bundle_pem;
+    // An empty PEM string is supplied material to the gateway, not an omitted
+    // field. Preserve populated PEM bytes, but omit blank optional controls.
+    for (const field of VALIDATE_FIELDS) {
+      if (values[field.key]?.trim()) request[field.key] = values[field.key];
+    }
+    if (allowExpired) request.allow_expired = true;
+    const warningDays = values.cert_expiry_warning_days?.trim();
+    if (warningDays) {
+      const threshold = Number(warningDays);
+      if (!Number.isSafeInteger(threshold) || threshold < 0) {
+        setFieldErrors({
+          cert_expiry_warning_days: "Enter a non-negative whole number of days within the supported range.",
+        });
+        return;
+      }
+      request.cert_expiry_warning_days = threshold;
+    }
     try {
       setResult(await validateMaterial.mutateAsync(request));
     } catch (err) {
       // A 400 here names the request key it rejected, so the message belongs
-      // under that textarea rather than in a toast quoting the request URL.
+      // under that control rather than in a toast quoting the request URL.
       const detail = await getApiErrorDetail(err);
       const fieldError = parseFieldError(detail, TLS_VALIDATE_FIELDS);
-      if (
-        fieldError &&
-        VALIDATE_FIELDS.some((field) => field.key === fieldError.field)
-      ) {
+      if (fieldError) {
         setFieldErrors({ [fieldError.field]: fieldError.message });
         return;
       }
-      // A field with no control on this tab (crl_pem, ...) still has to be
-      // readable, so fall back to the bare message.
-      toast(
-        "error",
-        fieldError?.message || detail || "Could not validate this material",
-      );
+      toast("error", detail || "Could not validate this material");
     }
   };
 
@@ -1398,7 +1410,9 @@ function ValidateTab() {
     <div className="space-y-4 max-w-3xl">
       <p className="text-text-muted text-sm">
         Validate PEM material without persisting anything — cert/key match, chain
-        integrity, and expiry are checked by the gateway.
+        integrity, certificate expiry, and CRL validity windows are checked by the
+        gateway. Supply a certificate with its private key, a CA bundle, a CRL
+        bundle, or a combination. Leave unused fields blank.
       </p>
       {VALIDATE_FIELDS.map((field) => (
         <div key={field.key} className="flex flex-col gap-1.5">
@@ -1416,6 +1430,40 @@ function ValidateTab() {
           )}
         </div>
       ))}
+      <div className="flex flex-col gap-1.5">
+        <label className="flex items-center gap-2 text-sm text-text-secondary">
+          <input
+            type="checkbox"
+            checked={allowExpired}
+            onChange={(e) => {
+              setAllowExpired(e.target.checked);
+              clearFieldError("allow_expired");
+            }}
+            aria-invalid={fieldErrors.allow_expired ? true : undefined}
+          />
+          Allow expired certificates
+        </label>
+        <p className="text-text-muted text-xs">
+          Off by default. Skips certificate notBefore/notAfter checks, including
+          CA certificates. CRL checks always apply: future thisUpdate, missing
+          nextUpdate, or reached nextUpdate rejects the entire CRL bundle.
+        </p>
+        {fieldErrors.allow_expired && (
+          <p className="text-danger text-xs">{fieldErrors.allow_expired}</p>
+        )}
+      </div>
+      <Input
+        label="Certificate expiry warning (days)"
+        type="number"
+        min={0}
+        max={Number.MAX_SAFE_INTEGER}
+        step={1}
+        placeholder="30"
+        value={values.cert_expiry_warning_days ?? ""}
+        onChange={(e) => setField("cert_expiry_warning_days", e.target.value)}
+        helpText="Optional non-negative whole number. Leave blank for the gateway default of 30 days."
+        error={fieldErrors.cert_expiry_warning_days}
+      />
       <Button loading={validateMaterial.isPending} onClick={handleValidate}>
         Validate
       </Button>
@@ -1426,6 +1474,7 @@ function ValidateTab() {
               {result.valid ? "VALID" : "INVALID"}
             </Badge>
           </div>
+          <p className="text-sm text-text-secondary mb-2">Gateway validation details</p>
           <pre className="text-xs font-mono text-text-secondary bg-code-bg rounded-lg p-3 overflow-x-auto">
             {JSON.stringify(result.validated, null, 2)}
           </pre>

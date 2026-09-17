@@ -17,6 +17,7 @@ const at = "2026-09-01T00:00:00Z";
 // form serialization. The mocked gateway owns material validation results.
 const certPem = "-----BEGIN CERTIFICATE-----\nfixture\n-----END CERTIFICATE-----";
 const keyPem = "-----BEGIN PRIVATE KEY-----\nfixture\n-----END PRIVATE KEY-----";
+const crlPem = "-----BEGIN X509 CRL-----\nfixture\n-----END X509 CRL-----";
 const record: ManagedTlsRecord = {
   id: "edge-cert", name: "Edge Certificate", kind: "certificate",
   source_uri: "managed://certificates/edge-cert", subject: "CN=api.example.test",
@@ -258,6 +259,117 @@ describe("managed TLS material", () => {
 });
 
 describe("TLS validation", () => {
+  it.each([
+    ["certificate and key", { cert_pem: certPem, key_pem: keyPem }],
+    ["CA only", { ca_bundle_pem: certPem }],
+    ["CRL only", { crl_pem: crlPem }],
+    ["combined material", { cert_pem: certPem, key_pem: keyPem, ca_bundle_pem: certPem, crl_pem: crlPem }],
+    ["custom warning threshold", { cert_pem: certPem, key_pem: keyPem, cert_expiry_warning_days: 14 }],
+    ["zero warning threshold", { ca_bundle_pem: certPem, cert_expiry_warning_days: 0 }],
+  ] satisfies [string, TlsValidateRequest][])("sends only populated fields for %s", async (_scenario, expected: TlsValidateRequest) => {
+    mutate.mockResolvedValue(Response.json({ valid: true, validated: {} }));
+    await mount("Validate");
+    const areas = panel().querySelectorAll("textarea");
+    const fields = ["cert_pem", "key_pem", "ca_bundle_pem", "crl_pem"] as const;
+    for (const [index, field] of fields.entries()) {
+      await fill(areas[index], expected[field] ?? "   ");
+    }
+    const threshold = inputByLabel(panel(), "Certificate expiry warning (days)");
+    expect(threshold.placeholder).toBe("30");
+    expect(threshold.value).toBe("");
+    expect(threshold.min).toBe("0");
+    expect(threshold.step).toBe("1");
+    expect(panel().querySelector<HTMLInputElement>('input[type="checkbox"]')!.checked).toBe(false);
+    if (expected.cert_expiry_warning_days !== undefined) {
+      await fill(threshold, String(expected.cert_expiry_warning_days));
+    }
+    await click("Validate", panel());
+    await settle(() => expect(panel().textContent).toContain("VALID"));
+    expect(writes()).toHaveLength(1);
+    expect(await writes()[0].json()).toEqual(expected);
+    expect(new URL(writes()[0].url).pathname).toBe("/api/proxy/admin/tls/validate");
+    expect(writes()[0].headers.has("X-Ferrum-Namespace")).toBe(false);
+  });
+
+  it("opts into relaxed certificate validity without relaxing CRL checks", async () => {
+    mutate.mockResolvedValueOnce(Response.json({ error: "cert_pem: certificate has expired" }, { status: 400 }))
+      .mockResolvedValueOnce(Response.json({ valid: true, validated: { cert_key_pair: { valid: true, certificate_count: 1 } } }))
+      .mockResolvedValueOnce(Response.json({ error: "crl_pem: nextUpdate has been reached" }, { status: 400 }));
+    await mount("Validate");
+    const areas = panel().querySelectorAll("textarea");
+    await fill(areas[0], certPem);
+    await fill(areas[1], keyPem);
+    await click("Validate", panel());
+    await settle(() => expect(panel().textContent).toContain("Certificate has expired"));
+    await act(async () => panel().querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());
+    await click("Validate", panel());
+    await settle(() => expect(panel().textContent).toContain("VALID"));
+    const expected = { cert_pem: certPem, key_pem: keyPem, allow_expired: true };
+    expect(await writes()[0].json()).toEqual({ cert_pem: certPem, key_pem: keyPem });
+    expect(await writes()[1].json()).toEqual(expected);
+    expect(panel().textContent).toContain("CRL checks always apply");
+    await fill(areas[3], crlPem);
+    await click("Validate", panel());
+    await settle(() => expect(panel().textContent).toContain("NextUpdate has been reached"));
+    expect(areas[3].getAttribute("aria-invalid")).toBe("true");
+    expect(await writes()[2].json()).toEqual({ ...expected, crl_pem: crlPem });
+    expect(panel().querySelector("pre")).toBeNull();
+  });
+
+  it("omits a cleared warning threshold and unchecked allow-expired option", async () => {
+    mutate.mockResolvedValue(Response.json({ valid: true, validated: {} }));
+    await mount("Validate");
+    await fill(panel().querySelectorAll("textarea")[3], `  ${crlPem}  `);
+    const threshold = inputByLabel(panel(), "Certificate expiry warning (days)");
+    await fill(threshold, "7");
+    await fill(threshold, "");
+    const allowExpired = panel().querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    await act(async () => allowExpired.click());
+    await act(async () => allowExpired.click());
+    await click("Validate", panel());
+    await settle(() => expect(writes()).toHaveLength(1));
+    expect(await writes()[0].json()).toEqual({ crl_pem: `  ${crlPem}  ` });
+  });
+
+  it.each(["-1", "1.5", "9007199254740992"])("rejects warning threshold %s inline before sending a request", async (value) => {
+    mutate.mockResolvedValue(Response.json({ valid: true, validated: {} }));
+    await mount("Validate");
+    await fill(panel().querySelectorAll("textarea")[2], certPem);
+    const threshold = inputByLabel(panel(), "Certificate expiry warning (days)");
+    await fill(threshold, value);
+    await click("Validate", panel());
+    expect(panel().textContent).toContain("Enter a non-negative whole number of days");
+    expect(threshold.getAttribute("aria-invalid")).toBe("true");
+    expect(writes()).toHaveLength(0);
+    expect(popup).not.toHaveBeenCalled();
+    await fill(threshold, "14");
+    expect(threshold.hasAttribute("aria-invalid")).toBe(false);
+    expect(panel().textContent).not.toContain("Enter a non-negative whole number of days");
+    await click("Validate", panel());
+    await settle(() => expect(writes()).toHaveLength(1));
+    expect(await writes()[0].json()).toEqual({ ca_bundle_pem: certPem, cert_expiry_warning_days: 14 });
+  });
+
+  it("renders CRL summaries and any expiry-warning details returned by the gateway", async () => {
+    // `validated` is an open object upstream. Keep even optional/new warning
+    // details visible; the current gateway need not return these warning keys.
+    const validated = {
+      cert_key_pair: { valid: true, certificate_count: 1, warnings: ["Certificate expires in 7 days"] },
+      ca_bundle: { valid: true, certificate_count: 2 },
+      crl: { valid: true, crl_count: 3 },
+      cert_expiry_warning_days: 14,
+    };
+    mutate.mockResolvedValueOnce(Response.json({ valid: true, validated }))
+      .mockResolvedValueOnce(Response.json({ valid: false, validated: { crl: { valid: false } } }));
+    await mount("Validate");
+    await fill(panel().querySelectorAll("textarea")[3], crlPem);
+    await click("Validate", panel());
+    await settle(() => expect(panel().querySelector("pre")?.textContent).toBe(JSON.stringify(validated, null, 2)));
+    await click("Validate", panel());
+    await settle(() => expect(panel().textContent).toContain("INVALID"));
+    expect(panel().querySelector("pre")?.textContent).toBe(JSON.stringify({ crl: { valid: false } }, null, 2));
+  });
+
   it("sends only populated fields and renders the gateway validation result", async () => {
     mutate.mockResolvedValueOnce(Response.json({ valid: true, validated: { certificate_count: 1 } }))
       .mockResolvedValueOnce(Response.json({ valid: false, validated: { key_match: false } }));
@@ -290,10 +402,11 @@ describe("TLS validation", () => {
       await click("Validate", panel());
       await settle(() => expect(document.body.textContent).toContain(message));
       expect(popup).not.toHaveBeenCalled();
-      if (error.startsWith("cert_pem")) {
-        expect(panel().querySelector("textarea")?.getAttribute("aria-invalid")).toBe("true");
-        await fill(panel().querySelector("textarea")!, certPem);
-        expect(panel().querySelector("textarea")?.hasAttribute("aria-invalid")).toBe(false);
+      if (error.startsWith("cert_pem") || error.startsWith("crl_pem")) {
+        const area = panel().querySelectorAll("textarea")[error.startsWith("cert_pem") ? 0 : 3];
+        expect(area.getAttribute("aria-invalid")).toBe("true");
+        await fill(area, certPem);
+        expect(area.hasAttribute("aria-invalid")).toBe(false);
         expect(panel().textContent).not.toContain(message);
       } else {
         expect(panel().querySelector('[aria-invalid="true"]')).toBeNull();
