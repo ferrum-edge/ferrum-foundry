@@ -111,8 +111,15 @@ verdicts, `CapabilityProvider`/`useCapabilities()` (`src/stores/capabilities.tsx
 publish them from the session role plus one `/health` snapshot, and
 `src/components/shared/CapabilityGate.tsx` renders them. A fact that was never
 read is `null` and concludes nothing, so a failed health read never downgrades a
-surface; the BFF and Ferrum Edge remain the only enforcement points. See
-`docs/capabilities.md`.
+surface; the last snapshot that *did* load is retained for the provider's
+lifetime, because a gateway's mode and write policy do not change without a
+restart. Each surface names which upstream write gate it mirrors
+(`config-store` / `read-only-mode` / `none`) — they are not interchangeable, and
+managed TLS/ACME is refused in a read-only mode even though
+`admin_writes_enabled` does not describe it. A read-only surface never shows
+less than the editable one: collapsible sections are forced open and Cancel
+stays outside the disabled fieldset. The BFF and Ferrum Edge remain the only
+enforcement points. See `docs/capabilities.md`.
 
 ## Theming
 

@@ -160,7 +160,7 @@ export function ConsumerForm({
   const navigate = useNavigate();
   const isEdit = !!initialData;
   const formRef = useRef<HTMLFormElement>(null);
-  const collapsible = useCollapsibleFormValidation(CONSUMER_COLLAPSIBLE_SECTIONS);
+  const collapsible = useCollapsibleFormValidation(CONSUMER_COLLAPSIBLE_SECTIONS, readOnly);
 
   /* ---------- Form state ---------- */
   // Seeded once per editor identity: the parent keys this form on
@@ -248,101 +248,103 @@ export function ConsumerForm({
 
   /* ---------- Render ---------- */
 
-  const body = (
+  return (
     <form ref={formRef} onSubmit={handleSubmit} className="space-y-0">
-      <div className="py-4 space-y-4">
-        <h3 className="text-sm font-semibold text-text-primary mb-4">
-          Consumer Details
-        </h3>
-        {!isEdit && (
-          <div className="flex items-end gap-2">
-            <div className="flex-1">
-              <Input
-                label="ID"
-                value={resourceId}
-                onChange={(e) => setResourceId(e.target.value)}
-                placeholder="Auto-generated UUID if left blank"
-                helpText="Optional custom ID. Must start with alphanumeric, max 254 chars."
-              />
-            </div>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              className="shrink-0 mb-[1px]"
-              onClick={() => setResourceId(crypto.randomUUID())}
-            >
-              Generate UUID
-            </Button>
-          </div>
-        )}
-        <Input
-          label="Username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          placeholder="my-api-consumer"
-          error={errors.username}
-          required
-        />
-        <Input
-          label="Custom ID"
-          value={customId}
-          onChange={(e) => setCustomId(e.target.value)}
-          placeholder="Optional external identifier"
-          helpText="An optional identifier used to map the consumer to an external system"
-        />
-        <TagInput
-          label="ACL Groups"
-          values={aclGroups}
-          onChange={setAclGroups}
-          placeholder="group-name, press Enter to add"
-          helpText="Access control groups this consumer belongs to. Comma-separated, press Enter to add."
-        />
-      </div>
-
-      {/* Credentials (create mode only) */}
-      {!isEdit && (
-        <CollapsibleSection
-          title="Credentials"
-          badge={credentialCount > 0 ? String(credentialCount) : undefined}
-          {...collapsible.sectionProps("credentials")}
-        >
-          <p className="text-text-muted text-xs mb-4">
-            Fill in any credentials to attach to this consumer. Leave blank to skip.
-          </p>
-          <div className="space-y-4">
-            {CREDENTIAL_TYPES.map((typeDef) => (
-              <div key={typeDef.value} className="flex items-end gap-2">
-                <div className="flex-1">
-                  <Input
-                    label={typeDef.label}
-                    value={credValues[typeDef.value]}
-                    onChange={(e) => updateCred(typeDef.value, e.target.value)}
-                    placeholder={typeDef.placeholder}
-                    helpText={typeDef.helpText}
-                    error={errors[`credential.${typeDef.value}`]}
-                    type={typeDef.field === "password" || typeDef.field === "secret" ? "password" : "text"}
-                  />
-                </div>
-                {typeDef.generatable && (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="shrink-0 mb-[1px]"
-                    onClick={() => updateCred(typeDef.value, generateSecret())}
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    Generate
-                  </Button>
-                )}
+      <ReadOnlySurface verdict={capability}>
+        <div className="py-4 space-y-4">
+          <h3 className="text-sm font-semibold text-text-primary mb-4">
+            Consumer Details
+          </h3>
+          {!isEdit && (
+            <div className="flex items-end gap-2">
+              <div className="flex-1">
+                <Input
+                  label="ID"
+                  value={resourceId}
+                  onChange={(e) => setResourceId(e.target.value)}
+                  placeholder="Auto-generated UUID if left blank"
+                  helpText="Optional custom ID. Must start with alphanumeric, max 254 chars."
+                />
               </div>
-            ))}
-          </div>
-        </CollapsibleSection>
-      )}
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="shrink-0 mb-[1px]"
+                onClick={() => setResourceId(crypto.randomUUID())}
+              >
+                Generate UUID
+              </Button>
+            </div>
+          )}
+          <Input
+            label="Username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="my-api-consumer"
+            error={errors.username}
+            required
+          />
+          <Input
+            label="Custom ID"
+            value={customId}
+            onChange={(e) => setCustomId(e.target.value)}
+            placeholder="Optional external identifier"
+            helpText="An optional identifier used to map the consumer to an external system"
+          />
+          <TagInput
+            label="ACL Groups"
+            values={aclGroups}
+            onChange={setAclGroups}
+            placeholder="group-name, press Enter to add"
+            helpText="Access control groups this consumer belongs to. Comma-separated, press Enter to add."
+          />
+        </div>
+
+        {/* Credentials (create mode only) */}
+        {!isEdit && (
+          <CollapsibleSection
+            title="Credentials"
+            badge={credentialCount > 0 ? String(credentialCount) : undefined}
+            {...collapsible.sectionProps("credentials")}
+          >
+            <p className="text-text-muted text-xs mb-4">
+              Fill in any credentials to attach to this consumer. Leave blank to skip.
+            </p>
+            <div className="space-y-4">
+              {CREDENTIAL_TYPES.map((typeDef) => (
+                <div key={typeDef.value} className="flex items-end gap-2">
+                  <div className="flex-1">
+                    <Input
+                      label={typeDef.label}
+                      value={credValues[typeDef.value]}
+                      onChange={(e) => updateCred(typeDef.value, e.target.value)}
+                      placeholder={typeDef.placeholder}
+                      helpText={typeDef.helpText}
+                      error={errors[`credential.${typeDef.value}`]}
+                      type={typeDef.field === "password" || typeDef.field === "secret" ? "password" : "text"}
+                    />
+                  </div>
+                  {typeDef.generatable && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="shrink-0 mb-[1px]"
+                      onClick={() => updateCred(typeDef.value, generateSecret())}
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      Generate
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </CollapsibleSection>
+        )}
+      </ReadOnlySurface>
 
       {/* Actions */}
       <div className="flex flex-col items-end gap-3 pt-6 border-t border-border/50">
@@ -358,14 +360,11 @@ export function ConsumerForm({
         >
           Cancel
         </Button>
-        <Button type="submit" loading={isLoading}>
+        <Button type="submit" loading={isLoading} disabled={readOnly}>
           {isEdit ? "Update Consumer" : "Create Consumer"}
         </Button>
         </div>
       </div>
     </form>
   );
-
-  if (!capability || capability.allowed) return body;
-  return <ReadOnlySurface verdict={capability}>{body}</ReadOnlySurface>;
 }

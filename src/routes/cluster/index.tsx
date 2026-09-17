@@ -10,6 +10,9 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
 import { getApiErrorMessage } from "@/api/client";
+import { useCapabilities } from "@/stores/capabilities";
+import { WriteAction } from "@/components/shared/CapabilityGate";
+import type { CapabilityVerdict } from "@/lib/capabilities";
 import {
   useClusterStatus,
   useBackendCapabilities,
@@ -58,6 +61,11 @@ type BackendCapabilitiesPanelProps =
       isFetching: boolean;
       dataUpdatedAt: number;
       reprobePending: boolean;
+      /**
+       * `POST /backend-capabilities/refresh` is an operator action, so a viewer
+       * session sees the reason instead of a 403 dialog.
+       */
+      reprobeCapability: CapabilityVerdict;
       onRetry: () => void;
       onReprobe: () => void | Promise<void>;
     };
@@ -75,14 +83,16 @@ function BackendCapabilitiesPanel(props: BackendCapabilitiesPanelProps) {
           </p>
         </div>
         {props.surface === "probe" ? (
-          <Button
-            variant="secondary"
-            size="sm"
-            loading={props.reprobePending}
-            onClick={() => { void props.onReprobe(); }}
-          >
-            Re-probe All
-          </Button>
+          <WriteAction verdict={props.reprobeCapability}>
+            <Button
+              variant="secondary"
+              size="sm"
+              loading={props.reprobePending}
+              onClick={() => { void props.onReprobe(); }}
+            >
+              Re-probe All
+            </Button>
+          </WriteAction>
         ) : null}
       </div>
 
@@ -188,6 +198,9 @@ export default function ClusterPage() {
   const capsQuery = useBackendCapabilities(probeQueryEnabled);
   const { data: capabilities, isLoading: capsLoading, isError: capsError } = capsQuery;
   const refresh = useRefreshBackendCapabilities();
+  // `capabilities` is already the probe response above, so this one is named
+  // for what it gates.
+  const reprobeCapability = useCapabilities().capabilities.operationalActions;
 
   return (
     <div className="space-y-6">
@@ -310,8 +323,10 @@ export default function ClusterPage() {
           isFetching={capsQuery.isFetching}
           dataUpdatedAt={capsQuery.dataUpdatedAt}
           reprobePending={refresh.isPending}
+          reprobeCapability={reprobeCapability}
           onRetry={() => { void capsQuery.refetch(); }}
           onReprobe={async () => {
+            if (!reprobeCapability.allowed) return;
             try {
               await refresh.mutateAsync();
               toast("success", "Backend probes refreshed");

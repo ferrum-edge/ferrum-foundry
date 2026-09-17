@@ -151,7 +151,7 @@ export function UpstreamForm({
   const navigate = useNavigate();
   const isEdit = !!initialData;
   const formRef = useRef<HTMLFormElement>(null);
-  const collapsible = useCollapsibleFormValidation(UPSTREAM_COLLAPSIBLE_SECTIONS);
+  const collapsible = useCollapsibleFormValidation(UPSTREAM_COLLAPSIBLE_SECTIONS, readOnly);
 
   /* ---------- Basic ---------- */
   // Seeded once per editor identity: the parent keys this form on
@@ -426,663 +426,665 @@ export function UpstreamForm({
   /*  Render                                                           */
   /* ================================================================ */
 
-  const body = (
+  return (
     <form ref={formRef} onSubmit={handleSubmit} className="space-y-0">
-      {/* ── Basic ── */}
-      <div className="border-b border-border/50 py-4">
-        <h3 className="text-sm font-semibold text-text-primary mb-4">Basic Configuration</h3>
-        <div className="space-y-4">
-          <Input
-            label="Name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="My Upstream"
-            helpText="Optional friendly name for this upstream"
-          />
-          <Select
-            label="Algorithm"
-            value={algorithm}
-            onValueChange={(v) => setAlgorithm(v as Upstream["algorithm"])}
-            options={ALGORITHM_OPTIONS}
-          />
-          {algorithm === "consistent_hashing" && (
+      <ReadOnlySurface verdict={capability}>
+        {/* ── Basic ── */}
+        <div className="border-b border-border/50 py-4">
+          <h3 className="text-sm font-semibold text-text-primary mb-4">Basic Configuration</h3>
+          <div className="space-y-4">
             <Input
-              label="Hash On"
-              value={hashOn}
-              onChange={(e) => setHashOn(e.target.value)}
-              placeholder="ip, header:<name>, cookie:<name>"
-              helpText="Key used for consistent hashing: ip, header:<name>, or cookie:<name>"
-              error={errors.hash_on}
-              required
+              label="Name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="My Upstream"
+              helpText="Optional friendly name for this upstream"
             />
+            <Select
+              label="Algorithm"
+              value={algorithm}
+              onValueChange={(v) => setAlgorithm(v as Upstream["algorithm"])}
+              options={ALGORITHM_OPTIONS}
+            />
+            {algorithm === "consistent_hashing" && (
+              <Input
+                label="Hash On"
+                value={hashOn}
+                onChange={(e) => setHashOn(e.target.value)}
+                placeholder="ip, header:<name>, cookie:<name>"
+                helpText="Key used for consistent hashing: ip, header:<name>, or cookie:<name>"
+                error={errors.hash_on}
+                required
+              />
+            )}
+          </div>
+        </div>
+
+        {/* ── Targets ── */}
+        <div className="border-b border-border/50 py-4">
+          <h3 className="text-sm font-semibold text-text-primary mb-4">
+            Targets
+            {targets.length > 0 && (
+              <span className="ml-2 text-text-muted font-normal">({targets.length})</span>
+            )}
+          </h3>
+
+          {errors.targets && (
+            <p className="text-danger text-xs mb-3">{errors.targets}</p>
+          )}
+
+          {/* Existing targets */}
+          {targets.length > 0 && (
+            <div className="space-y-2 mb-4">
+              {targets.map((target, index) => (
+                <div key={`${target.host}-${target.port}-${index}`}>
+                  {editingTargetIndex === index ? (
+                    <TargetForm
+                      initialData={target}
+                      onSubmit={handleUpdateTarget}
+                      onCancel={() => setEditingTargetIndex(null)}
+                    />
+                  ) : (
+                    <Card className="p-3 flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm text-text-primary font-mono">
+                          {target.host}:{target.port}
+                        </span>
+                        <Badge variant="default">weight {target.weight}</Badge>
+                        {target.path && (
+                          <Badge variant="blue">{target.path}</Badge>
+                        )}
+                        {target.tags && Object.keys(target.tags).length > 0 && (
+                          <div className="flex gap-1">
+                            {Object.entries(target.tags).map(([k, v]) => (
+                              <Badge key={k} variant="purple">
+                                {k}:{v}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setShowTargetForm(false);
+                            setEditingTargetIndex(index);
+                          }}
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                          </svg>
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleRemoveTarget(index)}
+                        >
+                          <svg className="w-4 h-4 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </Button>
+                      </div>
+                    </Card>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Add target form */}
+          {showTargetForm ? (
+            <TargetForm
+              onSubmit={handleAddTarget}
+              onCancel={() => setShowTargetForm(false)}
+            />
+          ) : (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setEditingTargetIndex(null);
+                setShowTargetForm(true);
+              }}
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
+              Add Target
+            </Button>
           )}
         </div>
-      </div>
 
-      {/* ── Targets ── */}
-      <div className="border-b border-border/50 py-4">
-        <h3 className="text-sm font-semibold text-text-primary mb-4">
-          Targets
-          {targets.length > 0 && (
-            <span className="ml-2 text-text-muted font-normal">({targets.length})</span>
-          )}
-        </h3>
-
-        {errors.targets && (
-          <p className="text-danger text-xs mb-3">{errors.targets}</p>
-        )}
-
-        {/* Existing targets */}
-        {targets.length > 0 && (
-          <div className="space-y-2 mb-4">
-            {targets.map((target, index) => (
-              <div key={`${target.host}-${target.port}-${index}`}>
-                {editingTargetIndex === index ? (
-                  <TargetForm
-                    initialData={target}
-                    onSubmit={handleUpdateTarget}
-                    onCancel={() => setEditingTargetIndex(null)}
-                  />
-                ) : (
-                  <Card className="p-3 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm text-text-primary font-mono">
-                        {target.host}:{target.port}
-                      </span>
-                      <Badge variant="default">weight {target.weight}</Badge>
-                      {target.path && (
-                        <Badge variant="blue">{target.path}</Badge>
-                      )}
-                      {target.tags && Object.keys(target.tags).length > 0 && (
-                        <div className="flex gap-1">
-                          {Object.entries(target.tags).map(([k, v]) => (
-                            <Badge key={k} variant="purple">
-                              {k}:{v}
-                            </Badge>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setShowTargetForm(false);
-                          setEditingTargetIndex(index);
-                        }}
-                      >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                        </svg>
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleRemoveTarget(index)}
-                      >
-                        <svg className="w-4 h-4 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      </Button>
-                    </div>
-                  </Card>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Add target form */}
-        {showTargetForm ? (
-          <TargetForm
-            onSubmit={handleAddTarget}
-            onCancel={() => setShowTargetForm(false)}
+        {/* ── Health Checks ── */}
+        <CollapsibleSection
+          title="Health Checks"
+          badge={activeHcEnabled || passiveHcEnabled ? "ON" : undefined}
+          {...collapsible.sectionProps("health-checks")}
+        >
+          {/* Active */}
+          <Checkbox
+            label="Enable active health checks"
+            checked={activeHcEnabled}
+            onChange={setActiveHcEnabled}
           />
-        ) : (
+          {activeHcEnabled && (
+            <div className="space-y-4 pl-6 border-l-2 border-border/50">
+              <Select
+                label="Probe Type"
+                value={activeHc.probe_type ?? "http"}
+                onValueChange={(v) =>
+                  setActiveHc({ ...activeHc, probe_type: v as ActiveHealthCheck["probe_type"] })
+                }
+                options={[
+                  { value: "http", label: "HTTP / HTTPS" },
+                  { value: "tcp", label: "TCP" },
+                  { value: "udp", label: "UDP" },
+                  { value: "grpc", label: "gRPC (grpc.health.v1)" },
+                ]}
+              />
+              <Input
+                label="Interval (seconds)"
+                type="number"
+                value={String(activeHc.interval_seconds ?? 10)}
+                onChange={(e) => setActiveHc({ ...activeHc, interval_seconds: Number(e.target.value) })}
+              />
+              <Input
+                label="Timeout (ms)"
+                type="number"
+                value={String(activeHc.timeout_ms ?? 5000)}
+                onChange={(e) => setActiveHc({ ...activeHc, timeout_ms: Number(e.target.value) })}
+              />
+              <Input
+                label="Healthy Threshold"
+                type="number"
+                value={String(activeHc.healthy_threshold ?? 3)}
+                onChange={(e) => setActiveHc({ ...activeHc, healthy_threshold: Number(e.target.value) })}
+              />
+              <Input
+                label="Unhealthy Threshold"
+                type="number"
+                value={String(activeHc.unhealthy_threshold ?? 3)}
+                onChange={(e) => setActiveHc({ ...activeHc, unhealthy_threshold: Number(e.target.value) })}
+              />
+              {(activeHc.probe_type ?? "http") === "http" && (
+                <>
+                  <Input
+                    label="HTTP Path"
+                    value={activeHc.http_path ?? "/health"}
+                    onChange={(e) => setActiveHc({ ...activeHc, http_path: e.target.value })}
+                    placeholder="/health"
+                  />
+                  <Input
+                    label="Healthy Status Codes"
+                    value={(activeHc.healthy_status_codes ?? []).join(", ")}
+                    onChange={(e) =>
+                      setActiveHc({
+                        ...activeHc,
+                        healthy_status_codes: e.target.value
+                          .split(",")
+                          .map((s) => parseInt(s.trim(), 10))
+                          .filter((n) => !isNaN(n)),
+                      })
+                    }
+                    placeholder="200, 302"
+                    helpText="Comma-separated HTTP status codes considered healthy"
+                  />
+                  <Checkbox
+                    label="Use HTTPS for health probes"
+                    checked={activeHc.use_tls ?? false}
+                    onChange={(v) => setActiveHc({ ...activeHc, use_tls: v })}
+                  />
+                </>
+              )}
+              {(activeHc.probe_type) === "udp" && (
+                <Input
+                  label="UDP Probe Payload"
+                  value={activeHc.udp_probe_payload ?? ""}
+                  onChange={(e) => setActiveHc({ ...activeHc, udp_probe_payload: e.target.value || undefined })}
+                  placeholder="0000"
+                  helpText="Hex-encoded payload to send for UDP probes. If empty, a single zero byte is sent."
+                />
+              )}
+              {activeHc.probe_type === "grpc" && (
+                <Input
+                  label="gRPC Service Name"
+                  value={activeHc.grpc_service_name ?? ""}
+                  onChange={(e) =>
+                    setActiveHc({ ...activeHc, grpc_service_name: e.target.value || undefined })
+                  }
+                  placeholder="my.package.MyService"
+                  helpText="Empty checks overall server health via grpc.health.v1.Health/Check."
+                />
+              )}
+            </div>
+          )}
+
+          {/* Passive */}
+          <div className="mt-4">
+            <Checkbox
+              label="Enable passive health checks"
+              checked={passiveHcEnabled}
+              onChange={setPassiveHcEnabled}
+            />
+          </div>
+          {passiveHcEnabled && (
+            <div className="space-y-4 pl-6 border-l-2 border-border/50">
+              <Input
+                label="Unhealthy Status Codes"
+                value={(passiveHc.unhealthy_status_codes ?? []).join(", ")}
+                onChange={(e) =>
+                  setPassiveHc({
+                    ...passiveHc,
+                    unhealthy_status_codes: e.target.value
+                      .split(",")
+                      .map((s) => parseInt(s.trim(), 10))
+                      .filter((n) => !isNaN(n)),
+                  })
+                }
+                placeholder="500, 502, 503"
+                helpText="Comma-separated HTTP status codes"
+              />
+              <Input
+                label="Unhealthy Threshold"
+                type="number"
+                value={String(passiveHc.unhealthy_threshold ?? 3)}
+                onChange={(e) => setPassiveHc({ ...passiveHc, unhealthy_threshold: Number(e.target.value) })}
+              />
+              <Input
+                label="Unhealthy Window (seconds)"
+                type="number"
+                value={String(passiveHc.unhealthy_window_seconds ?? 30)}
+                onChange={(e) => setPassiveHc({ ...passiveHc, unhealthy_window_seconds: Number(e.target.value) })}
+              />
+              <Input
+                label="Auto-recovery After (seconds)"
+                type="number"
+                value={String(passiveHc.healthy_after_seconds ?? 30)}
+                onChange={(e) => setPassiveHc({ ...passiveHc, healthy_after_seconds: Number(e.target.value) })}
+                helpText="Seconds until an ejected target is restored to rotation. 0 disables auto-recovery."
+              />
+              <Input
+                label="Max Ejection Percent"
+                type="number"
+                value={passiveHc.max_ejection_percent != null ? String(passiveHc.max_ejection_percent) : ""}
+                onChange={(e) =>
+                  setPassiveHc({
+                    ...passiveHc,
+                    max_ejection_percent: e.target.value === "" ? null : Number(e.target.value),
+                  })
+                }
+                placeholder="No cap"
+                helpText="Maximum % of targets that may be passively ejected at once."
+              />
+            </div>
+          )}
+        </CollapsibleSection>
+
+        {/* ── Hash Cookie Config ── */}
+        {showHashCookie && (
+          <CollapsibleSection
+            title="Hash Cookie Config"
+            {...collapsible.sectionProps("hash-cookie")}
+          >
+            <Input
+              label="Path"
+              value={cookieConfig.path ?? ""}
+              onChange={(e) => setCookieConfig({ ...cookieConfig, path: e.target.value })}
+              placeholder="/"
+            />
+            <Input
+              label="TTL (seconds)"
+              type="number"
+              value={String(cookieConfig.ttl_seconds ?? "")}
+              onChange={(e) => setCookieConfig({ ...cookieConfig, ttl_seconds: Number(e.target.value) })}
+            />
+            <Input
+              label="Domain"
+              value={cookieConfig.domain ?? ""}
+              onChange={(e) => setCookieConfig({ ...cookieConfig, domain: e.target.value })}
+              placeholder=".example.com"
+            />
+            <Checkbox
+              label="HTTP Only"
+              checked={cookieConfig.http_only ?? false}
+              onChange={(v) => setCookieConfig({ ...cookieConfig, http_only: v })}
+            />
+            <Checkbox
+              label="Secure"
+              checked={cookieConfig.secure ?? false}
+              onChange={(v) => setCookieConfig({ ...cookieConfig, secure: v })}
+            />
+            <Checkbox
+              label="Session Cookie"
+              checked={cookieConfig.session_cookie ?? false}
+              onChange={(v) => setCookieConfig({ ...cookieConfig, session_cookie: v })}
+            />
+            <Select
+              label="SameSite"
+              value={cookieConfig.same_site ?? "Lax"}
+              onValueChange={(v) => setCookieConfig({ ...cookieConfig, same_site: v as HashOnCookieConfig["same_site"] })}
+              options={SAME_SITE_OPTIONS}
+            />
+          </CollapsibleSection>
+        )}
+
+        {/* ── Service Discovery ── */}
+        <CollapsibleSection
+          title="Service Discovery"
+          badge={sdEnabled ? sdProvider.toUpperCase() : undefined}
+          {...collapsible.sectionProps("service-discovery")}
+        >
+          <Checkbox
+            label="Enable service discovery"
+            checked={sdEnabled}
+            onChange={setSdEnabled}
+          />
+          {sdEnabled && (
+            <div className="space-y-4 pl-6 border-l-2 border-border/50">
+              <Select
+                label="Provider"
+                value={sdProvider}
+                onValueChange={(v) => {
+                  setSdProvider(v as ServiceDiscoveryConfig["provider"]);
+                  setSdConfig({});
+                }}
+                options={SD_PROVIDERS}
+              />
+              <Input
+                label="Service Name"
+                value={sdServiceName}
+                onChange={(e) => setSdServiceName(e.target.value)}
+                placeholder="my-service"
+                error={errors.sd_service_name}
+                required
+              />
+              {/* Provider-specific fields */}
+              {sdProvider === "dns_sd" && (
+                <Input
+                  label="Poll Interval (seconds)"
+                  type="number"
+                  value={String((sdConfig.poll_interval_seconds as number) ?? 30)}
+                  onChange={(e) => updateSdConfig("poll_interval_seconds", Number(e.target.value))}
+                />
+              )}
+
+              {sdProvider === "kubernetes" && (
+                <>
+                  <Input
+                    label="Namespace"
+                    value={String(sdConfig.namespace ?? "")}
+                    onChange={(e) => updateSdConfig("namespace", e.target.value)}
+                    placeholder="default"
+                  />
+                  <Input
+                    label="Port Name"
+                    value={String(sdConfig.port_name ?? "")}
+                    onChange={(e) => updateSdConfig("port_name", e.target.value)}
+                    placeholder="http"
+                  />
+                  <Input
+                    label="Label Selector"
+                    value={String(sdConfig.label_selector ?? "")}
+                    onChange={(e) => updateSdConfig("label_selector", e.target.value)}
+                    placeholder="app=payments,tier=backend"
+                  />
+                  <Input
+                    label="Poll Interval (seconds)"
+                    type="number"
+                    value={String((sdConfig.poll_interval_seconds as number) ?? 30)}
+                    onChange={(e) => updateSdConfig("poll_interval_seconds", Number(e.target.value))}
+                  />
+                </>
+              )}
+
+              {sdProvider === "mesh" && (
+                <>
+                  <Input
+                    label="Mesh Namespace"
+                    value={String(sdConfig.namespace ?? "")}
+                    onChange={(e) => updateSdConfig("namespace", e.target.value)}
+                    placeholder="Defaults to upstream namespace"
+                  />
+                  <Input
+                    label="Service Port"
+                    type="number"
+                    value={sdConfig.port != null ? String(sdConfig.port) : ""}
+                    onChange={(e) =>
+                      updateSdConfig("port", e.target.value === "" ? undefined : Number(e.target.value))
+                    }
+                    placeholder="Defaults to first service port"
+                  />
+                  <Select
+                    label="Topology"
+                    value={String(sdConfig.topology ?? "ambient")}
+                    onValueChange={(v) => updateSdConfig("topology", v)}
+                    options={[
+                      { value: "ambient", label: "Ambient (HBONE)" },
+                      { value: "sidecar", label: "Sidecar (mTLS :15006)" },
+                    ]}
+                    helpText="Must match the destination mesh topology or dispatch fails closed."
+                  />
+                  <Input
+                    label="Poll Interval (seconds)"
+                    type="number"
+                    value={String((sdConfig.poll_interval_seconds as number) ?? 30)}
+                    onChange={(e) => updateSdConfig("poll_interval_seconds", Number(e.target.value))}
+                  />
+                </>
+              )}
+
+              {sdProvider === "consul" && (
+                <>
+                  <Input
+                    label="Address"
+                    value={String(sdConfig.address ?? "")}
+                    onChange={(e) => updateSdConfig("address", e.target.value)}
+                    placeholder="http://consul.local:8500"
+                    error={errors.consul_address}
+                  />
+                  <Input
+                    label="Datacenter"
+                    value={String(sdConfig.datacenter ?? "")}
+                    onChange={(e) => updateSdConfig("datacenter", e.target.value)}
+                    placeholder="dc1"
+                  />
+                  <Input
+                    label="Tag"
+                    value={String(sdConfig.tag ?? "")}
+                    onChange={(e) => updateSdConfig("tag", e.target.value)}
+                    placeholder="production"
+                  />
+                  <Checkbox
+                    label="Healthy Only"
+                    checked={(sdConfig.healthy_only as boolean) ?? true}
+                    onChange={(v) => updateSdConfig("healthy_only", v)}
+                  />
+                  <Input
+                    label="Token"
+                    value={String(sdConfig.token ?? "")}
+                    onChange={(e) => updateSdConfig("token", e.target.value)}
+                    placeholder="consul-acl-token"
+                  />
+                  <Input
+                    label="Poll Interval (seconds)"
+                    type="number"
+                    value={String((sdConfig.poll_interval_seconds as number) ?? 30)}
+                    onChange={(e) => updateSdConfig("poll_interval_seconds", Number(e.target.value))}
+                  />
+                </>
+              )}
+
+              <Input
+                label="Default Weight"
+                type="number"
+                value={String((sdConfig.default_weight as number) ?? 1)}
+                onChange={(e) => updateSdConfig("default_weight", Number(e.target.value))}
+                helpText="Default weight for discovered targets"
+              />
+              <Input
+                label="Maximum Stale Age (seconds)"
+                type="number"
+                value={sdMaxStale === "" ? "" : String(sdMaxStale)}
+                onChange={(e) =>
+                  setSdMaxStale(e.target.value === "" ? "" : Number(e.target.value))
+                }
+                placeholder="Gateway default"
+              />
+              <Select
+                label="Stale Endpoint Policy"
+                value={sdStalePolicy || "inherit"}
+                onValueChange={(value) =>
+                  setSdStalePolicy(value === "inherit" ? "" : value as typeof sdStalePolicy)
+                }
+                options={[
+                  { value: "inherit", label: "Inherit gateway default" },
+                  { value: "retain", label: "Retain stale endpoints" },
+                  { value: "withdraw", label: "Withdraw stale endpoints" },
+                  { value: "fail_readiness", label: "Fail readiness" },
+                ]}
+              />
+            </div>
+          )}
+        </CollapsibleSection>
+
+        {/* ── Subsets ── */}
+        <CollapsibleSection
+          title="Subsets"
+          badge={subsets.length > 0 ? String(subsets.length) : undefined}
+          {...collapsible.sectionProps("subsets")}
+        >
+          <p className="text-text-muted text-xs">
+            Named target subsets for DestinationRule-style routing. A proxy's
+            "Upstream Subset" selects one by name; a target matches when its tags
+            contain every label listed here.
+          </p>
+          {subsets.map((subset, index) => (
+            <div key={index} className="flex items-start gap-2">
+              <div className="flex-1 grid grid-cols-2 gap-2">
+                <Input
+                  label={index === 0 ? "Name" : undefined}
+                  value={subset.name}
+                  onChange={(e) =>
+                    setSubsets((prev) =>
+                      prev.map((s, i) => (i === index ? { ...s, name: e.target.value } : s)),
+                    )
+                  }
+                  placeholder="v2"
+                />
+                <Input
+                  label={index === 0 ? "Labels (key=value)" : undefined}
+                  value={subset.labels}
+                  onChange={(e) =>
+                    setSubsets((prev) =>
+                      prev.map((s, i) => (i === index ? { ...s, labels: e.target.value } : s)),
+                    )
+                  }
+                  placeholder="version=v2, tier=canary"
+                />
+                <Select
+                  label={index === 0 ? "Subset Algorithm" : undefined}
+                  value={subset.algorithm || "inherit"}
+                  onValueChange={(value) =>
+                    setSubsets((prev) =>
+                      prev.map((s, i) => i === index
+                        ? { ...s, algorithm: value === "inherit" ? "" : value as Upstream["algorithm"] }
+                        : s),
+                    )
+                  }
+                  options={[
+                    { value: "inherit", label: "Inherit upstream algorithm" },
+                    ...ALGORITHM_OPTIONS,
+                  ]}
+                />
+                <Input
+                  label={index === 0 ? "Subset Hash Key" : undefined}
+                  value={subset.hashOn}
+                  onChange={(e) =>
+                    setSubsets((prev) =>
+                      prev.map((s, i) => i === index ? { ...s, hashOn: e.target.value } : s),
+                    )
+                  }
+                  placeholder="Optional hash key"
+                />
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className={index === 0 ? "mt-7" : ""}
+                onClick={() => setSubsets((prev) => prev.filter((_, i) => i !== index))}
+              >
+                <svg className="w-4 h-4 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </Button>
+            </div>
+          ))}
           <Button
             type="button"
             variant="secondary"
             size="sm"
-            onClick={() => {
-              setEditingTargetIndex(null);
-              setShowTargetForm(true);
-            }}
+            onClick={() => setSubsets((prev) => [
+              ...prev,
+              { name: "", labels: "", algorithm: "", hashOn: "" },
+            ])}
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-            </svg>
-            Add Target
+            Add Subset
           </Button>
-        )}
-      </div>
+        </CollapsibleSection>
 
-      {/* ── Health Checks ── */}
-      <CollapsibleSection
-        title="Health Checks"
-        badge={activeHcEnabled || passiveHcEnabled ? "ON" : undefined}
-        {...collapsible.sectionProps("health-checks")}
-      >
-        {/* Active */}
-        <Checkbox
-          label="Enable active health checks"
-          checked={activeHcEnabled}
-          onChange={setActiveHcEnabled}
-        />
-        {activeHcEnabled && (
-          <div className="space-y-4 pl-6 border-l-2 border-border/50">
-            <Select
-              label="Probe Type"
-              value={activeHc.probe_type ?? "http"}
-              onValueChange={(v) =>
-                setActiveHc({ ...activeHc, probe_type: v as ActiveHealthCheck["probe_type"] })
-              }
-              options={[
-                { value: "http", label: "HTTP / HTTPS" },
-                { value: "tcp", label: "TCP" },
-                { value: "udp", label: "UDP" },
-                { value: "grpc", label: "gRPC (grpc.health.v1)" },
-              ]}
-            />
-            <Input
-              label="Interval (seconds)"
-              type="number"
-              value={String(activeHc.interval_seconds ?? 10)}
-              onChange={(e) => setActiveHc({ ...activeHc, interval_seconds: Number(e.target.value) })}
-            />
-            <Input
-              label="Timeout (ms)"
-              type="number"
-              value={String(activeHc.timeout_ms ?? 5000)}
-              onChange={(e) => setActiveHc({ ...activeHc, timeout_ms: Number(e.target.value) })}
-            />
-            <Input
-              label="Healthy Threshold"
-              type="number"
-              value={String(activeHc.healthy_threshold ?? 3)}
-              onChange={(e) => setActiveHc({ ...activeHc, healthy_threshold: Number(e.target.value) })}
-            />
-            <Input
-              label="Unhealthy Threshold"
-              type="number"
-              value={String(activeHc.unhealthy_threshold ?? 3)}
-              onChange={(e) => setActiveHc({ ...activeHc, unhealthy_threshold: Number(e.target.value) })}
-            />
-            {(activeHc.probe_type ?? "http") === "http" && (
-              <>
-                <Input
-                  label="HTTP Path"
-                  value={activeHc.http_path ?? "/health"}
-                  onChange={(e) => setActiveHc({ ...activeHc, http_path: e.target.value })}
-                  placeholder="/health"
-                />
-                <Input
-                  label="Healthy Status Codes"
-                  value={(activeHc.healthy_status_codes ?? []).join(", ")}
-                  onChange={(e) =>
-                    setActiveHc({
-                      ...activeHc,
-                      healthy_status_codes: e.target.value
-                        .split(",")
-                        .map((s) => parseInt(s.trim(), 10))
-                        .filter((n) => !isNaN(n)),
-                    })
-                  }
-                  placeholder="200, 302"
-                  helpText="Comma-separated HTTP status codes considered healthy"
-                />
-                <Checkbox
-                  label="Use HTTPS for health probes"
-                  checked={activeHc.use_tls ?? false}
-                  onChange={(v) => setActiveHc({ ...activeHc, use_tls: v })}
-                />
-              </>
-            )}
-            {(activeHc.probe_type) === "udp" && (
-              <Input
-                label="UDP Probe Payload"
-                value={activeHc.udp_probe_payload ?? ""}
-                onChange={(e) => setActiveHc({ ...activeHc, udp_probe_payload: e.target.value || undefined })}
-                placeholder="0000"
-                helpText="Hex-encoded payload to send for UDP probes. If empty, a single zero byte is sent."
-              />
-            )}
-            {activeHc.probe_type === "grpc" && (
-              <Input
-                label="gRPC Service Name"
-                value={activeHc.grpc_service_name ?? ""}
-                onChange={(e) =>
-                  setActiveHc({ ...activeHc, grpc_service_name: e.target.value || undefined })
-                }
-                placeholder="my.package.MyService"
-                helpText="Empty checks overall server health via grpc.health.v1.Health/Check."
-              />
-            )}
-          </div>
-        )}
-
-        {/* Passive */}
-        <div className="mt-4">
-          <Checkbox
-            label="Enable passive health checks"
-            checked={passiveHcEnabled}
-            onChange={setPassiveHcEnabled}
-          />
-        </div>
-        {passiveHcEnabled && (
-          <div className="space-y-4 pl-6 border-l-2 border-border/50">
-            <Input
-              label="Unhealthy Status Codes"
-              value={(passiveHc.unhealthy_status_codes ?? []).join(", ")}
-              onChange={(e) =>
-                setPassiveHc({
-                  ...passiveHc,
-                  unhealthy_status_codes: e.target.value
-                    .split(",")
-                    .map((s) => parseInt(s.trim(), 10))
-                    .filter((n) => !isNaN(n)),
-                })
-              }
-              placeholder="500, 502, 503"
-              helpText="Comma-separated HTTP status codes"
-            />
-            <Input
-              label="Unhealthy Threshold"
-              type="number"
-              value={String(passiveHc.unhealthy_threshold ?? 3)}
-              onChange={(e) => setPassiveHc({ ...passiveHc, unhealthy_threshold: Number(e.target.value) })}
-            />
-            <Input
-              label="Unhealthy Window (seconds)"
-              type="number"
-              value={String(passiveHc.unhealthy_window_seconds ?? 30)}
-              onChange={(e) => setPassiveHc({ ...passiveHc, unhealthy_window_seconds: Number(e.target.value) })}
-            />
-            <Input
-              label="Auto-recovery After (seconds)"
-              type="number"
-              value={String(passiveHc.healthy_after_seconds ?? 30)}
-              onChange={(e) => setPassiveHc({ ...passiveHc, healthy_after_seconds: Number(e.target.value) })}
-              helpText="Seconds until an ejected target is restored to rotation. 0 disables auto-recovery."
-            />
-            <Input
-              label="Max Ejection Percent"
-              type="number"
-              value={passiveHc.max_ejection_percent != null ? String(passiveHc.max_ejection_percent) : ""}
-              onChange={(e) =>
-                setPassiveHc({
-                  ...passiveHc,
-                  max_ejection_percent: e.target.value === "" ? null : Number(e.target.value),
-                })
-              }
-              placeholder="No cap"
-              helpText="Maximum % of targets that may be passively ejected at once."
-            />
-          </div>
-        )}
-      </CollapsibleSection>
-
-      {/* ── Hash Cookie Config ── */}
-      {showHashCookie && (
+        {/* ── Backend TLS ── */}
         <CollapsibleSection
-          title="Hash Cookie Config"
-          {...collapsible.sectionProps("hash-cookie")}
+          title="Backend TLS"
+          badge={tlsCertPath || tlsSni ? "ON" : undefined}
+          {...collapsible.sectionProps("backend-tls")}
         >
+          <p className="text-text-muted text-xs">
+            TLS settings for backend connections. When this upstream is linked to
+            a proxy, these take precedence over the proxy's backend TLS fields.
+          </p>
           <Input
-            label="Path"
-            value={cookieConfig.path ?? ""}
-            onChange={(e) => setCookieConfig({ ...cookieConfig, path: e.target.value })}
-            placeholder="/"
-          />
-          <Input
-            label="TTL (seconds)"
-            type="number"
-            value={String(cookieConfig.ttl_seconds ?? "")}
-            onChange={(e) => setCookieConfig({ ...cookieConfig, ttl_seconds: Number(e.target.value) })}
+            label="Client Cert Path (mTLS)"
+            value={tlsCertPath}
+            onChange={(e) => setTlsCertPath(e.target.value)}
+            placeholder="/path/to/cert.pem"
           />
           <Input
-            label="Domain"
-            value={cookieConfig.domain ?? ""}
-            onChange={(e) => setCookieConfig({ ...cookieConfig, domain: e.target.value })}
-            placeholder=".example.com"
+            label="Client Key Path (mTLS)"
+            value={tlsKeyPath}
+            onChange={(e) => setTlsKeyPath(e.target.value)}
+            placeholder="/path/to/key.pem"
           />
           <Checkbox
-            label="HTTP Only"
-            checked={cookieConfig.http_only ?? false}
-            onChange={(v) => setCookieConfig({ ...cookieConfig, http_only: v })}
+            label="Verify backend server certificate"
+            checked={tlsVerify}
+            onChange={setTlsVerify}
           />
-          <Checkbox
-            label="Secure"
-            checked={cookieConfig.secure ?? false}
-            onChange={(v) => setCookieConfig({ ...cookieConfig, secure: v })}
+          <Input
+            label="Server CA Cert Path"
+            value={tlsCaPath}
+            onChange={(e) => setTlsCaPath(e.target.value)}
+            placeholder="/path/to/ca.pem or system://"
           />
-          <Checkbox
-            label="Session Cookie"
-            checked={cookieConfig.session_cookie ?? false}
-            onChange={(v) => setCookieConfig({ ...cookieConfig, session_cookie: v })}
+          <Input
+            label="SNI Override"
+            value={tlsSni}
+            onChange={(e) => setTlsSni(e.target.value)}
+            placeholder="backend.internal.example.com"
           />
-          <Select
-            label="SameSite"
-            value={cookieConfig.same_site ?? "Lax"}
-            onValueChange={(v) => setCookieConfig({ ...cookieConfig, same_site: v as HashOnCookieConfig["same_site"] })}
-            options={SAME_SITE_OPTIONS}
+          <Input
+            label="SAN Allow List"
+            value={tlsSanAllowList}
+            onChange={(e) => setTlsSanAllowList(e.target.value)}
+            placeholder="api.internal, spiffe://cluster.local/ns/prod/sa/api"
           />
         </CollapsibleSection>
-      )}
-
-      {/* ── Service Discovery ── */}
-      <CollapsibleSection
-        title="Service Discovery"
-        badge={sdEnabled ? sdProvider.toUpperCase() : undefined}
-        {...collapsible.sectionProps("service-discovery")}
-      >
-        <Checkbox
-          label="Enable service discovery"
-          checked={sdEnabled}
-          onChange={setSdEnabled}
-        />
-        {sdEnabled && (
-          <div className="space-y-4 pl-6 border-l-2 border-border/50">
-            <Select
-              label="Provider"
-              value={sdProvider}
-              onValueChange={(v) => {
-                setSdProvider(v as ServiceDiscoveryConfig["provider"]);
-                setSdConfig({});
-              }}
-              options={SD_PROVIDERS}
-            />
-            <Input
-              label="Service Name"
-              value={sdServiceName}
-              onChange={(e) => setSdServiceName(e.target.value)}
-              placeholder="my-service"
-              error={errors.sd_service_name}
-              required
-            />
-            {/* Provider-specific fields */}
-            {sdProvider === "dns_sd" && (
-              <Input
-                label="Poll Interval (seconds)"
-                type="number"
-                value={String((sdConfig.poll_interval_seconds as number) ?? 30)}
-                onChange={(e) => updateSdConfig("poll_interval_seconds", Number(e.target.value))}
-              />
-            )}
-
-            {sdProvider === "kubernetes" && (
-              <>
-                <Input
-                  label="Namespace"
-                  value={String(sdConfig.namespace ?? "")}
-                  onChange={(e) => updateSdConfig("namespace", e.target.value)}
-                  placeholder="default"
-                />
-                <Input
-                  label="Port Name"
-                  value={String(sdConfig.port_name ?? "")}
-                  onChange={(e) => updateSdConfig("port_name", e.target.value)}
-                  placeholder="http"
-                />
-                <Input
-                  label="Label Selector"
-                  value={String(sdConfig.label_selector ?? "")}
-                  onChange={(e) => updateSdConfig("label_selector", e.target.value)}
-                  placeholder="app=payments,tier=backend"
-                />
-                <Input
-                  label="Poll Interval (seconds)"
-                  type="number"
-                  value={String((sdConfig.poll_interval_seconds as number) ?? 30)}
-                  onChange={(e) => updateSdConfig("poll_interval_seconds", Number(e.target.value))}
-                />
-              </>
-            )}
-
-            {sdProvider === "mesh" && (
-              <>
-                <Input
-                  label="Mesh Namespace"
-                  value={String(sdConfig.namespace ?? "")}
-                  onChange={(e) => updateSdConfig("namespace", e.target.value)}
-                  placeholder="Defaults to upstream namespace"
-                />
-                <Input
-                  label="Service Port"
-                  type="number"
-                  value={sdConfig.port != null ? String(sdConfig.port) : ""}
-                  onChange={(e) =>
-                    updateSdConfig("port", e.target.value === "" ? undefined : Number(e.target.value))
-                  }
-                  placeholder="Defaults to first service port"
-                />
-                <Select
-                  label="Topology"
-                  value={String(sdConfig.topology ?? "ambient")}
-                  onValueChange={(v) => updateSdConfig("topology", v)}
-                  options={[
-                    { value: "ambient", label: "Ambient (HBONE)" },
-                    { value: "sidecar", label: "Sidecar (mTLS :15006)" },
-                  ]}
-                  helpText="Must match the destination mesh topology or dispatch fails closed."
-                />
-                <Input
-                  label="Poll Interval (seconds)"
-                  type="number"
-                  value={String((sdConfig.poll_interval_seconds as number) ?? 30)}
-                  onChange={(e) => updateSdConfig("poll_interval_seconds", Number(e.target.value))}
-                />
-              </>
-            )}
-
-            {sdProvider === "consul" && (
-              <>
-                <Input
-                  label="Address"
-                  value={String(sdConfig.address ?? "")}
-                  onChange={(e) => updateSdConfig("address", e.target.value)}
-                  placeholder="http://consul.local:8500"
-                  error={errors.consul_address}
-                />
-                <Input
-                  label="Datacenter"
-                  value={String(sdConfig.datacenter ?? "")}
-                  onChange={(e) => updateSdConfig("datacenter", e.target.value)}
-                  placeholder="dc1"
-                />
-                <Input
-                  label="Tag"
-                  value={String(sdConfig.tag ?? "")}
-                  onChange={(e) => updateSdConfig("tag", e.target.value)}
-                  placeholder="production"
-                />
-                <Checkbox
-                  label="Healthy Only"
-                  checked={(sdConfig.healthy_only as boolean) ?? true}
-                  onChange={(v) => updateSdConfig("healthy_only", v)}
-                />
-                <Input
-                  label="Token"
-                  value={String(sdConfig.token ?? "")}
-                  onChange={(e) => updateSdConfig("token", e.target.value)}
-                  placeholder="consul-acl-token"
-                />
-                <Input
-                  label="Poll Interval (seconds)"
-                  type="number"
-                  value={String((sdConfig.poll_interval_seconds as number) ?? 30)}
-                  onChange={(e) => updateSdConfig("poll_interval_seconds", Number(e.target.value))}
-                />
-              </>
-            )}
-
-            <Input
-              label="Default Weight"
-              type="number"
-              value={String((sdConfig.default_weight as number) ?? 1)}
-              onChange={(e) => updateSdConfig("default_weight", Number(e.target.value))}
-              helpText="Default weight for discovered targets"
-            />
-            <Input
-              label="Maximum Stale Age (seconds)"
-              type="number"
-              value={sdMaxStale === "" ? "" : String(sdMaxStale)}
-              onChange={(e) =>
-                setSdMaxStale(e.target.value === "" ? "" : Number(e.target.value))
-              }
-              placeholder="Gateway default"
-            />
-            <Select
-              label="Stale Endpoint Policy"
-              value={sdStalePolicy || "inherit"}
-              onValueChange={(value) =>
-                setSdStalePolicy(value === "inherit" ? "" : value as typeof sdStalePolicy)
-              }
-              options={[
-                { value: "inherit", label: "Inherit gateway default" },
-                { value: "retain", label: "Retain stale endpoints" },
-                { value: "withdraw", label: "Withdraw stale endpoints" },
-                { value: "fail_readiness", label: "Fail readiness" },
-              ]}
-            />
-          </div>
-        )}
-      </CollapsibleSection>
-
-      {/* ── Subsets ── */}
-      <CollapsibleSection
-        title="Subsets"
-        badge={subsets.length > 0 ? String(subsets.length) : undefined}
-        {...collapsible.sectionProps("subsets")}
-      >
-        <p className="text-text-muted text-xs">
-          Named target subsets for DestinationRule-style routing. A proxy's
-          "Upstream Subset" selects one by name; a target matches when its tags
-          contain every label listed here.
-        </p>
-        {subsets.map((subset, index) => (
-          <div key={index} className="flex items-start gap-2">
-            <div className="flex-1 grid grid-cols-2 gap-2">
-              <Input
-                label={index === 0 ? "Name" : undefined}
-                value={subset.name}
-                onChange={(e) =>
-                  setSubsets((prev) =>
-                    prev.map((s, i) => (i === index ? { ...s, name: e.target.value } : s)),
-                  )
-                }
-                placeholder="v2"
-              />
-              <Input
-                label={index === 0 ? "Labels (key=value)" : undefined}
-                value={subset.labels}
-                onChange={(e) =>
-                  setSubsets((prev) =>
-                    prev.map((s, i) => (i === index ? { ...s, labels: e.target.value } : s)),
-                  )
-                }
-                placeholder="version=v2, tier=canary"
-              />
-              <Select
-                label={index === 0 ? "Subset Algorithm" : undefined}
-                value={subset.algorithm || "inherit"}
-                onValueChange={(value) =>
-                  setSubsets((prev) =>
-                    prev.map((s, i) => i === index
-                      ? { ...s, algorithm: value === "inherit" ? "" : value as Upstream["algorithm"] }
-                      : s),
-                  )
-                }
-                options={[
-                  { value: "inherit", label: "Inherit upstream algorithm" },
-                  ...ALGORITHM_OPTIONS,
-                ]}
-              />
-              <Input
-                label={index === 0 ? "Subset Hash Key" : undefined}
-                value={subset.hashOn}
-                onChange={(e) =>
-                  setSubsets((prev) =>
-                    prev.map((s, i) => i === index ? { ...s, hashOn: e.target.value } : s),
-                  )
-                }
-                placeholder="Optional hash key"
-              />
-            </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className={index === 0 ? "mt-7" : ""}
-              onClick={() => setSubsets((prev) => prev.filter((_, i) => i !== index))}
-            >
-              <svg className="w-4 h-4 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </Button>
-          </div>
-        ))}
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          onClick={() => setSubsets((prev) => [
-            ...prev,
-            { name: "", labels: "", algorithm: "", hashOn: "" },
-          ])}
-        >
-          Add Subset
-        </Button>
-      </CollapsibleSection>
-
-      {/* ── Backend TLS ── */}
-      <CollapsibleSection
-        title="Backend TLS"
-        badge={tlsCertPath || tlsSni ? "ON" : undefined}
-        {...collapsible.sectionProps("backend-tls")}
-      >
-        <p className="text-text-muted text-xs">
-          TLS settings for backend connections. When this upstream is linked to
-          a proxy, these take precedence over the proxy's backend TLS fields.
-        </p>
-        <Input
-          label="Client Cert Path (mTLS)"
-          value={tlsCertPath}
-          onChange={(e) => setTlsCertPath(e.target.value)}
-          placeholder="/path/to/cert.pem"
-        />
-        <Input
-          label="Client Key Path (mTLS)"
-          value={tlsKeyPath}
-          onChange={(e) => setTlsKeyPath(e.target.value)}
-          placeholder="/path/to/key.pem"
-        />
-        <Checkbox
-          label="Verify backend server certificate"
-          checked={tlsVerify}
-          onChange={setTlsVerify}
-        />
-        <Input
-          label="Server CA Cert Path"
-          value={tlsCaPath}
-          onChange={(e) => setTlsCaPath(e.target.value)}
-          placeholder="/path/to/ca.pem or system://"
-        />
-        <Input
-          label="SNI Override"
-          value={tlsSni}
-          onChange={(e) => setTlsSni(e.target.value)}
-          placeholder="backend.internal.example.com"
-        />
-        <Input
-          label="SAN Allow List"
-          value={tlsSanAllowList}
-          onChange={(e) => setTlsSanAllowList(e.target.value)}
-          placeholder="api.internal, spiffe://cluster.local/ns/prod/sa/api"
-        />
-      </CollapsibleSection>
+      </ReadOnlySurface>
 
       {/* ── Actions ── */}
       <div className="flex flex-col items-end gap-3 pt-6">
@@ -1098,14 +1100,11 @@ export function UpstreamForm({
         >
           Cancel
         </Button>
-        <Button type="submit" loading={isLoading}>
+        <Button type="submit" loading={isLoading} disabled={readOnly}>
           {isEdit ? "Update Upstream" : "Create Upstream"}
         </Button>
         </div>
       </div>
     </form>
   );
-
-  if (!capability || capability.allowed) return body;
-  return <ReadOnlySurface verdict={capability}>{body}</ReadOnlySurface>;
 }

@@ -5,9 +5,44 @@ import {
   resolveCapabilities,
   resolveCapability,
   resolveGatewayWriteState,
+  resolveReadOnlyModeState,
   type CapabilityFacts,
+  type CapabilitySurface,
   type GatewayRole,
 } from "./capabilities";
+
+/**
+ * Surfaces behind `AdminState::admit_write`, observable as
+ * `admin_writes_enabled` (ferrum-edge `src/admin/mod.rs:499`).
+ */
+const CONFIG_STORE_SURFACES: readonly CapabilitySurface[] = [
+  "proxies",
+  "upstreams",
+  "pluginConfigs",
+  "consumers",
+  "consumerCredentials",
+  "apiSpecs",
+  "namespaceRegistry",
+  "configBackup",
+  "gatewayTrust",
+];
+
+/**
+ * Surfaces behind `admit_non_config_db_write`: refused in a read-only mode,
+ * but not covered by the config-DB failover gate `admin_writes_enabled` also
+ * folds in (ferrum-edge `src/admin/mod.rs:813`).
+ */
+const READ_ONLY_MODE_SURFACES: readonly CapabilitySurface[] = ["tlsMaterial"];
+
+/** Surfaces the gateway applies no write gate to at all. */
+const UNGATED_SURFACES: readonly CapabilitySurface[] = [
+  "operationalActions",
+  "configExport",
+  "bffSettings",
+];
+
+/** Modes that report `read_only: true` unconditionally. */
+const READ_ONLY_MODES: readonly string[] = ["file", "dp", "mesh", "node_agent"];
 
 function facts(
   role: GatewayRole | null,
@@ -26,7 +61,7 @@ describe("gateway write state", () => {
     expect(resolveGatewayWriteState(facts("admin", "database"))).toEqual({ state: "enabled" });
   });
 
-  it.each(["file", "dp", "mesh", "FILE", " file "])(
+  it.each([...READ_ONLY_MODES, "FILE", " file "])(
     "is read-only in %s mode",
     (mode) => {
       const state = resolveGatewayWriteState(facts("admin", mode));
@@ -87,31 +122,50 @@ describe("role x mode capability matrix", () => {
     }
   });
 
-  it("withholds every configuration write from an admin on a file-mode gateway", () => {
-    const capabilities = resolveCapabilities(facts("admin", "file", null));
-    for (const surface of [
-      "proxies",
-      "upstreams",
-      "pluginConfigs",
-      "consumers",
-      "consumerCredentials",
-      "apiSpecs",
-      "namespaceRegistry",
-      "configBackup",
-      "gatewayTrust",
-    ] as const) {
-      expect(capabilities[surface].allowed).toBe(false);
-      expect(capabilities[surface].blockedBy).toBe("gateway-read-only");
-      expect(capabilities[surface].explanation).toContain("file mode");
-    }
+  it.each(READ_ONLY_MODES)(
+    "withholds every gated write from an admin on a %s-mode gateway",
+    (mode) => {
+      const capabilities = resolveCapabilities(facts("admin", mode, null));
+      // Both gate kinds deny here: `admit_write` and
+      // `admit_non_config_db_write` each start with the read-only gate.
+      for (const surface of [...CONFIG_STORE_SURFACES, ...READ_ONLY_MODE_SURFACES]) {
+        expect(capabilities[surface].allowed).toBe(false);
+        expect(capabilities[surface].blockedBy).toBe("gateway-read-only");
+        expect(capabilities[surface].explanation).toContain(`${mode} mode`);
+      }
+      for (const surface of UNGATED_SURFACES) {
+        expect(capabilities[surface].allowed).toBe(true);
+      }
+    },
+  );
+
+  it("refuses managed TLS material in a read-only mode", () => {
+    // ferrum-edge `src/admin/tls_management.rs` routes all 18 managed TLS/ACME
+    // mutations through `admit_non_config_db_write`, whose first step is
+    // `admit_read_only_gate` (`src/admin/mod.rs:813`).
+    const verdict = resolveCapability("tlsMaterial", facts("admin", "file", null));
+    expect(verdict.allowed).toBe(false);
+    expect(verdict.blockedBy).toBe("gateway-read-only");
+    expect(verdict.explanation).toContain("file mode");
   });
 
-  it("keeps TLS material, operational actions, and BFF settings off the config-store gate", () => {
-    const capabilities = resolveCapabilities(facts("admin", "file", false));
+  it("keeps managed TLS material off the config-store gate on a writable mode", () => {
+    // `admin_writes_enabled` is `!admin_writes_currently_blocked()`, which also
+    // folds in the sticky config-DB failover gate. That gate does not reach the
+    // independent TLS/ACME stores, so denying them here would be invented.
+    const capabilities = resolveCapabilities(facts("admin", "database", false));
     expect(capabilities.tlsMaterial.allowed).toBe(true);
-    expect(capabilities.operationalActions.allowed).toBe(true);
-    expect(capabilities.bffSettings.allowed).toBe(true);
-    expect(capabilities.configExport.allowed).toBe(true);
+    expect(capabilities.proxies.allowed).toBe(false);
+    expect(capabilities.proxies.blockedBy).toBe("gateway-read-only");
+  });
+
+  it("keeps operational actions, export, and BFF settings off every gateway gate", () => {
+    for (const mode of [...READ_ONLY_MODES, "database"]) {
+      const capabilities = resolveCapabilities(facts("admin", mode, false));
+      for (const surface of UNGATED_SURFACES) {
+        expect(capabilities[surface].allowed).toBe(true);
+      }
+    }
   });
 
   it("reports the role denial ahead of the gateway-mode denial", () => {
@@ -133,6 +187,23 @@ describe("role x mode capability matrix", () => {
     const capabilities = resolveCapabilities(facts("viewer", null));
     expect(capabilities.proxies.allowed).toBe(false);
     expect(capabilities.proxies.blockedBy).toBe("role");
+  });
+});
+
+describe("read-only-mode gate", () => {
+  it.each(READ_ONLY_MODES)("reports %s mode read-only", (mode) => {
+    const state = resolveReadOnlyModeState(facts("admin", mode, true));
+    expect(state.state).toBe("read-only");
+  });
+
+  it("stays unknown on a writable mode even when admin writes are disabled", () => {
+    // `FERRUM_ADMIN_READ_ONLY` on a database/cp gateway is invisible in the
+    // mode string, and `admin_writes_enabled` cannot distinguish it from the
+    // failover gate, so this gate concludes nothing.
+    expect(resolveReadOnlyModeState(facts("admin", "database", false))).toEqual({
+      state: "unknown",
+    });
+    expect(resolveReadOnlyModeState(facts("admin", null))).toEqual({ state: "unknown" });
   });
 });
 

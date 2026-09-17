@@ -253,6 +253,7 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
                     existingCredentials={consumer.credentials?.[credType]}
                     revision={dataUpdatedAt}
                     isRefreshing={isFetching}
+                    capability={credentialCapability}
                   />
                 </Card>
               ))}
@@ -442,68 +443,67 @@ function AclGroupsManager({
     <div className="space-y-4">
       <h3 className="text-sm font-semibold text-text-primary">ACL Groups</h3>
       <ReadOnlySurface verdict={capability} noticeClassName="" contentClassName="space-y-4">
+        {/* Add group form */}
+        <form onSubmit={handleAddGroup} className="flex items-end gap-3">
+          <div className="flex-1">
+            <label className="text-text-secondary text-sm font-medium block mb-1.5">
+              Add Group
+            </label>
+            <input
+              type="text"
+              value={newGroup}
+              onChange={(e) => setNewGroup(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Enter group name"
+              className="w-full bg-bg-input border border-border rounded-lg px-3 py-2 text-text-primary text-sm placeholder:text-text-muted focus:border-orange focus:ring-1 focus:ring-orange/30 transition-colors duration-150"
+            />
+          </div>
+          <Button
+            type="submit"
+            size="md"
+            loading={updateConsumer.isPending}
+            disabled={!newGroup.trim()}
+          >
+            Add
+          </Button>
+        </form>
 
-      {/* Add group form */}
-      <form onSubmit={handleAddGroup} className="flex items-end gap-3">
-        <div className="flex-1">
-          <label className="text-text-secondary text-sm font-medium block mb-1.5">
-            Add Group
-          </label>
-          <input
-            type="text"
-            value={newGroup}
-            onChange={(e) => setNewGroup(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Enter group name"
-            className="w-full bg-bg-input border border-border rounded-lg px-3 py-2 text-text-primary text-sm placeholder:text-text-muted focus:border-orange focus:ring-1 focus:ring-orange/30 transition-colors duration-150"
-          />
-        </div>
-        <Button
-          type="submit"
-          size="md"
-          loading={updateConsumer.isPending}
-          disabled={!newGroup.trim()}
-        >
-          Add
-        </Button>
-      </form>
-
-      {/* Group list */}
-      {groups.length > 0 ? (
-        <div className="flex flex-wrap gap-2">
-          {groups.map((group) => (
-            <Badge key={group} variant="blue">
-              <span className="flex items-center gap-1.5">
-                {group}
-                <button
-                  type="button"
-                  onClick={() => handleRemoveGroup(group)}
-                  className="text-text-muted hover:text-danger cursor-pointer transition-colors"
-                  disabled={updateConsumer.isPending}
-                >
-                  <svg
-                    className="w-3 h-3"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
+        {/* Group list */}
+        {groups.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {groups.map((group) => (
+              <Badge key={group} variant="blue">
+                <span className="flex items-center gap-1.5">
+                  {group}
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveGroup(group)}
+                    className="text-text-muted hover:text-danger cursor-pointer transition-colors"
+                    disabled={updateConsumer.isPending}
                   >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M6 18L18 6M6 6l12 12"
-                    />
-                  </svg>
-                </button>
-              </span>
-            </Badge>
-          ))}
-        </div>
-      ) : (
-        <p className="text-text-muted text-sm py-2">
-          No ACL groups assigned. Add a group above to control access.
-        </p>
-      )}
+                    <svg
+                      className="w-3 h-3"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M6 18L18 6M6 6l12 12"
+                      />
+                    </svg>
+                  </button>
+                </span>
+              </Badge>
+            ))}
+          </div>
+        ) : (
+          <p className="text-text-muted text-sm py-2">
+            No ACL groups assigned. Add a group above to control access.
+          </p>
+        )}
       </ReadOnlySurface>
     </div>
   );

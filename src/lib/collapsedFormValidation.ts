@@ -68,8 +68,16 @@ export function reportValidationFailure(
   scheduleFocusFirstInvalid(options.form);
 }
 
+/**
+ * @param readOnly When the surface is presented read-only every section is
+ * forced open. A read-only form is wrapped in a `disabled` fieldset, which also
+ * disables each section's toggle button, so a section left collapsed could
+ * never be opened again — the read-only view would show strictly less than the
+ * editable one, hiding content the role is explicitly allowed to read.
+ */
 export function useCollapsibleFormValidation(
   sections: readonly CollapsibleSectionConfig[],
+  readOnly = false,
 ) {
   const [sectionState, setSectionState] = useState<Record<string, boolean>>({});
   const [showSummary, setShowSummary] = useState(false);
@@ -77,11 +85,11 @@ export function useCollapsibleFormValidation(
 
   const sectionProps = useCallback(
     (id: string, defaultOpen = false) => ({
-      open: sectionState[id] ?? defaultOpen,
+      open: readOnly || (sectionState[id] ?? defaultOpen),
       onOpenChange: (open: boolean) =>
         setSectionState((previous) => ({ ...previous, [id]: open })),
     }),
-    [sectionState],
+    [readOnly, sectionState],
   );
 
   const onValidationFailed = useCallback(

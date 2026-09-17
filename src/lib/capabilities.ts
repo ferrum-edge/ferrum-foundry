@@ -33,11 +33,15 @@ export function isGatewayRole(value: unknown): value is GatewayRole {
 }
 
 /**
- * Gateway operating modes whose admin API is documented read-only for
- * configuration: the configuration is owned by a config file, by the control
- * plane, or by mesh policy sources rather than by an admin-writable store.
+ * Gateway operating modes that report `read_only: true` unconditionally, so
+ * every admin mutation behind Ferrum Edge's read-only gate is refused with
+ * `403 {"error":"Admin API is in read-only mode"}`. The configuration is owned
+ * by a config file, by the control plane, by mesh policy sources, or by the
+ * node agent rather than by an admin-writable store. `database` and `cp` set
+ * the same flag from `FERRUM_ADMIN_READ_ONLY`, which the mode string cannot
+ * reveal — there they are observed through `admin_writes_enabled` instead.
  */
-const READ_ONLY_MODES = new Set(["file", "dp", "mesh"]);
+const READ_ONLY_MODES = new Set(["file", "dp", "mesh", "node_agent"]);
 
 const MODE_EXPLANATIONS: Record<string, string> = {
   file:
@@ -49,6 +53,9 @@ const MODE_EXPLANATIONS: Record<string, string> = {
   mesh:
     "The gateway runs in mesh mode: its configuration comes from mesh policy " +
     "sources and the admin API is read-only.",
+  node_agent:
+    "The gateway runs in node-agent mode: it serves no admin configuration API " +
+    "and its admin API is read-only.",
 };
 
 const WRITES_DISABLED_EXPLANATION =
@@ -99,6 +106,26 @@ export interface CapabilityFacts {
   adminWritesEnabled: boolean | null;
 }
 
+/**
+ * Which of Ferrum Edge's write-admission gates a surface passes through, on
+ * top of its role requirement. The three kinds are not interchangeable:
+ *
+ * - `config-store` — `AdminState::admit_write`, reported observably as
+ *   `admin_writes_enabled`. It folds read-only mode, an unavailable
+ *   configuration database, **and** the sticky failover topology gate
+ *   (`FERRUM_DB_FAILOVER_ALLOW_WRITES`) together.
+ * - `read-only-mode` — `AdminState::admit_non_config_db_write`, which the
+ *   managed TLS / ACME handlers call. It applies the read-only gate and the
+ *   database-availability gate but deliberately **not** the failover-topology
+ *   gate, because those stores are independent of the config database. Gating
+ *   it on `admin_writes_enabled` would invent a denial the gateway does not
+ *   make, so only an observed read-only *mode* denies it.
+ * - `none` — no gateway write gate at all: reads, operational actions
+ *   (`admit_audited_operation`: rotate, validate, refresh, dry-run), and
+ *   BFF-local writes that never reach the gateway.
+ */
+export type CapabilityGate = "config-store" | "read-only-mode" | "none";
+
 interface SurfaceDescriptor {
   label: string;
   /** Notice heading. Editing surfaces read "read-only"; actions "unavailable". */
@@ -106,16 +133,8 @@ interface SurfaceDescriptor {
   /** Verb phrase completing "The <role> role cannot <action>." */
   action: string;
   minimumRole: GatewayRole;
-  /**
-   * True when the surface persists into the gateway's configuration store and
-   * is therefore covered by read-only mode and `admin_writes_enabled`.
-   *
-   * Managed TLS/ACME material lives in independent stores that
-   * `admin_writes_enabled` deliberately does not gate, operational POSTs
-   * (rotate, validate, refresh, dry-run) persist no configuration at all, and
-   * BFF settings never reach the gateway — all three stay role-only.
-   */
-  configStore: boolean;
+  /** The upstream write-admission gate this surface mirrors. */
+  gate: CapabilityGate;
 }
 
 /**
@@ -131,91 +150,96 @@ const SURFACES: Record<CapabilitySurface, SurfaceDescriptor> = {
     headline: "Proxy configuration is read-only",
     action: "create, edit, or delete proxies",
     minimumRole: "operator",
-    configStore: true,
+    gate: "config-store",
   },
   upstreams: {
     label: "Upstream configuration",
     headline: "Upstream configuration is read-only",
     action: "create, edit, or delete upstreams and their targets",
     minimumRole: "operator",
-    configStore: true,
+    gate: "config-store",
   },
   pluginConfigs: {
     label: "Plugin configuration",
     headline: "Plugin configuration is read-only",
     action: "create, edit, or delete plugin configurations",
     minimumRole: "operator",
-    configStore: true,
+    gate: "config-store",
   },
   consumers: {
     label: "Consumer configuration",
     headline: "Consumer configuration is read-only",
     action: "create, edit, or delete consumers",
     minimumRole: "admin",
-    configStore: true,
+    gate: "config-store",
   },
   consumerCredentials: {
     label: "Consumer credentials",
     headline: "Consumer credentials are read-only",
     action: "add, rotate, or revoke consumer credentials",
     minimumRole: "admin",
-    configStore: true,
+    gate: "config-store",
   },
   apiSpecs: {
     label: "API spec import",
     headline: "API spec import is unavailable",
     action: "import, replace, or delete API specs",
     minimumRole: "admin",
-    configStore: true,
+    gate: "config-store",
   },
   namespaceRegistry: {
     label: "Namespace registry",
     headline: "The namespace registry is read-only",
     action: "create, rename, or delete namespaces",
     minimumRole: "admin",
-    configStore: true,
+    gate: "config-store",
   },
   configExport: {
     label: "Configuration export",
     headline: "Configuration export is unavailable",
     action: "export the gateway configuration",
     minimumRole: "admin",
-    configStore: false,
+    // `GET /backup` is a read: `handle_backup` applies no write gate, and in a
+    // database-less read-only mode it serves the cached configuration.
+    gate: "none",
   },
   configBackup: {
     label: "Configuration restore",
     headline: "Configuration restore is unavailable",
     action: "restore a configuration backup",
     minimumRole: "admin",
-    configStore: true,
+    gate: "config-store",
   },
   gatewayTrust: {
     label: "Gateway trust bundle",
     headline: "The gateway trust bundle is read-only",
     action: "create, edit, or delete the gateway trust bundle",
     minimumRole: "admin",
-    configStore: true,
+    gate: "config-store",
   },
   tlsMaterial: {
     label: "Managed TLS material",
     headline: "Managed TLS material is read-only",
     action: "upload or delete managed TLS material",
     minimumRole: "admin",
-    configStore: false,
+    // `admit_non_config_db_write`: the managed TLS / ACME stores are refused in
+    // a read-only mode but are not subject to the config-DB failover gate that
+    // `admin_writes_enabled` also folds in.
+    gate: "read-only-mode",
   },
   operationalActions: {
     label: "Operational gateway actions",
     headline: "Operational gateway actions are unavailable",
     action: "run operational gateway actions",
     minimumRole: "operator",
-    configStore: false,
+    gate: "none",
   },
   bffSettings: {
     label: "BFF connection settings",
     headline: "BFF connection settings are read-only",
     action: "change the Foundry BFF connection settings",
     minimumRole: "admin",
-    configStore: false,
+    gate: "none",
   },
 };
 
@@ -227,10 +251,13 @@ export type GatewayWriteState =
   | { state: "unknown" };
 
 /**
- * Classify whether the gateway will accept configuration writes at all.
- * `unknown` is the honest answer whenever neither signal was observed.
+ * Classify only the read-only-mode gate — the one Ferrum Edge applies to every
+ * admin mutation, including the independent managed TLS / ACME stores.
+ * `unknown` whenever the mode has not been read or does not name a read-only
+ * mode, because `FERRUM_ADMIN_READ_ONLY` on a `database`/`cp` gateway is
+ * invisible in the mode string.
  */
-export function resolveGatewayWriteState(facts: CapabilityFacts): GatewayWriteState {
+export function resolveReadOnlyModeState(facts: CapabilityFacts): GatewayWriteState {
   const mode = typeof facts.mode === "string" ? facts.mode.trim().toLowerCase() : null;
   if (mode && READ_ONLY_MODES.has(mode)) {
     return {
@@ -240,6 +267,17 @@ export function resolveGatewayWriteState(facts: CapabilityFacts): GatewayWriteSt
         `The gateway runs in ${mode} mode, where the admin API is read-only.`,
     };
   }
+  return { state: "unknown" };
+}
+
+/**
+ * Classify whether the gateway will accept configuration-store writes at all.
+ * `unknown` is the honest answer whenever neither signal was observed.
+ */
+export function resolveGatewayWriteState(facts: CapabilityFacts): GatewayWriteState {
+  const readOnlyMode = resolveReadOnlyModeState(facts);
+  // The mode check runs first because it names a cause the operator can act on.
+  if (readOnlyMode.state === "read-only") return readOnlyMode;
   if (facts.adminWritesEnabled === false) {
     return { state: "read-only", explanation: WRITES_DISABLED_EXPLANATION };
   }
@@ -268,8 +306,11 @@ export function resolveCapability(
     };
   }
 
-  if (descriptor.configStore) {
-    const writeState = resolveGatewayWriteState(facts);
+  if (descriptor.gate !== "none") {
+    const writeState =
+      descriptor.gate === "config-store"
+        ? resolveGatewayWriteState(facts)
+        : resolveReadOnlyModeState(facts);
     if (writeState.state === "read-only") {
       return {
         allowed: false,

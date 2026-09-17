@@ -20,6 +20,7 @@ import {
 import { buildCredentialInput, CredentialInputError } from "@/lib/credentials";
 import type { EditorSession } from "@/hooks/useEditorIdentity";
 import type { BuiltInCredentialType } from "@/api/types";
+import type { CapabilityVerdict } from "@/lib/capabilities";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -36,6 +37,12 @@ export interface CredentialFormProps {
   existingCredentials?: unknown;
   revision: number;
   isRefreshing: boolean;
+  /**
+   * Write capability for consumer credentials. The parent already presents the
+   * tab read-only; this is the handler-side short-circuit, so a programmatic
+   * submit cannot reach the gateway either.
+   */
+  capability?: CapabilityVerdict;
 }
 
 interface CredentialFieldConfig {
@@ -182,7 +189,9 @@ export function CredentialForm({
   existingCredentials,
   revision,
   isRefreshing,
+  capability,
 }: CredentialFormProps) {
+  const readOnly = capability !== undefined && !capability.allowed;
   const consumerId = session.identity.resourceId;
   const config = CREDENTIAL_CONFIGS[credentialType];
   const { toast } = useToast();
@@ -225,6 +234,7 @@ export function CredentialForm({
   /* ---------- Handlers ---------- */
 
   const addCredential = session.bind(async () => {
+    if (readOnly) return;
     if (busy) return;
     let data;
     try {
@@ -270,6 +280,7 @@ export function CredentialForm({
   };
 
   const handleDelete = session.bind(async () => {
+    if (readOnly) return;
     if (!deleteSelection) return;
     if (isRefreshing || deleteSelection.revision !== revision || deleteSelection.snapshot !== existingCredentials) {
       setDeleteSelection(null);
@@ -294,6 +305,7 @@ export function CredentialForm({
   });
 
   const handleDeleteAll = session.bind(async () => {
+    if (readOnly) return;
     if (deleteAllRevision === null || busy) return;
     if (isRefreshing || deleteAllRevision !== revision) {
       setDeleteAllRevision(null);

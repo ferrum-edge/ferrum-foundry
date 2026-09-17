@@ -969,6 +969,14 @@ function AcmeTab() {
                       variant="secondary"
                       size="sm"
                       loading={pendingKeys.has(`finalize:${order.id}`)}
+                      // Only the Finalize rendering is a write. The same button
+                      // reads `GET /admin/tls/acme/orders/{id}` for an unknown
+                      // or processing order, which an operator may run.
+                      disabled={
+                        !canWrite.allowed &&
+                        !orderIsUnknown(order) &&
+                        order.status !== "processing"
+                      }
                       onClick={() =>
                         void runRowAction(`finalize:${order.id}`, async () => {
                           try {
@@ -993,6 +1001,10 @@ function AcmeTab() {
                                 });
                               }
                               toast("success", `Order status: ${checked.status}`);
+                              return;
+                            }
+                            if (!canWrite.allowed) {
+                              toast("error", canWrite.summary ?? "Finalizing is unavailable");
                               return;
                             }
                             await finalizeOrder.mutateAsync({ id: order.id });

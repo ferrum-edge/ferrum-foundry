@@ -5,26 +5,39 @@
 /*  the explanation is always visible text — never only a `disabled`   */
 /*  attribute or a tooltip. The server keeps enforcing the same rule;  */
 /*  the existing error dialogs still handle genuine surprises.         */
+/*                                                                     */
+/*  A read-only surface never shows less than the editable one: the    */
+/*  disabled fieldset covers the editing controls, while the reasons   */
+/*  are wired to the controls they explain with `aria-describedby`     */
+/*  because a disabled control is not reachable by keyboard.           */
 /* ------------------------------------------------------------------ */
 
-import type { ReactNode } from "react";
+import { cloneElement, isValidElement, useId, type ReactNode } from "react";
 import type { CapabilityVerdict } from "@/lib/capabilities";
 
 /**
- * The visible note. Rendered as a status region so assistive technology
- * announces it with the surface rather than only on a failed submit.
+ * The visible note naming the blocked surface and why.
+ *
+ * It carries `role="status"` so a denial that appears *after* first paint — the
+ * health snapshot resolving mid-session — is announced. A notice already
+ * present on first paint is not announced by a live region; it is associated
+ * with the surface it covers through `aria-describedby` instead.
  */
 export function CapabilityNotice({
   verdict,
   className = "",
+  id,
 }: {
-  verdict: CapabilityVerdict;
+  verdict?: CapabilityVerdict;
   className?: string;
+  /** Set when a control or fieldset points at this notice. */
+  id?: string;
 }) {
-  if (verdict.allowed) return null;
+  if (!verdict || verdict.allowed) return null;
   return (
     <div
       role="status"
+      id={id}
       data-capability-blocked={verdict.blockedBy}
       className={`rounded-lg border border-warning/40 bg-warning/5 px-4 py-3 ${className}`}
     >
@@ -41,7 +54,14 @@ export function CapabilityNotice({
  * note above it, not the disabled state, is what tells the user why.
  *
  * `display: contents` keeps the fieldset out of the layout so surrounding
- * spacing is identical in both states.
+ * spacing is identical in both states. When a caller needs a real box instead,
+ * `min-w-0` goes with it: a fieldset inherits the UA `min-width: min-content`,
+ * which Tailwind preflight does not reset, and without it a denied surface
+ * cannot shrink at phone width where the allowed one can.
+ *
+ * Only controls belong inside. Anything the denied role may still *read* —
+ * collapsible section bodies, a Cancel button — must stay reachable, so a
+ * read-only surface is never less informative than the editable one.
  */
 export function ReadOnlySurface({
   verdict,
@@ -49,7 +69,7 @@ export function ReadOnlySurface({
   noticeClassName = "mb-4",
   contentClassName,
 }: {
-  verdict: CapabilityVerdict;
+  verdict?: CapabilityVerdict;
   children: ReactNode;
   noticeClassName?: string;
   /**
@@ -59,11 +79,16 @@ export function ReadOnlySurface({
    */
   contentClassName?: string;
 }) {
-  if (verdict.allowed) return <>{children}</>;
+  const noticeId = useId();
+  if (!verdict || verdict.allowed) return <>{children}</>;
   return (
     <>
-      <CapabilityNotice verdict={verdict} className={noticeClassName} />
-      <fieldset disabled className={contentClassName ?? "contents"}>
+      <CapabilityNotice verdict={verdict} className={noticeClassName} id={noticeId} />
+      <fieldset
+        disabled
+        aria-describedby={noticeId}
+        className={contentClassName ? `min-w-0 ${contentClassName}` : "contents"}
+      >
         {children}
       </fieldset>
     </>
@@ -73,6 +98,11 @@ export function ReadOnlySurface({
 /**
  * Present a single unavailable action (a create button, a Delete button) with
  * a short visible reason beside it.
+ *
+ * The reason is associated with the control through `aria-describedby`, so the
+ * two are one announcement rather than two adjacent, unrelated fragments. The
+ * full explanation rides along as visually hidden text because the visible
+ * summary is only a few words.
  */
 export function WriteAction({
   verdict,
@@ -83,21 +113,26 @@ export function WriteAction({
   children: ReactNode;
   align?: "start" | "end";
 }) {
+  const reasonId = useId();
   if (verdict.allowed) return <>{children}</>;
+  const described = isValidElement<{ "aria-describedby"?: string }>(children)
+    ? cloneElement(children, { "aria-describedby": reasonId })
+    : children;
   return (
     <div
       className={`flex flex-col gap-1 ${align === "end" ? "items-end text-right" : "items-start text-left"}`}
     >
       <fieldset disabled className="contents">
-        {children}
+        {described}
       </fieldset>
       <p
+        id={reasonId}
         role="status"
         data-capability-blocked={verdict.blockedBy}
         className="text-xs text-warning max-w-xs"
-        title={verdict.explanation}
       >
         {verdict.summary}
+        <span className="sr-only">. {verdict.explanation}</span>
       </p>
     </div>
   );

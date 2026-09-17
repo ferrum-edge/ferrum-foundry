@@ -15,16 +15,17 @@ import ProxyNewPage from "./new";
 
 let principal: { subject: string; displayName: string; role: "viewer" | "operator" | "admin"; authMode: "static" } | null = null;
 let health: HealthResponse | undefined;
+let healthIsError = false;
 
 vi.mock("@/stores/auth", () => ({ useAuth: () => ({ principal }) }));
 vi.mock("@/hooks/useMetrics", () => ({
   useHealth: () => ({
     data: health,
-    isError: false,
+    isError: healthIsError,
     isLoading: false,
     isFetching: false,
     dataUpdatedAt: health ? 1 : 0,
-    error: null,
+    error: healthIsError ? new Error("health unreachable") : null,
     refetch: async () => undefined,
   }),
 }));
@@ -69,7 +70,25 @@ let root: Root;
 function writableAdmin() {
   principal = { subject: "ops", displayName: "Ops", role: "admin", authMode: "static" };
   health = { status: "ok", ready: true, mode: "database", admin_writes_enabled: true };
+  healthIsError = false;
 }
+
+/**
+ * Every collapsible section of `ProxyForm`, keyed by a label only that section
+ * renders. A denied surface must still show all of them: the sections are
+ * content a viewer is explicitly allowed to read.
+ */
+const PROXY_SECTIONS: readonly [string, string][] = [
+  ["Routing Options", "Strip listen path"],
+  ["Backend Timeouts", "Connect Timeout (ms)"],
+  ["TLS Settings", "Frontend TLS"],
+  ["Upstream", "Upstream ID"],
+  ["DNS", "DNS Override"],
+  ["Circuit Breaker", "Enable circuit breaker"],
+  ["Retry", "Enable retry"],
+  ["Connection Pool", "Pool Idle Timeout (seconds)"],
+  ["Protocol-Specific", "Listen Port"],
+];
 
 async function renderPage(node: ReactNode) {
   await act(async () => {
@@ -178,6 +197,74 @@ describe("Update Proxy capability presentation", () => {
 
     await submitForm();
     expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("still exposes every collapsible section to a viewer", async () => {
+    // A collapsed section's toggle is disabled by the ancestor fieldset, so a
+    // read-only form that starts collapsed can never be opened — it would show
+    // strictly less than the editable one.
+    principal = { subject: "read-only", displayName: "Read Only", role: "viewer", authMode: "static" };
+    await renderPage(
+      <ProxyFormUnderCapability initialData={existingProxy} onSubmit={submit} />,
+    );
+
+    expect(readOnlyNotice()).not.toBeNull();
+    for (const [title, field] of PROXY_SECTIONS) {
+      expect(host.textContent, `${title} heading`).toContain(title);
+      expect(host.textContent, `${title} body`).toContain(field);
+    }
+  });
+
+  it("leaves Cancel usable on a read-only form", async () => {
+    principal = { subject: "read-only", displayName: "Read Only", role: "viewer", authMode: "static" };
+    await renderPage(
+      <ProxyFormUnderCapability initialData={existingProxy} onSubmit={submit} />,
+    );
+
+    const buttons = [...host.querySelectorAll("button")];
+    const cancel = buttons.find((button) => button.textContent?.trim() === "Cancel");
+    const update = buttons.find((button) => button.textContent?.trim() === "Update Proxy");
+    expect(cancel?.disabled).toBe(false);
+    expect(update?.disabled).toBe(true);
+  });
+
+  it("keeps the last loaded mode when a background health refetch fails", async () => {
+    // `resolveReadState` calls a retained response from an errored refetch
+    // `stale`, not `loaded`. Dropping the mode there would flip a read-only
+    // form to editable mid-session; the mode cannot change without a restart.
+    health = { status: "ok", ready: true, mode: "file", admin_writes_enabled: false };
+    await renderPage(
+      <ProxyFormUnderCapability initialData={existingProxy} onSubmit={submit} />,
+    );
+    expect(readOnlyNotice()?.textContent).toContain("file mode");
+
+    // A fresh element on the same root, so the provider genuinely re-renders
+    // rather than the assertion resting on a bailout.
+    healthIsError = true;
+    await renderPage(
+      <ProxyFormUnderCapability initialData={existingProxy} onSubmit={submit} />,
+    );
+
+    const notice = readOnlyNotice();
+    expect(notice?.getAttribute("data-capability-blocked")).toBe("gateway-read-only");
+    expect(notice?.textContent).toContain("file mode");
+    await submitForm();
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("concludes nothing when health has errored without ever loading", async () => {
+    // Retention only carries a snapshot that actually loaded. With no prior
+    // observation the facts stay `null`, so the surface stays editable and the
+    // gateway answers for itself.
+    health = undefined;
+    healthIsError = true;
+    await renderPage(
+      <ProxyFormUnderCapability initialData={existingProxy} onSubmit={submit} />,
+    );
+
+    expect(readOnlyNotice()).toBeNull();
+    await submitForm();
+    expect(submit).toHaveBeenCalledOnce();
   });
 
   it("submits normally once the gateway accepts writes", async () => {

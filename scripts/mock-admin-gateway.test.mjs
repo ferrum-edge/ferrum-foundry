@@ -4,6 +4,7 @@ import {
   buildHealth,
   crud,
   provisionerFromHeaders,
+  READ_ONLY_GATEWAY_MODES,
   readOnlyModeRefusal,
   stampProvisionedBy,
   validatePluginConfigWrite,
@@ -429,12 +430,46 @@ for (const mode of ["file", "dp", "mesh"]) {
     }
   });
 
+  test(`${mode} mode refuses managed TLS and ACME material writes`, () => {
+    // `admit_non_config_db_write` applies the read-only gate to the independent
+    // TLS/ACME stores even though `admin_writes_enabled` does not cover them.
+    for (const [method, path] of [
+      ["POST", "/admin/tls/certificates"],
+      ["PUT", "/admin/tls/certificates/cert-1"],
+      ["DELETE", "/admin/tls/ca-bundles/bundle-1"],
+      ["POST", "/admin/tls/crls"],
+      ["POST", "/admin/tls/ocsp-responses"],
+      ["POST", "/admin/tls/jwks"],
+      ["POST", "/admin/tls/acme/orders"],
+      ["POST", "/admin/tls/acme/orders/order-1/finalize"],
+      ["POST", "/admin/tls/acme/renew/cert-1"],
+      ["DELETE", "/admin/tls/acme/certificates/cert-1"],
+    ]) {
+      assert.deepEqual(
+        readOnlyModeRefusal(mode, method, path),
+        [403, { error: "Admin API is in read-only mode" }],
+        `${method} ${path}`,
+      );
+    }
+  });
+
   test(`${mode} mode still serves reads and non-persisting operations`, () => {
     assert.equal(readOnlyModeRefusal(mode, "GET", "/proxies"), null);
+    assert.equal(readOnlyModeRefusal(mode, "GET", "/admin/tls/certificates"), null);
+    // `admit_audited_operation` does not apply the read-only gate.
     assert.equal(readOnlyModeRefusal(mode, "POST", "/admin/tls/validate"), null);
     assert.equal(readOnlyModeRefusal(mode, "POST", "/admin/tls/rotate/proxy_https"), null);
-    assert.equal(readOnlyModeRefusal(mode, "POST", "/admin/tls/certificates"), null);
     assert.equal(readOnlyModeRefusal(mode, "POST", "/mesh/egress-scope/test"), null);
     assert.equal(readOnlyModeRefusal(mode, "POST", "/backend-capabilities/refresh"), null);
   });
 }
+
+test("node_agent is a read-only mode upstream", () => {
+  // `src/modes/node_agent.rs` reports `mode: "node_agent"` with
+  // `read_only: true`, so it belongs to the same refusal set.
+  assert.equal(READ_ONLY_GATEWAY_MODES.has("node_agent"), true);
+  assert.deepEqual(readOnlyModeRefusal("node_agent", "POST", "/proxies"), [
+    403,
+    { error: "Admin API is in read-only mode" },
+  ]);
+});

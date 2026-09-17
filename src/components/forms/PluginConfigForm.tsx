@@ -321,192 +321,194 @@ function PluginConfigFormFields({
   /*  Render                                                           */
   /* ================================================================ */
 
-  const body = (
+  return (
     <form ref={formRef} onSubmit={handleSubmit} className="space-y-0">
-      {/* ── Basic Fields ── */}
-      <div className="border-b border-border/50 py-4">
-        <h3 className="text-sm font-semibold text-text-primary mb-4">Plugin Configuration</h3>
-        <div className="space-y-4">
-          <Select
-            label="Plugin Name"
-            value={pluginName}
-            onValueChange={setPluginName}
-            groups={pluginGroups}
-            placeholder="Select a plugin..."
-            error={errors.plugin_name}
-            helpText={selectedMeta?.description}
-            disabled={isEdit}
-          />
-
-          <Select
-            label="Scope"
-            value={scope}
-            onValueChange={(v) => {
-              const next = v as PluginScope;
-              setScope(next);
-              // Editing another scope must not discard the existing draft.
-              // Submit includes only the selections for the chosen scope.
-              if (!isEdit) {
-                if (next !== "proxy") setProxyId("");
-                if (next !== "proxy_group") setProxyGroupIds([]);
-              }
-            }}
-            options={[
-              { value: "global", label: "Global" },
-              { value: "proxy", label: "Proxy" },
-              { value: "proxy_group", label: "Proxy Group" },
-            ]}
-          />
-
-          {scope === "proxy" && (
-            <ProxySearchPicker
-              mode="single"
-              label="Proxy"
-              value={proxyId}
-              onChange={setProxyId}
-              error={errors.proxy_id}
-              helpText="The single proxy this plugin applies to."
-            />
-          )}
-
-          {scope === "proxy_group" && (
-            <ProxySearchPicker
-              mode="multi"
-              label="Proxies"
-              value={proxyGroupIds}
-              onChange={setProxyGroupIds}
-              error={errors.proxy_group}
-              helpText="Select proxies that will share this plugin instance. Stateful plugins (e.g. rate limiting) share counters across the group."
-            />
-          )}
-
-          <Checkbox label="Enabled" checked={enabled} onChange={setEnabled} />
-
-          <Input
-            label="Priority Override"
-            type="number"
-            value={numVal(priorityOverride)}
-            onChange={(e) => {
-              const raw = e.target.value;
-              setPriorityOverride(raw === "" ? "" : Number(raw));
-            }}
-            placeholder="Optional (0-10000)"
-            helpText="Lower values execute first. Leave empty for default."
-            error={errors.priority_override}
-          />
-        </div>
-      </div>
-
-      {pluginName === "mcp_gateway" && parsedMcpGatewayConfig && (
+      <ReadOnlySurface verdict={capability}>
+        {/* ── Basic Fields ── */}
         <div className="border-b border-border/50 py-4">
-          <h3 className="text-sm font-semibold text-text-primary mb-4">MCP Gateway Mode</h3>
-          <div className="space-y-3">
+          <h3 className="text-sm font-semibold text-text-primary mb-4">Plugin Configuration</h3>
+          <div className="space-y-4">
             <Select
-              label="Mode"
-              value={mcpGatewayMode}
-              onValueChange={(value) => handleMcpGatewayModeChange(value as McpGatewayMode)}
-              options={[
-                { value: "aggregate_router", label: "Aggregate router" },
-                { value: "transparent_proxy", label: "Transparent proxy" },
-              ]}
-              helpText="Aggregate mode exposes a merged catalog with policy controls. Transparent mode proxies upstream MCP servers directly."
+              label="Plugin Name"
+              value={pluginName}
+              onValueChange={setPluginName}
+              groups={pluginGroups}
+              placeholder="Select a plugin..."
+              error={errors.plugin_name}
+              helpText={selectedMeta?.description}
+              disabled={isEdit}
             />
-            {mcpGatewayMode === "transparent_proxy" && (
-              <p className="text-xs text-text-muted">{MCP_GATEWAY_TRANSPARENT_NOTE}</p>
+
+            <Select
+              label="Scope"
+              value={scope}
+              onValueChange={(v) => {
+                const next = v as PluginScope;
+                setScope(next);
+                // Editing another scope must not discard the existing draft.
+                // Submit includes only the selections for the chosen scope.
+                if (!isEdit) {
+                  if (next !== "proxy") setProxyId("");
+                  if (next !== "proxy_group") setProxyGroupIds([]);
+                }
+              }}
+              options={[
+                { value: "global", label: "Global" },
+                { value: "proxy", label: "Proxy" },
+                { value: "proxy_group", label: "Proxy Group" },
+              ]}
+            />
+
+            {scope === "proxy" && (
+              <ProxySearchPicker
+                mode="single"
+                label="Proxy"
+                value={proxyId}
+                onChange={setProxyId}
+                error={errors.proxy_id}
+                helpText="The single proxy this plugin applies to."
+              />
             )}
-            {mcpGatewayMode === "transparent_proxy" && (
-              <p className="text-xs text-text-muted">
-                Omitted in transparent mode:{" "}
-                {MCP_GATEWAY_AGGREGATE_ONLY_PATHS.join(", ")}.
-              </p>
+
+            {scope === "proxy_group" && (
+              <ProxySearchPicker
+                mode="multi"
+                label="Proxies"
+                value={proxyGroupIds}
+                onChange={setProxyGroupIds}
+                error={errors.proxy_group}
+                helpText="Select proxies that will share this plugin instance. Stateful plugins (e.g. rate limiting) share counters across the group."
+              />
             )}
+
+            <Checkbox label="Enabled" checked={enabled} onChange={setEnabled} />
+
+            <Input
+              label="Priority Override"
+              type="number"
+              value={numVal(priorityOverride)}
+              onChange={(e) => {
+                const raw = e.target.value;
+                setPriorityOverride(raw === "" ? "" : Number(raw));
+              }}
+              placeholder="Optional (0-10000)"
+              helpText="Lower values execute first. Leave empty for default."
+              error={errors.priority_override}
+            />
           </div>
         </div>
-      )}
 
-      {/* ── Config JSON ── */}
-      <div className="border-b border-border/50 py-4">
-        <div className="flex items-center justify-between gap-3 mb-4">
-          <h3 className="text-sm font-semibold text-text-primary">Config (JSON)</h3>
-          {!isEdit && pluginName && userEditedConfig && !configMatchesDefault && (
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={resetConfigToPluginDefault}
-            >
-              Reset Defaults
-            </Button>
-          )}
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <textarea
-            aria-label="Plugin config JSON"
-            value={configJson}
-            onChange={(e) => {
-              setUserEditedConfig(true);
-              setConfigJson(e.target.value);
-            }}
-            rows={12}
-            aria-invalid={errors.config ? true : undefined}
-            aria-describedby={errors.config ? "plugin-config-error" : undefined}
-            className={`bg-code-bg border rounded-lg px-3 py-2 text-text-primary text-sm font-mono placeholder:text-text-muted transition-colors duration-150 resize-y min-h-[120px] ${
-              errors.config
-                ? "border-danger focus:border-danger focus:ring-1 focus:ring-danger/30"
-                : "border-border focus:border-orange focus:ring-1 focus:ring-orange/30"
-            }`}
-            spellCheck={false}
-          />
-          {!isEdit && (
-            <p className="text-xs text-text-muted">
-              Defaults are editable templates for the selected plugin.
-            </p>
-          )}
-          {errors.config && (
-            <p id="plugin-config-error" className="text-danger text-xs">
-              {errors.config}
-            </p>
-          )}
-        </div>
-      </div>
+        {pluginName === "mcp_gateway" && parsedMcpGatewayConfig && (
+          <div className="border-b border-border/50 py-4">
+            <h3 className="text-sm font-semibold text-text-primary mb-4">MCP Gateway Mode</h3>
+            <div className="space-y-3">
+              <Select
+                label="Mode"
+                value={mcpGatewayMode}
+                onValueChange={(value) => handleMcpGatewayModeChange(value as McpGatewayMode)}
+                options={[
+                  { value: "aggregate_router", label: "Aggregate router" },
+                  { value: "transparent_proxy", label: "Transparent proxy" },
+                ]}
+                helpText="Aggregate mode exposes a merged catalog with policy controls. Transparent mode proxies upstream MCP servers directly."
+              />
+              {mcpGatewayMode === "transparent_proxy" && (
+                <p className="text-xs text-text-muted">{MCP_GATEWAY_TRANSPARENT_NOTE}</p>
+              )}
+              {mcpGatewayMode === "transparent_proxy" && (
+                <p className="text-xs text-text-muted">
+                  Omitted in transparent mode:{" "}
+                  {MCP_GATEWAY_AGGREGATE_ONLY_PATHS.join(", ")}.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
-      {/* ── Execution Trigger ── */}
-      <div className="border-b border-border/50 py-4">
-        <div className="flex items-center justify-between gap-3 mb-2">
-          <h3 className="text-sm font-semibold text-text-primary">Execution Trigger</h3>
-          <Checkbox label="Enabled" checked={triggerEnabled} onChange={setTriggerEnabled} />
-        </div>
-        <p className="text-xs text-text-muted mb-3">
-          Optional per-instance predicate deciding when this plugin runs.
-          Combine <code className="font-mono">all</code> / <code className="font-mono">any</code> /{" "}
-          <code className="font-mono">not</code> nodes with <code className="font-mono">match</code>{" "}
-          leaves on method, path, host, SNI, header, query, cookie, protocol,
-          source CIDR, consumer, and more.
-        </p>
-        {triggerEnabled && (
+        {/* ── Config JSON ── */}
+        <div className="border-b border-border/50 py-4">
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <h3 className="text-sm font-semibold text-text-primary">Config (JSON)</h3>
+            {!isEdit && pluginName && userEditedConfig && !configMatchesDefault && (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={resetConfigToPluginDefault}
+              >
+                Reset Defaults
+              </Button>
+            )}
+          </div>
           <div className="flex flex-col gap-1.5">
             <textarea
-              aria-label="Execution trigger JSON"
-              value={triggerJson}
-              onChange={(e) => setTriggerJson(e.target.value)}
-              rows={8}
-              aria-invalid={errors.trigger ? true : undefined}
-              aria-describedby={errors.trigger ? "plugin-trigger-error" : undefined}
-              className={`bg-code-bg border rounded-lg px-3 py-2 text-text-primary text-sm font-mono placeholder:text-text-muted transition-colors duration-150 resize-y min-h-[100px] ${
-                errors.trigger
+              aria-label="Plugin config JSON"
+              value={configJson}
+              onChange={(e) => {
+                setUserEditedConfig(true);
+                setConfigJson(e.target.value);
+              }}
+              rows={12}
+              aria-invalid={errors.config ? true : undefined}
+              aria-describedby={errors.config ? "plugin-config-error" : undefined}
+              className={`bg-code-bg border rounded-lg px-3 py-2 text-text-primary text-sm font-mono placeholder:text-text-muted transition-colors duration-150 resize-y min-h-[120px] ${
+                errors.config
                   ? "border-danger focus:border-danger focus:ring-1 focus:ring-danger/30"
                   : "border-border focus:border-orange focus:ring-1 focus:ring-orange/30"
               }`}
               spellCheck={false}
             />
-            {errors.trigger && (
-              <p id="plugin-trigger-error" className="text-danger text-xs">
-                {errors.trigger}
+            {!isEdit && (
+              <p className="text-xs text-text-muted">
+                Defaults are editable templates for the selected plugin.
+              </p>
+            )}
+            {errors.config && (
+              <p id="plugin-config-error" className="text-danger text-xs">
+                {errors.config}
               </p>
             )}
           </div>
-        )}
-      </div>
+        </div>
+
+        {/* ── Execution Trigger ── */}
+        <div className="border-b border-border/50 py-4">
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <h3 className="text-sm font-semibold text-text-primary">Execution Trigger</h3>
+            <Checkbox label="Enabled" checked={triggerEnabled} onChange={setTriggerEnabled} />
+          </div>
+          <p className="text-xs text-text-muted mb-3">
+            Optional per-instance predicate deciding when this plugin runs.
+            Combine <code className="font-mono">all</code> / <code className="font-mono">any</code> /{" "}
+            <code className="font-mono">not</code> nodes with <code className="font-mono">match</code>{" "}
+            leaves on method, path, host, SNI, header, query, cookie, protocol,
+            source CIDR, consumer, and more.
+          </p>
+          {triggerEnabled && (
+            <div className="flex flex-col gap-1.5">
+              <textarea
+                aria-label="Execution trigger JSON"
+                value={triggerJson}
+                onChange={(e) => setTriggerJson(e.target.value)}
+                rows={8}
+                aria-invalid={errors.trigger ? true : undefined}
+                aria-describedby={errors.trigger ? "plugin-trigger-error" : undefined}
+                className={`bg-code-bg border rounded-lg px-3 py-2 text-text-primary text-sm font-mono placeholder:text-text-muted transition-colors duration-150 resize-y min-h-[100px] ${
+                  errors.trigger
+                    ? "border-danger focus:border-danger focus:ring-1 focus:ring-danger/30"
+                    : "border-border focus:border-orange focus:ring-1 focus:ring-orange/30"
+                }`}
+                spellCheck={false}
+              />
+              {errors.trigger && (
+                <p id="plugin-trigger-error" className="text-danger text-xs">
+                  {errors.trigger}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      </ReadOnlySurface>
 
       {/* ── Actions ── */}
       <div className="flex flex-col items-end gap-3 pt-6">
@@ -522,14 +524,11 @@ function PluginConfigFormFields({
         >
           Cancel
         </Button>
-        <Button type="submit" loading={isLoading}>
+        <Button type="submit" loading={isLoading} disabled={readOnly}>
           {isEdit ? "Update Plugin" : "Create Plugin"}
         </Button>
         </div>
       </div>
     </form>
   );
-
-  if (!capability || capability.allowed) return body;
-  return <ReadOnlySurface verdict={capability}>{body}</ReadOnlySurface>;
 }
