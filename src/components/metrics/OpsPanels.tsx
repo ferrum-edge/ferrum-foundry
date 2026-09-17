@@ -12,7 +12,7 @@ import { useOverload, useRuntimeMetrics, useCharges } from "@/hooks/useOps";
 interface RefreshPolicy { refetchInterval?: number | false; }
 
 function ratioBar(label: string, current: number, max: number) {
-  const ratio = Math.min(1, current / max);
+  const ratio = max > 0 ? Math.min(1, current / max) : 0;
   const color =
     ratio > 0.9 ? "bg-danger" : ratio > 0.7 ? "bg-warning" : "bg-success";
   return (

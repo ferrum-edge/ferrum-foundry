@@ -471,7 +471,7 @@ const runtimeMetrics = () => ({
     sampled_at_unix_ms: Date.now(), platform: 'linux',
     cpu: { process_percent: 8.4, system_percent: 22.1, cpu_count: 8 },
     memory: { rss_bytes: 412_000_000, virtual_bytes: 1_800_000_000, host_percent: 5.1 },
-    file_descriptors: { current: 812, max: 65536, ratio: 0.012 },
+    file_descriptors: { current: 812, max: 65536, ratio: 0.012, enforced: true },
     ephemeral_ports: { range_size: 28000, exhaustion_events: 0, active_outbound_estimate: 220 },
   },
   http: {
