@@ -3,6 +3,7 @@
 /* ------------------------------------------------------------------ */
 
 import { Card } from "@/components/ui/Card";
+import { ResourceGrid } from "@/components/ui/ResourceGrid";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/shared/EmptyState";
@@ -183,8 +184,17 @@ export default function ClusterPage() {
             {capsError ? "Last known capabilities" : "Capabilities"} observed: {formatDate(new Date(capsQuery.dataUpdatedAt).toISOString())}
           </p>
         )}
-        <Card className="overflow-x-auto p-0">
-          <div className="grid min-w-[48rem] grid-cols-[2fr_4rem_4rem_4rem_6rem_5rem_4rem_5rem] gap-3 px-6 py-3 border-b border-border text-text-muted text-xs font-semibold uppercase tracking-wider">
+        <ResourceGrid
+          label="Backend capabilities"
+          minWidth="48rem"
+          emptyState={!capsLoading && !capsError && capabilities?.entries.length === 0 && (
+            <EmptyState
+              title="No backend probes yet"
+              description="Capabilities are collected as proxies dispatch to backends, or on demand via Re-probe All."
+            />
+          )}
+        >
+          <div className="grid grid-cols-[2fr_4rem_4rem_4rem_6rem_5rem_4rem_5rem] gap-3 px-6 py-3 border-b border-border text-text-muted text-xs font-semibold uppercase tracking-wider">
             <span>Backend</span>
             <span>H1</span>
             <span>H2/TLS</span>
@@ -195,16 +205,10 @@ export default function ClusterPage() {
             <span>Probed</span>
           </div>
           {capsLoading && <div className="px-6 py-8 text-text-muted text-sm">Loading…</div>}
-          {!capsLoading && !capsError && capabilities?.entries.length === 0 && (
-            <EmptyState
-              title="No backend probes yet"
-              description="Capabilities are collected as proxies dispatch to backends, or on demand via Re-probe All."
-            />
-          )}
           {(capabilities?.entries ?? []).map((entry) => (
             <div
               key={entry.key}
-              className="grid min-w-[48rem] grid-cols-[2fr_4rem_4rem_4rem_6rem_5rem_4rem_5rem] gap-3 px-6 py-3 border-b border-border/50 last:border-b-0 items-center"
+              className="grid grid-cols-[2fr_4rem_4rem_4rem_6rem_5rem_4rem_5rem] gap-3 px-6 py-3 border-b border-border/50 last:border-b-0 items-center"
             >
               <div className="min-w-0">
                 <p className="text-xs font-mono text-text-primary truncate">
@@ -227,7 +231,7 @@ export default function ClusterPage() {
               </span>
             </div>
           ))}
-        </Card>
+        </ResourceGrid>
       </div>
     </div>
   );
