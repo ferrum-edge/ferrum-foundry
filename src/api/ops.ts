@@ -34,6 +34,11 @@ export interface PressureGauge {
   ratio: number;
 }
 
+/** Authenticated GET /overload file-descriptor pressure, including `enforced`. */
+export interface FileDescriptorGauge extends PressureGauge {
+  enforced: boolean;
+}
+
 export interface OverloadSnapshot {
   level: OverloadLevel;
   message?: string;
@@ -43,7 +48,7 @@ export interface OverloadSnapshot {
   red_drop_probability_pct?: number;
   port_exhaustion_events?: number;
   pressure?: {
-    file_descriptors?: PressureGauge;
+    file_descriptors?: FileDescriptorGauge;
     connections?: PressureGauge;
     requests?: PressureGauge;
     event_loop_latency_us?: number;

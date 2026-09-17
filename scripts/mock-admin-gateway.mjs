@@ -457,7 +457,7 @@ const overload = {
   level: 'normal', draining: false, active_connections: 342, active_requests: 57,
   red_drop_probability_pct: 0, port_exhaustion_events: 0,
   pressure: {
-    file_descriptors: { current: 812, max: 65536, ratio: 0.012 },
+    file_descriptors: { current: 812, max: 65536, ratio: 0.012, enforced: true },
     connections: { current: 342, max: 20000, ratio: 0.017 },
     requests: { current: 57, max: 8000, ratio: 0.007 },
     event_loop_latency_us: 180,
