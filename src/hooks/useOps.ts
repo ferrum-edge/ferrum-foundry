@@ -65,12 +65,13 @@ export function useClusterStatus() {
   });
 }
 
-export function useBackendCapabilities() {
+export function useBackendCapabilities(enabled = true) {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["backendCapabilities"],
     queryFn: () => ops.getBackendCapabilities(queryScope(scope)),
     retry: false,
+    enabled,
   });
 }
 
