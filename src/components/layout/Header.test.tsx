@@ -115,4 +115,23 @@ describe("Header readiness and accessibility", () => {
     );
     expect(label?.textContent?.trim()).toBe("Active Namespace:");
   });
+
+  // jsdom has no layout engine. These assertions protect the responsive
+  // container contract; they do not claim pixel visibility at 390px.
+  it("constrains the namespace selector so the selected value can truncate", () => {
+    const trigger = host.querySelector('[role="combobox"]');
+    expect(trigger).not.toBeNull();
+    const shell = trigger!.closest("[class*='max-w-36']");
+    expect(shell).not.toBeNull();
+    expect(shell!.classList.contains("min-w-0")).toBe(true);
+    expect(shell!.classList.contains("max-w-36")).toBe(true);
+    expect(shell!.classList.contains("sm:max-w-44")).toBe(true);
+    expect(shell!.classList.contains("md:max-w-52")).toBe(true);
+    expect(trigger!.classList.contains("min-w-0")).toBe(true);
+    expect(trigger!.classList.contains("max-w-full")).toBe(true);
+    expect(trigger!.classList.contains("overflow-hidden")).toBe(true);
+    expect(trigger!.querySelector(".truncate")).not.toBeNull();
+    expect(trigger!.getAttribute("title")).toBe("default");
+    expect(host.querySelector('[aria-label="Switch to light theme"]')?.classList.contains("shrink-0")).toBe(true);
+  });
 });

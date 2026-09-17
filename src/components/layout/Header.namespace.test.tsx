@@ -59,12 +59,17 @@ beforeEach(() => {
   auth.principal.namespaces = undefined;
   localStorage.setItem(NAMESPACE_STORAGE_KEY, "retired");
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+    configurable: true,
+    value: vi.fn(),
+  });
 });
 afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
   client.clear();
   localStorage.removeItem(NAMESPACE_STORAGE_KEY);
+  Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
 });
 
 describe("Header namespace registry reconciliation", () => {
@@ -113,7 +118,33 @@ describe("Header namespace registry reconciliation", () => {
     await mount();
     await waitFor(() => expect(combobox().disabled).toBe(true));
     expect(combobox().textContent).toContain("No namespaces available");
+    expect(combobox().getAttribute("title")).toBe("No namespaces available");
     expect(combobox().textContent).not.toContain("retired");
     expect(localStorage.getItem(NAMESPACE_STORAGE_KEY)).toBe("retired");
+  });
+
+  // jsdom has no layout engine. These assertions protect the responsive
+  // container contract; they do not claim pixel visibility at 390px.
+  it("keeps the full namespace on the trigger and in the open listbox", async () => {
+    const name = "ferrum-foundry-demo";
+    localStorage.setItem(NAMESPACE_STORAGE_KEY, name);
+    list.mockResolvedValue([name]);
+    await mount();
+    await waitFor(() => expect(combobox().textContent).toContain(name));
+    const trigger = combobox();
+    expect(trigger.getAttribute("title")).toBe(name);
+    const shell = trigger.closest("[class*='max-w-36']");
+    expect(shell?.classList.contains("min-w-0")).toBe(true);
+    expect(shell?.classList.contains("max-w-36")).toBe(true);
+    expect(trigger.classList.contains("max-w-full")).toBe(true);
+    expect(trigger.querySelector(".truncate")).not.toBeNull();
+    await act(async () => {
+      trigger.focus();
+      trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    await waitFor(() => expect(trigger.getAttribute("aria-expanded")).toBe("true"));
+    const option = document.querySelector('[role="option"]');
+    expect(option?.textContent).toContain(name);
+    expect(option?.getAttribute("title")).toBe(name);
   });
 });
