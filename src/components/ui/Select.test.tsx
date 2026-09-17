@@ -130,4 +130,49 @@ describe("Select accessibility", () => {
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
     expect(referencedText(trigger, "aria-labelledby")).toBe("Backend scheme");
   });
+
+  it("truncates the trigger value and keeps the full label on title and in the listbox", async () => {
+    const long = "ferrum-foundry-demo";
+    await render(
+      <Select
+        label="Active Namespace"
+        value={long}
+        options={[
+          { value: long, label: long },
+          { value: "other", label: "other" },
+        ]}
+      />,
+    );
+    const trigger = host.querySelector<HTMLElement>('[role="combobox"]')!;
+    expect(trigger.classList.contains("min-w-0")).toBe(true);
+    expect(trigger.classList.contains("max-w-full")).toBe(true);
+    expect(trigger.classList.contains("overflow-hidden")).toBe(true);
+    expect(trigger.querySelector(".truncate")).not.toBeNull();
+    expect(trigger.getAttribute("title")).toBe(long);
+    expect(trigger.textContent).toContain(long);
+    await act(async () => {
+      trigger.focus();
+      trigger.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+      );
+    });
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    const option = [...document.querySelectorAll('[role="option"]')].find((entry) =>
+      entry.textContent?.includes(long),
+    );
+    expect(option).toBeDefined();
+    expect(option!.textContent).toContain(long);
+    expect(option!.getAttribute("title")).toBe(long);
+    let node: Element | null = option!;
+    let popover: Element | undefined;
+    while (node) {
+      if (node.classList.contains("w-max")) {
+        popover = node;
+        break;
+      }
+      node = node.parentElement;
+    }
+    expect(popover).toBeDefined();
+    expect(popover!.className).toContain("max-w-[calc(100vw-2rem)]");
+  });
 });

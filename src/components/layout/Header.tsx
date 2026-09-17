@@ -86,7 +86,7 @@ export function Header({ onToggleSidebar }: HeaderProps) {
           >
             Active Namespace:
           </span>
-          <div className="w-36 min-w-0 sm:w-44 md:w-52">
+          <div className="min-w-0 max-w-36 sm:max-w-44 md:max-w-52">
             <Select
               aria-labelledby={namespaceLabelId}
               value={noNamespaces ? "" : selectedNamespace}
@@ -101,7 +101,7 @@ export function Header({ onToggleSidebar }: HeaderProps) {
         {/* Theme toggle */}
         <button
           onClick={toggleTheme}
-          className="p-1.5 rounded-lg text-text-secondary hover:bg-bg-card-hover hover:text-text-primary transition-colors cursor-pointer"
+          className="shrink-0 p-1.5 rounded-lg text-text-secondary hover:bg-bg-card-hover hover:text-text-primary transition-colors cursor-pointer"
           aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
         >
           {theme === "dark" ? (
@@ -117,7 +117,7 @@ export function Header({ onToggleSidebar }: HeaderProps) {
 
         {/* Connection status indicator */}
         <div
-          className="flex items-center gap-2 text-xs text-text-muted"
+          className="flex shrink-0 items-center gap-2 text-xs text-text-muted"
           title={principal ? `${principal.displayName} · ${principal.role}` : connectionLabel}
         >
           <span className="relative flex h-2.5 w-2.5">
@@ -132,7 +132,7 @@ export function Header({ onToggleSidebar }: HeaderProps) {
         {/* Sign out */}
         <button
           onClick={() => void logout()}
-          className="p-1.5 rounded-lg text-text-secondary hover:bg-bg-card-hover hover:text-text-primary transition-colors cursor-pointer"
+          className="shrink-0 p-1.5 rounded-lg text-text-secondary hover:bg-bg-card-hover hover:text-text-primary transition-colors cursor-pointer"
           aria-label="Sign out"
           title="Sign out"
         >

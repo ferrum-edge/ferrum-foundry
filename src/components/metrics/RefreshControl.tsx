@@ -47,13 +47,13 @@ export function RefreshControl({
   );
 
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex min-w-0 flex-col flex-wrap items-stretch gap-3 sm:flex-row sm:items-center">
       {agoText && (
-        <span className="text-text-muted text-xs whitespace-nowrap">
+        <span className="text-text-muted text-xs sm:whitespace-nowrap">
           {lastUpdatedLabel}: {agoText}
         </span>
       )}
-      <div className="w-28">
+      <div className="w-full min-w-0 sm:w-28">
         <Select
           value={String(refreshInterval)}
           onValueChange={(v) => onIntervalChange(Number(v))}

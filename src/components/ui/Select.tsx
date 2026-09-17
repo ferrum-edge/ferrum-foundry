@@ -48,10 +48,15 @@ export function Select({
   const id = useId();
   const labelId = `${id}-label`;
   const descriptionId = `${id}-description`;
+  const selectedLabel = (groups?.flatMap((group) => group.options) ?? options)?.find(
+    (option) => option.value === value,
+  )?.label;
+  const triggerTitle = selectedLabel || value || placeholder;
   const renderOption = (option: SelectOption) => (
     <SelectPrimitive.Item
       key={option.value}
       value={option.value}
+      title={option.label}
       className="relative flex min-w-0 items-center px-3 py-2 text-sm text-text-primary rounded-md cursor-pointer select-none outline-none data-[highlighted]:bg-bg-card-hover"
     >
       <SelectPrimitive.ItemText>
@@ -76,9 +81,10 @@ export function Select({
           aria-labelledby={label ? labelId : ariaLabelledBy}
           aria-describedby={error || helpText ? descriptionId : undefined}
           aria-invalid={error ? true : undefined}
-          className={`inline-flex w-full min-w-0 items-center justify-between bg-bg-input border rounded-lg px-3 py-2 text-sm transition-colors duration-150 ${error ? "border-danger" : "border-border focus:border-orange focus:ring-1 focus:ring-orange/30"} ${value ? "text-text-primary" : "text-text-muted"} ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+          title={triggerTitle}
+          className={`flex w-full min-w-0 max-w-full items-center justify-between overflow-hidden bg-bg-input border rounded-lg px-3 py-2 text-sm transition-colors duration-150 ${error ? "border-danger" : "border-border focus:border-orange focus:ring-1 focus:ring-orange/30"} ${value ? "text-text-primary" : "text-text-muted"} ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
         >
-          <SelectPrimitive.Value className="truncate" placeholder={placeholder} />
+          <span className="min-w-0 flex-1 truncate text-left"><SelectPrimitive.Value placeholder={placeholder} /></span>
           <SelectPrimitive.Icon className="ml-2 shrink-0 text-text-muted">
             <svg
               width="12"
@@ -100,7 +106,7 @@ export function Select({
 
         <SelectPrimitive.Portal>
           <SelectPrimitive.Content
-            className="z-50 min-w-[var(--radix-select-trigger-width)] max-w-[calc(100vw-2rem)] bg-bg-card border border-border rounded-lg shadow-xl overflow-hidden"
+            className="z-50 min-w-[var(--radix-select-trigger-width)] w-max max-w-[calc(100vw-2rem)] bg-bg-card border border-border rounded-lg shadow-xl overflow-hidden"
             position="popper"
             sideOffset={4}
           >
