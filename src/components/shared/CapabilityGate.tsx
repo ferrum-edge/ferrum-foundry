@@ -102,7 +102,9 @@ export function ReadOnlySurface({
  * The reason is associated with the control through `aria-describedby`, so the
  * two are one announcement rather than two adjacent, unrelated fragments. The
  * full explanation rides along as visually hidden text because the visible
- * summary is only a few words.
+ * summary is only a few words. Denied actions receive `disabled` on the child
+ * itself so they share the same greyed appearance as surfaces that pass
+ * `disabled` directly.
  */
 export function WriteAction({
   verdict,
@@ -115,16 +117,14 @@ export function WriteAction({
 }) {
   const reasonId = useId();
   if (verdict.allowed) return <>{children}</>;
-  const described = isValidElement<{ "aria-describedby"?: string }>(children)
-    ? cloneElement(children, { "aria-describedby": reasonId })
+  const described = isValidElement<{ "aria-describedby"?: string; disabled?: boolean }>(children)
+    ? cloneElement(children, { "aria-describedby": reasonId, disabled: true })
     : children;
   return (
     <div
       className={`flex flex-col gap-1 ${align === "end" ? "items-end text-right" : "items-start text-left"}`}
     >
-      <fieldset disabled className="contents">
-        {described}
-      </fieldset>
+      {described}
       <p
         id={reasonId}
         role="status"

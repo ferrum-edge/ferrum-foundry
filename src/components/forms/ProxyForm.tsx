@@ -202,7 +202,7 @@ function MethodCheckboxGroup({
         {options.map((method) => (
           <label
             key={method}
-            className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border cursor-pointer transition-colors ${
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border cursor-pointer transition-colors has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60 has-[:disabled]:pointer-events-none ${
               selected.includes(method)
                 ? "bg-orange/15 text-orange-light border-orange/30"
                 : "bg-transparent text-text-secondary border-border hover:border-border-hover"
@@ -239,12 +239,12 @@ function Checkbox({
 }) {
   return (
     <div className="flex flex-col gap-1">
-      <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+      <label className="inline-flex items-center gap-2 cursor-pointer select-none has-[:disabled]:cursor-not-allowed">
         <input
           type="checkbox"
           checked={checked}
           onChange={(e) => onChange(e.target.checked)}
-          className="w-4 h-4 rounded border-border bg-bg-input text-orange accent-orange cursor-pointer"
+          className="w-4 h-4 rounded border-border bg-bg-input text-orange accent-orange cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
         />
         <span className="text-sm text-text-secondary">{label}</span>
       </label>

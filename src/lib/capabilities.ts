@@ -10,8 +10,8 @@
 /*                                                                     */
 /*    * the authenticated role on the Foundry session principal        */
 /*      (`viewer` / `operator` / `admin`), and                         */
-/*    * the gateway's operating mode plus `admin_writes_enabled` from  */
-/*      the authenticated `/health` snapshot.                          */
+/*    * the gateway's operating mode, `admin_writes_enabled`, and      */
+/*      `status` from the authenticated `/health` snapshot.            */
 /*                                                                     */
 /*  Read truthfulness applies: a fact that has not been read is `null` */
 /*  and never concludes anything. An unknown role or an unread health  */
@@ -39,7 +39,8 @@ export function isGatewayRole(value: unknown): value is GatewayRole {
  * by a config file, by the control plane, by mesh policy sources, or by the
  * node agent rather than by an admin-writable store. `database` and `cp` set
  * the same flag from `FERRUM_ADMIN_READ_ONLY`, which the mode string cannot
- * reveal — there they are observed through `admin_writes_enabled` instead.
+ * reveal. There they are observed through `admin_writes_enabled === false`
+ * together with a health `status` that is not `"degraded"`.
  */
 const READ_ONLY_MODES = new Set(["file", "dp", "mesh", "node_agent"]);
 
@@ -62,6 +63,13 @@ const WRITES_DISABLED_EXPLANATION =
   "The gateway reports that admin writes are disabled — a read-only admin API, " +
   "an unavailable configuration database, or a failover topology that does not " +
   "allow writes.";
+
+const ADMIN_READ_ONLY_FLAG_EXPLANATION =
+  "The gateway was started with FERRUM_ADMIN_READ_ONLY, so the admin API is read-only.";
+
+const NODE_AGENT_EXPORT_EXPLANATION =
+  "The gateway runs in node-agent mode: it has neither a configuration database " +
+  "nor a cached configuration, so configuration export is unavailable.";
 
 /** Surfaces the UI can present a write for. */
 export type CapabilitySurface =
@@ -104,6 +112,8 @@ export interface CapabilityFacts {
   mode: string | null;
   /** `health.admin_writes_enabled`, or `null` when it was not observed. */
   adminWritesEnabled: boolean | null;
+  /** `health.status`, or `null` when the health snapshot has not been read. */
+  status: string | null;
 }
 
 /**
@@ -117,9 +127,12 @@ export interface CapabilityFacts {
  * - `read-only-mode` — `AdminState::admit_non_config_db_write`, which the
  *   managed TLS / ACME handlers call. It applies the read-only gate and the
  *   database-availability gate but deliberately **not** the failover-topology
- *   gate, because those stores are independent of the config database. Gating
- *   it on `admin_writes_enabled` would invent a denial the gateway does not
- *   make, so only an observed read-only *mode* denies it.
+ *   gate, because those stores are independent of the config database. An
+ *   observed read-only *mode* denies it. On `database`/`cp`, so does
+ *   `admin_writes_enabled === false` together with a health `status` that is
+ *   not `"degraded"` (intentional `FERRUM_ADMIN_READ_ONLY`). Gating it on
+ *   `admin_writes_enabled` alone would invent a failover-topology denial the
+ *   gateway does not make.
  * - `none` — no gateway write gate at all: reads, operational actions
  *   (`admit_audited_operation`: rotate, validate, refresh, dry-run), and
  *   BFF-local writes that never reach the gateway.
@@ -199,8 +212,10 @@ const SURFACES: Record<CapabilitySurface, SurfaceDescriptor> = {
     headline: "Configuration export is unavailable",
     action: "export the gateway configuration",
     minimumRole: "admin",
-    // `GET /backup` is a read: `handle_backup` applies no write gate, and in a
-    // database-less read-only mode it serves the cached configuration.
+    // `GET /backup` is a read: `handle_backup` applies no write gate. file, dp,
+    // and mesh populate `cached_config` and serve that when there is no
+    // database. `node_agent` is the exception: it builds AdminState with
+    // `db: None` and `cached_config: None`, so export returns 503.
     gate: "none",
   },
   configBackup: {
@@ -250,15 +265,28 @@ export type GatewayWriteState =
   | { state: "read-only"; explanation: string }
   | { state: "unknown" };
 
+function observedMode(facts: CapabilityFacts): string | null {
+  return typeof facts.mode === "string" ? facts.mode.trim().toLowerCase() : null;
+}
+
+function observedStatus(facts: CapabilityFacts): string | null {
+  return typeof facts.status === "string" ? facts.status.trim().toLowerCase() : null;
+}
+
 /**
  * Classify only the read-only-mode gate — the one Ferrum Edge applies to every
  * admin mutation, including the independent managed TLS / ACME stores.
- * `unknown` whenever the mode has not been read or does not name a read-only
- * mode, because `FERRUM_ADMIN_READ_ONLY` on a `database`/`cp` gateway is
- * invisible in the mode string.
+ *
+ * `unknown` when neither an unconditional read-only mode nor the
+ * `FERRUM_ADMIN_READ_ONLY` observation has been read. On `database`/`cp` the
+ * mode string cannot reveal that flag; `handle_health` forces `status:
+ * "degraded"` only when writes are blocked **and** the process is not
+ * read-only, so `admin_writes_enabled === false` together with an observed
+ * `status` other than `"degraded"` is a positive observation of admin
+ * read-only mode and cannot fire on a failover-topology denial.
  */
 export function resolveReadOnlyModeState(facts: CapabilityFacts): GatewayWriteState {
-  const mode = typeof facts.mode === "string" ? facts.mode.trim().toLowerCase() : null;
+  const mode = observedMode(facts);
   if (mode && READ_ONLY_MODES.has(mode)) {
     return {
       state: "read-only",
@@ -266,6 +294,10 @@ export function resolveReadOnlyModeState(facts: CapabilityFacts): GatewayWriteSt
         MODE_EXPLANATIONS[mode] ??
         `The gateway runs in ${mode} mode, where the admin API is read-only.`,
     };
+  }
+  const status = observedStatus(facts);
+  if (facts.adminWritesEnabled === false && status && status !== "degraded") {
+    return { state: "read-only", explanation: ADMIN_READ_ONLY_FLAG_EXPLANATION };
   }
   return { state: "unknown" };
 }
@@ -303,6 +335,17 @@ export function resolveCapability(
       explanation:
         `Your session has the ${facts.role} role, which cannot ${action}. ` +
         `Ferrum Edge requires the ${minimumRole} role for this surface.`,
+    };
+  }
+
+  if (surface === "configExport" && observedMode(facts) === "node_agent") {
+    return {
+      allowed: false,
+      label,
+      headline,
+      blockedBy: "gateway-read-only",
+      summary: "The gateway has no cached configuration",
+      explanation: NODE_AGENT_EXPORT_EXPLANATION,
     };
   }
 

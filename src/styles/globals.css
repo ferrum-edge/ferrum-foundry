@@ -100,3 +100,10 @@ body {
   outline: 2px solid var(--orange);
   outline-offset: 2px;
 }
+
+/* Native textareas inside ReadOnlySurface are not Input/Select descendants, so
+   they would otherwise keep full-contrast author colors under fieldset[disabled]. */
+fieldset[disabled] textarea {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

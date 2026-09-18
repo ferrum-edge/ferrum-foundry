@@ -18,6 +18,7 @@ Two facts drive every verdict, both already read by the UI:
 | `role` | `principal.role` on the Foundry session (`GET /api/auth/session`) — `viewer`, `operator`, or `admin`. Validated with `isGatewayRole()` at the provider boundary, so an off-enum role from the network is `null` rather than a silent comparison against `undefined` |
 | `mode` | `mode` on the authenticated gateway health snapshot (`GET /health`) |
 | `adminWritesEnabled` | `admin_writes_enabled` on the same snapshot |
+| `status` | `status` on the same snapshot (`ok` / `degraded` / `starting` / `unavailable` / `draining`) |
 
 `CapabilityProvider` reads one health snapshot for the whole workspace and only
 accepts it while `resolveReadState` says `loaded`. A stale or failed read
@@ -55,7 +56,8 @@ runs it first and then falls back to `admin_writes_enabled`:
 | Observation | `read-only-mode` | `config-store` |
 | --- | --- | --- |
 | `mode` is `file`, `dp`, `mesh`, or `node_agent` | `read-only` | `read-only` |
-| `admin_writes_enabled === false` | `unknown` | `read-only` |
+| not a read-only mode, `admin_writes_enabled === false`, observed `status !== "degraded"` | `read-only` | `read-only` |
+| `admin_writes_enabled === false` (`status` unread or `"degraded"`) | `unknown` | `read-only` |
 | `admin_writes_enabled === true` | `unknown` | `enabled` |
 | neither observed | `unknown` | `unknown` |
 
@@ -63,13 +65,22 @@ The mode check runs first because it names a cause the operator can act on.
 Those four modes set `read_only: true` unconditionally (`src/modes/file.rs:1092`,
 `data_plane.rs:790`, `mesh/mod.rs:16015`, `node_agent.rs:1275`); `database` and
 `cp` take the same flag from `FERRUM_ADMIN_READ_ONLY` (`database.rs:2078`,
-`control_plane.rs:2439`), which the mode string cannot reveal — there it is only
-visible through `admin_writes_enabled`.
+`control_plane.rs:2439`), which the mode string cannot reveal.
 
-A `read-only-mode` surface must **not** be gated on `admin_writes_enabled`: that
-flag also folds in the failover-topology gate, which does not reach the
-independent TLS/ACME stores, so doing so would invent a denial the gateway does
-not make.
+On those writable modes the flag is still observable. `handle_health` forces
+`status: "degraded"` when writes are blocked **and** the process is not
+read-only (`src/admin/mod.rs:2823-2826`). The OpenAPI `HealthResponse` schema
+states the same split: intentional read-only mode does **not** set `degraded`,
+and `admin_writes_enabled: false` without read-only mode forces `degraded`. So
+on a mode that is not in the read-only set, `admin_writes_enabled === false`
+together with an observed `status !== "degraded"` is a positive observation of
+`FERRUM_ADMIN_READ_ONLY`, and cannot fire on a failover-topology denial (that
+path is `status: "degraded"`). An unread `status` still concludes nothing.
+
+A `read-only-mode` surface must **not** be gated on `admin_writes_enabled`
+alone: that flag also folds in the failover-topology gate, which does not
+reach the independent TLS/ACME stores, so doing so would invent a denial the
+gateway does not make.
 
 ## Surface matrix
 
@@ -92,7 +103,7 @@ the namespace registry, and audit.
 | `namespaceRegistry` | `admin` | `config-store` | `admit_write` on `/namespaces` |
 | `configBackup` (`POST /restore`) | `admin` | `config-store` | `admit_write` on `/restore` |
 | `gatewayTrust` | `admin` | `config-store` | `admit_write` on `/gateway-trust-bundles` |
-| `configExport` (`GET /backup`) | `admin` | `none` | `handle_backup` — a read, no write gate |
+| `configExport` (`GET /backup`) | `admin` | `none` (denied on `node_agent`) | `handle_backup` — a read, no write gate; `node_agent` has no cached config |
 | `tlsMaterial` (certificates, CA bundles, CRLs, OCSP, JWKS, ACME) | `admin` | `read-only-mode` | `admit_non_config_db_write` — all 18 handlers in `src/admin/tls_management.rs` |
 | `bffSettings` (`PUT /api/settings`, BFF-local) | `admin` | `none` | `requireRole('admin')` in `server/routes/settings.ts`; never reaches the gateway |
 
@@ -102,17 +113,22 @@ Two entries deserve their reasoning spelled out.
 live in stores independent of the configuration database, so `admin_writes_enabled`
 does not describe them — but every one of their 18 mutation handlers calls
 `admit_non_config_db_write`, whose first step is `admit_read_only_gate()`. On a
-`file`/`dp`/`mesh` gateway they return `403 {"error":"Admin API is in read-only mode"}`.
-Rotate and validate are the exemption: they go through `admit_audited_operation`,
-which does not apply the read-only gate, and stay available in every mode.
+`file`/`dp`/`mesh`/`node_agent` gateway they return `403 {"error":"Admin API is in
+read-only mode"}`. The same refusal applies on `database`/`cp` started with
+`FERRUM_ADMIN_READ_ONLY=true`, which the model now observes as writes-disabled
+plus a non-`degraded` health status. Rotate and validate are the exemption: they
+go through `admit_audited_operation`, which does not apply the read-only gate,
+and stay available in every mode.
 
-**`configExport` is `none`.** `GET /backup` is a read. `handle_backup`
-(`src/admin/mod.rs:9383`) applies no write gate at all, and when the process has
-no configuration database — as in `file` mode — it serves `cached_gateway_config()`,
-which file mode populates (`src/modes/file.rs:1090`). It returns `503` only when
-there is neither a database nor a cached config, which is not a state the model
-can observe. So export stays available to an admin in a read-only mode, and that
-matches the gateway.
+**`configExport` is `none`, except on `node_agent`.** `GET /backup` is a read.
+`handle_backup` (`src/admin/mod.rs:9383`) applies no write gate. `file`, `dp`,
+and `mesh` populate `cached_config` (`file.rs:1090`, `data_plane.rs:787`,
+`mesh/mod.rs:16012`) and serve that when there is no configuration database.
+`node_agent` is the exception: it builds `AdminState { db: None, cached_config:
+None }` (`src/modes/node_agent.rs:1269-1275`), so the cached-config branch of
+`handle_backup` returns `503 {"error":"Database unavailable and no cached
+config"}`. The model observes that mode and denies export there. On every other
+read-only mode, export stays available to an admin.
 
 A role denial is reported ahead of a gateway-mode denial: it is the more
 fundamental and the more stable of the two.
@@ -132,13 +148,23 @@ fundamental and the more stable of the two.
 - `WriteAction` — a single unavailable action with a short visible reason,
   associated with the control through `aria-describedby`. The full explanation
   rides along as visually hidden text, since a disabled control is not
-  focusable and the visible summary is only a few words.
+  focusable and the visible summary is only a few words. The child receives
+  `disabled: true` via `cloneElement` so a denied button matches the greyed
+  controls that pass `disabled` directly (TLS inventory, API spec import).
 
 A disabled control is never the only signal: every read-only surface carries
 visible text naming the role or the gateway mode **before** the user edits
 anything. `role="status"` on the reason means a denial that resolves *after*
 first paint is announced; one already present at first paint is not announced by
 a live region, which is why the `aria-describedby` association exists.
+
+`Input`, `Select` triggers, and the form `Checkbox` helpers carry
+`disabled:opacity-60 disabled:cursor-not-allowed` so a `fieldset[disabled]`
+descendant — which matches `:disabled` — reads as disabled. HTTP-method chip
+labels wrap an `sr-only` checkbox, so they use `has-[:disabled]:` to lose
+`cursor-pointer` and hover; a `:disabled` variant on the hidden input would not
+restyle the label. Native textareas under the fieldset are covered in
+`src/styles/globals.css`.
 
 Forms additionally refuse to submit while their capability is denied, so a
 programmatic submit cannot slip past the presentation.
@@ -169,7 +195,8 @@ still **read** stays reachable:
    `ReadOnlySurface`, or `WriteAction`.
 3. Guard the mutation handler with `if (!capability.allowed) return;`. Guard the
    *mutation*, not the button, when one control serves both a read and a write.
-4. Extend `src/lib/capabilities.test.ts` with the new row, and
+4. Extend `src/lib/capabilities.test.ts` with the new row (the three gate lists
+   must still partition `CAPABILITY_SURFACES`), and
    `scripts/mock-admin-gateway.mjs` if the gateway refuses it in a read-only mode.
 
 ## Drift
