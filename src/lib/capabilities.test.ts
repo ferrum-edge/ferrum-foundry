@@ -55,8 +55,9 @@ function facts(
   role: GatewayRole | null,
   mode: string | null,
   adminWritesEnabled: boolean | null = mode === null ? null : true,
+  status: string | null = null,
 ): CapabilityFacts {
-  return { role, mode, adminWritesEnabled };
+  return { role, mode, adminWritesEnabled, status };
 }
 
 describe("gateway write state", () => {
@@ -140,8 +141,15 @@ describe("role x mode capability matrix", () => {
         expect(capabilities[surface].blockedBy).toBe("gateway-read-only");
         expect(capabilities[surface].explanation).toContain(MODE_PHRASE[mode]);
       }
-      for (const surface of UNGATED_SURFACES) {
-        expect(capabilities[surface].allowed).toBe(true);
+      expect(capabilities.operationalActions.allowed).toBe(true);
+      expect(capabilities.bffSettings.allowed).toBe(true);
+      if (mode === "node_agent") {
+        expect(capabilities.configExport.allowed).toBe(false);
+        expect(capabilities.configExport.blockedBy).toBe("gateway-read-only");
+        expect(capabilities.configExport.explanation).toContain("node-agent mode");
+        expect(capabilities.configExport.explanation).toContain("cached configuration");
+      } else {
+        expect(capabilities.configExport.allowed).toBe(true);
       }
     },
   );
@@ -159,19 +167,28 @@ describe("role x mode capability matrix", () => {
   it("keeps managed TLS material off the config-store gate on a writable mode", () => {
     // `admin_writes_enabled` is `!admin_writes_currently_blocked()`, which also
     // folds in the sticky config-DB failover gate. That gate does not reach the
-    // independent TLS/ACME stores, so denying them here would be invented.
+    // independent TLS/ACME stores, so denying them from writes-disabled alone
+    // (no non-degraded status) would be invented.
     const capabilities = resolveCapabilities(facts("admin", "database", false));
     expect(capabilities.tlsMaterial.allowed).toBe(true);
     expect(capabilities.proxies.allowed).toBe(false);
     expect(capabilities.proxies.blockedBy).toBe("gateway-read-only");
   });
 
-  it("keeps operational actions, export, and BFF settings off every gateway gate", () => {
+  it("denies configuration export on node_agent because there is no cached config", () => {
+    const verdict = resolveCapability("configExport", facts("admin", "node_agent", null));
+    expect(verdict.allowed).toBe(false);
+    expect(verdict.blockedBy).toBe("gateway-read-only");
+    expect(verdict.explanation).toContain("node-agent mode");
+    expect(verdict.explanation).toContain("cached configuration");
+    expect(resolveCapability("configExport", facts("admin", "file", null)).allowed).toBe(true);
+  });
+
+  it("keeps operational actions and BFF settings off every gateway gate", () => {
     for (const mode of [...READ_ONLY_MODES, "database"]) {
       const capabilities = resolveCapabilities(facts("admin", mode, false));
-      for (const surface of UNGATED_SURFACES) {
-        expect(capabilities[surface].allowed).toBe(true);
-      }
+      expect(capabilities.operationalActions.allowed).toBe(true);
+      expect(capabilities.bffSettings.allowed).toBe(true);
     }
   });
 
@@ -203,14 +220,61 @@ describe("read-only-mode gate", () => {
     expect(state.state).toBe("read-only");
   });
 
-  it("stays unknown on a writable mode even when admin writes are disabled", () => {
+  it("stays unknown on a writable mode when writes are disabled without a status", () => {
     // `FERRUM_ADMIN_READ_ONLY` on a database/cp gateway is invisible in the
-    // mode string, and `admin_writes_enabled` cannot distinguish it from the
-    // failover gate, so this gate concludes nothing.
+    // mode string. Without an observed health status the third case cannot
+    // distinguish it from failover, so this gate concludes nothing.
     expect(resolveReadOnlyModeState(facts("admin", "database", false))).toEqual({
       state: "unknown",
     });
     expect(resolveReadOnlyModeState(facts("admin", null))).toEqual({ state: "unknown" });
+  });
+
+  it("treats writes-disabled plus status ok as admin read-only on database/cp", () => {
+    // handle_health forces status: "degraded" when writes are blocked AND the
+    // process is not read-only. status: "ok" with admin_writes_enabled: false
+    // on a writable mode is therefore FERRUM_ADMIN_READ_ONLY.
+    for (const mode of ["database", "cp"] as const) {
+      const state = resolveReadOnlyModeState(facts("admin", mode, false, "ok"));
+      expect(state.state).toBe("read-only");
+      expect(state.state === "read-only" && state.explanation).toContain("FERRUM_ADMIN_READ_ONLY");
+      const capabilities = resolveCapabilities(facts("admin", mode, false, "ok"));
+      for (const surface of READ_ONLY_MODE_SURFACES) {
+        expect(capabilities[surface].allowed).toBe(false);
+        expect(capabilities[surface].blockedBy).toBe("gateway-read-only");
+        expect(capabilities[surface].explanation).toContain("FERRUM_ADMIN_READ_ONLY");
+      }
+      expect(capabilities.proxies.allowed).toBe(false);
+      expect(capabilities.operationalActions.allowed).toBe(true);
+    }
+  });
+
+  it("does not treat writes-disabled plus status degraded as read-only mode", () => {
+    // Failover / DB-unavailable: handle_health forces degraded when writes are
+    // blocked and the process is not read-only. That is a different gate.
+    const state = resolveReadOnlyModeState(facts("admin", "database", false, "degraded"));
+    expect(state).toEqual({ state: "unknown" });
+    const capabilities = resolveCapabilities(facts("admin", "database", false, "degraded"));
+    expect(capabilities.tlsMaterial.allowed).toBe(true);
+    expect(capabilities.proxies.allowed).toBe(false);
+  });
+
+  it("still reports file mode read-only regardless of health status", () => {
+    expect(resolveReadOnlyModeState(facts("admin", "file", false, "ok")).state).toBe("read-only");
+    expect(resolveReadOnlyModeState(facts("admin", "file", false, "degraded")).state).toBe(
+      "read-only",
+    );
+    const capabilities = resolveCapabilities(facts("admin", "file", false, "ok"));
+    expect(capabilities.tlsMaterial.allowed).toBe(false);
+    expect(capabilities.tlsMaterial.explanation).toContain("file mode");
+  });
+});
+
+describe("surface gate lists", () => {
+  it("partitions every capability surface across the three gate lists", () => {
+    expect(
+      [...CONFIG_STORE_SURFACES, ...READ_ONLY_MODE_SURFACES, ...UNGATED_SURFACES].sort(),
+    ).toEqual([...CAPABILITY_SURFACES].sort());
   });
 });
 

@@ -99,12 +99,12 @@ function Checkbox({
   onChange: (checked: boolean) => void;
 }) {
   return (
-    <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+    <label className="inline-flex items-center gap-2 cursor-pointer select-none has-[:disabled]:cursor-not-allowed">
       <input
         type="checkbox"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
-        className="w-4 h-4 rounded border-border bg-bg-input text-orange accent-orange cursor-pointer"
+        className="w-4 h-4 rounded border-border bg-bg-input text-orange accent-orange cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
       />
       <span className="text-sm text-text-secondary">{label}</span>
     </label>

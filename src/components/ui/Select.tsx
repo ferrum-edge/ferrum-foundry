@@ -82,7 +82,7 @@ export function Select({
           aria-describedby={error || helpText ? descriptionId : undefined}
           aria-invalid={error ? true : undefined}
           title={triggerTitle}
-          className={`flex w-full min-w-0 max-w-full items-center justify-between overflow-hidden bg-bg-input border rounded-lg px-3 py-2 text-sm transition-colors duration-150 ${error ? "border-danger" : "border-border focus:border-orange focus:ring-1 focus:ring-orange/30"} ${value ? "text-text-primary" : "text-text-muted"} ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+          className={`flex w-full min-w-0 max-w-full items-center justify-between overflow-hidden bg-bg-input border rounded-lg px-3 py-2 text-sm transition-colors duration-150 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed ${error ? "border-danger" : "border-border focus:border-orange focus:ring-1 focus:ring-orange/30"} ${value ? "text-text-primary" : "text-text-muted"}`}
         >
           <span className="min-w-0 flex-1 truncate text-left"><SelectPrimitive.Value placeholder={placeholder} /></span>
           <SelectPrimitive.Icon className="ml-2 shrink-0 text-text-muted">

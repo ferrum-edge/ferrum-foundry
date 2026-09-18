@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The client-side capability model observes `FERRUM_ADMIN_READ_ONLY` on `database`/`cp` gateways (`admin_writes_enabled: false` with health `status` other than `degraded`), denies configuration export on `node_agent`, and presents disabled fieldset descendants and denied `WriteAction` buttons with the same greyed appearance as controls that pass `disabled` directly (#373).
 - Cluster backend capabilities on a control plane explain that probes belong to a data plane instead of showing a permanent read error and Re-probe All (#364).
 - Overload protection shows disabled file-descriptor shedding and unconfigured request limits instead of a misleading `current / 0` ratio (#360).
 - Keep proxy, consumer, upstream, and plugin editors mounted through failed background reads, preserving unsaved fields and group membership with a retry notice (#299).
