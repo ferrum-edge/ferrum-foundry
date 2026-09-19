@@ -462,8 +462,16 @@ const health = {
   status: 'ok', ready: true, admin_writes_enabled: true, timestamp: now(),
   mode: 'database',
   database: { status: 'connected', type: 'sqlite', pool: { size: 5, idle: 4, active: 1, max_connections: 10 } },
-  fips: { mode: 'off', enforcing: false, build_capable: false, build_profile: 'crypto-ring', provider: 'ring', module_self_test_passed: true, provider_algorithms_approved: false, certified: false, boundary_documentation: 'docs/fips.md' },
+  fips: { mode: 'off', enforcing: false, build_capable: false, build_profile: 'crypto-ring', provider: 'ring', module_self_test_passed: false, provider_algorithms_approved: false, certified: false, boundary_documentation: 'docs/fips.md' },
   cached_config: { available: true, loaded_at: ago(2), proxy_count: proxies.length, consumer_count: consumers.length },
+  gateway_listeners: { config_generation: 1, desired_listeners: 0, active_listeners: 0, failed_ports: 0, active_failures: 0, retained_failures: 0, truncated: false, overflowed: false, active_by_category: [], failures: [] },
+  database_polling: { status: 'ok', consecutive_identical_rejections: 0, current_backoff_bucket: 'none', current_backoff_seconds: 0, last_poll_completed_at: now() },
+  logging: { stdout: null, stderr: null },
+  log_sink_record_loss: { dropped_total: 0, accepted_total: 0, dropped_by_plugin: {} },
+  jwks_trust: { fresh: 0, grace: 0, expired: 0, max_age_seconds: { fresh: 0, grace: 0, expired: 0 } },
+  kafka_logging: [], ai_transcript_audit: [],
+  // Ordinary audit collection is off by default upstream. The demo's existing
+  // records remain readable; absence of new records must not imply no writes.
 };
 
 /** Health snapshot for `mode`; file mode has no configured database. */
@@ -471,6 +479,13 @@ export function buildHealth(mode, base = health) {
   const readOnly = READ_ONLY_GATEWAY_MODES.has(mode);
   const snapshot = { ...base, mode, admin_writes_enabled: !readOnly };
   if (mode === 'file') delete snapshot.database;
+  if (!['database', 'cp'].includes(mode)) delete snapshot.database_polling;
+  if (!['database', 'file', 'dp'].includes(mode)) delete snapshot.gateway_listeners;
+  snapshot.namespace = {
+    active: ['cp', 'node_agent'].includes(mode) ? null : 'ferrum',
+    serving_scope: mode === 'cp' ? 'control-plane' : mode === 'node_agent' ? 'no-data-plane' : 'single-namespace-data-plane',
+    data_plane_single_namespace: !['cp', 'node_agent'].includes(mode),
+  };
   return snapshot;
 }
 
@@ -591,6 +606,37 @@ const meshData = {
   },
 };
 
+/** Raw by-proxy documents have no UUID envelope. Namespaces bind both reads. */
+export function apiSpecByProxyResponse(specs, documents, namespace, proxyId) {
+  const spec = specs.find(s => s.namespace === namespace && s.proxy_id === proxyId);
+  return spec
+    ? [200, documents[spec.id], 'application/yaml']
+    : [404, { error: 'API spec not found' }, 'application/json'];
+}
+
+export function apiSpecListResponse(specs, url, namespace) {
+  const proxyId = url.searchParams.get('proxy_id');
+  const filtered = specs.filter(s => s.namespace === namespace && (!proxyId || s.proxy_id === proxyId));
+  const offset = Number(url.searchParams.get('offset') ?? 0);
+  const limit = Number(url.searchParams.get('limit') ?? 50);
+  const items = filtered.slice(offset, offset + limit).map(spec => {
+    const summary = { ...spec };
+    delete summary.namespace;
+    delete summary.content_encoding;
+    return summary;
+  });
+  return { items, limit, offset, next_offset: offset + items.length < filtered.length ? offset + items.length : null, total: filtered.length };
+}
+
+export function runtimeOverlayResponse(mode) {
+  if (mode !== 'mesh') return [404, { error: 'No active mesh runtime overlay' }];
+  return [200, { namespace: 'ferrum', version: 'demo-accepted-1', runtime_overlay: { fields: {
+    'ferrum.log.level': { kind: 'string', value: 'info' },
+    'ferrum.request_transformer.demo.enabled': { kind: 'bool', value: true },
+    'ferrum.fault_injection.demo.abort_percent': { kind: 'fractional_percent', value: { numerator: 1, denominator: 'hundred' } },
+  } } }];
+}
+
 /* ---------------- Server ---------------- */
 
 const server = createServer(async (req, res) => {
@@ -650,6 +696,7 @@ const server = createServer(async (req, res) => {
   if (path === '/backend-capabilities/refresh') return send(200, { status: 'refreshed' });
 
   /* mesh — sample graph; everything else 404s like a non-mesh gateway */
+  if (path === '/mesh/runtime-overlay' && method === 'GET') return send(...runtimeOverlayResponse(GATEWAY_MODE));
   if (path === '/mesh/service-graph') return send(200, meshData['service-graph']);
   if (path.startsWith('/mesh/') || path.startsWith('/node-waypoint') || path.startsWith('/service-waypoint')) {
     return send(404, { error: 'mesh mode not active' });
@@ -657,7 +704,7 @@ const server = createServer(async (req, res) => {
 
   /* audit */
   if (path === '/audit') {
-    let items = auditEvents;
+    let items = auditEvents.filter(event => event.namespace === ns);
     for (const key of ['actor', 'action', 'resource_type', 'resource_id']) {
       const value = url.searchParams.get(key);
       if (value) items = items.filter((e) => e[key] === value);
@@ -680,18 +727,20 @@ const server = createServer(async (req, res) => {
 
   /* api specs */
   if (path === '/api-specs' && method === 'GET') {
-    return send(200, { items: apiSpecs, limit: 50, offset: 0, next_offset: null, total: apiSpecs.length });
+    return send(200, apiSpecListResponse(apiSpecs, url, ns));
   }
   if (path === '/api-specs' && method === 'POST') {
     const id = `spec-${randomUUID().slice(0, 8)}`;
     const doc = typeof body._raw === 'string' ? body._raw : JSON.stringify(body);
     specDocuments[id] = doc;
-    apiSpecs.push({ id, proxy_id: `proxy-${id}`, namespace: 'ferrum', spec_version: '3.1.0', spec_format: doc.trimStart().startsWith('{') ? 'json' : 'yaml', title: extractSpecTitle(doc), info_version: '1.0.0', description: null, contact_name: null, contact_email: null, license_name: null, license_identifier: null, tags: [], server_urls: [], operation_count: 1, uncompressed_size: doc.length, content_hash: 'cafebabe', content_encoding: 'gzip', created_at: now(), updated_at: now() });
+    apiSpecs.push({ id, proxy_id: `proxy-${id}`, namespace: ns, spec_version: '3.1.0', spec_format: doc.trimStart().startsWith('{') ? 'json' : 'yaml', title: extractSpecTitle(doc), info_version: '1.0.0', description: null, contact_name: null, contact_email: null, license_name: null, license_identifier: null, tags: [], server_urls: [], operation_count: 1, uncompressed_size: doc.length, content_hash: 'cafebabe', content_encoding: 'gzip', created_at: now(), updated_at: now() });
     return send(201, { id, proxy_id: `proxy-${id}`, spec_version: '3.1.0', content_hash: 'cafebabe' });
   }
+  const byProxyMatch = path.match(/^\/api-specs\/by-proxy\/([^/]+)$/);
+  if (byProxyMatch && method === 'GET') return send(...apiSpecByProxyResponse(apiSpecs, specDocuments, ns, decodeURIComponent(byProxyMatch[1])));
   const specMatch = path.match(/^\/api-specs\/([^/]+)$/);
   if (specMatch) {
-    const spec = apiSpecs.find((s) => s.id === specMatch[1]);
+    const spec = apiSpecs.find((s) => s.id === specMatch[1] && s.namespace === ns);
     if (!spec) return send(404, { error: 'not found' });
     if (method === 'GET') return send(200, specDocuments[spec.id] ?? '# document unavailable', 'application/yaml');
     if (method === 'PUT') {

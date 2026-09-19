@@ -7,11 +7,11 @@ import { stubFetch } from "@/test/__tests__/harness";
 
 const scope = { namespace: "tenant-a" };
 const summary: specs.ApiSpecSummary = {
-  id: "orders-spec", proxy_id: "orders", namespace: "tenant-a", spec_version: "3.1.0",
+  id: "orders-spec", proxy_id: "orders", spec_version: "3.1.0",
   spec_format: "yaml", title: "Orders", info_version: "1.0", description: null,
   contact_name: null, contact_email: null, license_name: null, license_identifier: null,
   tags: ["orders"], server_urls: ["https://orders.example.test"], operation_count: 2,
-  uncompressed_size: 80, content_hash: "fixture-hash", content_encoding: "gzip",
+  uncompressed_size: 80, content_hash: "fixture-hash",
   created_at: "2026-09-01T00:00:00Z", updated_at: "2026-09-01T00:00:00Z",
 };
 let requests: Request[];
@@ -157,4 +157,49 @@ describe("API spec request contracts", () => {
     expect(requests).toHaveLength(1);
     expect(popup).not.toHaveBeenCalled();
   });
+});
+
+describe('proxy binding contracts', () => {
+  it('reads summary UUIDs via the filtered list and raw content via by-proxy', async () => {
+    respond.mockImplementation(request => {
+      const url = new URL(request.url);
+      if (url.pathname.includes('/by-proxy/')) return new Response('openapi: 3.1.0\n', { headers: { 'content-type': 'application/yaml' } });
+      expect(url.searchParams.get('proxy_id')).toBe('orders');
+      return Response.json(listPage());
+    });
+    expect((await specs.listByProxy(scope, 'orders'))[0].id).toBe('orders-spec');
+    expect(await specs.getDocumentByProxy(scope, 'orders')).toBe('openapi: 3.1.0\n');
+    expect(new URL(requests[1].url).pathname).toBe('/api/proxy/api-specs/by-proxy/orders');
+    expect(requests[1].headers.get('accept')).toBe('application/yaml');
+    expect(requests.every(r => r.headers.get('X-Ferrum-Namespace') === 'tenant-a')).toBe(true);
+  });
+
+  it('does not conflate a documented missing binding and arbitrary failures', async () => {
+    respond.mockReturnValue(Response.json({ error: 'API spec not found' }, { status: 404 }));
+    expect(await specs.getDocumentByProxy(scope, 'orders')).toBeNull();
+    respond.mockReturnValue(Response.json({ error: 'route not found' }, { status: 404 }));
+    await expect(specs.getDocumentByProxy(scope, 'orders')).rejects.toThrow();
+    expect(popup).not.toHaveBeenCalled();
+  });
+
+  it.each([401, 403, 503])('preserves HTTP %s as a failed binding read', async status => {
+    respond.mockReturnValue(Response.json({ error: 'unavailable' }, { status }));
+    await expect(specs.getDocumentByProxy(scope, 'orders')).rejects.toThrow();
+  });
+
+  it('accepts an empty metadata collection but rejects mismatched IDs and invalid envelopes', async () => {
+    respond.mockReturnValue(Response.json(listPage([])));
+    expect(await specs.listByProxy(scope, 'orders')).toEqual([]);
+    respond.mockReturnValue(Response.json(listPage([{ ...summary, proxy_id: 'other' }])));
+    await expect(specs.listByProxy(scope, 'orders')).rejects.toThrow('inconsistent');
+    respond.mockReturnValue(Response.json({ openapi: '3.1.0', info: {} }));
+    await expect(specs.listByProxy(scope, 'orders')).rejects.toThrow('inconsistent');
+  });
+});
+
+it('does not accept an empty or non-document successful by-proxy response', async () => {
+  respond.mockReturnValue(new Response('', { headers: { 'content-type': 'application/yaml' } }));
+  await expect(specs.getDocumentByProxy(scope, 'orders')).rejects.toThrow('invalid bound spec document');
+  respond.mockReturnValue(Response.json({ items: [] }));
+  await expect(specs.getDocumentByProxy(scope, 'orders')).rejects.toThrow('invalid bound spec document');
 });

@@ -1,3 +1,4 @@
+import { useSearch } from '@tanstack/react-router';
 /* ------------------------------------------------------------------ */
 /*  Ferrum Foundry – API spec import & management page                 */
 /* ------------------------------------------------------------------ */
@@ -73,13 +74,15 @@ paths:
  */
 export default function ApiSpecsPage() {
   const { scope } = useNamespace();
-  return <ApiSpecsWorkspace key={scope.namespace} />;
+  const routeSearch = useSearch({ strict: false }) as Record<string, unknown>;
+  const initialSpec = typeof routeSearch.spec === 'string' ? routeSearch.spec : '';
+  return <ApiSpecsWorkspace key={JSON.stringify([scope.namespace, initialSpec])} initialSpec={initialSpec} />;
 }
 
-function ApiSpecsWorkspace() {
+function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
   const { toast } = useToast();
   const { scope } = useNamespace();
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(initialSpec);
   const pagination = usePaginationParams();
   const searching = search.trim().length > 0;
   const pageQuery = useApiSpecs(pagination.paginationParams, !searching);

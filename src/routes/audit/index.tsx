@@ -2,6 +2,9 @@
 /*  Ferrum Foundry – Audit log page                                    */
 /* ------------------------------------------------------------------ */
 
+import { AuditPipelineCard } from '@/components/health/AuditPipelineCard';
+import { auditEmptyDescription } from '@/lib/auditStatus';
+import { useHealth } from '@/hooks/useMetrics';
 import { ReadState } from '@/components/shared/ReadState';
 import { useState } from "react";
 import { Card } from "@/components/ui/Card";
@@ -33,6 +36,7 @@ function actionBadge(action: string) {
 }
 
 export default function AuditPage() {
+  const healthQuery = useHealth(30_000);
   const [actor, setActor] = useState("");
   const [action, setAction] = useState("");
   const [resourceType, setResourceType] = useState("");
@@ -55,9 +59,11 @@ export default function AuditPage() {
       <div>
         <h1 className="text-2xl font-bold text-text-primary">Audit Log</h1>
         <p className="text-text-muted text-sm mt-1">
-          Every admin API mutation with actor, outcome, and a redacted diff.
+          Recorded admin API mutations with actor, outcome, and a redacted diff.
         </p>
       </div>
+
+      <AuditPipelineCard query={healthQuery} />
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3 items-end">
@@ -102,7 +108,7 @@ export default function AuditPage() {
           {events.length === 0 && (
             <EmptyState
               title="No audit events"
-              description="Admin API mutations will appear here."
+              description={auditEmptyDescription(healthQuery)}
             />
           )}
           {events.map((event) => (

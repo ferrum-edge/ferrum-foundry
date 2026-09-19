@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildHealth,
+  apiSpecByProxyResponse,
+  apiSpecListResponse,
+  runtimeOverlayResponse,
   crud,
   provisionerFromHeaders,
   READ_ONLY_GATEWAY_MODES,
@@ -472,4 +475,36 @@ test("node_agent is a read-only mode upstream", () => {
     403,
     { error: "Admin API is in read-only mode" },
   ]);
+});
+
+
+test("API spec binding metadata and raw lookup share namespace isolation", () => {
+  const specs = [
+    { id: 'spec-a', proxy_id: 'shared', namespace: 'a', content_encoding: 'gzip' },
+    { id: 'spec-b', proxy_id: 'shared', namespace: 'b', content_encoding: 'gzip' },
+  ];
+  const query = new URL('http://localhost/api-specs?proxy_id=shared&limit=2&offset=0');
+  assert.deepEqual(apiSpecListResponse(specs, query, 'a'), {
+    items: [{ id: 'spec-a', proxy_id: 'shared' }], total: 1, limit: 2, offset: 0, next_offset: null,
+  });
+  assert.deepEqual(apiSpecByProxyResponse(specs, { 'spec-a': 'openapi: 3.1.0' }, 'a', 'shared'),
+    [200, 'openapi: 3.1.0', 'application/yaml']);
+  assert.deepEqual(apiSpecByProxyResponse(specs, {}, 'c', 'shared'),
+    [404, { error: 'API spec not found' }, 'application/json']);
+});
+
+test("runtime overlay distinguishes mesh accepted state from no active overlay", () => {
+  assert.equal(runtimeOverlayResponse('mesh')[0], 200);
+  assert.equal(runtimeOverlayResponse('mesh')[1].runtime_overlay.fields['ferrum.log.level'].kind, 'string');
+  assert.deepEqual(runtimeOverlayResponse('database'), [404, { error: 'No active mesh runtime overlay' }]);
+});
+
+test("detailed mock health carries conditional diagnostics and namespace serving scope", () => {
+  const db = buildHealth('database');
+  assert.equal(db.namespace.serving_scope, 'single-namespace-data-plane');
+  assert.equal(db.database_polling.status, 'ok');
+  assert.equal('audit_pipeline' in db, false);
+  assert.equal(db.logging.stdout, null);
+  assert.equal('database_polling' in buildHealth('mesh'), false);
+  assert.equal(buildHealth('cp').namespace.active, null);
 });

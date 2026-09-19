@@ -105,6 +105,7 @@ export const services: ServiceWaypointServicesResponse = {
 
 export const meshResponses: Record<string, unknown> = {
   "mesh/service-graph": graph,
+  "mesh/runtime-overlay": { namespace: "api", version: "runtime-v1", runtime_overlay: { fields: { "ferrum.log.level": { kind: "string", value: "warn" } } } },
   "mesh/config-drift": config,
   "mesh/slice-drift": slices,
   "mesh/policy-denies/recent": denies,

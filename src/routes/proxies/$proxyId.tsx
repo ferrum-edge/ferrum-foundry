@@ -1,3 +1,4 @@
+import { ProxyApiSpecsCard } from '@/components/shared/ProxyApiSpecsCard';
 import { ResourceLabels } from "@/components/shared/ResourceLabels";
 /* ------------------------------------------------------------------ */
 /*  Ferrum Foundry – Proxy detail / edit page                          */
@@ -198,6 +199,7 @@ function ProxyEditor({ session }: { session: EditorSession }) {
       </div>
 
       <ResourceLabels labels={proxy.labels} />
+      <ProxyApiSpecsCard proxyId={proxyId} enabled={detailLive && !resourceQuery.isError} />
 
       {/* Tabs */}
       <Tabs defaultValue="config">

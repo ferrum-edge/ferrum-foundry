@@ -2,7 +2,8 @@
 /*  Ferrum Foundry – API spec import endpoints (types + functions)    */
 /* ------------------------------------------------------------------ */
 
-import { proxyApi, scoped, SILENT_ERRORS, type NamespaceScope } from "./client";
+import { isHTTPError } from 'ky';
+import { proxyApi, scoped, SILENT_ERRORS, extractApiErrorData, type NamespaceScope } from "./client";
 import { longRunningClientTimeout } from '../../server/waitBudget';
 import { observeMutation } from './mutationOutcome';
 
@@ -11,7 +12,6 @@ const readOptions = { timeout: longRunningClientTimeout('GET', '/api-specs'), re
 export interface ApiSpecSummary {
   id: string;
   proxy_id: string;
-  namespace: string;
   spec_version: string;
   spec_format: "json" | "yaml";
   title: string | null;
@@ -27,7 +27,6 @@ export interface ApiSpecSummary {
   uncompressed_size: number;
   content_hash: string;
   external_ref_digest?: string | null;
-  content_encoding: "gzip";
   created_at: string;
   updated_at: string;
 }
@@ -89,6 +88,40 @@ export async function list(
   return proxyApi
     .get("api-specs", scoped(scope, { ...readOptions, searchParams }))
     .json<ApiSpecListResponse>();
+}
+
+/** Summary lookup uses the filtered list: by-proxy returns a raw document,
+ * not a list or a metadata record, and does not carry the spec UUID.
+ * (namespace, proxy_id) is unique upstream. Never substitute proxy_id for id.
+ */
+export async function listByProxy(scope: NamespaceScope, proxyId: string): Promise<ApiSpecSummary[]> {
+  const page = await list(scope, { proxy_id: proxyId, offset: 0, limit: 2 });
+  if (!Array.isArray(page.items) || page.total !== page.items.length || page.items.length > 1 ||
+      page.offset !== 0 || page.next_offset !== null ||
+      page.items.some(item => !item || typeof item.id !== 'string' || !item.id || item.proxy_id !== proxyId)) {
+    throw new Error('Gateway returned inconsistent API spec binding metadata');
+  }
+  return page.items;
+}
+
+/** The actual by-proxy endpoint negotiates raw YAML, like GET /api-specs/{id}.
+ * A documented 404 means no binding, including a binding removed since listing.
+ * Other failures remain errors; a failed read must not look like an empty spec.
+ */
+export async function getDocumentByProxy(scope: NamespaceScope, proxyId: string): Promise<string | null> {
+  try {
+    const response = await proxyApi.get(`api-specs/by-proxy/${encodeURIComponent(proxyId)}`,
+      scoped(scope, { ...readOptions, headers: { accept: 'application/yaml' } }));
+    const document = await response.text();
+    if (!response.headers.get('content-type')?.includes('yaml') || !document.trim()) {
+      throw new Error('Gateway returned an invalid bound spec document response');
+    }
+    return document;
+  } catch (error) {
+    if (isHTTPError(error) && error.response.status === 404 &&
+        extractApiErrorData(error.data) === 'API spec not found') return null;
+    throw error;
+  }
 }
 
 /**

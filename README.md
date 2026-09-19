@@ -42,7 +42,7 @@ works the same way against a live Ferrum Edge gateway.
     </td>
     <td width="50%" valign="top">
       <img src="docs/screenshots/audit.png" alt="Audit log of Admin API mutations with actor and outcome" />
-      <sub><b>Audit log</b> — every Admin API mutation with its actor, outcome and a redacted diff, filterable by action and resource.</sub>
+      <sub><b>Audit log</b> — recorded Admin API mutations with collection and delivery status, filterable by action and resource.</sub>
     </td>
   </tr>
 </table>
@@ -71,8 +71,8 @@ data as needed. Revisit this policy before onboarding users.
 - **API Spec Import** - Create spec-managed proxies, upstreams, and plugins from OpenAPI documents (`x-ferrum-proxy` extensions) with replace/delete lifecycle
 - **Metrics Dashboard** - Gateway stats, overload protection, host runtime, circuit breakers, connection pools, health checks, load balancers, caches, API chargeback, and Prometheus metrics with one refresh policy across all panels, including per-route metrics. Manual stops periodic reads; Refresh Now refreshes every panel. Each independently fetched panel identifies its last successful sample, while the toolbar timestamp applies only to admin metrics. Control-plane and node-agent gateways show omitted pool/cache metrics as not reported; available gateway metrics remain visible
 - **Operations** - Audit log with filters and redacted diffs, CP/DP cluster topology, backend protocol capability probes, and full configuration backup/restore
-- **Mesh Observability** - Service graph, config/slice drift, policy denies, remote clusters and federation, egress scope testing, waypoints, and SPIFFE gateway trust (mesh-mode gateways)
-- **Health Monitoring** - Real-time gateway, database, and FIPS/readiness status
+- **Mesh Observability** - Service graph, config/slice drift, policy denies, accepted runtime overlays, remote clusters and federation, egress scope testing, waypoints, and SPIFFE gateway trust (mesh-mode gateways)
+- **Health Monitoring** - Gateway readiness, listeners, audit/logging loss, database polling, trust freshness, and mode-specific runtime diagnostics
 - **Namespace Support** - Browse and manage tenant resources across namespaces via `X-Ferrum-Namespace`; every operation is bound to the namespace active when it started (see `docs/authentication.md` → "Namespace binding"), and process/runtime surfaces such as TLS management remain fleet-global
 - **Dark / Light Theme** - Dark theme by default with a light theme toggle in the header
 
@@ -294,6 +294,7 @@ attestations. See [Release and supply-chain gates](docs/release-security.md).
 ## Documentation
 
 - [Deployment](docs/deployment.md) - production topology, full configuration reference, reverse proxy / Compose / Kubernetes examples, and a go-live checklist
+- [Operator visibility](docs/operator-visibility.md) - health and audit evidence, proxy-bound specs, and mesh Runtime
 - [Production authentication](docs/authentication.md) - trusted-proxy identity contract and downstream JWT claims
 - [Release and supply-chain gates](docs/release-security.md) - publication gates, image tags, provenance and SBOM
 - [Security](SECURITY.md) - supported versions and how to report a vulnerability privately
