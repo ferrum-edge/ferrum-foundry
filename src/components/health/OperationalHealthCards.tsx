@@ -90,7 +90,7 @@ export function OperationalHealthCards({ health: h }: { health: HealthResponse }
     {j && <HealthSection title="Remote JWKS trust" tone={j.expired > 0 ? 'red' : j.grace > 0 ? 'yellow' : 'default'}>
       <HealthFields fields={namedFields(j, ['fresh', 'grace', 'expired'])} />
       <h3 className="text-sm font-medium text-text-primary">Maximum age in seconds</h3>
-      {j.max_age_seconds && <HealthFields fields={namedFields(j.max_age_seconds, ['fresh', 'grace', 'expired'])} />
+      {j.max_age_seconds && <HealthFields fields={namedFields(j.max_age_seconds, ['fresh', 'grace', 'expired'])} />}
       <p className="text-xs text-text-muted">Active remote stores only. Grace degrades trust; expired stores fail readiness and token verification. Inline and retired stores are excluded.</p>
     </HealthSection>}
     {h.logging && (['stdout', 'stderr'] as const).map(name => {
@@ -99,7 +99,7 @@ export function OperationalHealthCards({ health: h }: { health: HealthResponse }
         status={!s ? 'Not reported' : s.healthy === false ? 'Unhealthy' : s.accepting === false ? 'Not accepting' : logLoss(s) ? 'Historical failures / loss' : 'Observed'}>
         {s ? <>
           <HealthFields fields={namedFields(s, ['healthy', 'accepting', 'queued_records', 'queued_bytes', 'reserved_bytes', 'queue_capacity_records', 'queue_capacity_bytes', 'max_record_bytes'])} />
-          {s.last_failure && <HealthFields fields={namedFields(s.last_failure, ['operation', 'error_kind', 'occurred_at'])} />
+          {s.last_failure && <HealthFields fields={namedFields(s.last_failure, ['operation', 'error_kind', 'occurred_at'])} />}
           <CounterNote /><HealthFields fields={namedFields(s, LOG_COUNTERS)} />
         </> : <p className="text-sm text-text-muted">No sink snapshot is available.</p>}
       </HealthSection>;
@@ -117,7 +117,7 @@ export function OperationalHealthCards({ health: h }: { health: HealthResponse }
       {h.kafka_logging.map(s => <div key={s.generation_id} className="space-y-3 border-t border-border pt-3 first:border-0 first:pt-0">
         <h3 className="text-sm font-medium text-text-primary">Generation {s.generation_id}{s.finalized ? ' · Finalized' : ''}</h3>
         <HealthFields fields={namedFields(s, ['healthy', 'accepting', 'finalized', 'in_flight', 'retained_bytes', 'buffer_max_bytes', 'max_entry_bytes', 'flush_timeout_seconds'])} />
-        {s.last_failure && <HealthFields fields={namedFields(s.last_failure, ['operation', 'error_kind', 'occurred_at'])} />
+        {s.last_failure && <HealthFields fields={namedFields(s.last_failure, ['operation', 'error_kind', 'occurred_at'])} />}
         <CounterNote scope="sink generation" /><HealthFields fields={namedFields(s, KAFKA_COUNTERS)} />
       </div>)}
     </HealthSection>}
