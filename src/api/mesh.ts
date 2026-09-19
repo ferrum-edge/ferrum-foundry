@@ -352,3 +352,45 @@ export async function getServiceWaypointServices(
     .get("service-waypoint/services", scoped(scope))
     .json<ServiceWaypointServicesResponse>();
 }
+
+/* ---------- Accepted runtime overlay (one connected workload) ---------- */
+
+export type MeshRuntimeValue =
+  | { kind: 'number'; value: number }
+  | { kind: 'string'; value: string }
+  | { kind: 'bool'; value: boolean }
+  | { kind: 'fractional_percent'; value: { numerator: number; denominator: 'hundred' | 'ten_thousand' | 'million' } };
+
+export interface MeshRuntimeOverlayResponse {
+  namespace: string;
+  version: string;
+  // Rust omits fields when the accepted overlay is empty, returning {}.
+  runtime_overlay: { fields?: Record<string, MeshRuntimeValue> };
+}
+
+function object(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function runtimeValue(value: unknown): value is MeshRuntimeValue {
+  if (!object(value)) return false;
+  if (value.kind === 'number') return typeof value.value === 'number' && Number.isFinite(value.value);
+  if (value.kind === 'string') return typeof value.value === 'string';
+  if (value.kind === 'bool') return typeof value.value === 'boolean';
+  if (value.kind !== 'fractional_percent' || !object(value.value)) return false;
+  return typeof value.value.numerator === 'number' && Number.isInteger(value.value.numerator) &&
+    value.value.numerator >= 0 && value.value.numerator <= 4_294_967_295 &&
+    typeof value.value.denominator === 'string' &&
+    ['hundred', 'ten_thousand', 'million'].includes(value.value.denominator);
+}
+
+export async function getRuntimeOverlay(scope: NamespaceScope): Promise<MeshRuntimeOverlayResponse> {
+  const body: unknown = await proxyApi.get('mesh/runtime-overlay', scoped(scope, { retry: 0 })).json();
+  if (!object(body) || typeof body.namespace !== 'string' || typeof body.version !== 'string' ||
+      !object(body.runtime_overlay) ||
+      ('fields' in body.runtime_overlay && (!object(body.runtime_overlay.fields) ||
+        !Object.values(body.runtime_overlay.fields).every(runtimeValue)))) {
+    throw new Error('Gateway returned an invalid runtime overlay snapshot');
+  }
+  return body as unknown as MeshRuntimeOverlayResponse;
+}

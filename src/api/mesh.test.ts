@@ -99,3 +99,47 @@ describe("mesh API contracts", () => {
     expect(fetch).toHaveBeenCalledOnce();
   });
 });
+
+describe('runtime overlay contract', () => {
+  it('keeps the accepted slice envelope and tagged wire values', async () => {
+    const snapshot = { namespace: 'tenant-a', version: 'v1', runtime_overlay: { fields: {
+      number: { kind: 'number', value: 1.5 }, string: { kind: 'string', value: 'warn' },
+      boolean: { kind: 'bool', value: false }, fraction: { kind: 'fractional_percent', value: { numerator: 25, denominator: 'hundred' } },
+    } } };
+    stubFetch(request => { requests.push(request); return Response.json(snapshot); });
+    expect(await mesh.getRuntimeOverlay(scope)).toEqual(snapshot);
+    expect(new URL(requests[0].url).pathname).toBe('/api/proxy/mesh/runtime-overlay');
+    expect(requests[0].headers.get('X-Ferrum-Namespace')).toBe('tenant-a');
+  });
+
+  it.each([{}, { fields: {} }])('accepts an empty accepted overlay %o', async runtime_overlay => {
+    stubFetch(() => Response.json({ namespace: 'tenant-a', version: 'v1', runtime_overlay }));
+    expect((await mesh.getRuntimeOverlay(scope)).runtime_overlay).toEqual(runtime_overlay);
+  });
+
+  it.each([
+    {}, { nodes: [] }, { namespace: 'a', version: 'v', runtime_overlay: null },
+    { namespace: 'a', version: 'v', runtime_overlay: { fields: { bad: true } } },
+    { namespace: 'a', version: 'v', runtime_overlay: { fields: { bad: { kind: 'bool', value: 'false' } } } },
+    { namespace: 'a', version: 'v', runtime_overlay: { fields: { bad: { kind: 'fractional_percent', value: { numerator: 1, denominator: '100' } } } } },
+    { namespace: 'a', version: 'v', runtime_overlay: { fields: { bad: { kind: 'fractional_percent', value: { numerator: 1, denominator: ['hundred'] } } } } },
+  ])('rejects invalid data instead of showing an empty overlay (%#)', async body => {
+    stubFetch(() => Response.json(body));
+    await expect(mesh.getRuntimeOverlay(scope)).rejects.toThrow('invalid runtime overlay snapshot');
+  });
+
+  it.each([404, 503])('silences documented probe status %s without swallowing it', async status => {
+    const transport = stubFetch(() => Response.json({ error: 'No active mesh runtime overlay' }, { status }));
+    await expect(mesh.getRuntimeOverlay(scope)).rejects.toThrow();
+    expect(transport).toHaveBeenCalledOnce();
+    expect(popup).not.toHaveBeenCalled();
+  });
+
+  it('retains authorization and network failures', async () => {
+    stubFetch(() => Response.json({ error: 'Forbidden' }, { status: 403 }));
+    await expect(mesh.getRuntimeOverlay(scope)).rejects.toThrow();
+    expect(popup).toHaveBeenCalled();
+    stubFetch(() => { throw new TypeError('offline'); });
+    await expect(mesh.getRuntimeOverlay(scope)).rejects.toThrow();
+  });
+});

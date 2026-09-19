@@ -166,3 +166,9 @@ describe("mesh tab observations", () => {
     expect(await writes[1].json()).toEqual({ host: "external.example.test" });
   });
 });
+
+it("makes the connected node runtime overlay reachable through the Runtime tab", async () => {
+  await open("Runtime", "runtime-v1");
+  expect(panel().textContent).toContain("ferrum.log.level");
+  expect(panel().textContent).toContain("warn");
+});

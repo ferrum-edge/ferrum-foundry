@@ -1,3 +1,5 @@
+import type { DetailedHealthSections } from './health';
+
 /* ------------------------------------------------------------------ */
 /*  Ferrum Foundry – shared API types (mirrors the OpenAPI spec)      */
 /* ------------------------------------------------------------------ */
@@ -480,7 +482,7 @@ export type UpstreamCreate = Partial<
 
 // ── Health / Metrics ──────────────────────────────────────────────
 
-export interface HealthResponse {
+export interface HealthResponse extends DetailedHealthSections {
   status: 'ok' | 'degraded' | 'starting' | 'unavailable' | 'draining';
   ready: boolean;
   // Authenticated-tier detail fields
@@ -497,6 +499,15 @@ export interface HealthResponse {
       active?: number;
       max_connections?: number;
       min_connections?: number;
+      read_replica?: { size?: number; idle?: number; active?: number };
+    };
+    failover_topology?: {
+      primary_active: boolean;
+      allow_writes: boolean;
+      opt_in_writes_enabled_during_window: boolean;
+      primary_failback_fenced: boolean;
+      active_url_redacted?: string;
+      failover_since_unix_ms?: number;
     };
   };
   fips?: {
@@ -507,6 +518,8 @@ export interface HealthResponse {
     provider: string;
     module_self_test_passed: boolean;
     provider_algorithms_approved: boolean;
+    certified: false;
+    boundary_documentation: string;
   };
   cached_config?: {
     available: boolean;
@@ -515,9 +528,6 @@ export interface HealthResponse {
     consumer_count?: number;
   };
   config_rejected?: boolean;
-  // The health payload carries many optional mode-specific snapshot
-  // sections (mesh, service discovery, logging sinks, listeners, ...).
-  [snapshot: string]: unknown;
 }
 
 export interface AdminMetricsCircuitBreaker {

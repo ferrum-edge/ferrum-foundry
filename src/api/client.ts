@@ -289,7 +289,7 @@ export class UnboundNamespaceError extends Error {
  * the global error popup stays quiet for them.
  */
 const SILENT_PROBE_PATTERNS = [
-  /\/api\/proxy\/mesh\//,
+  /\/api\/proxy\/mesh\//, // Includes runtime-overlay: documented absent/temporarily unavailable probes.
   /\/api\/proxy\/node-waypoint\//,
   /\/api\/proxy\/service-waypoint\//,
   /\/api\/proxy\/gateway-trust/,

@@ -1,3 +1,4 @@
+import { RuntimeTab } from './RuntimeTab';
 /* ------------------------------------------------------------------ */
 /*  Ferrum Foundry – Mesh observability page                           */
 /*  Read-only views over the mesh admin endpoints. Every endpoint      */
@@ -569,6 +570,7 @@ export default function MeshPage() {
       <Tabs defaultValue="overview">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="runtime">Runtime</TabsTrigger>
           <TabsTrigger value="graph">Service Graph</TabsTrigger>
           <TabsTrigger value="denies">Policy Denies</TabsTrigger>
           <TabsTrigger value="clusters">Clusters</TabsTrigger>
@@ -578,6 +580,7 @@ export default function MeshPage() {
         </TabsList>
 
         <TabsContent value="overview"><OverviewTab /></TabsContent>
+        <TabsContent value="runtime"><RuntimeTab /></TabsContent>
         <TabsContent value="graph"><ServiceGraphTab /></TabsContent>
         <TabsContent value="denies"><PolicyDeniesTab /></TabsContent>
         <TabsContent value="clusters"><ClustersTab /></TabsContent>

@@ -145,6 +145,7 @@ beforeEach(() => {
         return Response.json(serverProxy);
       }
       if (path.endsWith("/proxies/spec-proxy")) return Response.json(serverProxy);
+      if (path.endsWith("/api-specs")) return Response.json({ items: [], total: 0, limit: 2, offset: 0, next_offset: null });
       return Response.json({ data: [], pagination: { offset: 0, limit: 250, total: 0 } });
     }),
   );
@@ -199,6 +200,10 @@ for (const [kind, retired] of cases) {
     it("retires the cascaded detail entries of the originating namespace only", async () => {
       const Probe = probes[kind];
       seedDetails();
+      for (const ns of ['tenant-a', 'tenant-b']) {
+        client.setQueryData(['apiSpecDocument', ns, 'byProxy', 'shared'], 'old document');
+        client.setQueryData(['apiSpecs', ns, 'byProxy', 'shared'], [{ id: 'old-spec' }]);
+      }
       await render(<Probe />);
       const pending = run("spec-1");
       await settle(() => expect(writes).toHaveLength(1));
@@ -214,6 +219,9 @@ for (const [kind, retired] of cases) {
       });
 
       expect(writes[0]!.namespace).toBe("tenant-a");
+      expect(client.getQueryData(['apiSpecDocument', 'tenant-a', 'byProxy', 'shared'])).toBeUndefined();
+      expect(client.getQueryData(['apiSpecDocument', 'tenant-b', 'byProxy', 'shared'])).toBe('old document');
+      expect(client.getQueryState(['apiSpecs', 'tenant-a', 'byProxy', 'shared'])?.isInvalidated).toBe(true);
       for (const detail of retired) {
         expect(client.getQueryData([detail, "tenant-a", "cascaded-id"])).toBeUndefined();
         expect(client.getQueryData([detail, "tenant-b", "cascaded-id"])).toBeDefined();

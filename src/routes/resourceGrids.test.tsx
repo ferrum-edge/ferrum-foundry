@@ -98,6 +98,7 @@ beforeEach(() => {
       "plugins/config": page(empty ? [] : [plugin]),
       "proxies/orders": proxy,
       "consumers/operator": consumer,
+      "api-specs": { items: [], total: 0, limit: 2, offset: 0, next_offset: null },
       cluster: { mode: "standalone", message: "Standalone gateway" },
       "backend-capabilities": { entries: empty ? [] : [{
         key: "https|orders.example.test|443",

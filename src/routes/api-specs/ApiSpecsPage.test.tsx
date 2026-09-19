@@ -23,11 +23,11 @@ class BasedRequest extends Request {
 
 function summary(id: string): ApiSpecSummary {
   return {
-    id, proxy_id: `proxy-${id}`, namespace: "tenant-a", title: `API ${id}`,
+    id, proxy_id: `proxy-${id}`, title: `API ${id}`,
     spec_version: "3.1.0", spec_format: "yaml", info_version: "1", description: null,
     contact_name: null, contact_email: null, license_name: null, license_identifier: null,
     tags: [], server_urls: [], operation_count: 1, uncompressed_size: 100,
-    content_hash: id, content_encoding: "gzip",
+    content_hash: id,
     created_at: "2026-09-06T00:00:00Z", updated_at: "2026-09-06T00:00:00Z",
   };
 }

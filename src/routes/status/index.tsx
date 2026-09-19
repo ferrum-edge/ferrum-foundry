@@ -2,6 +2,10 @@
 /*  Ferrum Foundry – Health / Status page                              */
 /* ------------------------------------------------------------------ */
 
+import { AuditPipelineCard } from '@/components/health/AuditPipelineCard';
+import { OperationalHealthCards, healthFindings } from '@/components/health/OperationalHealthCards';
+import { HealthFields, namedFields } from '@/components/health/HealthSection';
+import { isDetailedHealth } from '@/lib/auditStatus';
 import { useHealth } from "@/hooks/useMetrics";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -32,7 +36,8 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 /* ================================================================== */
 
 export default function StatusPage() {
-  const { data: health, isLoading, isError, error } = useHealth();
+  const query = useHealth(30_000);
+  const { data: health, isLoading, isError, error } = query;
 
   if (isLoading) {
     return (
@@ -67,22 +72,35 @@ export default function StatusPage() {
     </div>
   );
 
+  const findings = healthFindings(health);
+
   return (
     <div className="space-y-6 max-w-3xl">
       <h1 className="text-2xl font-bold text-text-primary">Health Status</h1>
       <BffConnectionCard />
+
+      {query.isStale && <Card role="status" className="border-warning/40">
+        <p className="text-warning text-sm">Health snapshot is stale. Current state is unknown; values below are the last observation.</p>
+      </Card>}
+      {!isDetailedHealth(health) && <p className="text-sm text-text-muted">Only a minimal health snapshot was returned. Omitted diagnostics and audit collection are unknown.</p>}
+      {findings.length > 0 && <Card role="status" className="border-warning/40">
+        <h2 className="text-warning font-semibold">Operational diagnostics need attention</h2>
+        <ul className="list-disc pl-5 mt-2 text-sm text-text-secondary">
+          {findings.map(finding => <li key={finding}>{finding}</li>)}
+        </ul>
+      </Card>}
 
       {/* Gateway process details are separate from Foundry connectivity. */}
       <Card>
         <h2 className="text-sm font-semibold text-text-primary mb-3">Gateway process health</h2>
         <div className="flex flex-wrap items-center gap-4">
           <Badge
-            variant={statusVariant(health.status)}
+            variant={query.isStale ? "default" : health.status === "ok" && findings.length > 0 ? "yellow" : statusVariant(health.status)}
             className="text-base px-4 py-1.5"
           >
             {health.status.toUpperCase()}
           </Badge>
-          <Badge variant={health.ready ? "green" : "red"}>
+          <Badge variant={query.isStale ? "default" : health.ready ? "green" : "red"}>
             {health.ready ? "Ready" : "Not Ready"}
           </Badge>
           {health.admin_writes_enabled === false && (
@@ -122,11 +140,17 @@ export default function StatusPage() {
             {health.database.type && <Row label="Type">{health.database.type}</Row>}
             {health.database.pool && (
               <Row label="Pool">
-                {health.database.pool.active ?? 0} active /{" "}
-                {health.database.pool.idle ?? 0} idle /{" "}
-                {health.database.pool.size ?? 0} total
+                {health.database.pool.active ?? "unknown"} active /{" "}
+                {health.database.pool.idle ?? "unknown"} idle /{" "}
+                {health.database.pool.size ?? "unknown"} total
               </Row>
             )}
+            {health.database.failover_topology && <HealthFields fields={namedFields(health.database.failover_topology, ['primary_active', 'allow_writes', 'opt_in_writes_enabled_during_window', 'primary_failback_fenced', 'active_url_redacted', 'failover_since_unix_ms'])} />}
+            {health.database.pool?.read_replica && <HealthFields fields={[
+              ['Read replica active', health.database.pool.read_replica.active],
+              ['Read replica idle', health.database.pool.read_replica.idle],
+              ['Read replica size', health.database.pool.read_replica.size],
+            ]} />}
             {health.database.error && (
               <div className="mt-2 bg-danger/5 border border-danger/20 rounded-lg p-3">
                 <p className="text-danger text-sm">{health.database.error}</p>
@@ -151,8 +175,10 @@ export default function StatusPage() {
             <Row label="Provider">{health.fips.provider}</Row>
             <Row label="Build Profile">{health.fips.build_profile}</Row>
             <Row label="Self-test Passed">
-              {health.fips.module_self_test_passed ? "Yes" : "No"}
+              {health.fips.build_capable ? (health.fips.module_self_test_passed ? "Yes" : "No") : "No validated module in this build"}
             </Row>
+            <HealthFields fields={namedFields(health.fips, ['build_capable', 'provider_algorithms_approved', 'certified', 'boundary_documentation'])} />
+            <p className="text-xs text-text-muted">Enforcement is not certification. Ferrum Edge is not independently FIPS-certified.</p>
           </div>
         </Card>
       )}
@@ -183,6 +209,8 @@ export default function StatusPage() {
           </div>
         </Card>
       )}
+      <AuditPipelineCard query={query} />
+      <OperationalHealthCards health={health} />
     </div>
   );
 }

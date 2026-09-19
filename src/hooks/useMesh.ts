@@ -115,3 +115,15 @@ export function useServiceWaypointServices() {
     retry: false,
   });
 }
+
+/** Bound cache identity even though the response describes the connected node:
+ * a previous namespace's response must not bypass the next namespace's auth.
+ */
+export function useRuntimeOverlay() {
+  const { scope } = useNamespace();
+  return useQuery({
+    queryKey: ['mesh', 'runtimeOverlay', scope.namespace],
+    queryFn: () => mesh.getRuntimeOverlay(queryScope(scope)),
+    ...MESH_QUERY_OPTS,
+  });
+}

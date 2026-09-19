@@ -40,6 +40,26 @@ export function useApiSpecs(
   });
 }
 
+export function useApiSpecsByProxy(proxyId: string, enabled = true) {
+  const { scope } = useNamespace();
+  return useQuery({
+    queryKey: ['apiSpecs', scope.namespace, 'byProxy', proxyId],
+    queryFn: () => apiSpecs.listByProxy(queryScope(scope), proxyId),
+    enabled: enabled && !!proxyId,
+    retry: false,
+  });
+}
+
+export function useApiSpecDocumentByProxy(proxyId: string, enabled: boolean) {
+  const { scope } = useNamespace();
+  return useQuery({
+    queryKey: ['apiSpecDocument', scope.namespace, 'byProxy', proxyId],
+    queryFn: () => apiSpecs.getDocumentByProxy(queryScope(scope), proxyId),
+    enabled: enabled && !!proxyId,
+    retry: false,
+  });
+}
+
 export function useAllApiSpecs(enabled = true) {
   const { scope } = useNamespace();
   return useQuery({
