@@ -122,6 +122,7 @@ describe('runtime overlay contract', () => {
     { namespace: 'a', version: 'v', runtime_overlay: { fields: { bad: true } } },
     { namespace: 'a', version: 'v', runtime_overlay: { fields: { bad: { kind: 'bool', value: 'false' } } } },
     { namespace: 'a', version: 'v', runtime_overlay: { fields: { bad: { kind: 'fractional_percent', value: { numerator: 1, denominator: '100' } } } } },
+    { namespace: 'a', version: 'v', runtime_overlay: { fields: { bad: { kind: 'fractional_percent', value: { numerator: 1, denominator: ['hundred'] } } } } },
   ])('rejects invalid data instead of showing an empty overlay (%#)', async body => {
     stubFetch(() => Response.json(body));
     await expect(mesh.getRuntimeOverlay(scope)).rejects.toThrow('invalid runtime overlay snapshot');

@@ -380,7 +380,8 @@ function runtimeValue(value: unknown): value is MeshRuntimeValue {
   if (value.kind !== 'fractional_percent' || !object(value.value)) return false;
   return typeof value.value.numerator === 'number' && Number.isInteger(value.value.numerator) &&
     value.value.numerator >= 0 && value.value.numerator <= 4_294_967_295 &&
-    ['hundred', 'ten_thousand', 'million'].includes(String(value.value.denominator));
+    typeof value.value.denominator === 'string' &&
+    ['hundred', 'ten_thousand', 'million'].includes(value.value.denominator);
 }
 
 export async function getRuntimeOverlay(scope: NamespaceScope): Promise<MeshRuntimeOverlayResponse> {
