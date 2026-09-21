@@ -32,7 +32,13 @@ export function bindPluginMembership(
   return {
     listProxies: () => proxiesApi.listAll(scope),
     getProxy: (id) => proxiesApi.get(scope, id),
-    updateProxy: (id, data) => proxiesApi.update(scope, id, data),
+    // A membership plan runs its own concurrency contract (#244): every write
+    // is preceded by a fresh read whose `updated_at` must still match the
+    // preflight snapshot, and a mismatch aborts the plan or refuses the
+    // rollback. Layering the editor baseline guard on top would compare a
+    // snapshot this plan never took, so this revision-aware family keeps its
+    // own contract. See `docs/concurrent-edits.md`.
+    updateProxy: (id, data) => proxiesApi.update(scope, id, data, null),
     getPlugin: (id) => pluginsApi.getConfig(scope, id, true),
     createPlugin: (data) => pluginsApi.createConfig(scope, data),
     updatePlugin: (id, data) => pluginsApi.updateConfig(scope, id, data),

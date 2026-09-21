@@ -29,6 +29,9 @@ import {
 } from "@/lib/effectivePolicy";
 import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
 import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
+import { useEditBaseline } from "@/hooks/useEditBaseline";
+import { isStaleResourceError, type StaleResourceDetail } from "@/api/conditionalWrite";
+import { StaleWriteDialog } from "@/components/shared/StaleWriteDialog";
 import { useCapabilities } from "@/stores/capabilities";
 import { WriteAction } from "@/components/shared/CapabilityGate";
 import type { ProxyCreate, PluginConfig } from "@/api/types";
@@ -78,6 +81,14 @@ function ProxyEditor({ session }: { session: EditorSession }) {
   const { data: proxy, isLoading } = resourceQuery;
 
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [conflict, setConflict] = useState<StaleResourceDetail | null>(null);
+  // Bumped only by an explicit "discard my draft and reload"; a background
+  // refetch never remounts the form (see `src/lib/editorIdentity.ts`).
+  const [formGeneration, setFormGeneration] = useState(0);
+
+  // The content this editor opened against, captured once and advanced only
+  // by a canonical accepted response. This is what a save is judged against.
+  const baseline = useEditBaseline(proxy, proxiesApi.proxyWriteGuard);
 
   const pluginsQuery = useAllPluginConfigs();
   const consumersQuery = useAllConsumers();
@@ -113,16 +124,34 @@ function ProxyEditor({ session }: { session: EditorSession }) {
   const handleSubmit = session.bind(async (data: ProxyCreate) => {
     if (!proxy || !capability.allowed) return;
     try {
-      await updateProxy.mutateAsync({
+      const updated = await updateProxy.mutateAsync({
         id: proxyId,
         data: proxiesApi.mergeFormUpdatePayload(proxy, data),
+        guard: baseline.current(),
       });
+      // The accepted response is now what the gateway holds, so it becomes the
+      // baseline the next save is judged against.
+      baseline.adopt(updated);
       toast("success", "Proxy updated successfully");
     } catch (err: unknown) {
+      if (isStaleResourceError(err)) {
+        // Nothing was sent and the draft is untouched: hand the operator the
+        // comparison and let them decide. Never resend this body for them.
+        setConflict(err.detail);
+        return;
+      }
       const message = await getApiErrorMessage(err, "Failed to update proxy");
       toast("error", message);
     }
   });
+
+  /** Deliberate restart: drop the draft and reseed the form from the gateway. */
+  const handleDiscardAndReload = async () => {
+    setConflict(null);
+    const refreshed = await resourceQuery.refetch();
+    if (refreshed.data) baseline.adopt(refreshed.data);
+    setFormGeneration((generation) => generation + 1);
+  };
 
   const handleDelete = session.bind(async () => {
     if (!capability.allowed) return;
@@ -220,6 +249,7 @@ function ProxyEditor({ session }: { session: EditorSession }) {
         <TabsContent value="config">
           <Card>
             <ProxyForm
+              key={formGeneration}
               initialData={proxy}
               onSubmit={handleSubmit}
               isLoading={updateProxy.isPending}
@@ -497,6 +527,13 @@ function ProxyEditor({ session }: { session: EditorSession }) {
           )}
         </TabsContent>
       </Tabs>
+
+      {/* Refused concurrent-edit save */}
+      <StaleWriteDialog
+        conflict={conflict}
+        onKeepEditing={() => setConflict(null)}
+        onDiscardAndReload={handleDiscardAndReload}
+      />
 
       {/* Delete confirmation */}
       <ConfirmDialog

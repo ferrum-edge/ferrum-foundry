@@ -14,7 +14,8 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import * as upstreams from "@/api/upstreams";
-import type { PaginationParams, UpstreamCreate } from "@/api/types";
+import type { WriteGuard } from "@/api/conditionalWrite";
+import type { PaginationParams, Upstream, UpstreamCreate } from "@/api/types";
 import { useNamespace } from "@/stores/namespace";
 import { retireDeletedDetail } from "./retireDeletedDetail";
 
@@ -60,15 +61,25 @@ export function useCreateUpstream() {
   });
 }
 
+/**
+ * Upstream settings save, or a targets-only save.
+ *
+ * Each variant carries the guard for what it replaces: the settings form
+ * compares the whole writable resource, the targets editor compares only
+ * `targets`, so a settings save from this same client still composes with a
+ * target edit (#235/#254) while a *concurrent* target change is refused.
+ */
 export function useUpdateUpstream() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
   return useMutation({
-    mutationFn: (input: { id: string; data: UpstreamCreate } | {
-      id: string; targets: UpstreamCreate["targets"];
-    }) => "targets" in input
-      ? upstreams.updateTargets(scope, input.id, input.targets)
-      : upstreams.update(scope, input.id, input.data),
+    mutationFn: (input: {
+      id: string;
+      guard: WriteGuard<Upstream | UpstreamCreate> | null;
+    } & ({ data: UpstreamCreate } | { targets: UpstreamCreate["targets"] })) =>
+      "targets" in input
+        ? upstreams.updateTargets(scope, input.id, input.targets, input.guard)
+        : upstreams.update(scope, input.id, input.data, input.guard),
     onSuccess: async (upstream, { id }) => {
       const queryKey = ["upstream", scope.namespace, id];
       await qc.cancelQueries({ queryKey, exact: true });
