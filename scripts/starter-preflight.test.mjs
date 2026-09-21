@@ -297,3 +297,41 @@ test("every third-party image in the starter is pinned by digest", async () => {
     assert.match(image, /@sha256:[0-9a-f]{64}/, `${image} must be pinned by digest`);
   }
 });
+
+test("only variables both profiles need are required by compose", async () => {
+  // Compose interpolates the whole file before it filters by profile, so a
+  // `:?` on a production-only value stops the demo profile from starting at
+  // all — and the other way round. Only the three the BFF cannot run without
+  // may be required here; everything else is the reading service's business.
+  const compose = await readFile(new URL("compose.yaml", STARTER), "utf8");
+  const required = [...compose.matchAll(/\$\{([A-Z0-9_]+):\?/g)].map((match) => match[1]);
+
+  assert.deepEqual(
+    [...new Set(required)].sort(),
+    ["FERRUM_ADMIN_URL", "FERRUM_JWT_SECRET", "FERRUM_TRUSTED_PROXY_SECRET"],
+    "a profile-specific variable marked required breaks the other profile",
+  );
+});
+
+test("oauth2-proxy takes its identity settings from the environment", async () => {
+  const compose = await readFile(new URL("compose.yaml", STARTER), "utf8");
+  const service = compose.slice(
+    compose.indexOf("  oauth2-proxy:"),
+    compose.indexOf("  proxy:"),
+  );
+  // Passing these on the command line would reintroduce the interpolation the
+  // demo profile cannot satisfy.
+  assert.ok(!/--oidc-issuer-url/.test(service));
+  assert.ok(!/--redirect-url/.test(service));
+  assert.ok(!/--email-domain/.test(service));
+  assert.match(service, /env_file:/);
+
+  const env = parseEnvFile(await readFile(new URL(".env.example", STARTER), "utf8"));
+  for (const key of [
+    "OAUTH2_PROXY_OIDC_ISSUER_URL",
+    "OAUTH2_PROXY_REDIRECT_URL",
+    "OAUTH2_PROXY_EMAIL_DOMAINS",
+  ]) {
+    assert.ok(env[key], `${key} must be documented in .env.example`);
+  }
+});
