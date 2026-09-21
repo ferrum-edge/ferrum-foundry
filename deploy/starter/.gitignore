@@ -1,0 +1,6 @@
+# Never commit a real configuration or a proof secret.
+.env
+secrets/*.conf
+tls/*
+ca/*
+!.gitkeep

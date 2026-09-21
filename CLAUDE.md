@@ -143,7 +143,8 @@ The app supports dark and light themes via CSS custom properties. Dark is the de
 - `src/hooks/` - React Query hooks for data fetching
 - `src/lib/pluginConfigDefaults.ts` - plugin catalog: per-plugin default configs plus `PLUGIN_METADATA` (category + description) used by the plugin picker
 - `server/` - Fastify BFF server
-- `scripts/` - Demo backend, seeding, traffic generation, and `mock-admin-gateway.mjs`
+- `scripts/` - Demo backend, seeding, traffic generation, `mock-admin-gateway.mjs`, and the starter's `starter-preflight.mjs` / `starter-journey.mjs`
+- `deploy/starter/` - the runnable deployment starter: one Compose stack with a `production` and a disposable `demo` profile. `nginx/identity/policy.conf` (group → role/namespace) and `nginx/identity/inject.conf` (the four identity headers) are included by **both** proxy configurations, so the demo exercises the production authorization path; a test fails if either config grows its own copy. See `docs/getting-started.md`
 
 ## Type conventions
 

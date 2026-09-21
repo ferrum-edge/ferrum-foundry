@@ -154,6 +154,71 @@ jobs:
           docker logs ferrum-edge-contract
           cat /tmp/ferrum-demo-backend.log
 
+  starter:
+    name: Deployment Starter
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Build the production image the starter runs
+        # The starter is exercised with the same image an operator would pull,
+        # not with a development server.
+        run: |
+          docker build \
+            --file docker/Dockerfile \
+            --build-arg SOURCE_REVISION="${GITHUB_SHA}" \
+            --tag ferrum-foundry:starter \
+            .
+
+      - name: Bring the checked-in starter up from a clean environment
+        working-directory: deploy/starter
+        env:
+          FOUNDRY_IMAGE: ferrum-foundry:starter
+        run: |
+          ./bootstrap-demo.sh
+          docker compose --profile demo up --detach --wait --wait-timeout 180
+
+      - name: Preflight
+        working-directory: deploy/starter
+        env:
+          # The preflight runs on the host, so it reaches the gateway through
+          # the published loopback port rather than the compose network alias.
+          FERRUM_ADMIN_URL: http://127.0.0.1:9000
+          FOUNDRY_PREFLIGHT_URL: http://127.0.0.1:8088
+        run: node ../../scripts/starter-preflight.mjs --env .env
+
+      - name: First-success walkthrough
+        working-directory: deploy/starter
+        env:
+          FOUNDRY_URL: http://127.0.0.1:8088
+          FERRUM_DATA_PLANE_URL: http://127.0.0.1:8000
+          FERRUM_NAMESPACE: ferrum-foundry-demo
+          FERRUM_STARTER_CONFIRM_TARGET: 'http://127.0.0.1:8088#ferrum-foundry-demo'
+        run: |
+          set -a
+          . ./.env
+          set +a
+          node ../../scripts/starter-journey.mjs
+
+      - name: Show stack logs on failure
+        if: failure()
+        working-directory: deploy/starter
+        run: docker compose --profile demo logs --no-color --tail 200
+
+      - name: Tear the stack down
+        if: always()
+        working-directory: deploy/starter
+        run: docker compose --profile demo down --volumes
+
   container:
     name: Container Gate (${{ matrix.platform }})
     runs-on: ubuntu-latest
@@ -278,7 +343,7 @@ jobs:
 
   docker:
     name: Docker (${{ matrix.platform }})
-    needs: [quality, gateway-contract, container]
+    needs: [quality, gateway-contract, starter, container]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
