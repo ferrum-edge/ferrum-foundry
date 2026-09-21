@@ -65,7 +65,11 @@ request header. It is for a first run and for CI. Do not expose it.
 
 1. `cp .env.example .env`, fill it in, `chmod 600 .env`. Generate secrets with
    `openssl rand -base64 48`. `FERRUM_JWT_SECRET` must equal the gateway's
-   `FERRUM_ADMIN_JWT_SECRET`.
+   `FERRUM_ADMIN_JWT_SECRET`. The identity-provider settings are the
+   `OAUTH2_PROXY_*` names oauth2-proxy reads itself — they are passed as
+   environment rather than through compose interpolation, because Compose
+   interpolates the whole file before it filters by profile and a
+   production-only requirement would stop the demo profile from starting.
 2. Write `secrets/ferrum-proxy-secret.conf` with the **same** value as
    `FERRUM_TRUSTED_PROXY_SECRET`:
 
