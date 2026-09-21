@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – Proxy API functions                              */
 /* ------------------------------------------------------------------ */
 
-import { proxyApi, scoped, type NamespaceScope } from "./client";
+import { proxyApi, scoped, SILENT_ERRORS, type NamespaceScope } from "./client";
 import type {
   PaginatedResponse,
   PaginationParams,
@@ -16,26 +16,65 @@ function withProxyId(data: ProxyCreate, id?: string): ProxyCreate {
   return resolvedId ? { ...data, id: resolvedId } : data;
 }
 
+/**
+ * `GET /proxies` accepts only `offset` and `limit`. There is no `search`,
+ * `name`, or reference filter on the admin API, so a search still has to be
+ * answered by traversing the collection — see `docs/data-loading.md`.
+ */
 export async function list(
   scope: NamespaceScope,
   params: PaginationParams = {},
+  signal?: AbortSignal,
 ): Promise<PaginatedResponse<Proxy>> {
   const searchParams: Record<string, string> = {};
   if (params.offset !== undefined) searchParams.offset = String(params.offset);
   if (params.limit !== undefined) searchParams.limit = String(params.limit);
 
   return proxyApi
-    .get("proxies", scoped(scope, { searchParams }))
+    .get("proxies", scoped(scope, { searchParams, signal }))
     .json<PaginatedResponse<Proxy>>();
 }
 
-/** Every page is fetched under `scope`, however long the collection takes. */
-export async function listAll(scope: NamespaceScope): Promise<Proxy[]> {
-  return collectAllPages((offset, limit) => list(scope, { offset, limit }));
+/**
+ * Every page is fetched under `scope`, however long the collection takes.
+ * `signal` lets the caller abandon the traversal — a namespace switch, a new
+ * search term, or an unmounted page — instead of paying for pages nobody will
+ * read.
+ */
+export async function listAll(
+  scope: NamespaceScope,
+  signal?: AbortSignal,
+): Promise<Proxy[]> {
+  return collectAllPages(
+    (offset, limit, pageSignal) => list(scope, { offset, limit }, pageSignal),
+    undefined,
+    signal,
+  );
 }
 
 export async function get(scope: NamespaceScope, id: string): Promise<Proxy> {
   return proxyApi.get(`proxies/${id}`, scoped(scope)).json<Proxy>();
+}
+
+/**
+ * Resolve one proxy a picker already holds the id of.
+ *
+ * A selection can point at a proxy outside the page the picker loaded, or at
+ * one that has since been deleted. Neither is a fault to report in the global
+ * error dialog: the picker shows the id and says the label could not be
+ * resolved, and the selection itself is preserved either way.
+ */
+export async function getReference(
+  scope: NamespaceScope,
+  id: string,
+  signal?: AbortSignal,
+): Promise<Proxy> {
+  return proxyApi
+    .get(
+      `proxies/${id}`,
+      scoped(scope, { signal, context: { [SILENT_ERRORS]: true } }),
+    )
+    .json<Proxy>();
 }
 
 /**

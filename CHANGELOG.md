@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Ordinary navigation no longer downloads whole namespace collections. Opening the proxy list fetches one page of rows and names their upstreams from one catalog page (or, in a namespace larger than that page, one read per visible row); opening a proxy editor issues exactly one request, with plugin, consumer, and upstream reads deferred to the tab that needs them. The list's effective-plugin column stops at a budget and reports the count as unavailable at that size rather than a number derived from a partial scan, while the policy views that produce authorization conclusions still traverse completely or report unknown. Collection traversals now carry the query's abort signal, so a namespace switch abandons them instead of paying for pages nobody will read. Measured against a 50,000-record fixture, opening the proxy list went from 200 requests and 11.5 MB to 2–22 requests and under 75 KB. Server-side search still needs an upstream contract and is documented as such. See `docs/data-loading.md` (#382).
 - Local gateway setup docs pin `ferrumedge/ferrum-edge:v0.9.5` instead of the stale `latest` tag and note that release images are chosen from upstream releases (#361).
 
 ### Added

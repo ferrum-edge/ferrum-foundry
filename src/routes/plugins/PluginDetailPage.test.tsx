@@ -189,19 +189,19 @@ describe("proxy group membership loading", () => {
         }),
       );
     }
-    expect(get).toHaveBeenCalledWith("proxies", {
+    expect(get).toHaveBeenCalledWith("proxies", expect.objectContaining({
       searchParams: { offset: "0", limit: "250" },
       headers: { "X-Ferrum-Namespace": "default" },
       context: { deferQueryErrors: true },
-    });
+    }));
     pluginResponse.resolve(plugin);
     firstPage.resolve(page([member("source")], 0, 2));
     await settle();
-    expect(get).toHaveBeenCalledWith("proxies", {
+    expect(get).toHaveBeenCalledWith("proxies", expect.objectContaining({
       searchParams: { offset: "1", limit: "250" },
       headers: { "X-Ferrum-Namespace": "default" },
       context: { deferQueryErrors: true },
-    });
+    }));
     expect(host.querySelector("form")).toBeNull();
     secondPage.resolve(page([member("destination")], 1, 2));
     await settle();
@@ -314,9 +314,16 @@ describe("proxy group membership loading", () => {
       client.setQueryData(["proxies", "default", "all"], [member("source")]);
     });
     await settle();
-    expect(selectedIds()).toEqual(["Remove /source", "Remove destination (not in current catalog)"]);
+    // The picker no longer downloads the collection to name a selection, so a
+    // member outside the loaded catalog is resolved by id. Here that read is
+    // refused, and the selection stays visible and removable either way (#382).
+    await settle();
+    expect(selectedIds()).toEqual([
+      "Remove /source",
+      "Remove destination (no longer on the gateway)",
+    ]);
     await act(async () => {
-      host.querySelector<HTMLButtonElement>('button[aria-label="Remove destination (not in current catalog)"]')!.click();
+      host.querySelector<HTMLButtonElement>('button[aria-label="Remove destination (no longer on the gateway)"]')!.click();
     });
     expect(selectedIds()).toEqual(["Remove /source"]);
     await act(async () => {
