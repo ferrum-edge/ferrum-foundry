@@ -35,6 +35,9 @@ import {
   isInternalPlugin,
 } from "@/lib/pluginConfigDefaults";
 import { ProxySearchPicker } from "@/components/forms/ProxySearchPicker";
+import { PluginGuidedConfig } from "@/components/forms/PluginGuidedConfig";
+import { getGuidedSchema } from "@/lib/pluginSchemas";
+import type { FieldIssue, JsonObject } from "@/lib/pluginGuidedConfig";
 
 /* ------------------------------------------------------------------ */
 /*  Props                                                              */
@@ -147,6 +150,13 @@ function PluginConfigFormFields({
   const [configJson, setConfigJson] = useState(initialConfigJson);
   // Track whether the user has manually edited the config textarea
   const [userEditedConfig, setUserEditedConfig] = useState(false);
+  // Guided editing is opt-out, not opt-in: an operator who wants JSON gets it
+  // with one click, and the raw editor remains the complete surface.
+  const [configMode, setConfigMode] = useState<"guided" | "json">("guided");
+  const [guidedIssues, setGuidedIssues] = useState<FieldIssue[]>([]);
+  // Remount the guided fields when the plugin changes or the operator returns
+  // from the JSON editor, so they re-read the configuration as it now stands.
+  const [guidedGeneration, setGuidedGeneration] = useState(0);
   const mcpAggregateStashRef = useRef<Record<string, unknown>>({});
 
   /* ---------- Trigger (optional per-instance execution predicate) --- */
@@ -178,6 +188,14 @@ function PluginConfigFormFields({
       JSON.parse(configJson);
     } catch {
       errs.config = "Invalid JSON";
+    }
+    // Guided validation is assistance before submission; the gateway is still
+    // the authority. Blocking here keeps a value the schema rejects — a
+    // half-typed number, an out-of-range window — from becoming a 400.
+    if (guidedActive && guidedIssues.length > 0) {
+      errs.config = `${guidedIssues.length} field${
+        guidedIssues.length === 1 ? "" : "s"
+      } need attention before this can be saved`;
     }
     if (triggerEnabled) {
       try {
@@ -252,6 +270,31 @@ function PluginConfigFormFields({
   }, [availablePlugins]);
 
   const selectedMeta = pluginName ? getPluginMeta(pluginName) : undefined;
+
+  /* ---------- Guided configuration ---------- */
+  const guidedSchema = pluginName ? getGuidedSchema(pluginName) : undefined;
+  const parsedConfig = useMemo<JsonObject | null>(() => {
+    try {
+      const value = JSON.parse(configJson) as unknown;
+      // `null` is a valid config for plugins whose schema admits it; the
+      // guided view edits it as the empty object it stands for.
+      if (value === null) return {};
+      return value && typeof value === "object" && !Array.isArray(value)
+        ? (value as JsonObject)
+        : null;
+    } catch {
+      return null;
+    }
+  }, [configJson]);
+  // A configuration the descriptors cannot represent is a supported outcome,
+  // not a failure: the editor says why and keeps the raw JSON surface.
+  const guidedUnsupported = useMemo(() => {
+    if (!guidedSchema) return null;
+    if (parsedConfig === null) return "This configuration is not a JSON object.";
+    return guidedSchema.unsupported(parsedConfig);
+  }, [guidedSchema, parsedConfig]);
+  const guidedAvailable = Boolean(guidedSchema) && guidedUnsupported === null;
+  const guidedActive = guidedAvailable && configMode === "guided";
 
   const numVal = (v: number | ""): string => (v === "" ? "" : String(v));
 
@@ -425,21 +468,75 @@ function PluginConfigFormFields({
           </div>
         )}
 
-        {/* ── Config JSON ── */}
+        {/* ── Config ── */}
         <div className="border-b border-border/50 py-4">
           <div className="flex items-center justify-between gap-3 mb-4">
-            <h3 className="text-sm font-semibold text-text-primary">Config (JSON)</h3>
-            {!isEdit && pluginName && userEditedConfig && !configMatchesDefault && (
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={resetConfigToPluginDefault}
-              >
-                Reset Defaults
-              </Button>
-            )}
+            <h3 className="text-sm font-semibold text-text-primary">
+              {guidedActive ? "Configuration" : "Config (JSON)"}
+            </h3>
+            <div className="flex items-center gap-3">
+              {guidedAvailable && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setConfigMode(guidedActive ? "json" : "guided");
+                    if (!guidedActive) setGuidedGeneration((value) => value + 1);
+                  }}
+                >
+                  {guidedActive ? "Edit as JSON" : "Guided fields"}
+                </Button>
+              )}
+              {!isEdit && pluginName && userEditedConfig && !configMatchesDefault && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={resetConfigToPluginDefault}
+                >
+                  Reset Defaults
+                </Button>
+              )}
+            </div>
           </div>
+
+          {guidedSchema && guidedUnsupported && (
+            <p className="text-warning text-xs mb-4">
+              Guided fields are unavailable for this configuration: {guidedUnsupported}{" "}
+              Nothing has been changed &mdash; edit it as JSON below.
+            </p>
+          )}
+
+          {guidedActive && guidedSchema && (
+            <>
+              <PluginGuidedConfig
+                key={`${pluginName}:${guidedGeneration}`}
+                schema={guidedSchema}
+                configJson={configJson}
+                readOnly={readOnly}
+                onChange={(next) => {
+                  setUserEditedConfig(true);
+                  setConfigJson(next);
+                  setErrors(({ config: _config, ...rest }) => rest);
+                }}
+                onIssuesChange={setGuidedIssues}
+              />
+              <p className="text-xs text-text-muted mt-4">
+                Fields come from the pinned {guidedSchema.components.join(" and ")}{" "}
+                schema. Anything this view does not model is preserved untouched
+                &mdash; switch to JSON to see the whole configuration. The gateway
+                still validates on save.
+              </p>
+              {errors.config && (
+                <p role="alert" className="text-danger text-xs mt-2">
+                  {errors.config}
+                </p>
+              )}
+            </>
+          )}
+
+          {!guidedActive && (
           <div className="flex flex-col gap-1.5">
             <textarea
               aria-label="Plugin config JSON"
@@ -469,6 +566,7 @@ function PluginConfigFormFields({
               </p>
             )}
           </div>
+          )}
         </div>
 
         {/* ── Execution Trigger ── */}
