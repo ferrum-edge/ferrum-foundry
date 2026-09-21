@@ -1,0 +1,22 @@
+# ------------------------------------------------------------------
+# Critical-journey overlay for the starter stack (issue #380)
+# ------------------------------------------------------------------
+#
+# Layered over deploy/starter/compose.yaml. It changes one thing: the BFF
+# reaches the gateway through the fault forwarder instead of directly, so the
+# journeys can arrange a failure precisely rather than wait for one.
+#
+#   docker compose -f deploy/starter/compose.yaml -f e2e/compose.e2e.yaml \
+#     --profile demo up -d
+#
+# The forwarder itself runs on the host (`npm run e2e:fault-proxy`), pointed at
+# the gateway's published admin port. Keeping it out of the stack is
+# deliberate: it is a test fixture, and it must be impossible to start the
+# starter and get it by accident.
+
+services:
+  foundry:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      FERRUM_ADMIN_URL: http://host.docker.internal:9500

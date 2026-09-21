@@ -300,6 +300,7 @@ attestations. See [Release and supply-chain gates](docs/release-security.md).
 ## Documentation
 
 - [Getting started](docs/getting-started.md) - install to first authenticated request, using the starter in [`deploy/starter/`](deploy/starter/README.md)
+- [Critical journeys](e2e/README.md) - the browser-to-gateway release gate: what each journey proves and how to run it locally
 - [Deployment](docs/deployment.md) - production topology, full configuration reference, reverse proxy / Compose / Kubernetes examples, and a go-live checklist
 - [Operator visibility](docs/operator-visibility.md) - health and audit evidence, proxy-bound specs, and mesh Runtime
 - [Production authentication](docs/authentication.md) - trusted-proxy identity contract and downstream JWT claims

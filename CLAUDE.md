@@ -144,6 +144,7 @@ The app supports dark and light themes via CSS custom properties. Dark is the de
 - `src/lib/pluginConfigDefaults.ts` - plugin catalog: per-plugin default configs plus `PLUGIN_METADATA` (category + description) used by the plugin picker
 - `server/` - Fastify BFF server
 - `scripts/` - Demo backend, seeding, traffic generation, `mock-admin-gateway.mjs`, and the starter's `starter-preflight.mjs` / `starter-journey.mjs`
+- `e2e/` - the critical-journey suite: a real browser against the production build, the starter's identity proxy, and the pinned gateway, finishing with data-plane requests. `retries: 0` on purpose; failures are *arranged* through `e2e/fault-proxy.mjs` (arm exactly N, assert they were consumed) rather than waited for, and `npm run e2e:gate-self-test` proves the gate fails when the journey is broken. See `e2e/README.md`
 - `deploy/starter/` - the runnable deployment starter: one Compose stack with a `production` and a disposable `demo` profile. `nginx/identity/policy.conf` (group → role/namespace) and `nginx/identity/inject.conf` (the four identity headers) are included by **both** proxy configurations, so the demo exercises the production authorization path; a test fails if either config grows its own copy. See `docs/getting-started.md`
 
 ## Type conventions
