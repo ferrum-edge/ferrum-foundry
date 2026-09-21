@@ -159,3 +159,19 @@ services:
         }).listen(8081, "0.0.0.0");
     expose:
       - "8081"
+    # The image's own HEALTHCHECK probes the BFF's port, which this service
+    # does not run, so it would report unhealthy forever and `up --wait` would
+    # never return. Probe what this container actually serves instead.
+    healthcheck:
+      test:
+        - CMD
+        - /nodejs/bin/node
+        - -e
+        - |
+          fetch("http://127.0.0.1:8081/health")
+            .then((response) => process.exit(response.ok ? 0 : 1))
+            .catch(() => process.exit(1));
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s

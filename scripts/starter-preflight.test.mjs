@@ -335,3 +335,13 @@ test("oauth2-proxy takes its identity settings from the environment", async () =
     assert.ok(env[key], `${key} must be documented in .env.example`);
   }
 });
+
+test("every demo service can prove it is ready", async () => {
+  // `docker compose up --wait` blocks on health, so a service that inherits a
+  // healthcheck for a port it does not serve holds the whole stack. The demo
+  // backend runs the Foundry image for its Node runtime, not for its server.
+  const compose = await readFile(new URL("compose.yaml", STARTER), "utf8");
+  const backend = compose.slice(compose.indexOf("  demo-backend:"));
+  assert.match(backend, /healthcheck:/);
+  assert.match(backend, /127\.0\.0\.1:8081/, "the probe must target this service's own port");
+});
