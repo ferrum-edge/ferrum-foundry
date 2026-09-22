@@ -9,18 +9,21 @@ import {
 import { ErrorPopup } from "@/components/shared/ErrorPopup";
 import { useQueryClient } from "@tanstack/react-query";
 import { reportDeferredQueryError, setApiErrorHandler } from "@/api/client";
+import type { UnobservedOutcome } from "@/api/mutationOutcome";
 
 interface ErrorState {
   open: boolean;
   statusCode: number;
   body: string;
   url: string;
+  outcome?: UnobservedOutcome;
 }
 
 interface ShowErrorParams {
   statusCode: number;
   body: string;
   url: string;
+  outcome?: UnobservedOutcome;
 }
 
 interface ErrorPopupContextValue {
@@ -70,6 +73,7 @@ export function ErrorPopupProvider({ children }: { children: ReactNode }) {
         statusCode={state.statusCode}
         body={state.body}
         url={state.url}
+        outcome={state.outcome}
         onClose={hideError}
       />
     </ErrorPopupContext.Provider>

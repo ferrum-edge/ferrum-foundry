@@ -1,4 +1,5 @@
 import type { DetailedHealthSections } from './health';
+import type { UnobservedOutcome } from './mutationOutcome';
 
 /* ------------------------------------------------------------------ */
 /*  Ferrum Foundry – shared API types (mirrors the OpenAPI spec)      */
@@ -623,4 +624,6 @@ export interface ApiError {
   statusCode: number;
   body: string;
   url: string;
+  /** Set when this was a write whose outcome Foundry could not observe. */
+  outcome?: UnobservedOutcome;
 }

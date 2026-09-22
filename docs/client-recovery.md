@@ -128,19 +128,63 @@ connectivity failures retain the gateway's structured `restore_errors` and
 `failure_class` in the recovery panel. Typed API-spec deletion confirmation and
 HTTP 500 rollback outcomes keep their existing handling.
 
-Restore also classifies the outcomes Foundry never observed, using the BFF's
-`phase` as the discriminator. A `504 FERRUM_BFF_TIMEOUT` with `phase: "upload"`
-means the request body never finished streaming: the restore provably did not
-run, so it stays on the ordinary retryable path with the confirmation armed.
-Every other transport outcome — a `504` once the body has been sent, a `502`
-`FERRUM_BFF_UPSTREAM_FAILURE`, ky's own `TimeoutError`, a dropped connection —
-may already have replaced the namespace. Those produce an "outcome unknown"
-panel that names the cause, clears the pinned backup so the destructive action
-is no longer one click away, and invalidates cached reads so the operator reads
-real state back. The same backup can be put back under an explicit "Re-arm this
-restore" action. The admin API exposes no restore operation id or idempotency
-key, so the ambiguity is reported rather than resolved; Foundry never resubmits
-a restore automatically.
+Some write failures carry no answer from the gateway at all, so Foundry cannot
+know whether the change committed. `classifyUnobservedOutcome()` in
+`src/api/mutationOutcome.ts` is the one classifier for them, shared by ordinary
+create/update/delete writes and by restore. The BFF's `phase` is the
+discriminator:
+
+| Failure | Classified as |
+| --- | --- |
+| `504 FERRUM_BFF_TIMEOUT` with `phase: "upload"` | Definite failure — the body never finished streaming, so the write provably did not run |
+| `504` once the body was sent (`phase: "response"`, or no BFF body) | Unknown outcome (`gateway_timeout`) |
+| `502 FERRUM_BFF_UPSTREAM_FAILURE` | Unknown outcome (`upstream_failure`) |
+| ky's `TimeoutError` | Unknown outcome (`client_timeout`) |
+| A dropped connection or any other rejection after dispatch | Unknown outcome (`transport`) |
+| `UnboundNamespaceError` | Not a write outcome — refused before anything was sent |
+
+Every other status is the gateway's own answer and keeps its ordinary handling,
+including the 503 classifications above. The admin API offers no operation id or
+idempotency key, so the ambiguity is reported rather than resolved.
+
+For an ordinary configuration write, the client's `beforeError` hook classifies
+the rejection before any popup opt-out, so a `SILENT_ERRORS` caller's write is
+reported the same way:
+
+- The live-apply banner shows **Outcome unknown — this change may have
+  committed**, naming the cause, the originating namespace, and the request
+  path, and stating that the request was not replayed. It never says the change
+  was not committed: Foundry does not know that. Like "Change was not
+  committed", it is cleared when the next write starts, and it never displaces
+  a pending, rejected, or unverifiable monitor for a known commit — the error
+  dialog still reports the newer write.
+- The error dialog is titled **Outcome unknown** instead of "API Error", and
+  keeps the status, URL, and BFF code for diagnosis. Forms that toast their own
+  error through `getApiErrorMessage()` get the same unknown-outcome wording
+  instead of their "Failed to …" message.
+- The application `MutationCache` (`src/lib/queryClient.ts`) invalidates cached
+  reads, so the operator decides from real gateway state. The form keeps its
+  draft: a background refetch never rewrites an open editor's fields.
+- Nothing is resubmitted. The no-replay property comes from the shared retry
+  policy above, not from this classification, and holds whether or not the
+  banner or dialog is shown.
+
+Operations that wrap the rejection (for example `observeMutation()` for TLS and
+API-spec writes) are still recognized through `isUnobservedWrite()`, which
+follows the `cause` chain.
+
+The browser journey `e2e/journeys/interrupted-write.spec.ts` lets a create
+commit on the real gateway, destroys its response, and asserts the unknown
+outcome is shown, the draft survives, and exactly one resource exists.
+
+Restore uses the same unobserved-outcome classification. An upload-phase `504`
+stays on the ordinary retryable path with the confirmation armed. Every other
+unobserved outcome may already have replaced the namespace, so restore adds a
+stronger response than an ordinary write: an "outcome unknown" panel that names
+the cause and clears the pinned backup so the destructive action is no longer
+one click away, alongside the same refresh of cached reads. The same backup can
+be put back under an explicit "Re-arm this restore" action. Foundry never
+resubmits a restore automatically.
 
 The global error dialog reports terminal failures. Direct HTTP calls notify from
 ky's final-error hook after its retry budget is exhausted. Query hooks explicitly

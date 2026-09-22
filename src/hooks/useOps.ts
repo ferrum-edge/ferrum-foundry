@@ -9,6 +9,7 @@
 /* ------------------------------------------------------------------ */
 
 import { queryScope } from "@/api/client";
+import { classifyUnobservedOutcome } from "@/api/mutationOutcome";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as ops from "@/api/ops";
 import { useNamespace } from "@/stores/namespace";
@@ -119,7 +120,7 @@ export function useRestore() {
       // The durable configuration changed even when runtime application is pending.
       // An unobservable outcome may have changed it too, so cached rows are
       // refreshed there as well and the operator reads back real state.
-      if (ops.getRestoreCommitted(error) || ops.getRestoreUnknownOutcome(error)) {
+      if (ops.getRestoreCommitted(error) || classifyUnobservedOutcome(error)) {
         qc.invalidateQueries();
       }
     },

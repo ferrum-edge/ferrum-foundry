@@ -5,6 +5,7 @@ import {
 } from "../ui/Dialog";
 import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
+import { UNOBSERVED_OUTCOME_CAUSE, type UnobservedOutcome } from "@/api/mutationOutcome";
 
 export interface ErrorPopupProps {
   open: boolean;
@@ -12,6 +13,8 @@ export interface ErrorPopupProps {
   statusCode?: number;
   body?: string;
   url?: string;
+  /** A write whose answer never arrived: report it as unknown, not failed. */
+  outcome?: UnobservedOutcome;
 }
 
 function statusBadgeVariant(code?: number) {
@@ -37,11 +40,13 @@ export function ErrorPopup({
   statusCode,
   body,
   url,
+  outcome,
 }: ErrorPopupProps) {
   const formattedBody = formatBody(body);
 
   const handleCopy = async () => {
     const text = [
+      outcome && "Outcome unknown: the change may have committed and was not replayed.",
       statusCode && `Status: ${statusCode}`,
       url && `URL: ${url}`,
       formattedBody && `\nResponse:\n${formattedBody}`,
@@ -55,13 +60,21 @@ export function ErrorPopup({
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent>
         <div className="flex items-center gap-3 mb-4">
-          <DialogTitle>API Error</DialogTitle>
+          <DialogTitle>{outcome ? "Outcome unknown" : "API Error"}</DialogTitle>
           {statusCode && (
             <Badge variant={statusBadgeVariant(statusCode)}>
               {statusCode}
             </Badge>
           )}
         </div>
+
+        {outcome && (
+          <p className="mb-3 text-sm text-text-secondary">
+            {UNOBSERVED_OUTCOME_CAUSE[outcome.reason]} The gateway may already
+            have committed this change. Foundry did not replay it. Re-read the
+            current configuration before retrying.
+          </p>
+        )}
 
         {url && (
           <div className="mb-3">

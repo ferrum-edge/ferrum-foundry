@@ -3,6 +3,7 @@ import {
   getGatewayMetadataSnapshot,
   subscribeGatewayMetadata,
 } from "@/api/gatewayMetadata";
+import { UNOBSERVED_OUTCOME_CAUSE, type UnobservedOutcomeReason } from "@/api/mutationOutcome";
 
 function pathFromUrl(url: string | null): string {
   if (!url) return "configuration request";
@@ -36,7 +37,7 @@ export function GatewayMetadataBanner() {
           className={`rounded-lg border px-4 py-3 text-sm text-text-secondary ${
             apply.state === "applied" || apply.state === "succeeded"
               ? "border-success/40 bg-success/10"
-              : apply.state === "nothing_applied"
+              : apply.state === "nothing_applied" || apply.state === "outcome_unknown"
                 ? "border-warning/40 bg-warning/10"
                 : apply.state === "pending"
                   ? "border-blue/40 bg-blue/10"
@@ -52,6 +53,16 @@ export function GatewayMetadataBanner() {
               The request was not replayed. Re-check the current configuration
               before retrying manually
               {apply.retryAfter ? ` after at least ${apply.retryAfter} seconds` : " when the gateway is available"}.
+            </>
+          )}
+          {apply.state === "outcome_unknown" && (
+            <>
+              <strong className="text-warning">Outcome unknown — this change may have committed.</strong>{" "}
+              {apply.reason && apply.reason in UNOBSERVED_OUTCOME_CAUSE
+                ? `${UNOBSERVED_OUTCOME_CAUSE[apply.reason as UnobservedOutcomeReason]} `
+                : ""}
+              The request was not replayed. Re-read the current configuration
+              before retrying manually.
             </>
           )}
           {apply.state === "pending" && (
