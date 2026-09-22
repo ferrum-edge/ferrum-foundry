@@ -227,6 +227,115 @@ jobs:
         working-directory: deploy/starter
         run: docker compose --profile demo down --volumes
 
+  critical-journeys:
+    name: Critical Journeys
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Install the browser
+        # One explicitly supported browser. `--with-deps` installs the system
+        # libraries Chromium needs on the runner image.
+        run: npx playwright install --with-deps chromium
+
+      - name: Build the production image the journeys run against
+        run: |
+          docker build \
+            --file docker/Dockerfile \
+            --build-arg SOURCE_REVISION="${GITHUB_SHA}" \
+            --tag ferrum-foundry:e2e \
+            .
+
+      - name: Bring up the starter stack with the fault forwarder in the path
+        working-directory: deploy/starter
+        env:
+          FOUNDRY_IMAGE: ferrum-foundry:e2e
+        run: ./bootstrap-demo.sh
+
+      - name: Start the stack
+        env:
+          FOUNDRY_IMAGE: ferrum-foundry:e2e
+        run: |
+          docker compose \
+            -f deploy/starter/compose.yaml \
+            -f e2e/compose.e2e.yaml \
+            --profile demo up --detach --wait --wait-timeout 180
+
+      - name: Start the fault forwarder
+        env:
+          FAULT_UPSTREAM: http://127.0.0.1:9000
+          FAULT_TOKEN: ci-fault-token
+          PORT: "9500"
+        run: |
+          node e2e/fault-proxy.mjs >/tmp/fault-proxy.log 2>&1 &
+          for _attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error \
+              --header 'x-fault-token: ci-fault-token' \
+              http://127.0.0.1:9500/__fault >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/fault-proxy.log
+          exit 1
+
+      - name: Run the critical journeys
+        env:
+          FOUNDRY_URL: http://127.0.0.1:8088
+          FERRUM_DATA_PLANE_URL: http://127.0.0.1:8000
+          FERRUM_ADMIN_URL: http://127.0.0.1:9000
+          FAULT_PROXY_URL: http://127.0.0.1:9500
+          FAULT_TOKEN: ci-fault-token
+        run: npm run e2e
+
+      - name: Prove the gate is not vacuous
+        # Refuse every gateway write and require the critical journey to fail.
+        # A green run here would mean the journeys stopped depending on real
+        # gateway state, and that a release could pass on nothing.
+        env:
+          FOUNDRY_URL: http://127.0.0.1:8088
+          FERRUM_DATA_PLANE_URL: http://127.0.0.1:8000
+          FAULT_PROXY_URL: http://127.0.0.1:9500
+          FAULT_TOKEN: ci-fault-token
+        run: npm run e2e:gate-self-test
+
+      - name: Upload browser evidence on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: critical-journey-evidence
+          path: |
+            e2e-report/
+            e2e-results/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Show stack logs on failure
+        if: failure()
+        run: |
+          docker compose \
+            -f deploy/starter/compose.yaml \
+            -f e2e/compose.e2e.yaml \
+            --profile demo logs --no-color --tail 200
+          cat /tmp/fault-proxy.log
+
+      - name: Tear the stack down
+        if: always()
+        run: |
+          docker compose \
+            -f deploy/starter/compose.yaml \
+            -f e2e/compose.e2e.yaml \
+            --profile demo down --volumes
+
   container:
     name: Container Gate (${{ matrix.platform }})
     runs-on: ubuntu-latest
@@ -351,7 +460,7 @@ jobs:
 
   docker:
     name: Docker (${{ matrix.platform }})
-    needs: [quality, gateway-contract, starter, container]
+    needs: [quality, gateway-contract, starter, critical-journeys, container]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:

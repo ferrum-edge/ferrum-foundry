@@ -15,14 +15,18 @@
     "build:server": "tsc -p tsconfig.server.json",
     "preview": "vite preview",
     "start": "node dist-server/index.js",
-    "lint": "eslint src server scripts shared",
+    "lint": "eslint src server scripts shared e2e",
     "test": "vitest run && npm run test:contracts",
     "test:contracts": "node --test scripts/*.test.mjs",
     "check:plugin-schemas": "node scripts/plugin-schema-drift.mjs",
     "test:gateway-contract": "node scripts/gateway-contract-smoke.mjs && node scripts/seed-demo-gateway.mjs && node scripts/seed-demo-gateway.mjs && node scripts/verify-demo-gateway.mjs && node scripts/demo-route-smoke.mjs",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage && npm run test:contracts",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit"
+    "e2e": "playwright test",
+    "e2e:fault-proxy": "node e2e/fault-proxy.mjs",
+    "e2e:gate-self-test": "node scripts/e2e-gate-self-test.mjs",
+    "e2e:report": "playwright show-report e2e-report",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.e2e.json --noEmit"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.2",
@@ -48,6 +52,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^24.13.4",
     "@types/react": "^19.3.0",
