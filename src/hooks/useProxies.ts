@@ -18,6 +18,7 @@ import {
 } from "@tanstack/react-query";
 import { ALL_PAGE_SIZE } from "@/api/pagination";
 import * as proxies from "@/api/proxies";
+import type { WriteGuard } from "@/api/conditionalWrite";
 import type { PaginationParams, Proxy, ProxyCreate } from "@/api/types";
 import { useNamespace } from "@/stores/namespace";
 import { retireCascade, type CascadeKind } from "./retireCascade";
@@ -205,12 +206,23 @@ export function useCreateProxy() {
   });
 }
 
+/**
+ * Full-replacement proxy save.
+ *
+ * `guard` is the content the editor was seeded with. It is not optional: a
+ * save that cannot name what it is replacing is the cross-session overwrite
+ * this mutation refuses to perform. Pass `null` only from a caller that
+ * provably cannot lose a concurrent change.
+ */
 export function useUpdateProxy() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: ProxyCreate }) =>
-      proxies.update(scope, id, data),
+    mutationFn: ({ id, data, guard }: {
+      id: string;
+      data: ProxyCreate;
+      guard: WriteGuard<Proxy | ProxyCreate> | null;
+    }) => proxies.update(scope, id, data, guard),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["proxies"] });
       qc.invalidateQueries({ queryKey: ["proxy"] });

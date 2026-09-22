@@ -7,11 +7,12 @@ import {
 } from "./seed-demo-gateway.mjs";
 import { verifyPluginDefaults } from "./plugin-defaults-contract.mjs";
 import { verifyBasicAuthContract } from "./basic-auth-contract.mjs";
+import { verifyConcurrentEditContract } from "./concurrent-edit-contract.mjs";
 
 const config = readSeedConfig();
 confirmDestructiveTarget(config);
 
-async function exchange(path, { method = "GET", body } = {}, requestConfig = config) {
+async function exchange(path, { method = "GET", body, headers = {} } = {}, requestConfig = config) {
   const token = await adminToken(requestConfig);
   const response = await fetch(`${config.adminUrl}${path}`, {
     method,
@@ -20,6 +21,7 @@ async function exchange(path, { method = "GET", body } = {}, requestConfig = con
       authorization: `Bearer ${token}`,
       "content-type": "application/json",
       "x-ferrum-namespace": requestConfig.namespace,
+      ...headers,
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -142,6 +144,11 @@ const defaultsConfig = { ...config, namespace: `${config.namespace}-plugin-defau
 const defaults = await verifyPluginDefaults((path, options) => exchange(path, options, defaultsConfig));
 const basicAuth = await verifyBasicAuthContract(exchange);
 
+// Two administrators, one proxy, one older draft (#381). This records the
+// gateway's own behavior — an unguarded stale write still reverts an accepted
+// change — and proves Foundry's guard refuses that write before the wire.
+const concurrentEdits = await verifyConcurrentEditContract(exchange, proxyTemplate);
+
 // Validation is non-persistent. Empty PEM values are present-but-invalid, so
 // Foundry must omit unused fields to support CA-only and CRL-only submissions.
 // Exercise option decoding against the pinned gateway without storing material.
@@ -163,6 +170,7 @@ console.log(JSON.stringify({
   verified: true,
   defaults,
   basicAuth,
+  concurrentEdits,
   operations: ["read", "create", "full-replace update", "credential rotation", "delete", "TLS validation"],
   resources: ["upstreams", "consumers", "proxies", "plugin configs", "namespaces"],
 }));
