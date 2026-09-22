@@ -10,6 +10,12 @@ import type {
   ProxyCreate,
 } from "./types";
 import { collectAllPages } from "./pagination";
+import { guardedReplace, type WriteGuard } from "./conditionalWrite";
+import {
+  baselineSnapshot,
+  PROXY_BASELINE_OMIT,
+  type BaselineSnapshot,
+} from "@/lib/resourceBaseline";
 
 function withProxyId(data: ProxyCreate, id?: string): ProxyCreate {
   const resolvedId = id ?? data.id;
@@ -124,14 +130,51 @@ export async function create(
     .json<Proxy>();
 }
 
+/**
+ * Reduce a proxy — or a proxy write payload — to the content a full-replace
+ * save overwrites. The editor captures this when it opens and the guard
+ * compares it against a fresh read just before the `PUT`.
+ */
+export function toBaseline(proxy: Proxy | ProxyCreate): BaselineSnapshot {
+  return baselineSnapshot(proxy, PROXY_BASELINE_OMIT);
+}
+
+/** The guard shape a proxy editor builds from the resource it was seeded with. */
+export function proxyWriteGuard(seed: Proxy): WriteGuard<Proxy | ProxyCreate> {
+  return { baseline: toBaseline(seed), select: toBaseline };
+}
+
+/**
+ * Full-replacement update.
+ *
+ * `guard` carries the content the editor opened against. Pass `null` only for
+ * a write that cannot lose a concurrent change — there is no default, because
+ * an omitted guard is exactly the silent overwrite this argument exists to
+ * prevent. A guarded call re-reads the proxy and throws `StaleResourceError`
+ * without sending anything when another writer got there first; see
+ * `docs/concurrent-edits.md` for the residual non-atomic window.
+ */
 export async function update(
   scope: NamespaceScope,
   id: string,
   data: ProxyCreate,
+  guard: WriteGuard<Proxy | ProxyCreate> | null,
 ): Promise<Proxy> {
-  return proxyApi
-    .put(`proxies/${id}`, scoped(scope, { json: withProxyId(data, id) }))
-    .json<Proxy>();
+  const payload = withProxyId(data, id);
+  const put = (body: ProxyCreate) =>
+    proxyApi.put(`proxies/${id}`, scoped(scope, { json: body })).json<Proxy>();
+
+  if (!guard) return put(payload);
+
+  return guardedReplace<Proxy, ProxyCreate>({
+    resource: "proxy",
+    id,
+    namespace: scope.namespace,
+    guard,
+    proposed: payload,
+    read: () => get(scope, id),
+    write: put,
+  });
 }
 
 export async function remove(scope: NamespaceScope, id: string): Promise<void> {

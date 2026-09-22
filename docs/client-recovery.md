@@ -44,6 +44,10 @@ omitting credentials can remove represented credential types. A failed fresh
 read prevents the PUT. A failed write releases the queue without replaying it.
 This queue coordinates one client instance; it cannot make GET/PUT atomic against
 other browsers or external writers without a gateway conditional-write contract.
+The cross-session half of that problem is handled separately by the editor
+baseline guard — see [concurrent-edits.md](concurrent-edits.md), which also
+records what the pinned gateway actually does with a stale full-replacement
+write and with `If-Match`.
 
 After a metadata write, the accepted consumer seeds its namespace-specific query
 cache and the editor remains pending through refetch. Subsequent ACL changes use
@@ -57,7 +61,10 @@ namespace/upstream queue, so target updates preserve health checks, service
 discovery, subsets, and TLS accepted by an earlier Settings save. The accepted
 upstream seeds its scoped cache and editing stays pending through reconciliation.
 As with consumers, this client queue cannot protect against external writers
-without a gateway conditional-write contract.
+by itself. The targets editor additionally carries a `targets`-scoped baseline
+guard, so a concurrent target change from another session is refused before the
+PUT while this client's own settings-then-targets composition still works; see
+[concurrent-edits.md](concurrent-edits.md).
 
 Live-apply response ownership is allocated when a gateway mutation is dispatched,
 before its headers arrive. A delayed older response or body cannot replace the
