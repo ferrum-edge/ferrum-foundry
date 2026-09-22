@@ -24,6 +24,9 @@ import { getApiErrorMessage } from "@/api/client";
 import * as upstreamsApi from "@/api/upstreams";
 import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
 import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
+import { useEditBaseline } from "@/hooks/useEditBaseline";
+import { isStaleResourceError, type StaleResourceDetail } from "@/api/conditionalWrite";
+import { StaleWriteDialog } from "@/components/shared/StaleWriteDialog";
 import { useCapabilities } from "@/stores/capabilities";
 import { CapabilityNotice, WriteAction } from "@/components/shared/CapabilityGate";
 import type { UpstreamCreate, UpstreamTarget } from "@/api/types";
@@ -58,6 +61,14 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
   const { data: upstream, isLoading } = resourceQuery;
 
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [conflict, setConflict] = useState<StaleResourceDetail | null>(null);
+  // Bumped only by an explicit "discard my draft and reload".
+  const [formGeneration, setFormGeneration] = useState(0);
+
+  // Settings are a whole-resource replacement, so the baseline is the resource
+  // this editor was seeded with, captured once and advanced only by an
+  // accepted response.
+  const baseline = useEditBaseline(upstream, upstreamsApi.upstreamWriteGuard);
 
   /* ---------- Targets tab state ---------- */
   const [showTargetForm, setShowTargetForm] = useState(false);
@@ -68,16 +79,30 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
   const handleSubmit = session.bind(async (data: UpstreamCreate) => {
     if (!upstream || updateUpstream.isPending || !capability.allowed) return;
     try {
-      await updateUpstream.mutateAsync({
+      const updated = await updateUpstream.mutateAsync({
         id: upstreamId,
         data: upstreamsApi.mergeFormUpdatePayload(upstream, data),
+        guard: baseline.current(),
       });
+      baseline.adopt(updated);
       toast("success", "Upstream updated successfully");
     } catch (err: unknown) {
+      if (isStaleResourceError(err)) {
+        setConflict(err.detail);
+        return;
+      }
       const message = await getApiErrorMessage(err, "Failed to update upstream");
       toast("error", message);
     }
   });
+
+  /** Deliberate restart: drop the draft and reseed the form from the gateway. */
+  const handleDiscardAndReload = async () => {
+    setConflict(null);
+    const refreshed = await resourceQuery.refetch();
+    if (refreshed.data) baseline.adopt(refreshed.data);
+    setFormGeneration((generation) => generation + 1);
+  };
 
   const handleDelete = session.bind(async () => {
     if (!capability.allowed) return;
@@ -93,16 +118,24 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
 
   /* ---------- Target management (Targets tab) ---------- */
 
-  // Every target edit funnels through this one bound write.
+  // Every target edit funnels through this one bound write. Its guard is built
+  // from the same `upstream` object the new list was computed from — the list
+  // the operator actually saw — so a concurrent target change is refused while
+  // a settings save from this same client still composes (#235/#254).
   const saveTargets = session.bind(async (newTargets: UpstreamTarget[]) => {
     if (!upstream || updateUpstream.isPending || !capability.allowed) return;
     try {
       await updateUpstream.mutateAsync({
         id: upstreamId,
         targets: newTargets,
+        guard: upstreamsApi.targetsWriteGuard(upstream),
       });
       toast("success", "Targets updated successfully");
     } catch (err: unknown) {
+      if (isStaleResourceError(err)) {
+        setConflict(err.detail);
+        return;
+      }
       const message = await getApiErrorMessage(err, "Failed to update targets");
       toast("error", message);
     }
@@ -207,6 +240,7 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
         <TabsContent value="config">
           <Card>
             <UpstreamForm
+              key={formGeneration}
               initialData={upstream}
               onSubmit={handleSubmit}
               isLoading={updateUpstream.isPending}
@@ -324,6 +358,13 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
           </fieldset>
         </TabsContent>
       </Tabs>
+
+      {/* Refused concurrent-edit save */}
+      <StaleWriteDialog
+        conflict={conflict}
+        onKeepEditing={() => setConflict(null)}
+        onDiscardAndReload={handleDiscardAndReload}
+      />
 
       {/* Delete confirmation */}
       <ConfirmDialog

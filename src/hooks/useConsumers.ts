@@ -31,7 +31,7 @@ export function useConsumers(params: PaginationParams = {}, enabled = true) {
       scope.namespace,
       { offset: params.offset, limit: params.limit },
     ],
-    queryFn: () => consumers.list(queryScope(scope), params),
+    queryFn: ({ signal }) => consumers.list(queryScope(scope), params, signal),
     enabled,
   });
 }
@@ -40,7 +40,7 @@ export function useAllConsumers(enabled = true) {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["consumers", scope.namespace, "all"],
-    queryFn: () => consumers.listAll(queryScope(scope)),
+    queryFn: ({ signal }) => consumers.listAll(queryScope(scope), signal),
     enabled,
   });
 }

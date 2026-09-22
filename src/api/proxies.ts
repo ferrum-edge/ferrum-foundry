@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – Proxy API functions                              */
 /* ------------------------------------------------------------------ */
 
-import { proxyApi, scoped, type NamespaceScope } from "./client";
+import { proxyApi, scoped, SILENT_ERRORS, type NamespaceScope } from "./client";
 import type {
   PaginatedResponse,
   PaginationParams,
@@ -10,32 +10,77 @@ import type {
   ProxyCreate,
 } from "./types";
 import { collectAllPages } from "./pagination";
+import { guardedReplace, type WriteGuard } from "./conditionalWrite";
+import {
+  baselineSnapshot,
+  PROXY_BASELINE_OMIT,
+  type BaselineSnapshot,
+} from "@/lib/resourceBaseline";
 
 function withProxyId(data: ProxyCreate, id?: string): ProxyCreate {
   const resolvedId = id ?? data.id;
   return resolvedId ? { ...data, id: resolvedId } : data;
 }
 
+/**
+ * `GET /proxies` accepts only `offset` and `limit`. There is no `search`,
+ * `name`, or reference filter on the admin API, so a search still has to be
+ * answered by traversing the collection — see `docs/data-loading.md`.
+ */
 export async function list(
   scope: NamespaceScope,
   params: PaginationParams = {},
+  signal?: AbortSignal,
 ): Promise<PaginatedResponse<Proxy>> {
   const searchParams: Record<string, string> = {};
   if (params.offset !== undefined) searchParams.offset = String(params.offset);
   if (params.limit !== undefined) searchParams.limit = String(params.limit);
 
   return proxyApi
-    .get("proxies", scoped(scope, { searchParams }))
+    .get("proxies", scoped(scope, { searchParams, signal }))
     .json<PaginatedResponse<Proxy>>();
 }
 
-/** Every page is fetched under `scope`, however long the collection takes. */
-export async function listAll(scope: NamespaceScope): Promise<Proxy[]> {
-  return collectAllPages((offset, limit) => list(scope, { offset, limit }));
+/**
+ * Every page is fetched under `scope`, however long the collection takes.
+ * `signal` lets the caller abandon the traversal — a namespace switch, a new
+ * search term, or an unmounted page — instead of paying for pages nobody will
+ * read.
+ */
+export async function listAll(
+  scope: NamespaceScope,
+  signal?: AbortSignal,
+): Promise<Proxy[]> {
+  return collectAllPages(
+    (offset, limit, pageSignal) => list(scope, { offset, limit }, pageSignal),
+    undefined,
+    signal,
+  );
 }
 
 export async function get(scope: NamespaceScope, id: string): Promise<Proxy> {
   return proxyApi.get(`proxies/${id}`, scoped(scope)).json<Proxy>();
+}
+
+/**
+ * Resolve one proxy a picker already holds the id of.
+ *
+ * A selection can point at a proxy outside the page the picker loaded, or at
+ * one that has since been deleted. Neither is a fault to report in the global
+ * error dialog: the picker shows the id and says the label could not be
+ * resolved, and the selection itself is preserved either way.
+ */
+export async function getReference(
+  scope: NamespaceScope,
+  id: string,
+  signal?: AbortSignal,
+): Promise<Proxy> {
+  return proxyApi
+    .get(
+      `proxies/${id}`,
+      scoped(scope, { signal, context: { [SILENT_ERRORS]: true } }),
+    )
+    .json<Proxy>();
 }
 
 /**
@@ -124,14 +169,51 @@ export async function create(
     .json<Proxy>();
 }
 
+/**
+ * Reduce a proxy — or a proxy write payload — to the content a full-replace
+ * save overwrites. The editor captures this when it opens and the guard
+ * compares it against a fresh read just before the `PUT`.
+ */
+export function toBaseline(proxy: Proxy | ProxyCreate): BaselineSnapshot {
+  return baselineSnapshot(proxy, PROXY_BASELINE_OMIT);
+}
+
+/** The guard shape a proxy editor builds from the resource it was seeded with. */
+export function proxyWriteGuard(seed: Proxy): WriteGuard<Proxy | ProxyCreate> {
+  return { baseline: toBaseline(seed), select: toBaseline };
+}
+
+/**
+ * Full-replacement update.
+ *
+ * `guard` carries the content the editor opened against. Pass `null` only for
+ * a write that cannot lose a concurrent change — there is no default, because
+ * an omitted guard is exactly the silent overwrite this argument exists to
+ * prevent. A guarded call re-reads the proxy and throws `StaleResourceError`
+ * without sending anything when another writer got there first; see
+ * `docs/concurrent-edits.md` for the residual non-atomic window.
+ */
 export async function update(
   scope: NamespaceScope,
   id: string,
   data: ProxyCreate,
+  guard: WriteGuard<Proxy | ProxyCreate> | null,
 ): Promise<Proxy> {
-  return proxyApi
-    .put(`proxies/${id}`, scoped(scope, { json: withProxyId(data, id) }))
-    .json<Proxy>();
+  const payload = withProxyId(data, id);
+  const put = (body: ProxyCreate) =>
+    proxyApi.put(`proxies/${id}`, scoped(scope, { json: body })).json<Proxy>();
+
+  if (!guard) return put(payload);
+
+  return guardedReplace<Proxy, ProxyCreate>({
+    resource: "proxy",
+    id,
+    namespace: scope.namespace,
+    guard,
+    proposed: payload,
+    read: () => get(scope, id),
+    write: put,
+  });
 }
 
 export async function remove(scope: NamespaceScope, id: string): Promise<void> {

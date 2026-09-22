@@ -60,6 +60,12 @@ interface HarnessOptions {
   failProxyCalls?: number[];
   losePluginOnFailure?: string;
   failPluginGetCall?: number;
+  /**
+   * Model a gateway that performs the documented proxy-scoped side effect on
+   * create (appending the association in the same transaction). The pinned
+   * contract image does not, which is the case the default models.
+   */
+  gatewayAttachesOnCreate?: boolean;
 }
 
 function notFound(id: string): Error {
@@ -172,6 +178,13 @@ function harness(
         updated_at: stamp(),
       } as PluginConfig;
       plugins.set(plugin.id, plugin);
+      if (options.gatewayAttachesOnCreate && plugin.scope === "proxy" && plugin.proxy_id) {
+        const proxy = proxies.get(plugin.proxy_id);
+        if (proxy && !proxy.plugins.some((entry) => entry.plugin_config_id === plugin.id)) {
+          proxy.plugins.push({ plugin_config_id: plugin.id });
+          proxy.updated_at = stamp();
+        }
+      }
       return structuredClone(plugin);
     },
     updatePlugin: async (id: string, data: PluginConfigCreate) => {
@@ -623,5 +636,95 @@ describe("proxy-group membership reconciliation", () => {
     );
     expect(memberships(state.proxies, "plugin-1")).toEqual(["p1", "p2"]);
     expect(state.plugins.has("plugin-1")).toBe(true);
+  });
+});
+
+describe("proxy-scoped attachment", () => {
+  const proxyScoped = (proxyId: string): PluginConfigCreate => ({
+    id: "keyauth-1",
+    plugin_name: "key_auth",
+    config: { key_location: "header:X-API-Key" },
+    scope: "proxy",
+    proxy_id: proxyId,
+    enabled: true,
+  });
+
+  it("attaches the plugin when the gateway did not", async () => {
+    // `openapi.yaml`: a proxy-scoped plugin "applies only when the target
+    // proxy lists it in `plugins` — `proxy_id` alone never attaches it".
+    // A gateway that answers 201 without appending leaves a policy that does
+    // not run, which is how a protected route silently stays open.
+    const stack = harness([makeProxy("checkout")]);
+
+    const created = await createPluginWithMembership(proxyScoped("checkout"), [], stack.deps);
+
+    expect(created.id).toBe("keyauth-1");
+    expect(memberships(stack.proxies, "keyauth-1")).toEqual(["checkout"]);
+    expect(stack.counts().updateProxyCalls).toBe(1);
+  });
+
+  it("writes nothing extra when the gateway already attached it", async () => {
+    const stack = harness([makeProxy("checkout")], [], { gatewayAttachesOnCreate: true });
+
+    await createPluginWithMembership(proxyScoped("checkout"), [], stack.deps);
+
+    expect(memberships(stack.proxies, "keyauth-1")).toEqual(["checkout"]);
+    expect(
+      stack.counts().updateProxyCalls,
+      "a compliant gateway must not be fought with a second write",
+    ).toBe(0);
+  });
+
+  it("refuses to report success when the attachment cannot be made", async () => {
+    const stack = harness([makeProxy("checkout")], [], { failProxyOnce: "checkout" });
+
+    await expect(
+      createPluginWithMembership(proxyScoped("checkout"), [], stack.deps),
+    ).rejects.toThrow(PluginMembershipError);
+
+    // The plugin is not left behind looking like a configured policy.
+    expect(stack.plugins.has("keyauth-1")).toBe(false);
+    expect(memberships(stack.proxies, "keyauth-1")).toEqual([]);
+  });
+
+  it("carries the configuration back when the orphan cannot be deleted", async () => {
+    const stack = harness([makeProxy("checkout")], [], {
+      failProxyOnce: "checkout",
+      failPluginDelete: true,
+    });
+
+    const failure = await createPluginWithMembership(proxyScoped("checkout"), [], stack.deps)
+      .then(() => null, (error: unknown) => error as PluginMembershipError);
+
+    expect(failure).toBeInstanceOf(PluginMembershipError);
+    expect(failure!.recovery.join(" ")).toMatch(/not attached to any proxy/);
+    expect(failure!.lastKnownConfig?.plugin_name).toBe("key_auth");
+  });
+
+  it("moves the association when the target proxy changes", async () => {
+    const stack = harness(
+      [makeProxy("checkout", ["keyauth-1"]), makeProxy("payments")],
+      [{ ...makePlugin("keyauth-1", "proxy"), proxy_id: "checkout" }],
+    );
+
+    await updatePluginWithMembership("keyauth-1", proxyScoped("payments"), [], stack.deps);
+
+    expect(memberships(stack.proxies, "keyauth-1")).toEqual(["payments"]);
+  });
+
+  it("detaches when the plugin stops being proxy-scoped", async () => {
+    const stack = harness(
+      [makeProxy("checkout", ["keyauth-1"])],
+      [{ ...makePlugin("keyauth-1", "proxy"), proxy_id: "checkout" }],
+    );
+
+    await updatePluginWithMembership(
+      "keyauth-1",
+      { plugin_name: "key_auth", config: {}, scope: "global", enabled: true },
+      [],
+      stack.deps,
+    );
+
+    expect(memberships(stack.proxies, "keyauth-1")).toEqual([]);
   });
 });

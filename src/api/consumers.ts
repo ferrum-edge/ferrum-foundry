@@ -45,19 +45,27 @@ function withConsumerId(data: ConsumerCreate, id?: string): ConsumerCreate {
 export async function list(
   scope: NamespaceScope,
   params: PaginationParams = {},
+  signal?: AbortSignal,
 ): Promise<PaginatedResponse<Consumer>> {
   const searchParams: Record<string, string> = {};
   if (params.offset !== undefined) searchParams.offset = String(params.offset);
   if (params.limit !== undefined) searchParams.limit = String(params.limit);
 
   return proxyApi
-    .get("consumers", scoped(scope, { searchParams }))
+    .get("consumers", scoped(scope, { searchParams, signal }))
     .json<PaginatedResponse<Consumer>>();
 }
 
 /** Every page is fetched under `scope`, however long the collection takes. */
-export async function listAll(scope: NamespaceScope): Promise<Consumer[]> {
-  return collectAllPages((offset, limit) => list(scope, { offset, limit }));
+export async function listAll(
+  scope: NamespaceScope,
+  signal?: AbortSignal,
+): Promise<Consumer[]> {
+  return collectAllPages(
+    (offset, limit, pageSignal) => list(scope, { offset, limit }, pageSignal),
+    undefined,
+    signal,
+  );
 }
 
 export async function get(scope: NamespaceScope, id: string): Promise<Consumer> {

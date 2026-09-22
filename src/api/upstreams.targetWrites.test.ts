@@ -29,6 +29,10 @@ const settings = {
   backend_tls_san_allow_list: ["payments.internal"],
 };
 
+// These cases are about *ordering* between this client's own writes, which the
+// serialized queue owns. They pass `null` for the cross-session guard on
+// purpose: the guard is exercised in `upstreams.writeGuard.test.ts`, and
+// comparing a baseline here would change what these regressions measure.
 describe("upstream target writes", () => {
   beforeEach(() => {
     resetGatewayMetadata();
@@ -62,9 +66,9 @@ describe("upstream target writes", () => {
       }
       return Response.json(current);
     }));
-    const saving = update(scope, "payments", settings);
+    const saving = update(scope, "payments", settings, null);
     await started.promise;
-    const adding = updateTargets(scope, "payments", targets);
+    const adding = updateTargets(scope, "payments", targets, null);
     expect(calls).toEqual(["PUT"]);
     finish.release();
     await Promise.all([saving, adding]);
@@ -80,7 +84,7 @@ describe("upstream target writes", () => {
       return new Response("missing", { status: 404 });
     });
     vi.stubGlobal("fetch", fetcher);
-    await expect(updateTargets(scope, "payments", targets))
+    await expect(updateTargets(scope, "payments", targets, null))
       .rejects.toMatchObject({ response: { status: 404 } });
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
@@ -101,11 +105,11 @@ describe("upstream target writes", () => {
       }
       return Response.json({ ...settings, id: "payments", namespace: tenant });
     }));
-    const failed = expect(update(scope, "payments", settings))
+    const failed = expect(update(scope, "payments", settings, null))
       .rejects.toMatchObject({ response: { status: 502 } });
     await started.promise;
-    const queued = updateTargets(scope, "payments", targets);
-    await updateTargets({ namespace: "tenant-b" }, "payments", targets);
+    const queued = updateTargets(scope, "payments", targets, null);
+    await updateTargets({ namespace: "tenant-b" }, "payments", targets, null);
     expect(calls).toEqual(["tenant-a PUT", "tenant-b GET", "tenant-b PUT"]);
     finish.release();
     await failed;

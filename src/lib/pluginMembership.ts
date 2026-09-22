@@ -32,7 +32,13 @@ export function bindPluginMembership(
   return {
     listProxies: () => proxiesApi.listAll(scope),
     getProxy: (id) => proxiesApi.get(scope, id),
-    updateProxy: (id, data) => proxiesApi.update(scope, id, data),
+    // A membership plan runs its own concurrency contract (#244): every write
+    // is preceded by a fresh read whose `updated_at` must still match the
+    // preflight snapshot, and a mismatch aborts the plan or refuses the
+    // rollback. Layering the editor baseline guard on top would compare a
+    // snapshot this plan never took, so this revision-aware family keeps its
+    // own contract. See `docs/concurrent-edits.md`.
+    updateProxy: (id, data) => proxiesApi.update(scope, id, data, null),
     getPlugin: (id) => pluginsApi.getConfig(scope, id, true),
     createPlugin: (data) => pluginsApi.createConfig(scope, data),
     updatePlugin: (id, data) => pluginsApi.updateConfig(scope, id, data),
@@ -314,6 +320,70 @@ async function updatePluginIfUnchanged(
   return deps.updatePlugin(snapshot.id, data);
 }
 
+/**
+ * Make the documented proxy-scoped end state true, and prove it.
+ *
+ * `openapi.yaml` is explicit that a proxy-scoped plugin "applies only when the
+ * target proxy lists it in `plugins` — `proxy_id` alone never attaches it",
+ * and that the gateway appends the association in the same transaction as the
+ * write, idempotently. A gateway that does that leaves nothing for this to do:
+ * the read below already finds the association and no second write happens.
+ *
+ * A gateway that does **not** — the pinned contract image is one — answers
+ * `201` for a plugin that never runs. The visible consequence is an operator
+ * attaching key authentication to a route through the UI and being told it
+ * worked while the route keeps serving anonymous traffic, which the
+ * critical-journey suite catches at the data plane (#380). So the association
+ * is verified after every proxy-scoped write and reconciled when it is
+ * missing, and a reconciliation that fails is reported rather than swallowed:
+ * Foundry never reports a plugin as attached without having read it back.
+ */
+async function reconcileProxyScopedAssociation(
+  pluginId: string,
+  desiredProxyId: string,
+  deps: PluginMembershipDependencies,
+): Promise<void> {
+  const proxy = await deps.getProxy(desiredProxyId);
+  if (referencesPlugin(proxy, pluginId)) return;
+
+  await deps.updateProxy(proxy.id, {
+    ...proxiesApi.toUpdatePayload(proxy),
+    plugins: desiredAssociations(proxy, pluginId, true),
+  });
+
+  const confirmed = await deps.getProxy(desiredProxyId);
+  if (!referencesPlugin(confirmed, pluginId)) {
+    throw new PluginMembershipError(
+      `Plugin ${pluginId} could not be attached to proxy ${desiredProxyId}`,
+      [
+        `proxy ${desiredProxyId} does not list plugin ${pluginId} after the association write; the plugin exists but does not run`,
+      ],
+    );
+  }
+}
+
+/**
+ * The mirror image: a plugin that stops being proxy-scoped must stop being
+ * attached. The gateway reconciles this too; this verifies it and repairs the
+ * one proxy the plugin used to name, never any other.
+ */
+async function detachFormerProxyScope(
+  pluginId: string,
+  formerProxyId: string,
+  deps: PluginMembershipDependencies,
+): Promise<void> {
+  const proxy = await deps.getProxy(formerProxyId).catch((error: unknown) => {
+    if (isNotFound(error)) return undefined;
+    throw error;
+  });
+  if (!proxy || !referencesPlugin(proxy, pluginId)) return;
+
+  await deps.updateProxy(proxy.id, {
+    ...proxiesApi.toUpdatePayload(proxy),
+    plugins: desiredAssociations(proxy, pluginId, false),
+  });
+}
+
 export async function createPluginWithMembership(
   data: PluginConfigCreate,
   desiredProxyIds: string[],
@@ -325,6 +395,32 @@ export async function createPluginWithMembership(
     deps,
   );
   const created = await deps.createPlugin(data);
+
+  if (data.scope === "proxy" && data.proxy_id) {
+    try {
+      await reconcileProxyScopedAssociation(created.id, data.proxy_id, deps);
+      return created;
+    } catch (error) {
+      // The plugin exists but does not run. Leaving it behind would look like
+      // a configured policy, so remove it and say what happened.
+      const failure = error instanceof Error ? error.message : "unknown error";
+      const recovery: string[] = [];
+      try {
+        await deps.deletePlugin(created.id);
+      } catch {
+        recovery.push(
+          `orphan plugin ${created.id} could not be deleted; it exists but is not attached to any proxy`,
+        );
+      }
+      throw new PluginMembershipError(
+        `Plugin creation did not converge (${failure})`,
+        recovery,
+        { cause: error },
+        pluginsApi.toUpdatePayload(created),
+      );
+    }
+  }
+
   if (data.scope !== "proxy_group") return created;
 
   const applied: AppliedProxyChange[] = [];
@@ -393,6 +489,14 @@ export async function updatePluginWithMembership(
     updatedPlugin = await updatePluginIfUnchanged(beforePlugin, data, deps);
     if (nextIsGroup) {
       await applyAssociationPlan(plan.proxies, pluginId, desired, deps, applied);
+    } else if (data.scope === "proxy" && data.proxy_id) {
+      await reconcileProxyScopedAssociation(pluginId, data.proxy_id, deps);
+      if (beforePlugin.scope === "proxy" && beforePlugin.proxy_id &&
+          beforePlugin.proxy_id !== data.proxy_id) {
+        await detachFormerProxyScope(pluginId, beforePlugin.proxy_id, deps);
+      }
+    } else if (beforePlugin.scope === "proxy" && beforePlugin.proxy_id) {
+      await detachFormerProxyScope(pluginId, beforePlugin.proxy_id, deps);
     }
     return updatedPlugin;
   } catch (error) {

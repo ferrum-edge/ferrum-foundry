@@ -189,19 +189,19 @@ describe("proxy group membership loading", () => {
         }),
       );
     }
-    expect(get).toHaveBeenCalledWith("proxies", {
+    expect(get).toHaveBeenCalledWith("proxies", expect.objectContaining({
       searchParams: { offset: "0", limit: "250" },
       headers: { "X-Ferrum-Namespace": "default" },
       context: { deferQueryErrors: true },
-    });
+    }));
     pluginResponse.resolve(plugin);
     firstPage.resolve(page([member("source")], 0, 2));
     await settle();
-    expect(get).toHaveBeenCalledWith("proxies", {
+    expect(get).toHaveBeenCalledWith("proxies", expect.objectContaining({
       searchParams: { offset: "1", limit: "250" },
       headers: { "X-Ferrum-Namespace": "default" },
       context: { deferQueryErrors: true },
-    });
+    }));
     expect(host.querySelector("form")).toBeNull();
     secondPage.resolve(page([member("destination")], 1, 2));
     await settle();
@@ -306,7 +306,28 @@ describe("proxy group membership loading", () => {
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ scope: "proxy_group" }), ["source", "destination"]);
   });
 
+  it("says only 'unavailable' when a selected member's read fails for another reason", async () => {
+    client.setQueryData(["proxies", "default", "all"], [member("source")]);
+    get.mockImplementation((path: string) => ({
+      json: () =>
+        path === "proxies/destination"
+          ? Promise.reject(Object.assign(new Error("Service Unavailable"), { response: { status: 503 } }))
+          : Promise.reject(new Error(`Unexpected request: ${path}`)),
+    }));
+    await render(<PluginConfigForm initialData={plugin} initialProxyGroupIds={["source", "destination"]} availablePlugins={["rate_limiting"]} isLoading={false} onSubmit={vi.fn()} />);
+    await settle();
+    // A 503 says nothing about whether the proxy exists; it must not be
+    // reported as a deletion.
+    expect(selectedIds()).toEqual(["Remove /source", "Remove destination (label unavailable)"]);
+  });
+
   it("keeps a missing selected member visible until explicitly removed", async () => {
+    get.mockImplementation((path: string) => ({
+      json: () =>
+        path === "proxies/destination"
+          ? Promise.reject(Object.assign(new Error("Not Found"), { response: { status: 404 } }))
+          : Promise.reject(new Error(`Unexpected request: ${path}`)),
+    }));
     client.setQueryData(["proxies", "default", "all"], [member("source"), member("destination")]);
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     await render(<PluginConfigForm initialData={plugin} initialProxyGroupIds={["source", "destination"]} availablePlugins={["rate_limiting"]} isLoading={false} onSubmit={onSubmit} />);
@@ -314,9 +335,16 @@ describe("proxy group membership loading", () => {
       client.setQueryData(["proxies", "default", "all"], [member("source")]);
     });
     await settle();
-    expect(selectedIds()).toEqual(["Remove /source", "Remove destination (not in current catalog)"]);
+    // The picker no longer downloads the collection to name a selection, so a
+    // member outside the loaded catalog is resolved by id. Here that read is
+    // refused, and the selection stays visible and removable either way (#382).
+    await settle();
+    expect(selectedIds()).toEqual([
+      "Remove /source",
+      "Remove destination (no longer on the gateway)",
+    ]);
     await act(async () => {
-      host.querySelector<HTMLButtonElement>('button[aria-label="Remove destination (not in current catalog)"]')!.click();
+      host.querySelector<HTMLButtonElement>('button[aria-label="Remove destination (no longer on the gateway)"]')!.click();
     });
     expect(selectedIds()).toEqual(["Remove /source"]);
     await act(async () => {
