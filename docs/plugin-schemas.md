@@ -80,6 +80,7 @@ reported with its reason and the editor stays on raw JSON:
 | A `rate_limiting` policy with more than one rule, or whose single rule is not `scope: default` | Per-consumer rules carry their own counters and cross-rule identity constraints the field set does not express |
 | `cors.allowed_origins` containing Istio `StringMatch` objects | Object `exact`/`prefix`/`regex` have deliberately different matching semantics from the native string form, and must not be broadened by rewriting |
 | A `cors` policy with `unmatched_preflights` | That marker changes what omitted method, header, and max-age fields mean; editing it structurally would rewrite those omissions |
+| An enum field stored in a spelling the gateway accepts but the control does not offer (`limit_by: "Consumer"`, the `spiffe` alias, `sync_mode: "Redis"`) | The schema parses these case-insensitively, so they are valid; the control can only show canonical values, and silently canonicalising them would rewrite the operator's configuration |
 
 This is a supported outcome, not a failure. Nothing is changed, and the whole
 configuration remains editable.
@@ -91,6 +92,14 @@ reaches the DOM, browser storage, or a validation message. Leaving it blank
 keeps the stored value; typing a new one replaces it; omitting the field
 removes it. Editing an unrelated rate-limit field never requires re-entering
 it.
+
+## Never stricter than the gateway
+
+Client validation may be looser than the schema — the gateway is the
+authority and will refuse what this lets through — but it must never refuse
+something the gateway admits. Where a transcribed pattern cannot express the
+schema exactly (the Redis URL's `2^31-1` database bound, for example), the
+guided pattern is the looser one.
 
 ## Validation, and what it is not
 

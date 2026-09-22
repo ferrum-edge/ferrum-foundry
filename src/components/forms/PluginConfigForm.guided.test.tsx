@@ -146,7 +146,7 @@ describe("guided configuration", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it("refuses an enum value the schema does not allow", async () => {
+  it("refuses an empty required list", async () => {
     await renderForm("cors", { allowed_origins: ["https://app.example.com"] });
     await type("Allowed origins", "");
     await submit();
@@ -235,5 +235,40 @@ describe("guided configuration", () => {
     await renderForm("request_size_limiting", { max_bytes: 4096 });
     expect(configJsonField()).not.toBeNull();
     expect(host.textContent).not.toContain("Guided fields are unavailable");
+  });
+
+  it("saves a rate limit with a stored Redis password, keeping the password", async () => {
+    await renderForm("rate_limiting", {
+      limits: [{ scope: "default", requests_per_second: 400 }],
+      sync_mode: "redis",
+      redis_url: "redis://redis.internal:6379/0",
+      redis_password: "stored-password",
+    });
+    // Never displayed.
+    expect(host.innerHTML).not.toContain("stored-password");
+
+    await type("Requests per second", "500");
+    await submit();
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({
+          limits: [{ scope: "default", requests_per_second: 500 }],
+          redis_password: "stored-password",
+        }),
+      }),
+      undefined,
+    );
+  });
+
+  it("edits a gateway-accepted enum spelling as JSON rather than refusing it", async () => {
+    await renderForm("rate_limiting", {
+      limit_by: "Consumer",
+      limits: [{ scope: "default", requests_per_second: 400 }],
+    });
+    expect(host.textContent).toContain("Guided fields are unavailable");
+    expect(JSON.parse(configJsonField().value).limit_by).toBe("Consumer");
+    await submit();
+    expect(onSubmit).toHaveBeenCalled();
   });
 });

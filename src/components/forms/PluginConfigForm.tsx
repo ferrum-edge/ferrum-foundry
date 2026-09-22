@@ -37,7 +37,7 @@ import {
 import { ProxySearchPicker } from "@/components/forms/ProxySearchPicker";
 import { PluginGuidedConfig } from "@/components/forms/PluginGuidedConfig";
 import { getGuidedSchema } from "@/lib/pluginSchemas";
-import type { FieldIssue, JsonObject } from "@/lib/pluginGuidedConfig";
+import { unmodelledEnumSpelling, type FieldIssue, type JsonObject } from "@/lib/pluginGuidedConfig";
 
 /* ------------------------------------------------------------------ */
 /*  Props                                                              */
@@ -291,7 +291,10 @@ function PluginConfigFormFields({
   const guidedUnsupported = useMemo(() => {
     if (!guidedSchema) return null;
     if (parsedConfig === null) return "This configuration is not a JSON object.";
-    return guidedSchema.unsupported(parsedConfig);
+    return (
+      guidedSchema.unsupported(parsedConfig) ??
+      unmodelledEnumSpelling(guidedSchema, parsedConfig)
+    );
   }, [guidedSchema, parsedConfig]);
   const guidedAvailable = Boolean(guidedSchema) && guidedUnsupported === null;
   const guidedActive = guidedAvailable && configMode === "guided";

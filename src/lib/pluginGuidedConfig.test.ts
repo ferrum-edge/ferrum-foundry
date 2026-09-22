@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   readGuidedConfig,
+  unmodelledEnumSpelling,
   validateGuidedConfig,
   writeGuidedConfig,
   type GuidedValues,
@@ -295,5 +296,57 @@ describe("validation", () => {
         max_age: 300,
       }),
     ).toEqual([]);
+  });
+});
+
+describe("never stricter than the gateway", () => {
+  const defaultRule = { limits: [{ scope: "default", requests_per_second: 5 }] };
+
+  function issuesSeeded(config: JsonObject) {
+    const values = readGuidedConfig(rateLimiting, config);
+    const written = writeGuidedConfig(rateLimiting, config, values, values);
+    return validateGuidedConfig(rateLimiting, values, written, values);
+  }
+
+  it("does not refuse a stored secret it deliberately left blank", () => {
+    // Read as present-but-blank so it is never displayed; kept on write.
+    // Treating that as "set but empty" made the config unsavable.
+    expect(
+      issuesSeeded({
+        ...defaultRule,
+        sync_mode: "redis",
+        redis_url: "redis://redis.internal:6379/0",
+        redis_password: "stored",
+      }),
+    ).toEqual([]);
+  });
+
+  it("still refuses a secret the operator newly set to an empty value", () => {
+    const config: JsonObject = { ...defaultRule };
+    const seeded = readGuidedConfig(rateLimiting, config);
+    const values = { ...seeded, redis_password: { present: true, text: "" } };
+    const written = writeGuidedConfig(rateLimiting, config, values, seeded);
+    const issues = validateGuidedConfig(rateLimiting, values, written, seeded);
+    expect(issues.map((issue) => issue.path)).toContain("redis_password");
+  });
+
+  it("accepts a Redis URL with a bare trailing slash", () => {
+    expect(
+      issuesSeeded({ ...defaultRule, sync_mode: "redis", redis_url: "redis://redis.internal:6379/" }),
+    ).toEqual([]);
+  });
+
+  it("hands a non-canonical enum spelling to the JSON editor instead of refusing it", () => {
+    for (const limit_by of ["Consumer", "IP", "spiffe"]) {
+      expect(
+        unmodelledEnumSpelling(rateLimiting, { ...defaultRule, limit_by }),
+        limit_by,
+      ).toContain(JSON.stringify(limit_by));
+    }
+    expect(unmodelledEnumSpelling(rateLimiting, { ...defaultRule, limit_by: "consumer" })).toBeNull();
+    expect(unmodelledEnumSpelling(rateLimiting, { ...defaultRule, limit_by: null })).toBeNull();
+    expect(unmodelledEnumSpelling(rateLimiting, { ...defaultRule, sync_mode: "Redis" })).toContain(
+      "sync_mode",
+    );
   });
 });

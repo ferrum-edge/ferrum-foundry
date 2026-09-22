@@ -188,7 +188,12 @@ export function writeGuidedConfig(
 /*  Validation                                                         */
 /* ------------------------------------------------------------------ */
 
-function validateField(field: GuidedField, state: FieldState, path: string): FieldIssue | null {
+function validateField(
+  field: GuidedField,
+  state: FieldState,
+  path: string,
+  seeded: FieldState | undefined,
+): FieldIssue | null {
   if (!state.present) {
     if (field.required) {
       return { path, message: `${field.label} is required.` };
@@ -228,6 +233,11 @@ function validateField(field: GuidedField, state: FieldState, path: string): Fie
   }
 
   if (text === "null") return null;
+
+  // A stored secret is read as present-but-blank so it is never displayed,
+  // and `writeGuidedConfig` keeps the stored value when it stays blank. That
+  // is not an empty value, and must not block the save.
+  if (field.secret && text.length === 0 && seeded?.present) return null;
 
   if (text.length === 0) {
     return {
@@ -277,6 +287,7 @@ export function validateGuidedConfig(
   schema: PluginGuidedSchema,
   values: GuidedValues,
   config: JsonObject,
+  seeded: GuidedValues = {},
 ): FieldIssue[] {
   const issues: FieldIssue[] = [];
   for (const section of schema.sections) {
@@ -284,10 +295,42 @@ export function validateGuidedConfig(
       const path = fieldPath(section, field);
       const state = values[path];
       if (!state) continue;
-      const issue = validateField(field, state, path);
+      const issue = validateField(field, state, path, seeded[path]);
       if (issue) issues.push(issue);
     }
   }
   issues.push(...(schema.crossFieldErrors?.(config) ?? []));
   return issues;
+}
+
+/**
+ * An enum field whose stored value is a spelling the gateway accepts but the
+ * guided control does not offer — `limit_by: "Consumer"`, the `spiffe` alias.
+ * The schema parses these case-insensitively, so they are valid; the control
+ * can only show canonical values, so it would display nothing and validation
+ * would refuse a configuration the gateway admits. Such a configuration is
+ * edited as JSON rather than canonicalised behind the operator's back.
+ */
+export function unmodelledEnumSpelling(
+  schema: PluginGuidedSchema,
+  config: JsonObject,
+): string | null {
+  for (const section of schema.sections) {
+    for (const field of section.fields) {
+      if (field.kind !== "enum") continue;
+      const container = section.path
+        ? resolveContainer(config, section.path)
+        : config;
+      const value = container?.[field.key];
+      if (typeof value !== "string") continue;
+      const allowed = (field.enumValues ?? []).map((option) => option.value);
+      if (!allowed.includes(value)) {
+        return (
+          `\`${field.key}\` is ${JSON.stringify(value)}, a spelling the gateway ` +
+          `accepts but this view does not offer (${allowed.join(", ")}).`
+        );
+      }
+    }
+  }
+  return null;
 }

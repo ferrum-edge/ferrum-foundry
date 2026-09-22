@@ -359,7 +359,11 @@ const RATE_LIMITING: PluginGuidedSchema = {
           kind: "text",
           description:
             "Redis connection URL (for example redis://host:6379/0), required with sync_mode=redis. Any RESP-compatible server works. URL fragments are forbidden.",
-          pattern: /^rediss?:\/\/[^/?#\s]+(\/\d{1,10})?(\?[^\s#]*)?$/i,
+          // Mirrors the schema's shape — optional database selector, and a bare
+          // trailing slash selects database 0 — without its exact 2^31-1 bound,
+          // which the gateway enforces. Assistance may be looser than the
+          // schema, never stricter.
+          pattern: /^rediss?:\/\/[^/?#\s]+(\/(0|[1-9]\d{0,9})?)?(\?[^\s#]*)?$/i,
           patternHint: "For example redis://redis.internal:6379/0",
           prerequisite:
             "The gateway must be able to reach this endpoint through its egress policy; Redis Cluster is not supported.",

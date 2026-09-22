@@ -67,7 +67,7 @@ export function PluginGuidedConfig({
     [schema, values],
   );
   const issues = useMemo(
-    () => validateGuidedConfig(schema, values, currentConfig),
+    () => validateGuidedConfig(schema, values, currentConfig, seededRef.current),
     [schema, values, currentConfig],
   );
 
