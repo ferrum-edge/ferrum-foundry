@@ -1,5 +1,6 @@
 # Never commit a real configuration or a proof secret.
 .env
+oauth2-proxy.env
 secrets/*.conf
 tls/*
 ca/*

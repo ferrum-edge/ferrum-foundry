@@ -411,8 +411,10 @@ services:
     restart: unless-stopped
     expose:
       - "4180"
+    # Its own file: an env_file hands a service every variable in it, and
+    # .env holds FERRUM_JWT_SECRET and the proxy proof secret.
     env_file:
-      - .env
+      - oauth2-proxy.env
     command:
       - --provider=oidc
       - --oidc-issuer-url=https://idp.example.com/
@@ -441,14 +443,16 @@ services:
       - ./tls:/etc/nginx/tls:ro
 ```
 
-Put `FERRUM_JWT_SECRET`, `FERRUM_TRUSTED_PROXY_SECRET`,
+Put `FERRUM_JWT_SECRET` and `FERRUM_TRUSTED_PROXY_SECRET` in `.env`, and
 `OAUTH2_PROXY_CLIENT_ID`, `OAUTH2_PROXY_CLIENT_SECRET`, and
-`OAUTH2_PROXY_COOKIE_SECRET` in `.env` with restrictive permissions, and keep
-`.env` out of version control. Compose substitutes the `${...}` references in
-the `foundry` service from that file, and oauth2-proxy reads its
-`OAUTH2_PROXY_*` variables from it through `env_file`. The `foundry` service
-deliberately has no `env_file`, so the OAuth client secret never enters the
-BFF's environment.
+`OAUTH2_PROXY_COOKIE_SECRET` in a separate `oauth2-proxy.env`. Give both
+restrictive permissions and keep both out of version control. Compose
+substitutes the `${...}` references in the `foundry` service from `.env`;
+oauth2-proxy reads its `OAUTH2_PROXY_*` variables from its own file through
+`env_file`. The split matters in both directions: the `foundry` service has no
+`env_file`, so the OAuth client secret never enters the BFF's environment, and
+oauth2-proxy never receives the gateway admin signing key or the proof secret.
+A runnable version of this stack is in `deploy/starter/`.
 
 The image ships a `HEALTHCHECK` that requests `/api/health/live` on the
 container's own `PORT`, so `docker ps` reports the container unhealthy when the

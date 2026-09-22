@@ -63,12 +63,19 @@ services:
     profiles: [production]
     expose:
       - "4180"
-    env_file:
-      - .env
-    # The issuer, redirect URL, and email domain come from `env_file` as
+    # Its own file, not `.env`: `.env` holds FERRUM_JWT_SECRET, which signs
+    # gateway admin tokens, and the proxy proof secret. oauth2-proxy needs
+    # neither, and an env_file hands a service every variable in it.
+    #
+    # The issuer, redirect URL, and email domain come from here as
     # OAUTH2_PROXY_* variables rather than through compose interpolation, so a
     # demo run does not have to supply production identity settings. Missing
-    # ones are reported by oauth2-proxy itself at startup.
+    # ones are reported by oauth2-proxy itself at startup. `required: false`
+    # keeps the demo profile, which never runs this service, from needing the
+    # file to exist.
+    env_file:
+      - path: oauth2-proxy.env
+        required: false
     command:
       - --provider=oidc
       - --scope=openid email profile groups
