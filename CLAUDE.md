@@ -142,6 +142,7 @@ The app supports dark and light themes via CSS custom properties. Dark is the de
 - `src/api/` - API client, types, and endpoint modules (`tls.ts`, `mesh.ts`, `ops.ts`, `apiSpecs.ts`, `trust.ts` bundle their own response types)
 - `src/hooks/` - React Query hooks for data fetching
 - `src/lib/pluginConfigDefaults.ts` - plugin catalog: per-plugin default configs plus `PLUGIN_METADATA` (category + description) used by the plugin picker
+- `src/lib/pluginSchemas.ts` - reviewed field descriptors for the guided plugin editor (`key_auth`, `rate_limiting`, `cors`, `prometheus_metrics`), transcribed from named `openapi.yaml` schema components. Foundry stores no copy of the spec, so each component's SHA-256 is pinned and `scripts/plugin-schema-drift.mjs` re-fetches and compares on every PR. Never update a digest without re-reading the schema. Guided edits are lossless (unmodelled keys, key order, and omission/`null` semantics all survive) and a shape the descriptors cannot model falls back to raw JSON with a stated reason rather than being rewritten. See `docs/plugin-schemas.md`
 - `server/` - Fastify BFF server
 - `scripts/` - Demo backend, seeding, traffic generation, and `mock-admin-gateway.mjs`
 
