@@ -144,7 +144,8 @@ The app supports dark and light themes via CSS custom properties. Dark is the de
 - `src/lib/pluginConfigDefaults.ts` - plugin catalog: per-plugin default configs plus `PLUGIN_METADATA` (category + description) used by the plugin picker
 - `src/lib/pluginSchemas.ts` - reviewed field descriptors for the guided plugin editor (`key_auth`, `rate_limiting`, `cors`, `prometheus_metrics`), transcribed from named `openapi.yaml` schema components. Foundry stores no copy of the spec, so each component's SHA-256 is pinned and `scripts/plugin-schema-drift.mjs` re-fetches and compares on every PR. Never update a digest without re-reading the schema. Guided edits are lossless (unmodelled keys, key order, and omission/`null` semantics all survive) and a shape the descriptors cannot model falls back to raw JSON with a stated reason rather than being rewritten. See `docs/plugin-schemas.md`
 - `server/` - Fastify BFF server
-- `scripts/` - Demo backend, seeding, traffic generation, and `mock-admin-gateway.mjs`
+- `scripts/` - Demo backend, seeding, traffic generation, `mock-admin-gateway.mjs`, and the starter's `starter-preflight.mjs` / `starter-journey.mjs`
+- `deploy/starter/` - the runnable deployment starter: one Compose stack with a `production` and a disposable `demo` profile. `nginx/identity/policy.conf` (group → role/namespace) and `nginx/identity/inject.conf` (the four identity headers) are included by **both** proxy configurations, so the demo exercises the production authorization path; a test fails if either config grows its own copy. See `docs/getting-started.md`
 
 ## Type conventions
 

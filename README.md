@@ -108,6 +108,12 @@ and [plugin membership](docs/plugin-membership.md).
 
 ## Quick Start
 
+Deploying it rather than developing on it? Start at
+[Getting started](docs/getting-started.md): a runnable stack in
+[`deploy/starter/`](deploy/starter/README.md) takes you from nothing to an
+authenticated request through the real data plane, with a `demo` profile that
+needs no gateway and no identity provider of your own.
+
 ### Prerequisites
 
 - Node.js 22.19+ within 22.x, 24.x, or 26+. The published container image runs Node.js 24 LTS. This range satisfies both Undici's runtime floor and Vitest 5's supported Node versions.
@@ -293,6 +299,7 @@ attestations. See [Release and supply-chain gates](docs/release-security.md).
 
 ## Documentation
 
+- [Getting started](docs/getting-started.md) - install to first authenticated request, using the starter in [`deploy/starter/`](deploy/starter/README.md)
 - [Deployment](docs/deployment.md) - production topology, full configuration reference, reverse proxy / Compose / Kubernetes examples, and a go-live checklist
 - [Operator visibility](docs/operator-visibility.md) - health and audit evidence, proxy-bound specs, and mesh Runtime
 - [Production authentication](docs/authentication.md) - trusted-proxy identity contract and downstream JWT claims
