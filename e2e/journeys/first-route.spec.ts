@@ -48,7 +48,8 @@ test.describe("first route, first authenticated request", () => {
     consumerName: uniqueId("e2e-consumer"),
     consumerId: "",
     listenPath: `/${uniqueId("e2e")}`,
-    apiKey: `e2e-key-${uniqueId("k")}`,
+    // Filled in from the UI's copy-once receipt.
+    apiKey: "",
   };
 
   test.afterAll(async () => {
@@ -158,17 +159,27 @@ test.describe("first route, first authenticated request", () => {
     ).toContain(created.pluginId);
   });
 
-  test("a consumer credential is shown once and redacted afterwards", async ({
+  test("a generated credential is shown once, copied, and redacted afterwards", async ({
     adminPage: page,
     gateway,
   }) => {
     await page.goto("/consumers/new");
     await page.getByLabel("Username", { exact: true }).fill(created.consumerName);
     await page.getByRole("button", { name: "Credentials" }).click();
-    await page.getByLabel("Key Auth", { exact: true }).fill(created.apiKey);
+    // The operator does not invent the key; the UI generates it.
+    await page.getByRole("button", { name: "Generate", exact: true }).first().click();
+    await expect(page.getByLabel("Key Auth", { exact: true })).not.toHaveValue("");
 
     await page.getByRole("button", { name: "Create Consumer" }).click();
     await expect(page.getByText("Consumer created successfully")).toBeVisible();
+
+    // The copy-once receipt is the only place the key is ever shown again.
+    // Take it from there, as the operator would.
+    const receipt = page.getByLabel("API key 1", { exact: true });
+    await expect(receipt).toBeVisible();
+    created.apiKey = await receipt.inputValue();
+    expect(created.apiKey.length, "the receipt must carry the generated key").toBeGreaterThan(16);
+    await page.getByRole("button", { name: "I have saved these credentials" }).click();
 
     const consumers = await gateway.get<{ data: { id: string; username: string }[] }>(
       "/consumers?offset=0&limit=250",
@@ -179,18 +190,14 @@ test.describe("first route, first authenticated request", () => {
     expect(match, "the consumer the UI reported creating").toBeTruthy();
     created.consumerId = match!.id;
 
-    // An ordinary read never returns the key again. An operator who did not
-    // copy it has to rotate, and the UI must not pretend otherwise.
+    // An ordinary read never returns the key again, and neither does the UI.
     const stored = await gateway.get<{ credentials?: { keyauth?: { key: string }[] } }>(
       `/consumers/${created.consumerId}`,
     );
-    const storedKey = stored.body?.credentials?.keyauth?.[0]?.key;
-    expect(storedKey, "a stored credential must not come back in the clear").not.toBe(
-      created.apiKey,
-    );
-    expect(storedKey).toBe("[REDACTED]");
-
-    await page.goto(`/consumers/${created.consumerId}`);
+    expect(stored.body?.credentials?.keyauth?.[0]?.key).toBe("[REDACTED]");
+    await expect(page).toHaveURL(new RegExp(`/consumers/${created.consumerId}$`));
+    await expect(page.getByText(created.apiKey)).toHaveCount(0);
+    await page.reload();
     await expect(page.getByText(created.apiKey)).toHaveCount(0);
   });
 

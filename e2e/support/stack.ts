@@ -2,6 +2,7 @@
 /*  Critical-journey fixtures (issue #380)                             */
 /* ------------------------------------------------------------------ */
 
+import { readFileSync } from "node:fs";
 import { test as base, expect, type BrowserContext, type Page } from "@playwright/test";
 
 export const FOUNDRY_URL = process.env.FOUNDRY_URL ?? "http://127.0.0.1:8088";
@@ -21,6 +22,29 @@ export const IDENTITY_HEADER = "X-Demo-Identity";
 
 export type Identity = "admin" | "operator" | "viewer" | "unmapped";
 
+/**
+ * The real proxy proof secret, from the environment or the starter's `.env`.
+ *
+ * The header-stripping journey has to present it: with a guessed value the
+ * BFF refuses the request whether or not the proxy strips client headers,
+ * so the journey could never fail. Missing, it throws rather than guessing.
+ */
+export function proofSecret(): string {
+  const fromEnv = process.env.FERRUM_TRUSTED_PROXY_SECRET;
+  if (fromEnv) return fromEnv;
+  try {
+    const env = readFileSync(new URL("../../deploy/starter/.env", import.meta.url), "utf8");
+    const match = /^FERRUM_TRUSTED_PROXY_SECRET=(.+)$/m.exec(env);
+    if (match?.[1]) return match[1].trim();
+  } catch {
+    // Fall through to the explicit failure below.
+  }
+  throw new Error(
+    "FERRUM_TRUSTED_PROXY_SECRET is not set and deploy/starter/.env has none. " +
+      "The header-stripping journey is meaningless without the real secret.",
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /*  Deterministic failure injection                                    */
 /* ------------------------------------------------------------------ */
@@ -38,6 +62,10 @@ export interface Fault {
    * ambiguous case: the write happened and the client cannot know it.
    */
   dropAfterForward?: boolean;
+  /** Hold the request this long, then forward it: a late answer. */
+  delayMs?: number;
+  /** Match only requests bound to this namespace. */
+  namespace?: string;
 }
 
 export class FaultControl {

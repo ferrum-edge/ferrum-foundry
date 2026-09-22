@@ -82,7 +82,7 @@ test.describe("read failures", () => {
     await expect(page.getByText(/create your first proxy/i)).toHaveCount(0);
   });
 
-  test("a detail page keeps the editor mounted through a failed background read", async ({
+  test("a failed background read keeps the operator's unsaved draft", async ({
     adminPage: page,
     faults,
   }) => {
@@ -90,15 +90,40 @@ test.describe("read failures", () => {
     const listenPath = page.getByLabel("Listen Path", { exact: true });
     await expect(listenPath).toHaveValue(`/${PROXY_ID}`);
 
-    // An unsaved edit, then a background read that fails.
+    // An unsaved edit.
     const draft = `/${PROXY_ID}-edited`;
     await listenPath.fill(draft);
-    await faults.arm({ method: "GET", path: `/proxies/${PROXY_ID}`, times: 2, status: 503 });
-    await page.reload();
 
-    // Either the page recovered and shows the stored value, or it reports the
-    // failure — what it must never do is claim the resource is gone.
+    // Every read of this proxy now fails — more times than the client and
+    // query layers will retry, so the refetch really ends in an error.
+    const blockedBefore = (await faults.state()).blocked;
+    await faults.arm({ method: "GET", path: `/proxies/${PROXY_ID}`, times: 50, status: 503 });
+
+    // Make the cached read stale (the app keeps reads fresh for 30s) and
+    // return to the tab, which is what triggers a background refetch for a
+    // real operator. Only Date.now is skewed; timers stay real, so the retry
+    // ladder runs exactly as it would in production.
+    await page.evaluate(() => {
+      const realNow = Date.now.bind(Date);
+      Date.now = () => realNow() + 31_000;
+      // Bubbling, as the browser's own event does: the query layer listens
+      // on window, so a non-bubbling synthetic event would never reach it
+      // and this journey would pass without any refetch happening.
+      document.dispatchEvent(new Event("visibilitychange", { bubbles: true }));
+    });
+
+    // The failure is reported as a refresh problem, not as a missing proxy…
+    await expect(page.getByText(/proxy configuration could not refresh/i)).toBeVisible({
+      timeout: 40_000,
+    });
     await expect(page.getByText(/failed to load proxy configuration/i)).toHaveCount(0);
-    await expect(page.getByLabel("Listen Path", { exact: true })).toBeVisible();
+    // …and the draft is exactly where the operator left it.
+    await expect(listenPath).toHaveValue(draft);
+
+    const state = await faults.state();
+    expect(
+      state.blocked - blockedBefore,
+      "the background refetch must actually have hit the armed failures",
+    ).toBeGreaterThan(0);
   });
 });

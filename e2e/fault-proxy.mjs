@@ -43,15 +43,21 @@ let served = 0;
 /** Requests the upstream never saw because a fault consumed them. */
 let blocked = 0;
 
-function matches(rule, method, pathname) {
+function matches(rule, method, pathname, namespace) {
   return (
     (rule.method === "*" || rule.method === method.toUpperCase()) &&
-    pathname.startsWith(rule.path)
+    pathname.startsWith(rule.path) &&
+    // Without a namespace, a rule would also match the same path read under
+    // another tenant — which is exactly the request a namespace-isolation
+    // journey needs to leave alone.
+    (rule.namespace === null || rule.namespace === namespace)
   );
 }
 
-function takeFault(method, pathname) {
-  const rule = armed.find((entry) => entry.remaining > 0 && matches(entry, method, pathname));
+function takeFault(method, pathname, namespace) {
+  const rule = armed.find(
+    (entry) => entry.remaining > 0 && matches(entry, method, pathname, namespace),
+  );
   if (!rule) return null;
   rule.remaining -= 1;
   blocked += 1;
@@ -108,6 +114,10 @@ async function control(request, response, url) {
       // genuinely ambiguous case: the write happened, the client cannot know.
       drop: rule.drop === true,
       dropAfterForward: rule.dropAfterForward === true,
+      // Hold the request, then forward it normally: a late answer, which is
+      // how a response for a previous tenant arrives after a switch.
+      delayMs: Number.isSafeInteger(rule.delayMs) && rule.delayMs > 0 ? rule.delayMs : 0,
+      namespace: typeof rule.namespace === "string" ? rule.namespace : null,
     });
     void url;
     return json(response, 200, { armed, served, blocked });
@@ -122,8 +132,15 @@ const server = createServer(async (request, response) => {
     return control(request, response, url);
   }
 
-  const fault = takeFault(request.method ?? "GET", url.pathname);
-  if (fault && !fault.dropAfterForward) {
+  const fault = takeFault(
+    request.method ?? "GET",
+    url.pathname,
+    request.headers["x-ferrum-namespace"] ?? null,
+  );
+  if (fault?.delayMs) {
+    await new Promise((resolve) => setTimeout(resolve, fault.delayMs));
+  }
+  if (fault && !fault.dropAfterForward && !fault.delayMs) {
     if (fault.drop) {
       // The request reached this forwarder and was discarded without an
       // answer. From the BFF's side the outcome is genuinely unknown, which

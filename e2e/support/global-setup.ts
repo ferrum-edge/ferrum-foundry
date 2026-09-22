@@ -46,4 +46,18 @@ export default async function globalSetup(): Promise<void> {
         "make this gate weaker than it looks.",
     );
   }
+
+  // `scripts/e2e-gate-self-test.mjs` breaks the stack on purpose. Its fault
+  // has to be armed here, after the disarm above — armed any earlier, this
+  // setup would clear it and the self-test would be testing an unbroken
+  // stack.
+  const selfTestFault = process.env.FERRUM_E2E_SELF_TEST_FAULT;
+  if (selfTestFault) {
+    const armed = await fetch(`${FAULT_URL}/__fault`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-fault-token": FAULT_TOKEN },
+      body: selfTestFault,
+    });
+    if (!armed.ok) throw new Error(`Could not arm the self-test fault: ${armed.status}`);
+  }
 }

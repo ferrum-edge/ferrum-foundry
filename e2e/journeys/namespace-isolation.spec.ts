@@ -99,7 +99,7 @@ test.describe("namespace isolation", () => {
     await expect(page.getByLabel("Name", { exact: true })).toHaveCount(0);
   });
 
-  test("a failed read for the previous tenant cannot repaint the new one", async ({
+  test("a late response for the previous tenant cannot repaint the new one", async ({
     adminPage: page,
     faults,
   }) => {
@@ -108,18 +108,33 @@ test.describe("namespace isolation", () => {
       `shared-${NAMESPACE}`,
     );
 
-    // Whatever this read eventually answers belongs to the namespace it was
-    // issued under. It must not reach the page after the switch.
+    // Hold tenant A's next read of this upstream — and only tenant A's: the
+    // rule is namespace-bound, so tenant B's read of the same path is not
+    // slowed. The answer is real, it just arrives after the switch.
+    const DELAY_MS = 4_000;
     await faults.arm({
       method: "GET",
       path: `/upstreams/${tenants[0].id}`,
-      times: 3,
-      status: 503,
+      namespace: NAMESPACE,
+      delayMs: DELAY_MS,
+      times: 1,
     });
+    await page.reload();
     await selectNamespace(page, NAMESPACE_B);
 
+    // Tenant B does not hold this id. The page reaches that conclusion only
+    // after the query layer's retry ladder, so wait for the terminal state
+    // rather than racing it — as the suite's other terminal-state checks do.
+    await expect(page.getByText(/failed to load upstream configuration/i)).toBeVisible({
+      timeout: 40_000,
+    });
+
+    // Let tenant A's held response land, then look again.
+    await page.waitForTimeout(DELAY_MS + 1_000);
+    await faults.expectAllConsumed();
     await expect(page.getByText(`${tenants[0].backend}:8081`)).toHaveCount(0);
-    await expect(page.getByText(`shared-${NAMESPACE}`)).toHaveCount(0);
+    await expect(page.getByLabel("Name", { exact: true })).toHaveCount(0);
+    await expect(page.getByText(/failed to load upstream configuration/i)).toBeVisible();
   });
 
   test("a list shows only the namespace on screen", async ({ adminPage: page }) => {

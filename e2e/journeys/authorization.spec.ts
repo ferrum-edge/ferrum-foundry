@@ -9,6 +9,7 @@ import {
   IDENTITY_HEADER,
   NAMESPACE,
   NAMESPACE_B,
+  proofSecret,
 } from "../support/stack";
 
 const ADMIN_ROUTE = "/api/proxy/proxies?offset=0&limit=1";
@@ -56,7 +57,9 @@ test.describe("authorization through the identity proxy", () => {
     // a browser could make itself an administrator.
     const forged = await request.get(`${FOUNDRY_URL}${ADMIN_ROUTE}`, {
       headers: {
-        "X-Ferrum-Auth-Secret": process.env.FERRUM_TRUSTED_PROXY_SECRET ?? "guessed",
+        // The real secret: a client holding it must still be unable to assert
+        // its own identity. A guessed one would be refused regardless.
+        "X-Ferrum-Auth-Secret": proofSecret(),
         "X-Forwarded-User": "mallory",
         "X-Ferrum-Role": "admin",
         "X-Ferrum-Namespaces": `${NAMESPACE},${NAMESPACE_B}`,

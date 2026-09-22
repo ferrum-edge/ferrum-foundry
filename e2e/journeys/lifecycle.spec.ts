@@ -90,15 +90,16 @@ test.describe("resource lifecycle", () => {
     expect(gone.status, "the proxy must actually be gone").toBe(404);
 
     // `DELETE /proxies/{id}` orphan-cleans a last-referenced hand-owned
-    // upstream by default. Whatever the gateway did, the UI must not have
-    // reported something different — so this asserts the real outcome rather
-    // than assuming one.
+    // upstream by default, and this upstream was referenced by this proxy
+    // alone. The cascade must have happened on the gateway…
     const upstream = await gateway.get(`/upstreams/${UPSTREAM_ID}`);
-    expect([200, 404]).toContain(upstream.status);
+    expect(upstream.status, "the orphaned upstream should have been cleaned up").toBe(404);
 
-    // And the list the operator is returned to agrees.
+    // …and the UI must agree rather than serve the upstream from its cache.
     await page.goto("/proxies");
     await expect(page.getByText(PROXY_ID)).toHaveCount(0);
+    await page.goto("/upstreams");
+    await expect(page.getByText(UPSTREAM_ID)).toHaveCount(0);
   });
 
   test("a deleted resource's detail page does not resurrect it", async ({ adminPage: page }) => {

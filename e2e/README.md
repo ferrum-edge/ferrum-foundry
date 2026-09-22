@@ -58,9 +58,21 @@ because the failure it arranged never happened.
 gateway, and the route journeys finish with real data-plane requests. A save
 that rendered green is not evidence.
 
-**The gate proves it is live.** `npm run e2e:gate-self-test` refuses every
-gateway write and asserts the critical journey *fails*. A green run there means
-the journeys stopped depending on real state, and it exits non-zero.
+**The gate proves it is live.** `npm run e2e:gate-self-test` makes the
+forwarder answer `POST /consumers` with a fabricated `201` that never reaches
+the gateway — the UI shows success, the gateway holds nothing — and requires
+the critical journey's consumer step to fail on its gateway read-back. It also
+requires that the fault was actually triggered, that global setup succeeded,
+and that the steps before the break passed, so a run that dies early for an
+unrelated reason cannot pass as proof. The fault is armed by the suite's own
+global setup (`FERRUM_E2E_SELF_TEST_FAULT`), because setup disarms the
+forwarder and would clear anything armed before it.
+
+**Faults can be late, or tenant-specific.** Besides failing, the forwarder can
+hold a request (`delayMs`) and forward it afterwards, and can match only
+requests bound to one namespace (`namespace`) — which is how the isolation
+journey delivers tenant A's answer after the operator has switched to B,
+without also slowing B's own read.
 
 ## Adding a journey
 

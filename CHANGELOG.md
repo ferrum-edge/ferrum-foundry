@@ -22,7 +22,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- A proxy-scoped plugin created through the UI is now verified to be attached to its proxy, and attached when the gateway did not do it. `openapi.yaml` states that a proxy-scoped plugin "applies only when the target proxy lists it in `plugins` — `proxy_id` alone never attaches it" and that the gateway appends the association in the same transaction; a gateway that does not answers `201` for a plugin that never runs. The visible consequence was attaching key authentication to a route and being told it worked while the route kept serving anonymous traffic. The check is a read-back, so a gateway that performs the side effect is not written to twice, and a reconciliation that fails is reported rather than leaving a plugin that looks like a configured policy (#380).
 - The client-side capability model observes `FERRUM_ADMIN_READ_ONLY` on `database`/`cp` gateways (`admin_writes_enabled: false` with health `status` other than `degraded`), denies configuration export on `node_agent`, and presents disabled fieldset descendants and denied `WriteAction` buttons with the same greyed appearance as controls that pass `disabled` directly (#373).
 - Cluster backend capabilities on a control plane explain that probes belong to a data plane instead of showing a permanent read error and Re-probe All (#364).
 - Overload protection shows disabled file-descriptor shedding and unconfigured request limits instead of a misleading `current / 0` ratio (#360).
