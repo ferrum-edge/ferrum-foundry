@@ -303,6 +303,33 @@ describe("cross-session upstream target edits", () => {
     ]);
   });
 
+  it("refuses a settings save whose targets predate this page's own target edit", async () => {
+    // The settings form owns `targets` and seeds them once. A save from the
+    // Targets tab leaves it holding the old list; without the guard its next
+    // save would silently revert that target change.
+    const gateway = stubUpstreamGateway(upstreamSeed);
+    const settingsEditor = upstreams.upstreamWriteGuard(upstreamSeed);
+
+    await upstreams.updateTargets(
+      scope,
+      "payments",
+      [...upstreamSeed.targets, { host: "two.internal", port: 443, weight: 1 }],
+      upstreams.targetsWriteGuard(upstreamSeed),
+    );
+
+    const refused = await upstreams
+      .update(
+        scope,
+        "payments",
+        { ...upstreams.toUpdatePayload(upstreamSeed), name: "renamed" },
+        settingsEditor,
+      )
+      .then(() => null, (error: unknown) => error);
+
+    expect(isStaleResourceError(refused)).toBe(true);
+    expect(gateway.read().targets).toHaveLength(2);
+  });
+
   it("still composes with a settings save from this same client", async () => {
     // #235/#254: the targets write reads the current settings and preserves
     // them. Scoping its guard to `targets` keeps that supported composition.

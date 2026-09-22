@@ -60,14 +60,16 @@ export function StaleWriteDialog({
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onKeepEditing(); }}>
       <DialogContent className="max-w-3xl">
-        <DialogTitle>Someone else changed this {conflict.resource}</DialogTitle>
+        <DialogTitle>This {conflict.resource} changed after you opened it</DialogTitle>
         <DialogDescription className="mt-2">
           Your changes were <strong>not</strong> saved and nothing was sent to the
-          gateway. Another session wrote to{" "}
+          gateway.{" "}
           <span className="font-mono">{conflict.id}</span> in namespace{" "}
-          <span className="font-mono">{conflict.namespace}</span> after you opened
-          this editor. A save here replaces the whole {conflict.resource}, so
-          submitting your draft would have reverted their change.
+          <span className="font-mono">{conflict.namespace}</span> was written after
+          this editor opened — by another session, another tool, or another tab of
+          this page such as the upstream Targets tab. A save here replaces the
+          whole {conflict.resource}, so submitting your draft would have reverted
+          that change.
         </DialogDescription>
 
         {conflicting.length > 0 && (

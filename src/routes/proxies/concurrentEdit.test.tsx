@@ -183,7 +183,7 @@ describe("a proxy save refused as stale", () => {
 
     // The conflict is on screen with all three sides of the comparison.
     const text = dialogText();
-    expect(text).toContain("Someone else changed this proxy");
+    expect(text).toContain("This proxy changed after you opened it");
     expect(text).toContain(OPENED_HOST);
     expect(text).toContain(GATEWAY_HOST);
     expect(text).toContain("30000");

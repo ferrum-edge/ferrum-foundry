@@ -116,6 +116,15 @@ top of it.
    never returns key bytes on these resources anyway. Nothing from the
    comparison is written to browser storage, telemetry, or logs.
 
+### The writer can be this operator
+
+The upstream settings form owns `targets` too, seeded once like every other
+field. After a save from the Targets tab, the settings form still holds the
+old list, so its next save would have reverted the target change. The guard
+refuses it, and the dialog says the resource changed after the editor opened —
+not that "someone else" did, because the other writer may be this same page.
+Discard and reload picks up the new targets.
+
 ## Baselines and background refetches
 
 The baseline follows the same seed-once rule as the form fields
