@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – Upstream API functions                           */
 /* ------------------------------------------------------------------ */
 
-import { proxyApi, scoped, type NamespaceScope } from "./client";
+import { proxyApi, scoped, SILENT_ERRORS, type NamespaceScope } from "./client";
 import type {
   PaginatedResponse,
   PaginationParams,
@@ -10,6 +10,13 @@ import type {
   UpstreamCreate,
 } from "./types";
 import { collectAllPages } from "./pagination";
+import { guardedReplace, type WriteGuard } from "./conditionalWrite";
+import {
+  baselineSnapshot,
+  pickSnapshot,
+  UPSTREAM_BASELINE_OMIT,
+  type BaselineSnapshot,
+} from "@/lib/resourceBaseline";
 
 const upstreamWrites = new Map<string, Promise<void>>();
 
@@ -33,23 +40,52 @@ function withUpstreamId(data: UpstreamCreate, id?: string): UpstreamCreate {
 export async function list(
   scope: NamespaceScope,
   params: PaginationParams = {},
+  signal?: AbortSignal,
 ): Promise<PaginatedResponse<Upstream>> {
   const searchParams: Record<string, string> = {};
   if (params.offset !== undefined) searchParams.offset = String(params.offset);
   if (params.limit !== undefined) searchParams.limit = String(params.limit);
 
   return proxyApi
-    .get("upstreams", scoped(scope, { searchParams }))
+    .get("upstreams", scoped(scope, { searchParams, signal }))
     .json<PaginatedResponse<Upstream>>();
 }
 
 /** Every page is fetched under `scope`, however long the collection takes. */
-export async function listAll(scope: NamespaceScope): Promise<Upstream[]> {
-  return collectAllPages((offset, limit) => list(scope, { offset, limit }));
+export async function listAll(
+  scope: NamespaceScope,
+  signal?: AbortSignal,
+): Promise<Upstream[]> {
+  return collectAllPages(
+    (offset, limit, pageSignal) => list(scope, { offset, limit }, pageSignal),
+    undefined,
+    signal,
+  );
 }
 
 export async function get(scope: NamespaceScope, id: string): Promise<Upstream> {
   return proxyApi.get(`upstreams/${id}`, scoped(scope)).json<Upstream>();
+}
+
+/**
+ * Resolve one upstream that another resource references.
+ *
+ * A dangling `upstream_id` on a list row is a fact about that row, not a fault
+ * to report in the global error dialog, so this read opts out of the popup and
+ * the caller renders the reference as unresolved. Kept separate from `get` so
+ * the detail page's own read keeps reporting its failures.
+ */
+export async function getReference(
+  scope: NamespaceScope,
+  id: string,
+  signal?: AbortSignal,
+): Promise<Upstream> {
+  return proxyApi
+    .get(
+      `upstreams/${id}`,
+      scoped(scope, { signal, context: { [SILENT_ERRORS]: true } }),
+    )
+    .json<Upstream>();
 }
 
 /** Strip server- and mesh-owned fields from a fetched full-replace resource. */
@@ -127,12 +163,62 @@ export async function create(
     .json<Upstream>();
 }
 
+/** Reduce an upstream, or an upstream payload, to the content a save replaces. */
+export function toBaseline(
+  upstream: Upstream | UpstreamCreate,
+): BaselineSnapshot {
+  return baselineSnapshot(upstream, UPSTREAM_BASELINE_OMIT);
+}
+
+/** Guard for the whole-resource settings form. */
+export function upstreamWriteGuard(
+  seed: Upstream,
+): WriteGuard<Upstream | UpstreamCreate> {
+  return { baseline: toBaseline(seed), select: toBaseline };
+}
+
+/**
+ * Guard for the targets editor, which replaces only `targets`.
+ *
+ * Scoping the comparison to that one field is deliberate: `updateTargets`
+ * composes with a settings save from this same client by design (#235/#254),
+ * and comparing the whole upstream would turn that supported composition into
+ * a conflict. A concurrent *target* change is still caught, which is the only
+ * thing this write can lose.
+ */
+export function targetsWriteGuard(
+  seed: Upstream,
+): WriteGuard<Upstream | UpstreamCreate> {
+  const select = (value: Upstream | UpstreamCreate) =>
+    pickSnapshot(value, ["targets"]);
+  return { baseline: select(seed), select };
+}
+
+/**
+ * Full-replacement update of the upstream settings.
+ *
+ * `guard` carries the content the editor opened against; pass `null` only for
+ * a write that cannot lose a concurrent change. See `docs/concurrent-edits.md`.
+ */
 export async function update(
   scope: NamespaceScope,
   id: string,
   data: UpstreamCreate,
+  guard: WriteGuard<Upstream | UpstreamCreate> | null,
 ): Promise<Upstream> {
-  return serializeWrite(scope, id, () => put(scope, id, data));
+  if (!guard) return serializeWrite(scope, id, () => put(scope, id, data));
+
+  return serializeWrite(scope, id, () =>
+    guardedReplace<Upstream, UpstreamCreate>({
+      resource: "upstream",
+      id,
+      namespace: scope.namespace,
+      guard,
+      proposed: data,
+      read: () => get(scope, id),
+      write: (body) => put(scope, id, body),
+    }),
+  );
 }
 
 function put(scope: NamespaceScope, id: string, data: UpstreamCreate): Promise<Upstream> {
@@ -141,15 +227,36 @@ function put(scope: NamespaceScope, id: string, data: UpstreamCreate): Promise<U
     .json<Upstream>();
 }
 
-/** Targets own only the target list; all settings come from a current read. */
+/**
+ * Targets own only the target list; all settings come from a current read.
+ *
+ * The same read that supplies those settings is what the guard compares, so a
+ * guarded target write costs no extra request. `guard` must be built from the
+ * list the operator actually edited (`targetsWriteGuard(upstream)` on the
+ * render whose targets produced this array), not from a later refetch.
+ */
 export async function updateTargets(
   scope: NamespaceScope,
   id: string,
   targets: UpstreamCreate["targets"],
+  guard: WriteGuard<Upstream | UpstreamCreate> | null,
 ): Promise<Upstream> {
   return serializeWrite(scope, id, async () => {
     const current = await get(scope, id);
-    return put(scope, id, { ...toUpdatePayload(current), targets });
+    const proposed = { ...toUpdatePayload(current), targets };
+    if (!guard) return put(scope, id, proposed);
+
+    // The verification read and the settings read are the same response, so a
+    // guarded target write costs no extra round trip.
+    return guardedReplace<Upstream, UpstreamCreate>({
+      resource: "upstream targets",
+      id,
+      namespace: scope.namespace,
+      guard,
+      proposed,
+      read: async () => current,
+      write: (body) => put(scope, id, body),
+    });
   });
 }
 

@@ -5,7 +5,11 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import { ReadStateNotice } from '@/components/shared/ReadState';
 import { resolveReadState } from '@/lib/readState';
-import { useAllProxies } from "@/hooks/useProxies";
+import {
+  describeProxy,
+  useProxyCatalog,
+  useProxyReferences,
+} from "@/hooks/useProxies";
 import type { Proxy } from "@/api/types";
 
 /* ------------------------------------------------------------------ */
@@ -36,10 +40,7 @@ export type ProxySearchPickerProps = SingleProps | MultiProps;
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
-function proxyLabel(p: Proxy): string {
-  const path = p.listen_path ?? (p.listen_port ? `:${p.listen_port}` : p.id);
-  return p.name ? `${p.name} (${path})` : path;
-}
+const proxyLabel = describeProxy;
 
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
@@ -51,10 +52,14 @@ export function ProxySearchPicker(props: ProxySearchPickerProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const query = useAllProxies();
-  const { data, isLoading } = query;
-  const disabled = resolveReadState(query) !== 'loaded';
-  const proxies = useMemo(() => data ?? [], [data]);
+  // Bounded by default: one catalog page answers any namespace that fits in
+  // it, and only an explicit "search all" traverses the rest (#382).
+  const [expanded, setExpanded] = useState(false);
+  const catalog = useProxyCatalog(expanded);
+  const catalogState = resolveReadState(catalog.query);
+  const isLoading = catalogState === 'loading';
+  const disabled = catalogState !== 'loaded';
+  const proxies = catalog.proxies;
 
   // Filter by search term
   const filtered = useMemo(() => {
@@ -80,16 +85,40 @@ export function ProxySearchPicker(props: ProxySearchPickerProps) {
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
+  const selectedIds = useMemo(() => {
+    const ids = mode === "single" ? (value ? [value as string] : []) : (value as string[]);
+    return [...new Set(ids)];
+  }, [value, mode]);
+
+  // A selection can point outside the loaded page. Resolve those ids one by
+  // one — bounded by the number of selections — rather than downloading the
+  // collection to find them.
+  const loadedIds = useMemo(() => new Set(proxies.map((proxy) => proxy.id)), [proxies]);
+  const unloadedSelections = useMemo(
+    () => selectedIds.filter((id) => !loadedIds.has(id)),
+    [selectedIds, loadedIds],
+  );
+  const references = useProxyReferences(unloadedSelections);
+
   // Every selected ID stays visible even if a later catalog omits its proxy.
   // Do not silently change desired membership when a catalog refreshes.
   const selectedProxies = useMemo(() => {
     const byId = new Map(proxies.map((proxy) => [proxy.id, proxy]));
-    const ids = mode === "single" ? (value ? [value as string] : []) : value as string[];
-    return [...new Set(ids)].map((id) => {
+    return selectedIds.map((id) => {
       const proxy = byId.get(id);
-      return { id, label: proxy ? proxyLabel(proxy) : `${id} (not in current catalog)` };
+      if (proxy) return { id, label: proxyLabel(proxy) };
+      const resolved = references.names.get(id);
+      if (resolved) return { id, label: resolved };
+      return {
+        id,
+        label: references.missing.has(id)
+          ? `${id} (no longer on the gateway)`
+          : references.unresolved.has(id)
+            ? `${id} (label unavailable)`
+            : `${id} (resolving…)`,
+      };
     });
-  }, [proxies, value, mode]);
+  }, [proxies, selectedIds, references]);
 
   /* ---------- Handlers ---------- */
 
@@ -197,6 +226,28 @@ export function ProxySearchPicker(props: ProxySearchPickerProps) {
                 </div>
               )}
 
+              {/* The search above ran over what is loaded. Say so, and make
+                  completing it a deliberate, cancellable action rather than
+                  something every picker pays for on open. */}
+              {!catalog.complete && !disabled && (
+                <div className="border-t border-border/60 mt-1 px-3 py-2 text-xs text-text-muted">
+                  <p>
+                    Searching the first {proxies.length} of {catalog.total} proxies
+                    in this namespace.
+                  </p>
+                  <button
+                    type="button"
+                    disabled={catalog.expanding}
+                    onClick={() => setExpanded(true)}
+                    className="mt-1 text-orange hover:text-orange-light font-medium transition-colors disabled:opacity-60"
+                  >
+                    {catalog.expanding
+                      ? `Loading all ${catalog.total} proxies…`
+                      : `Search all ${catalog.total} proxies`}
+                  </button>
+                </div>
+              )}
+
               {!isLoading &&
                 filtered.map((proxy) => {
                   const selected = isSelected(proxy.id);
@@ -251,7 +302,9 @@ export function ProxySearchPicker(props: ProxySearchPickerProps) {
         )}
       </div>
 
-      {query.isError && <ReadStateNotice query={query} label="Proxy catalog" />}
+      {catalog.query.isError && (
+        <ReadStateNotice query={catalog.query} label="Proxy catalog" />
+      )}
       {error && <p className="text-danger text-xs">{error}</p>}
       {!error && helpText && <p className="text-text-muted text-xs">{helpText}</p>}
     </div>

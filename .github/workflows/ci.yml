@@ -92,6 +92,14 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
+      - name: Verify guided plugin schemas against the upstream spec
+        # The guided plugin editor is derived from named schema components in
+        # the canonical openapi.yaml. Foundry keeps no copy of that spec, so
+        # this re-fetches it and compares the pinned digests. A changed block
+        # fails: a structured editor built from an older schema is how fields
+        # a newer gateway understands start getting stripped.
+        run: npm run check:plugin-schemas
+
       - name: Start demo backends
         run: |
           FERRUM_DEMO_BACKEND_BIND=0.0.0.0 node scripts/demo-backend.mjs >/tmp/ferrum-demo-backend.log 2>&1 &

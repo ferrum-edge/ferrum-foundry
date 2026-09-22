@@ -210,7 +210,7 @@ describe("namespace binding through the query hooks", () => {
     localStorage.removeItem(NAMESPACE_STORAGE_KEY);
   });
 
-  it("fetches every page of a listing under the namespace it started in", async () => {
+  it("abandons a traversal on a namespace switch without retargeting it", async () => {
     localStorage.setItem(NAMESPACE_STORAGE_KEY, "tenant-a");
     let handle: NamespaceHandle | undefined;
     await mount(<ListingProbe onValue={(value) => { handle = value; }} />);
@@ -225,7 +225,34 @@ describe("namespace binding through the query hooks", () => {
     expect(displayed()).toBe("tenant-b");
     await waitFor(() => queryClient.getQueryData(["proxies", "tenant-b", "all"]) !== undefined);
 
-    // Page two of the tenant-a listing goes out after the switch.
+    // Releasing the held page resolves the abandoned traversal's first
+    // request. It must not go on to request the rest of a collection nobody
+    // is displaying (#382).
+    releaseFirstPage();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+
+    const pages = captured
+      .filter((r) => r.url.includes("/api/proxy/proxies"))
+      .map((r) => [r.offset, r.namespace]);
+    expect(pages).toEqual([
+      ["0", "tenant-a"],
+      ["0", "tenant-b"],
+    ]);
+
+    // No request was retargeted: every page carries the namespace its
+    // traversal started in, and the abandoned one cached nothing partial.
+    expect(queryClient.getQueryData(["proxies", "tenant-a", "all"])).toBeUndefined();
+    const cachedB = queryClient.getQueryData<Proxy[]>(["proxies", "tenant-b", "all"]);
+    expect(cachedB?.map((proxy) => proxy.namespace)).toEqual(["tenant-b"]);
+  });
+
+  it("completes a traversal the displayed namespace still needs", async () => {
+    localStorage.setItem(NAMESPACE_STORAGE_KEY, "tenant-a");
+    await mount(<ListingProbe onValue={() => {}} />);
+
+    await waitFor(() => captured.some((r) => r.namespace === "tenant-a" && r.offset === "0"));
     releaseFirstPage();
     await waitFor(() => queryClient.getQueryData(["proxies", "tenant-a", "all"]) !== undefined);
 
@@ -234,20 +261,14 @@ describe("namespace binding through the query hooks", () => {
       .map((r) => [r.offset, r.namespace]);
     expect(pages).toEqual([
       ["0", "tenant-a"],
-      ["0", "tenant-b"],
       ["2", "tenant-a"],
     ]);
-
-    // The collection cached under tenant-a holds tenant-a rows only, and the
-    // one cached under tenant-b holds tenant-b rows only.
     const cachedA = queryClient.getQueryData<Proxy[]>(["proxies", "tenant-a", "all"]);
     expect(cachedA?.map((proxy) => [proxy.id, proxy.namespace])).toEqual([
       ["a-1", "tenant-a"],
       ["a-2", "tenant-a"],
       ["a-3", "tenant-a"],
     ]);
-    const cachedB = queryClient.getQueryData<Proxy[]>(["proxies", "tenant-b", "all"]);
-    expect(cachedB?.map((proxy) => proxy.namespace)).toEqual(["tenant-b"]);
   });
 
   it("sends a mutation to the displayed namespace after another tab switches", async () => {
