@@ -4,7 +4,7 @@ import { ResourceLabels } from "@/components/shared/ResourceLabels";
 /*  Ferrum Foundry – Proxy detail / edit page                          */
 /* ------------------------------------------------------------------ */
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useProxy, useUpdateProxy, useDeleteProxy } from "@/hooks/useProxies";
 import { useAllPluginConfigs } from "@/hooks/usePlugins";
@@ -25,10 +25,14 @@ import { getApiErrorMessage } from "@/api/client";
 import * as proxiesApi from "@/api/proxies";
 import {
   analyzeProxyPolicy,
+  effectivePluginsForProxy,
   inapplicablePluginsForProxy,
 } from "@/lib/effectivePolicy";
 import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
 import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
+import { useEditBaseline } from "@/hooks/useEditBaseline";
+import { isStaleResourceError, type StaleResourceDetail } from "@/api/conditionalWrite";
+import { StaleWriteDialog } from "@/components/shared/StaleWriteDialog";
 import { useCapabilities } from "@/stores/capabilities";
 import { WriteAction } from "@/components/shared/CapabilityGate";
 import type { ProxyCreate, PluginConfig } from "@/api/types";
@@ -78,18 +82,52 @@ function ProxyEditor({ session }: { session: EditorSession }) {
   const { data: proxy, isLoading } = resourceQuery;
 
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [conflict, setConflict] = useState<StaleResourceDetail | null>(null);
+  // Bumped only by an explicit "discard my draft and reload"; a background
+  // refetch never remounts the form (see `src/lib/editorIdentity.ts`).
+  const [formGeneration, setFormGeneration] = useState(0);
 
-  const pluginsQuery = useAllPluginConfigs();
-  const consumersQuery = useAllConsumers();
+  // The content this editor opened against, captured once and advanced only
+  // by a canonical accepted response. This is what a save is judged against.
+  const baseline = useEditBaseline(proxy, proxiesApi.proxyWriteGuard);
+
+  /* ---------- Deferred policy reads ---------- */
+  //
+  // The effective-policy answer is an authorization conclusion, so it needs the
+  // *complete* plugin and consumer collections — there is no bounded
+  // reference query on the admin API to ask instead (`docs/data-loading.md`).
+  // What is avoidable is paying for them before the operator asks the
+  // question: opening an editor to change a timeout used to traverse both
+  // collections. They now start when their tab is first opened and stay
+  // enabled afterwards, so returning to a tab is instant.
+  const [openedTabs, setOpenedTabs] = useState<ReadonlySet<string>>(
+    () => new Set(["config"]),
+  );
+  const openTab = useCallback((tab: string) => {
+    setOpenedTabs((opened) => (opened.has(tab) ? opened : new Set([...opened, tab])));
+  }, []);
+  const pluginPolicyRequested = openedTabs.has("plugins") || openedTabs.has("consumers");
+  const consumerPolicyRequested = openedTabs.has("consumers");
+
+  const pluginsQuery = useAllPluginConfigs(pluginPolicyRequested);
+  const consumersQuery = useAllConsumers(consumerPolicyRequested);
   const { data: allPluginConfigs } = pluginsQuery;
   const { data: allConsumers } = consumersQuery;
   const policyQueries = [resourceQuery, pluginsQuery, consumersQuery];
-  const policyKnown = policyQueries.every((query) => resolveReadState(query) === 'loaded');
+  const policyKnown =
+    consumerPolicyRequested &&
+    policyQueries.every((query) => resolveReadState(query) === 'loaded');
+  const pluginQueries = [resourceQuery, pluginsQuery];
+  const pluginsKnown =
+    pluginPolicyRequested &&
+    pluginQueries.every((query) => resolveReadState(query) === 'loaded');
 
-  // Fetch upstream if the proxy has one linked
+  // Fetch the linked upstream when its tab is opened. The tab's own label is
+  // decided by `proxy.upstream_id`, which the detail read already carries, so
+  // nothing on screen waits for this.
   const { data: upstream, isLoading: upstreamLoading } = useUpstream(
     proxy?.upstream_id ?? "",
-    detailLive,
+    detailLive && openedTabs.has("upstream"),
   );
 
   const policy = useMemo(
@@ -98,11 +136,20 @@ function ProxyEditor({ session }: { session: EditorSession }) {
       : undefined,
     [proxy, allPluginConfigs, allConsumers, policyKnown],
   );
-  const proxyPlugins = policy?.effectivePlugins ?? [];
+  // The plugins tab needs the plugin collection but not the consumer one, so
+  // it does not wait on — or start — the consumer traversal.
+  const proxyPlugins = useMemo(
+    () => (proxy && pluginsKnown
+      ? effectivePluginsForProxy(proxy, allPluginConfigs ?? [])
+      : []),
+    [proxy, allPluginConfigs, pluginsKnown],
+  );
   // Attached but never invoked: HTTP-only plugins on a TCP/UDP listener.
   const skippedPlugins = useMemo(
-    () => (proxy ? inapplicablePluginsForProxy(proxy, allPluginConfigs ?? []) : []),
-    [proxy, allPluginConfigs],
+    () => (proxy && pluginsKnown
+      ? inapplicablePluginsForProxy(proxy, allPluginConfigs ?? [])
+      : []),
+    [proxy, allPluginConfigs, pluginsKnown],
   );
   const visibleConsumers = policy?.consumers.filter(
     (result) => result.decision === "allowed" || result.decision === "conditional",
@@ -113,16 +160,34 @@ function ProxyEditor({ session }: { session: EditorSession }) {
   const handleSubmit = session.bind(async (data: ProxyCreate) => {
     if (!proxy || !capability.allowed) return;
     try {
-      await updateProxy.mutateAsync({
+      const updated = await updateProxy.mutateAsync({
         id: proxyId,
         data: proxiesApi.mergeFormUpdatePayload(proxy, data),
+        guard: baseline.current(),
       });
+      // The accepted response is now what the gateway holds, so it becomes the
+      // baseline the next save is judged against.
+      baseline.adopt(updated);
       toast("success", "Proxy updated successfully");
     } catch (err: unknown) {
+      if (isStaleResourceError(err)) {
+        // Nothing was sent and the draft is untouched: hand the operator the
+        // comparison and let them decide. Never resend this body for them.
+        setConflict(err.detail);
+        return;
+      }
       const message = await getApiErrorMessage(err, "Failed to update proxy");
       toast("error", message);
     }
   });
+
+  /** Deliberate restart: drop the draft and reseed the form from the gateway. */
+  const handleDiscardAndReload = async () => {
+    setConflict(null);
+    const refreshed = await resourceQuery.refetch();
+    if (refreshed.data) baseline.adopt(refreshed.data);
+    setFormGeneration((generation) => generation + 1);
+  };
 
   const handleDelete = session.bind(async () => {
     if (!capability.allowed) return;
@@ -202,11 +267,11 @@ function ProxyEditor({ session }: { session: EditorSession }) {
       <ProxyApiSpecsCard proxyId={proxyId} enabled={detailLive && !resourceQuery.isError} />
 
       {/* Tabs */}
-      <Tabs defaultValue="config">
+      <Tabs defaultValue="config" onValueChange={openTab}>
         <TabsList>
           <TabsTrigger value="config">Config</TabsTrigger>
           <TabsTrigger value="plugins">
-            Plugins ({policyKnown ? proxyPlugins.length : 'unknown'})
+            Plugins ({pluginsKnown ? proxyPlugins.length : 'unknown'})
           </TabsTrigger>
           <TabsTrigger value="consumers">
             Consumers
@@ -220,6 +285,7 @@ function ProxyEditor({ session }: { session: EditorSession }) {
         <TabsContent value="config">
           <Card>
             <ProxyForm
+              key={formGeneration}
               initialData={proxy}
               onSubmit={handleSubmit}
               isLoading={updateProxy.isPending}
@@ -230,7 +296,7 @@ function ProxyEditor({ session }: { session: EditorSession }) {
 
         {/* ── Plugins Tab ────────────────────────────────────────── */}
         <TabsContent value="plugins">
-          <ReadState queries={policyQueries} label="Plugin policy">
+          <ReadState queries={pluginQueries} label="Plugin policy">
             <div className="space-y-3">
               {proxyPlugins.length === 0 ? (
                 <Card>
@@ -497,6 +563,13 @@ function ProxyEditor({ session }: { session: EditorSession }) {
           )}
         </TabsContent>
       </Tabs>
+
+      {/* Refused concurrent-edit save */}
+      <StaleWriteDialog
+        conflict={conflict}
+        onKeepEditing={() => setConflict(null)}
+        onDiscardAndReload={handleDiscardAndReload}
+      />
 
       {/* Delete confirmation */}
       <ConfirmDialog

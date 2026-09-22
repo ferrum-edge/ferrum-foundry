@@ -15,6 +15,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import * as plugins from "@/api/plugins";
+import { SUMMARY_SCAN_BUDGET } from "@/api/pagination";
 import type { PaginationParams, PluginConfigCreate } from "@/api/types";
 import { useNamespace } from "@/stores/namespace";
 import {
@@ -41,16 +42,44 @@ export function usePluginConfigs(params: PaginationParams = {}, enabled = true) 
       scope.namespace,
       { offset: params.offset, limit: params.limit },
     ],
-    queryFn: () => plugins.listConfigs(queryScope(scope), params),
+    queryFn: ({ signal }) =>
+      plugins.listConfigs(queryScope(scope), params, signal),
     enabled,
   });
 }
 
+/**
+ * The complete plugin-configuration collection.
+ *
+ * Only for conclusions that are wrong if partial — the effective-policy graph
+ * and membership. Pass `enabled` to defer it until the view that needs it is
+ * actually requested: opening a proxy editor should not traverse the whole
+ * namespace before the operator asks a policy question. A summary count uses
+ * `useBoundedPluginConfigs` instead.
+ */
 export function useAllPluginConfigs(enabled = true) {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["pluginConfigs", scope.namespace, "all"],
-    queryFn: () => plugins.listAllConfigs(queryScope(scope)),
+    queryFn: ({ signal }) => plugins.listAllConfigs(queryScope(scope), signal),
+    enabled,
+  });
+}
+
+/**
+ * Plugin configurations up to the summary budget.
+ *
+ * `complete: false` means the namespace is larger than a list column is
+ * willing to traverse. The caller must then present the count as unavailable
+ * at this size — never as a smaller number, which would under-report what runs
+ * on a proxy.
+ */
+export function useBoundedPluginConfigs(enabled = true) {
+  const { scope } = useNamespace();
+  return useQuery({
+    queryKey: ["pluginConfigs", scope.namespace, "bounded", SUMMARY_SCAN_BUDGET],
+    queryFn: ({ signal }) =>
+      plugins.listBoundedConfigs(queryScope(scope), signal),
     enabled,
   });
 }
