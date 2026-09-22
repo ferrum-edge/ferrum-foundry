@@ -81,6 +81,8 @@ export interface ProxyCatalog {
    * boolean.
    */
   readonly query: UseQueryResult<unknown>;
+  /** True while an explicit "search all" traversal is still running. */
+  readonly expanding: boolean;
 }
 
 /**
@@ -115,6 +117,7 @@ export function useProxyCatalog(expanded: boolean): ProxyCatalog {
       total: everything.data.length,
       complete: true,
       query: everything,
+      expanding: false,
     };
   }
   return {
@@ -122,6 +125,7 @@ export function useProxyCatalog(expanded: boolean): ProxyCatalog {
     total: page?.pagination.total ?? 0,
     complete: firstPageIsWholeCollection,
     query: everything.isError ? everything : firstPage,
+    expanding: everything.isFetching,
   };
 }
 
@@ -132,6 +136,9 @@ export function useProxyCatalog(expanded: boolean): ProxyCatalog {
  */
 export function useProxyReferences(ids: readonly string[]): {
   names: ReadonlyMap<string, string>;
+  /** The gateway answered 404: the proxy is not in this namespace any more. */
+  missing: ReadonlySet<string>;
+  /** The read failed for another reason. Nothing is known about the proxy. */
   unresolved: ReadonlySet<string>;
 } {
   const { scope } = useNamespace();
@@ -151,13 +158,24 @@ export function useProxyReferences(ids: readonly string[]): {
   });
 
   const names = new Map<string, string>();
+  const missing = new Set<string>();
   const unresolved = new Set<string>();
   distinct.forEach((id, index) => {
     const reference = references[index];
     if (reference?.data) names.set(id, describeProxy(reference.data));
-    else if (reference?.isError) unresolved.add(id);
+    else if (reference?.isError) {
+      // Only a 404 says the proxy is gone. A 503 or a dropped connection says
+      // nothing about it, and must not be reported as a deletion.
+      if (errorStatus(reference.error) === 404) missing.add(id);
+      else unresolved.add(id);
+    }
   });
-  return { names, unresolved };
+  return { names, missing, unresolved };
+}
+
+function errorStatus(error: unknown): number | undefined {
+  const response = (error as { response?: { status?: unknown } } | null)?.response;
+  return typeof response?.status === "number" ? response.status : undefined;
 }
 
 /** The label a picker shows for a proxy: its name, else how it listens. */
@@ -182,6 +200,7 @@ export function useCreateProxy() {
     mutationFn: (data: ProxyCreate) => proxies.create(scope, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["proxies"] });
+      qc.invalidateQueries({ queryKey: ["proxyRef"] });
     },
   });
 }
@@ -195,6 +214,7 @@ export function useUpdateProxy() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["proxies"] });
       qc.invalidateQueries({ queryKey: ["proxy"] });
+      qc.invalidateQueries({ queryKey: ["proxyRef"] });
     },
   });
 }
@@ -211,6 +231,7 @@ export function useDeleteProxy() {
     onSuccess: async (retired) => {
       await retireDeletedDetail(qc, ["proxy", retired.namespace, retired.id]);
       qc.invalidateQueries({ queryKey: ["proxies"] });
+      qc.invalidateQueries({ queryKey: ["proxyRef", retired.namespace, retired.id] });
       retireCascade(qc, retired.namespace, PROXY_DELETE_CASCADE);
     },
   });

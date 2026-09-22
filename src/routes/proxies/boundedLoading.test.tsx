@@ -272,4 +272,23 @@ describe("bounded loading on ordinary navigation", () => {
     // And the consumer traversal still waits for its own tab.
     expect(countOf(/\/api\/proxy\/consumers/)).toBe(0);
   });
+
+  it("opening the upstream tab loads it without flashing a failure", async () => {
+    await render(<ProxyDetailPage />);
+    expect(countOf(/upstreams/)).toBe(0);
+
+    const upstreamTab = [...document.querySelectorAll<HTMLElement>('[role="tab"]')].find(
+      (tab) => tab.textContent?.startsWith("Upstream"),
+    )!;
+    await act(async () => {
+      upstreamTab.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+    });
+    // The read has only just been enabled. A deferred query must render as
+    // loading here, never as a failed read.
+    expect(host.textContent).not.toContain("Failed to load upstream data");
+
+    await settle();
+    expect(countOf(/GET \/api\/proxy\/upstreams\/upstream-0/)).toBe(1);
+    expect(host.textContent).toContain("upstream 0");
+  });
 });

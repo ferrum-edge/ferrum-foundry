@@ -158,6 +158,7 @@ export function useCreateUpstream() {
     mutationFn: (data: UpstreamCreate) => upstreams.create(scope, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["upstreams"] });
+      qc.invalidateQueries({ queryKey: ["upstreamRef"] });
     },
   });
 }
@@ -178,6 +179,8 @@ export function useUpdateUpstream() {
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["upstreams", scope.namespace] }),
         qc.invalidateQueries({ queryKey, exact: true }),
+        // A rename must reach the list rows that name this upstream.
+        qc.invalidateQueries({ queryKey: ["upstreamRef", scope.namespace, id] }),
       ]);
     },
   });
@@ -195,6 +198,7 @@ export function useDeleteUpstream() {
     onSuccess: async (retired) => {
       await retireDeletedDetail(qc, ["upstream", retired.namespace, retired.id]);
       qc.invalidateQueries({ queryKey: ["upstreams"] });
+      qc.invalidateQueries({ queryKey: ["upstreamRef", retired.namespace, retired.id] });
     },
   });
 }

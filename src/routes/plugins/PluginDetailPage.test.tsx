@@ -306,7 +306,28 @@ describe("proxy group membership loading", () => {
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ scope: "proxy_group" }), ["source", "destination"]);
   });
 
+  it("says only 'unavailable' when a selected member's read fails for another reason", async () => {
+    client.setQueryData(["proxies", "default", "all"], [member("source")]);
+    get.mockImplementation((path: string) => ({
+      json: () =>
+        path === "proxies/destination"
+          ? Promise.reject(Object.assign(new Error("Service Unavailable"), { response: { status: 503 } }))
+          : Promise.reject(new Error(`Unexpected request: ${path}`)),
+    }));
+    await render(<PluginConfigForm initialData={plugin} initialProxyGroupIds={["source", "destination"]} availablePlugins={["rate_limiting"]} isLoading={false} onSubmit={vi.fn()} />);
+    await settle();
+    // A 503 says nothing about whether the proxy exists; it must not be
+    // reported as a deletion.
+    expect(selectedIds()).toEqual(["Remove /source", "Remove destination (label unavailable)"]);
+  });
+
   it("keeps a missing selected member visible until explicitly removed", async () => {
+    get.mockImplementation((path: string) => ({
+      json: () =>
+        path === "proxies/destination"
+          ? Promise.reject(Object.assign(new Error("Not Found"), { response: { status: 404 } }))
+          : Promise.reject(new Error(`Unexpected request: ${path}`)),
+    }));
     client.setQueryData(["proxies", "default", "all"], [member("source"), member("destination")]);
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     await render(<PluginConfigForm initialData={plugin} initialProxyGroupIds={["source", "destination"]} availablePlugins={["rate_limiting"]} isLoading={false} onSubmit={onSubmit} />);

@@ -111,9 +111,11 @@ export function ProxySearchPicker(props: ProxySearchPickerProps) {
       if (resolved) return { id, label: resolved };
       return {
         id,
-        label: references.unresolved.has(id)
+        label: references.missing.has(id)
           ? `${id} (no longer on the gateway)`
-          : `${id} (resolving…)`,
+          : references.unresolved.has(id)
+            ? `${id} (label unavailable)`
+            : `${id} (resolving…)`,
       };
     });
   }, [proxies, selectedIds, references]);
@@ -235,11 +237,11 @@ export function ProxySearchPicker(props: ProxySearchPickerProps) {
                   </p>
                   <button
                     type="button"
-                    disabled={isLoading}
+                    disabled={catalog.expanding}
                     onClick={() => setExpanded(true)}
                     className="mt-1 text-orange hover:text-orange-light font-medium transition-colors disabled:opacity-60"
                   >
-                    {isLoading
+                    {catalog.expanding
                       ? `Loading all ${catalog.total} proxies…`
                       : `Search all ${catalog.total} proxies`}
                   </button>
