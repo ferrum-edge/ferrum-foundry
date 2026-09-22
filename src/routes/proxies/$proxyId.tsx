@@ -4,7 +4,7 @@ import { ResourceLabels } from "@/components/shared/ResourceLabels";
 /*  Ferrum Foundry – Proxy detail / edit page                          */
 /* ------------------------------------------------------------------ */
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useProxy, useUpdateProxy, useDeleteProxy } from "@/hooks/useProxies";
 import { useAllPluginConfigs } from "@/hooks/usePlugins";
@@ -25,6 +25,7 @@ import { getApiErrorMessage } from "@/api/client";
 import * as proxiesApi from "@/api/proxies";
 import {
   analyzeProxyPolicy,
+  effectivePluginsForProxy,
   inapplicablePluginsForProxy,
 } from "@/lib/effectivePolicy";
 import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
@@ -90,17 +91,43 @@ function ProxyEditor({ session }: { session: EditorSession }) {
   // by a canonical accepted response. This is what a save is judged against.
   const baseline = useEditBaseline(proxy, proxiesApi.proxyWriteGuard);
 
-  const pluginsQuery = useAllPluginConfigs();
-  const consumersQuery = useAllConsumers();
+  /* ---------- Deferred policy reads ---------- */
+  //
+  // The effective-policy answer is an authorization conclusion, so it needs the
+  // *complete* plugin and consumer collections — there is no bounded
+  // reference query on the admin API to ask instead (`docs/data-loading.md`).
+  // What is avoidable is paying for them before the operator asks the
+  // question: opening an editor to change a timeout used to traverse both
+  // collections. They now start when their tab is first opened and stay
+  // enabled afterwards, so returning to a tab is instant.
+  const [openedTabs, setOpenedTabs] = useState<ReadonlySet<string>>(
+    () => new Set(["config"]),
+  );
+  const openTab = useCallback((tab: string) => {
+    setOpenedTabs((opened) => (opened.has(tab) ? opened : new Set([...opened, tab])));
+  }, []);
+  const pluginPolicyRequested = openedTabs.has("plugins") || openedTabs.has("consumers");
+  const consumerPolicyRequested = openedTabs.has("consumers");
+
+  const pluginsQuery = useAllPluginConfigs(pluginPolicyRequested);
+  const consumersQuery = useAllConsumers(consumerPolicyRequested);
   const { data: allPluginConfigs } = pluginsQuery;
   const { data: allConsumers } = consumersQuery;
   const policyQueries = [resourceQuery, pluginsQuery, consumersQuery];
-  const policyKnown = policyQueries.every((query) => resolveReadState(query) === 'loaded');
+  const policyKnown =
+    consumerPolicyRequested &&
+    policyQueries.every((query) => resolveReadState(query) === 'loaded');
+  const pluginQueries = [resourceQuery, pluginsQuery];
+  const pluginsKnown =
+    pluginPolicyRequested &&
+    pluginQueries.every((query) => resolveReadState(query) === 'loaded');
 
-  // Fetch upstream if the proxy has one linked
+  // Fetch the linked upstream when its tab is opened. The tab's own label is
+  // decided by `proxy.upstream_id`, which the detail read already carries, so
+  // nothing on screen waits for this.
   const { data: upstream, isLoading: upstreamLoading } = useUpstream(
     proxy?.upstream_id ?? "",
-    detailLive,
+    detailLive && openedTabs.has("upstream"),
   );
 
   const policy = useMemo(
@@ -109,11 +136,20 @@ function ProxyEditor({ session }: { session: EditorSession }) {
       : undefined,
     [proxy, allPluginConfigs, allConsumers, policyKnown],
   );
-  const proxyPlugins = policy?.effectivePlugins ?? [];
+  // The plugins tab needs the plugin collection but not the consumer one, so
+  // it does not wait on — or start — the consumer traversal.
+  const proxyPlugins = useMemo(
+    () => (proxy && pluginsKnown
+      ? effectivePluginsForProxy(proxy, allPluginConfigs ?? [])
+      : []),
+    [proxy, allPluginConfigs, pluginsKnown],
+  );
   // Attached but never invoked: HTTP-only plugins on a TCP/UDP listener.
   const skippedPlugins = useMemo(
-    () => (proxy ? inapplicablePluginsForProxy(proxy, allPluginConfigs ?? []) : []),
-    [proxy, allPluginConfigs],
+    () => (proxy && pluginsKnown
+      ? inapplicablePluginsForProxy(proxy, allPluginConfigs ?? [])
+      : []),
+    [proxy, allPluginConfigs, pluginsKnown],
   );
   const visibleConsumers = policy?.consumers.filter(
     (result) => result.decision === "allowed" || result.decision === "conditional",
@@ -231,11 +267,11 @@ function ProxyEditor({ session }: { session: EditorSession }) {
       <ProxyApiSpecsCard proxyId={proxyId} enabled={detailLive && !resourceQuery.isError} />
 
       {/* Tabs */}
-      <Tabs defaultValue="config">
+      <Tabs defaultValue="config" onValueChange={openTab}>
         <TabsList>
           <TabsTrigger value="config">Config</TabsTrigger>
           <TabsTrigger value="plugins">
-            Plugins ({policyKnown ? proxyPlugins.length : 'unknown'})
+            Plugins ({pluginsKnown ? proxyPlugins.length : 'unknown'})
           </TabsTrigger>
           <TabsTrigger value="consumers">
             Consumers
@@ -260,7 +296,7 @@ function ProxyEditor({ session }: { session: EditorSession }) {
 
         {/* ── Plugins Tab ────────────────────────────────────────── */}
         <TabsContent value="plugins">
-          <ReadState queries={policyQueries} label="Plugin policy">
+          <ReadState queries={pluginQueries} label="Plugin policy">
             <div className="space-y-3">
               {proxyPlugins.length === 0 ? (
                 <Card>

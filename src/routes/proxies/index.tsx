@@ -5,8 +5,8 @@
 import { useState, useMemo } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useAllProxies, useProxies } from "@/hooks/useProxies";
-import { useAllUpstreams } from "@/hooks/useUpstreams";
-import { useAllPluginConfigs } from "@/hooks/usePlugins";
+import { useUpstreamReferences } from "@/hooks/useUpstreams";
+import { useBoundedPluginConfigs } from "@/hooks/usePlugins";
 import { usePaginationParams } from "@/hooks/usePagination";
 import { Button } from "@/components/ui/Button";
 import { ResourceGrid } from "@/components/ui/ResourceGrid";
@@ -19,6 +19,7 @@ import { useCapabilities } from "@/stores/capabilities";
 import { SkeletonRow } from "@/components/ui/Skeleton";
 import type { PluginConfig, Proxy } from "@/api/types";
 import { filterAndPage } from "@/lib/collectionSearch";
+import { SUMMARY_SCAN_BUDGET } from "@/api/pagination";
 import {
   effectivePluginsForProxy,
   inapplicablePluginsForProxy,
@@ -75,27 +76,36 @@ function summarizePlugins(proxy: Proxy, pluginConfigs: PluginConfig[]): PluginSu
 }
 
 /**
- * Effective plugin count cell. Until the plugin collection resolves there is
- * no honest number to print, so show a muted placeholder rather than 0.
+ * Effective plugin count cell.
+ *
+ * There are three honest states and no fourth. Until the plugin collection
+ * resolves there is no number to print. If the collection is larger than the
+ * summary budget the count is *unavailable at this size* — never a smaller
+ * number, which would under-report what runs on the proxy. Only a complete
+ * traversal produces a badge.
  */
 function PluginCountCell({
   summary,
   unavailable,
+  overBudget,
 }: {
   summary?: PluginSummary;
   unavailable: boolean;
+  overBudget: boolean;
 }) {
   if (!summary) {
     return (
       <span
         className="text-center text-sm text-text-muted"
         title={
-          unavailable
-            ? "Effective plugin count unavailable"
-            : "Counting effective plugins"
+          overBudget
+            ? `Effective plugin count unavailable: this namespace has more than ${SUMMARY_SCAN_BUDGET} plugin configurations. Open a proxy to see the plugins that run on it.`
+            : unavailable
+              ? "Effective plugin count unavailable"
+              : "Counting effective plugins"
         }
       >
-        &hellip;
+        {overBudget ? "n/a" : "\u2026"}
       </span>
     );
   }
@@ -145,15 +155,6 @@ export default function ProxiesPage() {
   /* --- Data fetching with pagination --- */
   const pagination = usePaginationParams();
   const searching = search.trim().length > 0;
-  const { data: upstreamData } = useAllUpstreams();
-  const upstreamNameMap = useMemo(() => {
-    const map = new Map<string, string>();
-    const upstreams = upstreamData ?? [];
-    for (const u of upstreams) {
-      map.set(u.id, u.name ?? u.id);
-    }
-    return map;
-  }, [upstreamData]);
 
   const pageQuery = useProxies(pagination.paginationParams, !searching);
   const allQuery = useAllProxies(searching);
@@ -182,19 +183,33 @@ export default function ProxiesPage() {
   const isLoading = searching ? allQuery.isLoading : pageQuery.isLoading;
   const isError = searching ? allQuery.isError : pageQuery.isError;
 
+  /* --- Upstream names for the visible rows only --- */
+  // Resolved from the rows on screen, not from the whole upstream collection:
+  // one catalog page when the namespace fits in it, otherwise one read per
+  // visible reference. See `useUpstreamReferences`.
+  const referencedUpstreamIds = useMemo(
+    () => proxies.map((proxy) => proxy.upstream_id).filter((id): id is string => Boolean(id)),
+    [proxies],
+  );
+  const upstreamReferences = useUpstreamReferences(referencedUpstreamIds);
+
   /* --- Effective plugin counts (global + direct + group, protocol-filtered) --- */
   const {
-    data: allPluginConfigs,
+    data: pluginConfigs,
     isError: pluginConfigsError,
-  } = useAllPluginConfigs();
+  } = useBoundedPluginConfigs();
+  // A partial plugin collection cannot produce an effective count, so an
+  // over-budget namespace reports the column as unavailable rather than
+  // counting what it happened to fetch.
+  const pluginCountsOverBudget = pluginConfigs?.complete === false;
   const pluginSummaries = useMemo(() => {
     const map = new Map<string, PluginSummary>();
-    if (!allPluginConfigs) return map;
+    if (!pluginConfigs?.complete) return map;
     for (const proxy of proxies) {
-      map.set(proxy.id, summarizePlugins(proxy, allPluginConfigs));
+      map.set(proxy.id, summarizePlugins(proxy, pluginConfigs.items));
     }
     return map;
-  }, [allPluginConfigs, proxies]);
+  }, [pluginConfigs, proxies]);
 
   /* ---------------------------------------------------------------- */
   /*  Render                                                           */
@@ -331,11 +346,19 @@ export default function ProxiesPage() {
                     <>
                       <span
                         className="text-sm text-text-primary truncate block"
-                        title={upstreamNameMap.get(proxy.upstream_id) ?? proxy.upstream_id}
+                        title={
+                          upstreamReferences.names.get(proxy.upstream_id) ??
+                          proxy.upstream_id
+                        }
                       >
-                        {upstreamNameMap.get(proxy.upstream_id) ?? proxy.upstream_id}
+                        {upstreamReferences.names.get(proxy.upstream_id) ??
+                          proxy.upstream_id}
                       </span>
-                      <span className="text-xs text-text-muted block">load balanced</span>
+                      <span className="text-xs text-text-muted block">
+                        {upstreamReferences.unresolved.has(proxy.upstream_id)
+                          ? "load balanced · name unavailable"
+                          : "load balanced"}
+                      </span>
                     </>
                   ) : (
                     <span
@@ -352,6 +375,7 @@ export default function ProxiesPage() {
                 <PluginCountCell
                   summary={pluginSummaries.get(proxy.id)}
                   unavailable={pluginConfigsError}
+                  overBudget={pluginCountsOverBudget}
                 />
 
                 {/* Created at */}

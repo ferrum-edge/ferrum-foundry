@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – Upstream API functions                           */
 /* ------------------------------------------------------------------ */
 
-import { proxyApi, scoped, type NamespaceScope } from "./client";
+import { proxyApi, scoped, SILENT_ERRORS, type NamespaceScope } from "./client";
 import type {
   PaginatedResponse,
   PaginationParams,
@@ -40,23 +40,52 @@ function withUpstreamId(data: UpstreamCreate, id?: string): UpstreamCreate {
 export async function list(
   scope: NamespaceScope,
   params: PaginationParams = {},
+  signal?: AbortSignal,
 ): Promise<PaginatedResponse<Upstream>> {
   const searchParams: Record<string, string> = {};
   if (params.offset !== undefined) searchParams.offset = String(params.offset);
   if (params.limit !== undefined) searchParams.limit = String(params.limit);
 
   return proxyApi
-    .get("upstreams", scoped(scope, { searchParams }))
+    .get("upstreams", scoped(scope, { searchParams, signal }))
     .json<PaginatedResponse<Upstream>>();
 }
 
 /** Every page is fetched under `scope`, however long the collection takes. */
-export async function listAll(scope: NamespaceScope): Promise<Upstream[]> {
-  return collectAllPages((offset, limit) => list(scope, { offset, limit }));
+export async function listAll(
+  scope: NamespaceScope,
+  signal?: AbortSignal,
+): Promise<Upstream[]> {
+  return collectAllPages(
+    (offset, limit, pageSignal) => list(scope, { offset, limit }, pageSignal),
+    undefined,
+    signal,
+  );
 }
 
 export async function get(scope: NamespaceScope, id: string): Promise<Upstream> {
   return proxyApi.get(`upstreams/${id}`, scoped(scope)).json<Upstream>();
+}
+
+/**
+ * Resolve one upstream that another resource references.
+ *
+ * A dangling `upstream_id` on a list row is a fact about that row, not a fault
+ * to report in the global error dialog, so this read opts out of the popup and
+ * the caller renders the reference as unresolved. Kept separate from `get` so
+ * the detail page's own read keeps reporting its failures.
+ */
+export async function getReference(
+  scope: NamespaceScope,
+  id: string,
+  signal?: AbortSignal,
+): Promise<Upstream> {
+  return proxyApi
+    .get(
+      `upstreams/${id}`,
+      scoped(scope, { signal, context: { [SILENT_ERRORS]: true } }),
+    )
+    .json<Upstream>();
 }
 
 /** Strip server- and mesh-owned fields from a fetched full-replace resource. */

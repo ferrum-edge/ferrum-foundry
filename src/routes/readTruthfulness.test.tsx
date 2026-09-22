@@ -283,7 +283,11 @@ describe('detail drafts survive terminal background errors (#299)', () => {
     const remove = host.querySelector<HTMLButtonElement>('[aria-label="Remove /orders"]')!;
     await act(async () => remove.click());
     failures.set('proxies', 503);
+    // Two distinct reads now fail together: the page's membership traversal,
+    // which must stay complete (#205), and the picker's bounded catalog read,
+    // which is what the picker itself is gated on (#382).
     await refetch(['proxies', 'tenant-a', 'all']);
+    await refetch(['proxies', 'tenant-a', 'firstPage', 250]);
     await settle(() => {
       expect(host.textContent).toContain('Proxy group membership could not refresh');
     });

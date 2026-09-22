@@ -9,7 +9,12 @@ import type {
   PluginConfig,
   PluginConfigCreate,
 } from "./types";
-import { collectAllPages } from "./pagination";
+import {
+  collectAllPages,
+  collectBoundedPages,
+  SUMMARY_SCAN_BUDGET,
+  type BoundedCollection,
+} from "./pagination";
 
 function withPluginConfigId(
   data: PluginConfigCreate,
@@ -29,22 +34,50 @@ export async function listAvailable(scope: NamespaceScope): Promise<string[]> {
 export async function listConfigs(
   scope: NamespaceScope,
   params: PaginationParams = {},
+  signal?: AbortSignal,
 ): Promise<PaginatedResponse<PluginConfig>> {
   const searchParams: Record<string, string> = {};
   if (params.offset !== undefined) searchParams.offset = String(params.offset);
   if (params.limit !== undefined) searchParams.limit = String(params.limit);
 
   return proxyApi
-    .get("plugins/config", scoped(scope, { searchParams }))
+    .get("plugins/config", scoped(scope, { searchParams, signal }))
     .json<PaginatedResponse<PluginConfig>>();
 }
 
-/** Every page is fetched under `scope`, however long the collection takes. */
+/**
+ * Every page is fetched under `scope`, however long the collection takes.
+ *
+ * Reserved for the effective-policy analysis, whose answer is an authorization
+ * conclusion: a partial plugin graph would under-report what runs on a proxy,
+ * so it is complete or it is unknown. A summary column uses
+ * `listBoundedConfigs` instead.
+ */
 export async function listAllConfigs(
   scope: NamespaceScope,
+  signal?: AbortSignal,
 ): Promise<PluginConfig[]> {
-  return collectAllPages((offset, limit) =>
-    listConfigs(scope, { offset, limit }),
+  return collectAllPages(
+    (offset, limit, pageSignal) => listConfigs(scope, { offset, limit }, pageSignal),
+    undefined,
+    signal,
+  );
+}
+
+/**
+ * Traverse plugin configurations up to a budget for a summary view.
+ *
+ * `complete: false` means the caller must present the summary as unavailable
+ * at this collection size, not as a smaller number.
+ */
+export async function listBoundedConfigs(
+  scope: NamespaceScope,
+  signal?: AbortSignal,
+  budget = SUMMARY_SCAN_BUDGET,
+): Promise<BoundedCollection<PluginConfig>> {
+  return collectBoundedPages(
+    (offset, limit, pageSignal) => listConfigs(scope, { offset, limit }, pageSignal),
+    { budget, signal },
   );
 }
 
