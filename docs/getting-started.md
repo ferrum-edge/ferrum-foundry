@@ -6,8 +6,10 @@ authentication, and proved with two requests that the route refuses an
 anonymous caller and serves an authenticated one **through the real data
 plane**.
 
-Every command below is exercised in CI against the checked-in starter, the
-production Foundry image, and the pinned Ferrum Edge gateway.
+The same steps run in CI, as `scripts/starter-journey.mjs`, against the
+checked-in starter, the production Foundry image, and the pinned Ferrum Edge
+gateway — so if the gateway's behaviour changes under this walkthrough, the
+build says so.
 
 - The runnable stack: [`deploy/starter/`](../deploy/starter/README.md)
 - The full configuration reference: [deployment.md](deployment.md)
@@ -150,11 +152,15 @@ curl -s -b "$COOKIES" -X POST "$FOUNDRY/api/proxy/plugins/config?apply=sync" \
       }'
 ```
 
-Then **attach it to the proxy**. A proxy-scoped plugin configuration naming a
-`proxy_id` is not yet running on that proxy: the association lives on the
-proxy's `plugins` list. The Foundry UI does both halves when you attach a
-plugin; by hand it is a second call, and skipping it leaves the route open
-while everything looks configured.
+Then **attach it to the proxy**. The association that makes a plugin run lives
+on the proxy's `plugins` list. The admin API contract says the gateway appends
+it when a proxy-scoped plugin is written; the gateway image this starter pins
+does not, so the plugin exists, names the proxy, is enabled — and does not
+run. The route stays open while everything looks configured.
+
+Attaching it yourself is safe either way: on a gateway that already attached
+it, the call below changes nothing. Foundry's plugin editor does this check
+for you once #393 is merged; by hand it is a second call.
 
 Proxy `PUT` is a **full replacement**, so read the proxy, add the
 association, and send the whole object back:

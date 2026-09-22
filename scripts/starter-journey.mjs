@@ -22,6 +22,7 @@
  */
 
 import assert from "node:assert/strict";
+import { mayCarrySecret } from "./starter-preflight.mjs";
 
 const FOUNDRY = process.env.FOUNDRY_URL ?? "http://127.0.0.1:8088";
 const DATA_PLANE = process.env.FERRUM_DATA_PLANE_URL ?? "http://127.0.0.1:8000";
@@ -39,6 +40,13 @@ const RESOURCES = {
 };
 
 function confirmTarget() {
+  // The boundary check sends the real proof secret (see
+  // starter-preflight.mjs → mayCarrySecret); never in the clear to another host.
+  if (!mayCarrySecret(FOUNDRY)) {
+    throw new Error(
+      `Refusing to send the proof secret to ${FOUNDRY}: use https or a loopback address.`,
+    );
+  }
   const expected = `${FOUNDRY}#${NAMESPACE}`;
   if (process.env.FERRUM_STARTER_CONFIRM_TARGET !== expected) {
     throw new Error(

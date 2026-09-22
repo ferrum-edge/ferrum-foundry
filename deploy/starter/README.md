@@ -36,7 +36,8 @@ copy.
 | Path | What it is |
 | --- | --- |
 | `compose.yaml` | Both profiles. Third-party images are pinned by digest |
-| `.env.example` | Every input, with placeholders. No working secrets |
+| `.env.example` | Foundry and gateway inputs, with placeholders. No working secrets |
+| `oauth2-proxy.env.example` | Identity-provider settings, read by oauth2-proxy alone |
 | `bootstrap-demo.sh` | Generates throwaway demo secrets; refuses to overwrite an existing `.env` |
 | `nginx/foundry.conf` | Production reverse proxy |
 | `nginx/foundry.demo.conf` | Demo reverse proxy plus the stub identity provider |
@@ -63,13 +64,17 @@ request header. It is for a first run and for CI. Do not expose it.
 
 ## Production
 
-1. `cp .env.example .env`, fill it in, `chmod 600 .env`. Generate secrets with
+1. `cp .env.example .env` and `cp oauth2-proxy.env.example oauth2-proxy.env`,
+   fill both in, `chmod 600` both. Generate secrets with
    `openssl rand -base64 48`. `FERRUM_JWT_SECRET` must equal the gateway's
    `FERRUM_ADMIN_JWT_SECRET`. The identity-provider settings are the
-   `OAUTH2_PROXY_*` names oauth2-proxy reads itself — they are passed as
-   environment rather than through compose interpolation, because Compose
-   interpolates the whole file before it filters by profile and a
-   production-only requirement would stop the demo profile from starting.
+   `OAUTH2_PROXY_*` names oauth2-proxy reads itself, in their own file: an
+   `env_file` hands a service every variable in it, and `.env` holds the
+   gateway admin signing key and the proof secret, which oauth2-proxy has no
+   use for. They are passed as environment rather than through compose
+   interpolation because Compose interpolates the whole file before it filters
+   by profile, and a production-only requirement would stop the demo profile
+   from starting.
 2. Write `secrets/ferrum-proxy-secret.conf` with the **same** value as
    `FERRUM_TRUSTED_PROXY_SECRET`:
 

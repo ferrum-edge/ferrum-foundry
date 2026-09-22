@@ -23,7 +23,7 @@
  */
 
 import { readFile, stat } from "node:fs/promises";
-import { resolve } from "node:path";
+import { resolve, sep } from "node:path";
 import { signAdminJwt } from "../shared/admin-jwt.js";
 
 export const PASS = "pass";
@@ -163,7 +163,11 @@ export async function checkTlsTrust(env, fs = { stat }) {
       "The BFF defaults the root to the bundle's directory; set it explicitly so the approved root is part of the configuration.",
     );
   }
-  if (!resolve(path).startsWith(resolve(root))) {
+  // A prefix test alone would accept `/etc/ferrum/ca-evil/x.pem` as inside
+  // `/etc/ferrum/ca`, so containment is checked on a path-segment boundary.
+  const resolvedRoot = resolve(root);
+  const resolvedPath = resolve(path);
+  if (resolvedPath !== resolvedRoot && !resolvedPath.startsWith(resolvedRoot + sep)) {
     return check(
       "gateway TLS trust",
       FAIL,
@@ -339,6 +343,19 @@ export async function checkAdminCredentials(env, fetchImpl = fetch) {
  * The BFF must refuse a request that does not come through the proxy, and the
  * proxy must not be reachable without an identity.
  */
+/** True when a secret may be sent to `url`: over TLS, or to this machine. */
+export function mayCarrySecret(url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol === "https:") return true;
+  const host = parsed.hostname.replace(/^\[|\]$/g, "");
+  return host === "localhost" || host === "::1" || /^127\./.test(host);
+}
+
 export async function checkTrustBoundary(env, fetchImpl = fetch) {
   const front = env.FOUNDRY_PREFLIGHT_URL;
   if (!front) {
@@ -383,7 +400,23 @@ export async function checkTrustBoundary(env, fetchImpl = fetch) {
   }
 
   // A client that can set its own identity headers is an administrator. The
-  // proxy must overwrite every one of them.
+  // proxy must overwrite every one of them — including the proof secret, so
+  // the probe has to send the real one: with a guessed secret, a proxy that
+  // forwarded client headers would still be refused and the check would
+  // pass for the wrong reason. That makes the probe itself a disclosure risk,
+  // so the real secret is only ever sent over TLS or to this machine.
+  if (!mayCarrySecret(front)) {
+    results.push(
+      check(
+        "client identity headers are stripped",
+        UNKNOWN,
+        `not tested: ${front} is neither https nor loopback`,
+        "The probe must send the real proof secret to be meaningful, and will not send it in the clear to another host. Run it against the https front door, or from the proxy host against loopback.",
+      ),
+    );
+    return results;
+  }
+
   try {
     const response = await fetchImpl(`${front}/api/proxy/proxies?offset=0&limit=1`, {
       signal: AbortSignal.timeout(10_000),

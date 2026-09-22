@@ -11,6 +11,7 @@ import {
   checkSecrets,
   checkTlsTrust,
   checkTrustBoundary,
+  mayCarrySecret,
   parseEnvFile,
   runPreflight,
 } from "./starter-preflight.mjs";
@@ -326,13 +327,15 @@ test("oauth2-proxy takes its identity settings from the environment", async () =
   assert.ok(!/--email-domain/.test(service));
   assert.match(service, /env_file:/);
 
-  const env = parseEnvFile(await readFile(new URL(".env.example", STARTER), "utf8"));
+  const env = parseEnvFile(
+    await readFile(new URL("oauth2-proxy.env.example", STARTER), "utf8"),
+  );
   for (const key of [
     "OAUTH2_PROXY_OIDC_ISSUER_URL",
     "OAUTH2_PROXY_REDIRECT_URL",
     "OAUTH2_PROXY_EMAIL_DOMAINS",
   ]) {
-    assert.ok(env[key], `${key} must be documented in .env.example`);
+    assert.ok(env[key], `${key} must be documented in oauth2-proxy.env.example`);
   }
 });
 
@@ -344,4 +347,54 @@ test("every demo service can prove it is ready", async () => {
   const backend = compose.slice(compose.indexOf("  demo-backend:"));
   assert.match(backend, /healthcheck:/);
   assert.match(backend, /127\.0\.0\.1:8081/, "the probe must target this service's own port");
+});
+
+test("oauth2-proxy never receives the gateway admin secrets", async () => {
+  // An env_file hands a service every variable in it. `.env` holds the key
+  // that signs gateway admin tokens and the proxy proof secret.
+  const compose = await readFile(new URL("compose.yaml", STARTER), "utf8");
+  const service = compose.slice(compose.indexOf("  oauth2-proxy:"), compose.indexOf("  proxy:"));
+  assert.ok(!/-\s+\.env\s*$/m.test(service), "oauth2-proxy must not read .env");
+  assert.match(service, /path: oauth2-proxy\.env/);
+
+  const oauthEnv = await readFile(new URL("oauth2-proxy.env.example", STARTER), "utf8");
+  assert.ok(!/FERRUM_JWT_SECRET|FERRUM_TRUSTED_PROXY_SECRET/.test(oauthEnv));
+  const mainEnv = parseEnvFile(await readFile(new URL(".env.example", STARTER), "utf8"));
+  assert.ok(
+    !Object.keys(mainEnv).some((key) => key.startsWith("OAUTH2_PROXY_")),
+    "identity-provider secrets belong in oauth2-proxy.env, not .env",
+  );
+});
+
+test("a CA path merely sharing the root's prefix is outside it", async () => {
+  const result = await checkTlsTrust(
+    { FERRUM_TLS_CA_PATH: "/etc/ferrum/ca-evil/x.pem", FERRUM_TLS_CA_ROOT: "/etc/ferrum/ca" },
+    statFor(),
+  );
+  assert.equal(result.status, FAIL);
+});
+
+test("the proof secret is only ever sent over TLS or to this machine", () => {
+  for (const url of ["https://foundry.example.com", "http://127.0.0.1:8088", "http://localhost:8088", "http://[::1]:8088"]) {
+    assert.equal(mayCarrySecret(url), true, url);
+  }
+  for (const url of ["http://foundry.example.com", "http://10.0.0.5:8088", "not a url"]) {
+    assert.equal(mayCarrySecret(url), false, url);
+  }
+});
+
+test("the stripping probe is not run against a plaintext remote front door", async () => {
+  const sent = [];
+  const results = await checkTrustBoundary(
+    { ...workingEnv, FOUNDRY_PREFLIGHT_URL: "http://foundry.example.com" },
+    async (_url, init) => {
+      sent.push(init.headers ?? {});
+      return new Response("", { status: 401 });
+    },
+  );
+  assert.equal(results[1].status, UNKNOWN);
+  assert.ok(
+    !sent.some((headers) => headers["X-Ferrum-Auth-Secret"] === workingEnv.FERRUM_TRUSTED_PROXY_SECRET),
+    "the proof secret must not have been sent",
+  );
 });
