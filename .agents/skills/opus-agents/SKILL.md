@@ -11,13 +11,13 @@ final merge recommendation. Require each worker to carry its assigned scope thro
 point in the prompt. Never accept a worker's report without checking the repository and GitHub
 state yourself.
 
-**Guard: do NOT use this skill when you are yourself a dispatched worker.** If your session
-prompt says you were dispatched by an orchestrator — it references the `astra-agents` briefs
-(`agent-brief.md` / `continuation-brief.md`), says "YOU are the implementer", or hands you an
-existing worktree and findings to fix — then this skill does not apply: implement directly in
-your session. Your model and reasoning effort were chosen deliberately by the dispatching
-orchestrator; delegating to an Opus worker silently substitutes different hands at a different
-effort. This skill is only for sessions where the USER asked Codex to delegate to Claude.
+**Guard: do not use this skill when you are yourself a dispatched worker.** If your session
+prompt says an orchestrator dispatched you — it references this skill's `agent-brief.md` or
+`continuation-brief.md`, says "YOU are the implementer", or hands you an existing worktree and
+findings to fix — implement directly in your session. The dispatching orchestrator chose your
+model and reasoning effort deliberately; delegating to an Opus worker substitutes different
+hands at a different effort. This skill applies only when the user asked Codex to delegate to
+Claude.
 
 ## Remote CI validation
 
@@ -41,9 +41,7 @@ prompt, including continuation prompts and any permitted nested delegation.
 
 ## Preflight
 
-1. Read `AGENTS.md`, the relevant `docs/*.md`, and the issue or PR before dispatching. The
-   `.claude/rules/*.md` files are gateway reference rules copied from ferrum-edge, not Foundry
-   build or test instructions.
+1. Read `AGENTS.md`, the relevant `docs/*.md`, and the issue or PR before dispatching.
 2. Confirm the standalone claude CLI is resolvable, then run `claude --version`, `claude auth status`,
    and `claude --help` against it. The launcher resolves the binary in this order and refuses
    any candidate under `com.conductor.app`, because Conductor's bundled copy lags the standalone
@@ -134,12 +132,11 @@ user sets a lower limit.
 Every prompt must contain this role instruction even though the briefs repeat it:
 
 ```text
-YOU are the implementer. Complete every task and validation the controller assigns before ending.
-Do not stop at analysis, partial implementation, or a handoff for someone else to finish. Perform
+YOU are the implementer. Complete every task and validation the controller assigns before ending. Perform
 commit, push, PR, review, and CI actions only when the prompt assigns them. Do not request or wait
 for a separate review-bot pass unless explicitly assigned. After the final requested push and
 report, exit; the controller owns post-push CI and review monitoring. Do not invoke agent-dispatch
-skills or scripts (including astra-agents, opus-agents, fable-agents, grok-agents, or any
+skills or scripts (any .agents/skills/*-agents skill or any
 .agents/skills/*/scripts/dispatch-agent.sh), and do not spawn nested workers.
 ```
 
@@ -173,12 +170,12 @@ actionable work appears. Do not add a review trigger unless the controller expli
 
 1. Poll each retained execution session separately. Use `pgrep -x claude` only as a secondary
    fleet-wide cross-check, never as the identity of a particular worker.
-2. Give the user a concise progress update at least once a minute while workers are active.
+2. Tell the user when a worker starts, finishes, fails, or stalls.
 3. On completion, verify the claims relevant to the prompt, such as the branch, pushed head, PR,
    requested validation, and any explicitly assigned review or CI actions.
 4. Fetch `origin/main` and independently inspect `git diff origin/main...HEAD` in the worker's
-   worktree. Use a three-dot diff. Review fail-closed behavior, hot paths, docs/spec parity,
-   production panics, tests, and scope creep.
+   worktree. Use a three-dot diff. Review fail-closed behavior, docs/spec parity, tests,
+   and scope creep.
 5. Own post-push review and CI monitoring. Diagnose red checks from logs, rerun only demonstrated
    infrastructure failures or known flakes, and dispatch bounded repair work for deterministic
    failures.

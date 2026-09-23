@@ -39,9 +39,7 @@ prompt, including continuation prompts and any permitted nested delegation.
 
 ## Preflight
 
-1. Read `AGENTS.md`, the relevant `docs/*.md`, and the issue or PR before dispatching. The
-   `.claude/rules/*.md` files are gateway reference rules copied from ferrum-edge, not Foundry
-   build or test instructions.
+1. Read `AGENTS.md`, the relevant `docs/*.md`, and the issue or PR before dispatching.
 2. Confirm the standalone claude CLI is resolvable, then run `claude --version`, `claude auth status`,
    and `claude --help` against it. The launcher resolves the binary in this order and refuses
    any candidate under `com.conductor.app`, because Conductor's bundled copy lags the standalone
@@ -120,12 +118,11 @@ Fable workers unless the user sets a lower limit.
 Every prompt must contain this role instruction even though the briefs repeat it:
 
 ```text
-YOU are the implementer. Complete every task and validation the controller assigns before ending.
-Do not stop at analysis, partial implementation, or a handoff for someone else to finish. Perform
+YOU are the implementer. Complete every task and validation the controller assigns before ending. Perform
 commit, push, PR, review, and CI actions only when the prompt assigns them. Do not request or wait
 for a separate review-bot pass unless explicitly assigned. After the final requested push and
 report, exit; the controller owns post-push CI and review monitoring. Do not invoke agent-dispatch
-skills or scripts (including astra-agents, opus-agents, fable-5-1-agents, grok-agents, or any
+skills or scripts (any .agents/skills/*-agents skill or any
 .agents/skills/*/scripts/dispatch-agent.sh), and do not spawn nested workers.
 ```
 
@@ -161,8 +158,9 @@ After every Fable run, review its exact output and the resulting repository and 
 accepting the work. Fable's security guardrails can reject a request or cause the platform to route
 the affected turn to another model even though the CLI process exits normally.
 
-Treat an explicit refusal, safeguard or fallback notice, a response that identifies a non-Fable
-serving model, or structured output showing `stop_reason: "refusal"` as confirmation. Missing or
+Treat an explicit refusal, a safeguard or fallback notice, or a response that identifies a
+non-Fable serving model as confirmation. The launcher emits plain text, so there is no structured
+`stop_reason` to inspect. Missing or
 poor work alone is not proof; inspect the transcript and state first.
 
 When a safeguard rejection or model reroute is confirmed:
@@ -185,13 +183,13 @@ them guardrail rejections.
 
 1. Poll each retained execution session separately. Use `pgrep -x claude` only as a secondary
    fleet-wide cross-check, never as the identity of a particular worker.
-2. Give the user a concise progress update at least once a minute while workers are active.
+2. Tell the user when a worker starts, finishes, fails, or stalls.
 3. On completion, perform the safeguard check above, then verify the claims relevant to the
    prompt, such as the branch, pushed head, PR, requested validation, and any explicitly assigned
    review or CI actions.
 4. Fetch `origin/main` and independently inspect `git diff origin/main...HEAD` in the worker's
-   worktree. Use a three-dot diff. Review fail-closed behavior, hot paths, docs/spec parity,
-   production panics, tests, and scope creep.
+   worktree. Use a three-dot diff. Review fail-closed behavior, docs/spec parity, tests,
+   and scope creep.
 5. Own post-push review and CI monitoring. Diagnose red checks from logs, rerun only demonstrated
    infrastructure failures or known flakes, and dispatch bounded repair work for deterministic
    failures.

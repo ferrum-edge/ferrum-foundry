@@ -44,9 +44,7 @@ prompt, including continuation prompts and any permitted nested delegation.
 
 ## Preflight
 
-1. Read `AGENTS.md`, the relevant `docs/*.md`, and the issue or PR before dispatching. The
-   `.claude/rules/*.md` files are gateway reference rules copied from ferrum-edge, not Foundry
-   build or test instructions.
+1. Read `AGENTS.md`, the relevant `docs/*.md`, and the issue or PR before dispatching.
 2. Confirm the standalone opencode CLI is resolvable. The launcher resolves it in this order and
    refuses any candidate under `com.conductor.app`, because Conductor's bundled ACP-provider copy
    lags the standalone release:
@@ -128,8 +126,7 @@ Do not stop at analysis, partial implementation, or a handoff for someone else t
 commit, push, PR, review, and CI actions only when the prompt assigns them. Do not request or wait
 for a separate review-bot pass unless explicitly assigned. After the final requested push and
 report, exit; the controller owns post-push CI and review monitoring. Do not invoke agent-dispatch
-skills or scripts (including qwen-agents, deepseek-pro-agents, deepseek-flash-agents,
-opencode-agents, grok-agents, astra-agents, opus-agents, fable-agents, composer-agents, or any
+skills or scripts (any .agents/skills/*-agents skill or any
 .agents/skills/*/scripts/dispatch-agent.sh), and do not spawn nested workers.
 ```
 
@@ -161,15 +158,15 @@ actionable work appears. Do not add a review trigger unless the controller expli
 
 ## Control and verify the fleet
 
-1. Poll retained execution sessions separately and keep the user updated at least once a minute
-   while workers are active. Use `pgrep -f 'opencode run'` only as a secondary fleet-wide
+1. Poll retained execution sessions separately and tell the user when a worker starts,
+   finishes, fails, or stalls. Use `pgrep -f 'opencode run'` only as a secondary fleet-wide
    cross-check, never as the identity of a particular worker — sibling opencode skills share that
    process name.
 2. On completion, verify the claims relevant to the prompt, such as the branch, pushed head, PR,
    requested validation, and any explicitly assigned review or CI actions.
 3. Fetch `origin/main` and independently inspect `git diff origin/main...HEAD` in the worker's
-   worktree. Use a three-dot diff. Review fail-closed behavior, hot paths, docs/spec parity,
-   production panics, tests, and scope creep.
+   worktree. Use a three-dot diff. Review fail-closed behavior, docs/spec parity, tests,
+   and scope creep.
 4. For an explicitly assigned review, fix-round, or shepherd task, fetch all review threads;
    findings may not appear in the top-level review body. Verify the active review bot before
    posting a trigger that the prompt specifically requests.
