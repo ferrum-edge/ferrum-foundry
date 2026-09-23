@@ -35,6 +35,7 @@ let root: Root;
 let host: HTMLDivElement;
 let qc: QueryClient;
 let fail: boolean;
+let failStatus: number;
 let hold: Promise<void> | undefined;
 let release: (() => void) | undefined;
 let holdRead: Promise<void> | undefined;
@@ -91,6 +92,7 @@ beforeEach(() => {
   writes.length = 0;
   reads.length = 0;
   fail = false;
+  failStatus = 400;
   hold = undefined;
   release = undefined;
   holdRead = undefined;
@@ -105,7 +107,7 @@ beforeEach(() => {
       writes.push({ method: request.method, path, namespace: tenant,
         body: request.method === "DELETE" ? undefined : await request.json() });
       await hold;
-      if (fail) return Response.json({ error: `rejected ${secret}` }, { status: 400 });
+      if (fail) return Response.json({ error: `rejected ${secret}` }, { status: failStatus });
       if (request.method === "DELETE") return new Response(null, { status: 204 });
     } else {
       reads.push(`${tenant}/${id}`);
@@ -171,6 +173,18 @@ describe("unobservable basic credential management", () => {
     await click("Cancel");
     await click("Replace basic credentials");
     expect(host.querySelector("input")?.value).toBe("");
+    expect(writes).toHaveLength(1);
+  });
+
+  it("reports a replacement whose answer was lost as an unknown outcome, once", async () => {
+    fail = true;
+    failStatus = 502;
+    await mount();
+    await replace();
+    await waitFor(() => expect(host.textContent).toContain("Outcome unknown"));
+    expect(host.textContent).not.toContain("Credential replacement failed");
+    expect(host.textContent).not.toContain(secret);
+    await assertClearedMutation();
     expect(writes).toHaveLength(1);
   });
 

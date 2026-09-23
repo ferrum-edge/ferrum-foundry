@@ -49,7 +49,7 @@ export interface UnobservedOutcome {
 
 /** Operator-facing cause for each reason; says what was lost, never what happened. */
 export const UNOBSERVED_OUTCOME_CAUSE: Record<UnobservedOutcomeReason, string> = {
-  gateway_timeout: 'The gateway did not answer in time after Foundry finished sending the request.',
+  gateway_timeout: 'No answer arrived before the time limit once the request was on its way.',
   upstream_failure: "The BFF's connection to the gateway failed before an answer arrived.",
   client_timeout: "Foundry stopped waiting for the gateway's answer.",
   transport: 'The request ended without an answer.',

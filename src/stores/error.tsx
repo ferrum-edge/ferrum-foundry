@@ -9,22 +9,13 @@ import {
 import { ErrorPopup } from "@/components/shared/ErrorPopup";
 import { useQueryClient } from "@tanstack/react-query";
 import { reportDeferredQueryError, setApiErrorHandler } from "@/api/client";
-import type { UnobservedOutcome } from "@/api/mutationOutcome";
+import type { ApiError } from "@/api/types";
 
-interface ErrorState {
+interface ErrorState extends ApiError {
   open: boolean;
-  statusCode: number;
-  body: string;
-  url: string;
-  outcome?: UnobservedOutcome;
 }
 
-interface ShowErrorParams {
-  statusCode: number;
-  body: string;
-  url: string;
-  outcome?: UnobservedOutcome;
-}
+type ShowErrorParams = ApiError;
 
 interface ErrorPopupContextValue {
   state: ErrorState;

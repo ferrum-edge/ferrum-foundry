@@ -204,6 +204,16 @@ export function reportDeferredQueryError(error: unknown): void {
 const unobservedWrites = new WeakSet<object>();
 
 /**
+ * Carry the unobserved-write marker onto an error that deliberately replaces
+ * the original rather than wrapping it via `cause` (for example to avoid
+ * retaining a secret-bearing request).
+ */
+export function markUnobservedWrite<T extends object>(error: T): T {
+  unobservedWrites.add(error);
+  return error;
+}
+
+/**
  * Whether `error` is, or was caused by, a configuration write whose outcome
  * Foundry could not observe. Such a write may have committed; it was not
  * replayed, and cached reads must be refreshed before anyone retries it.

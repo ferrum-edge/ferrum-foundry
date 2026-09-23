@@ -7,7 +7,12 @@
 /*  after the click cannot retarget the write.                        */
 /* ------------------------------------------------------------------ */
 
-import { queryScope } from "@/api/client";
+import {
+  isUnobservedWrite,
+  markUnobservedWrite,
+  queryScope,
+  UNOBSERVED_WRITE_MESSAGE,
+} from "@/api/client";
 import {
   useMutation,
   useQuery,
@@ -121,9 +126,12 @@ export function useUpdateCredentials() {
     }) => {
       try {
         await consumers.updateCredentials(scope, consumerId, credType, data);
-      } catch {
+      } catch (error) {
         // Do not retain a ky error containing the password-bearing Request or
-        // an echoed response body in the mutation cache.
+        // an echoed response body in the mutation cache. A lost answer keeps
+        // its unknown-outcome marker so cached reads are still refreshed.
+        if (isUnobservedWrite(error)) throw markUnobservedWrite(new Error(UNOBSERVED_WRITE_MESSAGE));
+        // eslint-disable-next-line preserve-caught-error -- the cause is the secret-bearing error
         throw new Error("Credential replacement failed. Check the gateway state before retrying.");
       }
       return { namespace: scope.namespace, consumerId };
