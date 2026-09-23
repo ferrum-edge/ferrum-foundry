@@ -69,10 +69,10 @@ node scripts/demo-traffic-client.mjs mixed
 
 ### Running the gateway locally
 
-The `ferrumedge/ferrum-edge:latest` tag is not refreshed for releases; pick the
-current immutable tag from
-[ferrum-edge releases](https://github.com/ferrum-edge/ferrum-edge/releases)
-(here `v0.9.5`).
+Run the same image the `Pinned Gateway Contract` CI job, the e2e suite, and
+`deploy/starter/compose.yaml` pin, so local results match CI. That digest is the
+single source of truth; the `ferrumedge/ferrum-edge:latest` tag is not refreshed
+for releases.
 
 ```bash
 docker run --rm -d --name ferrum-edge \
@@ -86,7 +86,7 @@ docker run --rm -d --name ferrum-edge \
   -e FERRUM_ADMIN_BIND_ADDRESS=0.0.0.0 \
   -e FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true \
   -p 127.0.0.1:9000:9000 -p 127.0.0.1:8000:8000 \
-  ferrumedge/ferrum-edge:v0.9.5 run -m database -v
+  ferrumedge/ferrum-edge@sha256:fb0f05b0392a272ba36a493584bced171655ce8ebd36b2ae0818bb5c3c25ef2d run -m database -v
 ```
 
 The public plaintext admin bind above is a local-development exception and is
@@ -152,11 +152,11 @@ The app supports dark and light themes via CSS custom properties. Dark is the de
 
 - `src/api/types.ts` mirrors the Ferrum Edge admin API response shapes (NOT the OpenAPI spec schemas directly -- field names must match what the API actually returns)
 - Form components use `*Create` types for submission payloads
-- Proxies use `backend_scheme` (`http`/`https`/`tcp`/`tcps`/`udp`/`dtls`); gRPC and WebSocket are detected per-request and are NOT schemes. The legacy `backend_protocol` enum is gone
+- Proxies use `backend_scheme` (`http`/`https`/`tcp`/`tcps`/`udp`/`dtls`); gRPC and WebSocket are detected per-request and are NOT schemes. Proxies have no `backend_protocol` field
 - HTTP proxies need `hosts` and/or `listen_path`; stream proxies must omit `listen_path` and set `listen_port`
 - Consumer credentials are maps of rotation ARRAYS per type (`keyauth`, `basicauth`, `jwt`, `hmac_auth`, `mtls_auth`); ordinary responses redact secrets as the literal `[REDACTED]`, which PUT accepts as a round-trip marker
 - Proxy PUT is full-replace: build update payloads with `proxies.toUpdatePayload(proxy)` and override fields, never send partial bodies
-- A full-replacement save from a detail editor carries a **write guard**: the editor captures a baseline when it is seeded (`src/lib/resourceBaseline.ts`), the API layer re-reads and compares it immediately before the PUT, and a mismatch throws `StaleResourceError` without sending anything (`src/api/conditionalWrite.ts`). `update()` takes the guard as a required argument — pass `null` only from a caller that provably cannot lose a concurrent change, such as a plugin membership plan, which runs its own `updated_at` preflight contract. Edge has no conditional-write precondition (`If-Match` is ignored; verified in `scripts/concurrent-edit-contract.mjs`), so this narrows the race to one round trip rather than closing it. A refused save keeps the draft, shows a redacted original/current/proposed comparison, and is never resent automatically. See `docs/concurrent-edits.md`
+- A full-replacement save from a detail editor carries a **write guard**: the editor captures a baseline when it is seeded (`src/lib/resourceBaseline.ts`), the API layer re-reads and compares it immediately before the PUT, and a mismatch throws `StaleResourceError` without sending anything (`src/api/conditionalWrite.ts`). A match sends the PUT with `If-Match` set to the `ETag` of **that verification read** — never a tag from the editor's seed or a refetch — so Edge refuses it with `412` if anything commits in between (ferrum-edge#5661); the guard then re-verifies, and re-sends only if the fields this write replaces are still unchanged. A read with no strong `ETag` (older gateway, cached-config fallback) gets an unconditional PUT, which narrows the race to one round trip rather than closing it. Send `If-Match` only on the four resource `PUT`/`DELETE` paths Edge evaluates it on; anywhere else it is a `400`. `update()` takes the guard as a required argument — pass `null` only from a caller that provably cannot lose a concurrent change, such as a plugin membership plan, which runs its own `updated_at` preflight contract. A refused save keeps the draft, shows a redacted original/current/proposed comparison, and is never resent automatically with the same body. See `docs/concurrent-edits.md`
 - Health check enablement is controlled by presence/absence (not an `enabled` boolean field)
 - `ServiceDiscoveryConfig` uses nested provider-specific objects (`dns_sd`, `kubernetes`, `consul`, `mesh`)
 - ky v2 parses a failing response body into `error.data` **and consumes the response doing it** — `error.response.clone()` throws "body is already used" from then on, and that throw is synchronous, so it escapes a trailing `.catch()`. Read error bodies with `getApiErrorDetail()` / `extractApiErrorData()`, never by cloning the response

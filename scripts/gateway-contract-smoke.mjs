@@ -28,7 +28,11 @@ async function exchange(path, { method = "GET", body, headers = {} } = {}, reque
   const text = await response.text();
   const cursor = response.headers.get("x-ferrum-config-cursor");
   if (cursor !== null) assert.match(cursor, /^\d+:\d+$/);
-  return { status: response.status, body: text ? JSON.parse(text) : undefined };
+  return {
+    status: response.status,
+    body: text ? JSON.parse(text) : undefined,
+    etag: response.headers.get("etag"),
+  };
 }
 
 async function request(path, { expected = [200, 201], ...options } = {}) {
@@ -146,7 +150,9 @@ const basicAuth = await verifyBasicAuthContract(exchange);
 
 // Two administrators, one proxy, one older draft (#381). This records the
 // gateway's own behavior — an unguarded stale write still reverts an accepted
-// change — and proves Foundry's guard refuses that write before the wire.
+// change — proves Foundry's guard refuses that write, and records whether the
+// gateway enforces the If-Match precondition the guard sends
+// (ferrum-edge#5661).
 const concurrentEdits = await verifyConcurrentEditContract(exchange, proxyTemplate);
 
 // Validation is non-persistent. Empty PEM values are present-but-invalid, so

@@ -1,6 +1,6 @@
 ---
 name: opus-agents
-description: Dispatch and orchestrate external Claude Code Opus 5 1M agents from Codex for Ferrum Foundry issue, PR, review-feedback, CI-repair, and shepherding work, with optional fast mode only when the user explicitly requests it. Use when the user asks GPT or Codex to delegate to Claude or Opus agents, run multiple Claude Code workers, select low/medium/high/xhigh/max effort, resume interrupted Claude runs, or drive agent-owned branches and PRs. Do not use for Codex-native subagents or ordinary single-agent edits.
+description: Dispatch and orchestrate external Claude Code Opus 5.5 1M agents from Codex for Ferrum Foundry issue, PR, review-feedback, CI-repair, and shepherding work, with optional fast mode only when the user explicitly requests it. Use when the user asks GPT or Codex to delegate to Claude or Opus agents, run multiple Claude Code workers, select low/medium/high/xhigh/max effort, resume interrupted Claude runs, or drive agent-owned branches and PRs. Do not use for Codex-native subagents or ordinary single-agent edits.
 ---
 
 # Opus agents
@@ -11,39 +11,39 @@ final merge recommendation. Require each worker to carry its assigned scope thro
 point in the prompt. Never accept a worker's report without checking the repository and GitHub
 state yourself.
 
-**Guard: do NOT use this skill when you are yourself a dispatched worker.** If your session
-prompt says you were dispatched by an orchestrator — it references the `astra-agents` briefs
-(`agent-brief.md` / `continuation-brief.md`), says "YOU are the implementer", or hands you an
-existing worktree and findings to fix — then this skill does not apply: implement directly in
-your session. Your model and reasoning effort were chosen deliberately by the dispatching
-orchestrator; delegating to an Opus worker silently substitutes different hands at a different
-effort. This skill is only for sessions where the USER asked Codex to delegate to Claude.
+**Guard: do not use this skill when you are yourself a dispatched worker.** If your session
+prompt says an orchestrator dispatched you — it references this skill's `agent-brief.md` or
+`continuation-brief.md`, says "YOU are the implementer", or hands you an existing worktree and
+findings to fix — implement directly in your session. The dispatching orchestrator chose your
+model and reasoning effort deliberately; delegating to an Opus worker substitutes different
+hands at a different effort. This skill applies only when the user asked Codex to delegate to
+Claude.
 
-## Remote CI validation
+## Validation
 
-Do not run local builds, tests, benchmarks, or compilation-based checks, including `npm run build`,
-`npm test`, `npm run typecheck`, `npm run lint`, and the `test:*` scripts, or wrappers that invoke
-them. Do not make an exception for a targeted check, an ambiguous failure, or a controller's
-routine validation request. Local source inspection and `git diff --check` are allowed.
+Workers validate locally before pushing, and CI confirms the pushed head. Require each worker to
+run `npm ci` in a fresh worktree, then `npm run typecheck`, `npm run lint`, and the tests covering
+its change (`npx vitest run <paths>`, or `npm test` for broad changes; `npm run test:contracts` for
+`scripts/`), plus `npm run build` when build configuration, server entrypoints, or bundling change.
+`npm run test:gateway-contract` and `npm run e2e` need a running gateway or browser stack; workers
+run them only when the task touches that surface and the stack is available, and otherwise leave
+them to CI. Workers report the exact commands and results.
 
-Use remote CI results for the exact pushed head SHA as build/test confirmation. Inspect failed
-job logs, fix the demonstrated failure, push the change, and use the next CI run to confirm it.
-Pending, skipped, unavailable, or earlier-head checks are not evidence that the change passed.
-Keep adding or updating relevant tests; remote CI executes them.
+Local passes are not CI evidence. Use CI results for the exact pushed head SHA as confirmation:
+pending, skipped, unavailable, or earlier-head checks do not show that the change passed. Inspect
+failed job logs, fix the demonstrated failure, push, and confirm it on the next run.
 
 The controller owns post-push CI monitoring unless the worker is explicitly assigned a CI repair
 or shepherd round. A worker assigned to exit after pushing must report the head SHA and CI status
 as pending or unverified and exit; the controller continues the CI-driven fix loop. Never report
-build/test success without matching remote evidence.
+CI success without matching remote evidence.
 
-Include the no-local-build/test rule and remote CI confirmation requirement in every dispatch
-prompt, including continuation prompts and any permitted nested delegation.
+Include the local-validation and CI-confirmation requirements in every dispatch prompt, including
+continuation prompts and any permitted nested delegation.
 
 ## Preflight
 
-1. Read `AGENTS.md`, the relevant `docs/*.md`, and the issue or PR before dispatching. The
-   `.claude/rules/*.md` files are gateway reference rules copied from ferrum-edge, not Foundry
-   build or test instructions.
+1. Read `AGENTS.md`, the relevant `docs/*.md`, and the issue or PR before dispatching.
 2. Confirm the standalone claude CLI is resolvable, then run `claude --version`, `claude auth status`,
    and `claude --help` against it. The launcher resolves the binary in this order and refuses
    any candidate under `com.conductor.app`, because Conductor's bundled copy lags the standalone
@@ -52,7 +52,7 @@ prompt, including continuation prompts and any permitted nested delegation.
    - `~/.local/bin/claude`, `/opt/homebrew/bin/claude`, `/usr/local/bin/claude`,
    - `claude` on `PATH`.
 3. Confirm that the installed CLI exposes `--effort` with `low`, `medium`, `high`, `xhigh`, and `max`.
-4. Use the pinned model `claude-opus-5[1m]`. Use `opus[1m]` only when the user explicitly asks
+4. Use the pinned model `claude-opus-5-5[1m]`. Use `opus[1m]` only when the user explicitly asks
    for the rolling latest Opus rather than Opus 5.
 5. If the user explicitly requests fast mode, confirm the CLI accepts the `fastMode` setting and
    that the account and selected Opus model are eligible. Fast mode requires separate usage-credit
@@ -117,7 +117,7 @@ for the dispatch or fleet. Never infer it from urgency, deadlines, task size, or
 Omit it for every other run, including continuations unless they remain within the same explicit
 request. Record the selected mode beside each worker.
 
-The launcher pins `claude-opus-5[1m]`, clears environment variables that can override effort,
+The launcher pins `claude-opus-5-5[1m]`, clears environment variables that can override effort,
 context, or thinking, omits fallback models, enables verbose text output, and closes stdin at the
 prompt file's EOF. It passes `fastMode: false` by default so user-level settings cannot enable Fast
 implicitly, and passes `fastMode: true` only with `--fast`. Pass `--model 'opus[1m]'` only for an
@@ -134,12 +134,11 @@ user sets a lower limit.
 Every prompt must contain this role instruction even though the briefs repeat it:
 
 ```text
-YOU are the implementer. Complete every task and validation the controller assigns before ending.
-Do not stop at analysis, partial implementation, or a handoff for someone else to finish. Perform
+YOU are the implementer. Complete every task and validation the controller assigns before ending. Perform
 commit, push, PR, review, and CI actions only when the prompt assigns them. Do not request or wait
 for a separate review-bot pass unless explicitly assigned. After the final requested push and
 report, exit; the controller owns post-push CI and review monitoring. Do not invoke agent-dispatch
-skills or scripts (including astra-agents, opus-agents, fable-agents, grok-agents, or any
+skills or scripts (any .agents/skills/*-agents skill or any
 .agents/skills/*/scripts/dispatch-agent.sh), and do not spawn nested workers.
 ```
 
@@ -173,12 +172,12 @@ actionable work appears. Do not add a review trigger unless the controller expli
 
 1. Poll each retained execution session separately. Use `pgrep -x claude` only as a secondary
    fleet-wide cross-check, never as the identity of a particular worker.
-2. Give the user a concise progress update at least once a minute while workers are active.
+2. Tell the user when a worker starts, finishes, fails, or stalls.
 3. On completion, verify the claims relevant to the prompt, such as the branch, pushed head, PR,
    requested validation, and any explicitly assigned review or CI actions.
 4. Fetch `origin/main` and independently inspect `git diff origin/main...HEAD` in the worker's
-   worktree. Use a three-dot diff. Review fail-closed behavior, hot paths, docs/spec parity,
-   production panics, tests, and scope creep.
+   worktree. Use a three-dot diff. Review fail-closed behavior, docs/spec parity, tests,
+   and scope creep.
 5. Own post-push review and CI monitoring. Diagnose red checks from logs, rerun only demonstrated
    infrastructure failures or known flakes, and dispatch bounded repair work for deterministic
    failures.
