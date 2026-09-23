@@ -276,6 +276,14 @@ test("an unmapped identity is denied by the shared policy's default", async () =
   assert.match(policy, /map \$auth_groups \$ferrum_namespaces \{\s*\n\s*default\s+"";/);
 });
 
+test("the shipped policy grants no test-only second namespace", async () => {
+  const policy = await readFile(new URL("nginx/identity/policy.conf", STARTER), "utf8");
+  assert.ok(!policy.includes("ferrum-foundry-demo-b"));
+
+  const e2ePolicy = await readFile(new URL("../e2e/nginx/policy.conf", import.meta.url), "utf8");
+  assert.match(e2ePolicy, /ferrum-foundry-demo,ferrum-foundry-demo-b/);
+});
+
 test("the BFF publishes no host port in either profile", async () => {
   const compose = await readFile(new URL("compose.yaml", STARTER), "utf8");
   const foundryService = compose.slice(

@@ -129,6 +129,22 @@ describe("guided configuration", () => {
     );
   });
 
+  it("preserves an explicit null boolean when another field is edited", async () => {
+    await renderForm("key_auth", {
+      key_location: "header:X-API-Key",
+      hide_credentials: null,
+    });
+    await type("Key location", "query:api_key");
+    await submit();
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: { key_location: "query:api_key", hide_credentials: null },
+      }),
+      undefined,
+    );
+  });
+
   it("shows an accessible inline error and refuses to submit an out-of-range value", async () => {
     await renderForm("rate_limiting", {
       limits: [{ scope: "default", requests_per_second: 400 }],

@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PluginConfig, Proxy } from "@/api/types";
+import { isStaleResourceError } from "@/api/conditionalWrite";
+import { pluginWriteGuard } from "@/api/plugins";
 import {
   bindPluginMembership,
   deletePluginWithMembership,
+  updatePluginWithMembership,
 } from "./pluginMembership";
 
 /**
@@ -129,7 +132,7 @@ describe("plugin membership plans bind every request to the starting namespace",
   it("keeps listing, preflight, apply, and rollback in the bound namespace", async () => {
     const deps = bindPluginMembership({ namespace: "tenant-a" });
 
-    await expect(deletePluginWithMembership("plugin-1", deps)).rejects.toThrow(
+    await expect(deletePluginWithMembership("plugin-1", deps, null)).rejects.toThrow(
       "membership rollback was attempted",
     );
 
@@ -150,5 +153,125 @@ describe("plugin membership plans bind every request to the starting namespace",
     ]);
     expect(captured.every((r) => r.namespace === "tenant-a")).toBe(true);
     expect(localStorage.getItem("ferrum:namespace")).toBe("tenant-b");
+  });
+});
+
+describe("plugin membership plans on a gateway that honours If-Match", () => {
+  interface Stored {
+    value: Proxy | PluginConfig;
+    revision: number;
+  }
+  const store = new Map<string, Stored>();
+  const wire: string[] = [];
+  let interleaveOnPut: string | null = null;
+
+  const tag = (path: string) => `"${path}@${store.get(path)!.revision}"`;
+
+  beforeEach(() => {
+    store.clear();
+    wire.length = 0;
+    interleaveOnPut = null;
+    store.set("plugins/config/plugin-1", { value: plugin, revision: 0 });
+    store.set("proxies/p1", { value: makeProxy("p1", "v1"), revision: 0 });
+    store.set("proxies/p2", { value: makeProxy("p2", "v1"), revision: 0 });
+    vi.stubGlobal("Request", BasedRequest);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request) => {
+        const path = new URL(input.url).pathname.replace("/api/proxy/", "");
+        const ifMatch = input.headers.get("if-match");
+        wire.push(`${input.method} ${path}${ifMatch ? ` if-match ${ifMatch}` : ""}`);
+
+        if (input.method === "GET" && path === "proxies") {
+          const data = [...store.entries()]
+            .filter(([key]) => key.startsWith("proxies/"))
+            .map(([, entry]) => entry.value);
+          return json({ data, pagination: { offset: 0, limit: 250, total: data.length } });
+        }
+        const entry = store.get(path);
+        if (!entry) return json({ error: "Not Found" }, 404);
+        if (input.method === "GET") {
+          return new Response(JSON.stringify(entry.value), {
+            headers: { "content-type": "application/json", etag: tag(path) },
+          });
+        }
+        // Another administrator edits this proxy after the plan's preflight
+        // read, without moving `updated_at` — the change the plan's own
+        // `updated_at` comparison cannot see.
+        if (interleaveOnPut === path) {
+          interleaveOnPut = null;
+          entry.value = path.startsWith("plugins/")
+            ? { ...entry.value, config: { requests: 99 } } as PluginConfig
+            : { ...entry.value, backend_host: "moved.internal" } as Proxy;
+          entry.revision += 1;
+        }
+        if (ifMatch !== null && ifMatch !== tag(path)) {
+          return json({ error: "Precondition Failed" }, 412);
+        }
+        if (input.method === "DELETE") {
+          store.delete(path);
+          return new Response(null, { status: 204 });
+        }
+        const body = (await input.clone().json()) as object;
+        entry.value = { ...entry.value, ...body } as Proxy | PluginConfig;
+        entry.revision += 1;
+        return json(entry.value);
+      }),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("makes every write conditional on the read the plan just compared", async () => {
+    await deletePluginWithMembership(
+      "plugin-1",
+      bindPluginMembership({ namespace: "tenant-a" }),
+      null,
+    );
+
+    expect(wire).toEqual([
+      "GET plugins/config/plugin-1",
+      "GET proxies",
+      "GET proxies/p1",
+      'PUT proxies/p1 if-match "proxies/p1@0"',
+      "GET proxies/p2",
+      'PUT proxies/p2 if-match "proxies/p2@0"',
+      "GET plugins/config/plugin-1",
+      'DELETE plugins/config/plugin-1 if-match "plugins/config/plugin-1@0"',
+    ]);
+    expect(store.has("plugins/config/plugin-1")).toBe(false);
+  });
+
+  it("aborts on a change its updated_at comparison cannot see, instead of overwriting it", async () => {
+    interleaveOnPut = "proxies/p1";
+
+    await expect(
+      deletePluginWithMembership("plugin-1", bindPluginMembership({ namespace: "tenant-a" }), null),
+    ).rejects.toThrow("Proxy p1 changed during membership preflight");
+
+    const p1 = store.get("proxies/p1")!.value as Proxy;
+    expect(p1.backend_host).toBe("moved.internal");
+    expect(p1.plugins).toEqual([{ plugin_config_id: "plugin-1" }]);
+    expect(store.has("plugins/config/plugin-1")).toBe(true);
+  });
+
+  it("shows the editor the comparison when its plugin changes between the plan's read and its PUT", async () => {
+    interleaveOnPut = "plugins/config/plugin-1";
+
+    const refused = await updatePluginWithMembership(
+      "plugin-1",
+      { plugin_name: "rate_limiting", config: { requests: 20 }, scope: "proxy_group", enabled: true },
+      ["p1", "p2"],
+      bindPluginMembership({ namespace: "tenant-a" }),
+      pluginWriteGuard(plugin),
+    ).then(() => null, (error: unknown) => error);
+
+    if (!isStaleResourceError(refused)) throw new Error("expected a stale write");
+    expect(refused.detail.current.config).toEqual({ requests: 99 });
+    expect(refused.detail.proposed.config).toEqual({ requests: 20 });
+    expect((store.get("plugins/config/plugin-1")!.value as PluginConfig).config).toEqual({ requests: 99 });
+    expect(wire.filter((call) => call.startsWith("PUT proxies"))).toEqual([]);
   });
 });
