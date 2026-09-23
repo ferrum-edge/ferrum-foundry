@@ -1,8 +1,10 @@
 import { APPLY_WAIT_MS } from "../../server/waitBudget";
+import { classifyUnobservedOutcome, type UnobservedOutcome } from "./mutationOutcome";
 
 export type ApplyState =
   | "idle"
   | "nothing_applied"
+  | "outcome_unknown"
   | "pending"
   | "succeeded"
   | "applied"
@@ -130,7 +132,7 @@ export function beginGatewayRequest(request: Request): GatewayRequestIdentity {
   const identity: GatewayRequestIdentity = { session: sessionGeneration };
   if (!request.url.includes("/api/proxy/") || !isConfigurationMutation(request)) return identity;
   latestMutationOrder += 1;
-  if (["applied", "succeeded", "nothing_applied"].includes(snapshot.apply.state)) {
+  if (["applied", "succeeded", "nothing_applied", "outcome_unknown"].includes(snapshot.apply.state)) {
     publish({ ...snapshot, apply: IDLE_APPLY });
   }
   return { ...identity, mutationOrder: latestMutationOrder };
@@ -375,6 +377,51 @@ export async function observeGatewayResponse(
       namespace,
     );
   }
+}
+
+/**
+ * Observe a configuration write that failed without a gateway answer.
+ *
+ * A `502` `FERRUM_BFF_UPSTREAM_FAILURE`, a response-phase `504`, a client
+ * timeout, or a dropped connection says nothing about whether the gateway
+ * committed the write. Such a failure is published as `outcome_unknown`, never
+ * as `nothing_applied`: Foundry does not know the change was not committed,
+ * and it does not replay the request to find out (writes are never retried;
+ * see `src/api/client.ts`). A known commit that still needs inspection keeps
+ * its monitor, exactly as a definite failure would leave it.
+ *
+ * Returns the classification of this request whether or not it still owns the
+ * banner, so the caller can report the individual failure honestly. Returns
+ * `null` for anything that is not a dispatched configuration mutation, and for
+ * a failure the gateway or BFF did answer definitively.
+ */
+export function observeGatewayFailure(
+  request: Request,
+  error: unknown,
+  identity?: GatewayRequestIdentity,
+): UnobservedOutcome | null {
+  // `mutationOrder` is only allocated for a configuration mutation that
+  // reached dispatch; a request refused before that never left the client.
+  if (identity?.mutationOrder === undefined) return null;
+  const outcome = classifyUnobservedOutcome(error);
+  if (!outcome) return null;
+  if (identity.session !== sessionGeneration || identity.mutationOrder !== latestMutationOrder) {
+    return outcome;
+  }
+  if (["pending", "rejected", "unverifiable"].includes(snapshot.apply.state)) return outcome;
+  publish({
+    ...snapshot,
+    apply: {
+      namespace: request.headers.get(NAMESPACE_HEADER),
+      state: "outcome_unknown",
+      cursor: null,
+      requestUrl: request.url,
+      reason: outcome.reason,
+      retryAfter: null,
+      polling: false,
+    },
+  });
+  return outcome;
 }
 
 /** Retire metadata when the authenticated authorization boundary changes. */

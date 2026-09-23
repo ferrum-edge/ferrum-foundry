@@ -8,6 +8,7 @@ import type { ApiError } from "./types";
 import {
   beginGatewayRequest,
   GATEWAY_REQUEST_IDENTITY,
+  observeGatewayFailure,
   observeGatewayResponse,
   setApplyStatusFetcher,
   type ApplyStatusResponse,
@@ -162,6 +163,10 @@ export async function getApiErrorDetail(error: unknown): Promise<string> {
   }
 }
 
+export const UNOBSERVED_WRITE_MESSAGE =
+  "Outcome unknown: the gateway may already have committed this change. " +
+  "It was not replayed. Re-read the current configuration before retrying.";
+
 export async function getApiErrorMessage(
   error: unknown,
   fallback: string,
@@ -170,6 +175,10 @@ export async function getApiErrorMessage(
 
   const detail = await getApiErrorDetail(error);
 
+  // Never phrase a write whose answer was lost as a failure.
+  if (isUnobservedWrite(error)) {
+    return detail ? `${UNOBSERVED_WRITE_MESSAGE}\n${detail}` : UNOBSERVED_WRITE_MESSAGE;
+  }
   return detail ? `${error.message}: ${detail}` : error.message;
 }
 
@@ -188,6 +197,36 @@ export function reportDeferredQueryError(error: unknown): void {
   if (!detail) return;
   deferredQueryErrors.delete(error);
   onApiError(detail);
+}
+
+// Writes whose answer never arrived (see `observeGatewayFailure`). Keyed by the
+// rejected Error so a caller that wraps it (via `cause`) is still recognized.
+const unobservedWrites = new WeakSet<object>();
+
+/**
+ * Carry the unobserved-write marker onto an error that deliberately replaces
+ * the original rather than wrapping it via `cause` (for example to avoid
+ * retaining a secret-bearing request).
+ */
+export function markUnobservedWrite<T extends object>(error: T): T {
+  unobservedWrites.add(error);
+  return error;
+}
+
+/**
+ * Whether `error` is, or was caused by, a configuration write whose outcome
+ * Foundry could not observe. Such a write may have committed; it was not
+ * replayed, and cached reads must be refreshed before anyone retries it.
+ */
+export function isUnobservedWrite(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current && typeof current === "object" && !seen.has(current)) {
+    if (unobservedWrites.has(current)) return true;
+    seen.add(current);
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
 }
 
 // ── BFF session / CSRF state (set by AuthProvider) ───────────────
@@ -394,6 +433,14 @@ export const api = ky.create({
     ],
     beforeError: [
       ({ request, options, error }) => {
+        // Classified before any popup opt-out: a silent caller's write is just
+        // as ambiguous, and the live-apply banner must still say so.
+        const unobserved = observeGatewayFailure(
+          request,
+          error,
+          options.context[GATEWAY_REQUEST_IDENTITY] as GatewayRequestIdentity | undefined,
+        );
+        if (unobserved) unobservedWrites.add(error);
         if (options.context[SILENT_ERRORS] || error.name === "AbortError") return error;
         if (isHTTPError(error) && isExpectedProbeFailure(error.response, request.url)) return error;
         const data = isHTTPError(error) ? error.data : error.message;
@@ -401,6 +448,7 @@ export const api = ky.create({
           statusCode: isHTTPError(error) ? error.response.status : 0,
           body: typeof data === "string" ? data : data === undefined ? "" : JSON.stringify(data),
           url: request.url,
+          ...(unobserved && { outcome: unobserved }),
         }, Boolean(options.context[DEFER_QUERY_ERRORS]));
         return error;
       },

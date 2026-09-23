@@ -23,10 +23,9 @@ import {
   getRestoreApiSpecConfirmation,
   getRestoreFailure,
   getRestoreCommitted,
-  getRestoreUnknownOutcome,
   type RestoreFailure,
-  type RestoreUnknownOutcome,
 } from "@/api/ops";
+import { classifyUnobservedOutcome, type UnobservedOutcome } from "@/api/mutationOutcome";
 
 interface PendingRestore {
   data: Record<string, unknown>;
@@ -48,11 +47,11 @@ interface ApiSpecRisk {
  */
 interface UnknownRestore {
   pending: PendingRestore;
-  outcome: RestoreUnknownOutcome;
+  outcome: UnobservedOutcome;
   confirmedApiSpecDeletion: boolean;
 }
 
-const UNKNOWN_RESTORE_CAUSE: Record<RestoreUnknownOutcome["reason"], string> = {
+const UNKNOWN_RESTORE_CAUSE: Record<UnobservedOutcome["reason"], string> = {
   gateway_timeout:
     "The gateway did not answer within the restore budget after Foundry finished sending the backup.",
   upstream_failure:
@@ -147,7 +146,7 @@ export function BackupRestoreCard() {
       setRestoreFailure(failure);
       return true;
     }
-    const unknown = getRestoreUnknownOutcome(error);
+    const unknown = classifyUnobservedOutcome(error);
     if (!unknown) return false;
     clearRestore();
     setRestoreFailure(null);

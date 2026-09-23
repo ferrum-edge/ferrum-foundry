@@ -9,19 +9,13 @@ import {
 import { ErrorPopup } from "@/components/shared/ErrorPopup";
 import { useQueryClient } from "@tanstack/react-query";
 import { reportDeferredQueryError, setApiErrorHandler } from "@/api/client";
+import type { ApiError } from "@/api/types";
 
-interface ErrorState {
+interface ErrorState extends ApiError {
   open: boolean;
-  statusCode: number;
-  body: string;
-  url: string;
 }
 
-interface ShowErrorParams {
-  statusCode: number;
-  body: string;
-  url: string;
-}
+type ShowErrorParams = ApiError;
 
 interface ErrorPopupContextValue {
   state: ErrorState;
@@ -70,6 +64,7 @@ export function ErrorPopupProvider({ children }: { children: ReactNode }) {
         statusCode={state.statusCode}
         body={state.body}
         url={state.url}
+        outcome={state.outcome}
         onClose={hideError}
       />
     </ErrorPopupContext.Provider>

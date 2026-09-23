@@ -69,10 +69,10 @@ node scripts/demo-traffic-client.mjs mixed
 
 ### Running the gateway locally
 
-The `ferrumedge/ferrum-edge:latest` tag is not refreshed for releases; pick the
-current immutable tag from
-[ferrum-edge releases](https://github.com/ferrum-edge/ferrum-edge/releases)
-(here `v0.9.5`).
+Run the same image the `Pinned Gateway Contract` CI job, the e2e suite, and
+`deploy/starter/compose.yaml` pin, so local results match CI. That digest is the
+single source of truth; the `ferrumedge/ferrum-edge:latest` tag is not refreshed
+for releases.
 
 ```bash
 docker run --rm -d --name ferrum-edge \
@@ -86,7 +86,7 @@ docker run --rm -d --name ferrum-edge \
   -e FERRUM_ADMIN_BIND_ADDRESS=0.0.0.0 \
   -e FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true \
   -p 127.0.0.1:9000:9000 -p 127.0.0.1:8000:8000 \
-  ferrumedge/ferrum-edge:v0.9.5 run -m database -v
+  ferrumedge/ferrum-edge@sha256:fb0f05b0392a272ba36a493584bced171655ce8ebd36b2ae0818bb5c3c25ef2d run -m database -v
 ```
 
 The public plaintext admin bind above is a local-development exception and is
@@ -152,7 +152,7 @@ The app supports dark and light themes via CSS custom properties. Dark is the de
 
 - `src/api/types.ts` mirrors the Ferrum Edge admin API response shapes (NOT the OpenAPI spec schemas directly -- field names must match what the API actually returns)
 - Form components use `*Create` types for submission payloads
-- Proxies use `backend_scheme` (`http`/`https`/`tcp`/`tcps`/`udp`/`dtls`); gRPC and WebSocket are detected per-request and are NOT schemes. The legacy `backend_protocol` enum is gone
+- Proxies use `backend_scheme` (`http`/`https`/`tcp`/`tcps`/`udp`/`dtls`); gRPC and WebSocket are detected per-request and are NOT schemes. Proxies have no `backend_protocol` field
 - HTTP proxies need `hosts` and/or `listen_path`; stream proxies must omit `listen_path` and set `listen_port`
 - Consumer credentials are maps of rotation ARRAYS per type (`keyauth`, `basicauth`, `jwt`, `hmac_auth`, `mtls_auth`); ordinary responses redact secrets as the literal `[REDACTED]`, which PUT accepts as a round-trip marker
 - Proxy PUT is full-replace: build update payloads with `proxies.toUpdatePayload(proxy)` and override fields, never send partial bodies

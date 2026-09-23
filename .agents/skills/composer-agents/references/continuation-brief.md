@@ -1,24 +1,21 @@
 # Ferrum Foundry Composer continuation brief
 
 Resume the existing worktree and branch named in the dispatch prompt. Follow every rule in
-`agent-brief.md`, especially isolation, direct implementation, host discipline, the
+`agent-brief.md`, especially isolation, direct implementation, the
 controller-defined stopping point, final reporting, and the prohibition on merging. The
 orchestrator must provide absolute paths to both briefs; do not use this continuation brief alone.
 
-Do not run local builds, tests, benchmarks, `npm run typecheck`, or `npm run lint`, including
-through wrappers. Follow the remote CI validation policy in `agent-brief.md`: use failed remote job logs
-to drive fixes and matching pushed-head CI results to confirm them. Formatting and source/diff
-inspection are allowed. Report pending CI honestly and preserve the assigned stopping point.
+Validate locally according to `agent-brief.md` before pushing, reproducing red CI checks locally
+where you can, and use matching pushed-head CI results to confirm. Report pending CI honestly and
+preserve the assigned stopping point.
 
 ## Implement directly
 
 Complete the assigned continuation work and validation yourself in this session. Do not stop at
 partial work or hand unfinished implementation back to the controller. Perform commit, push, PR,
 review handling, and CI repair actions only when the dispatch prompt assigns them. Do not invoke
-any agent-dispatch skill or script, including `composer-agents`, `grok-agents`, `astra-agents`,
-`opus-agents`,
-`fable-agents`, `.agents/skills/*/scripts/dispatch-agent.sh`, Codex CLI workers, or Claude CLI
-workers. Do not spawn nested workers. The orchestrator selected this model deliberately.
+any agent-dispatch skill or script: any `.agents/skills/*-agents` skill, any
+`.agents/skills/*/scripts/dispatch-agent.sh`, Codex CLI workers, or Claude CLI workers. Do not spawn nested workers. The orchestrator selected this model deliberately.
 
 ## Reconstruct state before editing
 
@@ -45,7 +42,7 @@ workers. Do not spawn nested workers. The orchestrator selected this model delib
 ## Continue the round
 
 Fix the legitimate findings and deterministic CI failures assigned in the prompt. Rebut false
-positives with concrete file-and-line reasoning. Format and validate according to `agent-brief.md`,
+positives with concrete file-and-line reasoning. Validate according to `agent-brief.md`,
 then perform the requested commit and push actions. Post exactly one review trigger only when the
 dispatch prompt explicitly assigns it.
 

@@ -48,20 +48,34 @@ test.describe("an interrupted mutation", () => {
     await page.getByRole("button", { name: "Add Target", exact: true }).last().click();
     await page.getByRole("button", { name: "Create Upstream" }).click();
 
-    // Not a success. The BFF could not read an answer, so it reports the
-    // upstream failure by its own code rather than inventing an outcome.
-    //
-    // Known gap, and deliberately asserted as it is rather than as it should
-    // be: this ambiguous 502 is presented as a plain failure. The restore flow
-    // presents the same condition as an explicit *unknown* outcome
-    // (`docs/client-recovery.md`), which is the more honest shape for a write
-    // that may have committed. Aligning ordinary writes with it is follow-up
-    // work; the property that matters for safety — no replay — is asserted
-    // below and does hold.
+    // Not a success, and not a failure either. The BFF could not read an
+    // answer, so Foundry cannot know whether the gateway committed — and it
+    // says exactly that, in the same shape the restore flow uses
+    // (`docs/client-recovery.md`). "Not committed" would be a guess, and here
+    // it would be the wrong one.
     await expect(page.getByText("Upstream created successfully")).toHaveCount(0);
-    await expect(page.getByText("FERRUM_BFF_UPSTREAM_FAILURE").first()).toBeVisible({
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByRole("heading", { name: "Outcome unknown" })).toBeVisible({
       timeout: 40_000,
     });
+    await expect(dialog.getByText(/did not replay it/i)).toBeVisible();
+    // The form's own toast says the same thing rather than "failed".
+    await expect(
+      page.getByText(/^Outcome unknown: the gateway may already have committed this change/),
+    ).toBeVisible();
+    // The BFF's own code stays visible for diagnosis.
+    await expect(dialog.getByText(/FERRUM_BFF_UPSTREAM_FAILURE/)).toBeVisible();
+    await dialog.getByRole("button", { name: "Dismiss" }).click();
+
+    // The live-apply banner keeps the report after the dialog is gone, bound to
+    // the namespace and path of the write it describes.
+    const banner = page.getByRole("status").filter({ hasText: "Outcome unknown" });
+    await expect(banner).toBeVisible();
+    await expect(banner).toContainText("this change may have committed");
+    await expect(banner).toContainText("The request was not replayed");
+    await expect(banner).toContainText(`Namespace: ${NAMESPACE}`);
+    await expect(banner).toContainText("/api/proxy/upstreams");
+    await expect(page.getByText("Change was not committed")).toHaveCount(0);
 
     await faults.expectAllConsumed();
 
