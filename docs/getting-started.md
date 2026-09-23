@@ -7,9 +7,9 @@ anonymous caller and serves an authenticated one **through the real data
 plane**.
 
 The same steps run in CI, as `scripts/starter-journey.mjs`, against the
-checked-in starter, the production Foundry image, and the pinned Ferrum Edge
-gateway — so if the gateway's behaviour changes under this walkthrough, the
-build says so.
+checked-in starter, the production Foundry image, and the Ferrum Edge image
+CI pins by digest ([compatibility.md](compatibility.md)) — so if the gateway's
+behaviour changes under this walkthrough, the build says so.
 
 - The runnable stack: [`deploy/starter/`](../deploy/starter/README.md)
 - The full configuration reference: [deployment.md](deployment.md)
@@ -17,7 +17,8 @@ build says so.
 ## What you need
 
 - Docker with Compose.
-- Either your own Ferrum Edge gateway and an OIDC provider, or nothing at all
+- Either your own Ferrum Edge gateway (the release named in
+  [compatibility.md](compatibility.md)) and an OIDC provider, or nothing at all
   — the `demo` profile brings up a disposable gateway, a disposable backend,
   and a stub identity provider so you can walk this path first and connect
   real systems afterwards.

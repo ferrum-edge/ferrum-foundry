@@ -39,7 +39,7 @@ The same three steps run in CI. Nothing about the suite is CI-only.
 | File | The question it answers |
 | --- | --- |
 | `first-route.spec.ts` | Can an admin go from nothing to a route that refuses anonymous callers and serves authenticated ones? |
-| `authorization.spec.ts` | Can anyone reach a surface they were not granted — unauthenticated, unmapped, or by sending their own identity headers? |
+| `authorization.spec.ts` | Can anyone reach a surface they were not granted — unauthenticated, unmapped, or by sending their own identity headers? And is a read the gateway withholds from a role shown as a denial rather than as empty data? |
 | `namespace-isolation.spec.ts` | Can one tenant's configuration appear under another, across switches and a failed read? |
 | `lifecycle.spec.ts` | Does an edit or a delete leave the gateway in the state the UI claimed? |
 | `read-failures.spec.ts` | Does a transient failure recover quietly, and does an unavailable read stay distinguishable from an empty one? |

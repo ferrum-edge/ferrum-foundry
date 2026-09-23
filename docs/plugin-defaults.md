@@ -63,7 +63,8 @@ because isolation is no longer assured. The contract transport tests exercise
 unexpected acceptance, unknown-key diagnostics, status changes, and cleanup,
 including simultaneous admission/cleanup failures and rejecting Prometheus 409s.
 
-The job retains its existing image digest
+The job runs the Ferrum Edge image pinned as `edge.image` in
+[the compatibility record](compatibility.md), digest
 `sha256:fb0f05b0392a272ba36a493584bced171655ce8ebd36b2ae0818bb5c3c25ef2d`.
 Issue #291's reproduction used a different digest (`sha256:f2c3eb7696677fed4a90551c7c8adfccae547c0e540452011f98a53b34233c2d`).
 The pinned digest was published from Edge revision

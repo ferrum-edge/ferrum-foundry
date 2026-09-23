@@ -120,6 +120,21 @@ test.describe("authorization through the identity proxy", () => {
     await expect(page.getByRole("button", { name: /^cancel$/i })).toBeEnabled();
   });
 
+  test("a read the gateway withholds from a viewer is a denial, not an empty store", async ({
+    signIn,
+  }) => {
+    // Ferrum Edge requires operator for every TLS read. The pinned gateway
+    // answers the viewer 403; the page must say so rather than claim that no
+    // TLS material exists (#385).
+    const { page } = await signIn("viewer");
+    await page.goto("/tls");
+    // Reads retry with backoff before settling as an error, so allow for it.
+    await expect(page.getByText("TLS inventory: read not permitted for this session")).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(page.getByText("No TLS material found")).toHaveCount(0);
+  });
+
   test("an operator may write, and the gateway agrees", async ({ signIn, request }) => {
     const { page } = await signIn("operator");
     await page.goto("/proxies");

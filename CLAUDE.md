@@ -70,10 +70,15 @@ node scripts/demo-traffic-client.mjs mixed
 
 ### Running the gateway locally
 
-Run the same image the `Pinned Gateway Contract` CI job, the e2e suite, and
-`deploy/starter/compose.yaml` pin, so local results match CI. That digest is the
-single source of truth; the `ferrumedge/ferrum-edge:latest` tag is not refreshed
-for releases.
+Run the Ferrum Edge image CI pins, by digest, so local results match CI. It is
+an interim development build (`main-b96cfaa…`), not a published release: no
+published Edge release qualifies yet — v0.9.5 was evaluated and fails the
+starter walkthrough and a critical journey. `edge.image` in
+`docs/compatibility.json` is the single source: CI reads it
+(`node scripts/supported-pairing.mjs edge-image`), and
+`scripts/supported-pairing.test.mjs` fails if the starter, this command, or any
+doc pins a different Edge image. The Edge `latest` tag is not refreshed for
+releases. Moving the pin is a re-qualification — see `docs/compatibility.md`.
 
 ```bash
 docker run --rm -d --name ferrum-edge \
@@ -120,7 +125,11 @@ managed TLS/ACME is refused in a read-only mode even though
 `admin_writes_enabled` does not describe it. A read-only surface never shows
 less than the editable one: collapsible sections are forced open and Cancel
 stays outside the disabled fieldset. The BFF and Ferrum Edge remain the only
-enforcement points. See `docs/capabilities.md`.
+enforcement points. `scripts/capability-parity-contract.mjs` checks the model
+against the pinned gateway as each role, writable and `FERRUM_ADMIN_READ_ONLY`;
+extend its probe table when you add a surface. A read the gateway refuses with
+`403` is a denial, rendered by `ReadDeniedNotice`, never an empty collection or
+a missing feature. See `docs/capabilities.md`.
 
 ## Theming
 
@@ -147,6 +156,7 @@ The app supports dark and light themes via CSS custom properties. Dark is the de
 - `server/` - Fastify BFF server
 - `scripts/` - Demo backend, seeding, traffic generation, `mock-admin-gateway.mjs`, and the starter's `starter-preflight.mjs` / `starter-journey.mjs`
 - `e2e/` - the critical-journey suite: a real browser against the production build, the starter's identity proxy, and the pinned gateway, finishing with data-plane requests. `retries: 0` on purpose; failures are *arranged* through `e2e/fault-proxy.mjs` (arm exactly N, assert they were consumed) rather than waited for, and `npm run e2e:gate-self-test` proves the gate fails when the journey is broken. See `e2e/README.md`
+- `docs/compatibility.md` / `docs/compatibility.json` - the Foundry–Edge pairing: the one Edge image CI qualifies (`edge.image`, an interim development build), the published Edge release the next Foundry release must pair with (`edge.release`, a release-step placeholder, with its requirements: ferrum-edge#5661 plus the starter and critical journeys passing), Edge releases evaluated and rejected (v0.9.5), the tested envelope, and what is best-effort or not qualified. `docs/release-notes/UNRELEASED.md` drafts the next release's notes; the release workflow requires `docs/release-notes/vX.Y.Z.md`, a matching `foundry.version`, and `supported-pairing.mjs release-ready`
 - `deploy/starter/` - the runnable deployment starter: one Compose stack with a `production` and a disposable `demo` profile. `nginx/identity/policy.conf` (group → role/namespace) and `nginx/identity/inject.conf` (the four identity headers) are included by **both** proxy configurations, so the demo exercises the production authorization path; a test fails if either config grows its own copy. See `docs/getting-started.md`
 
 ## Type conventions

@@ -8,6 +8,7 @@ import {
 import { verifyPluginDefaults } from "./plugin-defaults-contract.mjs";
 import { verifyBasicAuthContract } from "./basic-auth-contract.mjs";
 import { verifyConcurrentEditContract } from "./concurrent-edit-contract.mjs";
+import { gatewaySender, verifyCapabilityParity } from "./capability-parity-contract.mjs";
 
 const config = readSeedConfig();
 confirmDestructiveTarget(config);
@@ -155,6 +156,13 @@ const basicAuth = await verifyBasicAuthContract(exchange);
 // (ferrum-edge#5661).
 const concurrentEdits = await verifyConcurrentEditContract(exchange, proxyTemplate);
 
+// The UI's role x mode capability model against this gateway, as viewer,
+// operator, and admin (#385). The read-only half runs against a second
+// container started with FERRUM_ADMIN_READ_ONLY (see the CI workflow).
+const capabilityParity = await verifyCapabilityParity(gatewaySender(config), {
+  expectation: "writable",
+});
+
 // Validation is non-persistent. Empty PEM values are present-but-invalid, so
 // Foundry must omit unused fields to support CA-only and CRL-only submissions.
 // Exercise option decoding against the pinned gateway without storing material.
@@ -177,6 +185,7 @@ console.log(JSON.stringify({
   defaults,
   basicAuth,
   concurrentEdits,
+  capabilityParity,
   operations: ["read", "create", "full-replace update", "credential rotation", "delete", "TLS validation"],
   resources: ["upstreams", "consumers", "proxies", "plugin configs", "namespaces"],
 }));

@@ -49,6 +49,27 @@ jobs:
             exit 1
           fi
 
+      - name: Require the supported pairing and release notes for this version
+        # Every release names the published Ferrum Edge release it was
+        # qualified against (docs/compatibility.md): release-ready refuses the
+        # tag until edge.release is recorded and CI's edge.image is that
+        # release. The record and the notes are prepared on main before
+        # tagging; nothing here edits them.
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          node scripts/supported-pairing.mjs release-ready
+          recorded="$(node -p "JSON.parse(require('node:fs').readFileSync('docs/compatibility.json', 'utf8')).foundry.version")"
+          if [[ "$recorded" != "$RELEASE_VERSION" ]]; then
+            echo "docs/compatibility.json foundry.version is '${recorded}', not ${RELEASE_VERSION}" >&2
+            exit 1
+          fi
+          if [[ ! -s "docs/release-notes/${RELEASE_TAG}.md" ]]; then
+            echo "docs/release-notes/${RELEASE_TAG}.md is missing; move docs/release-notes/UNRELEASED.md there before tagging" >&2
+            exit 1
+          fi
+
   quality-gates:
     name: Pre-publication Gates
     uses: ./.github/workflows/ci.yml
@@ -333,7 +354,14 @@ jobs:
           tag = os.environ["RELEASE_TAG"]
           ghcr = os.environ["IMAGE_REPOSITORY"]
           repository = os.environ["SOURCE_REPOSITORY"]
+          # Checked to exist by the Validate Release Tag job. Its own title
+          # line is replaced by the release heading below.
+          drafted = Path(f"docs/release-notes/{tag}.md").read_text(encoding="utf-8").strip()
+          if drafted.startswith("# "):
+              drafted = drafted.split("\n", 1)[1].strip() if "\n" in drafted else ""
           notes = f"""## Ferrum Foundry {tag}
+
+          {drafted}
 
           ### Docker
 
