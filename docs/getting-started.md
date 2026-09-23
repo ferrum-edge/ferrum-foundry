@@ -7,9 +7,9 @@ anonymous caller and serves an authenticated one **through the real data
 plane**.
 
 The same steps run in CI, as `scripts/starter-journey.mjs`, against the
-checked-in starter, the production Foundry image, and the supported Ferrum
-Edge release pinned by digest ([compatibility.md](compatibility.md)) — so if
-the gateway's behaviour changes under this walkthrough, the build says so.
+checked-in starter, the production Foundry image, and the Ferrum Edge image
+CI pins by digest ([compatibility.md](compatibility.md)) — so if the gateway's
+behaviour changes under this walkthrough, the build says so.
 
 - The runnable stack: [`deploy/starter/`](../deploy/starter/README.md)
 - The full configuration reference: [deployment.md](deployment.md)

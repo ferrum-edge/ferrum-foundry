@@ -7,8 +7,8 @@ completed every launch gate:
    the complete test suite with coverage floors, a production-only dependency
    audit, and a production build;
 2. the gateway-contract gate seeds the same destructive payload twice against
-   the supported Ferrum Edge image — pinned by digest in
-   `docs/compatibility.json`, the single source CI reads it from — with
+   the Ferrum Edge image pinned by digest as `edge.image` in
+   `docs/compatibility.json`, the single source CI reads it from, with
    audience and namespace enforcement enabled, then verifies the exported
    backup state plus live public, rejected-anonymous, key, basic, JWT,
    multi-auth, and response-mock traffic, and compares the UI's capability
@@ -25,12 +25,14 @@ completed every launch gate:
    SBOMs.
 
 Passing these gates qualifies Foundry with that one Ferrum Edge image, not with
-later Edge releases. The supported pairing, what else is best-effort, and what
-is not qualified are recorded in `docs/compatibility.md`. Moving the Edge pin is
-a re-qualification: change `edge.image` in `docs/compatibility.json`, and the
-pull request re-runs every gate above against the new image;
-`scripts/supported-pairing.test.mjs` fails if the starter, the workflow, or the
-launch documents still name another one.
+any other Edge build. Today `edge.image` is an interim development build; the
+published Edge release a Foundry release must pair with (`edge.release`), its
+requirements, the releases evaluated and rejected, what else is best-effort,
+and what is not qualified are recorded in `docs/compatibility.md`. Moving the
+Edge pin is a re-qualification: change `edge.image` in
+`docs/compatibility.json`, and the pull request re-runs every gate above
+against the new image; `scripts/supported-pairing.test.mjs` fails if the
+starter, the workflow, or the launch documents still name another one.
 
 The Docker build context is deny-by-default. Only package manifests, TypeScript
 and Vite build configuration, application/server/shared source, and public
@@ -53,9 +55,12 @@ from `main` before any registry login or build. The `version` field in
 `1.2.3`), because the BFF reports that field from `/api/health/live` and
 `/api/health/ready`; a mismatch fails the release before anything is built.
 The same step requires `foundry.version` in `docs/compatibility.json` to equal
-that version and `docs/release-notes/vX.Y.Z.md` to exist, and the GitHub
-release is published with those notes, so every release names the Edge image
-it was qualified against. A
+that version, `docs/release-notes/vX.Y.Z.md` to exist, and
+`node scripts/supported-pairing.mjs release-ready` to pass: `edge.release` must
+name a published Edge release and `edge.image` must be that release, so the
+gates that ran for the tag qualified the release it names. The GitHub release
+is published with those notes, so every release names the Edge release it was
+qualified against. A
 prerelease is marked as such on GitHub and never advances the stable
 major/minor or `latest` image tags. A stable backport advances its major/minor
 channel only when it is the newest patch in that line, and advances `latest`

@@ -207,7 +207,7 @@ still **read** stays reachable:
 ## Drift
 
 The role/mode matrix is duplicated from ferrum-edge by hand. CI checks the copy
-against the supported gateway image (`docs/compatibility.md`) with
+against the pinned gateway image (`edge.image`, `docs/compatibility.md`) with
 `scripts/capability-parity-contract.mjs`: as `viewer`, `operator`, and `admin`,
 it sends every gateway-backed surface a non-mutating probe that passes through
 the same role check and write gate as the surface's real writes, and fails when

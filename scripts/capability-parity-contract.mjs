@@ -28,7 +28,8 @@
  * or a `POST /restore` without `?confirm=true` and with a body that is not
  * JSON. Each still passes through exactly the role check and the admission
  * gate the surface mirrors, because Edge applies both before it looks the
- * resource up (ferrum-edge v0.9.5 `crud::handle_delete`, `handle_restore`,
+ * resource up (ferrum-edge b96cfaa, the pinned build, and v0.9.5 alike:
+ * `crud::handle_delete`, `handle_restore`,
  * `tls_management::handle_delete_managed`).
  *
  * Run directly against a gateway whose mode is fixed by

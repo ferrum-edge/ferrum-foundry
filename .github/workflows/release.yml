@@ -50,14 +50,16 @@ jobs:
           fi
 
       - name: Require the supported pairing and release notes for this version
-        # Every release names the Ferrum Edge image it was qualified against
-        # (docs/compatibility.md). The record and the notes are prepared on
-        # main before tagging; nothing here edits them.
+        # Every release names the published Ferrum Edge release it was
+        # qualified against (docs/compatibility.md): release-ready refuses the
+        # tag until edge.release is recorded and CI's edge.image is that
+        # release. The record and the notes are prepared on main before
+        # tagging; nothing here edits them.
         env:
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          node scripts/supported-pairing.mjs edge-image >/dev/null
+          node scripts/supported-pairing.mjs release-ready
           recorded="$(node -p "JSON.parse(require('node:fs').readFileSync('docs/compatibility.json', 'utf8')).foundry.version")"
           if [[ "$recorded" != "$RELEASE_VERSION" ]]; then
             echo "docs/compatibility.json foundry.version is '${recorded}', not ${RELEASE_VERSION}" >&2

@@ -100,9 +100,10 @@ jobs:
         # a newer gateway understands start getting stripped.
         run: npm run check:plugin-schemas
 
-      - name: Resolve the supported Ferrum Edge image
-        # docs/compatibility.json is the single source for the gateway Foundry
-        # is qualified against; the starter and docs are checked against it.
+      - name: Resolve the pinned Ferrum Edge image
+        # edge.image in docs/compatibility.json is the single source for the
+        # gateway Foundry is qualified against; the starter and docs are
+        # checked against it.
         run: |
           image="$(node scripts/supported-pairing.mjs edge-image)"
           echo "FERRUM_EDGE_IMAGE=${image}" >> "$GITHUB_ENV"
@@ -396,9 +397,10 @@ jobs:
         with:
           platforms: ${{ matrix.arch_dir }}
 
-      - name: Resolve the supported Ferrum Edge image
-        # docs/compatibility.json is the single source for the gateway Foundry
-        # is qualified against; the starter and docs are checked against it.
+      - name: Resolve the pinned Ferrum Edge image
+        # edge.image in docs/compatibility.json is the single source for the
+        # gateway Foundry is qualified against; the starter and docs are
+        # checked against it.
         run: |
           image="$(node scripts/supported-pairing.mjs edge-image)"
           echo "FERRUM_EDGE_IMAGE=${image}" >> "$GITHUB_ENV"

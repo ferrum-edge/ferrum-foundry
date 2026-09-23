@@ -5,6 +5,19 @@
 > workflow publishes that file as the GitHub release body and refuses a tag
 > without it. Changes since [v0.1.0](https://github.com/ferrum-edge/ferrum-foundry/releases/tag/v0.1.0):
 > `git log v0.1.0..vX.Y.Z`.
+>
+> **Blocked on the next Ferrum Edge release.** No published Edge release
+> qualifies yet. Ferrum Edge v0.9.5 was evaluated and fails the Deployment
+> Starter walkthrough and a critical journey
+> ([CI run 35901872338](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/35901872338)).
+> The pairing needs the next published Edge release. It must include
+> ferrum-edge#5661, agree with Foundry's walkthrough and critical journeys on
+> proxy-association and namespace-identity semantics, and pass the full
+> qualification before this release is published: Quality Gate, Pinned Gateway
+> Contract (including capability parity), Deployment Starter, Critical
+> Journeys, and Container Gate. The requirements are in `docs/compatibility.md`
+> ("The Edge release to pair with"). The release workflow refuses the tag until
+> `edge.release` is recorded and CI runs it.
 
 This is the first Foundry release qualified against an explicit Ferrum Edge
 release. It is intended for a **supervised early-access deployment**: one
@@ -17,7 +30,7 @@ earlier Foundry development builds.
 | | |
 | --- | --- |
 | Foundry | vX.Y.Z (*release step*) — `ferrumedge/ferrum-foundry@sha256:…` (*release step*), `linux/amd64` and `linux/arm64` |
-| Ferrum Edge | Ferrum Edge v0.9.5 — `ferrumedge/ferrum-edge@sha256:eca46c84bca92d6ef467979f8846537f7ab56c0cdc137befff465526a10fe10f` |
+| Ferrum Edge | *release step* — the next published Ferrum Edge release after v0.9.5 that includes ferrum-edge#5661 and passed the full qualification, with its multi-architecture index digest from `docs/compatibility.json` `edge.release.image` |
 | Tested gateway | `database` mode on SQLite, writable and with `FERRUM_ADMIN_READ_ONLY=true`; admin JWT with audience and namespace-claim enforcement |
 | Tested access | `trusted-proxy` authentication through the starter's identity proxy; `viewer`, `operator`, and `admin` |
 | Tested browser | Chromium (the build bundled with Playwright 1.63.0) |
@@ -59,7 +72,7 @@ envelope, including tested scale, is in
 
 - A client-side capability model presents surfaces a role or a read-only
   gateway cannot write as read-only, with the reason visible before anything
-  is edited. CI now checks that model against the supported gateway as every
+  is edited. CI now checks that model against the pinned gateway as every
   role, writable and read-only.
 - Every gateway request is bound to the namespace its operation started in;
   editors are bound to namespace and resource so a tenant switch cannot submit
@@ -84,17 +97,20 @@ The complete list is in
 
 ### Known limitations
 
-- **Concurrent edits are narrowed, not closed, on this Edge release.** Atomic
-  protection needs ferrum-edge#5661 (strong `ETag` and `If-Match` on resource
-  writes), merged on Ferrum Edge `main` on 2026-09-23 but not in v0.9.5 or any
-  published image. Against v0.9.5 the write guard re-verifies the resource
-  immediately before each write, so a stale editor cannot revert a newer
-  change, but a writer that commits within that one round trip is not detected.
-  Keep concurrent administration supervised. Foundry already sends `If-Match`,
-  so a future Edge release with #5661 closes the gap without a Foundry change,
-  once the pairing is re-qualified.
+- **Atomic concurrent edits need ferrum-edge#5661.** Strong `ETag` and
+  `If-Match` on resource writes were merged on Ferrum Edge `main` on 2026-09-23
+  but are in no published image yet, and the paired Edge release must include
+  them. Against a gateway without them, the write guard re-verifies the
+  resource immediately before each write. A stale editor cannot revert a newer
+  change, but a writer that commits within that one round trip is not
+  detected. Foundry already sends `If-Match`, so the paired release closes the
+  gap without a Foundry change.
+- **Ferrum Edge v0.9.5 is not supported.** It was evaluated and fails the
+  starter walkthrough and a critical journey. It attaches a proxy-scoped plugin
+  configuration to its proxy on write (ferrum-edge#4611), and it accepts a
+  resource id already used in another namespace. It also lacks #5661.
 - **One qualified gateway configuration.** Modes other than `database`, and Edge
-  releases other than v0.9.5, have not been run in CI.
+  releases other than the paired one, have not been run in CI.
 - **Scale.** Real-gateway testing covers tens of resources per namespace.
   Request budgets are measured at 50,000 records against a synthetic gateway;
   browser latency is not measured. List search still traverses the
@@ -103,11 +119,12 @@ The complete list is in
 
 ### Install
 
-Run the pairing above, both by digest:
+Run the pairing above, both by digest. The Ferrum Edge image is
+`edge.release.image` in `docs/compatibility.json` (*release step*: write it
+out here too).
 
 ```bash
 docker pull ferrumedge/ferrum-foundry@sha256:<release step>
-docker pull ferrumedge/ferrum-edge@sha256:eca46c84bca92d6ef467979f8846537f7ab56c0cdc137befff465526a10fe10f
 ```
 
 - New deployment: follow [Getting started](https://github.com/ferrum-edge/ferrum-foundry/blob/vX.Y.Z/docs/getting-started.md)
@@ -123,7 +140,7 @@ Foundry keeps no persistent state of its own, so an upgrade is an image
 replacement. v0.1.0 was published during buildout and is not supported; there
 is no migration and no compatibility promise between the two.
 
-1. Move the gateway to Ferrum Edge v0.9.5 first, following Ferrum Edge's own
+1. Move the gateway to the paired Ferrum Edge release (*release step*) first, following Ferrum Edge's own
    upgrade guidance. Foundry is not qualified against the gateway you ran with
    v0.1.0.
 2. Review new BFF settings in `docs/deployment.md` (`FERRUM_UPLOAD_TIMEOUT`,
@@ -137,7 +154,7 @@ is no migration and no compatibility promise between the two.
 - **Foundry:** redeploy the previous immutable tag or digest. Nothing Foundry
   wrote needs undoing — configuration lives in Ferrum Edge — but a rollback
   does not revert configuration changes made through the newer version, and
-  the previous version is not qualified against Ferrum Edge v0.9.5.
+  the previous version is not qualified against the paired Ferrum Edge release.
 - **Ferrum Edge:** follow Ferrum Edge's own rollback guidance and restore the
   configuration from a backup taken before the upgrade. Take one per namespace
   with Settings → Download Backup (`GET /backup`, admin role) before either

@@ -13,12 +13,13 @@ import {
 const RANK = { viewer: 0, operator: 1, admin: 2 };
 
 /**
- * An independent transcription of ferrum-edge v0.9.5's route roles
+ * An independent transcription of the pinned ferrum-edge build's (b96cfaa;
+ * identical in v0.9.5) route roles
  * (`require_admin_role` in each `src/admin/mod.rs` arm) and the admission
  * function each handler calls first — not derived from the probe table or the
  * capability model it is checking.
  */
-const EDGE_V095 = [
+const EDGE_ROUTES = [
   { method: "DELETE", prefix: "/proxies/", role: "operator", gate: "config-store", ok: 404 },
   { method: "DELETE", prefix: "/upstreams/", role: "operator", gate: "config-store", ok: 404 },
   { method: "DELETE", prefix: "/plugins/config/", role: "operator", gate: "config-store", ok: 404 },
@@ -50,7 +51,7 @@ function fakeGateway({ readOnly = false, override = () => undefined } = {}) {
         body: { status: "ok", mode: "database", admin_writes_enabled: !readOnly },
       };
     }
-    const rule = EDGE_V095
+    const rule = EDGE_ROUTES
       .filter((entry) => entry.method === request.method && request.path.startsWith(entry.prefix))
       .sort((a, b) => b.prefix.length - a.prefix.length)[0];
     assert.ok(rule, `unmodelled request ${request.method} ${request.path}`);

@@ -63,19 +63,18 @@ because isolation is no longer assured. The contract transport tests exercise
 unexpected acceptance, unknown-key diagnostics, status changes, and cleanup,
 including simultaneous admission/cleanup failures and rejecting Prometheus 409s.
 
-The job runs the supported Ferrum Edge image, Ferrum Edge v0.9.5, named in
-[the compatibility record](compatibility.md). The catalog
-and rejection table were first qualified against a development build of Edge
-revision `b96cfaadd41a676d39a409d47b48e0b0588fa86e` (the retired pin listed in
-the compatibility record); v0.9.5 registers the same 81 non-internal plugins
-and carries the same seven diagnostics, and the gate re-verifies both on every
-pull request. Issue #291's reproduction used a different digest
-(`sha256:f2c3eb7696677fed4a90551c7c8adfccae547c0e540452011f98a53b34233c2d`).
-Native `mesh_authz`
+The job runs the Ferrum Edge image pinned as `edge.image` in
+[the compatibility record](compatibility.md), digest
+`sha256:fb0f05b0392a272ba36a493584bced171655ce8ebd36b2ae0818bb5c3c25ef2d`.
+Issue #291's reproduction used a different digest (`sha256:f2c3eb7696677fed4a90551c7c8adfccae547c0e540452011f98a53b34233c2d`).
+The pinned digest was published from Edge revision
+`b96cfaadd41a676d39a409d47b48e0b0588fa86e`: the
+[Docker Manifest job](https://github.com/ferrum-edge/ferrum-edge/actions/runs/33094251786/job/98636370391)
+records that digest for the corresponding `main-b96cfa...` tag. Native `mesh_authz`
 `MeshPolicy` input (`name`, `namespace`, `scope`, `rules`, plus required per-rule
-`action`) is the same document on that revision and on current Edge `main`;
+`action`) is the same document on that pinned revision and on current Edge `main`;
 mesh mode is not required for admission. The previous Kubernetes CRD envelope is
-not that document: that development build ignored unknown members and then reported
+not that document: the pinned image ignored unknown members and then reported
 `missing field name`, while current `main` rejects `apiVersion` first under
 `deny_unknown_fields`. At that revision, both guards call the shared
 [built-in PII pattern table](https://github.com/ferrum-edge/ferrum-edge/blob/b96cfaadd41a676d39a409d47b48e0b0588fa86e/src/plugins/utils/ai_pii.rs#L45),

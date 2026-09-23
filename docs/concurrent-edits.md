@@ -25,12 +25,12 @@ job, and is executed on every pull request from
 | `PUT` carrying a stale or invented `If-Match` | `412` and nothing written on a gateway that tags reads (`gatewayHonoursIfMatch: true`); ignored on one that does not |
 
 The precondition is ferrum-edge#5661, merged on Ferrum Edge `main` on
-2026-09-23 and not yet in any published release or image. The supported
-release, Ferrum Edge v0.9.5 (`docs/compatibility.md`), predates it and issues
-no tag, so Foundry sends it no `If-Match`. The contract fails if the two
-halves disagree: a gateway that tags reads must refuse a stale tag, and a
-gateway that issues no tag must not be enforcing a precondition Foundry has no
-way to satisfy.
+2026-09-23 and not yet in any published release or image. The Edge image CI
+pins (`edge.image` in `docs/compatibility.md`, an interim development build)
+predates it and issues no tag, so Foundry sends it no `If-Match`. The
+contract fails if the two halves disagree: a gateway that tags reads must
+refuse a stale tag, and a gateway that issues no tag must not be enforcing a
+precondition Foundry has no way to satisfy.
 
 ## The Edge contract
 
@@ -286,11 +286,11 @@ keys its tag so it cannot be used to test guesses of a redacted value.
 
 ## Still open
 
-- **The pinned image.** The supported Ferrum Edge release (v0.9.5, see
+- **The pinned image.** The Edge image CI pins (`edge.image`, see
   `docs/compatibility.md`) predates ferrum-edge#5661, so CI exercises the
   untagged path and the guard narrows the race to one round trip rather than
-  closing it. Moving `edge.image` in `docs/compatibility.json` to a published
-  release that includes #5661 turns on the atomic path with no Foundry change;
-  the contract then asserts the `412`s.
+  closing it. The release Foundry pairs with must include #5661; moving
+  `edge.image` in `docs/compatibility.json` to it turns on the atomic path with
+  no Foundry change, and the contract then asserts the `412`s.
 - **A browser-level two-session journey.** Belongs in the critical-journey
   suite tracked by #380.

@@ -22,7 +22,7 @@ was removed: sorting and slicing now belong to the table itself.
 ## Gateway contract and current pages
 
 The **Pinned Gateway Contract** job in `.github/workflows/ci.yml` runs the
-supported Ferrum Edge image named in [`docs/compatibility.md`](compatibility.md).
+Ferrum Edge image pinned as `edge.image` in [`docs/compatibility.md`](compatibility.md).
 It exercises live requests through `scripts/gateway-contract-smoke.mjs`; it does
 not check out an OpenAPI fixture or record a corresponding gateway source SHA.
 Do not infer sorting support from acceptance of an unknown query parameter.

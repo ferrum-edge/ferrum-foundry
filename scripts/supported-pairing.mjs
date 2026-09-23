@@ -9,11 +9,17 @@
  * starter, a workflow, or a launch document that drifted would otherwise pair
  * Foundry with a gateway nobody tested.
  *
+ * `edge.image` may be an interim development build; `edge.release` is the
+ * published Edge release the next Foundry release pairs with. `release-ready`
+ * refuses a release until that release is recorded and `edge.image` is it, so
+ * the gates that qualified the tag ran against the release it names.
+ *
  * Changing `edge.image` is a re-qualification, not a tag edit: the pull request
  * that changes it runs every gateway-backed gate against the new image.
  *
- *   node scripts/supported-pairing.mjs edge-image   # print the pinned image
- *   node scripts/supported-pairing.mjs check        # validate and scan
+ *   node scripts/supported-pairing.mjs edge-image     # print the pinned image
+ *   node scripts/supported-pairing.mjs check          # validate and scan
+ *   node scripts/supported-pairing.mjs release-ready  # the release workflow's gate
  */
 
 import { readFileSync, readdirSync } from "node:fs";
@@ -75,10 +81,52 @@ export function readSupportedPairing(root = REPO_ROOT) {
   return JSON.parse(readFileSync(join(root, RECORD_PATH), "utf8"));
 }
 
+const PLATFORMS = ["linux/amd64", "linux/arm64"];
+
+/**
+ * The published Edge release a Foundry release may pair with: recorded,
+ * not rejected, and what CI actually ran (`edge.image`). Empty when the
+ * record is ready to be tagged against it.
+ */
+export function edgeReleaseErrors(record) {
+  const edge = record?.edge ?? {};
+  const release = edge.release ?? {};
+  const errors = [];
+  const fields = [
+    ["version", release.version],
+    ["source_commit", release.source_commit],
+    ["image", release.image],
+    ...PLATFORMS.map((platform) => [
+      `platform_manifests["${platform}"]`,
+      release.platform_manifests?.[platform],
+    ]),
+  ];
+  for (const [field, value] of fields) {
+    if (value === undefined || isPlaceholder(value)) {
+      errors.push(`edge.release.${field} is not recorded yet`);
+    }
+  }
+  if (errors.length > 0) return errors;
+
+  if (edge.image !== release.image) {
+    errors.push("edge.image is not edge.release.image; CI has not qualified the release");
+  }
+  if (edge.source_commit !== release.source_commit) {
+    errors.push("edge.source_commit is not edge.release.source_commit");
+  }
+  for (const platform of PLATFORMS) {
+    if (edge.platform_manifests?.[platform] !== release.platform_manifests[platform]) {
+      errors.push(`edge.platform_manifests["${platform}"] is not the release's`);
+    }
+  }
+  return errors;
+}
+
 /** Structural problems with the record itself, as readable strings. */
 export function validatePairing(record) {
   const errors = [];
   const edge = record?.edge ?? {};
+  const release = edge.release ?? {};
   const foundry = record?.foundry ?? {};
 
   if (!["candidate", "released"].includes(record?.status)) {
@@ -87,22 +135,49 @@ export function validatePairing(record) {
   if (!EDGE_IMAGE.test(edge.image ?? "")) {
     errors.push("edge.image must be ferrumedge/ferrum-edge@sha256:<64 hex>; tags are mutable");
   }
-  if (!EDGE_VERSION.test(edge.version ?? "")) {
-    errors.push("edge.version must be a published vX.Y.Z release");
-  }
   if (!COMMIT.test(edge.source_commit ?? "")) {
     errors.push("edge.source_commit must be a full commit SHA");
   }
-  for (const platform of ["linux/amd64", "linux/arm64"]) {
+  for (const platform of PLATFORMS) {
     if (!DIGEST.test(edge.platform_manifests?.[platform] ?? "")) {
       errors.push(`edge.platform_manifests["${platform}"] must be a sha256 digest`);
     }
   }
-  for (const retired of edge.retired_images ?? []) {
-    if (retired?.image === edge.image) errors.push("edge.image is listed as retired");
+
+  const releaseFields = [
+    ["version", release.version, EDGE_VERSION, "a published vX.Y.Z release"],
+    ["source_commit", release.source_commit, COMMIT, "a full commit SHA"],
+    ["image", release.image, EDGE_IMAGE, "ferrumedge/ferrum-edge@sha256:<64 hex>"],
+    ...PLATFORMS.map((platform) => [
+      `platform_manifests["${platform}"]`,
+      release.platform_manifests?.[platform],
+      DIGEST,
+      "a sha256 digest",
+    ]),
+  ];
+  for (const [field, value, pattern, expected] of releaseFields) {
+    if (!isPlaceholder(value) && !(typeof value === "string" && pattern.test(value))) {
+      errors.push(`edge.release.${field} must be ${expected} or a ${PLACEHOLDER_PREFIX} placeholder`);
+    }
+  }
+  if (!Array.isArray(release.requirements) || release.requirements.length === 0) {
+    errors.push("edge.release.requirements must state what the paired Edge release needs");
+  }
+
+  for (const rejected of edge.rejected_images ?? []) {
+    if (!EDGE_IMAGE.test(rejected?.image ?? "") || !rejected?.evidence || !rejected?.finding) {
+      errors.push("each edge.rejected_images entry needs an image digest, evidence, and a finding");
+    }
+    if (rejected?.image === edge.image) errors.push("edge.image is listed as rejected");
+    if (rejected?.image === release.image) errors.push("edge.release.image is listed as rejected");
+    if (rejected?.version && rejected.version === release.version) {
+      errors.push(`edge.release.version ${release.version} was evaluated and rejected`);
+    }
   }
 
   const released = record?.status === "released";
+  if (released) errors.push(...edgeReleaseErrors(record));
+
   const fields = [
     ["version", FOUNDRY_VERSION],
     ["source_commit", COMMIT],
@@ -140,12 +215,12 @@ function isExempt(file) {
 
 /**
  * Every place outside the history files that pins a Ferrum Edge image other
- * than `edge.image`, or still names a retired digest in any form.
+ * than `edge.image`, or still names a rejected digest in any form.
  */
 export function findPairingDrift(record, root = REPO_ROOT) {
   const drift = [];
-  const retiredDigests = (record.edge?.retired_images ?? [])
-    .map((retired) => retired.image?.split("@")[1])
+  const rejectedDigests = (record.edge?.rejected_images ?? [])
+    .map((rejected) => rejected.image?.split("@")[1])
     .filter(Boolean);
   for (const file of walk(root)) {
     if (isExempt(file)) continue;
@@ -156,9 +231,9 @@ export function findPairingDrift(record, root = REPO_ROOT) {
           drift.push({ file, line: index + 1, found: reference });
         }
       }
-      for (const digest of retiredDigests) {
+      for (const digest of rejectedDigests) {
         if (text.includes(digest.slice("sha256:".length))) {
-          drift.push({ file, line: index + 1, found: `retired ${digest}` });
+          drift.push({ file, line: index + 1, found: `rejected ${digest}` });
         }
       }
     });
@@ -188,8 +263,20 @@ function main(command) {
     console.log(record.edge.image);
     return;
   }
+  if (command === "release-ready") {
+    const unready = edgeReleaseErrors(record);
+    if (unready.length > 0) {
+      throw new Error([
+        `${RECORD_PATH} does not name a qualified Ferrum Edge release to pair with:`,
+        ...unready.map((error) => `  ${error}`),
+        "Record the release in edge.release, move edge.image to it, and re-run the full qualification first.",
+      ].join("\n"));
+    }
+    console.log(JSON.stringify({ ready: true, edge: record.edge.release.version, image: record.edge.image }));
+    return;
+  }
   if (command !== "check") {
-    throw new Error("usage: supported-pairing.mjs edge-image|check");
+    throw new Error("usage: supported-pairing.mjs edge-image|check|release-ready");
   }
   const drift = findPairingDrift(record);
   const missing = missingRequiredReferences(record);
@@ -200,7 +287,7 @@ function main(command) {
       ...missing.map((file) => `  ${file} does not name the supported image`),
     ].join("\n"));
   }
-  console.log(JSON.stringify({ aligned: true, edge: record.edge.version, image: record.edge.image }));
+  console.log(JSON.stringify({ aligned: true, image: record.edge.image }));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
