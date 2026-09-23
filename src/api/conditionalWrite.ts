@@ -37,7 +37,10 @@ export interface StaleResourceDetail {
  * Raised instead of committing a full-replacement write whose baseline no
  * longer matches the gateway — either because the verification read already
  * differed, or because the gateway refused the conditional `PUT` with `412`
- * and the re-read did. Nothing from the draft was written, and the draft
+ * and the re-read did. It is also raised after `PRECONDITION_ATTEMPTS`
+ * consecutive `412`s whose re-reads all matched: then `current` equals
+ * `original` on every compared field, and the dialog says the change is in a
+ * field the comparison does not model. Nothing from the draft was written, and the draft
  * itself is untouched: the caller keeps the form mounted and the operator
  * decides what happens next.
  *
@@ -113,7 +116,10 @@ export async function readTagged<TResource>(
   scope: NamespaceScope,
   path: string,
 ): Promise<TaggedRead<TResource>> {
-  const response = await proxyApi.get(path, scoped(scope));
+  const response = await proxyApi.get(
+    path,
+    scoped(scope, { headers: { Accept: "application/json" } }),
+  );
   return {
     value: await response.json<TResource>(),
     etag: strongEtag(response.headers.get("etag")),

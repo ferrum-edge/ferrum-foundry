@@ -64,7 +64,7 @@ export async function listAll(
 }
 
 export async function get(scope: NamespaceScope, id: string): Promise<Proxy> {
-  return proxyApi.get(`proxies/${id}`, scoped(scope)).json<Proxy>();
+  return (await readTagged<Proxy>(scope, `proxies/${id}`)).value;
 }
 
 /**
@@ -210,6 +210,12 @@ export async function update(
   const path = `proxies/${id}`;
 
   if (!guard) return conditionalPut<Proxy>(scope, path, payload, null);
+
+  // The guard does not compare `plugins`, so a guarded body must not carry
+  // them: after a `412` caused by a membership change the guard re-sends, and
+  // a replayed association list would detach what that change attached. An
+  // omitted key tells Edge to preserve the live associations.
+  delete payload.plugins;
 
   return guardedReplace<Proxy, ProxyCreate>({
     resource: "proxy",

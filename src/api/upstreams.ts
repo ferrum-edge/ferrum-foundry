@@ -69,7 +69,7 @@ export async function listAll(
 }
 
 export async function get(scope: NamespaceScope, id: string): Promise<Upstream> {
-  return proxyApi.get(`upstreams/${id}`, scoped(scope)).json<Upstream>();
+  return (await readTagged<Upstream>(scope, `upstreams/${id}`)).value;
 }
 
 /**
@@ -199,6 +199,12 @@ export function targetsWriteGuard(
   return { baseline: select(seed), select };
 }
 
+/** A guard that compares nothing, for a write that owns only what it sends. */
+const UNCOMPARED: WriteGuard<Upstream | UpstreamCreate> = {
+  baseline: {},
+  select: () => ({}),
+};
+
 /**
  * Full-replacement update of the upstream settings.
  *
@@ -253,16 +259,14 @@ export async function updateTargets(
     withUpstreamId({ ...toUpdatePayload(current), targets }, id);
 
   return serializeWrite(scope, id, async () => {
-    if (!guard) {
-      const { value } = await readTagged<Upstream>(scope, path);
-      return conditionalPut<Upstream>(scope, path, propose(value), null);
-    }
-
     return guardedReplace<Upstream, UpstreamCreate>({
       resource: "upstream targets",
       id,
       namespace: scope.namespace,
-      guard,
+      // Unguarded, the targets write still rebuilds every setting from the
+      // read it is sent against, so it is conditional on that read's tag.
+      // `targets` itself is simply replaced: nothing is compared.
+      guard: guard ?? UNCOMPARED,
       read: () => readTagged<Upstream>(scope, path),
       propose,
       write: (body, ifMatch) => conditionalPut<Upstream>(scope, path, body, ifMatch),

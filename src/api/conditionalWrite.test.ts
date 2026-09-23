@@ -247,6 +247,30 @@ describe("guarded proxy saves on a gateway that honours If-Match", () => {
     expect(popups).not.toHaveBeenCalled();
   });
 
+  it("never re-sends a plugin association list, even when the caller's body carries one", async () => {
+    // A body built from `toUpdatePayload` still has `plugins`. Re-sent after a
+    // 412 caused by a membership change, it would detach the plugin the other
+    // writer just attached.
+    const seed = proxyFixture();
+    const gateway = stubGateway(seed, {
+      interleave: (stored) => ({
+        ...stored,
+        plugins: [{ plugin_config_id: "rate-limit" }],
+      }),
+    });
+
+    await proxies.update(
+      scope,
+      "checkout",
+      { ...proxies.toUpdatePayload(seed), backend_read_timeout_ms: 30_000 },
+      proxies.proxyWriteGuard(seed),
+    );
+
+    expect(gateway.wire).toHaveLength(4);
+    expect(gateway.read().backend_read_timeout_ms).toBe(30_000);
+    expect(gateway.read().plugins).toEqual([{ plugin_config_id: "rate-limit" }]);
+  });
+
   it(`gives up after ${PRECONDITION_ATTEMPTS} refusals under continuous churn`, async () => {
     const seed = proxyFixture();
     let churn = 0;
@@ -389,6 +413,28 @@ describe("guarded upstream saves on a gateway that honours If-Match", () => {
       "one.internal",
       "two.internal",
     ]);
+  });
+
+  it("makes an unguarded targets write conditional on the read its settings came from", async () => {
+    const gateway = stubGateway(upstreamSeed, {
+      interleave: (stored) => ({ ...stored, algorithm: "least_connections" }),
+    });
+
+    await upstreams.updateTargets(
+      scope,
+      "payments",
+      [{ host: "two.internal", port: 443, weight: 1 }],
+      null,
+    );
+
+    expect(gateway.wire).toEqual([
+      "GET",
+      'PUT if-match "r0"',
+      "GET",
+      'PUT if-match "r1"',
+    ]);
+    expect(gateway.read().algorithm).toBe("least_connections");
+    expect(gateway.read().targets.map((target) => target.host)).toEqual(["two.internal"]);
   });
 
   it("keeps a settings change made in the gap and re-sends the targets over it", async () => {
