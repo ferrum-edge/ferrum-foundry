@@ -16,7 +16,8 @@ import {
 } from "@tanstack/react-query";
 import * as plugins from "@/api/plugins";
 import { SUMMARY_SCAN_BUDGET } from "@/api/pagination";
-import type { PaginationParams, PluginConfigCreate } from "@/api/types";
+import type { WriteGuard } from "@/api/conditionalWrite";
+import type { PaginationParams, PluginConfig, PluginConfigCreate } from "@/api/types";
 import { useNamespace } from "@/stores/namespace";
 import {
   bindPluginMembership,
@@ -122,19 +123,6 @@ export function useCreatePluginWithMembership() {
   });
 }
 
-export function useUpdatePluginConfig() {
-  const qc = useQueryClient();
-  const { scope } = useNamespace();
-  return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: PluginConfigCreate }) =>
-      plugins.updateConfig(scope, id, data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["pluginConfigs"] });
-      qc.invalidateQueries({ queryKey: ["pluginConfig"] });
-    },
-  });
-}
-
 export function useUpdatePluginWithMembership() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
@@ -143,12 +131,14 @@ export function useUpdatePluginWithMembership() {
       id,
       data,
       proxyIds = [],
+      guard,
     }: {
       id: string;
       data: PluginConfigCreate;
       proxyIds?: string[];
+      guard: WriteGuard<PluginConfig | PluginConfigCreate> | null;
     }) =>
-      updatePluginWithMembership(id, data, proxyIds, bindPluginMembership(scope)),
+      updatePluginWithMembership(id, data, proxyIds, bindPluginMembership(scope), guard),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pluginConfigs"] });
       qc.invalidateQueries({ queryKey: ["pluginConfig"] });
@@ -157,32 +147,18 @@ export function useUpdatePluginWithMembership() {
   });
 }
 
-export function useDeletePluginConfig() {
-  const qc = useQueryClient();
-  const { scope } = useNamespace();
-  return useMutation({
-    mutationFn: async (id: string) => {
-      await plugins.removeConfig(scope, id);
-      // Carry the mutation's namespace through completion, even after a switch.
-      return { namespace: scope.namespace, id };
-    },
-    onSuccess: async (retired) => {
-      await retireDeletedDetail(qc, [
-        "pluginConfig",
-        retired.namespace,
-        retired.id,
-      ]);
-      qc.invalidateQueries({ queryKey: ["pluginConfigs"] });
-    },
-  });
-}
-
 export function useDeletePluginWithMembership() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
   return useMutation({
-    mutationFn: async (id: string) => {
-      await deletePluginWithMembership(id, bindPluginMembership(scope));
+    mutationFn: async ({
+      id,
+      guard,
+    }: {
+      id: string;
+      guard: WriteGuard<PluginConfig | PluginConfigCreate> | null;
+    }) => {
+      await deletePluginWithMembership(id, bindPluginMembership(scope), guard);
       // Carry the mutation's namespace through completion, even after a switch.
       return { namespace: scope.namespace, id };
     },

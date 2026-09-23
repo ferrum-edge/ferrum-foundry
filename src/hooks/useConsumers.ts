@@ -19,8 +19,10 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import * as consumers from "@/api/consumers";
+import type { WriteGuard } from "@/api/conditionalWrite";
 import type {
   BuiltInCredentialType,
+  Consumer,
   ConsumerCreate,
   ConsumerCredentialInput,
   PaginationParams,
@@ -76,8 +78,15 @@ export function useUpdateConsumer() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: ConsumerCreate }) =>
-      consumers.update(scope, id, data),
+    mutationFn: ({
+      id,
+      data,
+      guard,
+    }: {
+      id: string;
+      data: ConsumerCreate;
+      guard: WriteGuard<Consumer | ConsumerCreate> | null;
+    }) => consumers.update(scope, id, data, guard),
     onSuccess: async (consumer, { id }) => {
       const queryKey = ["consumer", scope.namespace, id];
       await qc.cancelQueries({ queryKey, exact: true });
@@ -96,8 +105,14 @@ export function useDeleteConsumer() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
   return useMutation({
-    mutationFn: async (id: string) => {
-      await consumers.remove(scope, id);
+    mutationFn: async ({
+      id,
+      guard,
+    }: {
+      id: string;
+      guard: WriteGuard<Consumer | ConsumerCreate> | null;
+    }) => {
+      await consumers.remove(scope, id, guard);
       // Carry the mutation's namespace through completion, even after a switch.
       return { namespace: scope.namespace, id };
     },

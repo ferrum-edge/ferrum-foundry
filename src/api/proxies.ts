@@ -11,7 +11,9 @@ import type {
 } from "./types";
 import { collectAllPages } from "./pagination";
 import {
+  conditionalDelete,
   conditionalPut,
+  guardedRemove,
   guardedReplace,
   readTagged,
   type WriteGuard,
@@ -209,7 +211,7 @@ export async function update(
   const payload = withProxyId(data, id);
   const path = `proxies/${id}`;
 
-  if (!guard) return conditionalPut<Proxy>(scope, path, payload, null);
+  if (!guard) return replace(scope, id, payload, null);
 
   // The guard does not compare `plugins`, so a guarded body must not carry
   // them: after a `412` caused by a membership change the guard re-sends, and
@@ -228,6 +230,40 @@ export async function update(
   });
 }
 
-export async function remove(scope: NamespaceScope, id: string): Promise<void> {
-  await proxyApi.delete(`proxies/${id}`, scoped(scope));
+/**
+ * Full-replacement `PUT` with no editor baseline, conditional on `ifMatch`
+ * when there is one. For a multi-request operation that just read this proxy
+ * and passes `validatorOf(thatRead)` — a plugin membership plan. Editors use
+ * `update` with a guard instead.
+ */
+export async function replace(
+  scope: NamespaceScope,
+  id: string,
+  data: ProxyCreate,
+  ifMatch: string | null,
+): Promise<Proxy> {
+  return conditionalPut<Proxy>(scope, `proxies/${id}`, withProxyId(data, id), ifMatch);
+}
+
+/**
+ * Delete a proxy. `guard` is the detail page's baseline: the delete goes out
+ * only if the proxy still holds what the operator was looking at, and
+ * conditionally on the read that proved it. Pass `null` only from a caller
+ * with nothing on screen to compare.
+ */
+export async function remove(
+  scope: NamespaceScope,
+  id: string,
+  guard: WriteGuard<Proxy | ProxyCreate> | null,
+): Promise<void> {
+  const path = `proxies/${id}`;
+  if (!guard) return conditionalDelete(scope, path, null);
+  return guardedRemove<Proxy>({
+    resource: "proxy",
+    id,
+    namespace: scope.namespace,
+    guard,
+    read: () => readTagged<Proxy>(scope, path),
+    remove: (ifMatch) => conditionalDelete(scope, path, ifMatch),
+  });
 }

@@ -2,13 +2,24 @@
 /*  Ferrum Foundry – Plugin API functions                             */
 /* ------------------------------------------------------------------ */
 
-import { proxyApi, scoped, SILENT_ERRORS, type NamespaceScope } from "./client";
+import { proxyApi, scoped, type NamespaceScope } from "./client";
 import type {
   PaginatedResponse,
   PaginationParams,
   PluginConfig,
   PluginConfigCreate,
 } from "./types";
+import {
+  conditionalDelete,
+  conditionalPut,
+  readTagged,
+  type WriteGuard,
+} from "./conditionalWrite";
+import {
+  baselineSnapshot,
+  PLUGIN_BASELINE_OMIT,
+  type BaselineSnapshot,
+} from "@/lib/resourceBaseline";
 import {
   collectAllPages,
   collectBoundedPages,
@@ -86,12 +97,19 @@ export async function getConfig(
   id: string,
   silentErrors = false,
 ): Promise<PluginConfig> {
-  return proxyApi
-    .get(
-      `plugins/config/${id}`,
-      scoped(scope, { context: { [SILENT_ERRORS]: silentErrors } }),
-    )
-    .json<PluginConfig>();
+  return (await readTagged<PluginConfig>(scope, `plugins/config/${id}`, { silentErrors })).value;
+}
+
+/** Reduce a plugin configuration, or a payload, to the content a save replaces. */
+export function toBaseline(plugin: PluginConfig | PluginConfigCreate): BaselineSnapshot {
+  return baselineSnapshot(plugin, PLUGIN_BASELINE_OMIT);
+}
+
+/** The guard a plugin editor builds from the configuration it was seeded with. */
+export function pluginWriteGuard(
+  seed: PluginConfig,
+): WriteGuard<PluginConfig | PluginConfigCreate> {
+  return { baseline: toBaseline(seed), select: toBaseline };
 }
 
 export function toUpdatePayload(plugin: PluginConfig): PluginConfigCreate {
@@ -112,22 +130,33 @@ export async function createConfig(
     .json<PluginConfig>();
 }
 
+/**
+ * Full-replacement `PUT`, conditional on `ifMatch` when there is one.
+ *
+ * Plugin configurations are written by the membership plan
+ * (`src/lib/pluginMembership.ts`), which compares its own fresh reads and
+ * passes `validatorOf(thatRead)`; the editor's baseline is checked inside the
+ * plan, not here.
+ */
 export async function updateConfig(
   scope: NamespaceScope,
   id: string,
   data: PluginConfigCreate,
+  ifMatch: string | null,
 ): Promise<PluginConfig> {
-  return proxyApi
-    .put(
-      `plugins/config/${id}`,
-      scoped(scope, { json: withPluginConfigId(data, id) }),
-    )
-    .json<PluginConfig>();
+  return conditionalPut<PluginConfig>(
+    scope,
+    `plugins/config/${id}`,
+    withPluginConfigId(data, id),
+    ifMatch,
+  );
 }
 
+/** `DELETE`, conditional on `ifMatch` when there is one; see `updateConfig`. */
 export async function removeConfig(
   scope: NamespaceScope,
   id: string,
+  ifMatch: string | null,
 ): Promise<void> {
-  await proxyApi.delete(`plugins/config/${id}`, scoped(scope));
+  await conditionalDelete(scope, `plugins/config/${id}`, ifMatch);
 }
