@@ -143,7 +143,7 @@ test.describe("authorization through the identity proxy", () => {
       expect(response.status(), `${identity} reading an ungranted namespace`).toBe(403);
     }
 
-    // The admin's grant covers two namespaces; the operator's covers one.
+    // The E2E-only policy grants two namespaces to admins and one to operators.
     const adminSecond = await request.get(`${FOUNDRY_URL}${ADMIN_ROUTE}`, {
       headers: { [IDENTITY_HEADER]: "admin", "X-Ferrum-Namespace": NAMESPACE_B },
     });

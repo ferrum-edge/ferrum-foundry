@@ -8,8 +8,10 @@ making a request through the gateway.
 
 ## Running it
 
-The suite does not own the stack. It runs against the checked-in starter, so
-what it exercises is the deployment Foundry actually ships.
+The suite does not own the stack. It runs against the checked-in starter, with
+the E2E Compose overlay supplying only the fault-forwarder address and a
+test-only namespace policy. That policy adds the second admin namespace needed
+to exercise isolation without widening the starter's production grant.
 
 ```bash
 # 1. The stack, with the BFF reaching the gateway through the forwarder.

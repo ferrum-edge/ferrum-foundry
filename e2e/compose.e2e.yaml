@@ -2,9 +2,9 @@
 # Critical-journey overlay for the starter stack (issue #380)
 # ------------------------------------------------------------------
 #
-# Layered over deploy/starter/compose.yaml. It changes one thing: the BFF
-# reaches the gateway through the fault forwarder instead of directly, so the
-# journeys can arrange a failure precisely rather than wait for one.
+# Layered over deploy/starter/compose.yaml. The BFF reaches the gateway through
+# the fault forwarder, and the demo proxy receives a test-only policy granting
+# its admin the second namespace needed by the isolation journeys.
 #
 #   docker compose -f deploy/starter/compose.yaml -f e2e/compose.e2e.yaml \
 #     --profile demo up -d
@@ -20,3 +20,6 @@ services:
       - "host.docker.internal:host-gateway"
     environment:
       FERRUM_ADMIN_URL: http://host.docker.internal:9500
+  demo-proxy:
+    volumes:
+      - ./../../e2e/nginx/policy.conf:/etc/nginx/identity/policy.conf:ro
