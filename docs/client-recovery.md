@@ -45,9 +45,10 @@ read prevents the PUT. A failed write releases the queue without replaying it.
 This queue coordinates one client instance; it cannot make GET/PUT atomic against
 other browsers or external writers without a gateway conditional-write contract.
 The cross-session half of that problem is handled separately by the editor
-baseline guard — see [concurrent-edits.md](concurrent-edits.md), which also
-records what the pinned gateway actually does with a stale full-replacement
-write and with `If-Match`.
+baseline guard, which sends `If-Match` on gateways that tag reads — see
+[concurrent-edits.md](concurrent-edits.md), which also records what the
+pinned gateway actually does with a stale full-replacement write and with
+`If-Match`.
 
 After a metadata write, the accepted consumer seeds its namespace-specific query
 cache and the editor remains pending through refetch. Subsequent ACL changes use

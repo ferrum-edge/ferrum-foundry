@@ -349,6 +349,23 @@ const SILENT_PROBE_PATTERNS = [
  */
 export const SILENT_ERRORS = "silentErrors";
 
+/**
+ * Per-request list of HTTP statuses the caller turns into its own outcome.
+ * Narrower than `SILENT_ERRORS`: any other failure on the same request still
+ * reaches the global error popup.
+ *
+ * Pass as `{ context: { [HANDLED_STATUSES]: [412] } }`. The canonical case is
+ * a conditional full-replacement `PUT` (`src/api/conditionalWrite.ts`), whose
+ * `412` becomes a re-verification or the stale-write dialog rather than a raw
+ * API error.
+ */
+export const HANDLED_STATUSES = "handledStatuses";
+
+function isHandledStatus(context: Record<string, unknown>, status: number): boolean {
+  const handled = context[HANDLED_STATUSES];
+  return Array.isArray(handled) && handled.includes(status);
+}
+
 function isExpectedProbeFailure(response: Response, requestUrl: string): boolean {
   if (response.status !== 404 && response.status !== 503 && response.status !== 501) {
     return false;
@@ -443,6 +460,7 @@ export const api = ky.create({
         if (unobserved) unobservedWrites.add(error);
         if (options.context[SILENT_ERRORS] || error.name === "AbortError") return error;
         if (isHTTPError(error) && isExpectedProbeFailure(error.response, request.url)) return error;
+        if (isHTTPError(error) && isHandledStatus(options.context, error.response.status)) return error;
         const data = isHTTPError(error) ? error.data : error.message;
         reportRequestError(error, {
           statusCode: isHTTPError(error) ? error.response.status : 0,

@@ -24,7 +24,8 @@ export interface StaleWriteDialogProps {
 
 /**
  * Shown when a full-replacement save was refused because the resource changed
- * on the gateway after this editor opened it.
+ * on the gateway after this editor opened it — by Foundry's verification read,
+ * or by the gateway's own `If-Match` precondition.
  *
  * Three rules this dialog exists to keep:
  *
@@ -62,8 +63,8 @@ export function StaleWriteDialog({
       <DialogContent className="max-w-3xl">
         <DialogTitle>This {conflict.resource} changed after you opened it</DialogTitle>
         <DialogDescription className="mt-2">
-          Your changes were <strong>not</strong> saved and nothing was sent to the
-          gateway.{" "}
+          Your changes were <strong>not</strong> saved and nothing from this draft
+          was written to the gateway.{" "}
           <span className="font-mono">{conflict.id}</span> in namespace{" "}
           <span className="font-mono">{conflict.namespace}</span> was written after
           this editor opened — by another session, another tool, or another tab of
