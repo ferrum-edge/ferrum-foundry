@@ -50,8 +50,13 @@ If an edit fails, compensation restores original references before removing new
 ones. It retains a final reference when removing it would destroy a configuration
 that still needs recovery. Compensation for entering group scope restores the
 original non-group scope first, using Edge's atomic association reconciliation.
-Timestamp checks avoid overwriting resources observed to have changed meanwhile;
-these are client checks, not server-side compare-and-swap guarantees.
+Timestamp checks avoid overwriting resources observed to have changed meanwhile.
+Every write is also sent with `If-Match` set to the tag of the read it was
+checked against, so on a gateway that implements the precondition
+(ferrum-edge#5661) the check and the write are atomic and a change that did not
+move `updated_at` is caught too; without a tag they remain client checks. A
+plugin save or delete from its detail page is also refused if the configuration
+no longer matches what the editor opened — see `docs/concurrent-edits.md`.
 
 Concurrent writers or ambiguous network failures can still prevent compensation.
 Foundry checks that the plugin exists before trying to reattach it, and reports

@@ -105,12 +105,22 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
   };
 
   const handleDelete = session.bind(async () => {
-    if (!capability.allowed) return;
+    if (!upstream || !capability.allowed) return;
     try {
-      await deleteUpstream.mutateAsync(upstreamId);
+      // Judged against the upstream this page is displaying — see the proxy
+      // detail page.
+      await deleteUpstream.mutateAsync({
+        id: upstreamId,
+        guard: upstreamsApi.upstreamWriteGuard(upstream),
+      });
       toast("success", "Upstream deleted successfully");
       navigate({ to: "/upstreams" });
     } catch (err: unknown) {
+      if (isStaleResourceError(err)) {
+        setDeleteOpen(false);
+        setConflict(err.detail);
+        return;
+      }
       const message = await getApiErrorMessage(err, "Failed to delete upstream");
       toast("error", message);
     }

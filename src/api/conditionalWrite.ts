@@ -7,12 +7,16 @@ import {
   HANDLED_STATUSES,
   proxyApi,
   scoped,
+  SILENT_ERRORS,
   type NamespaceScope,
 } from "./client";
 import {
   resourceFingerprint,
   type BaselineSnapshot,
 } from "@/lib/resourceBaseline";
+
+/** What the refused request would have done. */
+export type GuardedOperation = "save" | "delete";
 
 /**
  * The three sides an operator needs to resolve a concurrent-edit conflict.
@@ -22,6 +26,12 @@ import {
 export interface StaleResourceDetail {
   /** Human-readable resource kind, e.g. `"proxy"`. */
   readonly resource: string;
+  /**
+   * A refused save leaves a draft to keep or discard. A refused delete leaves
+   * the resource in place, and `proposed` is the baseline itself: there is no
+   * draft value for any field.
+   */
+  readonly operation: GuardedOperation;
   readonly id: string;
   /** The namespace the refused write was bound to. */
   readonly namespace: string;
@@ -29,7 +39,7 @@ export interface StaleResourceDetail {
   readonly original: BaselineSnapshot;
   /** The content the gateway holds now. */
   readonly current: BaselineSnapshot;
-  /** The content this editor was about to write. */
+  /** The content this editor was about to write (the baseline for a delete). */
   readonly proposed: BaselineSnapshot;
 }
 
@@ -42,7 +52,7 @@ export interface StaleResourceDetail {
  * `original` on every compared field, and the dialog says the change is in a
  * field the comparison does not model. Nothing from the draft was written, and the draft
  * itself is untouched: the caller keeps the form mounted and the operator
- * decides what happens next.
+ * decides what happens next. A refused delete deleted nothing.
  *
  * This is never retried automatically. Re-sending the same body against a
  * fresh read is exactly the silent overwrite the guard exists to prevent.
@@ -53,7 +63,9 @@ export class StaleResourceError extends Error {
   constructor(detail: StaleResourceDetail) {
     super(
       `This ${detail.resource} changed on the gateway since you opened it. ` +
-        "Your draft was not saved.",
+        (detail.operation === "delete"
+          ? "It was not deleted."
+          : "Your draft was not saved."),
     );
     this.name = "StaleResourceError";
     this.detail = detail;
@@ -76,6 +88,16 @@ export function isStaleResourceError(error: unknown): error is StaleResourceErro
 export interface WriteGuard<TShape> {
   readonly baseline: BaselineSnapshot;
   readonly select: (value: TShape) => BaselineSnapshot;
+}
+
+/**
+ * A guard that compares nothing, for a write that owns only the fields it
+ * sends and takes every other field from the read it is sent against — an
+ * unguarded upstream targets write, or a consumer metadata write's
+ * credentials. Such a write still goes out conditionally on that read.
+ */
+export function uncomparedGuard<TShape>(): WriteGuard<TShape> {
+  return { baseline: {}, select: () => ({}) };
 }
 
 /** A resource read together with the gateway's validator for exactly that read. */
@@ -111,19 +133,56 @@ export function strongEtag(header: string | null): string | null {
   return STRONG_ETAG.test(value) ? value : null;
 }
 
+// The validator each tagged read was issued with, keyed by the exact object
+// that read produced. A copy or a later read of the same resource is a
+// different object and carries no validator.
+const validators = new WeakMap<object, string>();
+
+/**
+ * The strong `ETag` the gateway issued with this exact read, or `null`.
+ *
+ * For a multi-request operation that reads a resource and then writes it —
+ * a plugin membership plan's preflight read followed by its association
+ * `PUT`, a delete plan's final existence check followed by its `DELETE` —
+ * passing the read's own object here makes the write conditional on it.
+ *
+ * Never pass an editor's seed or a Query-cache value: those reads may be
+ * minutes old, and a tag taken from them would let a draft through against
+ * content nobody compared. Editors go through `guardedReplace`, which reads
+ * and compares first.
+ */
+export function validatorOf(value: object | null | undefined): string | null {
+  return value ? (validators.get(value) ?? null) : null;
+}
+
 /** `GET` one resource and keep the validator the gateway issued for it. */
 export async function readTagged<TResource>(
   scope: NamespaceScope,
   path: string,
+  options: { readonly silentErrors?: boolean } = {},
 ): Promise<TaggedRead<TResource>> {
   const response = await proxyApi.get(
     path,
-    scoped(scope, { headers: { Accept: "application/json" } }),
+    scoped(scope, {
+      headers: { Accept: "application/json" },
+      ...(options.silentErrors && { context: { [SILENT_ERRORS]: true } }),
+    }),
   );
-  return {
-    value: await response.json<TResource>(),
-    etag: strongEtag(response.headers.get("etag")),
-  };
+  const value = await response.json<TResource>();
+  const etag = strongEtag(response.headers.get("etag"));
+  if (etag !== null && typeof value === "object" && value !== null) {
+    validators.set(value, etag);
+  }
+  return { value, etag };
+}
+
+function conditionalOptions(ifMatch: string | null) {
+  return ifMatch === null
+    ? {}
+    : {
+        headers: { "If-Match": ifMatch },
+        context: { [HANDLED_STATUSES]: [412] },
+      };
 }
 
 /**
@@ -141,20 +200,17 @@ export function conditionalPut<TResource>(
   ifMatch: string | null,
 ): Promise<TResource> {
   return proxyApi
-    .put(
-      path,
-      scoped(
-        scope,
-        ifMatch === null
-          ? { json: body }
-          : {
-              json: body,
-              headers: { "If-Match": ifMatch },
-              context: { [HANDLED_STATUSES]: [412] },
-            },
-      ),
-    )
+    .put(path, scoped(scope, { json: body, ...conditionalOptions(ifMatch) }))
     .json<TResource>();
+}
+
+/** `DELETE`, conditional on `ifMatch` when there is one; see `conditionalPut`. */
+export async function conditionalDelete(
+  scope: NamespaceScope,
+  path: string,
+  ifMatch: string | null,
+): Promise<void> {
+  await proxyApi.delete(path, scoped(scope, conditionalOptions(ifMatch)));
 }
 
 /** Whether `error` is the gateway refusing a conditional write. */
@@ -245,7 +301,60 @@ export interface GuardedReplaceOptions<TResource, TPayload> {
 export async function guardedReplace<TResource, TPayload>(
   options: GuardedReplaceOptions<TResource, TPayload>,
 ): Promise<TResource> {
-  const { guard } = options;
+  return verifiedAttempts({
+    ...options,
+    operation: "save",
+    proposedSnapshot: (proposed: TPayload) => options.guard.select(proposed),
+  });
+}
+
+export interface GuardedRemoveOptions<TResource> {
+  readonly resource: string;
+  readonly id: string;
+  readonly namespace: string;
+  readonly guard: WriteGuard<TResource>;
+  readonly read: () => Promise<TaggedRead<TResource>>;
+  /** The `DELETE`, sent with `If-Match: ifMatch` when it is not `null`. */
+  readonly remove: (ifMatch: string | null) => Promise<void>;
+}
+
+/**
+ * Delete a resource only if it still holds what the editor was showing.
+ *
+ * The same verify-then-write as `guardedReplace`, with a `DELETE` in place of
+ * the `PUT`: an operator who confirms "delete this proxy" on a page opened
+ * before someone else repointed it is refused rather than deleting a
+ * configuration they never saw. A `412` caused only by fields the guard does
+ * not compare is re-verified and re-sent, exactly as for a save.
+ */
+export async function guardedRemove<TResource>(
+  options: GuardedRemoveOptions<TResource>,
+): Promise<void> {
+  return verifiedAttempts<TResource, null, void>({
+    ...options,
+    operation: "delete",
+    propose: () => null,
+    proposedSnapshot: () => options.guard.baseline,
+    write: (_payload, ifMatch) => options.remove(ifMatch),
+  });
+}
+
+interface VerifiedAttemptOptions<TResource, TPayload, TResult> {
+  readonly resource: string;
+  readonly id: string;
+  readonly namespace: string;
+  readonly operation: GuardedOperation;
+  readonly guard: WriteGuard<TResource | TPayload> | WriteGuard<TResource>;
+  readonly read: () => Promise<TaggedRead<TResource>>;
+  readonly propose: (current: TResource) => TPayload;
+  readonly proposedSnapshot: (proposed: TPayload) => BaselineSnapshot;
+  readonly write: (payload: TPayload, ifMatch: string | null) => Promise<TResult>;
+}
+
+async function verifiedAttempts<TResource, TPayload, TResult>(
+  options: VerifiedAttemptOptions<TResource, TPayload, TResult>,
+): Promise<TResult> {
+  const guard = options.guard as WriteGuard<TResource>;
   const expected = resourceFingerprint(guard.baseline);
 
   for (let attempt = 1; ; attempt += 1) {
@@ -255,11 +364,12 @@ export async function guardedReplace<TResource, TPayload>(
     const refuse = () =>
       new StaleResourceError({
         resource: options.resource,
+        operation: options.operation,
         id: options.id,
         namespace: options.namespace,
         original: guard.baseline,
         current,
-        proposed: guard.select(proposed),
+        proposed: options.proposedSnapshot(proposed),
       });
 
     if (resourceFingerprint(current) !== expected) throw refuse();

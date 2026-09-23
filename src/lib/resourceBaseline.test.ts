@@ -166,6 +166,26 @@ describe("redaction", () => {
     expect(formatBaselineValue("api_key", undefined)).toBe("—");
   });
 
+  it("redacts a plugin configuration's own secrets, including request headers", () => {
+    // A plugin's `config` is one top-level field holding the plugin's own
+    // settings; an upstream `Authorization` header is not a key-shaped name.
+    const rendered = formatBaselineValue("config", {
+      algorithm: "HS256",
+      secret: "jwt-signing-secret",
+      upstream_headers: { Authorization: "Bearer abc", Cookie: "session=1", "X-Trace": "on" },
+      cleared_token: null,
+    });
+    expect(rendered).not.toContain("jwt-signing-secret");
+    expect(rendered).not.toContain("Bearer abc");
+    expect(rendered).not.toContain("session=1");
+    expect(JSON.parse(rendered)).toEqual({
+      algorithm: "HS256",
+      secret: "[redacted]",
+      upstream_headers: { Authorization: "[redacted]", Cookie: "[redacted]", "X-Trace": "on" },
+      cleared_token: null,
+    });
+  });
+
   it("recursively hides credentials in nested objects and arrays", () => {
     const rendered = formatBaselineValue("service_discovery", {
       consul: {
