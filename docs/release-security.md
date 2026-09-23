@@ -25,9 +25,10 @@ completed every launch gate:
    SBOMs.
 
 Passing these gates qualifies Foundry with that one Ferrum Edge image, not with
-any other Edge build. Today `edge.image` is an interim development build; the
+any other Edge build. Today `edge.image` is the published Ferrum Edge v0.9.5
+release, which is not the pairing because it lacks ferrum-edge#5661; the
 published Edge release a Foundry release must pair with (`edge.release`), its
-requirements, the releases evaluated and rejected, what else is best-effort,
+requirements, the images evaluated and rejected, what else is best-effort,
 and what is not qualified are recorded in `docs/compatibility.md`. Moving the
 Edge pin is a re-qualification: change `edge.image` in
 `docs/compatibility.json`, and the pull request re-runs every gate above

@@ -26,7 +26,7 @@ job, and is executed on every pull request from
 
 The precondition is ferrum-edge#5661, merged on Ferrum Edge `main` on
 2026-09-23 and not yet in any published release or image. The Edge image CI
-pins (`edge.image` in `docs/compatibility.md`, an interim development build)
+pins (`edge.image` in `docs/compatibility.md`, the published v0.9.5 release)
 predates it and issues no tag, so Foundry sends it no `If-Match`. The
 contract fails if the two halves disagree: a gateway that tags reads must
 refuse a stale tag, and a gateway that issues no tag must not be enforcing a

@@ -7,12 +7,11 @@
 > `git log v0.1.0..vX.Y.Z`.
 >
 > **Blocked on the next Ferrum Edge release.** No published Edge release
-> qualifies yet. Ferrum Edge v0.9.5 was evaluated and fails the Deployment
-> Starter walkthrough and a critical journey
-> ([CI run 35901872338](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/35901872338)).
+> qualifies yet. CI runs the published Ferrum Edge v0.9.5 release, whose
+> proxy-association and namespace-identity semantics the walkthrough and
+> critical journeys now assert (#409), but v0.9.5 lacks ferrum-edge#5661.
 > The pairing needs the next published Edge release. It must include
-> ferrum-edge#5661, agree with Foundry's walkthrough and critical journeys on
-> proxy-association and namespace-identity semantics, and pass the full
+> ferrum-edge#5661, keep those semantics, and pass the full
 > qualification before this release is published: Quality Gate, Pinned Gateway
 > Contract (including capability parity), Deployment Starter, Critical
 > Journeys, and Container Gate. The requirements are in `docs/compatibility.md`
@@ -56,7 +55,9 @@ envelope, including tested scale, is in
   a dropped connection) is reported as an unknown outcome and never replayed;
   reads are retried only when safe.
 - A proxy-scoped plugin created through the UI is verified to be attached to
-  its proxy, and attached when the gateway left it unattached.
+  its proxy, and attached when the gateway left it unattached. Ferrum Edge
+  0.9.x attaches it on create; the proxy write that does so is never mistaken
+  for a concurrent edit.
 
 **Truthful reads**
 
@@ -105,10 +106,11 @@ The complete list is in
   change, but a writer that commits within that one round trip is not
   detected. Foundry already sends `If-Match`, so the paired release closes the
   gap without a Foundry change.
-- **Ferrum Edge v0.9.5 is not supported.** It was evaluated and fails the
-  starter walkthrough and a critical journey. It attaches a proxy-scoped plugin
-  configuration to its proxy on write (ferrum-edge#4611), and it accepts a
-  resource id already used in another namespace. It also lacks #5661.
+- **Ferrum Edge v0.9.5 is not the supported pairing.** CI runs it, and the
+  walkthrough and critical journeys pass against its semantics: it attaches a
+  proxy-scoped plugin configuration to its proxy on write (ferrum-edge#4611),
+  and it keys resources on `(namespace, id)`, so two namespaces can hold the
+  same id. It lacks #5661, so it cannot be the pairing.
 - **One qualified gateway configuration.** Modes other than `database`, and Edge
   releases other than the paired one, have not been run in CI.
 - **Scale.** Real-gateway testing covers tens of resources per namespace.

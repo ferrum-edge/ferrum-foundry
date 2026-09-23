@@ -71,11 +71,10 @@ node scripts/demo-traffic-client.mjs mixed
 ### Running the gateway locally
 
 Run the Ferrum Edge image CI pins, by digest, so local results match CI. It is
-an interim development build (`main-b96cfaa…`), not a published release: no
-published Edge release qualifies yet — v0.9.5 was evaluated and fails the
-starter walkthrough and a critical journey. `edge.image` in
-`docs/compatibility.json` is the single source: CI reads it
-(`node scripts/supported-pairing.mjs edge-image`), and
+the published Ferrum Edge v0.9.5 release, but not yet a supported pairing:
+v0.9.5 lacks ferrum-edge#5661 (`If-Match`), so the pairing needs the next Edge
+release. `edge.image` in `docs/compatibility.json` is the single source: CI
+reads it (`node scripts/supported-pairing.mjs edge-image`), and
 `scripts/supported-pairing.test.mjs` fails if the starter, this command, or any
 doc pins a different Edge image. The Edge `latest` tag is not refreshed for
 releases. Moving the pin is a re-qualification — see `docs/compatibility.md`.
@@ -92,7 +91,7 @@ docker run --rm -d --name ferrum-edge \
   -e FERRUM_ADMIN_BIND_ADDRESS=0.0.0.0 \
   -e FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true \
   -p 127.0.0.1:9000:9000 -p 127.0.0.1:8000:8000 \
-  ferrumedge/ferrum-edge@sha256:fb0f05b0392a272ba36a493584bced171655ce8ebd36b2ae0818bb5c3c25ef2d run -m database -v
+  ferrumedge/ferrum-edge@sha256:eca46c84bca92d6ef467979f8846537f7ab56c0cdc137befff465526a10fe10f run -m database -v
 ```
 
 The public plaintext admin bind above is a local-development exception and is
@@ -156,7 +155,7 @@ The app supports dark and light themes via CSS custom properties. Dark is the de
 - `server/` - Fastify BFF server
 - `scripts/` - Demo backend, seeding, traffic generation, `mock-admin-gateway.mjs`, and the starter's `starter-preflight.mjs` / `starter-journey.mjs`
 - `e2e/` - the critical-journey suite: a real browser against the production build, the starter's identity proxy, and the pinned gateway, finishing with data-plane requests. `retries: 0` on purpose; failures are *arranged* through `e2e/fault-proxy.mjs` (arm exactly N, assert they were consumed) rather than waited for, and `npm run e2e:gate-self-test` proves the gate fails when the journey is broken. See `e2e/README.md`
-- `docs/compatibility.md` / `docs/compatibility.json` - the Foundry–Edge pairing: the one Edge image CI qualifies (`edge.image`, an interim development build), the published Edge release the next Foundry release must pair with (`edge.release`, a release-step placeholder, with its requirements: ferrum-edge#5661 plus the starter and critical journeys passing), Edge releases evaluated and rejected (v0.9.5), the tested envelope, and what is best-effort or not qualified. `docs/release-notes/UNRELEASED.md` drafts the next release's notes; the release workflow requires `docs/release-notes/vX.Y.Z.md`, a matching `foundry.version`, and `supported-pairing.mjs release-ready`
+- `docs/compatibility.md` / `docs/compatibility.json` - the Foundry–Edge pairing: the one Edge image CI qualifies (`edge.image`, the published v0.9.5 release), the published Edge release the next Foundry release must pair with (`edge.release`, a release-step placeholder, with its requirements: ferrum-edge#5661 plus the starter and critical journeys passing), Edge images evaluated and rejected, the pin history, the tested envelope, and what is best-effort or not qualified. `docs/release-notes/UNRELEASED.md` drafts the next release's notes; the release workflow requires `docs/release-notes/vX.Y.Z.md`, a matching `foundry.version`, and `supported-pairing.mjs release-ready`
 - `deploy/starter/` - the runnable deployment starter: one Compose stack with a `production` and a disposable `demo` profile. `nginx/identity/policy.conf` (group → role/namespace) and `nginx/identity/inject.conf` (the four identity headers) are included by **both** proxy configurations, so the demo exercises the production authorization path; a test fails if either config grows its own copy. See `docs/getting-started.md`
 
 ## Type conventions

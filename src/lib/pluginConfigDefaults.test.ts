@@ -10,7 +10,7 @@ describe("canonical plugin defaults", () => {
     ["ai_prompt_shield", "patterns"],
     ["ai_response_guard", "pii_patterns"],
   ])("%s uses the pinned gateway's US phone pattern token", (name, field) => {
-    // Edge b96cfaad: src/plugins/utils/ai_pii.rs::builtin_pii_pattern.
+    // Edge v0.9.5: src/plugins/utils/ai_pii.rs::builtin_pii_pattern.
     // `phone` is rejected by both constructors, rather than ignored.
     expect(getPluginConfigDefault(name)[field]).toEqual([
       "email", "phone_us", "credit_card", "ssn",
@@ -50,8 +50,8 @@ describe("canonical plugin defaults", () => {
   });
 
   it("uses native MeshPolicy documents instead of a Kubernetes CRD envelope", () => {
-    // Edge MeshPolicy (pinned b96cfaad and current main): name, namespace, scope, rules.
-    // A CRD envelope fails current main first on unknown field `apiVersion`.
+    // Edge MeshPolicy (pinned v0.9.5 and current main): name, namespace, scope, rules.
+    // A CRD envelope fails first on unknown field `apiVersion`.
     expect(getPluginConfigDefault("mesh_authz")).toEqual({
       namespace: "default",
       labels: { app: "payments" },

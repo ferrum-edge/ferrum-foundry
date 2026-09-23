@@ -17,10 +17,10 @@ plane, see [`docs/getting-started.md`](../../docs/getting-started.md).
 **Supported pairing.** This stack is qualified with exactly one Ferrum Edge
 image, recorded by digest in
 [`docs/compatibility.md`](../../docs/compatibility.md) together with what is
-tested, what is best-effort, and what is not qualified. Today that image is an
-interim Edge development build, not a published release. No published Edge
-release qualifies yet (v0.9.5 was evaluated and fails), so the record names the
-release a Foundry release will pair with as a release step. The `demo` profile
+tested, what is best-effort, and what is not qualified. Today that image is the
+published Ferrum Edge v0.9.5 release. It is not yet a supported pairing (it
+lacks ferrum-edge#5661), so the record names the release a Foundry release will
+pair with as a release step. The `demo` profile
 runs the pinned image. The Foundry default, `ferrumedge/ferrum-foundry:main`,
 is the development channel; pin the released Foundry image named in the same
 record.

@@ -64,24 +64,23 @@ unexpected acceptance, unknown-key diagnostics, status changes, and cleanup,
 including simultaneous admission/cleanup failures and rejecting Prometheus 409s.
 
 The job runs the Ferrum Edge image pinned as `edge.image` in
-[the compatibility record](compatibility.md), digest
-`sha256:fb0f05b0392a272ba36a493584bced171655ce8ebd36b2ae0818bb5c3c25ef2d`.
-Issue #291's reproduction used a different digest (`sha256:f2c3eb7696677fed4a90551c7c8adfccae547c0e540452011f98a53b34233c2d`).
-The pinned digest was published from Edge revision
-`b96cfaadd41a676d39a409d47b48e0b0588fa86e`: the
-[Docker Manifest job](https://github.com/ferrum-edge/ferrum-edge/actions/runs/33094251786/job/98636370391)
-records that digest for the corresponding `main-b96cfa...` tag. Native `mesh_authz`
-`MeshPolicy` input (`name`, `namespace`, `scope`, `rules`, plus required per-rule
-`action`) is the same document on that pinned revision and on current Edge `main`;
-mesh mode is not required for admission. The previous Kubernetes CRD envelope is
-not that document: the pinned image ignored unknown members and then reported
-`missing field name`, while current `main` rejects `apiVersion` first under
-`deny_unknown_fields`. At that revision, both guards call the shared
-[built-in PII pattern table](https://github.com/ferrum-edge/ferrum-edge/blob/b96cfaadd41a676d39a409d47b48e0b0588fa86e/src/plugins/utils/ai_pii.rs#L45),
+[the compatibility record](compatibility.md): the published v0.9.5 release,
+digest `sha256:eca46c84bca92d6ef467979f8846537f7ab56c0cdc137befff465526a10fe10f`,
+built from Edge revision `20e76030a05dc49c3804e969516c94ab101110b9` (the `v0.9.5`
+tag). Issue #291's reproduction used a different digest (`sha256:f2c3eb7696677fed4a90551c7c8adfccae547c0e540452011f98a53b34233c2d`),
+and the interim pin before #409 was development build `b96cfaadd41a676d39a409d47b48e0b0588fa86e`.
+Native `mesh_authz` `MeshPolicy` input (`name`, `namespace`, `scope`, `rules`,
+plus required per-rule `action`) is the same document on v0.9.5 and on current
+Edge `main`; mesh mode is not required for admission. The previous Kubernetes
+CRD envelope is not that document: v0.9.5 and current `main` reject `apiVersion`
+first under `deny_unknown_fields` (the pre-#409 development build ignored
+unknown members and then reported `missing field name`). At v0.9.5, both guards
+call the shared
+[built-in PII pattern table](https://github.com/ferrum-edge/ferrum-edge/blob/20e76030a05dc49c3804e969516c94ab101110b9/src/plugins/utils/ai_pii.rs#L46),
 which defines `phone_us`. Kafka's
-[egress screening](https://github.com/ferrum-edge/ferrum-edge/blob/b96cfaadd41a676d39a409d47b48e0b0588fa86e/src/plugins/kafka_logging.rs#L339)
+[egress screening](https://github.com/ferrum-edge/ferrum-edge/blob/20e76030a05dc49c3804e969516c94ab101110b9/src/plugins/kafka_logging.rs#L349)
 returns the restrictive-policy diagnostic through the admin
-[field-validation boundary](https://github.com/ferrum-edge/ferrum-edge/blob/b96cfaadd41a676d39a409d47b48e0b0588fa86e/src/admin/crud.rs#L3827).
+[field-validation boundary](https://github.com/ferrum-edge/ferrum-edge/blob/20e76030a05dc49c3804e969516c94ab101110b9/src/admin/crud.rs#L3926).
 The [initial Foundry contract run](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/34172111334/job/101894263227)
 confirmed the complete Kafka diagnostic and exposed the invalid phone tokens and
 seeded Prometheus conflict. Hosted results establish compatibility with the pinned

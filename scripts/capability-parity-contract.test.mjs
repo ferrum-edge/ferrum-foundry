@@ -13,8 +13,8 @@ import {
 const RANK = { viewer: 0, operator: 1, admin: 2 };
 
 /**
- * An independent transcription of the pinned ferrum-edge build's (b96cfaa;
- * identical in v0.9.5) route roles
+ * An independent transcription of the pinned ferrum-edge release's (v0.9.5;
+ * identical in the earlier b96cfaa build) route roles
  * (`require_admin_role` in each `src/admin/mod.rs` arm) and the admission
  * function each handler calls first — not derived from the probe table or the
  * capability model it is checking.
