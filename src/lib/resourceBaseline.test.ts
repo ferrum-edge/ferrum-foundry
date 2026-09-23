@@ -166,6 +166,36 @@ describe("redaction", () => {
     expect(formatBaselineValue("api_key", undefined)).toBe("—");
   });
 
+  it("recursively hides credentials in nested objects and arrays", () => {
+    const rendered = formatBaselineValue("service_discovery", {
+      consul: {
+        address: "http://consul.internal:8500",
+        token: "CONSUL_SECRET",
+        nested: [{ api_key: "NESTED_SECRET" }],
+      },
+    });
+
+    expect(JSON.parse(rendered)).toEqual({
+      consul: {
+        address: "http://consul.internal:8500",
+        token: "[redacted]",
+        nested: [{ api_key: "[redacted]" }],
+      },
+    });
+    expect(rendered).not.toContain("CONSUL_SECRET");
+    expect(rendered).not.toContain("NESTED_SECRET");
+  });
+
+  it("preserves nested material paths while redacting nearby material", () => {
+    expect(JSON.parse(formatBaselineValue("tls", {
+      private_key_path: "/etc/ferrum/client.key",
+      private_key: "PRIVATE_KEY_BYTES",
+    }))).toEqual({
+      private_key_path: "/etc/ferrum/client.key",
+      private_key: "[redacted]",
+    });
+  });
+
   it("renders ordinary values readably", () => {
     expect(formatBaselineValue("backend_host", "a.internal")).toBe("a.internal");
     expect(formatBaselineValue("hosts", ["a", "b"])).toBe('["a","b"]');
