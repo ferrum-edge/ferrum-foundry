@@ -241,6 +241,11 @@ export function isRedactedField(field: string): boolean {
   return REDACTED_FIELD_PATTERN.test(field);
 }
 
+function redactFieldValue(field: string, value: unknown): unknown {
+  if (!isRedactedField(field) || value === null || value === "") return value;
+  return REDACTED_PLACEHOLDER;
+}
+
 /**
  * Render one side of a field comparison for display. Redacted fields collapse
  * to a marker that still distinguishes "set", "cleared", and "absent", because
@@ -256,5 +261,7 @@ export function formatBaselineValue(field: string, value: unknown): string {
   }
   if (value === null) return "null";
   if (typeof value === "string") return value.length === 0 ? '""' : value;
-  return JSON.stringify(value);
+  return JSON.stringify(value, (nestedField, nestedValue) =>
+    nestedField === "" ? nestedValue : redactFieldValue(nestedField, nestedValue),
+  );
 }
