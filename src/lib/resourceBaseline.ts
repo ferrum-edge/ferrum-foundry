@@ -16,16 +16,15 @@
  *
  * ## What a baseline is not
  *
- * It is **not** a resource revision issued by the gateway, and comparing it is
- * **not** a compare-and-swap. Ferrum Edge's admin API has no conditional-write
- * precondition on resource `PUT` (no `If-Match`, no `412`; see
- * `docs/concurrent-edits.md` for the surveyed revision of the spec), so a
- * writer that commits between Foundry's verification read and its `PUT` is
- * still overwritten. The comparison narrows that window from "the whole time
- * an editor is open" — minutes to hours — to one gateway round trip, and it
- * catches an external writer as reliably as another Foundry tab because it
- * compares the gateway's own content rather than local bookkeeping. Closing
- * the remainder requires an Edge precondition contract.
+ * It is **not** a resource revision issued by the gateway. Edge's `ETag`
+ * covers the whole stored resource, including fields a write does not replace
+ * (plugin associations, or every upstream setting during a targets save), so
+ * an editor cannot hold one from the moment it opens without refusing saves
+ * that race nothing. The baseline answers "does the gateway still hold what
+ * this draft was edited against, on the fields it replaces?"; the tag of the
+ * read that answered it, sent as `If-Match`, then makes the write atomic with
+ * that answer. On a gateway that issues no tag the comparison alone narrows
+ * the race to one round trip. See `docs/concurrent-edits.md`.
  */
 
 /** A resource reduced to the fields a full-replacement write overwrites. */
