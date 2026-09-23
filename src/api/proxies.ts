@@ -10,7 +10,12 @@ import type {
   ProxyCreate,
 } from "./types";
 import { collectAllPages } from "./pagination";
-import { guardedReplace, type WriteGuard } from "./conditionalWrite";
+import {
+  conditionalPut,
+  guardedReplace,
+  readTagged,
+  type WriteGuard,
+} from "./conditionalWrite";
 import {
   baselineSnapshot,
   PROXY_BASELINE_OMIT,
@@ -59,7 +64,7 @@ export async function listAll(
 }
 
 export async function get(scope: NamespaceScope, id: string): Promise<Proxy> {
-  return proxyApi.get(`proxies/${id}`, scoped(scope)).json<Proxy>();
+  return (await readTagged<Proxy>(scope, `proxies/${id}`)).value;
 }
 
 /**
@@ -189,9 +194,11 @@ export function proxyWriteGuard(seed: Proxy): WriteGuard<Proxy | ProxyCreate> {
  * `guard` carries the content the editor opened against. Pass `null` only for
  * a write that cannot lose a concurrent change — there is no default, because
  * an omitted guard is exactly the silent overwrite this argument exists to
- * prevent. A guarded call re-reads the proxy and throws `StaleResourceError`
- * without sending anything when another writer got there first; see
- * `docs/concurrent-edits.md` for the residual non-atomic window.
+ * prevent. A guarded call re-reads the proxy, throws `StaleResourceError`
+ * without writing when another writer got there first, and otherwise sends the
+ * `PUT` with `If-Match` set to the tag of the read it just verified, so the
+ * gateway refuses it if anything commits in between. See
+ * `docs/concurrent-edits.md`.
  */
 export async function update(
   scope: NamespaceScope,
@@ -200,19 +207,24 @@ export async function update(
   guard: WriteGuard<Proxy | ProxyCreate> | null,
 ): Promise<Proxy> {
   const payload = withProxyId(data, id);
-  const put = (body: ProxyCreate) =>
-    proxyApi.put(`proxies/${id}`, scoped(scope, { json: body })).json<Proxy>();
+  const path = `proxies/${id}`;
 
-  if (!guard) return put(payload);
+  if (!guard) return conditionalPut<Proxy>(scope, path, payload, null);
+
+  // The guard does not compare `plugins`, so a guarded body must not carry
+  // them: after a `412` caused by a membership change the guard re-sends, and
+  // a replayed association list would detach what that change attached. An
+  // omitted key tells Edge to preserve the live associations.
+  delete payload.plugins;
 
   return guardedReplace<Proxy, ProxyCreate>({
     resource: "proxy",
     id,
     namespace: scope.namespace,
     guard,
-    proposed: payload,
-    read: () => get(scope, id),
-    write: put,
+    read: () => readTagged<Proxy>(scope, path),
+    propose: () => payload,
+    write: (body, ifMatch) => conditionalPut<Proxy>(scope, path, body, ifMatch),
   });
 }
 
