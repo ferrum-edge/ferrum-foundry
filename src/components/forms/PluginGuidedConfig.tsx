@@ -196,7 +196,13 @@ function FieldControl({
           type="checkbox"
           disabled={readOnly}
           checked={state.checked === true}
-          onChange={(event) => onUpdate(path, { ...state, checked: event.target.checked })}
+          onChange={(event) =>
+            onUpdate(path, {
+              ...state,
+              text: String(event.target.checked),
+              checked: event.target.checked,
+            })
+          }
           className="w-4 h-4 rounded border-border bg-bg-input text-orange accent-orange cursor-pointer disabled:opacity-60"
         />
         <span className="text-sm text-text-secondary">
