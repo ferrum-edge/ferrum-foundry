@@ -64,8 +64,10 @@ interface HarnessOptions {
   failPluginGetCall?: number;
   /**
    * Model a gateway that performs the documented proxy-scoped side effect on
-   * create (appending the association in the same transaction). The pinned
-   * contract image does not, which is the case the default models.
+   * create (appending the association in the same transaction and advancing
+   * the proxy's `updated_at`), as every Edge 0.9.x release does
+   * (ferrum-edge#4611). The default models a gateway that does not, which the
+   * plan must still converge on.
    */
   gatewayAttachesOnCreate?: boolean;
 }
@@ -675,7 +677,9 @@ describe("proxy-scoped attachment", () => {
   });
 
   it("writes nothing extra when the gateway already attached it", async () => {
-    const stack = harness([makeProxy("checkout")], [], { gatewayAttachesOnCreate: true });
+    const stack = harness([makeProxy("checkout", ["cors-1"])], [], {
+      gatewayAttachesOnCreate: true,
+    });
 
     await createPluginWithMembership(proxyScoped("checkout"), [], stack.deps);
 
@@ -684,6 +688,15 @@ describe("proxy-scoped attachment", () => {
       stack.counts().updateProxyCalls,
       "a compliant gateway must not be fought with a second write",
     ).toBe(0);
+    // The attach moved the proxy after the plan's preflight listing. That is
+    // the gateway's own write, not a concurrent change: nothing is refused,
+    // rolled back, or deleted, and the proxy's other associations stand.
+    expect(stack.proxies.get("checkout")?.updated_at).not.toBe("v0");
+    expect(stack.proxies.get("checkout")?.plugins).toEqual([
+      { plugin_config_id: "cors-1" },
+      { plugin_config_id: "keyauth-1" },
+    ]);
+    expect(stack.counts().deleteCalls).toBe(0);
   });
 
   it("refuses to report success when the attachment cannot be made", async () => {
@@ -721,6 +734,9 @@ describe("proxy-scoped attachment", () => {
     await updatePluginWithMembership("keyauth-1", proxyScoped("payments"), [], stack.deps, null);
 
     expect(memberships(stack.proxies, "keyauth-1")).toEqual(["payments"]);
+    // The plugin PUT re-homed it and advanced both proxies; the plan only
+    // reads them back, so neither bump is taken for a concurrent change.
+    expect(stack.counts().updateProxyCalls).toBe(0);
   });
 
   it("detaches when the plugin stops being proxy-scoped", async () => {

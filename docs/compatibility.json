@@ -11,13 +11,13 @@
     "platforms": ["linux/amd64", "linux/arm64"]
   },
   "edge": {
-    "image": "ferrumedge/ferrum-edge@sha256:fb0f05b0392a272ba36a493584bced171655ce8ebd36b2ae0818bb5c3c25ef2d",
-    "build": "development build main-b96cfaadd41a676d39a409d47b48e0b0588fa86e (2026-08-27) from Ferrum Edge main, never a published release. It is the interim CI pin, not a supported pairing; edge.release names the Edge release Foundry will be paired with",
-    "source_commit": "b96cfaadd41a676d39a409d47b48e0b0588fa86e",
-    "source_evidence": "https://github.com/ferrum-edge/ferrum-edge/actions/runs/33094251786/job/98636370391",
+    "image": "ferrumedge/ferrum-edge@sha256:eca46c84bca92d6ef467979f8846537f7ab56c0cdc137befff465526a10fe10f",
+    "build": "published release v0.9.5 (https://github.com/ferrum-edge/ferrum-edge/releases/tag/v0.9.5). It is the CI pin, not a supported pairing: it does not include ferrum-edge#5661, so edge.release names the next Edge release Foundry will be paired with",
+    "source_commit": "20e76030a05dc49c3804e969516c94ab101110b9",
+    "source_evidence": "https://github.com/ferrum-edge/ferrum-edge/actions/runs/34795503690",
     "platform_manifests": {
-      "linux/amd64": "sha256:8dc20df77ddf636052bf3191d1584e50ef082db8a5736f495fca9fa078d69c29",
-      "linux/arm64": "sha256:15bce0a914efca89dbce076dd1617f4a9571717e3fb8493bc38dd56b4d73df20"
+      "linux/amd64": "sha256:3bb2b253e0cc338108320a39de86da216c6e644aef39fd83a3e22ca0ad6173a8",
+      "linux/arm64": "sha256:d28b77e39e17e2480b3a3f39d55236f8fddbcc8cdf3dbbf314dbba6aa4ad3a1d"
     },
     "release": {
       "version": "RELEASE-STEP: the next published Ferrum Edge vX.Y.Z after v0.9.5 that meets every requirement below",
@@ -29,25 +29,11 @@
       },
       "requirements": [
         "It includes ferrum-edge#5661: a strong ETag on resource reads and If-Match on PUT/DELETE of proxies, upstreams, consumers, and plugin configs.",
-        "Its proxy-association and namespace-identity semantics agree with Foundry's walkthrough and critical journeys. Every Edge 0.9.x release, and Edge main, attaches the proxy association when a proxy-scoped plugin config is written (ferrum-edge#4611) and keys proxies, upstreams, plugin configs, and API specs on (namespace, id) (ferrum-edge 5db1d77a8); scripts/starter-journey.mjs and e2e/journeys/namespace-isolation.spec.ts still assert the behaviour of edge.image, which predates both. Whichever side moves, the gates must pass unchanged in intent against the release.",
+        "Its proxy-association and namespace-identity semantics are those Foundry's walkthrough and critical journeys assert: it attaches the proxy association when a proxy-scoped plugin config is written (ferrum-edge#4611) and keys proxies, upstreams, plugin configs, and API specs on (namespace, id) (ferrum-edge 5db1d77a8), as v0.9.5 (edge.image) does. scripts/starter-journey.mjs and e2e/journeys/namespace-isolation.spec.ts were aligned with those semantics in #409. A release that changes either must pass the gates unchanged in intent.",
         "The full qualification is re-run with edge.image moved to that release, and every job is green on the pull request that moves it, before any Foundry release is published: Quality Gate, Pinned Gateway Contract (including capability parity, writable and read-only), Deployment Starter, Critical Journeys, and Container Gate."
       ]
     },
-    "rejected_images": [
-      {
-        "image": "ferrumedge/ferrum-edge@sha256:eca46c84bca92d6ef467979f8846537f7ab56c0cdc137befff465526a10fe10f",
-        "version": "v0.9.5",
-        "release": "https://github.com/ferrum-edge/ferrum-edge/releases/tag/v0.9.5",
-        "source_commit": "20e76030a05dc49c3804e969516c94ab101110b9",
-        "platform_manifests": {
-          "linux/amd64": "sha256:3bb2b253e0cc338108320a39de86da216c6e644aef39fd83a3e22ca0ad6173a8",
-          "linux/arm64": "sha256:d28b77e39e17e2480b3a3f39d55236f8fddbcc8cdf3dbbf314dbba6aa4ad3a1d"
-        },
-        "evaluated_by": "#385",
-        "evidence": "https://github.com/ferrum-edge/ferrum-foundry/actions/runs/35901872338",
-        "finding": "Not compatible with current Foundry. Deployment Starter failed the first-success walkthrough: a proxy-scoped key_auth config took effect before the walkthrough attached it (401, expected 200), because v0.9.5 attaches the association on write (ferrum-edge#4611). Critical Journeys failed 'a resource id cannot be reused in another namespace' (201, expected 409), because v0.9.5 keys resources on (namespace, id). It does not include ferrum-edge#5661. Quality Gate, Pinned Gateway Contract (including capability parity), and Container Gate passed."
-      }
-    ]
+    "rejected_images": []
   },
   "tested": {
     "gateway": [
@@ -85,7 +71,7 @@
   ],
   "not_qualified": [
     "file, dp, mesh, and node_agent gateway modes (modelled read-only in the UI, not run in CI)",
-    "any published Ferrum Edge release until edge.release is filled and qualified; v0.9.5 was evaluated and fails (edge.rejected_images)",
+    "any published Ferrum Edge release as a supported pairing until edge.release is filled and qualified; v0.9.5 is edge.image but lacks ferrum-edge#5661",
     "any Ferrum Edge image other than edge.image",
     "atomic concurrent-edit protection (needs ferrum-edge#5661 in a published release)",
     "browser latency and more than one concurrent operator at scale"

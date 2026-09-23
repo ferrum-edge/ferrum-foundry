@@ -18,6 +18,23 @@ import {
 
 const record = readSupportedPairing();
 
+/** A rejected entry for fixtures; the live record currently rejects nothing. */
+const REJECTED_FIXTURE = {
+  image: `ferrumedge/ferrum-edge@sha256:${"f".repeat(64)}`,
+  version: "v0.0.1",
+  evidence: "https://github.com/ferrum-edge/ferrum-foundry/actions/runs/1",
+  finding: "fixture",
+};
+
+function withRejected(base) {
+  const copy = structuredClone(base);
+  copy.edge.rejected_images = [
+    ...(copy.edge.rejected_images ?? []),
+    structuredClone(REJECTED_FIXTURE),
+  ];
+  return copy;
+}
+
 function repoFile(path) {
   return readFileSync(join(REPO_ROOT, path), "utf8");
 }
@@ -45,16 +62,29 @@ describe("the supported pairing record", () => {
     }
   });
 
-  it("records v0.9.5 as evaluated and rejected, with the CI run that showed it", () => {
-    const rejected = record.edge.rejected_images.find((entry) => entry.version === "v0.9.5");
-    assert.ok(rejected, "v0.9.5 must stay recorded as rejected");
+  it("runs CI against the published v0.9.5 release, which is not the pairing", () => {
     assert.equal(
-      rejected.image,
+      record.edge.image,
       "ferrumedge/ferrum-edge@sha256:eca46c84bca92d6ef467979f8846537f7ab56c0cdc137befff465526a10fe10f",
     );
-    assert.match(rejected.evidence, /^https:\/\/github\.com\/ferrum-edge\/ferrum-foundry\/actions\/runs\/\d+$/);
-    assert.match(rejected.finding, /Deployment Starter/);
+    assert.equal(record.edge.source_commit, "20e76030a05dc49c3804e969516c94ab101110b9");
+    assert.deepEqual(record.edge.platform_manifests, {
+      "linux/amd64": "sha256:3bb2b253e0cc338108320a39de86da216c6e644aef39fd83a3e22ca0ad6173a8",
+      "linux/arm64": "sha256:d28b77e39e17e2480b3a3f39d55236f8fddbcc8cdf3dbbf314dbba6aa4ad3a1d",
+    });
+    assert.match(record.edge.build, /v0\.9\.5/);
+    // v0.9.5 lacks ferrum-edge#5661, so it can never be the recorded pairing.
     assert.notEqual(record.edge.release.version, "v0.9.5");
+    assert.ok(!record.edge.rejected_images.some((entry) => entry.image === record.edge.image));
+  });
+
+  it("records the Edge 0.9.x semantics the gates now assert", () => {
+    const semantics = record.edge.release.requirements.find((requirement) =>
+      requirement.includes("ferrum-edge#4611"),
+    );
+    assert.ok(semantics, "the association and namespace-identity requirement must stay recorded");
+    assert.match(semantics, /5db1d77a8/);
+    assert.match(semantics, /#409/);
   });
 
   it("names its previous release and never claims a Foundry artifact it cannot know yet", () => {
@@ -87,13 +117,17 @@ describe("validatePairing", () => {
     delete oneArch.edge.platform_manifests["linux/arm64"];
     assert.ok(validatePairing(oneArch).some((error) => error.includes("linux/arm64")));
 
-    const repinned = structuredClone(valid);
-    repinned.edge.image = repinned.edge.rejected_images[0].image;
+    const repinned = withRejected(valid);
+    repinned.edge.image = REJECTED_FIXTURE.image;
     assert.ok(validatePairing(repinned).includes("edge.image is listed as rejected"));
 
-    const repaired = structuredClone(valid);
-    repaired.edge.release.version = repaired.edge.rejected_images[0].version;
+    const repaired = withRejected(valid);
+    repaired.edge.release.version = REJECTED_FIXTURE.version;
     assert.ok(validatePairing(repaired).some((error) => error.includes("evaluated and rejected")));
+
+    const unexplained = structuredClone(valid);
+    unexplained.edge.rejected_images = [{ image: REJECTED_FIXTURE.image }];
+    assert.ok(validatePairing(unexplained).some((error) => error.includes("needs an image digest")));
 
     const guessed = structuredClone(valid);
     guessed.edge.release.image = "ferrumedge/ferrum-edge:latest";
@@ -200,7 +234,7 @@ describe("repository alignment", () => {
     const notes = repoFile(path);
     const release = record.edge.release;
     if (isPlaceholder(release.image)) {
-      // The notes must not present the interim development build as the pairing.
+      // The notes must not present the CI pin, which is not the pairing, as the pairing.
       assert.ok(!notes.includes(record.edge.image), "the draft must not pair with edge.image");
       assert.match(notes, /\| Ferrum Edge \| \*release step\*/);
     } else {
@@ -238,7 +272,8 @@ describe("findPairingDrift", () => {
   }
 
   it("reports tags, bare names, other digests, and rejected digests in any form", () => {
-    const rejected = record.edge.rejected_images[0].image;
+    const rejecting = withRejected(record);
+    const rejected = REJECTED_FIXTURE.image;
     const root = fixture({
       "README.md": `docker run ${record.edge.image}\n`,
       "docs/a.md": "docker run ferrumedge/ferrum-edge:latest\ndocker pull ferrumedge/ferrum-edge\n",
@@ -250,7 +285,7 @@ describe("findPairingDrift", () => {
       "node_modules/pkg/README.md": "ferrumedge/ferrum-edge:latest\n",
     });
     try {
-      const found = findPairingDrift(record, root)
+      const found = findPairingDrift(rejecting, root)
         .map(({ file, line, found: what }) => `${file}:${line} ${what}`)
         .sort();
       assert.deepEqual(found, [

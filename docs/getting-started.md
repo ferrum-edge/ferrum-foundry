@@ -135,8 +135,6 @@ curl -s http://127.0.0.1:8000/starter/hello
 
 ## 6. Protect it with key authentication
 
-This is two steps, and the second one is easy to miss.
-
 Create the plugin configuration:
 
 ```bash
@@ -153,21 +151,38 @@ curl -s -b "$COOKIES" -X POST "$FOUNDRY/api/proxy/plugins/config?apply=sync" \
       }'
 ```
 
-Then **attach it to the proxy**. The association that makes a plugin run lives
-on the proxy's `plugins` list. The admin API contract says the gateway appends
-it when a proxy-scoped plugin is written; the gateway image this starter pins
-does not, so the plugin exists, names the proxy, is enabled — and does not
-run. The route stays open while everything looks configured.
+A plugin runs only when the proxy's own `plugins` list names it; `proxy_id`
+on the plugin records intent, not attachment. Ferrum Edge 0.9.x, in
+`database` mode, writes that association for you: a `201` for a proxy-scoped
+plugin configuration means the gateway also appended `{"plugin_config_id": "starter-keyauth"}` to the proxy,
+in the same transaction (ferrum-edge#4611). The route is protected from this
+moment — no consumer exists yet, so an anonymous request is already refused:
 
-Attaching it yourself is safe either way: on a gateway that already attached
-it, the call below changes nothing. Foundry's plugin editor verifies the
-association after every proxy-scoped plugin write and writes it when it is
-missing (`reconcileProxyScopedAssociation` in `src/lib/pluginMembership.ts`).
-Creating the config through the raw API as this walkthrough does skips that
-check, so attaching it remains a second call as shown.
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/starter/hello
+# 401
+```
 
-Proxy `PUT` is a **full replacement**, so read the proxy, add the
-association, and send the whole object back:
+Check the association where the gateway looks for it, on the proxy:
+
+```bash
+curl -s -b "$COOKIES" -H "$IDENTITY" -H "$NAMESPACE" \
+  "$FOUNDRY/api/proxy/proxies/starter-route" \
+  | python3 -c 'import json, sys; print(json.dumps(json.load(sys.stdin)["plugins"]))'
+# [{"plugin_config_id": "starter-keyauth"}]
+```
+
+If the list does not name the plugin — a gateway older than 0.9, for example —
+the plugin exists, names the proxy, is enabled, and does not run: the route
+stays open while everything looks configured. Attach it yourself. On a gateway
+that already attached it, the call below changes nothing; the CI walkthrough
+sends it anyway and checks that. Foundry's plugin editor does the same check
+after every proxy-scoped plugin write, and writes the association only when it
+is missing (`reconcileProxyScopedAssociation` in `src/lib/pluginMembership.ts`).
+
+Proxy `PUT` is a **full replacement**, so read the proxy, add the association
+if it is missing, and send the whole object back. Keep the associations the
+proxy already has — a `plugins` list you send replaces the stored one:
 
 ```bash
 CURRENT=$(curl -s -b "$COOKIES" -H "$IDENTITY" -H "$NAMESPACE" \
@@ -178,7 +193,10 @@ import json, sys
 proxy = json.loads(sys.argv[1])
 for field in ("created_at", "updated_at", "namespace", "api_spec_id"):
     proxy.pop(field, None)
-proxy["plugins"] = [{"plugin_config_id": "starter-keyauth"}]
+plugins = proxy.get("plugins") or []
+if not any(entry["plugin_config_id"] == "starter-keyauth" for entry in plugins):
+    plugins.append({"plugin_config_id": "starter-keyauth"})
+proxy["plugins"] = plugins
 print(json.dumps(proxy))
 PY
 )
@@ -270,7 +288,7 @@ reason. It is not part of setup.
 | `403 Namespace access denied` | `X-Ferrum-Namespaces` does not grant the namespace in `X-Ferrum-Namespace`, or the gateway does not serve it |
 | Every admin call is `401` at the gateway | `FERRUM_JWT_SECRET` must equal the gateway's `FERRUM_ADMIN_JWT_SECRET`, and `FERRUM_JWT_AUDIENCE` its `FERRUM_ADMIN_JWT_AUDIENCE`. The preflight reports this directly |
 | A write returns `403` with a CSRF message | Start a session first and send its `X-CSRF-Token` with the session cookie |
-| The route answers but ignores the plugin | The association in step 6 was not attached, or the plugin is `enabled: false` |
+| The route answers but ignores the plugin | The proxy's `plugins` list does not name the plugin (step 6 shows how to check and attach it), or the plugin is `enabled: false` |
 | A save returned `503` with `applied: false` | The row is durable but the reload did not apply. The change is not live; check the gateway's logs before changing anything else |
 
 Run the preflight again after any change. It is non-destructive and safe to

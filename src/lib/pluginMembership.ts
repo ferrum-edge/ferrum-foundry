@@ -429,17 +429,24 @@ async function updatePluginIfUnchanged(
  * `openapi.yaml` is explicit that a proxy-scoped plugin "applies only when the
  * target proxy lists it in `plugins` — `proxy_id` alone never attaches it",
  * and that the gateway appends the association in the same transaction as the
- * write, idempotently. A gateway that does that leaves nothing for this to do:
- * the read below already finds the association and no second write happens.
+ * write, idempotently. Every Edge 0.9.x release does that (ferrum-edge#4611),
+ * which leaves nothing for this to do: the read below already finds the
+ * association and no second write happens.
  *
- * A gateway that does **not** — the pinned contract image is one — answers
- * `201` for a plugin that never runs. The visible consequence is an operator
- * attaching key authentication to a route through the UI and being told it
- * worked while the route keeps serving anonymous traffic, which the
- * critical-journey suite catches at the data plane (#380). So the association
- * is verified after every proxy-scoped write and reconciled when it is
- * missing, and a reconciliation that fails is reported rather than swallowed:
- * Foundry never reports a plugin as attached without having read it back.
+ * That transaction also advances the proxy's `updated_at`. The plan does not
+ * trip over it: this function never compares the proxy with anything read
+ * before the plugin write. Its read happens after it, and the one write it may
+ * send is conditional on that same read (`basis`), so the gateway's own bump
+ * is simply part of the state the plan starts from.
+ *
+ * A gateway that does **not** attach answers `201` for a plugin that never
+ * runs. The visible consequence is an operator attaching key authentication
+ * to a route through the UI and being told it worked while the route keeps
+ * serving anonymous traffic, which the critical-journey suite catches at the
+ * data plane (#380). So the association is verified after every proxy-scoped
+ * write and reconciled when it is missing, and a reconciliation that fails is
+ * reported rather than swallowed: Foundry never reports a plugin as attached
+ * without having read it back.
  */
 async function reconcileProxyScopedAssociation(
   pluginId: string,

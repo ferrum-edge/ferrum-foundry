@@ -50,15 +50,15 @@ works the same way against a live Ferrum Edge gateway.
 ## Supported Ferrum Edge version
 
 Foundry is qualified against one Ferrum Edge image at a time. **No published
-Ferrum Edge release is supported yet.** The first supported pairing needs the
-next published Edge release. It must include ferrum-edge#5661 (atomic
-concurrent-edit protection) and pass the full qualification. Ferrum Edge v0.9.5
-was evaluated and fails the starter walkthrough and a critical journey. Until a
-release qualifies, CI runs an interim Edge development build,
-`ferrumedge/ferrum-edge@sha256:fb0f05b0392a272ba36a493584bced171655ce8ebd36b2ae0818bb5c3c25ef2d`,
+Ferrum Edge release is supported yet.** CI runs the published Ferrum Edge
+v0.9.5 release,
+`ferrumedge/ferrum-edge@sha256:eca46c84bca92d6ef467979f8846537f7ab56c0cdc137befff465526a10fe10f`,
 in `database` mode (writable and `FERRUM_ADMIN_READ_ONLY`), behind the
-trusted-proxy starter, in Chromium, on `linux/amd64` and `linux/arm64`. Other
-gateway modes and other browsers are best-effort or not qualified.
+trusted-proxy starter, in Chromium, on `linux/amd64` and `linux/arm64`. It is
+not the supported pairing, because it lacks ferrum-edge#5661 (atomic
+concurrent-edit protection): that needs the next published Edge release,
+qualified in full. Other gateway modes and other browsers are best-effort or
+not qualified.
 [Supported pairing](docs/compatibility.md) has the requirements, the full
 envelope, and the tested scale.
 
