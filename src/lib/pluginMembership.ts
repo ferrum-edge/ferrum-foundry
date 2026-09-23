@@ -410,7 +410,17 @@ async function updatePluginIfUnchanged(
   const current = await deps.getPlugin(snapshot.id);
   assertEditorBaseline(current, guard, "save", data, deps.namespace);
   if (current.updated_at !== snapshot.updated_at) throw changed();
-  return unlessChanged(() => deps.updatePlugin(snapshot.id, data, current), changed);
+  try {
+    return await deps.updatePlugin(snapshot.id, data, current);
+  } catch (error) {
+    if (!isPreconditionFailed(error)) throw error;
+    // Something was written between that read and the PUT. If it touched what
+    // the editor opened against, the operator needs the comparison, not a
+    // generic plan failure.
+    const latest = await getPluginIfPresent(snapshot.id, deps);
+    if (latest) assertEditorBaseline(latest, guard, "save", data, deps.namespace);
+    throw changed();
+  }
 }
 
 /**

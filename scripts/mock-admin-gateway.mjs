@@ -448,11 +448,12 @@ export function ifMatchRouteRefusal(method, path, header) {
 }
 
 /**
- * `ifMatch` is the raw request header and `kind` the collection name; both are
- * optional so callers that model no precondition keep the old behavior. A
- * third tuple member carries response headers (the `ETag` on an item `GET`).
+ * `precondition.kind` is the collection name and `precondition.ifMatch` the raw
+ * request header; without a `kind` no tag is issued or evaluated. A third
+ * tuple member carries response headers (the `ETag` on an item `GET`).
  */
-export function crud(list, url, method, id, body, defaults = {}, ns = 'ferrum', validate, provisioner, kind, ifMatch) {
+export function crud(list, url, method, id, body, defaults = {}, ns = 'ferrum', validate, provisioner, precondition = {}) {
+  const { kind, ifMatch } = precondition;
   // The real gateway isolates resources per namespace; list responses must
   // reflect that or namespace occupancy counts are meaningless.
   if (method === 'GET' && !id) {
@@ -1007,7 +1008,7 @@ const server = createServer(async (req, res) => {
   for (const [pattern, list, defaults, validate, kind] of routes) {
     const match = path.match(pattern);
     if (match) {
-      const [status, payload, headers] = crud(list, url, method, match[1], body, defaults, ns, validate, provisioner, kind, ifMatch);
+      const [status, payload, headers] = crud(list, url, method, match[1], body, defaults, ns, validate, provisioner, { kind, ifMatch });
       return send(status, payload, 'application/json', headers);
     }
   }

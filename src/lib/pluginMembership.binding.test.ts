@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PluginConfig, Proxy } from "@/api/types";
+import { isStaleResourceError } from "@/api/conditionalWrite";
+import { pluginWriteGuard } from "@/api/plugins";
 import {
   bindPluginMembership,
   deletePluginWithMembership,
+  updatePluginWithMembership,
 } from "./pluginMembership";
 
 /**
@@ -197,7 +200,9 @@ describe("plugin membership plans on a gateway that honours If-Match", () => {
         // `updated_at` comparison cannot see.
         if (interleaveOnPut === path) {
           interleaveOnPut = null;
-          entry.value = { ...entry.value, backend_host: "moved.internal" } as Proxy;
+          entry.value = path.startsWith("plugins/")
+            ? { ...entry.value, config: { requests: 99 } } as PluginConfig
+            : { ...entry.value, backend_host: "moved.internal" } as Proxy;
           entry.revision += 1;
         }
         if (ifMatch !== null && ifMatch !== tag(path)) {
@@ -250,5 +255,23 @@ describe("plugin membership plans on a gateway that honours If-Match", () => {
     expect(p1.backend_host).toBe("moved.internal");
     expect(p1.plugins).toEqual([{ plugin_config_id: "plugin-1" }]);
     expect(store.has("plugins/config/plugin-1")).toBe(true);
+  });
+
+  it("shows the editor the comparison when its plugin changes between the plan's read and its PUT", async () => {
+    interleaveOnPut = "plugins/config/plugin-1";
+
+    const refused = await updatePluginWithMembership(
+      "plugin-1",
+      { plugin_name: "rate_limiting", config: { requests: 20 }, scope: "proxy_group", enabled: true },
+      ["p1", "p2"],
+      bindPluginMembership({ namespace: "tenant-a" }),
+      pluginWriteGuard(plugin),
+    ).then(() => null, (error: unknown) => error);
+
+    if (!isStaleResourceError(refused)) throw new Error("expected a stale write");
+    expect(refused.detail.current.config).toEqual({ requests: 99 });
+    expect(refused.detail.proposed.config).toEqual({ requests: 20 });
+    expect((store.get("plugins/config/plugin-1")!.value as PluginConfig).config).toEqual({ requests: 99 });
+    expect(wire.filter((call) => call.startsWith("PUT proxies"))).toEqual([]);
   });
 });

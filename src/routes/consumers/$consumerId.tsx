@@ -132,7 +132,7 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
     try {
       const updated = await updateConsumer.mutateAsync({
         id: consumerId,
-        data: consumersApi.mergeFormUpdatePayload(consumer, data),
+        data,
         guard: baseline.current(),
       });
       baseline.adopt(updated);
@@ -442,11 +442,11 @@ function AclGroupsManager({
       // rather than reverted (see `upstreams.targetsWriteGuard`).
       await updateConsumer.mutateAsync({
         id: consumerId,
-        data: consumersApi.mergeFormUpdatePayload(consumer, {
+        data: {
           username: consumer.username,
-          ...(consumer.custom_id != null && { custom_id: consumer.custom_id }),
+          ...(consumer.custom_id && { custom_id: consumer.custom_id }),
           acl_groups: [...groups, trimmed],
-        }),
+        },
         guard: consumersApi.consumerWriteGuard(consumer),
       });
       toast("success", `Added group "${trimmed}"`);
@@ -471,11 +471,11 @@ function AclGroupsManager({
     try {
       await updateConsumer.mutateAsync({
         id: consumerId,
-        data: consumersApi.mergeFormUpdatePayload(consumer, {
+        data: {
           username: consumer.username,
-          ...(consumer.custom_id != null && { custom_id: consumer.custom_id }),
+          ...(consumer.custom_id && { custom_id: consumer.custom_id }),
           acl_groups: groups.filter((g) => g !== group),
-        }),
+        },
         guard: consumersApi.consumerWriteGuard(consumer),
       });
       toast("success", `Removed group "${group}"`);

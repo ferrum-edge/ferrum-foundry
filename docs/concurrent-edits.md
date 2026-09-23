@@ -162,9 +162,9 @@ can lose.
 | Proxy settings save | the editor's seed, every field except `plugins` (never sent) | the verification read |
 | Upstream settings save | the editor's seed, minus mesh-projected fields | the verification read |
 | Upstream targets save | `targets` of the render the new list was built from | the read its settings are rebuilt from |
-| Consumer Details save | the editor's seed, minus `credentials` | the read its credentials are taken from |
+| Consumer Details save | the editor's seed, minus `credentials` and `labels` (never sent) | the read its credentials are taken from |
 | Consumer ACL add/remove | the consumer the group list was computed from | the read its credentials are taken from |
-| Plugin configuration save | the editor's seed, every writable field | the membership plan's fresh read |
+| Plugin configuration save | the editor's seed, minus `labels` (never sent) | the membership plan's fresh read |
 | Proxy / upstream / consumer / plugin delete from its detail page | the resource the page is displaying | the verification read |
 | Every write inside a plugin membership plan | the plan's own `updated_at` preflight (#244) | the read that preflight compared |
 
@@ -180,9 +180,11 @@ unchanged, and re-sends with the rotated set. Credentials are excluded from the
 comparison — a metadata draft cannot revert a rotation, and redacted
 `[REDACTED]` markers say nothing about what changed.
 
-Both the Details form and the ACL editor build their body with
-`consumers.mergeFormUpdatePayload`, which round-trips every field the form does
-not model. Before this, a consumer save from either one dropped `labels`.
+Neither the Details form nor the ACL editor sends `labels`, and Edge preserves
+the stored map when a `PUT` omits the key. A provisioner stamping a label
+therefore cannot be reverted by these saves, so `labels` is left out of the
+comparison — the same reasoning as `plugins` on a proxy. Plugin configuration
+saves omit `labels` too and exclude it the same way.
 
 ### Plugin configurations and membership plans
 
@@ -199,7 +201,9 @@ which already re-reads every resource it writes and refuses when its
 - **The editor's baseline is checked by the plan.** A configuration that
   changed since the editor opened is refused with `StaleResourceError` at the
   preflight read — before any association is touched — and again at the read
-  the plugin `PUT` is conditional on.
+  the plugin `PUT` is conditional on. If that `PUT` gets a `412`, the plan
+  re-reads once more so an editor whose draft is now stale sees the
+  comparison rather than a generic plan failure.
 
 ### Deletes
 

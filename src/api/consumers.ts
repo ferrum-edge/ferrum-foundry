@@ -51,30 +51,6 @@ export function toUpdatePayload(data: ConsumerCreate): ConsumerCreate {
   return payload;
 }
 
-/**
- * Merge the fields a consumer editor owns over the complete fetched consumer.
- *
- * Consumer `PUT` is a full replacement, so a body built from the form alone
- * reset every field the form does not model — `labels` in particular was
- * wiped by any Details or ACL save. Unmodelled fields now round-trip; the
- * form-owned optionals are explicit clears when absent. Credentials are never
- * taken from here: `update` supplies them from its own read.
- */
-export function mergeFormUpdatePayload(
-  consumer: Consumer,
-  changes: ConsumerCreate,
-): ConsumerCreate {
-  const { created_at, updated_at, namespace, credentials, ...rest } = consumer;
-  void created_at;
-  void updated_at;
-  void namespace;
-  void credentials;
-  const merged: ConsumerCreate = { ...rest, ...toUpdatePayload(changes) };
-  if (!("custom_id" in changes)) merged.custom_id = null;
-  if (!("acl_groups" in changes)) merged.acl_groups = [];
-  return merged;
-}
-
 function withConsumerId(data: ConsumerCreate, id?: string): ConsumerCreate {
   const resolvedId = id ?? data.id;
   return resolvedId ? { ...data, id: resolvedId } : data;

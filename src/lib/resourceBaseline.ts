@@ -103,23 +103,34 @@ export const UPSTREAM_BASELINE_OMIT: readonly string[] = [
 ];
 
 /**
- * Consumer fields excluded on top of the server-managed set. A metadata save
- * never sends the editor's `credentials`: it takes them from the read it is
- * sent against (`consumers.update`), and credentials are edited through their
- * own endpoints. A rotation is therefore not something a metadata draft can
- * revert, and comparing redacted `[REDACTED]` markers would say nothing anyway.
+ * Consumer fields excluded on top of the server-managed set.
+ *
+ * - `credentials`: a metadata save never sends the editor's credentials; it
+ *   takes them from the read it is sent against (`consumers.update`), and
+ *   credentials are edited through their own endpoints. A rotation is not
+ *   something a metadata draft can revert, and comparing redacted
+ *   `[REDACTED]` markers would say nothing anyway.
+ * - `labels`: neither the Details form nor the ACL editor sends them, and Edge
+ *   preserves the stored map when a `PUT` omits the key. A provisioner
+ *   stamping a label cannot be reverted by these saves, so it is not a
+ *   conflict — the same reasoning as `plugins` on a proxy.
  */
 export const CONSUMER_BASELINE_OMIT: readonly string[] = [
   ...SERVER_MANAGED_FIELDS,
   "credentials",
+  "labels",
 ];
 
 /**
- * Plugin configurations are compared on every writable field. Proxy-group
- * membership lives on the proxies (`plugins` associations), not here, and the
- * membership plan runs its own per-proxy contract.
+ * Plugin configuration fields excluded on top of the server-managed set.
+ * `PluginConfigForm` does not send `labels`, which Edge then preserves (see
+ * `CONSUMER_BASELINE_OMIT`). Proxy-group membership lives on the proxies, not
+ * here, and the membership plan runs its own per-proxy contract.
  */
-export const PLUGIN_BASELINE_OMIT: readonly string[] = SERVER_MANAGED_FIELDS;
+export const PLUGIN_BASELINE_OMIT: readonly string[] = [
+  ...SERVER_MANAGED_FIELDS,
+  "labels",
+];
 
 /** Reduce a fetched resource to the fields a full-replacement write replaces. */
 export function baselineSnapshot(

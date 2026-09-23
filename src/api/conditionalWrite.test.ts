@@ -97,10 +97,14 @@ function stubGateway<T extends object>(seed: T, options: GatewayOptions = {}) {
         stored = null;
         return new Response(null, { status: 204 });
       }
-      // Full replacement, except that an omitted `plugins` key preserves the
-      // live associations, exactly as Edge does for a proxy PUT.
+      // Full replacement, except that an omitted `plugins` or `labels` key
+      // preserves the stored value, exactly as Edge does.
       const body = (await request.json()) as Record<string, unknown>;
-      commit({ ...body, ...(!("plugins" in body) && { plugins: stored.plugins }) });
+      commit({
+        ...body,
+        ...(!("plugins" in body) && { plugins: stored.plugins }),
+        ...(!("labels" in body) && stored.labels !== undefined && { labels: stored.labels }),
+      });
       return Response.json(stored);
     }),
   );
@@ -560,19 +564,23 @@ describe("consumer metadata saves", () => {
     updated_at: "2026-01-01T00:00:00Z",
   };
 
-  it("keeps labels and every other unmodelled field through a form save", () => {
-    const merged = consumers.mergeFormUpdatePayload(consumerSeed, {
-      username: "alice",
-      acl_groups: ["readers", "writers"],
-    });
+  it("is not refused by a label another writer stamped, and never replays labels", async () => {
+    // The consumer editors omit `labels`, and Edge preserves the stored map
+    // when a PUT omits the key, so a provisioner's label cannot be reverted
+    // by this save and is not a conflict.
+    const stamped = { team: "payments", "provisioned-by": "ferrum-nexus" };
+    const gateway = stubGateway({ ...consumerSeed, labels: stamped });
 
-    expect(merged).toEqual({
-      id: "alice",
-      username: "alice",
-      custom_id: null,
-      labels: { team: "payments" },
-      acl_groups: ["readers", "writers"],
-    });
+    await consumers.update(
+      scope,
+      "alice",
+      { username: "alice", custom_id: "alice-1", acl_groups: ["readers", "writers"] },
+      consumers.consumerWriteGuard(consumerSeed),
+    );
+
+    expect(gateway.wire).toEqual(["GET", 'PUT if-match "r0"']);
+    expect(gateway.read().acl_groups).toEqual(["readers", "writers"]);
+    expect(gateway.read().labels).toEqual(stamped);
   });
 
   it("refuses a draft opened before another writer's metadata change", async () => {
@@ -582,11 +590,7 @@ describe("consumer metadata saves", () => {
       consumers.update(
         scope,
         "alice",
-        consumers.mergeFormUpdatePayload(consumerSeed, {
-          username: "alice",
-          custom_id: "alice-1",
-          acl_groups: ["readers", "writers"],
-        }),
+        { username: "alice", custom_id: "alice-1", acl_groups: ["readers", "writers"] },
         consumers.consumerWriteGuard(consumerSeed),
       ),
     );
@@ -611,11 +615,7 @@ describe("consumer metadata saves", () => {
     await consumers.update(
       scope,
       "alice",
-      consumers.mergeFormUpdatePayload(consumerSeed, {
-        username: "alice",
-        custom_id: "alice-1",
-        acl_groups: ["readers", "writers"],
-      }),
+      { username: "alice", custom_id: "alice-1", acl_groups: ["readers", "writers"] },
       consumers.consumerWriteGuard(consumerSeed),
     );
 

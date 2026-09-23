@@ -514,10 +514,10 @@ test("detailed mock health carries conditional diagnostics and namespace serving
 
 test("item GET carries a strong ETag that changes when the resource does", () => {
   const list = [{ id: "orders", namespace: "ferrum", backend_host: "a.internal", plugins: [] }];
-  const [, , first] = crud(list, url, "GET", "orders", {}, proxyDefaults, "ferrum", undefined, undefined, "proxies");
+  const [, , first] = crud(list, url, "GET", "orders", {}, proxyDefaults, "ferrum", undefined, undefined, { kind: "proxies" });
   assert.match(first.etag, /^"[0-9a-f]{32}"$/);
-  crud(list, url, "PUT", "orders", { backend_host: "b.internal" }, proxyDefaults, "ferrum", undefined, undefined, "proxies", first.etag);
-  const [, , second] = crud(list, url, "GET", "orders", {}, proxyDefaults, "ferrum", undefined, undefined, "proxies");
+  crud(list, url, "PUT", "orders", { backend_host: "b.internal" }, proxyDefaults, "ferrum", undefined, undefined, { kind: "proxies", ifMatch: first.etag });
+  const [, , second] = crud(list, url, "GET", "orders", {}, proxyDefaults, "ferrum", undefined, undefined, { kind: "proxies" });
   assert.notEqual(second.etag, first.etag);
 });
 
@@ -526,8 +526,8 @@ test("a stale If-Match is refused with 412 and writes nothing", () => {
   const stale = resourceEtag("proxies", list[0]);
   list[0] = { ...list[0], backend_host: "b.internal" };
 
-  const [putStatus] = crud(list, url, "PUT", "orders", { backend_host: "c.internal" }, proxyDefaults, "ferrum", undefined, undefined, "proxies", stale);
-  const [deleteStatus] = crud(list, url, "DELETE", "orders", {}, proxyDefaults, "ferrum", undefined, undefined, "proxies", stale);
+  const [putStatus] = crud(list, url, "PUT", "orders", { backend_host: "c.internal" }, proxyDefaults, "ferrum", undefined, undefined, { kind: "proxies", ifMatch: stale });
+  const [deleteStatus] = crud(list, url, "DELETE", "orders", {}, proxyDefaults, "ferrum", undefined, undefined, { kind: "proxies", ifMatch: stale });
 
   assert.equal(putStatus, 412);
   assert.equal(deleteStatus, 412);
@@ -535,7 +535,7 @@ test("a stale If-Match is refused with 412 and writes nothing", () => {
 });
 
 test("404 takes precedence over the precondition", () => {
-  const [status] = crud([], url, "PUT", "missing", {}, proxyDefaults, "ferrum", undefined, undefined, "proxies", '"anything"');
+  const [status] = crud([], url, "PUT", "missing", {}, proxyDefaults, "ferrum", undefined, undefined, { kind: "proxies", ifMatch: '"anything"' });
   assert.equal(status, 404);
 });
 
