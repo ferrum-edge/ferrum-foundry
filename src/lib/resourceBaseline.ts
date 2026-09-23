@@ -270,6 +270,11 @@ export function isRedactedField(field: string): boolean {
   return REDACTED_FIELD_PATTERN.test(field);
 }
 
+function redactFieldValue(field: string, value: unknown): unknown {
+  if (!isRedactedField(field) || value === null || value === "") return value;
+  return REDACTED_PLACEHOLDER;
+}
+
 /**
  * Render one side of a field comparison for display. Redacted fields collapse
  * to a marker that still distinguishes "set", "cleared", and "absent", because
@@ -278,30 +283,14 @@ export function isRedactedField(field: string): boolean {
  */
 export function formatBaselineValue(field: string, value: unknown): string {
   if (value === undefined) return "—";
-  if (isRedactedField(field)) return redactedMarker(value);
+  if (isRedactedField(field)) {
+    if (value === null) return "null";
+    if (typeof value === "string" && value.length === 0) return '""';
+    return REDACTED_PLACEHOLDER;
+  }
   if (value === null) return "null";
   if (typeof value === "string") return value.length === 0 ? '""' : value;
-  return JSON.stringify(redactNested(value));
-}
-
-function redactedMarker(value: unknown): string {
-  if (value === null) return "null";
-  if (typeof value === "string" && value.length === 0) return '""';
-  return REDACTED_PLACEHOLDER;
-}
-
-/**
- * Apply the same field-name rule at every depth. A plugin configuration's
- * `config` is one top-level field whose members are the plugin's own
- * settings — a JWT secret, an upstream `Authorization` header, an HMAC key —
- * so redacting by top-level name alone would print them.
- */
-function redactNested(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(redactNested);
-  if (value === null || typeof value !== "object") return value;
-  const redacted: Record<string, unknown> = {};
-  for (const [key, member] of Object.entries(value as Record<string, unknown>)) {
-    redacted[key] = isRedactedField(key) ? redactedMarker(member) : redactNested(member);
-  }
-  return redacted;
+  return JSON.stringify(value, (nestedField, nestedValue) =>
+    nestedField === "" ? nestedValue : redactFieldValue(nestedField, nestedValue),
+  );
 }

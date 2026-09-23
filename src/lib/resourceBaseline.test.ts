@@ -166,25 +166,53 @@ describe("redaction", () => {
     expect(formatBaselineValue("api_key", undefined)).toBe("—");
   });
 
-  it("redacts secret-shaped keys at every depth of a structured value", () => {
-    // A plugin configuration's `config` is one top-level field holding the
-    // plugin's own settings, secrets included.
+  it("redacts a plugin configuration's own secrets, including request headers", () => {
+    // A plugin's `config` is one top-level field holding the plugin's own
+    // settings; an upstream `Authorization` header is not a key-shaped name.
     const rendered = formatBaselineValue("config", {
       algorithm: "HS256",
       secret: "jwt-signing-secret",
-      upstream_headers: { Authorization: "Bearer abc", "X-Trace": "on" },
-      keys: [{ kid: "k1", private_key: "-----BEGIN" }],
+      upstream_headers: { Authorization: "Bearer abc", Cookie: "session=1", "X-Trace": "on" },
       cleared_token: null,
     });
     expect(rendered).not.toContain("jwt-signing-secret");
     expect(rendered).not.toContain("Bearer abc");
-    expect(rendered).not.toContain("BEGIN");
+    expect(rendered).not.toContain("session=1");
     expect(JSON.parse(rendered)).toEqual({
       algorithm: "HS256",
       secret: "[redacted]",
-      upstream_headers: { Authorization: "[redacted]", "X-Trace": "on" },
-      keys: [{ kid: "k1", private_key: "[redacted]" }],
-      cleared_token: "null",
+      upstream_headers: { Authorization: "[redacted]", Cookie: "[redacted]", "X-Trace": "on" },
+      cleared_token: null,
+    });
+  });
+
+  it("recursively hides credentials in nested objects and arrays", () => {
+    const rendered = formatBaselineValue("service_discovery", {
+      consul: {
+        address: "http://consul.internal:8500",
+        token: "CONSUL_SECRET",
+        nested: [{ api_key: "NESTED_SECRET" }],
+      },
+    });
+
+    expect(JSON.parse(rendered)).toEqual({
+      consul: {
+        address: "http://consul.internal:8500",
+        token: "[redacted]",
+        nested: [{ api_key: "[redacted]" }],
+      },
+    });
+    expect(rendered).not.toContain("CONSUL_SECRET");
+    expect(rendered).not.toContain("NESTED_SECRET");
+  });
+
+  it("preserves nested material paths while redacting nearby material", () => {
+    expect(JSON.parse(formatBaselineValue("tls", {
+      private_key_path: "/etc/ferrum/client.key",
+      private_key: "PRIVATE_KEY_BYTES",
+    }))).toEqual({
+      private_key_path: "/etc/ferrum/client.key",
+      private_key: "[redacted]",
     });
   });
 
