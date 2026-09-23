@@ -5,10 +5,9 @@ Resume the existing worktree and branch named in the dispatch prompt. Follow all
 controller-defined stopping point, final reporting, safeguard notices, and the prohibition on
 merging.
 
-Do not run local builds, tests, benchmarks, `npm run typecheck`, or `npm run lint`, including
-through wrappers. Follow the remote CI validation policy in `agent-brief.md`: use failed remote job logs
-to drive fixes and matching pushed-head CI results to confirm them. Local source inspection and
-`git diff --check` are allowed. Report pending CI honestly and preserve the assigned stopping point.
+Validate locally according to `agent-brief.md` before pushing, reproducing red CI checks locally
+where you can, and use matching pushed-head CI results to confirm. Report pending CI honestly and
+preserve the assigned stopping point.
 
 ## Implement directly
 

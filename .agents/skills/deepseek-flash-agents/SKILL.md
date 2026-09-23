@@ -22,25 +22,27 @@ or assigns an existing worktree and findings to fix, implement directly in the c
 Do not recursively dispatch another DeepSeek V4 Flash, opencode, Grok, Sol, Opus, Fable, or Composer
 worker. The orchestrator selected this session's model deliberately.
 
-## Remote CI validation
+## Validation
 
-Do not run local builds, tests, benchmarks, or compilation-based checks, including `npm run build`,
-`npm test`, `npm run typecheck`, `npm run lint`, and the `test:*` scripts, or wrappers that invoke
-them. Do not make an exception for a targeted check, an ambiguous failure, or a controller's
-routine validation request. Local source inspection and `git diff --check` are allowed.
+Workers validate locally before pushing, and CI confirms the pushed head. Require each worker to
+run `npm ci` in a fresh worktree, then `npm run typecheck`, `npm run lint`, and the tests covering
+its change (`npx vitest run <paths>`, or `npm test` for broad changes; `npm run test:contracts` for
+`scripts/`), plus `npm run build` when build configuration, server entrypoints, or bundling change.
+`npm run test:gateway-contract` and `npm run e2e` need a running gateway or browser stack; workers
+run them only when the task touches that surface and the stack is available, and otherwise leave
+them to CI. Workers report the exact commands and results.
 
-Use remote CI results for the exact pushed head SHA as build/test confirmation. Inspect failed
-job logs, fix the demonstrated failure, push the change, and use the next CI run to confirm it.
-Pending, skipped, unavailable, or earlier-head checks are not evidence that the change passed.
-Keep adding or updating relevant tests; remote CI executes them.
+Local passes are not CI evidence. Use CI results for the exact pushed head SHA as confirmation:
+pending, skipped, unavailable, or earlier-head checks do not show that the change passed. Inspect
+failed job logs, fix the demonstrated failure, push, and confirm it on the next run.
 
 The controller owns post-push CI monitoring unless the worker is explicitly assigned a CI repair
 or shepherd round. A worker assigned to exit after pushing must report the head SHA and CI status
 as pending or unverified and exit; the controller continues the CI-driven fix loop. Never report
-build/test success without matching remote evidence.
+CI success without matching remote evidence.
 
-Include the no-local-build/test rule and remote CI confirmation requirement in every dispatch
-prompt, including continuation prompts and any permitted nested delegation.
+Include the local-validation and CI-confirmation requirements in every dispatch prompt, including
+continuation prompts and any permitted nested delegation.
 
 ## Preflight
 
