@@ -11,6 +11,14 @@ import { Badge } from "@/components/ui/Badge";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { FormValidationSummary } from "./FormValidationSummary";
 import { useCollapsibleFormValidation } from "@/lib/collapsedFormValidation";
+import {
+  missingNumberError,
+  numberDraftFromInput,
+  numberDraftText,
+  resolveNumberDrafts,
+  type NumberDraft,
+  type WithNumberDrafts,
+} from "@/lib/formDrafts";
 import { ReadOnlySurface } from "@/components/shared/CapabilityGate";
 import type { CapabilityVerdict } from "@/lib/capabilities";
 import type {
@@ -23,15 +31,44 @@ import type {
 
 const PROXY_COLLAPSIBLE_SECTIONS = [
   { id: "routing", errorKeys: [] },
-  { id: "timeouts", errorKeys: [] },
+  {
+    id: "timeouts",
+    errorKeys: ["connect_timeout", "read_timeout", "write_timeout"],
+  },
   { id: "tls", errorKeys: [] },
   { id: "upstream", errorKeys: [] },
   { id: "dns", errorKeys: [] },
-  { id: "circuit-breaker", errorKeys: [] },
-  { id: "retry", errorKeys: [] },
+  {
+    id: "circuit-breaker",
+    errorKeys: [
+      "cb_failure_threshold",
+      "cb_success_threshold",
+      "cb_timeout_seconds",
+      "cb_half_open_max_requests",
+    ],
+  },
+  {
+    id: "retry",
+    errorKeys: ["retry_max_retries", "retry_fixed_delay", "retry_exp_base", "retry_exp_max"],
+  },
   { id: "connection-pool", errorKeys: [] },
-  { id: "protocol", errorKeys: ["listen_port"] },
+  { id: "protocol", errorKeys: ["listen_port", "udp_idle_timeout"] },
 ] as const;
+
+// Required numeric fields hold `""` while cleared so the input never snaps
+// to `0`; validate() rejects an empty value before anything is sent.
+const CB_NUMBER_FIELDS = [
+  ["failure_threshold", "Failure threshold"],
+  ["success_threshold", "Success threshold"],
+  ["timeout_seconds", "Timeout"],
+  ["half_open_max_requests", "Half-open max requests"],
+] as const;
+const CB_NUMBER_KEYS = CB_NUMBER_FIELDS.map(([key]) => key);
+type CircuitBreakerDraft = WithNumberDrafts<
+  CircuitBreakerConfig,
+  (typeof CB_NUMBER_KEYS)[number]
+>;
+type RetryConfigDraft = WithNumberDrafts<RetryConfig, "max_retries">;
 
 
 export interface ProxyFormProps {
@@ -328,7 +365,7 @@ export function ProxyForm({
     initialData?.backend_scheme ?? "https",
   );
   const [backendHost, setBackendHost] = useState(initialData?.backend_host ?? "");
-  const [backendPort, setBackendPort] = useState(initialData?.backend_port ?? 80);
+  const [backendPort, setBackendPort] = useState<NumberDraft>(initialData?.backend_port ?? 80);
   const [backendPath, setBackendPath] = useState(initialData?.backend_path ?? "");
 
   /* ---------- Routing Options ---------- */
@@ -345,9 +382,15 @@ export function ProxyForm({
   const [allowedWsOrigins, setAllowedWsOrigins] = useState<string[]>(initialData?.allowed_ws_origins ?? []);
 
   /* ---------- Backend Timeouts ---------- */
-  const [connectTimeout, setConnectTimeout] = useState(initialData?.backend_connect_timeout_ms ?? 5000);
-  const [readTimeout, setReadTimeout] = useState(initialData?.backend_read_timeout_ms ?? 30000);
-  const [writeTimeout, setWriteTimeout] = useState(initialData?.backend_write_timeout_ms ?? 30000);
+  const [connectTimeout, setConnectTimeout] = useState<NumberDraft>(
+    initialData?.backend_connect_timeout_ms ?? 5000,
+  );
+  const [readTimeout, setReadTimeout] = useState<NumberDraft>(
+    initialData?.backend_read_timeout_ms ?? 30000,
+  );
+  const [writeTimeout, setWriteTimeout] = useState<NumberDraft>(
+    initialData?.backend_write_timeout_ms ?? 30000,
+  );
 
   /* ---------- TLS Settings ---------- */
   const [frontendTls, setFrontendTls] = useState(initialData?.frontend_tls ?? false);
@@ -381,23 +424,23 @@ export function ProxyForm({
 
   /* ---------- Circuit Breaker ---------- */
   const [cbEnabled, setCbEnabled] = useState(!!initialData?.circuit_breaker);
-  const [cb, setCb] = useState<CircuitBreakerConfig>(
+  const [cb, setCb] = useState<CircuitBreakerDraft>(
     initialData?.circuit_breaker ?? defaultCircuitBreaker(),
   );
 
   /* ---------- Retry ---------- */
   const [retryEnabled, setRetryEnabled] = useState(!!initialData?.retry);
-  const [retry, setRetry] = useState<RetryConfig>(initialData?.retry ?? defaultRetryConfig());
+  const [retry, setRetry] = useState<RetryConfigDraft>(initialData?.retry ?? defaultRetryConfig());
   const [backoffType, setBackoffType] = useState<BackoffType>(
     initialData?.retry ? getBackoffType(initialData.retry.backoff) : "fixed",
   );
-  const [fixedDelay, setFixedDelay] = useState(
+  const [fixedDelay, setFixedDelay] = useState<NumberDraft>(
     initialData?.retry ? getFixedDelay(initialData.retry.backoff) : 100,
   );
-  const [expBase, setExpBase] = useState(
+  const [expBase, setExpBase] = useState<NumberDraft>(
     initialData?.retry ? getExponentialBase(initialData.retry.backoff) : 100,
   );
-  const [expMax, setExpMax] = useState(
+  const [expMax, setExpMax] = useState<NumberDraft>(
     initialData?.retry ? getExponentialMax(initialData.retry.backoff) : 10000,
   );
 
@@ -436,7 +479,9 @@ export function ProxyForm({
   /* ---------- Protocol-Specific ---------- */
   const [listenPort, setListenPort] = useState<number | "">(initialData?.listen_port ?? "");
   const [tcpIdleTimeout, setTcpIdleTimeout] = useState<number | "">(initialData?.tcp_idle_timeout_seconds ?? "");
-  const [udpIdleTimeout, setUdpIdleTimeout] = useState(initialData?.udp_idle_timeout_seconds ?? 60);
+  const [udpIdleTimeout, setUdpIdleTimeout] = useState<NumberDraft>(
+    initialData?.udp_idle_timeout_seconds ?? 60,
+  );
   const [poolH3ConnsPerBackend, setPoolH3ConnsPerBackend] = useState<number | "">(
     initialData?.pool_http3_connections_per_backend ?? "",
   );
@@ -466,6 +511,26 @@ export function ProxyForm({
     if (!usingUpstream && (!backendPort || backendPort <= 0)) {
       errs.backend_port = "Backend port is required";
     }
+    const requireNumber = (key: string, value: NumberDraft | undefined, label: string) => {
+      const error = missingNumberError(value, label);
+      if (error) errs[key] = error;
+    };
+    requireNumber("connect_timeout", connectTimeout, "Connect timeout");
+    requireNumber("read_timeout", readTimeout, "Read timeout");
+    requireNumber("write_timeout", writeTimeout, "Write timeout");
+    if (cbEnabled) {
+      for (const [key, label] of CB_NUMBER_FIELDS) requireNumber(`cb_${key}`, cb[key], label);
+    }
+    if (retryEnabled) {
+      requireNumber("retry_max_retries", retry.max_retries, "Max retries");
+      if (backoffType === "fixed") {
+        requireNumber("retry_fixed_delay", fixedDelay, "Delay");
+      } else {
+        requireNumber("retry_exp_base", expBase, "Base delay");
+        requireNumber("retry_exp_max", expMax, "Max delay");
+      }
+    }
+    if (isUdpLike) requireNumber("udp_idle_timeout", udpIdleTimeout, "UDP idle timeout");
     setErrors(errs);
     const ok = Object.keys(errs).length === 0;
     if (!ok) {
@@ -483,9 +548,10 @@ export function ProxyForm({
     if (readOnly) return;
     if (!validate()) return;
 
+    // validate() has rejected every empty draft that is sent below.
     const buildBackoff = (): BackoffStrategy => {
-      if (backoffType === "fixed") return { fixed: { delay_ms: fixedDelay } };
-      return { exponential: { base_ms: expBase, max_ms: expMax } };
+      if (backoffType === "fixed") return { fixed: { delay_ms: Number(fixedDelay) } };
+      return { exponential: { base_ms: Number(expBase), max_ms: Number(expMax) } };
     };
 
     const data: ProxyCreate = {
@@ -494,7 +560,9 @@ export function ProxyForm({
       ...(isHttpLike && listenPath.trim() && { listen_path: listenPath }),
       backend_scheme: backendScheme,
       backend_host: backendHost,
-      backend_port: backendPort,
+      // Only an upstream-linked proxy may leave the port empty; the gateway
+      // documents 0 as that omitted port.
+      backend_port: backendPort === "" ? 0 : backendPort,
       ...(name && { name }),
       ...(hosts.length > 0 && { hosts }),
       ...(backendPath && { backend_path: backendPath }),
@@ -506,9 +574,9 @@ export function ProxyForm({
         ? allowedMethods as ProxyCreate["allowed_methods"]
         : null,
       ...(allowedWsOrigins.length > 0 && { allowed_ws_origins: allowedWsOrigins }),
-      backend_connect_timeout_ms: connectTimeout,
-      backend_read_timeout_ms: readTimeout,
-      backend_write_timeout_ms: writeTimeout,
+      backend_connect_timeout_ms: Number(connectTimeout),
+      backend_read_timeout_ms: Number(readTimeout),
+      backend_write_timeout_ms: Number(writeTimeout),
       frontend_tls: frontendTls,
       passthrough,
       backend_tls_verify_server_cert: backendTlsVerify,
@@ -519,10 +587,10 @@ export function ProxyForm({
       ...(upstreamId && upstreamSubset && { upstream_subset: upstreamSubset }),
       ...(dnsOverride && { dns_override: dnsOverride }),
       ...(dnsCacheTtl !== "" && { dns_cache_ttl_seconds: Number(dnsCacheTtl) }),
-      ...(cbEnabled && { circuit_breaker: cb }),
+      ...(cbEnabled && { circuit_breaker: resolveNumberDrafts(cb, CB_NUMBER_KEYS) }),
       ...(retryEnabled && {
         retry: {
-          ...retry,
+          ...resolveNumberDrafts(retry, ["max_retries"]),
           backoff: buildBackoff(),
         },
       }),
@@ -544,7 +612,9 @@ export function ProxyForm({
       }),
       ...(listenPort !== "" && { listen_port: Number(listenPort) }),
       ...(tcpIdleTimeout !== "" && { tcp_idle_timeout_seconds: Number(tcpIdleTimeout) }),
-      udp_idle_timeout_seconds: udpIdleTimeout,
+      // Sent for every scheme as before; a cleared value is only rejected
+      // where the field is shown (UDP/DTLS) and is otherwise omitted.
+      ...(udpIdleTimeout !== "" && { udp_idle_timeout_seconds: udpIdleTimeout }),
       ...(poolH3ConnsPerBackend !== "" && { pool_http3_connections_per_backend: Number(poolH3ConnsPerBackend) }),
       ...(isStream && streamProxyProtocol && { stream_proxy_protocol: true }),
       ...(isTcpLike && backendProxyProtocol && { backend_proxy_protocol: "v2" as const }),
@@ -561,10 +631,9 @@ export function ProxyForm({
 
   /* ---------- Helpers for optional number inputs ---------- */
 
-  const numVal = (v: number | ""): string => (v === "" ? "" : String(v));
-  const setNum = (setter: (v: number | "") => void) => (e: React.ChangeEvent<HTMLInputElement>) => {
-    const raw = e.target.value;
-    setter(raw === "" ? "" : Number(raw));
+  const numVal = numberDraftText;
+  const setNum = (setter: (v: NumberDraft) => void) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    setter(numberDraftFromInput(e.target.value));
   };
 
   /* ---------- Section visibility ---------- */
@@ -648,8 +717,8 @@ export function ProxyForm({
             <Input
               label="Backend Port"
               type="number"
-              value={String(backendPort)}
-              onChange={(e) => setBackendPort(Number(e.target.value))}
+              value={numVal(backendPort)}
+              onChange={setNum(setBackendPort)}
               placeholder="80"
               error={errors.backend_port}
             />
@@ -729,20 +798,23 @@ export function ProxyForm({
           <Input
             label="Connect Timeout (ms)"
             type="number"
-            value={String(connectTimeout)}
-            onChange={(e) => setConnectTimeout(Number(e.target.value))}
+            value={numVal(connectTimeout)}
+            onChange={setNum(setConnectTimeout)}
+            error={errors.connect_timeout}
           />
           <Input
             label="Read Timeout (ms)"
             type="number"
-            value={String(readTimeout)}
-            onChange={(e) => setReadTimeout(Number(e.target.value))}
+            value={numVal(readTimeout)}
+            onChange={setNum(setReadTimeout)}
+            error={errors.read_timeout}
           />
           <Input
             label="Write Timeout (ms)"
             type="number"
-            value={String(writeTimeout)}
-            onChange={(e) => setWriteTimeout(Number(e.target.value))}
+            value={numVal(writeTimeout)}
+            onChange={setNum(setWriteTimeout)}
+            error={errors.write_timeout}
           />
         </CollapsibleSection>
 
@@ -853,20 +925,23 @@ export function ProxyForm({
               <Input
                 label="Failure Threshold"
                 type="number"
-                value={String(cb.failure_threshold)}
-                onChange={(e) => setCb({ ...cb, failure_threshold: Number(e.target.value) })}
+                value={numVal(cb.failure_threshold)}
+                onChange={(e) => setCb({ ...cb, failure_threshold: numberDraftFromInput(e.target.value) })}
+                error={errors.cb_failure_threshold}
               />
               <Input
                 label="Success Threshold"
                 type="number"
-                value={String(cb.success_threshold)}
-                onChange={(e) => setCb({ ...cb, success_threshold: Number(e.target.value) })}
+                value={numVal(cb.success_threshold)}
+                onChange={(e) => setCb({ ...cb, success_threshold: numberDraftFromInput(e.target.value) })}
+                error={errors.cb_success_threshold}
               />
               <Input
                 label="Timeout (seconds)"
                 type="number"
-                value={String(cb.timeout_seconds)}
-                onChange={(e) => setCb({ ...cb, timeout_seconds: Number(e.target.value) })}
+                value={numVal(cb.timeout_seconds)}
+                onChange={(e) => setCb({ ...cb, timeout_seconds: numberDraftFromInput(e.target.value) })}
+                error={errors.cb_timeout_seconds}
               />
               <TagInput
                 label="Failure Status Codes"
@@ -878,8 +953,9 @@ export function ProxyForm({
               <Input
                 label="Half-Open Max Requests"
                 type="number"
-                value={String(cb.half_open_max_requests)}
-                onChange={(e) => setCb({ ...cb, half_open_max_requests: Number(e.target.value) })}
+                value={numVal(cb.half_open_max_requests)}
+                onChange={(e) => setCb({ ...cb, half_open_max_requests: numberDraftFromInput(e.target.value) })}
+                error={errors.cb_half_open_max_requests}
               />
               <Checkbox
                 label="Trip on connection errors"
@@ -908,8 +984,11 @@ export function ProxyForm({
               <Input
                 label="Max Retries"
                 type="number"
-                value={String(retry.max_retries)}
-                onChange={(e) => setRetry({ ...retry, max_retries: Number(e.target.value) })}
+                value={numVal(retry.max_retries)}
+                onChange={(e) =>
+                  setRetry({ ...retry, max_retries: numberDraftFromInput(e.target.value) })
+                }
+                error={errors.retry_max_retries}
               />
               <TagInput
                 label="Retryable Status Codes"
@@ -937,22 +1016,25 @@ export function ProxyForm({
                 <Input
                   label="Delay (ms)"
                   type="number"
-                  value={String(fixedDelay)}
-                  onChange={(e) => setFixedDelay(Number(e.target.value))}
+                  value={numVal(fixedDelay)}
+                  onChange={setNum(setFixedDelay)}
+                  error={errors.retry_fixed_delay}
                 />
               ) : (
                 <>
                   <Input
                     label="Base (ms)"
                     type="number"
-                    value={String(expBase)}
-                    onChange={(e) => setExpBase(Number(e.target.value))}
+                    value={numVal(expBase)}
+                    onChange={setNum(setExpBase)}
+                    error={errors.retry_exp_base}
                   />
                   <Input
                     label="Max (ms)"
                     type="number"
-                    value={String(expMax)}
-                    onChange={(e) => setExpMax(Number(e.target.value))}
+                    value={numVal(expMax)}
+                    onChange={setNum(setExpMax)}
+                    error={errors.retry_exp_max}
                   />
                 </>
               )}
@@ -1102,8 +1184,9 @@ export function ProxyForm({
                 <Input
                   label="UDP Idle Timeout (seconds)"
                   type="number"
-                  value={String(udpIdleTimeout)}
-                  onChange={(e) => setUdpIdleTimeout(Number(e.target.value))}
+                  value={numVal(udpIdleTimeout)}
+                  onChange={setNum(setUdpIdleTimeout)}
+                  error={errors.udp_idle_timeout}
                 />
                 <Input
                   label="Max Response Amplification Factor"

@@ -2,6 +2,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Proxy, ProxyCreate } from "@/api/types";
+import { clearText, inputByLabel, inputByLabelOrNull, typeText } from "@/test/fields";
 import { ProxyForm } from "./ProxyForm";
 
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn() }));
@@ -91,5 +92,121 @@ describe("ProxyForm collapsed validation", () => {
       backend_scheme: "tcp",
       listen_port: 9100,
     });
+  });
+});
+
+const httpProxy: Proxy = {
+  ...streamProxy,
+  backend_scheme: "http",
+  listen_path: "/api",
+};
+
+async function toggleSection(title: string) {
+  const section = Array.from(host.querySelectorAll("button")).find((button) =>
+    button.textContent?.includes(title),
+  )!;
+  await act(async () => section.click());
+}
+
+function submitted(): ProxyCreate {
+  expect(submit).toHaveBeenCalledOnce();
+  return submit.mock.calls[0]![0];
+}
+
+describe("ProxyForm numeric drafts (#402)", () => {
+  it("clears and replaces the backend port without inserting 0", async () => {
+    await renderForm(httpProxy);
+    const port = inputByLabel(host, "Backend Port");
+    expect(port.value).toBe("8080");
+    await clearText(port);
+    expect(port.value).toBe("");
+
+    await save();
+    expect(submit).not.toHaveBeenCalled();
+    expect(port.getAttribute("aria-invalid")).toBe("true");
+    expect(host.textContent).toContain("Backend port is required");
+
+    await typeText(port, "9090");
+    expect(port.value).toBe("9090");
+    await save();
+    expect(submitted()).toMatchObject({
+      backend_port: 9090,
+      backend_connect_timeout_ms: 5000,
+      backend_read_timeout_ms: 30000,
+      backend_write_timeout_ms: 30000,
+      udp_idle_timeout_seconds: 60,
+    });
+  });
+
+  it("sends the documented 0 for an empty port on an upstream-linked proxy", async () => {
+    await renderForm({ ...httpProxy, upstream_id: "orders-pool" });
+    await clearText(inputByLabel(host, "Backend Port"));
+    await save();
+    expect(submitted()).toMatchObject({ upstream_id: "orders-pool", backend_port: 0 });
+  });
+
+  it("reopens Backend Timeouts for a cleared timeout and blocks submit", async () => {
+    await renderForm(httpProxy);
+    await toggleSection("Backend Timeouts");
+    const connect = inputByLabel(host, "Connect Timeout (ms)");
+    await clearText(connect);
+    expect(connect.value).toBe("");
+    await toggleSection("Backend Timeouts");
+    expect(inputByLabelOrNull(host, "Connect Timeout (ms)")).toBeNull();
+
+    await save();
+    expect(submit).not.toHaveBeenCalled();
+    const reopened = inputByLabel(host, "Connect Timeout (ms)");
+    expect(reopened.value).toBe("");
+    expect(reopened.getAttribute("aria-invalid")).toBe("true");
+    expect(host.textContent).toContain("Connect timeout is required");
+
+    await typeText(reopened, "2500");
+    await save();
+    expect(submitted().backend_connect_timeout_ms).toBe(2500);
+  });
+
+  it("clears and retypes circuit-breaker and retry settings", async () => {
+    await renderForm({
+      ...httpProxy,
+      circuit_breaker: {
+        failure_threshold: 5,
+        success_threshold: 3,
+        timeout_seconds: 30,
+        failure_status_codes: [500],
+        half_open_max_requests: 1,
+        trip_on_connection_errors: true,
+      },
+      retry: {
+        max_retries: 3,
+        retryable_status_codes: [503],
+        retryable_methods: ["GET"],
+        backoff: { fixed: { delay_ms: 100 } },
+        retry_on_connect_failure: true,
+      },
+    });
+    await toggleSection("Circuit Breaker");
+    await toggleSection("Retry");
+
+    const failures = inputByLabel(host, "Failure Threshold");
+    const retries = inputByLabel(host, "Max Retries");
+    const delay = inputByLabel(host, "Delay (ms)");
+    for (const field of [failures, retries, delay]) {
+      await clearText(field);
+      expect(field.value).toBe("");
+    }
+    await save();
+    expect(submit).not.toHaveBeenCalled();
+    expect(host.textContent).toContain("Failure threshold is required");
+    expect(host.textContent).toContain("Max retries is required");
+    expect(host.textContent).toContain("Delay is required");
+
+    await typeText(failures, "7");
+    await typeText(retries, "0");
+    await typeText(delay, "250");
+    await save();
+    const data = submitted();
+    expect(data.circuit_breaker?.failure_threshold).toBe(7);
+    expect(data.retry).toMatchObject({ max_retries: 0, backoff: { fixed: { delay_ms: 250 } } });
   });
 });

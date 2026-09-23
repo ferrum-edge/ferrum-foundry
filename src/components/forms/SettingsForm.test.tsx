@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { blurField, clearText, typeText } from "@/test/fields";
 import { SettingsForm } from "./SettingsForm";
 
 const { get, put, toast } = vi.hoisted(() => ({
@@ -182,5 +183,76 @@ describe("SettingsForm runtime saves", () => {
     expect(inputByLabel("JWT Audience").disabled).toBe(true);
     expect(host.textContent).not.toContain("Save Settings");
     expect(put).not.toHaveBeenCalled();
+  });
+});
+
+describe("SettingsForm editing drafts", () => {
+  it("saves namespace grants typed one character at a time (#401)", async () => {
+    await renderForm();
+    const grants = inputByLabel("Namespace grants");
+    await clearText(grants);
+    await typeText(grants, "tenant-a, tenant-b");
+    expect(grants.value).toBe("tenant-a, tenant-b");
+    await blurField(grants);
+    expect(grants.getAttribute("aria-invalid")).toBeNull();
+    await save();
+
+    expect(put).toHaveBeenCalledOnce();
+    expect(submitted.jwtNamespaces).toEqual(["tenant-a", "tenant-b"]);
+  });
+
+  it("keeps an invalid grant visible with an inline error and does not save", async () => {
+    await renderForm();
+    const grants = inputByLabel("Namespace grants");
+    await clearText(grants);
+    await typeText(grants, "tenant-a, bad grant");
+    await blurField(grants);
+    expect(grants.value).toBe("tenant-a, bad grant");
+    expect(grants.getAttribute("aria-invalid")).toBe("true");
+    const description = document.getElementById(grants.getAttribute("aria-describedby")!);
+    expect(description?.textContent).toContain('("bad grant")');
+
+    await save();
+    expect(put).not.toHaveBeenCalled();
+    expect(grants.value).toBe("tenant-a, bad grant");
+  });
+
+  it("leaves an unrestricted (absent) grant list absent when untouched", async () => {
+    delete currentSettings.jwtNamespaces;
+    await renderForm();
+    expect(inputByLabel("Namespace grants").value).toBe("");
+    await change("JWT Issuer", "issuer-2");
+    await save();
+
+    expect(put).toHaveBeenCalledOnce();
+    expect(submitted).toMatchObject({ jwtIssuer: "issuer-2", jwtRole: "admin" });
+    expect(submitted).not.toHaveProperty("jwtNamespaces");
+  });
+
+  it("clears and retypes numeric settings without inserting 0 (#402)", async () => {
+    await renderForm();
+    const ttl = inputByLabel("JWT TTL (seconds)");
+    await clearText(ttl);
+    expect(ttl.value).toBe("");
+    await save();
+    expect(put).not.toHaveBeenCalled();
+    expect(ttl.value).toBe("");
+    expect(ttl.getAttribute("aria-invalid")).toBe("true");
+    expect(host.textContent).toContain("JWT TTL is required");
+
+    await typeText(ttl, "1200");
+    const read = inputByLabel("Read Timeout (ms)");
+    await clearText(read);
+    expect(read.value).toBe("");
+    await typeText(read, "45000");
+    await save();
+
+    expect(put).toHaveBeenCalledOnce();
+    expect(submitted).toMatchObject({
+      jwtTtl: 1200,
+      connectTimeout: 5000,
+      readTimeout: 45000,
+      writeTimeout: 60000,
+    });
   });
 });
