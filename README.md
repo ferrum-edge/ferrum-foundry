@@ -47,6 +47,19 @@ works the same way against a live Ferrum Edge gateway.
   </tr>
 </table>
 
+## Supported Ferrum Edge version
+
+Foundry is qualified against one Ferrum Edge image at a time: currently
+**Ferrum Edge v0.9.5**,
+`ferrumedge/ferrum-edge@sha256:eca46c84bca92d6ef467979f8846537f7ab56c0cdc137befff465526a10fe10f`,
+in `database` mode (writable and `FERRUM_ADMIN_READ_ONLY`), behind the
+trusted-proxy starter, in Chromium, on `linux/amd64` and `linux/arm64`. Other
+Edge releases, other gateway modes, and other browsers are best-effort or not
+qualified. [Supported pairing](docs/compatibility.md) has the full envelope and
+the tested scale. It also covers the one dependency on unreleased Edge work:
+atomic concurrent-edit protection needs ferrum-edge#5661, which no published
+Edge release includes yet.
+
 ## Development status
 
 Ferrum Foundry is in active buildout and has no users yet. Breaking changes are
@@ -304,6 +317,7 @@ attestations. See [Release and supply-chain gates](docs/release-security.md).
 - [Deployment](docs/deployment.md) - production topology, full configuration reference, reverse proxy / Compose / Kubernetes examples, and a go-live checklist
 - [Operator visibility](docs/operator-visibility.md) - health and audit evidence, proxy-bound specs, and mesh Runtime
 - [Production authentication](docs/authentication.md) - trusted-proxy identity contract and downstream JWT claims
+- [Supported pairing](docs/compatibility.md) - the Ferrum Edge release Foundry is qualified against, tested envelope, best-effort and unqualified modes
 - [Release and supply-chain gates](docs/release-security.md) - publication gates, image tags, provenance and SBOM
 - [Security](SECURITY.md) - supported versions and how to report a vulnerability privately
 - [Changelog](CHANGELOG.md) - notable changes

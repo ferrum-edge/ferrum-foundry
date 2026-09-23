@@ -30,7 +30,9 @@
 
 services:
   foundry:
-    # Pin a released digest for production. The demo and CI override this.
+    # `main` is the development channel. For production pin the released
+    # Foundry digest named in docs/compatibility.md. The demo and CI override
+    # this with the image under test.
     image: ${FOUNDRY_IMAGE:-ferrumedge/ferrum-foundry:main}
     restart: unless-stopped
     profiles: [production, demo]
@@ -120,8 +122,10 @@ services:
       - ./nginx/identity:/etc/nginx/identity:ro
       - ./secrets:/etc/nginx/secrets:ro
 
+  # The supported Ferrum Edge release (docs/compatibility.md). Must equal
+  # `edge.image` in docs/compatibility.json; a test fails if it drifts.
   demo-gateway:
-    image: ferrumedge/ferrum-edge@sha256:fb0f05b0392a272ba36a493584bced171655ce8ebd36b2ae0818bb5c3c25ef2d
+    image: ferrumedge/ferrum-edge@sha256:eca46c84bca92d6ef467979f8846537f7ab56c0cdc137befff465526a10fe10f # v0.9.5
     restart: unless-stopped
     profiles: [demo]
     environment:

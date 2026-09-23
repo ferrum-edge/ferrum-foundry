@@ -260,6 +260,18 @@ const SURFACES: Record<CapabilitySurface, SurfaceDescriptor> = {
 
 export const CAPABILITY_SURFACES = Object.keys(SURFACES) as CapabilitySurface[];
 
+/**
+ * The role and write gate a surface mirrors. Exposed so the capability parity
+ * contract (`scripts/capability-parity-contract.mjs`) can compare this model
+ * with the role a real gateway names in its `403`, instead of a second copy.
+ */
+export function capabilityRequirement(
+  surface: CapabilitySurface,
+): { minimumRole: GatewayRole; gate: CapabilityGate } {
+  const { minimumRole, gate } = SURFACES[surface];
+  return { minimumRole, gate };
+}
+
 export type GatewayWriteState =
   | { state: "enabled" }
   | { state: "read-only"; explanation: string }

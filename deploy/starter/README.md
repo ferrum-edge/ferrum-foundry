@@ -14,13 +14,21 @@ per request.
 For the walkthrough that ends in an authenticated request through the data
 plane, see [`docs/getting-started.md`](../../docs/getting-started.md).
 
+**Supported pairing.** This stack is qualified with exactly one Ferrum Edge
+image, Ferrum Edge v0.9.5 by digest, recorded in
+[`docs/compatibility.md`](../../docs/compatibility.md) together with what is
+tested, what is best-effort, and what is not qualified. The `demo` profile runs
+that image; in `production`, run the same release. The Foundry default,
+`ferrumedge/ferrum-foundry:main`, is the development channel — pin the released
+Foundry image named in the same record.
+
 ## Two profiles
 
 | | `production` | `demo` |
 | --- | --- | --- |
 | Reverse proxy | nginx, TLS on :443 | nginx, plain HTTP on loopback |
 | Identity | oauth2-proxy against your OIDC provider | a local stub keyed by a request header |
-| Gateway | yours | a disposable SQLite Ferrum Edge |
+| Gateway | yours — run the supported Ferrum Edge release | a disposable SQLite Ferrum Edge, the supported release pinned by digest |
 | Backend | yours | a disposable echo origin |
 | Data | yours | throwaway; `down -v` removes it |
 
@@ -90,7 +98,8 @@ request header. It is for a first run and for CI. Do not expose it.
    presents a private certificate.
 4. Edit `nginx/foundry.conf` for your `server_name` and certificate paths, and
    `nginx/identity/policy.conf` for your IdP's group names and your namespaces.
-5. Pin `FOUNDRY_IMAGE` to a released digest.
+5. Pin `FOUNDRY_IMAGE` to a released digest, and run the Ferrum Edge release
+   named in [`docs/compatibility.md`](../../docs/compatibility.md).
 6. `docker compose --profile production up -d`, then run the preflight.
 
 ### Things this stack gets right, and why

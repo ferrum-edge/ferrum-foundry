@@ -21,8 +21,8 @@ was removed: sorting and slicing now belong to the table itself.
 
 ## Gateway contract and current pages
 
-The **Pinned Gateway Contract** job in `.github/workflows/ci.yml` runs image
-`ferrumedge/ferrum-edge@sha256:fb0f05b0392a272ba36a493584bced171655ce8ebd36b2ae0818bb5c3c25ef2d`.
+The **Pinned Gateway Contract** job in `.github/workflows/ci.yml` runs the
+supported Ferrum Edge image named in [`docs/compatibility.md`](compatibility.md).
 It exercises live requests through `scripts/gateway-contract-smoke.mjs`; it does
 not check out an OpenAPI fixture or record a corresponding gateway source SHA.
 Do not infer sorting support from acceptance of an unknown query parameter.

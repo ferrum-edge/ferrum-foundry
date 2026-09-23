@@ -1,0 +1,78 @@
+{
+  "$comment": "Supported Foundry-Edge pairing. docs/compatibility.md is the human-readable record; scripts/supported-pairing.mjs reads and validates this file, CI starts the gateway it names, and scripts/supported-pairing.test.mjs fails when any other file pins a different Ferrum Edge image. Values beginning with RELEASE-STEP are filled by the release step, never guessed.",
+  "record_version": 1,
+  "status": "candidate",
+  "foundry": {
+    "version": "RELEASE-STEP: the X.Y.Z that package.json and the vX.Y.Z tag will carry",
+    "previous_release": "v0.1.0",
+    "source_commit": "RELEASE-STEP: the commit vX.Y.Z points to (also the image's org.opencontainers.image.revision label)",
+    "image": "RELEASE-STEP: ferrumedge/ferrum-foundry@sha256:<multi-arch index digest from the release run>",
+    "ci_evidence": "RELEASE-STEP: URL of the green CI run for the tagged commit",
+    "platforms": ["linux/amd64", "linux/arm64"]
+  },
+  "edge": {
+    "version": "v0.9.5",
+    "release": "https://github.com/ferrum-edge/ferrum-edge/releases/tag/v0.9.5",
+    "source_commit": "20e76030a05dc49c3804e969516c94ab101110b9",
+    "image": "ferrumedge/ferrum-edge@sha256:eca46c84bca92d6ef467979f8846537f7ab56c0cdc137befff465526a10fe10f",
+    "platform_manifests": {
+      "linux/amd64": "sha256:3bb2b253e0cc338108320a39de86da216c6e644aef39fd83a3e22ca0ad6173a8",
+      "linux/arm64": "sha256:d28b77e39e17e2480b3a3f39d55236f8fddbcc8cdf3dbbf314dbba6aa4ad3a1d"
+    },
+    "retired_images": [
+      {
+        "image": "ferrumedge/ferrum-edge@sha256:fb0f05b0392a272ba36a493584bced171655ce8ebd36b2ae0818bb5c3c25ef2d",
+        "was": "development build main-b96cfaadd41a676d39a409d47b48e0b0588fa86e (2026-08-27), never a published release",
+        "retired_by": "#385"
+      }
+    ]
+  },
+  "tested": {
+    "gateway": [
+      {
+        "mode": "database",
+        "database": "sqlite",
+        "admin_writes": "enabled",
+        "admin_security": "HS256 admin JWT with audience and FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM=true",
+        "evidence": ["Pinned Gateway Contract", "Deployment Starter", "Critical Journeys", "Container Gate"]
+      },
+      {
+        "mode": "database",
+        "database": "sqlite",
+        "admin_writes": "FERRUM_ADMIN_READ_ONLY=true",
+        "evidence": ["Pinned Gateway Contract (capability parity, read-only half)"]
+      }
+    ],
+    "roles": ["viewer", "operator", "admin"],
+    "auth_mode": "trusted-proxy",
+    "deployment": "deploy/starter: Compose, nginx identity proxy with the shared group-to-role policy, production image",
+    "browsers": ["Chromium bundled with @playwright/test 1.63.0 (Desktop Chrome profile)"],
+    "container_platforms": ["linux/amd64", "linux/arm64"],
+    "bff_node": ["22", "24"],
+    "scale": {
+      "real_gateway": "demo seed and contract fixtures: tens of resources per namespace, two namespaces",
+      "synthetic_request_budget": "500 and 50,000 records per collection (request counts and bytes only, src/api/dataLoadingBudget.test.ts)"
+    }
+  },
+  "best_effort": [
+    "database mode on PostgreSQL or MySQL",
+    "cp (control plane) mode",
+    "other Chromium-based browsers, Firefox, and Safari",
+    "Kubernetes and other deployments that reproduce the documented trusted-proxy contract",
+    "static-token authentication (development only)"
+  ],
+  "not_qualified": [
+    "file, dp, mesh, and node_agent gateway modes (modelled read-only in the UI, not run in CI)",
+    "any Ferrum Edge image other than edge.image, including newer releases",
+    "atomic concurrent-edit protection (needs ferrum-edge#5661 in a published release)",
+    "browser latency and more than one concurrent operator at scale"
+  ],
+  "edge_dependencies": [
+    {
+      "change": "ferrum-edge#5661",
+      "what": "strong ETag on resource reads and If-Match on PUT/DELETE of proxies, upstreams, consumers, and plugin configs",
+      "status": "merged on Ferrum Edge main as e55ce01893c25bd802cb4f10831c07ca32b3deda (2026-09-23); not in v0.9.5 or any published image",
+      "effect_on_pinned_edge": "Foundry's write guard verifies before every full-replacement write but sends it unconditionally, so a writer that commits within that round trip is not detected"
+    }
+  ]
+}

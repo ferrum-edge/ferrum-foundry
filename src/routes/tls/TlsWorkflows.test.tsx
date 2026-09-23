@@ -191,6 +191,33 @@ describe("TLS inventory and events", () => {
     expect(requests.every((request) => !request.headers.has("X-Ferrum-Namespace"))).toBe(true);
   });
 
+  it("presents a refused read as a denial, never as an empty store", async () => {
+    // Edge requires operator for every TLS read. A viewer's 403 is an answer
+    // about the session: claiming "no TLS material" would be a false fact.
+    readStatus = 403;
+    await mount();
+    await settle(() => expect(panel().textContent).toContain("TLS inventory: read not permitted for this session"));
+    expect(panel().textContent).not.toContain("No TLS material found");
+    for (const [tab, label, empty] of [
+      ["Certificates", "Managed Certificates", "No certificates yet"],
+      ["CA Bundles", "Managed CA Bundles", "No CA bundles yet"],
+      ["CRLs", "Managed CRLs", "No CRLs yet"],
+      ["OCSP", "Managed OCSP", "No OCSP responses yet"],
+      ["JWKS", "Managed JWKS", "No JWKS documents yet"],
+      ["Events", "TLS events", "No TLS events"],
+      // Last, so the orders list below is read from the ACME panel.
+      ["ACME", "ACME certificates", "No ACME certificates"],
+    ]) {
+      await selectTab(tab);
+      await settle(() => expect(panel().textContent).toContain(`${label}: read not permitted for this session`));
+      expect(panel().textContent).not.toContain(empty);
+      expect(panel().querySelector("[data-read-denied]")).not.toBeNull();
+    }
+    await settle(() => expect(panel().textContent).toContain("ACME orders: read not permitted for this session"));
+    expect(panel().textContent).not.toContain("No active orders");
+    expect(writes()).toHaveLength(0);
+  });
+
   it("rotates the selected surface and reports acceptance and failure", async () => {
     mutate.mockResolvedValueOnce(Response.json({ accepted: true, requested_surface: "backend_tls" }, { status: 202 }))
       .mockResolvedValueOnce(Response.json({ error: "surface not configured" }, { status: 400 }));
