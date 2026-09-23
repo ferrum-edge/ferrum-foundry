@@ -17,31 +17,31 @@ and findings to fix, implement directly in that session. The dispatching orchest
 worker and effort deliberately. This skill applies only when the user asks Codex to delegate to
 Fable.
 
-## Remote CI validation
+## Validation
 
-Do not run local builds, tests, benchmarks, or compilation-based checks, including `npm run build`,
-`npm test`, `npm run typecheck`, `npm run lint`, and the `test:*` scripts, or wrappers that invoke
-them. Do not make an exception for a targeted check, an ambiguous failure, or a controller's
-routine validation request. Local source inspection and `git diff --check` are allowed.
+Workers validate locally before pushing, and CI confirms the pushed head. Require each worker to
+run `npm ci` in a fresh worktree, then `npm run typecheck`, `npm run lint`, and the tests covering
+its change (`npx vitest run <paths>`, or `npm test` for broad changes; `npm run test:contracts` for
+`scripts/`), plus `npm run build` when build configuration, server entrypoints, or bundling change.
+`npm run test:gateway-contract` and `npm run e2e` need a running gateway or browser stack; workers
+run them only when the task touches that surface and the stack is available, and otherwise leave
+them to CI. Workers report the exact commands and results.
 
-Use remote CI results for the exact pushed head SHA as build/test confirmation. Inspect failed
-job logs, fix the demonstrated failure, push the change, and use the next CI run to confirm it.
-Pending, skipped, unavailable, or earlier-head checks are not evidence that the change passed.
-Keep adding or updating relevant tests; remote CI executes them.
+Local passes are not CI evidence. Use CI results for the exact pushed head SHA as confirmation:
+pending, skipped, unavailable, or earlier-head checks do not show that the change passed. Inspect
+failed job logs, fix the demonstrated failure, push, and confirm it on the next run.
 
 The controller owns post-push CI monitoring unless the worker is explicitly assigned a CI repair
 or shepherd round. A worker assigned to exit after pushing must report the head SHA and CI status
 as pending or unverified and exit; the controller continues the CI-driven fix loop. Never report
-build/test success without matching remote evidence.
+CI success without matching remote evidence.
 
-Include the no-local-build/test rule and remote CI confirmation requirement in every dispatch
-prompt, including continuation prompts and any permitted nested delegation.
+Include the local-validation and CI-confirmation requirements in every dispatch prompt, including
+continuation prompts and any permitted nested delegation.
 
 ## Preflight
 
-1. Read `AGENTS.md`, the relevant `docs/*.md`, and the issue or PR before dispatching. The
-   `.claude/rules/*.md` files are gateway reference rules copied from ferrum-edge, not Foundry
-   build or test instructions.
+1. Read `AGENTS.md`, the relevant `docs/*.md`, and the issue or PR before dispatching.
 2. Confirm the standalone claude CLI is resolvable, then run `claude --version`, `claude auth status`,
    and `claude --help` against it. The launcher resolves the binary in this order and refuses
    any candidate under `com.conductor.app`, because Conductor's bundled copy lags the standalone
@@ -120,12 +120,11 @@ Fable workers unless the user sets a lower limit.
 Every prompt must contain this role instruction even though the briefs repeat it:
 
 ```text
-YOU are the implementer. Complete every task and validation the controller assigns before ending.
-Do not stop at analysis, partial implementation, or a handoff for someone else to finish. Perform
+YOU are the implementer. Complete every task and validation the controller assigns before ending. Perform
 commit, push, PR, review, and CI actions only when the prompt assigns them. Do not request or wait
 for a separate review-bot pass unless explicitly assigned. After the final requested push and
 report, exit; the controller owns post-push CI and review monitoring. Do not invoke agent-dispatch
-skills or scripts (including astra-agents, opus-agents, fable-5-1-agents, grok-agents, or any
+skills or scripts (any .agents/skills/*-agents skill or any
 .agents/skills/*/scripts/dispatch-agent.sh), and do not spawn nested workers.
 ```
 
@@ -161,8 +160,9 @@ After every Fable run, review its exact output and the resulting repository and 
 accepting the work. Fable's security guardrails can reject a request or cause the platform to route
 the affected turn to another model even though the CLI process exits normally.
 
-Treat an explicit refusal, safeguard or fallback notice, a response that identifies a non-Fable
-serving model, or structured output showing `stop_reason: "refusal"` as confirmation. Missing or
+Treat an explicit refusal, a safeguard or fallback notice, or a response that identifies a
+non-Fable serving model as confirmation. The launcher emits plain text, so there is no structured
+`stop_reason` to inspect. Missing or
 poor work alone is not proof; inspect the transcript and state first.
 
 When a safeguard rejection or model reroute is confirmed:
@@ -185,13 +185,13 @@ them guardrail rejections.
 
 1. Poll each retained execution session separately. Use `pgrep -x claude` only as a secondary
    fleet-wide cross-check, never as the identity of a particular worker.
-2. Give the user a concise progress update at least once a minute while workers are active.
+2. Tell the user when a worker starts, finishes, fails, or stalls.
 3. On completion, perform the safeguard check above, then verify the claims relevant to the
    prompt, such as the branch, pushed head, PR, requested validation, and any explicitly assigned
    review or CI actions.
 4. Fetch `origin/main` and independently inspect `git diff origin/main...HEAD` in the worker's
-   worktree. Use a three-dot diff. Review fail-closed behavior, hot paths, docs/spec parity,
-   production panics, tests, and scope creep.
+   worktree. Use a three-dot diff. Review fail-closed behavior, docs/spec parity, tests,
+   and scope creep.
 5. Own post-push review and CI monitoring. Diagnose red checks from logs, rerun only demonstrated
    infrastructure failures or known flakes, and dispatch bounded repair work for deterministic
    failures.
