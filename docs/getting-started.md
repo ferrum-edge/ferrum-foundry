@@ -159,8 +159,11 @@ does not, so the plugin exists, names the proxy, is enabled — and does not
 run. The route stays open while everything looks configured.
 
 Attaching it yourself is safe either way: on a gateway that already attached
-it, the call below changes nothing. Foundry's plugin editor does this check
-for you once #393 is merged; by hand it is a second call.
+it, the call below changes nothing. Foundry's plugin editor verifies the
+association after every proxy-scoped plugin write and writes it when it is
+missing (`reconcileProxyScopedAssociation` in `src/lib/pluginMembership.ts`).
+Creating the config through the raw API as this walkthrough does skips that
+check, so attaching it remains a second call as shown.
 
 Proxy `PUT` is a **full replacement**, so read the proxy, add the
 association, and send the whole object back:
