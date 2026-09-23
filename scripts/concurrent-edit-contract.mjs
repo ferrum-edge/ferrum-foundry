@@ -13,11 +13,14 @@
  *      gone. It is what any other admin-API client still does.
  *   4. The same older draft is submitted **through the guard**. It is refused
  *      before anything reaches the wire and the newer value survives.
- *
- * It also probes the gateway for a conditional-write precondition. If a future
- * Edge revision starts honouring `If-Match`, step 5 fails and this contract is
- * the signal to move the enforcement point into the request itself rather than
- * keeping a verification read (see `docs/concurrent-edits.md`).
+ *   5. The precondition itself. The guard sends the `ETag` of its verification
+ *      read as `If-Match` (ferrum-edge#5661), which is what closes the gap
+ *      between that read and the write. A gateway that tags reads must refuse
+ *      a tag from before administrator 1's change, and an invented one, with
+ *      `412` and write nothing. A gateway that issues no tag gets no
+ *      `If-Match` from Foundry, so it must not be enforcing one either —
+ *      either mismatch means Foundry's guard and the gateway disagree about
+ *      the contract (see `docs/concurrent-edits.md`).
  *
  * The comparison uses `src/lib/resourceBaseline.ts` directly — the same module
  * the browser uses — so the contract cannot pass against a second copy of the
@@ -49,9 +52,16 @@ function toUpdatePayload(proxy) {
   return rest;
 }
 
+/** RFC 9110 strong entity-tag, as `strongEtag()` in `conditionalWrite.ts`. */
+function strongEtag(header) {
+  const value = header?.trim();
+  return value && /^"[\x21\x23-\x7e\x80-\xff]*"$/.test(value) ? value : null;
+}
+
 /**
  * The guard, expressed against the raw admin API exactly as
- * `src/api/conditionalWrite.ts` expresses it against the BFF.
+ * `src/api/conditionalWrite.ts` expresses it against the BFF: verify against
+ * the baseline, then write conditionally on the tag of that same read.
  */
 async function guardedPut(exchange, baseline, body) {
   const fresh = await exchange(`/proxies/${PROXY_ID}`);
@@ -59,9 +69,11 @@ async function guardedPut(exchange, baseline, body) {
   if (fingerprint(fresh.body) !== fingerprint(baseline)) {
     return { refused: true, current: fresh.body };
   }
+  const etag = strongEtag(fresh.etag);
   const written = await exchange(`/proxies/${PROXY_ID}?apply=sync`, {
     method: "PUT",
     body,
+    ...(etag && { headers: { "if-match": etag } }),
   });
   assert.equal(written.status, 200, `guarded PUT returned ${written.status}`);
   return { refused: false, current: written.body };
@@ -143,20 +155,56 @@ export async function verifyConcurrentEditContract(exchange, proxyTemplate) {
     );
     assert.equal(after.body.backend_read_timeout_ms, 5_000);
 
-    // ── 5. Does the gateway enforce a precondition yet? ─────────────
-    const precondition = await exchange(`/proxies/${PROXY_ID}?apply=sync`, {
-      method: "PUT",
-      body: newerChange,
-      headers: { "if-match": '"a-revision-this-proxy-never-had"' },
-    });
-    findings.ifMatchStatus = precondition.status;
-    findings.gatewayHonoursIfMatch = precondition.status === 412;
-    assert.notEqual(
-      precondition.status,
-      412,
-      "the gateway now enforces If-Match — move enforcement into the write " +
-        "itself and update docs/concurrent-edits.md",
-    );
+    // ── 5. The precondition the guard sends ────────────────────────
+    const openedTag = strongEtag(opened.etag);
+    findings.gatewayIssuesEtag = openedTag !== null;
+
+    if (openedTag) {
+      const current = await exchange(`/proxies/${PROXY_ID}`);
+      assert.notEqual(
+        strongEtag(current.etag),
+        openedTag,
+        "the tag did not change after an accepted write",
+      );
+
+      // Administrator 2's tag predates administrator 1's change.
+      const stale = await exchange(`/proxies/${PROXY_ID}?apply=sync`, {
+        method: "PUT",
+        body: staleDraft,
+        headers: { "if-match": openedTag },
+      });
+      assert.equal(stale.status, 412, `a stale If-Match returned ${stale.status}`);
+
+      const invented = await exchange(`/proxies/${PROXY_ID}?apply=sync`, {
+        method: "PUT",
+        body: staleDraft,
+        headers: { "if-match": '"a-revision-this-proxy-never-had"' },
+      });
+      assert.equal(invented.status, 412, `an invented If-Match returned ${invented.status}`);
+
+      const survived = await exchange(`/proxies/${PROXY_ID}`);
+      assert.equal(survived.body.backend_host, BACKEND_B, "a refused conditional write reached the gateway");
+      assert.equal(survived.body.backend_read_timeout_ms, 5_000);
+      findings.ifMatchStatus = stale.status;
+      findings.gatewayHonoursIfMatch = true;
+    } else {
+      // No tag, so Foundry sends no If-Match and the guard is the
+      // verification read alone. The gateway must not be enforcing a
+      // precondition Foundry cannot satisfy.
+      const precondition = await exchange(`/proxies/${PROXY_ID}?apply=sync`, {
+        method: "PUT",
+        body: newerChange,
+        headers: { "if-match": '"a-revision-this-proxy-never-had"' },
+      });
+      findings.ifMatchStatus = precondition.status;
+      findings.gatewayHonoursIfMatch = precondition.status === 412;
+      assert.notEqual(
+        precondition.status,
+        412,
+        "the gateway enforces If-Match but issued no ETag on the read, so " +
+          "Foundry's guard cannot send one — see docs/concurrent-edits.md",
+      );
+    }
   } finally {
     await exchange(`/proxies/${PROXY_ID}?apply=sync&cleanup_orphaned_upstream=false`, {
       method: "DELETE",

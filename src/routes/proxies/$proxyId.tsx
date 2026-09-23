@@ -171,7 +171,7 @@ function ProxyEditor({ session }: { session: EditorSession }) {
       toast("success", "Proxy updated successfully");
     } catch (err: unknown) {
       if (isStaleResourceError(err)) {
-        // Nothing was sent and the draft is untouched: hand the operator the
+        // Nothing was written and the draft is untouched: hand the operator the
         // comparison and let them decide. Never resend this body for them.
         setConflict(err.detail);
         return;

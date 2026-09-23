@@ -2,6 +2,13 @@
 /*  Ferrum Foundry – guarded full-replacement writes                   */
 /* ------------------------------------------------------------------ */
 
+import { isHTTPError } from "ky";
+import {
+  HANDLED_STATUSES,
+  proxyApi,
+  scoped,
+  type NamespaceScope,
+} from "./client";
 import {
   resourceFingerprint,
   type BaselineSnapshot,
@@ -28,8 +35,11 @@ export interface StaleResourceDetail {
 
 /**
  * Raised instead of committing a full-replacement write whose baseline no
- * longer matches the gateway. The draft that produced it is untouched: the
- * caller keeps the form mounted and the operator decides what happens next.
+ * longer matches the gateway — either because the verification read already
+ * differed, or because the gateway refused the conditional `PUT` with `412`
+ * and the re-read did. Nothing from the draft was written, and the draft
+ * itself is untouched: the caller keeps the form mounted and the operator
+ * decides what happens next.
  *
  * This is never retried automatically. Re-sending the same body against a
  * fresh read is exactly the silent overwrite the guard exists to prevent.
@@ -40,7 +50,7 @@ export class StaleResourceError extends Error {
   constructor(detail: StaleResourceDetail) {
     super(
       `This ${detail.resource} changed on the gateway since you opened it. ` +
-        "Your draft was not sent.",
+        "Your draft was not saved.",
     );
     this.name = "StaleResourceError";
     this.detail = detail;
@@ -65,42 +75,162 @@ export interface WriteGuard<TShape> {
   readonly select: (value: TShape) => BaselineSnapshot;
 }
 
+/** A resource read together with the gateway's validator for exactly that read. */
+export interface TaggedRead<TResource> {
+  readonly value: TResource;
+  /**
+   * The strong `ETag` the gateway returned, or `null` when it returned none —
+   * a gateway without the conditional-write contract, a mode without a
+   * database, or the cached-config fallback (`X-Data-Source: cached`), which
+   * may lag the database and so is deliberately untagged.
+   */
+  readonly etag: string | null;
+}
+
+/**
+ * RFC 9110 strong entity-tag: `DQUOTE *etagc DQUOTE`, with
+ * `etagc = %x21 / %x23-7E / obs-text`.
+ */
+const STRONG_ETAG = /^"[\x21\x23-\x7e\x80-\xff]*"$/;
+
+/**
+ * The `ETag` response header as a value that can be sent back in `If-Match`,
+ * or `null` when there is nothing usable.
+ *
+ * Edge compares `If-Match` strongly, so a weak `W/"…"` tag — which only an
+ * intermediary would produce here — can never match. Sending one would turn
+ * every save into a `412`, so it is treated as no tag at all and the write
+ * falls back to the verification read alone.
+ */
+export function strongEtag(header: string | null): string | null {
+  if (header === null) return null;
+  const value = header.trim();
+  return STRONG_ETAG.test(value) ? value : null;
+}
+
+/** `GET` one resource and keep the validator the gateway issued for it. */
+export async function readTagged<TResource>(
+  scope: NamespaceScope,
+  path: string,
+): Promise<TaggedRead<TResource>> {
+  const response = await proxyApi.get(path, scoped(scope));
+  return {
+    value: await response.json<TResource>(),
+    etag: strongEtag(response.headers.get("etag")),
+  };
+}
+
+/**
+ * Full-replacement `PUT`, conditional on `ifMatch` when there is one.
+ *
+ * A conditional write's `412` is an outcome `guardedReplace` resolves itself,
+ * so it is kept out of the global error popup; every other failure is not.
+ * `If-Match` is only ever sent to the resource paths whose `PUT` evaluates it
+ * — Edge answers `400` to one on any other mutating route.
+ */
+export function conditionalPut<TResource>(
+  scope: NamespaceScope,
+  path: string,
+  body: unknown,
+  ifMatch: string | null,
+): Promise<TResource> {
+  return proxyApi
+    .put(
+      path,
+      scoped(
+        scope,
+        ifMatch === null
+          ? { json: body }
+          : {
+              json: body,
+              headers: { "If-Match": ifMatch },
+              context: { [HANDLED_STATUSES]: [412] },
+            },
+      ),
+    )
+    .json<TResource>();
+}
+
+/** Whether `error` is the gateway refusing a conditional write. */
+export function isPreconditionFailed(error: unknown): boolean {
+  return isHTTPError(error) && error.response.status === 412;
+}
+
+/**
+ * How many times a write whose only `412`s were caused by fields it does not
+ * replace is attempted before it is refused anyway. Each attempt is a complete
+ * verify-then-write; the bound only stops a resource under continuous churn
+ * from holding a save open indefinitely.
+ */
+export const PRECONDITION_ATTEMPTS = 3;
+
 export interface GuardedReplaceOptions<TResource, TPayload> {
   /** Resource kind, used in the conflict message and dialog heading. */
   readonly resource: string;
   readonly id: string;
   readonly namespace: string;
   readonly guard: WriteGuard<TResource | TPayload>;
-  /** The body this editor wants to send. */
-  readonly proposed: TPayload;
   /** A fresh authoritative read, bound to the same namespace as the write. */
-  readonly read: () => Promise<TResource>;
-  readonly write: (payload: TPayload) => Promise<TResource>;
+  readonly read: () => Promise<TaggedRead<TResource>>;
+  /**
+   * The body this editor wants to send, given the read it will be sent
+   * against. A whole-resource form ignores `current`; the targets editor takes
+   * every setting it does not own from it.
+   */
+  readonly propose: (current: TResource) => TPayload;
+  /**
+   * The full-replacement `PUT`. When `ifMatch` is not `null` it must be sent
+   * as `If-Match`, and a `412` must reach this function's caller as an
+   * `HTTPError` (see `HANDLED_STATUSES` in `client.ts`).
+   */
+  readonly write: (payload: TPayload, ifMatch: string | null) => Promise<TResource>;
 }
 
 /**
  * Verify that nobody else has changed a resource since an editor opened it,
- * then perform the full-replacement write.
+ * then perform the full-replacement write conditionally on that verification.
  *
- * ## Why this is a guard and not a compare-and-swap
+ * ## How the comparison becomes atomic
  *
- * The verification read and the write are two requests. A writer that commits
- * between them is not detected and is still overwritten. Ferrum Edge's admin
- * API exposes no conditional-write precondition on resource `PUT` — there is
- * no `If-Match` parameter and no `412` response on the surveyed revision of
- * `openapi.yaml` — so there is currently nothing atomic to bind to. What this
- * does buy:
+ * The verification read compares the gateway's current content against the
+ * editor's baseline. When the gateway tags that read with an `ETag`, the `PUT`
+ * carries it as `If-Match`, and Ferrum Edge refuses the write with `412`
+ * unless the stored resource is still exactly the representation that was
+ * verified. The two checks compose: the baseline proves the verified read
+ * holds nothing this draft would revert, and `If-Match` proves nothing has
+ * been written since that read. Edge evaluates the precondition under the
+ * same admission lease its every admin writer takes, so no writer — another
+ * Foundry deployment, the seeding scripts, Terraform, a direct admin-API
+ * client, another control-plane replica — can commit in between.
  *
- * - the exposure shrinks from "as long as the editor stayed open" to one
- *   gateway round trip;
- * - it detects **any** writer, including a second Foundry deployment, the
- *   seeding scripts, or a direct admin-API client, because it compares the
- *   gateway's own content rather than local bookkeeping;
- * - the refusal is a real refusal — the stale body never reaches the wire.
+ * The tag is always taken from the read that was just verified, never from
+ * the editor's original load or a later cache refetch. Adopting a tag from
+ * any other read would let an older draft pass the precondition against
+ * content the operator never compared.
  *
- * When Edge gains a precondition contract, the atomic check belongs in
- * `write`, and this verification read becomes a diagnosis aid rather than the
- * enforcement point. `docs/concurrent-edits.md` tracks that migration.
+ * ## After a `412`
+ *
+ * The tag covers the whole stored resource, including fields this write does
+ * not replace — a proxy's plugin associations, an upstream's settings during a
+ * targets save. So a `412` means "something moved", not "this draft conflicts".
+ * The guard re-reads and verifies again from the top:
+ *
+ * - a change to anything this draft would overwrite fails verification and
+ *   raises `StaleResourceError` with the content that caused it;
+ * - a change only to fields this draft leaves alone passes verification, and
+ *   the write is re-sent against the fresh tag with `propose` re-evaluated on
+ *   the fresh read. That is not a replay of a refused write: it is the same
+ *   decision the guard would have made had the operator pressed Save a moment
+ *   later, and it cannot revert anything.
+ *
+ * After `PRECONDITION_ATTEMPTS` such rounds the write is refused anyway.
+ *
+ * ## Without a tag
+ *
+ * A gateway that returns no `ETag` — one predating the contract, or a read
+ * served from the cached-config fallback — gets an unconditional `PUT`. The
+ * guard then narrows the exposure to one gateway round trip rather than
+ * closing it; see `docs/concurrent-edits.md`.
  *
  * Per-client write serialization (`upstreams.ts`) still matters and is not
  * replaced by this: it orders *this* client's writes so two of the operator's
@@ -111,19 +241,28 @@ export async function guardedReplace<TResource, TPayload>(
 ): Promise<TResource> {
   const { guard } = options;
   const expected = resourceFingerprint(guard.baseline);
-  const current = await options.read();
-  const currentSnapshot = guard.select(current);
 
-  if (resourceFingerprint(currentSnapshot) !== expected) {
-    throw new StaleResourceError({
-      resource: options.resource,
-      id: options.id,
-      namespace: options.namespace,
-      original: guard.baseline,
-      current: currentSnapshot,
-      proposed: guard.select(options.proposed),
-    });
+  for (let attempt = 1; ; attempt += 1) {
+    const { value, etag } = await options.read();
+    const current = guard.select(value);
+    const proposed = options.propose(value);
+    const refuse = () =>
+      new StaleResourceError({
+        resource: options.resource,
+        id: options.id,
+        namespace: options.namespace,
+        original: guard.baseline,
+        current,
+        proposed: guard.select(proposed),
+      });
+
+    if (resourceFingerprint(current) !== expected) throw refuse();
+
+    try {
+      return await options.write(proposed, etag);
+    } catch (error) {
+      if (etag === null || !isPreconditionFailed(error)) throw error;
+      if (attempt >= PRECONDITION_ATTEMPTS) throw refuse();
+    }
   }
-
-  return options.write(options.proposed);
 }

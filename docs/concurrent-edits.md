@@ -15,22 +15,46 @@ and what is still open.
 `scripts/concurrent-edit-contract.mjs` runs the two-administrator sequence
 against the pinned Ferrum Edge image used by the `Pinned Gateway Contract` CI
 job, and is executed on every pull request from
-`scripts/gateway-contract-smoke.mjs`. Against
-`ferrumedge/ferrum-edge@sha256:fb0f05b0392a272ba36a493584bced171655ce8ebd36b2ae0818bb5c3c25ef2d`
-it records:
+`scripts/gateway-contract-smoke.mjs`. It records:
 
 | Observation | Result |
 | --- | --- |
-| Unguarded stale `PUT` after another administrator's accepted change | **Accepted; the newer value is reverted** (`unguardedStaleWriteReverts: true`) |
-| The same draft submitted through Foundry's guard | **Refused before the wire** (`guardedStaleWriteRefused: true`) |
-| `PUT` carrying `If-Match: "<a revision this proxy never had>"` | **`200`** — the header is ignored (`gatewayHonoursIfMatch: false`) |
+| Unguarded stale `PUT` after another administrator's accepted change | **Accepted; the newer value is reverted** (`unguardedStaleWriteReverts: true`). Omitting `If-Match` keeps last-writer-wins on every Edge revision. |
+| The same draft submitted through Foundry's guard | **Refused; nothing is written** (`guardedStaleWriteRefused: true`) |
+| Does `GET /proxies/{id}` carry an `ETag`? | `gatewayIssuesEtag` |
+| `PUT` carrying a stale or invented `If-Match` | `412` and nothing written on a gateway that tags reads (`gatewayHonoursIfMatch: true`); ignored on one that does not |
 
-The third row is the important one: **the admin API has no conditional-write
-precondition.** The surveyed `openapi.yaml` declares no `If-Match` parameter and
-no `412` response on any resource `PUT`; the only conditional semantics in the
-spec are `If-None-Match`/`ETag` on `GET /api-specs/{id}`, which are cache
-validators for reads. The contract asserts `status !== 412`, so the day Edge
-starts enforcing a precondition, CI fails and points here.
+The precondition is ferrum-edge#5661. Before it,
+`ferrumedge/ferrum-edge@sha256:fb0f05b0392a272ba36a493584bced171655ce8ebd36b2ae0818bb5c3c25ef2d`
+— the image CI pins at the time of writing — issued no tag and answered `200`
+to any `If-Match`. The contract fails if the two halves disagree: a gateway
+that tags reads must refuse a stale tag, and a gateway that issues no tag must
+not be enforcing a precondition Foundry has no way to satisfy.
+
+## The Edge contract
+
+`GET /proxies/{id}`, `/upstreams/{id}`, `/consumers/{id}`, and
+`/plugins/config/{id}` return a strong `ETag`: a keyed MAC over the full stored
+resource, bound to its kind, namespace, and id. A `PUT` or `DELETE` carrying it
+as `If-Match` is refused with `412 Precondition Failed`, writing nothing,
+unless the stored resource still has that representation. Edge evaluates the
+comparison under the namespace config admission lease that every admin writer
+of these families takes — CRUD, `/batch`, `/restore`, spec import, credential
+routes, and the same paths on another control-plane replica — so nothing can
+commit between the comparison and the write.
+
+The parts of that contract Foundry relies on:
+
+- **Write responses carry no tag**, and neither does the cached-config `GET`
+  fallback (`X-Data-Source: cached`). A tag always comes from a fresh read.
+- **Comparison is strong.** A weak `W/"…"` tag never matches.
+- **`If-Match` on any other mutating route is `400`**, not ignored — `POST`
+  creates, `/batch`, `/restore`, trust bundles, API specs, and credential
+  sub-routes. Foundry sends it only on the resource `PUT` paths the guard
+  covers.
+- **After a `412`, reapply the intended edit to the current representation.**
+  Resending the same body with the fresh tag would revert the change that
+  caused the refusal.
 
 ## What Foundry does
 
@@ -38,33 +62,71 @@ starts enforcing a precondition, CI fails and points here.
 
 1. The editor captures a **baseline** when it is seeded — the resource reduced
    to the fields this write would overwrite (`src/lib/resourceBaseline.ts`).
-2. At submit time the guard re-reads the resource and compares the canonical
-   fingerprint of that reduction.
+2. At submit time the guard re-reads the resource, keeping the read's `ETag`,
+   and compares the canonical fingerprint of that reduction.
 3. A mismatch throws `StaleResourceError`. **Nothing is sent.**
-4. A match performs the `PUT`, and the accepted response becomes the new
-   baseline.
+4. A match sends the `PUT` with `If-Match` set to the tag of **that same
+   read**. If anything was written after it, Edge answers `412` and writes
+   nothing; the guard goes back to step 2.
+5. An accepted response becomes the new baseline.
 
-### This is a guard, not a compare-and-swap
+The two checks compose. The baseline comparison proves the verified read holds
+nothing this draft would revert; `If-Match` proves nothing has been written
+since that read. Together the write commits only against content equal to what
+the editor opened, on every field the write replaces.
 
-The verification read and the write are two requests. A writer that commits
-between them is not detected and is still overwritten. What the guard buys:
+### Where the tag comes from
+
+Always the verification read — never the editor's original load, never a
+later background refetch. The editor's baseline is compared field by field
+precisely because the tag cannot be: it covers fields the write does not
+replace (plugin associations, and for a targets save, every upstream setting),
+so a tag captured at seed time would refuse saves that race nothing. Adopting
+a tag from any read other than the one just compared would let an older draft
+pass the precondition against content the operator never saw.
+
+### After a `412`
+
+A `412` means "something was written since the verification read", not "this
+draft conflicts". The guard re-reads and verifies from the top:
+
+- a change to anything the draft would overwrite fails the comparison and
+  raises `StaleResourceError`, carrying the content that caused it;
+- a change only to fields the draft leaves alone — a plugin attached from the
+  plugin pages, an upstream setting changed while the Targets tab saves —
+  passes, and the write is re-sent against the fresh tag, with the targets
+  save rebuilding its body from the fresh settings.
+
+That re-send is not a replay of a refused write. It is exactly the decision the
+guard would have made had the operator pressed Save a moment later, and by
+construction it cannot revert anything. After `PRECONDITION_ATTEMPTS` (3)
+consecutive rounds the save is refused anyway, so a resource under continuous
+churn cannot hold a save open.
+
+The `412` is an outcome the guard resolves, so the conditional `PUT` opts it
+out of the global error popup with `HANDLED_STATUSES` (`src/api/client.ts`);
+every other failure of the same request is still reported.
+
+### Without a tag
+
+When the verification read carries no usable `ETag` — a gateway predating
+ferrum-edge#5661, a read served from the cached-config fallback, or a weak tag
+an intermediary produced — Foundry sends the `PUT` without `If-Match`. The
+guard then narrows the race rather than closing it: a writer that commits
+between the verification read and the write is not detected. What the guard
+still buys:
 
 - the exposure shrinks from "however long the editor stayed open" — minutes to
   hours — to one gateway round trip;
 - it detects **any** writer, not just another Foundry tab: a second Foundry
   deployment, the seeding scripts, Terraform, or a direct admin-API client, all
   of which local bookkeeping cannot see;
-- the refusal is real — the stale body never reaches the wire, so there is no
-  window in which the gateway holds the wrong configuration.
+- the refusal is real — the stale body never reaches the wire.
 
-Closing the remainder requires an Edge precondition contract. When one exists,
-the atomic check belongs inside `write`, and the verification read becomes a
-diagnosis aid rather than the enforcement point. Nothing else in the design
-changes: the baseline is already the value a precondition would be derived
-from.
-
-A BFF-local lock is **not** an alternative. It cannot see another BFF replica
-or a direct admin-API client, which is exactly the population the guard is for.
+A BFF-local lock is **not** an alternative in either case. It cannot see
+another BFF replica or a direct admin-API client, which is exactly the
+population the guard is for. The BFF forwards `If-Match` and `ETag` unchanged
+(`server/proxy.ts`).
 
 ## What is compared, and what is not
 
@@ -101,7 +163,8 @@ top of it.
 
 `StaleWriteDialog` is shown when a save is refused. It keeps three properties:
 
-1. **The draft survives.** The dialog does not touch the form. "Keep my draft"
+1. **The draft survives.** Nothing from it was written — the guard refused
+   it, or the gateway did with `412`. The dialog does not touch the form. "Keep my draft"
    closes it and the operator is back in their unsaved changes.
 2. **There is no automatic reapplication and no "save anyway".** Re-sending the
    same body against the newer revision *is* the overwrite the guard refused.
@@ -145,17 +208,24 @@ so the next successful read seeds a fresh baseline for the new tenant.
 | --- | --- |
 | Reduction, fingerprint, three-way comparison, redaction | `src/lib/resourceBaseline.test.ts` |
 | Two-session regression, unguarded baseline, re-seeded save, plugin-association non-conflict, targets scope | `src/api/writeGuard.test.ts` |
+| `If-Match` from the verified read, a writer in the gap refused, re-send after a `412` on unowned fields, bounded retries, untagged and weak-tag fallback, popup opt-out | `src/api/conditionalWrite.test.ts` |
 | Draft preserved, no reapply control, keep/discard behavior | `src/routes/proxies/concurrentEdit.test.tsx` |
 | Same-client write ordering still composes | `src/api/upstreams.targetWrites.test.ts` |
-| Real gateway behavior and the `If-Match` probe | `scripts/concurrent-edit-contract.mjs` |
+| Real gateway behavior and the `If-Match` contract | `scripts/concurrent-edit-contract.mjs` |
 
 ## Still open
 
-- **Atomicity.** Requires a conditional-write contract in `ferrum-edge`. Track
-  it there; this repository's integration point is ready for it.
-- **Consumers and plugin configurations.** Their editors have their own
-  fresh-read protections (`docs/client-recovery.md`) but do not yet capture an
-  editor baseline. The guard is resource-agnostic; wiring them is the same
-  three lines as the proxy editor.
+- **The pinned image.** CI's pinned gateway predates ferrum-edge#5661, so
+  CI exercises the untagged path. Bumping the digest to a release that
+  includes it turns on the atomic path with no Foundry change; the contract
+  then asserts the `412`s.
+- **Consumers and plugin configurations.** Edge tags them too. Their editors
+  have their own fresh-read protections (`docs/client-recovery.md`) but do not
+  yet capture an editor baseline. The guard is resource-agnostic; wiring them
+  is the same three lines as the proxy editor, and their `PUT`s can then carry
+  `If-Match` the same way.
+- **Conditional deletes.** Edge honours `If-Match` on `DELETE` of the same
+  four families. Foundry's deletes are confirmed from list rows rather than an
+  editor baseline, so they are sent unconditionally.
 - **A browser-level two-session journey.** Belongs in the critical-journey
   suite tracked by #380.
