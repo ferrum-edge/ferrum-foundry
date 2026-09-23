@@ -98,8 +98,13 @@ draft conflicts". The guard re-reads and verifies from the top:
   save rebuilding its body from the fresh settings.
 
 That re-send is not a replay of a refused write. It is exactly the decision the
-guard would have made had the operator pressed Save a moment later, and by
-construction it cannot revert anything. After `PRECONDITION_ATTEMPTS` (3)
+guard would have made had the operator pressed Save a moment later, and it
+cannot revert anything because every field in the body is either compared or
+taken from the read it is sent against. `proxies.update` enforces that for
+the one uncompared writable field: a guarded proxy body never carries
+`plugins`, whatever the caller built. The unguarded targets write
+(`updateTargets(…, null)`) is conditional too, since it rebuilds every
+setting from its read. After `PRECONDITION_ATTEMPTS` (3)
 consecutive rounds the save is refused anyway, so a resource under continuous
 churn cannot hold a save open.
 
