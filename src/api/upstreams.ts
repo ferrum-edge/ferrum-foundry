@@ -11,9 +11,12 @@ import type {
 } from "./types";
 import { collectAllPages } from "./pagination";
 import {
+  conditionalDelete,
   conditionalPut,
+  guardedRemove,
   guardedReplace,
   readTagged,
+  uncomparedGuard,
   type WriteGuard,
 } from "./conditionalWrite";
 import {
@@ -199,12 +202,6 @@ export function targetsWriteGuard(
   return { baseline: select(seed), select };
 }
 
-/** A guard that compares nothing, for a write that owns only what it sends. */
-const UNCOMPARED: WriteGuard<Upstream | UpstreamCreate> = {
-  baseline: {},
-  select: () => ({}),
-};
-
 /**
  * Full-replacement update of the upstream settings.
  *
@@ -266,7 +263,7 @@ export async function updateTargets(
       // Unguarded, the targets write still rebuilds every setting from the
       // read it is sent against, so it is conditional on that read's tag.
       // `targets` itself is simply replaced: nothing is compared.
-      guard: guard ?? UNCOMPARED,
+      guard: guard ?? uncomparedGuard(),
       read: () => readTagged<Upstream>(scope, path),
       propose,
       write: (body, ifMatch) => conditionalPut<Upstream>(scope, path, body, ifMatch),
@@ -274,8 +271,26 @@ export async function updateTargets(
   });
 }
 
-export async function remove(scope: NamespaceScope, id: string): Promise<void> {
-  await serializeWrite(scope, id, async () => {
-    await proxyApi.delete(`upstreams/${id}`, scoped(scope));
-  });
+/**
+ * Delete an upstream, only if it still holds what the detail page shows —
+ * see `proxies.remove`. Pass `null` only with nothing on screen to compare.
+ */
+export async function remove(
+  scope: NamespaceScope,
+  id: string,
+  guard: WriteGuard<Upstream | UpstreamCreate> | null,
+): Promise<void> {
+  const path = `upstreams/${id}`;
+  await serializeWrite(scope, id, () =>
+    guard
+      ? guardedRemove<Upstream>({
+          resource: "upstream",
+          id,
+          namespace: scope.namespace,
+          guard,
+          read: () => readTagged<Upstream>(scope, path),
+          remove: (ifMatch) => conditionalDelete(scope, path, ifMatch),
+        })
+      : conditionalDelete(scope, path, null),
+  );
 }

@@ -12,6 +12,20 @@ import type {
   PaginationParams,
 } from "./types";
 import { collectAllPages } from "./pagination";
+import {
+  conditionalDelete,
+  conditionalPut,
+  guardedRemove,
+  guardedReplace,
+  readTagged,
+  uncomparedGuard,
+  type WriteGuard,
+} from "./conditionalWrite";
+import {
+  baselineSnapshot,
+  CONSUMER_BASELINE_OMIT,
+  type BaselineSnapshot,
+} from "@/lib/resourceBaseline";
 
 // Coordinate this UI's writes by their explicit namespace and consumer id.
 // A metadata PUT reads credentials only after earlier rotation writes finish.
@@ -35,6 +49,30 @@ export function toUpdatePayload(data: ConsumerCreate): ConsumerCreate {
   const payload = { ...data };
   delete payload.credentials;
   return payload;
+}
+
+/**
+ * Merge the fields a consumer editor owns over the complete fetched consumer.
+ *
+ * Consumer `PUT` is a full replacement, so a body built from the form alone
+ * reset every field the form does not model — `labels` in particular was
+ * wiped by any Details or ACL save. Unmodelled fields now round-trip; the
+ * form-owned optionals are explicit clears when absent. Credentials are never
+ * taken from here: `update` supplies them from its own read.
+ */
+export function mergeFormUpdatePayload(
+  consumer: Consumer,
+  changes: ConsumerCreate,
+): ConsumerCreate {
+  const { created_at, updated_at, namespace, credentials, ...rest } = consumer;
+  void created_at;
+  void updated_at;
+  void namespace;
+  void credentials;
+  const merged: ConsumerCreate = { ...rest, ...toUpdatePayload(changes) };
+  if (!("custom_id" in changes)) merged.custom_id = null;
+  if (!("acl_groups" in changes)) merged.acl_groups = [];
+  return merged;
 }
 
 function withConsumerId(data: ConsumerCreate, id?: string): ConsumerCreate {
@@ -69,7 +107,7 @@ export async function listAll(
 }
 
 export async function get(scope: NamespaceScope, id: string): Promise<Consumer> {
-  return proxyApi.get(`consumers/${id}`, scoped(scope)).json<Consumer>();
+  return (await readTagged<Consumer>(scope, `consumers/${id}`)).value;
 }
 
 export async function create(
@@ -81,28 +119,81 @@ export async function create(
     .json<Consumer>();
 }
 
+/** Reduce a consumer, or a consumer payload, to the metadata a save replaces. */
+export function toBaseline(consumer: Consumer | ConsumerCreate): BaselineSnapshot {
+  return baselineSnapshot(consumer, CONSUMER_BASELINE_OMIT);
+}
+
+/**
+ * The guard a consumer editor builds from the consumer it rendered: the
+ * Details form from its seed, an ACL change from the consumer whose group
+ * list it edited (the same rule as `upstreams.targetsWriteGuard`).
+ */
+export function consumerWriteGuard(
+  seed: Consumer,
+): WriteGuard<Consumer | ConsumerCreate> {
+  return { baseline: toBaseline(seed), select: toBaseline };
+}
+
+/**
+ * Full-replacement metadata update.
+ *
+ * Consumer PUT replaces represented credential types even when the whole
+ * credentials field is omitted, so the body carries the credentials of the
+ * read it is sent against, taken inside this write queue; only dedicated
+ * credential endpoints edit secrets. That read is also what `guard` is
+ * compared with and what `If-Match` comes from, so a rotation committed after
+ * it makes the gateway refuse the write instead of it replaying stale
+ * credentials. The guard then re-reads and re-sends with the rotated set.
+ *
+ * `guard` is the editor's baseline; pass `null` only for a write that cannot
+ * lose a concurrent metadata change. An unguarded write is still conditional
+ * on its credential read. See `docs/concurrent-edits.md`.
+ */
 export async function update(
   scope: NamespaceScope,
   id: string,
   data: ConsumerCreate,
+  guard: WriteGuard<Consumer | ConsumerCreate> | null,
 ): Promise<Consumer> {
-  return serializeWrite(scope, id, async () => {
-    // Consumer PUT replaces represented credential types even when the whole
-    // credentials field is omitted. Read the latest projection inside this
-    // write queue; only dedicated credential endpoints should edit secrets.
-    const current = await get(scope, id);
-    return proxyApi
-      .put(`consumers/${id}`, scoped(scope, {
-        json: withConsumerId({ ...toUpdatePayload(data), credentials: current.credentials }, id),
-      }))
-      .json<Consumer>();
-  });
+  const path = `consumers/${id}`;
+  const metadata = toUpdatePayload(data);
+  return serializeWrite(scope, id, () =>
+    guardedReplace<Consumer, ConsumerCreate>({
+      resource: "consumer",
+      id,
+      namespace: scope.namespace,
+      guard: guard ?? uncomparedGuard(),
+      read: () => readTagged<Consumer>(scope, path),
+      propose: (current) =>
+        withConsumerId({ ...metadata, credentials: current.credentials }, id),
+      write: (body, ifMatch) => conditionalPut<Consumer>(scope, path, body, ifMatch),
+    }),
+  );
 }
 
-export async function remove(scope: NamespaceScope, id: string): Promise<void> {
-  await serializeWrite(scope, id, async () => {
-    await proxyApi.delete(`consumers/${id}`, scoped(scope));
-  });
+/**
+ * Delete a consumer, only if its metadata still matches what the detail page
+ * shows — see `proxies.remove`. Pass `null` only with nothing to compare.
+ */
+export async function remove(
+  scope: NamespaceScope,
+  id: string,
+  guard: WriteGuard<Consumer | ConsumerCreate> | null,
+): Promise<void> {
+  const path = `consumers/${id}`;
+  await serializeWrite(scope, id, () =>
+    guard
+      ? guardedRemove<Consumer>({
+          resource: "consumer",
+          id,
+          namespace: scope.namespace,
+          guard,
+          read: () => readTagged<Consumer>(scope, path),
+          remove: (ifMatch) => conditionalDelete(scope, path, ifMatch),
+        })
+      : conditionalDelete(scope, path, null),
+  );
 }
 
 // ── Credential sub-endpoints ─────────────────────────────────────

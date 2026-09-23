@@ -102,6 +102,25 @@ export const UPSTREAM_BASELINE_OMIT: readonly string[] = [
   "locality_lb_strict",
 ];
 
+/**
+ * Consumer fields excluded on top of the server-managed set. A metadata save
+ * never sends the editor's `credentials`: it takes them from the read it is
+ * sent against (`consumers.update`), and credentials are edited through their
+ * own endpoints. A rotation is therefore not something a metadata draft can
+ * revert, and comparing redacted `[REDACTED]` markers would say nothing anyway.
+ */
+export const CONSUMER_BASELINE_OMIT: readonly string[] = [
+  ...SERVER_MANAGED_FIELDS,
+  "credentials",
+];
+
+/**
+ * Plugin configurations are compared on every writable field. Proxy-group
+ * membership lives on the proxies (`plugins` associations), not here, and the
+ * membership plan runs its own per-proxy contract.
+ */
+export const PLUGIN_BASELINE_OMIT: readonly string[] = SERVER_MANAGED_FIELDS;
+
 /** Reduce a fetched resource to the fields a full-replacement write replaces. */
 export function baselineSnapshot(
   resource: object,
@@ -223,7 +242,7 @@ export function compareBaselines(
  * the conflict actionable — but the value is replaced.
  */
 const REDACTED_FIELD_PATTERN =
-  /(secret|password|passphrase|credential|api[_-]?key|client[_-]?key|private[_-]?key|_key$|^key$|token|jwk|hmac|signature|salt|certificate[_-]?pem|_pem$)/i;
+  /(secret|password|passphrase|credential|api[_-]?key|client[_-]?key|private[_-]?key|_key$|^key$|token|jwk|hmac|signature|salt|certificate[_-]?pem|_pem$|authorization|cookie|bearer)/i;
 
 /**
  * A `*_path` field names a file on the gateway host, not the material in it.
@@ -248,12 +267,30 @@ export function isRedactedField(field: string): boolean {
  */
 export function formatBaselineValue(field: string, value: unknown): string {
   if (value === undefined) return "—";
-  if (isRedactedField(field)) {
-    if (value === null) return "null";
-    if (typeof value === "string" && value.length === 0) return '""';
-    return REDACTED_PLACEHOLDER;
-  }
+  if (isRedactedField(field)) return redactedMarker(value);
   if (value === null) return "null";
   if (typeof value === "string") return value.length === 0 ? '""' : value;
-  return JSON.stringify(value);
+  return JSON.stringify(redactNested(value));
+}
+
+function redactedMarker(value: unknown): string {
+  if (value === null) return "null";
+  if (typeof value === "string" && value.length === 0) return '""';
+  return REDACTED_PLACEHOLDER;
+}
+
+/**
+ * Apply the same field-name rule at every depth. A plugin configuration's
+ * `config` is one top-level field whose members are the plugin's own
+ * settings — a JWT secret, an upstream `Authorization` header, an HMAC key —
+ * so redacting by top-level name alone would print them.
+ */
+function redactNested(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactNested);
+  if (value === null || typeof value !== "object") return value;
+  const redacted: Record<string, unknown> = {};
+  for (const [key, member] of Object.entries(value as Record<string, unknown>)) {
+    redacted[key] = isRedactedField(key) ? redactedMarker(member) : redactNested(member);
+  }
+  return redacted;
 }

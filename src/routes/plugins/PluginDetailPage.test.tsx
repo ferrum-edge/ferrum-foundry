@@ -99,6 +99,7 @@ beforeEach(() => {
   firstPage = deferred<ReturnType<typeof page>>();
   secondPage = deferred<ReturnType<typeof page>>();
   get.mockImplementation((path, options) => ({
+    headers: new Headers(),
     json: () => {
       if (path === "plugins") return Promise.resolve(["rate_limiting"]);
       if (path === "plugins/config/group-1") return pluginResponse.promise;
@@ -185,7 +186,7 @@ describe("proxy group membership loading", () => {
       expect(get).toHaveBeenCalledWith(
         path,
         expect.objectContaining({
-          headers: { "X-Ferrum-Namespace": "default" },
+          headers: expect.objectContaining({ "X-Ferrum-Namespace": "default" }),
         }),
       );
     }
@@ -309,6 +310,7 @@ describe("proxy group membership loading", () => {
   it("says only 'unavailable' when a selected member's read fails for another reason", async () => {
     client.setQueryData(["proxies", "default", "all"], [member("source")]);
     get.mockImplementation((path: string) => ({
+      headers: new Headers(),
       json: () =>
         path === "proxies/destination"
           ? Promise.reject(Object.assign(new Error("Service Unavailable"), { response: { status: 503 } }))
@@ -323,6 +325,7 @@ describe("proxy group membership loading", () => {
 
   it("keeps a missing selected member visible until explicitly removed", async () => {
     get.mockImplementation((path: string) => ({
+      headers: new Headers(),
       json: () =>
         path === "proxies/destination"
           ? Promise.reject(Object.assign(new Error("Not Found"), { response: { status: 404 } }))

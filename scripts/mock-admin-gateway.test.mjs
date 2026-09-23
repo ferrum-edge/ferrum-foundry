@@ -6,7 +6,10 @@ import {
   apiSpecListResponse,
   runtimeOverlayResponse,
   crud,
+  evaluateIfMatch,
+  ifMatchRouteRefusal,
   provisionerFromHeaders,
+  resourceEtag,
   READ_ONLY_GATEWAY_MODES,
   readOnlyModeRefusal,
   stampProvisionedBy,
@@ -507,4 +510,62 @@ test("detailed mock health carries conditional diagnostics and namespace serving
   assert.equal(db.logging.stdout, null);
   assert.equal('database_polling' in buildHealth('mesh'), false);
   assert.equal(buildHealth('cp').namespace.active, null);
+});
+
+test("item GET carries a strong ETag that changes when the resource does", () => {
+  const list = [{ id: "orders", namespace: "ferrum", backend_host: "a.internal", plugins: [] }];
+  const [, , first] = crud(list, url, "GET", "orders", {}, proxyDefaults, "ferrum", undefined, undefined, "proxies");
+  assert.match(first.etag, /^"[0-9a-f]{32}"$/);
+  crud(list, url, "PUT", "orders", { backend_host: "b.internal" }, proxyDefaults, "ferrum", undefined, undefined, "proxies", first.etag);
+  const [, , second] = crud(list, url, "GET", "orders", {}, proxyDefaults, "ferrum", undefined, undefined, "proxies");
+  assert.notEqual(second.etag, first.etag);
+});
+
+test("a stale If-Match is refused with 412 and writes nothing", () => {
+  const list = [{ id: "orders", namespace: "ferrum", backend_host: "a.internal", plugins: [] }];
+  const stale = resourceEtag("proxies", list[0]);
+  list[0] = { ...list[0], backend_host: "b.internal" };
+
+  const [putStatus] = crud(list, url, "PUT", "orders", { backend_host: "c.internal" }, proxyDefaults, "ferrum", undefined, undefined, "proxies", stale);
+  const [deleteStatus] = crud(list, url, "DELETE", "orders", {}, proxyDefaults, "ferrum", undefined, undefined, "proxies", stale);
+
+  assert.equal(putStatus, 412);
+  assert.equal(deleteStatus, 412);
+  assert.equal(list[0].backend_host, "b.internal");
+});
+
+test("404 takes precedence over the precondition", () => {
+  const [status] = crud([], url, "PUT", "missing", {}, proxyDefaults, "ferrum", undefined, undefined, "proxies", '"anything"');
+  assert.equal(status, 404);
+});
+
+test("proxy plugin associations are tagged order-independently", () => {
+  const a = { id: "p", namespace: "ferrum", plugins: [{ plugin_config_id: "x" }, { plugin_config_id: "y" }] };
+  const b = { ...a, plugins: [...a.plugins].reverse() };
+  assert.equal(resourceEtag("proxies", a), resourceEtag("proxies", b));
+  assert.notEqual(resourceEtag("proxies", a), resourceEtag("upstreams", a));
+  assert.notEqual(resourceEtag("proxies", a), resourceEtag("proxies", { ...a, namespace: "other" }));
+});
+
+test("If-Match parsing follows Edge: *, lists, strong comparison, malformed is 400", () => {
+  const current = '"abc"';
+  assert.equal(evaluateIfMatch(undefined, current), null);
+  assert.equal(evaluateIfMatch("*", current), null);
+  assert.equal(evaluateIfMatch('"x", "abc"', current), null);
+  assert.equal(evaluateIfMatch('"a,b", "abc"', current), null);
+  assert.equal(evaluateIfMatch('W/"abc"', current)?.[0], 412);
+  assert.equal(evaluateIfMatch('"x"', current)?.[0], 412);
+  assert.equal(evaluateIfMatch("", current)?.[0], 400);
+  assert.equal(evaluateIfMatch("abc", current)?.[0], 400);
+});
+
+test("If-Match on a route that does not evaluate it is refused, not ignored", () => {
+  assert.equal(ifMatchRouteRefusal("POST", "/proxies", '"x"')?.[0], 400);
+  assert.equal(ifMatchRouteRefusal("POST", "/batch", '"x"')?.[0], 400);
+  assert.equal(ifMatchRouteRefusal("PUT", "/consumers/c/credentials/keyauth", '"x"')?.[0], 400);
+  assert.equal(ifMatchRouteRefusal("PUT", "/gateway-trust-bundles/t", '"x"')?.[0], 400);
+  assert.equal(ifMatchRouteRefusal("PUT", "/proxies/p", '"x"'), null);
+  assert.equal(ifMatchRouteRefusal("DELETE", "/plugins/config/c", '"x"'), null);
+  assert.equal(ifMatchRouteRefusal("GET", "/proxies/p", '"x"'), null);
+  assert.equal(ifMatchRouteRefusal("POST", "/proxies", undefined), null);
 });

@@ -166,6 +166,28 @@ describe("redaction", () => {
     expect(formatBaselineValue("api_key", undefined)).toBe("—");
   });
 
+  it("redacts secret-shaped keys at every depth of a structured value", () => {
+    // A plugin configuration's `config` is one top-level field holding the
+    // plugin's own settings, secrets included.
+    const rendered = formatBaselineValue("config", {
+      algorithm: "HS256",
+      secret: "jwt-signing-secret",
+      upstream_headers: { Authorization: "Bearer abc", "X-Trace": "on" },
+      keys: [{ kid: "k1", private_key: "-----BEGIN" }],
+      cleared_token: null,
+    });
+    expect(rendered).not.toContain("jwt-signing-secret");
+    expect(rendered).not.toContain("Bearer abc");
+    expect(rendered).not.toContain("BEGIN");
+    expect(JSON.parse(rendered)).toEqual({
+      algorithm: "HS256",
+      secret: "[redacted]",
+      upstream_headers: { Authorization: "[redacted]", "X-Trace": "on" },
+      keys: [{ kid: "k1", private_key: "[redacted]" }],
+      cleared_token: "null",
+    });
+  });
+
   it("renders ordinary values readably", () => {
     expect(formatBaselineValue("backend_host", "a.internal")).toBe("a.internal");
     expect(formatBaselineValue("hosts", ["a", "b"])).toBe('["a","b"]');

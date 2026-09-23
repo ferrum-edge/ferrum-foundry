@@ -155,18 +155,66 @@ whole upstream would turn that supported composition into a conflict. A
 concurrent *target* change is still refused, which is the only thing that write
 can lose.
 
-## Families that keep their own contract
+## Which writes are guarded
 
-Plugin membership plans (`src/lib/pluginMembership.ts`) already run a
-revision-aware contract established in #244: every write is preceded by a fresh
-read whose `updated_at` must still match the preflight snapshot, and a mismatch
-aborts the plan or refuses the rollback. That family passes `null` for the
-editor guard rather than layering a second, differently-scoped comparison on
-top of it.
+| Write | Compared against | Conditional on |
+| --- | --- | --- |
+| Proxy settings save | the editor's seed, every field except `plugins` (never sent) | the verification read |
+| Upstream settings save | the editor's seed, minus mesh-projected fields | the verification read |
+| Upstream targets save | `targets` of the render the new list was built from | the read its settings are rebuilt from |
+| Consumer Details save | the editor's seed, minus `credentials` | the read its credentials are taken from |
+| Consumer ACL add/remove | the consumer the group list was computed from | the read its credentials are taken from |
+| Plugin configuration save | the editor's seed, every writable field | the membership plan's fresh read |
+| Proxy / upstream / consumer / plugin delete from its detail page | the resource the page is displaying | the verification read |
+| Every write inside a plugin membership plan | the plan's own `updated_at` preflight (#244) | the read that preflight compared |
+
+### Consumers
+
+A consumer `PUT` replaces represented credential types even when the body
+omits `credentials`, so a metadata save has always taken the credentials from
+a fresh read inside the consumer write queue (`docs/client-recovery.md`). That
+read is now also the guard's verification read, and the `PUT` carries its tag.
+A rotation that lands after it makes the gateway refuse the write rather than
+replay the credentials it read; the guard re-reads, finds the metadata
+unchanged, and re-sends with the rotated set. Credentials are excluded from the
+comparison — a metadata draft cannot revert a rotation, and redacted
+`[REDACTED]` markers say nothing about what changed.
+
+Both the Details form and the ACL editor build their body with
+`consumers.mergeFormUpdatePayload`, which round-trips every field the form does
+not model. Before this, a consumer save from either one dropped `labels`.
+
+### Plugin configurations and membership plans
+
+A plugin save runs through the membership plan (`src/lib/pluginMembership.ts`),
+which already re-reads every resource it writes and refuses when its
+`updated_at` moved since the plan's preflight (#244). Two things changed:
+
+- **Every write in the plan names the read it is based on.** The binding sends
+  that read's tag as `If-Match` (`validatorOf` in
+  `src/api/conditionalWrite.ts`), so each read-compare-write step is atomic and
+  also catches a change that did not move `updated_at`. A `412` surfaces as the
+  plan's own "changed during membership preflight" refusal, and in a rollback as
+  "changed after Foundry updated it; … was not overwritten".
+- **The editor's baseline is checked by the plan.** A configuration that
+  changed since the editor opened is refused with `StaleResourceError` at the
+  preflight read — before any association is touched — and again at the read
+  the plugin `PUT` is conditional on.
+
+### Deletes
+
+A delete from a detail page is judged against the resource the page is
+displaying at the moment the operator confirms — not the form's seed, so this
+operator's own earlier saves (for example from the upstream Targets tab) never
+block their delete. If another writer changed it, the delete is refused and
+`StaleWriteDialog` shows what moved, with no draft column and no "delete
+anyway". A plugin delete checks before detaching any proxy and again at the
+read its final `DELETE` is conditional on.
 
 ## What the operator sees
 
-`StaleWriteDialog` is shown when a save is refused. It keeps three properties:
+`StaleWriteDialog` is shown when a save or a delete is refused. For a save it
+keeps three properties:
 
 1. **The draft survives.** Nothing from it was written — the guard refused
    it, or the gateway did with `412`. The dialog does not touch the form. "Keep my draft"
@@ -216,7 +264,20 @@ so the next successful read seeds a fresh baseline for the new tenant.
 | `If-Match` from the verified read, a writer in the gap refused, re-send after a `412` on unowned fields, bounded retries, untagged and weak-tag fallback, popup opt-out | `src/api/conditionalWrite.test.ts` |
 | Draft preserved, no reapply control, keep/discard behavior | `src/routes/proxies/concurrentEdit.test.tsx` |
 | Same-client write ordering still composes | `src/api/upstreams.targetWrites.test.ts` |
+| Guarded deletes, consumer saves and rotation re-send, nested redaction of plugin `config` | `src/api/conditionalWrite.test.ts`, `src/lib/resourceBaseline.test.ts` |
+| Plugin editor baseline, membership writes conditional on their reads | `src/lib/pluginMembership.test.ts`, `src/lib/pluginMembership.binding.test.ts` |
+| Refused delete dialog | `src/routes/proxies/concurrentEdit.test.tsx` |
+| Mock gateway precondition contract | `scripts/mock-admin-gateway.test.mjs` |
 | Real gateway behavior and the `If-Match` contract | `scripts/concurrent-edit-contract.mjs` |
+
+## Local development
+
+`scripts/mock-admin-gateway.mjs` implements the same contract — a tag on item
+`GET`, `412` on a stale `If-Match` for `PUT`/`DELETE`, `404` before the
+precondition, strong comparison, `400` for a malformed header or for
+`If-Match` on any other mutating route — so the atomic path and the conflict
+dialog can be exercised without a gateway. Its tag is an unkeyed digest; Edge
+keys its tag so it cannot be used to test guesses of a redacted value.
 
 ## Still open
 
@@ -224,13 +285,5 @@ so the next successful read seeds a fresh baseline for the new tenant.
   CI exercises the untagged path. Bumping the digest to a release that
   includes it turns on the atomic path with no Foundry change; the contract
   then asserts the `412`s.
-- **Consumers and plugin configurations.** Edge tags them too. Their editors
-  have their own fresh-read protections (`docs/client-recovery.md`) but do not
-  yet capture an editor baseline. The guard is resource-agnostic; wiring them
-  is the same three lines as the proxy editor, and their `PUT`s can then carry
-  `If-Match` the same way.
-- **Conditional deletes.** Edge honours `If-Match` on `DELETE` of the same
-  four families. Foundry's deletes are confirmed from list rows rather than an
-  editor baseline, so they are sent unconditionally.
 - **A browser-level two-session journey.** Belongs in the critical-journey
   suite tracked by #380.

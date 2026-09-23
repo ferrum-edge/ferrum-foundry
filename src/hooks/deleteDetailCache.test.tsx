@@ -2,7 +2,7 @@ import { act, useEffect, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useDeletePluginConfig, useDeletePluginWithMembership } from "./usePlugins";
+import { useDeletePluginWithMembership } from "./usePlugins";
 import { useDeleteConsumer } from "./useConsumers";
 import { useDeleteProxy, useProxy } from "./useProxies";
 import { useDeleteUpstream } from "./useUpstreams";
@@ -26,21 +26,20 @@ class BasedRequest extends Request {
   }
 }
 const hooks = {
-  plugin: useDeletePluginConfig,
   membership: useDeletePluginWithMembership,
   consumer: useDeleteConsumer,
   proxy: useDeleteProxy,
   upstream: useDeleteUpstream,
 };
 const cases = [
-  ["plugin", "pluginConfig"], ["membership", "pluginConfig"],
+  ["membership", "pluginConfig"],
   ["consumer", "consumer"], ["proxy", "proxy"], ["upstream", "upstream"],
 ] as const;
 let remove: (id: string) => Promise<unknown>;
 function Probe({ kind }: { kind: keyof typeof hooks }) {
   const useDelete = hooks[kind];
   const mutation = useDelete();
-  useEffect(() => { remove = mutation.mutateAsync; });
+  useEffect(() => { remove = (id) => mutation.mutateAsync({ id, guard: null }); });
   return null;
 }
 
@@ -159,7 +158,7 @@ it("reopens and submits a recreated plugin without retired configuration", async
 function ObservedProxyDelete() {
   const mutation = useDeleteProxy();
   const query = useProxy("same-id", !mutation.isPending && !mutation.isSuccess);
-  useEffect(() => { remove = mutation.mutateAsync; });
+  useEffect(() => { remove = (id) => mutation.mutateAsync({ id, guard: null }); });
   return <span data-status={query.status} data-fetch={query.fetchStatus} />;
 }
 

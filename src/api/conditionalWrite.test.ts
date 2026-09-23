@@ -24,9 +24,10 @@ import {
 } from "./conditionalWrite";
 import { setApiErrorHandler } from "./client";
 import { resetGatewayMetadata } from "./gatewayMetadata";
+import * as consumers from "./consumers";
 import * as proxies from "./proxies";
 import * as upstreams from "./upstreams";
-import type { Proxy, ProxyCreate, Upstream } from "./types";
+import type { Consumer, Proxy, ProxyCreate, Upstream } from "./types";
 
 class BasedRequest extends Request {
   constructor(input: RequestInfo | URL, init?: RequestInit) {
@@ -53,7 +54,7 @@ interface GatewayOptions {
 }
 
 function stubGateway<T extends object>(seed: T, options: GatewayOptions = {}) {
-  let stored = { ...seed } as Record<string, unknown>;
+  let stored: Record<string, unknown> | null = { ...seed } as Record<string, unknown>;
   let revision = 0;
   let interleaves = options.interleaveTimes ?? 1;
   const wire: string[] = [];
@@ -80,6 +81,7 @@ function stubGateway<T extends object>(seed: T, options: GatewayOptions = {}) {
         return Response.json(stored, { headers });
       }
 
+      if (stored === null) return Response.json({ error: "Not Found" }, { status: 404 });
       if (options.interleave && interleaves > 0) {
         interleaves -= 1;
         commit(options.interleave(stored));
@@ -91,6 +93,10 @@ function stubGateway<T extends object>(seed: T, options: GatewayOptions = {}) {
       if (ifMatch !== null && ifMatch !== tag()) {
         return Response.json({ error: "Precondition Failed" }, { status: 412 });
       }
+      if (request.method === "DELETE") {
+        stored = null;
+        return new Response(null, { status: 204 });
+      }
       // Full replacement, except that an omitted `plugins` key preserves the
       // live associations, exactly as Edge does for a proxy PUT.
       const body = (await request.json()) as Record<string, unknown>;
@@ -99,7 +105,7 @@ function stubGateway<T extends object>(seed: T, options: GatewayOptions = {}) {
     }),
   );
 
-  return { wire, read: () => stored as T };
+  return { wire, read: () => stored as T, exists: () => stored !== null };
 }
 
 function proxyFixture(): Proxy {
@@ -462,5 +468,179 @@ describe("guarded upstream saves on a gateway that honours If-Match", () => {
     ]);
     expect(gateway.read().algorithm).toBe("least_connections");
     expect(gateway.read().targets.map((target) => target.host)).toEqual(["two.internal"]);
+  });
+});
+
+describe("guarded deletes", () => {
+  it("deletes conditionally on the read that matched what the page shows", async () => {
+    const seed = proxyFixture();
+    const gateway = stubGateway(seed);
+
+    await proxies.remove(scope, "checkout", proxies.proxyWriteGuard(seed));
+
+    expect(gateway.wire).toEqual(["GET", 'DELETE if-match "r0"']);
+    expect(gateway.exists()).toBe(false);
+  });
+
+  it("refuses to delete a proxy another writer changed since the page loaded", async () => {
+    const seed = proxyFixture();
+    const gateway = stubGateway({ ...seed, backend_host: "backend-b.internal" });
+
+    const refused = await settle(
+      proxies.remove(scope, "checkout", proxies.proxyWriteGuard(seed)),
+    );
+
+    if (!isStaleResourceError(refused)) throw new Error("expected a stale delete");
+    expect(refused.detail.operation).toBe("delete");
+    expect(refused.detail.current.backend_host).toBe("backend-b.internal");
+    // There is no draft: the proposed side is the page's own view.
+    expect(refused.detail.proposed).toEqual(refused.detail.original);
+    expect(refused.message).toContain("It was not deleted");
+    expect(gateway.wire).toEqual(["GET"]);
+    expect(gateway.exists()).toBe(true);
+  });
+
+  it("refuses a delete when a writer commits between the verification read and the DELETE", async () => {
+    const seed = proxyFixture();
+    const gateway = stubGateway(seed, {
+      interleave: (stored) => ({ ...stored, backend_host: "backend-b.internal" }),
+    });
+
+    const refused = await settle(
+      proxies.remove(scope, "checkout", proxies.proxyWriteGuard(seed)),
+    );
+
+    expect(isStaleResourceError(refused)).toBe(true);
+    expect(gateway.wire).toEqual(["GET", 'DELETE if-match "r0"', "GET"]);
+    expect(gateway.exists()).toBe(true);
+    expect(popups).not.toHaveBeenCalled();
+  });
+
+  it("guards upstream deletes the same way", async () => {
+    const seed: Upstream = {
+      id: "payments",
+      namespace: "tenant-a",
+      algorithm: "round_robin",
+      targets: [{ host: "one.internal", port: 443, weight: 1 }],
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+    const gateway = stubGateway({
+      ...seed,
+      targets: [...seed.targets, { host: "two.internal", port: 443, weight: 1 }],
+    });
+
+    const refused = await settle(
+      upstreams.remove(scope, "payments", upstreams.upstreamWriteGuard(seed)),
+    );
+
+    expect(isStaleResourceError(refused)).toBe(true);
+    expect(gateway.exists()).toBe(true);
+  });
+
+  it("sends an unguarded delete unconditionally", async () => {
+    const gateway = stubGateway(proxyFixture());
+
+    await proxies.remove(scope, "checkout", null);
+
+    expect(gateway.wire).toEqual(["DELETE"]);
+  });
+});
+
+describe("consumer metadata saves", () => {
+  const consumerSeed: Consumer = {
+    id: "alice",
+    namespace: "tenant-a",
+    username: "alice",
+    custom_id: "alice-1",
+    labels: { team: "payments" },
+    acl_groups: ["readers"],
+    credentials: { keyauth: [{ key: "[REDACTED]" }] },
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  };
+
+  it("keeps labels and every other unmodelled field through a form save", () => {
+    const merged = consumers.mergeFormUpdatePayload(consumerSeed, {
+      username: "alice",
+      acl_groups: ["readers", "writers"],
+    });
+
+    expect(merged).toEqual({
+      id: "alice",
+      username: "alice",
+      custom_id: null,
+      labels: { team: "payments" },
+      acl_groups: ["readers", "writers"],
+    });
+  });
+
+  it("refuses a draft opened before another writer's metadata change", async () => {
+    const gateway = stubGateway({ ...consumerSeed, custom_id: "alice-2" });
+
+    const refused = await settle(
+      consumers.update(
+        scope,
+        "alice",
+        consumers.mergeFormUpdatePayload(consumerSeed, {
+          username: "alice",
+          custom_id: "alice-1",
+          acl_groups: ["readers", "writers"],
+        }),
+        consumers.consumerWriteGuard(consumerSeed),
+      ),
+    );
+
+    if (!isStaleResourceError(refused)) throw new Error("expected a stale write");
+    expect(refused.detail.current.custom_id).toBe("alice-2");
+    // Credentials are never part of the comparison, redacted or not.
+    expect(refused.detail.current).not.toHaveProperty("credentials");
+    expect(refused.detail.proposed).not.toHaveProperty("credentials");
+    expect(gateway.wire).toEqual(["GET"]);
+  });
+
+  it("re-sends with the rotated credentials when a rotation lands in the gap", async () => {
+    // The body's credentials come from the verification read. A rotation
+    // after that read would have been replayed stale; now the gateway refuses
+    // the PUT and the guard rebuilds the body from the rotated set.
+    const rotated = { keyauth: [{ key: "[REDACTED]" }, { key: "[REDACTED]" }] };
+    const gateway = stubGateway(consumerSeed, {
+      interleave: (stored) => ({ ...stored, credentials: rotated }),
+    });
+
+    await consumers.update(
+      scope,
+      "alice",
+      consumers.mergeFormUpdatePayload(consumerSeed, {
+        username: "alice",
+        custom_id: "alice-1",
+        acl_groups: ["readers", "writers"],
+      }),
+      consumers.consumerWriteGuard(consumerSeed),
+    );
+
+    expect(gateway.wire).toEqual(["GET", 'PUT if-match "r0"', "GET", 'PUT if-match "r1"']);
+    expect(gateway.read().credentials).toEqual(rotated);
+    expect(gateway.read().acl_groups).toEqual(["readers", "writers"]);
+    expect(gateway.read().labels).toEqual({ team: "payments" });
+  });
+
+  it("makes an unguarded metadata write conditional on its credential read", async () => {
+    const gateway = stubGateway(consumerSeed);
+
+    await consumers.update(scope, "alice", { username: "alice" }, null);
+
+    expect(gateway.wire).toEqual(["GET", 'PUT if-match "r0"']);
+  });
+
+  it("refuses to delete a consumer whose metadata changed since the page loaded", async () => {
+    const gateway = stubGateway({ ...consumerSeed, acl_groups: ["admins"] });
+
+    const refused = await settle(
+      consumers.remove(scope, "alice", consumers.consumerWriteGuard(consumerSeed)),
+    );
+
+    expect(isStaleResourceError(refused)).toBe(true);
+    expect(gateway.exists()).toBe(true);
   });
 });
