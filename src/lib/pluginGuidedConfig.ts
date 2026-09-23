@@ -172,7 +172,7 @@ export function writeGuidedConfig(
         continue;
       }
 
-      if (state.text.trim() === "null" && field.kind !== "stringList" && field.kind !== "boolean") {
+      if (state.text.trim() === "null" && field.kind !== "stringList") {
         setIn(next, section.path, field.key, null);
         continue;
       }

@@ -108,6 +108,41 @@ describe("omission and clear semantics", () => {
     expect(result.limit_by).toBeNull();
   });
 
+  it("keeps an explicit null boolean when another field is edited", () => {
+    const config: JsonObject = {
+      key_location: "header:X-API-Key",
+      hide_credentials: null,
+    };
+    const values = readGuidedConfig(keyAuth, config);
+    const edited = writeGuidedConfig(
+      keyAuth,
+      config,
+      { ...values, key_location: { present: true, text: "query:api_key" } },
+      values,
+    );
+
+    expect(edited).toEqual({
+      key_location: "query:api_key",
+      hide_credentials: null,
+    });
+  });
+
+  it("allows an explicit null boolean to be deliberately changed", () => {
+    const config: JsonObject = { hide_credentials: null };
+    const values = readGuidedConfig(keyAuth, config);
+    const edited = writeGuidedConfig(
+      keyAuth,
+      config,
+      {
+        ...values,
+        hide_credentials: { present: true, text: "true", checked: true },
+      },
+      values,
+    );
+
+    expect(edited.hide_credentials).toBe(true);
+  });
+
   it("removes the key when a field is explicitly omitted", () => {
     const config: JsonObject = { key_location: "header:X-API-Key", hide_credentials: false };
     const values = readGuidedConfig(keyAuth, config);
