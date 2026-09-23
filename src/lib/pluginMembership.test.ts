@@ -5,6 +5,8 @@ import type {
   Proxy,
   ProxyCreate,
 } from "@/api/types";
+import { StaleResourceError } from "@/api/conditionalWrite";
+import { pluginWriteGuard } from "@/api/plugins";
 import {
   createPluginWithMembership,
   deletePluginWithMembership,
@@ -93,6 +95,7 @@ function harness(
 
   const stamp = () => `v${++version}`;
   const deps: PluginMembershipDependencies = {
+    namespace: "tenant-a",
     listProxies: async () => {
       const snapshots = [...proxies.values()].map((proxy) => structuredClone(proxy));
       if (!listCalled && options.mutateAfterList) {
@@ -258,7 +261,7 @@ describe("proxy-group membership reconciliation", () => {
   it("rejects an empty group edit before it can remove the final reference", async () => {
     const state = harness([makeProxy("p1", ["plugin-1"])], [makePlugin("plugin-1")]);
     await expect(
-      updatePluginWithMembership("plugin-1", groupInput(), [], state.deps),
+      updatePluginWithMembership("plugin-1", groupInput(), [], state.deps, null),
     ).rejects.toThrow("require at least one proxy");
     expect(state.counts().updateProxyCalls).toBe(0);
     expect(state.counts().updatePluginCalls).toBe(0);
@@ -274,6 +277,7 @@ describe("proxy-group membership reconciliation", () => {
       groupInput(),
       ["z-target"],
       state.deps,
+      null,
     );
     expect(
       state.operations.filter((operation) => operation.startsWith("proxy:")),
@@ -295,7 +299,7 @@ describe("proxy-group membership reconciliation", () => {
       { failProxyOnce: "p3" },
     );
     await expect(
-      updatePluginWithMembership("plugin-1", groupInput(), ["p4"], state.deps),
+      updatePluginWithMembership("plugin-1", groupInput(), ["p4"], state.deps, null),
     ).rejects.toThrow("rollback was attempted");
     expect(
       state.operations.filter((operation) => operation.startsWith("proxy:")),
@@ -320,7 +324,7 @@ describe("proxy-group membership reconciliation", () => {
       { failProxyOnce: "p2" },
     );
     await expect(
-      updatePluginWithMembership("plugin-1", groupInput(), ["p1", "p2"], state.deps),
+      updatePluginWithMembership("plugin-1", groupInput(), ["p1", "p2"], state.deps, null),
     ).rejects.toThrow("proxy p1 was retained as the last reference");
     expect(memberships(state.proxies, "plugin-1")).toEqual(["p1"]);
     expect(state.plugins.has("plugin-1")).toBe(true);
@@ -337,7 +341,7 @@ describe("proxy-group membership reconciliation", () => {
       { failProxyCalls: [3, 4] },
     );
     await expect(
-      updatePluginWithMembership("plugin-1", groupInput(), ["p3"], state.deps),
+      updatePluginWithMembership("plugin-1", groupInput(), ["p3"], state.deps, null),
     ).rejects.toThrow("remaining proxy references: p2");
     expect(memberships(state.proxies, "plugin-1")).toEqual(["p2"]);
     expect(state.plugins.get("plugin-1")?.config).toEqual({ requests: 10 });
@@ -356,6 +360,7 @@ describe("proxy-group membership reconciliation", () => {
       groupInput(),
       ["p2", "p3"],
       state.deps,
+      null,
     ).catch((failure: unknown) => failure);
     expect(error).toBeInstanceOf(PluginMembershipError);
     expect((error as PluginMembershipError).message).toContain("GET returned 404");
@@ -377,7 +382,7 @@ describe("proxy-group membership reconciliation", () => {
       [makePlugin("plugin-1")],
       { failPluginDelete: true },
     );
-    await deletePluginWithMembership("plugin-1", state.deps);
+    await deletePluginWithMembership("plugin-1", state.deps, null);
     expect(state.operations.slice(-2)).toEqual(["cascade:plugin-1", "get:plugin-1"]);
     expect(state.counts().deleteCalls).toBe(0);
     expect(state.plugins.has("plugin-1")).toBe(false);
@@ -386,22 +391,22 @@ describe("proxy-group membership reconciliation", () => {
 
   it("models DELETE of an already cascade-deleted plugin as 404", async () => {
     const state = harness([makeProxy("p1", ["plugin-1"])], [makePlugin("plugin-1")]);
-    await state.deps.updateProxy("p1", { ...makeProxy("p1"), plugins: [] });
-    await expect(state.deps.deletePlugin("plugin-1")).rejects.toMatchObject({
+    await state.deps.updateProxy("p1", { ...makeProxy("p1"), plugins: [] }, null);
+    await expect(state.deps.deletePlugin("plugin-1", null)).rejects.toMatchObject({
       response: { status: 404 },
     });
   });
 
   it("explicitly deletes an existing group with no references", async () => {
     const state = harness([], [makePlugin("plugin-1")]);
-    await deletePluginWithMembership("plugin-1", state.deps);
+    await deletePluginWithMembership("plugin-1", state.deps, null);
     expect(state.counts().deleteCalls).toBe(1);
     expect(state.plugins.has("plugin-1")).toBe(false);
   });
 
   it("reports explicit deletion failure when the unreferenced plugin still exists", async () => {
     const state = harness([], [makePlugin("plugin-1")], { failPluginDelete: true });
-    await expect(deletePluginWithMembership("plugin-1", state.deps)).rejects.toThrow(
+    await expect(deletePluginWithMembership("plugin-1", state.deps, null)).rejects.toThrow(
       "plugin plugin-1 exists with scope proxy_group",
     );
     expect(state.plugins.has("plugin-1")).toBe(true);
@@ -413,7 +418,7 @@ describe("proxy-group membership reconciliation", () => {
       [makePlugin("plugin-1")],
       { failPluginGetCall: 2 },
     );
-    await expect(deletePluginWithMembership("plugin-1", state.deps)).rejects.toThrow(
+    await expect(deletePluginWithMembership("plugin-1", state.deps, null)).rejects.toThrow(
       "injected plugin read failure",
     );
     // Recovery probes see the missing config and never PUT a dangling reference.
@@ -470,10 +475,10 @@ describe("proxy-group membership reconciliation", () => {
         await state.deps.updatePlugin("created-plugin", {
           ...groupInput(),
           config: { requests: 99 },
-        });
+        }, null);
         throw new Error("injected failure after concurrent config edit");
       }
-      return updateProxy(id, data);
+      return updateProxy(id, data, null);
     };
     await expect(
       createPluginWithMembership(groupInput(), ["p1", "p2"], state.deps),
@@ -497,6 +502,7 @@ describe("proxy-group membership reconciliation", () => {
       groupInput(),
       ["p2", "p3"],
       state.deps,
+      null,
     );
     expect(memberships(state.proxies, "plugin-1")).toEqual(["p2", "p3"]);
   });
@@ -512,6 +518,7 @@ describe("proxy-group membership reconciliation", () => {
       groupInput(),
       ["p1"],
       state.deps,
+      null,
     );
 
     expect(state.counts().updateProxyCalls).toBe(0);
@@ -531,6 +538,7 @@ describe("proxy-group membership reconciliation", () => {
       groupInput(),
       ["p2"],
       state.deps,
+      null,
     );
     expect(state.plugins.get("plugin-1")?.scope).toBe("proxy_group");
     expect(memberships(state.proxies, "plugin-1")).toEqual(["p2"]);
@@ -559,6 +567,7 @@ describe("proxy-group membership reconciliation", () => {
           groupInput(),
           ["p2", "p3"],
           state.deps,
+          null,
         ),
       ).rejects.toThrow("rollback was attempted");
       expect(state.plugins.get("plugin-1")?.scope).toBe(scope);
@@ -585,6 +594,7 @@ describe("proxy-group membership reconciliation", () => {
         { ...groupInput(scope), ...(scope === "proxy" ? { proxy_id: "p3" } : {}) },
         [],
         state.deps,
+        null,
       );
       expect(memberships(state.proxies, "plugin-1")).toEqual(
         scope === "proxy" ? ["p3"] : [],
@@ -606,6 +616,7 @@ describe("proxy-group membership reconciliation", () => {
       groupInput("global"),
       [],
       state.deps,
+      null,
     )).rejects.toThrow("rollback was attempted");
     expect(memberships(state.proxies, "plugin-1")).toEqual(["p1", "p2"]);
     expect(state.plugins.get("plugin-1")?.scope).toBe("proxy_group");
@@ -631,7 +642,7 @@ describe("proxy-group membership reconciliation", () => {
       [makePlugin("plugin-1")],
       { failProxyOnce: "p2" },
     );
-    await expect(deletePluginWithMembership("plugin-1", state.deps)).rejects.toThrow(
+    await expect(deletePluginWithMembership("plugin-1", state.deps, null)).rejects.toThrow(
       "rollback was attempted",
     );
     expect(memberships(state.proxies, "plugin-1")).toEqual(["p1", "p2"]);
@@ -707,7 +718,7 @@ describe("proxy-scoped attachment", () => {
       [{ ...makePlugin("keyauth-1", "proxy"), proxy_id: "checkout" }],
     );
 
-    await updatePluginWithMembership("keyauth-1", proxyScoped("payments"), [], stack.deps);
+    await updatePluginWithMembership("keyauth-1", proxyScoped("payments"), [], stack.deps, null);
 
     expect(memberships(stack.proxies, "keyauth-1")).toEqual(["payments"]);
   });
@@ -723,8 +734,66 @@ describe("proxy-scoped attachment", () => {
       { plugin_name: "key_auth", config: {}, scope: "global", enabled: true },
       [],
       stack.deps,
+      null,
     );
 
     expect(memberships(stack.proxies, "keyauth-1")).toEqual([]);
+  });
+});
+
+describe("the plugin editor's baseline", () => {
+  const openedAt = { ...makePlugin("plugin-1"), config: { requests: 5 } };
+
+  it("refuses a save whose configuration changed since the editor opened, before any write", async () => {
+    const state = harness([makeProxy("p1", ["plugin-1"])], [makePlugin("plugin-1")]);
+
+    const refused = await updatePluginWithMembership(
+      "plugin-1",
+      groupInput(),
+      ["p1"],
+      state.deps,
+      pluginWriteGuard(openedAt),
+    ).then(() => null, (error: unknown) => error);
+
+    if (!(refused instanceof StaleResourceError)) throw new Error("expected a stale write");
+    expect(refused.detail).toMatchObject({
+      resource: "plugin configuration",
+      operation: "save",
+      namespace: "tenant-a",
+    });
+    expect(refused.detail.original.config).toEqual({ requests: 5 });
+    expect(refused.detail.current.config).toEqual({ requests: 10 });
+    expect(state.counts()).toMatchObject({ updatePluginCalls: 0, updateProxyCalls: 0 });
+  });
+
+  it("saves when the configuration still matches what the editor opened", async () => {
+    const state = harness([makeProxy("p1", ["plugin-1"])], [makePlugin("plugin-1")]);
+
+    await updatePluginWithMembership(
+      "plugin-1",
+      groupInput(),
+      ["p1"],
+      state.deps,
+      pluginWriteGuard(makePlugin("plugin-1")),
+    );
+
+    expect(state.counts().updatePluginCalls).toBe(1);
+  });
+
+  it("refuses to delete a configuration that changed since the page loaded, before detaching anything", async () => {
+    const state = harness(
+      [makeProxy("p1", ["plugin-1"]), makeProxy("p2", ["plugin-1"])],
+      [makePlugin("plugin-1")],
+    );
+
+    const refused = await deletePluginWithMembership(
+      "plugin-1",
+      state.deps,
+      pluginWriteGuard(openedAt),
+    ).then(() => null, (error: unknown) => error);
+
+    if (!(refused instanceof StaleResourceError)) throw new Error("expected a stale delete");
+    expect(refused.detail.operation).toBe("delete");
+    expect(state.counts()).toMatchObject({ updateProxyCalls: 0, deleteCalls: 0 });
   });
 });

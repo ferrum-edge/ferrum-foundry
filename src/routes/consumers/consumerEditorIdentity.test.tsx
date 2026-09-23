@@ -387,13 +387,14 @@ describe("consumer editor identity across a namespace switch", () => {
     expect(field("Username")?.value).toBe("edited-locally");
     expect(field("Custom ID")?.value).toBe("tenant-a-custom");
 
+    // Submitting that older draft would revert the other writer's
+    // `custom_id`. The write guard refuses it before anything is written and
+    // leaves the draft on the page (see `docs/concurrent-edits.md`).
     await submitForm();
-    await waitFor(() => puts().length === 1);
-    expect(puts()[0].namespace).toBe("tenant-a");
-    expect(puts()[0].body).toMatchObject({
-      username: "edited-locally",
-      custom_id: "tenant-a-custom",
-    });
+    await waitFor(() => dialog()?.textContent?.includes("changed after you opened it") ?? false);
+    expect(puts()).toHaveLength(0);
+    expect(field("Username")?.value).toBe("edited-locally");
+    expect(records.get("tenant-a")?.custom_id).toBe("tenant-a-custom-v2");
   });
 
   it("discards a pending delete confirmation when the tenant changes", async () => {
