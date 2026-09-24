@@ -53,6 +53,28 @@ describe("reconcileNamespaceCache", () => {
     expect(qc.getQueryData(["namespace", "staging"])).toBeUndefined();
   });
 
+  it("retires every resource cached under a deleted or renamed-away namespace", () => {
+    for (const retired of [null, "staging-eu"]) {
+      qc.clear();
+      seed(["ferrum", "staging"]);
+      for (const kind of ["proxy", "upstream", "consumer", "pluginConfig", "apiSpecDocument"]) {
+        qc.setQueryData([kind, "staging", "starter-keyauth"], { id: "starter-keyauth" });
+        qc.setQueryData([kind, "ferrum", "starter-keyauth"], { id: "starter-keyauth" });
+      }
+      qc.setQueryData(["proxies", "staging", { offset: 0, limit: 25 }], { data: [] });
+
+      reconcileNamespaceCache(qc, "staging", retired);
+
+      for (const kind of ["proxy", "upstream", "consumer", "pluginConfig", "apiSpecDocument"]) {
+        expect(qc.getQueryData([kind, "staging", "starter-keyauth"]), `${kind} ${retired}`)
+          .toBeUndefined();
+        expect(qc.getQueryData([kind, "ferrum", "starter-keyauth"])).toBeDefined();
+      }
+      expect(qc.getQueryData(["proxies", "staging", { offset: 0, limit: 25 }])).toBeUndefined();
+      expect(qc.getQueryData(["namespaces"])).toBeDefined();
+    }
+  });
+
   it("keeps and invalidates the detail entry on a description-only update", () => {
     seed(["ferrum", "staging"]);
 
