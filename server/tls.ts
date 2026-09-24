@@ -38,6 +38,17 @@ for (const [address, prefix, family] of [
   ['240.0.0.0', 4, 'ipv4'],
   ['::', 128, 'ipv6'],
   ['::1', 128, 'ipv6'],
+  // IPv6 forms that embed or translate to an IPv4 address (IPv4-compatible,
+  // NAT64 well-known and local-use, 6to4) reach the ranges above by another
+  // spelling. BlockList already maps ::ffff:0:0/96; these it does not. An
+  // operator whose gateway is only reachable through one of them authorizes
+  // it with FERRUM_ADMIN_ALLOWED_CIDRS like any other private range.
+  ['::', 96, 'ipv6'],
+  ['64:ff9b::', 96, 'ipv6'],
+  ['64:ff9b:1::', 48, 'ipv6'],
+  ['2002::', 16, 'ipv6'],
+  ['100::', 64, 'ipv6'],
+  ['fec0::', 10, 'ipv6'],
   ['fc00::', 7, 'ipv6'],
   ['fe80::', 10, 'ipv6'],
   ['ff00::', 8, 'ipv6'],
