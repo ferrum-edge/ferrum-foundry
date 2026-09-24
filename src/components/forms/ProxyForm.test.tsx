@@ -210,3 +210,24 @@ describe("ProxyForm numeric drafts (#402)", () => {
     expect(data.retry).toMatchObject({ max_retries: 0, backoff: { fixed: { delay_ms: 250 } } });
   });
 });
+
+describe("ProxyForm method restriction", () => {
+  it("refuses an empty restriction inline instead of sending allowed_methods: []", async () => {
+    await renderForm({ ...httpProxy, allowed_methods: [] as unknown as Proxy["allowed_methods"] });
+    await save();
+    expect(submit).not.toHaveBeenCalled();
+    expect(host.textContent).toContain("Select at least one method");
+  });
+
+  it("sends a non-empty restriction and null when unrestricted", async () => {
+    await renderForm({ ...httpProxy, allowed_methods: ["GET"] as Proxy["allowed_methods"] });
+    await save();
+    expect(submitted().allowed_methods).toEqual(["GET"]);
+    submit.mockClear();
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    await renderForm({ ...httpProxy, allowed_methods: null });
+    await save();
+    expect(submitted().allowed_methods).toBeNull();
+  });
+});

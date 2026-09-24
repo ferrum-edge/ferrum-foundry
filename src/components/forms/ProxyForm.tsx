@@ -30,7 +30,7 @@ import type {
 } from "@/api/types";
 
 const PROXY_COLLAPSIBLE_SECTIONS = [
-  { id: "routing", errorKeys: [] },
+  { id: "routing", errorKeys: ["allowed_methods"] },
   {
     id: "timeouts",
     errorKeys: ["connect_timeout", "read_timeout", "write_timeout"],
@@ -218,11 +218,13 @@ function MethodCheckboxGroup({
   selected,
   onChange,
   options,
+  error,
 }: {
   label: string;
   selected: string[];
   onChange: (selected: string[]) => void;
   options: readonly string[];
+  error?: string;
 }) {
   const toggle = (method: string) => {
     if (selected.includes(method)) {
@@ -255,6 +257,7 @@ function MethodCheckboxGroup({
           </label>
         ))}
       </div>
+      {error && <p className="text-danger text-xs">{error}</p>}
     </div>
   );
 }
@@ -531,6 +534,11 @@ export function ProxyForm({
       }
     }
     if (isUdpLike) requireNumber("udp_idle_timeout", udpIdleTimeout, "UDP idle timeout");
+    // The gateway requires at least one method (`minItems: 1`); an empty
+    // restriction is a 400, not "allow nothing".
+    if (isHttpLike && restrictMethods && allowedMethods.length === 0) {
+      errs.allowed_methods = "Select at least one method, or stop restricting methods";
+    }
     setErrors(errs);
     const ok = Object.keys(errs).length === 0;
     if (!ok) {
@@ -770,6 +778,7 @@ export function ProxyForm({
                 selected={allowedMethods}
                 onChange={setAllowedMethods}
                 options={ALL_HTTP_METHODS}
+                error={errors.allowed_methods}
               />
             )}
             <TagInput
