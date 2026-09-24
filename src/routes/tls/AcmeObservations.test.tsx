@@ -5,6 +5,7 @@ import { createMemoryHistory, createRootRoute, createRoute, createRouter, Router
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "@/components/ui/Toast";
 import type { AcmeOrder } from "@/api/tls";
+import type { PaginatedResponse } from "@/api/types";
 import TlsPage from "./index";
 import { inputByLabel } from "@/test/fields";
 
@@ -15,7 +16,10 @@ class BasedRequest extends Request {
   }
 }
 
-const key = ["tls", "acme", "orders", "all"];
+// The tab reads one server page; refetches address every cached order page.
+const key = ["tls", "acme", "orders"];
+const firstPage = [...key, { offset: 0, limit: 20 }];
+
 let root: Root;
 let host: HTMLDivElement;
 let client: QueryClient;
@@ -24,6 +28,10 @@ let details: ((response: Response) => void)[];
 let collections: ((response: Response) => void)[];
 let holdCollections: boolean;
 let posts: number;
+
+function cachedOrders() {
+  return client.getQueryData<PaginatedResponse<AcmeOrder>>(firstPage)?.data;
+}
 
 function order(nextStatus = status): AcmeOrder {
   return {
@@ -108,7 +116,7 @@ async function click(label: string) {
 async function refresh(nextStatus: AcmeOrder["status"]) {
   status = nextStatus;
   await act(async () => { await client.refetchQueries({ queryKey: key }); });
-  await settle(() => expect(client.getQueryData<AcmeOrder[]>(key)?.[0]?.status).toBe(nextStatus));
+  await settle(() => expect(cachedOrders()?.[0]?.status).toBe(nextStatus));
 }
 
 function expectTerminal(terminal: AcmeOrder["status"]) {
@@ -135,7 +143,7 @@ describe("ACME order observations", () => {
     await refresh(terminal);
     await act(async () => details[0]!(Response.json(order("processing"))));
     await settle(() => expectTerminal(terminal));
-    expect(client.getQueryData<AcmeOrder[]>(key)?.[0]?.status).toBe(terminal);
+    expect(cachedOrders()?.[0]?.status).toBe(terminal);
     expect(posts).toBe(0);
   });
 
@@ -173,7 +181,7 @@ describe("ACME order observations", () => {
     })));
     await staleCollection;
     await settle(() => expectTerminal("valid"));
-    expect(client.getQueryData<AcmeOrder[]>(key)?.[0]?.status).toBe("valid");
+    expect(cachedOrders()?.[0]?.status).toBe("valid");
     expect(posts).toBe(1);
   });
 });
@@ -206,11 +214,14 @@ it('keeps uncertain order creation disarmed after closing and reopening', async 
 it('blocks renewal after an uncertain response', async () => {
   await mount();
   await act(async () => {
-    client.setQueryData(['tls', 'acme', 'certificates', 'all'], [{
-      id: 'fixture-cert', domains: ['example.test'], status: 'issued',
-      directory_url: 'https://ca.example.test/directory', source_uri: 'acme://fixture-cert',
-      created_at: '2026-09-06T00:00:00Z', updated_at: '2026-09-06T00:00:00Z',
-    }]);
+    client.setQueryData(['tls', 'acme', 'certificates', { offset: 0, limit: 20 }], {
+      data: [{
+        id: 'fixture-cert', domains: ['example.test'], status: 'issued',
+        directory_url: 'https://ca.example.test/directory', source_uri: 'acme://fixture-cert',
+        created_at: '2026-09-06T00:00:00Z', updated_at: '2026-09-06T00:00:00Z',
+      }],
+      pagination: { offset: 0, limit: 20, total: 1 },
+    });
   });
   const renew = () => [...panel().querySelectorAll<HTMLButtonElement>('button')]
     .find((button) => button.textContent?.trim() === 'Renew')!;

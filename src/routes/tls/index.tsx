@@ -58,6 +58,7 @@ import type {
   AcmeOrder,
   AcmeCertificateRecord,
 } from "@/api/tls";
+import type { PaginatedResponse } from "@/api/types";
 import { usePaginationParams } from "@/hooks/usePagination";
 import { useCapabilities } from "@/stores/capabilities";
 import { CapabilityNotice } from "@/components/shared/CapabilityGate";
@@ -665,6 +666,10 @@ const EMPTY_ACME_ORDER_FORM = {
   terms_of_service_agreed: false,
 };
 
+// Every cached server page of ACME orders, whatever its offset and limit.
+const ACME_ORDERS_PREFIX = ["tls", "acme", "orders"] as const;
+type AcmeOrderPage = PaginatedResponse<AcmeOrder>;
+
 interface AcmeCertificateEditor {
   mode: "import" | "replace";
   target: AcmeCertificateRecord | null;
@@ -992,33 +997,41 @@ function AcmeTab() {
                         void runRowAction(`finalize:${order.id}`, async () => {
                           try {
                             if (orderIsUnknown(order) || order.status === "processing") {
-                              const ordersKey = ["tls", "acme", "orders"] as const;
-                              await queryClient.cancelQueries({ queryKey: ordersKey });
+                              await queryClient.cancelQueries({ queryKey: ACME_ORDERS_PREFIX });
                               const observed = queryClient
-                                .getQueriesData({ queryKey: ordersKey })
+                                .getQueriesData<AcmeOrderPage>({ queryKey: ACME_ORDERS_PREFIX })
                                 .map(([key]) => [key, queryClient.getQueryState(key)?.dataUpdateCount] as const);
                               const checked = await getAcmeOrder(order.id);
                               // Do not let a collection request that captured an older
                               // status overwrite the accepted detail observation.
-                              await queryClient.cancelQueries({ queryKey: ordersKey });
-                              // A collection observation completed during this read. It
-                              // owns the current state; a late detail must not rewind it.
+                              await queryClient.cancelQueries({ queryKey: ACME_ORDERS_PREFIX });
+                              const pageChanged = ([key, count]: (typeof observed)[number]) =>
+                                queryClient.getQueryState(key)?.dataUpdateCount !== count;
+                              // A collection page holding this order completed during
+                              // this read. It owns the current state; a late detail
+                              // must not rewind it.
                               if (
                                 observed.some(
-                                  ([key, count]) =>
-                                    queryClient.getQueryState(key)?.dataUpdateCount !== count,
+                                  (entry) =>
+                                    pageChanged(entry) &&
+                                    queryClient
+                                      .getQueryData<AcmeOrderPage>(entry[0])
+                                      ?.data.some((candidate) => candidate.id === order.id),
                                 )
                               ) return;
-                              queryClient.setQueriesData<{ data: AcmeOrder[] }>(
-                                { queryKey: ordersKey },
-                                (previous) =>
-                                  previous && ({
+                              // Merge the detail into every cached page that still
+                              // holds the observation it supersedes.
+                              for (const entry of observed) {
+                                if (pageChanged(entry)) continue;
+                                queryClient.setQueryData<AcmeOrderPage>(entry[0], (previous) =>
+                                  previous && {
                                     ...previous,
-                                    data: previous.data.map((entry) =>
-                                      entry.id === order.id ? checked : entry,
+                                    data: previous.data.map((candidate) =>
+                                      candidate.id === order.id ? checked : candidate,
                                     ),
-                                  }),
-                              );
+                                  },
+                                );
+                              }
                               if (!acmeOrderInProgress(checked)) {
                                 setUnknownOrders((previous) => {
                                   const next = new Set(previous);
