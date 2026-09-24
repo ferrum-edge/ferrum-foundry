@@ -261,8 +261,14 @@ function EditNamespaceDialog({
               if (descriptionError) setDescriptionError(validateNamespaceDescription(e.target.value));
             }}
             error={descriptionError ?? undefined}
-            disabled={!descriptionLoaded}
-            helpText={descriptionLoaded ? "Leave empty to clear the description" : "Loading the current description…"}
+            disabled={!descriptionLoaded && !detail.isError}
+            helpText={
+              descriptionLoaded
+                ? "Leave empty to clear the description"
+                : detail.isError
+                  ? "The current description could not be loaded. Leave empty to keep it; a value typed here replaces it."
+                  : "Loading the current description…"
+            }
           />
         </div>
         <div className="flex justify-end gap-3 mt-6">
