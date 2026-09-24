@@ -137,11 +137,24 @@ describe("effective authorization policy", () => {
       plugin("group-acl", "access_control", "proxy_group"),
       plugin("disabled", "hmac_auth", "global", {}, { enabled: false }),
     ];
-    expect(effectivePluginsForProxy(proxy(), plugins).map((entry) => entry.id)).toEqual([
+    const attached = proxy({
+      plugins: [{ plugin_config_id: "group-acl" }, { plugin_config_id: "direct-auth" }],
+    });
+    expect(effectivePluginsForProxy(attached, plugins).map((entry) => entry.id)).toEqual([
       "direct-auth",
       "global-auth",
       "group-acl",
     ]);
+  });
+
+  it("does not count a proxy-scoped plugin the proxy does not list", () => {
+    // `proxy_id` records intent; the gateway runs the plugin only when the
+    // proxy's own `plugins` names it. An orphan must not read as protection.
+    const plugins = [plugin("orphan-auth", "key_auth", "proxy", {}, { proxy_id: "proxy-1" })];
+    const bare = proxy({ plugins: [] });
+    expect(effectivePluginsForProxy(bare, plugins)).toEqual([]);
+    expect(analyzeProxyPolicy(bare, plugins, [consumer("1", "alice", [], {})]).consumers[0]!.decision)
+      .toBe("public");
   });
 
   it("does not count HTTP-only plugins as effective on a stream proxy", () => {
