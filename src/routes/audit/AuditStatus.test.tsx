@@ -10,8 +10,9 @@ let harness: ReturnType<typeof createHarness>;
 let health: unknown;
 let healthFailure: boolean;
 let requests: Request[];
+let auditPages: ((request: Request) => Response) | null;
 beforeEach(() => {
-  namespace = 'tenant-a'; health = detailedHealth; healthFailure = false; requests = [];
+  namespace = 'tenant-a'; health = detailedHealth; healthFailure = false; requests = []; auditPages = null;
   harness = createHarness();
   stubFetch(request => {
     requests.push(request);
@@ -19,6 +20,7 @@ beforeEach(() => {
       if (healthFailure) throw new TypeError('offline');
       return Response.json(health);
     }
+    if (auditPages) return auditPages(request);
     return Response.json({ items: [], total: 0, limit: 50, offset: 0, next_offset: null });
   });
 });
@@ -103,5 +105,53 @@ describe('audit evidence and collection state', () => {
     await act(async () => finishA(Response.json(detailedHealth)));
     await settle(() => expect(harness.client.getQueryData(['health', 'tenant-a'])).toBeDefined());
     expect(harness.host.textContent).not.toContain('Collection disabled');
+  });
+});
+
+describe('audit pagination across a namespace switch', () => {
+  const event = (id: number) => ({
+    id: `e${id}`, ts: '2026-09-20T00:00:00Z', actor: 'op', action: 'update',
+    resource_type: 'proxy', resource_id: 'orders', namespace, outcome: 'success', diff: {},
+  });
+  const auditOffsets = () => requests
+    .filter(r => new URL(r.url).pathname.endsWith('/audit'))
+    .map(r => [r.headers.get('X-Ferrum-Namespace'), new URL(r.url).searchParams.get('offset')]);
+
+  it('starts the new namespace at its first page', async () => {
+    auditPages = (request) => {
+      const offset = Number(new URL(request.url).searchParams.get('offset'));
+      const total = request.headers.get('X-Ferrum-Namespace') === 'tenant-a' ? 300 : 30;
+      const items = offset < total ? Array.from({ length: Math.min(50, total - offset) }, (_, i) => event(offset + i)) : [];
+      return Response.json({ items, total, limit: 50, offset, next_offset: offset + 50 < total ? offset + 50 : null });
+    };
+    await harness.render(<AuditPage />);
+    await settle(() => expect(harness.host.textContent).toContain('1–50 of 300'));
+    const next = [...harness.host.querySelectorAll('button')].find(b => b.textContent === 'Next')!;
+    await act(async () => next.click());
+    await settle(() => expect(harness.host.textContent).toContain('51–100 of 300'));
+
+    namespace = 'tenant-b';
+    await harness.render(<AuditPage />);
+    await settle(() => expect(auditOffsets().at(-1)).toEqual(['tenant-b', '0']));
+    expect(harness.host.textContent).not.toContain('No audit events');
+  });
+
+  it('offers a way back from a page past the end', async () => {
+    auditPages = (request) => {
+      const offset = Number(new URL(request.url).searchParams.get('offset'));
+      // The log shrank (retention) after the first page was read.
+      return offset === 0
+        ? Response.json({ items: [event(0)], total: 120, limit: 50, offset, next_offset: 50 })
+        : Response.json({ items: [], total: 20, limit: 50, offset, next_offset: null });
+    };
+    await harness.render(<AuditPage />);
+    await settle(() => expect(harness.host.textContent).toContain('of 120'));
+    const next = [...harness.host.querySelectorAll('button')].find(b => b.textContent === 'Next')!;
+    await act(async () => next.click());
+    await settle(() => expect(harness.host.textContent).toContain('No results on this page'));
+    expect(harness.host.textContent).not.toContain('No audit events');
+    const back = [...harness.host.querySelectorAll('button')].find(b => b.textContent === 'Go to first page')!;
+    await act(async () => back.click());
+    await settle(() => expect(harness.host.textContent).toContain('of 120'));
   });
 });
