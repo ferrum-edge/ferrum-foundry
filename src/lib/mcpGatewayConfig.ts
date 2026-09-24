@@ -150,17 +150,24 @@ export function omitMcpGatewayAggregateOnlyFields(config: unknown): JsonObject {
   return next;
 }
 
+/**
+ * Return `config` in aggregate mode.
+ *
+ * `stash` is the aggregate-only state captured when this editor last left
+ * aggregate mode, or `null` when nothing was captured. A captured stash is the
+ * operator's own configuration and is restored exactly, even when empty (an
+ * aggregate config that relied on the gateway's default policy): merging the
+ * sample defaults into it would add a deny-by-default policy with an allow
+ * rule the operator never wrote. The sample only seeds a configuration that
+ * never had aggregate state here and has no aggregate fields now.
+ */
 export function applyMcpGatewayAggregateDefaults(
   config: unknown,
-  stash: JsonObject = {},
+  stash: JsonObject | null = null,
 ): JsonObject {
   const next = isPlainObject(config) ? deepClone(config) : {};
   next.mode = "aggregate_router";
-  // A stash is the operator's own aggregate configuration and is restored
-  // exactly: merging the sample defaults under it would add an allow rule to
-  // a deny-by-default policy the operator never wrote. The sample is only a
-  // starting point for a configuration that has no aggregate fields at all.
-  if (mcpGatewayConfigHasAggregateOnlyFields(stash)) return mergeDefined(next, stash);
+  if (stash !== null) return mergeDefined(next, stash);
   if (mcpGatewayConfigHasAggregateOnlyFields(next)) return next;
   return mergeDefined(next, AGGREGATE_FIELD_DEFAULTS);
 }
@@ -188,18 +195,23 @@ export function sanitizeMcpGatewayConfigForSubmit(config: unknown): JsonObject {
   return next;
 }
 
+/**
+ * Switch modes. Leaving aggregate mode always yields a (possibly empty)
+ * stash, so returning restores exactly what was there; `null` means nothing
+ * has been captured.
+ */
 export function switchMcpGatewayMode(
   config: unknown,
   nextMode: McpGatewayMode,
-  stash: JsonObject = {},
-): { config: JsonObject; stash: JsonObject } {
+  stash: JsonObject | null = null,
+): { config: JsonObject; stash: JsonObject | null } {
   const base = isPlainObject(config) ? deepClone(config) : {};
   if (nextMode === "transparent_proxy") {
-    const nextStash = mergeDefined(stash, pickMcpGatewayAggregateOnlyFields(base));
+    const nextStash = mergeDefined(stash ?? {}, pickMcpGatewayAggregateOnlyFields(base));
     const stripped = omitMcpGatewayAggregateOnlyFields(base);
     stripped.mode = "transparent_proxy";
     return { config: stripped, stash: nextStash };
   }
   const restored = applyMcpGatewayAggregateDefaults(base, stash);
-  return { config: restored, stash: {} };
+  return { config: restored, stash: null };
 }

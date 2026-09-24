@@ -157,7 +157,9 @@ function PluginConfigFormFields({
   // Remount the guided fields when the plugin changes or the operator returns
   // from the JSON editor, so they re-read the configuration as it now stands.
   const [guidedGeneration, setGuidedGeneration] = useState(0);
-  const mcpAggregateStashRef = useRef<Record<string, unknown>>({});
+  // Aggregate-only state captured when the config leaves aggregate mode;
+  // `null` until something has been captured (see `switchMcpGatewayMode`).
+  const mcpAggregateStashRef = useRef<Record<string, unknown> | null>(null);
 
   /* ---------- Trigger (optional per-instance execution predicate) --- */
   const [triggerEnabled, setTriggerEnabled] = useState(!!initialData?.trigger);
@@ -305,7 +307,7 @@ function PluginConfigFormFields({
   const configMatchesDefault = configJson === currentDefault;
 
   const resetConfigToPluginDefault = () => {
-    mcpAggregateStashRef.current = {};
+    mcpAggregateStashRef.current = null;
     setConfigJson(currentDefault);
     setUserEditedConfig(false);
     setErrors(({ config: _config, ...remainingErrors }) => remainingErrors);
@@ -343,7 +345,7 @@ function PluginConfigFormFields({
     if (!mcpGatewayConfigHasAggregateOnlyFields(parsedMcpGatewayConfig)) return;
 
     mcpAggregateStashRef.current = {
-      ...mcpAggregateStashRef.current,
+      ...(mcpAggregateStashRef.current ?? {}),
       ...pickMcpGatewayAggregateOnlyFields(parsedMcpGatewayConfig),
     };
     const stripped = omitMcpGatewayAggregateOnlyFields(parsedMcpGatewayConfig);
@@ -360,7 +362,7 @@ function PluginConfigFormFields({
   const selectPlugin = (next: string) => {
     setPluginName(next);
     if (isEdit || !next) return;
-    mcpAggregateStashRef.current = {};
+    mcpAggregateStashRef.current = null;
     setConfigJson(formatPluginConfigDefault(next));
     setUserEditedConfig(false);
   };

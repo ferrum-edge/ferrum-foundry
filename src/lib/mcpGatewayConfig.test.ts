@@ -110,7 +110,7 @@ describe("mcpGatewayConfig", () => {
     });
     expect(transparent.config.policy).toBeUndefined();
     expect(transparent.config.discovery).toBeUndefined();
-    expect(transparent.stash.policy).toEqual(customized.policy);
+    expect(transparent.stash?.policy).toEqual(customized.policy);
 
     const restored = switchMcpGatewayMode(
       transparent.config,
@@ -146,6 +146,23 @@ describe("mcpGatewayConfig", () => {
     );
 
     expect(restored.config.policy).toEqual(denyByDefault.policy);
+  });
+
+  it("restores an aggregate config that relied on gateway defaults without adding a policy", () => {
+    const relyingOnDefaults = { ...aggregateConfig };
+    delete (relyingOnDefaults as Record<string, unknown>).policy;
+    delete (relyingOnDefaults as Record<string, unknown>).discovery;
+    expect(mcpGatewayConfigHasAggregateOnlyFields(relyingOnDefaults)).toBe(false);
+
+    const transparent = switchMcpGatewayMode(relyingOnDefaults, "transparent_proxy");
+    expect(transparent.stash).toEqual({});
+    const restored = switchMcpGatewayMode(
+      transparent.config,
+      "aggregate_router",
+      transparent.stash,
+    );
+    expect(restored.config.policy).toBeUndefined();
+    expect(restored.config).toEqual({ ...relyingOnDefaults, mode: "aggregate_router" });
   });
 
   it("does not merge the sample policy into aggregate fields already present", () => {
