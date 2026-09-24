@@ -61,7 +61,9 @@ function PluginEditor({ session }: { session: EditorSession }) {
   const resourceQuery = usePluginConfig(pluginId, detailLive);
   const { data: plugin, isLoading } = resourceQuery;
   const { data: availablePlugins, isLoading: pluginsLoading } = useAvailablePlugins();
-  const proxiesQuery = useAllProxies();
+  // Only a proxy-group plugin's membership needs the whole proxy collection;
+  // global and proxy-scoped plugins must not pay for that traversal.
+  const proxiesQuery = useAllProxies(plugin?.scope === "proxy_group");
   const {
     data: allProxies,
     isPending: proxiesPending,
