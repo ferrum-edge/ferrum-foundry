@@ -7,6 +7,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PluginConfigForm } from "./PluginConfigForm";
 import type { PluginConfig, PluginConfigCreate } from "@/api/types";
+import { formatPluginName } from "@/lib/pluginConfigDefaults";
 
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn() }));
 
@@ -286,5 +287,45 @@ describe("guided configuration", () => {
     expect(JSON.parse(configJsonField().value).limit_by).toBe("Consumer");
     await submit();
     expect(onSubmit).toHaveBeenCalled();
+  });
+
+  it("seeds the chosen plugin's default config into the guided fields in create mode", async () => {
+    await act(async () => {
+      root.render(
+        <PluginConfigForm
+          availablePlugins={["prometheus_metrics", "key_auth"]}
+          isLoading={false}
+          onSubmit={onSubmit}
+        />,
+      );
+    });
+
+    const choose = async (pluginName: string) => {
+      const trigger = [...host.querySelectorAll<HTMLElement>('[role="combobox"]')].find(
+        (entry) =>
+          document.getElementById(entry.getAttribute("aria-labelledby") ?? "")?.textContent
+            ?.replace("*", "")
+            .trim() === "Plugin Name",
+      )!;
+      await act(async () => {
+        trigger.focus();
+        trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      });
+      const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(
+        (entry) => entry.textContent === formatPluginName(pluginName),
+      )!;
+      await act(async () => {
+        option.focus();
+        option.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      });
+    };
+
+    await choose("prometheus_metrics");
+    await choose("key_auth");
+    expect((labelledControl("Key location") as HTMLInputElement).value).toBe("header:X-API-Key");
+
+    await submit();
+    expect(onSubmit).toHaveBeenCalledOnce();
+    expect(onSubmit.mock.calls[0]![0].config).toMatchObject({ key_location: "header:X-API-Key" });
   });
 });

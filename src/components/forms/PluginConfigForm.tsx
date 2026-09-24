@@ -354,14 +354,16 @@ function PluginConfigFormFields({
     }
   }, [configJson, parsedMcpGatewayConfig, pluginName]);
 
-  // When plugin name changes in create mode, always update config to the new default
-  useEffect(() => {
-    if (isEdit || !pluginName) return;
+  // Picking a plugin in create mode reseeds its default config in the same
+  // update, so the guided editor (keyed on the plugin name) never mounts
+  // against the previous plugin's config and captures that as its base.
+  const selectPlugin = (next: string) => {
+    setPluginName(next);
+    if (isEdit || !next) return;
     mcpAggregateStashRef.current = {};
-    const nextConfigJson = formatPluginConfigDefault(pluginName);
-    setConfigJson(nextConfigJson);
+    setConfigJson(formatPluginConfigDefault(next));
     setUserEditedConfig(false);
-  }, [isEdit, pluginName]);
+  };
 
   /* ================================================================ */
   /*  Render                                                           */
@@ -377,7 +379,7 @@ function PluginConfigFormFields({
             <Select
               label="Plugin Name"
               value={pluginName}
-              onValueChange={setPluginName}
+              onValueChange={selectPlugin}
               groups={pluginGroups}
               placeholder="Select a plugin..."
               error={errors.plugin_name}
