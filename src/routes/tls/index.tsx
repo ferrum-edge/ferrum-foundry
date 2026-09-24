@@ -4,7 +4,7 @@
 /*  surface rotation, and material validation.                        */
 /* ------------------------------------------------------------------ */
 
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
