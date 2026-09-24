@@ -261,7 +261,7 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
         </TabsList>
 
         {/* ── Details Tab ── */}
-        <TabsContent value="details">
+        <TabsContent value="details" keepMounted>
           <Card>
             <ConsumerForm
               key={formGeneration}

@@ -253,7 +253,7 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
         </TabsList>
 
         {/* Config tab */}
-        <TabsContent value="config">
+        <TabsContent value="config" keepMounted>
           <Card>
             <UpstreamForm
               key={formGeneration}

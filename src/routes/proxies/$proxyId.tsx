@@ -293,7 +293,7 @@ function ProxyEditor({ session }: { session: EditorSession }) {
         </TabsList>
 
         {/* ── Config Tab ─────────────────────────────────────────── */}
-        <TabsContent value="config">
+        <TabsContent value="config" keepMounted>
           <Card>
             <ProxyForm
               key={formGeneration}

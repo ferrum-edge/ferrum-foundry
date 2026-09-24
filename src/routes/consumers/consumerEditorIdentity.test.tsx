@@ -185,7 +185,8 @@ describe("consumer editor identity across a namespace switch", () => {
 
   async function submitForm(): Promise<void> {
     await act(async () => {
-      host!.querySelector("form")!.requestSubmit();
+      // The form in the open tab: inactive editor tabs stay mounted, hidden.
+      host!.querySelector<HTMLFormElement>('[role="tabpanel"][data-state="active"] form')!.requestSubmit();
     });
   }
 

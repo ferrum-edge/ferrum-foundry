@@ -162,6 +162,16 @@ describe("upstream target route integration", () => {
     expect(current).toEqual(initial);
   });
 
+  it("keeps an unsaved configuration draft across a tab switch", async () => {
+    await mount();
+    await settle(() => expect(panel().textContent).toContain("Update Upstream"));
+    await fill(inputByLabel(panel(), "Name"), "Draft name");
+    await selectTab("Targets (1)");
+    await selectTab("Configuration");
+    expect(inputByLabel(panel(), "Name").value).toBe("Draft name");
+    expect(writes).toHaveLength(0);
+  });
+
   it("keeps a target draft when a concurrent edit refuses the save", async () => {
     await mount();
     await settle(() => expect(ui.host.textContent).toContain("Targets (1)"));
