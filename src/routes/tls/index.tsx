@@ -6,6 +6,7 @@
 
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
 import { Card } from "@/components/ui/Card";
 import { ResourceGrid } from "@/components/ui/ResourceGrid";
@@ -1567,8 +1568,33 @@ function ValidateTab() {
 /*  TlsPage                                                            */
 /* ================================================================== */
 
+const TLS_TABS: readonly string[] = [
+  "inventory",
+  ...MANAGED_TABS.map((tab) => tab.collection),
+  "acme",
+  "events",
+  "validate",
+];
+
 export default function TlsPage() {
   const { capabilities } = useCapabilities();
+  // Inventory and Events each page through the route's one `offset`. The
+  // active tab lives in the URL beside it so a switch drops the offset in the
+  // same navigation: the newly opened list starts at its first page instead
+  // of being requested at the other list's position.
+  const search = useSearch({ strict: false }) as Record<string, unknown>;
+  const navigate = useNavigate();
+  const activeTab =
+    typeof search.tab === "string" && TLS_TABS.includes(search.tab) ? search.tab : "inventory";
+  const selectTab = (next: string) => {
+    void navigate({
+      search: ({ offset: _offset, ...previous }: Record<string, unknown>) => ({
+        ...previous,
+        tab: next,
+      }),
+      replace: true,
+    } as never);
+  };
   return (
     <div className="space-y-6">
       <div>
@@ -1595,7 +1621,7 @@ export default function TlsPage() {
       <CapabilityNotice verdict={capabilities.tlsMaterial} />
       <CapabilityNotice verdict={capabilities.operationalActions} />
 
-      <Tabs defaultValue="inventory">
+      <Tabs value={activeTab} onValueChange={selectTab}>
         <TabsList>
           <TabsTrigger value="inventory">Inventory</TabsTrigger>
           {MANAGED_TABS.map((tab) => (
