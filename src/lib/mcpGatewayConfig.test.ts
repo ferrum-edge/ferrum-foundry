@@ -128,4 +128,40 @@ describe("mcpGatewayConfig", () => {
       servers: customized.servers,
     });
   });
+
+  it("restores a stashed policy exactly, without the sample allow rule", () => {
+    const denyByDefault = {
+      ...aggregateConfig,
+      policy: {
+        default_action: "deny",
+        tools: { "github.list_repos": { action: "allow" } },
+      },
+    };
+
+    const transparent = switchMcpGatewayMode(denyByDefault, "transparent_proxy");
+    const restored = switchMcpGatewayMode(
+      transparent.config,
+      "aggregate_router",
+      transparent.stash,
+    );
+
+    expect(restored.config.policy).toEqual(denyByDefault.policy);
+  });
+
+  it("does not merge the sample policy into aggregate fields already present", () => {
+    const config = {
+      mode: "transparent_proxy",
+      policy: { default_action: "deny", tools: {} },
+    };
+    const restored = switchMcpGatewayMode(config, "aggregate_router");
+    expect(restored.config.policy).toEqual({ default_action: "deny", tools: {} });
+  });
+
+  it("seeds the sample policy only for a configuration with no aggregate fields", () => {
+    const restored = switchMcpGatewayMode({ mode: "transparent_proxy" }, "aggregate_router");
+    expect(restored.config.policy).toEqual({
+      default_action: "deny",
+      tools: { "github.search_issues": { action: "allow" } },
+    });
+  });
 });

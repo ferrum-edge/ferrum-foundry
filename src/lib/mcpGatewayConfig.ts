@@ -156,8 +156,13 @@ export function applyMcpGatewayAggregateDefaults(
 ): JsonObject {
   const next = isPlainObject(config) ? deepClone(config) : {};
   next.mode = "aggregate_router";
-  const restored = mergeDefined(AGGREGATE_FIELD_DEFAULTS, stash);
-  return mergeDefined(next, restored);
+  // A stash is the operator's own aggregate configuration and is restored
+  // exactly: merging the sample defaults under it would add an allow rule to
+  // a deny-by-default policy the operator never wrote. The sample is only a
+  // starting point for a configuration that has no aggregate fields at all.
+  if (mcpGatewayConfigHasAggregateOnlyFields(stash)) return mergeDefined(next, stash);
+  if (mcpGatewayConfigHasAggregateOnlyFields(next)) return next;
+  return mergeDefined(next, AGGREGATE_FIELD_DEFAULTS);
 }
 
 export function buildMcpGatewayTemplate(mode: McpGatewayMode): JsonObject {
