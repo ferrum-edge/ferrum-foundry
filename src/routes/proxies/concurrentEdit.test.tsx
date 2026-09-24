@@ -6,7 +6,9 @@
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { markCommittedWrite } from "@/api/client";
 import { StaleResourceError } from "@/api/conditionalWrite";
+import * as proxiesApi from "@/api/proxies";
 import { NamespaceProvider, NAMESPACE_STORAGE_KEY } from "@/stores/namespace";
 import type { Proxy } from "@/api/types";
 import { inputByLabel } from "@/test/fields";
@@ -17,7 +19,8 @@ vi.mock("@tanstack/react-router", () => ({
   useParams: () => ({ proxyId: "checkout" }),
   Link: ({ children }: { children: ReactNode }) => <span>{children}</span>,
 }));
-vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
+const toast = vi.fn();
+vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
 vi.mock("@/components/shared/ProxyApiSpecsCard", () => ({
   ProxyApiSpecsCard: () => null,
 }));
@@ -263,5 +266,102 @@ describe("a proxy save refused as stale", () => {
       .map((button) => button.textContent?.trim())
       .filter((label): label is string => Boolean(label));
     expect(choices).toEqual(["Reload current version", "Close"]);
+  });
+});
+
+describe("a proxy save that committed but is not yet live (#430)", () => {
+  const COMMITTED_HOST = "typed-by-operator.internal";
+  const committed = { cursor: "1:2", reason: "reload_timeout" };
+
+  beforeEach(() => {
+    localStorage.setItem(NAMESPACE_STORAGE_KEY, "tenant-a");
+    served = proxyAt(OPENED_HOST);
+    toast.mockClear();
+    refetch.mockClear();
+    // The gateway now holds the operator's own committed draft.
+    refetch.mockImplementation(async () => {
+      served = proxyAt(COMMITTED_HOST);
+      return { data: served };
+    });
+    mutateAsync.mockReset();
+    mutateAsync
+      .mockRejectedValueOnce(markCommittedWrite(new Error("HTTP 503"), committed))
+      .mockResolvedValueOnce(proxyAt(COMMITTED_HOST));
+    deleteMutateAsync.mockReset();
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    host.remove();
+    localStorage.clear();
+    refetch.mockImplementation(async () => {
+      served = proxyAt(GATEWAY_HOST);
+      return { data: served };
+    });
+  });
+
+  it("says saved-not-live, reseeds from the gateway, and a second Save is judged against it", async () => {
+    await render();
+    setField("Backend Host", COMMITTED_HOST);
+    await clickButton("Update Proxy");
+
+    // Not a failure and not a conflict.
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(toast).toHaveBeenCalledWith(
+      "warning",
+      expect.stringContaining("Proxy saved: committed, not yet proven live"),
+    );
+    expect(toast.mock.calls.flat().join(" ")).toContain("cursor 1:2");
+    expect(toast).not.toHaveBeenCalledWith("error", expect.anything());
+
+    // Form and baseline were reseeded from one fresh read.
+    expect(refetch).toHaveBeenCalledTimes(1);
+    expect(inputByLabel(host, "Backend Host").value).toBe(COMMITTED_HOST);
+    expect(mutateAsync.mock.calls[0]![0].guard.baseline).toEqual(
+      proxiesApi.toBaseline(proxyAt(OPENED_HOST)),
+    );
+
+    // Pressing Save again is compared against the operator's own commit, so
+    // the guard has nothing to refuse.
+    await clickButton("Update Proxy");
+    expect(mutateAsync).toHaveBeenCalledTimes(2);
+    expect(mutateAsync.mock.calls[1]![0].guard.baseline).toEqual(
+      proxiesApi.toBaseline(proxyAt(COMMITTED_HOST)),
+    );
+    expect(mutateAsync.mock.calls[1]![0].data.backend_host).toBe(COMMITTED_HOST);
+    expect(toast).toHaveBeenLastCalledWith("success", "Proxy updated successfully");
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it("keeps the draft and the old baseline when the reseed read fails", async () => {
+    refetch.mockImplementationOnce(async () => ({ data: served, isError: true }) as never);
+    await render();
+    setField("Backend Host", COMMITTED_HOST);
+    await clickButton("Update Proxy");
+
+    expect(toast).toHaveBeenCalledWith(
+      "warning",
+      expect.stringContaining("reload it before saving again"),
+    );
+    expect(inputByLabel(host, "Backend Host").value).toBe(COMMITTED_HOST);
+  });
+
+  it("reports a committed delete as deleted, not as a failure", async () => {
+    deleteMutateAsync.mockResolvedValueOnce({
+      namespace: "tenant-a",
+      id: "checkout",
+      committed: { cursor: "1:2", reason: null },
+    });
+    await render();
+
+    await clickButton("Delete");
+    await clickButton("Delete Proxy");
+
+    expect(toast).toHaveBeenCalledWith(
+      "warning",
+      expect.stringContaining("Proxy deleted: committed, not yet proven live"),
+    );
+    expect(toast).not.toHaveBeenCalledWith("error", expect.anything());
+    expect(dialogText()).not.toContain("changed after you opened it");
   });
 });

@@ -27,7 +27,7 @@ import {
   CredentialForm,
   CREDENTIAL_TYPES,
 } from "@/components/forms/CredentialForm";
-import { getApiErrorMessage } from "@/api/client";
+import { committedWriteMessage, getApiErrorMessage, getCommittedWrite } from "@/api/client";
 import { analyzeProxyPolicy } from "@/lib/effectivePolicy";
 import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
 import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
@@ -38,7 +38,7 @@ import type { ConsumerCreate, Consumer } from "@/api/types";
 import * as consumersApi from "@/api/consumers";
 import { isStaleResourceError, type StaleResourceDetail } from "@/api/conditionalWrite";
 import { StaleWriteDialog } from "@/components/shared/StaleWriteDialog";
-import { useEditBaseline } from "@/hooks/useEditBaseline";
+import { reseedAfterCommit, useEditBaseline } from "@/hooks/useEditBaseline";
 
 /* ================================================================== */
 /*  ConsumerDetailPage                                                 */
@@ -145,6 +145,20 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
         setConflict(err.detail);
         return;
       }
+      const committed = getCommittedWrite(err);
+      if (committed) {
+        // Saved, only not yet live: reseed from the gateway, as on the proxy
+        // detail page.
+        const reseeded = await reseedAfterCommit(resourceQuery.refetch, baseline, () =>
+          setFormGeneration((generation) => generation + 1),
+        );
+        toast(
+          "warning",
+          committedWriteMessage("Consumer saved", committed) +
+            (reseeded ? "" : " Foundry could not re-read the consumer; reload it before saving again."),
+        );
+        return;
+      }
       const message = await getApiErrorMessage(err, "Failed to update consumer");
       toast("error", message);
     }
@@ -163,11 +177,15 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
     try {
       // Judged against the consumer this page is displaying — see the proxy
       // detail page.
-      await deleteConsumer.mutateAsync({
+      const deleted = await deleteConsumer.mutateAsync({
         id: consumerId,
         guard: consumersApi.consumerWriteGuard(consumer),
       });
-      toast("success", "Consumer deleted successfully");
+      if (deleted.committed) {
+        toast("warning", committedWriteMessage("Consumer deleted", deleted.committed));
+      } else {
+        toast("success", "Consumer deleted successfully");
+      }
       navigate({ to: "/consumers" });
     } catch (err: unknown) {
       if (isStaleResourceError(err)) {
@@ -459,6 +477,14 @@ function AclGroupsManager({
         onConflict(err.detail);
         return;
       }
+      const committed = getCommittedWrite(err);
+      if (committed) {
+        // Added, only not yet live. The mutation has already refreshed this
+        // consumer, so the next group edit starts from the committed list.
+        toast("warning", committedWriteMessage(`Added group "${trimmed}"`, committed));
+        setNewGroup("");
+        return;
+      }
       const message = await getApiErrorMessage(err, "Failed to add group");
       toast("error", message);
     }
@@ -485,6 +511,11 @@ function AclGroupsManager({
     } catch (err: unknown) {
       if (isStaleResourceError(err)) {
         onConflict(err.detail);
+        return;
+      }
+      const committed = getCommittedWrite(err);
+      if (committed) {
+        toast("warning", committedWriteMessage(`Removed group "${group}"`, committed));
         return;
       }
       const message = await getApiErrorMessage(err, "Failed to remove group");

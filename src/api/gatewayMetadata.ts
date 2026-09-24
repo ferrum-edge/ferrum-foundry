@@ -173,6 +173,60 @@ function isCommittedNotLive(body: unknown): boolean {
   );
 }
 
+/**
+ * A configuration write the gateway durably committed but could not yet make
+ * live. `cursor` is the covering `X-Ferrum-Config-Cursor`, when the answer
+ * carried a valid one; `reason` is Edge's closed `reason` (`config_rejected`,
+ * `reload_timeout`, `sequence_unavailable`), when the body carried one.
+ */
+export interface CommittedWrite {
+  readonly cursor: string | null;
+  readonly reason: string | null;
+}
+
+/**
+ * Whether a gateway answer is the committed-but-not-live `503`.
+ *
+ * Edge's `NamespaceAdmissionUnavailable` response has two families under one
+ * status, and the answer itself says which: a `503` with a valid
+ * `X-Ferrum-Config-Cursor` or a body carrying `applied: false` is **durably
+ * committed** — only the live apply lagged — while the nothing-applied family
+ * has no `applied` field and never carries the cursor. This is the single
+ * predicate for that distinction: the live-apply monitor
+ * (`observeGatewayResponse`), the API client's error classification, and
+ * restore all use it.
+ */
+export function committedNotLiveAnswer(
+  status: number,
+  cursorHeader: string | null,
+  body: unknown,
+): CommittedWrite | null {
+  if (status !== 503) return null;
+  const cursor = parseConfigCursor(cursorHeader);
+  if (!cursor && !isCommittedNotLive(body)) return null;
+  return { cursor: cursor?.raw ?? null, reason: responseReason(body) };
+}
+
+/**
+ * `committedNotLiveAnswer` for a rejected request. ky parses the failing body
+ * into `error.data` and consumes the response doing it, so the body is read
+ * from there, never from the response.
+ */
+export function classifyCommittedWrite(error: unknown): CommittedWrite | null {
+  if (!error || typeof error !== "object") return null;
+  const candidate = error as {
+    response?: { status?: unknown; headers?: Headers };
+    data?: unknown;
+  };
+  const status = candidate.response?.status;
+  if (typeof status !== "number") return null;
+  return committedNotLiveAnswer(
+    status,
+    candidate.response?.headers?.get("x-ferrum-config-cursor") ?? null,
+    candidate.data,
+  );
+}
+
 async function pollApplyStatus(
   cursor: ConfigCursor,
   generation: number,
@@ -288,7 +342,12 @@ export async function observeGatewayResponse(
   // Body reads and status polls may both have completed since this observer
   // started. Base publication on the current monitor, never its earlier copy.
   next = { ...snapshot, cachedResponse, etag: next.etag, cacheControl: next.cacheControl, contentDisposition: next.contentDisposition };
-  const committed = response.ok || (response.status === 503 && (cursor !== null || isCommittedNotLive(body)));
+  const notLive = committedNotLiveAnswer(
+    response.status,
+    response.headers.get("x-ferrum-config-cursor"),
+    body,
+  );
+  const committed = response.ok || notLive !== null;
   if (!committed && ["pending", "rejected", "unverifiable"].includes(snapshot.apply.state)) {
     publish(next);
     return;
@@ -296,7 +355,7 @@ export async function observeGatewayResponse(
   if (committed) pollGeneration += 1;
   const generation = pollGeneration;
 
-  if (response.status === 503 && (cursor || isCommittedNotLive(body))) {
+  if (notLive) {
     next = {
       ...next,
       apply: {

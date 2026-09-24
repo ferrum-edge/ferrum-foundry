@@ -7,7 +7,7 @@
 /*  after the click cannot retarget the write.                        */
 /* ------------------------------------------------------------------ */
 
-import { queryScope } from "@/api/client";
+import { isCommittedWrite, queryScope } from "@/api/client";
 import { useMemo } from "react";
 import {
   useMutation,
@@ -22,7 +22,11 @@ import type { WriteGuard } from "@/api/conditionalWrite";
 import type { PaginationParams, Proxy, ProxyCreate } from "@/api/types";
 import { useNamespace } from "@/stores/namespace";
 import { retireCascade, type CascadeKind } from "./retireCascade";
-import { retireDeletedDetail } from "./retireDeletedDetail";
+import {
+  removeCommitted,
+  retireDeletedDetail,
+  type DeleteOutcome,
+} from "./retireDeletedDetail";
 
 /**
  * `DELETE /proxies/{id}` cascades: the proxy's plugin configs (spec-owned and
@@ -228,6 +232,16 @@ export function useUpdateProxy() {
       qc.invalidateQueries({ queryKey: ["proxy"] });
       qc.invalidateQueries({ queryKey: ["proxyRef"] });
     },
+    // A committed-but-not-live save changed the gateway even though it
+    // rejects: reconcile before the caller sees the outcome, as for a success.
+    onError: async (error) => {
+      if (!isCommittedWrite(error)) return;
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["proxies"] }),
+        qc.invalidateQueries({ queryKey: ["proxy"] }),
+        qc.invalidateQueries({ queryKey: ["proxyRef"] }),
+      ]);
+    },
   });
 }
 
@@ -241,10 +255,12 @@ export function useDeleteProxy() {
     }: {
       id: string;
       guard: WriteGuard<Proxy | ProxyCreate> | null;
-    }) => {
-      await proxies.remove(scope, id, guard);
+    }): Promise<DeleteOutcome> => {
+      // A committed-but-not-live answer is a completed delete: its caches are
+      // retired below exactly as for a 204.
+      const committed = await removeCommitted(() => proxies.remove(scope, id, guard));
       // Carry the mutation's namespace through completion, even after a switch.
-      return { namespace: scope.namespace, id };
+      return { namespace: scope.namespace, id, committed };
     },
     onSuccess: async (retired) => {
       await retireDeletedDetail(qc, ["proxy", retired.namespace, retired.id]);

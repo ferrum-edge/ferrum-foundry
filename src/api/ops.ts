@@ -4,7 +4,7 @@
 /*   audit, batch, backup/restore)                                    */
 /* ------------------------------------------------------------------ */
 
-import { parseConfigCursor } from "./gatewayMetadata";
+import { classifyCommittedWrite, type CommittedWrite } from "./gatewayMetadata";
 import {
   SILENT_ERRORS,
   reportRequestError,
@@ -559,21 +559,14 @@ function optionalStringArray(body: Record<string, unknown>, key: string): string
     : null;
 }
 
-export interface RestoreCommitted {
-  cursor: string | null;
-  reason: string | null;
-}
+export type RestoreCommitted = CommittedWrite;
 
-/** A committed restore is a recovery result even though its HTTP status is 503. */
+/**
+ * A committed restore is a recovery result even though its HTTP status is 503.
+ * The same committed-but-not-live predicate every other write uses.
+ */
 export function getRestoreCommitted(error: unknown): RestoreCommitted | null {
-  if (!error || typeof error !== "object") return null;
-  const candidate = error as { response?: { status?: unknown; headers?: Headers }; data?: unknown };
-  if (candidate.response?.status !== 503) return null;
-  const cursor = parseConfigCursor(candidate.response.headers?.get("x-ferrum-config-cursor") ?? null);
-  const body = candidate.data && typeof candidate.data === "object"
-    ? candidate.data as Record<string, unknown> : undefined;
-  if (!cursor && body?.applied !== false) return null;
-  return { cursor: cursor?.raw ?? null, reason: typeof body?.reason === "string" ? body.reason : null };
+  return classifyCommittedWrite(error);
 }
 
 /** Preserve authoritative rollback or pre-commit connectivity details. */
