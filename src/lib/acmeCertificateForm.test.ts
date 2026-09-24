@@ -27,6 +27,21 @@ describe("buildAcmeCertificateRequest", () => {
     });
   });
 
+  it.each(["", "  ", "1.5", "-1", "1e2"])(
+    "rejects expiry warning days %j instead of sending 0 or a coerced value",
+    (expiryWarningDays) => {
+      expect(() =>
+        buildAcmeCertificateRequest({
+          ...EMPTY_ACME_CERTIFICATE_FORM,
+          domains: "example.com",
+          certPem: CERT,
+          keyPem: KEY,
+          expiryWarningDays,
+        }),
+      ).toThrow("Expiry warning days");
+    },
+  );
+
   it.each([
     ["http://ca.example/directory", "absolute HTTPS"],
     ["https://user:pass@ca.example/directory", "without credentials"],

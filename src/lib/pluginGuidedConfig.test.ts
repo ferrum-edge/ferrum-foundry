@@ -191,6 +191,13 @@ describe("secret-bearing fields", () => {
     expect(edited.redis_password).toBe("a-real-password");
   });
 
+  it("flags whitespace typed over a stored secret instead of saving it silently", () => {
+    const values = readGuidedConfig(rateLimiting, config);
+    const draft = { ...values, redis_password: { present: true, text: "   " } };
+    const issues = validateGuidedConfig(rateLimiting, draft, config, values);
+    expect(issues.map((issue) => issue.path)).toContain("redis_password");
+  });
+
   it("replaces it when the operator types a new one", () => {
     const values = readGuidedConfig(rateLimiting, config);
     const edited = writeGuidedConfig(
@@ -383,5 +390,32 @@ describe("never stricter than the gateway", () => {
     expect(unmodelledEnumSpelling(rateLimiting, { ...defaultRule, sync_mode: "Redis" })).toContain(
       "sync_mode",
     );
+  });
+});
+
+describe("integer drafts", () => {
+  it("never writes an empty integer field as 0", () => {
+    const config: JsonObject = { max_age: 600 };
+    const values = readGuidedConfig(cors, config);
+    const edited = writeGuidedConfig(
+      cors,
+      config,
+      { ...values, max_age: { present: true, text: "" } },
+      values,
+    );
+    expect(edited.max_age).not.toBe(0);
+    expect(edited.max_age).toBe("");
+  });
+
+  it("writes a typed integer as a number", () => {
+    const config: JsonObject = { max_age: 600 };
+    const values = readGuidedConfig(cors, config);
+    const edited = writeGuidedConfig(
+      cors,
+      config,
+      { ...values, max_age: { present: true, text: " 120 " } },
+      values,
+    );
+    expect(edited.max_age).toBe(120);
   });
 });
