@@ -132,29 +132,35 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
   // from the same `upstream` object the new list was computed from — the list
   // the operator actually saw — so a concurrent target change is refused while
   // a settings save from this same client still composes (#235/#254).
-  const saveTargets = session.bind(async (newTargets: UpstreamTarget[]) => {
-    if (!upstream || updateUpstream.isPending || !capability.allowed) return;
-    try {
-      await updateUpstream.mutateAsync({
-        id: upstreamId,
-        targets: newTargets,
-        guard: upstreamsApi.targetsWriteGuard(upstream),
-      });
-      toast("success", "Targets updated successfully");
-    } catch (err: unknown) {
-      if (isStaleResourceError(err)) {
-        setConflict(err.detail);
+  // `onSaved` runs only when the targets were written: a refused or rejected
+  // save keeps the target draft open, as the configuration form does, so the
+  // conflict dialog's "Keep editing" has something to return to.
+  const saveTargets = session.bind(
+    async (newTargets: UpstreamTarget[], onSaved: () => void) => {
+      if (!upstream || updateUpstream.isPending || !capability.allowed) return;
+      try {
+        await updateUpstream.mutateAsync({
+          id: upstreamId,
+          targets: newTargets,
+          guard: upstreamsApi.targetsWriteGuard(upstream),
+        });
+      } catch (err: unknown) {
+        if (isStaleResourceError(err)) {
+          setConflict(err.detail);
+          return;
+        }
+        const message = await getApiErrorMessage(err, "Failed to update targets");
+        toast("error", message);
         return;
       }
-      const message = await getApiErrorMessage(err, "Failed to update targets");
-      toast("error", message);
-    }
-  });
+      toast("success", "Targets updated successfully");
+      onSaved();
+    },
+  );
 
   const handleAddTarget = async (target: UpstreamTarget) => {
     if (!upstream || updateUpstream.isPending) return;
-    await saveTargets([...upstream.targets, target]);
-    setShowTargetForm(false);
+    await saveTargets([...upstream.targets, target], () => setShowTargetForm(false));
   };
 
   const handleUpdateTarget = async (target: UpstreamTarget) => {
@@ -162,15 +168,15 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
     const newTargets = upstream.targets.map((t, i) =>
       i === editingTargetIndex ? target : t,
     );
-    await saveTargets(newTargets);
-    setEditingTargetIndex(null);
+    await saveTargets(newTargets, () => setEditingTargetIndex(null));
   };
 
   const handleRemoveTarget = async (index: number) => {
     if (!upstream || updateUpstream.isPending) return;
     const newTargets = upstream.targets.filter((_, i) => i !== index);
-    await saveTargets(newTargets);
-    if (editingTargetIndex === index) setEditingTargetIndex(null);
+    await saveTargets(newTargets, () => {
+      if (editingTargetIndex === index) setEditingTargetIndex(null);
+    });
   };
 
   /* ---------- Loading / Error states ---------- */

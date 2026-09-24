@@ -151,8 +151,8 @@ describe("upstream target route integration", () => {
     await fill(inputByLabel(panel(), "Host"), "rejected-backend");
     await click("Add Target", panel());
     await settle(() => expect(writes).toHaveLength(2));
-    await settle(() => expect(panel().querySelector("input")).toBeNull());
-    expect(panel().textContent).not.toContain("rejected-backend");
+    // A rejected target save keeps its draft, as the configuration form does.
+    expect(inputByLabel(panel(), "Host").value).toBe("rejected-backend");
     expect(panel().textContent).toContain("old-backend:8080");
     await click("Delete", ui.host);
     await click("Delete Upstream");
@@ -160,6 +160,20 @@ describe("upstream target route integration", () => {
     await settle(() => expect(button("Delete Upstream").disabled).toBe(false));
     expect(document.querySelector('[role="dialog"]')).not.toBeNull();
     expect(current).toEqual(initial);
+  });
+
+  it("keeps a target draft when a concurrent edit refuses the save", async () => {
+    await mount();
+    await settle(() => expect(ui.host.textContent).toContain("Targets (1)"));
+    await selectTab("Targets (1)");
+    await click("Add Target", panel());
+    await fill(inputByLabel(panel(), "Host"), "my-backend");
+    // Another administrator replaces the targets after this page loaded.
+    current = { ...initial, targets: [{ host: "their-backend", port: 9090, weight: 1 }], updated_at: "2026-09-02T00:00:00Z" };
+    await click("Add Target", panel());
+    await settle(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull());
+    expect(writes).toHaveLength(0);
+    expect(inputByLabel(panel(), "Host").value).toBe("my-backend");
   });
 
   it("offers a route back when the requested upstream no longer exists", async () => {
