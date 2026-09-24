@@ -297,6 +297,20 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
     reply.raw.once('close', abortOnDisconnect);
     // Covers a peer that closed while signing/initializing the handler.
     if (reply.raw.destroyed) abortOnDisconnect();
+    // Once the reply is out, tear down the guarded upload and its timers now
+    // rather than when its own deadline fires.
+    reply.raw.once('finish', () => {
+      if (!controller.signal.aborted) controller.abort(new Error('Response complete'));
+    });
+    // A gateway may answer (400/403/412/413, or not at all) without reading
+    // the whole upload. The unread remainder sits paused on the client's
+    // socket, so a keep-alive connection would hang the next request on it
+    // until the server's request timeout. Close it instead of reusing it.
+    const closeIfUploadUnread = () => {
+      if (carriesRequestBody(request) && !request.raw.complete) {
+        reply.header('connection', 'close');
+      }
+    };
 
     try {
       const token = await generateToken(config, principal);
@@ -371,6 +385,7 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
         }
       }
       if (response.status === 401) reply.header('x-ferrum-auth-layer', 'gateway');
+      closeIfUploadUnread();
 
       if (!response.body) {
         clearResponseDeadline();
@@ -392,6 +407,7 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
     } catch (error: unknown) {
       clearResponseDeadline();
       reply.raw.off('close', abortOnDisconnect);
+      closeIfUploadUnread();
       if (error instanceof RegistryRequestError) {
         return reply.status(error.status).send({ error: error.message });
       }
