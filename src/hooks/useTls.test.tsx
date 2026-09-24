@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AcmeOrder, AcmeOrderStatus } from "@/api/tls";
 import { stubFetch, page } from "@/test/__tests__/harness";
-import { useAllAcmeOrders } from "./useTls";
+import { useAcmeOrders } from "./useTls";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -13,6 +13,7 @@ let root: Root;
 let client: QueryClient;
 let statuses: AcmeOrderStatus[];
 let reads: number;
+let requested: URL[];
 
 function order(id: string, status: AcmeOrderStatus): AcmeOrder {
   return {
@@ -22,15 +23,17 @@ function order(id: string, status: AcmeOrderStatus): AcmeOrder {
 }
 
 function Probe() {
-  useAllAcmeOrders();
+  useAcmeOrders({ offset: 0, limit: 20 });
   return null;
 }
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
   reads = 0;
-  stubFetch(() => {
+  requested = [];
+  stubFetch((request) => {
     reads += 1;
+    requested.push(new URL(request.url));
     return Response.json(page(statuses.map((status, index) => order(`o${index}`, status))));
   });
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -56,6 +59,9 @@ describe("ACME order polling", () => {
   it("stops re-reading every order once all of them have settled", async () => {
     statuses = ["valid", "failed", "cancelled"];
     expect(await observeFor(60_000)).toBe(0);
+    expect(requested).toHaveLength(1);
+    expect(requested[0].searchParams.get("offset")).toBe("0");
+    expect(requested[0].searchParams.get("limit")).toBe("20");
   });
 
   it("keeps polling while an order can still change", async () => {

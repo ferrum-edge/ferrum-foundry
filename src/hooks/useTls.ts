@@ -31,14 +31,6 @@ export function useManagedTlsRecords(
   });
 }
 
-export function useAllManagedTlsRecords(collection: tls.ManagedTlsCollection) {
-  return useQuery({
-    queryKey: ["tls", "managed", collection, "all"],
-    queryFn: ({ signal }) =>
-      tls.listAllManagedRecords(collection, QUERY_ERROR_CONTEXT, signal),
-  });
-}
-
 export function useCreateManagedTlsRecord(collection: tls.ManagedTlsCollection) {
   const qc = useQueryClient();
   return useMutation({
@@ -77,13 +69,6 @@ export function useAcmeCertificates(params: PaginationParams = {}) {
   return useQuery({
     queryKey: ["tls", "acme", "certificates", params],
     queryFn: () => tls.listAcmeCertificates(params, QUERY_ERROR_CONTEXT),
-  });
-}
-
-export function useAllAcmeCertificates() {
-  return useQuery({
-    queryKey: ["tls", "acme", "certificates", "all"],
-    queryFn: ({ signal }) => tls.listAllAcmeCertificates(QUERY_ERROR_CONTEXT, signal),
   });
 }
 
@@ -126,18 +111,8 @@ export function useAcmeOrders(params: PaginationParams = {}) {
   return useQuery({
     queryKey: ["tls", "acme", "orders", params],
     queryFn: () => tls.listAcmeOrders(params, QUERY_ERROR_CONTEXT),
-    refetchInterval: 15000,
-  });
-}
-
-export function useAllAcmeOrders() {
-  return useQuery({
-    queryKey: ["tls", "acme", "orders", "all"],
-    queryFn: ({ signal }) => tls.listAllAcmeOrders(QUERY_ERROR_CONTEXT, signal),
-    // Re-traversing every order only tracks progress, so poll only while an
-    // order can still change; a settled collection is read again on mutation.
     refetchInterval: (query) =>
-      query.state.data?.some(tls.acmeOrderInProgress) ? 15000 : false,
+      query.state.data?.data.some(tls.acmeOrderInProgress) ? 15000 : false,
   });
 }
 
@@ -145,13 +120,6 @@ export function useAcmeAccounts(params: PaginationParams = {}) {
   return useQuery({
     queryKey: ["tls", "acme", "accounts", params],
     queryFn: () => tls.listAcmeAccounts(params, QUERY_ERROR_CONTEXT),
-  });
-}
-
-export function useAllAcmeAccounts() {
-  return useQuery({
-    queryKey: ["tls", "acme", "accounts", "all"],
-    queryFn: ({ signal }) => tls.listAllAcmeAccounts(QUERY_ERROR_CONTEXT, signal),
   });
 }
 
