@@ -23,7 +23,7 @@ function gateway(totalRequests: number): AdminMetrics["gateway"] {
     uptime_seconds: 86_400 * 2,
     total_requests: totalRequests,
     status_codes_total: { "200": totalRequests },
-  } as AdminMetrics["gateway"];
+  } as unknown as AdminMetrics["gateway"];
 }
 
 function Probe({ total, at }: { total: number; at: number }) {
