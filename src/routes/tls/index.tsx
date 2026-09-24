@@ -49,7 +49,7 @@ import {
   useValidateTlsMaterial,
 } from "@/hooks/useTls";
 import { MutationOutcomeUnknownError } from '@/api/mutationOutcome';
-import { AcmeFinalizationUnknownError, getAcmeOrder, TLS_VALIDATE_FIELDS } from "@/api/tls";
+import { acmeOrderInProgress, AcmeFinalizationUnknownError, getAcmeOrder, TLS_VALIDATE_FIELDS } from "@/api/tls";
 import type {
   ManagedTlsCollection,
   ManagedTlsRecord,
@@ -782,7 +782,7 @@ function AcmeTab() {
   const visibleOrders = (orders ?? []).slice(orderOffset, orderOffset + ACME_PAGE_SIZE);
   // A terminal observation resolves an ambiguous finalization without replaying it.
   const orderIsUnknown = (order: AcmeOrder) =>
-    unknownOrders.has(order.id) && !["valid", "failed", "cancelled"].includes(order.status);
+    unknownOrders.has(order.id) && acmeOrderInProgress(order);
 
   const handleCreateOrder = async () => {
     if (!canWrite.allowed) return;
@@ -1006,7 +1006,7 @@ function AcmeTab() {
                               queryClient.setQueryData<AcmeOrder[]>(ACME_ORDERS_KEY, (previous) =>
                                 previous?.map((entry) => entry.id === order.id ? checked : entry),
                               );
-                              if (["valid", "failed", "cancelled"].includes(checked.status)) {
+                              if (!acmeOrderInProgress(checked)) {
                                 setUnknownOrders((previous) => {
                                   const next = new Set(previous);
                                   next.delete(order.id);
