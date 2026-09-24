@@ -328,14 +328,38 @@ describe("consumer editor identity across a namespace switch", () => {
     expect(records.get("tenant-a")).toEqual(consumerFixture("tenant-a"));
   });
 
+  it("reads no proxy, plugin, or consumer collection until Matched Proxies is opened", async () => {
+    await mount();
+    await waitFor(() => heading() === "tenant-a-user");
+    const collectionReads = () => captured.filter((request) => {
+      const path = new URL(request.url).pathname;
+      return request.method === "GET" && /\/(proxies|plugins\/config|consumers)$/.test(path);
+    });
+    expect(collectionReads()).toEqual([]);
+    expect(pageText()).toContain("Matched Proxies (unknown)");
+
+    await act(async () => {
+      [...host!.querySelectorAll("button")].find((button) => button.textContent === "Matched Proxies (unknown)")!
+        .dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    await waitFor(() => !pageText().includes("Matched Proxies (unknown)"));
+    const paths = collectionReads().map((request) => new URL(request.url).pathname);
+    expect(paths.some((path) => path.endsWith("/proxies"))).toBe(true);
+    expect(paths.some((path) => path.endsWith("/plugins/config"))).toBe(true);
+    // A consumer's access depends on nobody else: no consumer traversal.
+    expect(paths.some((path) => path.endsWith("/consumers"))).toBe(false);
+  });
+
   it("shows an omitted basic credential as a conditional proxy match without fetching backups", async () => {
     basicPolicy = true;
     await mount();
-    await waitFor(() => pageText().includes("Matched Proxies (1)"));
+    // The policy traversals start only once the tab is opened.
+    await waitFor(() => pageText().includes("Matched Proxies (unknown)"));
     await act(async () => {
-      [...host!.querySelectorAll("button")].find((button) => button.textContent === "Matched Proxies (1)")!
+      [...host!.querySelectorAll("button")].find((button) => button.textContent === "Matched Proxies (unknown)")!
         .dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     });
+    await waitFor(() => pageText().includes("Matched Proxies (1)"));
     await waitFor(() => pageText().includes("ordinary Consumer responses omit basicauth"));
     expect(pageText()).toContain("Basic proxy");
     expect(pageText()).toContain("conditional");
