@@ -203,3 +203,23 @@ it("does not refetch a still-mounted proxy detail after a successful delete", as
     invalidate.mock.invocationCallOrder[listInvalidation]!,
   );
 });
+
+it("marks cached proxy details stale when a membership plan settles, even on failure", async () => {
+  // The plan rewrites proxies' `plugins`; the detail page combines the
+  // cached proxy with fresh plugin configs, so it must not keep the old list.
+  for (const outcome of [204, 400]) {
+    client.setQueryData(["proxy", "tenant-a", "orders"], { id: "orders", plugins: [] });
+    await render(<Probe kind="membership" />);
+    const pending = remove("same-id").catch((error: unknown) => error);
+    await settle(() => expect(deletion).toHaveLength(1));
+    await act(async () => {
+      deletion.shift()!.resolve(
+        outcome === 204 ? new Response(null, { status: 204 }) : new Response("Refused", { status: 400 }),
+      );
+      await pending;
+    });
+    expect(client.getQueryState(["proxy", "tenant-a", "orders"])?.isInvalidated, `after ${outcome}`)
+      .toBe(true);
+    client.clear();
+  }
+});

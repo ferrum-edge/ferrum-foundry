@@ -10,6 +10,7 @@
 
 import { queryScope } from "@/api/client";
 import {
+  type QueryClient,
   useMutation,
   useQuery,
   useQueryClient,
@@ -105,6 +106,19 @@ export function useCreatePluginConfig() {
   });
 }
 
+/**
+ * A membership plan rewrites `plugins` on proxies (and Edge appends the
+ * association itself on a proxy-scoped create), so the cached proxy detail is
+ * as stale as the list. Run on settle: a plan that failed part-way may still
+ * have written some proxies. Editors seed once and never compare `plugins`,
+ * so refreshing the detail cannot disturb an open draft.
+ */
+function invalidateMembership(qc: QueryClient): void {
+  qc.invalidateQueries({ queryKey: ["pluginConfigs"] });
+  qc.invalidateQueries({ queryKey: ["proxies"] });
+  qc.invalidateQueries({ queryKey: ["proxy"] });
+}
+
 export function useCreatePluginWithMembership() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
@@ -116,10 +130,7 @@ export function useCreatePluginWithMembership() {
       data: PluginConfigCreate;
       proxyIds?: string[];
     }) => createPluginWithMembership(data, proxyIds, bindPluginMembership(scope)),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["pluginConfigs"] });
-      qc.invalidateQueries({ queryKey: ["proxies"] });
-    },
+    onSettled: () => invalidateMembership(qc),
   });
 }
 
@@ -139,10 +150,9 @@ export function useUpdatePluginWithMembership() {
       guard: WriteGuard<PluginConfig | PluginConfigCreate> | null;
     }) =>
       updatePluginWithMembership(id, data, proxyIds, bindPluginMembership(scope), guard),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["pluginConfigs"] });
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: ["pluginConfig"] });
-      qc.invalidateQueries({ queryKey: ["proxies"] });
+      invalidateMembership(qc);
     },
   });
 }
@@ -168,8 +178,7 @@ export function useDeletePluginWithMembership() {
         retired.namespace,
         retired.id,
       ]);
-      qc.invalidateQueries({ queryKey: ["pluginConfigs"] });
-      qc.invalidateQueries({ queryKey: ["proxies"] });
     },
+    onSettled: () => invalidateMembership(qc),
   });
 }
