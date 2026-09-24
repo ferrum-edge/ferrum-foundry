@@ -175,7 +175,12 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
     if (!upstream || updateUpstream.isPending) return;
     const newTargets = upstream.targets.filter((_, i) => i !== index);
     await saveTargets(newTargets, () => {
-      if (editingTargetIndex === index) setEditingTargetIndex(null);
+      // Removing a row shifts every row below it up by one, so the open
+      // editor must follow its own target rather than keep its old index.
+      setEditingTargetIndex((editing) => {
+        if (editing === null || editing === index) return null;
+        return editing > index ? editing - 1 : editing;
+      });
     });
   };
 
@@ -297,7 +302,16 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
               {upstream.targets.length > 0 && (
                 <div className="space-y-2">
                   {upstream.targets.map((target, index) => (
-                    <div key={`${target.host}-${target.port}-${index}`}>
+                    // Keyed by address and its occurrence, not position, so
+                    // removing another row does not remount an open editor.
+                    <div
+                      key={`${target.host}-${target.port}-${
+                        upstream.targets
+                          .slice(0, index)
+                          .filter((other) => other.host === target.host && other.port === target.port)
+                          .length
+                      }`}
+                    >
                       {editingTargetIndex === index ? (
                         <TargetForm
                           initialData={target}

@@ -162,6 +162,28 @@ describe("upstream target route integration", () => {
     expect(current).toEqual(initial);
   });
 
+  it("keeps editing the same target when a row above it is removed", async () => {
+    current = {
+      ...initial,
+      targets: [
+        { host: "a-backend", port: 8080, weight: 1 },
+        { host: "b-backend", port: 8080, weight: 1 },
+        { host: "c-backend", port: 8080, weight: 1 },
+      ],
+    };
+    await mount();
+    await settle(() => expect(ui.host.textContent).toContain("Targets (3)"));
+    await selectTab("Targets (3)");
+    // Row actions are [edit, remove] per row; open the editor on the third row.
+    await act(async () => rowActions()[4].click());
+    await fill(inputByLabel(panel(), "Host"), "c-backend-draft");
+    // Remove the first row while the third is being edited.
+    await act(async () => rowActions()[1].click());
+    await settle(() => expect(current?.targets.map((target) => target.host)).toEqual(["b-backend", "c-backend"]));
+    await settle(() => expect(panel().textContent).toContain("b-backend:8080"));
+    expect(inputByLabel(panel(), "Host").value).toBe("c-backend-draft");
+  });
+
   it("keeps an unsaved configuration draft across a tab switch", async () => {
     await mount();
     await settle(() => expect(panel().textContent).toContain("Update Upstream"));
