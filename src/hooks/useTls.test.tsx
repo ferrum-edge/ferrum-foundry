@@ -13,6 +13,7 @@ let root: Root;
 let client: QueryClient;
 let statuses: AcmeOrderStatus[];
 let reads: number;
+let requested: URL[];
 
 function order(id: string, status: AcmeOrderStatus): AcmeOrder {
   return {
@@ -29,8 +30,10 @@ function Probe() {
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
   reads = 0;
-  stubFetch(() => {
+  requested = [];
+  stubFetch((request) => {
     reads += 1;
+    requested.push(new URL(request.url));
     return Response.json(page(statuses.map((status, index) => order(`o${index}`, status))));
   });
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -56,6 +59,9 @@ describe("ACME order polling", () => {
   it("stops re-reading every order once all of them have settled", async () => {
     statuses = ["valid", "failed", "cancelled"];
     expect(await observeFor(60_000)).toBe(0);
+    expect(requested).toHaveLength(1);
+    expect(requested[0].searchParams.get("offset")).toBe("0");
+    expect(requested[0].searchParams.get("limit")).toBe("20");
   });
 
   it("keeps polling while an order can still change", async () => {

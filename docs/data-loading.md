@@ -124,6 +124,15 @@ at a time, so a selected member is labelled correctly instead of being shown
 as missing, and a selection whose proxy is gone is labelled as such and stays
 removable.
 
+### TLS managed stores and ACME
+
+Managed TLS records and the ACME certificates, orders, and accounts panels each
+request one server page. Their page controls use the total reported by the
+gateway; rendering the visible rows never traverses the rest of a
+fleet-global collection. ACME order pages poll every 15 seconds only while an
+order on that page can still change. A settled page is read again by the next
+user action or ordinary query invalidation.
+
 ## Cancellation
 
 `listAll`, `list`, and `listBoundedConfigs` take an `AbortSignal`, and the
@@ -159,5 +168,6 @@ the one the displayed namespace still needs.
 | Budget, incompleteness, cancellation, fail-closed checks | `src/api/pagination.test.ts` |
 | Request counts at 500 and 50,000 records | `src/api/dataLoadingBudget.test.ts` |
 | List and detail pages issue bounded requests; over-budget counts report unavailable | `src/routes/proxies/boundedLoading.test.tsx` |
+| TLS and ACME collections request one server page and advance by server offset | `src/routes/tls/TlsWorkflows.test.tsx`, `src/hooks/useTls.test.tsx` |
 | Traversals are abandoned on a namespace switch and never retargeted | `src/hooks/namespaceBinding.test.tsx` |
 | Membership completeness and picker selections survive | `src/routes/plugins/PluginDetailPage.test.tsx`, `src/routes/readTruthfulness.test.tsx` |

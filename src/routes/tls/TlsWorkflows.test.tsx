@@ -71,7 +71,21 @@ beforeEach(() => {
     if (readStatus) return Response.json({ error: "TLS unavailable" }, { status: readStatus, headers: { "retry-after": "0" } });
     const path = new URL(request.url).pathname.replace("/api/proxy/admin/tls/", "");
     if (path === "acme/certificates/acme-edge") return Response.json(certificate);
+    if (path === "acme/orders/order-edge") return Response.json({ ...order, status: "valid" });
     if (!(path in collections)) throw new Error(`Unexpected TLS read: ${path}`);
+    if ([
+      "certificates", "ca-bundles", "crls", "ocsp-responses", "jwks",
+      "acme/certificates", "acme/orders", "acme/accounts",
+    ].includes(path)) {
+      const url = new URL(request.url);
+      const offset = Number(url.searchParams.get("offset") ?? 0);
+      const limit = Number(url.searchParams.get("limit") ?? 250);
+      const items = collections[path];
+      return Response.json({
+        data: items.slice(offset, offset + limit),
+        pagination: { offset, limit, total: items.length },
+      });
+    }
     return Response.json(page(collections[path]));
   });
 });
@@ -150,6 +164,65 @@ function describedText(control: Element) {
 }
 
 describe("TLS inventory and events", () => {
+  it("loads and pages managed records with one server page per view", async () => {
+    collections.certificates = Array.from({ length: 21 }, (_, index) => ({
+      ...record, id: `managed-${index}`, name: `Managed ${index}`,
+    }));
+    await mount("Certificates");
+    await settle(() => expect(panel().textContent).toContain("Managed 0"));
+
+    const reads = requests.filter((request) =>
+      new URL(request.url).pathname.endsWith("/tls/certificates"));
+    expect(reads).toHaveLength(1);
+    expect(new URL(reads[0].url).searchParams.get("offset")).toBe("0");
+    expect(new URL(reads[0].url).searchParams.get("limit")).toBe("20");
+    await click("Next", panel());
+    await settle(() => expect(panel().textContent).toContain("Managed 20"));
+    const pages = requests.filter((request) =>
+      new URL(request.url).pathname.endsWith("/tls/certificates"));
+    expect(pages).toHaveLength(2);
+    expect(new URL(pages[1].url).searchParams.get("offset")).toBe("20");
+  });
+
+  it("opens ACME collections with one server page each and requests the next certificate page", async () => {
+    collections["acme/certificates"] = Array.from({ length: 21 }, (_, index) => ({
+      ...certificate, id: `acme-${index}`, domains: [`domain-${index}.example.test`],
+    }));
+    collections["acme/orders"] = Array.from({ length: 21 }, (_, index) => ({
+      ...order, id: `order-${index}`, status: "valid",
+    }));
+    collections["acme/accounts"] = Array.from({ length: 21 }, (_, index) => ({
+      ...account, account_id: `account-${index}`,
+    }));
+    await mount("ACME");
+    await settle(() => expect(panel().textContent).toContain("domain-0.example.test"));
+
+    const firstPageReads = requests.filter((request) => {
+      const path = new URL(request.url).pathname;
+      return request.method === "GET" &&
+        path.startsWith("/api/proxy/admin/tls/acme/") &&
+        ["/certificates", "/orders", "/accounts"].some((suffix) => path.endsWith(suffix));
+    });
+    expect(firstPageReads).toHaveLength(3);
+    expect(firstPageReads.map((request) => {
+      const url = new URL(request.url);
+      return [url.pathname, url.searchParams.get("offset"), url.searchParams.get("limit")];
+    })).toEqual(expect.arrayContaining([
+      ["/api/proxy/admin/tls/acme/certificates", "0", "20"],
+      ["/api/proxy/admin/tls/acme/orders", "0", "20"],
+      ["/api/proxy/admin/tls/acme/accounts", "0", "20"],
+    ]));
+
+    const nextButtons = [...panel().querySelectorAll<HTMLButtonElement>("button")]
+      .filter((element) => element.textContent?.trim() === "Next");
+    await act(async () => nextButtons[0].click());
+    await settle(() => expect(panel().textContent).toContain("domain-20.example.test"));
+    const certificateReads = requests.filter((request) =>
+      new URL(request.url).pathname.endsWith("/acme/certificates"));
+    expect(certificateReads).toHaveLength(2);
+    expect(new URL(certificateReads[1].url).searchParams.get("offset")).toBe("20");
+  });
+
   it("renders loaded, invalid, unavailable and expiring inventory with source and usage", async () => {
     const entries: TlsInventoryEntry[] = [
       { id: "loaded", material_kind: "certificate", state: "loaded", subject: "CN=api.example.test",
@@ -624,6 +697,21 @@ describe("ACME workflows", () => {
     expect(await writes()[1].json()).toEqual({ terms_of_service_agreed: true });
     expect(new URL(writes()[1].url).pathname).toBe("/api/proxy/admin/tls/acme/renew/acme-edge");
     expect(writes()).toHaveLength(2);
+  });
+
+  it("updates the visible paged order cache after a status re-check", async () => {
+    collections["acme/orders"] = [{ ...order, status: "processing" }];
+    await mount("ACME");
+    await settle(() => expect(panel().textContent).toContain("Re-check status"));
+    await click("Re-check status", panel());
+    await settle(() => expect(panel().textContent).not.toContain("Re-check status"));
+
+    const orderPages = ui.client.getQueriesData<{ data: AcmeOrder[] }>({
+      queryKey: ["tls", "acme", "orders"],
+    });
+    expect(orderPages).toHaveLength(1);
+    expect(orderPages[0][0]).toEqual(["tls", "acme", "orders", { offset: 0, limit: 20 }]);
+    expect(orderPages[0][1]?.data[0].status).toBe("valid");
   });
 
   it.each(["certificate", "order"] as const)("preserves a %s on conflict, then deletes after explicit confirmation", async (kind) => {

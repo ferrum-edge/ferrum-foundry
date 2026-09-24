@@ -31,12 +31,12 @@ import { parseFieldError } from "@/lib/apiFieldErrors";
 import {
   useTlsInventory,
   useTlsEvents,
-  useAllManagedTlsRecords,
+  useManagedTlsRecords,
   useCreateManagedTlsRecord,
   useDeleteManagedTlsRecord,
-  useAllAcmeCertificates,
-  useAllAcmeOrders,
-  useAllAcmeAccounts,
+  useAcmeCertificates,
+  useAcmeOrders,
+  useAcmeAccounts,
   useAcmeCertificate,
   useImportAcmeCertificate,
   useUpdateAcmeCertificate,
@@ -96,6 +96,8 @@ function expiryBadge(notAfter?: string): ReactNode {
 function Mono({ children }: { children: ReactNode }) {
   return <span className="font-mono text-xs text-text-muted break-all">{children}</span>;
 }
+
+const TLS_PAGE_SIZE = 20;
 
 /* ------------------------------------------------------------------ */
 /*  Managed record collections                                         */
@@ -194,7 +196,9 @@ const MANAGED_TABS: ManagedTabConfig[] = [
 function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
   const formId = useId();
   const { toast } = useToast();
-  const { data, isLoading, error } = useAllManagedTlsRecords(config.collection);
+  const [offset, setOffset] = useState(0);
+  const page = useManagedTlsRecords(config.collection, { offset, limit: TLS_PAGE_SIZE });
+  const { data, isLoading, error } = page;
   const createRecord = useCreateManagedTlsRecord(config.collection);
   const deleteRecord = useDeleteManagedTlsRecord(config.collection);
   const { capabilities } = useCapabilities();
@@ -205,7 +209,7 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
   const [form, setForm] = useState<Record<string, string>>({});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  const records = data ?? [];
+  const records = data?.data ?? [];
   // A viewer is refused these reads (Edge requires operator). That is an
   // answer about the session, not an empty store.
   const denied = data === undefined && isReadDenied(error);
@@ -327,6 +331,14 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
           </div>
         )}
       </Card>
+      {(data?.pagination.total ?? 0) > 0 && (
+        <PaginationControls
+          offset={offset}
+          limit={TLS_PAGE_SIZE}
+          total={data?.pagination.total ?? 0}
+          onChange={({ offset: nextOffset }) => setOffset(nextOffset)}
+        />
+      )}
 
       {/* Create dialog */}
       <Dialog open={createOpen} onOpenChange={(open) => (open ? setCreateOpen(true) : closeCreate())}>
@@ -645,7 +657,6 @@ function acmeStatusBadge(status: AcmeOrder["status"] | string): ReactNode {
   return <Badge variant={variant}>{status.replace(/_/g, " ")}</Badge>;
 }
 
-const ACME_PAGE_SIZE = 20;
 const EMPTY_ACME_ORDER_FORM = {
   domains: "",
   directory_url: "https://acme-v02.api.letsencrypt.org/directory",
@@ -659,16 +670,22 @@ interface AcmeCertificateEditor {
   target: AcmeCertificateRecord | null;
 }
 
-const ACME_ORDERS_KEY = ["tls", "acme", "orders", "all"] as const;
-
 function AcmeTab() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const { data: certs, isLoading: certsLoading, error: certsError } = useAllAcmeCertificates();
-  const { data: orders, isLoading: ordersLoading, error: ordersError } = useAllAcmeOrders();
+  const [certificateOffset, setCertificateOffset] = useState(0);
+  const [orderOffset, setOrderOffset] = useState(0);
+  const [accountOffset, setAccountOffset] = useState(0);
+  const { data: certs, isLoading: certsLoading, error: certsError } =
+    useAcmeCertificates({ offset: certificateOffset, limit: TLS_PAGE_SIZE });
+  const { data: orders, isLoading: ordersLoading, error: ordersError } =
+    useAcmeOrders({ offset: orderOffset, limit: TLS_PAGE_SIZE });
   const certsDenied = certs === undefined && isReadDenied(certsError);
   const ordersDenied = orders === undefined && isReadDenied(ordersError);
-  const { data: accounts } = useAllAcmeAccounts();
+  const { data: accounts } = useAcmeAccounts({
+    offset: accountOffset,
+    limit: TLS_PAGE_SIZE,
+  });
   const importCert = useImportAcmeCertificate();
   const updateCert = useUpdateAcmeCertificate();
   const createOrder = useCreateAcmeOrder();
@@ -693,8 +710,6 @@ function AcmeTab() {
   const [deleteCertificateTarget, setDeleteCertificateTarget] =
     useState<AcmeCertificateRecord | null>(null);
   const [deleteOrderTarget, setDeleteOrderTarget] = useState<AcmeOrder | null>(null);
-  const [certificateOffset, setCertificateOffset] = useState(0);
-  const [orderOffset, setOrderOffset] = useState(0);
   const pendingKeysRef = useRef(new Set<string>());
   const [pendingKeys, setPendingKeys] = useState<ReadonlySet<string>>(new Set());
 
@@ -702,20 +717,6 @@ function AcmeTab() {
     setCertificateEditor(null);
     setCertificateForm(EMPTY_ACME_CERTIFICATE_FORM);
   };
-
-  useEffect(() => {
-    const certificateTotal = certs?.length ?? 0;
-    if (certificateOffset > 0 && certificateOffset >= certificateTotal) {
-      setCertificateOffset(Math.max(0, Math.floor((certificateTotal - 1) / ACME_PAGE_SIZE) * ACME_PAGE_SIZE));
-    }
-  }, [certificateOffset, certs?.length]);
-
-  useEffect(() => {
-    const orderTotal = orders?.length ?? 0;
-    if (orderOffset > 0 && orderOffset >= orderTotal) {
-      setOrderOffset(Math.max(0, Math.floor((orderTotal - 1) / ACME_PAGE_SIZE) * ACME_PAGE_SIZE));
-    }
-  }, [orderOffset, orders?.length]);
 
   const runRowAction = async (key: string, action: () => Promise<void>) => {
     if (pendingKeysRef.current.has(key)) return;
@@ -775,11 +776,8 @@ function AcmeTab() {
     }
   };
 
-  const visibleCertificates = (certs ?? []).slice(
-    certificateOffset,
-    certificateOffset + ACME_PAGE_SIZE,
-  );
-  const visibleOrders = (orders ?? []).slice(orderOffset, orderOffset + ACME_PAGE_SIZE);
+  const visibleCertificates = certs?.data ?? [];
+  const visibleOrders = orders?.data ?? [];
   // A terminal observation resolves an ambiguous finalization without replaying it.
   const orderIsUnknown = (order: AcmeOrder) =>
     unknownOrders.has(order.id) && acmeOrderInProgress(order);
@@ -847,7 +845,7 @@ function AcmeTab() {
             </div>
           )}
           {certsDenied && <ReadDeniedNotice label="ACME certificates" />}
-          {!certsLoading && !certsDenied && (certs ?? []).length === 0 && (
+          {!certsLoading && !certsDenied && visibleCertificates.length === 0 && (
             <EmptyState
               title="No ACME certificates"
               description="Create an order to obtain a certificate, or import issued material."
@@ -927,11 +925,11 @@ function AcmeTab() {
             </div>
           ))}
         </Card>
-        {(certs?.length ?? 0) > 0 && (
+        {(certs?.pagination.total ?? 0) > 0 && (
           <PaginationControls
             offset={certificateOffset}
-            limit={ACME_PAGE_SIZE}
-            total={certs?.length ?? 0}
+            limit={TLS_PAGE_SIZE}
+            total={certs?.pagination.total ?? 0}
             onChange={({ offset }) => setCertificateOffset(offset)}
           />
         )}
@@ -949,7 +947,7 @@ function AcmeTab() {
             </div>
           )}
           {ordersDenied && <ReadDeniedNotice label="ACME orders" />}
-          {!ordersLoading && !ordersDenied && (orders ?? []).length === 0 && (
+          {!ordersLoading && !ordersDenied && visibleOrders.length === 0 && (
             <EmptyState
               title="No active orders"
               description="ACME orders and their pending challenges appear here."
@@ -994,17 +992,32 @@ function AcmeTab() {
                         void runRowAction(`finalize:${order.id}`, async () => {
                           try {
                             if (orderIsUnknown(order) || order.status === "processing") {
-                              await queryClient.cancelQueries({ queryKey: ACME_ORDERS_KEY, exact: true });
-                              const observed = queryClient.getQueryState(ACME_ORDERS_KEY)?.dataUpdateCount;
+                              const ordersKey = ["tls", "acme", "orders"] as const;
+                              await queryClient.cancelQueries({ queryKey: ordersKey });
+                              const observed = queryClient
+                                .getQueriesData({ queryKey: ordersKey })
+                                .map(([key]) => [key, queryClient.getQueryState(key)?.dataUpdateCount] as const);
                               const checked = await getAcmeOrder(order.id);
                               // Do not let a collection request that captured an older
                               // status overwrite the accepted detail observation.
-                              await queryClient.cancelQueries({ queryKey: ACME_ORDERS_KEY, exact: true });
+                              await queryClient.cancelQueries({ queryKey: ordersKey });
                               // A collection observation completed during this read. It
                               // owns the current state; a late detail must not rewind it.
-                              if (queryClient.getQueryState(ACME_ORDERS_KEY)?.dataUpdateCount !== observed) return;
-                              queryClient.setQueryData<AcmeOrder[]>(ACME_ORDERS_KEY, (previous) =>
-                                previous?.map((entry) => entry.id === order.id ? checked : entry),
+                              if (
+                                observed.some(
+                                  ([key, count]) =>
+                                    queryClient.getQueryState(key)?.dataUpdateCount !== count,
+                                )
+                              ) return;
+                              queryClient.setQueriesData<{ data: AcmeOrder[] }>(
+                                { queryKey: ordersKey },
+                                (previous) =>
+                                  previous && ({
+                                    ...previous,
+                                    data: previous.data.map((entry) =>
+                                      entry.id === order.id ? checked : entry,
+                                    ),
+                                  }),
                               );
                               if (!acmeOrderInProgress(checked)) {
                                 setUnknownOrders((previous) => {
@@ -1063,22 +1076,22 @@ function AcmeTab() {
             </div>
           ))}
         </Card>
-        {(orders?.length ?? 0) > 0 && (
+        {(orders?.pagination.total ?? 0) > 0 && (
           <PaginationControls
             offset={orderOffset}
-            limit={ACME_PAGE_SIZE}
-            total={orders?.length ?? 0}
+            limit={TLS_PAGE_SIZE}
+            total={orders?.pagination.total ?? 0}
             onChange={({ offset }) => setOrderOffset(offset)}
           />
         )}
       </div>
 
       {/* Accounts */}
-      {(accounts ?? []).length > 0 && (
+      {(accounts?.data ?? []).length > 0 && (
         <div className="space-y-3">
           <h3 className="text-sm font-semibold text-text-primary">Accounts</h3>
           <Card className="overflow-hidden p-0">
-            {(accounts ?? []).map((account) => (
+            {(accounts?.data ?? []).map((account) => (
               <div key={account.account_id} className="px-6 py-3 border-b border-border/50 last:border-b-0 flex items-center justify-between gap-4">
                 <div className="min-w-0">
                   <Mono>{account.account_id}</Mono>
@@ -1093,6 +1106,14 @@ function AcmeTab() {
               </div>
             ))}
           </Card>
+          {(accounts?.pagination.total ?? 0) > 0 && (
+            <PaginationControls
+              offset={accountOffset}
+              limit={TLS_PAGE_SIZE}
+              total={accounts?.pagination.total ?? 0}
+              onChange={({ offset: nextOffset }) => setAccountOffset(nextOffset)}
+            />
+          )}
         </div>
       )}
 
