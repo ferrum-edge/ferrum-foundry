@@ -439,6 +439,10 @@ export function UpstreamForm({
             kubernetes: {
               service_name: sdServiceName,
               namespace: (sdConfig.namespace as string) || undefined,
+              address_type:
+                sdConfig.address_type === "IPv4" || sdConfig.address_type === "IPv6"
+                  ? sdConfig.address_type
+                  : undefined,
               port_name: (sdConfig.port_name as string) || undefined,
               label_selector: (sdConfig.label_selector as string) || undefined,
               poll_interval_seconds: (sdConfig.poll_interval_seconds as number) ?? 30,
@@ -980,6 +984,17 @@ export function UpstreamForm({
                     value={String(sdConfig.namespace ?? "")}
                     onChange={(e) => updateSdConfig("namespace", e.target.value)}
                     placeholder="default"
+                  />
+                  <Select
+                    label="Address Family"
+                    value={String(sdConfig.address_type ?? "auto")}
+                    onValueChange={(v) => updateSdConfig("address_type", v === "auto" ? undefined : v)}
+                    options={[
+                      { value: "auto", label: "Automatic (IPv4 when available)" },
+                      { value: "IPv4", label: "IPv4 only" },
+                      { value: "IPv6", label: "IPv6 only" },
+                    ]}
+                    helpText="EndpointSlice IP family. An explicit family never falls back to the other."
                   />
                   <Input
                     label="Port Name"

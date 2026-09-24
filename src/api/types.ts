@@ -410,6 +410,7 @@ export interface ServiceDiscoveryConfig {
   kubernetes?: {
     service_name: string;
     namespace?: string;
+    address_type?: "IPv4" | "IPv6" | null;
     port_name?: string | null;
     label_selector?: string | null;
     poll_interval_seconds?: number;
