@@ -89,6 +89,19 @@ export function requestIsProxyRoute(request: FastifyRequest): boolean {
   return routePath === '/api/proxy/*' || routePath.startsWith(PROXY_PREFIX);
 }
 
+/**
+ * Whether an unmatched request may be answered with the SPA shell. Only a
+ * page navigation can be: a write to a page path is not one, and a missing
+ * build asset is a stale chunk from an earlier deploy, which a 404 reports
+ * plainly where `index.html` fails as an opaque MIME-type error.
+ */
+export function servesSpaShell(request: FastifyRequest): boolean {
+  if (request.method !== 'GET' && request.method !== 'HEAD') return false;
+  if (requestIsApiRoute(request)) return false;
+  const requestPath = request.url.split('?', 1)[0];
+  return requestPath !== '/api' && !requestPath.startsWith('/assets/');
+}
+
 export function requestIsApiRoute(request: FastifyRequest): boolean {
   if (request.routeOptions.url?.startsWith('/api/')) return true;
 
