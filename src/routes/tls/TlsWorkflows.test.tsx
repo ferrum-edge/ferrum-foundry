@@ -656,7 +656,7 @@ describe("ACME workflows", () => {
 
 describe("TLS list pagination", () => {
   it("opens Events at its first page, not at Inventory's offset", async () => {
-    await mount("Inventory", "/tls?offset=100&limit=50");
+    await mount("Inventory", "/tls?offset=100&limit=100");
     await settle(() => expect(requests.some((r) => r.url.includes("/admin/tls/inventory"))).toBe(true));
     const inventory = requests.find((r) => r.url.includes("/admin/tls/inventory"))!;
     expect(new URL(inventory.url).searchParams.get("offset")).toBe("100");
@@ -665,5 +665,7 @@ describe("TLS list pagination", () => {
     await settle(() => expect(requests.some((r) => r.url.includes("/admin/tls/events"))).toBe(true));
     const events = requests.filter((r) => r.url.includes("/admin/tls/events"));
     expect(events.map((r) => new URL(r.url).searchParams.get("offset") ?? "0")).toEqual(["0"]);
+    // Nor does Events inherit Inventory's page size.
+    expect(events.map((r) => new URL(r.url).searchParams.get("limit"))).toEqual(["50"]);
   });
 });

@@ -277,7 +277,7 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
         </TabsContent>
 
         {/* ── Credentials Tab ── */}
-        <TabsContent value="credentials">
+        <TabsContent value="credentials" keepMounted>
           <div className="space-y-6">
             <ReadOnlySurface
               verdict={credentialCapability}

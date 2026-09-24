@@ -201,8 +201,9 @@ export function ProxySearchPicker(props: ProxySearchPickerProps) {
               // The picker sits inside a form: Enter picks the first match
               // instead of submitting the whole form (and its membership plan).
               e.preventDefault();
-              const first = filtered[0];
-              if (search.trim() && first && !isSelected(first.id)) handleSelect(first);
+              // The first match not already chosen: Enter adds, never toggles off.
+              const next = filtered.find((proxy) => !isSelected(proxy.id));
+              if (search.trim() && next) handleSelect(next);
             } else if (e.key === "Escape" && open) {
               e.preventDefault();
               setOpen(false);

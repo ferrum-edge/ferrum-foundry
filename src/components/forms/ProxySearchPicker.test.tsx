@@ -6,6 +6,7 @@ import { ProxySearchPicker } from "./ProxySearchPicker";
 
 const catalog: Proxy[] = [
   { id: "orders", name: "Orders", listen_path: "/orders", backend_host: "orders.internal", backend_port: 8080 },
+  { id: "orders-v2", name: "Orders v2", listen_path: "/orders/v2", backend_host: "orders.internal", backend_port: 8080 },
   { id: "mqtt", name: "MQTT Broker", listen_path: null, backend_scheme: "tcps", backend_host: "mqtt.internal", backend_port: 8883 },
 ] as unknown as Proxy[];
 
@@ -84,9 +85,11 @@ describe("ProxySearchPicker", () => {
     await press("Enter");
     expect(submitted).not.toHaveBeenCalled();
     expect(selection).toEqual(["orders"]);
-    // Enter again does not toggle the selection back off.
+    // Enter again adds the next unselected match; it never toggles one off.
     await press("Enter");
-    expect(selection).toEqual(["orders"]);
+    expect(selection).toEqual(["orders", "orders-v2"]);
+    await press("Enter");
+    expect(selection).toEqual(["orders", "orders-v2"]);
   });
 
   it("does not render a null listen path for a stream proxy", async () => {

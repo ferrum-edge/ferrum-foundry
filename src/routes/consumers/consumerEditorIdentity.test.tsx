@@ -523,7 +523,7 @@ describe("consumer editor identity across a namespace switch", () => {
     const releaseRead = hold("GET tenant-a");
     releasePut();
     await waitFor(() => queryClient.getQueryData<Consumer>(["consumer", "tenant-a", "shared"])?.acl_groups?.includes("first-group") === true);
-    const addButton = [...host!.querySelectorAll("button")].find((button) => button.textContent === "Add")!;
+    const addButton = [...host!.querySelectorAll<HTMLButtonElement>('[role="tabpanel"][data-state="active"] button')].find((button) => button.textContent === "Add")!;
     expect(addButton.disabled).toBe(true);
     await act(async () => {
       typeInto(input, "second-group");

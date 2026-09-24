@@ -5,13 +5,7 @@ import { RuntimeTab } from './RuntimeTab';
 /*  404s outside mesh mode, which renders as a friendly empty state.  */
 /* ------------------------------------------------------------------ */
 
-import {
-  errorStatus,
-  ReadDeniedNotice,
-  ReadState,
-  ReadStateNotice,
-  isReadDenied,
-} from '@/components/shared/ReadState';
+import { ReadState, ReadStateNotice } from '@/components/shared/ReadState';
 import type { ReadQuery } from '@/lib/readState';
 import { useState } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
@@ -50,16 +44,14 @@ function NotMeshEmpty({ what }: { what: string }) {
 }
 
 /**
- * A read that produced nothing. Only `404`/`503` mean this gateway does not
- * serve the surface; a `403` is a denial for this session and anything else
- * is a failure whose state is unknown, never "not mesh mode".
+ * A read that produced nothing. It is classified exactly as the Clusters and
+ * Waypoints tabs classify theirs: `403` is a denial for this session,
+ * `404`/`503` a surface this gateway may not serve, and anything else an
+ * unknown state, never "not mesh mode".
  */
 function MeshReadFailure({ query, what }: { query: ReadQuery; what: string }) {
   if (!query.isError) return <NotMeshEmpty what={what} />;
-  if (isReadDenied(query.error)) return <ReadDeniedNotice label={what} />;
-  const status = errorStatus(query.error);
-  if (status === 404 || status === 503) return <NotMeshEmpty what={what} />;
-  return <ReadStateNotice query={query} label={what} />;
+  return <ReadStateNotice query={query} label={what} optionalFeature />;
 }
 
 function StatTile({ label, value, tone }: { label: string; value: string | number; tone?: "good" | "warn" | "bad" }) {

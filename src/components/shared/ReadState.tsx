@@ -4,7 +4,7 @@ import { Card } from '@/components/ui/Card';
 import { SkeletonCard } from '@/components/ui/Skeleton';
 import { resolveReadState, type ReadQuery } from '@/lib/readState';
 
-export function errorStatus(error: unknown): number | undefined {
+function errorStatus(error: unknown): number | undefined {
   return (error as { response?: { status?: number } } | null)?.response?.status;
 }
 

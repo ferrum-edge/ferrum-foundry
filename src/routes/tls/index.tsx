@@ -1578,17 +1578,17 @@ const TLS_TABS: readonly string[] = [
 
 export default function TlsPage() {
   const { capabilities } = useCapabilities();
-  // Inventory and Events each page through the route's one `offset`. The
-  // active tab lives in the URL beside it so a switch drops the offset in the
-  // same navigation: the newly opened list starts at its first page instead
-  // of being requested at the other list's position.
+  // Inventory and Events each page through the route's one `offset` and
+  // `limit`. The active tab lives in the URL beside them so a switch drops
+  // both in the same navigation: the newly opened list starts at its first
+  // page and its own page size instead of the other list's.
   const search = useSearch({ strict: false }) as Record<string, unknown>;
   const navigate = useNavigate();
   const activeTab =
     typeof search.tab === "string" && TLS_TABS.includes(search.tab) ? search.tab : "inventory";
   const selectTab = (next: string) => {
     void navigate({
-      search: ({ offset: _offset, ...previous }: Record<string, unknown>) => ({
+      search: ({ offset: _offset, limit: _limit, ...previous }: Record<string, unknown>) => ({
         ...previous,
         tab: next,
       }),
