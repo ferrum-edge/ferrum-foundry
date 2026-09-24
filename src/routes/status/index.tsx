@@ -35,8 +35,14 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 /*  StatusPage                                                         */
 /* ================================================================== */
 
+const REFRESH_MS = 30_000;
+
 export default function StatusPage() {
-  const query = useHealth(30_000);
+  // The page warns when `isStale`. A snapshot only becomes stale after two
+  // missed refreshes: with staleTime equal to the interval it went stale on
+  // every cycle while the next read was in flight, flashing "Current state is
+  // unknown" over a healthy gateway whenever that read ran a little slower.
+  const query = useHealth(REFRESH_MS, 2 * REFRESH_MS);
   const { data: health, isLoading, isError, error } = query;
 
   if (isLoading) {

@@ -103,4 +103,28 @@ describe('health snapshots', () => {
     expect(report).toHaveBeenCalledTimes(1);
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
+
+  it('does not flash a stale warning while an on-schedule refresh is in flight', async () => {
+    fetcher.mockResolvedValue(Response.json({ status: 'ok', ready: true }));
+    await renderUntil('OK');
+    const now = Date.now();
+    const pendingRefresh = async (age: number) => {
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(now + age);
+      let resolveRefresh!: (response: Response) => void;
+      fetcher.mockReturnValueOnce(new Promise<Response>((resolve) => { resolveRefresh = resolve; }));
+      await act(async () => {
+        void client.refetchQueries({ queryKey: ['health'] });
+        // Query notifications are delivered on a timer tick.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      const text = host.textContent;
+      await act(async () => { resolveRefresh(Response.json({ status: 'ok', ready: true })); });
+      clock.mockRestore();
+      return text;
+    };
+    // One refresh interval plus a slow read: not stale.
+    expect(await pendingRefresh(31_000)).not.toContain('Health snapshot is stale');
+    // Two missed refreshes (e.g. a throttled background tab): stale.
+    expect(await pendingRefresh(31_000 + 61_000)).toContain('Health snapshot is stale');
+  });
 });
