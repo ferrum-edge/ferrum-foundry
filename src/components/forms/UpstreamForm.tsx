@@ -426,17 +426,24 @@ export function UpstreamForm({
           }
         : undefined;
 
+    // `sdConfig` is seeded from the stored provider object and reset when the
+    // provider changes. `service_discovery` is replaced wholesale on save, so
+    // every key the form does not model is carried through under the modelled
+    // ones rather than erased by the next unrelated edit.
+    const { default_weight: _defaultWeight, ...providerExtras } = sdConfig;
     const serviceDiscovery: ServiceDiscoveryConfig | undefined = sdEnabled
       ? {
           provider: sdProvider as ServiceDiscoveryConfig["provider"],
           ...(sdProvider === "dns_sd" && {
             dns_sd: {
+              ...providerExtras,
               service_name: sdServiceName,
               poll_interval_seconds: (sdConfig.poll_interval_seconds as number) ?? 30,
             },
           }),
           ...(sdProvider === "kubernetes" && {
             kubernetes: {
+              ...providerExtras,
               service_name: sdServiceName,
               namespace: (sdConfig.namespace as string) || undefined,
               address_type:
@@ -450,6 +457,7 @@ export function UpstreamForm({
           }),
           ...(sdProvider === "consul" && {
             consul: {
+              ...providerExtras,
               address: String(sdConfig.address ?? "").trim(),
               service_name: sdServiceName.trim(),
               datacenter: (sdConfig.datacenter as string) || undefined,
@@ -461,6 +469,7 @@ export function UpstreamForm({
           }),
           ...(sdProvider === "mesh" && {
             mesh: {
+              ...providerExtras,
               service_name: sdServiceName,
               namespace: (sdConfig.namespace as string) || undefined,
               port: (sdConfig.port as number) || undefined,
