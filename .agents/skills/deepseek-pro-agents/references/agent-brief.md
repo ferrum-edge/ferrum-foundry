@@ -55,25 +55,25 @@ explicitly assigns that operation.
 - Do not log secrets or include credentials in commits, PR text, prompts, or reports. The provider
   API key reaches this session through the environment; never echo, commit, or quote it.
 
-## Validation
+## Remote CI validation
 
-Validate locally before pushing. In a fresh worktree run `npm ci` first. Run `npm run typecheck`,
-`npm run lint`, and the tests covering your change (`npx vitest run <paths>`, or `npm test` for
-broad changes; `npm run test:contracts` for `scripts/`), plus `npm run build` when build
-configuration, server entrypoints, or bundling change. `npm run test:gateway-contract` and
-`npm run e2e` need a running gateway or browser stack; run them only when the task touches that
-surface and the stack is available, and otherwise say you left them to CI. Fix failures before
-pushing, and report the exact commands and results.
+Do not install dependencies or run repository-controlled code locally. This includes `npm ci`,
+builds, tests, benchmarks, compilation-based checks, `npm run build`, `npm test`,
+`npm run typecheck`, `npm run lint`, the `test:*` scripts, and wrappers that invoke them. Do not
+make an exception for a targeted check, an ambiguous failure, or a controller's routine validation
+request. Local source inspection and `git diff --check` are allowed.
+For dispatched workers this replaces the local checks listed under "Build & check" in
+`AGENTS.md`.
 
-Local passes are not CI evidence. Use CI results for the exact pushed head SHA as confirmation:
-pending, skipped, unavailable, or earlier-head checks do not show that the change passed. Inspect
-failed job logs, reproduce the failure locally where you can, fix it, push, and confirm it on the
-next run.
+Use remote CI results for the exact pushed head SHA as build/test confirmation. Inspect failed
+job logs, fix the demonstrated failure, push the change, and use the next CI run to confirm it.
+Pending, skipped, unavailable, or earlier-head checks are not evidence that the change passed.
+Keep adding or updating relevant tests; remote CI executes them.
 
 The controller owns post-push CI monitoring unless the worker is explicitly assigned a CI repair
 or shepherd round. A worker assigned to exit after pushing must report the head SHA and CI status
 as pending or unverified and exit; the controller continues the CI-driven fix loop. Never report
-CI success without matching remote evidence.
+build/test success without matching remote evidence.
 
 ## Finish and report
 
