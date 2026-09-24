@@ -287,7 +287,7 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
           </div>
         )}
         {denied && <ReadDeniedNotice label={`Managed ${config.title}`} />}
-        {!isLoading && !denied && records.length === 0 && (
+        {!isLoading && !denied && (data?.pagination.total ?? 0) === 0 && (
           <EmptyState
             title={config.emptyTitle}
             description={`${config.emptyDescription} Reference it as managed://${config.collection}/{id}.`}
@@ -850,7 +850,7 @@ function AcmeTab() {
             </div>
           )}
           {certsDenied && <ReadDeniedNotice label="ACME certificates" />}
-          {!certsLoading && !certsDenied && visibleCertificates.length === 0 && (
+          {!certsLoading && !certsDenied && (certs?.pagination.total ?? 0) === 0 && (
             <EmptyState
               title="No ACME certificates"
               description="Create an order to obtain a certificate, or import issued material."
@@ -952,7 +952,7 @@ function AcmeTab() {
             </div>
           )}
           {ordersDenied && <ReadDeniedNotice label="ACME orders" />}
-          {!ordersLoading && !ordersDenied && visibleOrders.length === 0 && (
+          {!ordersLoading && !ordersDenied && (orders?.pagination.total ?? 0) === 0 && (
             <EmptyState
               title="No active orders"
               description="ACME orders and their pending challenges appear here."
@@ -1100,7 +1100,7 @@ function AcmeTab() {
       </div>
 
       {/* Accounts */}
-      {(accounts?.data ?? []).length > 0 && (
+      {(accounts?.pagination.total ?? 0) > 0 && (
         <div className="space-y-3">
           <h3 className="text-sm font-semibold text-text-primary">Accounts</h3>
           <Card className="overflow-hidden p-0">
