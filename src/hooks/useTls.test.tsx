@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AcmeOrder, AcmeOrderStatus } from "@/api/tls";
 import { stubFetch, page } from "@/test/__tests__/harness";
-import { useAllAcmeOrders } from "./useTls";
+import { useAcmeOrders } from "./useTls";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -23,7 +23,7 @@ function order(id: string, status: AcmeOrderStatus): AcmeOrder {
 }
 
 function Probe() {
-  useAllAcmeOrders();
+  useAcmeOrders({ offset: 0, limit: 20 });
   return null;
 }
 
