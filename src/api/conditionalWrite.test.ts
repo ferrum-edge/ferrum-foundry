@@ -51,12 +51,15 @@ interface GatewayOptions {
   readonly interleaveTimes?: number;
   /** Status to answer a conditional PUT with instead of evaluating it. */
   readonly failConditionalWith?: number;
+  /** Tag only the first read, as when a re-read falls back to cached config. */
+  readonly tagFirstReadOnly?: boolean;
 }
 
 function stubGateway<T extends object>(seed: T, options: GatewayOptions = {}) {
   let stored: Record<string, unknown> | null = { ...seed } as Record<string, unknown>;
   let revision = 0;
   let interleaves = options.interleaveTimes ?? 1;
+  let reads = 0;
   const wire: string[] = [];
   const tag = () => `"r${revision}"`;
 
@@ -74,8 +77,10 @@ function stubGateway<T extends object>(seed: T, options: GatewayOptions = {}) {
       );
 
       if (request.method === "GET") {
+        reads += 1;
         const headers = new Headers();
-        if (options.tags !== "none") {
+        const untagged = options.tags === "none" || (options.tagFirstReadOnly && reads > 1);
+        if (!untagged) {
           headers.set("etag", options.tags === "weak" ? `W/${tag()}` : tag());
         }
         return Response.json(stored, { headers });
@@ -223,6 +228,32 @@ describe("guarded proxy saves on a gateway that honours If-Match", () => {
       "GET", // re-verified: the backend moved, so the draft stops here
     ]);
     // The 412 is resolved into the stale-write dialog, not a raw API error.
+    expect(popups).not.toHaveBeenCalled();
+  });
+
+  it("refuses rather than writing unconditionally when the re-read after a 412 is untagged", async () => {
+    // The 412 proves a commit happened. A re-read served from the cached
+    // config fallback carries no tag and can lag that commit, so it still
+    // matches the baseline; an unconditional PUT from it would revert the
+    // commit that caused the 412.
+    const seed = proxyFixture();
+    const gateway = stubGateway(seed, {
+      interleave: (stored) => ({ ...stored, plugins: [{ plugin_config_id: "rate-limit" }] }),
+      tagFirstReadOnly: true,
+    });
+
+    const refused = await settle(
+      proxies.update(
+        scope,
+        "checkout",
+        formDraft(seed, { backend_read_timeout_ms: 30_000 }),
+        proxies.proxyWriteGuard(seed),
+      ),
+    );
+
+    expect(isStaleResourceError(refused)).toBe(true);
+    expect(gateway.wire).toEqual(["GET", 'PUT if-match "r0"', "GET"]);
+    expect(gateway.read().backend_read_timeout_ms).toBe(5_000);
     expect(popups).not.toHaveBeenCalled();
   });
 

@@ -34,7 +34,8 @@ export function useManagedTlsRecords(
 export function useAllManagedTlsRecords(collection: tls.ManagedTlsCollection) {
   return useQuery({
     queryKey: ["tls", "managed", collection, "all"],
-    queryFn: () => tls.listAllManagedRecords(collection, QUERY_ERROR_CONTEXT),
+    queryFn: ({ signal }) =>
+      tls.listAllManagedRecords(collection, QUERY_ERROR_CONTEXT, signal),
   });
 }
 
@@ -82,7 +83,7 @@ export function useAcmeCertificates(params: PaginationParams = {}) {
 export function useAllAcmeCertificates() {
   return useQuery({
     queryKey: ["tls", "acme", "certificates", "all"],
-    queryFn: () => tls.listAllAcmeCertificates(QUERY_ERROR_CONTEXT),
+    queryFn: ({ signal }) => tls.listAllAcmeCertificates(QUERY_ERROR_CONTEXT, signal),
   });
 }
 
@@ -132,8 +133,11 @@ export function useAcmeOrders(params: PaginationParams = {}) {
 export function useAllAcmeOrders() {
   return useQuery({
     queryKey: ["tls", "acme", "orders", "all"],
-    queryFn: () => tls.listAllAcmeOrders(QUERY_ERROR_CONTEXT),
-    refetchInterval: 15000,
+    queryFn: ({ signal }) => tls.listAllAcmeOrders(QUERY_ERROR_CONTEXT, signal),
+    // Re-traversing every order only tracks progress, so poll only while an
+    // order can still change; a settled collection is read again on mutation.
+    refetchInterval: (query) =>
+      query.state.data?.some(tls.acmeOrderInProgress) ? 15000 : false,
   });
 }
 
@@ -147,7 +151,7 @@ export function useAcmeAccounts(params: PaginationParams = {}) {
 export function useAllAcmeAccounts() {
   return useQuery({
     queryKey: ["tls", "acme", "accounts", "all"],
-    queryFn: () => tls.listAllAcmeAccounts(QUERY_ERROR_CONTEXT),
+    queryFn: ({ signal }) => tls.listAllAcmeAccounts(QUERY_ERROR_CONTEXT, signal),
   });
 }
 

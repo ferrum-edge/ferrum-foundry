@@ -38,6 +38,9 @@ let delayMutation: boolean;
 let completeMutation: ((response?: Response) => void) | undefined;
 let nextMutationResponse: Response | undefined;
 let listReads: number;
+let delayDetail: boolean;
+let failDetail: boolean;
+let releaseDetail: (() => void) | undefined;
 
 beforeEach(() => {
   names = ["ferrum", "tenant-a", "tenant-c"];
@@ -47,6 +50,9 @@ beforeEach(() => {
   nextMutationResponse = undefined;
   toast.mockClear();
   listReads = 0;
+  delayDetail = false;
+  failDetail = false;
+  releaseDetail = undefined;
   localStorage.setItem(NAMESPACE_STORAGE_KEY, "tenant-a");
   vi.stubGlobal("Request", BasedRequest);
   vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
@@ -56,6 +62,9 @@ beforeEach(() => {
         listReads += 1;
         return Response.json({ data: names, pagination: { offset: 0, limit: 250, total: names.length } });
       }
+      const detail = record(url.pathname.split("/").at(-1)!, "Existing description");
+      if (failDetail) return Response.json({ error: "unavailable" }, { status: 500 });
+      if (delayDetail) return new Promise<Response>((resolve) => { releaseDetail = () => resolve(Response.json(detail)); });
       return Response.json(record(url.pathname.split("/").at(-1)!));
     }
     const body: Record<string, unknown> = request.method === "DELETE" ? {} : await request.json();
@@ -164,6 +173,35 @@ describe("pending namespace completion", () => {
       }
     });
   }
+});
+
+it("keeps a rename typed while the namespace detail is still loading", async () => {
+  delayDetail = true;
+  client.removeQueries({ queryKey: ["namespace", "tenant-a"] });
+  await render();
+  await click("Edit", row());
+  await settle(() => expect(releaseDetail).toBeTypeOf("function"));
+  const description = document.querySelectorAll<HTMLInputElement>('[role="dialog"] input')[1]!;
+  expect(description.disabled).toBe(true);
+  await input(0, "tenant-renamed");
+  await act(async () => releaseDetail!());
+  await settle(() => expect(description.value).toBe("Existing description"));
+  expect(description.disabled).toBe(false);
+  expect(document.querySelectorAll<HTMLInputElement>('[role="dialog"] input')[0]!.value).toBe("tenant-renamed");
+});
+
+it("lets the description be edited when its current value cannot be read", async () => {
+  failDetail = true;
+  client.removeQueries({ queryKey: ["namespace", "tenant-a"] });
+  await render();
+  await click("Edit", row());
+  const description = () => document.querySelectorAll<HTMLInputElement>('[role="dialog"] input')[1]!;
+  await settle(() => expect(description().disabled).toBe(false));
+  expect(document.querySelector('[role="dialog"]')!.textContent).toContain("could not be loaded");
+  await input(1, "Replaced description");
+  await click("Save");
+  await settle(() => expect(writes).toHaveLength(1));
+  expect(writes[0].body).toEqual({ description: "Replaced description" });
 });
 
 async function closeDialog() {

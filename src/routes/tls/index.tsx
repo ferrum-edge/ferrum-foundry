@@ -6,6 +6,7 @@
 
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
 import { Card } from "@/components/ui/Card";
 import { ResourceGrid } from "@/components/ui/ResourceGrid";
@@ -48,7 +49,7 @@ import {
   useValidateTlsMaterial,
 } from "@/hooks/useTls";
 import { MutationOutcomeUnknownError } from '@/api/mutationOutcome';
-import { AcmeFinalizationUnknownError, getAcmeOrder, TLS_VALIDATE_FIELDS } from "@/api/tls";
+import { acmeOrderInProgress, AcmeFinalizationUnknownError, getAcmeOrder, TLS_VALIDATE_FIELDS } from "@/api/tls";
 import type {
   ManagedTlsCollection,
   ManagedTlsRecord,
@@ -781,7 +782,7 @@ function AcmeTab() {
   const visibleOrders = (orders ?? []).slice(orderOffset, orderOffset + ACME_PAGE_SIZE);
   // A terminal observation resolves an ambiguous finalization without replaying it.
   const orderIsUnknown = (order: AcmeOrder) =>
-    unknownOrders.has(order.id) && !["valid", "failed", "cancelled"].includes(order.status);
+    unknownOrders.has(order.id) && acmeOrderInProgress(order);
 
   const handleCreateOrder = async () => {
     if (!canWrite.allowed) return;
@@ -1005,7 +1006,7 @@ function AcmeTab() {
                               queryClient.setQueryData<AcmeOrder[]>(ACME_ORDERS_KEY, (previous) =>
                                 previous?.map((entry) => entry.id === order.id ? checked : entry),
                               );
-                              if (["valid", "failed", "cancelled"].includes(checked.status)) {
+                              if (!acmeOrderInProgress(checked)) {
                                 setUnknownOrders((previous) => {
                                   const next = new Set(previous);
                                   next.delete(order.id);
@@ -1567,8 +1568,33 @@ function ValidateTab() {
 /*  TlsPage                                                            */
 /* ================================================================== */
 
+const TLS_TABS: readonly string[] = [
+  "inventory",
+  ...MANAGED_TABS.map((tab) => tab.collection),
+  "acme",
+  "events",
+  "validate",
+];
+
 export default function TlsPage() {
   const { capabilities } = useCapabilities();
+  // Inventory and Events each page through the route's one `offset` and
+  // `limit`. The active tab lives in the URL beside them so a switch drops
+  // both in the same navigation: the newly opened list starts at its first
+  // page and its own page size instead of the other list's.
+  const search = useSearch({ strict: false }) as Record<string, unknown>;
+  const navigate = useNavigate();
+  const activeTab =
+    typeof search.tab === "string" && TLS_TABS.includes(search.tab) ? search.tab : "inventory";
+  const selectTab = (next: string) => {
+    void navigate({
+      search: ({ offset: _offset, limit: _limit, ...previous }: Record<string, unknown>) => ({
+        ...previous,
+        tab: next,
+      }),
+      replace: true,
+    } as never);
+  };
   return (
     <div className="space-y-6">
       <div>
@@ -1595,7 +1621,7 @@ export default function TlsPage() {
       <CapabilityNotice verdict={capabilities.tlsMaterial} />
       <CapabilityNotice verdict={capabilities.operationalActions} />
 
-      <Tabs defaultValue="inventory">
+      <Tabs value={activeTab} onValueChange={selectTab}>
         <TabsList>
           <TabsTrigger value="inventory">Inventory</TabsTrigger>
           {MANAGED_TABS.map((tab) => (

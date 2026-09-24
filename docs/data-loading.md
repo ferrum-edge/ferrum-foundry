@@ -102,6 +102,17 @@ The policy traversals themselves remain **complete**. An effective-policy
 answer is an authorization conclusion; a partial plugin graph would
 under-report what runs on a proxy.
 
+### Consumer and plugin detail pages
+
+A consumer editor issues one request for the consumer. The proxy and plugin
+collections behind "Matched Proxies" load when that tab is first opened; its
+label reads `unknown` until then. A consumer's access depends on no other
+consumer, so the consumer collection is never traversed for it, and each
+proxy is analyzed for this consumer alone.
+
+A plugin editor traverses the proxy collection only for a `proxy_group`
+plugin, whose membership needs it. Global and proxy-scoped plugins do not.
+
 ### Proxy picker
 
 `useProxyCatalog` loads one catalog page. If the namespace fits in it the

@@ -43,11 +43,20 @@ TabsTrigger.displayName = "TabsTrigger";
 
 export const TabsContent = forwardRef<
   HTMLDivElement,
-  ComponentPropsWithoutRef<typeof TabsPrimitive.Content>
->(({ className = "", ...props }, ref) => (
+  ComponentPropsWithoutRef<typeof TabsPrimitive.Content> & {
+    /**
+     * Keep the panel mounted (hidden) while another tab is open. Radix
+     * unmounts inactive panels, which discards an editor's unsaved draft and
+     * reseeds it from the cache on return. Radix's own `forceMount` alone
+     * leaves the panel visible, so the inactive state is hidden here.
+     */
+    keepMounted?: boolean;
+  }
+>(({ className = "", keepMounted = false, ...props }, ref) => (
   <TabsPrimitive.Content
     ref={ref}
-    className={`pt-4 outline-none ${className}`}
+    className={`pt-4 outline-none ${keepMounted ? "data-[state=inactive]:hidden " : ""}${className}`}
+    {...(keepMounted && { forceMount: true as const })}
     {...props}
   />
 ));

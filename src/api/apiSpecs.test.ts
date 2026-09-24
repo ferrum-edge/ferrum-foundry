@@ -89,6 +89,16 @@ describe("API spec request contracts", () => {
     expect(requests).toHaveLength(1);
   });
 
+  it("stops collecting when its signal aborts between pages", async () => {
+    const controller = new AbortController();
+    respond.mockImplementationOnce(() => {
+      controller.abort();
+      return Response.json(listPage([summary], 2, 0, 1));
+    });
+    await expect(specs.listAll(scope, controller.signal)).rejects.toThrow();
+    expect(requests).toHaveLength(1);
+  });
+
   it("rejects a total that changes between pages", async () => {
     respond.mockImplementationOnce(() => Response.json(listPage([summary], 2, 0, 1)))
       .mockImplementationOnce(() => Response.json(listPage([summary], 3, 1, 2)));

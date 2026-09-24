@@ -2,13 +2,13 @@
 /*  Ferrum Foundry – Proxy create / edit form                         */
 /* ------------------------------------------------------------------ */
 
-import { useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
-import { Badge } from "@/components/ui/Badge";
 import { CollapsibleSection } from "./CollapsibleSection";
+import { TagInput } from "./TagInput";
 import { FormValidationSummary } from "./FormValidationSummary";
 import { useCollapsibleFormValidation } from "@/lib/collapsedFormValidation";
 import {
@@ -30,7 +30,7 @@ import type {
 } from "@/api/types";
 
 const PROXY_COLLAPSIBLE_SECTIONS = [
-  { id: "routing", errorKeys: [] },
+  { id: "routing", errorKeys: ["allowed_methods"] },
   {
     id: "timeouts",
     errorKeys: ["connect_timeout", "read_timeout", "write_timeout"],
@@ -114,102 +114,6 @@ const ALL_HTTP_METHODS = [
 ] as const;
 
 /* ------------------------------------------------------------------ */
-/*  Helper: Tag Input                                                  */
-/* ------------------------------------------------------------------ */
-
-function TagInput({
-  label,
-  values,
-  onChange,
-  placeholder = "Type and press Enter",
-  helpText,
-  parseAsNumber = false,
-}: {
-  label?: string;
-  values: (string | number)[];
-  onChange: (values: (string | number)[]) => void;
-  placeholder?: string;
-  helpText?: string;
-  parseAsNumber?: boolean;
-}) {
-  const [input, setInput] = useState("");
-
-  const addTags = (raw: string) => {
-    const parts = raw
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const newValues = parts
-      .map((p) => (parseAsNumber ? Number(p) : p))
-      .filter((v) => {
-        if (parseAsNumber && isNaN(v as number)) return false;
-        return !values.includes(v);
-      });
-    if (newValues.length > 0) {
-      onChange([...values, ...newValues]);
-    }
-  };
-
-  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter" || e.key === ",") {
-      e.preventDefault();
-      addTags(input);
-      setInput("");
-    }
-    if (e.key === "Backspace" && input === "" && values.length > 0) {
-      onChange(values.slice(0, -1));
-    }
-  };
-
-  const handleBlur = () => {
-    if (input.trim()) {
-      addTags(input);
-      setInput("");
-    }
-  };
-
-  const removeTag = (index: number) => {
-    onChange(values.filter((_, i) => i !== index));
-  };
-
-  return (
-    <div className="flex flex-col gap-1.5">
-      {label && (
-        <span className="text-text-secondary text-sm font-medium">{label}</span>
-      )}
-      <div className="flex flex-wrap gap-1.5 bg-bg-input border border-border rounded-lg px-3 py-2 focus-within:border-orange focus-within:ring-1 focus-within:ring-orange/30 transition-colors duration-150">
-        {values.map((v, i) => (
-          <Badge key={`${v}-${i}`} variant="default">
-            <span className="flex items-center gap-1">
-              {String(v)}
-              <button
-                type="button"
-                onClick={() => removeTag(i)}
-                className="text-text-muted hover:text-text-primary cursor-pointer"
-              >
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </span>
-          </Badge>
-        ))}
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          onBlur={handleBlur}
-          placeholder={values.length === 0 ? placeholder : ""}
-          className="bg-transparent text-text-primary text-sm outline-none flex-1 min-w-[80px] placeholder:text-text-muted"
-        />
-      </div>
-      {helpText && <p className="text-text-muted text-xs">{helpText}</p>}
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
 /*  Helper: Checkbox group for methods                                 */
 /* ------------------------------------------------------------------ */
 
@@ -218,11 +122,13 @@ function MethodCheckboxGroup({
   selected,
   onChange,
   options,
+  error,
 }: {
   label: string;
   selected: string[];
   onChange: (selected: string[]) => void;
   options: readonly string[];
+  error?: string;
 }) {
   const toggle = (method: string) => {
     if (selected.includes(method)) {
@@ -255,6 +161,7 @@ function MethodCheckboxGroup({
           </label>
         ))}
       </div>
+      {error && <p className="text-danger text-xs">{error}</p>}
     </div>
   );
 }
@@ -531,6 +438,11 @@ export function ProxyForm({
       }
     }
     if (isUdpLike) requireNumber("udp_idle_timeout", udpIdleTimeout, "UDP idle timeout");
+    // The gateway requires at least one method (`minItems: 1`); an empty
+    // restriction is a 400, not "allow nothing".
+    if (isHttpLike && restrictMethods && allowedMethods.length === 0) {
+      errs.allowed_methods = "Select at least one method, or stop restricting methods";
+    }
     setErrors(errs);
     const ok = Object.keys(errs).length === 0;
     if (!ok) {
@@ -770,6 +682,7 @@ export function ProxyForm({
                 selected={allowedMethods}
                 onChange={setAllowedMethods}
                 options={ALL_HTTP_METHODS}
+                error={errors.allowed_methods}
               />
             )}
             <TagInput

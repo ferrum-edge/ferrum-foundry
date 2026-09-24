@@ -16,13 +16,22 @@ interface ProxyRequestRow {
   count: number;
 }
 
+/**
+ * A histogram percentile. Past the largest finite bucket a histogram only
+ * knows a lower bound, so `atLeast` marks a value that is really "more than".
+ */
+interface Percentile {
+  ms: number;
+  atLeast: boolean;
+}
+
 interface ProxyLatency {
   proxyId: string;
   kind: "request" | "backend" | "overhead";
   count: number;
   sum: number;
-  p50: number | null;
-  p99: number | null;
+  p50: Percentile | null;
+  p99: Percentile | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -107,13 +116,14 @@ function percentileFromBuckets(
   buckets: { le: number; count: number }[],
   total: number,
   pct: number,
-): number | null {
+): Percentile | null {
   if (total === 0 || buckets.length === 0) return null;
   const target = total * pct;
   for (const b of buckets) {
-    if (b.count >= target) return b.le;
+    if (b.count >= target) return { ms: b.le, atLeast: false };
   }
-  return buckets[buckets.length - 1]?.le ?? null;
+  // The percentile falls in the +Inf bucket: the top bound is only a floor.
+  return { ms: buckets[buckets.length - 1]!.le, atLeast: true };
 }
 
 function parseRateLimitTotal(text: string): number | null {
@@ -142,6 +152,11 @@ function fmtMs(v: number | null): string {
   return v >= 1000 ? `${(v / 1000).toFixed(2)}s` : `${v.toFixed(1)}ms`;
 }
 
+function fmtPercentile(v: Percentile | null): string {
+  if (v === null) return "--";
+  return v.atLeast ? `> ${fmtMs(v.ms)}` : fmtMs(v.ms);
+}
+
 /* ------------------------------------------------------------------ */
 /*  Aggregation helpers                                                */
 /* ------------------------------------------------------------------ */
@@ -151,8 +166,8 @@ interface ProxySummary {
   totalRequests: number;
   byStatus: { code: string; count: number }[];
   avgLatencyMs: number | null;
-  p50Ms: number | null;
-  p99Ms: number | null;
+  p50Ms: Percentile | null;
+  p99Ms: Percentile | null;
 }
 
 function aggregateProxySummaries(
@@ -279,10 +294,10 @@ export function PrometheusStatsPanel({ text }: { text: string }) {
                     {fmtMs(s.avgLatencyMs)}
                   </span>
                   <span className="text-text-muted text-right tabular-nums">
-                    {fmtMs(s.p50Ms)}
+                    {fmtPercentile(s.p50Ms)}
                   </span>
                   <span className="text-text-muted text-right tabular-nums">
-                    {fmtMs(s.p99Ms)}
+                    {fmtPercentile(s.p99Ms)}
                   </span>
                 </div>
               ))}

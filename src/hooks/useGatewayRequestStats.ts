@@ -3,6 +3,13 @@ import type { AdminMetrics } from "@/api/types";
 import { useNamespace } from "@/stores/namespace";
 
 const REQUEST_SAMPLE_STORAGE_KEY = "ferrum:metricsRequestSample";
+/**
+ * A stored sample only bridges a remount (navigating away and back), so the
+ * first reading after it is still a recent rate. One from an earlier visit
+ * would average over hours and be shown as the current requests per second.
+ * The in-memory sample is unaffected: it is always one refresh old.
+ */
+export const STORED_SAMPLE_MAX_AGE_MS = 15 * 60_000;
 
 interface RequestSample {
   timestamp: number;
@@ -115,8 +122,14 @@ export function useGatewayRequestStats(
     if (!gateway || !dataUpdatedAt) return;
 
     const currentSample = toSample(gateway, dataUpdatedAt);
+    const storedSample = previousSampleRef.current
+      ? undefined
+      : readStoredSample(selectedNamespace);
     const previousSample =
-      previousSampleRef.current ?? readStoredSample(selectedNamespace);
+      previousSampleRef.current ??
+      (storedSample && currentSample.timestamp - storedSample.timestamp <= STORED_SAMPLE_MAX_AGE_MS
+        ? storedSample
+        : undefined);
 
     setStats(calculateStats(currentSample, previousSample));
     previousSampleRef.current = currentSample;

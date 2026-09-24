@@ -85,11 +85,11 @@ afterEach(async () => {
   Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
 });
 
-async function mount(tab = "Inventory") {
+async function mount(tab = "Inventory", entry = "/tls") {
   const parent = createRootRoute();
   const route = createRoute({ getParentRoute: () => parent, path: "/tls", component: TlsPage });
   const router = createRouter({
-    routeTree: parent.addChildren([route]), history: createMemoryHistory({ initialEntries: ["/tls"] }),
+    routeTree: parent.addChildren([route]), history: createMemoryHistory({ initialEntries: [entry] }),
   });
   await router.load();
   await ui.render(<RouterProvider router={router} />);
@@ -651,5 +651,21 @@ describe("ACME workflows", () => {
     await settle(() => expect(panel().textContent).toContain(kind === "certificate" ? "No ACME certificates" : "No active orders"));
     expect(writes()).toHaveLength(2);
     expect(writes().every((request) => request.method === "DELETE" && !request.headers.has("X-Ferrum-Namespace"))).toBe(true);
+  });
+});
+
+describe("TLS list pagination", () => {
+  it("opens Events at its first page, not at Inventory's offset", async () => {
+    await mount("Inventory", "/tls?offset=100&limit=100");
+    await settle(() => expect(requests.some((r) => r.url.includes("/admin/tls/inventory"))).toBe(true));
+    const inventory = requests.find((r) => r.url.includes("/admin/tls/inventory"))!;
+    expect(new URL(inventory.url).searchParams.get("offset")).toBe("100");
+
+    await selectTab("Events");
+    await settle(() => expect(requests.some((r) => r.url.includes("/admin/tls/events"))).toBe(true));
+    const events = requests.filter((r) => r.url.includes("/admin/tls/events"));
+    expect(events.map((r) => new URL(r.url).searchParams.get("offset") ?? "0")).toEqual(["0"]);
+    // Nor does Events inherit Inventory's page size.
+    expect(events.map((r) => new URL(r.url).searchParams.get("limit"))).toEqual(["50"]);
   });
 });

@@ -356,3 +356,47 @@ describe("UpstreamForm numeric drafts (#402)", () => {
     expect(submitted().service_discovery?.dns_sd?.poll_interval_seconds).toBe(60);
   });
 });
+
+describe("UpstreamForm Kubernetes discovery", () => {
+  it("carries provider keys the form does not model through a save", async () => {
+    await mountPlain({
+      targets: [],
+      service_discovery: {
+        provider: "consul",
+        consul: {
+          address: "http://consul.internal:8500",
+          service_name: "api",
+          a_newer_gateway_field: { nested: true },
+        } as never,
+      },
+    });
+    await save();
+    expect(submitted().service_discovery?.consul).toMatchObject({
+      address: "http://consul.internal:8500",
+      service_name: "api",
+      a_newer_gateway_field: { nested: true },
+    });
+  });
+
+  it("keeps a loaded address_type on an unrelated save", async () => {
+    await mountPlain({
+      targets: [],
+      service_discovery: {
+        provider: "kubernetes",
+        kubernetes: {
+          service_name: "api",
+          namespace: "prod",
+          address_type: "IPv6",
+          poll_interval_seconds: 30,
+        },
+      },
+    });
+    await save();
+    expect(submitted().service_discovery?.kubernetes).toEqual({
+      service_name: "api",
+      namespace: "prod",
+      address_type: "IPv6",
+      poll_interval_seconds: 30,
+    });
+  });
+});

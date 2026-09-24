@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { useAuditEvents } from "@/hooks/useOps";
+import { useNamespace } from "@/stores/namespace";
 import type { AuditEvent } from "@/api/ops";
 
 const PAGE_SIZE = 50;
@@ -36,6 +37,14 @@ function actionBadge(action: string) {
 }
 
 export default function AuditPage() {
+  // Filters and offset belong to one namespace's log: a switch starts over at
+  // the first page rather than asking the new namespace for an offset it may
+  // not have, which would read as "No audit events".
+  const { scope } = useNamespace();
+  return <AuditLog key={scope.namespace} />;
+}
+
+function AuditLog() {
   const healthQuery = useHealth(30_000);
   const [actor, setActor] = useState("");
   const [action, setAction] = useState("");
@@ -105,7 +114,18 @@ export default function AuditPage() {
 
       <ReadState queries={[query]} label="Audit log" optionalFeature>
         <Card className="overflow-hidden p-0">
-          {events.length === 0 && (
+          {events.length === 0 && offset > 0 && (
+            <EmptyState
+              title="No results on this page"
+              description="The log has fewer events than this offset."
+              action={
+                <Button variant="secondary" size="sm" onClick={() => setOffset(0)}>
+                  Go to first page
+                </Button>
+              }
+            />
+          )}
+          {events.length === 0 && offset === 0 && (
             <EmptyState
               title="No audit events"
               description={auditEmptyDescription(healthQuery)}

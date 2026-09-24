@@ -77,6 +77,8 @@ function deferred<T>() {
     resolve = res;
     reject = rej;
   });
+  // A page may be rejected before the query that reads it has started.
+  promise.catch(() => undefined);
   return { promise, resolve, reject };
 }
 
@@ -165,6 +167,20 @@ async function chooseScope(label: string) {
 }
 
 describe("proxy group membership loading", () => {
+  it.each(["global", "proxy"] as const)("does not traverse proxies for a %s-scoped plugin", async (scope) => {
+    await render();
+    pluginResponse.resolve({ ...plugin, scope, ...(scope === "proxy" && { proxy_id: "source" }) });
+    await settle();
+    await settle();
+    expect(host.querySelector("form")).not.toBeNull();
+    // A proxy-scoped plugin's picker reads its own bounded first page; the
+    // whole-collection membership traversal must never start.
+    const all = client.getQueryState(["proxies", "default", "all"]);
+    expect(all?.data).toBeUndefined();
+    expect(all?.fetchStatus ?? "idle").toBe("idle");
+    if (scope === "global") expect(get).not.toHaveBeenCalledWith("proxies", expect.anything());
+  });
+
   it.each(["plugin first", "proxies first"])("waits for both: %s", async (order) => {
     await render();
     expect(host.querySelector("form")).toBeNull();
@@ -190,12 +206,15 @@ describe("proxy group membership loading", () => {
         }),
       );
     }
+    // Membership is read only once the plugin proves to be group-scoped.
+    expect(get).not.toHaveBeenCalledWith("proxies", expect.anything());
+    pluginResponse.resolve(plugin);
+    await settle();
     expect(get).toHaveBeenCalledWith("proxies", expect.objectContaining({
       searchParams: { offset: "0", limit: "250" },
       headers: { "X-Ferrum-Namespace": "default" },
       context: { deferQueryErrors: true },
     }));
-    pluginResponse.resolve(plugin);
     firstPage.resolve(page([member("source")], 0, 2));
     await settle();
     expect(get).toHaveBeenCalledWith("proxies", expect.objectContaining({

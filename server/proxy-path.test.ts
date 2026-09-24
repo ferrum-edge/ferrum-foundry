@@ -1,6 +1,12 @@
 import type { FastifyRequest } from 'fastify';
 import { describe, expect, it } from 'vitest';
-import { proxyPathIsFleetGlobal, proxyTargetPath, proxyTargetUrl, UnsafeProxyPathError } from './proxy-path.js';
+import {
+  proxyPathIsFleetGlobal,
+  proxyTargetPath,
+  proxyTargetUrl,
+  servesSpaShell,
+  UnsafeProxyPathError,
+} from './proxy-path.js';
 
 function request(url: string, wildcard?: string, method = 'GET'): FastifyRequest {
   return {
@@ -109,5 +115,25 @@ describe('canonical proxy targets', () => {
       ['PUT', 'acme/orders/id'], ['GET', 'acme/orders/id/finalize'],
       ['POST', 'certificates/id/extra'], ['GET', '../proxies'],
     ]) expect(proxyPathIsFleetGlobal(request(`/api/proxy/admin/tls/${path}`, undefined, method))).toBe(false);
+  });
+});
+
+describe('SPA shell fallback', () => {
+  it.each([
+    ['GET', '/proxies/orders.v2'],
+    ['GET', '/settings?tab=namespaces'],
+    ['HEAD', '/'],
+  ])('serves the shell for a page navigation: %s %s', (method, url) => {
+    expect(servesSpaShell(request(url, undefined, method))).toBe(true);
+  });
+
+  it.each([
+    ['GET', '/assets/index-OLDHASH1.js'],
+    ['GET', '/api'],
+    ['GET', '/api/unknown'],
+    ['POST', '/settings'],
+    ['DELETE', '/proxies/orders'],
+  ])('answers 404 instead of the shell: %s %s', (method, url) => {
+    expect(servesSpaShell(request(url, undefined, method))).toBe(false);
   });
 });

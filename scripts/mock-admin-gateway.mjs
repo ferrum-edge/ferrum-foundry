@@ -763,14 +763,24 @@ const server = createServer(async (req, res) => {
   if (path === '/health' || path === '/status') return send(200, modeHealth);
   if (path === '/admin/metrics') return send(200, adminMetrics());
   if (path === '/metrics') {
+    // Edge's prometheus_metrics exposition: `proxy_id` first, `status_code`,
+    // millisecond histograms, and `namespace` appended last. The Metrics
+    // page parses exactly this shape, so the mock must not drift from it.
+    const ns = ',namespace="ferrum"';
+    const proxy = 'proxy_id="proxy-orders-api"';
     return send(200, [
       '# TYPE ferrum_requests_total counter',
-      'ferrum_requests_total{namespace="ferrum",proxy_id="proxy-orders-api",method="GET",status="200"} 1420031',
-      'ferrum_requests_total{namespace="ferrum",proxy_id="proxy-orders-api",method="POST",status="201"} 52011',
-      'ferrum_requests_total{namespace="ferrum",proxy_id="proxy-orders-api",method="GET",status="404"} 21892',
-      '# TYPE ferrum_request_duration_seconds histogram',
-      'ferrum_request_duration_seconds_sum{namespace="ferrum",proxy_id="proxy-orders-api"} 15234.2',
-      'ferrum_request_duration_seconds_count{namespace="ferrum",proxy_id="proxy-orders-api"} 1493934',
+      `ferrum_requests_total{${proxy},method="GET",status_code="200"${ns}} 1420031`,
+      `ferrum_requests_total{${proxy},method="POST",status_code="201"${ns}} 52011`,
+      `ferrum_requests_total{${proxy},method="GET",status_code="404"${ns}} 21892`,
+      '# TYPE ferrum_request_duration_ms histogram',
+      `ferrum_request_duration_ms_bucket{${proxy},le="5"${ns}} 402113`,
+      `ferrum_request_duration_ms_bucket{${proxy},le="10"${ns}} 1120442`,
+      `ferrum_request_duration_ms_bucket{${proxy},le="50"${ns}} 1468201`,
+      `ferrum_request_duration_ms_bucket{${proxy},le="250"${ns}} 1492007`,
+      `ferrum_request_duration_ms_bucket{${proxy},le="+Inf"${ns}} 1493934`,
+      `ferrum_request_duration_ms_sum{${proxy}${ns}} 15234200.00`,
+      `ferrum_request_duration_ms_count{${proxy}${ns}} 1493934`,
     ].join('\n'), 'text/plain');
   }
   if (path === '/metrics/runtime') return send(200, runtimeMetrics());

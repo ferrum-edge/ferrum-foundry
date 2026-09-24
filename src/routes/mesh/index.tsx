@@ -5,7 +5,8 @@ import { RuntimeTab } from './RuntimeTab';
 /*  404s outside mesh mode, which renders as a friendly empty state.  */
 /* ------------------------------------------------------------------ */
 
-import { ReadState } from '@/components/shared/ReadState';
+import { ReadState, ReadStateNotice } from '@/components/shared/ReadState';
+import type { ReadQuery } from '@/lib/readState';
 import { useState } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
 import { Card } from "@/components/ui/Card";
@@ -42,6 +43,17 @@ function NotMeshEmpty({ what }: { what: string }) {
   );
 }
 
+/**
+ * A read that produced nothing. It is classified exactly as the Clusters and
+ * Waypoints tabs classify theirs: `403` is a denial for this session,
+ * `404`/`503` a surface this gateway may not serve, and anything else an
+ * unknown state, never "not mesh mode".
+ */
+function MeshReadFailure({ query, what }: { query: ReadQuery; what: string }) {
+  if (!query.isError) return <NotMeshEmpty what={what} />;
+  return <ReadStateNotice query={query} label={what} optionalFeature />;
+}
+
 function StatTile({ label, value, tone }: { label: string; value: string | number; tone?: "good" | "warn" | "bad" }) {
   const color =
     tone === "bad" ? "text-danger" : tone === "warn" ? "text-warning" : "text-text-primary";
@@ -74,7 +86,7 @@ function OverviewTab() {
           <Button variant="secondary" size="sm" className="mt-3" loading={configQuery.isFetching}
             onClick={() => void configQuery.refetch()}>Retry configuration</Button>
         </Card>
-      ) : <NotMeshEmpty what="Mesh configuration state" />)}
+      ) : <MeshReadFailure query={configQuery} what="Mesh configuration state" />)}
       {drift && !isError && (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -152,7 +164,7 @@ function OverviewTab() {
           <Button variant="secondary" size="sm" className="mt-3" loading={sliceQuery.isFetching}
             onClick={() => void sliceQuery.refetch()}>Retry convergence</Button>
         </Card>
-      ) : <NotMeshEmpty what="Data plane convergence" />)}
+      ) : <MeshReadFailure query={sliceQuery} what="Data plane convergence" />)}
       {sliceDrift && !sliceError && (
         <Card className="overflow-hidden p-0">
           <div className="px-6 py-3 border-b border-border flex items-center gap-3">
@@ -199,77 +211,84 @@ function OverviewTab() {
 /* ---------- Service graph ---------- */
 
 function ServiceGraphTab() {
-  const { data, isLoading, isError } = useServiceGraph();
+  const query = useServiceGraph();
+  const { data, isLoading } = query;
 
   if (isLoading) return <SkeletonCard />;
-  if (isError || !data) return <NotMeshEmpty what="Service graph" />;
+  if (!data) return <MeshReadFailure query={query} what="Service graph" />;
 
   return (
-    <ResourceGrid
-      label="Mesh service graph"
-      emptyState={data.edges.length === 0 && (
-        <EmptyState title="No traffic observed" description="Edges appear as mesh traffic flows." />
-      )}
-    >
-      <div className="px-6 py-3 border-b border-border flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-text-primary">
-          {data.edge_count} edge(s)
-        </h3>
-        <span className="text-xs text-text-muted">
-          generated {new Date(data.generated_at).toLocaleTimeString()}
-        </span>
-      </div>
-      <div className="grid grid-cols-[2fr_2fr_5rem_5rem_5rem_6rem] gap-3 px-6 py-3 border-b border-border text-text-muted text-xs font-semibold uppercase tracking-wider">
-        <span>Source</span>
-        <span>Destination</span>
-        <span>Requests</span>
-        <span>Errors</span>
-        <span>Avg ms</span>
-        <span>Security</span>
-      </div>
-      {data.edges.map((edge, i) => (
-        <div
-          key={i}
-          className="grid grid-cols-[2fr_2fr_5rem_5rem_5rem_6rem] gap-3 px-6 py-3 border-b border-border/50 last:border-b-0 items-center"
-        >
-          <div className="min-w-0">
-            <p className="text-sm text-text-primary truncate">
-              {edge.source_workload || edge.source_app || "unknown"}
-            </p>
-            <p className="text-xs text-text-muted truncate">{edge.source_namespace}</p>
-          </div>
-          <div className="min-w-0">
-            <p className="text-sm text-text-primary truncate">
-              {edge.destination_service || edge.destination_workload || "unknown"}
-            </p>
-            <p className="text-xs text-text-muted truncate">{edge.destination_namespace}</p>
-          </div>
-          <span className="text-sm text-text-primary">{edge.requests_total}</span>
-          <span className={`text-sm ${edge.errors_total > 0 ? "text-danger" : "text-text-muted"}`}>
-            {edge.errors_total}
+    <div className="space-y-4">
+      {/* A failed poll keeps the last graph on screen, marked stale. */}
+      {query.isError && <ReadStateNotice query={query} label="Service graph" />}
+      <ResourceGrid
+        label="Mesh service graph"
+        emptyState={data.edges.length === 0 && (
+          <EmptyState title="No traffic observed" description="Edges appear as mesh traffic flows." />
+        )}
+      >
+        <div className="px-6 py-3 border-b border-border flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-text-primary">
+            {data.edge_count} edge(s)
+          </h3>
+          <span className="text-xs text-text-muted">
+            generated {new Date(data.generated_at).toLocaleTimeString()}
           </span>
-          <span className="text-sm text-text-secondary">
-            {edge.duration_ms_avg.toFixed(1)}
-          </span>
-          <Badge variant={edge.connection_security_policy === "mutual_tls" ? "green" : "yellow"}>
-            {edge.connection_security_policy || "unknown"}
-          </Badge>
         </div>
-      ))}
-    </ResourceGrid>
+        <div className="grid grid-cols-[2fr_2fr_5rem_5rem_5rem_6rem] gap-3 px-6 py-3 border-b border-border text-text-muted text-xs font-semibold uppercase tracking-wider">
+          <span>Source</span>
+          <span>Destination</span>
+          <span>Requests</span>
+          <span>Errors</span>
+          <span>Avg ms</span>
+          <span>Security</span>
+        </div>
+        {data.edges.map((edge, i) => (
+          <div
+            key={i}
+            className="grid grid-cols-[2fr_2fr_5rem_5rem_5rem_6rem] gap-3 px-6 py-3 border-b border-border/50 last:border-b-0 items-center"
+          >
+            <div className="min-w-0">
+              <p className="text-sm text-text-primary truncate">
+                {edge.source_workload || edge.source_app || "unknown"}
+              </p>
+              <p className="text-xs text-text-muted truncate">{edge.source_namespace}</p>
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm text-text-primary truncate">
+                {edge.destination_service || edge.destination_workload || "unknown"}
+              </p>
+              <p className="text-xs text-text-muted truncate">{edge.destination_namespace}</p>
+            </div>
+            <span className="text-sm text-text-primary">{edge.requests_total}</span>
+            <span className={`text-sm ${edge.errors_total > 0 ? "text-danger" : "text-text-muted"}`}>
+              {edge.errors_total}
+            </span>
+            <span className="text-sm text-text-secondary">
+              {edge.duration_ms_avg.toFixed(1)}
+            </span>
+            <Badge variant={edge.connection_security_policy === "mutual_tls" ? "green" : "yellow"}>
+              {edge.connection_security_policy || "unknown"}
+            </Badge>
+          </div>
+        ))}
+      </ResourceGrid>
+    </div>
   );
 }
 
 /* ---------- Policy denies ---------- */
 
 function PolicyDeniesTab() {
-  const { data, isLoading, isError } = usePolicyDenies("15m", 100);
+  const query = usePolicyDenies("15m", 100);
+  const { data, isLoading } = query;
 
   if (isLoading) return <SkeletonCard />;
-  if (isError || !data) return <NotMeshEmpty what="Policy denies" />;
+  if (!data) return <MeshReadFailure query={query} what="Policy denies" />;
 
   return (
     <div className="space-y-4">
+      {query.isError && <ReadStateNotice query={query} label="Policy denies" />}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         <StatTile
           label={`Denies (${Math.round(data.window_seconds / 60)}m)`}
@@ -397,7 +416,8 @@ function ClustersTab() {
 
 function EgressTab() {
   const { toast } = useToast();
-  const { data, isLoading, isError } = useEgressScope();
+  const query = useEgressScope();
+  const { data, isLoading } = query;
   const testEgress = useTestEgressScope();
   const { capabilities } = useCapabilities();
   const canTest = capabilities.operationalActions;
@@ -406,10 +426,11 @@ function EgressTab() {
   const [testResult, setTestResult] = useState<string | null>(null);
 
   if (isLoading) return <SkeletonCard />;
-  if (isError || !data) return <NotMeshEmpty what="Egress scope" />;
+  if (!data) return <MeshReadFailure query={query} what="Egress scope" />;
 
   return (
     <div className="space-y-4">
+      {query.isError && <ReadStateNotice query={query} label="Egress scope" />}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <StatTile
           label="Enforcement"

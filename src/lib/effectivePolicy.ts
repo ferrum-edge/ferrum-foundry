@@ -87,7 +87,11 @@ function attachedPluginsForProxy(
     .filter((plugin) => {
       if (!plugin.enabled) return false;
       if (plugin.scope === "global") return true;
-      if (plugin.scope === "proxy") return plugin.proxy_id === proxy.id;
+      // `proxy_id` records intent, not attachment: a proxy-scoped plugin runs
+      // only when the proxy's own `plugins` list names it, like a group one.
+      if (plugin.scope === "proxy") {
+        return plugin.proxy_id === proxy.id && associated.has(plugin.id);
+      }
       return associated.has(plugin.id);
     })
     .map((plugin) => ({

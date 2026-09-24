@@ -138,7 +138,7 @@ strings `true` and `false`. Duration variables are integers.
 |---|---|---|---|---|
 | `FERRUM_ALLOW_RUNTIME_SETTINGS` | No | `false` | `true`/`false` | Permits admins to change an allowlist of connection settings through the UI at runtime |
 | `FERRUM_ADMIN_ALLOWED_ORIGINS` | Required when runtime settings are enabled | - | comma-separated `http`/`https` origins | Origins a runtime `adminUrl` change may select |
-| `FERRUM_ADMIN_ALLOWED_CIDRS` | No | - | comma-separated CIDRs | Private or special-purpose ranges a changed admin URL may resolve to; the startup origin is always permitted |
+| `FERRUM_ADMIN_ALLOWED_CIDRS` | No | - | comma-separated CIDRs | Private or special-purpose ranges a changed admin URL may resolve to; the startup origin is always permitted. IPv4-mapped, IPv4-compatible, NAT64 (`64:ff9b::/96`), and 6to4 (`2002::/16`) addresses are judged by the IPv4 address they embed, so an IPv4 CIDR here also authorizes those spellings |
 
 CIDRs require a literal IPv4 or IPv6 address and an explicit decimal prefix:
 `0`–`32` for IPv4, `0`–`128` for IPv6. Prefixes use ASCII digits without signs,

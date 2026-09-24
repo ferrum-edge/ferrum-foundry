@@ -93,8 +93,10 @@ export function buildAcmeCertificateRequest(
   if (domains.some((domain) => /\s|:\/\//.test(domain))) {
     throw new AcmeCertificateFormError("Certificate domains must be DNS identifiers, not URLs");
   }
-  const expiryWarningDays = Number(form.expiryWarningDays);
-  if (!Number.isSafeInteger(expiryWarningDays) || expiryWarningDays < 0) {
+  // `Number("")` is 0, which would silently disable expiry warnings.
+  const expiryWarningText = form.expiryWarningDays.trim();
+  const expiryWarningDays = /^\d+$/.test(expiryWarningText) ? Number(expiryWarningText) : NaN;
+  if (!Number.isSafeInteger(expiryWarningDays)) {
     throw new AcmeCertificateFormError("Expiry warning days must be a non-negative integer");
   }
 

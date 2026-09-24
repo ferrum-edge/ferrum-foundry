@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 
 export interface CollapsibleSectionProps {
   title: string;
@@ -20,6 +20,7 @@ export function CollapsibleSection({
   const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen);
   const isControlled = controlledOpen !== undefined;
   const open = isControlled ? controlledOpen : uncontrolledOpen;
+  const contentId = useId();
 
   const setOpen = (next: boolean) => {
     if (isControlled) {
@@ -35,6 +36,8 @@ export function CollapsibleSection({
         type="button"
         className="flex items-center justify-between w-full text-left cursor-pointer group"
         onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        aria-controls={open ? contentId : undefined}
       >
         <div className="flex items-center gap-2">
           <h3 className="text-sm font-semibold text-text-primary group-hover:text-orange transition-colors">
@@ -47,6 +50,7 @@ export function CollapsibleSection({
           )}
         </div>
         <svg
+          aria-hidden="true"
           className={`w-4 h-4 text-text-muted transition-transform duration-200 ${open ? "rotate-180" : ""}`}
           fill="none"
           viewBox="0 0 24 24"
@@ -60,7 +64,7 @@ export function CollapsibleSection({
           />
         </svg>
       </button>
-      {open && <div className="mt-4 space-y-4">{children}</div>}
+      {open && <div id={contentId} className="mt-4 space-y-4">{children}</div>}
     </div>
   );
 }

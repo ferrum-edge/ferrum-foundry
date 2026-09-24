@@ -9,7 +9,6 @@ import {
   useConsumer,
   useUpdateConsumer,
   useDeleteConsumer,
-  useAllConsumers,
 } from "@/hooks/useConsumers";
 import { useAllProxies } from "@/hooks/useProxies";
 import { useAllPluginConfigs } from "@/hooks/usePlugins";
@@ -88,27 +87,31 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
   // only by an accepted response. See `docs/concurrent-edits.md`.
   const baseline = useEditBaseline(consumer, consumersApi.consumerWriteGuard);
 
-  const proxiesQuery = useAllProxies();
-  const pluginsQuery = useAllPluginConfigs();
-  const consumersQuery = useAllConsumers();
+  // The matched-proxy answer needs every proxy and plugin config in the
+  // namespace. Opening a consumer to edit its username must not pay for
+  // that, so both traversals start when the Matched Proxies tab is first
+  // opened and stay enabled afterwards (docs/data-loading.md).
+  const [policyRequested, setPolicyRequested] = useState(false);
+  const openTab = (tab: string) => {
+    if (tab === "proxies") setPolicyRequested(true);
+  };
+  const proxiesQuery = useAllProxies(policyRequested);
+  const pluginsQuery = useAllPluginConfigs(policyRequested);
   const { data: allProxies } = proxiesQuery;
   const { data: allPluginConfigs } = pluginsQuery;
-  const { data: allConsumers } = consumersQuery;
-  const policyQueries = [resourceQuery, proxiesQuery, pluginsQuery, consumersQuery];
-  const policyKnown = policyQueries.every((query) => resolveReadState(query) === 'loaded');
+  const policyQueries = [resourceQuery, proxiesQuery, pluginsQuery];
+  const policyKnown =
+    policyRequested && policyQueries.every((query) => resolveReadState(query) === 'loaded');
 
   const authorizedProxies = useMemo(() => {
     if (!policyKnown || !consumer || !allProxies || !allPluginConfigs) return [];
-    const consumers = allConsumers?.some((candidate) => candidate.id === consumer.id)
-      ? allConsumers
-      : [...(allConsumers ?? []), consumer];
 
     return allProxies
       .map((proxy) => {
-        const analysis = analyzeProxyPolicy(proxy, allPluginConfigs, consumers);
-        const result = analysis.consumers.find(
-          (candidate) => candidate.consumer.id === consumer.id,
-        );
+        // A consumer's access depends on nobody else, so analyze this one
+        // consumer rather than every consumer in the namespace per proxy.
+        const analysis = analyzeProxyPolicy(proxy, allPluginConfigs, [consumer]);
+        const result = analysis.consumers[0];
         if (!result || (result.decision !== "allowed" && result.decision !== "conditional")) {
           return null;
         }
@@ -120,7 +123,7 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
         };
       })
       .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
-  }, [consumer, allProxies, allPluginConfigs, allConsumers, policyKnown]);
+  }, [consumer, allProxies, allPluginConfigs, policyKnown]);
 
   /* ---------- Handlers ---------- */
 
@@ -250,7 +253,7 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
       <ResourceLabels labels={consumer.labels} />
 
       {/* Tabs */}
-      <Tabs defaultValue="details">
+      <Tabs defaultValue="details" onValueChange={openTab}>
         <TabsList>
           <TabsTrigger value="details">Details</TabsTrigger>
           <TabsTrigger value="credentials">Credentials</TabsTrigger>
@@ -261,7 +264,7 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
         </TabsList>
 
         {/* ── Details Tab ── */}
-        <TabsContent value="details">
+        <TabsContent value="details" keepMounted>
           <Card>
             <ConsumerForm
               key={formGeneration}
@@ -274,7 +277,7 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
         </TabsContent>
 
         {/* ── Credentials Tab ── */}
-        <TabsContent value="credentials">
+        <TabsContent value="credentials" keepMounted>
           <div className="space-y-6">
             <ReadOnlySurface
               verdict={credentialCapability}

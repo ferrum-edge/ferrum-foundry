@@ -357,6 +357,7 @@ async function verifiedAttempts<TResource, TPayload, TResult>(
   const guard = options.guard as WriteGuard<TResource>;
   const expected = resourceFingerprint(guard.baseline);
 
+  let preconditionFailed = false;
   for (let attempt = 1; ; attempt += 1) {
     const { value, etag } = await options.read();
     const current = guard.select(value);
@@ -373,11 +374,17 @@ async function verifiedAttempts<TResource, TPayload, TResult>(
       });
 
     if (resourceFingerprint(current) !== expected) throw refuse();
+    // A 412 proved another writer committed. A re-read with no strong tag
+    // (the cached-config fallback) can lag that commit and still match the
+    // baseline, so an unconditional PUT from it would silently revert the
+    // change that caused the 412.
+    if (preconditionFailed && etag === null) throw refuse();
 
     try {
       return await options.write(proposed, etag);
     } catch (error) {
       if (etag === null || !isPreconditionFailed(error)) throw error;
+      preconditionFailed = true;
       if (attempt >= PRECONDITION_ATTEMPTS) throw refuse();
     }
   }

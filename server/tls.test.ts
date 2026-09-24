@@ -140,6 +140,46 @@ describe('managed Undici dispatchers', () => {
     expect(() => getDispatcher(config)).toThrow(/network policy/);
   });
 
+  it.each([
+    '[64:ff9b::a9fe:a9fe]', // NAT64 of 169.254.169.254
+    '[64:ff9b::10.0.0.1]', // NAT64 with a dotted tail
+    '[64:ff9b:1::a00:1]',
+    '[2002:a9fe:a9fe::1]', // 6to4 of 169.254.169.254
+    '[::7f00:1]', // IPv4-compatible 127.0.0.1
+    '[::ffff:7f00:1]', // IPv4-mapped 127.0.0.1
+    '[fec0::1]',
+    '[100::1]',
+  ])('rejects a runtime-selected IPv6 spelling of a blocked range: %s', (host) => {
+    const config = makeConfig({
+      adminUrl: `http://${host}`,
+      initialAdminOrigin: 'https://gateway.example',
+      adminAllowedOrigins: [`http://${host}`],
+    });
+    expect(() => getDispatcher(config)).toThrow(/network policy/);
+  });
+
+  it.each([
+    '[64:ff9b::808:808]', // DNS64-synthesized 8.8.8.8
+    '[2002:808:808::1]', // 6to4 of 8.8.8.8
+  ])('permits a translated public IPv4 destination: %s', (host) => {
+    const config = makeConfig({
+      adminUrl: `http://${host}`,
+      initialAdminOrigin: 'https://gateway.example',
+      adminAllowedOrigins: [`http://${host}`],
+    });
+    expect(() => getDispatcher(config)).not.toThrow();
+  });
+
+  it('applies an IPv4 CIDR authorization to its NAT64 spelling', () => {
+    const config = makeConfig({
+      adminUrl: 'http://[64:ff9b::a14:1e28]',
+      initialAdminOrigin: 'https://gateway.example',
+      adminAllowedOrigins: ['http://[64:ff9b::a14:1e28]'],
+      adminAllowedCidrs: ['10.20.30.40/32'],
+    });
+    expect(() => getDispatcher(config)).not.toThrow();
+  });
+
   it('permits an operator-authorized private CIDR', () => {
     const config = makeConfig({
       adminUrl: 'http://10.20.30.40',

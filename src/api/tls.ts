@@ -417,11 +417,13 @@ export async function listManagedRecords(
   collection: ManagedTlsCollection,
   params: PaginationParams = {},
   context: Record<string, unknown> = {},
+  signal?: AbortSignal,
 ): Promise<PaginatedResponse<ManagedTlsRecord>> {
   return proxyApi
     .get(`admin/tls/${collection}`, {
       searchParams: paginationSearch(params),
       context: { ...context, ...FLEET_GLOBAL_CONTEXT },
+      ...(signal && { signal }),
     })
     .json<PaginatedResponse<ManagedTlsRecord>>();
 }
@@ -429,9 +431,13 @@ export async function listManagedRecords(
 export async function listAllManagedRecords(
   collection: ManagedTlsCollection,
   context: Record<string, unknown> = {},
+  signal?: AbortSignal,
 ): Promise<ManagedTlsRecord[]> {
-  return collectAllPages((offset, limit) =>
-    listManagedRecords(collection, { offset, limit }, context),
+  return collectAllPages(
+    (offset, limit, pageSignal) =>
+      listManagedRecords(collection, { offset, limit }, context, pageSignal),
+    undefined,
+    signal,
   );
 }
 
@@ -469,18 +475,25 @@ export async function removeManagedRecord(
 export async function listAcmeCertificates(
   params: PaginationParams = {},
   context: Record<string, unknown> = {},
+  signal?: AbortSignal,
 ): Promise<PaginatedResponse<AcmeCertificateRecord>> {
   return proxyApi
     .get("admin/tls/acme/certificates", {
       searchParams: paginationSearch(params),
       context: { ...context, ...FLEET_GLOBAL_CONTEXT },
+      ...(signal && { signal }),
     })
     .json<PaginatedResponse<AcmeCertificateRecord>>();
 }
 
-export async function listAllAcmeCertificates(context: Record<string, unknown> = {}): Promise<AcmeCertificateRecord[]> {
-  return collectAllPages((offset, limit) =>
-    listAcmeCertificates({ offset, limit }, context),
+export async function listAllAcmeCertificates(
+  context: Record<string, unknown> = {},
+  signal?: AbortSignal,
+): Promise<AcmeCertificateRecord[]> {
+  return collectAllPages(
+    (offset, limit, pageSignal) => listAcmeCertificates({ offset, limit }, context, pageSignal),
+    undefined,
+    signal,
   );
 }
 
@@ -529,17 +542,37 @@ export async function removeAcmeCertificate(
 export async function listAcmeOrders(
   params: PaginationParams = {},
   context: Record<string, unknown> = {},
+  signal?: AbortSignal,
 ): Promise<PaginatedResponse<AcmeOrder>> {
   return proxyApi
     .get("admin/tls/acme/orders", {
       searchParams: paginationSearch(params),
       context: { ...context, ...FLEET_GLOBAL_CONTEXT },
+      ...(signal && { signal }),
     })
     .json<PaginatedResponse<AcmeOrder>>();
 }
 
-export async function listAllAcmeOrders(context: Record<string, unknown> = {}): Promise<AcmeOrder[]> {
-  return collectAllPages((offset, limit) => listAcmeOrders({ offset, limit }, context));
+export async function listAllAcmeOrders(
+  context: Record<string, unknown> = {},
+  signal?: AbortSignal,
+): Promise<AcmeOrder[]> {
+  return collectAllPages(
+    (offset, limit, pageSignal) => listAcmeOrders({ offset, limit }, context, pageSignal),
+    undefined,
+    signal,
+  );
+}
+
+const TERMINAL_ACME_ORDER_STATUSES: ReadonlySet<AcmeOrderStatus> = new Set([
+  "valid",
+  "failed",
+  "cancelled",
+]);
+
+/** An order the gateway is still working on; its status can still change. */
+export function acmeOrderInProgress(order: AcmeOrder): boolean {
+  return !TERMINAL_ACME_ORDER_STATUSES.has(order.status);
 }
 
 export async function createAcmeOrder(
@@ -629,17 +662,26 @@ export async function renewAcmeCertificate(
 export async function listAcmeAccounts(
   params: PaginationParams = {},
   context: Record<string, unknown> = {},
+  signal?: AbortSignal,
 ): Promise<PaginatedResponse<AcmeAccount>> {
   return proxyApi
     .get("admin/tls/acme/accounts", {
       searchParams: paginationSearch(params),
       context: { ...context, ...FLEET_GLOBAL_CONTEXT },
+      ...(signal && { signal }),
     })
     .json<PaginatedResponse<AcmeAccount>>();
 }
 
-export async function listAllAcmeAccounts(context: Record<string, unknown> = {}): Promise<AcmeAccount[]> {
-  return collectAllPages((offset, limit) => listAcmeAccounts({ offset, limit }, context));
+export async function listAllAcmeAccounts(
+  context: Record<string, unknown> = {},
+  signal?: AbortSignal,
+): Promise<AcmeAccount[]> {
+  return collectAllPages(
+    (offset, limit, pageSignal) => listAcmeAccounts({ offset, limit }, context, pageSignal),
+    undefined,
+    signal,
+  );
 }
 
 /* ---------- Rotate / validate ---------- */

@@ -80,13 +80,14 @@ export interface ApiSpecListParams {
 export async function list(
   scope: NamespaceScope,
   params: ApiSpecListParams = {},
+  signal?: AbortSignal,
 ): Promise<ApiSpecListResponse> {
   const searchParams: Record<string, string> = {};
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined && value !== "") searchParams[key] = String(value);
   }
   return proxyApi
-    .get("api-specs", scoped(scope, { ...readOptions, searchParams }))
+    .get("api-specs", scoped(scope, { ...readOptions, searchParams, ...(signal && { signal }) }))
     .json<ApiSpecListResponse>();
 }
 
@@ -126,16 +127,22 @@ export async function getDocumentByProxy(scope: NamespaceScope, proxyId: string)
 
 /**
  * Fetch every API spec without imposing a silent UI-side record cap. Every
- * page is fetched under `scope`, however long the collection takes.
+ * page is fetched under `scope`, however long the collection takes, unless
+ * `signal` (the Query's) aborts it: a namespace switch or leaving the page
+ * abandons the traversal instead of paging the old namespace to completion.
  */
-export async function listAll(scope: NamespaceScope): Promise<ApiSpecSummary[]> {
+export async function listAll(
+  scope: NamespaceScope,
+  signal?: AbortSignal,
+): Promise<ApiSpecSummary[]> {
   const items: ApiSpecSummary[] = [];
   let offset = 0;
   const limit = 250;
   let expectedTotal: number | undefined;
 
   for (;;) {
-    const page = await list(scope, { offset, limit });
+    signal?.throwIfAborted();
+    const page = await list(scope, { offset, limit }, signal);
     if (
       !Number.isSafeInteger(page.total) ||
       page.total < 0 ||

@@ -196,6 +196,20 @@ export function ProxySearchPicker(props: ProxySearchPickerProps) {
             if (!open) setOpen(true);
           }}
           onFocus={() => setOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              // The picker sits inside a form: Enter picks the first match
+              // instead of submitting the whole form (and its membership plan).
+              e.preventDefault();
+              // The first match not already chosen: Enter adds, never toggles off.
+              const next = filtered.find((proxy) => !isSelected(proxy.id));
+              if (search.trim() && next) handleSelect(next);
+            } else if (e.key === "Escape" && open) {
+              e.preventDefault();
+              setOpen(false);
+            }
+          }}
+          aria-label={label ?? "Search proxies"}
           placeholder={
             mode === "single"
               ? selectedProxies.length > 0
@@ -283,7 +297,7 @@ export function ProxySearchPicker(props: ProxySearchPickerProps) {
                           {proxy.name || proxy.listen_path || proxy.id}
                         </div>
                         <div className="text-xs text-text-muted truncate">
-                          {proxy.name ? `${proxy.listen_path} · ` : ""}
+                          {proxy.name && proxy.listen_path ? `${proxy.listen_path} · ` : ""}
                           {proxy.backend_scheme ?? "https"}://{proxy.backend_host}:{proxy.backend_port}
                           <span className="ml-1.5 font-mono opacity-70">{proxy.id.slice(0, 12)}...</span>
                         </div>
