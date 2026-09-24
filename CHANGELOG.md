@@ -52,6 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - Request bodies proxied to the gateway are bounded by an absolute upload deadline (`FERRUM_UPLOAD_TIMEOUT`) and a global in-flight upload cap (`FERRUM_MAX_ACTIVE_UPLOADS`) in addition to the idle write timeout, so a slowly progressing upload can no longer hold sockets, upstream requests, or upload permits indefinitely.
+- The agent-dispatch skills no longer tell dispatched workers to run `npm ci`, builds, tests, typecheck, or lint locally. Those commands execute repository-controlled code from the branch under review on a host that holds provider and maintainer credentials. Workers now inspect source only and use remote CI on the exact pushed head as the build and test gate.
 
 ## [0.1.0] - 2026-09-03
 
