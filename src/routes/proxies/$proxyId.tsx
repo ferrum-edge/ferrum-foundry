@@ -21,7 +21,7 @@ import { SkeletonCard } from "@/components/ui/Skeleton";
 import { ProxyForm } from "@/components/forms/ProxyForm";
 import { Badge } from "@/components/ui/Badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
-import { getApiErrorMessage } from "@/api/client";
+import { committedWriteMessage, getApiErrorMessage, getCommittedWrite } from "@/api/client";
 import * as proxiesApi from "@/api/proxies";
 import {
   analyzeProxyPolicy,
@@ -30,7 +30,7 @@ import {
 } from "@/lib/effectivePolicy";
 import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
 import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
-import { useEditBaseline } from "@/hooks/useEditBaseline";
+import { reseedAfterCommit, useEditBaseline } from "@/hooks/useEditBaseline";
 import { isStaleResourceError, type StaleResourceDetail } from "@/api/conditionalWrite";
 import { StaleWriteDialog } from "@/components/shared/StaleWriteDialog";
 import { useCapabilities } from "@/stores/capabilities";
@@ -176,6 +176,21 @@ function ProxyEditor({ session }: { session: EditorSession }) {
         setConflict(err.detail);
         return;
       }
+      const committed = getCommittedWrite(err);
+      if (committed) {
+        // Saved, only not yet live. Reseed form and baseline from the gateway
+        // so pressing Save again is not refused as a conflict with this very
+        // commit (see `reseedAfterCommit`).
+        const reseeded = await reseedAfterCommit(resourceQuery.refetch, baseline, () =>
+          setFormGeneration((generation) => generation + 1),
+        );
+        toast(
+          "warning",
+          committedWriteMessage("Proxy saved", committed) +
+            (reseeded ? "" : " Foundry could not re-read the proxy; reload it before saving again."),
+        );
+        return;
+      }
       const message = await getApiErrorMessage(err, "Failed to update proxy");
       toast("error", message);
     }
@@ -195,11 +210,15 @@ function ProxyEditor({ session }: { session: EditorSession }) {
       // The delete is judged against the proxy this page is displaying, so
       // one that another writer changed since is refused rather than deleted
       // unseen. This operator's own saves have already advanced it.
-      await deleteProxy.mutateAsync({
+      const deleted = await deleteProxy.mutateAsync({
         id: proxyId,
         guard: proxiesApi.proxyWriteGuard(proxy),
       });
-      toast("success", "Proxy deleted successfully");
+      if (deleted.committed) {
+        toast("warning", committedWriteMessage("Proxy deleted", deleted.committed));
+      } else {
+        toast("success", "Proxy deleted successfully");
+      }
       navigate({ to: "/proxies" });
     } catch (err: unknown) {
       if (isStaleResourceError(err)) {

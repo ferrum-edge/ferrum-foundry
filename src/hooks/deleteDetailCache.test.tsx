@@ -133,6 +133,39 @@ for (const [kind, detail] of cases) {
   });
 }
 
+const committedCases = [
+  ["consumer", "consumer", "consumers"],
+  ["proxy", "proxy", "proxies"],
+  ["upstream", "upstream", "upstreams"],
+] as const;
+
+for (const [kind, detail, list] of committedCases) {
+  it(`${kind}: a committed-but-not-live delete retires the seeded detail and lists (#430)`, async () => {
+    client.setQueryData([detail, namespace, "same-id"], { preserved: true });
+    client.setQueryData([list, namespace, "all"], [{ id: "same-id" }]);
+    await render(<Probe kind={kind} />);
+    const pending = remove("same-id");
+    await settle(() => expect(deletion).toHaveLength(1));
+    let outcome: unknown;
+    await act(async () => {
+      deletion[0]!.resolve(Response.json(
+        { error: "reload timed out", applied: false, reason: "reload_timeout" },
+        { status: 503, headers: { "x-ferrum-config-cursor": "1:2" } },
+      ));
+      outcome = await pending;
+    });
+    // The delete is durable, so it completes as a delete and says why it is
+    // not yet live, rather than rejecting as a failure.
+    expect(outcome).toEqual({
+      namespace: "tenant-a",
+      id: "same-id",
+      committed: { cursor: "1:2", reason: "reload_timeout" },
+    });
+    expect(client.getQueryData([detail, namespace, "same-id"])).toBeUndefined();
+    expect(client.getQueryState([list, namespace, "all"])?.isInvalidated).toBe(true);
+  });
+}
+
 it("reopens and submits a recreated plugin without retired configuration", async () => {
   await render(<PluginDetailPage />);
   await settle(() => expect(host.querySelector("textarea")?.value).toContain("retired"));

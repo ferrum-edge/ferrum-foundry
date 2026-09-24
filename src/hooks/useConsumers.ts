@@ -8,7 +8,11 @@
 /* ------------------------------------------------------------------ */
 
 import {
+  committedWriteMessage,
+  getCommittedWrite,
+  isCommittedWrite,
   isUnobservedWrite,
+  markCommittedWrite,
   markUnobservedWrite,
   queryScope,
   UNOBSERVED_WRITE_MESSAGE,
@@ -28,7 +32,11 @@ import type {
   PaginationParams,
 } from "@/api/types";
 import { useNamespace } from "@/stores/namespace";
-import { retireDeletedDetail } from "./retireDeletedDetail";
+import {
+  removeCommitted,
+  retireDeletedDetail,
+  type DeleteOutcome,
+} from "./retireDeletedDetail";
 
 export function useConsumers(params: PaginationParams = {}, enabled = true) {
   const { scope } = useNamespace();
@@ -98,6 +106,16 @@ export function useUpdateConsumer() {
         qc.invalidateQueries({ queryKey, exact: true }),
       ]);
     },
+    // A committed-but-not-live save changed the gateway even though it
+    // rejects. Reconcile the same way before the caller sees the outcome, so a
+    // second ACL edit uses the committed group list.
+    onError: async (error, { id }) => {
+      if (!isCommittedWrite(error)) return;
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["consumers", scope.namespace] }),
+        qc.invalidateQueries({ queryKey: ["consumer", scope.namespace, id], exact: true }),
+      ]);
+    },
   });
 }
 
@@ -111,10 +129,12 @@ export function useDeleteConsumer() {
     }: {
       id: string;
       guard: WriteGuard<Consumer | ConsumerCreate> | null;
-    }) => {
-      await consumers.remove(scope, id, guard);
+    }): Promise<DeleteOutcome> => {
+      // A committed-but-not-live answer is a completed delete: its caches are
+      // retired below exactly as for a 204.
+      const committed = await removeCommitted(() => consumers.remove(scope, id, guard));
       // Carry the mutation's namespace through completion, even after a switch.
-      return { namespace: scope.namespace, id };
+      return { namespace: scope.namespace, id, committed };
     },
     onSuccess: async (retired) => {
       await retireDeletedDetail(qc, ["consumer", retired.namespace, retired.id]);
@@ -146,6 +166,15 @@ export function useUpdateCredentials() {
         // an echoed response body in the mutation cache. A lost answer keeps
         // its unknown-outcome marker so cached reads are still refreshed.
         if (isUnobservedWrite(error)) throw markUnobservedWrite(new Error(UNOBSERVED_WRITE_MESSAGE));
+        // A committed-but-not-live answer keeps its marker too: the credentials
+        // were replaced, so it is not reported as a failure.
+        const committed = getCommittedWrite(error);
+        if (committed) {
+          throw markCommittedWrite(
+            new Error(committedWriteMessage("Credentials replaced", committed)),
+            committed,
+          );
+        }
         // eslint-disable-next-line preserve-caught-error -- the cause is the secret-bearing error
         throw new Error("Credential replacement failed. Check the gateway state before retrying.");
       }

@@ -70,6 +70,10 @@ The parts of that contract Foundry relies on:
    read**. If anything was written after it, Edge answers `412` and writes
    nothing; the guard goes back to step 2.
 5. An accepted response becomes the new baseline.
+6. A committed-but-not-live answer — `503` with `X-Ferrum-Config-Cursor` or
+   `applied: false` — is a committed write, not a failure. The editor reseeds
+   its form **and** its baseline from one fresh read; see
+   [Committed but not yet live](#committed-but-not-yet-live).
 
 The two checks compose. The baseline comparison proves the verified read holds
 nothing this draft would revert; `If-Match` proves nothing has been written
@@ -221,6 +225,83 @@ block their delete. If another writer changed it, the delete is refused and
 anyway". A plugin delete checks before detaching any proxy and again at the
 read its final `DELETE` is conditional on.
 
+## Committed but not yet live
+
+Edge answers a proxy, upstream, or consumer `PUT` or `DELETE` whose row
+committed, but whose generation the in-process reload could not make live,
+with `503` and either a valid `X-Ferrum-Config-Cursor` or a body carrying
+`applied: false` (the "committed but not live" family of
+`NamespaceAdmissionUnavailable` in Edge's `openapi.yaml`). The nothing-applied
+`503` has no `applied` field and never carries the cursor. The row is durable;
+only the live apply lagged.
+
+`committedNotLiveAnswer()` (`src/api/gatewayMetadata.ts`) is the one predicate
+for that distinction. The live-apply monitor, restore, and the API client all
+use it. For a configuration write, the client's `beforeError` hook marks the
+rejection as a **committed write** (`getCommittedWrite()` in
+`src/api/client.ts`, which follows the `cause` chain like
+`isUnobservedWrite()`), and then:
+
+- **No error popup.** The live-apply banner already says "Committed, not yet
+  proven live" and monitors the cursor, or reports a commit without a valid
+  cursor as unverifiable. `getApiErrorMessage()` phrases it the same way, never
+  as "Failed to …".
+- **Cached reads are refreshed.** The application `MutationCache`
+  (`src/lib/queryClient.ts`) invalidates on a committed write exactly as on an
+  unobserved one, and the proxy, upstream, and consumer update hooks also
+  refresh the resource's detail and list before the caller sees the outcome,
+  as their `onSuccess` does.
+- **Nothing is resent.** The retry policy refuses a committed `503` even on a
+  read.
+
+### The decision: reseed, do not adopt
+
+A save that commits must move the baseline, or the next Save re-reads the
+gateway, finds the operator's own change, and refuses it as a concurrent edit
+(#430). There are three ways to move it, and only one keeps the seed-once
+invariant ("the baseline only ever describes what the form is showing"):
+
+| Option | Why not / why |
+| --- | --- |
+| Keep the old baseline | The next Save is refused with `StaleResourceError` listing this operator's own change. |
+| Adopt the draft payload | Not a canonical representation: a payload spells a clear as `null` where a read omits the key, so it never fingerprints like the stored resource, and the next Save is refused anyway. |
+| Adopt a fresh read, keep the form's fields | A writer who committed between this save and that read would be adopted into the baseline while the form still shows this operator's values — the next Save would silently revert them. That is the silent rebase the guard exists to prevent. |
+| **Reseed form and baseline from one fresh read** | **Chosen.** Both come from the same read, so the baseline never describes content the form is not showing. The draft is not lost: it is what the gateway now holds. A writer in the gap is displayed, not overwritten. |
+
+`reseedAfterCommit()` (`src/hooks/useEditBaseline.ts`) does this for the
+proxy, upstream, and consumer detail forms: the same refetch-and-remount as
+"Discard my draft and reload", run for the operator because their draft was
+committed. The toast says "Proxy saved: committed, not yet proven live" and
+points at the live-apply banner for the cursor. If that read fails, nothing
+moves: the form keeps the draft, the toast says to reload before saving again,
+and a further Save is judged against the old baseline — the honest outcome
+when Foundry cannot say what the gateway holds, which the stale-write dialog's
+"Discard my draft and reload" resolves.
+
+The two single-field editors build their guard from the rendered resource
+rather than a form seed. The update hooks refresh that resource before the
+rejection reaches them, so an upstream **targets** save or a consumer **ACL**
+change that commits closes its editor like a success, and the next edit is
+computed from the committed list.
+
+A read served from the cached-config fallback (`X-Data-Source: cached`) can
+lag the commit, and the form would then show the older content. That is the
+same exposure as seeding an editor from such a read in the first place: the
+next Save is refused if its verification read comes from the database, and is
+covered only by [Without a tag](#without-a-tag) if that read is cached too. The
+cached-data banner is shown either way.
+
+### Committed deletes
+
+A committed delete **is** a completed delete. A delete has no response body to
+adopt, so `removeCommitted()` (`src/hooks/retireDeletedDetail.ts`) resolves the
+proxy, upstream, and consumer delete mutations with `committed` set rather than
+rejecting them. Their `onSuccess` then retires the seeded detail entry and
+invalidates the lists (and, for a proxy, the cascade) exactly as for a `204`,
+and the detail page leaves with "Proxy deleted: committed, not yet proven live"
+instead of "Failed to delete proxy". Until then the cached detail would have
+seeded an editor for a resource the gateway no longer holds.
+
 ## What the operator sees
 
 `StaleWriteDialog` is shown when a save or a delete is refused. For a save it
@@ -258,9 +339,10 @@ The baseline follows the same seed-once rule as the form fields
 for an editor identity and is **not** advanced by a background refetch.
 Adopting a newer refetch would let the guard pass while the form still held
 values from the older read — a silent rebase, which is the failure mode this
-whole mechanism exists to prevent. Only two things move a baseline: a canonical
-response the gateway just accepted from this editor, and an explicit discard
-and reload.
+whole mechanism exists to prevent. Only three things move a baseline: a
+canonical response the gateway just accepted from this editor, an explicit
+discard and reload, and the reseed after a committed-but-not-live save — which
+is that same reload, run because the draft is already on the gateway.
 
 A namespace switch or a route change to another resource remounts the editor,
 so the next successful read seeds a fresh baseline for the new tenant.
@@ -277,6 +359,9 @@ so the next successful read seeds a fresh baseline for the new tenant.
 | Guarded deletes, consumer saves and rotation re-send, nested redaction of plugin `config` | `src/api/conditionalWrite.test.ts`, `src/lib/resourceBaseline.test.ts` |
 | Plugin editor baseline, membership writes conditional on their reads | `src/lib/pluginMembership.test.ts`, `src/lib/pluginMembership.binding.test.ts` |
 | Refused delete dialog | `src/routes/proxies/concurrentEdit.test.tsx` |
+| Committed-but-not-live classification, popup suppression, cache refresh, save-twice regression | `src/api/committedWrite.test.ts`, `src/lib/queryClient.test.ts` |
+| Editor reseed after a committed save; committed delete reported as deleted | `src/routes/proxies/concurrentEdit.test.tsx` |
+| Committed delete retires the seeded detail and list caches | `src/hooks/deleteDetailCache.test.tsx` |
 | Mock gateway precondition contract | `scripts/mock-admin-gateway.test.mjs` |
 | Real gateway behavior and the `If-Match` contract | `scripts/concurrent-edit-contract.mjs` |
 

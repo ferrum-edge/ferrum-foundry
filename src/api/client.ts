@@ -7,11 +7,13 @@ import { serverWaitTimeout } from "../../server/waitBudget";
 import type { ApiError } from "./types";
 import {
   beginGatewayRequest,
+  classifyCommittedWrite,
   GATEWAY_REQUEST_IDENTITY,
   observeGatewayFailure,
   observeGatewayResponse,
   setApplyStatusFetcher,
   type ApplyStatusResponse,
+  type CommittedWrite,
   type GatewayRequestIdentity,
 } from "./gatewayMetadata";
 
@@ -167,6 +169,21 @@ export const UNOBSERVED_WRITE_MESSAGE =
   "Outcome unknown: the gateway may already have committed this change. " +
   "It was not replayed. Re-read the current configuration before retrying.";
 
+/**
+ * Operator-facing report of a committed-but-not-live write. It uses the
+ * live-apply banner's own words ("Committed, not yet proven live") and points
+ * at the banner, which carries the cursor and the runtime verdict; it never
+ * says the change failed, because it did not.
+ *
+ * `summary` names what was saved, e.g. `"Proxy saved"`.
+ */
+export function committedWriteMessage(summary: string, committed: CommittedWrite): string {
+  const reason = committed.reason ? ` Reason: ${committed.reason}.` : "";
+  return `${summary}: committed, not yet proven live.${reason} ` + (committed.cursor
+    ? `See the live-apply banner for cursor ${committed.cursor} and runtime status.`
+    : "No valid apply cursor was provided; verify the live gateway configuration.");
+}
+
 export async function getApiErrorMessage(
   error: unknown,
   fallback: string,
@@ -179,6 +196,9 @@ export async function getApiErrorMessage(
   if (isUnobservedWrite(error)) {
     return detail ? `${UNOBSERVED_WRITE_MESSAGE}\n${detail}` : UNOBSERVED_WRITE_MESSAGE;
   }
+  // Nor one the gateway says it committed.
+  const committed = getCommittedWrite(error);
+  if (committed) return committedWriteMessage("The change was saved", committed);
   return detail ? `${error.message}: ${detail}` : error.message;
 }
 
@@ -227,6 +247,46 @@ export function isUnobservedWrite(error: unknown): boolean {
     current = (current as { cause?: unknown }).cause;
   }
   return false;
+}
+
+// Writes the gateway durably committed but answered `503` because the live
+// apply lagged (see `committedNotLiveAnswer`). Keyed like `unobservedWrites`.
+const committedWrites = new WeakMap<object, CommittedWrite>();
+
+/**
+ * Carry the committed-write marker onto an error that deliberately replaces
+ * the original rather than wrapping it via `cause`.
+ */
+export function markCommittedWrite<T extends object>(error: T, committed: CommittedWrite): T {
+  committedWrites.set(error, committed);
+  return error;
+}
+
+/**
+ * The commit `error` reports, when it is — or was caused by — a configuration
+ * write the gateway answered with the committed-but-not-live `503`.
+ *
+ * Such a write is **not a failure**: the row is durable and only the live
+ * apply lagged. It is never retried (the retry policy refuses it), the global
+ * error popup is not shown for it (the live-apply banner already reports the
+ * lag), cached reads are refreshed (`src/lib/queryClient.ts`), and an editor
+ * that issued it reseeds from the gateway rather than keeping a baseline that
+ * predates its own commit. See `docs/concurrent-edits.md`.
+ */
+export function getCommittedWrite(error: unknown): CommittedWrite | null {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current && typeof current === "object" && !seen.has(current)) {
+    const committed = committedWrites.get(current);
+    if (committed) return committed;
+    seen.add(current);
+    current = (current as { cause?: unknown }).cause;
+  }
+  return null;
+}
+
+export function isCommittedWrite(error: unknown): boolean {
+  return getCommittedWrite(error) !== null;
 }
 
 // ── BFF session / CSRF state (set by AuthProvider) ───────────────
@@ -450,14 +510,23 @@ export const api = ky.create({
     ],
     beforeError: [
       ({ request, options, error }) => {
+        const identity = options.context[GATEWAY_REQUEST_IDENTITY] as
+          | GatewayRequestIdentity
+          | undefined;
         // Classified before any popup opt-out: a silent caller's write is just
         // as ambiguous, and the live-apply banner must still say so.
-        const unobserved = observeGatewayFailure(
-          request,
-          error,
-          options.context[GATEWAY_REQUEST_IDENTITY] as GatewayRequestIdentity | undefined,
-        );
+        const unobserved = observeGatewayFailure(request, error, identity);
         if (unobserved) unobservedWrites.add(error);
+        // A configuration write answered with the committed-but-not-live 503
+        // did commit. It is marked for callers and never reported as a failure:
+        // the live-apply banner (`observeGatewayResponse`) already says the
+        // change is committed and not yet proven live.
+        const committed =
+          identity?.mutationOrder !== undefined ? classifyCommittedWrite(error) : null;
+        if (committed) {
+          committedWrites.set(error, committed);
+          return error;
+        }
         if (options.context[SILENT_ERRORS] || error.name === "AbortError") return error;
         if (isHTTPError(error) && isExpectedProbeFailure(error.response, request.url)) return error;
         if (isHTTPError(error) && isHandledStatus(options.context, error.response.status)) return error;

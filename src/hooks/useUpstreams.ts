@@ -7,7 +7,7 @@
 /*  after the click cannot retarget the write.                        */
 /* ------------------------------------------------------------------ */
 
-import { queryScope } from "@/api/client";
+import { isCommittedWrite, queryScope } from "@/api/client";
 import { useMemo } from "react";
 import {
   useMutation,
@@ -20,7 +20,11 @@ import * as upstreams from "@/api/upstreams";
 import type { WriteGuard } from "@/api/conditionalWrite";
 import type { PaginationParams, Upstream, UpstreamCreate } from "@/api/types";
 import { useNamespace } from "@/stores/namespace";
-import { retireDeletedDetail } from "./retireDeletedDetail";
+import {
+  removeCommitted,
+  retireDeletedDetail,
+  type DeleteOutcome,
+} from "./retireDeletedDetail";
 
 export function useUpstreams(params: PaginationParams = {}, enabled = true) {
   const { scope } = useNamespace();
@@ -194,6 +198,17 @@ export function useUpdateUpstream() {
         qc.invalidateQueries({ queryKey: ["upstreamRef", scope.namespace, id] }),
       ]);
     },
+    // A committed-but-not-live save changed the gateway even though it
+    // rejects. Reconcile before the caller sees the outcome, so the next
+    // targets edit is computed from the committed list, not the previous one.
+    onError: async (error, { id }) => {
+      if (!isCommittedWrite(error)) return;
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["upstreams", scope.namespace] }),
+        qc.invalidateQueries({ queryKey: ["upstream", scope.namespace, id], exact: true }),
+        qc.invalidateQueries({ queryKey: ["upstreamRef", scope.namespace, id] }),
+      ]);
+    },
   });
 }
 
@@ -207,10 +222,12 @@ export function useDeleteUpstream() {
     }: {
       id: string;
       guard: WriteGuard<Upstream | UpstreamCreate> | null;
-    }) => {
-      await upstreams.remove(scope, id, guard);
+    }): Promise<DeleteOutcome> => {
+      // A committed-but-not-live answer is a completed delete: its caches are
+      // retired below exactly as for a 204.
+      const committed = await removeCommitted(() => upstreams.remove(scope, id, guard));
       // Carry the mutation's namespace through completion, even after a switch.
-      return { namespace: scope.namespace, id };
+      return { namespace: scope.namespace, id, committed };
     },
     onSuccess: async (retired) => {
       await retireDeletedDetail(qc, ["upstream", retired.namespace, retired.id]);
