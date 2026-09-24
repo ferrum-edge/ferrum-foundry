@@ -109,6 +109,11 @@ setting from its read. After `PRECONDITION_ATTEMPTS` (3)
 consecutive rounds the save is refused anyway, so a resource under continuous
 churn cannot hold a save open.
 
+A re-read after a `412` that carries no strong tag (the cached-config
+fallback) is refused rather than written unconditionally: the `412` proved a
+commit, and an untagged read can lag it and still match the baseline, so a
+`PUT` without `If-Match` from it could revert that commit.
+
 The `412` is an outcome the guard resolves, so the conditional `PUT` opts it
 out of the global error popup with `HANDLED_STATUSES` (`src/api/client.ts`);
 every other failure of the same request is still reported.
