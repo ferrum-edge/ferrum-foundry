@@ -151,8 +151,8 @@ describe("upstream target route integration", () => {
     await fill(inputByLabel(panel(), "Host"), "rejected-backend");
     await click("Add Target", panel());
     await settle(() => expect(writes).toHaveLength(2));
-    await settle(() => expect(panel().querySelector("input")).toBeNull());
-    expect(panel().textContent).not.toContain("rejected-backend");
+    // A rejected target save keeps its draft, as the configuration form does.
+    expect(inputByLabel(panel(), "Host").value).toBe("rejected-backend");
     expect(panel().textContent).toContain("old-backend:8080");
     await click("Delete", ui.host);
     await click("Delete Upstream");
@@ -160,6 +160,52 @@ describe("upstream target route integration", () => {
     await settle(() => expect(button("Delete Upstream").disabled).toBe(false));
     expect(document.querySelector('[role="dialog"]')).not.toBeNull();
     expect(current).toEqual(initial);
+  });
+
+  it("keeps editing the same target when a row above it is removed", async () => {
+    current = {
+      ...initial,
+      targets: [
+        { host: "a-backend", port: 8080, weight: 1 },
+        { host: "b-backend", port: 8080, weight: 1 },
+        { host: "c-backend", port: 8080, weight: 1 },
+      ],
+    };
+    await mount();
+    await settle(() => expect(ui.host.textContent).toContain("Targets (3)"));
+    await selectTab("Targets (3)");
+    // Row actions are [edit, remove] per row; open the editor on the third row.
+    await act(async () => rowActions()[4].click());
+    await fill(inputByLabel(panel(), "Host"), "c-backend-draft");
+    // Remove the first row while the third is being edited.
+    await act(async () => rowActions()[1].click());
+    await settle(() => expect(current?.targets.map((target) => target.host)).toEqual(["b-backend", "c-backend"]));
+    await settle(() => expect(panel().textContent).toContain("b-backend:8080"));
+    expect(inputByLabel(panel(), "Host").value).toBe("c-backend-draft");
+  });
+
+  it("keeps an unsaved configuration draft across a tab switch", async () => {
+    await mount();
+    await settle(() => expect(panel().textContent).toContain("Update Upstream"));
+    await fill(inputByLabel(panel(), "Name"), "Draft name");
+    await selectTab("Targets (1)");
+    await selectTab("Configuration");
+    expect(inputByLabel(panel(), "Name").value).toBe("Draft name");
+    expect(writes).toHaveLength(0);
+  });
+
+  it("keeps a target draft when a concurrent edit refuses the save", async () => {
+    await mount();
+    await settle(() => expect(ui.host.textContent).toContain("Targets (1)"));
+    await selectTab("Targets (1)");
+    await click("Add Target", panel());
+    await fill(inputByLabel(panel(), "Host"), "my-backend");
+    // Another administrator replaces the targets after this page loaded.
+    current = { ...initial, targets: [{ host: "their-backend", port: 9090, weight: 1 }], updated_at: "2026-09-02T00:00:00Z" };
+    await click("Add Target", panel());
+    await settle(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull());
+    expect(writes).toHaveLength(0);
+    expect(inputByLabel(panel(), "Host").value).toBe("my-backend");
   });
 
   it("offers a route back when the requested upstream no longer exists", async () => {

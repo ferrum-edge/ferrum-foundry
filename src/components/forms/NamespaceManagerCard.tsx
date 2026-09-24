@@ -164,34 +164,38 @@ function EditNamespaceDialog({
 
   const detail = useNamespaceDetail(target && !submitted ? target : "");
 
-  // Seed the form once per target: on open with the name, then again when
-  // that target's detail first arrives. Keyed on the description value (not
-  // the query object) so a later refetch cannot clobber in-progress edits.
-  const seededFor = useRef<string | null>(null);
+  // Seed each field once per target: the name on open, the description when
+  // that target's detail first arrives. The two are tracked separately so the
+  // late description never re-seeds a name typed while it loaded, and keyed
+  // on the value (not the query object) so a refetch cannot clobber edits.
+  const nameSeededFor = useRef<string | null>(null);
+  const [descriptionSeededFor, setDescriptionSeededFor] = useState<string | null>(null);
   const loadedDescription = detail.data?.description ?? null;
+  const descriptionLoaded = target !== null && descriptionSeededFor === target;
 
   useEffect(() => {
     if (!target) {
-      seededFor.current = null;
+      nameSeededFor.current = null;
+      setDescriptionSeededFor(null);
       setSubmitted(false);
       return;
     }
-    if (seededFor.current === target) return;
-
-    setName(target);
-    setNameError(null);
-    setDescriptionError(null);
-    // Wait for the detail before seeding the description, so the field is
-    // not briefly empty and then overwritten under the user's cursor.
-    if (detail.isSuccess) {
-      setDescription(loadedDescription ?? "");
-      setOriginalDescription(loadedDescription ?? "");
-      seededFor.current = target;
-    } else {
+    if (nameSeededFor.current !== target) {
+      nameSeededFor.current = target;
+      setName(target);
+      setNameError(null);
+      setDescriptionError(null);
       setDescription("");
       setOriginalDescription("");
     }
-  }, [target, detail.isSuccess, loadedDescription]);
+    // The description field stays disabled until this arrives, so nothing
+    // typed can be overwritten under the user's cursor.
+    if (descriptionSeededFor !== target && detail.isSuccess) {
+      setDescriptionSeededFor(target);
+      setDescription(loadedDescription ?? "");
+      setOriginalDescription(loadedDescription ?? "");
+    }
+  }, [target, detail.isSuccess, loadedDescription, descriptionSeededFor]);
 
   async function handleSubmit() {
     if (!target || principal?.role !== "admin" || !namespaceGranted(principal.namespaces, target)) return;
@@ -257,7 +261,14 @@ function EditNamespaceDialog({
               if (descriptionError) setDescriptionError(validateNamespaceDescription(e.target.value));
             }}
             error={descriptionError ?? undefined}
-            helpText="Leave empty to clear the description"
+            disabled={!descriptionLoaded && !detail.isError}
+            helpText={
+              descriptionLoaded
+                ? "Leave empty to clear the description"
+                : detail.isError
+                  ? "The current description could not be loaded. Leave empty to keep it; a value typed here replaces it."
+                  : "Loading the current description…"
+            }
           />
         </div>
         <div className="flex justify-end gap-3 mt-6">

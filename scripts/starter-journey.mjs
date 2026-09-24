@@ -190,6 +190,13 @@ async function dataPlane(headers = {}) {
   return { status: response.status, body: await response.text() };
 }
 
+/** The proxy's associations that name `pluginId`, one entry per association. */
+function associationsTo(proxy, pluginId) {
+  return (proxy.plugins ?? [])
+    .map((association) => association.plugin_config_id)
+    .filter((id) => id === pluginId);
+}
+
 /* ------------------------------------------------------------------ */
 
 async function removeResources(session) {
@@ -240,29 +247,58 @@ async function runWalkthrough(session) {
   });
   assert.ok([200, 201].includes(plugin.status), `plugin create: ${plugin.status}`);
 
-  // Creating a proxy-scoped plugin configuration does not attach it. The
-  // association lives on the proxy, and a full-replacement PUT carries it.
-  // The walkthrough documents this because skipping it leaves the route open
-  // while everything looks configured.
-  const stillOpen = await dataPlane();
-  assert.equal(
-    stillOpen.status,
-    200,
-    "the plugin took effect without an association; re-check the walkthrough",
+  // Edge 0.9.x attaches a proxy-scoped plugin configuration to its proxy in
+  // the same transaction as the create (ferrum-edge#4611), so the route is
+  // protected from here on, before any consumer exists. The walkthrough says
+  // so; if the gateway ever stops attaching, the route would stay open while
+  // everything looks configured, and this is where that shows.
+  const created = await read(session, `/api/proxy/proxies/${RESOURCES.proxy}`);
+  assert.deepEqual(
+    associationsTo(created, RESOURCES.plugin),
+    [RESOURCES.plugin],
+    "the gateway did not attach the proxy-scoped plugin on create; re-check the walkthrough",
   );
-  record("a plugin configuration alone does not protect the route");
+  const protectedOnCreate = await dataPlane();
+  assert.equal(
+    protectedOnCreate.status,
+    401,
+    `the route returned ${protectedOnCreate.status} once the plugin existed; it is not protected`,
+  );
+  record("the gateway attaches the plugin on create, and it protects the route at once");
 
-  const current = await read(session, `/api/proxy/proxies/${RESOURCES.proxy}`);
+  // The walkthrough still shows the explicit attach, as its raw-API step for a
+  // gateway that does not write the association: a full-replacement PUT that
+  // keeps the proxy's associations and adds this one if it is missing.
+  // Sending it here must change nothing: one association, route still
+  // protected.
+  const current = structuredClone(created);
   for (const field of ["created_at", "updated_at", "namespace", "api_spec_id"]) {
     delete current[field];
+  }
+  const plugins = current.plugins ?? [];
+  if (associationsTo(current, RESOURCES.plugin).length === 0) {
+    plugins.push({ plugin_config_id: RESOURCES.plugin });
   }
   const attached = await write(
     session,
     "PUT",
     `/api/proxy/proxies/${RESOURCES.proxy}?apply=sync`,
-    { ...current, plugins: [{ plugin_config_id: RESOURCES.plugin }] },
+    { ...current, plugins },
   );
   assert.equal(attached.status, 200, `attach: ${attached.status}`);
+  const reattached = await read(session, `/api/proxy/proxies/${RESOURCES.proxy}`);
+  assert.deepEqual(
+    associationsTo(reattached, RESOURCES.plugin),
+    [RESOURCES.plugin],
+    "attaching an already-attached plugin changed the association",
+  );
+  const stillProtected = await dataPlane();
+  assert.equal(
+    stillProtected.status,
+    401,
+    `the route returned ${stillProtected.status} after the explicit attach`,
+  );
+  record("attaching it again by hand is idempotent");
 
   const consumer = await write(session, "POST", "/api/proxy/consumers?apply=sync", {
     id: RESOURCES.consumer,
@@ -270,7 +306,7 @@ async function runWalkthrough(session) {
     credentials: { keyauth: [{ key: API_KEY }] },
   });
   assert.ok([200, 201].includes(consumer.status), `consumer create: ${consumer.status}`);
-  record("key authentication attached and a consumer credential created");
+  record("a consumer and its credential are created");
 
   // Ordinary reads redact the credential; the UI shows it once at creation.
   const stored = await read(session, `/api/proxy/consumers/${RESOURCES.consumer}`);
@@ -299,6 +335,11 @@ async function runWalkthrough(session) {
     "the backend received the API key; key_auth should hide credentials by default",
   );
   record("authenticated succeeds, and the credential is hidden from the backend");
+
+  // A wrong key is refused, so the 200 above was the credential, not an open route.
+  const wrong = await dataPlane({ "X-API-Key": "not-the-issued-key" });
+  assert.equal(wrong.status, 401, `a wrong API key returned ${wrong.status}`);
+  record("a wrong key is refused");
 }
 
 /* ------------------------------------------------------------------ */

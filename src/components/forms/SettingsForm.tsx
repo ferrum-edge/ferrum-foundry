@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
+import { validateNamespaceName } from "@/api/namespaces";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
@@ -13,6 +14,15 @@ import { Select } from "@/components/ui/Select";
 import { useToast } from "@/components/ui/Toast";
 import { useCapabilities } from "@/stores/capabilities";
 import { CapabilityNotice } from "@/components/shared/CapabilityGate";
+import {
+  formatCommaList,
+  missingNumberError,
+  numberDraftFromInput,
+  numberDraftText,
+  parseCommaList,
+  resolveNumberDrafts,
+  type WithNumberDrafts,
+} from "@/lib/formDrafts";
 
 /* ── Types ─────────────────────────────────────────────────────────── */
 
@@ -30,6 +40,26 @@ interface Settings {
   readTimeout: number;
   writeTimeout: number;
   runtimeSettingsEnabled: boolean;
+}
+
+// Numeric settings hold `""` while cleared so the input never snaps to `0`;
+// save rejects an empty value, and the BFF enforces each field's range.
+const SETTINGS_NUMBER_FIELDS = [
+  ["jwtTtl", "JWT TTL"],
+  ["connectTimeout", "Connect timeout"],
+  ["readTimeout", "Read timeout"],
+  ["writeTimeout", "Write timeout"],
+] as const;
+const SETTINGS_NUMBER_KEYS = SETTINGS_NUMBER_FIELDS.map(([key]) => key);
+type SettingsDraft = WithNumberDrafts<Settings, (typeof SETTINGS_NUMBER_KEYS)[number]>;
+
+/** Each comma-separated grant must be a valid namespace name. */
+function namespaceGrantsError(text: string): string | undefined {
+  for (const grant of parseCommaList(text)) {
+    const error = validateNamespaceName(grant);
+    if (error) return `${error} ("${grant}")`;
+  }
+  return undefined;
 }
 
 interface StatusResult {
@@ -65,7 +95,11 @@ export function SettingsForm() {
   const { capabilities } = useCapabilities();
   const canWrite = capabilities.bffSettings;
 
-  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  const [settings, setSettings] = useState<SettingsDraft>(DEFAULT_SETTINGS);
+  // Namespace grants keep the operator's raw text (commas included) and are
+  // parsed on save; `settings.jwtNamespaces` stays the last server value.
+  const [namespaceText, setNamespaceText] = useState("");
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -73,17 +107,23 @@ export function SettingsForm() {
 
   /* ── Fetch current settings ─────────────────────────────────────── */
 
+  const adoptSettings = useCallback((data: Settings) => {
+    setSettings(data);
+    setNamespaceText(formatCommaList(data.jwtNamespaces));
+    setErrors({});
+    queryClient.setQueryData(["settings"], data);
+  }, [queryClient]);
+
   const fetchSettings = useCallback(async () => {
     try {
       const data = await api.get("api/settings").json<Settings>();
-      setSettings(data);
-      queryClient.setQueryData(["settings"], data);
+      adoptSettings(data);
     } catch {
       toast("error", "Failed to load settings");
     } finally {
       setLoading(false);
     }
-  }, [queryClient, toast]);
+  }, [adoptSettings, toast]);
 
   useEffect(() => {
     fetchSettings();
@@ -91,8 +131,32 @@ export function SettingsForm() {
 
   /* ── Field helpers ──────────────────────────────────────────────── */
 
-  function update<K extends keyof Settings>(key: K, value: Settings[K]) {
+  function update<K extends keyof SettingsDraft>(key: K, value: SettingsDraft[K]) {
     setSettings((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function checkNamespaceGrants() {
+    const error = namespaceGrantsError(namespaceText);
+    setErrors((prev) => {
+      const next = { ...prev };
+      if (error) next.jwtNamespaces = error;
+      else delete next.jwtNamespaces;
+      return next;
+    });
+  }
+
+  function validate(): boolean {
+    const errs: Record<string, string> = {};
+    for (const [key, label] of SETTINGS_NUMBER_FIELDS) {
+      const error = missingNumberError(settings[key], label);
+      if (error) errs[key] = error;
+    }
+    if (settings.authMode === "static") {
+      const error = namespaceGrantsError(namespaceText);
+      if (error) errs.jwtNamespaces = error;
+    }
+    setErrors(errs);
+    return Object.keys(errs).length === 0;
   }
 
   /* ── Test connection ────────────────────────────────────────────── */
@@ -117,23 +181,28 @@ export function SettingsForm() {
 
   async function handleSave() {
     if (!canWrite.allowed) return;
+    if (!validate()) return;
     setSaving(true);
     try {
       const {
         authMode,
         jwtRole,
-        jwtNamespaces,
+        jwtNamespaces: seededNamespaces,
         tlsCaConfigured: _tlsCaConfigured,
         runtimeSettingsEnabled: _runtimeSettingsEnabled,
         ...updates
-      } = settings;
+      } = resolveNumberDrafts(settings, SETTINGS_NUMBER_KEYS);
+      // Untouched text keeps the server's value, so an unrestricted
+      // (absent) grant list is not rewritten as `[]`.
+      const jwtNamespaces = namespaceText === formatCommaList(seededNamespaces)
+        ? seededNamespaces
+        : parseCommaList(namespaceText);
       const data = await api
         .put("api/settings", {
           json: authMode === "static" ? { ...updates, jwtRole, jwtNamespaces } : updates,
         })
         .json<Settings>();
-      setSettings(data);
-      queryClient.setQueryData(["settings"], data);
+      adoptSettings(data);
       toast("success", "Settings saved successfully");
     } catch {
       toast("error", "Failed to save settings");
@@ -202,8 +271,9 @@ export function SettingsForm() {
               label="JWT TTL (seconds)"
               type="number"
               min={1}
-              value={settings.jwtTtl}
-              onChange={(e) => update("jwtTtl", Number(e.target.value))}
+              value={numberDraftText(settings.jwtTtl)}
+              onChange={(e) => update("jwtTtl", numberDraftFromInput(e.target.value))}
+              error={errors.jwtTtl}
               helpText="Token lifetime in seconds. Maps to FERRUM_JWT_TTL."
               disabled={!settings.runtimeSettingsEnabled}
             />
@@ -238,12 +308,11 @@ export function SettingsForm() {
           </div>
           <Input
             label="Namespace grants"
-            value={settings.jwtNamespaces?.join(", ") ?? ""}
-            onChange={(event) => update(
-              "jwtNamespaces",
-              event.target.value.split(",").map((value) => value.trim()).filter(Boolean),
-            )}
+            value={namespaceText}
+            onChange={(event) => setNamespaceText(event.target.value)}
+            onBlur={checkNamespaceGrants}
             helpText="Applies to new static logins: exact comma-separated namespace grants."
+            error={errors.jwtNamespaces}
             disabled={!settings.runtimeSettingsEnabled || settings.authMode !== "static"}
           />
         </div>
@@ -290,24 +359,27 @@ export function SettingsForm() {
             label="Connect Timeout (ms)"
             type="number"
             min={0}
-            value={settings.connectTimeout}
-            onChange={(e) => update("connectTimeout", Number(e.target.value))}
+            value={numberDraftText(settings.connectTimeout)}
+            onChange={(e) => update("connectTimeout", numberDraftFromInput(e.target.value))}
+            error={errors.connectTimeout}
             disabled={!settings.runtimeSettingsEnabled}
           />
           <Input
             label="Read Timeout (ms)"
             type="number"
             min={0}
-            value={settings.readTimeout}
-            onChange={(e) => update("readTimeout", Number(e.target.value))}
+            value={numberDraftText(settings.readTimeout)}
+            onChange={(e) => update("readTimeout", numberDraftFromInput(e.target.value))}
+            error={errors.readTimeout}
             disabled={!settings.runtimeSettingsEnabled}
           />
           <Input
             label="Write Timeout (ms)"
             type="number"
             min={0}
-            value={settings.writeTimeout}
-            onChange={(e) => update("writeTimeout", Number(e.target.value))}
+            value={numberDraftText(settings.writeTimeout)}
+            onChange={(e) => update("writeTimeout", numberDraftFromInput(e.target.value))}
+            error={errors.writeTimeout}
             disabled={!settings.runtimeSettingsEnabled}
           />
         </div>

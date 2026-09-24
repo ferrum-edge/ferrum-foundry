@@ -10,13 +10,15 @@
 
 import { queryScope } from "@/api/client";
 import {
+  type QueryClient,
   useMutation,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
 import * as plugins from "@/api/plugins";
 import { SUMMARY_SCAN_BUDGET } from "@/api/pagination";
-import type { PaginationParams, PluginConfigCreate } from "@/api/types";
+import type { WriteGuard } from "@/api/conditionalWrite";
+import type { PaginationParams, PluginConfig, PluginConfigCreate } from "@/api/types";
 import { useNamespace } from "@/stores/namespace";
 import {
   bindPluginMembership,
@@ -104,6 +106,19 @@ export function useCreatePluginConfig() {
   });
 }
 
+/**
+ * A membership plan rewrites `plugins` on proxies (and Edge appends the
+ * association itself on a proxy-scoped create), so the cached proxy detail is
+ * as stale as the list. Run on settle: a plan that failed part-way may still
+ * have written some proxies. Editors seed once and never compare `plugins`,
+ * so refreshing the detail cannot disturb an open draft.
+ */
+function invalidateMembership(qc: QueryClient): void {
+  qc.invalidateQueries({ queryKey: ["pluginConfigs"] });
+  qc.invalidateQueries({ queryKey: ["proxies"] });
+  qc.invalidateQueries({ queryKey: ["proxy"] });
+}
+
 export function useCreatePluginWithMembership() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
@@ -115,23 +130,7 @@ export function useCreatePluginWithMembership() {
       data: PluginConfigCreate;
       proxyIds?: string[];
     }) => createPluginWithMembership(data, proxyIds, bindPluginMembership(scope)),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["pluginConfigs"] });
-      qc.invalidateQueries({ queryKey: ["proxies"] });
-    },
-  });
-}
-
-export function useUpdatePluginConfig() {
-  const qc = useQueryClient();
-  const { scope } = useNamespace();
-  return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: PluginConfigCreate }) =>
-      plugins.updateConfig(scope, id, data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["pluginConfigs"] });
-      qc.invalidateQueries({ queryKey: ["pluginConfig"] });
-    },
+    onSettled: () => invalidateMembership(qc),
   });
 }
 
@@ -143,36 +142,17 @@ export function useUpdatePluginWithMembership() {
       id,
       data,
       proxyIds = [],
+      guard,
     }: {
       id: string;
       data: PluginConfigCreate;
       proxyIds?: string[];
+      guard: WriteGuard<PluginConfig | PluginConfigCreate> | null;
     }) =>
-      updatePluginWithMembership(id, data, proxyIds, bindPluginMembership(scope)),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["pluginConfigs"] });
+      updatePluginWithMembership(id, data, proxyIds, bindPluginMembership(scope), guard),
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: ["pluginConfig"] });
-      qc.invalidateQueries({ queryKey: ["proxies"] });
-    },
-  });
-}
-
-export function useDeletePluginConfig() {
-  const qc = useQueryClient();
-  const { scope } = useNamespace();
-  return useMutation({
-    mutationFn: async (id: string) => {
-      await plugins.removeConfig(scope, id);
-      // Carry the mutation's namespace through completion, even after a switch.
-      return { namespace: scope.namespace, id };
-    },
-    onSuccess: async (retired) => {
-      await retireDeletedDetail(qc, [
-        "pluginConfig",
-        retired.namespace,
-        retired.id,
-      ]);
-      qc.invalidateQueries({ queryKey: ["pluginConfigs"] });
+      invalidateMembership(qc);
     },
   });
 }
@@ -181,8 +161,14 @@ export function useDeletePluginWithMembership() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
   return useMutation({
-    mutationFn: async (id: string) => {
-      await deletePluginWithMembership(id, bindPluginMembership(scope));
+    mutationFn: async ({
+      id,
+      guard,
+    }: {
+      id: string;
+      guard: WriteGuard<PluginConfig | PluginConfigCreate> | null;
+    }) => {
+      await deletePluginWithMembership(id, bindPluginMembership(scope), guard);
       // Carry the mutation's namespace through completion, even after a switch.
       return { namespace: scope.namespace, id };
     },
@@ -192,8 +178,7 @@ export function useDeletePluginWithMembership() {
         retired.namespace,
         retired.id,
       ]);
-      qc.invalidateQueries({ queryKey: ["pluginConfigs"] });
-      qc.invalidateQueries({ queryKey: ["proxies"] });
     },
+    onSettled: () => invalidateMembership(qc),
   });
 }

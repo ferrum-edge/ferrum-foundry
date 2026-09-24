@@ -87,6 +87,7 @@ const refetch = vi.fn(async () => {
 });
 
 const mutateAsync = vi.fn();
+const deleteMutateAsync = vi.fn();
 vi.mock("@/hooks/useProxies", () => ({
   useProxy: () => ({
     data: served,
@@ -99,7 +100,7 @@ vi.mock("@/hooks/useProxies", () => ({
   }),
   useUpdateProxy: () => ({ mutateAsync, isPending: false }),
   useDeleteProxy: () => ({
-    mutateAsync: vi.fn(),
+    mutateAsync: deleteMutateAsync,
     isPending: false,
     isSuccess: false,
   }),
@@ -160,6 +161,7 @@ describe("a proxy save refused as stale", () => {
     mutateAsync.mockRejectedValue(
       new StaleResourceError({
         resource: "proxy",
+        operation: "save",
         id: "checkout",
         namespace: "tenant-a",
         original: { backend_host: OPENED_HOST, backend_read_timeout_ms: 5000 },
@@ -229,5 +231,37 @@ describe("a proxy save refused as stale", () => {
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     // The remounted form shows what the other administrator actually saved.
     expect(inputByLabel(host, "Backend Host").value).toBe(GATEWAY_HOST);
+  });
+
+  it("refuses a delete of a proxy that changed, without offering to delete anyway", async () => {
+    deleteMutateAsync.mockRejectedValueOnce(
+      new StaleResourceError({
+        resource: "proxy",
+        operation: "delete",
+        id: "checkout",
+        namespace: "tenant-a",
+        original: { backend_host: OPENED_HOST },
+        current: { backend_host: GATEWAY_HOST },
+        proposed: { backend_host: OPENED_HOST },
+      }),
+    );
+    await render();
+
+    await clickButton("Delete");
+    await clickButton("Delete Proxy");
+
+    const text = dialogText();
+    expect(text).toContain("This proxy changed after you opened it");
+    expect(text).toContain("It was not deleted");
+    expect(text).toContain(GATEWAY_HOST);
+    expect(text).not.toContain("Your draft");
+    expect(deleteMutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "checkout", guard: expect.anything() }),
+    );
+    const dialog = document.querySelector('[role="dialog"]')!;
+    const choices = [...dialog.querySelectorAll("button")]
+      .map((button) => button.textContent?.trim())
+      .filter((label): label is string => Boolean(label));
+    expect(choices).toEqual(["Reload current version", "Close"]);
   });
 });

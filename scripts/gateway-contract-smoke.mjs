@@ -8,6 +8,7 @@ import {
 import { verifyPluginDefaults } from "./plugin-defaults-contract.mjs";
 import { verifyBasicAuthContract } from "./basic-auth-contract.mjs";
 import { verifyConcurrentEditContract } from "./concurrent-edit-contract.mjs";
+import { gatewaySender, verifyCapabilityParity } from "./capability-parity-contract.mjs";
 
 const config = readSeedConfig();
 confirmDestructiveTarget(config);
@@ -28,7 +29,11 @@ async function exchange(path, { method = "GET", body, headers = {} } = {}, reque
   const text = await response.text();
   const cursor = response.headers.get("x-ferrum-config-cursor");
   if (cursor !== null) assert.match(cursor, /^\d+:\d+$/);
-  return { status: response.status, body: text ? JSON.parse(text) : undefined };
+  return {
+    status: response.status,
+    body: text ? JSON.parse(text) : undefined,
+    etag: response.headers.get("etag"),
+  };
 }
 
 async function request(path, { expected = [200, 201], ...options } = {}) {
@@ -146,8 +151,17 @@ const basicAuth = await verifyBasicAuthContract(exchange);
 
 // Two administrators, one proxy, one older draft (#381). This records the
 // gateway's own behavior — an unguarded stale write still reverts an accepted
-// change — and proves Foundry's guard refuses that write before the wire.
+// change — proves Foundry's guard refuses that write, and records whether the
+// gateway enforces the If-Match precondition the guard sends
+// (ferrum-edge#5661).
 const concurrentEdits = await verifyConcurrentEditContract(exchange, proxyTemplate);
+
+// The UI's role x mode capability model against this gateway, as viewer,
+// operator, and admin (#385). The read-only half runs against a second
+// container started with FERRUM_ADMIN_READ_ONLY (see the CI workflow).
+const capabilityParity = await verifyCapabilityParity(gatewaySender(config), {
+  expectation: "writable",
+});
 
 // Validation is non-persistent. Empty PEM values are present-but-invalid, so
 // Foundry must omit unused fields to support CA-only and CRL-only submissions.
@@ -171,6 +185,7 @@ console.log(JSON.stringify({
   defaults,
   basicAuth,
   concurrentEdits,
+  capabilityParity,
   operations: ["read", "create", "full-replace update", "credential rotation", "delete", "TLS validation"],
   resources: ["upstreams", "consumers", "proxies", "plugin configs", "namespaces"],
 }));

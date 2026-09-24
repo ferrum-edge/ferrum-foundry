@@ -85,11 +85,11 @@ afterEach(async () => {
   Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
 });
 
-async function mount(tab = "Inventory") {
+async function mount(tab = "Inventory", entry = "/tls") {
   const parent = createRootRoute();
   const route = createRoute({ getParentRoute: () => parent, path: "/tls", component: TlsPage });
   const router = createRouter({
-    routeTree: parent.addChildren([route]), history: createMemoryHistory({ initialEntries: ["/tls"] }),
+    routeTree: parent.addChildren([route]), history: createMemoryHistory({ initialEntries: [entry] }),
   });
   await router.load();
   await ui.render(<RouterProvider router={router} />);
@@ -189,6 +189,33 @@ describe("TLS inventory and events", () => {
     }
     expect(writes()).toHaveLength(0);
     expect(requests.every((request) => !request.headers.has("X-Ferrum-Namespace"))).toBe(true);
+  });
+
+  it("presents a refused read as a denial, never as an empty store", async () => {
+    // Edge requires operator for every TLS read. A viewer's 403 is an answer
+    // about the session: claiming "no TLS material" would be a false fact.
+    readStatus = 403;
+    await mount();
+    await settle(() => expect(panel().textContent).toContain("TLS inventory: read not permitted for this session"));
+    expect(panel().textContent).not.toContain("No TLS material found");
+    for (const [tab, label, empty] of [
+      ["Certificates", "Managed Certificates", "No certificates yet"],
+      ["CA Bundles", "Managed CA Bundles", "No CA bundles yet"],
+      ["CRLs", "Managed CRLs", "No CRLs yet"],
+      ["OCSP", "Managed OCSP", "No OCSP responses yet"],
+      ["JWKS", "Managed JWKS", "No JWKS documents yet"],
+      ["Events", "TLS events", "No TLS events"],
+      // Last, so the orders list below is read from the ACME panel.
+      ["ACME", "ACME certificates", "No ACME certificates"],
+    ]) {
+      await selectTab(tab);
+      await settle(() => expect(panel().textContent).toContain(`${label}: read not permitted for this session`));
+      expect(panel().textContent).not.toContain(empty);
+      expect(panel().querySelector("[data-read-denied]")).not.toBeNull();
+    }
+    await settle(() => expect(panel().textContent).toContain("ACME orders: read not permitted for this session"));
+    expect(panel().textContent).not.toContain("No active orders");
+    expect(writes()).toHaveLength(0);
   });
 
   it("rotates the selected surface and reports acceptance and failure", async () => {
@@ -624,5 +651,21 @@ describe("ACME workflows", () => {
     await settle(() => expect(panel().textContent).toContain(kind === "certificate" ? "No ACME certificates" : "No active orders"));
     expect(writes()).toHaveLength(2);
     expect(writes().every((request) => request.method === "DELETE" && !request.headers.has("X-Ferrum-Namespace"))).toBe(true);
+  });
+});
+
+describe("TLS list pagination", () => {
+  it("opens Events at its first page, not at Inventory's offset", async () => {
+    await mount("Inventory", "/tls?offset=100&limit=100");
+    await settle(() => expect(requests.some((r) => r.url.includes("/admin/tls/inventory"))).toBe(true));
+    const inventory = requests.find((r) => r.url.includes("/admin/tls/inventory"))!;
+    expect(new URL(inventory.url).searchParams.get("offset")).toBe("100");
+
+    await selectTab("Events");
+    await settle(() => expect(requests.some((r) => r.url.includes("/admin/tls/events"))).toBe(true));
+    const events = requests.filter((r) => r.url.includes("/admin/tls/events"));
+    expect(events.map((r) => new URL(r.url).searchParams.get("offset") ?? "0")).toEqual(["0"]);
+    // Nor does Events inherit Inventory's page size.
+    expect(events.map((r) => new URL(r.url).searchParams.get("limit"))).toEqual(["50"]);
   });
 });

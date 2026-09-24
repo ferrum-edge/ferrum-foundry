@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CAPABILITY_SURFACES,
+  capabilityRequirement,
   isGatewayRole,
   resolveCapabilities,
   resolveCapability,
@@ -275,6 +276,30 @@ describe("surface gate lists", () => {
     expect(
       [...CONFIG_STORE_SURFACES, ...READ_ONLY_MODE_SURFACES, ...UNGATED_SURFACES].sort(),
     ).toEqual([...CAPABILITY_SURFACES].sort());
+  });
+});
+
+describe("capability requirements", () => {
+  it("reports each surface's gate consistently with the gate lists", () => {
+    for (const surface of CONFIG_STORE_SURFACES) {
+      expect(capabilityRequirement(surface).gate).toBe("config-store");
+    }
+    for (const surface of READ_ONLY_MODE_SURFACES) {
+      expect(capabilityRequirement(surface).gate).toBe("read-only-mode");
+    }
+    for (const surface of UNGATED_SURFACES) {
+      expect(capabilityRequirement(surface).gate).toBe("none");
+    }
+  });
+
+  it("reports the role the resolver actually enforces", () => {
+    for (const surface of CAPABILITY_SURFACES) {
+      const { minimumRole } = capabilityRequirement(surface);
+      const verdict = resolveCapability(surface, facts("viewer", "database"));
+      expect(verdict.allowed).toBe(minimumRole === "viewer");
+      if (!verdict.allowed) expect(verdict.summary).toBe(`Requires the ${minimumRole} role`);
+      expect(resolveCapability(surface, facts(minimumRole, "database")).allowed).toBe(true);
+    }
   });
 });
 

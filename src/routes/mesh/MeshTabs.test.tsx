@@ -145,6 +145,20 @@ describe("mesh tab observations", () => {
     expect(requests.every((request) => request.headers.get("X-Ferrum-Namespace") === "tenant-a")).toBe(true);
   });
 
+  it.each([
+    [403, "read not permitted"],
+    [500, "Current state is unknown"],
+  ])("does not present HTTP %s as a gateway without mesh", async (status, expected) => {
+    failure = status;
+    await open("Overview", expected);
+    for (const tab of ["Service Graph", "Policy Denies", "Egress"]) {
+      await selectTab(tab);
+      await settle(() => expect(panel().textContent).toContain(expected));
+      expect(panel().textContent).not.toContain("only served in mesh mode");
+      expect(panel().querySelector("[data-read-denied]") !== null).toBe(status === 403);
+    }
+  });
+
   it("tests admit and deny decisions and replaces a stale result with an actionable error", async () => {
     await open("Egress", "Known Destinations");
     expect(panel().textContent).toContain("orders.api.svc");

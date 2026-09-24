@@ -7,7 +7,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { authPlugin } from './auth.js';
 import { loadConfig } from './config.js';
 import proxyPlugin from './proxy.js';
-import { requestIsApiRoute } from './proxy-path.js';
+import { requestIsApiRoute, servesSpaShell } from './proxy-path.js';
 import healthPlugin from './routes/health.js';
 import settingsPlugin from './routes/settings.js';
 import { closeDispatchers } from './tls.js';
@@ -109,7 +109,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     });
 
     fastify.setNotFoundHandler(async (request, reply) => {
-      if (requestIsApiRoute(request)) return reply.status(404).send({ error: 'Not Found' });
+      if (!servesSpaShell(request)) return reply.status(404).send({ error: 'Not Found' });
       reply.header('cache-control', 'no-cache, no-store, must-revalidate');
       return reply.sendFile('index.html');
     });

@@ -11,7 +11,7 @@
 /* ------------------------------------------------------------------ */
 
 import { createServer } from 'node:http';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
 const PORT = Number(process.env.MOCK_ADMIN_PORT ?? 9000);
@@ -372,7 +372,88 @@ function applyCreateLabels(body, provisioner) {
   return { ...body, labels };
 }
 
-export function crud(list, url, method, id, body, defaults = {}, ns = 'ferrum', validate, provisioner) {
+/* ---------------- Conditional writes (ferrum-edge#5661) ---------------- */
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`;
+}
+
+/**
+ * The strong `ETag` Edge issues on `GET /proxies|upstreams|consumers|
+ * plugins/config/{id}`: a MAC over the key-sorted full stored resource, bound
+ * to its kind, namespace, and id, with proxy plugin associations compared
+ * order-independently. Edge keys it with a subkey of the admin JWT secret;
+ * the mock needs no secrecy and uses a plain digest of the same input.
+ */
+export function resourceEtag(kind, item) {
+  const representation = kind === 'proxies' && Array.isArray(item.plugins)
+    ? { ...item, plugins: [...item.plugins].sort((a, b) => canonicalJson(a).localeCompare(canonicalJson(b))) }
+    : item;
+  const digest = createHash('sha256')
+    .update(`${kind}\0${item.namespace ?? 'ferrum'}\0${item.id}\0${canonicalJson(representation)}`)
+    .digest('hex')
+    .slice(0, 32);
+  return `"${digest}"`;
+}
+
+/**
+ * Parse an `If-Match` list: `1#entity-tag` separated by commas with optional
+ * whitespace. A comma may appear inside a quoted tag, so this tokenizes rather
+ * than splitting. Returns the members verbatim, or `null` when malformed.
+ */
+function parseEntityTags(value) {
+  const member = /[ \t]*((?:W\/)?"[\x21\x23-\x7e\x80-\xff]*")[ \t]*(,|$)/y;
+  const tags = [];
+  while (member.lastIndex < value.length) {
+    const start = member.lastIndex;
+    const match = member.exec(value);
+    if (!match || match.index !== start) return null;
+    tags.push(match[1]);
+    if (match[2] === '') break;
+  }
+  return tags.length > 0 && member.lastIndex === value.length ? tags : null;
+}
+
+/**
+ * Evaluate `If-Match` the way Edge does: `*` requires only existence, a list
+ * matches if any member does, comparison is strong (a weak `W/"…"` member
+ * never matches), and a malformed or empty header is `400` — never treated as
+ * absent. Returns `null` to proceed, or `[status, body]` to refuse.
+ */
+export function evaluateIfMatch(header, currentTag) {
+  if (header === undefined) return null;
+  const value = header.trim();
+  if (value === '*') return null;
+  const members = parseEntityTags(value);
+  if (!members) return [400, { error: 'Malformed If-Match header' }];
+  return members.includes(currentTag)
+    ? null
+    : [412, { error: 'Precondition Failed: the resource changed since the supplied ETag was issued' }];
+}
+
+/** Item paths whose `PUT`/`DELETE` evaluate `If-Match`; everywhere else it is `400`. */
+export const IF_MATCH_ROUTES = [
+  /^\/proxies\/[^/]+$/,
+  /^\/upstreams\/[^/]+$/,
+  /^\/consumers\/[^/]+$/,
+  /^\/plugins\/config\/[^/]+$/,
+];
+
+export function ifMatchRouteRefusal(method, path, header) {
+  if (header === undefined || method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return null;
+  if ((method === 'PUT' || method === 'DELETE') && IF_MATCH_ROUTES.some((route) => route.test(path))) return null;
+  return [400, { error: `If-Match is not supported on ${method} ${path}` }];
+}
+
+/**
+ * `precondition.kind` is the collection name and `precondition.ifMatch` the raw
+ * request header; without a `kind` no tag is issued or evaluated. A third
+ * tuple member carries response headers (the `ETag` on an item `GET`).
+ */
+export function crud(list, url, method, id, body, defaults = {}, ns = 'ferrum', validate, provisioner, precondition = {}) {
+  const { kind, ifMatch } = precondition;
   // The real gateway isolates resources per namespace; list responses must
   // reflect that or namespace occupancy counts are meaningless.
   if (method === 'GET' && !id) {
@@ -380,7 +461,16 @@ export function crud(list, url, method, id, body, defaults = {}, ns = 'ferrum', 
   }
   if (method === 'GET') {
     const item = list.find((x) => x.id === id);
-    return item ? [200, item] : [404, { error: 'not found' }];
+    if (!item) return [404, { error: 'not found' }];
+    return kind ? [200, item, { etag: resourceEtag(kind, item) }] : [200, item];
+  }
+  // RFC 9110 §13.2.1: a request that would be 404 without the precondition is
+  // still 404; otherwise the precondition is evaluated before anything else.
+  if (id && (method === 'PUT' || method === 'DELETE')) {
+    const existing = list.find((x) => x.id === id);
+    if (!existing) return [404, { error: 'not found' }];
+    const refusal = kind ? evaluateIfMatch(ifMatch, resourceEtag(kind, existing)) : null;
+    if (refusal) return refusal;
   }
   if (method === 'POST' || method === 'PUT') {
     const rejection = validate?.(body, method);
@@ -652,8 +742,8 @@ const server = createServer(async (req, res) => {
     : req.headers['x-ferrum-namespace']) || 'ferrum';
   const provisioner = provisionerFromHeaders(req.headers);
 
-  const send = (status, payload, contentType = 'application/json') => {
-    res.writeHead(status, { 'content-type': contentType });
+  const send = (status, payload, contentType = 'application/json', headers = {}) => {
+    res.writeHead(status, { 'content-type': contentType, ...headers });
     res.end(payload == null ? '' : contentType === 'application/json' ? JSON.stringify(payload) : payload);
   };
 
@@ -663,18 +753,34 @@ const server = createServer(async (req, res) => {
   const refusal = readOnlyModeRefusal(GATEWAY_MODE, method, path);
   if (refusal) return send(refusal[0], refusal[1]);
 
+  // `If-Match` on a mutating route that does not evaluate it is refused, not
+  // ignored — ignoring it is the silent last-writer-wins Edge replaced.
+  const ifMatch = Array.isArray(req.headers['if-match']) ? req.headers['if-match'].join(',') : req.headers['if-match'];
+  const unsupported = ifMatchRouteRefusal(method, path, ifMatch);
+  if (unsupported) return send(unsupported[0], unsupported[1]);
+
   /* health & metrics */
   if (path === '/health' || path === '/status') return send(200, modeHealth);
   if (path === '/admin/metrics') return send(200, adminMetrics());
   if (path === '/metrics') {
+    // Edge's prometheus_metrics exposition: `proxy_id` first, `status_code`,
+    // millisecond histograms, and `namespace` appended last. The Metrics
+    // page parses exactly this shape, so the mock must not drift from it.
+    const ns = ',namespace="ferrum"';
+    const proxy = 'proxy_id="proxy-orders-api"';
     return send(200, [
       '# TYPE ferrum_requests_total counter',
-      'ferrum_requests_total{namespace="ferrum",proxy_id="proxy-orders-api",method="GET",status="200"} 1420031',
-      'ferrum_requests_total{namespace="ferrum",proxy_id="proxy-orders-api",method="POST",status="201"} 52011',
-      'ferrum_requests_total{namespace="ferrum",proxy_id="proxy-orders-api",method="GET",status="404"} 21892',
-      '# TYPE ferrum_request_duration_seconds histogram',
-      'ferrum_request_duration_seconds_sum{namespace="ferrum",proxy_id="proxy-orders-api"} 15234.2',
-      'ferrum_request_duration_seconds_count{namespace="ferrum",proxy_id="proxy-orders-api"} 1493934',
+      `ferrum_requests_total{${proxy},method="GET",status_code="200"${ns}} 1420031`,
+      `ferrum_requests_total{${proxy},method="POST",status_code="201"${ns}} 52011`,
+      `ferrum_requests_total{${proxy},method="GET",status_code="404"${ns}} 21892`,
+      '# TYPE ferrum_request_duration_ms histogram',
+      `ferrum_request_duration_ms_bucket{${proxy},le="5"${ns}} 402113`,
+      `ferrum_request_duration_ms_bucket{${proxy},le="10"${ns}} 1120442`,
+      `ferrum_request_duration_ms_bucket{${proxy},le="50"${ns}} 1468201`,
+      `ferrum_request_duration_ms_bucket{${proxy},le="250"${ns}} 1492007`,
+      `ferrum_request_duration_ms_bucket{${proxy},le="+Inf"${ns}} 1493934`,
+      `ferrum_request_duration_ms_sum{${proxy}${ns}} 15234200.00`,
+      `ferrum_request_duration_ms_count{${proxy}${ns}} 1493934`,
     ].join('\n'), 'text/plain');
   }
   if (path === '/metrics/runtime') return send(200, runtimeMetrics());
@@ -904,16 +1010,16 @@ const server = createServer(async (req, res) => {
     // The real gateway always returns a plugins association array on proxies;
     // default it on create so upstream-only proxies match that shape. `auth_mode`
     // defaults to `single` the same way Edge's serde Default does.
-    [/^\/proxies(?:\/([^/]+))?$/, proxies, { plugins: [], auth_mode: 'single' }, validateProxyWrite],
-    [/^\/consumers(?:\/([^/]+))?$/, consumers],
-    [/^\/plugins\/config(?:\/([^/]+))?$/, pluginConfigs, {}, validatePluginConfigWrite],
-    [/^\/upstreams(?:\/([^/]+))?$/, upstreams],
+    [/^\/proxies(?:\/([^/]+))?$/, proxies, { plugins: [], auth_mode: 'single' }, validateProxyWrite, 'proxies'],
+    [/^\/consumers(?:\/([^/]+))?$/, consumers, {}, undefined, 'consumers'],
+    [/^\/plugins\/config(?:\/([^/]+))?$/, pluginConfigs, {}, validatePluginConfigWrite, 'plugins/config'],
+    [/^\/upstreams(?:\/([^/]+))?$/, upstreams, {}, undefined, 'upstreams'],
   ];
-  for (const [pattern, list, defaults, validate] of routes) {
+  for (const [pattern, list, defaults, validate, kind] of routes) {
     const match = path.match(pattern);
     if (match) {
-      const [status, payload] = crud(list, url, method, match[1], body, defaults, ns, validate, provisioner);
-      return send(status, payload);
+      const [status, payload, headers] = crud(list, url, method, match[1], body, defaults, ns, validate, provisioner, { kind, ifMatch });
+      return send(status, payload, 'application/json', headers);
     }
   }
 

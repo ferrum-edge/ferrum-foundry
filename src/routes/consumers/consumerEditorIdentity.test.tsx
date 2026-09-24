@@ -185,7 +185,8 @@ describe("consumer editor identity across a namespace switch", () => {
 
   async function submitForm(): Promise<void> {
     await act(async () => {
-      host!.querySelector("form")!.requestSubmit();
+      // The form in the open tab: inactive editor tabs stay mounted, hidden.
+      host!.querySelector<HTMLFormElement>('[role="tabpanel"][data-state="active"] form')!.requestSubmit();
     });
   }
 
@@ -327,14 +328,38 @@ describe("consumer editor identity across a namespace switch", () => {
     expect(records.get("tenant-a")).toEqual(consumerFixture("tenant-a"));
   });
 
+  it("reads no proxy, plugin, or consumer collection until Matched Proxies is opened", async () => {
+    await mount();
+    await waitFor(() => heading() === "tenant-a-user");
+    const collectionReads = () => captured.filter((request) => {
+      const path = new URL(request.url).pathname;
+      return request.method === "GET" && /\/(proxies|plugins\/config|consumers)$/.test(path);
+    });
+    expect(collectionReads()).toEqual([]);
+    expect(pageText()).toContain("Matched Proxies (unknown)");
+
+    await act(async () => {
+      [...host!.querySelectorAll("button")].find((button) => button.textContent === "Matched Proxies (unknown)")!
+        .dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    await waitFor(() => !pageText().includes("Matched Proxies (unknown)"));
+    const paths = collectionReads().map((request) => new URL(request.url).pathname);
+    expect(paths.some((path) => path.endsWith("/proxies"))).toBe(true);
+    expect(paths.some((path) => path.endsWith("/plugins/config"))).toBe(true);
+    // A consumer's access depends on nobody else: no consumer traversal.
+    expect(paths.some((path) => path.endsWith("/consumers"))).toBe(false);
+  });
+
   it("shows an omitted basic credential as a conditional proxy match without fetching backups", async () => {
     basicPolicy = true;
     await mount();
-    await waitFor(() => pageText().includes("Matched Proxies (1)"));
+    // The policy traversals start only once the tab is opened.
+    await waitFor(() => pageText().includes("Matched Proxies (unknown)"));
     await act(async () => {
-      [...host!.querySelectorAll("button")].find((button) => button.textContent === "Matched Proxies (1)")!
+      [...host!.querySelectorAll("button")].find((button) => button.textContent === "Matched Proxies (unknown)")!
         .dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     });
+    await waitFor(() => pageText().includes("Matched Proxies (1)"));
     await waitFor(() => pageText().includes("ordinary Consumer responses omit basicauth"));
     expect(pageText()).toContain("Basic proxy");
     expect(pageText()).toContain("conditional");
@@ -387,13 +412,14 @@ describe("consumer editor identity across a namespace switch", () => {
     expect(field("Username")?.value).toBe("edited-locally");
     expect(field("Custom ID")?.value).toBe("tenant-a-custom");
 
+    // Submitting that older draft would revert the other writer's
+    // `custom_id`. The write guard refuses it before anything is written and
+    // leaves the draft on the page (see `docs/concurrent-edits.md`).
     await submitForm();
-    await waitFor(() => puts().length === 1);
-    expect(puts()[0].namespace).toBe("tenant-a");
-    expect(puts()[0].body).toMatchObject({
-      username: "edited-locally",
-      custom_id: "tenant-a-custom",
-    });
+    await waitFor(() => dialog()?.textContent?.includes("changed after you opened it") ?? false);
+    expect(puts()).toHaveLength(0);
+    expect(field("Username")?.value).toBe("edited-locally");
+    expect(records.get("tenant-a")?.custom_id).toBe("tenant-a-custom-v2");
   });
 
   it("discards a pending delete confirmation when the tenant changes", async () => {
@@ -497,7 +523,7 @@ describe("consumer editor identity across a namespace switch", () => {
     const releaseRead = hold("GET tenant-a");
     releasePut();
     await waitFor(() => queryClient.getQueryData<Consumer>(["consumer", "tenant-a", "shared"])?.acl_groups?.includes("first-group") === true);
-    const addButton = [...host!.querySelectorAll("button")].find((button) => button.textContent === "Add")!;
+    const addButton = [...host!.querySelectorAll<HTMLButtonElement>('[role="tabpanel"][data-state="active"] button')].find((button) => button.textContent === "Add")!;
     expect(addButton.disabled).toBe(true);
     await act(async () => {
       typeInto(input, "second-group");

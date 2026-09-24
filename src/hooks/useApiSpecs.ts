@@ -64,7 +64,7 @@ export function useAllApiSpecs(enabled = true) {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["apiSpecs", scope.namespace, "all"],
-    queryFn: () => apiSpecs.listAll(queryScope(scope)),
+    queryFn: ({ signal }) => apiSpecs.listAll(queryScope(scope), signal),
     enabled,
     retry: false,
   });

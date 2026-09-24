@@ -32,6 +32,21 @@ the associations, and proxy scope keeps only the selected `proxy_id`. Foundry
 must not detach the group first. Entering group scope establishes the group
 configuration before adding members.
 
+Creating a proxy-scoped plugin is the same on Ferrum Edge 0.9.x
+(ferrum-edge#4611): `POST /plugins/config` appends the association to the
+target proxy in the same transaction, so the plugin runs as soon as the `201`
+arrives. Every such create or `PUT` also advances the `updated_at` of each
+proxy whose associations it changed. That is the gateway's own write, not a
+concurrent edit, and the plan never mistakes it for one: after a proxy-scoped
+write Foundry reads the target proxy fresh, writes the association only if it
+is missing (a gateway that does not attach), conditions that write on the read
+it just made, and never compares a proxy with a snapshot taken before the
+plugin write. Group membership is unaffected: Edge does not touch associations
+when a write leaves the plugin in group scope, so the preflight snapshots the
+group plan compares stay valid. `src/lib/pluginMembership.binding.test.ts`
+drives both proxy-scoped paths against a fake gateway that attaches, bumps, and
+enforces `If-Match`.
+
 The CI job **Pinned Gateway Contract** in `.github/workflows/ci.yml` pins the
 gateway image by digest and exercises `scripts/gateway-contract-smoke.mjs`;
 there is no local OpenAPI fixture. The [upstream OpenAPI contract](https://github.com/ferrum-edge/ferrum-edge/blob/main/openapi.yaml)
@@ -50,8 +65,13 @@ If an edit fails, compensation restores original references before removing new
 ones. It retains a final reference when removing it would destroy a configuration
 that still needs recovery. Compensation for entering group scope restores the
 original non-group scope first, using Edge's atomic association reconciliation.
-Timestamp checks avoid overwriting resources observed to have changed meanwhile;
-these are client checks, not server-side compare-and-swap guarantees.
+Timestamp checks avoid overwriting resources observed to have changed meanwhile.
+Every write is also sent with `If-Match` set to the tag of the read it was
+checked against, so on a gateway that implements the precondition
+(ferrum-edge#5661) the check and the write are atomic and a change that did not
+move `updated_at` is caught too; without a tag they remain client checks. A
+plugin save or delete from its detail page is also refused if the configuration
+no longer matches what the editor opened — see `docs/concurrent-edits.md`.
 
 Concurrent writers or ambiguous network failures can still prevent compensation.
 Foundry checks that the plugin exists before trying to reattach it, and reports

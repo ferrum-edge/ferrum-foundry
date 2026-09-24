@@ -16,16 +16,15 @@
  *
  * ## What a baseline is not
  *
- * It is **not** a resource revision issued by the gateway, and comparing it is
- * **not** a compare-and-swap. Ferrum Edge's admin API has no conditional-write
- * precondition on resource `PUT` (no `If-Match`, no `412`; see
- * `docs/concurrent-edits.md` for the surveyed revision of the spec), so a
- * writer that commits between Foundry's verification read and its `PUT` is
- * still overwritten. The comparison narrows that window from "the whole time
- * an editor is open" — minutes to hours — to one gateway round trip, and it
- * catches an external writer as reliably as another Foundry tab because it
- * compares the gateway's own content rather than local bookkeeping. Closing
- * the remainder requires an Edge precondition contract.
+ * It is **not** a resource revision issued by the gateway. Edge's `ETag`
+ * covers the whole stored resource, including fields a write does not replace
+ * (plugin associations, or every upstream setting during a targets save), so
+ * an editor cannot hold one from the moment it opens without refusing saves
+ * that race nothing. The baseline answers "does the gateway still hold what
+ * this draft was edited against, on the fields it replaces?"; the tag of the
+ * read that answered it, sent as `If-Match`, then makes the write atomic with
+ * that answer. On a gateway that issues no tag the comparison alone narrows
+ * the race to one round trip. See `docs/concurrent-edits.md`.
  */
 
 /** A resource reduced to the fields a full-replacement write overwrites. */
@@ -101,6 +100,36 @@ export const UPSTREAM_BASELINE_OMIT: readonly string[] = [
   "source_labels",
   "locality_lb_setting",
   "locality_lb_strict",
+];
+
+/**
+ * Consumer fields excluded on top of the server-managed set.
+ *
+ * - `credentials`: a metadata save never sends the editor's credentials; it
+ *   takes them from the read it is sent against (`consumers.update`), and
+ *   credentials are edited through their own endpoints. A rotation is not
+ *   something a metadata draft can revert, and comparing redacted
+ *   `[REDACTED]` markers would say nothing anyway.
+ * - `labels`: neither the Details form nor the ACL editor sends them, and Edge
+ *   preserves the stored map when a `PUT` omits the key. A provisioner
+ *   stamping a label cannot be reverted by these saves, so it is not a
+ *   conflict — the same reasoning as `plugins` on a proxy.
+ */
+export const CONSUMER_BASELINE_OMIT: readonly string[] = [
+  ...SERVER_MANAGED_FIELDS,
+  "credentials",
+  "labels",
+];
+
+/**
+ * Plugin configuration fields excluded on top of the server-managed set.
+ * `PluginConfigForm` does not send `labels`, which Edge then preserves (see
+ * `CONSUMER_BASELINE_OMIT`). Proxy-group membership lives on the proxies, not
+ * here, and the membership plan runs its own per-proxy contract.
+ */
+export const PLUGIN_BASELINE_OMIT: readonly string[] = [
+  ...SERVER_MANAGED_FIELDS,
+  "labels",
 ];
 
 /** Reduce a fetched resource to the fields a full-replacement write replaces. */
@@ -224,7 +253,7 @@ export function compareBaselines(
  * the conflict actionable — but the value is replaced.
  */
 const REDACTED_FIELD_PATTERN =
-  /(secret|password|passphrase|credential|api[_-]?key|client[_-]?key|private[_-]?key|_key$|^key$|token|jwk|hmac|signature|salt|certificate[_-]?pem|_pem$)/i;
+  /(secret|password|passphrase|credential|api[_-]?key|client[_-]?key|private[_-]?key|_key$|^key$|token|jwk|hmac|signature|salt|certificate[_-]?pem|_pem$|authorization|cookie|bearer)/i;
 
 /**
  * A `*_path` field names a file on the gateway host, not the material in it.
@@ -239,6 +268,11 @@ export const REDACTED_PLACEHOLDER = "[redacted]";
 export function isRedactedField(field: string): boolean {
   if (MATERIAL_LOCATION_PATTERN.test(field)) return false;
   return REDACTED_FIELD_PATTERN.test(field);
+}
+
+function redactFieldValue(field: string, value: unknown): unknown {
+  if (!isRedactedField(field) || value === null || value === "") return value;
+  return REDACTED_PLACEHOLDER;
 }
 
 /**
@@ -256,5 +290,7 @@ export function formatBaselineValue(field: string, value: unknown): string {
   }
   if (value === null) return "null";
   if (typeof value === "string") return value.length === 0 ? '""' : value;
-  return JSON.stringify(value);
+  return JSON.stringify(value, (nestedField, nestedValue) =>
+    nestedField === "" ? nestedValue : redactFieldValue(nestedField, nestedValue),
+  );
 }

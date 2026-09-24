@@ -2,7 +2,7 @@ import { act, useEffect, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useDeletePluginConfig, useDeletePluginWithMembership } from "./usePlugins";
+import { useDeletePluginWithMembership } from "./usePlugins";
 import { useDeleteConsumer } from "./useConsumers";
 import { useDeleteProxy, useProxy } from "./useProxies";
 import { useDeleteUpstream } from "./useUpstreams";
@@ -26,21 +26,20 @@ class BasedRequest extends Request {
   }
 }
 const hooks = {
-  plugin: useDeletePluginConfig,
   membership: useDeletePluginWithMembership,
   consumer: useDeleteConsumer,
   proxy: useDeleteProxy,
   upstream: useDeleteUpstream,
 };
 const cases = [
-  ["plugin", "pluginConfig"], ["membership", "pluginConfig"],
+  ["membership", "pluginConfig"],
   ["consumer", "consumer"], ["proxy", "proxy"], ["upstream", "upstream"],
 ] as const;
 let remove: (id: string) => Promise<unknown>;
 function Probe({ kind }: { kind: keyof typeof hooks }) {
   const useDelete = hooks[kind];
   const mutation = useDelete();
-  useEffect(() => { remove = mutation.mutateAsync; });
+  useEffect(() => { remove = (id) => mutation.mutateAsync({ id, guard: null }); });
   return null;
 }
 
@@ -159,7 +158,7 @@ it("reopens and submits a recreated plugin without retired configuration", async
 function ObservedProxyDelete() {
   const mutation = useDeleteProxy();
   const query = useProxy("same-id", !mutation.isPending && !mutation.isSuccess);
-  useEffect(() => { remove = mutation.mutateAsync; });
+  useEffect(() => { remove = (id) => mutation.mutateAsync({ id, guard: null }); });
   return <span data-status={query.status} data-fetch={query.fetchStatus} />;
 }
 
@@ -203,4 +202,24 @@ it("does not refetch a still-mounted proxy detail after a successful delete", as
   expect(removeQueries.mock.invocationCallOrder[0]).toBeLessThan(
     invalidate.mock.invocationCallOrder[listInvalidation]!,
   );
+});
+
+it("marks cached proxy details stale when a membership plan settles, even on failure", async () => {
+  // The plan rewrites proxies' `plugins`; the detail page combines the
+  // cached proxy with fresh plugin configs, so it must not keep the old list.
+  for (const outcome of [204, 400]) {
+    client.setQueryData(["proxy", "tenant-a", "orders"], { id: "orders", plugins: [] });
+    await render(<Probe kind="membership" />);
+    const pending = remove("same-id").catch((error: unknown) => error);
+    await settle(() => expect(deletion).toHaveLength(1));
+    await act(async () => {
+      deletion.shift()!.resolve(
+        outcome === 204 ? new Response(null, { status: 204 }) : new Response("Refused", { status: 400 }),
+      );
+      await pending;
+    });
+    expect(client.getQueryState(["proxy", "tenant-a", "orders"])?.isInvalidated, `after ${outcome}`)
+      .toBe(true);
+    client.clear();
+  }
 });

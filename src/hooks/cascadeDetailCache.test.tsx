@@ -90,7 +90,7 @@ function DeleteSpecProbe() {
 function DeleteProxyProbe() {
   const mutation = useDeleteProxy();
   useEffect(() => {
-    run = (id) => mutation.mutateAsync(id);
+    run = (id) => mutation.mutateAsync({ id, guard: null });
   });
   return null;
 }

@@ -100,6 +100,14 @@ jobs:
         # a newer gateway understands start getting stripped.
         run: npm run check:plugin-schemas
 
+      - name: Resolve the pinned Ferrum Edge image
+        # edge.image in docs/compatibility.json is the single source for the
+        # gateway Foundry is qualified against; the starter and docs are
+        # checked against it.
+        run: |
+          image="$(node scripts/supported-pairing.mjs edge-image)"
+          echo "FERRUM_EDGE_IMAGE=${image}" >> "$GITHUB_ENV"
+
       - name: Start demo backends
         run: |
           FERRUM_DEMO_BACKEND_BIND=0.0.0.0 node scripts/demo-backend.mjs >/tmp/ferrum-demo-backend.log 2>&1 &
@@ -131,18 +139,40 @@ jobs:
             --env FERRUM_ADMIN_JWT_AUDIENCE=ferrum-admin \
             --env FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM=true \
             --env FERRUM_BASIC_AUTH_HMAC_SECRET=contract-basic-auth-hmac-secret-at-least-32-characters \
-            ferrumedge/ferrum-edge@sha256:fb0f05b0392a272ba36a493584bced171655ce8ebd36b2ae0818bb5c3c25ef2d
+            "$FERRUM_EDGE_IMAGE"
+
+      - name: Start the same gateway with its admin API read-only
+        # A second container of the same image, started with
+        # FERRUM_ADMIN_READ_ONLY, so the capability parity check can compare
+        # the UI's read-only verdicts with the gateway's own refusals.
+        run: |
+          docker run --detach --name ferrum-edge-read-only \
+            --publish 127.0.0.1:9010:9000 \
+            --env FERRUM_MODE=database \
+            --env FERRUM_NAMESPACE=ferrum-foundry-demo \
+            --env FERRUM_DB_TYPE=sqlite \
+            --env 'FERRUM_DB_URL=sqlite:////tmp/ferrum-read-only.db?mode=rwc' \
+            --env FERRUM_ADMIN_BIND_ADDRESS=0.0.0.0 \
+            --env FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true \
+            --env FERRUM_ADMIN_JWT_SECRET=contract-admin-signing-secret-at-least-32-characters \
+            --env FERRUM_ADMIN_JWT_AUDIENCE=ferrum-admin \
+            --env FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM=true \
+            --env FERRUM_ADMIN_READ_ONLY=true \
+            "$FERRUM_EDGE_IMAGE"
 
       - name: Wait for gateway readiness
         run: |
-          for _attempt in $(seq 1 60); do
-            if curl --fail --silent --show-error http://127.0.0.1:9000/health >/dev/null; then
-              exit 0
-            fi
-            sleep 2
+          for port in 9000 9010; do
+            for _attempt in $(seq 1 60); do
+              if curl --fail --silent --show-error "http://127.0.0.1:${port}/health" >/dev/null; then
+                continue 2
+              fi
+              sleep 2
+            done
+            docker logs ferrum-edge-contract
+            docker logs ferrum-edge-read-only
+            exit 1
           done
-          docker logs ferrum-edge-contract
-          exit 1
 
       - name: Seed twice and verify canonical backup state
         env:
@@ -156,10 +186,22 @@ jobs:
           FERRUM_DEMO_INCLUDE_BASIC_AUTH: "true"
         run: npm run test:gateway-contract
 
+      - name: Verify role and read-only capability parity
+        # viewer, operator, and admin against the read-only gateway. The
+        # writable half runs inside test:gateway-contract above.
+        env:
+          FERRUM_ADMIN_URL: http://127.0.0.1:9010
+          FERRUM_JWT_SECRET: contract-admin-signing-secret-at-least-32-characters
+          FERRUM_JWT_AUDIENCE: ferrum-admin
+          FERRUM_NAMESPACE: ferrum-foundry-demo
+          FERRUM_CAPABILITY_EXPECT: read-only
+        run: node scripts/capability-parity-contract.mjs
+
       - name: Show gateway logs on failure
         if: failure()
         run: |
           docker logs ferrum-edge-contract
+          docker logs ferrum-edge-read-only
           cat /tmp/ferrum-demo-backend.log
 
   starter:
@@ -355,6 +397,14 @@ jobs:
         with:
           platforms: ${{ matrix.arch_dir }}
 
+      - name: Resolve the pinned Ferrum Edge image
+        # edge.image in docs/compatibility.json is the single source for the
+        # gateway Foundry is qualified against; the starter and docs are
+        # checked against it.
+        run: |
+          image="$(node scripts/supported-pairing.mjs edge-image)"
+          echo "FERRUM_EDGE_IMAGE=${image}" >> "$GITHUB_ENV"
+
       - name: Plant an excluded canary and build the exact image
         env:
           CANARY: FERRUM_BUILD_CONTEXT_SECRET_CANARY_7a65576b
@@ -396,7 +446,7 @@ jobs:
             --env FERRUM_ADMIN_JWT_SECRET=container-contract-signing-secret-at-least-32-characters \
             --env FERRUM_ADMIN_JWT_AUDIENCE=ferrum-admin \
             --env FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM=true \
-            ferrumedge/ferrum-edge@sha256:fb0f05b0392a272ba36a493584bced171655ce8ebd36b2ae0818bb5c3c25ef2d
+            "$FERRUM_EDGE_IMAGE"
           docker run --detach --name ferrum-foundry-contract \
             --network ferrum-foundry-contract \
             --publish 127.0.0.1:8080:8080 \

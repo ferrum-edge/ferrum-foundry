@@ -114,8 +114,11 @@ function parseValue(field: GuidedField, state: FieldState): JsonValue {
     case "boolean":
       return state.checked === true;
     case "integer": {
-      const parsed = Number(state.text.trim());
-      return Number.isFinite(parsed) ? parsed : state.text.trim();
+      // `Number("")` is 0: only a written integer becomes a number, so an
+      // empty or malformed draft is kept as text (and flagged) rather than
+      // silently saved as 0 once the operator switches to the JSON editor.
+      const text = state.text.trim();
+      return /^-?\d+$/.test(text) ? Number(text) : text;
     }
     case "stringList":
       return state.text
@@ -172,7 +175,7 @@ export function writeGuidedConfig(
         continue;
       }
 
-      if (state.text.trim() === "null" && field.kind !== "stringList" && field.kind !== "boolean") {
+      if (state.text.trim() === "null" && field.kind !== "stringList") {
         setIn(next, section.path, field.key, null);
         continue;
       }
@@ -237,7 +240,9 @@ function validateField(
   // A stored secret is read as present-but-blank so it is never displayed,
   // and `writeGuidedConfig` keeps the stored value when it stays blank. That
   // is not an empty value, and must not block the save.
-  if (field.secret && text.length === 0 && seeded?.present) return null;
+  // Compared untrimmed, exactly as `writeGuidedConfig` does: whitespace typed
+  // into a stored secret replaces it, so it must be flagged, not waved through.
+  if (field.secret && state.text.length === 0 && seeded?.present) return null;
 
   if (text.length === 0) {
     return {

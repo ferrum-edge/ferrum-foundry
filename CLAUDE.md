@@ -51,7 +51,8 @@ npm run dev
 FERRUM_DEMO_BACKEND_BIND=0.0.0.0 node scripts/demo-backend.mjs
 
 # OR: run against a mock admin API (no gateway needed; serves sample data
-# for every admin surface including TLS, ACME, audit, mesh, chargeback)
+# for every admin surface including TLS, ACME, audit, mesh, chargeback, and
+# implements ETag/If-Match on the four full-replacement resource families)
 node scripts/mock-admin-gateway.mjs   # listens on :9000
 
 # Reproduce a read-only admin API (file/dp/mesh mode) against the same mock
@@ -69,10 +70,14 @@ node scripts/demo-traffic-client.mjs mixed
 
 ### Running the gateway locally
 
-Run the same image the `Pinned Gateway Contract` CI job, the e2e suite, and
-`deploy/starter/compose.yaml` pin, so local results match CI. That digest is the
-single source of truth; the `ferrumedge/ferrum-edge:latest` tag is not refreshed
-for releases.
+Run the Ferrum Edge image CI pins, by digest, so local results match CI. It is
+the published Ferrum Edge v0.9.5 release, but not yet a supported pairing:
+v0.9.5 lacks ferrum-edge#5661 (`If-Match`), so the pairing needs the next Edge
+release. `edge.image` in `docs/compatibility.json` is the single source: CI
+reads it (`node scripts/supported-pairing.mjs edge-image`), and
+`scripts/supported-pairing.test.mjs` fails if the starter, this command, or any
+doc pins a different Edge image. The Edge `latest` tag is not refreshed for
+releases. Moving the pin is a re-qualification — see `docs/compatibility.md`.
 
 ```bash
 docker run --rm -d --name ferrum-edge \
@@ -86,7 +91,7 @@ docker run --rm -d --name ferrum-edge \
   -e FERRUM_ADMIN_BIND_ADDRESS=0.0.0.0 \
   -e FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true \
   -p 127.0.0.1:9000:9000 -p 127.0.0.1:8000:8000 \
-  ferrumedge/ferrum-edge@sha256:fb0f05b0392a272ba36a493584bced171655ce8ebd36b2ae0818bb5c3c25ef2d run -m database -v
+  ferrumedge/ferrum-edge@sha256:eca46c84bca92d6ef467979f8846537f7ab56c0cdc137befff465526a10fe10f run -m database -v
 ```
 
 The public plaintext admin bind above is a local-development exception and is
@@ -119,7 +124,11 @@ managed TLS/ACME is refused in a read-only mode even though
 `admin_writes_enabled` does not describe it. A read-only surface never shows
 less than the editable one: collapsible sections are forced open and Cancel
 stays outside the disabled fieldset. The BFF and Ferrum Edge remain the only
-enforcement points. See `docs/capabilities.md`.
+enforcement points. `scripts/capability-parity-contract.mjs` checks the model
+against the pinned gateway as each role, writable and `FERRUM_ADMIN_READ_ONLY`;
+extend its probe table when you add a surface. A read the gateway refuses with
+`403` is a denial, rendered by `ReadDeniedNotice`, never an empty collection or
+a missing feature. See `docs/capabilities.md`.
 
 ## Theming
 
@@ -146,6 +155,7 @@ The app supports dark and light themes via CSS custom properties. Dark is the de
 - `server/` - Fastify BFF server
 - `scripts/` - Demo backend, seeding, traffic generation, `mock-admin-gateway.mjs`, and the starter's `starter-preflight.mjs` / `starter-journey.mjs`
 - `e2e/` - the critical-journey suite: a real browser against the production build, the starter's identity proxy, and the pinned gateway, finishing with data-plane requests. `retries: 0` on purpose; failures are *arranged* through `e2e/fault-proxy.mjs` (arm exactly N, assert they were consumed) rather than waited for, and `npm run e2e:gate-self-test` proves the gate fails when the journey is broken. See `e2e/README.md`
+- `docs/compatibility.md` / `docs/compatibility.json` - the Foundry–Edge pairing: the one Edge image CI qualifies (`edge.image`, the published v0.9.5 release), the published Edge release the next Foundry release must pair with (`edge.release`, a release-step placeholder, with its requirements: ferrum-edge#5661 plus the starter and critical journeys passing), Edge images evaluated and rejected, the pin history, the tested envelope, and what is best-effort or not qualified. `docs/release-notes/UNRELEASED.md` drafts the next release's notes; the release workflow requires `docs/release-notes/vX.Y.Z.md`, a matching `foundry.version`, and `supported-pairing.mjs release-ready`
 - `deploy/starter/` - the runnable deployment starter: one Compose stack with a `production` and a disposable `demo` profile. `nginx/identity/policy.conf` (group → role/namespace) and `nginx/identity/inject.conf` (the four identity headers) are included by **both** proxy configurations, so the demo exercises the production authorization path; a test fails if either config grows its own copy. See `docs/getting-started.md`
 
 ## Type conventions
@@ -156,7 +166,7 @@ The app supports dark and light themes via CSS custom properties. Dark is the de
 - HTTP proxies need `hosts` and/or `listen_path`; stream proxies must omit `listen_path` and set `listen_port`
 - Consumer credentials are maps of rotation ARRAYS per type (`keyauth`, `basicauth`, `jwt`, `hmac_auth`, `mtls_auth`); ordinary responses redact secrets as the literal `[REDACTED]`, which PUT accepts as a round-trip marker
 - Proxy PUT is full-replace: build update payloads with `proxies.toUpdatePayload(proxy)` and override fields, never send partial bodies
-- A full-replacement save from a detail editor carries a **write guard**: the editor captures a baseline when it is seeded (`src/lib/resourceBaseline.ts`), the API layer re-reads and compares it immediately before the PUT, and a mismatch throws `StaleResourceError` without sending anything (`src/api/conditionalWrite.ts`). `update()` takes the guard as a required argument — pass `null` only from a caller that provably cannot lose a concurrent change, such as a plugin membership plan, which runs its own `updated_at` preflight contract. Edge has no conditional-write precondition (`If-Match` is ignored; verified in `scripts/concurrent-edit-contract.mjs`), so this narrows the race to one round trip rather than closing it. A refused save keeps the draft, shows a redacted original/current/proposed comparison, and is never resent automatically. See `docs/concurrent-edits.md`
+- A full-replacement save from a detail editor carries a **write guard**: the editor captures a baseline when it is seeded (`src/lib/resourceBaseline.ts`), the API layer re-reads and compares it immediately before the PUT, and a mismatch throws `StaleResourceError` without sending anything (`src/api/conditionalWrite.ts`). A match sends the PUT with `If-Match` set to the `ETag` of **that verification read** — never a tag from the editor's seed or a refetch — so Edge refuses it with `412` if anything commits in between (ferrum-edge#5661); the guard then re-verifies, and re-sends only if the fields this write replaces are still unchanged. A read with no strong `ETag` (older gateway, cached-config fallback) gets an unconditional PUT, which narrows the race to one round trip rather than closing it. Send `If-Match` only on the four resource `PUT`/`DELETE` paths Edge evaluates it on; anywhere else it is a `400`. `update()` and `remove()` take the guard as a required argument on proxies, upstreams, and consumers — pass `null` only from a caller that provably cannot lose a concurrent change. Plugin configurations are written by the membership plan, which takes the editor's guard and makes each of its own read-compare-write steps conditional by passing the read it compared as `basis` (`validatorOf`); never pass an editor seed or Query-cache value there. Detail-page deletes are guarded against the resource the page is displaying. A refused save keeps the draft, a refused delete deletes nothing, both show a redacted original/current(/proposed) comparison (redaction applies at every depth of structured values such as plugin `config`), and nothing is resent automatically with the same body. A field a save omits and Edge preserves (`plugins` on a proxy, `labels` on a consumer or plugin configuration) is left out of the comparison, since the save cannot revert it. See `docs/concurrent-edits.md`
 - Health check enablement is controlled by presence/absence (not an `enabled` boolean field)
 - `ServiceDiscoveryConfig` uses nested provider-specific objects (`dns_sd`, `kubernetes`, `consul`, `mesh`)
 - ky v2 parses a failing response body into `error.data` **and consumes the response doing it** — `error.response.clone()` throws "body is already used" from then on, and that throw is synchronous, so it escapes a trailing `.catch()`. Read error bodies with `getApiErrorDetail()` / `extractApiErrorData()`, never by cloning the response
@@ -179,7 +189,7 @@ Namespaces are a full CRUD registry on the gateway, not just a header value.
 - PUT is a partial update, unlike proxy PUT: omit a field to keep it. `name: null` is a `400` (omit instead); `description: null` or `""` clears the description. Build payloads with `buildNamespaceUpdate()` rather than by hand
 - DELETE needs `?confirm=true` to cascade-delete a non-empty namespace; without it a non-empty namespace is a `409`
 - The gateway's own configured namespaces (`FERRUM_NAMESPACE`, `FERRUM_CP_NAMESPACES`) and the last remaining registry row cannot be renamed or deleted — expect `409`
-- After a rename or delete, **remove** the retired `["namespace", name]` query key rather than invalidating it (`reconcileNamespaceCache` in `src/hooks/useNamespaces.ts`). Invalidating refetches a name the gateway no longer resolves and pops a spurious 404 on top of a successful mutation
+- After a rename or delete, **remove** the retired `["namespace", name]` query key rather than invalidating it (`reconcileNamespaceCache` in `src/hooks/useNamespaces.ts`). Invalidating refetches a name the gateway no longer resolves and pops a spurious 404 on top of a successful mutation. Every other query scoped under the retired name (`[kind, name, …]`) is removed too, so a recreated namespace never seeds an editor from a resource the cascade destroyed
 - Delete is a two-stage, gateway-driven flow (`DeleteNamespaceDialog`), not a cascade checkbox. Stage 1 always sends the **unconfirmed** DELETE; an empty namespace goes in one click. The `409` is the gateway's own "not empty" signal and is what promotes stage 2, which shows real occupancy counts and gates the cascade behind typing the namespace name — the only type-to-confirm in the app, because it is the highest-blast-radius action in it
 - Only an occupancy `409` is cascadable. Protected-namespace and last-registry-row `409`s are terminal — `isCascadableDeleteError()` filters them out so the UI never offers a cascade that would just fail again
 - `namespaces.remove()` opts out of the global error popup via `context: { [SILENT_ERRORS]: true }` (`src/api/client.ts`), since its `409` is an expected answer rather than a fault. Use the same opt-out for any call whose failure the caller handles itself

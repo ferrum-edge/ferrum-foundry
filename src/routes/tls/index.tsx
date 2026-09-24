@@ -6,6 +6,7 @@
 
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
 import { Card } from "@/components/ui/Card";
 import { ResourceGrid } from "@/components/ui/ResourceGrid";
@@ -21,6 +22,7 @@ import {
 } from "@/components/ui/Dialog";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { ReadDeniedNotice, isReadDenied } from "@/components/shared/ReadState";
 import { SkeletonRow } from "@/components/ui/Skeleton";
 import { PaginationControls } from "@/components/shared/PaginationControls";
 import { useToast } from "@/components/ui/Toast";
@@ -47,7 +49,7 @@ import {
   useValidateTlsMaterial,
 } from "@/hooks/useTls";
 import { MutationOutcomeUnknownError } from '@/api/mutationOutcome';
-import { AcmeFinalizationUnknownError, getAcmeOrder, TLS_VALIDATE_FIELDS } from "@/api/tls";
+import { acmeOrderInProgress, AcmeFinalizationUnknownError, getAcmeOrder, TLS_VALIDATE_FIELDS } from "@/api/tls";
 import type {
   ManagedTlsCollection,
   ManagedTlsRecord,
@@ -192,7 +194,7 @@ const MANAGED_TABS: ManagedTabConfig[] = [
 function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
   const formId = useId();
   const { toast } = useToast();
-  const { data, isLoading } = useAllManagedTlsRecords(config.collection);
+  const { data, isLoading, error } = useAllManagedTlsRecords(config.collection);
   const createRecord = useCreateManagedTlsRecord(config.collection);
   const deleteRecord = useDeleteManagedTlsRecord(config.collection);
   const { capabilities } = useCapabilities();
@@ -204,6 +206,9 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const records = data ?? [];
+  // A viewer is refused these reads (Edge requires operator). That is an
+  // answer about the session, not an empty store.
+  const denied = data === undefined && isReadDenied(error);
 
   const setField = (key: string, value: string) => {
     setForm((f) => ({ ...f, [key]: value }));
@@ -276,7 +281,8 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
             ))}
           </div>
         )}
-        {!isLoading && records.length === 0 && (
+        {denied && <ReadDeniedNotice label={`Managed ${config.title}`} />}
+        {!isLoading && !denied && records.length === 0 && (
           <EmptyState
             title={config.emptyTitle}
             description={`${config.emptyDescription} Reference it as managed://${config.collection}/{id}.`}
@@ -433,13 +439,14 @@ function stateBadge(state: string): ReactNode {
 function InventoryTab() {
   const { toast } = useToast();
   const pagination = usePaginationParams({ defaultLimit: 50 });
-  const { data, isLoading } = useTlsInventory(pagination.paginationParams);
+  const { data, isLoading, error } = useTlsInventory(pagination.paginationParams);
   const rotate = useRotateTlsSurface();
   const { capabilities } = useCapabilities();
   const canRotate = capabilities.operationalActions;
   const [surface, setSurface] = useState<TlsRotateSurface>("proxy_https");
 
   const entries = data?.data ?? [];
+  const denied = data === undefined && isReadDenied(error);
 
   return (
     <div className="space-y-4">
@@ -478,7 +485,7 @@ function InventoryTab() {
 
       <ResourceGrid
         label="TLS inventory"
-        emptyState={!isLoading && entries.length === 0 && (
+        emptyState={denied ? <ReadDeniedNotice label="TLS inventory" /> : !isLoading && entries.length === 0 && (
           <EmptyState
             title={(data?.pagination.total ?? 0) > 0 ? "No results on this page" : "No TLS material found"}
             description={(data?.pagination.total ?? 0) > 0
@@ -548,11 +555,12 @@ function InventoryTab() {
 function EventsTab() {
   const [outcome, setOutcome] = useState<string>("");
   const pagination = usePaginationParams({ defaultLimit: 50 });
-  const { data, isLoading } = useTlsEvents({
+  const { data, isLoading, error } = useTlsEvents({
     ...pagination.paginationParams,
     ...(outcome && { outcome: outcome as "rotated" | "load_error" | "rebuild_error" }),
   });
   const events = data?.data ?? [];
+  const denied = data === undefined && isReadDenied(error);
 
   return (
     <div className="space-y-4">
@@ -580,7 +588,8 @@ function EventsTab() {
             ))}
           </div>
         )}
-        {!isLoading && events.length === 0 && (
+        {denied && <ReadDeniedNotice label="TLS events" />}
+        {!isLoading && !denied && events.length === 0 && (
           <EmptyState
             title={(data?.pagination.total ?? 0) > 0 ? "No results on this page" : "No TLS events"}
             description={(data?.pagination.total ?? 0) > 0
@@ -655,8 +664,10 @@ const ACME_ORDERS_KEY = ["tls", "acme", "orders", "all"] as const;
 function AcmeTab() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const { data: certs, isLoading: certsLoading } = useAllAcmeCertificates();
-  const { data: orders, isLoading: ordersLoading } = useAllAcmeOrders();
+  const { data: certs, isLoading: certsLoading, error: certsError } = useAllAcmeCertificates();
+  const { data: orders, isLoading: ordersLoading, error: ordersError } = useAllAcmeOrders();
+  const certsDenied = certs === undefined && isReadDenied(certsError);
+  const ordersDenied = orders === undefined && isReadDenied(ordersError);
   const { data: accounts } = useAllAcmeAccounts();
   const importCert = useImportAcmeCertificate();
   const updateCert = useUpdateAcmeCertificate();
@@ -771,7 +782,7 @@ function AcmeTab() {
   const visibleOrders = (orders ?? []).slice(orderOffset, orderOffset + ACME_PAGE_SIZE);
   // A terminal observation resolves an ambiguous finalization without replaying it.
   const orderIsUnknown = (order: AcmeOrder) =>
-    unknownOrders.has(order.id) && !["valid", "failed", "cancelled"].includes(order.status);
+    unknownOrders.has(order.id) && acmeOrderInProgress(order);
 
   const handleCreateOrder = async () => {
     if (!canWrite.allowed) return;
@@ -835,7 +846,8 @@ function AcmeTab() {
               ))}
             </div>
           )}
-          {!certsLoading && (certs ?? []).length === 0 && (
+          {certsDenied && <ReadDeniedNotice label="ACME certificates" />}
+          {!certsLoading && !certsDenied && (certs ?? []).length === 0 && (
             <EmptyState
               title="No ACME certificates"
               description="Create an order to obtain a certificate, or import issued material."
@@ -936,7 +948,8 @@ function AcmeTab() {
               ))}
             </div>
           )}
-          {!ordersLoading && (orders ?? []).length === 0 && (
+          {ordersDenied && <ReadDeniedNotice label="ACME orders" />}
+          {!ordersLoading && !ordersDenied && (orders ?? []).length === 0 && (
             <EmptyState
               title="No active orders"
               description="ACME orders and their pending challenges appear here."
@@ -993,7 +1006,7 @@ function AcmeTab() {
                               queryClient.setQueryData<AcmeOrder[]>(ACME_ORDERS_KEY, (previous) =>
                                 previous?.map((entry) => entry.id === order.id ? checked : entry),
                               );
-                              if (["valid", "failed", "cancelled"].includes(checked.status)) {
+                              if (!acmeOrderInProgress(checked)) {
                                 setUnknownOrders((previous) => {
                                   const next = new Set(previous);
                                   next.delete(order.id);
@@ -1555,8 +1568,33 @@ function ValidateTab() {
 /*  TlsPage                                                            */
 /* ================================================================== */
 
+const TLS_TABS: readonly string[] = [
+  "inventory",
+  ...MANAGED_TABS.map((tab) => tab.collection),
+  "acme",
+  "events",
+  "validate",
+];
+
 export default function TlsPage() {
   const { capabilities } = useCapabilities();
+  // Inventory and Events each page through the route's one `offset` and
+  // `limit`. The active tab lives in the URL beside them so a switch drops
+  // both in the same navigation: the newly opened list starts at its first
+  // page and its own page size instead of the other list's.
+  const search = useSearch({ strict: false }) as Record<string, unknown>;
+  const navigate = useNavigate();
+  const activeTab =
+    typeof search.tab === "string" && TLS_TABS.includes(search.tab) ? search.tab : "inventory";
+  const selectTab = (next: string) => {
+    void navigate({
+      search: ({ offset: _offset, limit: _limit, ...previous }: Record<string, unknown>) => ({
+        ...previous,
+        tab: next,
+      }),
+      replace: true,
+    } as never);
+  };
   return (
     <div className="space-y-6">
       <div>
@@ -1583,7 +1621,7 @@ export default function TlsPage() {
       <CapabilityNotice verdict={capabilities.tlsMaterial} />
       <CapabilityNotice verdict={capabilities.operationalActions} />
 
-      <Tabs defaultValue="inventory">
+      <Tabs value={activeTab} onValueChange={selectTab}>
         <TabsList>
           <TabsTrigger value="inventory">Inventory</TabsTrigger>
           {MANAGED_TABS.map((tab) => (

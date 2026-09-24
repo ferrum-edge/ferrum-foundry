@@ -2,6 +2,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Upstream, UpstreamCreate } from "@/api/types";
+import { blurField, clearText, inputByLabel, inputByLabelOrNull, typeText } from "@/test/fields";
 import { UpstreamForm } from "./UpstreamForm";
 
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn() }));
@@ -185,5 +186,217 @@ describe("UpstreamForm duplicate Input labels", () => {
       expect(input).not.toBeNull();
       expect(label.control).toBe(input);
     }
+  });
+});
+
+async function mountPlain(overrides: Partial<Upstream> = {}) {
+  const initialData: Upstream = {
+    id: "upstream-2",
+    name: "orders",
+    algorithm: "round_robin",
+    targets: [{ host: "backend", port: 8080, weight: 1 }],
+    created_at: "2026-09-06T00:00:00Z",
+    updated_at: "2026-09-06T00:00:00Z",
+    ...overrides,
+  };
+  await act(async () => {
+    root.render(
+      <UpstreamForm initialData={initialData} onSubmit={submit} isLoading={false} />,
+    );
+  });
+}
+
+async function toggleSection(title: string) {
+  const section = Array.from(host.querySelectorAll("button")).find((button) =>
+    button.textContent?.includes(title),
+  )!;
+  await act(async () => section.click());
+}
+
+async function check(label: string) {
+  const box = Array.from(host.querySelectorAll("label")).find(
+    (entry) => entry.textContent?.trim() === label,
+  )!.querySelector("input")!;
+  await act(async () => box.click());
+}
+
+function submitted(): UpstreamCreate {
+  expect(submit).toHaveBeenCalledOnce();
+  return submit.mock.calls[0]![0];
+}
+
+describe("UpstreamForm status-code drafts (#400)", () => {
+  it("accepts comma-separated codes typed one character at a time", async () => {
+    await mountPlain();
+    await toggleSection("Health Checks");
+    await check("Enable active health checks");
+    await check("Enable passive health checks");
+
+    const healthy = inputByLabel(host, "Healthy Status Codes");
+    await clearText(healthy);
+    await typeText(healthy, "200, 302");
+    expect(healthy.value).toBe("200, 302");
+    await blurField(healthy);
+
+    const unhealthy = inputByLabel(host, "Unhealthy Status Codes");
+    await clearText(unhealthy);
+    await typeText(unhealthy, "500, 502, 503");
+    expect(unhealthy.value).toBe("500, 502, 503");
+    await blurField(unhealthy);
+
+    expect(host.querySelector('[aria-invalid="true"]')).toBeNull();
+    await save();
+    const health = submitted().health_checks!;
+    expect(health.active?.healthy_status_codes).toEqual([200, 302]);
+    expect(health.passive?.unhealthy_status_codes).toEqual([500, 502, 503]);
+  });
+
+  it.each(["200x", "99", "600"])(
+    "keeps the invalid token %j visible, reports it accessibly, and blocks submit",
+    async (token) => {
+      await mountPlain();
+      await toggleSection("Health Checks");
+      await check("Enable active health checks");
+
+      const healthy = inputByLabel(host, "Healthy Status Codes");
+      await clearText(healthy);
+      await typeText(healthy, `200, ${token}`);
+      await blurField(healthy);
+      expect(healthy.value).toBe(`200, ${token}`);
+      expect(healthy.getAttribute("aria-invalid")).toBe("true");
+      const description = document.getElementById(healthy.getAttribute("aria-describedby")!);
+      expect(description?.textContent).toContain(`"${token}" is not an HTTP status code (100-599)`);
+
+      await save();
+      expect(submit).not.toHaveBeenCalled();
+      expect(healthy.value).toBe(`200, ${token}`);
+      expect(host.textContent).toContain("Fix 1 validation error above");
+
+      await clearText(healthy);
+      await typeText(healthy, "204");
+      await blurField(healthy);
+      expect(healthy.getAttribute("aria-invalid")).toBeNull();
+      await save();
+      expect(submitted().health_checks?.active?.healthy_status_codes).toEqual([204]);
+    },
+  );
+
+  it("sends untouched code lists exactly as loaded, including an absent one", async () => {
+    await mountPlain({
+      health_checks: {
+        active: { http_path: "/ready", interval_seconds: 5 },
+        passive: { unhealthy_status_codes: [500] },
+      },
+    });
+    await save();
+    const health = submitted().health_checks!;
+    expect(health.active).toEqual({ http_path: "/ready", interval_seconds: 5 });
+    expect(health.active).not.toHaveProperty("healthy_status_codes");
+    expect(health.passive).toEqual({ unhealthy_status_codes: [500] });
+  });
+});
+
+describe("UpstreamForm numeric drafts (#402)", () => {
+  it("clears and retypes a health-check interval without inserting 0", async () => {
+    await mountPlain();
+    await toggleSection("Health Checks");
+    await check("Enable active health checks");
+
+    const interval = inputByLabel(host, "Interval (seconds)");
+    await clearText(interval);
+    expect(interval.value).toBe("");
+    await typeText(interval, "15");
+    expect(interval.value).toBe("15");
+    await save();
+    expect(submitted().health_checks?.active).toMatchObject({
+      interval_seconds: 15,
+      timeout_ms: 5000,
+      healthy_status_codes: [200, 302],
+    });
+  });
+
+  it("reopens a collapsed Health Checks section for an empty required field", async () => {
+    await mountPlain();
+    await toggleSection("Health Checks");
+    await check("Enable passive health checks");
+    await clearText(inputByLabel(host, "Unhealthy Window (seconds)"));
+    await toggleSection("Health Checks");
+    expect(inputByLabelOrNull(host, "Unhealthy Window (seconds)")).toBeNull();
+
+    await save();
+    expect(submit).not.toHaveBeenCalled();
+    const windowField = inputByLabel(host, "Unhealthy Window (seconds)");
+    expect(windowField.value).toBe("");
+    expect(windowField.getAttribute("aria-invalid")).toBe("true");
+    expect(host.textContent).toContain("Unhealthy window is required");
+
+    await typeText(windowField, "45");
+    await save();
+    expect(submitted().health_checks?.passive?.unhealthy_window_seconds).toBe(45);
+  });
+
+  it("requires a service-discovery poll interval instead of sending 0", async () => {
+    await mountPlain({
+      targets: [],
+      service_discovery: {
+        provider: "dns_sd",
+        dns_sd: { service_name: "_orders._tcp.example", poll_interval_seconds: 20 },
+      },
+    });
+    await toggleSection("Service Discovery");
+    const poll = inputByLabel(host, "Poll Interval (seconds)");
+    await clearText(poll);
+    expect(poll.value).toBe("");
+    await save();
+    expect(submit).not.toHaveBeenCalled();
+    expect(host.textContent).toContain("Poll interval is required");
+
+    await typeText(poll, "60");
+    await save();
+    expect(submitted().service_discovery?.dns_sd?.poll_interval_seconds).toBe(60);
+  });
+});
+
+describe("UpstreamForm Kubernetes discovery", () => {
+  it("carries provider keys the form does not model through a save", async () => {
+    await mountPlain({
+      targets: [],
+      service_discovery: {
+        provider: "consul",
+        consul: {
+          address: "http://consul.internal:8500",
+          service_name: "api",
+          a_newer_gateway_field: { nested: true },
+        } as never,
+      },
+    });
+    await save();
+    expect(submitted().service_discovery?.consul).toMatchObject({
+      address: "http://consul.internal:8500",
+      service_name: "api",
+      a_newer_gateway_field: { nested: true },
+    });
+  });
+
+  it("keeps a loaded address_type on an unrelated save", async () => {
+    await mountPlain({
+      targets: [],
+      service_discovery: {
+        provider: "kubernetes",
+        kubernetes: {
+          service_name: "api",
+          namespace: "prod",
+          address_type: "IPv6",
+          poll_interval_seconds: 30,
+        },
+      },
+    });
+    await save();
+    expect(submitted().service_discovery?.kubernetes).toEqual({
+      service_name: "api",
+      namespace: "prod",
+      address_type: "IPv6",
+      poll_interval_seconds: 30,
+    });
   });
 });

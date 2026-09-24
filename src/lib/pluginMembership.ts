@@ -1,20 +1,46 @@
 import type { NamespaceScope } from "@/api/client";
+import {
+  isPreconditionFailed,
+  StaleResourceError,
+  validatorOf,
+  type GuardedOperation,
+  type WriteGuard,
+} from "@/api/conditionalWrite";
 import * as pluginsApi from "@/api/plugins";
 import * as proxiesApi from "@/api/proxies";
+import { resourceFingerprint } from "@/lib/resourceBaseline";
 import type {
   PluginConfig,
   PluginConfigCreate,
   Proxy,
 } from "@/api/types";
 
+/**
+ * Every write names the read it is based on (`basis`). The gateway binding
+ * sends that read's `ETag` as `If-Match`, so the plan's read-compare-write
+ * steps are atomic on a gateway that implements the precondition: a `412`
+ * surfaces here as the same "changed during the plan" outcome an
+ * `updated_at` mismatch produces. `null` means there is no read to be
+ * conditional on — a `POST` response, which Edge never tags.
+ */
 export interface PluginMembershipDependencies {
+  /** The namespace every request of the plan is bound to. */
+  readonly namespace: string;
   listProxies: () => Promise<Proxy[]>;
   getProxy: (id: string) => Promise<Proxy>;
-  updateProxy: (id: string, data: ReturnType<typeof proxiesApi.toUpdatePayload>) => Promise<Proxy>;
+  updateProxy: (
+    id: string,
+    data: ReturnType<typeof proxiesApi.toUpdatePayload>,
+    basis: Proxy | null,
+  ) => Promise<Proxy>;
   getPlugin: (id: string) => Promise<PluginConfig>;
   createPlugin: (data: PluginConfigCreate) => Promise<PluginConfig>;
-  updatePlugin: (id: string, data: PluginConfigCreate) => Promise<PluginConfig>;
-  deletePlugin: (id: string) => Promise<void>;
+  updatePlugin: (
+    id: string,
+    data: PluginConfigCreate,
+    basis: PluginConfig | null,
+  ) => Promise<PluginConfig>;
+  deletePlugin: (id: string, basis: PluginConfig | null) => Promise<void>;
 }
 
 /**
@@ -30,19 +56,24 @@ export function bindPluginMembership(
   scope: NamespaceScope,
 ): PluginMembershipDependencies {
   return {
+    namespace: scope.namespace,
     listProxies: () => proxiesApi.listAll(scope),
     getProxy: (id) => proxiesApi.get(scope, id),
     // A membership plan runs its own concurrency contract (#244): every write
     // is preceded by a fresh read whose `updated_at` must still match the
     // preflight snapshot, and a mismatch aborts the plan or refuses the
-    // rollback. Layering the editor baseline guard on top would compare a
-    // snapshot this plan never took, so this revision-aware family keeps its
-    // own contract. See `docs/concurrent-edits.md`.
-    updateProxy: (id, data) => proxiesApi.update(scope, id, data, null),
+    // rollback. Each write is conditional on that fresh read's own tag
+    // (`validatorOf`), which makes the comparison atomic. Layering the proxy
+    // editor's baseline guard on top would compare a snapshot this plan never
+    // took. See `docs/concurrent-edits.md`.
+    updateProxy: (id, data, basis) =>
+      proxiesApi.replace(scope, id, data, validatorOf(basis)),
     getPlugin: (id) => pluginsApi.getConfig(scope, id, true),
     createPlugin: (data) => pluginsApi.createConfig(scope, data),
-    updatePlugin: (id, data) => pluginsApi.updateConfig(scope, id, data),
-    deletePlugin: (id) => pluginsApi.removeConfig(scope, id),
+    updatePlugin: (id, data, basis) =>
+      pluginsApi.updateConfig(scope, id, data, validatorOf(basis)),
+    deletePlugin: (id, basis) =>
+      pluginsApi.removeConfig(scope, id, validatorOf(basis)),
   };
 }
 
@@ -74,6 +105,45 @@ function isNotFound(error: unknown): boolean {
     "response" in error &&
     (error.response as Response | undefined)?.status === 404
   );
+}
+
+/**
+ * Run a write that is conditional on a read the plan just compared, turning
+ * the gateway's `412` into the plan's own refusal. Anything else propagates.
+ */
+async function unlessChanged<T>(write: () => Promise<T>, changed: () => Error): Promise<T> {
+  try {
+    return await write();
+  } catch (error) {
+    if (isPreconditionFailed(error)) throw changed();
+    throw error;
+  }
+}
+
+/**
+ * Refuse a plan whose plugin no longer holds what the editor was showing.
+ * Checked against every read the plan writes on, so the `If-Match` that read
+ * carries makes the check atomic with the write.
+ */
+function assertEditorBaseline(
+  plugin: PluginConfig,
+  guard: WriteGuard<PluginConfig | PluginConfigCreate> | null,
+  operation: GuardedOperation,
+  proposed: PluginConfigCreate | null,
+  namespace: string,
+): void {
+  if (!guard) return;
+  const current = guard.select(plugin);
+  if (resourceFingerprint(current) === resourceFingerprint(guard.baseline)) return;
+  throw new StaleResourceError({
+    resource: "plugin configuration",
+    operation,
+    id: plugin.id,
+    namespace,
+    original: guard.baseline,
+    current,
+    proposed: proposed ? guard.select(proposed) : guard.baseline,
+  });
 }
 
 async function getPluginIfPresent(
@@ -220,10 +290,22 @@ async function applyAssociationPlan(
         [],
       );
     }
-    const after = await deps.updateProxy(snapshot.id, {
-      ...proxiesApi.toUpdatePayload(current),
-      plugins: desiredAssociations(current, pluginId, desired.has(current.id)),
-    });
+    const after = await unlessChanged(
+      () =>
+        deps.updateProxy(
+          snapshot.id,
+          {
+            ...proxiesApi.toUpdatePayload(current),
+            plugins: desiredAssociations(current, pluginId, desired.has(current.id)),
+          },
+          current,
+        ),
+      () =>
+        new PluginMembershipError(
+          `Proxy ${snapshot.id} changed during membership preflight`,
+          [],
+        ),
+    );
     applied.push({ before: current, after });
   }
 
@@ -273,8 +355,14 @@ async function rollbackAssociations(
           continue;
         }
       }
-      await deps.updateProxy(current.id, proxiesApi.toUpdatePayload(change.before));
+      await deps.updateProxy(current.id, proxiesApi.toUpdatePayload(change.before), current);
     } catch (error) {
+      if (isPreconditionFailed(error)) {
+        failures.push(
+          `proxy ${change.before.id} changed after Foundry updated it; association was not overwritten`,
+        );
+        continue;
+      }
       failures.push(
         `proxy ${change.before.id} rollback failed (${error instanceof Error ? error.message : "unknown error"})`,
       );
@@ -296,9 +384,12 @@ async function rollbackPlugin(
     if (current.updated_at !== after.updated_at) {
       return [`plugin ${after.id} changed after Foundry updated it; config was not overwritten`];
     }
-    await deps.updatePlugin(before.id, pluginsApi.toUpdatePayload(before));
+    await deps.updatePlugin(before.id, pluginsApi.toUpdatePayload(before), current);
     return [];
   } catch (error) {
+    if (isPreconditionFailed(error)) {
+      return [`plugin ${after.id} changed after Foundry updated it; config was not overwritten`];
+    }
     return [
       `plugin ${before.id} rollback failed (${error instanceof Error ? error.message : "unknown error"})`,
     ];
@@ -309,15 +400,27 @@ async function updatePluginIfUnchanged(
   snapshot: PluginConfig,
   data: PluginConfigCreate,
   deps: PluginMembershipDependencies,
+  guard: WriteGuard<PluginConfig | PluginConfigCreate> | null,
 ): Promise<PluginConfig> {
-  const current = await deps.getPlugin(snapshot.id);
-  if (current.updated_at !== snapshot.updated_at) {
-    throw new PluginMembershipError(
+  const changed = () =>
+    new PluginMembershipError(
       `Plugin ${snapshot.id} changed during membership preflight`,
       [],
     );
+  const current = await deps.getPlugin(snapshot.id);
+  assertEditorBaseline(current, guard, "save", data, deps.namespace);
+  if (current.updated_at !== snapshot.updated_at) throw changed();
+  try {
+    return await deps.updatePlugin(snapshot.id, data, current);
+  } catch (error) {
+    if (!isPreconditionFailed(error)) throw error;
+    // Something was written between that read and the PUT. If it touched what
+    // the editor opened against, the operator needs the comparison, not a
+    // generic plan failure.
+    const latest = await getPluginIfPresent(snapshot.id, deps);
+    if (latest) assertEditorBaseline(latest, guard, "save", data, deps.namespace);
+    throw changed();
   }
-  return deps.updatePlugin(snapshot.id, data);
 }
 
 /**
@@ -326,17 +429,24 @@ async function updatePluginIfUnchanged(
  * `openapi.yaml` is explicit that a proxy-scoped plugin "applies only when the
  * target proxy lists it in `plugins` — `proxy_id` alone never attaches it",
  * and that the gateway appends the association in the same transaction as the
- * write, idempotently. A gateway that does that leaves nothing for this to do:
- * the read below already finds the association and no second write happens.
+ * write, idempotently. Every Edge 0.9.x release does that (ferrum-edge#4611),
+ * which leaves nothing for this to do: the read below already finds the
+ * association and no second write happens.
  *
- * A gateway that does **not** — the pinned contract image is one — answers
- * `201` for a plugin that never runs. The visible consequence is an operator
- * attaching key authentication to a route through the UI and being told it
- * worked while the route keeps serving anonymous traffic, which the
- * critical-journey suite catches at the data plane (#380). So the association
- * is verified after every proxy-scoped write and reconciled when it is
- * missing, and a reconciliation that fails is reported rather than swallowed:
- * Foundry never reports a plugin as attached without having read it back.
+ * That transaction also advances the proxy's `updated_at`. The plan does not
+ * trip over it: this function never compares the proxy with anything read
+ * before the plugin write. Its read happens after it, and the one write it may
+ * send is conditional on that same read (`basis`), so the gateway's own bump
+ * is simply part of the state the plan starts from.
+ *
+ * A gateway that does **not** attach answers `201` for a plugin that never
+ * runs. The visible consequence is an operator attaching key authentication
+ * to a route through the UI and being told it worked while the route keeps
+ * serving anonymous traffic, which the critical-journey suite catches at the
+ * data plane (#380). So the association is verified after every proxy-scoped
+ * write and reconciled when it is missing, and a reconciliation that fails is
+ * reported rather than swallowed: Foundry never reports a plugin as attached
+ * without having read it back.
  */
 async function reconcileProxyScopedAssociation(
   pluginId: string,
@@ -346,10 +456,22 @@ async function reconcileProxyScopedAssociation(
   const proxy = await deps.getProxy(desiredProxyId);
   if (referencesPlugin(proxy, pluginId)) return;
 
-  await deps.updateProxy(proxy.id, {
-    ...proxiesApi.toUpdatePayload(proxy),
-    plugins: desiredAssociations(proxy, pluginId, true),
-  });
+  await unlessChanged(
+    () =>
+      deps.updateProxy(
+        proxy.id,
+        {
+          ...proxiesApi.toUpdatePayload(proxy),
+          plugins: desiredAssociations(proxy, pluginId, true),
+        },
+        proxy,
+      ),
+    () =>
+      new PluginMembershipError(
+        `Proxy ${desiredProxyId} changed while plugin ${pluginId} was being attached`,
+        [],
+      ),
+  );
 
   const confirmed = await deps.getProxy(desiredProxyId);
   if (!referencesPlugin(confirmed, pluginId)) {
@@ -378,10 +500,22 @@ async function detachFormerProxyScope(
   });
   if (!proxy || !referencesPlugin(proxy, pluginId)) return;
 
-  await deps.updateProxy(proxy.id, {
-    ...proxiesApi.toUpdatePayload(proxy),
-    plugins: desiredAssociations(proxy, pluginId, false),
-  });
+  await unlessChanged(
+    () =>
+      deps.updateProxy(
+        proxy.id,
+        {
+          ...proxiesApi.toUpdatePayload(proxy),
+          plugins: desiredAssociations(proxy, pluginId, false),
+        },
+        proxy,
+      ),
+    () =>
+      new PluginMembershipError(
+        `Proxy ${formerProxyId} changed while plugin ${pluginId} was being detached`,
+        [],
+      ),
+  );
 }
 
 export async function createPluginWithMembership(
@@ -406,7 +540,8 @@ export async function createPluginWithMembership(
       const failure = error instanceof Error ? error.message : "unknown error";
       const recovery: string[] = [];
       try {
-        await deps.deletePlugin(created.id);
+        // The create response carries no tag, so this delete is unconditional.
+        await deps.deletePlugin(created.id, null);
       } catch {
         recovery.push(
           `orphan plugin ${created.id} could not be deleted; it exists but is not attached to any proxy`,
@@ -444,7 +579,7 @@ export async function createPluginWithMembership(
             `orphan plugin ${created.id} changed concurrently and was not deleted`,
           );
         } else if (current) {
-          await deps.deletePlugin(created.id);
+          await deps.deletePlugin(created.id, current);
         }
       } catch (deleteError) {
         recovery.push(
@@ -464,14 +599,23 @@ export async function createPluginWithMembership(
   }
 }
 
+/**
+ * `guard` is the plugin editor's baseline. The plan refuses with
+ * `StaleResourceError`, before anything is written, if the configuration no
+ * longer holds what the editor opened — checked at the preflight read and
+ * again at the read the plugin `PUT` is conditional on. `null` only for a
+ * caller with no editor to compare.
+ */
 export async function updatePluginWithMembership(
   pluginId: string,
   data: PluginConfigCreate,
   desiredProxyIds: string[],
   deps: PluginMembershipDependencies,
+  guard: WriteGuard<PluginConfig | PluginConfigCreate> | null,
 ): Promise<PluginConfig> {
   validateScope(data, desiredProxyIds);
   const beforePlugin = await deps.getPlugin(pluginId);
+  assertEditorBaseline(beforePlugin, guard, "save", data, deps.namespace);
   const plan = await loadPlan(
     data.scope === "proxy_group" ? desiredProxyIds : [],
     deps,
@@ -486,7 +630,7 @@ export async function updatePluginWithMembership(
     // Edge atomically reconciles associations when PUT changes scope to global
     // or proxy. Do not detach first or remove the proxy-scoped target it adds.
     // Group membership remains operator-managed through proxy PUTs.
-    updatedPlugin = await updatePluginIfUnchanged(beforePlugin, data, deps);
+    updatedPlugin = await updatePluginIfUnchanged(beforePlugin, data, deps, guard);
     if (nextIsGroup) {
       await applyAssociationPlan(plan.proxies, pluginId, desired, deps, applied);
     } else if (data.scope === "proxy" && data.proxy_id) {
@@ -500,6 +644,10 @@ export async function updatePluginWithMembership(
     }
     return updatedPlugin;
   } catch (error) {
+    // Refused before the plugin write: nothing was changed, so there is
+    // nothing to roll back, and the editor needs the comparison, not a
+    // recovery report.
+    if (error instanceof StaleResourceError && !updatedPlugin) throw error;
     const failure = error instanceof Error ? error.message : "unknown error";
     const recovery: string[] = [];
     if (updatedPlugin && beforePlugin.scope !== "proxy_group") {
@@ -522,11 +670,19 @@ export async function updatePluginWithMembership(
   }
 }
 
+/**
+ * `guard` is the plugin editor's baseline: a configuration that changed since
+ * the page loaded is not deleted (`StaleResourceError`, operation `delete`).
+ * It is checked before any association is detached and again at the read the
+ * final `DELETE` is conditional on. `null` only with nothing on screen.
+ */
 export async function deletePluginWithMembership(
   pluginId: string,
   deps: PluginMembershipDependencies,
+  guard: WriteGuard<PluginConfig | PluginConfigCreate> | null,
 ): Promise<void> {
   const plugin = await deps.getPlugin(pluginId);
+  assertEditorBaseline(plugin, guard, "delete", null, deps.namespace);
   const proxies = await deps.listProxies();
   const applied: AppliedProxyChange[] = [];
   try {
@@ -535,10 +691,21 @@ export async function deletePluginWithMembership(
     }
     // The final detach may already have deleted the group. Only an observed
     // 404 confirms success; authentication/transport errors must still fail.
-    if (await getPluginIfPresent(pluginId, deps)) {
-      await deps.deletePlugin(pluginId);
+    const present = await getPluginIfPresent(pluginId, deps);
+    if (present) {
+      assertEditorBaseline(present, guard, "delete", null, deps.namespace);
+      await unlessChanged(
+        () => deps.deletePlugin(pluginId, present),
+        () =>
+          new PluginMembershipError(
+            `Plugin ${pluginId} changed during deletion; it was not deleted`,
+            [],
+          ),
+      );
     }
   } catch (error) {
+    // Nothing detached yet: the refusal is the whole outcome.
+    if (error instanceof StaleResourceError && applied.length === 0) throw error;
     const failure = error instanceof Error ? error.message : "unknown error";
     const recovery = await rollbackAssociations(applied, pluginId, deps);
     recovery.push(...await recoveryState(pluginId, deps));

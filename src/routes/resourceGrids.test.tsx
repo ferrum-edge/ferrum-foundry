@@ -76,7 +76,7 @@ const details: Surface[] = [
   { label: "Authorized consumers", Page: ProxyDetailPage, path: "/proxies/$proxyId",
     entry: "/proxies/orders", identity: consumer.username, minWidth: "min-w-[40rem]", tab: "Consumers" },
   { label: "Authorized proxies", Page: ConsumerDetailPage, path: "/consumers/$consumerId",
-    entry: "/consumers/operator", identity: proxy.name!, minWidth: "min-w-[40rem]", tab: "Matched Proxies (1)" },
+    entry: "/consumers/operator", identity: proxy.name!, minWidth: "min-w-[40rem]", tab: "Matched Proxies (unknown)" },
 ];
 
 let ui: ReturnType<typeof createHarness>;

@@ -1,4 +1,4 @@
-import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http';
+import { Agent, createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import { gzipSync } from 'node:zlib';
@@ -32,6 +32,13 @@ function gatewayHandler(request: IncomingMessage, response: ServerResponse): voi
   request.once('close', () => {
     if (!request.complete) abandonedUploads.push(request.url ?? '');
   });
+  if (request.url?.startsWith('/reject-unread')) {
+    // Refuse before reading the body, as an auth, role, or read-only check does.
+    response.statusCode = 400;
+    response.setHeader('content-type', 'application/json');
+    response.end('{"error":"rejected before reading the body"}');
+    return;
+  }
   void (async () => {
     observed.push({
       url: request.url ?? '',
@@ -220,6 +227,43 @@ async function rawGet(path: string): Promise<{ statusCode: number; body: string;
   });
 }
 
+/** Send on one keep-alive socket; resolves with the status, or 0 if nothing answered in time. */
+function keepAliveRequest(
+  agent: Agent,
+  method: string,
+  path: string,
+  body?: Buffer,
+): Promise<number> {
+  const port = (app.server.address() as AddressInfo).port;
+  return new Promise((resolve) => {
+    const request = httpRequest(
+      {
+        host: '127.0.0.1',
+        port,
+        path,
+        method,
+        agent,
+        headers: {
+          ...sessionHeaders,
+          ...(body && { 'content-type': 'application/json', 'content-length': String(body.length) }),
+        },
+      },
+      (incoming) => {
+        incoming.resume();
+        incoming.on('end', () => resolve(incoming.statusCode ?? 0));
+      },
+    );
+    const timer = setTimeout(() => {
+      request.destroy();
+      resolve(0);
+    }, 2_000);
+    timer.unref();
+    request.on('error', () => resolve(-1));
+    request.on('close', () => clearTimeout(timer));
+    request.end(body);
+  });
+}
+
 afterAll(async () => {
   await app.close();
   gateway.close();
@@ -324,6 +368,34 @@ describe('streaming gateway proxy', () => {
     expect(response.statusCode).toBe(200);
     expect(response.cacheControl).toBe('no-store');
     expect(observed.at(-1)?.url).toBe('/echo');
+  });
+
+  it.each([
+    ['rejects the upload unread', '/api/proxy/reject-unread'],
+    ['is unreachable', '/api/proxy/proxies/unreachable'],
+  ])('does not strand a keep-alive connection when the gateway %s', async (_case, path) => {
+    const agent = new Agent({ keepAlive: true, maxSockets: 1 });
+    try {
+      const unreachable = path.endsWith('/unreachable');
+      const configModule = await import('./config.js');
+      const configSpy = unreachable
+        ? vi.spyOn(configModule, 'loadConfig').mockReturnValue({
+            ...configModule.loadConfig(),
+            adminUrl: 'http://127.0.0.1:1',
+          })
+        : undefined;
+      try {
+        const status = await keepAliveRequest(agent, 'PUT', path, Buffer.alloc(1_900_000, 'a'));
+        expect(status).toBe(unreachable ? 502 : 400);
+      } finally {
+        configSpy?.mockRestore();
+      }
+      // The next request on the same agent must be answered, not queued
+      // behind an unread upload until the server's request timeout.
+      expect(await keepAliveRequest(agent, 'GET', '/api/auth/session')).toBe(200);
+    } finally {
+      agent.destroy();
+    }
   });
 
   it('enforces a small default streaming body limit without buffering the request', async () => {

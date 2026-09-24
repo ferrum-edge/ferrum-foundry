@@ -1,7 +1,7 @@
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { UpstreamCreate, UpstreamTarget } from "@/api/types";
-import { inputByLabel } from "@/test/fields";
+import { clearText, inputByLabel, typeText } from "@/test/fields";
 import { click, createHarness, fill } from "@/test/__tests__/harness";
 import { TargetForm } from "./TargetForm";
 
@@ -102,6 +102,30 @@ describe("TargetForm inline editor", () => {
       tags: { url: "https://backend.example.test", team: "payments" },
     });
     expect(initial.tags).toEqual({ version: "v1" });
+  });
+
+  it("clears and retypes port and weight without inserting 0 (#402)", async () => {
+    await mount({ host: "backend", port: 8080, weight: 3, path: null, locality: null, tags: {} });
+    const port = inputByLabel(ui.host, "Port");
+    await clearText(port);
+    expect(port.value).toBe("");
+    await typeText(port, "8443");
+    expect(port.value).toBe("8443");
+
+    const weight = inputByLabel(ui.host, "Weight");
+    await clearText(weight);
+    expect(weight.value).toBe("");
+    await click("Update Target");
+    expect(submit).not.toHaveBeenCalled();
+    expect(weight.value).toBe("");
+    expect(weight.getAttribute("aria-invalid")).toBe("true");
+    expect(ui.host.textContent).toContain("Weight is required");
+
+    await typeText(weight, "5");
+    await click("Update Target");
+    expect(submit).toHaveBeenCalledExactlyOnceWith({
+      host: "backend", port: 8443, weight: 5, path: null, locality: null, tags: {},
+    });
   });
 
   it("cancels without submitting and lets unrelated keys propagate", async () => {

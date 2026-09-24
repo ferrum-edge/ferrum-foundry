@@ -235,8 +235,14 @@ export function useDeleteProxy() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
   return useMutation({
-    mutationFn: async (id: string) => {
-      await proxies.remove(scope, id);
+    mutationFn: async ({
+      id,
+      guard,
+    }: {
+      id: string;
+      guard: WriteGuard<Proxy | ProxyCreate> | null;
+    }) => {
+      await proxies.remove(scope, id, guard);
       // Carry the mutation's namespace through completion, even after a switch.
       return { namespace: scope.namespace, id };
     },

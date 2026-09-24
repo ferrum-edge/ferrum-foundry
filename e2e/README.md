@@ -8,8 +8,10 @@ making a request through the gateway.
 
 ## Running it
 
-The suite does not own the stack. It runs against the checked-in starter, so
-what it exercises is the deployment Foundry actually ships.
+The suite does not own the stack. It runs against the checked-in starter, with
+the E2E Compose overlay supplying only the fault-forwarder address and a
+test-only namespace policy. That policy adds the second admin namespace needed
+to exercise isolation without widening the starter's production grant.
 
 ```bash
 # 1. The stack, with the BFF reaching the gateway through the forwarder.
@@ -37,8 +39,8 @@ The same three steps run in CI. Nothing about the suite is CI-only.
 | File | The question it answers |
 | --- | --- |
 | `first-route.spec.ts` | Can an admin go from nothing to a route that refuses anonymous callers and serves authenticated ones? |
-| `authorization.spec.ts` | Can anyone reach a surface they were not granted — unauthenticated, unmapped, or by sending their own identity headers? |
-| `namespace-isolation.spec.ts` | Can one tenant's configuration appear under another, across switches and a failed read? |
+| `authorization.spec.ts` | Can anyone reach a surface they were not granted — unauthenticated, unmapped, or by sending their own identity headers? And is a read the gateway withholds from a role shown as a denial rather than as empty data? |
+| `namespace-isolation.spec.ts` | Can one tenant's configuration appear under another — including when both namespaces hold the same id — across reads, writes, deletes, switches, and a late or failed read? |
 | `lifecycle.spec.ts` | Does an edit or a delete leave the gateway in the state the UI claimed? |
 | `read-failures.spec.ts` | Does a transient failure recover quietly, and does an unavailable read stay distinguishable from an empty one? |
 | `interrupted-write.spec.ts` | When the outcome of a write is genuinely unknown, is it reported rather than replayed? |

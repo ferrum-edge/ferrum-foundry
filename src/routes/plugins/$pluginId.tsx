@@ -27,6 +27,10 @@ import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity
 import { useCapabilities } from "@/stores/capabilities";
 import { WriteAction } from "@/components/shared/CapabilityGate";
 import type { PluginConfigCreate } from "@/api/types";
+import * as pluginsApi from "@/api/plugins";
+import { isStaleResourceError, type StaleResourceDetail } from "@/api/conditionalWrite";
+import { StaleWriteDialog } from "@/components/shared/StaleWriteDialog";
+import { useEditBaseline } from "@/hooks/useEditBaseline";
 
 /**
  * The route component survives a namespace switch; `PluginEditor` is keyed on
@@ -57,7 +61,9 @@ function PluginEditor({ session }: { session: EditorSession }) {
   const resourceQuery = usePluginConfig(pluginId, detailLive);
   const { data: plugin, isLoading } = resourceQuery;
   const { data: availablePlugins, isLoading: pluginsLoading } = useAvailablePlugins();
-  const proxiesQuery = useAllProxies();
+  // Only a proxy-group plugin's membership needs the whole proxy collection;
+  // global and proxy-scoped plugins must not pay for that traversal.
+  const proxiesQuery = useAllProxies(plugin?.scope === "proxy_group");
   const {
     data: allProxies,
     isPending: proxiesPending,
@@ -66,6 +72,14 @@ function PluginEditor({ session }: { session: EditorSession }) {
 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [membershipError, setMembershipError] = useState<unknown>(null);
+  const [conflict, setConflict] = useState<StaleResourceDetail | null>(null);
+  // Bumped only by an explicit "discard my draft and reload".
+  const [formGeneration, setFormGeneration] = useState(0);
+
+  // The configuration this editor opened against, advanced only by an
+  // accepted response. The membership plan refuses a save or delete whose
+  // plugin no longer matches it. See `docs/concurrent-edits.md`.
+  const baseline = useEditBaseline(plugin, pluginsApi.pluginWriteGuard);
 
   // Compute which proxies currently reference this plugin (for proxy_group)
   const initialProxyGroupIds = useMemo(() => {
@@ -82,14 +96,20 @@ function PluginEditor({ session }: { session: EditorSession }) {
       if (!capability.allowed) return;
       setMembershipError(null);
       try {
-        await updatePlugin.mutateAsync({
+        const updated = await updatePlugin.mutateAsync({
           id: pluginId,
           data,
           proxyIds: data.scope === "proxy_group" ? proxyGroupIds ?? [] : [],
+          guard: baseline.current(),
         });
+        baseline.adopt(updated);
 
         toast("success", "Plugin configuration updated successfully");
       } catch (err: unknown) {
+        if (isStaleResourceError(err)) {
+          setConflict(err.detail);
+          return;
+        }
         setMembershipError(err);
         const message = await getApiErrorMessage(
           err,
@@ -100,14 +120,32 @@ function PluginEditor({ session }: { session: EditorSession }) {
     },
   );
 
+  /** Deliberate restart: drop the draft and reseed the form from the gateway. */
+  const handleDiscardAndReload = async () => {
+    setConflict(null);
+    const refreshed = await resourceQuery.refetch();
+    if (refreshed.data) baseline.adopt(refreshed.data);
+    setFormGeneration((generation) => generation + 1);
+  };
+
   const handleDelete = session.bind(async () => {
-    if (!capability.allowed) return;
+    if (!plugin || !capability.allowed) return;
     setMembershipError(null);
     try {
-      await deletePlugin.mutateAsync(pluginId);
+      // Judged against the configuration this page is displaying — see the
+      // proxy detail page.
+      await deletePlugin.mutateAsync({
+        id: pluginId,
+        guard: pluginsApi.pluginWriteGuard(plugin),
+      });
       toast("success", "Plugin configuration deleted successfully");
       navigate({ to: "/plugins" });
     } catch (err: unknown) {
+      if (isStaleResourceError(err)) {
+        setDeleteOpen(false);
+        setConflict(err.detail);
+        return;
+      }
       setMembershipError(err);
       setDeleteOpen(false);
       const message = await getApiErrorMessage(
@@ -198,6 +236,7 @@ function PluginEditor({ session }: { session: EditorSession }) {
       <Card>
         <ResourceLabels labels={plugin.labels} />
         <PluginConfigForm
+          key={formGeneration}
           initialData={plugin}
           onSubmit={handleSubmit}
           isLoading={updatePlugin.isPending}
@@ -207,6 +246,13 @@ function PluginEditor({ session }: { session: EditorSession }) {
           initialProxyGroupIdsLoaded={!needsMembership || allProxies !== undefined}
         />
       </Card>
+
+      {/* Refused concurrent-edit save or delete */}
+      <StaleWriteDialog
+        conflict={conflict}
+        onKeepEditing={() => setConflict(null)}
+        onDiscardAndReload={handleDiscardAndReload}
+      />
 
       {/* Delete confirmation */}
       <ConfirmDialog

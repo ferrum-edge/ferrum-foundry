@@ -118,10 +118,10 @@ describe("TargetForm inside the upstream payload editor", () => {
     await check("Enable active health checks");
     for (const [label, value] of [["Interval (seconds)", "15"], ["Timeout (ms)", "2000"],
       ["Healthy Threshold", "2"], ["Unhealthy Threshold", "4"], ["HTTP Path", "/ready"],
-      ["Healthy Status Codes", "200, nonsense, 204"]]) await fill(inputByLabel(ui.host, label), value);
+      ["Healthy Status Codes", "200, 204"]]) await fill(inputByLabel(ui.host, label), value);
     await check("Use HTTPS for health probes");
     await check("Enable passive health checks");
-    for (const [label, value] of [["Unhealthy Status Codes", "500, nope, 503"],
+    for (const [label, value] of [["Unhealthy Status Codes", "500, 503"],
       ["Unhealthy Window (seconds)", "45"], ["Auto-recovery After (seconds)", "90"],
       ["Max Ejection Percent", "25"]]) await fill(inputByLabel(ui.host, label), value);
     const thresholds = [...ui.host.querySelectorAll("label")].filter((label) => label.textContent === "Unhealthy Threshold");

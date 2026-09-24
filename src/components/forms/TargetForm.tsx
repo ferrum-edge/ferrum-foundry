@@ -6,6 +6,7 @@ import { useState, type KeyboardEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
+import { numberDraftFromInput, numberDraftText, type NumberDraft } from "@/lib/formDrafts";
 import type { UpstreamTarget } from "@/api/types";
 
 /* ------------------------------------------------------------------ */
@@ -24,8 +25,9 @@ export interface TargetFormProps {
 
 export function TargetForm({ initialData, onSubmit, onCancel }: TargetFormProps) {
   const [host, setHost] = useState(initialData?.host ?? "");
-  const [port, setPort] = useState(initialData?.port ?? 80);
-  const [weight, setWeight] = useState(initialData?.weight ?? 1);
+  // `""` while cleared, so editing never inserts a `0`; validate() rejects it.
+  const [port, setPort] = useState<NumberDraft>(initialData?.port ?? 80);
+  const [weight, setWeight] = useState<NumberDraft>(initialData?.weight ?? 1);
   const [path, setPath] = useState(initialData?.path ?? "");
   const [locality, setLocality] = useState(initialData?.locality ?? "");
   const [tags, setTags] = useState<Record<string, string>>(initialData?.tags ?? {});
@@ -39,7 +41,8 @@ export function TargetForm({ initialData, onSubmit, onCancel }: TargetFormProps)
     const errs: Record<string, string> = {};
     if (!host.trim()) errs.host = "Host is required";
     if (!port || port <= 0 || port > 65535) errs.port = "Valid port required (1-65535)";
-    if (weight < 0) errs.weight = "Weight must be >= 0";
+    if (weight === "") errs.weight = "Weight is required";
+    else if (weight < 0) errs.weight = "Weight must be >= 0";
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -50,8 +53,8 @@ export function TargetForm({ initialData, onSubmit, onCancel }: TargetFormProps)
     const target: UpstreamTarget = {
       ...(initialData ?? {}),
       host: host.trim(),
-      port,
-      weight,
+      port: Number(port),
+      weight: Number(weight),
       path: path.trim() || null,
       locality: locality.trim() || null,
       tags,
@@ -129,16 +132,16 @@ export function TargetForm({ initialData, onSubmit, onCancel }: TargetFormProps)
         <Input
           label="Port"
           type="number"
-          value={String(port)}
-          onChange={(e) => setPort(Number(e.target.value))}
+          value={numberDraftText(port)}
+          onChange={(e) => setPort(numberDraftFromInput(e.target.value))}
           placeholder="80"
           error={errors.port}
         />
         <Input
           label="Weight"
           type="number"
-          value={String(weight)}
-          onChange={(e) => setWeight(Number(e.target.value))}
+          value={numberDraftText(weight)}
+          onChange={(e) => setWeight(numberDraftFromInput(e.target.value))}
           placeholder="1"
           error={errors.weight}
         />

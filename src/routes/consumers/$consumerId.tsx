@@ -9,7 +9,6 @@ import {
   useConsumer,
   useUpdateConsumer,
   useDeleteConsumer,
-  useAllConsumers,
 } from "@/hooks/useConsumers";
 import { useAllProxies } from "@/hooks/useProxies";
 import { useAllPluginConfigs } from "@/hooks/usePlugins";
@@ -36,6 +35,10 @@ import { useCapabilities } from "@/stores/capabilities";
 import { ReadOnlySurface, WriteAction } from "@/components/shared/CapabilityGate";
 import type { CapabilityVerdict } from "@/lib/capabilities";
 import type { ConsumerCreate, Consumer } from "@/api/types";
+import * as consumersApi from "@/api/consumers";
+import { isStaleResourceError, type StaleResourceDetail } from "@/api/conditionalWrite";
+import { StaleWriteDialog } from "@/components/shared/StaleWriteDialog";
+import { useEditBaseline } from "@/hooks/useEditBaseline";
 
 /* ================================================================== */
 /*  ConsumerDetailPage                                                 */
@@ -76,28 +79,39 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
   const { data: consumer, isLoading, isFetching, dataUpdatedAt } = resourceQuery;
 
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [conflict, setConflict] = useState<StaleResourceDetail | null>(null);
+  // Bumped only by an explicit "discard my draft and reload".
+  const [formGeneration, setFormGeneration] = useState(0);
 
-  const proxiesQuery = useAllProxies();
-  const pluginsQuery = useAllPluginConfigs();
-  const consumersQuery = useAllConsumers();
+  // The Details form's baseline: the consumer it was seeded with, advanced
+  // only by an accepted response. See `docs/concurrent-edits.md`.
+  const baseline = useEditBaseline(consumer, consumersApi.consumerWriteGuard);
+
+  // The matched-proxy answer needs every proxy and plugin config in the
+  // namespace. Opening a consumer to edit its username must not pay for
+  // that, so both traversals start when the Matched Proxies tab is first
+  // opened and stay enabled afterwards (docs/data-loading.md).
+  const [policyRequested, setPolicyRequested] = useState(false);
+  const openTab = (tab: string) => {
+    if (tab === "proxies") setPolicyRequested(true);
+  };
+  const proxiesQuery = useAllProxies(policyRequested);
+  const pluginsQuery = useAllPluginConfigs(policyRequested);
   const { data: allProxies } = proxiesQuery;
   const { data: allPluginConfigs } = pluginsQuery;
-  const { data: allConsumers } = consumersQuery;
-  const policyQueries = [resourceQuery, proxiesQuery, pluginsQuery, consumersQuery];
-  const policyKnown = policyQueries.every((query) => resolveReadState(query) === 'loaded');
+  const policyQueries = [resourceQuery, proxiesQuery, pluginsQuery];
+  const policyKnown =
+    policyRequested && policyQueries.every((query) => resolveReadState(query) === 'loaded');
 
   const authorizedProxies = useMemo(() => {
     if (!policyKnown || !consumer || !allProxies || !allPluginConfigs) return [];
-    const consumers = allConsumers?.some((candidate) => candidate.id === consumer.id)
-      ? allConsumers
-      : [...(allConsumers ?? []), consumer];
 
     return allProxies
       .map((proxy) => {
-        const analysis = analyzeProxyPolicy(proxy, allPluginConfigs, consumers);
-        const result = analysis.consumers.find(
-          (candidate) => candidate.consumer.id === consumer.id,
-        );
+        // A consumer's access depends on nobody else, so analyze this one
+        // consumer rather than every consumer in the namespace per proxy.
+        const analysis = analyzeProxyPolicy(proxy, allPluginConfigs, [consumer]);
+        const result = analysis.consumers[0];
         if (!result || (result.decision !== "allowed" && result.decision !== "conditional")) {
           return null;
         }
@@ -109,7 +123,7 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
         };
       })
       .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
-  }, [consumer, allProxies, allPluginConfigs, allConsumers, policyKnown]);
+  }, [consumer, allProxies, allPluginConfigs, policyKnown]);
 
   /* ---------- Handlers ---------- */
 
@@ -117,26 +131,50 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
   // that outlives it is discarded with a toast rather than acting on the
   // consumer now on screen.
   const handleSubmit = session.bind(async (data: ConsumerCreate) => {
-    if (!capability.allowed) return;
+    if (!consumer || !capability.allowed) return;
     try {
-      await updateConsumer.mutateAsync({
+      const updated = await updateConsumer.mutateAsync({
         id: consumerId,
         data,
+        guard: baseline.current(),
       });
+      baseline.adopt(updated);
       toast("success", "Consumer updated successfully");
     } catch (err: unknown) {
+      if (isStaleResourceError(err)) {
+        setConflict(err.detail);
+        return;
+      }
       const message = await getApiErrorMessage(err, "Failed to update consumer");
       toast("error", message);
     }
   });
 
+  /** Deliberate restart: drop the draft and reseed the form from the gateway. */
+  const handleDiscardAndReload = async () => {
+    setConflict(null);
+    const refreshed = await resourceQuery.refetch();
+    if (refreshed.data) baseline.adopt(refreshed.data);
+    setFormGeneration((generation) => generation + 1);
+  };
+
   const handleDelete = session.bind(async () => {
-    if (!capability.allowed) return;
+    if (!consumer || !capability.allowed) return;
     try {
-      await deleteConsumer.mutateAsync(consumerId);
+      // Judged against the consumer this page is displaying — see the proxy
+      // detail page.
+      await deleteConsumer.mutateAsync({
+        id: consumerId,
+        guard: consumersApi.consumerWriteGuard(consumer),
+      });
       toast("success", "Consumer deleted successfully");
       navigate({ to: "/consumers" });
     } catch (err: unknown) {
+      if (isStaleResourceError(err)) {
+        setDeleteOpen(false);
+        setConflict(err.detail);
+        return;
+      }
       const message = await getApiErrorMessage(err, "Failed to delete consumer");
       toast("error", message);
     }
@@ -215,7 +253,7 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
       <ResourceLabels labels={consumer.labels} />
 
       {/* Tabs */}
-      <Tabs defaultValue="details">
+      <Tabs defaultValue="details" onValueChange={openTab}>
         <TabsList>
           <TabsTrigger value="details">Details</TabsTrigger>
           <TabsTrigger value="credentials">Credentials</TabsTrigger>
@@ -226,9 +264,10 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
         </TabsList>
 
         {/* ── Details Tab ── */}
-        <TabsContent value="details">
+        <TabsContent value="details" keepMounted>
           <Card>
             <ConsumerForm
+              key={formGeneration}
               initialData={consumer}
               onSubmit={handleSubmit}
               isLoading={updateConsumer.isPending}
@@ -238,7 +277,7 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
         </TabsContent>
 
         {/* ── Credentials Tab ── */}
-        <TabsContent value="credentials">
+        <TabsContent value="credentials" keepMounted>
           <div className="space-y-6">
             <ReadOnlySurface
               verdict={credentialCapability}
@@ -266,9 +305,9 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
           <Card>
             <AclGroupsManager
               session={session}
-              groups={consumer.acl_groups}
               consumer={consumer}
               capability={capability}
+              onConflict={setConflict}
             />
           </Card>
         </TabsContent>
@@ -349,6 +388,13 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
       </Tabs>
 
       {/* Delete confirmation */}
+      {/* Refused concurrent-edit save or delete */}
+      <StaleWriteDialog
+        conflict={conflict}
+        onKeepEditing={() => setConflict(null)}
+        onDiscardAndReload={handleDiscardAndReload}
+      />
+
       <ConfirmDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
@@ -369,15 +415,16 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
 
 function AclGroupsManager({
   session,
-  groups,
   consumer,
   capability,
+  onConflict,
 }: {
   session: EditorSession;
-  groups: string[];
-  consumer: Pick<Consumer, "username" | "custom_id">;
+  consumer: Consumer;
   capability: CapabilityVerdict;
+  onConflict: (detail: StaleResourceDetail) => void;
 }) {
+  const groups = consumer.acl_groups;
   const consumerId = session.identity.resourceId;
   const { toast } = useToast();
   const updateConsumer = useUpdateConsumer();
@@ -393,6 +440,9 @@ function AclGroupsManager({
     }
 
     try {
+      // The new list is computed from this render's consumer, so the guard is
+      // built from the same object: a group change committed since is refused
+      // rather than reverted (see `upstreams.targetsWriteGuard`).
       await updateConsumer.mutateAsync({
         id: consumerId,
         data: {
@@ -400,10 +450,15 @@ function AclGroupsManager({
           ...(consumer.custom_id && { custom_id: consumer.custom_id }),
           acl_groups: [...groups, trimmed],
         },
+        guard: consumersApi.consumerWriteGuard(consumer),
       });
       toast("success", `Added group "${trimmed}"`);
       setNewGroup("");
     } catch (err: unknown) {
+      if (isStaleResourceError(err)) {
+        onConflict(err.detail);
+        return;
+      }
       const message = await getApiErrorMessage(err, "Failed to add group");
       toast("error", message);
     }
@@ -424,9 +479,14 @@ function AclGroupsManager({
           ...(consumer.custom_id && { custom_id: consumer.custom_id }),
           acl_groups: groups.filter((g) => g !== group),
         },
+        guard: consumersApi.consumerWriteGuard(consumer),
       });
       toast("success", `Removed group "${group}"`);
     } catch (err: unknown) {
+      if (isStaleResourceError(err)) {
+        onConflict(err.detail);
+        return;
+      }
       const message = await getApiErrorMessage(err, "Failed to remove group");
       toast("error", message);
     }

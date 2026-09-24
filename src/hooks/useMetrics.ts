@@ -10,12 +10,12 @@ import { useNamespace } from "@/stores/namespace";
 /** 5 minutes in ms. */
 const FIVE_MINUTES = 300_000;
 
-export function useHealth(refetchInterval?: number) {
+export function useHealth(refetchInterval?: number, staleTime = 30_000) {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["health", scope.namespace],
     queryFn: () => metrics.getHealth(queryScope(scope)),
-    staleTime: 30_000,
+    staleTime,
     refetchInterval,
   });
 }

@@ -119,7 +119,7 @@ test.describe("first route, first authenticated request", () => {
     expect(open.status, "a new route should serve traffic immediately").toBe(200);
   });
 
-  test("attaching key authentication takes two steps, and the UI does both", async ({
+  test("key authentication created in the UI is attached to its proxy", async ({
     adminPage: page,
     gateway,
   }) => {
@@ -147,9 +147,10 @@ test.describe("first route, first authenticated request", () => {
     expect(match, "a key_auth configuration bound to this proxy").toBeTruthy();
     created.pluginId = match!.id;
 
-    // The second step is the one a hand-written script forgets: a
-    // proxy-scoped configuration is not attached until the proxy's own
-    // association list names it. Creating it through the UI does both.
+    // A proxy-scoped configuration runs only once the proxy's own association
+    // list names it. Edge 0.9.x writes that association on create, and the UI
+    // reads it back and writes it only if it is missing; either way the proxy
+    // must list it, or the route stays open while everything looks configured.
     const proxy = await gateway.get<{ plugins: { plugin_config_id: string }[] }>(
       `/proxies/${created.proxyId}`,
     );

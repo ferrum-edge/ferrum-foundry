@@ -13,6 +13,17 @@ import { CollapsibleSection } from "./CollapsibleSection";
 import { FormValidationSummary } from "./FormValidationSummary";
 import { TargetForm } from "./TargetForm";
 import { useCollapsibleFormValidation } from "@/lib/collapsedFormValidation";
+import {
+  missingNumberError,
+  numberDraftFromInput,
+  numberDraftText,
+  resolveNumberDrafts,
+  resolveStatusCodeListDraft,
+  statusCodeListDraft,
+  type NumberDraft,
+  type StatusCodeListDraft,
+  type WithNumberDrafts,
+} from "@/lib/formDrafts";
 import { ReadOnlySurface } from "@/components/shared/CapabilityGate";
 import type { CapabilityVerdict } from "@/lib/capabilities";
 import type {
@@ -27,11 +38,29 @@ import type {
 } from "@/api/types";
 
 const UPSTREAM_COLLAPSIBLE_SECTIONS = [
-  { id: "health-checks", errorKeys: [] },
-  { id: "hash-cookie", errorKeys: [] },
+  {
+    id: "health-checks",
+    errorKeys: [
+      "active_interval_seconds",
+      "active_timeout_ms",
+      "active_healthy_threshold",
+      "active_unhealthy_threshold",
+      "healthy_status_codes",
+      "unhealthy_status_codes",
+      "passive_unhealthy_threshold",
+      "passive_unhealthy_window_seconds",
+      "passive_healthy_after_seconds",
+    ],
+  },
+  { id: "hash-cookie", errorKeys: ["cookie_ttl_seconds"] },
   {
     id: "service-discovery",
-    errorKeys: ["consul_address", "sd_service_name"],
+    errorKeys: [
+      "consul_address",
+      "sd_service_name",
+      "sd_poll_interval_seconds",
+      "sd_default_weight",
+    ],
   },
   { id: "subsets", errorKeys: [] },
   { id: "backend-tls", errorKeys: [] },
@@ -112,6 +141,47 @@ function Checkbox({
 }
 
 /* ------------------------------------------------------------------ */
+/*  Numeric drafts                                                     */
+/* ------------------------------------------------------------------ */
+
+// Required numeric fields hold `""` while cleared so the input never snaps
+// to `0`; validate() rejects an empty value before anything is sent.
+const ACTIVE_HC_NUMBER_FIELDS = [
+  ["interval_seconds", "Interval"],
+  ["timeout_ms", "Timeout"],
+  ["healthy_threshold", "Healthy threshold"],
+  ["unhealthy_threshold", "Unhealthy threshold"],
+] as const;
+const ACTIVE_HC_NUMBER_KEYS = ACTIVE_HC_NUMBER_FIELDS.map(([key]) => key);
+type ActiveHealthCheckDraft = WithNumberDrafts<
+  ActiveHealthCheck,
+  (typeof ACTIVE_HC_NUMBER_KEYS)[number]
+>;
+
+const PASSIVE_HC_NUMBER_FIELDS = [
+  ["unhealthy_threshold", "Unhealthy threshold"],
+  ["unhealthy_window_seconds", "Unhealthy window"],
+  ["healthy_after_seconds", "Auto-recovery delay"],
+] as const;
+const PASSIVE_HC_NUMBER_KEYS = PASSIVE_HC_NUMBER_FIELDS.map(([key]) => key);
+type PassiveHealthCheckDraft = WithNumberDrafts<
+  PassiveHealthCheck,
+  (typeof PASSIVE_HC_NUMBER_KEYS)[number]
+>;
+
+type HashOnCookieConfigDraft = WithNumberDrafts<HashOnCookieConfig, "ttl_seconds">;
+
+/**
+ * A status-code list resolved for submit. A hidden field (non-HTTP probe)
+ * that does not parse keeps its seeded list; validate() has already rejected
+ * an invalid visible field.
+ */
+function statusCodesForSubmit(draft: StatusCodeListDraft): number[] | undefined {
+  const result = resolveStatusCodeListDraft(draft);
+  return result.ok ? result.codes : draft.seedCodes;
+}
+
+/* ------------------------------------------------------------------ */
 /*  Default builders                                                   */
 /* ------------------------------------------------------------------ */
 
@@ -171,16 +241,24 @@ export function UpstreamForm({
 
   /* ---------- Health Checks ---------- */
   const [activeHcEnabled, setActiveHcEnabled] = useState(!!initialData?.health_checks?.active);
-  const [activeHc, setActiveHc] = useState<ActiveHealthCheck>(
+  const [activeHc, setActiveHc] = useState<ActiveHealthCheckDraft>(
     initialData?.health_checks?.active ?? defaultActiveHealthCheck(),
   );
+  // Status-code lists keep the operator's raw text (commas and unfinished
+  // tokens included) and are parsed on blur and submit, never per keystroke.
+  const [healthyCodes, setHealthyCodes] = useState(() =>
+    statusCodeListDraft(activeHc.healthy_status_codes),
+  );
   const [passiveHcEnabled, setPassiveHcEnabled] = useState(!!initialData?.health_checks?.passive);
-  const [passiveHc, setPassiveHc] = useState<PassiveHealthCheck>(
+  const [passiveHc, setPassiveHc] = useState<PassiveHealthCheckDraft>(
     initialData?.health_checks?.passive ?? defaultPassiveHealthCheck(),
+  );
+  const [unhealthyCodes, setUnhealthyCodes] = useState(() =>
+    statusCodeListDraft(passiveHc.unhealthy_status_codes),
   );
 
   /* ---------- Hash Cookie Config ---------- */
-  const [cookieConfig, setCookieConfig] = useState<HashOnCookieConfig>({
+  const [cookieConfig, setCookieConfig] = useState<HashOnCookieConfigDraft>({
     path: initialData?.hash_on_cookie_config?.path ?? "/",
     ttl_seconds: initialData?.hash_on_cookie_config?.ttl_seconds ?? 3600,
     domain: initialData?.hash_on_cookie_config?.domain,
@@ -249,11 +327,45 @@ export function UpstreamForm({
   /* ---------- Validation ---------- */
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  const isHttpProbe = (activeHc.probe_type ?? "http") === "http";
+
   const validate = (): boolean => {
     const errs: Record<string, string> = {};
     if (targets.length === 0 && !sdEnabled) errs.targets = "At least one target is required (unless service discovery is enabled)";
     if (algorithm === "consistent_hashing" && !hashOn.trim()) {
       errs.hash_on = "Hash key is required for consistent hashing";
+    }
+    if (activeHcEnabled) {
+      for (const [key, label] of ACTIVE_HC_NUMBER_FIELDS) {
+        const error = missingNumberError(activeHc[key], label);
+        if (error) errs[`active_${key}`] = error;
+      }
+      const codes = resolveStatusCodeListDraft(healthyCodes);
+      if (isHttpProbe && !codes.ok) errs.healthy_status_codes = codes.error;
+    }
+    if (passiveHcEnabled) {
+      for (const [key, label] of PASSIVE_HC_NUMBER_FIELDS) {
+        const error = missingNumberError(passiveHc[key], label);
+        if (error) errs[`passive_${key}`] = error;
+      }
+      const codes = resolveStatusCodeListDraft(unhealthyCodes);
+      if (!codes.ok) errs.unhealthy_status_codes = codes.error;
+    }
+    if (hashOn.startsWith("cookie:")) {
+      const error = missingNumberError(cookieConfig.ttl_seconds, "TTL");
+      if (error) errs.cookie_ttl_seconds = error;
+    }
+    if (sdEnabled) {
+      const pollError = missingNumberError(
+        sdConfig.poll_interval_seconds as NumberDraft | undefined,
+        "Poll interval",
+      );
+      if (pollError) errs.sd_poll_interval_seconds = pollError;
+      const weightError = missingNumberError(
+        sdConfig.default_weight as NumberDraft | undefined,
+        "Default weight",
+      );
+      if (weightError) errs.sd_default_weight = weightError;
     }
     if (sdEnabled && sdProvider === "consul") {
       if (!String(sdConfig.address ?? "").trim()) {
@@ -280,11 +392,24 @@ export function UpstreamForm({
     if (readOnly) return;
     if (!validate()) return;
 
+    // Only called for an enabled check, whose drafts validate() has checked.
+    const buildActive = (): ActiveHealthCheck => {
+      const { healthy_status_codes: _seeded, ...active } =
+        resolveNumberDrafts(activeHc, ACTIVE_HC_NUMBER_KEYS);
+      const codes = statusCodesForSubmit(healthyCodes);
+      return { ...active, ...(codes !== undefined && { healthy_status_codes: codes }) };
+    };
+    const buildPassive = (): PassiveHealthCheck => {
+      const { unhealthy_status_codes: _seeded, ...passive } =
+        resolveNumberDrafts(passiveHc, PASSIVE_HC_NUMBER_KEYS);
+      const codes = statusCodesForSubmit(unhealthyCodes);
+      return { ...passive, ...(codes !== undefined && { unhealthy_status_codes: codes }) };
+    };
     const healthChecks: HealthCheckConfig | undefined =
       activeHcEnabled || passiveHcEnabled
         ? {
-            ...(activeHcEnabled && { active: activeHc }),
-            ...(passiveHcEnabled && { passive: passiveHc }),
+            ...(activeHcEnabled && { active: buildActive() }),
+            ...(passiveHcEnabled && { passive: buildPassive() }),
           }
         : undefined;
 
@@ -292,7 +417,7 @@ export function UpstreamForm({
       hashOn.startsWith("cookie:")
         ? {
             path: cookieConfig.path,
-            ttl_seconds: cookieConfig.ttl_seconds,
+            ttl_seconds: resolveNumberDrafts(cookieConfig, ["ttl_seconds"]).ttl_seconds,
             ...(cookieConfig.domain && { domain: cookieConfig.domain }),
             http_only: cookieConfig.http_only,
             secure: cookieConfig.secure,
@@ -301,19 +426,30 @@ export function UpstreamForm({
           }
         : undefined;
 
+    // `sdConfig` is seeded from the stored provider object and reset when the
+    // provider changes. `service_discovery` is replaced wholesale on save, so
+    // every key the form does not model is carried through under the modelled
+    // ones rather than erased by the next unrelated edit.
+    const { default_weight: _defaultWeight, ...providerExtras } = sdConfig;
     const serviceDiscovery: ServiceDiscoveryConfig | undefined = sdEnabled
       ? {
           provider: sdProvider as ServiceDiscoveryConfig["provider"],
           ...(sdProvider === "dns_sd" && {
             dns_sd: {
+              ...providerExtras,
               service_name: sdServiceName,
               poll_interval_seconds: (sdConfig.poll_interval_seconds as number) ?? 30,
             },
           }),
           ...(sdProvider === "kubernetes" && {
             kubernetes: {
+              ...providerExtras,
               service_name: sdServiceName,
               namespace: (sdConfig.namespace as string) || undefined,
+              address_type:
+                sdConfig.address_type === "IPv4" || sdConfig.address_type === "IPv6"
+                  ? sdConfig.address_type
+                  : undefined,
               port_name: (sdConfig.port_name as string) || undefined,
               label_selector: (sdConfig.label_selector as string) || undefined,
               poll_interval_seconds: (sdConfig.poll_interval_seconds as number) ?? 30,
@@ -321,6 +457,7 @@ export function UpstreamForm({
           }),
           ...(sdProvider === "consul" && {
             consul: {
+              ...providerExtras,
               address: String(sdConfig.address ?? "").trim(),
               service_name: sdServiceName.trim(),
               datacenter: (sdConfig.datacenter as string) || undefined,
@@ -332,6 +469,7 @@ export function UpstreamForm({
           }),
           ...(sdProvider === "mesh" && {
             mesh: {
+              ...providerExtras,
               service_name: sdServiceName,
               namespace: (sdConfig.namespace as string) || undefined,
               port: (sdConfig.port as number) || undefined,
@@ -416,6 +554,20 @@ export function UpstreamForm({
 
   const updateSdConfig = (key: string, value: unknown) => {
     setSdConfig((prev) => ({ ...prev, [key]: value }));
+  };
+
+  /* ---------- Status-code list helpers ---------- */
+
+  // Validate on blur so a bad token is reported as soon as the operator
+  // leaves the field; the text itself is never rewritten.
+  const checkStatusCodes = (key: string, draft: StatusCodeListDraft) => {
+    const result = resolveStatusCodeListDraft(draft);
+    setErrors((prev) => {
+      const next = { ...prev };
+      if (result.ok) delete next[key];
+      else next[key] = result.error;
+      return next;
+    });
   };
 
   /* ---------- Helpers ---------- */
@@ -590,26 +742,38 @@ export function UpstreamForm({
               <Input
                 label="Interval (seconds)"
                 type="number"
-                value={String(activeHc.interval_seconds ?? 10)}
-                onChange={(e) => setActiveHc({ ...activeHc, interval_seconds: Number(e.target.value) })}
+                value={numberDraftText(activeHc.interval_seconds ?? 10)}
+                onChange={(e) =>
+                  setActiveHc({ ...activeHc, interval_seconds: numberDraftFromInput(e.target.value) })
+                }
+                error={errors.active_interval_seconds}
               />
               <Input
                 label="Timeout (ms)"
                 type="number"
-                value={String(activeHc.timeout_ms ?? 5000)}
-                onChange={(e) => setActiveHc({ ...activeHc, timeout_ms: Number(e.target.value) })}
+                value={numberDraftText(activeHc.timeout_ms ?? 5000)}
+                onChange={(e) =>
+                  setActiveHc({ ...activeHc, timeout_ms: numberDraftFromInput(e.target.value) })
+                }
+                error={errors.active_timeout_ms}
               />
               <Input
                 label="Healthy Threshold"
                 type="number"
-                value={String(activeHc.healthy_threshold ?? 3)}
-                onChange={(e) => setActiveHc({ ...activeHc, healthy_threshold: Number(e.target.value) })}
+                value={numberDraftText(activeHc.healthy_threshold ?? 3)}
+                onChange={(e) =>
+                  setActiveHc({ ...activeHc, healthy_threshold: numberDraftFromInput(e.target.value) })
+                }
+                error={errors.active_healthy_threshold}
               />
               <Input
                 label="Unhealthy Threshold"
                 type="number"
-                value={String(activeHc.unhealthy_threshold ?? 3)}
-                onChange={(e) => setActiveHc({ ...activeHc, unhealthy_threshold: Number(e.target.value) })}
+                value={numberDraftText(activeHc.unhealthy_threshold ?? 3)}
+                onChange={(e) =>
+                  setActiveHc({ ...activeHc, unhealthy_threshold: numberDraftFromInput(e.target.value) })
+                }
+                error={errors.active_unhealthy_threshold}
               />
               {(activeHc.probe_type ?? "http") === "http" && (
                 <>
@@ -621,18 +785,15 @@ export function UpstreamForm({
                   />
                   <Input
                     label="Healthy Status Codes"
-                    value={(activeHc.healthy_status_codes ?? []).join(", ")}
-                    onChange={(e) =>
-                      setActiveHc({
-                        ...activeHc,
-                        healthy_status_codes: e.target.value
-                          .split(",")
-                          .map((s) => parseInt(s.trim(), 10))
-                          .filter((n) => !isNaN(n)),
-                      })
-                    }
+                    value={healthyCodes.text}
+                    onChange={(e) => {
+                      const text = e.target.value;
+                      setHealthyCodes((prev) => ({ ...prev, text }));
+                    }}
+                    onBlur={() => checkStatusCodes("healthy_status_codes", healthyCodes)}
                     placeholder="200, 302"
                     helpText="Comma-separated HTTP status codes considered healthy"
+                    error={errors.healthy_status_codes}
                   />
                   <Checkbox
                     label="Use HTTPS for health probes"
@@ -676,37 +837,43 @@ export function UpstreamForm({
             <div className="space-y-4 pl-6 border-l-2 border-border/50">
               <Input
                 label="Unhealthy Status Codes"
-                value={(passiveHc.unhealthy_status_codes ?? []).join(", ")}
-                onChange={(e) =>
-                  setPassiveHc({
-                    ...passiveHc,
-                    unhealthy_status_codes: e.target.value
-                      .split(",")
-                      .map((s) => parseInt(s.trim(), 10))
-                      .filter((n) => !isNaN(n)),
-                  })
-                }
+                value={unhealthyCodes.text}
+                onChange={(e) => {
+                  const text = e.target.value;
+                  setUnhealthyCodes((prev) => ({ ...prev, text }));
+                }}
+                onBlur={() => checkStatusCodes("unhealthy_status_codes", unhealthyCodes)}
                 placeholder="500, 502, 503"
                 helpText="Comma-separated HTTP status codes"
+                error={errors.unhealthy_status_codes}
               />
               <Input
                 label="Unhealthy Threshold"
                 type="number"
-                value={String(passiveHc.unhealthy_threshold ?? 3)}
-                onChange={(e) => setPassiveHc({ ...passiveHc, unhealthy_threshold: Number(e.target.value) })}
+                value={numberDraftText(passiveHc.unhealthy_threshold ?? 3)}
+                onChange={(e) =>
+                  setPassiveHc({ ...passiveHc, unhealthy_threshold: numberDraftFromInput(e.target.value) })
+                }
+                error={errors.passive_unhealthy_threshold}
               />
               <Input
                 label="Unhealthy Window (seconds)"
                 type="number"
-                value={String(passiveHc.unhealthy_window_seconds ?? 30)}
-                onChange={(e) => setPassiveHc({ ...passiveHc, unhealthy_window_seconds: Number(e.target.value) })}
+                value={numberDraftText(passiveHc.unhealthy_window_seconds ?? 30)}
+                onChange={(e) =>
+                  setPassiveHc({ ...passiveHc, unhealthy_window_seconds: numberDraftFromInput(e.target.value) })
+                }
+                error={errors.passive_unhealthy_window_seconds}
               />
               <Input
                 label="Auto-recovery After (seconds)"
                 type="number"
-                value={String(passiveHc.healthy_after_seconds ?? 30)}
-                onChange={(e) => setPassiveHc({ ...passiveHc, healthy_after_seconds: Number(e.target.value) })}
+                value={numberDraftText(passiveHc.healthy_after_seconds ?? 30)}
+                onChange={(e) =>
+                  setPassiveHc({ ...passiveHc, healthy_after_seconds: numberDraftFromInput(e.target.value) })
+                }
                 helpText="Seconds until an ejected target is restored to rotation. 0 disables auto-recovery."
+                error={errors.passive_healthy_after_seconds}
               />
               <Input
                 label="Max Ejection Percent"
@@ -740,8 +907,11 @@ export function UpstreamForm({
             <Input
               label="TTL (seconds)"
               type="number"
-              value={String(cookieConfig.ttl_seconds ?? "")}
-              onChange={(e) => setCookieConfig({ ...cookieConfig, ttl_seconds: Number(e.target.value) })}
+              value={numberDraftText(cookieConfig.ttl_seconds)}
+              onChange={(e) =>
+                setCookieConfig({ ...cookieConfig, ttl_seconds: numberDraftFromInput(e.target.value) })
+              }
+              error={errors.cookie_ttl_seconds}
             />
             <Input
               label="Domain"
@@ -808,8 +978,11 @@ export function UpstreamForm({
                 <Input
                   label="Poll Interval (seconds)"
                   type="number"
-                  value={String((sdConfig.poll_interval_seconds as number) ?? 30)}
-                  onChange={(e) => updateSdConfig("poll_interval_seconds", Number(e.target.value))}
+                  value={numberDraftText((sdConfig.poll_interval_seconds as NumberDraft | undefined) ?? 30)}
+                  onChange={(e) =>
+                    updateSdConfig("poll_interval_seconds", numberDraftFromInput(e.target.value))
+                  }
+                  error={errors.sd_poll_interval_seconds}
                 />
               )}
 
@@ -820,6 +993,17 @@ export function UpstreamForm({
                     value={String(sdConfig.namespace ?? "")}
                     onChange={(e) => updateSdConfig("namespace", e.target.value)}
                     placeholder="default"
+                  />
+                  <Select
+                    label="Address Family"
+                    value={String(sdConfig.address_type ?? "auto")}
+                    onValueChange={(v) => updateSdConfig("address_type", v === "auto" ? undefined : v)}
+                    options={[
+                      { value: "auto", label: "Automatic (IPv4 when available)" },
+                      { value: "IPv4", label: "IPv4 only" },
+                      { value: "IPv6", label: "IPv6 only" },
+                    ]}
+                    helpText="EndpointSlice IP family. An explicit family never falls back to the other."
                   />
                   <Input
                     label="Port Name"
@@ -836,8 +1020,11 @@ export function UpstreamForm({
                   <Input
                     label="Poll Interval (seconds)"
                     type="number"
-                    value={String((sdConfig.poll_interval_seconds as number) ?? 30)}
-                    onChange={(e) => updateSdConfig("poll_interval_seconds", Number(e.target.value))}
+                    value={numberDraftText((sdConfig.poll_interval_seconds as NumberDraft | undefined) ?? 30)}
+                    onChange={(e) =>
+                      updateSdConfig("poll_interval_seconds", numberDraftFromInput(e.target.value))
+                    }
+                    error={errors.sd_poll_interval_seconds}
                   />
                 </>
               )}
@@ -872,8 +1059,11 @@ export function UpstreamForm({
                   <Input
                     label="Poll Interval (seconds)"
                     type="number"
-                    value={String((sdConfig.poll_interval_seconds as number) ?? 30)}
-                    onChange={(e) => updateSdConfig("poll_interval_seconds", Number(e.target.value))}
+                    value={numberDraftText((sdConfig.poll_interval_seconds as NumberDraft | undefined) ?? 30)}
+                    onChange={(e) =>
+                      updateSdConfig("poll_interval_seconds", numberDraftFromInput(e.target.value))
+                    }
+                    error={errors.sd_poll_interval_seconds}
                   />
                 </>
               )}
@@ -913,8 +1103,11 @@ export function UpstreamForm({
                   <Input
                     label="Poll Interval (seconds)"
                     type="number"
-                    value={String((sdConfig.poll_interval_seconds as number) ?? 30)}
-                    onChange={(e) => updateSdConfig("poll_interval_seconds", Number(e.target.value))}
+                    value={numberDraftText((sdConfig.poll_interval_seconds as NumberDraft | undefined) ?? 30)}
+                    onChange={(e) =>
+                      updateSdConfig("poll_interval_seconds", numberDraftFromInput(e.target.value))
+                    }
+                    error={errors.sd_poll_interval_seconds}
                   />
                 </>
               )}
@@ -922,9 +1115,10 @@ export function UpstreamForm({
               <Input
                 label="Default Weight"
                 type="number"
-                value={String((sdConfig.default_weight as number) ?? 1)}
-                onChange={(e) => updateSdConfig("default_weight", Number(e.target.value))}
+                value={numberDraftText((sdConfig.default_weight as NumberDraft | undefined) ?? 1)}
+                onChange={(e) => updateSdConfig("default_weight", numberDraftFromInput(e.target.value))}
                 helpText="Default weight for discovered targets"
+                error={errors.sd_default_weight}
               />
               <Input
                 label="Maximum Stale Age (seconds)"

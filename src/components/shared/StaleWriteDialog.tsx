@@ -24,7 +24,8 @@ export interface StaleWriteDialogProps {
 
 /**
  * Shown when a full-replacement save was refused because the resource changed
- * on the gateway after this editor opened it.
+ * on the gateway after this editor opened it — by Foundry's verification read,
+ * or by the gateway's own `If-Match` precondition.
  *
  * Three rules this dialog exists to keep:
  *
@@ -56,21 +57,37 @@ export function StaleWriteDialog({
   const conflicting = differences.filter(
     (difference) => difference.changedUpstream && difference.changedLocally,
   );
+  const isDelete = conflict.operation === "delete";
+  // A refused delete has no draft column: nothing about the resource was
+  // going to be written, only removed.
+  const columns = isDelete
+    ? "grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)]"
+    : "grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]";
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onKeepEditing(); }}>
       <DialogContent className="max-w-3xl">
         <DialogTitle>This {conflict.resource} changed after you opened it</DialogTitle>
-        <DialogDescription className="mt-2">
-          Your changes were <strong>not</strong> saved and nothing was sent to the
-          gateway.{" "}
-          <span className="font-mono">{conflict.id}</span> in namespace{" "}
-          <span className="font-mono">{conflict.namespace}</span> was written after
-          this editor opened — by another session, another tool, or another tab of
-          this page such as the upstream Targets tab. A save here replaces the
-          whole {conflict.resource}, so submitting your draft would have reverted
-          that change.
-        </DialogDescription>
+        {isDelete ? (
+          <DialogDescription className="mt-2">
+            It was <strong>not</strong> deleted.{" "}
+            <span className="font-mono">{conflict.id}</span> in namespace{" "}
+            <span className="font-mono">{conflict.namespace}</span> was written after
+            this page loaded — by another session, another tool, or another tab of
+            this page. Review what it holds now before deciding to delete it.
+          </DialogDescription>
+        ) : (
+          <DialogDescription className="mt-2">
+            Your changes were <strong>not</strong> saved and nothing from this draft
+            was written to the gateway.{" "}
+            <span className="font-mono">{conflict.id}</span> in namespace{" "}
+            <span className="font-mono">{conflict.namespace}</span> was written after
+            this editor opened — by another session, another tool, or another tab of
+            this page such as the upstream Targets tab. A save here replaces the
+            whole {conflict.resource}, so submitting your draft would have reverted
+            that change.
+          </DialogDescription>
+        )}
 
         {conflicting.length > 0 && (
           <p className="mt-3 text-sm text-warning">
@@ -80,11 +97,11 @@ export function StaleWriteDialog({
         )}
 
         <div className="mt-4 border border-border rounded-lg overflow-hidden">
-          <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3 px-4 py-2 bg-bg-card border-b border-border text-text-muted text-xs font-semibold uppercase tracking-wider">
+          <div className={`grid ${columns} gap-3 px-4 py-2 bg-bg-card border-b border-border text-text-muted text-xs font-semibold uppercase tracking-wider`}>
             <span>Field</span>
             <span>When you opened it</span>
             <span>On the gateway now</span>
-            <span>Your draft</span>
+            {!isDelete && <span>Your draft</span>}
           </div>
           <div className="max-h-[320px] overflow-auto divide-y divide-border/50">
             {differences.length === 0 ? (
@@ -96,7 +113,7 @@ export function StaleWriteDialog({
               differences.map((difference) => (
                 <div
                   key={difference.field}
-                  className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3 px-4 py-2.5 text-xs"
+                  className={`grid ${columns} gap-3 px-4 py-2.5 text-xs`}
                 >
                   <span className="font-mono text-text-primary break-all">
                     {difference.field}
@@ -116,30 +133,39 @@ export function StaleWriteDialog({
                   >
                     {formatBaselineValue(difference.field, difference.current)}
                   </span>
-                  <span
-                    className={`break-all whitespace-pre-wrap ${
-                      difference.changedLocally ? "text-orange" : "text-text-muted"
-                    }`}
-                  >
-                    {formatBaselineValue(difference.field, difference.proposed)}
-                  </span>
+                  {!isDelete && (
+                    <span
+                      className={`break-all whitespace-pre-wrap ${
+                        difference.changedLocally ? "text-orange" : "text-text-muted"
+                      }`}
+                    >
+                      {formatBaselineValue(difference.field, difference.proposed)}
+                    </span>
+                  )}
                 </div>
               ))
             )}
           </div>
         </div>
 
-        <p className="mt-4 text-xs text-text-muted">
-          Your draft is still on the page. Re-apply the changes you still want on
-          top of the current configuration, then save again. Foundry will not
-          resend this body for you.
-        </p>
+        {isDelete ? (
+          <p className="mt-4 text-xs text-text-muted">
+            Reloading shows the current configuration and discards any unsaved
+            edits on this page. Delete again from there if it should still go.
+          </p>
+        ) : (
+          <p className="mt-4 text-xs text-text-muted">
+            Your draft is still on the page. Re-apply the changes you still want on
+            top of the current configuration, then save again. Foundry will not
+            resend this body for you.
+          </p>
+        )}
 
         <div className="flex justify-end gap-3 mt-6">
           <Button variant="danger" onClick={onDiscardAndReload}>
-            Discard my draft and reload
+            {isDelete ? "Reload current version" : "Discard my draft and reload"}
           </Button>
-          <Button onClick={onKeepEditing}>Keep my draft</Button>
+          <Button onClick={onKeepEditing}>{isDelete ? "Close" : "Keep my draft"}</Button>
         </div>
       </DialogContent>
     </Dialog>

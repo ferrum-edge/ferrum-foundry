@@ -56,7 +56,7 @@ describe("consumer full-replace write coordination", () => {
     const metadata = update(scope, "alice", {
       username: "alice", acl_groups: ["new-group"],
       credentials: { keyauth: [{ key: "stale-editor-value" }] },
-    });
+    }, null);
     expect(methods).toEqual([operation === "append" ? "POST" : "DELETE"]);
     finish.release();
     await Promise.all([rotation, metadata]);
@@ -85,8 +85,8 @@ describe("consumer full-replace write coordination", () => {
     const failed = expect(deleteCredentialByIndex(scope, "alice", "keyauth", 0))
       .rejects.toMatchObject({ response: { status: 502 } });
     await started.promise;
-    const queued = update(scope, "alice", { username: "alice" });
-    await update({ namespace: "tenant-b" }, "alice", { username: "alice" });
+    const queued = update(scope, "alice", { username: "alice" }, null);
+    await update({ namespace: "tenant-b" }, "alice", { username: "alice" }, null);
     expect(calls).toEqual(["tenant-a DELETE", "tenant-b GET", "tenant-b PUT"]);
     finish.release();
     await failed;
@@ -99,7 +99,7 @@ describe("consumer full-replace write coordination", () => {
   it("does not PUT if the current credential projection cannot be read", async () => {
     const fetcher = vi.fn(async () => new Response("missing", { status: 404 }));
     vi.stubGlobal("fetch", fetcher);
-    await expect(update(scope, "alice", { username: "alice" }))
+    await expect(update(scope, "alice", { username: "alice" }, null))
       .rejects.toMatchObject({ response: { status: 404 } });
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect((fetcher.mock.calls[0] as unknown as [Request])[0].method).toBe("GET");

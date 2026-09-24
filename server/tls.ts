@@ -38,6 +38,13 @@ for (const [address, prefix, family] of [
   ['240.0.0.0', 4, 'ipv4'],
   ['::', 128, 'ipv6'],
   ['::1', 128, 'ipv6'],
+  // Local-use NAT64 places the IPv4 address at an operator-chosen prefix
+  // length, so it cannot be extracted reliably; the well-known NAT64, 6to4,
+  // and IPv4-compatible forms are judged by their embedded IPv4 address
+  // (`embeddedIpv4`). Discard-only and deprecated site-local round it out.
+  ['64:ff9b:1::', 48, 'ipv6'],
+  ['100::', 64, 'ipv6'],
+  ['fec0::', 10, 'ipv6'],
   ['fc00::', 7, 'ipv6'],
   ['fe80::', 10, 'ipv6'],
   ['ff00::', 8, 'ipv6'],
@@ -59,6 +66,50 @@ function parseAllowedCidrs(values: string[]): BlockList {
   return list;
 }
 
+/** The sixteen bytes of an IPv6 address, or `null` if it is not one. */
+function ipv6Bytes(address: string): number[] | null {
+  let text = address.split('%', 1)[0]!;
+  if (isIP(text) !== 6) return null;
+  // A trailing dotted quad (`::ffff:1.2.3.4`) becomes two hex groups.
+  const dotted = /(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(text);
+  if (dotted) {
+    const [a, b, c, d] = dotted.slice(1).map(Number) as [number, number, number, number];
+    text = `${text.slice(0, dotted.index)}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
+  }
+  const [head, tail] = text.includes('::') ? text.split('::') as [string, string] : [text, undefined];
+  const headGroups = head ? head.split(':') : [];
+  const tailGroups = tail ? tail.split(':') : [];
+  const groups = tail === undefined
+    ? headGroups
+    : [...headGroups, ...Array<string>(8 - headGroups.length - tailGroups.length).fill('0'), ...tailGroups];
+  if (groups.length !== 8) return null;
+  return groups.flatMap((group) => {
+    const value = Number.parseInt(group, 16);
+    return [value >> 8, value & 0xff];
+  });
+}
+
+/**
+ * The IPv4 address an IPv6 address reaches by construction: IPv4-mapped
+ * (`::ffff:0:0/96`), IPv4-compatible (`::/96`), well-known NAT64
+ * (`64:ff9b::/96`, RFC 6052), or 6to4 (`2002::/16`). Judging these by the
+ * embedded address blocks `64:ff9b::a9fe:a9fe` (169.254.169.254) without
+ * also blocking a public origin a DNS64 resolver synthesized.
+ */
+export function embeddedIpv4(address: string): string | null {
+  const bytes = ipv6Bytes(address);
+  if (!bytes) return null;
+  const zero = (from: number, to: number) => bytes.slice(from, to).every((byte) => byte === 0);
+  const quad = (at: number) => bytes.slice(at, at + 4).join('.');
+  if (zero(0, 10) && bytes[10] === 0xff && bytes[11] === 0xff) return quad(12);
+  if (zero(0, 12)) return quad(12);
+  if (bytes[0] === 0x00 && bytes[1] === 0x64 && bytes[2] === 0xff && bytes[3] === 0x9b && zero(4, 12)) {
+    return quad(12);
+  }
+  if (bytes[0] === 0x20 && bytes[1] === 0x02) return quad(2);
+  return null;
+}
+
 function addressIsAllowed(address: string, family: number, config: Config): boolean {
   const type = family === 6 ? 'ipv6' : 'ipv4';
   const targetIsTrustedEnvironmentOrigin = config.adminUrl === config.initialAdminOrigin;
@@ -66,6 +117,10 @@ function addressIsAllowed(address: string, family: number, config: Config): bool
 
   const explicitlyAllowed = parseAllowedCidrs(config.adminAllowedCidrs);
   if (explicitlyAllowed.check(address, type)) return true;
+  if (family === 6) {
+    const ipv4 = embeddedIpv4(address);
+    if (ipv4 !== null) return addressIsAllowed(ipv4, 4, config);
+  }
   return !blockedNetworks.check(address, type);
 }
 

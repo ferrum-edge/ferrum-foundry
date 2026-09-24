@@ -171,7 +171,7 @@ function ProxyEditor({ session }: { session: EditorSession }) {
       toast("success", "Proxy updated successfully");
     } catch (err: unknown) {
       if (isStaleResourceError(err)) {
-        // Nothing was sent and the draft is untouched: hand the operator the
+        // Nothing was written and the draft is untouched: hand the operator the
         // comparison and let them decide. Never resend this body for them.
         setConflict(err.detail);
         return;
@@ -190,12 +190,23 @@ function ProxyEditor({ session }: { session: EditorSession }) {
   };
 
   const handleDelete = session.bind(async () => {
-    if (!capability.allowed) return;
+    if (!proxy || !capability.allowed) return;
     try {
-      await deleteProxy.mutateAsync(proxyId);
+      // The delete is judged against the proxy this page is displaying, so
+      // one that another writer changed since is refused rather than deleted
+      // unseen. This operator's own saves have already advanced it.
+      await deleteProxy.mutateAsync({
+        id: proxyId,
+        guard: proxiesApi.proxyWriteGuard(proxy),
+      });
       toast("success", "Proxy deleted successfully");
       navigate({ to: "/proxies" });
     } catch (err: unknown) {
+      if (isStaleResourceError(err)) {
+        setDeleteOpen(false);
+        setConflict(err.detail);
+        return;
+      }
       const message = await getApiErrorMessage(err, "Failed to delete proxy");
       toast("error", message);
     }
@@ -282,7 +293,7 @@ function ProxyEditor({ session }: { session: EditorSession }) {
         </TabsList>
 
         {/* ── Config Tab ─────────────────────────────────────────── */}
-        <TabsContent value="config">
+        <TabsContent value="config" keepMounted>
           <Card>
             <ProxyForm
               key={formGeneration}

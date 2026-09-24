@@ -10,7 +10,15 @@ import type {
   UpstreamCreate,
 } from "./types";
 import { collectAllPages } from "./pagination";
-import { guardedReplace, type WriteGuard } from "./conditionalWrite";
+import {
+  conditionalDelete,
+  conditionalPut,
+  guardedRemove,
+  guardedReplace,
+  readTagged,
+  uncomparedGuard,
+  type WriteGuard,
+} from "./conditionalWrite";
 import {
   baselineSnapshot,
   pickSnapshot,
@@ -64,7 +72,7 @@ export async function listAll(
 }
 
 export async function get(scope: NamespaceScope, id: string): Promise<Upstream> {
-  return proxyApi.get(`upstreams/${id}`, scoped(scope)).json<Upstream>();
+  return (await readTagged<Upstream>(scope, `upstreams/${id}`)).value;
 }
 
 /**
@@ -198,7 +206,8 @@ export function targetsWriteGuard(
  * Full-replacement update of the upstream settings.
  *
  * `guard` carries the content the editor opened against; pass `null` only for
- * a write that cannot lose a concurrent change. See `docs/concurrent-edits.md`.
+ * a write that cannot lose a concurrent change. A guarded save is sent with
+ * `If-Match` from the read it verified. See `docs/concurrent-edits.md`.
  */
 export async function update(
   scope: NamespaceScope,
@@ -206,7 +215,11 @@ export async function update(
   data: UpstreamCreate,
   guard: WriteGuard<Upstream | UpstreamCreate> | null,
 ): Promise<Upstream> {
-  if (!guard) return serializeWrite(scope, id, () => put(scope, id, data));
+  const payload = withUpstreamId(data, id);
+  const path = `upstreams/${id}`;
+  if (!guard) {
+    return serializeWrite(scope, id, () => conditionalPut<Upstream>(scope, path, payload, null));
+  }
 
   return serializeWrite(scope, id, () =>
     guardedReplace<Upstream, UpstreamCreate>({
@@ -214,26 +227,23 @@ export async function update(
       id,
       namespace: scope.namespace,
       guard,
-      proposed: data,
-      read: () => get(scope, id),
-      write: (body) => put(scope, id, body),
+      read: () => readTagged<Upstream>(scope, path),
+      propose: () => payload,
+      write: (body, ifMatch) => conditionalPut<Upstream>(scope, path, body, ifMatch),
     }),
   );
-}
-
-function put(scope: NamespaceScope, id: string, data: UpstreamCreate): Promise<Upstream> {
-  return proxyApi
-    .put(`upstreams/${id}`, scoped(scope, { json: withUpstreamId(data, id) }))
-    .json<Upstream>();
 }
 
 /**
  * Targets own only the target list; all settings come from a current read.
  *
- * The same read that supplies those settings is what the guard compares, so a
- * guarded target write costs no extra request. `guard` must be built from the
- * list the operator actually edited (`targetsWriteGuard(upstream)` on the
- * render whose targets produced this array), not from a later refetch.
+ * The same read that supplies those settings is what the guard compares and
+ * what `If-Match` is taken from, so a guarded target write costs no extra
+ * request, and a settings change committed after that read makes the gateway
+ * refuse the write rather than revert it. The guard then re-reads, finds the
+ * targets unchanged, and re-sends with the new settings. `guard` must be built
+ * from the list the operator actually edited (`targetsWriteGuard(upstream)` on
+ * the render whose targets produced this array), not from a later refetch.
  */
 export async function updateTargets(
   scope: NamespaceScope,
@@ -241,27 +251,46 @@ export async function updateTargets(
   targets: UpstreamCreate["targets"],
   guard: WriteGuard<Upstream | UpstreamCreate> | null,
 ): Promise<Upstream> {
-  return serializeWrite(scope, id, async () => {
-    const current = await get(scope, id);
-    const proposed = { ...toUpdatePayload(current), targets };
-    if (!guard) return put(scope, id, proposed);
+  const path = `upstreams/${id}`;
+  const propose = (current: Upstream): UpstreamCreate =>
+    withUpstreamId({ ...toUpdatePayload(current), targets }, id);
 
-    // The verification read and the settings read are the same response, so a
-    // guarded target write costs no extra round trip.
+  return serializeWrite(scope, id, async () => {
     return guardedReplace<Upstream, UpstreamCreate>({
       resource: "upstream targets",
       id,
       namespace: scope.namespace,
-      guard,
-      proposed,
-      read: async () => current,
-      write: (body) => put(scope, id, body),
+      // Unguarded, the targets write still rebuilds every setting from the
+      // read it is sent against, so it is conditional on that read's tag.
+      // `targets` itself is simply replaced: nothing is compared.
+      guard: guard ?? uncomparedGuard(),
+      read: () => readTagged<Upstream>(scope, path),
+      propose,
+      write: (body, ifMatch) => conditionalPut<Upstream>(scope, path, body, ifMatch),
     });
   });
 }
 
-export async function remove(scope: NamespaceScope, id: string): Promise<void> {
-  await serializeWrite(scope, id, async () => {
-    await proxyApi.delete(`upstreams/${id}`, scoped(scope));
-  });
+/**
+ * Delete an upstream, only if it still holds what the detail page shows —
+ * see `proxies.remove`. Pass `null` only with nothing on screen to compare.
+ */
+export async function remove(
+  scope: NamespaceScope,
+  id: string,
+  guard: WriteGuard<Upstream | UpstreamCreate> | null,
+): Promise<void> {
+  const path = `upstreams/${id}`;
+  await serializeWrite(scope, id, () =>
+    guard
+      ? guardedRemove<Upstream>({
+          resource: "upstream",
+          id,
+          namespace: scope.namespace,
+          guard,
+          read: () => readTagged<Upstream>(scope, path),
+          remove: (ifMatch) => conditionalDelete(scope, path, ifMatch),
+        })
+      : conditionalDelete(scope, path, null),
+  );
 }

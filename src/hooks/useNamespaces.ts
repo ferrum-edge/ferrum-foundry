@@ -20,6 +20,12 @@ import { useNamespace } from "@/stores/namespace";
  * deleted. A retired name (renamed away, or deleted) has its detail key
  * *removed* rather than invalidated: invalidating would refetch a name the
  * gateway no longer resolves and surface a spurious 404 to the user.
+ *
+ * Everything cached *under* a retired name goes with it. A cascade delete
+ * destroyed those resources, and editors seed once per identity, so a
+ * namespace recreated and re-seeded with the same operator-chosen ids would
+ * otherwise open its editors on the deleted resources. Scoped keys carry the
+ * namespace second (`[kind, namespace, …]`); over-retiring costs a refetch.
  */
 export function reconcileNamespaceCache(
   qc: QueryClient,
@@ -29,7 +35,10 @@ export function reconcileNamespaceCache(
   qc.invalidateQueries({ queryKey: ["namespaces"] });
 
   if (nextName !== previousName) {
-    qc.removeQueries({ queryKey: ["namespace", previousName] });
+    qc.removeQueries({
+      predicate: (query) =>
+        query.queryKey[0] !== "namespaces" && query.queryKey[1] === previousName,
+    });
   }
   if (nextName) {
     qc.invalidateQueries({ queryKey: ["namespace", nextName] });
