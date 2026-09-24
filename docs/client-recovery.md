@@ -32,6 +32,16 @@ The live-apply banner's statement that the request was not replayed is enforced
 by the shared retry policy, independently of metadata observation and error
 popup suppression.
 
+On a configuration write that answer is a **committed write**, not a failure.
+The client marks the rejection (`getCommittedWrite()`), raises no error popup —
+the banner already reports it — and the application `MutationCache` refreshes
+cached reads. `getApiErrorMessage()` says the change was saved and is not yet
+proven live. A proxy, upstream, or consumer detail editor reseeds its form and
+write-guard baseline from a fresh read so a second Save is not refused as a
+conflict with its own commit, and a committed delete resolves as a delete and
+retires its cached detail. See
+[concurrent-edits.md](concurrent-edits.md#committed-but-not-yet-live).
+
 Configured-client tests in `src/api/client.retry.test.ts` inject fetch failures
 and count actual requests, including the surviving credential rotation entry.
 GitHub-hosted CI runs these tests together with the existing frontend suite.

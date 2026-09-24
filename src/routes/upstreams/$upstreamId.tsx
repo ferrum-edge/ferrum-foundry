@@ -20,11 +20,11 @@ import { SkeletonCard } from "@/components/ui/Skeleton";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
 import { UpstreamForm } from "@/components/forms/UpstreamForm";
 import { TargetForm } from "@/components/forms/TargetForm";
-import { getApiErrorMessage } from "@/api/client";
+import { committedWriteMessage, getApiErrorMessage, getCommittedWrite } from "@/api/client";
 import * as upstreamsApi from "@/api/upstreams";
 import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
 import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
-import { useEditBaseline } from "@/hooks/useEditBaseline";
+import { reseedAfterCommit, useEditBaseline } from "@/hooks/useEditBaseline";
 import { isStaleResourceError, type StaleResourceDetail } from "@/api/conditionalWrite";
 import { StaleWriteDialog } from "@/components/shared/StaleWriteDialog";
 import { useCapabilities } from "@/stores/capabilities";
@@ -91,6 +91,20 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
         setConflict(err.detail);
         return;
       }
+      const committed = getCommittedWrite(err);
+      if (committed) {
+        // Saved, only not yet live: reseed from the gateway, as on the proxy
+        // detail page.
+        const reseeded = await reseedAfterCommit(resourceQuery.refetch, baseline, () =>
+          setFormGeneration((generation) => generation + 1),
+        );
+        toast(
+          "warning",
+          committedWriteMessage("Upstream saved", committed) +
+            (reseeded ? "" : " Foundry could not re-read the upstream; reload it before saving again."),
+        );
+        return;
+      }
       const message = await getApiErrorMessage(err, "Failed to update upstream");
       toast("error", message);
     }
@@ -109,11 +123,15 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
     try {
       // Judged against the upstream this page is displaying — see the proxy
       // detail page.
-      await deleteUpstream.mutateAsync({
+      const deleted = await deleteUpstream.mutateAsync({
         id: upstreamId,
         guard: upstreamsApi.upstreamWriteGuard(upstream),
       });
-      toast("success", "Upstream deleted successfully");
+      if (deleted.committed) {
+        toast("warning", committedWriteMessage("Upstream deleted", deleted.committed));
+      } else {
+        toast("success", "Upstream deleted successfully");
+      }
       navigate({ to: "/upstreams" });
     } catch (err: unknown) {
       if (isStaleResourceError(err)) {
@@ -147,6 +165,15 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
       } catch (err: unknown) {
         if (isStaleResourceError(err)) {
           setConflict(err.detail);
+          return;
+        }
+        const committed = getCommittedWrite(err);
+        if (committed) {
+          // The targets were written; only the live apply lagged. The
+          // mutation has already refreshed this upstream, so the next target
+          // edit is computed from the committed list.
+          toast("warning", committedWriteMessage("Targets saved", committed));
+          onSaved();
           return;
         }
         const message = await getApiErrorMessage(err, "Failed to update targets");

@@ -49,3 +49,36 @@ export function useEditBaseline<TSeed, TShape>(
     },
   };
 }
+
+/**
+ * Reseed an editor after a committed-but-not-live save.
+ *
+ * The gateway answered `503` with `X-Ferrum-Config-Cursor` or `applied: false`:
+ * the draft is durably committed, but no canonical response came back to
+ * `adopt`. Keeping the old baseline would make the next Save refuse this
+ * operator's own commit as a concurrent edit. Adopting the draft instead is
+ * not sound either — a payload spells clears as `null` where a read omits the
+ * key, so it never fingerprints like the stored resource.
+ *
+ * So the form and the baseline are both reseeded from **one** fresh read, the
+ * same way an explicit "discard and reload" does. That keeps the seed-once
+ * invariant: the baseline only ever describes content the form is showing, so
+ * even a writer who committed between this save and the read is displayed,
+ * never silently rebased under a stale form. The draft itself is not lost —
+ * it is what the gateway now holds.
+ *
+ * Returns `false`, changing nothing, when that read fails: the form and the
+ * old baseline stay, and a further Save is compared against the old baseline,
+ * which is the honest outcome when Foundry cannot say what the gateway holds.
+ */
+export async function reseedAfterCommit<TSeed>(
+  refetch: () => Promise<{ data?: TSeed; isError?: boolean }>,
+  baseline: Pick<EditBaseline<TSeed, unknown>, "adopt">,
+  remount: () => void,
+): Promise<boolean> {
+  const refreshed = await refetch();
+  if (refreshed.isError || refreshed.data === undefined) return false;
+  baseline.adopt(refreshed.data);
+  remount();
+  return true;
+}
