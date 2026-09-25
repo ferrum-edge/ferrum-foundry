@@ -289,6 +289,44 @@ export function validateProxyWrite(body) {
   );
 }
 
+/**
+ * Edge v0.9.7 refuses an active health check whose `http_path` does not start
+ * with `/` (a path such as `@169.254.169.254/` was spliced after `host:port`
+ * and probed another host) and a `udp_probe_payload` that is not even-length
+ * hex (ferrum-edge#5683, #5688).
+ */
+export function validateUpstreamWrite(body) {
+  const active = body?.health_checks?.active;
+  if (!active || typeof active !== 'object') return null;
+  if (active.http_path !== undefined
+    && (typeof active.http_path !== 'string' || !active.http_path.startsWith('/'))) {
+    return { error: '`health_checks.active.http_path` must start with a slash' };
+  }
+  if (active.udp_probe_payload != null
+    && (typeof active.udp_probe_payload !== 'string'
+      || !/^(?:[0-9a-fA-F]{2})*$/.test(active.udp_probe_payload))) {
+    return { error: '`health_checks.active.udp_probe_payload` must be an even-length hex string' };
+  }
+  return null;
+}
+
+/** The identifier rule every resource id, and the `proxy_id` list filter, follows. */
+const RESOURCE_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
+
+/**
+ * `GET /plugins/config?proxy_id=` (Edge v0.9.7, ferrum-edge#5726): exact match
+ * on `proxy_id`, paginated over the filtered set; an unknown id is an empty
+ * page and an invalid one is `400`. Returns `{ rows }` or `{ refusal }`.
+ */
+export function filterPluginConfigList(rows, url) {
+  if (!url.searchParams.has('proxy_id')) return { rows };
+  const proxyId = url.searchParams.get('proxy_id');
+  if (proxyId.length > 254 || !RESOURCE_ID.test(proxyId)) {
+    return { refusal: [400, { error: `Invalid proxy_id '${proxyId}'` }] };
+  }
+  return { rows: rows.filter((row) => row.proxy_id === proxyId) };
+}
+
 /** Edge `PluginConfigCreate` / `PluginConfigReplace` wire contract. */
 export function validatePluginConfigWrite(body, method) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
@@ -457,7 +495,10 @@ export function crud(list, url, method, id, body, defaults = {}, ns = 'ferrum', 
   // The real gateway isolates resources per namespace; list responses must
   // reflect that or namespace occupancy counts are meaningless.
   if (method === 'GET' && !id) {
-    return [200, paginate(list.filter((x) => (x.namespace ?? 'ferrum') === ns), url)];
+    const rows = list.filter((x) => (x.namespace ?? 'ferrum') === ns);
+    const filtered = kind === 'plugins/config' ? filterPluginConfigList(rows, url) : { rows };
+    if (filtered.refusal) return filtered.refusal;
+    return [200, paginate(filtered.rows, url)];
   }
   if (method === 'GET') {
     const item = list.find((x) => x.id === id);
@@ -1013,7 +1054,7 @@ const server = createServer(async (req, res) => {
     [/^\/proxies(?:\/([^/]+))?$/, proxies, { plugins: [], auth_mode: 'single' }, validateProxyWrite, 'proxies'],
     [/^\/consumers(?:\/([^/]+))?$/, consumers, {}, undefined, 'consumers'],
     [/^\/plugins\/config(?:\/([^/]+))?$/, pluginConfigs, {}, validatePluginConfigWrite, 'plugins/config'],
-    [/^\/upstreams(?:\/([^/]+))?$/, upstreams, {}, undefined, 'upstreams'],
+    [/^\/upstreams(?:\/([^/]+))?$/, upstreams, {}, validateUpstreamWrite, 'upstreams'],
   ];
   for (const [pattern, list, defaults, validate, kind] of routes) {
     const match = path.match(pattern);

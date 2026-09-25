@@ -296,6 +296,64 @@ describe("UpstreamForm status-code drafts (#400)", () => {
   });
 });
 
+describe("UpstreamForm probe targets (Ferrum Edge v0.9.7)", () => {
+  it("refuses an HTTP path that does not start with / before submitting", async () => {
+    await mountPlain();
+    await toggleSection("Health Checks");
+    await check("Enable active health checks");
+
+    const path = inputByLabel(host, "HTTP Path");
+    await clearText(path);
+    await typeText(path, "@169.254.169.254/");
+    await save();
+    expect(submit).not.toHaveBeenCalled();
+    expect(path.getAttribute("aria-invalid")).toBe("true");
+    expect(host.textContent).toContain("HTTP path must start with /");
+
+    await clearText(path);
+    await typeText(path, "/ready");
+    await save();
+    expect(submitted().health_checks?.active?.http_path).toBe("/ready");
+  });
+
+  it.each(["abc", "0g", "0 00"])(
+    "refuses the UDP payload %j, which is not whole hex bytes",
+    async (payload) => {
+      await mountPlain({
+        health_checks: {
+          active: { probe_type: "udp", interval_seconds: 5, udp_probe_payload: "00" },
+        },
+      });
+      await toggleSection("Health Checks");
+
+      const field = inputByLabel(host, "UDP Probe Payload");
+      await clearText(field);
+      await typeText(field, payload);
+      await save();
+      expect(submit).not.toHaveBeenCalled();
+      expect(field.getAttribute("aria-invalid")).toBe("true");
+      expect(host.textContent).toContain("UDP probe payload must be hex");
+
+      await clearText(field);
+      await typeText(field, "00ff");
+      await save();
+      expect(submitted().health_checks?.active?.udp_probe_payload).toBe("00ff");
+    },
+  );
+
+  it("accepts an empty UDP payload, which Edge answers with a single zero byte", async () => {
+    await mountPlain({
+      health_checks: {
+        active: { probe_type: "udp", interval_seconds: 5, udp_probe_payload: "00" },
+      },
+    });
+    await toggleSection("Health Checks");
+    await clearText(inputByLabel(host, "UDP Probe Payload"));
+    await save();
+    expect(submitted().health_checks?.active?.udp_probe_payload).toBeUndefined();
+  });
+});
+
 describe("UpstreamForm numeric drafts (#402)", () => {
   it("clears and retypes a health-check interval without inserting 0", async () => {
     await mountPlain();

@@ -21,16 +21,18 @@ job, and is executed on every pull request from
 | --- | --- |
 | Unguarded stale `PUT` after another administrator's accepted change | **Accepted; the newer value is reverted** (`unguardedStaleWriteReverts: true`). Omitting `If-Match` keeps last-writer-wins on every Edge revision. |
 | The same draft submitted through Foundry's guard | **Refused; nothing is written** (`guardedStaleWriteRefused: true`) |
-| Does `GET /proxies/{id}` carry an `ETag`? | `gatewayIssuesEtag` |
-| `PUT` carrying a stale or invented `If-Match` | `412` and nothing written on a gateway that tags reads (`gatewayHonoursIfMatch: true`); ignored on one that does not |
+| Does `GET /proxies/{id}` carry an `ETag`? | **Yes** (`gatewayIssuesEtag: true`) |
+| `PUT` carrying a stale or invented `If-Match` | **`412` and nothing written** (`gatewayHonoursIfMatch: true`) |
+| `PUT` carrying a malformed `If-Match`, and `POST /proxies` carrying any `If-Match` | **`400` and nothing written** (`malformedIfMatchStatus: 400`, `createIfMatchStatus: 400`) |
 
 The precondition is ferrum-edge#5661, merged on Ferrum Edge `main` on
-2026-09-23 and not yet in any published release or image. The Edge image CI
-pins (`edge.image` in `docs/compatibility.md`, the published v0.9.5 release)
-predates it and issues no tag, so Foundry sends it no `If-Match`. The
-contract fails if the two halves disagree: a gateway that tags reads must
-refuse a stale tag, and a gateway that issues no tag must not be enforcing a
-precondition Foundry has no way to satisfy.
+2026-09-23 and released in Ferrum Edge v0.9.7, the image CI pins (`edge.image`
+in `docs/compatibility.md`) and the release Foundry v0.2.0 pairs with. The
+pairing requires it, so `scripts/gateway-contract-smoke.mjs` fails when the
+pinned gateway issues no tag. The contract itself still checks that the two
+halves agree on any gateway: one that tags reads must refuse a stale tag, and
+one that issues no tag must not be enforcing a precondition Foundry has no way
+to satisfy.
 
 ## The Edge contract
 
@@ -124,8 +126,9 @@ every other failure of the same request is still reported.
 
 ### Without a tag
 
-When the verification read carries no usable `ETag` — a gateway predating
-ferrum-edge#5661, a read served from the cached-config fallback, or a weak tag
+When the verification read carries no usable `ETag` — a read served from the
+cached-config fallback, a gateway predating ferrum-edge#5661 (outside the
+qualified pairing), or a weak tag
 an intermediary produced — Foundry sends the `PUT` without `If-Match`. The
 guard then narrows the race rather than closing it: a writer that commits
 between the verification read and the write is not detected. What the guard
@@ -376,11 +379,10 @@ keys its tag so it cannot be used to test guesses of a redacted value.
 
 ## Still open
 
-- **The pinned image.** The Edge image CI pins (`edge.image`, see
-  `docs/compatibility.md`) predates ferrum-edge#5661, so CI exercises the
-  untagged path and the guard narrows the race to one round trip rather than
-  closing it. The release Foundry pairs with must include #5661; moving
-  `edge.image` in `docs/compatibility.json` to it turns on the atomic path with
-  no Foundry change, and the contract then asserts the `412`s.
+- **The cached-config fallback.** A read Edge serves from its cached
+  configuration (`X-Data-Source: cached`) carries no tag, so a write verified
+  against it is sent unconditionally and the guard narrows the race to one
+  round trip rather than closing it. That is Edge's contract, not a pinning
+  gap: the tag cannot be issued from a cache that may lag the database.
 - **A browser-level two-session journey.** Belongs in the critical-journey
   suite tracked by #380.

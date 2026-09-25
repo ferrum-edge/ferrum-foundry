@@ -42,14 +42,24 @@ export async function listAvailable(scope: NamespaceScope): Promise<string[]> {
 
 // ── Plugin config CRUD ───────────────────────────────────────────
 
+export interface PluginConfigListParams extends PaginationParams {
+  /**
+   * `proxy_id` exact match (Ferrum Edge v0.9.7, ferrum-edge#5726). The gateway
+   * paginates the filtered set; use `listConfigsForProxy`, which checks that
+   * the filter was applied.
+   */
+  proxyId?: string;
+}
+
 export async function listConfigs(
   scope: NamespaceScope,
-  params: PaginationParams = {},
+  params: PluginConfigListParams = {},
   signal?: AbortSignal,
 ): Promise<PaginatedResponse<PluginConfig>> {
   const searchParams: Record<string, string> = {};
   if (params.offset !== undefined) searchParams.offset = String(params.offset);
   if (params.limit !== undefined) searchParams.limit = String(params.limit);
+  if (params.proxyId !== undefined) searchParams.proxy_id = params.proxyId;
 
   return proxyApi
     .get("plugins/config", scoped(scope, { searchParams, signal }))
@@ -89,6 +99,46 @@ export async function listBoundedConfigs(
   return collectBoundedPages(
     (offset, limit, pageSignal) => listConfigs(scope, { offset, limit }, pageSignal),
     { budget, signal },
+  );
+}
+
+/** A `?proxy_id=` listing that returned a configuration for another proxy. */
+export class ProxyFilterNotAppliedError extends Error {
+  constructor(readonly proxyId: string) {
+    super(
+      `The gateway did not filter plugin configurations by proxy_id "${proxyId}"; ` +
+        "listing one proxy's configurations needs Ferrum Edge v0.9.7 or later",
+    );
+    this.name = "ProxyFilterNotAppliedError";
+  }
+}
+
+/**
+ * Every proxy-scoped configuration whose `proxy_id` is `proxyId`, including
+ * disabled ones and ones the proxy does not list in `plugins`.
+ *
+ * `GET /plugins/config?proxy_id=` paginates the filtered set, so this walks
+ * that proxy's configurations, never the namespace. It is not an
+ * effective-policy answer: global and proxy-group configurations also run on
+ * a proxy and carry no `proxy_id`. A gateway that ignored the filter would
+ * answer with the whole namespace, so the first record for another proxy
+ * fails the read instead of being shown or traversed past.
+ */
+export async function listConfigsForProxy(
+  scope: NamespaceScope,
+  proxyId: string,
+  signal?: AbortSignal,
+): Promise<PluginConfig[]> {
+  return collectAllPages(
+    async (offset, limit, pageSignal) => {
+      const page = await listConfigs(scope, { offset, limit, proxyId }, pageSignal);
+      if (page.data.some((config) => config.proxy_id !== proxyId)) {
+        throw new ProxyFilterNotAppliedError(proxyId);
+      }
+      return page;
+    },
+    undefined,
+    signal,
   );
 }
 
