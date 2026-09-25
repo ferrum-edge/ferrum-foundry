@@ -200,7 +200,12 @@ describe("validatePairing", () => {
       ci_evidence: "https://github.com/ferrum-edge/ferrum-foundry/actions/runs/123",
     });
     // A released record also needs the Edge release it was qualified against.
-    assert.ok(validatePairing(filled).some((error) => error.startsWith("edge.release.image")));
+    // The checked-in record now carries a real one, so blank it here.
+    const unqualified = structuredClone(filled);
+    unqualified.edge.release.image = `${PLACEHOLDER_PREFIX}: edge release image`;
+    assert.ok(
+      validatePairing(unqualified).some((error) => error.startsWith("edge.release.image")),
+    );
     const edgeImage = `ferrumedge/ferrum-edge@sha256:${"e".repeat(64)}`;
     const manifests = {
       "linux/amd64": `sha256:${"1".repeat(64)}`,
