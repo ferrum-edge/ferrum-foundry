@@ -230,6 +230,18 @@ token; the SPA re-fetches `/api/auth/session` and recovers on its own. Static
 development mode is different: it stores sessions in process memory and is
 therefore single-process only.
 
+Every tab of one browser shares the CSRF cookie. `GET /api/auth/session`
+reissues it once the token is inside its final quarter, which replaces it for
+all tabs at once, so the SPA does not send the token its own tab last
+accepted: each unsafe request carries the current value of the readable cookie
+the session response names (`csrfCookie`), falling back to the accepted token
+only when the cookie cannot be read, and nothing at all while signed out. The
+BFF's checks are unchanged — the header must equal the cookie the browser sent
+and be validly signed for the asserted subject — so a tab another tab renewed
+keeps writing and can still sign out without waiting for its own refresh,
+while missing, forged, expired, wrong-subject, and mismatched values are still
+refused. A refused write is never replayed (#436).
+
 Graceful shutdown is bounded by `FERRUM_SHUTDOWN_TIMEOUT` (milliseconds,
 default `10000`), so a drain that outlasts the deadline exits non-zero instead
 of waiting for the orchestrator's SIGKILL.
@@ -271,6 +283,20 @@ when access changes, including a downgrade for the same user. Reordered or
 duplicated namespace grants and display-name-only updates preserve the workspace.
 The periodic session refresh applies this rule every 60 seconds; backend role
 and namespace checks continue to authorize each request independently.
+
+Session results are applied in the order their requests were sent, not the
+order they arrive. Every request takes a ticket from the client when it is
+sent. A session read, or any request's BFF `401`, changes the session only if
+nothing newer has been accepted since that request went out; a `401` reaches
+the provider with its request's ticket through `setOnUnauthorized`. A
+confirmed sign-in or sign-out, and unmounting the provider, retire every
+request already in flight — including one sent while the sign-out was pending
+— and abort pending session reads. So a read that completes after a sign-out
+cannot restore the old principal and CSRF value, an older privileged snapshot
+cannot overwrite a newer reduced grant, an older `401` cannot clear a newer
+session, and a replaced provider can neither publish a token nor clear its
+replacement's cache. A `401` for a request sent after the current session was
+accepted still signs the tab out (#435).
 
 ### Gateway target binding
 

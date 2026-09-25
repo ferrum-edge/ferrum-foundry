@@ -301,23 +301,91 @@ export function isCommittedWrite(error: unknown): boolean {
 
 // ── BFF session / CSRF state (set by AuthProvider) ───────────────
 
+/**
+ * Context key carrying a request's position in the order requests were
+ * issued. A late BFF `401` is only evidence about the session if nothing newer
+ * has been accepted since the request was sent (#435).
+ */
+export const REQUEST_TICKET = "requestTicket";
+
+/** Called with the ticket of the request the BFF answered `401`. */
+export type UnauthorizedHandler = (ticket: number) => void;
+
 let csrfToken: string | null = null;
-let unauthorizedHandler: (() => void) | undefined;
+let csrfCookie: string | null = null;
+let unauthorizedHandler: UnauthorizedHandler | undefined;
+let lastTicket = 0;
+
+/**
+ * Take the next request ticket. Tickets are strictly increasing across every
+ * request this tab sends, so the auth store can order a session read against
+ * any other request's `401`.
+ */
+export function issueRequestTicket(): number {
+  lastTicket += 1;
+  return lastTicket;
+}
+
+/** The newest ticket issued so far; every request in flight holds one at or below it. */
+export function latestRequestTicket(): number {
+  return lastTicket;
+}
 
 /**
  * Set the non-secret CSRF token paired with the HttpOnly BFF session cookie.
  * It intentionally lives only in memory and is never a reusable login secret.
+ *
+ * `cookieName` names the readable CSRF cookie the BFF issued with it. The
+ * cookie is shared by every tab, and a renewal in one tab replaces it for all
+ * of them (#436), so an unsafe request sends the cookie's current value and
+ * falls back to this token only when the cookie cannot be read.
  */
-export function setCsrfToken(token: string | null): void {
+export function setCsrfToken(token: string | null, cookieName?: string): void {
   csrfToken = token;
+  csrfCookie = token === null ? null : cookieName ?? null;
+}
+
+function readCookie(name: string): string | null {
+  let cookies: string;
+  try {
+    cookies = typeof document === "undefined" ? "" : document.cookie;
+  } catch {
+    return null;
+  }
+  for (const entry of cookies.split(";")) {
+    const separator = entry.indexOf("=");
+    if (separator < 0 || entry.slice(0, separator).trim() !== name) continue;
+    const value = entry.slice(separator + 1).trim();
+    try {
+      return decodeURIComponent(value) || null;
+    } catch {
+      return value || null;
+    }
+  }
+  return null;
+}
+
+/**
+ * The CSRF value for an unsafe request, or null while signed out. The BFF
+ * requires the header to equal the cookie the browser sends with this very
+ * request, and it still verifies the value itself, so reading the cookie
+ * accepts nothing the server would not.
+ */
+function currentCsrfToken(): string | null {
+  if (!csrfToken) return null;
+  return (csrfCookie && readCookie(csrfCookie)) || csrfToken;
 }
 
 /**
  * Register a callback invoked when the BFF returns 401. The auth store uses
- * this to clear the local token and force re-login.
+ * this to clear the local token and force re-login. Returns an unregister
+ * function that leaves a replacement's handler in place.
  */
-export function setOnUnauthorized(handler: (() => void) | undefined): void {
+export function setOnUnauthorized(handler: UnauthorizedHandler | undefined): () => void {
   unauthorizedHandler = handler;
+  return () => {
+    if (unauthorizedHandler === handler) unauthorizedHandler = undefined;
+  };
 }
 
 // ── Namespace binding ────────────────────────────────────────────
@@ -512,13 +580,19 @@ export const api = ky.create({
         // ky shallow-copies context for each request; set a fresh identity
         // without replacing the read-only normalized context property.
         options.context[GATEWAY_REQUEST_IDENTITY] = beginGatewayRequest(request);
+        // A caller that ordered itself against the auth store (a session
+        // read) brings its own ticket; every other request takes the next one.
+        if (typeof options.context[REQUEST_TICKET] !== "number") {
+          options.context[REQUEST_TICKET] = issueRequestTicket();
+        }
+        const csrf = currentCsrfToken();
         if (
-          csrfToken &&
+          csrf &&
           request.method !== "GET" &&
           request.method !== "HEAD" &&
           request.method !== "OPTIONS"
         ) {
-          request.headers.set("X-CSRF-Token", csrfToken);
+          request.headers.set("X-CSRF-Token", csrf);
         }
       },
     ],
@@ -536,7 +610,7 @@ export const api = ky.create({
           response.status === 401 &&
           response.headers.get("x-ferrum-auth-layer") === "bff"
         ) {
-          unauthorizedHandler?.();
+          unauthorizedHandler?.(options.context[REQUEST_TICKET] as number);
         }
       },
     ],
