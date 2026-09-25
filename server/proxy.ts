@@ -4,6 +4,7 @@ import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { fetch, type RequestInit } from 'undici';
 import { requireAdminAuth } from './auth.js';
 import { loadConfig } from './config.js';
+import { rejectStaleGatewayTarget, stampGatewayTarget } from './gateway-target.js';
 import { generateToken } from './jwt.js';
 import { proxyTargetPath, proxyTargetUrl, UnsafeProxyPathError } from './proxy-path.js';
 import { getDispatcher } from './tls.js';
@@ -257,6 +258,12 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
     const config = loadConfig();
     const principal = request.authPrincipal;
     if (!principal) return reply.status(401).send({ error: 'Unauthorized' });
+    // Checked against the same `config` this request is forwarded with, so an
+    // operation issued against a replaced gateway never reaches its successor.
+    if (!stampGatewayTarget(request, reply, config)) {
+      if (carriesRequestBody(request) && !request.raw.complete) reply.header('connection', 'close');
+      return rejectStaleGatewayTarget(reply);
+    }
 
     const target = proxyTargetUrl(request, config.adminUrl);
     const targetPath = target.pathname;

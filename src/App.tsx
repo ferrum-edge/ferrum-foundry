@@ -7,6 +7,7 @@ import { ErrorPopupProvider } from "@/stores/error";
 import { ThemeProvider } from "@/stores/theme";
 import { AuthProvider } from "@/stores/auth";
 import { CapabilityProvider } from "@/stores/capabilities";
+import { GatewayTargetGate } from "@/components/auth/GatewayTargetGate";
 import { LoginGate } from "@/components/auth/LoginGate";
 import { createQueryClient } from "@/lib/queryClient";
 import { router } from "./router";
@@ -23,9 +24,11 @@ export function App() {
               <NamespaceProvider>
                 <ErrorPopupProvider>
                   <LoginGate>
-                    <CapabilityProvider>
-                      <RouterProvider router={router} />
-                    </CapabilityProvider>
+                    <GatewayTargetGate>
+                      <CapabilityProvider>
+                        <RouterProvider router={router} />
+                      </CapabilityProvider>
+                    </GatewayTargetGate>
                   </LoginGate>
                 </ErrorPopupProvider>
               </NamespaceProvider>

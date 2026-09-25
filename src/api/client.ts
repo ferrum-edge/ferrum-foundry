@@ -16,6 +16,16 @@ import {
   type CommittedWrite,
   type GatewayRequestIdentity,
 } from "./gatewayMetadata";
+import {
+  boundGatewayTarget,
+  GATEWAY_TARGET_CHANGED_CODE,
+  GATEWAY_TARGET_HEADER,
+  GatewayTargetChangedError,
+  isGatewayTargetRetired,
+  observeGatewayTarget,
+  retireGatewayTarget,
+  targetsGateway,
+} from "./gatewayTarget";
 
 // ── Global error handler (event-emitter style) ───────────────────
 
@@ -501,6 +511,16 @@ function isExpectedProbeFailure(response: Response, requestUrl: string): boolean
   return SILENT_PROBE_PATTERNS.some((pattern) => pattern.test(requestUrl));
 }
 
+/** The BFF refused a gateway-facing request declared against a replaced target. */
+function isGatewayTargetRefusal(request: Request, error: unknown): boolean {
+  if (!isHTTPError(error) || error.response.status !== 409 || !targetsGateway(request.url)) {
+    return false;
+  }
+  const data: unknown = error.data;
+  return typeof data === "object" && data !== null &&
+    (data as { code?: unknown }).code === GATEWAY_TARGET_CHANGED_CODE;
+}
+
 // ── Configured ky instance ───────────────────────────────────────
 
 export const api = ky.create({
@@ -535,6 +555,15 @@ export const api = ky.create({
   hooks: {
     beforeRequest: [
       ({ request, options }) => {
+        // A page is bound to the gateway target it was opened against
+        // (`./gatewayTarget`). Once that target is replaced nothing further
+        // is sent; until then every gateway-facing request declares it, so
+        // the BFF refuses it rather than forwarding it to a successor.
+        if (targetsGateway(request.url)) {
+          if (isGatewayTargetRetired()) throw new GatewayTargetChangedError(request.url);
+          const target = boundGatewayTarget();
+          if (target) request.headers.set(GATEWAY_TARGET_HEADER, target);
+        }
         // Every gateway request must already carry the namespace its
         // operation was bound to (via `scoped()`), or be a documented
         // fleet-global call. The client never picks a namespace itself: the
@@ -569,6 +598,9 @@ export const api = ky.create({
     ],
     afterResponse: [
       async ({ request, options, response }) => {
+        // Observed first: a response naming another target retires the
+        // live-apply monitor, so the observation below is discarded with it.
+        observeGatewayTarget(response.headers.get(GATEWAY_TARGET_HEADER));
         await observeGatewayResponse(
           request,
           response,
@@ -584,6 +616,11 @@ export const api = ky.create({
     ],
     beforeError: [
       ({ request, options, error }) => {
+        // The BFF's refusal of a request declared against a replaced target
+        // retires the workspace even when an intermediary dropped the target
+        // header from it: every later request would be refused the same way,
+        // so no read state here may offer a retry that cannot succeed.
+        if (isGatewayTargetRefusal(request, error)) retireGatewayTarget();
         const identity = options.context[GATEWAY_REQUEST_IDENTITY] as
           | GatewayRequestIdentity
           | undefined;
@@ -602,6 +639,9 @@ export const api = ky.create({
           return error;
         }
         if (options.context[SILENT_ERRORS] || error.name === "AbortError") return error;
+        // The target-changed state replaces the workspace; a request refused
+        // or answered by the replaced target is not a fault to report on top.
+        if (isGatewayTargetRetired()) return error;
         if (isHTTPError(error) && isExpectedProbeFailure(error.response, request.url)) return error;
         if (isHTTPError(error) && isHandledStatus(options.context, error.response.status)) return error;
         const data = isHTTPError(error) ? error.data : error.message;

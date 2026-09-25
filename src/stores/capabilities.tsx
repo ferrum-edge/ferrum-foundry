@@ -16,7 +16,9 @@
 /*  the provider. A gateway's mode and write policy are set at start-  */
 /*  up, so a past observation of them stays true for this session,     */
 /*  while an errored background refetch is no reason to hand a user a  */
-/*  form that flips from read-only to editable and back again.         */
+/*  form that flips from read-only to editable and back again. The     */
+/*  provider never outlives its gateway target: `GatewayTargetGate`    */
+/*  unmounts it when the BFF is re-pointed at another gateway.         */
 /* ------------------------------------------------------------------ */
 
 import { createContext, useContext, useMemo, useRef, type ReactNode } from "react";
