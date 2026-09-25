@@ -160,11 +160,13 @@ Scale claims stop at what has been measured.
 `scripts/capability-parity-contract.mjs` asks the pinned gateway (`edge.image`) the questions
 the UI's capability model (`src/lib/capabilities.ts`) answers, as each role:
 
-- every gateway-backed surface gets a **non-mutating** probe that passes
-  through the same role check and write gate as the surface's real writes — a
-  `DELETE` of an id that does not exist, `POST /admin/tls/validate`,
+- every gateway-backed surface gets a probe that passes through the same role
+  check and write gate as the surface's real writes — a `DELETE` of a reserved
+  id, `POST /admin/tls/validate`,
   `GET /backup`, or a `POST /restore` with no `?confirm=true` and a body that is
-  not JSON;
+  not JSON. Every admitted `DELETE` must return `404`; writable execution is
+  allowed only after `FERRUM_DEMO_CONFIRM_TARGET` exactly identifies the
+  disposable gateway and namespace;
 - the model's verdict and the gateway's answer must agree: allowed means not
   refused, a role denial must name the same required role, and a read-only
   denial must be the gateway's read-only refusal;

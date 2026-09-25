@@ -201,22 +201,26 @@ still **read** stays reachable:
 4. Extend `src/lib/capabilities.test.ts` with the new row (the three gate lists
    must still partition `CAPABILITY_SURFACES`), and
    `scripts/mock-admin-gateway.mjs` if the gateway refuses it in a read-only mode.
-5. Add a non-mutating probe for it to `WRITE_PROBES` in
+5. Add a parity probe for it to `WRITE_PROBES` in
    `scripts/capability-parity-contract.mjs` — a request that reaches the same
-   role check and admission gate as the real write but cannot change anything —
-   or list it in `BFF_ONLY_SURFACES` if it never reaches the gateway. The
-   contract refuses to run while a surface has no probe.
+   role check and admission gate as the real write. Prefer a request that
+   cannot change anything; a DELETE must use the reserved probe id and require
+   `404`. Alternatively, list it in `BFF_ONLY_SURFACES` if it never reaches the
+   gateway. The contract refuses to run while a surface has no probe.
 
 ## Drift
 
 The role/mode matrix is duplicated from ferrum-edge by hand. CI checks the copy
 against the pinned gateway image (`edge.image`, `docs/compatibility.md`) with
 `scripts/capability-parity-contract.mjs`: as `viewer`, `operator`, and `admin`,
-it sends every gateway-backed surface a non-mutating probe that passes through
+it sends every gateway-backed surface a probe that passes through
 the same role check and write gate as the surface's real writes, and fails when
 the gateway's answer disagrees with `resolveCapability` — an allowed surface
 refused, a denied one admitted, a different required role named, or a read-only
-denial missing. It runs against a writable `database` gateway (inside
+denial missing. DELETE probes must return the expected `404`; a successful
+deletion is a contract failure. Writable execution additionally requires the
+exact `FERRUM_DEMO_CONFIRM_TARGET` confirmation and must only target a
+disposable gateway. It runs against a writable `database` gateway (inside
 `npm run test:gateway-contract`) and against a second container started with
 `FERRUM_ADMIN_READ_ONLY=true`. `capabilityRequirement()` exposes each surface's
 role and gate so the contract compares against this model rather than a copy.
