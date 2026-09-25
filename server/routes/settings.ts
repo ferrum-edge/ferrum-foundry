@@ -7,6 +7,12 @@ import {
   updateRuntimeConfig,
   type RuntimeConfig,
 } from '../config.js';
+import {
+  GATEWAY_TARGET_HEADER,
+  gatewayTargetId,
+  rejectStaleGatewayTarget,
+  stampGatewayTarget,
+} from '../gateway-target.js';
 import { generateToken } from '../jwt.js';
 import { getDispatcher } from '../tls.js';
 
@@ -47,7 +53,11 @@ async function readBoundedBody(response: Awaited<ReturnType<typeof fetch>>, maxB
 const settingsPlugin: FastifyPluginAsync = async (fastify) => {
   const requireAdmin = requireRole('admin');
 
-  fastify.get('/api/settings', { onRequest: requireAdmin }, async () => getPublicRuntimeConfig());
+  fastify.get('/api/settings', { onRequest: requireAdmin }, async (request, reply) => {
+    // A settings form seeded from this read belongs to the target it names.
+    stampGatewayTarget(request, reply, loadConfig());
+    return getPublicRuntimeConfig();
+  });
 
   fastify.put('/api/settings', { onRequest: requireAdmin, bodyLimit: 32 * 1024 }, async (request, reply) => {
     const config = loadConfig();
@@ -74,6 +84,10 @@ const settingsPlugin: FastifyPluginAsync = async (fastify) => {
       });
     }
 
+    // The form resubmits every field it was seeded with, `adminUrl` included,
+    // so a save drafted against a replaced target would silently revert it.
+    if (!stampGatewayTarget(request, reply, config)) return rejectStaleGatewayTarget(reply);
+
     try {
       const before = getPublicRuntimeConfig();
       const accepted = await updateRuntimeConfig(body as Partial<RuntimeConfig>);
@@ -89,6 +103,7 @@ const settingsPlugin: FastifyPluginAsync = async (fastify) => {
             : { before: before[field as keyof typeof before], after: after[field as keyof typeof after] },
         ])),
       }, 'Runtime settings changed');
+      reply.header(GATEWAY_TARGET_HEADER, gatewayTargetId({ ...config, adminUrl: accepted.adminUrl }));
       return after;
     } catch {
       return reply.status(400).send({
@@ -102,6 +117,7 @@ const settingsPlugin: FastifyPluginAsync = async (fastify) => {
     const config = loadConfig();
     const principal = request.authPrincipal;
     if (!principal) return reply.status(401).send({ error: 'Unauthorized' });
+    if (!stampGatewayTarget(request, reply, config)) return rejectStaleGatewayTarget(reply);
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), config.readTimeout);

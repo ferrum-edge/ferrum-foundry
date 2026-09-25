@@ -297,3 +297,53 @@ cannot overwrite a newer reduced grant, an older `401` cannot clear a newer
 session, and a replaced provider can neither publish a token nor clear its
 replacement's cache. A `401` for a request sent after the current session was
 accepted still signs the tab out (#435).
+
+### Gateway target binding
+
+With `FERRUM_ALLOW_RUNTIME_SETTINGS=true` an administrator can re-point the BFF
+at another allowlisted gateway while tabs are open. The namespace header cannot
+tell the `demo` namespace on gateway A from the `demo` namespace on gateway B,
+and query keys, editor identities, the live-apply banner, and capability
+observations carry no gateway at all, so Foundry binds each page load to one
+**gateway target** and never lets it cross to another:
+
+- Every gateway-facing BFF response — `/api/proxy/*`, `/api/settings`,
+  `/api/settings/status` — and every login and session response carries
+  `X-Foundry-Gateway-Target`, a keyed digest of the configured admin origin
+  (`server/gateway-target.ts`). It changes exactly when the destination does,
+  is the same on every replica and across restarts that point at the same
+  gateway, and does not disclose the origin.
+- The first target a page observes is its target for the page's lifetime
+  (`src/api/gatewayTarget.ts`). Every later gateway-facing request declares it
+  in the same header. The BFF compares it with the target it is about to
+  forward to — in the same synchronous step that reads the configuration it
+  forwards with — and refuses a mismatch with `409`
+  `FERRUM_BFF_GATEWAY_TARGET_CHANGED` before signing a token or forwarding
+  anything. A multi-request operation therefore stays on its original gateway
+  or stops: the next page of a listing, a membership plan's apply or rollback,
+  the apply-status poll, a guarded write's verification read and `PUT`, and a
+  draft submitted from a tab that has not noticed the change are all refused
+  rather than sent to the replacement.
+- A settings save is refused the same way when its tab was opened against a
+  replaced target. The form resubmits every field it was seeded with,
+  `adminUrl` included, so a stale tab saving only a timeout would otherwise
+  silently revert the other administrator's target change.
+- A page that observes any other target — its own settings save, the 60-second
+  session check, or the `409` above — **retires**: it sends no further gateway
+  request, drops live-apply monitoring (so a late answer from the old gateway
+  cannot repopulate the banner), discards every cached read, and unmounts the
+  workspace — editors, drafts, confirmation dialogs, and the capability
+  provider's retained health observation — in favour of a "Gateway target
+  changed" screen. Only a reload leaves it; the reload binds the new target
+  with nothing carried across. The `409` retires the page by its `code` even
+  if an intermediary dropped the target header from it, so a refused read —
+  the Settings form's first load, say — never lands on a "try again" state
+  that every retry would be refused from.
+- A refresh, save, or session check that names the same target changes
+  nothing, so drafts survive ordinary refreshes and non-target settings saves.
+  Runtime settings stay disabled by default, and a disallowed origin is still
+  refused before anything is published.
+
+A request that declares no target (a script calling the BFF directly) is not
+bound and is forwarded to the current target as before. The request header is
+not forwarded to the gateway.
