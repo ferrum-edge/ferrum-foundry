@@ -256,3 +256,88 @@ describe("SettingsForm editing drafts", () => {
     });
   });
 });
+
+describe("SettingsForm failed reads", () => {
+  function failRead(error: unknown) {
+    get.mockImplementation(() => ({
+      json: async () => {
+        throw error;
+      },
+    }));
+  }
+
+  function findButton(text: string): HTMLButtonElement | undefined {
+    return Array.from(host.querySelectorAll("button")).find(
+      (element) => element.textContent?.trim() === text,
+    );
+  }
+
+  it("renders a persistent read error instead of invented defaults on an initial failure", async () => {
+    failRead(new Error("network"));
+    await renderForm();
+
+    expect(host.textContent).toContain("Unable to load settings");
+    expect(host.textContent).toContain("Retry");
+    expect(host.textContent).not.toContain("Save Settings");
+    expect(host.textContent).not.toContain(
+      "Connection and signing settings are immutable",
+    );
+    expect(
+      Array.from(host.querySelectorAll("label")).some(
+        (label) => label.textContent?.trim() === "Admin URL",
+      ),
+    ).toBe(false);
+  });
+
+  it("adopts a successful retry and shows Save according to the observed flag", async () => {
+    get.mockImplementationOnce(() => ({
+      json: () => Promise.reject(new Error("network")),
+    }));
+    await renderForm();
+    expect(host.textContent).toContain("Unable to load settings");
+
+    const retryButton = findButton("Retry");
+    expect(retryButton).toBeDefined();
+    await act(async () => retryButton!.click());
+
+    expect(inputByLabel("Admin URL").value).toBe("http://127.0.0.1:9000");
+    expect(host.textContent).toContain("Save Settings");
+  });
+
+  it("restores the read-only explanation when a retry loads an immutable configuration", async () => {
+    get.mockImplementationOnce(() => ({
+      json: () => Promise.reject(new Error("network")),
+    }));
+    await renderForm();
+
+    currentSettings.runtimeSettingsEnabled = false;
+    const retryButton = findButton("Retry");
+    expect(retryButton).toBeDefined();
+    await act(async () => retryButton!.click());
+
+    expect(inputByLabel("Admin URL").disabled).toBe(true);
+    expect(host.textContent).not.toContain("Save Settings");
+    expect(host.textContent).toContain(
+      "Connection and signing settings are immutable",
+    );
+  });
+
+  it("distinguishes a permission denial from unavailable data", async () => {
+    failRead(Object.assign(new Error("Forbidden"), { response: { status: 403 } }));
+    await renderForm();
+
+    expect(host.textContent).toContain(
+      "Connection settings: read not permitted for this session",
+    );
+    expect(host.textContent).toContain(
+      "authorization denial, not missing or empty data",
+    );
+    expect(host.textContent).not.toContain("Save Settings");
+    expect(
+      Array.from(host.querySelectorAll("label")).some(
+        (label) => label.textContent?.trim() === "Admin URL",
+      ),
+    ).toBe(false);
+    expect(findButton("Retry")).toBeUndefined();
+  });
+});

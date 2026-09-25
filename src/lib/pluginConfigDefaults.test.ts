@@ -50,7 +50,7 @@ describe("canonical plugin defaults", () => {
   });
 
   it("uses native MeshPolicy documents instead of a Kubernetes CRD envelope", () => {
-    // Edge MeshPolicy (pinned v0.9.5 and current main): name, namespace, scope, rules.
+    // Edge MeshPolicy (v0.9.5, the previous pin, and current main): name, namespace, scope, rules.
     // A CRD envelope fails first on unknown field `apiVersion`.
     expect(getPluginConfigDefault("mesh_authz")).toEqual({
       namespace: "default",

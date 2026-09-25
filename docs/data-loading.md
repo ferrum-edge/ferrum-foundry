@@ -7,9 +7,12 @@ budgets, and what is still blocked on upstream work.
 ## The constraint
 
 `GET /proxies`, `GET /upstreams`, `GET /consumers`, and `GET /plugins/config`
-accept **`offset` and `limit` only**. The surveyed `openapi.yaml` declares no
-`search`, `name`, `filter`, `label`, or reference (`id in (…)`) parameter on
-any of them, and no bulk-resolve endpoint.
+accept **`offset` and `limit`**. The surveyed `openapi.yaml` declares no
+`search`, `name`, `label`, or reference (`id in (…)`) parameter on any of them,
+and no bulk-resolve endpoint. The one filter is `proxy_id` on
+`GET /plugins/config` (Ferrum Edge v0.9.7, ferrum-edge#5726): an exact match on
+the configuration's `proxy_id`, paginated over the filtered set, with
+`pagination.total` counting only the matches.
 
 Everything below follows from that. Where a view needs an answer the gateway
 will not compute — "which proxies match this text", "how many plugins run on
@@ -102,6 +105,16 @@ The policy traversals themselves remain **complete**. An effective-policy
 answer is an authorization conclusion; a partial plugin graph would
 under-report what runs on a proxy.
 
+The Plugins tab also lists the proxy-scoped configurations that name this
+proxy but do not run on it — disabled, or not in the proxy's `plugins` list.
+That list comes from `GET /plugins/config?proxy_id=<id>`
+(`plugins.listConfigsForProxy`), so it costs this proxy's configurations, one
+request in the common case, whatever the namespace size. It cannot replace the
+traversal above: global and proxy-group configurations run on the proxy too
+and carry no `proxy_id`. A response containing a configuration for another
+proxy means the gateway ignored the filter, and the read fails rather than
+showing or traversing the namespace.
+
 ### Consumer and plugin detail pages
 
 A consumer editor issues one request for the consumer. The proxy and plugin
@@ -155,9 +168,11 @@ the one the displayed namespace still needs.
   (cancellably, and abandoned as soon as the term changes). Restoring an
   arbitrary cap here would re-open the bugs #142 fixed, so the traversal
   stays. A bounded search needs an upstream contract.
-- **Bounded effective-policy queries.** There is no endpoint that answers
-  "which plugin configurations apply to proxy X". Until there is, the complete
-  traversal is what keeps the authorization conclusion truthful.
+- **Bounded effective-policy queries.** `?proxy_id=` answers "which
+  proxy-scoped configurations target proxy X", not "which configurations
+  apply to it": global and proxy-group configurations need a scope filter the
+  admin API does not offer. Until it does, the complete traversal is what
+  keeps the authorization conclusion truthful.
 - **Bulk reference resolution.** An `ids=` filter on `GET /upstreams` would
   replace up to twenty per-row reads with one request.
 
@@ -168,6 +183,7 @@ the one the displayed namespace still needs.
 | Budget, incompleteness, cancellation, fail-closed checks | `src/api/pagination.test.ts` |
 | Request counts at 500 and 50,000 records | `src/api/dataLoadingBudget.test.ts` |
 | List and detail pages issue bounded requests; over-budget counts report unavailable | `src/routes/proxies/boundedLoading.test.tsx` |
+| One proxy's configurations come from the filtered set; an unfiltered answer is refused | `src/api/plugins.proxyFilter.test.ts`, `src/routes/proxies/boundedLoading.test.tsx` |
 | TLS and ACME collections request one server page and advance by server offset | `src/routes/tls/TlsWorkflows.test.tsx`, `src/hooks/useTls.test.tsx` |
 | Traversals are abandoned on a namespace switch and never retargeted | `src/hooks/namespaceBinding.test.tsx` |
 | Membership completeness and picker selections survive | `src/routes/plugins/PluginDetailPage.test.tsx`, `src/routes/readTruthfulness.test.tsx` |

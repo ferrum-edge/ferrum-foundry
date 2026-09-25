@@ -170,13 +170,26 @@ describe("bounded loading on ordinary navigation", () => {
         const url = new URL(input.url);
         const offset = Number(url.searchParams.get("offset") ?? "0");
         const limit = Number(url.searchParams.get("limit") ?? String(PAGE_SIZE));
-        calls.push(`${input.method} ${url.pathname}?offset=${offset}&limit=${limit}`);
+        const proxyFilter = url.searchParams.get("proxy_id");
+        calls.push(
+          `${input.method} ${url.pathname}?offset=${offset}&limit=${limit}` +
+            (proxyFilter === null ? "" : `&proxy_id=${proxyFilter}`),
+        );
 
         if (url.pathname === "/api/proxy/proxies") {
           return Response.json(pageOf(proxyAt, PROXY_COUNT, offset, limit));
         }
         if (url.pathname === "/api/proxy/upstreams") {
           return Response.json(pageOf(upstreamAt, UPSTREAM_COUNT, offset, limit));
+        }
+        if (url.pathname === "/api/proxy/plugins/config" && proxyFilter !== null) {
+          // Edge v0.9.7 paginates the filtered set: pluginAt(n) targets proxy-n.
+          const index = Number(proxyFilter.replace("proxy-", ""));
+          const matches = index < PLUGIN_COUNT ? [pluginAt(index)] : [];
+          return Response.json({
+            data: matches.slice(offset, offset + limit),
+            pagination: { offset, limit, total: matches.length },
+          });
         }
         if (url.pathname === "/api/proxy/plugins/config") {
           return Response.json(pageOf(pluginAt, PLUGIN_COUNT, offset, limit));
@@ -268,9 +281,31 @@ describe("bounded loading on ordinary navigation", () => {
 
     // The policy answer is an authorization conclusion, so this traversal is
     // complete by design — it just does not happen before it is asked for.
-    expect(countOf(/plugins\/config/)).toBeGreaterThan(0);
+    expect(countOf(/plugins\/config\?offset=\d+&limit=\d+$/)).toBeGreaterThan(0);
     // And the consumer traversal still waits for its own tab.
     expect(countOf(/\/api\/proxy\/consumers/)).toBe(0);
+  });
+
+  it("lists what targets this proxy from one filtered read, not the namespace", async () => {
+    await render(<ProxyDetailPage />);
+    const pluginsTab = [...document.querySelectorAll<HTMLElement>('[role="tab"]')].find(
+      (tab) => tab.textContent?.startsWith("Plugins"),
+    )!;
+    await act(async () => {
+      pluginsTab.dispatchEvent(
+        new MouseEvent("mousedown", { bubbles: true, button: 0 }),
+      );
+    });
+    await settle();
+
+    // One request for this proxy's configurations, whatever the namespace size.
+    expect(calls.filter((call) => call.includes("proxy_id="))).toEqual([
+      "GET /api/proxy/plugins/config?offset=0&limit=250&proxy_id=proxy-0",
+    ]);
+    // plugin-0 names proxy-0, which does not list it: it targets but never runs.
+    expect(host.textContent).toContain("Targeting this proxy, not running");
+    expect(host.textContent).toContain("plugin-0");
+    expect(host.textContent).toContain("Not attached");
   });
 
   it("opening the upstream tab loads it without flashing a failure", async () => {

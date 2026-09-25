@@ -31,6 +31,7 @@ vi.mock("@/stores/capabilities", () => ({
 }));
 vi.mock("@/hooks/usePlugins", () => ({
   useAllPluginConfigs: () => emptyQuery([]),
+  useProxyPluginConfigs: () => emptyQuery([]),
 }));
 vi.mock("@/hooks/useConsumers", () => ({
   useAllConsumers: () => emptyQuery([]),

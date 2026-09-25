@@ -17,10 +17,12 @@
  *      read as `If-Match` (ferrum-edge#5661), which is what closes the gap
  *      between that read and the write. A gateway that tags reads must refuse
  *      a tag from before administrator 1's change, and an invented one, with
- *      `412` and write nothing. A gateway that issues no tag gets no
- *      `If-Match` from Foundry, so it must not be enforcing one either —
- *      either mismatch means Foundry's guard and the gateway disagree about
- *      the contract (see `docs/concurrent-edits.md`).
+ *      `412` and write nothing, and must refuse a malformed `If-Match` and
+ *      one on a create with `400` (Edge v0.9.7), never apply them as if the
+ *      header were absent. A gateway that issues no tag gets no `If-Match`
+ *      from Foundry, so it must not be enforcing one either — either
+ *      mismatch means Foundry's guard and the gateway disagree about the
+ *      contract (see `docs/concurrent-edits.md`).
  *
  * The comparison uses `src/lib/resourceBaseline.ts` directly — the same module
  * the browser uses — so the contract cannot pass against a second copy of the
@@ -35,6 +37,7 @@ import {
 } from "../src/lib/resourceBaseline.ts";
 
 const PROXY_ID = "concurrent-edit-contract-proxy";
+const CREATE_PROBE_ID = "concurrent-edit-contract-create-probe";
 const BACKEND_A = "backend-a.contract.invalid";
 const BACKEND_B = "backend-b.contract.invalid";
 
@@ -182,6 +185,35 @@ export async function verifyConcurrentEditContract(exchange, proxyTemplate) {
       });
       assert.equal(invented.status, 412, `an invented If-Match returned ${invented.status}`);
 
+      // A malformed header is a 400, never read as "no precondition".
+      const malformed = await exchange(`/proxies/${PROXY_ID}?apply=sync`, {
+        method: "PUT",
+        body: staleDraft,
+        headers: { "if-match": "a-tag-without-quotes" },
+      });
+      assert.equal(malformed.status, 400, `a malformed If-Match returned ${malformed.status}`);
+      findings.malformedIfMatchStatus = malformed.status;
+
+      // A create does not evaluate If-Match, so carrying one is a 400 rather
+      // than an unconditional write. Foundry never sends one there.
+      const create = await exchange("/proxies?apply=sync", {
+        method: "POST",
+        body: {
+          ...proxyTemplate,
+          id: CREATE_PROBE_ID,
+          name: "Concurrent edit contract create probe",
+          listen_path: "/concurrent-edit-contract-create-probe",
+          upstream_id: null,
+          backend_host: BACKEND_A,
+          plugins: [],
+        },
+        headers: { "if-match": '"a-revision-this-proxy-never-had"' },
+      });
+      assert.equal(create.status, 400, `If-Match on a create returned ${create.status}`);
+      findings.createIfMatchStatus = create.status;
+      const notCreated = await exchange(`/proxies/${CREATE_PROBE_ID}`);
+      assert.equal(notCreated.status, 404, "a create refused for its If-Match still wrote");
+
       const survived = await exchange(`/proxies/${PROXY_ID}`);
       assert.equal(survived.body.backend_host, BACKEND_B, "a refused conditional write reached the gateway");
       assert.equal(survived.body.backend_read_timeout_ms, 5_000);
@@ -207,6 +239,10 @@ export async function verifyConcurrentEditContract(exchange, proxyTemplate) {
     }
   } finally {
     await exchange(`/proxies/${PROXY_ID}?apply=sync&cleanup_orphaned_upstream=false`, {
+      method: "DELETE",
+    });
+    // Only present if the gateway wrongly accepted the create probe.
+    await exchange(`/proxies/${CREATE_PROBE_ID}?apply=sync&cleanup_orphaned_upstream=false`, {
       method: "DELETE",
     });
   }

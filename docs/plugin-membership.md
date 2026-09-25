@@ -68,7 +68,7 @@ original non-group scope first, using Edge's atomic association reconciliation.
 Timestamp checks avoid overwriting resources observed to have changed meanwhile.
 Every write is also sent with `If-Match` set to the tag of the read it was
 checked against, so on a gateway that implements the precondition
-(ferrum-edge#5661) the check and the write are atomic and a change that did not
+(ferrum-edge#5661, in the paired Ferrum Edge v0.9.7) the check and the write are atomic and a change that did not
 move `updated_at` is caught too; without a tag they remain client checks. A
 plugin save or delete from its detail page is also refused if the configuration
 no longer matches what the editor opened — see `docs/concurrent-edits.md`.

@@ -7,7 +7,7 @@ import { ResourceLabels } from "@/components/shared/ResourceLabels";
 import { useCallback, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useProxy, useUpdateProxy, useDeleteProxy } from "@/hooks/useProxies";
-import { useAllPluginConfigs } from "@/hooks/usePlugins";
+import { useAllPluginConfigs, useProxyPluginConfigs } from "@/hooks/usePlugins";
 import { useUpstream } from "@/hooks/useUpstreams";
 import { useAllConsumers } from "@/hooks/useConsumers";
 import { ReadState, ReadStateNotice } from '@/components/shared/ReadState';
@@ -110,6 +110,14 @@ function ProxyEditor({ session }: { session: EditorSession }) {
   const consumerPolicyRequested = openedTabs.has("consumers");
 
   const pluginsQuery = useAllPluginConfigs(pluginPolicyRequested);
+  // What targets this proxy by `proxy_id`, attached or not. Edge filters it
+  // (`GET /plugins/config?proxy_id=`), so it costs this proxy's configurations,
+  // not the namespace — but it cannot replace the traversal above, because
+  // global and proxy-group configurations carry no `proxy_id`.
+  const targetingQuery = useProxyPluginConfigs(
+    proxyId,
+    detailLive && openedTabs.has("plugins"),
+  );
   const consumersQuery = useAllConsumers(consumerPolicyRequested);
   const { data: allPluginConfigs } = pluginsQuery;
   const { data: allConsumers } = consumersQuery;
@@ -151,6 +159,19 @@ function ProxyEditor({ session }: { session: EditorSession }) {
       : []),
     [proxy, allPluginConfigs, pluginsKnown],
   );
+  // Proxy-scoped configurations that name this proxy but do not run on it:
+  // disabled, or absent from the proxy's own `plugins` list (`proxy_id`
+  // records intent, not attachment). Nothing else on the page shows them.
+  const targetingQueries = [resourceQuery, targetingQuery];
+  const idleTargeting = useMemo(() => {
+    if (!proxy || !targetingQuery.data) return [];
+    const attached = new Set(
+      (proxy.plugins ?? []).map((association) => association.plugin_config_id),
+    );
+    return targetingQuery.data
+      .filter((plugin) => !plugin.enabled || !attached.has(plugin.id))
+      .map((plugin) => ({ plugin, attached: attached.has(plugin.id) }));
+  }, [proxy, targetingQuery.data]);
   const visibleConsumers = policy?.consumers.filter(
     (result) => result.decision === "allowed" || result.decision === "conditional",
   ) ?? [];
@@ -420,6 +441,42 @@ function ProxyEditor({ session }: { session: EditorSession }) {
               )}
             </div>
           </ReadState>
+          <div className="mt-3">
+            <ReadState queries={targetingQueries} label="Plugins targeting this proxy">
+              {idleTargeting.length > 0 && (
+                <Card>
+                  <h3 className="text-sm font-semibold text-text-muted uppercase tracking-wide">
+                    Targeting this proxy, not running
+                  </h3>
+                  <p className="text-text-muted text-sm mt-1 mb-3">
+                    These proxy-scoped plugins name this proxy but do not run on it until
+                    they are enabled and the proxy lists them.
+                  </p>
+                  <div className="space-y-2">
+                    {idleTargeting.map(({ plugin, attached }) => (
+                      <Link
+                        key={plugin.id}
+                        to="/plugins/$pluginId"
+                        params={{ pluginId: plugin.id }}
+                        className="block rounded-lg border border-border p-3 opacity-70 hover:opacity-100 transition-opacity"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-medium text-text-secondary">
+                            {plugin.plugin_name}
+                          </span>
+                          <span className="flex gap-2">
+                            {!plugin.enabled && <Badge variant="red">Disabled</Badge>}
+                            {!attached && <Badge variant="default">Not attached</Badge>}
+                          </span>
+                        </div>
+                        <p className="font-mono text-xs text-text-muted mt-1">{plugin.id}</p>
+                      </Link>
+                    ))}
+                  </div>
+                </Card>
+              )}
+            </ReadState>
+          </div>
         </TabsContent>
 
         {/* ── Consumers Tab ──────────────────────────────────────── */}
