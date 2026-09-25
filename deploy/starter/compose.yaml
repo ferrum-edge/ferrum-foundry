@@ -123,10 +123,10 @@ services:
       - ./secrets:/etc/nginx/secrets:ro
 
   # The Ferrum Edge image CI qualifies (docs/compatibility.md): the published
-  # v0.9.5 release. Must equal `edge.image` in docs/compatibility.json; a test
+  # v0.9.7 release. Must equal `edge.image` in docs/compatibility.json; a test
   # fails if it drifts.
   demo-gateway:
-    image: ferrumedge/ferrum-edge@sha256:eca46c84bca92d6ef467979f8846537f7ab56c0cdc137befff465526a10fe10f
+    image: ferrumedge/ferrum-edge@sha256:4c9530e09443649526dc4fbbec0720ba7b47ceb91b0dd5cb06db85430908874a
     restart: unless-stopped
     profiles: [demo]
     environment:

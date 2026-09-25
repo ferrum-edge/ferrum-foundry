@@ -62,20 +62,39 @@ describe("the supported pairing record", () => {
     }
   });
 
-  it("runs CI against the published v0.9.5 release, which is not the pairing", () => {
-    assert.equal(
-      record.edge.image,
-      "ferrumedge/ferrum-edge@sha256:eca46c84bca92d6ef467979f8846537f7ab56c0cdc137befff465526a10fe10f",
-    );
-    assert.equal(record.edge.source_commit, "20e76030a05dc49c3804e969516c94ab101110b9");
-    assert.deepEqual(record.edge.platform_manifests, {
-      "linux/amd64": "sha256:3bb2b253e0cc338108320a39de86da216c6e644aef39fd83a3e22ca0ad6173a8",
-      "linux/arm64": "sha256:d28b77e39e17e2480b3a3f39d55236f8fddbcc8cdf3dbbf314dbba6aa4ad3a1d",
-    });
-    assert.match(record.edge.build, /v0\.9\.5/);
-    // v0.9.5 lacks ferrum-edge#5661, so it can never be the recorded pairing.
-    assert.notEqual(record.edge.release.version, "v0.9.5");
+  it("pairs with and runs CI against the published v0.9.7 release", () => {
+    const image =
+      "ferrumedge/ferrum-edge@sha256:4c9530e09443649526dc4fbbec0720ba7b47ceb91b0dd5cb06db85430908874a";
+    const sourceCommit = "8fed1346ce2e267eb69c03683cb89ea44d785e0b";
+    const manifests = {
+      "linux/amd64": "sha256:e4d4367e815e86f510c28d8f831ca3502b7c9d5f21fd0eeabeb609a8c8e6f47f",
+      "linux/arm64": "sha256:7d3d28d2529dfb6a303b734fad0bf35ebec07caa95f5632e81d92170baf15fab",
+    };
+    assert.equal(record.edge.image, image);
+    assert.equal(record.edge.source_commit, sourceCommit);
+    assert.deepEqual(record.edge.platform_manifests, manifests);
+    assert.match(record.edge.build, /v0\.9\.7/);
+
+    const release = record.edge.release;
+    assert.equal(release.version, "v0.9.7");
+    assert.equal(release.image, image);
+    assert.equal(release.source_commit, sourceCommit);
+    assert.deepEqual(release.platform_manifests, manifests);
+    // CI ran the release it names, so the release workflow may tag against it.
+    assert.deepEqual(edgeReleaseErrors(record), []);
     assert.ok(!record.edge.rejected_images.some((entry) => entry.image === record.edge.image));
+  });
+
+  it("never pairs with v0.9.5, which lacks ferrum-edge#5661, or the unpublished v0.9.6", () => {
+    for (const version of ["v0.9.5", "v0.9.6"]) {
+      assert.notEqual(record.edge.release.version, version);
+    }
+    assert.ok(
+      !JSON.stringify(record.edge).includes(
+        "eca46c84bca92d6ef467979f8846537f7ab56c0cdc137befff465526a10fe10f",
+      ),
+      "the v0.9.5 digest belongs to history, not to edge.image or edge.release",
+    );
   });
 
   it("records the Edge 0.9.x semantics the gates now assert", () => {
@@ -87,8 +106,15 @@ describe("the supported pairing record", () => {
     assert.match(semantics, /#409/);
   });
 
-  it("names its previous release and never claims a Foundry artifact it cannot know yet", () => {
+  it("names its version and previous release, and no Foundry artifact it cannot know yet", () => {
+    assert.equal(record.foundry.version, "0.2.0");
     assert.equal(record.foundry.previous_release, "v0.1.0");
+    const pkg = JSON.parse(repoFile("package.json"));
+    const lock = JSON.parse(repoFile("package-lock.json"));
+    // The release workflow requires the tag, package.json, and the record to agree.
+    assert.equal(pkg.version, record.foundry.version);
+    assert.equal(lock.version, record.foundry.version);
+    assert.equal(lock.packages[""].version, record.foundry.version);
     if (record.status === "candidate") {
       // The commit, digest, and CI run of a release exist only once it is cut.
       for (const field of ["source_commit", "image", "ci_evidence"]) {
@@ -98,10 +124,13 @@ describe("the supported pairing record", () => {
     assert.deepEqual(record.foundry.platforms, ["linux/amd64", "linux/arm64"]);
   });
 
-  it("keeps the unreleased If-Match dependency explicit while Edge has not shipped it", () => {
-    const dependency = record.edge_dependencies.find((entry) => entry.change === "ferrum-edge#5661");
-    assert.ok(dependency, "ferrum-edge#5661 must stay listed until a pinned release includes it");
-    assert.match(dependency.status, /not in v0\.9\.5, any published image, or edge\.image/);
+  it("records the Edge changes the pairing depends on as released in it", () => {
+    const changes = record.edge_dependencies.map((entry) => entry.change);
+    assert.deepEqual(changes, ["ferrum-edge#5661", "ferrum-edge#5726"]);
+    const released = `released in Ferrum Edge ${record.edge.release.version}`;
+    for (const dependency of record.edge_dependencies) {
+      assert.ok(dependency.status.includes(released), `${dependency.change}: ${dependency.status}`);
+    }
   });
 });
 
@@ -225,21 +254,23 @@ describe("repository alignment", () => {
     assert.match(workflow, /node scripts\/supported-pairing\.mjs release-ready\n/);
   });
 
-  it("drafts the next release notes against the same pairing", () => {
-    // Between releases the draft is UNRELEASED.md; the release step renames it
-    // to the version's own notes, which the release workflow publishes.
-    const path = existsSync(join(REPO_ROOT, UNRELEASED_NOTES))
-      ? UNRELEASED_NOTES
-      : `docs/release-notes/v${record.foundry.version}.md`;
-    const notes = repoFile(path);
+  it("publishes the release notes for foundry.version against the same pairing", () => {
+    // The release step moves UNRELEASED.md to the version's own notes, which
+    // the release workflow publishes; UNRELEASED.md then drafts the next one.
     const release = record.edge.release;
+    const versioned = `docs/release-notes/v${record.foundry.version}.md`;
+    const path = isPlaceholder(record.foundry.version) ? UNRELEASED_NOTES : versioned;
+    assert.ok(existsSync(join(REPO_ROOT, path)), `${path} must exist`);
+    const notes = repoFile(path);
     if (isPlaceholder(release.image)) {
       // The notes must not present the CI pin, which is not the pairing, as the pairing.
       assert.ok(!notes.includes(record.edge.image), "the draft must not pair with edge.image");
       assert.match(notes, /\| Ferrum Edge \| \*release step\*/);
     } else {
       assert.ok(notes.includes(release.image));
+      assert.ok(notes.includes(release.source_commit));
       assert.ok(notes.includes(`Ferrum Edge ${release.version}`));
+      for (const digest of Object.values(release.platform_manifests)) assert.ok(notes.includes(digest));
     }
     for (const rejected of record.edge.rejected_images ?? []) {
       assert.ok(notes.includes(rejected.evidence), `release notes must cite ${rejected.version}'s run`);
@@ -247,6 +278,12 @@ describe("repository alignment", () => {
     for (const dependency of record.edge_dependencies ?? []) {
       assert.ok(notes.includes(dependency.change), `release notes must state ${dependency.change}`);
     }
+  });
+
+  it("keeps a release-notes draft for the next release that pins nothing", () => {
+    const draft = repoFile(UNRELEASED_NOTES);
+    assert.equal(draft.match(EDGE_REFERENCE), null, "the draft names no Edge image until its release step");
+    assert.ok(!draft.includes(`# Ferrum Foundry v${record.foundry.version}`));
   });
 
   it("documents the same pairing in the human-readable record", () => {

@@ -311,7 +311,7 @@ describe('streaming gateway proxy', () => {
   it('separates liveness from authenticated downstream readiness', async () => {
     const live = await app.inject({ method: 'GET', url: '/api/health/live' });
     expect(live.statusCode).toBe(200);
-    expect(live.json()).toMatchObject({ status: 'ok', version: '0.1.0' });
+    expect(live.json()).toMatchObject({ status: 'ok', version: '0.2.0' });
 
     const ready = await app.inject({ method: 'GET', url: '/api/health/ready' });
     expect(ready.statusCode).toBe(200);

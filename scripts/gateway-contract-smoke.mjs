@@ -94,6 +94,19 @@ await request(`/upstreams/${upstreamId}?apply=sync`, {
   method: "PUT",
   body: { ...upstream, name: "Contract smoke upstream updated" },
 });
+// Edge v0.9.7 refuses probe targets it used to accept (ferrum-edge#5683,
+// #5688); the upstream form checks the same rules before submitting.
+for (const [active, field] of [
+  [{ http_path: "health" }, "http_path"],
+  [{ probe_type: "udp", udp_probe_payload: "abc" }, "udp_probe_payload"],
+]) {
+  const refused = await request(`/upstreams/${upstreamId}?apply=sync`, {
+    method: "PUT",
+    body: { ...upstream, health_checks: { active } },
+    expected: [400],
+  });
+  assert.match(JSON.stringify(refused), new RegExp(`health_checks\\.active\\.${field}`));
+}
 
 await request("/consumers?apply=sync", { method: "POST", body: consumer });
 await request(`/consumers/${consumerId}?apply=sync`, {
@@ -121,6 +134,16 @@ await request(`/plugins/config/${pluginId}?apply=sync`, {
   method: "PUT",
   body: { ...plugin, config: { max_bytes: 8192 } },
 });
+
+// `GET /plugins/config?proxy_id=` (Edge v0.9.7, ferrum-edge#5726) pages only
+// the configurations targeting that proxy; Foundry's proxy Plugins tab uses it.
+const targeting = await request(`/plugins/config?proxy_id=${proxyId}&offset=0&limit=20`);
+assert.deepEqual(targeting.data.map((config) => config.id), [pluginId]);
+assert.equal(targeting.pagination.total, 1);
+const untargeted = await request("/plugins/config?proxy_id=contract-smoke-no-such-proxy");
+assert.deepEqual(untargeted.data, []);
+assert.equal(untargeted.pagination.total, 0);
+await request("/plugins/config?proxy_id=has%20space", { expected: [400] });
 
 for (const endpoint of ["upstreams", "consumers", "proxies", "plugins/config"]) {
   const page = await request(`/${endpoint}?offset=0&limit=20`);
@@ -155,6 +178,10 @@ const basicAuth = await verifyBasicAuthContract(exchange);
 // gateway enforces the If-Match precondition the guard sends
 // (ferrum-edge#5661).
 const concurrentEdits = await verifyConcurrentEditContract(exchange, proxyTemplate);
+// The paired Edge release includes ferrum-edge#5661 (docs/compatibility.md), so
+// the pinned gateway must tag reads and enforce the If-Match Foundry sends.
+assert.equal(concurrentEdits.gatewayIssuesEtag, true, "edge.image issued no ETag (ferrum-edge#5661)");
+assert.equal(concurrentEdits.gatewayHonoursIfMatch, true);
 
 // The UI's role x mode capability model against this gateway, as viewer,
 // operator, and admin (#385). The read-only half runs against a second
@@ -186,6 +213,15 @@ console.log(JSON.stringify({
   basicAuth,
   concurrentEdits,
   capabilityParity,
-  operations: ["read", "create", "full-replace update", "credential rotation", "delete", "TLS validation"],
+  operations: [
+    "read",
+    "create",
+    "full-replace update",
+    "credential rotation",
+    "delete",
+    "TLS validation",
+    "plugin configs by proxy_id",
+    "health-check probe validation",
+  ],
   resources: ["upstreams", "consumers", "proxies", "plugin configs", "namespaces"],
 }));
