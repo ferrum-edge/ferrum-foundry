@@ -6,7 +6,10 @@ import {
   FLEET_GLOBAL,
   getApiErrorDetail,
   getApiErrorMessage,
+  issueRequestTicket,
+  latestRequestTicket,
   NAMESPACE_HEADER,
+  REQUEST_TICKET,
   scoped,
   setCsrfToken,
   setOnUnauthorized,
@@ -472,6 +475,97 @@ describe("session request hooks", () => {
     });
     await api.get("api/settings", { throwHttpErrors: false });
     expect(unauthorized).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a BFF 401 with the ticket of the request it answered (#435)", async () => {
+    const unauthorized = vi.fn();
+    setOnUnauthorized(unauthorized);
+    nextResponse = () => new Response("{}", {
+      status: 401,
+      headers: { "content-type": "application/json", "x-ferrum-auth-layer": "bff" },
+    });
+    const before = latestRequestTicket();
+    await api.get("api/settings", { throwHttpErrors: false });
+    const [ticket] = unauthorized.mock.calls[0] as [number];
+    expect(ticket).toBeGreaterThan(before);
+    expect(issueRequestTicket()).toBeGreaterThan(ticket);
+
+    // A session read orders itself before it is sent and keeps that ticket.
+    const read = issueRequestTicket();
+    issueRequestTicket();
+    await api.get("api/auth/session", {
+      throwHttpErrors: false,
+      context: { [REQUEST_TICKET]: read },
+    });
+    expect(unauthorized).toHaveBeenLastCalledWith(read);
+  });
+
+  it("lets an unmounted handler unregister without removing its replacement", async () => {
+    const retired = vi.fn();
+    const replacement = vi.fn();
+    const unregisterRetired = setOnUnauthorized(retired);
+    setOnUnauthorized(replacement);
+    unregisterRetired();
+    nextResponse = () => new Response("{}", {
+      status: 401,
+      headers: { "content-type": "application/json", "x-ferrum-auth-layer": "bff" },
+    });
+    await api.get("api/settings", { throwHttpErrors: false });
+    expect(retired).not.toHaveBeenCalled();
+    expect(replacement).toHaveBeenCalledTimes(1);
+  });
+
+  describe("CSRF value shared with other tabs (#436)", () => {
+    const COOKIE = "ferrum-foundry-csrf";
+
+    function setSharedCookie(value: string | null): void {
+      document.cookie = value === null
+        ? `${COOKIE}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`
+        : `${COOKIE}=${value}; path=/`;
+    }
+
+    afterEach(() => setSharedCookie(null));
+
+    it("sends the cookie's current value after another tab renewed it", async () => {
+      // This tab accepted T1; a refresh in another tab of the same browser
+      // then replaced the shared cookie with T2.
+      setSharedCookie("token-t1");
+      setCsrfToken("token-t1", COOKIE);
+      setSharedCookie("token-t2");
+      await api.post("api/settings", { json: { readTimeout: 1000 } });
+      await api.post("api/auth/logout");
+      expect(captured.map((request) => request.headers.get("x-csrf-token")))
+        .toEqual(["token-t2", "token-t2"]);
+    });
+
+    it("never pairs the page with a different cookie after concurrent session responses", async () => {
+      setSharedCookie("token-b");
+      // The older of two responses is accepted last.
+      setCsrfToken("token-b", COOKIE);
+      setCsrfToken("token-a", COOKIE);
+      await api.post("api/settings", { json: {} });
+      expect(captured[0].headers.get("x-csrf-token")).toBe("token-b");
+    });
+
+    it("falls back to the accepted token when the cookie cannot be read", async () => {
+      setCsrfToken("token-t1", COOKIE);
+      await api.post("api/settings", { json: {} });
+      expect(captured[0].headers.get("x-csrf-token")).toBe("token-t1");
+    });
+
+    it("sends no CSRF value while signed out, even if a cookie remains", async () => {
+      setSharedCookie("token-t2");
+      setCsrfToken(null, COOKIE);
+      await api.post("api/settings", { json: {} });
+      expect(captured[0].headers.has("x-csrf-token")).toBe(false);
+    });
+
+    it("keeps safe methods free of the CSRF header", async () => {
+      setSharedCookie("token-t2");
+      setCsrfToken("token-t1", COOKIE);
+      await api.get("api/settings");
+      expect(captured[0].headers.has("x-csrf-token")).toBe(false);
+    });
   });
 });
 

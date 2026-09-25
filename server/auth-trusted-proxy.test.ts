@@ -404,4 +404,60 @@ describe('trusted OIDC proxy authentication', () => {
       vi.useRealTimers();
     }
   });
+
+  it('names the shared CSRF cookie so a tab can follow a renewal made by another tab (#436)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-03-01T00:00:00Z'));
+    const app = await buildApp();
+    try {
+      // Both tabs of one browser hold the first token and share its cookie.
+      const first = await app.inject({ method: 'GET', url: '/api/auth/session', headers: identityHeaders() });
+      const original = first.json() as { csrfToken: string; csrfCookie: string };
+      expect(original.csrfCookie).toBe('ferrum-foundry-csrf');
+      expect(first.cookies.find((entry) => entry.name === original.csrfCookie)?.value)
+        .toBe(original.csrfToken);
+
+      // 2701 s into a 3600 s grant: tab A's refresh renews the shared cookie
+      // while the original token is still validly signed and unexpired.
+      vi.setSystemTime(new Date('2026-03-01T00:45:01Z'));
+      const renewal = await app.inject({
+        method: 'GET',
+        url: '/api/auth/session',
+        headers: identityHeaders({ cookie: cookieHeaderOf(first) }),
+      });
+      const renewed = renewal.json() as { csrfToken: string; csrfCookie: string };
+      expect(renewed.csrfToken).not.toBe(original.csrfToken);
+      expect(renewed.csrfCookie).toBe(original.csrfCookie);
+      const jar = cookieHeaderOf(renewal);
+      expect(jar).toBe(`${renewed.csrfCookie}=${renewed.csrfToken}`);
+
+      // Tab B still holding the original token in memory is rejected: the
+      // double-submit equality check is not relaxed for a valid sibling token.
+      const stale = await app.inject({
+        method: 'POST',
+        url: '/protected',
+        headers: identityHeaders({ cookie: jar, 'x-csrf-token': original.csrfToken }),
+      });
+      expect(stale.statusCode).toBe(403);
+      expect(stale.json()).toEqual({ error: 'CSRF validation failed' });
+
+      // Tab B sending the value of the cookie the response named passes, for
+      // an ordinary write and for signing out.
+      const write = await app.inject({
+        method: 'POST',
+        url: '/protected',
+        headers: identityHeaders({ cookie: jar, 'x-csrf-token': renewed.csrfToken }),
+      });
+      expect(write.statusCode).toBe(200);
+      const logout = await app.inject({
+        method: 'POST',
+        url: '/api/auth/logout',
+        headers: identityHeaders({ cookie: jar, 'x-csrf-token': renewed.csrfToken }),
+      });
+      expect(logout.statusCode).toBe(200);
+    } finally {
+      await app.close();
+      vi.useRealTimers();
+    }
+  });
 });

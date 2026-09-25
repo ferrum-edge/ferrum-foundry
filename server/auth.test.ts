@@ -142,6 +142,20 @@ describe('static development sessions', () => {
     }
   });
 
+  it('names the readable CSRF cookie that carries the session token (#436)', async () => {
+    const app = await buildApp();
+    try {
+      const { response, body } = await login(app);
+      const { csrfCookie } = body as { csrfCookie?: string };
+      expect(csrfCookie).toBe('ferrum-foundry-csrf');
+      const cookie = response.cookies.find((entry) => entry.name === csrfCookie);
+      expect(cookie?.value).toBe(body.csrfToken);
+      expect(cookie?.httpOnly).toBeFalsy();
+    } finally {
+      await app.close();
+    }
+  });
+
   it('revokes the server-side session on logout', async () => {
     const app = await buildApp();
     try {
