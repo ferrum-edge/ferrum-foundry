@@ -120,6 +120,11 @@ describe("the supported pairing record", () => {
       for (const field of ["source_commit", "image", "ci_evidence"]) {
         assert.ok(isPlaceholder(record.foundry[field]), `foundry.${field} before release`);
       }
+    } else {
+      // Once the release is recorded, those artifacts are filled from its run.
+      for (const field of ["source_commit", "image", "ci_evidence"]) {
+        assert.ok(!isPlaceholder(record.foundry[field]), `foundry.${field} after release`);
+      }
     }
     assert.deepEqual(record.foundry.platforms, ["linux/amd64", "linux/arm64"]);
   });
@@ -165,6 +170,9 @@ describe("validatePairing", () => {
 
   it("is release-ready only when edge.image is the recorded Edge release", () => {
     const recorded = structuredClone(valid);
+    // This falsifies an in-progress pairing evaluation; a released record can
+    // only pair with the Edge release it was already qualified against.
+    recorded.status = "candidate";
     Object.assign(recorded.edge.release, {
       version: "v9.9.9",
       source_commit: "d".repeat(40),

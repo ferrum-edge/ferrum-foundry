@@ -6,9 +6,9 @@ Foundry does not claim otherwise. This page is the human-readable record;
 [`compatibility.json`](compatibility.json) is the machine-readable one and the
 single source CI reads the gateway image from.
 
-**Record version 1 — status: release candidate for Foundry v0.2.0.** Values
-marked *release step* are filled when the release is cut, from the release run
-itself. They are never guessed ahead of it.
+**Record version 1 — status: released.** Foundry v0.2.0 was recorded from the
+release run itself: its source commit, multi-architecture image digest, and CI
+run below were filled when the release was cut, never guessed ahead of it.
 
 **Foundry v0.2.0 pairs with the published Ferrum Edge v0.9.7 release.** It is
 the first published Edge release after v0.9.5 (`v0.9.6` was tagged but never
@@ -24,10 +24,10 @@ moved the pin to it, is the qualification run
 | | Foundry | Ferrum Edge |
 | --- | --- | --- |
 | Version | 0.2.0 (previous release: [v0.1.0](https://github.com/ferrum-edge/ferrum-foundry/releases/tag/v0.1.0)) | [v0.9.7](https://github.com/ferrum-edge/ferrum-edge/releases/tag/v0.9.7) |
-| Source commit | *release step* — the commit `v0.2.0` points to, also the image's `org.opencontainers.image.revision` label | `8fed1346ce2e267eb69c03683cb89ea44d785e0b`, the commit the `v0.9.7` tag points to, built by Edge's [Release run](https://github.com/ferrum-edge/ferrum-edge/actions/runs/36110533284) |
-| Image | *release step* — `ferrumedge/ferrum-foundry@sha256:…` from the release run | `ferrumedge/ferrum-edge@sha256:4c9530e09443649526dc4fbbec0720ba7b47ceb91b0dd5cb06db85430908874a`, the release's multi-architecture index digest |
-| Platforms | `linux/amd64`, `linux/arm64` | `linux/amd64` `sha256:e4d4367e815e86f510c28d8f831ca3502b7c9d5f21fd0eeabeb609a8c8e6f47f`, `linux/arm64` `sha256:7d3d28d2529dfb6a303b734fad0bf35ebec07caa95f5632e81d92170baf15fab` |
-| CI evidence | *release step* — the green CI run for the tagged commit | same run, with `edge.image` at the release; qualified in [#439](https://github.com/ferrum-edge/ferrum-foundry/pull/439) |
+| Source commit | `c028c235fd83bb7a1962f3e06b0280d8d8ed8878`, the commit the `v0.2.0` tag points to, also the image's `org.opencontainers.image.revision` label | `8fed1346ce2e267eb69c03683cb89ea44d785e0b`, the commit the `v0.9.7` tag points to, built by Edge's [Release run](https://github.com/ferrum-edge/ferrum-edge/actions/runs/36110533284) |
+| Image | `ferrumedge/ferrum-foundry@sha256:54e784c9a7f658e7f7d2d3bcab32d5ca0b113a417726ad1736c1765e0834fe7f`, the release's multi-architecture index digest | `ferrumedge/ferrum-edge@sha256:4c9530e09443649526dc4fbbec0720ba7b47ceb91b0dd5cb06db85430908874a`, the release's multi-architecture index digest |
+| Platforms | `linux/amd64` `sha256:d42862dce8b8fea01bc1d25ff20fc68d26f89789c163415bf0476feb618c14fc`, `linux/arm64` `sha256:295c4b2fa641ad65f4832022fda70a893737b81b7fb4ffbdd20e0d2a02a1f3f2` | `linux/amd64` `sha256:e4d4367e815e86f510c28d8f831ca3502b7c9d5f21fd0eeabeb609a8c8e6f47f`, `linux/arm64` `sha256:7d3d28d2529dfb6a303b734fad0bf35ebec07caa95f5632e81d92170baf15fab` |
+| CI evidence | [release run](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/36125598365), green including the Pre-publication Gates, for the tagged commit | same run, with `edge.image` at the release; qualified in [#439](https://github.com/ferrum-edge/ferrum-foundry/pull/439) |
 
 Run Edge by digest, never by tag: `ferrumedge/ferrum-edge:latest` is not
 refreshed for releases, and any tag can be moved. The `0.9.7-ebpf` and
