@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Sessions follow the authentication lifecycle and the browser's shared CSRF cookie. A session read that completes after a confirmed sign-out no longer restores the signed-out principal and CSRF value; an older refresh can no longer overwrite a newer role or namespace grant; and a late `401` — from a session read or from any request through the client's global hook — no longer clears a session accepted after that request was sent. Sign-in, sign-out, and unmounting the provider retire and abort reads in flight, and a replaced provider can no longer publish a token or clear its replacement's cache (#435). When one tab renewed the trusted-proxy CSRF cookie, other open tabs kept sending their own older token and their writes and sign-out were refused with `403 CSRF validation failed` until their next refresh; each unsafe request now sends the current value of the cookie the BFF names in its session response (`csrfCookie`). The BFF's double-submit and signature checks are unchanged (#436).
+
 ## [0.2.0] - 2026-09-25
 
 The first Foundry release paired with a published Ferrum Edge release:

@@ -10,7 +10,15 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { api, setCsrfToken, setOnUnauthorized, SILENT_ERRORS } from "@/api/client";
+import {
+  api,
+  issueRequestTicket,
+  latestRequestTicket,
+  REQUEST_TICKET,
+  setCsrfToken,
+  setOnUnauthorized,
+  SILENT_ERRORS,
+} from "@/api/client";
 import { clearGatewayMetadata } from "@/api/gatewayMetadata";
 
 export type AuthMode = "static" | "trusted-proxy";
@@ -33,6 +41,8 @@ interface AuthConfig {
 interface SessionResponse {
   principal: AuthPrincipal;
   csrfToken: string;
+  /** The readable cookie the BFF set to the same value; see `setCsrfToken`. */
+  csrfCookie?: string;
   expiresAt?: number;
   logoutUrl?: string;
 }
@@ -81,8 +91,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [principal, setPrincipal] = useState<AuthPrincipal | null>(null);
   const [error, setError] = useState<string | null>(null);
   const principalRef = useRef<AuthPrincipal | null>(null);
+  // Request ticket of the newest evidence this provider has published. A
+  // session read, or another request's BFF 401, may change the session only if
+  // it was sent after that evidence; otherwise it is an older answer arriving
+  // late (#435).
+  const appliedTicketRef = useRef(0);
+  const disposedRef = useRef(false);
+  const readsRef = useRef(new Set<AbortController>());
+
+  const isCurrent = useCallback(
+    (ticket: number) => !disposedRef.current && ticket > appliedTicketRef.current,
+    [],
+  );
+
+  // A confirmed identity transition (sign-in, sign-out, unmount) retires every
+  // request already sent, including one sent while the transition was pending.
+  const retireInFlight = useCallback(() => {
+    appliedTicketRef.current = Math.max(appliedTicketRef.current, latestRequestTicket());
+    for (const controller of readsRef.current) controller.abort();
+    readsRef.current.clear();
+  }, []);
+
+  useEffect(() => {
+    disposedRef.current = false;
+    return () => {
+      disposedRef.current = true;
+      retireInFlight();
+    };
+  }, [retireInFlight]);
 
   const clearLocalSession = useCallback(() => {
+    if (disposedRef.current) return;
     setCsrfToken(null);
     principalRef.current = null;
     setPrincipal(null);
@@ -92,6 +131,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [queryClient]);
 
   const acceptSession = useCallback((session: SessionResponse) => {
+    if (disposedRef.current) return;
     const previous = principalRef.current;
     if (previous && authorizationKey(previous) !== authorizationKey(session.principal)) {
       queryClient.clear();
@@ -101,19 +141,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     principalRef.current = session.principal;
     setPrincipal(session.principal);
-    setCsrfToken(session.csrfToken);
+    setCsrfToken(session.csrfToken, session.csrfCookie);
     setStatus("authenticated");
     setError(null);
   }, [queryClient]);
 
   const refreshSession = useCallback(async () => {
+    const ticket = issueRequestTicket();
+    const controller = new AbortController();
+    readsRef.current.add(controller);
     try {
       const session = await api.get("api/auth/session", {
-        context: { [SILENT_ERRORS]: true },
+        signal: controller.signal,
+        context: { [SILENT_ERRORS]: true, [REQUEST_TICKET]: ticket },
       }).json<SessionResponse>();
+      if (controller.signal.aborted || !isCurrent(ticket)) return;
+      appliedTicketRef.current = ticket;
       acceptSession(session);
     } catch (sessionError) {
+      if (controller.signal.aborted || !isCurrent(ticket)) return;
       if (responseStatus(sessionError) === 401) {
+        appliedTicketRef.current = ticket;
         clearLocalSession();
       } else if (principalRef.current) {
         setError("Session verification is temporarily unavailable.");
@@ -121,8 +169,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setError("Unable to verify your Foundry session.");
         setStatus("unauthenticated");
       }
+    } finally {
+      readsRef.current.delete(controller);
     }
-  }, [acceptSession, clearLocalSession]);
+  }, [acceptSession, clearLocalSession, isCurrent]);
 
   useEffect(() => {
     removeLegacyCredential();
@@ -151,24 +201,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.clearInterval(timer);
   }, [refreshSession, status]);
 
-  useEffect(() => {
-    setOnUnauthorized(clearLocalSession);
-    return () => setOnUnauthorized(undefined);
-  }, [clearLocalSession]);
+  // The client reports every BFF 401 with the ticket of the request it
+  // answered, so a late 401 cannot clear a session accepted after it was sent.
+  const handleUnauthorized = useCallback((ticket: number) => {
+    if (!isCurrent(ticket)) return;
+    appliedTicketRef.current = ticket;
+    clearLocalSession();
+  }, [clearLocalSession, isCurrent]);
+
+  useEffect(() => setOnUnauthorized(handleUnauthorized), [handleUnauthorized]);
 
   const login = useCallback(async (token: string) => {
     setError(null);
+    let session: SessionResponse;
     try {
-      const session = await api.post("api/auth/login", {
+      session = await api.post("api/auth/login", {
         json: { token },
         context: { [SILENT_ERRORS]: true },
       }).json<SessionResponse>();
-      acceptSession(session);
     } catch {
       setError("The token was rejected.");
       throw new Error("Authentication failed");
     }
-  }, [acceptSession]);
+    if (disposedRef.current) return;
+    retireInFlight();
+    acceptSession(session);
+  }, [acceptSession, retireInFlight]);
 
   const logout = useCallback(async () => {
     let logoutUrl = config?.logoutUrl;
@@ -177,13 +235,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         context: { [SILENT_ERRORS]: true },
       }).json<{ logoutUrl?: string }>();
       logoutUrl = response.logoutUrl ?? logoutUrl;
-      clearLocalSession();
     } catch {
       setError("Sign out could not be confirmed by the server. Please try again.");
       return;
     }
+    if (!disposedRef.current) {
+      retireInFlight();
+      clearLocalSession();
+    }
     if (logoutUrl) window.location.assign(logoutUrl);
-  }, [clearLocalSession, config?.logoutUrl]);
+  }, [clearLocalSession, config?.logoutUrl, retireInFlight]);
 
   const value = useMemo<AuthContextValue>(() => ({
     status,
