@@ -103,6 +103,12 @@ From Edge's [upgrade guide](https://github.com/ferrum-edge/ferrum-edge/blob/v0.9
   database selectors, `ECHCONFIG` blocks in `mtls_auth` CA bundles) are gateway
   deployment settings or plugin configuration Foundry passes through unchanged;
   the gateway's `400` is shown as returned.
+- **Diagnostic wording.** The upgrade guide asks tooling that matches exact
+  error text to update. Plugin configuration refusals now quote field names
+  and values with backticks and double quotes rather than single quotes. The
+  gateway contract records each default-template rejection as a whole string
+  (`docs/plugin-defaults.md`), so the five affected expectations were re-recorded
+  from the pinned gateway; the comparison is still exact.
 
 ## Evaluated and rejected
 
