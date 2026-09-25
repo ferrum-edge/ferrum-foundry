@@ -6,6 +6,7 @@ import { App } from "./App";
 import { router } from "./router";
 import { setCsrfToken } from "@/api/client";
 import { resetGatewayMetadata } from "@/api/gatewayMetadata";
+import { GATEWAY_TARGET_HEADER, resetGatewayTarget } from "@/api/gatewayTarget";
 import { inputByLabel } from "@/test/fields";
 import { click, createHarness, fill, page, selectOption, settle, stubFetch } from "@/test/__tests__/harness";
 import { meshResponses } from "@/test/__tests__/meshFixtures";
@@ -69,6 +70,7 @@ afterEach(async () => {
   for (const client of clients) client.clear();
   setCsrfToken(null);
   resetGatewayMetadata();
+  resetGatewayTarget();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   localStorage.clear();
@@ -126,4 +128,96 @@ it("loads an authenticated deep link, navigates the shell, saves settings, and s
   expect(ui.host.querySelector("main")).toBeNull();
   expect(requests.filter((request) => request.url.includes("/api/proxy/") && !request.url.includes("/admin/tls/"))
     .every((request) => request.headers.get("X-Ferrum-Namespace") === "tenant-a")).toBe(true);
+}, 15000);
+
+function gatewayFacing(request: Request): boolean {
+  const path = new URL(request.url).pathname;
+  return path.startsWith("/api/proxy/") || path.startsWith("/api/settings");
+}
+
+/**
+ * Put the fixture behind a BFF whose `adminUrl` can be re-pointed: every
+ * response names the current target, and a gateway-facing request declared
+ * against any other target is refused before it reaches the fixture
+ * (`server/gateway-target.ts`). A settings save that changes `adminUrl`
+ * re-points it.
+ */
+function retargetableBff() {
+  const bff = { target: "target-a", refused: [] as string[] };
+  const fixture = globalThis.fetch;
+  vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
+    const path = new URL(request.url).pathname;
+    const declared = request.headers.get(GATEWAY_TARGET_HEADER);
+    if (gatewayFacing(request) && declared !== null && declared !== bff.target) {
+      bff.refused.push(`${request.method} ${path}`);
+      return Response.json(
+        { code: "FERRUM_BFF_GATEWAY_TARGET_CHANGED" },
+        { status: 409, headers: { [GATEWAY_TARGET_HEADER]: bff.target } },
+      );
+    }
+    const saved = request.method === "PUT" && path === "/api/settings"
+      ? await request.clone().json() as { adminUrl?: string }
+      : undefined;
+    const response = await fixture(request);
+    if (saved?.adminUrl && saved.adminUrl !== settings.adminUrl) bff.target = "target-b";
+    const headers = new Headers(response.headers);
+    headers.set(GATEWAY_TARGET_HEADER, bff.target);
+    return new Response(response.body, { status: response.status, headers });
+  }));
+  return bff;
+}
+
+async function openSettings() {
+  router.update({ history: createMemoryHistory({ initialEntries: ["/settings"] }) });
+  await ui.render(<App />);
+  await settle(() => expect(ui.host.textContent).toContain("Save Settings"));
+}
+
+function expectWorkspaceRetired() {
+  expect(ui.host.textContent).toContain("Gateway target changed");
+  expect(ui.host.textContent).not.toContain("Save Settings");
+  expect(ui.host.querySelector("main")).toBeNull();
+  for (const client of clients) expect(client.getQueryCache().getAll()).toEqual([]);
+}
+
+it("keeps drafts through same-target refreshes and retires a tab whose target another tab replaced", async () => {
+  const bff = retargetableBff();
+  await openSettings();
+  expect(requests.filter(gatewayFacing).length).toBeGreaterThan(0);
+  expect(requests.filter(gatewayFacing).every((request) => request.headers.get(GATEWAY_TARGET_HEADER) === "target-a"))
+    .toBe(true);
+
+  await fill(inputByLabel(ui.host, "JWT Issuer"), "drafted-against-a");
+  await click("Test Connection");
+  await settle(() => expect(ui.host.textContent).toContain("Connected (HTTP 200)"));
+  expect(inputByLabel(ui.host, "JWT Issuer").value).toBe("drafted-against-a");
+
+  // Another tab re-points the BFF at gateway B. This tab's draft, seeded
+  // from A (adminUrl included), must not be saved to B.
+  bff.target = "target-b";
+  const answered = requests.length;
+  await click("Save Settings");
+  await settle(() => expect(ui.host.textContent).toContain("Gateway target changed"));
+  expect(bff.refused).toContain("PUT /api/settings");
+  expect(requests.slice(answered).filter(gatewayFacing)).toEqual([]);
+  expectWorkspaceRetired();
+  expect(document.body.textContent).not.toContain("Failed to save settings");
+  expect(document.body.textContent).not.toContain("409");
+}, 15000);
+
+it("retires this tab's workspace once its own settings save re-points the BFF", async () => {
+  const bff = retargetableBff();
+  await openSettings();
+  await fill(inputByLabel(ui.host, "Admin URL"), "https://gateway-b.example.test");
+  await click("Save Settings");
+  await settle(() => expect(ui.host.textContent).toContain("Gateway target changed"));
+
+  const save = requests.find((request) => request.method === "PUT")!;
+  expect(save.headers.get(GATEWAY_TARGET_HEADER)).toBe("target-a");
+  expect(bff.target).toBe("target-b");
+  expectWorkspaceRetired();
+  expect(document.body.textContent).not.toContain("Settings saved successfully");
+  const sent = requests.length;
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+  expect(requests.slice(sent).filter(gatewayFacing)).toEqual([]);
 }, 15000);

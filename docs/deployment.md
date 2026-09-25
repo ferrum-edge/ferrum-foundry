@@ -156,6 +156,13 @@ send `jwtAudience: ""` (or `[]`) to clear the audience, and `jwtNamespaces: []`
 to clear the default namespace grants. Runtime overrides reset to environment
 values when the BFF restarts.
 
+Changing `adminUrl` replaces the gateway every open tab is working against.
+Each tab is bound to the gateway it loaded against: the BFF refuses its later
+gateway requests with `409 FERRUM_BFF_GATEWAY_TARGET_CHANGED` instead of
+forwarding them to the new gateway, and the tab discards its cached data,
+drafts, and live-apply state and asks for a reload. See
+[Gateway target binding](authentication.md#gateway-target-binding).
+
 ### Process lifecycle
 
 | Variable | Required | Default | Range or format | Meaning |

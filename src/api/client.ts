@@ -16,6 +16,14 @@ import {
   type CommittedWrite,
   type GatewayRequestIdentity,
 } from "./gatewayMetadata";
+import {
+  boundGatewayTarget,
+  GATEWAY_TARGET_HEADER,
+  GatewayTargetChangedError,
+  isGatewayTargetRetired,
+  observeGatewayTarget,
+  targetsGateway,
+} from "./gatewayTarget";
 
 // ── Global error handler (event-emitter style) ───────────────────
 
@@ -467,6 +475,15 @@ export const api = ky.create({
   hooks: {
     beforeRequest: [
       ({ request, options }) => {
+        // A page is bound to the gateway target it was opened against
+        // (`./gatewayTarget`). Once that target is replaced nothing further
+        // is sent; until then every gateway-facing request declares it, so
+        // the BFF refuses it rather than forwarding it to a successor.
+        if (targetsGateway(request.url)) {
+          if (isGatewayTargetRetired()) throw new GatewayTargetChangedError(request.url);
+          const target = boundGatewayTarget();
+          if (target) request.headers.set(GATEWAY_TARGET_HEADER, target);
+        }
         // Every gateway request must already carry the namespace its
         // operation was bound to (via `scoped()`), or be a documented
         // fleet-global call. The client never picks a namespace itself: the
@@ -495,6 +512,9 @@ export const api = ky.create({
     ],
     afterResponse: [
       async ({ request, options, response }) => {
+        // Observed first: a response naming another target retires the
+        // live-apply monitor, so the observation below is discarded with it.
+        observeGatewayTarget(response.headers.get(GATEWAY_TARGET_HEADER));
         await observeGatewayResponse(
           request,
           response,
@@ -528,6 +548,9 @@ export const api = ky.create({
           return error;
         }
         if (options.context[SILENT_ERRORS] || error.name === "AbortError") return error;
+        // The target-changed state replaces the workspace; a request refused
+        // or answered by the replaced target is not a fault to report on top.
+        if (isGatewayTargetRetired()) return error;
         if (isHTTPError(error) && isExpectedProbeFailure(error.response, request.url)) return error;
         if (isHTTPError(error) && isHandledStatus(options.context, error.response.status)) return error;
         const data = isHTTPError(error) ? error.data : error.message;

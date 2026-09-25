@@ -2,6 +2,7 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import type { AuthPrincipal } from './auth-types.js';
 import { loadConfig, type Config, type GatewayRole } from './config.js';
+import { GATEWAY_TARGET_HEADER, gatewayTargetId } from './gateway-target.js';
 import { proxyPathIsFleetGlobal, requestIsProxyRoute } from './proxy-path.js';
 
 interface StaticSession {
@@ -279,6 +280,7 @@ export const authPlugin: FastifyPluginAsync = async (fastify) => {
     staticSessions.set(sessionId, session);
     reply.setCookie(cookieNames(config).session, sessionId, cookieOptions(config, true));
     issueCsrfCookie(reply, config, csrfToken);
+    reply.header(GATEWAY_TARGET_HEADER, gatewayTargetId(config));
     return { principal: session.principal, csrfToken, expiresAt: session.expiresAt };
   });
 
@@ -302,6 +304,9 @@ export const authPlugin: FastifyPluginAsync = async (fastify) => {
     }
     if (!csrfToken) return rejectAuth(reply);
     issueCsrfCookie(reply, config, csrfToken);
+    // The periodic session check is how an idle tab learns that another one
+    // re-pointed the BFF at a different gateway.
+    reply.header(GATEWAY_TARGET_HEADER, gatewayTargetId(config));
     return {
       principal,
       csrfToken,

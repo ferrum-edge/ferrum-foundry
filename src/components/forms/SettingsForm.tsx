@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
+import { isGatewayTargetRetired } from "@/api/gatewayTarget";
 import { validateNamespaceName } from "@/api/namespaces";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
@@ -202,10 +203,15 @@ export function SettingsForm() {
           json: authMode === "static" ? { ...updates, jwtRole, jwtNamespaces } : updates,
         })
         .json<Settings>();
+      // A save that re-pointed the BFF retired this workspace; the gateway
+      // target gate reports it and nothing here may repopulate the cache.
+      if (isGatewayTargetRetired()) return;
       adoptSettings(data);
       toast("success", "Settings saved successfully");
     } catch {
-      toast("error", "Failed to save settings");
+      // A save refused because this tab's target was replaced is not a
+      // failure of the save; the gateway target gate explains it.
+      if (!isGatewayTargetRetired()) toast("error", "Failed to save settings");
     } finally {
       setSaving(false);
     }

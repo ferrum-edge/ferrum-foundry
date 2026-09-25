@@ -78,6 +78,10 @@ envelope, including tested scale, is in
 - Every gateway request is bound to the namespace its operation started in;
   editors are bound to namespace and resource so a tenant switch cannot submit
   stale fields.
+- Each browser tab is bound to the gateway it loaded against. When runtime
+  settings re-point Foundry at another gateway, requests from open tabs are
+  refused instead of forwarded, and those tabs discard their cached data and
+  drafts and ask for a reload (#437).
 
 **Operating Foundry**
 
