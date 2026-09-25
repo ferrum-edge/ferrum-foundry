@@ -86,6 +86,23 @@ export function useBoundedPluginConfigs(enabled = true) {
   });
 }
 
+/**
+ * The proxy-scoped configurations whose `proxy_id` is this proxy, attached or
+ * not (`GET /plugins/config?proxy_id=`). Bounded by that proxy's
+ * configurations, not the namespace; it is not an effective-policy answer.
+ * The key sits under `["pluginConfigs", namespace]`, so every plugin and
+ * membership mutation that invalidates the lists refreshes it too.
+ */
+export function useProxyPluginConfigs(proxyId: string, enabled = true) {
+  const { scope } = useNamespace();
+  return useQuery({
+    queryKey: ["pluginConfigs", scope.namespace, "proxy", proxyId],
+    queryFn: ({ signal }) =>
+      plugins.listConfigsForProxy(queryScope(scope), proxyId, signal),
+    enabled: enabled && !!proxyId,
+  });
+}
+
 export function usePluginConfig(id: string, enabled = true) {
   const { scope } = useNamespace();
   return useQuery({

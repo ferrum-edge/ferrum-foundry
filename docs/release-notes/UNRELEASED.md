@@ -1,169 +1,57 @@
 # Ferrum Foundry — next release (draft)
 
 > **Draft.** The release step renames this file to `docs/release-notes/vX.Y.Z.md`,
-> replaces every *release step* marker, and removes this note. The release
-> workflow publishes that file as the GitHub release body and refuses a tag
-> without it. Changes since [v0.1.0](https://github.com/ferrum-edge/ferrum-foundry/releases/tag/v0.1.0):
-> `git log v0.1.0..vX.Y.Z`.
+> replaces every *release step* marker, removes this note, and leaves a fresh
+> copy of this template behind. The release workflow publishes that file as the
+> GitHub release body and refuses a tag without it. It also requires
+> `package.json` and `foundry.version` in `docs/compatibility.json` to be
+> `X.Y.Z`, and `node scripts/supported-pairing.mjs release-ready` to pass.
+> Changes since [v0.2.0](https://github.com/ferrum-edge/ferrum-foundry/releases/tag/v0.2.0):
+> `git log v0.2.0..vX.Y.Z`.
 >
-> **Blocked on the next Ferrum Edge release.** No published Edge release
-> qualifies yet. CI runs the published Ferrum Edge v0.9.5 release, whose
-> proxy-association and namespace-identity semantics the walkthrough and
-> critical journeys now assert (#409), but v0.9.5 lacks ferrum-edge#5661.
-> The pairing needs the next published Edge release. It must include
-> ferrum-edge#5661, keep those semantics, and pass the full
-> qualification before this release is published: Quality Gate, Pinned Gateway
-> Contract (including capability parity), Deployment Starter, Critical
-> Journeys, and Container Gate. The requirements are in `docs/compatibility.md`
-> ("The Edge release to pair with"). The release workflow refuses the tag until
-> `edge.release` is recorded and CI runs it.
+> Name a Ferrum Edge image here only at the release step, and only
+> `edge.release.image`: `scripts/supported-pairing.test.mjs` fails if this
+> draft pins one. If the next release pairs with a different Edge release,
+> moving the pin is a re-qualification (`docs/compatibility.md`, "Changing the
+> pairing").
 
-This is the first Foundry release qualified against an explicit Ferrum Edge
-release. It is intended for a **supervised early-access deployment**: one
-gateway, a small number of administrators, the documented identity-proxy
-topology. It makes no compatibility promise for other Edge releases or for
-earlier Foundry development builds.
+*Release step:* one paragraph on who this release is for and what it changes.
 
 ### Supported pairing
 
 | | |
 | --- | --- |
-| Foundry | vX.Y.Z (*release step*) — `ferrumedge/ferrum-foundry@sha256:…` (*release step*), `linux/amd64` and `linux/arm64` |
-| Ferrum Edge | *release step* — the next published Ferrum Edge release after v0.9.5 that includes ferrum-edge#5661 and passed the full qualification, with its multi-architecture index digest from `docs/compatibility.json` `edge.release.image` |
-| Tested gateway | `database` mode on SQLite, writable and with `FERRUM_ADMIN_READ_ONLY=true`; admin JWT with audience and namespace-claim enforcement |
-| Tested access | `trusted-proxy` authentication through the starter's identity proxy; `viewer`, `operator`, and `admin` |
-| Tested browser | Chromium (the build bundled with Playwright 1.63.0) |
-| CI evidence | *release step* — the green CI run for the tagged commit |
+| Foundry | vX.Y.Z (*release step*) — `ferrumedge/ferrum-foundry:vX.Y.Z`, `linux/amd64` and `linux/arm64` |
+| Ferrum Edge | *release step* — `edge.release` from `docs/compatibility.json`: version, multi-architecture index digest, source commit, and per-platform manifest digests |
+| Tested gateway | *release step* — from `tested.gateway` |
+| Tested access | *release step* — from `tested.roles` and `tested.auth_mode` |
+| Tested browser | *release step* — from `tested.browsers` |
+| CI evidence | *release step* — the qualifying pull request and this release's Pre-publication Gates |
 
-Best-effort: PostgreSQL/MySQL `database` mode, `cp` mode, other browsers,
-Kubernetes. Not qualified: `file`/`dp`/`mesh`/`node_agent` modes (so the mesh,
-waypoint, trust, and chargeback pages), and any other Edge image. The full
-envelope, including tested scale, is in
-[`docs/compatibility.md`](https://github.com/ferrum-edge/ferrum-foundry/blob/vX.Y.Z/docs/compatibility.md).
+Best-effort and not qualified: *release step* — from `best_effort` and
+`not_qualified`, linking
+`https://github.com/ferrum-edge/ferrum-foundry/blob/vX.Y.Z/docs/compatibility.md`.
 
-### Highlights since v0.1.0
+### Highlights since v0.2.0
 
-**Safer writes**
-
-- Full-replacement saves of proxies, upstreams, upstream targets, consumers,
-  and plugin configurations, and deletes from their detail pages, are refused
-  when the resource changed since the editor opened, instead of silently
-  reverting another administrator's change. The draft is kept and shown against
-  the current gateway content, with secrets redacted at every depth. There is
-  no "save anyway" and nothing is re-sent automatically (#381).
-- A write whose outcome Foundry could not observe (a lost response, a timeout,
-  a dropped connection) is reported as an unknown outcome and never replayed;
-  reads are retried only when safe.
-- A proxy-scoped plugin created through the UI is verified to be attached to
-  its proxy, and attached when the gateway left it unattached. Ferrum Edge
-  0.9.x attaches it on create; the proxy write that does so is never mistaken
-  for a concurrent edit.
-
-**Truthful reads**
-
-- A failed or unavailable read is distinguishable from an empty collection
-  across policy, trust, mesh, dashboard, audit, and API-spec views, and editors
-  keep unsaved fields through failed background reads.
-- A read the gateway refuses to the session's role (for example TLS inventory
-  for a `viewer`) is shown as a denial, never as an empty store.
-- Ordinary navigation is bounded: the proxy list fetches one page instead of
-  whole collections (#382).
-
-**Access and tenancy**
-
-- A client-side capability model presents surfaces a role or a read-only
-  gateway cannot write as read-only, with the reason visible before anything
-  is edited. CI now checks that model against the pinned gateway as every
-  role, writable and read-only.
-- Every gateway request is bound to the namespace its operation started in;
-  editors are bound to namespace and resource so a tenant switch cannot submit
-  stale fields.
-- Each browser tab is bound to the gateway it loaded against. When runtime
-  settings re-point Foundry at another gateway, requests from open tabs are
-  refused instead of forwarded, and those tabs discard their cached data and
-  drafts and ask for a reload (#437).
-
-**Operating Foundry**
-
-- A maintained deployment starter (`deploy/starter/`) with a production and a
-  disposable demo profile, a preflight that reports unknowns honestly, and a
-  first-success walkthrough (#384).
-- A critical-journey release gate: a real browser against the production image,
-  the identity proxy, and the pinned gateway, finishing with data-plane
-  requests (#380).
-- Guided configuration for `key_auth`, `rate_limiting`, `cors`, and
-  `prometheus_metrics`, lossless against the raw JSON editor (#383).
-- Proxied uploads are bounded by an absolute deadline
-  (`FERRUM_UPLOAD_TIMEOUT`) and a global in-flight cap
-  (`FERRUM_MAX_ACTIVE_UPLOADS`).
-
-The complete list is in
-[`CHANGELOG.md`](https://github.com/ferrum-edge/ferrum-foundry/blob/vX.Y.Z/CHANGELOG.md).
+*Release step:* grouped highlights from the `[Unreleased]` section of
+`CHANGELOG.md`, which moves under `[X.Y.Z]` in the same change.
 
 ### Known limitations
 
-- **Atomic concurrent edits need ferrum-edge#5661.** Strong `ETag` and
-  `If-Match` on resource writes were merged on Ferrum Edge `main` on 2026-09-23
-  but are in no published image yet, and the paired Edge release must include
-  them. Against a gateway without them, the write guard re-verifies the
-  resource immediately before each write. A stale editor cannot revert a newer
-  change, but a writer that commits within that one round trip is not
-  detected. Foundry already sends `If-Match`, so the paired release closes the
-  gap without a Foundry change.
-- **Ferrum Edge v0.9.5 is not the supported pairing.** CI runs it, and the
-  walkthrough and critical journeys pass against its semantics: it attaches a
-  proxy-scoped plugin configuration to its proxy on write (ferrum-edge#4611),
-  and it keys resources on `(namespace, id)`, so two namespaces can hold the
-  same id. It lacks #5661, so it cannot be the pairing.
-- **One qualified gateway configuration.** Modes other than `database`, and Edge
-  releases other than the paired one, have not been run in CI.
-- **Scale.** Real-gateway testing covers tens of resources per namespace.
-  Request budgets are measured at 50,000 records against a synthetic gateway;
-  browser latency is not measured. List search still traverses the
-  collection, because the admin API offers no server-side search.
-- **One browser.** Only Chromium runs in the release gate.
+*Release step.*
 
 ### Install
 
-Run the pairing above, both by digest. The Ferrum Edge image is
-`edge.release.image` in `docs/compatibility.json` (*release step*: write it
-out here too).
+*Release step:* both images by digest, and the starter and deployment links at
+`vX.Y.Z`.
 
-```bash
-docker pull ferrumedge/ferrum-foundry@sha256:<release step>
-```
+### Upgrading from v0.2.0
 
-- New deployment: follow [Getting started](https://github.com/ferrum-edge/ferrum-foundry/blob/vX.Y.Z/docs/getting-started.md)
-  with the starter, then [Deployment](https://github.com/ferrum-edge/ferrum-foundry/blob/vX.Y.Z/docs/deployment.md)
-  for the production checklist. Set `FOUNDRY_IMAGE` to the Foundry digest; the
-  starter's default (`:main`) is the development channel.
-- `FERRUM_JWT_SECRET` must equal the gateway's `FERRUM_ADMIN_JWT_SECRET`, and
-  `FERRUM_JWT_AUDIENCE` its `FERRUM_ADMIN_JWT_AUDIENCE`.
-
-### Upgrading from v0.1.0
-
-Foundry keeps no persistent state of its own, so an upgrade is an image
-replacement. v0.1.0 was published during buildout and is not supported; there
-is no migration and no compatibility promise between the two.
-
-1. Move the gateway to the paired Ferrum Edge release (*release step*) first, following Ferrum Edge's own
-   upgrade guidance. Foundry is not qualified against the gateway you ran with
-   v0.1.0.
-2. Review new BFF settings in `docs/deployment.md` (`FERRUM_UPLOAD_TIMEOUT`,
-   `FERRUM_MAX_ACTIVE_UPLOADS`); their defaults are safe.
-3. Replace the Foundry image with the release digest and confirm
-   `GET /api/health/ready` reports the new version and a reachable gateway.
-4. Reload open browser tabs so they run the new SPA bundle.
+*Release step:* Edge first if the pairing moved, then Foundry; what changed in
+configuration; how to confirm `GET /api/health/ready`.
 
 ### Rolling back
 
-- **Foundry:** redeploy the previous immutable tag or digest. Nothing Foundry
-  wrote needs undoing — configuration lives in Ferrum Edge — but a rollback
-  does not revert configuration changes made through the newer version, and
-  the previous version is not qualified against the paired Ferrum Edge release.
-- **Ferrum Edge:** follow Ferrum Edge's own rollback guidance and restore the
-  configuration from a backup taken before the upgrade. Take one per namespace
-  with Settings → Download Backup (`GET /backup`, admin role) before either
-  upgrade.
-- Confirm `FERRUM_JWT_SECRET` and `FERRUM_JWT_AUDIENCE` still match the gateway
-  after any rollback.
+*Release step:* Foundry by immutable tag or digest; Ferrum Edge by its own
+guidance; the backup to take first.

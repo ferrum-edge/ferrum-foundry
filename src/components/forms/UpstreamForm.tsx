@@ -45,6 +45,8 @@ const UPSTREAM_COLLAPSIBLE_SECTIONS = [
       "active_timeout_ms",
       "active_healthy_threshold",
       "active_unhealthy_threshold",
+      "active_http_path",
+      "active_udp_probe_payload",
       "healthy_status_codes",
       "unhealthy_status_codes",
       "passive_unhealthy_threshold",
@@ -138,6 +140,36 @@ function Checkbox({
       <span className="text-sm text-text-secondary">{label}</span>
     </label>
   );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Probe targets                                                      */
+/* ------------------------------------------------------------------ */
+
+// Ferrum Edge v0.9.7 refuses both at admission (`openapi.yaml`
+// `ActiveHealthCheck`): a path not starting with `/` was spliced after
+// `host:port` and could probe another host, and a payload that is not whole
+// hex bytes was silently replaced by a single zero byte.
+const PROBE_TEXT_MAX_LENGTH = 2048;
+
+function httpPathError(path: string | undefined): string | undefined {
+  if (path === undefined) return undefined;
+  if (!path.startsWith("/")) return "HTTP path must start with /";
+  if (path.length > PROBE_TEXT_MAX_LENGTH) {
+    return `HTTP path must be at most ${PROBE_TEXT_MAX_LENGTH} characters`;
+  }
+  return undefined;
+}
+
+function udpPayloadError(payload: string | null | undefined): string | undefined {
+  if (payload == null) return undefined;
+  if (!/^(?:[0-9a-fA-F]{2})*$/.test(payload)) {
+    return "UDP probe payload must be hex with two digits per byte, e.g. 0000";
+  }
+  if (payload.length > PROBE_TEXT_MAX_LENGTH) {
+    return `UDP probe payload must be at most ${PROBE_TEXT_MAX_LENGTH} characters`;
+  }
+  return undefined;
 }
 
 /* ------------------------------------------------------------------ */
@@ -342,6 +374,11 @@ export function UpstreamForm({
       }
       const codes = resolveStatusCodeListDraft(healthyCodes);
       if (isHttpProbe && !codes.ok) errs.healthy_status_codes = codes.error;
+      // Both are sent whatever the probe type, so both are checked.
+      const pathError = httpPathError(activeHc.http_path);
+      if (pathError) errs.active_http_path = pathError;
+      const payloadError = udpPayloadError(activeHc.udp_probe_payload);
+      if (payloadError) errs.active_udp_probe_payload = payloadError;
     }
     if (passiveHcEnabled) {
       for (const [key, label] of PASSIVE_HC_NUMBER_FIELDS) {
@@ -782,6 +819,7 @@ export function UpstreamForm({
                     value={activeHc.http_path ?? "/health"}
                     onChange={(e) => setActiveHc({ ...activeHc, http_path: e.target.value })}
                     placeholder="/health"
+                    error={errors.active_http_path}
                   />
                   <Input
                     label="Healthy Status Codes"
@@ -809,6 +847,7 @@ export function UpstreamForm({
                   onChange={(e) => setActiveHc({ ...activeHc, udp_probe_payload: e.target.value || undefined })}
                   placeholder="0000"
                   helpText="Hex-encoded payload to send for UDP probes. If empty, a single zero byte is sent."
+                  error={errors.active_udp_probe_payload}
                 />
               )}
               {activeHc.probe_type === "grpc" && (

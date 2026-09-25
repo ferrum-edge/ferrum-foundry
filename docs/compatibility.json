@@ -3,7 +3,7 @@
   "record_version": 1,
   "status": "candidate",
   "foundry": {
-    "version": "RELEASE-STEP: the X.Y.Z that package.json and the vX.Y.Z tag will carry",
+    "version": "0.2.0",
     "previous_release": "v0.1.0",
     "source_commit": "RELEASE-STEP: the commit vX.Y.Z points to (also the image's org.opencontainers.image.revision label)",
     "image": "RELEASE-STEP: ferrumedge/ferrum-foundry@sha256:<multi-arch index digest from the release run>",
@@ -11,21 +11,22 @@
     "platforms": ["linux/amd64", "linux/arm64"]
   },
   "edge": {
-    "image": "ferrumedge/ferrum-edge@sha256:eca46c84bca92d6ef467979f8846537f7ab56c0cdc137befff465526a10fe10f",
-    "build": "published release v0.9.5 (https://github.com/ferrum-edge/ferrum-edge/releases/tag/v0.9.5). It is the CI pin, not a supported pairing: it does not include ferrum-edge#5661, so edge.release names the next Edge release Foundry will be paired with",
-    "source_commit": "20e76030a05dc49c3804e969516c94ab101110b9",
-    "source_evidence": "https://github.com/ferrum-edge/ferrum-edge/actions/runs/34795503690",
+    "image": "ferrumedge/ferrum-edge@sha256:4c9530e09443649526dc4fbbec0720ba7b47ceb91b0dd5cb06db85430908874a",
+    "build": "published release v0.9.7 (https://github.com/ferrum-edge/ferrum-edge/releases/tag/v0.9.7), the Edge release Foundry v0.2.0 pairs with (edge.release). v0.9.6 was tagged but never published; v0.9.7 is the first published release after v0.9.5",
+    "source_commit": "8fed1346ce2e267eb69c03683cb89ea44d785e0b",
+    "source_evidence": "https://github.com/ferrum-edge/ferrum-edge/actions/runs/36110533284",
     "platform_manifests": {
-      "linux/amd64": "sha256:3bb2b253e0cc338108320a39de86da216c6e644aef39fd83a3e22ca0ad6173a8",
-      "linux/arm64": "sha256:d28b77e39e17e2480b3a3f39d55236f8fddbcc8cdf3dbbf314dbba6aa4ad3a1d"
+      "linux/amd64": "sha256:e4d4367e815e86f510c28d8f831ca3502b7c9d5f21fd0eeabeb609a8c8e6f47f",
+      "linux/arm64": "sha256:7d3d28d2529dfb6a303b734fad0bf35ebec07caa95f5632e81d92170baf15fab"
     },
     "release": {
-      "version": "RELEASE-STEP: the next published Ferrum Edge vX.Y.Z after v0.9.5 that meets every requirement below",
-      "source_commit": "RELEASE-STEP: the commit that Edge release tag points to",
-      "image": "RELEASE-STEP: ferrumedge/ferrum-edge@sha256:<multi-arch index digest Docker Hub publishes for that release>",
+      "version": "v0.9.7",
+      "github_release": "https://github.com/ferrum-edge/ferrum-edge/releases/tag/v0.9.7",
+      "source_commit": "8fed1346ce2e267eb69c03683cb89ea44d785e0b",
+      "image": "ferrumedge/ferrum-edge@sha256:4c9530e09443649526dc4fbbec0720ba7b47ceb91b0dd5cb06db85430908874a",
       "platform_manifests": {
-        "linux/amd64": "RELEASE-STEP: sha256 of that release's linux/amd64 manifest",
-        "linux/arm64": "RELEASE-STEP: sha256 of that release's linux/arm64 manifest"
+        "linux/amd64": "sha256:e4d4367e815e86f510c28d8f831ca3502b7c9d5f21fd0eeabeb609a8c8e6f47f",
+        "linux/arm64": "sha256:7d3d28d2529dfb6a303b734fad0bf35ebec07caa95f5632e81d92170baf15fab"
       },
       "requirements": [
         "It includes ferrum-edge#5661: a strong ETag on resource reads and If-Match on PUT/DELETE of proxies, upstreams, consumers, and plugin configs.",
@@ -71,17 +72,22 @@
   ],
   "not_qualified": [
     "file, dp, mesh, and node_agent gateway modes (modelled read-only in the UI, not run in CI)",
-    "any published Ferrum Edge release as a supported pairing until edge.release is filled and qualified; v0.9.5 is edge.image but lacks ferrum-edge#5661",
-    "any Ferrum Edge image other than edge.image",
-    "atomic concurrent-edit protection (needs ferrum-edge#5661 in a published release)",
+    "any Ferrum Edge release other than v0.9.7 (edge.release), older or newer",
+    "any Ferrum Edge image other than edge.image, including the 0.9.7-ebpf and 0.9.7-ebpf-tools variants",
     "browser latency and more than one concurrent operator at scale"
   ],
   "edge_dependencies": [
     {
       "change": "ferrum-edge#5661",
-      "what": "strong ETag on resource reads and If-Match on PUT/DELETE of proxies, upstreams, consumers, and plugin configs",
-      "status": "merged on Ferrum Edge main as e55ce01893c25bd802cb4f10831c07ca32b3deda (2026-09-23); not in v0.9.5, any published image, or edge.image",
-      "effect_on_pinned_edge": "Foundry's write guard verifies before every full-replacement write but sends it unconditionally, so a writer that commits within that round trip is not detected"
+      "what": "strong ETag on resource reads and If-Match on PUT/DELETE of proxies, upstreams, consumers, and plugin configs; a malformed If-Match, or one on a route that does not evaluate it, is 400",
+      "status": "released in Ferrum Edge v0.9.7 (edge.release and edge.image)",
+      "effect_on_pinned_edge": "Foundry's write guard sends If-Match with the ETag of its verification read, so a writer that commits between that read and the write is refused with 412; the gateway contract asserts the 412s and the 400s"
+    },
+    {
+      "change": "ferrum-edge#5726",
+      "what": "optional proxy_id filter on GET /plugins/config (exact match, paginated over the filtered set, invalid value is 400)",
+      "status": "released in Ferrum Edge v0.9.7 (edge.release and edge.image)",
+      "effect_on_pinned_edge": "a proxy's Plugins tab lists the proxy-scoped configurations targeting it from the filtered collection instead of the whole namespace; a response the filter did not narrow is refused rather than shown"
     }
   ]
 }
