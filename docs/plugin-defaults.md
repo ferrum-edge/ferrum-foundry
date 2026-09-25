@@ -64,10 +64,14 @@ unexpected acceptance, unknown-key diagnostics, status changes, and cleanup,
 including simultaneous admission/cleanup failures and rejecting Prometheus 409s.
 
 The job runs the Ferrum Edge image pinned as `edge.image` in
-[the compatibility record](compatibility.md): the published v0.9.5 release,
-digest `sha256:eca46c84bca92d6ef467979f8846537f7ab56c0cdc137befff465526a10fe10f`,
-built from Edge revision `20e76030a05dc49c3804e969516c94ab101110b9` (the `v0.9.5`
-tag). Issue #291's reproduction used a different digest (`sha256:f2c3eb7696677fed4a90551c7c8adfccae547c0e540452011f98a53b34233c2d`),
+[the compatibility record](compatibility.md): the published v0.9.7 release,
+digest `sha256:4c9530e09443649526dc4fbbec0720ba7b47ceb91b0dd5cb06db85430908874a`,
+built from Edge revision `8fed1346ce2e267eb69c03683cb89ea44d785e0b` (the `v0.9.7`
+tag). The source notes below were taken at v0.9.5 (revision
+`20e76030a05dc49c3804e969516c94ab101110b9`), the previous pin; the contract
+re-checks the behaviour they describe against `edge.image` on every run, and at
+v0.9.7 `builtin_pii_pattern` still defines `phone_us` and `kafka_logging` still
+screens broker egress. Issue #291's reproduction used a different digest (`sha256:f2c3eb7696677fed4a90551c7c8adfccae547c0e540452011f98a53b34233c2d`),
 and the interim pin before #409 was development build `b96cfaadd41a676d39a409d47b48e0b0588fa86e`.
 Native `mesh_authz` `MeshPolicy` input (`name`, `namespace`, `scope`, `rules`,
 plus required per-rule `action`) is the same document on v0.9.5 and on current

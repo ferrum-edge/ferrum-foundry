@@ -15,6 +15,7 @@ import {
   stampProvisionedBy,
   validatePluginConfigWrite,
   validateProxyWrite,
+  validateUpstreamWrite,
 } from "./mock-admin-gateway.mjs";
 
 const url = new URL("http://127.0.0.1/");
@@ -568,4 +569,53 @@ test("If-Match on a route that does not evaluate it is refused, not ignored", ()
   assert.equal(ifMatchRouteRefusal("DELETE", "/plugins/config/c", '"x"'), null);
   assert.equal(ifMatchRouteRefusal("GET", "/proxies/p", '"x"'), null);
   assert.equal(ifMatchRouteRefusal("POST", "/proxies", undefined), null);
+});
+
+test("GET /plugins/config?proxy_id= pages the filtered set in the request namespace", () => {
+  const list = [
+    { id: "a", namespace: "ferrum", scope: "proxy", proxy_id: "orders" },
+    { id: "b", namespace: "ferrum", scope: "global", proxy_id: null },
+    { id: "c", namespace: "ferrum", scope: "proxy", proxy_id: "orders" },
+    { id: "d", namespace: "other", scope: "proxy", proxy_id: "orders" },
+    { id: "e", namespace: "ferrum", scope: "proxy", proxy_id: "billing" },
+  ];
+  const kind = { kind: "plugins/config" };
+  const filtered = new URL("http://127.0.0.1/plugins/config?proxy_id=orders&offset=1&limit=1");
+  const [status, page] = crud(list, filtered, "GET", undefined, {}, {}, "ferrum", undefined, undefined, kind);
+  assert.equal(status, 200);
+  assert.deepEqual(page.data.map((row) => row.id), ["c"]);
+  assert.equal(page.pagination.total, 2);
+
+  const unknown = new URL("http://127.0.0.1/plugins/config?proxy_id=nobody");
+  const [unknownStatus, empty] = crud(list, unknown, "GET", undefined, {}, {}, "ferrum", undefined, undefined, kind);
+  assert.equal(unknownStatus, 200);
+  assert.deepEqual(empty, { data: [], pagination: { offset: 0, limit: 100, total: 0 } });
+
+  for (const invalid of ["-orders", "has space", "x".repeat(255)]) {
+    const bad = new URL(`http://127.0.0.1/plugins/config?proxy_id=${encodeURIComponent(invalid)}`);
+    const [badStatus] = crud(list, bad, "GET", undefined, {}, {}, "ferrum", undefined, undefined, kind);
+    assert.equal(badStatus, 400, JSON.stringify(invalid));
+  }
+
+  // Only plugin configs take the filter; other lists ignore the parameter.
+  const [, proxies] = crud(list, filtered, "GET", undefined, {}, {}, "ferrum", undefined, undefined, { kind: "proxies" });
+  assert.equal(proxies.pagination.total, 4);
+});
+
+test("upstream health checks follow the Edge v0.9.7 path and payload rules", () => {
+  const upstream = (active) => ({ name: "orders", targets: [], health_checks: { active } });
+  assert.equal(validateUpstreamWrite(upstream({ http_path: "/health" })), null);
+  assert.equal(validateUpstreamWrite(upstream({ probe_type: "udp", udp_probe_payload: "00ff" })), null);
+  assert.equal(validateUpstreamWrite(upstream({ probe_type: "udp", udp_probe_payload: null })), null);
+  assert.equal(validateUpstreamWrite(upstream({ probe_type: "udp", udp_probe_payload: "" })), null);
+  assert.equal(validateUpstreamWrite({ name: "orders", targets: [] }), null);
+  assert.match(validateUpstreamWrite(upstream({ http_path: "health" })).error, /http_path/);
+  assert.match(validateUpstreamWrite(upstream({ http_path: "@169.254.169.254/" })).error, /http_path/);
+  assert.match(validateUpstreamWrite(upstream({ udp_probe_payload: "abc" })).error, /udp_probe_payload/);
+  assert.match(validateUpstreamWrite(upstream({ udp_probe_payload: "zz" })).error, /udp_probe_payload/);
+
+  const list = [];
+  const [status] = crud(list, url, "POST", undefined, upstream({ http_path: "health" }), {}, "ferrum", validateUpstreamWrite);
+  assert.equal(status, 400);
+  assert.equal(list.length, 0);
 });

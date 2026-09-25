@@ -2,6 +2,7 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import type { AuthPrincipal } from './auth-types.js';
 import { loadConfig, type Config, type GatewayRole } from './config.js';
+import { GATEWAY_TARGET_HEADER, gatewayTargetId } from './gateway-target.js';
 import { proxyPathIsFleetGlobal, requestIsProxyRoute } from './proxy-path.js';
 
 interface StaticSession {
@@ -279,7 +280,13 @@ export const authPlugin: FastifyPluginAsync = async (fastify) => {
     staticSessions.set(sessionId, session);
     reply.setCookie(cookieNames(config).session, sessionId, cookieOptions(config, true));
     issueCsrfCookie(reply, config, csrfToken);
-    return { principal: session.principal, csrfToken, expiresAt: session.expiresAt };
+    reply.header(GATEWAY_TARGET_HEADER, gatewayTargetId(config));
+    return {
+      principal: session.principal,
+      csrfToken,
+      csrfCookie: cookieNames(config).csrf,
+      expiresAt: session.expiresAt,
+    };
   });
 
   fastify.get('/api/auth/session', async (request, reply) => {
@@ -302,9 +309,15 @@ export const authPlugin: FastifyPluginAsync = async (fastify) => {
     }
     if (!csrfToken) return rejectAuth(reply);
     issueCsrfCookie(reply, config, csrfToken);
+    // The periodic session check is how an idle tab learns that another one
+    // re-pointed the BFF at a different gateway.
+    reply.header(GATEWAY_TARGET_HEADER, gatewayTargetId(config));
     return {
       principal,
       csrfToken,
+      // Every tab shares this cookie, and a renewal here replaces it for all
+      // of them. Naming it lets each tab send the current value (#436).
+      csrfCookie: cookieNames(config).csrf,
       expiresAt: session?.expiresAt,
       logoutUrl: config.authLogoutUrl,
     };

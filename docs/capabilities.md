@@ -29,7 +29,10 @@ gateway's mode and its write policy are fixed at start-up, so a past observation
 of them stays true for the session, and a failing background refetch — `useHealth`
 has `staleTime: 30_000` and refetches on window focus — must not flip a form
 from read-only to editable and back. Until some read has loaded, both facts are
-`null`.
+`null`. The provider never outlives the gateway it observed: when the BFF is
+re-pointed at another gateway, `GatewayTargetGate` unmounts it with the rest of
+the workspace, so the old gateway's mode and health are never presented as the
+new one's (see [Gateway target binding](authentication.md#gateway-target-binding)).
 
 ## Read truthfulness
 

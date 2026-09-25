@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
+import { isGatewayTargetRetired } from "@/api/gatewayTarget";
 import { validateNamespaceName } from "@/api/namespaces";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
@@ -14,6 +15,7 @@ import { Select } from "@/components/ui/Select";
 import { useToast } from "@/components/ui/Toast";
 import { useCapabilities } from "@/stores/capabilities";
 import { CapabilityNotice } from "@/components/shared/CapabilityGate";
+import { isReadDenied, ReadDeniedNotice } from "@/components/shared/ReadState";
 import {
   formatCommaList,
   missingNumberError,
@@ -69,22 +71,6 @@ interface StatusResult {
   error?: string;
 }
 
-const DEFAULT_SETTINGS: Settings = {
-  authMode: "trusted-proxy",
-  adminUrl: "",
-  jwtIssuer: "ferrum-edge",
-  jwtTtl: 900,
-  jwtRole: "admin",
-  jwtAudience: undefined,
-  jwtNamespaces: undefined,
-  tlsCaConfigured: false,
-  tlsVerify: true,
-  connectTimeout: 5000,
-  readTimeout: 60000,
-  writeTimeout: 60000,
-  runtimeSettingsEnabled: false,
-};
-
 /* ================================================================== */
 /*  SettingsForm                                                       */
 /* ================================================================== */
@@ -95,12 +81,18 @@ export function SettingsForm() {
   const { capabilities } = useCapabilities();
   const canWrite = capabilities.bffSettings;
 
-  const [settings, setSettings] = useState<SettingsDraft>(DEFAULT_SETTINGS);
+  // `null` until a successful read: an unobserved response is never rendered
+  // as an editable server snapshot or an invented default configuration.
+  const [settings, setSettings] = useState<SettingsDraft | null>(null);
   // Namespace grants keep the operator's raw text (commas included) and are
   // parsed on save; `settings.jwtNamespaces` stays the last server value.
   const [namespaceText, setNamespaceText] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  // A terminal failed read is either a permission denial or unavailable data;
+  // both render an explicit read state, never a fabricated configuration.
+  const [readFailed, setReadFailed] = useState<"denied" | "unavailable" | null>(null);
+  const [retrying, setRetrying] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [status, setStatus] = useState<StatusResult | null>(null);
@@ -118,12 +110,22 @@ export function SettingsForm() {
     try {
       const data = await api.get("api/settings").json<Settings>();
       adoptSettings(data);
-    } catch {
-      toast("error", "Failed to load settings");
+      setReadFailed(null);
+    } catch (error) {
+      setReadFailed(isReadDenied(error) ? "denied" : "unavailable");
     } finally {
       setLoading(false);
     }
-  }, [adoptSettings, toast]);
+  }, [adoptSettings]);
+
+  async function retry() {
+    setRetrying(true);
+    try {
+      await fetchSettings();
+    } finally {
+      setRetrying(false);
+    }
+  }
 
   useEffect(() => {
     fetchSettings();
@@ -132,7 +134,7 @@ export function SettingsForm() {
   /* ── Field helpers ──────────────────────────────────────────────── */
 
   function update<K extends keyof SettingsDraft>(key: K, value: SettingsDraft[K]) {
-    setSettings((prev) => ({ ...prev, [key]: value }));
+    setSettings((prev) => (prev ? { ...prev, [key]: value } : prev));
   }
 
   function checkNamespaceGrants() {
@@ -146,6 +148,7 @@ export function SettingsForm() {
   }
 
   function validate(): boolean {
+    if (!settings) return false;
     const errs: Record<string, string> = {};
     for (const [key, label] of SETTINGS_NUMBER_FIELDS) {
       const error = missingNumberError(settings[key], label);
@@ -180,6 +183,7 @@ export function SettingsForm() {
   /* ── Save settings ──────────────────────────────────────────────── */
 
   async function handleSave() {
+    if (!settings) return;
     if (!canWrite.allowed) return;
     if (!validate()) return;
     setSaving(true);
@@ -202,10 +206,15 @@ export function SettingsForm() {
           json: authMode === "static" ? { ...updates, jwtRole, jwtNamespaces } : updates,
         })
         .json<Settings>();
+      // A save that re-pointed the BFF retired this workspace; the gateway
+      // target gate reports it and nothing here may repopulate the cache.
+      if (isGatewayTargetRetired()) return;
       adoptSettings(data);
       toast("success", "Settings saved successfully");
     } catch {
-      toast("error", "Failed to save settings");
+      // A save refused because this tab's target was replaced is not a
+      // failure of the save; the gateway target gate explains it.
+      if (!isGatewayTargetRetired()) toast("error", "Failed to save settings");
     } finally {
       setSaving(false);
     }
@@ -221,6 +230,31 @@ export function SettingsForm() {
           <div className="h-10 w-full bg-bg-card-hover rounded" />
           <div className="h-10 w-full bg-bg-card-hover rounded" />
         </div>
+      </Card>
+    );
+  }
+
+  if (settings === null) {
+    if (readFailed === "denied") {
+      return <ReadDeniedNotice label="Connection settings" />;
+    }
+    return (
+      <Card className="border-warning/40" role="status">
+        <p className="text-sm text-warning">Unable to load settings</p>
+        <p className="text-xs text-text-muted mt-1">
+          No settings response has loaded, so the current configuration is
+          unknown. No configuration values are shown here.
+        </p>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          className="mt-3"
+          loading={retrying}
+          onClick={() => void retry()}
+        >
+          Retry
+        </Button>
       </Card>
     );
   }

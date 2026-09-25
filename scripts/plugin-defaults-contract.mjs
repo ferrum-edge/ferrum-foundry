@@ -36,23 +36,23 @@ export const ACCEPTED_PLUGIN_DEFAULTS = [
 export const OPERATOR_INPUT_REJECTIONS = {
   hmac_auth: {
     status: 400,
-    error: "Invalid plugin config: hmac_auth: 'replay_scope' is required for 'ferrum-hmac-v2' — use 'shared' together with sync_mode: 'redis' for any deployment running more than one gateway replica, or 'process' to declare a single-process deployment whose replay protection is not cross-replica",
+    error: "Invalid plugin config: hmac_auth: `replay_scope` is required for `ferrum-hmac-v2` — use `shared` together with sync_mode: `redis` for any deployment running more than one gateway replica, or `process` to declare a single-process deployment whose replay protection is not cross-replica",
   },
   mtls_auth: {
     status: 400,
-    error: "Invalid plugin config: mtls_auth: 'allowed_issuers[0].ca_certificate_pem' is required to cryptographically pin the issuer",
+    error: "Invalid plugin config: mtls_auth: `allowed_issuers[0].ca_certificate_pem` is required to cryptographically pin the issuer",
   },
   ai_stream_router: {
     status: 400,
-    error: "Invalid plugin config: ai_stream_router: provider 'openai-streaming' missing 'api_key'",
+    error: 'Invalid plugin config: ai_stream_router: provider "openai-streaming" missing `api_key`',
   },
   load_testing: {
     status: 400,
-    error: "Invalid plugin config: load_testing: 'key' must be at least 32 characters",
+    error: "Invalid plugin config: load_testing: `key` must be at least 32 characters",
   },
   proxy_alerts: {
     status: 400,
-    error: "Invalid plugin config: proxy_alerts: channel 'ops_slack': env var 'FERRUM_ALERTS_SLACK_WEBHOOK' (referenced by 'webhook_url_env') is not set",
+    error: 'Invalid plugin config: proxy_alerts: channel "ops_slack": env var "FERRUM_ALERTS_SLACK_WEBHOOK" (referenced by `webhook_url_env`) is not set',
   },
   kafka_logging: {
     status: 400,

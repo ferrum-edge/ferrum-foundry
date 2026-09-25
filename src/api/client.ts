@@ -16,6 +16,16 @@ import {
   type CommittedWrite,
   type GatewayRequestIdentity,
 } from "./gatewayMetadata";
+import {
+  boundGatewayTarget,
+  GATEWAY_TARGET_CHANGED_CODE,
+  GATEWAY_TARGET_HEADER,
+  GatewayTargetChangedError,
+  isGatewayTargetRetired,
+  observeGatewayTarget,
+  retireGatewayTarget,
+  targetsGateway,
+} from "./gatewayTarget";
 
 // ── Global error handler (event-emitter style) ───────────────────
 
@@ -291,23 +301,91 @@ export function isCommittedWrite(error: unknown): boolean {
 
 // ── BFF session / CSRF state (set by AuthProvider) ───────────────
 
+/**
+ * Context key carrying a request's position in the order requests were
+ * issued. A late BFF `401` is only evidence about the session if nothing newer
+ * has been accepted since the request was sent (#435).
+ */
+export const REQUEST_TICKET = "requestTicket";
+
+/** Called with the ticket of the request the BFF answered `401`. */
+export type UnauthorizedHandler = (ticket: number) => void;
+
 let csrfToken: string | null = null;
-let unauthorizedHandler: (() => void) | undefined;
+let csrfCookie: string | null = null;
+let unauthorizedHandler: UnauthorizedHandler | undefined;
+let lastTicket = 0;
+
+/**
+ * Take the next request ticket. Tickets are strictly increasing across every
+ * request this tab sends, so the auth store can order a session read against
+ * any other request's `401`.
+ */
+export function issueRequestTicket(): number {
+  lastTicket += 1;
+  return lastTicket;
+}
+
+/** The newest ticket issued so far; every request in flight holds one at or below it. */
+export function latestRequestTicket(): number {
+  return lastTicket;
+}
 
 /**
  * Set the non-secret CSRF token paired with the HttpOnly BFF session cookie.
  * It intentionally lives only in memory and is never a reusable login secret.
+ *
+ * `cookieName` names the readable CSRF cookie the BFF issued with it. The
+ * cookie is shared by every tab, and a renewal in one tab replaces it for all
+ * of them (#436), so an unsafe request sends the cookie's current value and
+ * falls back to this token only when the cookie cannot be read.
  */
-export function setCsrfToken(token: string | null): void {
+export function setCsrfToken(token: string | null, cookieName?: string): void {
   csrfToken = token;
+  csrfCookie = token === null ? null : cookieName ?? null;
+}
+
+function readCookie(name: string): string | null {
+  let cookies: string;
+  try {
+    cookies = typeof document === "undefined" ? "" : document.cookie;
+  } catch {
+    return null;
+  }
+  for (const entry of cookies.split(";")) {
+    const separator = entry.indexOf("=");
+    if (separator < 0 || entry.slice(0, separator).trim() !== name) continue;
+    const value = entry.slice(separator + 1).trim();
+    try {
+      return decodeURIComponent(value) || null;
+    } catch {
+      return value || null;
+    }
+  }
+  return null;
+}
+
+/**
+ * The CSRF value for an unsafe request, or null while signed out. The BFF
+ * requires the header to equal the cookie the browser sends with this very
+ * request, and it still verifies the value itself, so reading the cookie
+ * accepts nothing the server would not.
+ */
+function currentCsrfToken(): string | null {
+  if (!csrfToken) return null;
+  return (csrfCookie && readCookie(csrfCookie)) || csrfToken;
 }
 
 /**
  * Register a callback invoked when the BFF returns 401. The auth store uses
- * this to clear the local token and force re-login.
+ * this to clear the local token and force re-login. Returns an unregister
+ * function that leaves a replacement's handler in place.
  */
-export function setOnUnauthorized(handler: (() => void) | undefined): void {
+export function setOnUnauthorized(handler: UnauthorizedHandler | undefined): () => void {
   unauthorizedHandler = handler;
+  return () => {
+    if (unauthorizedHandler === handler) unauthorizedHandler = undefined;
+  };
 }
 
 // ── Namespace binding ────────────────────────────────────────────
@@ -433,6 +511,16 @@ function isExpectedProbeFailure(response: Response, requestUrl: string): boolean
   return SILENT_PROBE_PATTERNS.some((pattern) => pattern.test(requestUrl));
 }
 
+/** The BFF refused a gateway-facing request declared against a replaced target. */
+function isGatewayTargetRefusal(request: Request, error: unknown): boolean {
+  if (!isHTTPError(error) || error.response.status !== 409 || !targetsGateway(request.url)) {
+    return false;
+  }
+  const data: unknown = error.data;
+  return typeof data === "object" && data !== null &&
+    (data as { code?: unknown }).code === GATEWAY_TARGET_CHANGED_CODE;
+}
+
 // ── Configured ky instance ───────────────────────────────────────
 
 export const api = ky.create({
@@ -467,6 +555,15 @@ export const api = ky.create({
   hooks: {
     beforeRequest: [
       ({ request, options }) => {
+        // A page is bound to the gateway target it was opened against
+        // (`./gatewayTarget`). Once that target is replaced nothing further
+        // is sent; until then every gateway-facing request declares it, so
+        // the BFF refuses it rather than forwarding it to a successor.
+        if (targetsGateway(request.url)) {
+          if (isGatewayTargetRetired()) throw new GatewayTargetChangedError(request.url);
+          const target = boundGatewayTarget();
+          if (target) request.headers.set(GATEWAY_TARGET_HEADER, target);
+        }
         // Every gateway request must already carry the namespace its
         // operation was bound to (via `scoped()`), or be a documented
         // fleet-global call. The client never picks a namespace itself: the
@@ -483,18 +580,27 @@ export const api = ky.create({
         // ky shallow-copies context for each request; set a fresh identity
         // without replacing the read-only normalized context property.
         options.context[GATEWAY_REQUEST_IDENTITY] = beginGatewayRequest(request);
+        // A caller that ordered itself against the auth store (a session
+        // read) brings its own ticket; every other request takes the next one.
+        if (typeof options.context[REQUEST_TICKET] !== "number") {
+          options.context[REQUEST_TICKET] = issueRequestTicket();
+        }
+        const csrf = currentCsrfToken();
         if (
-          csrfToken &&
+          csrf &&
           request.method !== "GET" &&
           request.method !== "HEAD" &&
           request.method !== "OPTIONS"
         ) {
-          request.headers.set("X-CSRF-Token", csrfToken);
+          request.headers.set("X-CSRF-Token", csrf);
         }
       },
     ],
     afterResponse: [
       async ({ request, options, response }) => {
+        // Observed first: a response naming another target retires the
+        // live-apply monitor, so the observation below is discarded with it.
+        observeGatewayTarget(response.headers.get(GATEWAY_TARGET_HEADER));
         await observeGatewayResponse(
           request,
           response,
@@ -504,12 +610,17 @@ export const api = ky.create({
           response.status === 401 &&
           response.headers.get("x-ferrum-auth-layer") === "bff"
         ) {
-          unauthorizedHandler?.();
+          unauthorizedHandler?.(options.context[REQUEST_TICKET] as number);
         }
       },
     ],
     beforeError: [
       ({ request, options, error }) => {
+        // The BFF's refusal of a request declared against a replaced target
+        // retires the workspace even when an intermediary dropped the target
+        // header from it: every later request would be refused the same way,
+        // so no read state here may offer a retry that cannot succeed.
+        if (isGatewayTargetRefusal(request, error)) retireGatewayTarget();
         const identity = options.context[GATEWAY_REQUEST_IDENTITY] as
           | GatewayRequestIdentity
           | undefined;
@@ -528,6 +639,9 @@ export const api = ky.create({
           return error;
         }
         if (options.context[SILENT_ERRORS] || error.name === "AbortError") return error;
+        // The target-changed state replaces the workspace; a request refused
+        // or answered by the replaced target is not a fault to report on top.
+        if (isGatewayTargetRetired()) return error;
         if (isHTTPError(error) && isExpectedProbeFailure(error.response, request.url)) return error;
         if (isHTTPError(error) && isHandledStatus(options.context, error.response.status)) return error;
         const data = isHTTPError(error) ? error.data : error.message;
