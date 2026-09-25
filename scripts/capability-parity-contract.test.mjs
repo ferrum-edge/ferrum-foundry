@@ -6,6 +6,7 @@ import {
   READ_PROBES,
   WRITE_PROBES,
   classifyDenial,
+  confirmWritableParityTarget,
   gatewaySender,
   verifyCapabilityParity,
 } from "./capability-parity-contract.mjs";
@@ -179,12 +180,41 @@ describe("capability parity contract", () => {
     await assert.rejects(verifyCapabilityParity(send, { expectation: "writable" }), /gateway answered 401: authentication failed/);
   });
 
-  it("probes every gateway-backed surface without mutating anything", () => {
+  it("fails if an admitted delete finds and removes the reserved probe id", async () => {
+    const { send } = fakeGateway({
+      override: (role, request) => role === "operator" && request.path === `/proxies/${PROBE_ID}`
+        ? { status: 204, body: undefined }
+        : undefined,
+    });
+    await assert.rejects(
+      verifyCapabilityParity(send, { expectation: "writable" }),
+      /operator proxies .*gateway answered admitted \(204\)/,
+    );
+  });
+
+  it("requires exact destructive-target confirmation for writable execution", () => {
+    const config = {
+      adminUrl: "https://gateway.example",
+      namespace: "tenant-a",
+      destructiveConfirmation: undefined,
+    };
+    assert.throws(
+      () => confirmWritableParityTarget(config, "writable"),
+      /FERRUM_DEMO_CONFIRM_TARGET must exactly equal "https:\/\/gateway\.example#tenant-a"/,
+    );
+    config.destructiveConfirmation = "https://gateway.example#tenant-a";
+    assert.doesNotThrow(() => confirmWritableParityTarget(config, "writable"));
+    config.destructiveConfirmation = undefined;
+    assert.doesNotThrow(() => confirmWritableParityTarget(config, "read-only"));
+  });
+
+  it("defines safe expected outcomes for every gateway-backed surface", () => {
     assert.ok(BFF_ONLY_SURFACES.has("bffSettings"));
     assert.equal(Object.hasOwn(WRITE_PROBES, "bffSettings"), false);
     for (const [surface, probe] of Object.entries(WRITE_PROBES)) {
       if (probe.method === "DELETE") {
         assert.ok(probe.path.includes(PROBE_ID), `${surface} must delete only the probe id`);
+        assert.equal(probe.admittedStatus, 404, `${surface} must require a missing probe id`);
       } else if (probe.method === "POST") {
         assert.ok(["/restore", "/admin/tls/validate"].includes(probe.path), `${surface} POST`);
       } else {

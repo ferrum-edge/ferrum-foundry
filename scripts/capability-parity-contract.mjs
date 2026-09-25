@@ -23,8 +23,11 @@
  * role must come back as an explicit `403` naming the role — never as a
  * `404`/`501`/`503`, which Foundry presents as "not enabled on this gateway".
  *
- * Every write probe is non-mutating by construction: a `DELETE` of an id that
- * does not exist, `POST /admin/tls/validate` (non-persistent), `GET /backup`,
+ * The destructive-target confirmation is mandatory before writable probes,
+ * because the `DELETE` probes are safe only when their reserved id does not
+ * exist. The contract also requires those admitted deletes to return `404`,
+ * rather than treating a successful deletion as parity. The remaining probes
+ * are `POST /admin/tls/validate` (non-persistent), `GET /backup`,
  * or a `POST /restore` without `?confirm=true` and with a body that is not
  * JSON. Each still passes through exactly the role check and the admission
  * gate the surface mirrors, because Edge applies both before it looks the
@@ -46,7 +49,11 @@ import {
   resolveGatewayWriteState,
   resolveReadOnlyModeState,
 } from "../src/lib/capabilities.ts";
-import { adminToken, readSeedConfig } from "./seed-demo-gateway.mjs";
+import {
+  adminToken,
+  confirmDestructiveTarget,
+  readSeedConfig,
+} from "./seed-demo-gateway.mjs";
 
 export const ROLES = ["viewer", "operator", "admin"];
 const ROLE_RANK = { viewer: 0, operator: 1, admin: 2 };
@@ -59,19 +66,19 @@ export const PROBE_ID = "capability-parity-probe";
  * and write gate as the surface's real mutations.
  */
 export const WRITE_PROBES = {
-  proxies: { method: "DELETE", path: `/proxies/${PROBE_ID}` },
-  upstreams: { method: "DELETE", path: `/upstreams/${PROBE_ID}` },
-  pluginConfigs: { method: "DELETE", path: `/plugins/config/${PROBE_ID}` },
-  consumers: { method: "DELETE", path: `/consumers/${PROBE_ID}` },
-  consumerCredentials: { method: "DELETE", path: `/consumers/${PROBE_ID}/credentials/keyauth/0` },
-  apiSpecs: { method: "DELETE", path: `/api-specs/${PROBE_ID}` },
-  namespaceRegistry: { method: "DELETE", path: `/namespaces/${PROBE_ID}` },
-  gatewayTrust: { method: "DELETE", path: `/gateway-trust-bundles/${PROBE_ID}` },
+  proxies: { method: "DELETE", path: `/proxies/${PROBE_ID}`, admittedStatus: 404 },
+  upstreams: { method: "DELETE", path: `/upstreams/${PROBE_ID}`, admittedStatus: 404 },
+  pluginConfigs: { method: "DELETE", path: `/plugins/config/${PROBE_ID}`, admittedStatus: 404 },
+  consumers: { method: "DELETE", path: `/consumers/${PROBE_ID}`, admittedStatus: 404 },
+  consumerCredentials: { method: "DELETE", path: `/consumers/${PROBE_ID}/credentials/keyauth/0`, admittedStatus: 404 },
+  apiSpecs: { method: "DELETE", path: `/api-specs/${PROBE_ID}`, admittedStatus: 404 },
+  namespaceRegistry: { method: "DELETE", path: `/namespaces/${PROBE_ID}`, admittedStatus: 404 },
+  gatewayTrust: { method: "DELETE", path: `/gateway-trust-bundles/${PROBE_ID}`, admittedStatus: 404 },
   // No `?confirm=true` and not JSON: Edge refuses it after admission and
   // before it would read the payload, so the restore can never run.
   configBackup: { method: "POST", path: "/restore", rawBody: "{" },
   configExport: { method: "GET", path: "/backup" },
-  tlsMaterial: { method: "DELETE", path: `/admin/tls/certificates/${PROBE_ID}` },
+  tlsMaterial: { method: "DELETE", path: `/admin/tls/certificates/${PROBE_ID}`, admittedStatus: 404 },
   operationalActions: { method: "POST", path: "/admin/tls/validate", body: {} },
 };
 
@@ -187,7 +194,9 @@ export async function verifyCapabilityParity(send, { expectation } = {}) {
       if (response.status === 401) {
         agrees = false; // authentication failed: the probe tested nothing
       } else if (verdict.allowed) {
-        agrees = denial === null;
+        const admittedStatus = WRITE_PROBES[surface].admittedStatus;
+        agrees = denial === null
+          && (admittedStatus === undefined || response.status === admittedStatus);
       } else if (verdict.blockedBy === "role") {
         agrees = denial?.kind === "role"
           && denial.requiredRole === capabilityRequirement(surface).minimumRole;
@@ -265,10 +274,17 @@ export function gatewaySender(config, { fetchImpl = fetch } = {}) {
   };
 }
 
+/** Require explicit acknowledgement before probes can reach a writable target. */
+export function confirmWritableParityTarget(config, expectation) {
+  if (expectation === "writable") confirmDestructiveTarget(config);
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const config = readSeedConfig();
+  const expectation = process.env.FERRUM_CAPABILITY_EXPECT?.trim();
+  confirmWritableParityTarget(config, expectation);
   verifyCapabilityParity(gatewaySender(config), {
-    expectation: process.env.FERRUM_CAPABILITY_EXPECT?.trim(),
+    expectation,
   })
     .then((result) => console.log(JSON.stringify({ verified: true, capabilityParity: result })))
     .catch((error) => {
