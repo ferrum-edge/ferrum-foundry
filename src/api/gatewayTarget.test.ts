@@ -93,6 +93,33 @@ describe("gateway target binding", () => {
     expect(popup).not.toHaveBeenCalled();
   });
 
+  it("retires on a refusal whose target header an intermediary dropped", async () => {
+    const popup = vi.fn();
+    setApiErrorHandler(popup);
+    const fetchMock = stubFetch((request) => new URL(request.url).pathname === "/api/auth/session"
+      ? answer({}, "target-a")
+      : Response.json({ code: "FERRUM_BFF_GATEWAY_TARGET_CHANGED" }, { status: 409 }));
+    await api.get("api/auth/session").json();
+
+    expect(await refusedStatus(api.get("api/settings").json())).toBe(409);
+    expect(isGatewayTargetRetired()).toBe(true);
+    expect(popup).not.toHaveBeenCalled();
+    const sent = fetchMock.mock.calls.length;
+    await expect(api.get("api/settings").json()).rejects.toBeInstanceOf(GatewayTargetChangedError);
+    expect(fetchMock.mock.calls.length).toBe(sent);
+  });
+
+  it("does not retire on an unrelated conflict", async () => {
+    stubFetch((request) => new URL(request.url).pathname === "/api/auth/session"
+      ? answer({}, "target-a")
+      : answer({ code: "FERRUM_CONFLICT" }, "target-a", { status: 409 }));
+    await api.get("api/auth/session").json();
+
+    expect(await refusedStatus(proxyApi.post("proxies", scoped(DEMO, { json: { id: "p-1" } })).json()))
+      .toBe(409);
+    expect(isGatewayTargetRetired()).toBe(false);
+  });
+
   it("retires when the periodic session check names another target", async () => {
     let current = "target-a";
     stubFetch(() => answer({}, current));

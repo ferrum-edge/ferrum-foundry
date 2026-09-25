@@ -18,10 +18,12 @@ import {
 } from "./gatewayMetadata";
 import {
   boundGatewayTarget,
+  GATEWAY_TARGET_CHANGED_CODE,
   GATEWAY_TARGET_HEADER,
   GatewayTargetChangedError,
   isGatewayTargetRetired,
   observeGatewayTarget,
+  retireGatewayTarget,
   targetsGateway,
 } from "./gatewayTarget";
 
@@ -441,6 +443,16 @@ function isExpectedProbeFailure(response: Response, requestUrl: string): boolean
   return SILENT_PROBE_PATTERNS.some((pattern) => pattern.test(requestUrl));
 }
 
+/** The BFF refused a gateway-facing request declared against a replaced target. */
+function isGatewayTargetRefusal(request: Request, error: unknown): boolean {
+  if (!isHTTPError(error) || error.response.status !== 409 || !targetsGateway(request.url)) {
+    return false;
+  }
+  const data: unknown = error.data;
+  return typeof data === "object" && data !== null &&
+    (data as { code?: unknown }).code === GATEWAY_TARGET_CHANGED_CODE;
+}
+
 // ── Configured ky instance ───────────────────────────────────────
 
 export const api = ky.create({
@@ -530,6 +542,11 @@ export const api = ky.create({
     ],
     beforeError: [
       ({ request, options, error }) => {
+        // The BFF's refusal of a request declared against a replaced target
+        // retires the workspace even when an intermediary dropped the target
+        // header from it: every later request would be refused the same way,
+        // so no read state here may offer a retry that cannot succeed.
+        if (isGatewayTargetRefusal(request, error)) retireGatewayTarget();
         const identity = options.context[GATEWAY_REQUEST_IDENTITY] as
           | GatewayRequestIdentity
           | undefined;

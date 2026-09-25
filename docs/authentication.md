@@ -309,7 +309,10 @@ observations carry no gateway at all, so Foundry binds each page load to one
   workspace — editors, drafts, confirmation dialogs, and the capability
   provider's retained health observation — in favour of a "Gateway target
   changed" screen. Only a reload leaves it; the reload binds the new target
-  with nothing carried across.
+  with nothing carried across. The `409` retires the page by its `code` even
+  if an intermediary dropped the target header from it, so a refused read —
+  the Settings form's first load, say — never lands on a "try again" state
+  that every retry would be refused from.
 - A refresh, save, or session check that names the same target changes
   nothing, so drafts survive ordinary refreshes and non-target settings saves.
   Runtime settings stay disabled by default, and a disallowed origin is still

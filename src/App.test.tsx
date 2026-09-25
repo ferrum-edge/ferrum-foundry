@@ -143,16 +143,27 @@ function gatewayFacing(request: Request): boolean {
  * re-points it.
  */
 function retargetableBff() {
-  const bff = { target: "target-a", refused: [] as string[] };
+  const bff = {
+    target: "target-a",
+    refused: [] as string[],
+    // Another tab re-points the BFF just as this request arrives.
+    repointOn: null as string | null,
+    // An intermediary drops the target header from the refusal.
+    stripRefusalTarget: false,
+  };
   const fixture = globalThis.fetch;
   vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
     const path = new URL(request.url).pathname;
+    if (bff.repointOn === `${request.method} ${path}`) {
+      bff.target = "target-b";
+      bff.repointOn = null;
+    }
     const declared = request.headers.get(GATEWAY_TARGET_HEADER);
     if (gatewayFacing(request) && declared !== null && declared !== bff.target) {
       bff.refused.push(`${request.method} ${path}`);
       return Response.json(
         { code: "FERRUM_BFF_GATEWAY_TARGET_CHANGED" },
-        { status: 409, headers: { [GATEWAY_TARGET_HEADER]: bff.target } },
+        { status: 409, headers: bff.stripRefusalTarget ? {} : { [GATEWAY_TARGET_HEADER]: bff.target } },
       );
     }
     const saved = request.method === "PUT" && path === "/api/settings"
@@ -167,9 +178,20 @@ function retargetableBff() {
   return bff;
 }
 
-async function openSettings() {
-  router.update({ history: createMemoryHistory({ initialEntries: ["/settings"] }) });
+/**
+ * Render the signed-in shell. The router is a module singleton that an earlier
+ * test has already loaded, and a remounted `RouterProvider` keeps presenting
+ * that test's last location instead of loading the fresh memory history, so
+ * tests reach a page by navigating once the shell is up.
+ */
+async function openShell() {
   await ui.render(<App />);
+  await settle(() => expect(ui.host.querySelector("main")).not.toBeNull());
+}
+
+async function openSettings() {
+  await openShell();
+  await act(async () => { await router.navigate({ to: "/settings" }); });
   await settle(() => expect(ui.host.textContent).toContain("Save Settings"));
 }
 
@@ -220,4 +242,32 @@ it("retires this tab's workspace once its own settings save re-points the BFF", 
   const sent = requests.length;
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
   expect(requests.slice(sent).filter(gatewayFacing)).toEqual([]);
+}, 15000);
+
+it.each([
+  ["names the new target", false],
+  ["lost its target header on the way back", true],
+])("retires the workspace instead of offering a settings retry when the read is refused and the refusal %s", async (
+  _refusal,
+  stripped,
+) => {
+  const bff = retargetableBff();
+  bff.stripRefusalTarget = stripped;
+  await openShell();
+  await act(async () => { await router.navigate({ to: "/tls" }); });
+  await settle(() => expect(ui.host.querySelector("main")?.textContent).toContain("No TLS material found"));
+
+  // Another tab re-points the BFF as this tab opens Settings: the read was
+  // declared against A, so no answer from B can seed the form, and a retry
+  // would be refused the same way.
+  bff.repointOn = "GET /api/settings";
+  const answered = requests.length;
+  await act(async () => { void router.navigate({ to: "/settings" }); });
+  await settle(() => expect(ui.host.textContent).toContain("Gateway target changed"));
+  expect(bff.refused).toContain("GET /api/settings");
+  expect(requests.slice(answered).some((request) => new URL(request.url).pathname === "/api/settings")).toBe(false);
+  expectWorkspaceRetired();
+  expect(document.body.textContent).not.toContain("Unable to load settings");
+  expect(document.body.textContent).not.toContain("Retry");
+  expect(document.body.textContent).not.toContain("409");
 }, 15000);
