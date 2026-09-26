@@ -105,6 +105,17 @@ The policy traversals themselves remain **complete**. An effective-policy
 answer is an authorization conclusion; a partial plugin graph would
 under-report what runs on a proxy.
 
+The complete graph is then merged the way the gateway merges scopes
+(Ferrum Edge v0.9.7 `src/plugin_cache.rs`, `remove_shadowed_global_plugin`):
+an enabled proxy- or proxy-group-scoped configuration that the proxy's
+`plugins` list attaches replaces every global configuration with the same
+plugin name, before the protocol filter runs. The request and response size
+limiters, and the exact no-static-rules transformer the Istio VirtualService
+translator emits for a proxy, are additive and leave the global instance in
+place. A disabled or unattached scoped configuration shadows nothing. Plugin
+counts, the proxy's consumer analysis, and a consumer's Matched Proxies all use
+this one merge (#469).
+
 The Plugins tab also lists the proxy-scoped configurations that name this
 proxy but do not run on it — disabled, or not in the proxy's `plugins` list.
 That list comes from `GET /plugins/config?proxy_id=<id>`
