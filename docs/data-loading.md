@@ -121,7 +121,11 @@ A consumer editor issues one request for the consumer. The proxy and plugin
 collections behind "Matched Proxies" load when that tab is first opened; its
 label reads `unknown` until then. A consumer's access depends on no other
 consumer, so the consumer collection is never traversed for it, and each
-proxy is analyzed for this consumer alone.
+proxy is analyzed for this consumer alone. That per-proxy analysis resolves
+the proxy's attached plugins from an attachment index built once per plugin
+collection (`src/lib/effectivePolicy.ts`), so opening the tab stays linear in
+the number of proxies rather than scanning every configuration per proxy
+(#454).
 
 A plugin editor traverses the proxy collection only for a `proxy_group`
 plugin, whose membership needs it. Global and proxy-scoped plugins do not.
