@@ -39,14 +39,22 @@ const LIST_KEY: Record<CascadeKind, string> = {
  * `namespace` must be the namespace the mutation was *issued* under — carry it
  * through completion (`onMutate` context or the mutation's own result) so a
  * switch after the click cannot retire another tenant's cache.
+ *
+ * `retireLists` also retires that namespace's *inactive* list entries, for a
+ * mutation that may have replaced what an editor seeds from a list (the plugin
+ * editor's proxy-group membership comes from the whole proxy list). A list a
+ * mounted page is observing is refetched instead: removing it would orphan
+ * the observer, which then never sees the refetch.
  */
 export function retireCascade(
   qc: QueryClient,
   namespace: string,
   kinds: readonly CascadeKind[],
+  { retireLists = false }: { retireLists?: boolean } = {},
 ): void {
   for (const kind of kinds) {
     qc.removeQueries({ queryKey: [kind, namespace] });
+    if (retireLists) qc.removeQueries({ queryKey: [LIST_KEY[kind], namespace], type: "inactive" });
     qc.invalidateQueries({ queryKey: [LIST_KEY[kind]] });
   }
 }

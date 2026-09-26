@@ -132,7 +132,15 @@ response omission and canonical backup hashes with disposable synthetic credenti
 
 Restore also distinguishes HTTP 503 recovery outcomes. A valid commit cursor or
 `applied: false` produces a “Restore committed” warning, clears the restore
-confirmation, and refreshes cached resource reads. The shared live-apply banner
+confirmation, and refreshes cached resource reads. Because detail editors seed
+once, "refresh" after a restore means *retire*: the restored namespace's
+proxy, upstream, consumer, plugin configuration, and API spec detail entries,
+and its inactive lists of those kinds, are removed rather than invalidated,
+and every other read is invalidated. That happens after a success, a
+committed-but-not-live answer, an unobserved outcome, and every server (5xx)
+failure except one whose answer proves the namespace unchanged — a rollback
+that `completed` or was `not_needed`, a `connectivity` failure class, or the
+BFF's upload-phase timeout (#446). The shared live-apply banner
 monitors a valid cursor; a committed response without a valid cursor remains
 unverifiable. Foundry never resubmits the restore automatically. Pre-commit
 connectivity failures retain the gateway's structured `restore_errors` and

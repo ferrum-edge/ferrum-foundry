@@ -207,10 +207,12 @@ them, correctly addressed, to the wrong consumer. Foundry therefore binds the
   *issued* under, carried through completion, so a switch after the click
   cannot retire another tenant's cache. A namespace **restore** replaces every
   proxy, upstream, consumer, plugin configuration, and API spec in the
-  namespace it was confirmed for, so it retires all five detail kinds there
-  — after a success, a committed-but-not-live answer, an unobserved outcome,
-  and a failure whose rollback was `incomplete` or `unknown_outcome` — and
-  invalidates everything else (#446).
+  namespace it was confirmed for, so it retires all five detail kinds there,
+  plus that namespace's inactive lists of them (the plugin editor seeds
+  proxy-group membership from the whole proxy list) — after a success, a
+  committed-but-not-live answer, an unobserved outcome, and every server
+  failure whose answer does not prove the namespace unchanged — and
+  invalidates everything else (#446). See `docs/client-recovery.md`.
 
 Do not expose the BFF port directly to an untrusted network. Terminate TLS at
 the identity proxy, strip every identity/proof header supplied by the client,

@@ -30,7 +30,8 @@ import {
   type StaleResourceDetail,
   type WriteGuard,
 } from "@/api/conditionalWrite";
-import { resourceFingerprint } from "@/lib/resourceBaseline";
+import { pickSnapshot, resourceFingerprint } from "@/lib/resourceBaseline";
+import { targetActionLabels, targetIdentities } from "@/lib/upstreamTargets";
 import { StaleWriteDialog } from "@/components/shared/StaleWriteDialog";
 import { useCapabilities } from "@/stores/capabilities";
 import { CapabilityNotice, WriteAction } from "@/components/shared/CapabilityGate";
@@ -51,11 +52,31 @@ function targetEditBasis(upstream: Upstream): TargetEditBasis {
   return { targets: upstream.targets, guard: upstreamsApi.targetsWriteGuard(upstream) };
 }
 
+/**
+ * The one open target editor, if any. An edit form is bound to its target's
+ * identity (`targetIdentities`), not to a row position, so a refetch or a
+ * removal that shifts the rows neither moves nor remounts it; `index` is the
+ * target's position in the captured `targets` the save is computed from.
+ */
+type TargetDraft =
+  | (TargetEditBasis & { readonly mode: "add" })
+  | (TargetEditBasis & { readonly mode: "edit"; readonly index: number; readonly identity: string });
+
+const MISSING_TARGET_DRAFT =
+  "This target form lost the target list it was opened from, so nothing was saved. Cancel it and open the target again.";
+
 function sameTargetBaseline(
   a: WriteGuard<Upstream | UpstreamCreate>,
   b: WriteGuard<Upstream | UpstreamCreate>,
 ): boolean {
   return resourceFingerprint(a.baseline) === resourceFingerprint(b.baseline);
+}
+
+function holdsTargets(upstream: Upstream, targets: UpstreamTarget[]): boolean {
+  return (
+    resourceFingerprint(pickSnapshot(upstream, ["targets"])) ===
+    resourceFingerprint(pickSnapshot({ targets }, ["targets"]))
+  );
 }
 
 /**
@@ -103,15 +124,9 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
   const baseline = useEditBaseline(upstream, upstreamsApi.upstreamWriteGuard);
 
   /* ---------- Targets tab state ---------- */
-  const [showTargetForm, setShowTargetForm] = useState(false);
-  // The row the edit form is displayed on. A removal from this page shifts it
-  // so the form follows its own target.
-  const [editingTargetIndex, setEditingTargetIndex] = useState<number | null>(null);
-  // What the open target editor was seeded from, with the index of the edited
-  // target *in that list* (null for the add form).
-  const [targetDraft, setTargetDraft] = useState<
-    (TargetEditBasis & { index: number | null }) | null
-  >(null);
+  // The open target form and what it was seeded from. A form is shown only
+  // while this holds a draft, so dropping the draft closes the form.
+  const [targetDraft, setTargetDraft] = useState<TargetDraft | null>(null);
 
   /* ---------- Handlers ---------- */
 
@@ -194,22 +209,19 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
 
   /* ---------- Target management (Targets tab) ---------- */
 
-  const closeTargetEditors = () => {
-    setShowTargetForm(false);
-    setEditingTargetIndex(null);
-    setTargetDraft(null);
-  };
+  const closeTargetEditors = () => setTargetDraft(null);
 
   const openAddTarget = (source: Upstream) => {
-    setEditingTargetIndex(null);
-    setTargetDraft({ ...targetEditBasis(source), index: null });
-    setShowTargetForm(true);
+    setTargetDraft({ ...targetEditBasis(source), mode: "add" });
   };
 
   const openEditTarget = (source: Upstream, index: number) => {
-    setShowTargetForm(false);
-    setTargetDraft({ ...targetEditBasis(source), index });
-    setEditingTargetIndex(index);
+    setTargetDraft({
+      ...targetEditBasis(source),
+      mode: "edit",
+      index,
+      identity: targetIdentities(source.targets)[index],
+    });
   };
 
   // Every target edit funnels through this one bound write. Its guard is built
@@ -219,9 +231,11 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
   // for a row removal, the list on screen when it was clicked. Only `targets`
   // is compared, so a settings save from this same client still composes
   // (#235/#254). `onSaved` runs only when the targets were written, with the
-  // accepted upstream when the gateway returned one: a refused or rejected
-  // save keeps the target draft open, as the configuration form does, so the
-  // conflict dialog's "Keep editing" has something to return to.
+  // upstream now holding them when that is known: the gateway's answer, or,
+  // for a committed-but-not-live answer, a fresh read that holds exactly the
+  // list this save wrote. A refused or rejected save keeps the target draft
+  // open, as the configuration form does, so the conflict dialog's "Keep
+  // editing" has something to return to.
   const saveTargets = session.bind(
     async (
       newTargets: UpstreamTarget[],
@@ -243,11 +257,14 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
         }
         const committed = getCommittedWrite(err);
         if (committed) {
-          // The targets were written; only the live apply lagged. The
-          // mutation has already refreshed this upstream, so the next target
-          // editor is seeded from the committed list.
+          // The targets were written; only the live apply lagged. A fresh
+          // read stands in for the gateway's answer only when it holds
+          // exactly what this save wrote — anything else may include another
+          // writer's change, which an open form must not be rebased onto.
+          const refreshed = await resourceQuery.refetch();
+          const fresh = refreshed.isError ? undefined : refreshed.data;
           toast("warning", committedWriteMessage("Targets saved", committed));
-          onSaved(null);
+          onSaved(fresh && holdsTargets(fresh, newTargets) ? fresh : null);
           return;
         }
         const message = await getApiErrorMessage(err, "Failed to update targets");
@@ -260,12 +277,20 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
   );
 
   const handleAddTarget = async (target: UpstreamTarget) => {
-    if (!upstream || updateUpstream.isPending || !targetDraft) return;
+    if (!upstream || updateUpstream.isPending) return;
+    if (targetDraft?.mode !== "add") {
+      toast("error", MISSING_TARGET_DRAFT);
+      return;
+    }
     await saveTargets([...targetDraft.targets, target], targetDraft.guard, closeTargetEditors);
   };
 
   const handleUpdateTarget = async (target: UpstreamTarget) => {
-    if (!upstream || updateUpstream.isPending || !targetDraft || targetDraft.index === null) return;
+    if (!upstream || updateUpstream.isPending) return;
+    if (targetDraft?.mode !== "edit") {
+      toast("error", MISSING_TARGET_DRAFT);
+      return;
+    }
     const edited = targetDraft.index;
     const newTargets = targetDraft.targets.map((t, i) => (i === edited ? target : t));
     await saveTargets(newTargets, targetDraft.guard, closeTargetEditors);
@@ -273,27 +298,30 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
 
   const handleRemoveTarget = async (index: number) => {
     if (!upstream || updateUpstream.isPending) return;
+    const removed = targetIdentities(upstream.targets)[index];
     const newTargets = upstream.targets.filter((_, i) => i !== index);
     const guard = upstreamsApi.targetsWriteGuard(upstream);
-    await saveTargets(newTargets, guard, (accepted) => {
-      // Removing a row shifts every row below it up by one, so the open
-      // editor must follow its own target rather than keep its old index.
-      setEditingTargetIndex((editing) => {
-        if (editing === null || editing === index) return null;
-        return editing > index ? editing - 1 : editing;
-      });
+    await saveTargets(newTargets, guard, (result) => {
       setTargetDraft((draft) => {
         if (!draft) return draft;
-        if (draft.index === index) return null;
+        // Removing the target being edited drops its draft, which closes the
+        // form.
+        if (draft.mode === "edit" && draft.identity === removed) return null;
         // This page's own removal moves an open editor's basis only when that
         // editor was seeded from the very list the removal was computed from
-        // and the gateway returned the result. Otherwise the basis stays, and
-        // a save from it is refused rather than rebased onto content the
-        // operator never edited against.
-        if (!accepted || !sameTargetBaseline(draft.guard, guard)) return draft;
+        // and the upstream now holding the result is known. Otherwise the
+        // basis stays, and a save from it is refused rather than rebased onto
+        // content the operator never edited against.
+        if (!result || !sameTargetBaseline(draft.guard, guard)) return draft;
+        if (draft.mode === "add") return { ...targetEditBasis(result), mode: "add" };
+        // The bases match, so the draft's index and the removed row's index
+        // are positions in the same list.
+        const moved = draft.index > index ? draft.index - 1 : draft.index;
         return {
-          ...targetEditBasis(accepted),
-          index: draft.index !== null && draft.index > index ? draft.index - 1 : draft.index,
+          ...targetEditBasis(result),
+          mode: "edit",
+          index: moved,
+          identity: targetIdentities(result.targets)[moved] ?? draft.identity,
         };
       });
     });
@@ -333,6 +361,21 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
   }
 
   /* ---------- Render ---------- */
+
+  // The rows on screen, each with its identity. An open edit form whose
+  // target a refetch no longer lists keeps its place (at its captured
+  // position) instead of vanishing with the operator's typing.
+  const editingDraft = targetDraft?.mode === "edit" ? targetDraft : null;
+  const identities = targetIdentities(upstream.targets);
+  const targetRows: { target: UpstreamTarget; index: number | null; identity: string }[] =
+    upstream.targets.map((target, index) => ({ target, index, identity: identities[index] }));
+  if (editingDraft && !identities.includes(editingDraft.identity)) {
+    targetRows.splice(Math.min(editingDraft.index, targetRows.length), 0, {
+      target: editingDraft.targets[editingDraft.index],
+      index: null,
+      identity: editingDraft.identity,
+    });
+  }
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -395,7 +438,7 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
                 <h3 className="text-sm font-semibold text-text-primary">
                   Targets ({upstream.targets.length})
                 </h3>
-                {!showTargetForm && (
+                {targetDraft?.mode !== "add" && (
                   <Button
                     type="button"
                     variant="secondary"
@@ -411,86 +454,51 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
               </div>
 
               {/* Target list */}
-              {upstream.targets.length > 0 && (
+              {targetRows.length > 0 && (
                 <div className="space-y-2">
-                  {upstream.targets.map((target, index) => (
-                    // Keyed by address and its occurrence, not position, so
-                    // removing another row does not remount an open editor.
-                    <div
-                      key={`${target.host}-${target.port}-${
-                        upstream.targets
-                          .slice(0, index)
-                          .filter((other) => other.host === target.host && other.port === target.port)
-                          .length
-                      }`}
-                    >
-                      {editingTargetIndex === index ? (
-                        <TargetForm
-                          initialData={
-                            (targetDraft && targetDraft.index !== null
-                              ? targetDraft.targets[targetDraft.index]
-                              : undefined) ?? target
-                          }
-                          onSubmit={handleUpdateTarget}
-                          onCancel={closeTargetEditors}
-                        />
+                  {targetRows.map(({ target, index, identity }) => (
+                    // Keyed by the target's identity, not its position, so a
+                    // refetch or a removal that shifts the rows does not
+                    // remount an open editor or move it to another target.
+                    <div key={identity}>
+                      {editingDraft?.identity === identity ? (
+                        <>
+                          <TargetForm
+                            initialData={editingDraft.targets[editingDraft.index]}
+                            onSubmit={handleUpdateTarget}
+                            onCancel={closeTargetEditors}
+                          />
+                          {index === null && (
+                            <p role="status" className="text-warning text-xs mt-2">
+                              This target is no longer in the upstream&apos;s current list.
+                              Update Target shows what changed instead of saving; Cancel
+                              discards the draft.
+                            </p>
+                          )}
+                        </>
                       ) : (
-                        <div className="bg-bg-primary/50 border border-border rounded-lg p-3 flex items-center justify-between">
-                          <div className="flex items-center gap-3 flex-wrap">
-                            <span className="text-sm text-text-primary font-mono">
-                              {target.host}:{target.port}
-                            </span>
-                            <Badge variant="default">weight {target.weight}</Badge>
-                            {target.path && (
-                              <Badge variant="blue">{target.path}</Badge>
-                            )}
-                            {target.tags && Object.keys(target.tags).length > 0 && (
-                              <div className="flex gap-1 flex-wrap">
-                                {Object.entries(target.tags).map(([k, v]) => (
-                                  <Badge key={k} variant="purple">
-                                    {k}:{v}
-                                  </Badge>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-1 shrink-0">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => openEditTarget(upstream, index)}
-                            >
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                              </svg>
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleRemoveTarget(index)}
-                            >
-                              <svg className="w-4 h-4 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                              </svg>
-                            </Button>
-                          </div>
-                        </div>
+                        index !== null && (
+                          <TargetRow
+                            target={target}
+                            labels={targetActionLabels(upstream.targets, index)}
+                            onEdit={() => openEditTarget(upstream, index)}
+                            onRemove={() => handleRemoveTarget(index)}
+                          />
+                        )
                       )}
                     </div>
                   ))}
                 </div>
               )}
 
-              {upstream.targets.length === 0 && !showTargetForm && (
+              {targetRows.length === 0 && targetDraft?.mode !== "add" && (
                 <p className="text-text-muted text-sm py-4 text-center">
                   No targets configured. Add a target to start routing traffic.
                 </p>
               )}
 
               {/* Inline add form */}
-              {showTargetForm && (
+              {targetDraft?.mode === "add" && (
                 <TargetForm
                   onSubmit={handleAddTarget}
                   onCancel={closeTargetEditors}
@@ -520,6 +528,54 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
         onConfirm={handleDelete}
         loading={deleteUpstream.isPending}
       />
+    </div>
+  );
+}
+
+/** One target's read-only row, with its edit and remove actions. */
+function TargetRow({
+  target,
+  labels,
+  onEdit,
+  onRemove,
+}: {
+  target: UpstreamTarget;
+  labels: { edit: string; remove: string };
+  onEdit: () => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="bg-bg-primary/50 border border-border rounded-lg p-3 flex items-center justify-between">
+      <div className="flex items-center gap-3 flex-wrap">
+        <span className="text-sm text-text-primary font-mono">
+          {target.host}:{target.port}
+        </span>
+        <Badge variant="default">weight {target.weight}</Badge>
+        {target.path && (
+          <Badge variant="blue">{target.path}</Badge>
+        )}
+        {target.tags && Object.keys(target.tags).length > 0 && (
+          <div className="flex gap-1 flex-wrap">
+            {Object.entries(target.tags).map(([k, v]) => (
+              <Badge key={k} variant="purple">
+                {k}:{v}
+              </Badge>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="flex items-center gap-1 shrink-0">
+        <Button type="button" variant="ghost" size="sm" aria-label={labels.edit} onClick={onEdit}>
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+          </svg>
+        </Button>
+        <Button type="button" variant="ghost" size="sm" aria-label={labels.remove} onClick={onRemove}>
+          <svg className="w-4 h-4 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+          </svg>
+        </Button>
+      </div>
     </div>
   );
 }

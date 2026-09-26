@@ -13,6 +13,7 @@ import { CollapsibleSection } from "./CollapsibleSection";
 import { FormValidationSummary } from "./FormValidationSummary";
 import { TargetForm } from "./TargetForm";
 import { useCollapsibleFormValidation } from "@/lib/collapsedFormValidation";
+import { targetActionLabels } from "@/lib/upstreamTargets";
 import {
   missingNumberError,
   numberDraftFromInput,
@@ -110,7 +111,11 @@ const SD_PROVIDERS = [
   { value: "mesh", label: "Ferrum Mesh" },
 ];
 
+// Radix Select cannot hold an empty value, so an unset attribute has its own.
+const SAME_SITE_UNSET = "unset";
+
 const SAME_SITE_OPTIONS = [
+  { value: SAME_SITE_UNSET, label: "Not set" },
   { value: "Strict", label: "Strict" },
   { value: "Lax", label: "Lax" },
   { value: "None", label: "None" },
@@ -267,9 +272,16 @@ export function UpstreamForm({
   const [hashOn, setHashOn] = useState(initialData?.hash_on ?? "");
 
   /* ---------- Targets ---------- */
-  const [targets, setTargets] = useState<UpstreamTarget[]>(initialData?.targets ?? []);
+  // Each local target carries a stable id for its row and its open editor, so
+  // removing another row neither remounts the editor nor moves it onto a
+  // different target (#448).
+  const nextTargetId = useRef(0);
+  const [targetRows, setTargetRows] = useState<{ id: number; target: UpstreamTarget }[]>(() =>
+    (initialData?.targets ?? []).map((target) => ({ id: nextTargetId.current++, target })),
+  );
+  const targets = targetRows.map((row) => row.target);
   const [showTargetForm, setShowTargetForm] = useState(false);
-  const [editingTargetIndex, setEditingTargetIndex] = useState<number | null>(null);
+  const [editingTargetId, setEditingTargetId] = useState<number | null>(null);
 
   /* ---------- Health Checks ---------- */
   const [activeHcEnabled, setActiveHcEnabled] = useState(!!initialData?.health_checks?.active);
@@ -290,13 +302,22 @@ export function UpstreamForm({
   );
 
   /* ---------- Hash Cookie Config ---------- */
+  // Edge has no SameSite default, so an unset attribute on a stored cookie
+  // config stays unset through an unrelated save — `null` or omitted, exactly
+  // as it was read (#449). Only a cookie config this form creates starts at
+  // Lax.
+  const [unsetSameSite] = useState<null | undefined>(() =>
+    initialData?.hash_on_cookie_config?.same_site === null ? null : undefined,
+  );
   const [cookieConfig, setCookieConfig] = useState<HashOnCookieConfigDraft>({
     path: initialData?.hash_on_cookie_config?.path ?? "/",
     ttl_seconds: initialData?.hash_on_cookie_config?.ttl_seconds ?? 3600,
     domain: initialData?.hash_on_cookie_config?.domain,
     http_only: initialData?.hash_on_cookie_config?.http_only ?? true,
     secure: initialData?.hash_on_cookie_config?.secure ?? false,
-    same_site: initialData?.hash_on_cookie_config?.same_site ?? "Lax",
+    same_site: initialData?.hash_on_cookie_config
+      ? initialData.hash_on_cookie_config.same_site ?? null
+      : "Lax",
     session_cookie: initialData?.hash_on_cookie_config?.session_cookie ?? false,
   });
 
@@ -450,6 +471,7 @@ export function UpstreamForm({
           }
         : undefined;
 
+    const sameSite = cookieConfig.same_site ?? unsetSameSite;
     const hashOnCookie: HashOnCookieConfig | undefined =
       hashOn.startsWith("cookie:")
         ? {
@@ -458,7 +480,7 @@ export function UpstreamForm({
             ...(cookieConfig.domain && { domain: cookieConfig.domain }),
             http_only: cookieConfig.http_only,
             secure: cookieConfig.secure,
-            same_site: cookieConfig.same_site,
+            ...(sameSite !== undefined && { same_site: sameSite }),
             session_cookie: cookieConfig.session_cookie,
           }
         : undefined;
@@ -572,19 +594,21 @@ export function UpstreamForm({
   /* ---------- Target handlers ---------- */
 
   const handleAddTarget = (target: UpstreamTarget) => {
-    setTargets((prev) => [...prev, target]);
+    const id = nextTargetId.current++;
+    setTargetRows((prev) => [...prev, { id, target }]);
     setShowTargetForm(false);
   };
 
   const handleUpdateTarget = (target: UpstreamTarget) => {
-    if (editingTargetIndex === null) return;
-    setTargets((prev) => prev.map((t, i) => (i === editingTargetIndex ? target : t)));
-    setEditingTargetIndex(null);
+    if (editingTargetId === null) return;
+    const id = editingTargetId;
+    setTargetRows((prev) => prev.map((row) => (row.id === id ? { id, target } : row)));
+    setEditingTargetId(null);
   };
 
-  const handleRemoveTarget = (index: number) => {
-    setTargets((prev) => prev.filter((_, i) => i !== index));
-    if (editingTargetIndex === index) setEditingTargetIndex(null);
+  const handleRemoveTarget = (id: number) => {
+    setTargetRows((prev) => prev.filter((row) => row.id !== id));
+    if (editingTargetId === id) setEditingTargetId(null);
   };
 
   /* ---------- SD config helpers ---------- */
@@ -663,15 +687,15 @@ export function UpstreamForm({
           )}
 
           {/* Existing targets */}
-          {targets.length > 0 && (
+          {targetRows.length > 0 && (
             <div className="space-y-2 mb-4">
-              {targets.map((target, index) => (
-                <div key={`${target.host}-${target.port}-${index}`}>
-                  {editingTargetIndex === index ? (
+              {targetRows.map(({ id, target }, index) => (
+                <div key={id}>
+                  {editingTargetId === id ? (
                     <TargetForm
                       initialData={target}
                       onSubmit={handleUpdateTarget}
-                      onCancel={() => setEditingTargetIndex(null)}
+                      onCancel={() => setEditingTargetId(null)}
                     />
                   ) : (
                     <Card className="p-3 flex items-center justify-between">
@@ -698,12 +722,13 @@ export function UpstreamForm({
                           type="button"
                           variant="ghost"
                           size="sm"
+                          aria-label={targetActionLabels(targets, index).edit}
                           onClick={() => {
                             setShowTargetForm(false);
-                            setEditingTargetIndex(index);
+                            setEditingTargetId(id);
                           }}
                         >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                           </svg>
                         </Button>
@@ -711,9 +736,10 @@ export function UpstreamForm({
                           type="button"
                           variant="ghost"
                           size="sm"
-                          onClick={() => handleRemoveTarget(index)}
+                          aria-label={targetActionLabels(targets, index).remove}
+                          onClick={() => handleRemoveTarget(id)}
                         >
-                          <svg className="w-4 h-4 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <svg className="w-4 h-4 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                           </svg>
                         </Button>
@@ -737,7 +763,7 @@ export function UpstreamForm({
               variant="secondary"
               size="sm"
               onClick={() => {
-                setEditingTargetIndex(null);
+                setEditingTargetId(null);
                 setShowTargetForm(true);
               }}
             >
@@ -975,8 +1001,13 @@ export function UpstreamForm({
             />
             <Select
               label="SameSite"
-              value={cookieConfig.same_site ?? "Lax"}
-              onValueChange={(v) => setCookieConfig({ ...cookieConfig, same_site: v as HashOnCookieConfig["same_site"] })}
+              value={cookieConfig.same_site ?? SAME_SITE_UNSET}
+              onValueChange={(v) =>
+                setCookieConfig({
+                  ...cookieConfig,
+                  same_site: v === SAME_SITE_UNSET ? null : (v as HashOnCookieConfig["same_site"]),
+                })
+              }
               options={SAME_SITE_OPTIONS}
             />
           </CollapsibleSection>
@@ -1250,9 +1281,10 @@ export function UpstreamForm({
                 variant="ghost"
                 size="sm"
                 className={index === 0 ? "mt-7" : ""}
+                aria-label={`Remove subset ${subset.name.trim() || index + 1}`}
                 onClick={() => setSubsets((prev) => prev.filter((_, i) => i !== index))}
               >
-                <svg className="w-4 h-4 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <svg className="w-4 h-4 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </Button>

@@ -294,10 +294,26 @@ that brings a concurrent change to the targets updates the rows on screen but
 not the open form's basis, so its save is refused instead of being approved
 against a list the draft was never edited from (#445). Only `targets` is
 compared, so a settings change picked up by the same refetch still composes.
+"Discard my draft and reload" from a targets refusal closes the target form
+and leaves any settings draft alone.
+
+The open form and its captured list are one piece of state, so dropping the
+draft closes the form; a save handler that ever finds no draft reports an
+error instead of returning silently. An edit form is bound to its target's
+identity — `host:port` plus how many earlier targets share that address
+(`targetIdentities()`, `src/lib/upstreamTargets.ts`) — not to a row position,
+so a refetch or a removal that shifts the rows neither remounts the form nor
+moves it onto another target (#448). If a refetch no longer lists that
+target, the form stays where it was with a notice, and its save is refused
+with the comparison.
+
 A row removal from the same page moves an open form's basis only when the form
-was opened against the very list the removal was computed from and the gateway
-returned the result. "Discard my draft and reload" from a targets refusal
-closes the target form and leaves any settings draft alone.
+was opened against the very list the removal was computed from, and only onto
+an upstream known to hold the result: the gateway's answer, or — when the
+removal answered committed-but-not-live — a fresh read whose `targets`
+fingerprint equals the list the removal wrote. A read that differs may carry
+another writer's change, so the form keeps its old basis and its save is
+refused rather than rebased.
 
 A read served from the cached-config fallback (`X-Data-Source: cached`) can
 lag the commit, and the form would then show the older content. That is the
@@ -371,8 +387,8 @@ so the next successful read seeds a fresh baseline for the new tenant.
 | `If-Match` from the verified read, a writer in the gap refused, re-send after a `412` on unowned fields, bounded retries, untagged and weak-tag fallback, popup opt-out | `src/api/conditionalWrite.test.ts` |
 | Draft preserved, no reapply control, keep/discard behavior | `src/routes/proxies/concurrentEdit.test.tsx` |
 | Same-client write ordering still composes | `src/api/upstreams.targetWrites.test.ts` |
-| Target form basis survives a background refetch; unrelated settings still compose | `src/routes/upstreams/TargetEditor.test.tsx` |
-| Restore retires the restored namespace's detail caches | `src/hooks/restoreDetailCache.test.tsx`, `src/components/forms/BackupRestoreCard.recovery.test.tsx` |
+| Target form basis survives a background refetch; unrelated settings still compose; the form follows its target identity when rows shift; a committed-but-not-live removal is adopted only when the read holds exactly its result | `src/routes/upstreams/TargetEditor.test.tsx` |
+| Restore retires the restored namespace's detail caches and inactive lists | `src/hooks/restoreDetailCache.test.tsx`, `src/components/forms/BackupRestoreCard.recovery.test.tsx` |
 | Guarded deletes, consumer saves and rotation re-send, nested redaction of plugin `config` | `src/api/conditionalWrite.test.ts`, `src/lib/resourceBaseline.test.ts` |
 | Plugin editor baseline, membership writes conditional on their reads | `src/lib/pluginMembership.test.ts`, `src/lib/pluginMembership.binding.test.ts` |
 | Refused delete dialog | `src/routes/proxies/concurrentEdit.test.tsx` |

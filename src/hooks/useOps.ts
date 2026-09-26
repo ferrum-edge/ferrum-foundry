@@ -117,8 +117,34 @@ const RESTORE_CASCADE: readonly CascadeKind[] = [
   "consumer",
 ];
 
-/** Rollback outcomes that leave the namespace possibly changed. */
-const UNSETTLED_ROLLBACK = new Set<ops.RestoreRollbackOutcome>(["incomplete", "unknown_outcome"]);
+/** Rollback outcomes that prove the namespace was put back as it was. */
+const SETTLED_ROLLBACK = new Set<ops.RestoreRollbackOutcome>(["completed", "not_needed"]);
+
+/**
+ * True only when a failed restore's answer proves the namespace is unchanged:
+ * a rollback that completed or was not needed, a pre-commit connectivity
+ * failure, or the BFF's upload-phase timeout (the body never reached the
+ * gateway). Every other server failure may have left restored content behind.
+ */
+function restoreProvablyUnchanged(error: unknown): boolean {
+  const failure = ops.getRestoreFailure(error);
+  if (failure?.rollback !== undefined) return SETTLED_ROLLBACK.has(failure.rollback);
+  if (failure?.failure_class === "connectivity") return true;
+  const candidate = error as { response?: { status?: unknown }; data?: unknown };
+  const body = candidate.data;
+  return (
+    candidate.response?.status === 504 &&
+    typeof body === "object" &&
+    body !== null &&
+    (body as { phase?: unknown }).phase === "upload"
+  );
+}
+
+function serverFailure(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const status = (error as { response?: { status?: unknown } }).response?.status;
+  return typeof status === "number" && status >= 500;
+}
 
 export function useRestore() {
   const qc = useQueryClient();
@@ -128,8 +154,11 @@ export function useRestore() {
   // retired instead — by prefix, since the ids a backup replaced are not all
   // known client-side, and only under the namespace the restore was issued
   // for. Everything else is invalidated so it reads back current state.
+  // The restored namespace's cached lists are retired too: the plugin editor
+  // seeds proxy-group membership from the whole proxy list, so a pre-restore
+  // list would seed it exactly as a stale detail would.
   const settle = (namespace: string) => {
-    retireCascade(qc, namespace, RESTORE_CASCADE);
+    retireCascade(qc, namespace, RESTORE_CASCADE, { retireLists: true });
     qc.invalidateQueries();
   };
   return useMutation({
@@ -146,15 +175,14 @@ export function useRestore() {
     }) => ops.restore({ namespace }, data, { confirmApiSpecDeletion }),
     onError: (error, { namespace }) => {
       // The durable configuration changed even when runtime application is
-      // pending. An unobservable outcome, or a failure whose rollback did not
-      // complete, may have changed it too: none of those makes the cached
-      // detail authoritative, so they settle exactly like a success and the
-      // operator reads back real state.
-      const rollback = ops.getRestoreFailure(error)?.rollback;
+      // pending. An unobservable outcome, or any server failure whose answer
+      // does not prove the namespace unchanged, may have changed it too: none
+      // of those makes the cached detail authoritative, so they settle
+      // exactly like a success and the operator reads back real state.
       if (
         ops.getRestoreCommitted(error) ||
         classifyUnobservedOutcome(error) ||
-        (rollback !== undefined && UNSETTLED_ROLLBACK.has(rollback))
+        (serverFailure(error) && !restoreProvablyUnchanged(error))
       ) {
         settle(namespace);
       }
