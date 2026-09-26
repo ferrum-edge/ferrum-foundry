@@ -146,6 +146,9 @@ function attachedPluginsForProxy(
     // `proxy_id` records intent, not attachment: a proxy-scoped plugin runs
     // only when the proxy's own `plugins` list names it, like a group one.
     if (plugin.scope === "proxy" && plugin.proxy_id !== proxy.id) continue;
+    // Ferrum Edge's full composition rebuild admits proxy-group configs only
+    // when `proxy_id` is absent (PluginScope::ProxyGroup && proxy_id.is_none()).
+    if (plugin.scope === "proxy_group" && plugin.proxy_id != null) continue;
     matched.push(plugin);
   }
 

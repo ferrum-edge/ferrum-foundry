@@ -105,6 +105,14 @@ The policy traversals themselves remain **complete**. An effective-policy
 answer is an authorization conclusion; a partial plugin graph would
 under-report what runs on a proxy.
 
+The attachment resolver follows Ferrum Edge's full plugin composition check:
+a proxy-group configuration is effective only when it is attached to the
+proxy and has no `proxy_id`. Edge v0.9.7 enforces this in
+`src/plugin_cache.rs` (`validate_plugin_security_composition_candidate`,
+`group_configs`: `pc.scope == PluginScope::ProxyGroup && pc.proxy_id.is_none()`).
+Foundry treats both an omitted and `null` `proxy_id` as absent, and excludes
+any present value, including an empty string.
+
 The Plugins tab also lists the proxy-scoped configurations that name this
 proxy but do not run on it — disabled, or not in the proxy's `plugins` list.
 That list comes from `GET /plugins/config?proxy_id=<id>`

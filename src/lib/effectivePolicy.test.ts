@@ -91,7 +91,7 @@ function referenceAttachedPlugins(
       if (plugin.scope === "proxy") {
         return plugin.proxy_id === proxy.id && associated.has(plugin.id);
       }
-      return associated.has(plugin.id);
+      return plugin.proxy_id == null && associated.has(plugin.id);
     })
     .map((plugin) => ({ ...plugin, effectiveSource: plugin.scope }))
     .sort(
@@ -192,6 +192,33 @@ describe("effective authorization policy", () => {
     expect(analyzeProxyPolicy(bare, plugins, [consumer("1", "alice", [], {})]).consumers[0]!.decision)
       .toBe("public");
   });
+
+  it.each(["proxy-1", ""])(
+    "does not count an attached proxy-group plugin with proxy_id %j",
+    (proxyId) => {
+      const target = proxy({ plugins: [{ plugin_config_id: "group-acl" }] });
+      const plugins = [
+        plugin("global-acl", "access_control", "global", {
+          disallowed_consumers: ["alice"],
+        }),
+        plugin(
+          "group-acl",
+          "access_control",
+          "proxy_group",
+          { allowed_consumers: ["alice"] },
+          { proxy_id: proxyId },
+        ),
+      ];
+
+      expect(effectivePluginsForProxy(target, plugins).map((entry) => entry.id)).toEqual([
+        "global-acl",
+      ]);
+      expect(
+        analyzeProxyPolicy(target, plugins, [consumer("1", "alice", [], {})]).consumers[0]
+          ?.decision,
+      ).toBe("denied");
+    },
+  );
 
   it("does not count HTTP-only plugins as effective on a stream proxy", () => {
     const plugins = [
