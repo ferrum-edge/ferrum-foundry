@@ -1029,6 +1029,34 @@ describe("API spec import and replacement (#485)", () => {
     expect(yamlScalars(yaml)).toContain("secretpart:");
   });
 
+  it("recognizes block-scalar headers after anchors and tags", () => {
+    const scalars = yamlScalars([
+      "api_secret: &a |",
+      "  firstpart:",
+      "token: !!str |",
+      "  secondpart:",
+      "--- |",
+      "  thirdpart:",
+    ].join("\n"));
+
+    expect(scalars).toEqual(
+      expect.arrayContaining(["firstpart:", "secondpart:", "thirdpart:"]),
+    );
+  });
+
+  it("does not treat a comment's block header as a scalar header", () => {
+    const commentScalars = yamlScalars([
+      "# usage: |",
+      "  x-ferrum-plugins:",
+      "api_secret: actual-secret-value",
+    ].join("\n"));
+    const blockScalars = yamlScalars(["description: |", "  x-ferrum-plugins:"].join("\n"));
+
+    expect(commentScalars).not.toContain("x-ferrum-plugins:");
+    expect(commentScalars).toContain("actual-secret-value");
+    expect(blockScalars).toContain("x-ferrum-plugins:");
+  });
+
   it("opens a double-quoted scalar after a comment marker, as the line scan did", () => {
     const yaml = [
       'url: http://x # "abcdefgh',
