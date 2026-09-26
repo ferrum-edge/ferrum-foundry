@@ -106,8 +106,9 @@ function parseBackendHost(value) {
 }
 
 export function readSeedConfig(env = process.env) {
-  const jwtSecret = env.FERRUM_JWT_SECRET?.trim();
-  if (!jwtSecret) throw new Error("FERRUM_JWT_SECRET is required; the demo seeder has no fallback signing key");
+  // Verbatim: Ferrum Edge verifies with the exact bytes of its configured key.
+  const jwtSecret = env.FERRUM_JWT_SECRET;
+  if (!jwtSecret?.trim()) throw new Error("FERRUM_JWT_SECRET is required; the demo seeder has no fallback signing key");
 
   return {
     adminUrl: parseHttpOrigin(env.FERRUM_ADMIN_URL, "FERRUM_ADMIN_URL", "http://127.0.0.1:9000"),

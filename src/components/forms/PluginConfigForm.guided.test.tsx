@@ -146,6 +146,61 @@ describe("guided configuration", () => {
     );
   });
 
+  it.each([
+    ["Redis key prefix", { redis_key_prefix: "null" }],
+    ["Redis username", { redis_username: "null" }],
+  ])("preserves a literal `null` in %s when another field is edited", async (label, fields) => {
+    await renderForm("rate_limiting", {
+      limits: [{ scope: "default", requests_per_second: 100 }],
+      ...fields,
+    });
+    await type("Requests per second", "200");
+    await submit();
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({ ...fields }),
+      }),
+      undefined,
+    );
+  });
+
+  it("keeps a newly typed Redis password `null` as a string", async () => {
+    await renderForm("rate_limiting", {
+      limits: [{ scope: "default", requests_per_second: 100 }],
+    });
+
+    const passwordLabel = [...host.querySelectorAll("label")].find(
+      (element) => element.textContent?.trim() === "Redis password",
+    );
+    expect(passwordLabel).toBeTruthy();
+    const setValueButton = passwordLabel?.parentElement?.querySelector("button");
+    expect(setValueButton?.textContent?.trim()).toBe("Set a value");
+    await act(async () => setValueButton?.click());
+
+    await type("Redis password", "null");
+    await submit();
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ config: expect.objectContaining({ redis_password: "null" }) }),
+      undefined,
+    );
+  });
+
+  it("preserves an explicit null text field when another field is edited", async () => {
+    await renderForm("rate_limiting", {
+      limits: [{ scope: "default", requests_per_second: 100 }],
+      redis_key_prefix: null,
+    });
+    await type("Requests per second", "200");
+    await submit();
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ config: expect.objectContaining({ redis_key_prefix: null }) }),
+      undefined,
+    );
+  });
+
   it("shows an accessible inline error and refuses to submit an out-of-range value", async () => {
     await renderForm("rate_limiting", {
       limits: [{ scope: "default", requests_per_second: 400 }],

@@ -83,6 +83,19 @@ function requireEnv(name: string): string {
   return value;
 }
 
+/**
+ * An opaque key another service must match byte for byte. Ferrum Edge reads
+ * `FERRUM_ADMIN_JWT_SECRET` verbatim, so trimming here would sign with a
+ * different key than the gateway verifies with. A blank value is still unset.
+ */
+function requireExactEnv(name: string): string {
+  const value = process.env[name];
+  if (value === undefined || value.trim() === '') {
+    throw new Error(`Required environment variable ${name} is not set`);
+  }
+  return value;
+}
+
 function optionalEnv(name: string): string | undefined {
   const value = process.env[name]?.trim();
   return value || undefined;
@@ -214,6 +227,14 @@ function parseBindAddress(value: string | undefined): string {
   throw new Error('FERRUM_BIND_ADDRESS must be an IP address or localhost');
 }
 
+/** Minimum length in UTF-8 bytes, the unit Ferrum Edge measures its admin JWT secret in. */
+function validateSigningKey(value: string, name: string): string {
+  if (Buffer.byteLength(value, 'utf8') < MIN_SECRET_LENGTH) {
+    throw new Error(`${name} must be at least ${MIN_SECRET_LENGTH} bytes`);
+  }
+  return value;
+}
+
 function validateSecret(value: string, name: string): string {
   if (value.length < MIN_SECRET_LENGTH) {
     throw new Error(`${name} must be at least ${MIN_SECRET_LENGTH} characters`);
@@ -251,7 +272,7 @@ function validateRuntimeNumber(name: string, value: unknown, minimum: number, ma
 
 function parseBaseConfig(warnings: string[]): Config {
   const adminUrl = normalizeAdminUrl(requireEnv('FERRUM_ADMIN_URL'));
-  const jwtSecret = validateSecret(requireEnv('FERRUM_JWT_SECRET'), 'FERRUM_JWT_SECRET');
+  const jwtSecret = validateSigningKey(requireExactEnv('FERRUM_JWT_SECRET'), 'FERRUM_JWT_SECRET');
   const jwtMaxTtl = parseInteger('FERRUM_JWT_MAX_TTL', 3600, 0, 86_400);
   const jwtTtl = parseInteger('FERRUM_JWT_TTL', 900, 1, 86_400);
   if (jwtMaxTtl !== 0 && jwtTtl > jwtMaxTtl) {
