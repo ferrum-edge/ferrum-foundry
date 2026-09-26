@@ -1,3 +1,4 @@
+import type { ServerResponse } from 'node:http';
 import { Socket } from 'node:net';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { loadConfig } from './config.js';
@@ -6,6 +7,10 @@ import { loadConfig } from './config.js';
 const DRAIN_LINGER_MS = 5_000;
 const DRAIN_OVERSIZE_LINGER_MS = 1_000;
 const DRAIN_BYTE_CAP = 4 * 1024 * 1024;
+// A sender with no authenticated principal drains from a smaller pool of its
+// own, and more briefly, so it cannot take the drains signed-in rejections need.
+const SIGNED_OUT_DRAIN_SLOTS = 8;
+const SIGNED_OUT_DRAIN_LINGER_MS = 1_000;
 
 interface UnreadUpload {
   /** `performance.now()` value past which the request's upload budget is spent. */
@@ -32,7 +37,7 @@ export function closeUnreadUpload(request: FastifyRequest): void {
 }
 
 // A reply can go out before its request body has fully arrived: an onRequest
-// hook refused it (a 401 before authentication, a 403, an upload-capacity 429),
+// hook refused it (a 401 or 403 from authentication, or an upload-capacity 429),
 // the BFF refused it itself (an early 413), or the gateway answered without
 // reading it (400/403/412/413, or not at all). The unread remainder then sits
 // on the client's socket. Left there, it strands the next keep-alive request
@@ -42,30 +47,44 @@ export function closeUnreadUpload(request: FastifyRequest): void {
 // connection, which can discard the response before the client reads it and
 // fails the client's in-flight write with EPIPE/ECONNRESET (#453). So discard
 // the remainder under bounds of our own, so the response arrives and the
-// connection stays reusable. A drain never outlives the request's remaining
-// upload budget or DRAIN_LINGER_MS, whichever ends first; a remainder larger
-// than DRAIN_BYTE_CAP only lingers for DRAIN_OVERSIZE_LINGER_MS, long enough
-// for the response to be read. A sender that outlasts its bound, arrives while
-// every drain slot is taken, or is still sending when the server begins
+// connection stays reusable.
+//
+// A drain never outlives the request's remaining upload budget or
+// DRAIN_LINGER_MS, whichever ends first, nor FERRUM_WRITE_TIMEOUT between
+// chunks. Once it has discarded more than DRAIN_BYTE_CAP, or from the start
+// when the declared length exceeds it, it lingers at most
+// DRAIN_OVERSIZE_LINGER_MS more, long enough for the response to be read. A
+// request with no authenticated principal (refused by authentication) drains
+// from its own SIGNED_OUT_DRAIN_SLOTS pool for at most
+// SIGNED_OUT_DRAIN_LINGER_MS, so a sender that needs no credentials cannot
+// crowd out signed-in drains. A sender that outlasts its bound, arrives while
+// every slot in its pool is taken, or is still sending when the server begins
 // shutting down has its connection closed.
 //
 // Installed on the root instance, ahead of every other hook, so it covers a
 // rejection from any onRequest hook on any route, not only the proxy handler.
 export function installUploadDrain(fastify: FastifyInstance): void {
-  let activeDrains = 0;
+  const pools = { signedIn: { active: 0 }, signedOut: { active: 0 } };
   let closing = false;
   const drainAbandons = new Set<() => void>();
 
   fastify.addHook('onRequest', async (request, reply) => {
-    // A body that has already fully arrived (or never existed) leaves nothing
-    // to discard.
-    if (request.raw.complete) return;
+    // Only a request that declares a body can leave one unread. (Even a
+    // bodyless request is not yet marked `complete` here, so that flag cannot
+    // tell them apart.)
+    if (!declaresBody(request)) return;
     const state: UnreadUpload = {
       budgetEndsAt: performance.now() + loadConfig().writeTimeout,
       closeUnread: false,
     };
     unreadUploads.set(request, state);
-    reply.raw.once('finish', () => drainUnreadUpload(request, state));
+    // 'prefinish', not 'finish'. When nothing has read the body (every refusal
+    // before a handler, and an early one inside it), Node's own 'finish'
+    // listener, registered before any of ours, starts its unbounded discard,
+    // and from then on the parser drops body bytes without emitting them, so a
+    // drain started at 'finish' could not count what it discards. A reader
+    // attached first makes Node leave the body to the drain.
+    reply.raw.once('prefinish', () => drainUnreadUpload(request, reply.raw, state));
   });
 
   fastify.addHook('preClose', async () => {
@@ -75,7 +94,11 @@ export function installUploadDrain(fastify: FastifyInstance): void {
     for (const abandon of [...drainAbandons]) abandon();
   });
 
-  const drainUnreadUpload = (request: FastifyRequest, state: UnreadUpload) => {
+  const drainUnreadUpload = (
+    request: FastifyRequest,
+    response: ServerResponse,
+    state: UnreadUpload,
+  ) => {
     const incoming = request.raw;
     const socket = incoming.socket;
     // Assumes HTTP/1.1, which is all the BFF serves: the socket carries only
@@ -84,14 +107,35 @@ export function installUploadDrain(fastify: FastifyInstance): void {
     // check), and destroy() would kill every stream on it. Revisit this before
     // enabling HTTP/2.
     if (incoming.complete || !(socket instanceof Socket) || socket.destroyed) return;
+    // At 'prefinish' the response is handed to the socket but not necessarily
+    // written, and destroying the socket now would discard it; close the
+    // connection only once the response is out ('finish').
+    let responseWritten = false;
+    let closeWhenWritten = false;
+    response.once('finish', () => {
+      responseWritten = true;
+      if (closeWhenWritten) socket.destroy();
+    });
+    const closeConnection = () => {
+      if (responseWritten) socket.destroy();
+      else closeWhenWritten = true;
+    };
     const config = loadConfig();
+    const signedOut = request.authPrincipal === undefined;
+    const pool = signedOut ? pools.signedOut : pools.signedIn;
+    const slots = signedOut
+      ? Math.min(SIGNED_OUT_DRAIN_SLOTS, config.maxActiveUploads)
+      : config.maxActiveUploads;
     const now = performance.now();
-    const lingerFor = Math.min(state.budgetEndsAt - now, DRAIN_LINGER_MS);
-    if (state.closeUnread || closing || lingerFor <= 0 || activeDrains >= config.maxActiveUploads) {
-      socket.destroy();
+    const lingerFor = Math.min(
+      state.budgetEndsAt - now,
+      signedOut ? SIGNED_OUT_DRAIN_LINGER_MS : DRAIN_LINGER_MS,
+    );
+    if (state.closeUnread || closing || lingerFor <= 0 || pool.active >= slots) {
+      closeConnection();
       return;
     }
-    activeDrains += 1;
+    pool.active += 1;
     let settled = false;
     let drained = 0;
     let idleTimer: NodeJS.Timeout | undefined;
@@ -99,7 +143,7 @@ export function installUploadDrain(fastify: FastifyInstance): void {
     const settle = () => {
       if (settled) return;
       settled = true;
-      activeDrains = Math.max(0, activeDrains - 1);
+      pool.active = Math.max(0, pool.active - 1);
       drainAbandons.delete(abandon);
       if (deadlineTimer) clearTimeout(deadlineTimer);
       if (idleTimer) clearTimeout(idleTimer);
@@ -110,7 +154,10 @@ export function installUploadDrain(fastify: FastifyInstance): void {
     };
     const abandon = () => {
       settle();
-      socket.destroy();
+      // Stop reading until the connection closes, in case the response is
+      // not out yet.
+      incoming.pause();
+      closeConnection();
     };
     const armDeadline = (ms: number) => {
       if (deadlineTimer) clearTimeout(deadlineTimer);
@@ -146,11 +193,17 @@ export function installUploadDrain(fastify: FastifyInstance): void {
     incoming.once('error', settle);
     socket.once('close', settle);
     // Detach whatever was consuming the body, then let the bytes fall on the
-    // floor: a 'data' listener with nowhere to forward them. Node may already
-    // have started its own discard, which only resumes the stream; these
-    // bounds are what end it.
+    // floor: a 'data' listener with nowhere to forward them. Attached before
+    // the response's 'finish', it also keeps Node from starting its own
+    // discard, which would hide the bytes from this count.
     incoming.unpipe();
     incoming.on('data', onData);
     incoming.resume();
   };
+}
+
+function declaresBody(request: FastifyRequest): boolean {
+  if (request.headers['transfer-encoding'] !== undefined) return true;
+  const declaredLength = Number(request.headers['content-length']);
+  return Number.isFinite(declaredLength) && declaredLength > 0;
 }
