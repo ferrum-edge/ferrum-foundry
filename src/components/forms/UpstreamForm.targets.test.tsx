@@ -147,13 +147,15 @@ describe("TargetForm inside the upstream payload editor", () => {
     expect(submit.mock.calls[3][0]).not.toHaveProperty("health_checks");
   });
 
-  it("parses subset labels and retains policy when updating a target-bearing upstream", async () => {
+  it("edits subset labels and retains policy when updating a target-bearing upstream", async () => {
     await mount({ ...initial, subsets: [{ name: "old", labels: { version: "v1" }, traffic_policy: { hash_on: "ip" } }] });
     await section("Subsets");
-    const labelField = inputByLabel(ui.host, "Labels (key=value)");
-    const subsetFields = labelField.closest(".grid")!;
-    await fill(inputByLabel(subsetFields, "Name"), " canary ");
-    await fill(labelField, " version = v2, malformed, tier=canary ");
+    const group = ui.host.querySelector<HTMLElement>('[role="group"][aria-label="Subset old"]')!;
+    await fill(inputByLabel(group, "Subset Name"), " canary ");
+    await fill(group.querySelector<HTMLInputElement>('input[aria-label="Subset canary label 1 value"]')!, "v2");
+    await click("Add label to subset canary", group);
+    await fill(group.querySelector<HTMLInputElement>('input[aria-label="Subset canary label 2 key"]')!, "tier");
+    await fill(group.querySelector<HTMLInputElement>('input[aria-label="Subset canary label 2 value"]')!, "canary");
     await fill(inputByLabel(ui.host, "Subset Hash Key"), " header:x-tenant ");
     await selectOption("Subset Algorithm", "Consistent Hashing");
     await click("Add Subset", ui.host);
