@@ -110,6 +110,9 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
       .map((proxy) => {
         // A consumer's access depends on nobody else, so analyze this one
         // consumer rather than every consumer in the namespace per proxy.
+        // `analyzeProxyPolicy` resolves each proxy from a plugin-attachment
+        // index memoized on the plugin collection's identity, so this loop
+        // does not rescan every configuration per proxy (#454).
         const analysis = analyzeProxyPolicy(proxy, allPluginConfigs, [consumer]);
         const result = analysis.consumers[0];
         if (!result || (result.decision !== "allowed" && result.decision !== "conditional")) {
