@@ -227,38 +227,65 @@ async function rawGet(path: string): Promise<{ statusCode: number; body: string;
   });
 }
 
-/** Send on one keep-alive socket; resolves with the status, or 0 if nothing answered in time. */
+interface KeepAliveOutcome {
+  /** The response status, or 0 if nothing answered in time. */
+  status: number;
+  /** Whether the agent sent this request on a socket an earlier request used. */
+  reusedSocket: boolean;
+  /** The client-side error code, if the exchange failed before a response. */
+  error?: string;
+}
+
+interface StalledUploadOutcome {
+  status?: number;
+  /** A client error seen before any response: the rejection was lost. */
+  errorBeforeResponse?: string;
+  /** A client error seen after the response: the server closed a stalled sender. */
+  errorAfterResponse?: string;
+}
+
+/** Send on one keep-alive socket and report exactly what the client saw. */
 function keepAliveRequest(
   agent: Agent,
   method: string,
   path: string,
   body?: Buffer,
-): Promise<number> {
-  const port = (app.server.address() as AddressInfo).port;
+  target: { port: number; headers: Record<string, string>; timeoutMs?: number } = {
+    port: (app.server.address() as AddressInfo).port,
+    headers: sessionHeaders,
+  },
+): Promise<KeepAliveOutcome> {
   return new Promise((resolve) => {
     const request = httpRequest(
       {
         host: '127.0.0.1',
-        port,
+        port: target.port,
         path,
         method,
         agent,
         headers: {
-          ...sessionHeaders,
+          ...target.headers,
           ...(body && { 'content-type': 'application/json', 'content-length': String(body.length) }),
         },
       },
       (incoming) => {
         incoming.resume();
-        incoming.on('end', () => resolve(incoming.statusCode ?? 0));
+        incoming.on('end', () => resolve({
+          status: incoming.statusCode ?? 0,
+          reusedSocket: request.reusedSocket,
+        }));
       },
     );
     const timer = setTimeout(() => {
       request.destroy();
-      resolve(0);
-    }, 2_000);
+      resolve({ status: 0, reusedSocket: request.reusedSocket });
+    }, target.timeoutMs ?? 2_000);
     timer.unref();
-    request.on('error', () => resolve(-1));
+    request.on('error', (error: NodeJS.ErrnoException) => resolve({
+      status: -1,
+      reusedSocket: request.reusedSocket,
+      error: error.code ?? error.message,
+    }));
     request.on('close', () => clearTimeout(timer));
     request.end(body);
   });
@@ -370,32 +397,133 @@ describe('streaming gateway proxy', () => {
     expect(observed.at(-1)?.url).toBe('/echo');
   });
 
-  it.each([
-    ['rejects the upload unread', '/api/proxy/reject-unread'],
-    ['is unreachable', '/api/proxy/proxies/unreachable'],
-  ])('does not strand a keep-alive connection when the gateway %s', async (_case, path) => {
+  it('does not strand a keep-alive connection when the gateway is unreachable', async () => {
+    const path = '/api/proxy/proxies/unreachable';
     const agent = new Agent({ keepAlive: true, maxSockets: 1 });
     try {
-      const unreachable = path.endsWith('/unreachable');
       const configModule = await import('./config.js');
-      const configSpy = unreachable
-        ? vi.spyOn(configModule, 'loadConfig').mockReturnValue({
-            ...configModule.loadConfig(),
-            adminUrl: 'http://127.0.0.1:1',
-          })
-        : undefined;
+      const configSpy = vi.spyOn(configModule, 'loadConfig').mockReturnValue({
+        ...configModule.loadConfig(),
+        adminUrl: 'http://127.0.0.1:1',
+      });
       try {
-        const status = await keepAliveRequest(agent, 'PUT', path, Buffer.alloc(1_900_000, 'a'));
-        expect(status).toBe(unreachable ? 502 : 400);
+        const upload = await keepAliveRequest(agent, 'PUT', path, Buffer.alloc(1_900_000, 'a'));
+        expect(upload).toEqual({ status: 502, reusedSocket: false });
       } finally {
         configSpy?.mockRestore();
       }
       // The next request on the same agent must be answered, not queued
-      // behind an unread upload until the server's request timeout.
-      expect(await keepAliveRequest(agent, 'GET', '/api/auth/session')).toBe(200);
+      // behind an unread upload until the server's request timeout, and on
+      // the same connection, because the BFF discarded the unread remainder.
+      expect(await keepAliveRequest(agent, 'GET', '/api/auth/session')).toEqual({
+        status: 200,
+        reusedSocket: true,
+      });
     } finally {
       agent.destroy();
     }
+  });
+
+  it('closes a sender that stalls after its upload was rejected unread', async () => {
+    const port = (app.server.address() as AddressInfo).port;
+    const started = Date.now();
+    const outcome = await new Promise<StalledUploadOutcome>((resolve) => {
+      const request = httpRequest({
+        host: '127.0.0.1',
+        port,
+        path: '/api/proxy/reject-unread',
+        method: 'PUT',
+        headers: {
+          ...sessionHeaders,
+          'content-type': 'application/json',
+          'content-length': '1900000',
+        },
+      });
+      const seen: StalledUploadOutcome = {};
+      request.on('response', (incoming) => {
+        seen.status = incoming.statusCode;
+        incoming.resume();
+      });
+      request.on('error', (error: NodeJS.ErrnoException) => {
+        const code = error.code ?? error.message;
+        if (seen.status === undefined) seen.errorBeforeResponse = code;
+        else seen.errorAfterResponse = code;
+      });
+      request.on('close', () => resolve(seen));
+      // Promise far more than is sent, then go quiet: the drain must give up
+      // on this sender rather than hold its connection open indefinitely.
+      request.write(Buffer.alloc(64 * 1024, 'a'));
+    });
+    // The rejection is delivered before the connection goes away. On a loaded
+    // runner the 100ms upload bound can fire before the gateway's refusal is
+    // relayed, so either answer counts; what matters is that one arrived.
+    expect(outcome.errorBeforeResponse).toBeUndefined();
+    expect([400, 504]).toContain(outcome.status);
+    // Only once that response was observed is a reset of the unfinished write
+    // an expected consequence of the server closing a stalled sender.
+    if (outcome.errorAfterResponse !== undefined) {
+      expect(['ECONNRESET', 'EPIPE']).toContain(outcome.errorAfterResponse);
+    }
+    // The drain's idle bound closes this sender within the remaining route budget.
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  it('closes the connection after an upload-timeout response without draining the remainder', async () => {
+    const before = abandonedUploads.length;
+    const port = (app.server.address() as AddressInfo).port;
+    // An API-spec upload, because its whole-body deadline (FERRUM_UPLOAD_TIMEOUT,
+    // 1000ms here) sits well beyond the 100ms idle bound. On an ordinary route
+    // both bounds equal FERRUM_WRITE_TIMEOUT and are armed together, so which
+    // one fires first would be a race rather than the idle path under test.
+    const outcome = await new Promise<{ status: number; body: string; closed: boolean }>(
+      (resolve, reject) => {
+        const request = httpRequest({
+          host: '127.0.0.1',
+          port,
+          path: '/api/proxy/api-specs',
+          method: 'POST',
+          headers: {
+            ...sessionHeaders,
+            'content-type': 'application/octet-stream',
+            'content-length': '1900000',
+          },
+        });
+        let status = 0;
+        let body = '';
+        let responseEnded = false;
+        let requestClosed = false;
+        const finish = () => {
+          if (responseEnded && requestClosed) resolve({ status, body, closed: true });
+        };
+        request.on('response', (incoming) => {
+          status = incoming.statusCode ?? 0;
+          incoming.setEncoding('utf8');
+          incoming.on('data', (chunk: string) => {
+            body += chunk;
+          });
+          incoming.on('end', () => {
+            responseEnded = true;
+            finish();
+          });
+        });
+        request.on('close', () => {
+          requestClosed = true;
+          finish();
+        });
+        request.on('error', (error) => {
+          if (status === 0) reject(error);
+        });
+        // Leave most of the declared body unsent. The idle upload timeout
+        // should answer and close this connection instead of draining it.
+        request.write(Buffer.alloc(64 * 1024, 'a'));
+      },
+    );
+
+    expect(outcome.status).toBe(504);
+    expect(JSON.parse(outcome.body)).toMatchObject({ phase: 'upload', reason: 'idle' });
+    expect(outcome.closed).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(abandonedUploads.slice(before)).toContain('/api-specs');
   });
 
   it('enforces a small default streaming body limit without buffering the request', async () => {
@@ -671,5 +799,159 @@ describe('global in-flight upload capacity', () => {
 
     const after = await post();
     expect(after.statusCode).toBe(200);
+  });
+});
+
+interface DrainedUploadOutcome {
+  status?: number;
+  errorBeforeResponse?: string;
+  /** Milliseconds from the response arriving to the connection closing. */
+  closedAfterResponseMs?: number;
+}
+
+describe('unread upload drains', () => {
+  const drainSnapshot: Record<string, string | undefined> = {};
+  let lingering: FastifyInstance;
+  let lingeringHeaders: Record<string, string>;
+  let lingeringClosed = false;
+
+  beforeAll(async () => {
+    // Generous upload bounds, so only the drain's own linger and byte cap, or
+    // shutdown, can end a drain within these tests' timings.
+    const overrides = { FERRUM_WRITE_TIMEOUT: '30000', FERRUM_UPLOAD_TIMEOUT: '60000' };
+    for (const [key, value] of Object.entries(overrides)) {
+      drainSnapshot[key] = process.env[key];
+      process.env[key] = value;
+    }
+    vi.resetModules();
+    const { buildApp } = await import('./app.js');
+    lingering = await buildApp({ serveStatic: false, logger: false });
+    await lingering.listen({ host: '127.0.0.1', port: 0 });
+    const login = await lingering.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { token: BFF_TOKEN },
+    });
+    const { csrfToken } = login.json() as { csrfToken: string };
+    lingeringHeaders = {
+      cookie: login.cookies.map((entry) => `${entry.name}=${entry.value}`).join('; '),
+      'x-csrf-token': csrfToken,
+    };
+  });
+
+  afterAll(async () => {
+    if (!lingeringClosed) await lingering.close();
+    for (const [key, value] of Object.entries(drainSnapshot)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  /**
+   * Declare `declaredLength` bytes, send one chunk, then either keep sending
+   * (`keepSending`) or go quiet. `onResponse` runs once the status arrives.
+   */
+  function unreadUpload(
+    path: string,
+    declaredLength: number,
+    keepSending: boolean,
+    onResponse?: () => void,
+  ): Promise<DrainedUploadOutcome> {
+    const port = (lingering.server.address() as AddressInfo).port;
+    return new Promise((resolve) => {
+      const request = httpRequest({
+        host: '127.0.0.1',
+        port,
+        path,
+        method: 'PUT',
+        headers: {
+          ...lingeringHeaders,
+          'content-type': 'application/json',
+          'content-length': String(declaredLength),
+        },
+      });
+      const seen: DrainedUploadOutcome = {};
+      let respondedAt: number | undefined;
+      let timer: NodeJS.Timeout | undefined;
+      request.on('response', (incoming) => {
+        respondedAt = performance.now();
+        seen.status = incoming.statusCode;
+        incoming.resume();
+        onResponse?.();
+      });
+      request.on('error', (error: NodeJS.ErrnoException) => {
+        if (seen.status === undefined) seen.errorBeforeResponse = error.code ?? error.message;
+      });
+      request.on('close', () => {
+        if (timer) clearInterval(timer);
+        if (respondedAt !== undefined) seen.closedAfterResponseMs = performance.now() - respondedAt;
+        resolve(seen);
+      });
+      const chunk = Buffer.alloc(64 * 1024, 'a');
+      request.write(chunk);
+      if (keepSending) {
+        timer = setInterval(() => {
+          if (!request.destroyed) request.write(chunk);
+        }, 5);
+        timer.unref();
+      }
+    });
+  }
+
+  it('lingers only briefly over a declared remainder beyond the drain byte cap', async () => {
+    // 64 MiB against the 2 MiB route limit: refused before a byte is read.
+    // The sender never stops, so only the oversize linger can end the drain;
+    // without the cap it would run for the full drain linger instead.
+    const outcome = await unreadUpload('/api/proxy/echo', 64 * 1024 * 1024, true);
+    expect(outcome.errorBeforeResponse).toBeUndefined();
+    expect(outcome.status).toBe(413);
+    expect(outcome.closedAfterResponseMs).toBeLessThan(3_000);
+  });
+
+  it('does not strand a keep-alive connection when the gateway rejects an unread upload', async () => {
+    const agent = new Agent({ keepAlive: true, maxSockets: 1 });
+    const target = {
+      port: (lingering.server.address() as AddressInfo).port,
+      headers: lingeringHeaders,
+      timeoutMs: 30_000,
+    };
+    try {
+      // The rejection must reach the client in full, and discarding the
+      // remainder must leave the connection reusable for the next request.
+      const upload = await keepAliveRequest(
+        agent,
+        'PUT',
+        '/api/proxy/reject-unread',
+        Buffer.alloc(1_900_000, 'a'),
+        target,
+      );
+      expect(upload).toEqual({ status: 400, reusedSocket: false });
+      expect(await keepAliveRequest(agent, 'GET', '/api/auth/session', undefined, target)).toEqual({
+        status: 200,
+        reusedSocket: true,
+      });
+    } finally {
+      agent.destroy();
+    }
+  });
+
+  it('abandons a stalled drain when the server shuts down', async () => {
+    let closedIn: number | undefined;
+    let closing: Promise<void> | undefined;
+    const outcome = await unreadUpload('/api/proxy/reject-unread', 1_900_000, false, () => {
+      // Shut down while the drain waits on a sender that has gone quiet. A
+      // draining connection is not idle, so this must not wait for the
+      // drain's own bounds, or shutdown overruns FERRUM_SHUTDOWN_TIMEOUT.
+      const started = performance.now();
+      lingeringClosed = true;
+      closing = lingering.close().then(() => {
+        closedIn = performance.now() - started;
+      });
+    });
+    await closing;
+    expect(outcome.errorBeforeResponse).toBeUndefined();
+    expect(outcome.status).toBe(400);
+    expect(outcome.closedAfterResponseMs).toBeLessThan(1_000);
+    expect(closedIn).toBeLessThan(1_000);
   });
 });

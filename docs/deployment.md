@@ -709,6 +709,27 @@ FERRUM_BFF_UPLOAD_CAPACITY`, `retry-after: 1`, and a `scope` of `all` or
 body-bearing request ceiling; raise the cap only alongside the socket and memory
 headroom to match.
 
+When a reply goes out before its request body has fully arrived — the gateway
+refused the upload unread, the gateway was unreachable, or the BFF refused it
+itself (for example, an early `413` on a declared length over the route limit)
+— the BFF discards the unread remainder rather than closing the connection
+over it, so the client reliably receives the response and a keep-alive
+connection stays reusable. A drain is bounded by the request's remaining upload
+budget or 5 seconds, whichever ends first, and by `FERRUM_WRITE_TIMEOUT`
+between chunks. A remainder larger than 4 MiB (by declared `content-length` or
+by bytes discarded) lingers for at most 1 second, long enough for the client to
+read the response, and the connection is then closed. A request that failed its
+own upload bound (`504`, `phase: "upload"`) is not drained: its connection is
+closed as soon as the response is written, and so is every draining connection
+when shutdown begins.
+
+Drains have their own pool, also sized by `FERRUM_MAX_ACTIVE_UPLOADS`, separate
+from the in-flight upload pool; a drain that would exceed it closes its
+connection instead. A request leaves the upload pool once its response is
+written, so an instance can hold up to twice `FERRUM_MAX_ACTIVE_UPLOADS`
+body-bearing sockets at once — size socket and file-descriptor headroom for
+that.
+
 ### Graceful shutdown
 
 On `SIGTERM` or `SIGINT` the BFF stops accepting new connections, waits for
