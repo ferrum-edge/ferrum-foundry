@@ -1,9 +1,11 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { type RefObject, type ReactNode, useEffect, useRef, useState } from "react";
+import * as DialogPrimitive from "@radix-ui/react-dialog";
 
 interface SidebarProps {
   open: boolean;
   onClose: () => void;
+  triggerRef?: RefObject<HTMLButtonElement | null>;
 }
 
 interface NavItem {
@@ -147,9 +149,27 @@ const navSections: NavSection[] = [
   },
 ];
 
-export function Sidebar({ open, onClose }: SidebarProps) {
+export function Sidebar({ open, onClose, triggerRef }: SidebarProps) {
+  const [mobileViewport, setMobileViewport] = useState(true);
+  const closingForDesktop = useRef(false);
   const routerState = useRouterState();
   const currentPath = routerState.location.pathname;
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia("(max-width: 767px)");
+    const updateViewport = () => {
+      const isMobile = media.matches;
+      setMobileViewport(isMobile);
+      if (!isMobile && open) {
+        closingForDesktop.current = true;
+        onClose();
+      }
+    };
+    updateViewport();
+    media.addEventListener("change", updateViewport);
+    return () => media.removeEventListener("change", updateViewport);
+  }, [onClose, open]);
 
   function isActive(to: string) {
     if (to === "/") return currentPath === "/";
@@ -205,20 +225,49 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   return (
     <>
       {/* Desktop sidebar */}
-      <div className="hidden md:block fixed top-0 left-0 h-screen z-30">
+      <div
+        id="desktop-sidebar"
+        className="hidden md:block fixed top-0 left-0 h-screen z-30"
+      >
         {sidebarContent}
       </div>
 
       {/* Mobile overlay */}
-      {open && (
-        <div className="md:hidden fixed inset-0 z-40">
-          <div
-            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-            onClick={onClose}
-          />
-          <div className="relative h-full">{sidebarContent}</div>
-        </div>
-      )}
+      <DialogPrimitive.Root
+        open={open && mobileViewport}
+        onOpenChange={(nextOpen) => !nextOpen && onClose()}
+      >
+        <DialogPrimitive.Portal>
+          <DialogPrimitive.Overlay className="md:hidden fixed inset-0 z-40 bg-black/60 backdrop-blur-sm" />
+          <DialogPrimitive.Content
+            id="mobile-sidebar-dialog"
+            aria-label="Main navigation"
+            onCloseAutoFocus={(event) => {
+              event.preventDefault();
+              if (closingForDesktop.current) {
+                closingForDesktop.current = false;
+                document.querySelector<HTMLElement>("#desktop-sidebar a")?.focus();
+              } else {
+                triggerRef?.current?.focus();
+              }
+            }}
+            className="md:hidden fixed inset-y-0 left-0 z-40 h-full outline-none"
+          >
+            <DialogPrimitive.Title className="sr-only">
+              Main navigation
+            </DialogPrimitive.Title>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close sidebar"
+              className="absolute right-3 top-3 z-10 rounded-md p-2 text-text-secondary hover:bg-bg-card-hover"
+            >
+              <span aria-hidden="true">×</span>
+            </button>
+            <div className="relative h-full">{sidebarContent}</div>
+          </DialogPrimitive.Content>
+        </DialogPrimitive.Portal>
+      </DialogPrimitive.Root>
     </>
   );
 }
