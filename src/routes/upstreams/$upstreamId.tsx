@@ -3,7 +3,7 @@ import { ResourceLabels } from "@/components/shared/ResourceLabels";
 /*  Ferrum Foundry – Upstream detail / edit page                       */
 /* ------------------------------------------------------------------ */
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import {
   useUpstream,
@@ -30,8 +30,13 @@ import {
   type StaleResourceDetail,
   type WriteGuard,
 } from "@/api/conditionalWrite";
-import { pickSnapshot, resourceFingerprint } from "@/lib/resourceBaseline";
-import { targetActionLabels, targetIdentities } from "@/lib/upstreamTargets";
+import { resourceFingerprint } from "@/lib/resourceBaseline";
+import {
+  identityAfterRemoval,
+  normalizedTargets,
+  targetActionLabels,
+  targetIdentities,
+} from "@/lib/upstreamTargets";
 import { StaleWriteDialog } from "@/components/shared/StaleWriteDialog";
 import { useCapabilities } from "@/stores/capabilities";
 import { CapabilityNotice, WriteAction } from "@/components/shared/CapabilityGate";
@@ -53,14 +58,29 @@ function targetEditBasis(upstream: Upstream): TargetEditBasis {
 }
 
 /**
- * The one open target editor, if any. An edit form is bound to its target's
- * identity (`targetIdentities`), not to a row position, so a refetch or a
- * removal that shifts the rows neither moves nor remounts it; `index` is the
- * target's position in the captured `targets` the save is computed from.
+ * The one open target editor, if any. An edit form is shown on the row whose
+ * identity (`targetIdentities`) is `identity`, not at a row position, so a
+ * refetch or a removal that shifts the rows does not move it to another
+ * target; `index` is the target's position in the captured `targets` the save
+ * is computed from. `openId` names this opening of the form and keys its row:
+ * an identity can change while the form is open (removing an earlier target
+ * with the same `host:port` renumbers it), and the typing must survive that.
  */
 type TargetDraft =
   | (TargetEditBasis & { readonly mode: "add" })
-  | (TargetEditBasis & { readonly mode: "edit"; readonly index: number; readonly identity: string });
+  | (TargetEditBasis & {
+      readonly mode: "edit";
+      readonly index: number;
+      readonly identity: string;
+      readonly openId: number;
+    });
+
+const SAVE_IN_PROGRESS =
+  "Another save for this upstream is still in progress, so nothing was sent. Try again once it finishes.";
+
+/** Why Add Target and Edit are unavailable while a target form is open. */
+const OPEN_TARGET_FORM =
+  "Save or cancel the open target form first; opening another would discard its draft.";
 
 const MISSING_TARGET_DRAFT =
   "This target form lost the target list it was opened from, so nothing was saved. Cancel it and open the target again.";
@@ -72,10 +92,16 @@ function sameTargetBaseline(
   return resourceFingerprint(a.baseline) === resourceFingerprint(b.baseline);
 }
 
+/**
+ * Whether a read holds exactly the target list a write sent, up to spellings
+ * the gateway treats as equal (`normalizedTargets`), so a read that omits an
+ * empty optional member is not mistaken for another writer's change.
+ * `scripts/gateway-contract-smoke.mjs` checks the pinned gateway against it.
+ */
 function holdsTargets(upstream: Upstream, targets: UpstreamTarget[]): boolean {
   return (
-    resourceFingerprint(pickSnapshot(upstream, ["targets"])) ===
-    resourceFingerprint(pickSnapshot({ targets }, ["targets"]))
+    resourceFingerprint({ targets: normalizedTargets(upstream.targets) }) ===
+    resourceFingerprint({ targets: normalizedTargets(targets) })
   );
 }
 
@@ -127,11 +153,23 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
   // The open target form and what it was seeded from. A form is shown only
   // while this holds a draft, so dropping the draft closes the form.
   const [targetDraft, setTargetDraft] = useState<TargetDraft | null>(null);
+  const nextOpenId = useRef(0);
+
+  /**
+   * A write submitted while another is in flight is not sent. The controls
+   * are disabled while a save is pending, but a submission that raced the
+   * re-render still says why nothing happened.
+   */
+  const refuseWhileSaving = (): boolean => {
+    if (!updateUpstream.isPending) return false;
+    toast("warning", SAVE_IN_PROGRESS);
+    return true;
+  };
 
   /* ---------- Handlers ---------- */
 
   const handleSubmit = session.bind(async (data: UpstreamCreate) => {
-    if (!upstream || updateUpstream.isPending || !capability.allowed) return;
+    if (!upstream || !capability.allowed || refuseWhileSaving()) return;
     try {
       const updated = await updateUpstream.mutateAsync({
         id: upstreamId,
@@ -216,11 +254,13 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
   };
 
   const openEditTarget = (source: Upstream, index: number) => {
+    nextOpenId.current += 1;
     setTargetDraft({
       ...targetEditBasis(source),
       mode: "edit",
       index,
       identity: targetIdentities(source.targets)[index],
+      openId: nextOpenId.current,
     });
   };
 
@@ -233,16 +273,18 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
   // (#235/#254). `onSaved` runs only when the targets were written, with the
   // upstream now holding them when that is known: the gateway's answer, or,
   // for a committed-but-not-live answer, a fresh read that holds exactly the
-  // list this save wrote. A refused or rejected save keeps the target draft
+  // list this save wrote. `observed` is the upstream as read after the write
+  // — the gateway's answer or any successful fresh read — or `null` when the
+  // page could not read it back. A refused or rejected save keeps the target draft
   // open, as the configuration form does, so the conflict dialog's "Keep
   // editing" has something to return to.
   const saveTargets = session.bind(
     async (
       newTargets: UpstreamTarget[],
       guard: WriteGuard<Upstream | UpstreamCreate>,
-      onSaved: (accepted: Upstream | null) => void,
+      onSaved: (accepted: Upstream | null, observed: Upstream | null) => void,
     ) => {
-      if (!upstream || updateUpstream.isPending || !capability.allowed) return;
+      if (!upstream || !capability.allowed || refuseWhileSaving()) return;
       let accepted: Upstream;
       try {
         accepted = await updateUpstream.mutateAsync({
@@ -264,7 +306,7 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
           const refreshed = await resourceQuery.refetch();
           const fresh = refreshed.isError ? undefined : refreshed.data;
           toast("warning", committedWriteMessage("Targets saved", committed));
-          onSaved(fresh && holdsTargets(fresh, newTargets) ? fresh : null);
+          onSaved(fresh && holdsTargets(fresh, newTargets) ? fresh : null, fresh ?? null);
           return;
         }
         const message = await getApiErrorMessage(err, "Failed to update targets");
@@ -272,12 +314,12 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
         return;
       }
       toast("success", "Targets updated successfully");
-      onSaved(accepted);
+      onSaved(accepted, accepted);
     },
   );
 
   const handleAddTarget = async (target: UpstreamTarget) => {
-    if (!upstream || updateUpstream.isPending) return;
+    if (!upstream || refuseWhileSaving()) return;
     if (targetDraft?.mode !== "add") {
       toast("error", MISSING_TARGET_DRAFT);
       return;
@@ -286,7 +328,7 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
   };
 
   const handleUpdateTarget = async (target: UpstreamTarget) => {
-    if (!upstream || updateUpstream.isPending) return;
+    if (!upstream || refuseWhileSaving()) return;
     if (targetDraft?.mode !== "edit") {
       toast("error", MISSING_TARGET_DRAFT);
       return;
@@ -297,11 +339,11 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
   };
 
   const handleRemoveTarget = async (index: number) => {
-    if (!upstream || updateUpstream.isPending) return;
+    if (!upstream || refuseWhileSaving()) return;
     const removed = targetIdentities(upstream.targets)[index];
     const newTargets = upstream.targets.filter((_, i) => i !== index);
     const guard = upstreamsApi.targetsWriteGuard(upstream);
-    await saveTargets(newTargets, guard, (result) => {
+    await saveTargets(newTargets, guard, (result, observed) => {
       setTargetDraft((draft) => {
         if (!draft) return draft;
         // Removing the target being edited drops its draft, which closes the
@@ -312,7 +354,15 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
         // and the upstream now holding the result is known. Otherwise the
         // basis stays, and a save from it is refused rather than rebased onto
         // content the operator never edited against.
-        if (!result || !sameTargetBaseline(draft.guard, guard)) return draft;
+        if (!result || !sameTargetBaseline(draft.guard, guard)) {
+          // The form still follows its target on screen: once the rows show
+          // the list without the removed target, an earlier duplicate of the
+          // edited address no longer counts toward its identity. Without a
+          // read the rows still show the old list, so the identity stays.
+          if (draft.mode !== "edit" || !observed) return draft;
+          const identity = identityAfterRemoval(draft.identity, removed);
+          return identity === draft.identity ? draft : { ...draft, identity };
+        }
         if (draft.mode === "add") return { ...targetEditBasis(result), mode: "add" };
         // The bases match, so the draft's index and the removed row's index
         // are positions in the same list.
@@ -322,6 +372,7 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
           mode: "edit",
           index: moved,
           identity: targetIdentities(result.targets)[moved] ?? draft.identity,
+          openId: draft.openId,
         };
       });
     });
@@ -443,6 +494,7 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
                     type="button"
                     variant="secondary"
                     size="sm"
+                    disabled={targetDraft !== null}
                     onClick={() => openAddTarget(upstream)}
                   >
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -453,14 +505,26 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
                 )}
               </div>
 
+              {targetDraft !== null && (
+                <p className="text-text-muted text-xs">{OPEN_TARGET_FORM}</p>
+              )}
+
               {/* Target list */}
               {targetRows.length > 0 && (
                 <div className="space-y-2">
                   {targetRows.map(({ target, index, identity }) => (
                     // Keyed by the target's identity, not its position, so a
                     // refetch or a removal that shifts the rows does not
-                    // remount an open editor or move it to another target.
-                    <div key={identity}>
+                    // remount a row or move an editor to another target. The
+                    // open editor's row is keyed by its opening instead,
+                    // which survives a change to its identity.
+                    <div
+                      key={
+                        editingDraft?.identity === identity
+                          ? `edit:${editingDraft.openId}`
+                          : `row:${identity}`
+                      }
+                    >
                       {editingDraft?.identity === identity ? (
                         <>
                           <TargetForm
@@ -481,6 +545,7 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
                           <TargetRow
                             target={target}
                             labels={targetActionLabels(upstream.targets, index)}
+                            editBlocked={targetDraft !== null}
                             onEdit={() => openEditTarget(upstream, index)}
                             onRemove={() => handleRemoveTarget(index)}
                           />
@@ -536,11 +601,14 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
 function TargetRow({
   target,
   labels,
+  editBlocked,
   onEdit,
   onRemove,
 }: {
   target: UpstreamTarget;
   labels: { edit: string; remove: string };
+  /** Another target form is open; opening this one would discard its draft. */
+  editBlocked: boolean;
   onEdit: () => void;
   onRemove: () => void;
 }) {
@@ -565,7 +633,14 @@ function TargetRow({
         )}
       </div>
       <div className="flex items-center gap-1 shrink-0">
-        <Button type="button" variant="ghost" size="sm" aria-label={labels.edit} onClick={onEdit}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          aria-label={labels.edit}
+          disabled={editBlocked}
+          onClick={onEdit}
+        >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
             <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
           </svg>

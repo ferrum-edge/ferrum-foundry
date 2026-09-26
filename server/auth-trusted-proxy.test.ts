@@ -173,6 +173,40 @@ describe('trusted OIDC proxy authentication', () => {
     }
   });
 
+  it('accepts a lone * from an admin as the omitted header (#464)', async () => {
+    const app = await buildApp();
+    try {
+      for (const value of ['*', ' * ', '*,', ',*']) {
+        const headers = identityHeaders({ 'x-ferrum-role': 'admin', 'x-ferrum-namespaces': value });
+        const response = await app.inject({ method: 'GET', url: '/protected', headers });
+        expect(response.statusCode, JSON.stringify(value)).toBe(200);
+        expect(response.json(), JSON.stringify(value)).not.toHaveProperty('namespaces');
+      }
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('refuses * for a non-admin identity and * combined with names for every role (#464)', async () => {
+    const app = await buildApp();
+    try {
+      for (const role of ['viewer', 'operator']) {
+        const headers = identityHeaders({ 'x-ferrum-role': role, 'x-ferrum-namespaces': '*' });
+        const response = await app.inject({ method: 'GET', url: '/protected', headers });
+        expect(response.statusCode, role).toBe(401);
+      }
+      for (const role of ['viewer', 'operator', 'admin']) {
+        for (const value of ['*,tenant-a', 'tenant-a, *', 'tenant-*']) {
+          const headers = identityHeaders({ 'x-ferrum-role': role, 'x-ferrum-namespaces': value });
+          const response = await app.inject({ method: 'GET', url: '/protected', headers });
+          expect(response.statusCode, `${role} ${value}`).toBe(401);
+        }
+      }
+    } finally {
+      await app.close();
+    }
+  });
+
   it('drops empty entries between namespace grants', async () => {
     const app = await buildApp();
     try {

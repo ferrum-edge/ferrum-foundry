@@ -54,7 +54,7 @@ that already carries a valid proof secret is an administrator.
 | `X-Ferrum-Auth-Secret` | Exact `FERRUM_TRUSTED_PROXY_SECRET` value |
 | `X-Forwarded-User` | Stable actor identity, becomes the JWT `sub` |
 | `X-Ferrum-Role` | `viewer`, `operator`, or `admin` after group mapping |
-| `X-Ferrum-Namespaces` | Comma-separated exact namespace grants |
+| `X-Ferrum-Namespaces` | Comma-separated exact namespace grants, or `*` alone for a global admin |
 
 The header names are configurable for the last three
 (`FERRUM_TRUSTED_PROXY_USER_HEADER`, `FERRUM_TRUSTED_PROXY_ROLE_HEADER`,
@@ -334,11 +334,14 @@ FERRUM_AUTH_LOGOUT_URL=/oauth2/sign_out
 Notes:
 
 - `X-Ferrum-Namespaces` must be an exact comma-separated list of namespace
-  names. Foundry does not expand wildcards or prefixes. A name that does not
-  match `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$` invalidates the whole header.
+  names, or `*` alone. Foundry does not expand prefixes or globs. A name that
+  does not match `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$`, or `*` combined with
+  names, invalidates the whole header.
 - A `viewer` or `operator` identity is rejected outright when the namespace
-  header is missing or empty. Only `admin` may omit it, and only when global
-  administration is the intent. A header that is present but empty or
+  header is missing, empty, or `*`. Only `admin` may be global, and only when
+  global administration is the intent: omit the header, or send `*` alone
+  from a proxy that always sends it (the same spelling `FERRUM_JWT_NAMESPACES`
+  uses). Both give an unrestricted admin with no `ns` claim. A header that is present but empty or
   whitespace only is rejected for every role, admins included: absent and
   empty are not the same. nginx does not forward a `proxy_set_header` whose
   value is empty, so an nginx proxy that maps an identity to no namespaces

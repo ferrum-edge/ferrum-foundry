@@ -2,7 +2,7 @@ import { act } from "react";
 import { clearGatewayMetadata } from "@/api/gatewayMetadata";
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Upstream, UpstreamCreate } from "@/api/types";
+import type { Upstream, UpstreamCreate, UpstreamTarget } from "@/api/types";
 import { inputByLabel } from "@/test/fields";
 import { button, click, createHarness, fill, page, panel, selectTab, settle, stubFetch } from "@/test/__tests__/harness";
 import UpstreamDetailPage from "./$upstreamId";
@@ -17,6 +17,10 @@ let failure: boolean;
 let commitNotLive: boolean;
 // Runs after a write commits, before the answer: another writer in the gap.
 let afterCommit: (() => void) | undefined;
+// While set, a write is held unanswered until it resolves.
+let hold: Promise<void> | undefined;
+// Reads leave out a target's empty optional members (`null`, `{}`).
+let omitEmptyOnRead: boolean;
 let writes: Request[];
 const initial: Upstream = {
   id: "orders", name: "Orders", namespace: "tenant-a", algorithm: "round_robin",
@@ -32,12 +36,26 @@ function etagOf(upstream: Upstream): string {
   return `"${(hash >>> 0).toString(16)}"`;
 }
 
+/** The upstream as a read returns it. */
+function readShape(upstream: Upstream): Upstream {
+  if (!omitEmptyOnRead) return upstream;
+  return {
+    ...upstream,
+    targets: upstream.targets.map((entry) => Object.fromEntries(
+      Object.entries(entry).filter(([, value]) => value !== null
+        && !(typeof value === "object" && Object.keys(value).length === 0)),
+    ) as UpstreamTarget),
+  };
+}
+
 beforeEach(() => {
   ui = createHarness();
   current = initial;
   failure = false;
   commitNotLive = false;
   afterCommit = undefined;
+  hold = undefined;
+  omitEmptyOnRead = false;
   writes = [];
   clearGatewayMetadata();
   Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
@@ -46,11 +64,12 @@ beforeEach(() => {
     if (request.method === "GET") {
       if (path === "/api/proxy/upstreams") return Response.json(page(current ? [current] : []));
       if (path === "/api/proxy/upstreams/orders") return current
-        ? Response.json(current, { headers: { ETag: etagOf(current) } })
+        ? Response.json(readShape(current), { headers: { ETag: etagOf(current) } })
         : Response.json({ error: "upstream missing" }, { status: 404 });
       throw new Error(`Unexpected upstream read: ${path}`);
     }
     writes.push(request);
+    if (hold) await hold;
     if (failure) return Response.json({ error: "target policy rejected" }, { status: 400 });
     const ifMatch = request.headers.get("If-Match");
     if (ifMatch !== null && (!current || ifMatch !== etagOf(current))) {
@@ -102,6 +121,10 @@ async function refetchUpstream() {
 }
 
 const target = (host: string) => ({ host, port: 8080, weight: 1 });
+
+/** How many target forms are open: each has one Host field. */
+const openTargetForms = () => [...panel().querySelectorAll("label")]
+  .filter((label) => label.textContent?.trim() === "Host").length;
 
 describe("upstream target route integration", () => {
   it("creates an upstream from an inline target and opens the resulting editor", async () => {
@@ -272,6 +295,31 @@ describe("upstream target route integration", () => {
     expect(current?.targets.map((entry) => entry.host)).toEqual(["b-backend", "c-backend", "d-backend"]);
   });
 
+  it("adopts a committed-but-not-live removal when the read leaves out empty optional target members (#464)", async () => {
+    // Targets as Foundry's own target form writes them.
+    const [a, b, c] = ["a-backend", "b-backend", "c-backend"]
+      .map((host) => ({ ...target(host), path: null, locality: null, tags: {} }));
+    current = { ...initial, targets: [a, b, c] };
+    omitEmptyOnRead = true;
+    await mount();
+    await settle(() => expect(ui.host.textContent).toContain("Targets (3)"));
+    await selectTab("Targets (3)");
+    await click("Add Target", panel());
+    await fill(inputByLabel(panel(), "Host"), "d-backend");
+    commitNotLive = true;
+    await click("Remove target a-backend:8080", panel());
+    await settle(() => expect(document.body.textContent).toContain("Targets saved"));
+    await settle(() => expect(cachedUpstream()?.targets.map((entry) => entry.host)).toEqual(["b-backend", "c-backend"]));
+    expect(cachedUpstream()?.targets[0]).not.toHaveProperty("path");
+
+    commitNotLive = false;
+    await click("Add Target", panel());
+    await settle(() => expect(writes).toHaveLength(2));
+    await settle(() => expect(panel().querySelector("input")).toBeNull());
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(current?.targets.map((entry) => entry.host)).toEqual(["b-backend", "c-backend", "d-backend"]);
+  });
+
   it("keeps refusing after a committed-but-not-live removal when the read holds another writer's change too", async () => {
     const [a, b, c, z] = ["a-backend", "b-backend", "c-backend", "z-backend"].map(target);
     current = { ...initial, targets: [a, b, c] };
@@ -297,6 +345,120 @@ describe("upstream target route integration", () => {
     expect(writes).toHaveLength(1);
     expect(current?.targets).toEqual([b, c, z]);
     expect(inputByLabel(panel(), "Host").value).toBe("d-backend");
+  });
+
+  it("keeps typing in a duplicate-address target's form when an earlier duplicate is removed (#464)", async () => {
+    const [first, second, b] = [
+      { ...target("a-backend"), weight: 1 },
+      { ...target("a-backend"), weight: 2 },
+      target("b-backend"),
+    ];
+    current = { ...initial, targets: [first, second, b] };
+    await mount();
+    await settle(() => expect(ui.host.textContent).toContain("Targets (3)"));
+    await selectTab("Targets (3)");
+    await click("Edit target a-backend:8080 (2 of 2)", panel());
+    await fill(inputByLabel(panel(), "Host"), "a-backend-draft");
+    // Removing the earlier duplicate renumbers the edited target's identity
+    // (`a-backend:8080#1` becomes `#0`); the form must not remount.
+    await click("Remove target a-backend:8080 (1 of 2)", panel());
+    await settle(() => expect(current?.targets).toEqual([second, b]));
+    await settle(() => expect(panel().textContent).toContain("Targets (2)"));
+    expect(inputByLabel(panel(), "Host").value).toBe("a-backend-draft");
+    expect(openTargetForms()).toBe(1);
+    expect(panel().querySelectorAll("input[type=number]")).toHaveLength(2);
+    expect(panel().textContent).not.toContain("no longer in the upstream");
+
+    await click("Update Target", panel());
+    await settle(() => expect(writes).toHaveLength(2));
+    await settle(() => expect(panel().querySelector("input")).toBeNull());
+    expect(current?.targets.map((entry) => [entry.host, entry.weight])).toEqual([
+      ["a-backend-draft", 2], ["b-backend", 1],
+    ]);
+  });
+
+  it("keeps a duplicate-address form on its row when a committed-but-not-live removal is not adopted (#464)", async () => {
+    const [first, second, b, z] = [
+      { ...target("a-backend"), weight: 1 },
+      { ...target("a-backend"), weight: 2 },
+      target("b-backend"),
+      target("z-backend"),
+    ];
+    current = { ...initial, targets: [first, second, b] };
+    await mount();
+    await settle(() => expect(ui.host.textContent).toContain("Targets (3)"));
+    await selectTab("Targets (3)");
+    await click("Edit target a-backend:8080 (2 of 2)", panel());
+    await fill(inputByLabel(panel(), "Host"), "a-backend-draft");
+    commitNotLive = true;
+    // Another writer adds a target between this removal's commit and the read,
+    // so the open form's basis is not moved.
+    afterCommit = () => {
+      current = { ...initial, targets: [second, b, z] };
+    };
+    await click("Remove target a-backend:8080 (1 of 2)", panel());
+    await settle(() => expect(document.body.textContent).toContain("Targets saved"));
+    await settle(() => expect(panel().textContent).toContain("z-backend:8080"));
+    // The form stays in place of its own target rather than appearing as a
+    // "no longer listed" row beside it.
+    expect(inputByLabel(panel(), "Host").value).toBe("a-backend-draft");
+    expect(openTargetForms()).toBe(1);
+    expect(panel().textContent).not.toContain("no longer in the upstream");
+    expect(panel().querySelector('button[aria-label^="Edit target a-backend"]')).toBeNull();
+
+    // Its basis did not move, so the save is still refused, not rebased.
+    commitNotLive = false;
+    afterCommit = undefined;
+    await click("Update Target", panel());
+    await settle(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull());
+    expect(writes).toHaveLength(1);
+    expect(current?.targets).toEqual([second, b, z]);
+  });
+
+  it("says why a target submission sent while another save is pending does nothing (#464)", async () => {
+    await mount();
+    await settle(() => expect(ui.host.textContent).toContain("Targets (1)"));
+    await selectTab("Targets (1)");
+    await click("Add Target", panel());
+    await fill(inputByLabel(panel(), "Host"), "second-backend");
+    let release!: () => void;
+    hold = new Promise((resolve) => { release = resolve; });
+    await click("Add Target", panel());
+    await settle(() => expect(writes).toHaveLength(1));
+    // A second submission that raced the disabled controls is refused aloud.
+    await act(async () => {
+      inputByLabel(panel(), "Host").dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+      );
+    });
+    await settle(() => expect(document.body.textContent).toContain("Another save for this upstream is still in progress"));
+    expect(writes).toHaveLength(1);
+    await act(async () => release());
+    await settle(() => expect(panel().querySelector("input")).toBeNull());
+    expect(writes).toHaveLength(1);
+    expect(current?.targets).toHaveLength(2);
+  });
+
+  it("does not let a second target form replace an open draft (#464)", async () => {
+    current = { ...initial, targets: [target("a-backend"), target("b-backend")] };
+    await mount();
+    await settle(() => expect(ui.host.textContent).toContain("Targets (2)"));
+    await selectTab("Targets (2)");
+    await click("Edit target a-backend:8080", panel());
+    await fill(inputByLabel(panel(), "Host"), "a-backend-draft");
+    expect(button("Add Target", panel()).disabled).toBe(true);
+    expect(button("Edit target b-backend:8080", panel()).disabled).toBe(true);
+    expect(panel().textContent).toContain("Save or cancel the open target form first");
+    await act(async () => button("Edit target b-backend:8080", panel()).click());
+    expect(inputByLabel(panel(), "Host").value).toBe("a-backend-draft");
+
+    await click("Cancel", panel());
+    await click("Add Target", panel());
+    await fill(inputByLabel(panel(), "Host"), "c-backend");
+    expect(button("Edit target a-backend:8080", panel()).disabled).toBe(true);
+    expect(button("Edit target b-backend:8080", panel()).disabled).toBe(true);
+    expect(inputByLabel(panel(), "Host").value).toBe("c-backend");
+    expect(writes).toHaveLength(0);
   });
 
   it("names each target row action after its target (#455)", async () => {

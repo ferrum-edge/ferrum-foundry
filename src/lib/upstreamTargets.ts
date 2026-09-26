@@ -27,6 +27,43 @@ export function targetIdentities(targets: readonly UpstreamTarget[]): string[] {
 }
 
 /**
+ * Where a target identity lands after the target `removed` (an identity in the
+ * same list) is taken out: an earlier target with the same address no longer
+ * counts toward its occurrence. Any other identity is unchanged.
+ */
+export function identityAfterRemoval(identity: string, removed: string): string {
+  const split = (value: string) => {
+    const at = value.lastIndexOf("#");
+    return { address: value.slice(0, at), occurrence: Number(value.slice(at + 1)) };
+  };
+  const target = split(identity);
+  const gone = split(removed);
+  if (target.address !== gone.address || gone.occurrence >= target.occurrence) return identity;
+  return `${target.address}#${target.occurrence - 1}`;
+}
+
+/**
+ * `targets` with each target's optional members spelled out: `path` and
+ * `locality` absent or `null`, and `tags` absent or `{}`, mean the same thing
+ * to the gateway, so a read that omits them still holds the list a write sent.
+ * Every other difference — a changed value, an added member, a reordered
+ * target — survives, so two lists whose normalized forms fingerprint the same
+ * are the same list.
+ *
+ * Like `resourceBaseline.ts`, this module has only type imports:
+ * `scripts/gateway-contract-smoke.mjs` loads it directly to check the pinned
+ * gateway reads a written list back in a form this accepts.
+ */
+export function normalizedTargets(targets: readonly UpstreamTarget[]): UpstreamTarget[] {
+  return targets.map((target) => ({
+    ...target,
+    path: target.path ?? null,
+    locality: target.locality ?? null,
+    tags: target.tags ?? {},
+  }));
+}
+
+/**
  * Accessible names for a target row's icon-only actions, naming the target
  * they act on. A repeated address is numbered so each name stays unique.
  */
