@@ -11,6 +11,7 @@ import { requestIsApiRoute, servesSpaShell } from './proxy-path.js';
 import healthPlugin from './routes/health.js';
 import settingsPlugin from './routes/settings.js';
 import { closeDispatchers } from './tls.js';
+import { installUploadDrain } from './upload-drain.js';
 
 export interface BuildAppOptions {
   serveStatic?: boolean;
@@ -46,6 +47,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     trustProxy: isProduction ? trustDirectlyConnectedProxy : false,
   });
   for (const warning of getConfigWarnings()) fastify.log.warn(warning);
+  // First, so a body refused by any later onRequest hook is discarded under
+  // the BFF's own bounds rather than Node's unbounded one.
+  installUploadDrain(fastify);
 
   await fastify.register(cookie);
   await fastify.register(cors, { origin: isProduction ? false : true });
