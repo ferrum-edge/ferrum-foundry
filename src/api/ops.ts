@@ -5,7 +5,7 @@
 /* ------------------------------------------------------------------ */
 
 import { classifyCommittedWrite, type CommittedWrite } from "./gatewayMetadata";
-import { secretValues, withRedactedFailure } from "./secretRedaction";
+import { restoreSecrets, secretValues, withRedactedFailure } from "./secretRedaction";
 import {
   SILENT_ERRORS,
   REDACT_ERRORS,
@@ -620,6 +620,10 @@ export function getRestoreFailure(error: unknown): RestoreFailure | null {
  * Restore replaces the whole of `scope.namespace`. The scope is the one the
  * user confirmed in the restore dialog, captured when the dialog opened, so
  * a later switch cannot redirect the replacement.
+ *
+ * A backup carries credentials, plugin secrets and spec documents, so a
+ * failure is redacted and holds no request (`restoreSecrets`, #485). The
+ * restore card reports every failure itself.
  */
 export async function restore(
   scope: NamespaceScope,
@@ -630,15 +634,17 @@ export async function restore(
   if (options.confirmApiSpecDeletion) {
     searchParams.confirm_api_spec_deletion = "true";
   }
-  return proxyApi
-    .post(
-      "restore",
-      scoped(scope, {
-        json: data,
-        searchParams,
-        timeout: 120000,
-        context: { [SILENT_ERRORS]: true },
-      }),
-    )
-    .json<RestoreResponse>();
+  return withRedactedFailure(restoreSecrets(data), () =>
+    proxyApi
+      .post(
+        "restore",
+        scoped(scope, {
+          json: data,
+          searchParams,
+          timeout: 120000,
+          context: { [SILENT_ERRORS]: true },
+        }),
+      )
+      .json<RestoreResponse>(),
+  );
 }

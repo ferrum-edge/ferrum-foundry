@@ -387,7 +387,8 @@ The same redaction (`src/api/secretRedaction.ts`) covers every write whose
 body carries a secret: consumer create, plugin configuration create and update
 (so a membership plan's rollback too), upstream create and update, TLS managed
 record and ACME certificate writes, ACME order creation and renewal, TLS
-validation, and batch create (#478). `secretValues()` finds the secrets by
+validation, and batch create (#478), backup restore, and API spec import and
+replacement (#485). `secretValues()` finds the secrets by
 position rather than by resource: every string under a credential-shaped field
 name at any depth (the conflict dialog's `isRedactedField` list, plus
 `headers` maps, webhooks, service-account documents, and camelCase `*Key`
@@ -411,6 +412,41 @@ plugin Edge's table does not name — a custom plugin, or a built-in newer than
 the paired release — has no schema to classify by, so every string in its
 `config` is treated as secret. Edge's operator-configured
 `FERRUM_LOG_REDACT_METADATA_KEYS` extras are not visible to Foundry.
+
+The table lives in `src/api/pluginSensitivity.ts` with the Edge commit it was
+checked against (`PLUGIN_SENSITIVITY_SOURCE`). The Pinned Gateway Contract job
+runs `scripts/plugin-sensitivity-drift.mjs`, which fetches
+`plugin_config_projection.rs` at `edge.source_commit`, parses
+`PLUGIN_SENSITIVITY_SCHEMAS` and `KAFKA_SAFE_PRODUCER_PROPERTIES`, and fails on
+any plugin or rule that differs, and on any rule shape or sensitivity kind it
+cannot read. Its unit test fails when the recorded commit is not the pinned
+one, so moving the Edge pin cannot leave the table unchecked (#487).
+
+A backup restore carries every resource of a namespace. `restoreSecrets()` is
+`secretValues()` over the backup plus each API spec document it holds, which
+travels gzip-compressed and base64-encoded and is taken whole. An API spec
+document for import or replacement is text: `specDocumentSecrets()` classifies
+a JSON document by position — each `x-ferrum-plugins` entry by its plugin's
+rules, anything else by field name and URL — with an entry that is not a
+plugin configuration unclassified throughout. Foundry has no YAML parser, so a
+YAML (or malformed JSON) document is unclassified throughout: every scalar it
+could hold, found line by line without parsing (each `key: value` value,
+sequence entry, flow element, and quoted scalar unquoted and unescaped). A
+folded or joined echo of a multi-line scalar is therefore redacted piece by
+piece. Both surfaces report every failure themselves (`SILENT_ERRORS`), and a
+spec write's unknown outcome keeps only the redacted error as its `cause`.
+
+A value that is secret only because nothing classifies it — every string of an
+unknown plugin's config, every scalar of a YAML spec document — is redacted
+wherever it occurs when it is 8 characters or longer. A shorter one (`a`, `1`,
+`on`, `error`) also occurs in ordinary words, in the keys of the gateway's
+error body, and in the `[REDACTED]` marker itself, so it is redacted only
+where it stands as a whole token of a string value, and never in an object
+key: the body's `error` and `code` stay readable and the restore card's
+recovery details stay recognizable. A value that is classified is redacted
+wherever it occurs whatever its length. Every match is found in the original
+text and replaced in one pass, overlapping matches as one marker, so no
+replacement can split a marker another one wrote (#487).
 
 `withRedactedFailure()` replaces any failure of such a write with a
 `RedactedWriteError`: the redacted message, a bodiless copy of the response

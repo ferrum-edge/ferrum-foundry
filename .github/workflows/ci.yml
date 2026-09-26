@@ -104,6 +104,14 @@ jobs:
         # a newer gateway understands start getting stripped.
         run: npm run check:plugin-schemas
 
+      - name: Verify the plugin sensitivity table against the pinned Edge source
+        # Secret redaction classifies a plugin config by Ferrum Edge's own
+        # projection table, transcribed in src/api/pluginSensitivity.ts. This
+        # fetches that table at edge.source_commit and fails when Foundry's
+        # copy differs or records another commit: a built-in Foundry does not
+        # know is redacted wholesale, and a rule it lacks can echo a secret.
+        run: npm run check:plugin-sensitivity
+
       - name: Resolve the pinned Ferrum Edge image
         # edge.image in docs/compatibility.json is the single source for the
         # gateway Foundry is qualified against; the starter and docs are

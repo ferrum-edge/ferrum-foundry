@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { isHTTPError } from "ky";
 import * as specs from "./apiSpecs";
 import { getApiErrorDetail, setApiErrorHandler, setCsrfToken } from "./client";
 import { MutationOutcomeUnknownError } from "./mutationOutcome";
+import { RedactedWriteError } from "./secretRedaction";
 import { stubFetch } from "@/test/__tests__/harness";
 
 const scope = { namespace: "tenant-a" };
@@ -150,12 +150,14 @@ describe("API spec request contracts", () => {
       "invalid_yaml: line 3: expected mapping"],
     [{ error: "Validation failed", failures: [{ resource_type: "proxy", id: "orders", errors: ["hosts required"] }] },
       "Validation failed\nproxy (orders): hosts required"],
-  ])("retains actionable error data after ky consumes the failing response", async (body, detail) => {
+  ])("retains actionable error data, without the request", async (body, detail) => {
     respond.mockReturnValue(Response.json(body, { status: 400 }));
     const error = await specs.create(scope, "invalid").catch((failure: unknown) => failure);
-    expect(isHTTPError(error)).toBe(true);
-    if (!isHTTPError(error)) throw new Error("Expected an HTTP error");
-    expect(error.response.bodyUsed).toBe(true);
+    // The document can carry plugin secrets, so the failure is redacted (#485).
+    expect(error).toBeInstanceOf(RedactedWriteError);
+    if (!(error instanceof RedactedWriteError)) throw new Error("Expected a redacted write error");
+    expect(error.response?.status).toBe(400);
+    expect(error).not.toHaveProperty("request");
     expect(await getApiErrorDetail(error)).toBe(detail);
     expect(popup).not.toHaveBeenCalled();
     expect(requests).toHaveLength(1);
