@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo } from "react";
+import { type RefObject, useEffect, useId, useMemo } from "react";
 import { Select } from "@/components/ui/Select";
 import { useNamespace } from "@/stores/namespace";
 import { useNamespaces } from "@/hooks/useNamespaces";
@@ -10,9 +10,15 @@ import { namespaceGranted } from "@/lib/namespaceGrants";
 
 interface HeaderProps {
   onToggleSidebar: () => void;
+  sidebarOpen?: boolean;
+  sidebarToggleRef?: RefObject<HTMLButtonElement | null>;
 }
 
-export function Header({ onToggleSidebar }: HeaderProps) {
+export function Header({
+  onToggleSidebar,
+  sidebarOpen = false,
+  sidebarToggleRef,
+}: HeaderProps) {
   const namespaceLabelId = useId();
   const { selectedNamespace, setNamespace } = useNamespace();
   const registry = useNamespaces();
@@ -56,9 +62,12 @@ export function Header({ onToggleSidebar }: HeaderProps) {
       <div className="flex items-center gap-3">
         {/* Hamburger - mobile only */}
         <button
+          ref={sidebarToggleRef}
           onClick={onToggleSidebar}
           className="md:hidden p-1.5 rounded-lg text-text-secondary hover:bg-bg-card-hover hover:text-text-primary transition-colors cursor-pointer"
           aria-label="Toggle sidebar"
+          aria-expanded={sidebarOpen}
+          aria-controls="mobile-sidebar-dialog"
         >
           <svg
             className="w-5 h-5"
