@@ -71,9 +71,13 @@ function consumer(
 }
 
 /**
- * The pre-index implementation, kept here as the equivalence oracle: it filters
- * the whole collection for one proxy exactly as the route used to on every
- * iteration. The indexed path must return byte-for-byte the same plugins,
+ * A whole-collection oracle written from the gateway's scope merge (Ferrum
+ * Edge v0.9.7 `src/plugin_cache.rs`: `remove_shadowed_global_plugin` and
+ * `is_istio_route_transform_consumer`), not from the indexed implementation.
+ * It scans the collection once for the scoped configurations this proxy
+ * actually merges, drops every global those shadow by plugin name (size
+ * limiters and the exact Istio route-transform consumer are additive), and
+ * orders by priority then id. The indexed path must return the same plugins,
  * ordering, and sources.
  */
 function referenceAttachedPlugins(
@@ -83,15 +87,41 @@ function referenceAttachedPlugins(
   const associated = new Set(
     (proxy.plugins ?? []).map((association) => association.plugin_config_id),
   );
+  const merged = pluginConfigs.filter((plugin) => {
+    if (!plugin.enabled || plugin.scope === "global") return false;
+    if (!associated.has(plugin.id)) return false;
+    if (plugin.scope === "proxy") return plugin.proxy_id === proxy.id;
+    return plugin.proxy_id == null;
+  });
+  const istioPrefix: Record<string, string> = {
+    request_transformer: "istio-vs-req-xform-",
+    response_transformer: "istio-vs-resp-xform-",
+  };
+  const shadowedNames = new Set(
+    merged
+      .filter((plugin) => {
+        if (["request_size_limiting", "response_size_limiting"].includes(plugin.plugin_name)) {
+          return false;
+        }
+        const prefix = istioPrefix[plugin.plugin_name];
+        const rules = plugin.config.rules;
+        const istio =
+          plugin.scope === "proxy" &&
+          prefix !== undefined &&
+          plugin.id === `${prefix}${proxy.id}` &&
+          Array.isArray(rules) &&
+          rules.length === 0 &&
+          plugin.config.apply_route_overrides === true;
+        return !istio;
+      })
+      .map((plugin) => plugin.plugin_name),
+  );
 
   return pluginConfigs
     .filter((plugin) => {
       if (!plugin.enabled) return false;
-      if (plugin.scope === "global") return true;
-      if (plugin.scope === "proxy") {
-        return plugin.proxy_id === proxy.id && associated.has(plugin.id);
-      }
-      return plugin.proxy_id == null && associated.has(plugin.id);
+      if (plugin.scope === "global") return !shadowedNames.has(plugin.plugin_name);
+      return merged.includes(plugin);
     })
     .map((plugin) => ({ ...plugin, effectiveSource: plugin.scope }))
     .sort(
@@ -347,7 +377,7 @@ describe("effective authorization policy", () => {
     expect(analysis.consumers[0]?.decision).toBe("conditional");
   });
 
-  it("resolves each proxy identically to a whole-collection scan on a mixed fixture", () => {
+  it("resolves each proxy identically to the gateway scope merge on a mixed fixture", () => {
     const plugins = [
       plugin("global-auth", "key_auth", "global", {}, { priority_override: 30 }),
       plugin("global-logging", "stdout_logging", "global"),
@@ -392,7 +422,9 @@ describe("effective authorization policy", () => {
     ];
     const expectedAttached: Record<string, string[]> = {
       p1: ["direct-p1", "group-acl", "global-auth", "global-cors", "global-logging"],
-      p2: ["direct-p2", "global-auth", "global-cors", "global-logging", "group-rate"],
+      // p2's attached direct key_auth shadows the global key_auth. p1 lists
+      // direct-p2 too, but it targets p2, so p1 keeps the global instance.
+      p2: ["direct-p2", "global-cors", "global-logging", "group-rate"],
       s1: ["group-acl", "global-auth", "global-cors", "global-logging", "group-rate"],
     };
     // A stream proxy runs only the stream-capable plugins it is attached to.
@@ -474,5 +506,276 @@ describe("effective authorization policy", () => {
       expect(analyzeProxyPolicy(target, counted, [consumer("1", "alice", [], {})])).toBeDefined();
     }
     expect(elementReads).toBe(readsAfterBuild);
+  });
+});
+
+describe("gateway scope merge: scoped instances shadow same-name globals", () => {
+  const alice = consumer("1", "alice", [], { keyauth: [{ key: "[REDACTED]" }] });
+  const ids = (plugins: EffectivePlugin[]) => plugins.map((entry) => entry.id);
+  const allowAlice = { allowed_consumers: ["alice"] };
+
+  function expectOracleParity(target: Proxy, plugins: PluginConfig[]) {
+    const reference = referenceAttachedPlugins(target, plugins);
+    expect(ids(effectivePluginsForProxy(target, plugins))).toEqual(
+      ids(reference.filter((entry) => pluginAppliesToProxy(entry.plugin_name, target))),
+    );
+    expect(ids(inapplicablePluginsForProxy(target, plugins))).toEqual(
+      ids(reference.filter((entry) => !pluginAppliesToProxy(entry.plugin_name, target))),
+    );
+  }
+
+  it("lets an attached proxy-scoped ACL replace the global ACL (#469 reproduction)", () => {
+    const plugins = [
+      plugin("global-key", "key_auth", "global"),
+      plugin("global-acl", "access_control", "global", { disallowed_consumers: ["alice"] }),
+      plugin("scoped-acl", "access_control", "proxy", allowAlice, {
+        proxy_id: "p",
+      }),
+    ];
+    const target = proxy({ id: "p", plugins: [{ plugin_config_id: "scoped-acl" }] });
+
+    expect(ids(effectivePluginsForProxy(target, plugins))).toEqual(["global-key", "scoped-acl"]);
+    const analysis = analyzeProxyPolicy(target, plugins, [alice]);
+    expect(ids(analysis.accessControlPlugins)).toEqual(["scoped-acl"]);
+    expect(analysis.consumers[0]?.decision).toBe("allowed");
+    expect(analysis.consumers[0]?.reasons.join(" ")).not.toContain("global-acl");
+    expectOracleParity(target, plugins);
+  });
+
+  it("lets an attached proxy-group ACL replace the global ACL", () => {
+    const plugins = [
+      plugin("global-key", "key_auth", "global"),
+      plugin("global-acl", "access_control", "global", { allowed_consumers: ["bob"] }),
+      plugin("group-acl", "access_control", "proxy_group", allowAlice),
+      plugin("global-rate", "rate_limiting", "global"),
+      plugin("group-rate", "rate_limiting", "proxy_group"),
+    ];
+    const target = proxy({
+      plugins: [{ plugin_config_id: "group-acl" }, { plugin_config_id: "group-rate" }],
+    });
+
+    expect(ids(effectivePluginsForProxy(target, plugins))).toEqual([
+      "global-key",
+      "group-acl",
+      "group-rate",
+    ]);
+    expect(analyzeProxyPolicy(target, plugins, [alice]).consumers[0]?.decision).toBe("allowed");
+    expectOracleParity(target, plugins);
+  });
+
+  it("keeps globals whose name no attached scoped instance shares", () => {
+    const plugins = [
+      plugin("global-key", "key_auth", "global"),
+      plugin("global-acl", "access_control", "global", { disallowed_consumers: ["alice"] }),
+      plugin("scoped-rate", "rate_limiting", "proxy", {}, { proxy_id: "proxy-1" }),
+    ];
+    const target = proxy({ plugins: [{ plugin_config_id: "scoped-rate" }] });
+
+    expect(ids(effectivePluginsForProxy(target, plugins))).toEqual([
+      "global-acl",
+      "global-key",
+      "scoped-rate",
+    ]);
+    expect(analyzeProxyPolicy(target, plugins, [alice]).consumers[0]?.decision).toBe("denied");
+    expectOracleParity(target, plugins);
+  });
+
+  it.each([
+    {
+      label: "a disabled proxy-scoped instance",
+      scoped: plugin("scoped-acl", "access_control", "proxy", allowAlice, {
+        proxy_id: "proxy-1",
+        enabled: false,
+      }),
+      attach: ["scoped-acl"],
+    },
+    {
+      label: "a disabled proxy-group instance",
+      scoped: plugin("group-acl", "access_control", "proxy_group", allowAlice, {
+        enabled: false,
+      }),
+      attach: ["group-acl"],
+    },
+    {
+      label: "a proxy-scoped instance the proxy does not list",
+      scoped: plugin("scoped-acl", "access_control", "proxy", allowAlice, {
+        proxy_id: "proxy-1",
+      }),
+      attach: [],
+    },
+    {
+      label: "a proxy-group instance the proxy does not list",
+      scoped: plugin("group-acl", "access_control", "proxy_group", allowAlice),
+      attach: [],
+    },
+    {
+      label: "a listed proxy-scoped instance that targets another proxy",
+      scoped: plugin("scoped-acl", "access_control", "proxy", allowAlice, {
+        proxy_id: "proxy-2",
+      }),
+      attach: ["scoped-acl"],
+    },
+  ])("does not shadow the global ACL with $label", ({ scoped, attach }) => {
+    const plugins = [
+      plugin("global-key", "key_auth", "global"),
+      plugin("global-acl", "access_control", "global", { disallowed_consumers: ["alice"] }),
+      scoped,
+    ];
+    const target = proxy({ plugins: attach.map((id) => ({ plugin_config_id: id })) });
+
+    expect(ids(effectivePluginsForProxy(target, plugins))).toEqual(["global-acl", "global-key"]);
+    const analysis = analyzeProxyPolicy(target, plugins, [alice]);
+    expect(analysis.consumers[0]?.decision).toBe("denied");
+    expect(analysis.consumers[0]?.reasons).toEqual(["global-acl explicitly denies consumer alice"]);
+    expectOracleParity(target, plugins);
+  });
+
+  it.each(["request_size_limiting", "response_size_limiting"])(
+    "keeps a global %s beside same-name scoped instances",
+    (pluginName) => {
+      const plugins = [
+        plugin("global-limit", pluginName, "global"),
+        plugin("scoped-limit", pluginName, "proxy", {}, { proxy_id: "proxy-1" }),
+        plugin("group-limit", pluginName, "proxy_group"),
+      ];
+      const target = proxy({
+        plugins: [{ plugin_config_id: "scoped-limit" }, { plugin_config_id: "group-limit" }],
+      });
+
+      expect(ids(effectivePluginsForProxy(target, plugins))).toEqual([
+        "global-limit",
+        "group-limit",
+        "scoped-limit",
+      ]);
+      expectOracleParity(target, plugins);
+    },
+  );
+
+  it.each([
+    ["request_transformer", "istio-vs-req-xform-proxy-1"],
+    ["response_transformer", "istio-vs-resp-xform-proxy-1"],
+  ])("keeps a global %s beside the exact Istio route-transform consumer", (pluginName, id) => {
+    const plugins = [
+      plugin("global-xform", pluginName, "global", { rules: [{ op: "add" }] }),
+      plugin(id, pluginName, "proxy", { rules: [], apply_route_overrides: true }, {
+        proxy_id: "proxy-1",
+      }),
+    ];
+    const target = proxy({ plugins: [{ plugin_config_id: id }] });
+
+    expect(ids(effectivePluginsForProxy(target, plugins))).toEqual(["global-xform", id]);
+    expectOracleParity(target, plugins);
+  });
+
+  it.each([
+    {
+      label: "static rules",
+      pluginName: "request_transformer",
+      id: "istio-vs-req-xform-proxy-1",
+      config: { rules: [{ op: "add" }], apply_route_overrides: true },
+    },
+    {
+      label: "route overrides off",
+      pluginName: "request_transformer",
+      id: "istio-vs-req-xform-proxy-1",
+      config: { rules: [], apply_route_overrides: false },
+    },
+    {
+      label: "route overrides omitted",
+      pluginName: "response_transformer",
+      id: "istio-vs-resp-xform-proxy-1",
+      config: { rules: [] },
+    },
+    {
+      label: "rules omitted",
+      pluginName: "request_transformer",
+      id: "istio-vs-req-xform-proxy-1",
+      config: { apply_route_overrides: true },
+    },
+    {
+      label: "an id for another proxy",
+      pluginName: "request_transformer",
+      id: "istio-vs-req-xform-proxy-2",
+      config: { rules: [], apply_route_overrides: true },
+    },
+    {
+      label: "the other transformer's prefix",
+      pluginName: "response_transformer",
+      id: "istio-vs-req-xform-proxy-1",
+      config: { rules: [], apply_route_overrides: true },
+    },
+    {
+      label: "an ordinary operator id",
+      pluginName: "request_transformer",
+      id: "my-xform",
+      config: { rules: [], apply_route_overrides: true },
+    },
+  ])("shadows a global transformer with a near-Istio instance: $label", ({
+    pluginName,
+    id,
+    config,
+  }) => {
+    const plugins = [
+      plugin("global-xform", pluginName, "global", { rules: [{ op: "add" }] }),
+      plugin(id, pluginName, "proxy", config, { proxy_id: "proxy-1" }),
+    ];
+    const target = proxy({ plugins: [{ plugin_config_id: id }] });
+
+    expect(ids(effectivePluginsForProxy(target, plugins))).toEqual([id]);
+    expectOracleParity(target, plugins);
+  });
+
+  it("shadows a global transformer with a proxy-group instance using an Istio-shaped id", () => {
+    const id = "istio-vs-req-xform-proxy-1";
+    const plugins = [
+      plugin("global-xform", "request_transformer", "global", { rules: [{ op: "add" }] }),
+      plugin(id, "request_transformer", "proxy_group", { rules: [], apply_route_overrides: true }),
+    ];
+    const target = proxy({ plugins: [{ plugin_config_id: id }] });
+
+    expect(ids(effectivePluginsForProxy(target, plugins))).toEqual([id]);
+    expectOracleParity(target, plugins);
+  });
+
+  it("merges scopes before the protocol filter on a stream proxy", () => {
+    const plugins = [
+      plugin("global-cors", "cors", "global"),
+      plugin("group-cors", "cors", "proxy_group"),
+      plugin("global-logging", "stdout_logging", "global"),
+    ];
+    const streamProxy = proxy({
+      backend_scheme: "tcp",
+      listen_port: 18_443,
+      listen_path: null,
+      plugins: [{ plugin_config_id: "group-cors" }],
+    });
+
+    expect(ids(effectivePluginsForProxy(streamProxy, plugins))).toEqual(["global-logging"]);
+    // The shadowed global is neither run nor reported as skipped.
+    expect(ids(inapplicablePluginsForProxy(streamProxy, plugins))).toEqual(["group-cors"]);
+    expectOracleParity(streamProxy, plugins);
+  });
+
+  it("resolves the same shadowing from every proxy against one shared index", () => {
+    const plugins = [
+      plugin("global-key", "key_auth", "global"),
+      plugin("global-acl", "access_control", "global", { disallowed_consumers: ["alice"] }),
+      plugin("group-acl", "access_control", "proxy_group", allowAlice),
+    ];
+    const shadowedProxy = proxy({ id: "p1", plugins: [{ plugin_config_id: "group-acl" }] });
+    const plainProxy = proxy({ id: "p2", plugins: [] });
+
+    // Shadowing is per proxy: it must never leak into the shared index.
+    expect(analyzeProxyPolicy(shadowedProxy, plugins, [alice]).consumers[0]?.decision).toBe(
+      "allowed",
+    );
+    expect(analyzeProxyPolicy(plainProxy, plugins, [alice]).consumers[0]?.decision).toBe("denied");
+    expect(pluginAttachmentIndex(plugins).globals.map((entry) => entry.id)).toEqual([
+      "global-key",
+      "global-acl",
+    ]);
+    expect(analyzeProxyPolicy(shadowedProxy, plugins, [alice]).consumers[0]?.decision).toBe(
+      "allowed",
+    );
   });
 });

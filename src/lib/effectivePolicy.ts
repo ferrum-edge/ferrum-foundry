@@ -79,7 +79,9 @@ function priority(plugin: PluginConfig): number {
  * collection-wide filter did: an enabled global plugin attaches to every
  * proxy, while a proxy- or proxy-group-scoped plugin attaches only when the
  * proxy's own `plugins` list names its configuration (and, for a
- * proxy-scoped one, it targets that proxy). The index depends only on the
+ * proxy-scoped one, it targets that proxy). Shadowing of globals by a
+ * same-name scoped instance depends on the proxy, so it is applied per proxy
+ * from the index rather than stored in it. The index depends only on the
  * plugin collection, so it is memoized on that collection's identity and
  * rebuilt when the data changes.
  */
@@ -127,9 +129,49 @@ export function pluginAttachmentIndex(
   return built;
 }
 
+// Size policy is conjunctive in the gateway: a global limiter keeps running
+// beside a same-name scoped instance so the strictest bound still applies.
+const ADDITIVE_PLUGIN_NAMES = new Set(["request_size_limiting", "response_size_limiting"]);
+
+const ISTIO_ROUTE_TRANSFORM_PREFIXES: Readonly<Record<string, string>> = {
+  request_transformer: "istio-vs-req-xform-",
+  response_transformer: "istio-vs-resp-xform-",
+};
+
+/**
+ * The exact no-static-rules transformer the gateway's Istio VirtualService
+ * translator emits to apply per-route header overrides. It is additive to a
+ * same-name global transformer; any other proxy-scoped transformer shadows
+ * the global one as usual.
+ */
+function isIstioRouteTransformConsumer(plugin: PluginConfig, proxy: Proxy): boolean {
+  if (plugin.scope !== "proxy" || plugin.proxy_id !== proxy.id) return false;
+  const prefix = ISTIO_ROUTE_TRANSFORM_PREFIXES[plugin.plugin_name];
+  if (prefix === undefined || plugin.id !== `${prefix}${proxy.id}`) return false;
+  const rules = plugin.config?.rules;
+  return (
+    Array.isArray(rules) && rules.length === 0 && plugin.config?.apply_route_overrides === true
+  );
+}
+
+/** Whether attaching this scoped configuration removes same-name globals. */
+function shadowsGlobal(plugin: PluginConfig, proxy: Proxy): boolean {
+  if (ADDITIVE_PLUGIN_NAMES.has(plugin.plugin_name)) return false;
+  return !isIstioRouteTransformConsumer(plugin, proxy);
+}
+
 /**
  * Every enabled plugin config attached to this proxy by global, direct, or
  * proxy-group scope, before the gateway's protocol filter is applied.
+ *
+ * Mirrors the gateway's scope merge (Ferrum Edge v0.9.7 `plugin_cache.rs`,
+ * `remove_shadowed_global_plugin` and `is_istio_route_transform_consumer`):
+ * an enabled, attached proxy- or eligible proxy-group-scoped configuration
+ * replaces every global configuration with the same plugin name, except for
+ * the request/response size limiters and the Istio route-transform consumer,
+ * which are additive. A proxy-group configuration with any `proxy_id` is not
+ * eligible; a disabled or unattached scoped configuration shadows nothing,
+ * because the gateway never merges it.
  */
 function attachedPluginsForProxy(
   proxy: Proxy,
@@ -138,7 +180,8 @@ function attachedPluginsForProxy(
   const associated = new Set(
     (proxy.plugins ?? []).map((association) => association.plugin_config_id),
   );
-  const matched: PluginConfig[] = [...index.globals];
+  const scoped: PluginConfig[] = [];
+  const shadowed = new Set<string>();
 
   for (const id of associated) {
     const plugin = index.byId.get(id);
@@ -149,10 +192,15 @@ function attachedPluginsForProxy(
     // Ferrum Edge's full composition rebuild admits proxy-group configs only
     // when `proxy_id` is absent (PluginScope::ProxyGroup && proxy_id.is_none()).
     if (plugin.scope === "proxy_group" && plugin.proxy_id != null) continue;
-    matched.push(plugin);
+    scoped.push(plugin);
+    if (shadowsGlobal(plugin, proxy)) shadowed.add(plugin.plugin_name);
   }
 
-  return matched
+  const globals = shadowed.size === 0
+    ? index.globals
+    : index.globals.filter((plugin) => !shadowed.has(plugin.plugin_name));
+
+  return [...globals, ...scoped]
     .map((plugin) => ({
       ...plugin,
       effectiveSource: plugin.scope,
@@ -163,8 +211,9 @@ function attachedPluginsForProxy(
 }
 
 /**
- * Plugins the gateway actually runs for this proxy: attached by scope AND
- * applicable to the proxy's protocol. A stream (tcp/tcps/udp/dtls) proxy
+ * Plugins the gateway actually runs for this proxy: attached by scope, not
+ * shadowed by a same-name scoped instance, AND applicable to the proxy's
+ * protocol. A stream (tcp/tcps/udp/dtls) proxy
  * never executes HTTP-only plugins, so counting them would overstate both
  * policy coverage and consumer exposure.
  */
