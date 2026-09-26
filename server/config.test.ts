@@ -1,3 +1,4 @@
+import { jwtVerify } from 'jose';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const ENV_KEYS = [
@@ -92,6 +93,45 @@ describe('config', () => {
     setValidEnv({ FERRUM_BFF_AUTH_TOKEN: 'short' });
     const weakBff = await loadModule();
     expect(() => weakBff.loadConfig()).toThrow(/32/);
+  });
+
+  it('signs with the exact configured key bytes, as Ferrum Edge verifies', async () => {
+    const key = 'audit-only-dummy-signing-key-at-least-thirty-two-bytes';
+    const padded = `  ${key}  `;
+    setValidEnv({ FERRUM_JWT_SECRET: padded });
+    const { loadConfig } = await loadModule();
+    const config = loadConfig();
+    expect(config.jwtSecret).toBe(padded);
+
+    const { generateToken } = await import('./jwt.js');
+    const token = await generateToken(config, {
+      subject: 'admin@example.test',
+      displayName: 'Admin',
+      role: 'admin',
+      namespaces: undefined,
+      authMode: 'static',
+    });
+    await expect(jwtVerify(token, new TextEncoder().encode(padded))).resolves.toBeDefined();
+    await expect(jwtVerify(token, new TextEncoder().encode(key))).rejects.toMatchObject({
+      code: 'ERR_JWS_SIGNATURE_VERIFICATION_FAILED',
+    });
+  });
+
+  it('rejects a blank signing key rather than signing with it', async () => {
+    for (const blank of ['', ' '.repeat(40), '\t\n'.repeat(20)]) {
+      setValidEnv({ FERRUM_JWT_SECRET: blank });
+      const { loadConfig } = await loadModule();
+      expect(() => loadConfig()).toThrow(/FERRUM_JWT_SECRET is not set/);
+    }
+  });
+
+  it('measures the signing key minimum in UTF-8 bytes, as Ferrum Edge does', async () => {
+    setValidEnv({ FERRUM_JWT_SECRET: '\u00e9'.repeat(16) });
+    expect((await loadModule()).loadConfig().jwtSecret).toBe('\u00e9'.repeat(16));
+
+    setValidEnv({ FERRUM_JWT_SECRET: '\u00e9'.repeat(15) });
+    const short = await loadModule();
+    expect(() => short.loadConfig()).toThrow(/FERRUM_JWT_SECRET must be at least 32 bytes/);
   });
 
   it('applies bounded launch-safe defaults', async () => {

@@ -48,6 +48,41 @@ test("demo admin token matches the Ferrum admin claim contract", async () => {
   assert.equal(payload.jti, "contract-test-jti");
 });
 
+test("demo seeder signs with the exact configured key bytes, as Ferrum Edge verifies", async () => {
+  const padded = `  ${SIGNING_SECRET}  `;
+  const config = readSeedConfig({ FERRUM_JWT_SECRET: padded });
+  assert.equal(config.jwtSecret, padded);
+
+  const token = await adminToken(config, { now: Math.floor(Date.now() / 1000), jti: "padded-key-jti" });
+  await jwtVerify(token, new TextEncoder().encode(padded));
+  await assert.rejects(
+    jwtVerify(token, new TextEncoder().encode(SIGNING_SECRET)),
+    { code: "ERR_JWS_SIGNATURE_VERIFICATION_FAILED" },
+  );
+
+  assert.throws(() => readSeedConfig({ FERRUM_JWT_SECRET: " \t\n ".repeat(10) }), /FERRUM_JWT_SECRET is required/);
+});
+
+test("the shared signer measures its key in UTF-8 bytes, as Ferrum Edge does", async () => {
+  const now = 1_900_000_000;
+  // 16 characters but 32 UTF-8 bytes: Edge accepts it, so the signer must too.
+  const multibyte = "é".repeat(16);
+  const token = await adminToken({
+    jwtSecret: multibyte,
+    jwtIssuer: "ferrum-edge",
+    namespace: "ferrum-foundry-demo",
+  }, { now, jti: "multibyte-key-jti" });
+  const { payload } = await jwtVerify(token, new TextEncoder().encode(multibyte), {
+    currentDate: new Date(now * 1000),
+  });
+  assert.equal(payload.jti, "multibyte-key-jti");
+
+  await assert.rejects(
+    adminToken({ jwtSecret: "é".repeat(15), jwtIssuer: "ferrum-edge", namespace: "ferrum-foundry-demo" }),
+    /at least 32 bytes/,
+  );
+});
+
 test("demo seeder has no fallback signing credential and requires a target-bound confirmation", () => {
   assert.throws(() => readSeedConfig({}), /FERRUM_JWT_SECRET is required/);
 
