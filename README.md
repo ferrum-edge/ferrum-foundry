@@ -8,7 +8,7 @@
   <a href="https://github.com/ferrum-edge/ferrum-foundry/actions/workflows/ci.yml"><img src="https://github.com/ferrum-edge/ferrum-foundry/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
   <a href="https://github.com/ferrum-edge/ferrum-foundry/actions/workflows/release.yml"><img src="https://github.com/ferrum-edge/ferrum-foundry/actions/workflows/release.yml/badge.svg" alt="Release" /></a>
   <a href="https://github.com/ferrum-edge/ferrum-foundry/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue" alt="License" /></a>
-  <img src="https://img.shields.io/badge/node-22.19%2B%20%7C%2024%20%7C%2026%2B-brightgreen" alt="Node.js 22.19+, 24.x, or 26+ (image: 24 LTS)" />
+  <img src="https://img.shields.io/badge/node-22.22.2%2B%20%7C%2024.15%2B%20%7C%2026%2B-brightgreen" alt="Node.js 22.22.2+, 24.15.0+, or 26+ (image: 24 LTS)" />
   <img src="https://img.shields.io/badge/TypeScript-6-blue" alt="TypeScript" />
 </p>
 
@@ -128,7 +128,7 @@ needs no gateway and no identity provider of your own.
 
 ### Prerequisites
 
-- Node.js 22.19+ within 22.x, 24.x, or 26+. The published container image runs Node.js 24 LTS. This range satisfies both Undici's runtime floor and Vitest 5's supported Node versions.
+- Node.js 22.22.2+ within 22.x, 24.15.0+ within 24.x, or 26+. The published container image runs Node.js 24 LTS. These minimums satisfy the locked jsdom toolchain and Undici's runtime floor.
 - npm 10+
 
 ### Local Development
