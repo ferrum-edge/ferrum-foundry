@@ -8,11 +8,9 @@
 /* ------------------------------------------------------------------ */
 
 import {
-  committedWriteMessage,
   getCommittedWrite,
   isCommittedWrite,
   isUnobservedWrite,
-  markCommittedWrite,
   markUnobservedWrite,
   queryScope,
   UNOBSERVED_WRITE_MESSAGE,
@@ -21,9 +19,11 @@ import {
   useMutation,
   useQuery,
   useQueryClient,
+  type QueryClient,
 } from "@tanstack/react-query";
 import * as consumers from "@/api/consumers";
 import type { WriteGuard } from "@/api/conditionalWrite";
+import type { CommittedWrite } from "@/api/gatewayMetadata";
 import type {
   BuiltInCredentialType,
   Consumer,
@@ -145,12 +145,67 @@ export function useDeleteConsumer() {
 
 // ── Credential mutations ─────────────────────────────────────────
 
+/** What a credential write reports once the gateway holds it. */
+export interface CredentialWriteOutcome {
+  /** The namespace the write was issued under, even after a switch. */
+  readonly namespace: string;
+  readonly consumerId: string;
+  /**
+   * Set when the gateway answered the committed-but-not-live `503`: the write
+   * is durable and only the live apply lagged. `null` for an ordinary `2xx`.
+   */
+  readonly committed: CommittedWrite | null;
+}
+
+function refreshConsumer(qc: QueryClient, namespace: string, consumerId: string): Promise<void> {
+  return Promise.all([
+    qc.invalidateQueries({ queryKey: ["consumer", namespace, consumerId], exact: true }),
+    qc.invalidateQueries({ queryKey: ["consumers", namespace] }),
+  ]).then(() => undefined);
+}
+
+/**
+ * Run a credential write, resolving a committed-but-not-live answer as the
+ * completed write it is rather than as a failure (#451). The mutation then
+ * refreshes the consumer exactly as for a `2xx`, and the form closes instead
+ * of staying armed to submit the same secret again.
+ *
+ * A write whose answer was lost refreshes the consumer before it rejects, so
+ * the form's retry is judged against a re-read rather than the pre-write list.
+ * Neither outcome rethrows the ky error: it holds the secret-bearing request
+ * options and possibly an echoed body, and would otherwise be retained in the
+ * mutation cache. A definite pre-commit failure is rethrown as is, or replaced
+ * with `failure` when the caller must not surface gateway detail.
+ */
+async function writeCredential(
+  qc: QueryClient,
+  namespace: string,
+  consumerId: string,
+  write: () => Promise<unknown>,
+  failure?: string,
+): Promise<CredentialWriteOutcome> {
+  try {
+    await write();
+    return { namespace, consumerId, committed: null };
+  } catch (error) {
+    const committed = getCommittedWrite(error);
+    if (committed) return { namespace, consumerId, committed };
+    if (isUnobservedWrite(error)) {
+      await refreshConsumer(qc, namespace, consumerId);
+      throw markUnobservedWrite(new Error(UNOBSERVED_WRITE_MESSAGE));
+    }
+    if (failure === undefined) throw error;
+    // eslint-disable-next-line preserve-caught-error -- the cause is the secret-bearing error
+    throw new Error(failure);
+  }
+}
+
 export function useUpdateCredentials() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
   return useMutation({
     gcTime: 0,
-    mutationFn: async ({
+    mutationFn: ({
       consumerId,
       credType,
       data,
@@ -158,32 +213,16 @@ export function useUpdateCredentials() {
       consumerId: string;
       credType: BuiltInCredentialType;
       data: ConsumerCredentialInput | ConsumerCredentialInput[];
-    }) => {
-      try {
-        await consumers.updateCredentials(scope, consumerId, credType, data);
-      } catch (error) {
-        // Do not retain a ky error containing the password-bearing Request or
-        // an echoed response body in the mutation cache. A lost answer keeps
-        // its unknown-outcome marker so cached reads are still refreshed.
-        if (isUnobservedWrite(error)) throw markUnobservedWrite(new Error(UNOBSERVED_WRITE_MESSAGE));
-        // A committed-but-not-live answer keeps its marker too: the credentials
-        // were replaced, so it is not reported as a failure.
-        const committed = getCommittedWrite(error);
-        if (committed) {
-          throw markCommittedWrite(
-            new Error(committedWriteMessage("Credentials replaced", committed)),
-            committed,
-          );
-        }
-        // eslint-disable-next-line preserve-caught-error -- the cause is the secret-bearing error
-        throw new Error("Credential replacement failed. Check the gateway state before retrying.");
-      }
-      return { namespace: scope.namespace, consumerId };
-    },
-    onSuccess: ({ namespace, consumerId }) => Promise.all([
-      qc.invalidateQueries({ queryKey: ["consumer", namespace, consumerId], exact: true }),
-      qc.invalidateQueries({ queryKey: ["consumers", namespace] }),
-    ]).then(() => undefined),
+    }) =>
+      // Never surface an echoed response body: it may contain the password.
+      writeCredential(
+        qc,
+        scope.namespace,
+        consumerId,
+        () => consumers.updateCredentials(scope, consumerId, credType, data),
+        "Credential replacement failed. Check the gateway state before retrying.",
+      ),
+    onSuccess: ({ namespace, consumerId }) => refreshConsumer(qc, namespace, consumerId),
   });
 }
 
@@ -192,7 +231,7 @@ export function useAppendCredential() {
   const { scope } = useNamespace();
   return useMutation({
     gcTime: 0,
-    mutationFn: async ({
+    mutationFn: ({
       consumerId,
       credType,
       data,
@@ -200,14 +239,11 @@ export function useAppendCredential() {
       consumerId: string;
       credType: BuiltInCredentialType;
       data: ConsumerCredentialInput;
-    }) => {
-      await consumers.appendCredential(scope, consumerId, credType, data);
-      return { namespace: scope.namespace, consumerId };
-    },
-    onSuccess: ({ namespace, consumerId }) => Promise.all([
-      qc.invalidateQueries({ queryKey: ["consumer", namespace, consumerId], exact: true }),
-      qc.invalidateQueries({ queryKey: ["consumers", namespace] }),
-    ]).then(() => undefined),
+    }) =>
+      writeCredential(qc, scope.namespace, consumerId, () =>
+        consumers.appendCredential(scope, consumerId, credType, data),
+      ),
+    onSuccess: ({ namespace, consumerId }) => refreshConsumer(qc, namespace, consumerId),
   });
 }
 
@@ -216,20 +252,17 @@ export function useDeleteCredentials() {
   const { scope } = useNamespace();
   return useMutation({
     gcTime: 0,
-    mutationFn: async ({
+    mutationFn: ({
       consumerId,
       credType,
     }: {
       consumerId: string;
       credType: string;
-    }) => {
-      await consumers.deleteCredentials(scope, consumerId, credType);
-      return { namespace: scope.namespace, consumerId };
-    },
-    onSuccess: ({ namespace, consumerId }) => Promise.all([
-      qc.invalidateQueries({ queryKey: ["consumer", namespace, consumerId], exact: true }),
-      qc.invalidateQueries({ queryKey: ["consumers", namespace] }),
-    ]).then(() => undefined),
+    }) =>
+      writeCredential(qc, scope.namespace, consumerId, () =>
+        consumers.deleteCredentials(scope, consumerId, credType),
+      ),
+    onSuccess: ({ namespace, consumerId }) => refreshConsumer(qc, namespace, consumerId),
   });
 }
 
@@ -238,7 +271,7 @@ export function useDeleteCredentialByIndex() {
   const { scope } = useNamespace();
   return useMutation({
     gcTime: 0,
-    mutationFn: async ({
+    mutationFn: ({
       consumerId,
       credType,
       index,
@@ -246,13 +279,10 @@ export function useDeleteCredentialByIndex() {
       consumerId: string;
       credType: string;
       index: number;
-    }) => {
-      await consumers.deleteCredentialByIndex(scope, consumerId, credType, index);
-      return { namespace: scope.namespace, consumerId };
-    },
-    onSuccess: ({ namespace, consumerId }) => Promise.all([
-      qc.invalidateQueries({ queryKey: ["consumer", namespace, consumerId], exact: true }),
-      qc.invalidateQueries({ queryKey: ["consumers", namespace] }),
-    ]).then(() => undefined),
+    }) =>
+      writeCredential(qc, scope.namespace, consumerId, () =>
+        consumers.deleteCredentialByIndex(scope, consumerId, credType, index),
+      ),
+    onSuccess: ({ namespace, consumerId }) => refreshConsumer(qc, namespace, consumerId),
   });
 }
