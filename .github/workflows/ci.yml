@@ -21,8 +21,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 22 is the documented engines floor; 24 is the LTS the image ships.
-        node: [22, 24]
+        # Test the minimum supported patch on each maintained major line.
+        node: [22.22.2, 24.15.0]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
