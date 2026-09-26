@@ -172,7 +172,12 @@ function FieldControl({
     .join(" ");
 
   const setPresence = (present: boolean) =>
-    onUpdate(path, { ...state, present, checked: present ? state.checked ?? false : state.checked });
+    onUpdate(path, {
+      ...state,
+      present,
+      explicitNull: false,
+      checked: present ? state.checked ?? false : state.checked,
+    });
 
   let control: ReactNode;
   if (!state.present) {
@@ -200,6 +205,7 @@ function FieldControl({
             onUpdate(path, {
               ...state,
               text: String(event.target.checked),
+              explicitNull: false,
               checked: event.target.checked,
             })
           }
@@ -214,7 +220,7 @@ function FieldControl({
     control = (
       <Select
         value={state.text}
-        onValueChange={(value) => onUpdate(path, { ...state, text: value })}
+        onValueChange={(value) => onUpdate(path, { ...state, text: value, explicitNull: false })}
         options={(field.enumValues ?? []).map((option) => ({
           value: option.value,
           label: option.label,
@@ -232,7 +238,9 @@ function FieldControl({
         aria-describedby={describedBy || undefined}
         disabled={readOnly}
         value={state.text}
-        onChange={(event) => onUpdate(path, { ...state, text: event.target.value })}
+        onChange={(event) =>
+          onUpdate(path, { ...state, text: event.target.value, explicitNull: false })
+        }
         rows={Math.min(8, Math.max(3, state.text.split("\n").length + 1))}
         spellCheck={false}
         className={`w-full bg-bg-input border rounded-lg px-3 py-2 text-text-primary text-sm font-mono resize-y disabled:opacity-60 ${
@@ -252,7 +260,9 @@ function FieldControl({
         aria-describedby={describedBy || undefined}
         disabled={readOnly}
         value={state.text}
-        onChange={(event) => onUpdate(path, { ...state, text: event.target.value })}
+        onChange={(event) =>
+          onUpdate(path, { ...state, text: event.target.value, explicitNull: false })
+        }
       />
     );
   }

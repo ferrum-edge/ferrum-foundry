@@ -31,6 +31,8 @@ export interface FieldState {
   readonly present: boolean;
   /** Raw editor text. Parsed into JSON by `writeGuidedConfig`. */
   readonly text: string;
+  /** An explicit JSON null read from the configuration, distinct from text `null`. */
+  readonly explicitNull?: boolean;
   /** Booleans edit as a checkbox rather than text. */
   readonly checked?: boolean;
 }
@@ -102,6 +104,7 @@ export function readGuidedConfig(
       values[path] = {
         present,
         text: present && !field.secret ? renderValue(field, raw as JsonValue) : "",
+        ...(present && raw === null ? { explicitNull: true } : {}),
         checked: field.kind === "boolean" ? raw === true : undefined,
       };
     }
@@ -175,7 +178,7 @@ export function writeGuidedConfig(
         continue;
       }
 
-      if (state.text.trim() === "null" && field.kind !== "stringList") {
+      if (state.explicitNull) {
         setIn(next, section.path, field.key, null);
         continue;
       }
@@ -235,7 +238,7 @@ function validateField(
     return null;
   }
 
-  if (text === "null") return null;
+  if (state.explicitNull) return null;
 
   // A stored secret is read as present-but-blank so it is never displayed,
   // and `writeGuidedConfig` keeps the stored value when it stays blank. That
