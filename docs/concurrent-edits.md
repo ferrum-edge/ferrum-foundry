@@ -391,12 +391,26 @@ validation, and batch create (#478). `secretValues()` finds the secrets by
 position rather than by resource: every string under a credential-shaped field
 name at any depth (the conflict dialog's `isRedactedField` list, plus
 `headers` maps, webhooks, service-account documents, and camelCase `*Key`
-fields — Ferrum Edge's plugin projection treats these as secret, and a
-non-admin read never returns them), and the userinfo, path, query, and
-fragment of any URL; a bare `scheme://host[:port]` stays readable. A
-multi-line value such as a PEM key is also redacted line by line, for any line
-of 16 characters or more, since a parser that rejects one line quotes it
-rather than the document.
+fields), and the userinfo, path, query, and fragment of any URL; a bare
+`scheme://host[:port]` stays readable. A multi-line value such as a PEM key is
+also redacted line by line, for any line of 16 characters or more, since a
+parser that rejects one line quotes it rather than the document; the PEM armor
+lines (`-----BEGIN CERTIFICATE-----`) are the same text in every document and
+stay readable.
+
+A plugin configuration's `config` — in a plugin write or a batch entry — is
+classified the way Ferrum Edge v0.9.7 projects it for a non-admin read
+(`src/admin/plugin_config_projection.rs`), so nothing Edge hides from a read
+can come back in a refusal: `PLUGIN_SENSITIVITY` transcribes Edge's
+per-plugin schema rules (for example `ai_semantic_cache`'s
+`semantic_embedding_auth_header`, `proxy_alerts`' `channels.*.body_template`,
+`api_chargeback_sink`'s `clickhouse.insert_query_params.*`, and every
+`kafka_logging` `producer_config` property off Edge's safe list, such as
+`ssl.key.pem`), then Edge's name floor and URL sweep apply beneath them. A
+plugin Edge's table does not name — a custom plugin, or a built-in newer than
+the paired release — has no schema to classify by, so every string in its
+`config` is treated as secret. Edge's operator-configured
+`FERRUM_LOG_REDACT_METADATA_KEYS` extras are not visible to Foundry.
 
 `withRedactedFailure()` replaces any failure of such a write with a
 `RedactedWriteError`: the redacted message, a bodiless copy of the response
@@ -405,10 +419,20 @@ rather than the document.
 `isPreconditionFailed()`, and the outcome classifiers read it as they read a ky
 `HTTPError`, and the committed-write and unobserved-write markers are carried
 over, so a guarded save's `412` handling, "committed, not yet proven live",
-and "outcome unknown" are unchanged. Each such request opts out of the global
-error popup, which is raised from ky's own error before redaction could run;
-the page reports the failure, and a plugin membership plan includes the
-gateway's redacted reason in its own message. Consumer metadata saves are not
+and "outcome unknown" are unchanged. The global error popup is raised from
+ky's own error, before redaction could run, so each such request carries
+`REDACT_ERRORS`: the client holds the report it would have raised, and
+`withRedactedFailure()` raises it once the submitted secrets are removed from
+its body and the outcome's detail, with the same status, URL, and unobserved
+outcome — a write whose
+answer was lost still opens the "Outcome unknown" dialog, BFF code included
+(`docs/client-recovery.md`). A failure the popup never reports (a committed
+write, a guarded save's handled `412`) is not held. Writes whose form renders
+every refusal itself (consumer credential writes, managed TLS create, ACME
+order creation and renewal, TLS validation) keep `SILENT_ERRORS` instead. A plugin membership plan includes the
+gateway's redacted reason in its own message. Every such mutation hook sets
+`gcTime: 0`, so the submitted body does not linger in the mutation cache's
+variables after the form is gone. Consumer metadata saves are not
 covered because their body carries no submitted secret: credentials in it come
 from the read the save is sent against, where they are `[REDACTED]`.
 
@@ -471,7 +495,7 @@ so the next successful read seeds a fresh baseline for the new tenant.
 | Guarded deletes, consumer saves and rotation re-send, nested redaction of plugin `config` | `src/api/conditionalWrite.test.ts`, `src/lib/resourceBaseline.test.ts` |
 | Plugin editor baseline, membership writes conditional on their reads | `src/lib/pluginMembership.test.ts`, `src/lib/pluginMembership.binding.test.ts` |
 | Refused delete dialog | `src/routes/proxies/concurrentEdit.test.tsx` |
-| Echoed secrets redacted on consumer create, plugin, upstream, TLS, and batch writes; no request retained; status, `412`, and outcome markers kept | `src/api/secretRedaction.test.ts`, `src/routes/consumers/createSecretEcho.test.tsx` |
+| Echoed secrets redacted on consumer create, plugin, upstream, TLS, and batch writes, in the error and in the popup; plugin `config` classified by Edge's projection; no request retained; status, `412`, and outcome markers kept | `src/api/secretRedaction.test.ts`, `src/routes/consumers/createSecretEcho.test.tsx` |
 | Committed-but-not-live classification, popup suppression, cache refresh, save-twice regression | `src/api/committedWrite.test.ts`, `src/lib/queryClient.test.ts` |
 | Editor reseed after a committed save; committed delete reported as deleted | `src/routes/proxies/concurrentEdit.test.tsx` |
 | Committed delete retires the seeded detail and list caches | `src/hooks/deleteDetailCache.test.tsx` |

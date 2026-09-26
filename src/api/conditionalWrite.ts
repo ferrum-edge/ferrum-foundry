@@ -6,6 +6,7 @@ import { isHTTPError } from "ky";
 import {
   HANDLED_STATUSES,
   proxyApi,
+  REDACT_ERRORS,
   scoped,
   SILENT_ERRORS,
   type NamespaceScope,
@@ -190,8 +191,9 @@ function conditionalOptions(ifMatch: string | null) {
  * Full-replacement `PUT`, conditional on `ifMatch` when there is one.
  *
  * A conditional write's `412` is an outcome `guardedReplace` resolves itself,
- * so it is kept out of the global error popup; every other failure is not,
- * unless `silentErrors` says the caller reports it (a secret-bearing body).
+ * so it is kept out of the global error popup; every other failure is not.
+ * `redactErrors` defers that report to `withRedactedFailure`, which raises it
+ * with the secrets a secret-bearing body submitted removed.
  * `If-Match` is only ever sent to the resource paths whose `PUT` evaluates it
  * — Edge answers `400` to one on any other mutating route.
  */
@@ -200,15 +202,15 @@ export function conditionalPut<TResource>(
   path: string,
   body: unknown,
   ifMatch: string | null,
-  options: { readonly silentErrors?: boolean } = {},
+  options: { readonly redactErrors?: boolean } = {},
 ): Promise<TResource> {
   const conditional = conditionalOptions(ifMatch);
   return proxyApi
     .put(path, scoped(scope, {
       json: body,
       ...conditional,
-      ...(options.silentErrors && {
-        context: { ...conditional.context, [SILENT_ERRORS]: true },
+      ...(options.redactErrors && {
+        context: { ...conditional.context, [REDACT_ERRORS]: true },
       }),
     }))
     .json<TResource>();
@@ -253,8 +255,10 @@ export interface GuardedReplaceOptions<TResource, TPayload> {
   readonly propose: (current: TResource) => TPayload;
   /**
    * The full-replacement `PUT`. When `ifMatch` is not `null` it must be sent
-   * as `If-Match`, and a `412` must reach this function's caller as an
-   * `HTTPError` (see `HANDLED_STATUSES` in `client.ts`).
+   * as `If-Match`, and a `412` must reach this function's caller as an error
+   * `isPreconditionFailed` recognises — ky's `HTTPError`, or the
+   * `RedactedWriteError` a secret-bearing write replaces it with — and stay
+   * out of the global error popup (see `HANDLED_STATUSES` in `client.ts`).
    */
   readonly write: (payload: TPayload, ifMatch: string | null) => Promise<TResource>;
 }

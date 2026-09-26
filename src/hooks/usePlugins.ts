@@ -116,6 +116,8 @@ export function useCreatePluginConfig() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
   return useMutation({
+    // Discard submitted secret variables as soon as the form resets/unmounts.
+    gcTime: 0,
     mutationFn: (data: PluginConfigCreate) => plugins.createConfig(scope, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pluginConfigs"] });
@@ -140,6 +142,8 @@ export function useCreatePluginWithMembership() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
   return useMutation({
+    // Discard submitted secret variables as soon as the form resets/unmounts.
+    gcTime: 0,
     mutationFn: ({
       data,
       proxyIds = [],
@@ -155,6 +159,8 @@ export function useUpdatePluginWithMembership() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
   return useMutation({
+    // Discard submitted secret variables as soon as the form resets/unmounts.
+    gcTime: 0,
     mutationFn: ({
       id,
       data,

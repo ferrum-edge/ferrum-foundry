@@ -7,8 +7,9 @@
  * configuration writes, upstream writes, TLS key material, and batch create
  * all send secrets, so each failure must reach the page with every submitted
  * secret replaced by `[REDACTED]` — before any trimming or truncation — must
- * not raise the global popup (which shows the raw body), and must not keep the
- * request, its options, or a `cause`.
+ * raise the global popup (the "Outcome unknown" dialog included) only with its
+ * body redacted the same way, and must not keep the request, its options, or a
+ * `cause`.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -29,6 +30,7 @@ import * as plugins from "./plugins";
 import * as tls from "./tls";
 import * as upstreams from "./upstreams";
 import {
+  pluginConfigSecrets,
   redactionForms,
   RedactedWriteError,
   secretValues,
@@ -83,6 +85,23 @@ async function exposure(error: unknown): Promise<string> {
 function expectRedacted(text: string, secret: string): void {
   expect(text).toContain("[REDACTED]");
   for (const fragment of fragments(secret)) expect(text).not.toContain(fragment);
+}
+
+/**
+ * The one popup the failure raised: the gateway's status and the request's
+ * URL, with no fragment of `secret` in its body or its outcome's detail.
+ */
+function expectRedactedReport(secret: string, statusCode: number, path: string): ApiError {
+  expect(reported).toHaveLength(1);
+  const [report] = reported;
+  expect(report.statusCode).toBe(statusCode);
+  expect(new URL(report.url).pathname).toBe(path);
+  expectRedacted(`${report.body}\n${report.outcome?.detail ?? "[REDACTED]"}`, secret);
+  // An echo inside a field that is itself JSON is escaped twice once the body
+  // is serialized for the popup.
+  const twice = JSON.stringify(JSON.stringify(secret.trim()).slice(1, -1)).slice(1, -1);
+  expect(report.body).not.toContain(twice);
+  return report;
 }
 
 /** Nothing on the error still references the request or the ky error. */
@@ -169,11 +188,81 @@ describe("secretValues", () => {
     expect(secretValues({ backend_tls_client_key_path: "/etc/ferrum/client.key" })).toEqual([]);
   });
 
-  it("redacts each substantial line of a multi-line value", () => {
+  it("redacts each substantial line of a multi-line value, but not the PEM armor", () => {
     const forms = redactionForms([PEM]);
     expect(forms).toContain(PEM.split("\n")[1]);
     expect(forms).toContain(PEM.split("\n")[2]);
     expect(forms).not.toContain("");
+    expect(forms).not.toContain("-----BEGIN PRIVATE KEY-----");
+    expect(forms).not.toContain("-----END PRIVATE KEY-----");
+    expect(redactionForms([CERT])).not.toContain("-----BEGIN CERTIFICATE-----");
+  });
+});
+
+describe("plugin configurations follow Ferrum Edge's projection", () => {
+  it.each([
+    ["ai_semantic_cache", { semantic_embedding_auth_header: "Api-Key emb-1" }, ["Api-Key emb-1"]],
+    ["proxy_alerts", {
+      channels: [{ type: "webhook", url: "https://alerts.internal", body_template: "{\"rk\":\"rk-1\"}" }],
+    }, ['{"rk":"rk-1"}']],
+    ["proxy_alerts", {
+      channels: { pager: { url: "https://alerts.internal", body_template: "rk-2" } },
+    }, ["rk-2"]],
+    ["api_chargeback_sink", {
+      clickhouse: { url: "https://ch.internal:8443", insert_query_params: { quota_hint: "q-1" } },
+    }, ["q-1"]],
+    ["otel_tracing", { headers: { "x-honeycomb-team": "hc-1" }, service_name: "edge" }, ["hc-1"]],
+    ["serverless_function", { azure_function_key: "fk-1", provider: "azure" }, ["fk-1"]],
+    ["loki_logging", { authorization_header: "Basic b64-1", batch_size: "100" }, ["Basic b64-1"]],
+  ])("%s: takes the paths Edge redacts and nothing else", (plugin, config, expected) => {
+    expect(pluginConfigSecrets(plugin, config).sort()).toEqual([...expected].sort());
+  });
+
+  it("takes every kafka producer property off Edge's safe list, a PEM key included", () => {
+    const secrets = secretValues({
+      plugin_name: "kafka_logging",
+      config: {
+        broker_list: "kafka.internal:9092",
+        topic: "edge-logs",
+        producer_config: {
+          "ssl.key.pem": PEM,
+          "sasl.oauthbearer.config": "principal=edge secret=s-1",
+          acks: "all",
+          "compression.type": "zstd",
+        },
+      },
+    });
+    expect(secrets.sort()).toEqual([PEM, "principal=edge secret=s-1"].sort());
+    const forms = redactionForms(secrets);
+    expect(forms).toContain(PEM.split("\n")[1]);
+    expect(forms).not.toContain("all");
+    expect(forms).not.toContain("-----BEGIN PRIVATE KEY-----");
+  });
+
+  it("fails closed where Edge does: a scalar where a map is expected, a non-URL endpoint", () => {
+    expect(pluginConfigSecrets("kafka_logging", { producer_config: "ssl.key.pem=pk-1" }))
+      .toEqual(["ssl.key.pem=pk-1"]);
+    expect(pluginConfigSecrets("opa", { headers: "Bearer opa-1" })).toEqual(["Bearer opa-1"]);
+    expect(pluginConfigSecrets("http_logging", { endpoint_url: "collector.internal/t0ken" }))
+      .toEqual(["collector.internal/t0ken"]);
+    expect(pluginConfigSecrets("http_logging", { endpoint_url: "https://collector.internal" }))
+      .toEqual([]);
+  });
+
+  it("matches Edge's normalized key spellings and its name floor", () => {
+    expect(pluginConfigSecrets("http_logging", { customHeaders: { "X-Tenant": "t-1" } }))
+      .toEqual(["t-1"]);
+    expect(pluginConfigSecrets("http_logging", { nested: { "private.key": "pk-2", APIKey: "ak-2" } })
+      .sort()).toEqual(["ak-2", "pk-2"]);
+  });
+
+  it("treats every string of a plugin with no known schema as secret", () => {
+    expect(pluginConfigSecrets("acme_custom_auth", {
+      mode: "strict",
+      upstream: { realm: "r-1" },
+      tags: ["t-2"],
+    }).sort()).toEqual(["r-1", "strict", "t-2"]);
+    expect(pluginConfigSecrets("rate_limiting", ["not", "an object"])).toEqual(["not", "an object"]);
   });
 });
 
@@ -182,7 +271,10 @@ describe("consumer create (#478)", () => {
     ["a 1000-character key", LONG],
     ["a key that needs JSON escapes", QUOTED],
     ["a whitespace-padded key", PADDED],
-  ])("keeps no fragment of %s the gateway echoed, and raises no popup", async (_, secret) => {
+  ])("keeps no fragment of %s the gateway echoed, in the error or the popup", async (_, secret) => {
+    // `details` holds the secret JSON-escaped once; the popup's serialized
+    // body would escape it again, so the popup must be built from the
+    // redacted body rather than by redacting the serialized one.
     echo(secret);
     const failure = await consumers.create(scope, consumerWith(secret)).catch((e: unknown) => e);
 
@@ -190,7 +282,7 @@ describe("consumer create (#478)", () => {
     expectRedacted(await exposure(failure), secret);
     // The status still reaches the page, and the username is not a secret.
     expect((failure as RedactedWriteError).response?.status).toBe(400);
-    expect(reported).toEqual([]);
+    expect(expectRedactedReport(secret, 400, "/api/proxy/consumers").outcome).toBeUndefined();
     expect(sent).toHaveLength(1);
     expect(JSON.parse(sent[0].body).credentials.keyauth[0].key).toBe(secret);
   });
@@ -210,7 +302,7 @@ describe("consumer create (#478)", () => {
     expect(reported).toEqual([]);
   });
 
-  it("keeps the unobserved-write marker, without the popup", async () => {
+  it("keeps the unobserved-write marker, and opens the redacted Outcome unknown dialog", async () => {
     respond = () => Response.json(
       { error: `Bad Gateway ${LONG}`, code: "FERRUM_BFF_UPSTREAM_FAILURE" },
       { status: 502 },
@@ -221,7 +313,25 @@ describe("consumer create (#478)", () => {
     expect(isUnobservedWrite(failure)).toBe(true);
     expect(await getApiErrorMessage(failure, "Failed")).toContain("Outcome unknown");
     expectRedacted(await exposure(failure), LONG);
-    expect(reported).toEqual([]);
+    // The dialog keeps what diagnosis needs — the outcome, the status, the URL,
+    // and the BFF's code — and nothing that was submitted.
+    const report = expectRedactedReport(LONG, 502, "/api/proxy/consumers");
+    expect(report.outcome).toEqual({ reason: "upstream_failure", detail: "Bad Gateway [REDACTED]" });
+    expect(report.body).toContain("FERRUM_BFF_UPSTREAM_FAILURE");
+    expect(sent).toHaveLength(1);
+  });
+
+  it("reports a transport failure as an unknown outcome, without replaying it", async () => {
+    respond = () => { throw new TypeError("Failed to fetch"); };
+    const failure = await consumers.create(scope, consumerWith(LONG)).catch((e: unknown) => e);
+
+    expectDetached(failure);
+    expect(isUnobservedWrite(failure)).toBe(true);
+    expect(reported).toHaveLength(1);
+    expect(reported[0]).toMatchObject({ statusCode: 0, outcome: { reason: "transport" } });
+    expect(new URL(reported[0].url).pathname).toBe("/api/proxy/consumers");
+    for (const fragment of fragments(LONG)) expect(JSON.stringify(reported[0])).not.toContain(fragment);
+    expect(sent).toHaveLength(1);
   });
 });
 
@@ -230,13 +340,33 @@ describe("plugin configuration writes (#478)", () => {
     ["a 1000-character client secret", LONG],
     ["a client secret that needs JSON escapes", QUOTED],
     ["a whitespace-padded client secret", PADDED],
-  ])("create keeps no fragment of %s", async (_, secret) => {
+  ])("create keeps no fragment of %s, in the error or the popup", async (_, secret) => {
     echo(secret);
     const failure = await plugins.createConfig(scope, pluginWith(secret)).catch((e: unknown) => e);
 
     expectDetached(failure);
     expectRedacted(await exposure(failure), secret);
-    expect(reported).toEqual([]);
+    expectRedactedReport(secret, 400, "/api/proxy/plugins/config");
+  });
+
+  it("create keeps no line of a kafka producer's PEM key", async () => {
+    const line = PEM.split("\n")[1];
+    respond = () => Response.json(
+      { error: `producer_config: ssl.key.pem: bad base64 in ${line}` },
+      { status: 400 },
+    );
+    const failure = await plugins.createConfig(scope, {
+      plugin_name: "kafka_logging",
+      scope: "global",
+      config: { broker_list: "kafka.internal:9092", producer_config: { "ssl.key.pem": PEM } },
+    }).catch((e: unknown) => e);
+
+    expectDetached(failure);
+    const text = await exposure(failure);
+    expect(text).toContain("ssl.key.pem: bad base64 in [REDACTED]");
+    expect(text).not.toContain(line);
+    expect(reported).toHaveLength(1);
+    expect(reported[0].body).not.toContain(line);
   });
 
   it("update keeps no fragment of a secret in a URL, and a 412 stays a precondition failure", async () => {
@@ -247,7 +377,10 @@ describe("plugin configuration writes (#478)", () => {
     expectDetached(failure);
     expectRedacted(await exposure(failure), url);
     expect(isPreconditionFailed(failure)).toBe(false);
+    expectRedactedReport(url, 400, "/api/proxy/plugins/config/log");
 
+    // A handled 412 is the guard's to resolve: no popup for it.
+    reported.length = 0;
     respond = () => Response.json({ error: `precondition failed for ${url}` }, { status: 412 });
     const refused = await plugins.updateConfig(scope, "log", plugin, '"r1"').catch((e: unknown) => e);
     expectDetached(refused);
@@ -273,13 +406,15 @@ describe("upstream writes (#478)", () => {
     const created = await upstreams.create(scope, upstream(PADDED)).catch((e: unknown) => e);
     expectDetached(created);
     expectRedacted(await exposure(created), PADDED);
+    expectRedactedReport(PADDED, 400, "/api/proxy/upstreams");
 
+    reported.length = 0;
     echo(LONG);
     const updated = await upstreams.update(scope, "orders", upstream(LONG), null)
       .catch((e: unknown) => e);
     expectDetached(updated);
     expectRedacted(await exposure(updated), LONG);
-    expect(reported).toEqual([]);
+    expectRedactedReport(LONG, 400, "/api/proxy/upstreams/orders");
   });
 });
 
@@ -296,22 +431,44 @@ describe("TLS key material and ACME credentials (#478)", () => {
     const text = await exposure(failure);
     expect(text).toContain("key_pem: invalid base64 in line [REDACTED]");
     expect(text).not.toContain(line);
+    // The form renders this refusal under the field itself.
     expect(reported).toEqual([]);
   });
 
+  it("keeps a PEM armor line the gateway names readable", async () => {
+    respond = () => Response.json(
+      { error: "key_pem: expected -----BEGIN PRIVATE KEY-----" },
+      { status: 400 },
+    );
+    const failure = await tls.createManagedRecord("certificates", {
+      cert_pem: CERT,
+      key_pem: PEM,
+    }).catch((e: unknown) => e);
+
+    expect(await getApiErrorDetail(failure)).toBe("key_pem: expected -----BEGIN PRIVATE KEY-----");
+  });
+
   it.each([
-    ["managed record update", () =>
+    ["managed record update", "/api/proxy/admin/tls/certificates/edge", () =>
       tls.updateManagedRecord("certificates", "edge", { cert_pem: CERT, key_pem: LONG })],
-    ["ACME certificate import", () =>
+    ["ACME certificate import", "/api/proxy/admin/tls/acme/certificates", () =>
       tls.createAcmeCertificate({ domains: ["a.example"], directory_url: "https://acme.example",
         cert_pem: CERT, key_pem: LONG })],
-    ["ACME certificate replacement", () =>
+    ["ACME certificate replacement", "/api/proxy/admin/tls/acme/certificates/edge", () =>
       tls.updateAcmeCertificate("edge", { domains: ["a.example"], directory_url: "https://acme.example",
         cert_pem: CERT, key_pem: LONG })],
-    ["validation", () => tls.validateMaterial({ key_pem: LONG })],
-  ])("%s keeps no fragment of the key and raises no popup", async (_, write) => {
+  ])("%s keeps no fragment of the key in the error or the popup", async (_, path, write) => {
     echo(LONG);
     const failure = await write().catch((e: unknown) => e);
+
+    expectDetached(failure);
+    expectRedacted(await exposure(failure), LONG);
+    expectRedactedReport(LONG, 400, path);
+  });
+
+  it("validation keeps no fragment of the key and leaves the refusal to its form", async () => {
+    echo(LONG);
+    const failure = await tls.validateMaterial({ key_pem: LONG }).catch((e: unknown) => e);
 
     expectDetached(failure);
     expectRedacted(await exposure(failure), LONG);
@@ -344,6 +501,6 @@ describe("batch create (#478)", () => {
 
     expectDetached(failure);
     expectRedacted(await exposure(failure), QUOTED);
-    expect(reported).toEqual([]);
+    expectRedactedReport(QUOTED, 400, "/api/proxy/batch");
   });
 });

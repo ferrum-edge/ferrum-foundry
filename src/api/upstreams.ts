@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – Upstream API functions                           */
 /* ------------------------------------------------------------------ */
 
-import { proxyApi, scoped, SILENT_ERRORS, type NamespaceScope } from "./client";
+import { proxyApi, REDACT_ERRORS, scoped, SILENT_ERRORS, type NamespaceScope } from "./client";
 import type {
   PaginatedResponse,
   PaginationParams,
@@ -32,8 +32,8 @@ const upstreamWrites = new Map<string, Promise<void>>();
 /**
  * An upstream body can carry a service-discovery credential (the Consul ACL
  * `token`, a password in a discovery address). A failed write is reported with
- * those values removed and without the request (#478); the global error popup,
- * which would show the raw gateway body, stays closed and the caller reports it.
+ * those values removed and without the request (#478), to the caller and to
+ * the global error popup, which `redactErrors` holds until the body is redacted.
  */
 function putUpstream(
   scope: NamespaceScope,
@@ -42,7 +42,7 @@ function putUpstream(
   ifMatch: string | null,
 ): Promise<Upstream> {
   return withRedactedFailure(secretValues(body), () =>
-    conditionalPut<Upstream>(scope, path, body, ifMatch, { silentErrors: true }),
+    conditionalPut<Upstream>(scope, path, body, ifMatch, { redactErrors: true }),
   );
 }
 
@@ -187,7 +187,7 @@ export async function create(
   const body = withUpstreamId(data);
   return withRedactedFailure(secretValues(body), () =>
     proxyApi
-      .post("upstreams", scoped(scope, { json: body, context: { [SILENT_ERRORS]: true } }))
+      .post("upstreams", scoped(scope, { json: body, context: { [REDACT_ERRORS]: true } }))
       .json<Upstream>(),
   );
 }

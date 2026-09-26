@@ -15,7 +15,8 @@ vi.mock("@/stores/auth", () => ({ useAuth: () => ({ principal: null }) }));
 
 // Creating a consumer sends the keys and secrets typed into the form. A
 // gateway refusal that repeats one must not reach the toast, the global error
-// popup, or the rejected mutation's error (#478).
+// popup, or the rejected mutation's error (#478). The popup is still raised,
+// with the redacted body.
 
 class BasedRequest extends Request {
   constructor(input: RequestInfo | URL, init?: RequestInit) {
@@ -121,8 +122,11 @@ describe("a refused consumer create that echoes a submitted secret (#478)", () =
     }
     for (const fragment of exposed) expect(document.body.textContent).not.toContain(fragment);
 
-    // The global popup would show the raw gateway body.
-    expect(reported).toEqual([]);
+    // The global popup is raised as before, from the redacted body.
+    expect(reported).toHaveLength(1);
+    expect(reported[0].statusCode).toBe(409);
+    expect(reported[0].body).toContain("duplicate key [REDACTED]");
+    for (const fragment of exposed) expect(reported[0].body).not.toContain(fragment);
     // The rejected mutation's error keeps neither the echo nor the request.
     expect(errors).toHaveLength(1);
     const error = errors[0] as Error & Record<string, unknown>;

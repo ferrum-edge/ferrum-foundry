@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – Consumer API functions                           */
 /* ------------------------------------------------------------------ */
 
-import { proxyApi, scoped, SILENT_ERRORS, type NamespaceScope } from "./client";
+import { proxyApi, REDACT_ERRORS, scoped, SILENT_ERRORS, type NamespaceScope } from "./client";
 import type {
   BuiltInCredentialType,
   Consumer,
@@ -90,9 +90,9 @@ export async function get(scope: NamespaceScope, id: string): Promise<Consumer> 
 /**
  * Create a consumer with its initial credentials. The body carries the keys,
  * passwords and secrets entered in the form, so a failure is reported with
- * every submitted secret removed and without the request (#478), and the
- * global error popup — which would show the raw gateway body — stays closed.
- * The caller reports the failure.
+ * every submitted secret removed and without the request (#478) — to the
+ * caller, and to the global error popup, which `REDACT_ERRORS` holds until the
+ * body is redacted.
  */
 export async function create(
   scope: NamespaceScope,
@@ -101,7 +101,7 @@ export async function create(
   const body = withConsumerId(data);
   return withRedactedFailure(secretValues(body), () =>
     proxyApi
-      .post("consumers", scoped(scope, { json: body, context: { [SILENT_ERRORS]: true } }))
+      .post("consumers", scoped(scope, { json: body, context: { [REDACT_ERRORS]: true } }))
       .json<Consumer>(),
   );
 }

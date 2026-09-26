@@ -101,8 +101,8 @@ export class PluginMembershipError extends Error {
 
 /**
  * A failed step as the plan reports it: the error and the gateway's detail.
- * A plugin write's failure is redacted and kept out of the global error popup
- * (`plugins.createConfig`), so this message is where its reason is shown.
+ * A plugin write's failure is redacted (`plugins.createConfig`), so its detail
+ * is safe to carry into the plan's own message, which the editor shows.
  */
 function failureText(error: unknown): string {
   if (!(error instanceof Error)) return "unknown error";

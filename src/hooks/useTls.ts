@@ -34,6 +34,8 @@ export function useManagedTlsRecords(
 export function useCreateManagedTlsRecord(collection: tls.ManagedTlsCollection) {
   const qc = useQueryClient();
   return useMutation({
+    // Discard submitted secret variables as soon as the form resets/unmounts.
+    gcTime: 0,
     mutationFn: (data: tls.ManagedTlsRequest) =>
       tls.createManagedRecord(collection, data),
     onSuccess: () => {
@@ -45,6 +47,8 @@ export function useCreateManagedTlsRecord(collection: tls.ManagedTlsCollection) 
 export function useUpdateManagedTlsRecord(collection: tls.ManagedTlsCollection) {
   const qc = useQueryClient();
   return useMutation({
+    // Discard submitted secret variables as soon as the form resets/unmounts.
+    gcTime: 0,
     mutationFn: ({ id, data }: { id: string; data: tls.ManagedTlsRequest }) =>
       tls.updateManagedRecord(collection, id, data),
     onSuccess: () => {
@@ -83,6 +87,8 @@ export function useAcmeCertificate(id: string) {
 export function useImportAcmeCertificate() {
   const qc = useQueryClient();
   return useMutation({
+    // Discard submitted secret variables as soon as the form resets/unmounts.
+    gcTime: 0,
     mutationFn: (data: tls.AcmeCertificateRequest) => tls.createAcmeCertificate(data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["tls", "acme", "certificates"] });
@@ -93,6 +99,8 @@ export function useImportAcmeCertificate() {
 export function useUpdateAcmeCertificate() {
   const qc = useQueryClient();
   return useMutation({
+    // Discard submitted secret variables as soon as the form resets/unmounts.
+    gcTime: 0,
     mutationFn: ({
       id,
       data,
@@ -126,6 +134,8 @@ export function useAcmeAccounts(params: PaginationParams = {}) {
 export function useCreateAcmeOrder() {
   const qc = useQueryClient();
   return useMutation({
+    // Discard submitted secret variables as soon as the form resets/unmounts.
+    gcTime: 0,
     retry: false,
     mutationFn: (data: tls.AcmeOrderRequest) => tls.createAcmeOrder(data),
     onSuccess: () => {
@@ -164,6 +174,8 @@ export function useFinalizeAcmeOrder() {
 export function useRenewAcmeCertificate() {
   const qc = useQueryClient();
   return useMutation({
+    // Discard submitted secret variables as soon as the form resets/unmounts.
+    gcTime: 0,
     retry: false,
     mutationFn: ({ id, data }: { id: string; data?: tls.AcmeRenewRequest }) =>
       tls.renewAcmeCertificate(id, data),
@@ -197,6 +209,8 @@ export function useRotateTlsSurface() {
 
 export function useValidateTlsMaterial() {
   return useMutation({
+    // Discard submitted secret variables as soon as the form resets/unmounts.
+    gcTime: 0,
     mutationFn: (data: tls.TlsValidateRequest) => tls.validateMaterial(data),
   });
 }

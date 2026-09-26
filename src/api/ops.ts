@@ -8,6 +8,7 @@ import { classifyCommittedWrite, type CommittedWrite } from "./gatewayMetadata";
 import { secretValues, withRedactedFailure } from "./secretRedaction";
 import {
   SILENT_ERRORS,
+  REDACT_ERRORS,
   reportRequestError,
   DEFER_QUERY_ERRORS,
   proxyApi,
@@ -445,7 +446,7 @@ export interface BatchCreateResponse {
 /**
  * Consumers' credentials and plugin configurations travel in the body, so a
  * failure is reported like theirs (`consumers.create`): redacted, without the
- * request, and outside the global error popup (#478).
+ * request, to the caller and the global error popup alike (#478).
  */
 export async function batchCreate(
   scope: NamespaceScope,
@@ -453,7 +454,7 @@ export async function batchCreate(
 ): Promise<BatchCreateResponse> {
   return withRedactedFailure(secretValues(data), () =>
     proxyApi
-      .post("batch", scoped(scope, { json: data, context: { [SILENT_ERRORS]: true } }))
+      .post("batch", scoped(scope, { json: data, context: { [REDACT_ERRORS]: true } }))
       .json<BatchCreateResponse>(),
   );
 }

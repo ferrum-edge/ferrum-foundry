@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – TLS management API (types + endpoints)           */
 /* ------------------------------------------------------------------ */
 
-import { FLEET_GLOBAL, SILENT_ERRORS, proxyApi } from "./client";
+import { FLEET_GLOBAL, REDACT_ERRORS, SILENT_ERRORS, proxyApi } from "./client";
 import type { PaginatedResponse, PaginationParams } from "./types";
 import { collectAllPages } from "./pagination";
 import {
@@ -378,14 +378,24 @@ const FLEET_GLOBAL_CONTEXT = { [FLEET_GLOBAL]: true };
  * validation result, not a fault to report: the form renders it under the
  * offending textarea, so the global "API Error" dialog must stay closed.
  *
- * Every write that sends key material or ACME account credentials uses it,
+ * Every write that sends key material or ACME account credentials runs
  * inside `withRedactedFailure`: its failure reaches the caller with the
  * submitted private key, JWKS or account document removed and without the
- * request (#478), and the global dialog would show the raw gateway body.
+ * request (#478). A form that renders the gateway's refusal itself uses this
+ * context; any other secret-bearing write uses `FLEET_GLOBAL_REDACTED_CONTEXT`.
  */
 const FLEET_GLOBAL_SILENT_CONTEXT = {
   [FLEET_GLOBAL]: true,
   [SILENT_ERRORS]: true,
+};
+
+/**
+ * Fleet-global, reported to the global error popup only once the submitted
+ * secrets are removed from it (`REDACT_ERRORS`, `withRedactedFailure`).
+ */
+const FLEET_GLOBAL_REDACTED_CONTEXT = {
+  [FLEET_GLOBAL]: true,
+  [REDACT_ERRORS]: true,
 };
 
 /* ---------- Inventory & events ---------- */
@@ -468,7 +478,7 @@ export async function updateManagedRecord(
 ): Promise<ManagedTlsRecord> {
   return withRedactedFailure(secretValues(data), () =>
     proxyApi
-      .put(`admin/tls/${collection}/${id}`, { json: data, context: FLEET_GLOBAL_SILENT_CONTEXT })
+      .put(`admin/tls/${collection}/${id}`, { json: data, context: FLEET_GLOBAL_REDACTED_CONTEXT })
       .json<ManagedTlsRecord>(),
   );
 }
@@ -514,7 +524,7 @@ export async function createAcmeCertificate(
     proxyApi
       .post("admin/tls/acme/certificates", {
         json: data,
-        context: FLEET_GLOBAL_SILENT_CONTEXT,
+        context: FLEET_GLOBAL_REDACTED_CONTEXT,
       })
       .json<AcmeCertificateRecord>(),
   );
@@ -540,7 +550,7 @@ export async function updateAcmeCertificate(
     proxyApi
       .put(`admin/tls/acme/certificates/${id}`, {
         json: body,
-        context: FLEET_GLOBAL_SILENT_CONTEXT,
+        context: FLEET_GLOBAL_REDACTED_CONTEXT,
       })
       .json<AcmeCertificateRecord>(),
   );
