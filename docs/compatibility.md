@@ -141,7 +141,7 @@ paired Ferrum Edge v0.9.7 release.
 | Deployment path | `deploy/starter` (Compose) with the production Foundry image | Deployment Starter, Critical Journeys |
 | Browser | Chromium bundled with `@playwright/test` 1.63.0, Desktop Chrome profile | Critical Journeys |
 | Container platforms | `linux/amd64`, `linux/arm64` | Container Gate (both builds start and serve a protected request) |
-| BFF Node.js | 22 and 24 (the image ships 24) | Quality Gate matrix |
+| BFF Node.js | 22.22.2 and 24.15.0 minimums (the image ships 24) | Quality Gate matrix |
 
 ### Tested scale
 
