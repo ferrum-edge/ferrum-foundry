@@ -150,7 +150,6 @@ describe('settings identity authority', () => {
     { jwtNamespaces: ['*'] },
     { jwtNamespaces: ['tenant-c'] },
     { jwtNamespaces: ['tenant-a', 'tenant-c'] },
-    { jwtNamespaces: 'tenant-a' },
   ])('refuses a scoped session widening static grants: %j', async (update) => {
     const { app, headers } = await setup('static', 'tenant-a,tenant-b');
     const response = await app.inject({
@@ -163,6 +162,25 @@ describe('settings identity authority', () => {
     expect(settings.json()).toMatchObject({ jwtIssuer: 'ferrum-edge', jwtNamespaces: ['tenant-a', 'tenant-b'] });
     const login = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { token: BFF_TOKEN } });
     expect(login.json().principal.namespaces).toEqual(['tenant-a', 'tenant-b']);
+  });
+
+  it.each([
+    { jwtNamespaces: 'tenant-a' },
+    { jwtNamespaces: null },
+    { jwtNamespaces: { tenant: 'tenant-a' } },
+    { jwtNamespaces: ['tenant-a', 7] },
+  ])('refuses a malformed grant list as a bad request, not a widening: %j', async (update) => {
+    const logLines: string[] = [];
+    const { app, headers } = await setup('static', 'tenant-a,tenant-b', logLines);
+    const response = await app.inject({
+      method: 'PUT', url: '/api/settings', headers,
+      payload: { jwtIssuer: 'must-not-apply', ...update },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().code).toBe('FERRUM_BFF_INVALID_SETTINGS');
+    expect(logLines.join('\n')).not.toContain('Namespace grant widening refused');
+    const settings = await app.inject({ method: 'GET', url: '/api/settings', headers });
+    expect(settings.json()).toMatchObject({ jwtIssuer: 'ferrum-edge', jwtNamespaces: ['tenant-a', 'tenant-b'] });
   });
 
   it('logs a refused widening with the actor and the requested grants', async () => {

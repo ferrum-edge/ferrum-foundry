@@ -11,7 +11,14 @@ const { get, put, toast } = vi.hoisted(() => ({
   toast: vi.fn(),
 }));
 
-vi.mock("@/api/client", () => ({ api: { get, put } }));
+vi.mock("@/api/client", () => ({
+  api: { get, put },
+  HANDLED_STATUSES: "handledStatuses",
+  getApiErrorMessage: async (error: Error, fallback: string) => {
+    const detail = (error as { data?: { error?: string } }).data?.error;
+    return detail ? `${error.message}: ${detail}` : fallback;
+  },
+}));
 vi.mock("@/components/ui/Toast", () => ({
   useToast: () => ({ toast }),
 }));
@@ -270,6 +277,41 @@ describe("SettingsForm editing drafts", () => {
     expect(description?.textContent).toContain("namespaces this session does not hold");
     expect(toast).not.toHaveBeenCalled();
     expect(grants.value).toBe("tenant-a, tenant-z");
+    // The field error is the only report: the global popup is told the
+    // caller handles a 403 on this request (#464).
+    expect(put.mock.calls[0][1]).toMatchObject({ context: { handledStatuses: [403] } });
+  });
+
+  it("reports any other refused save once, with the server's reason (#464)", async () => {
+    put.mockImplementation(() => ({
+      json: async () => {
+        throw Object.assign(new Error("Forbidden"), {
+          response: { status: 403 },
+          data: { error: "Runtime settings are disabled", code: "FERRUM_BFF_SETTINGS_IMMUTABLE" },
+        });
+      },
+    }));
+    await renderForm();
+    await change("JWT Issuer", "issuer-2");
+    await save();
+
+    expect(put).toHaveBeenCalledOnce();
+    expect(toast).toHaveBeenCalledOnce();
+    expect(toast).toHaveBeenCalledWith("error", "Forbidden: Runtime settings are disabled");
+    expect(inputByLabel("Namespace grants").getAttribute("aria-invalid")).toBeNull();
+  });
+
+  it("treats reordered or respaced grants as untouched (#464)", async () => {
+    currentSettings.jwtNamespaces = ["tenant-a", "tenant-b"];
+    savedSettings = { ...currentSettings, jwtIssuer: "issuer-2" };
+    await renderForm();
+    await change("JWT Issuer", "issuer-2");
+    await change("Namespace grants", "tenant-b,tenant-a, tenant-b");
+    await save();
+
+    expect(put).toHaveBeenCalledOnce();
+    expect(submitted).toMatchObject({ jwtIssuer: "issuer-2" });
+    expect(submitted).not.toHaveProperty("jwtNamespaces");
   });
 
   it.each([

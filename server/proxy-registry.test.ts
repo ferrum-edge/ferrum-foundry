@@ -203,6 +203,10 @@ describe('registry authorization at the forwarding boundary', () => {
     for (const grant of ['*', 'tenant-*']) {
       expect((await call('/api/proxy/namespaces', 'GET', '', identity({ 'x-registry-grants': grant }))).status).toBe(401);
     }
+    for (const role of ['viewer', 'operator']) {
+      expect((await call('/api/proxy/namespaces', 'GET', '',
+        identity({ 'x-registry-role': role, 'x-registry-grants': '*' }))).status).toBe(401);
+    }
     expect(arrivals).toHaveLength(before);
     expect((await call('/api/proxy/namespaces/tenant-a', 'PUT', JSON.stringify({ description: '\u0085'.repeat(1025) }))).status).toBe(200);
   });
