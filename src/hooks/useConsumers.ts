@@ -8,8 +8,6 @@
 /* ------------------------------------------------------------------ */
 
 import {
-  extractApiErrorData,
-  extractApiErrorDetail,
   getCommittedWrite,
   isCommittedWrite,
   isUnobservedWrite,
@@ -24,6 +22,12 @@ import {
   type QueryClient,
 } from "@tanstack/react-query";
 import * as consumers from "@/api/consumers";
+import {
+  redactedErrorDetail,
+  redactionForms,
+  redactSubmitted,
+  submittedValues,
+} from "@/api/secretRedaction";
 import type { WriteGuard } from "@/api/conditionalWrite";
 import type { CommittedWrite } from "@/api/gatewayMetadata";
 import type {
@@ -182,70 +186,6 @@ export class UnobservedCredentialWriteError extends Error {
     this.name = "UnobservedCredentialWriteError";
     this.revision = revision;
     markUnobservedWrite(this);
-  }
-}
-
-/** Every string a credential payload carries, the values a failure must not echo. */
-function submittedValues(data: unknown): string[] {
-  if (typeof data === "string") return data ? [data] : [];
-  if (Array.isArray(data)) return data.flatMap(submittedValues);
-  if (data && typeof data === "object") return Object.values(data).flatMap(submittedValues);
-  return [];
-}
-
-/**
- * Every form in which a submitted value can be echoed: raw, JSON-escaped, and
- * both again with surrounding whitespace trimmed. Longest first, so a form is
- * never left partially exposed by a shorter one replaced inside it.
- */
-function redactionForms(values: readonly string[]): string[] {
-  const forms = new Set<string>();
-  for (const value of values) {
-    for (const candidate of [value, value.trim()]) {
-      if (!candidate) continue;
-      forms.add(candidate);
-      forms.add(JSON.stringify(candidate).slice(1, -1));
-    }
-  }
-  return [...forms].sort((a, b) => b.length - a.length);
-}
-
-/** `text` with every form of every submitted value replaced by `[REDACTED]`. */
-function redactSubmitted(text: string, forms: readonly string[]): string {
-  let redacted = text;
-  for (const form of forms) redacted = redacted.split(form).join("[REDACTED]");
-  return redacted;
-}
-
-/** A parsed error body with every string in it — keys included — redacted. */
-function redactBody(value: unknown, forms: readonly string[]): unknown {
-  if (typeof value === "string") return redactSubmitted(value, forms);
-  if (Array.isArray(value)) return value.map((item) => redactBody(item, forms));
-  if (value && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value).map(([key, item]) =>
-      [redactSubmitted(key, forms), redactBody(item, forms)]));
-  }
-  return value;
-}
-
-/**
- * The gateway's detail for a rejected credential write, redacted before it is
- * extracted. Extraction trims and truncates each field, which would leave a
- * long or whitespace-padded secret no longer matching its submitted value, so
- * redaction must see the body exactly as the gateway sent it (#466).
- */
-async function redactedErrorDetail(error: Error, forms: readonly string[]): Promise<string> {
-  if ("data" in error) {
-    const detail = extractApiErrorData(redactBody((error as { data?: unknown }).data, forms));
-    if (detail) return redactSubmitted(detail, forms);
-  }
-  const response = "response" in error ? (error as { response?: Response }).response : undefined;
-  if (!response) return "";
-  try {
-    const body = redactSubmitted(await response.clone().text(), forms);
-    return redactSubmitted(extractApiErrorDetail(body), forms);
-  } catch {
-    return "";
   }
 }
 

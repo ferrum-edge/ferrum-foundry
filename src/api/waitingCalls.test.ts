@@ -227,7 +227,12 @@ describe('spec and ACME mutation deadlines', () => {
         code: 'FERRUM_BFF_TIMEOUT', phase: 'upload',
       }, { status: 504 }));
       vi.stubGlobal('fetch', fetcher);
-      await expect(invoke(operation)).rejects.toMatchObject({ name: 'HTTPError' });
+      // ACME writes carry account credentials, so their failure is redacted
+      // (#478); it keeps the status and body the classification reads.
+      await expect(invoke(operation)).rejects.toMatchObject({
+        name: operation === 'create' || operation === 'renew' ? 'RedactedWriteError' : 'HTTPError',
+        data: { code: 'FERRUM_BFF_TIMEOUT', phase: 'upload' },
+      });
       fetcher.mockImplementation(async () => Response.json({
         code: 'FERRUM_BFF_TIMEOUT', phase: 'response',
       }, { status: 504 }));

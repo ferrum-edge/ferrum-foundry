@@ -160,6 +160,8 @@ export function useCreateUpstream() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
   return useMutation({
+    // Discard submitted secret variables as soon as the form resets/unmounts.
+    gcTime: 0,
     mutationFn: (data: UpstreamCreate) => upstreams.create(scope, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["upstreams"] });
@@ -180,6 +182,8 @@ export function useUpdateUpstream() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
   return useMutation({
+    // Discard submitted secret variables as soon as the form resets/unmounts.
+    gcTime: 0,
     mutationFn: (input: {
       id: string;
       guard: WriteGuard<Upstream | UpstreamCreate> | null;

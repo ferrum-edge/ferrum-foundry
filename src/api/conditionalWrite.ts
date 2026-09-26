@@ -6,6 +6,7 @@ import { isHTTPError } from "ky";
 import {
   HANDLED_STATUSES,
   proxyApi,
+  REDACT_ERRORS,
   scoped,
   SILENT_ERRORS,
   type NamespaceScope,
@@ -14,6 +15,7 @@ import {
   resourceFingerprint,
   type BaselineSnapshot,
 } from "@/lib/resourceBaseline";
+import { RedactedWriteError } from "./secretRedaction";
 
 /** What the refused request would have done. */
 export type GuardedOperation = "save" | "delete";
@@ -190,6 +192,8 @@ function conditionalOptions(ifMatch: string | null) {
  *
  * A conditional write's `412` is an outcome `guardedReplace` resolves itself,
  * so it is kept out of the global error popup; every other failure is not.
+ * `redactErrors` defers that report to `withRedactedFailure`, which raises it
+ * with the secrets a secret-bearing body submitted removed.
  * `If-Match` is only ever sent to the resource paths whose `PUT` evaluates it
  * — Edge answers `400` to one on any other mutating route.
  */
@@ -198,9 +202,17 @@ export function conditionalPut<TResource>(
   path: string,
   body: unknown,
   ifMatch: string | null,
+  options: { readonly redactErrors?: boolean } = {},
 ): Promise<TResource> {
+  const conditional = conditionalOptions(ifMatch);
   return proxyApi
-    .put(path, scoped(scope, { json: body, ...conditionalOptions(ifMatch) }))
+    .put(path, scoped(scope, {
+      json: body,
+      ...conditional,
+      ...(options.redactErrors && {
+        context: { ...conditional.context, [REDACT_ERRORS]: true },
+      }),
+    }))
     .json<TResource>();
 }
 
@@ -215,6 +227,7 @@ export async function conditionalDelete(
 
 /** Whether `error` is the gateway refusing a conditional write. */
 export function isPreconditionFailed(error: unknown): boolean {
+  if (error instanceof RedactedWriteError) return error.response?.status === 412;
   return isHTTPError(error) && error.response.status === 412;
 }
 
@@ -242,8 +255,10 @@ export interface GuardedReplaceOptions<TResource, TPayload> {
   readonly propose: (current: TResource) => TPayload;
   /**
    * The full-replacement `PUT`. When `ifMatch` is not `null` it must be sent
-   * as `If-Match`, and a `412` must reach this function's caller as an
-   * `HTTPError` (see `HANDLED_STATUSES` in `client.ts`).
+   * as `If-Match`, and a `412` must reach this function's caller as an error
+   * `isPreconditionFailed` recognises — ky's `HTTPError`, or the
+   * `RedactedWriteError` a secret-bearing write replaces it with — and stay
+   * out of the global error popup (see `HANDLED_STATUSES` in `client.ts`).
    */
   readonly write: (payload: TPayload, ifMatch: string | null) => Promise<TResource>;
 }

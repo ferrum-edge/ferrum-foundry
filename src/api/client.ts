@@ -488,6 +488,36 @@ const SILENT_PROBE_PATTERNS = [
 export const SILENT_ERRORS = "silentErrors";
 
 /**
+ * Per-request deferral of the global error popup to `withRedactedFailure`
+ * (`src/api/secretRedaction.ts`), for a write whose body carries a secret the
+ * gateway may echo. Every failure that would have been reported is held
+ * instead, and reported once the submitted secrets are removed from it — with
+ * the same status, URL and unobserved outcome — so the popup, and the
+ * "Outcome unknown" dialog in particular, is kept without showing the raw
+ * body. `SILENT_ERRORS` still wins: a request carrying both reports nothing.
+ *
+ * Pass as `{ context: { [REDACT_ERRORS]: true } }`, only on a request issued
+ * inside `withRedactedFailure`: nothing else takes a held report.
+ */
+export const REDACT_ERRORS = "redactErrors";
+
+// Held per rejected ky Error; the entry lives only as long as that error.
+const heldReports = new WeakMap<object, ApiError>();
+
+/**
+ * The popup report held for `error` by `REDACT_ERRORS`, removed as it is
+ * taken so it is reported at most once. `null` when the failure is not one the
+ * popup reports (a committed write, a handled status, a silent or aborted
+ * request) or was not held.
+ */
+export function takeHeldReport(error: unknown): ApiError | null {
+  if (!error || typeof error !== "object") return null;
+  const held = heldReports.get(error) ?? null;
+  heldReports.delete(error);
+  return held;
+}
+
+/**
  * Per-request list of HTTP statuses the caller turns into its own outcome.
  * Narrower than `SILENT_ERRORS`: any other failure on the same request still
  * reaches the global error popup.
@@ -645,12 +675,19 @@ export const api = ky.create({
         if (isHTTPError(error) && isExpectedProbeFailure(error.response, request.url)) return error;
         if (isHTTPError(error) && isHandledStatus(options.context, error.response.status)) return error;
         const data = isHTTPError(error) ? error.data : error.message;
-        reportRequestError(error, {
+        const detail: ApiError = {
           statusCode: isHTTPError(error) ? error.response.status : 0,
           body: typeof data === "string" ? data : data === undefined ? "" : JSON.stringify(data),
           url: request.url,
           ...(unobserved && { outcome: unobserved }),
-        }, Boolean(options.context[DEFER_QUERY_ERRORS]));
+        };
+        // A secret-bearing write is reported by `withRedactedFailure`, once
+        // the secrets it submitted are removed from the body.
+        if (options.context[REDACT_ERRORS]) {
+          heldReports.set(error, detail);
+          return error;
+        }
+        reportRequestError(error, detail, Boolean(options.context[DEFER_QUERY_ERRORS]));
         return error;
       },
     ],

@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – TLS management API (types + endpoints)           */
 /* ------------------------------------------------------------------ */
 
-import { FLEET_GLOBAL, SILENT_ERRORS, proxyApi } from "./client";
+import { FLEET_GLOBAL, REDACT_ERRORS, SILENT_ERRORS, proxyApi } from "./client";
 import type { PaginatedResponse, PaginationParams } from "./types";
 import { collectAllPages } from "./pagination";
 import {
@@ -11,6 +11,7 @@ import {
   serverWaitTimeout,
 } from '../../server/waitBudget';
 import { observeMutation } from './mutationOutcome';
+import { secretValues, withRedactedFailure } from './secretRedaction';
 
 /* ---------- Inventory ---------- */
 
@@ -376,10 +377,25 @@ const FLEET_GLOBAL_CONTEXT = { [FLEET_GLOBAL]: true };
  * 400 (`{"error":"cert_pem: no PEM certificates found"}`). That is a form
  * validation result, not a fault to report: the form renders it under the
  * offending textarea, so the global "API Error" dialog must stay closed.
+ *
+ * Every write that sends key material or ACME account credentials runs
+ * inside `withRedactedFailure`: its failure reaches the caller with the
+ * submitted private key, JWKS or account document removed and without the
+ * request (#478). A form that renders the gateway's refusal itself uses this
+ * context; any other secret-bearing write uses `FLEET_GLOBAL_REDACTED_CONTEXT`.
  */
 const FLEET_GLOBAL_SILENT_CONTEXT = {
   [FLEET_GLOBAL]: true,
   [SILENT_ERRORS]: true,
+};
+
+/**
+ * Fleet-global, reported to the global error popup only once the submitted
+ * secrets are removed from it (`REDACT_ERRORS`, `withRedactedFailure`).
+ */
+const FLEET_GLOBAL_REDACTED_CONTEXT = {
+  [FLEET_GLOBAL]: true,
+  [REDACT_ERRORS]: true,
 };
 
 /* ---------- Inventory & events ---------- */
@@ -445,12 +461,14 @@ export async function createManagedRecord(
   collection: ManagedTlsCollection,
   data: ManagedTlsRequest,
 ): Promise<ManagedTlsRecord> {
-  return proxyApi
-    .post(`admin/tls/${collection}`, {
-      json: data,
-      context: FLEET_GLOBAL_SILENT_CONTEXT,
-    })
-    .json<ManagedTlsRecord>();
+  return withRedactedFailure(secretValues(data), () =>
+    proxyApi
+      .post(`admin/tls/${collection}`, {
+        json: data,
+        context: FLEET_GLOBAL_SILENT_CONTEXT,
+      })
+      .json<ManagedTlsRecord>(),
+  );
 }
 
 export async function updateManagedRecord(
@@ -458,9 +476,11 @@ export async function updateManagedRecord(
   id: string,
   data: ManagedTlsRequest,
 ): Promise<ManagedTlsRecord> {
-  return proxyApi
-    .put(`admin/tls/${collection}/${id}`, { json: data, context: FLEET_GLOBAL_CONTEXT })
-    .json<ManagedTlsRecord>();
+  return withRedactedFailure(secretValues(data), () =>
+    proxyApi
+      .put(`admin/tls/${collection}/${id}`, { json: data, context: FLEET_GLOBAL_REDACTED_CONTEXT })
+      .json<ManagedTlsRecord>(),
+  );
 }
 
 export async function removeManagedRecord(
@@ -500,12 +520,14 @@ export async function listAllAcmeCertificates(
 export async function createAcmeCertificate(
   data: AcmeCertificateRequest,
 ): Promise<AcmeCertificateRecord> {
-  return proxyApi
-    .post("admin/tls/acme/certificates", {
-      json: data,
-      context: FLEET_GLOBAL_CONTEXT,
-    })
-    .json<AcmeCertificateRecord>();
+  return withRedactedFailure(secretValues(data), () =>
+    proxyApi
+      .post("admin/tls/acme/certificates", {
+        json: data,
+        context: FLEET_GLOBAL_REDACTED_CONTEXT,
+      })
+      .json<AcmeCertificateRecord>(),
+  );
 }
 
 export async function getAcmeCertificate(
@@ -523,12 +545,15 @@ export async function updateAcmeCertificate(
   id: string,
   data: AcmeCertificateRequest,
 ): Promise<AcmeCertificateRecord> {
-  return proxyApi
-    .put(`admin/tls/acme/certificates/${id}`, {
-      json: { ...data, id },
-      context: FLEET_GLOBAL_CONTEXT,
-    })
-    .json<AcmeCertificateRecord>();
+  const body = { ...data, id };
+  return withRedactedFailure(secretValues(body), () =>
+    proxyApi
+      .put(`admin/tls/acme/certificates/${id}`, {
+        json: body,
+        context: FLEET_GLOBAL_REDACTED_CONTEXT,
+      })
+      .json<AcmeCertificateRecord>(),
+  );
 }
 
 export async function removeAcmeCertificate(
@@ -580,14 +605,16 @@ export async function createAcmeOrder(
 ): Promise<AcmeOrder> {
   return observeMutation(
     'ACME order creation',
-    proxyApi
-      .post('admin/tls/acme/orders', {
-        json: data,
-        timeout: longRunningClientTimeout('POST', '/admin/tls/acme/orders'),
-        retry: 0,
-        context: FLEET_GLOBAL_SILENT_CONTEXT,
-      })
-      .json<AcmeOrder>(),
+    withRedactedFailure(secretValues(data), () =>
+      proxyApi
+        .post('admin/tls/acme/orders', {
+          json: data,
+          timeout: longRunningClientTimeout('POST', '/admin/tls/acme/orders'),
+          retry: 0,
+          context: FLEET_GLOBAL_SILENT_CONTEXT,
+        })
+        .json<AcmeOrder>(),
+    ),
   );
 }
 
@@ -648,14 +675,16 @@ export async function renewAcmeCertificate(
 ): Promise<AcmeOrder> {
   return observeMutation(
     'ACME renewal',
-    proxyApi
-      .post(`admin/tls/acme/renew/${id}`, {
-        json: data,
-        timeout: longRunningClientTimeout('POST', `/admin/tls/acme/renew/${id}`),
-        retry: 0,
-        context: FLEET_GLOBAL_SILENT_CONTEXT,
-      })
-      .json<AcmeOrder>(),
+    withRedactedFailure(secretValues(data), () =>
+      proxyApi
+        .post(`admin/tls/acme/renew/${id}`, {
+          json: data,
+          timeout: longRunningClientTimeout('POST', `/admin/tls/acme/renew/${id}`),
+          retry: 0,
+          context: FLEET_GLOBAL_SILENT_CONTEXT,
+        })
+        .json<AcmeOrder>(),
+    ),
   );
 }
 
@@ -697,10 +726,12 @@ export async function rotateSurface(
 export async function validateMaterial(
   data: TlsValidateRequest,
 ): Promise<TlsValidateResponse> {
-  return proxyApi
-    .post("admin/tls/validate", {
-      json: data,
-      context: FLEET_GLOBAL_SILENT_CONTEXT,
-    })
-    .json<TlsValidateResponse>();
+  return withRedactedFailure(secretValues(data), () =>
+    proxyApi
+      .post("admin/tls/validate", {
+        json: data,
+        context: FLEET_GLOBAL_SILENT_CONTEXT,
+      })
+      .json<TlsValidateResponse>(),
+  );
 }

@@ -5,8 +5,10 @@
 /* ------------------------------------------------------------------ */
 
 import { classifyCommittedWrite, type CommittedWrite } from "./gatewayMetadata";
+import { secretValues, withRedactedFailure } from "./secretRedaction";
 import {
   SILENT_ERRORS,
+  REDACT_ERRORS,
   reportRequestError,
   DEFER_QUERY_ERRORS,
   proxyApi,
@@ -441,13 +443,20 @@ export interface BatchCreateResponse {
   };
 }
 
+/**
+ * Consumers' credentials and plugin configurations travel in the body, so a
+ * failure is reported like theirs (`consumers.create`): redacted, without the
+ * request, to the caller and the global error popup alike (#478).
+ */
 export async function batchCreate(
   scope: NamespaceScope,
   data: BatchCreateRequest,
 ): Promise<BatchCreateResponse> {
-  return proxyApi
-    .post("batch", scoped(scope, { json: data }))
-    .json<BatchCreateResponse>();
+  return withRedactedFailure(secretValues(data), () =>
+    proxyApi
+      .post("batch", scoped(scope, { json: data, context: { [REDACT_ERRORS]: true } }))
+      .json<BatchCreateResponse>(),
+  );
 }
 
 export interface BackupResponse {

@@ -1,4 +1,4 @@
-import type { NamespaceScope } from "@/api/client";
+import { extractApiErrorData, type NamespaceScope } from "@/api/client";
 import {
   isPreconditionFailed,
   StaleResourceError,
@@ -97,6 +97,17 @@ export class PluginMembershipError extends Error {
     );
     this.name = "PluginMembershipError";
   }
+}
+
+/**
+ * A failed step as the plan reports it: the error and the gateway's detail.
+ * A plugin write's failure is redacted (`plugins.createConfig`), so its detail
+ * is safe to carry into the plan's own message, which the editor shows.
+ */
+function failureText(error: unknown): string {
+  if (!(error instanceof Error)) return "unknown error";
+  const detail = "data" in error ? extractApiErrorData((error as { data?: unknown }).data) : "";
+  return detail ? `${error.message}: ${detail}` : error.message;
 }
 
 function isNotFound(error: unknown): boolean {
@@ -537,7 +548,7 @@ export async function createPluginWithMembership(
     } catch (error) {
       // The plugin exists but does not run. Leaving it behind would look like
       // a configured policy, so remove it and say what happened.
-      const failure = error instanceof Error ? error.message : "unknown error";
+      const failure = failureText(error);
       const recovery: string[] = [];
       try {
         // The create response carries no tag, so this delete is unconditional.
@@ -569,7 +580,7 @@ export async function createPluginWithMembership(
     );
     return created;
   } catch (error) {
-    const failure = error instanceof Error ? error.message : "unknown error";
+    const failure = failureText(error);
     const recovery = await rollbackAssociations(applied, created.id, deps, created);
     if (recovery.length === 0) {
       try {
@@ -648,7 +659,7 @@ export async function updatePluginWithMembership(
     // nothing to roll back, and the editor needs the comparison, not a
     // recovery report.
     if (error instanceof StaleResourceError && !updatedPlugin) throw error;
-    const failure = error instanceof Error ? error.message : "unknown error";
+    const failure = failureText(error);
     const recovery: string[] = [];
     if (updatedPlugin && beforePlugin.scope !== "proxy_group") {
       // Restore non-group scope first: its atomic reconciliation removes group
@@ -706,7 +717,7 @@ export async function deletePluginWithMembership(
   } catch (error) {
     // Nothing detached yet: the refusal is the whole outcome.
     if (error instanceof StaleResourceError && applied.length === 0) throw error;
-    const failure = error instanceof Error ? error.message : "unknown error";
+    const failure = failureText(error);
     const recovery = await rollbackAssociations(applied, pluginId, deps);
     recovery.push(...await recoveryState(pluginId, deps));
     throw new PluginMembershipError(
