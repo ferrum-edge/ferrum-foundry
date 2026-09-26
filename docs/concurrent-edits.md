@@ -425,18 +425,21 @@ one, so moving the Edge pin cannot leave the table unchecked (#487).
 A backup restore carries every resource of a namespace. `restoreSecrets()` is
 `secretValues()` over the backup plus each API spec document it holds, which
 travels gzip-compressed and base64-encoded and is taken whole. An API spec
-document for import or replacement is text: `specDocumentSecrets()` classifies
-a JSON document by position — each `x-ferrum-plugins` entry by its plugin's
-rules, anything else by field name and URL — with an entry that is not a
-plugin configuration unclassified throughout. Foundry has no YAML parser, so a
-YAML (or malformed JSON) document is unclassified throughout: every scalar it
-could hold, found line by line without parsing (each `key: value` value,
-sequence entry, flow element, and quoted scalar unquoted and unescaped). A
-quoted key needs no space before its value (`"api_key":"…"`), as in a
-JSON-like document that is not valid JSON, and a double-quoted scalar
-continued with a trailing `\` is recorded without it. A folded or joined echo
-of a multi-line scalar is therefore redacted piece by piece. Both surfaces report every failure themselves (`SILENT_ERRORS`), and a
-spec write's unknown outcome keeps only the redacted error as its `cause`.
+document for import or replacement is text: `specDocumentSecrets()` classifies a
+JSON document by position — each `x-ferrum-plugins` entry by its plugin's rules,
+anything else by field name and URL — with an entry that is not a plugin
+configuration unclassified throughout. Foundry has no YAML parser, so a YAML (or
+malformed JSON) document is unclassified throughout: every scalar it could hold,
+found line by line without parsing (each `key: value` value, sequence entry,
+flow element, and quoted scalar unquoted and unescaped). Several pairs on one
+line (`"a": "x", "b": "y",`, or a flow mapping continued onto a line that starts
+with a key) are each found. A quoted key needs no space before its value
+(`"api_key":"…"`), as in a JSON-like document that is not valid JSON, and a
+double-quoted scalar continued with a trailing `\` is recorded without it, both
+line by line and joined as the scalar joins it, so short pieces cannot leak as
+one longer value. A folded echo of a multi-line scalar is therefore redacted
+piece by piece. Both surfaces report every failure themselves (`SILENT_ERRORS`),
+and a spec write's unknown outcome keeps only the redacted error as its `cause`.
 
 A value that is secret only because nothing classifies it — every string of an
 unknown plugin's config, every scalar of a YAML spec document — is redacted
@@ -449,7 +452,8 @@ recovery details stay recognizable. A value that is classified is redacted
 wherever it occurs in a string value whatever its length. No value shorter
 than 8 characters, classified or not, is matched in the body's structure:
 its object keys, and the fixed vocabulary callers recognize a failure by —
-`code`, `phase`, `rollback`, `failure_class`, and `confirmation_required`. A
+the body's top-level `code`, `phase`, `rollback`, `failure_class`, and
+`confirmation_required`; a nested field of the same name is redacted in full. A
 restore whose backup holds a credential such as `api`, `ro`, or `true` still
 gets a recognizable `api_specs_at_risk` confirmation, rollback outcome, and
 upload-phase timeout (#485). Every match is found in the original text and

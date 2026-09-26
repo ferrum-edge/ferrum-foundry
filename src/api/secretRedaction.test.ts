@@ -731,6 +731,42 @@ describe("backup restore (#485)", () => {
     expect(classifyUnobservedOutcome(timedOut)).toBeNull();
     expect(reported).toEqual([]);
   });
+
+  it("keeps the fixed vocabulary only in the body's top-level fields", async () => {
+    // No caller reads a nested `code`, `phase`, or `rollback`: each is free
+    // text, redacted like any other string.
+    const shortWords = {
+      version: "1",
+      consumers: [{
+        id: "alice",
+        username: "alice",
+        credentials: {
+          basicauth: [{ username: "api", password: "s3" }],
+          keyauth: [{ key: "load" }],
+        },
+      }],
+    };
+    respond = () => Response.json({
+      error: "restore import failed",
+      rollback: "completed",
+      phase: "upload",
+      details: { code: "api_error", phase: "upload", rollback: "reload s3" },
+    }, { status: 500 });
+    const failure = await ops.restore(scope, shortWords).catch((e: unknown) => e);
+
+    expectDetached(failure);
+    expect((failure as RedactedWriteError).data).toEqual({
+      error: "restore import failed",
+      rollback: "completed",
+      phase: "upload",
+      details: {
+        code: "[REDACTED]_error",
+        phase: "up[REDACTED]",
+        rollback: "re[REDACTED] [REDACTED]",
+      },
+    });
+    expect(reported).toEqual([]);
+  });
 });
 
 describe("API spec import and replacement (#485)", () => {
@@ -853,7 +889,7 @@ describe("API spec import and replacement (#485)", () => {
       `        ${second}"`,
       "",
     ].join("\n");
-    expect(yamlScalars(yaml)).toEqual(expect.arrayContaining([first, second]));
+    expect(yamlScalars(yaml)).toEqual(expect.arrayContaining([first, second, first + second]));
     respond = () => Response.json({
       error: "Spec parse failed",
       details: `api_secret ${first}${second} rejected`,
@@ -862,9 +898,73 @@ describe("API spec import and replacement (#485)", () => {
 
     expectDetached(failure);
     expectRedacted(await exposure(failure), `${first}${second}`);
-    expect(await getApiErrorDetail(failure)).toBe(
-      "Spec parse failed\napi_secret [REDACTED][REDACTED] rejected",
-    );
+    expect(await getApiErrorDetail(failure))
+      .toBe("Spec parse failed\napi_secret [REDACTED] rejected");
+  });
+
+  it("joins a continued double-quoted scalar whose pieces are too short to match", async () => {
+    // Neither `abc` nor `defghij` is a whole token of the joined echo.
+    const yaml = [
+      "x-ferrum-plugins:",
+      "  - plugin_name: acme_custom",
+      "    config:",
+      '      api_secret: "abc\\',
+      '        defghij"',
+      "",
+    ].join("\n");
+    expect(yamlScalars(yaml)).toContain("abcdefghij");
+    respond = () => Response.json({
+      error: "Spec parse failed",
+      details: "api_secret abcdefghij rejected",
+    }, { status: 400 });
+    const failure = await apiSpecs.update(scope, "orders-spec", yaml).catch((e: unknown) => e);
+
+    expectDetached(failure);
+    expect(await exposure(failure)).not.toContain("abcdefghij");
+    expect(await getApiErrorDetail(failure))
+      .toBe("Spec parse failed\napi_secret [REDACTED] rejected");
+  });
+
+  it("finds every key and value pair when several share a line", async () => {
+    // A trailing comma: not JSON, so each line is scanned as YAML.
+    const secret = "sk-shared-line-0123456789";
+    const document = [
+      "{",
+      '  "openapi": "3.1.0", "x-ferrum-plugins": [{"plugin_name": "key_auth", ' +
+        `"config": {"api_key": "${secret}"}}],`,
+      '  "info": {"title": "Orders", "version": "1"},',
+      "},",
+    ].join("\n");
+    expect(yamlScalars(document)).toContain(secret);
+    respond = () => Response.json({
+      error: "Spec parse failed",
+      details: `x-ferrum-plugins[0].config: api_key ${secret} rejected`,
+    }, { status: 400 });
+    const failure = await apiSpecs.create(scope, document).catch((e: unknown) => e);
+
+    expectDetached(failure);
+    expectRedacted(await exposure(failure), secret);
+    expect(reported).toEqual([]);
+  });
+
+  it("finds each pair of a flow mapping continued onto a line that starts with a key", async () => {
+    const yaml = [
+      "x-ferrum-plugins:",
+      "  - plugin_name: acme_custom",
+      "    config: {mode: strict,",
+      "      api_key: s3cretvalue, header: X}",
+      "",
+    ].join("\n");
+    expect(yamlScalars(yaml)).toEqual(expect.arrayContaining(["strict", "s3cretvalue", "X"]));
+    respond = () => Response.json({
+      error: "Spec parse failed",
+      details: "api_key s3cretvalue rejected",
+    }, { status: 400 });
+    const failure = await apiSpecs.update(scope, "orders-spec", yaml).catch((e: unknown) => e);
+
+    expectDetached(failure);
+    expect(await exposure(failure)).not.toContain("s3cretvalue");
+    expect(await getApiErrorDetail(failure)).toBe("Spec parse failed\napi_key [REDACTED] rejected");
   });
 
   it("finds YAML scalars without a parser, but not a line that is only a key", () => {

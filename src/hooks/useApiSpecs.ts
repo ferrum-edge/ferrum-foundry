@@ -103,6 +103,7 @@ export function useUpdateApiSpec() {
   const { scope } = useNamespace();
   return useMutation({
     retry: false,
+    // A replacement document can carry plugin secrets too.
     gcTime: 0,
     mutationFn: async ({ id, document }: { id: string; document: string }) => {
       const replaced = await apiSpecs.update(scope, id, document);

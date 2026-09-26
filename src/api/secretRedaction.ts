@@ -476,6 +476,19 @@ function addScalar(raw: string, found: Set<string>): void {
     addScalar(bare, found);
     return;
   }
+  // Each element of a flow collection, and each of several pairs on one line
+  // (`"a": "x", "b": "y",`, or a flow mapping continued from a line above
+  // with `key: x, other: y}`). Every piece is shorter than `text`.
+  const flow = text.startsWith("{") || text.startsWith("[");
+  const pieces = flowPieces(text);
+  if (flow || pieces.length > 1) {
+    for (const piece of pieces) {
+      addScalar(piece, found);
+      const value = mappingValue(piece);
+      if (value !== null) addScalar(value, found);
+    }
+    if (flow) return;
+  }
   if (text.startsWith('"') || text.startsWith("'")) {
     // A quoted key's value, with or without a space after the `:`.
     const value = mappingValue(text);
@@ -494,14 +507,6 @@ function addScalar(raw: string, found: Set<string>): void {
     found.add(doubled ? unescapeDoubleQuoted(inner) : inner.replaceAll("''", "'"));
     return;
   }
-  if (text.startsWith("{") || text.startsWith("[")) {
-    for (const piece of flowPieces(text)) {
-      addScalar(piece, found);
-      const value = mappingValue(piece);
-      if (value !== null) addScalar(value, found);
-    }
-    return;
-  }
   // A plain scalar, or a line of a multi-line one: without a trailing comment
   // or a stray quote from the line that closes a quoted scalar, and unescaped
   // in case it continues a double-quoted one, itself continued with a `\`.
@@ -517,24 +522,84 @@ function addScalar(raw: string, found: Set<string>): void {
 }
 
 /**
+ * The text after the `"` of a double-quoted scalar that `text` leaves open,
+ * or null. Over-inclusive: a `"` after any space or indicator opens one.
+ */
+function openDoubleQuoted(text: string): string | null {
+  let quote: string | null = null;
+  let start = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (quote) {
+      if (quote === '"' && character === "\\") {
+        index += 1;
+      } else if (character === quote) {
+        if (quote === "'" && text[index + 1] === "'") {
+          index += 1;
+        } else {
+          quote = null;
+        }
+      }
+    } else if (
+      (character === '"' || character === "'") &&
+      (index === 0 || /[\s,[\]{}:]/.test(text[index - 1]))
+    ) {
+      quote = character;
+      start = index + 1;
+    }
+  }
+  return quote === '"' ? text.slice(start) : null;
+}
+
+/** A double-quoted scalar's raw text, as written and unescaped. */
+function addQuotedRun(raw: string, found: Set<string>): void {
+  if (!raw.trim()) return;
+  found.add(raw);
+  found.add(unescapeDoubleQuoted(raw));
+}
+
+/**
  * Every scalar a YAML document could hold, found without parsing it. Over-
  * inclusive by design: each line after any sequence or mapping indicator,
- * whole; the value of each `key: value` pair; each element of a flow
- * collection; and each quoted scalar unquoted and unescaped. A block or
- * multi-line scalar is covered line by line, so a value the gateway echoes
- * folded or joined is redacted piece by piece. A line that is only a key
- * (`x-ferrum-plugins:`) holds no scalar: taken whole, it would redact the
- * gateway's own reference to that key.
+ * whole; the value of each `key: value` pair, several on one line included;
+ * each element of a flow collection; and each quoted scalar unquoted and
+ * unescaped. A block or multi-line scalar is covered line by line, so a value
+ * the gateway echoes folded is redacted piece by piece. The lines of a
+ * double-quoted scalar continued with a trailing `\` are also recorded
+ * joined, as the scalar joins them, since short pieces joined without a space
+ * are no whole token. A line that is only a key (`x-ferrum-plugins:`) holds no
+ * scalar: taken whole, it would redact the gateway's own reference to that key.
  */
 export function yamlScalars(document: string): string[] {
   const found = new Set<string>();
+  // The raw text of an open double-quoted scalar since its last unescaped
+  // line break, which a trailing `\` joins to the next line without one.
+  let open: string | null = null;
   for (const line of document.split(/\r\n|\r|\n/)) {
+    if (open === null) {
+      open = openDoubleQuoted(line);
+    } else {
+      const text = line.trimStart();
+      const end = quotedEnd(`"${text}`);
+      const chunk = end === -1 ? text : text.slice(0, end - 2);
+      if (withoutContinuation(open) !== open) {
+        open = withoutContinuation(open) + chunk;
+      } else {
+        addQuotedRun(open, found);
+        open = chunk;
+      }
+      if (end !== -1) {
+        addQuotedRun(open, found);
+        open = openDoubleQuoted(text.slice(end - 1));
+      }
+    }
     const rest = line.trim().replace(/^(?:[-?:](?:\s+|$))+/, "");
     const value = mappingValue(rest);
     if (value === "") continue;
     addScalar(rest, found);
     if (value !== null) addScalar(value, found);
   }
+  if (open !== null) addQuotedRun(open, found);
   return [...found];
 }
 
@@ -693,22 +758,33 @@ const FIXED_VOCABULARY_FIELDS = new Set([
   "confirmation_required",
 ]);
 
-/**
- * A parsed error body with every string in it redacted, and its keys and
- * fixed-vocabulary fields against the structural forms only (`MIN_DISTINCTIVE`).
- */
-export function redactBody(value: unknown, forms: RedactionForms): unknown {
+/** `value` with every string in it redacted, and its keys against the structural forms. */
+function redactValue(value: unknown, forms: RedactionForms): unknown {
   if (typeof value === "string") return redactSubmitted(value, forms);
-  if (Array.isArray(value)) return value.map((item) => redactBody(item, forms));
+  if (Array.isArray(value)) return value.map((item) => redactValue(item, forms));
   if (value && typeof value === "object") {
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [
       redactStructure(key, forms),
-      typeof item === "string" && FIXED_VOCABULARY_FIELDS.has(key)
-        ? redactStructure(item, forms)
-        : redactBody(item, forms),
+      redactValue(item, forms),
     ]));
   }
   return value;
+}
+
+/**
+ * A parsed error body with every string in it redacted, and its keys and
+ * fixed-vocabulary fields against the structural forms only (`MIN_DISTINCTIVE`).
+ * The fixed vocabulary is the body's own top-level fields, the only ones
+ * callers read; a field of the same name nested deeper is redacted in full.
+ */
+export function redactBody(value: unknown, forms: RedactionForms): unknown {
+  if (!isRecord(value)) return redactValue(value, forms);
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [
+    redactStructure(key, forms),
+    typeof item === "string" && FIXED_VOCABULARY_FIELDS.has(key)
+      ? redactStructure(item, forms)
+      : redactValue(item, forms),
+  ]));
 }
 
 /**
