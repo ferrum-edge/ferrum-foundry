@@ -210,7 +210,7 @@ function unresolvedMessage(
     const unobservable = `${lead} The consumer has been re-read, but the gateway does not list basic credentials, so whether the password was stored cannot be observed.`;
     return write.mode === "replace"
       ? `${unobservable} Replacing basic credentials again is safe to repeat: it leaves only the password you submit.`
-      : `${unobservable} Adding it again could store a duplicate; use “Replace basic credentials” instead, which is safe to repeat.`;
+      : `${unobservable} Adding it again could store a duplicate; use “Replace basic credentials” instead, which is safe to repeat but revokes every existing basic password.`;
   }
   const kind = `${view.label.toLowerCase()} credentials`;
   return view.count > write.countBefore
@@ -269,8 +269,10 @@ export function CredentialForm({
   const credentials = isBasic ? [] : normalizeCredentials(existingCredentials);
   const writePending = appendCredential.isPending || updateCredentials.isPending;
   const busy = writePending || deleteCredentials.isPending;
+  // Monotonic: only a read strictly newer than the recorded revision re-arms
+  // the form, so an older or missing revision can never unlock it.
   const awaitingReread = unresolved !== null
-    && (revision === unresolved.revision || isRefreshing);
+    && (revision <= unresolved.revision || isRefreshing);
   const badgeVariant = CRED_BADGE_VARIANT[credentialType] ?? "default";
 
   if (!config) {
@@ -390,7 +392,13 @@ export function CredentialForm({
       const summary = `${config.label} credential removed`;
       if (outcome.committed) reportCommitted(committedWriteMessage(summary, outcome.committed));
       else toast("success", summary);
-      setUnresolved(null);
+      // Deleting one entry does not resolve a lost add, which may still be
+      // stored. Keep the lock, and keep its count comparison valid by
+      // discounting an entry that was counted when the add was issued.
+      const deletedIndex = deleteSelection.index;
+      setUnresolved((current) => current && deletedIndex < current.countBefore
+        ? { ...current, countBefore: current.countBefore - 1 }
+        : current);
       setDeleteSelection(null);
     } catch (err: unknown) {
       const message = await getApiErrorMessage(err, "Failed to delete credential");

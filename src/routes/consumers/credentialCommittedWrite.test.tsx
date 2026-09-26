@@ -38,6 +38,10 @@ let readStatus: number;
 let gate: Promise<void> | null;
 // Whether the first write's credential shows up in later reads.
 let grown: boolean;
+// Whether a delete removes the first JWT credential from later reads.
+let shrinkOnDelete: boolean;
+// The body an "echo" answer returns in place of the default echo.
+let echoBody: unknown;
 const writes: { method: string; path: string; body: unknown }[] = [];
 const reads: string[] = [];
 const settled: { status: string; data: unknown; error: unknown }[] = [];
@@ -51,9 +55,10 @@ const LABELS: Record<string, string> = {
 
 function record(namespace: string): Consumer {
   const added = grown && writes.length > 0 ? [{ secret: "[REDACTED]" }] : [];
+  const removed = shrinkOnDelete && writes.some((write) => write.method === "DELETE");
   return { id: "first", namespace, username: "first", acl_groups: [], credentials: {
     keyauth: [{ key: "[REDACTED]" }, { key: "[REDACTED]" }],
-    jwt: [{ secret: "[REDACTED]" }, ...added],
+    jwt: [...(removed ? [] : [{ secret: "[REDACTED]" }]), ...added],
     hmac_auth: [{ secret: "[REDACTED]" }],
   }, created_at: "v1", updated_at: "v1" } as Consumer;
 }
@@ -115,6 +120,8 @@ beforeEach(() => {
   readStatus = 200;
   gate = null;
   grown = false;
+  shrinkOnDelete = false;
+  echoBody = null;
   writes.length = 0;
   reads.length = 0;
   settled.length = 0;
@@ -140,7 +147,7 @@ beforeEach(() => {
       if (answer === "rejected") return Response.json({ error: "validation failed" }, { status: 400 });
       if (answer === "echo") {
         // A gateway that repeats the submitted value, raw and JSON-escaped.
-        return Response.json({ error: `duplicate secret ${secret}`,
+        return Response.json(echoBody ?? { error: `duplicate secret ${secret}`,
           details: JSON.stringify({ secret }) }, { status: 400 });
       }
       if (request.method === "DELETE") return new Response(null, { status: 204 });
@@ -388,6 +395,42 @@ describe("credential append outcomes (#451)", () => {
   );
 });
 
+describe("echoed secrets are redacted before the detail is bounded (#466)", () => {
+  // Deterministic but non-repeating, so any fragment of it is distinctive.
+  const long = Array.from({ length: 1000 }, (_, i) => ((i * 2654435761) % 36).toString(36))
+    .join("");
+  const quoted = 'synthetic "quoted" \\ backslash secret 0123456789';
+  const padded = "   synthetic padded secret 0123456789abcdef   ";
+  it.each([
+    { name: "a 1000-character secret echoed in details", value: long,
+      body: { error: "duplicate secret", details: `rejected ${long}` } },
+    { name: "a secret with quotes and backslashes echoed JSON-escaped", value: quoted,
+      body: { error: "duplicate secret", details: JSON.stringify({ secret: quoted }) } },
+    { name: "a whitespace-padded secret echoed as the whole field", value: padded,
+      body: { error: "duplicate secret", code: padded, details: padded } },
+  ])("keeps no fragment of $name", async ({ value, body }) => {
+    answer = "echo";
+    echoBody = body;
+    await mount();
+    await click("Add");
+    await enterSecret(value);
+    await submit();
+    await waitFor(() => expect(host.textContent).toContain("[REDACTED]"));
+    const fragments = [value.trim(), JSON.stringify(value.trim()).slice(1, -1)];
+    for (let start = 0; start + 32 <= value.length; start += 16) {
+      fragments.push(value.slice(start, start + 32));
+    }
+    await waitFor(() => expect(qc.getMutationCache().getAll()).toHaveLength(0));
+    const messages = settled.map((outcome) => (outcome.error as Error | null)?.message ?? "");
+    expect(messages.join("")).toContain("[REDACTED]");
+    for (const fragment of fragments) {
+      expect(host.textContent).not.toContain(fragment);
+      for (const message of messages) expect(message).not.toContain(fragment);
+    }
+    expect(writes).toHaveLength(1);
+  });
+});
+
 describe("basic credential and delete outcomes (#451)", () => {
   it("closes a committed-but-not-live basic replacement with its receipt", async () => {
     type = "basicauth";
@@ -417,7 +460,9 @@ describe("basic credential and delete outcomes (#451)", () => {
     await waitFor(() => expect(notice()).toContain("Outcome unknown"));
     expect(notice()).toContain("does not list basic credentials");
     expect(notice()).toContain("cannot be observed");
-    expect(notice()).toContain("use “Replace basic credentials” instead, which is safe to repeat");
+    expect(notice()).toContain(
+      "use “Replace basic credentials” instead, which is safe to repeat but revokes every existing basic password",
+    );
     expect(writes).toEqual([{ method: "POST", path: "/api/proxy/consumers/first/credentials/basicauth",
       body: { password: secret } }]);
 
@@ -474,6 +519,33 @@ describe("basic credential and delete outcomes (#451)", () => {
     expect(host.textContent).toContain("Outcome unknown");
     expect(writes).toHaveLength(1);
     expect(reads).toEqual(["/api/proxy/consumers/first"]);
+  });
+
+  it("keeps a lost add's outcome and count across an indexed delete (#466)", async () => {
+    answer = "unobserved";
+    grown = true;
+    shrinkOnDelete = true;
+    await mount();
+    await click("Add");
+    await enterSecret();
+    await submit();
+    await waitFor(() => expect(notice()).toContain("likely stored"));
+    expect(host.querySelectorAll('[aria-label^="Delete JWT credential"]')).toHaveLength(2);
+
+    // Deleting the credential that was listed before the add does not resolve
+    // it: the outcome stays reported, and the comparison discounts the entry.
+    answer = "ok";
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>('[aria-label="Delete JWT credential 1"]')!.click();
+    });
+    await click("Delete Credential", dialog()!);
+    await waitFor(() => expect(dialog()).toBeNull());
+    await waitFor(() =>
+      expect(host.querySelectorAll('[aria-label^="Delete JWT credential"]')).toHaveLength(1));
+    expect(notice()).toContain("Outcome unknown");
+    expect(notice()).toContain("now lists more jwt credentials than before this write");
+    expect(notice()).toContain("likely stored");
+    expect(writes.map((write) => write.method)).toEqual(["POST", "DELETE"]);
   });
 
   it("closes the confirmation after a committed-but-not-live delete of all basic credentials", async () => {

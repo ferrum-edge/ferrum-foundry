@@ -361,16 +361,25 @@ basic credentials are not listed at all. For a key, JWT, or HMAC add, the card
 compares the count it listed when the write was issued with the re-read and
 says the credential was *likely* stored (or likely not). For a basic add it
 says presence cannot be observed and points to "Replace basic credentials",
-which is safe to repeat. This "outcome unknown" status line survives Cancel
-and reopening the form, and is cleared only when a later credential write from
-the card completes.
+which is safe to repeat but revokes every existing basic password. This
+"outcome unknown" status line survives Cancel and reopening the form, and is
+cleared only when a later add, replacement, or delete of all basic credentials
+from the card completes. Deleting one listed credential does not clear it: the
+card keeps the lock and, when the deleted entry was listed before the add,
+lowers the recorded count by one so the comparison stays valid. The lock is
+monotonic — only a read strictly newer than the recorded revision re-arms the
+form.
 
 An indexed delete whose answer was lost closes its confirmation, since the
 index may now name a different credential. No failure rethrows the ky error,
 which holds the secret-bearing request options: a definite rejection becomes a
-plain error whose message carries the gateway's detail with every submitted
-value (raw or JSON-escaped) replaced by `[REDACTED]`, and an append opts out of
-the global error popup, which would show the raw gateway body.
+plain error whose message carries the gateway's detail. Every submitted value
+is replaced by `[REDACTED]` throughout the parsed error body — every string,
+keys included, in raw, JSON-escaped, and whitespace-trimmed forms — before the
+detail is extracted, since extraction trims each field and cuts it to 600
+characters and a shortened or trimmed echo would no longer match the submitted
+value. An append opts out of the global error popup, which would show the raw
+gateway body.
 
 ## What the operator sees
 

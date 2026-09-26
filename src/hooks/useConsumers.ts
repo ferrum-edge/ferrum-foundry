@@ -8,7 +8,8 @@
 /* ------------------------------------------------------------------ */
 
 import {
-  getApiErrorDetail,
+  extractApiErrorData,
+  extractApiErrorDetail,
   getCommittedWrite,
   isCommittedWrite,
   isUnobservedWrite,
@@ -192,15 +193,60 @@ function submittedValues(data: unknown): string[] {
   return [];
 }
 
-/** `text` with each submitted value, raw or JSON-escaped, replaced by `[REDACTED]`. */
-function redactSubmitted(text: string, values: readonly string[]): string {
-  let redacted = text;
+/**
+ * Every form in which a submitted value can be echoed: raw, JSON-escaped, and
+ * both again with surrounding whitespace trimmed. Longest first, so a form is
+ * never left partially exposed by a shorter one replaced inside it.
+ */
+function redactionForms(values: readonly string[]): string[] {
+  const forms = new Set<string>();
   for (const value of values) {
-    for (const form of new Set([value, JSON.stringify(value).slice(1, -1)])) {
-      redacted = redacted.split(form).join("[REDACTED]");
+    for (const candidate of [value, value.trim()]) {
+      if (!candidate) continue;
+      forms.add(candidate);
+      forms.add(JSON.stringify(candidate).slice(1, -1));
     }
   }
+  return [...forms].sort((a, b) => b.length - a.length);
+}
+
+/** `text` with every form of every submitted value replaced by `[REDACTED]`. */
+function redactSubmitted(text: string, forms: readonly string[]): string {
+  let redacted = text;
+  for (const form of forms) redacted = redacted.split(form).join("[REDACTED]");
   return redacted;
+}
+
+/** A parsed error body with every string in it — keys included — redacted. */
+function redactBody(value: unknown, forms: readonly string[]): unknown {
+  if (typeof value === "string") return redactSubmitted(value, forms);
+  if (Array.isArray(value)) return value.map((item) => redactBody(item, forms));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) =>
+      [redactSubmitted(key, forms), redactBody(item, forms)]));
+  }
+  return value;
+}
+
+/**
+ * The gateway's detail for a rejected credential write, redacted before it is
+ * extracted. Extraction trims and truncates each field, which would leave a
+ * long or whitespace-padded secret no longer matching its submitted value, so
+ * redaction must see the body exactly as the gateway sent it (#466).
+ */
+async function redactedErrorDetail(error: Error, forms: readonly string[]): Promise<string> {
+  if ("data" in error) {
+    const detail = extractApiErrorData(redactBody((error as { data?: unknown }).data, forms));
+    if (detail) return redactSubmitted(detail, forms);
+  }
+  const response = "response" in error ? (error as { response?: Response }).response : undefined;
+  if (!response) return "";
+  try {
+    const body = redactSubmitted(await response.clone().text(), forms);
+    return redactSubmitted(extractApiErrorDetail(body), forms);
+  } catch {
+    return "";
+  }
 }
 
 /**
@@ -241,11 +287,11 @@ async function writeCredential(
     if (failure !== undefined) throw new Error(failure);
     // eslint-disable-next-line preserve-caught-error -- the cause is the secret-bearing error
     if (!(error instanceof Error)) throw new Error("Credential write failed");
-    const values = submittedValues(submitted);
-    const detail = await getApiErrorDetail(error);
-    const message = redactSubmitted(error.message, values);
+    const forms = redactionForms(submittedValues(submitted));
+    const detail = await redactedErrorDetail(error, forms);
+    const message = redactSubmitted(error.message, forms);
     // eslint-disable-next-line preserve-caught-error -- the cause is the secret-bearing error
-    throw new Error(detail ? `${message}: ${redactSubmitted(detail, values)}` : message);
+    throw new Error(detail ? `${message}: ${detail}` : message);
   }
 }
 
