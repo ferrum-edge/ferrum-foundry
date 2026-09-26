@@ -716,24 +716,42 @@ headroom to match.
 
 When a reply goes out before its request body has fully arrived — the gateway
 refused the upload unread, the gateway was unreachable, or the BFF refused it
-itself (for example, an early `413` on a declared length over the route limit)
-— the BFF discards the unread remainder rather than closing the connection
-over it, so the client reliably receives the response and a keep-alive
-connection stays reusable. A drain is bounded by the request's remaining upload
-budget or 5 seconds, whichever ends first, and by `FERRUM_WRITE_TIMEOUT`
-between chunks. A remainder larger than 4 MiB (by declared `content-length` or
-by bytes discarded) lingers for at most 1 second, long enough for the client to
-read the response, and the connection is then closed. A request that failed its
-own upload bound (`504`, `phase: "upload"`) is not drained: its connection is
-closed as soon as the response is written, and so is every draining connection
-when shutdown begins.
+itself (for example, an early `413` on a declared length over the route limit,
+or a `401`, `403`, or upload-capacity `429` returned before the request reaches
+its handler, on any route) — the BFF discards the unread remainder rather than
+closing the connection over it, so the client reliably receives the response
+and a keep-alive connection stays reusable. A drain is bounded by the request's
+remaining upload budget or 5 seconds, whichever ends first, and by
+`FERRUM_WRITE_TIMEOUT` between chunks. A drain whose request declared a
+`content-length` over 4 MiB lasts at most 1 second; any other drain, once it
+has discarded more than 4 MiB, continues for at most 1 more second. That is
+long enough for the client to read the response; the connection is then
+closed. A request that failed its own upload bound (`504`, `phase: "upload"`)
+is not drained: its connection is closed as soon as the response is written,
+and so is every draining connection when shutdown begins.
 
-Drains have their own pool, also sized by `FERRUM_MAX_ACTIVE_UPLOADS`, separate
-from the in-flight upload pool; a drain that would exceed it closes its
-connection instead. A request leaves the upload pool once its response is
-written, so an instance can hold up to twice `FERRUM_MAX_ACTIVE_UPLOADS`
-body-bearing sockets at once — size socket and file-descriptor headroom for
-that.
+A request with no authenticated principal — a `401`, or a `403` for a failed
+CSRF or namespace check — drains from a smaller pool of its own, of 8 slots or
+`FERRUM_MAX_ACTIVE_UPLOADS` if that is lower, for at most 1 second (still
+within the bounds above). Because the `401` needs no credentials, a client that
+fills this pool only makes other signed-out rejections close instead of drain;
+drains for signed-in requests, including an upload-capacity `429`, use the
+signed-in pool, sized by `FERRUM_MAX_ACTIVE_UPLOADS`. A drain that would
+exceed its pool closes its connection instead. A client whose upload outlasts
+its drain sees its write fail with `EPIPE` or `ECONNRESET` after the response
+has been sent; one that reads its response only after it finishes sending can
+then lose that response to the reset.
+
+Neither drain pool is part of the in-flight upload pool, and a request leaves
+the upload pool once its response is written. An instance can therefore hold
+up to twice `FERRUM_MAX_ACTIVE_UPLOADS`, plus the signed-out drain slots,
+body-bearing proxied sockets at once. Those pools are not a ceiling on
+body-bearing sockets overall: a request on a non-proxy route (sign-in, runtime
+settings) whose small body is still arriving is bounded only by the HTTP
+server's request timeout, `FERRUM_UPLOAD_TIMEOUT` plus five seconds. Size
+socket and file-descriptor headroom for these, and cap connections per client
+at the ingress proxy as well, for example with nginx `limit_conn`, so one
+client cannot hold many sockets open.
 
 ### Graceful shutdown
 
