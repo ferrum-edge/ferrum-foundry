@@ -226,8 +226,14 @@ describe("effective authorization policy", () => {
   it.each(["proxy-1", ""])(
     "does not count an attached proxy-group plugin with proxy_id %j",
     (proxyId) => {
+      // Ferrum Edge v0.9.7 merges a proxy-group config only when `proxy_id`
+      // is absent, so the excluded group ACL must neither apply nor shadow
+      // the global ACL. Alice holds a key-auth credential: were the group
+      // ACL merged, it would replace the global deny and she would read as
+      // allowed; the deny must come from the global ACL itself.
       const target = proxy({ plugins: [{ plugin_config_id: "group-acl" }] });
       const plugins = [
+        plugin("global-auth", "key_auth", "global"),
         plugin("global-acl", "access_control", "global", {
           disallowed_consumers: ["alice"],
         }),
@@ -239,14 +245,23 @@ describe("effective authorization policy", () => {
           { proxy_id: proxyId },
         ),
       ];
+      const alice = consumer("1", "alice", [], { keyauth: [{ key: "[REDACTED]" }] });
 
       expect(effectivePluginsForProxy(target, plugins).map((entry) => entry.id)).toEqual([
         "global-acl",
+        "global-auth",
       ]);
-      expect(
-        analyzeProxyPolicy(target, plugins, [consumer("1", "alice", [], {})]).consumers[0]
-          ?.decision,
-      ).toBe("denied");
+      const result = analyzeProxyPolicy(target, plugins, [alice]).consumers[0];
+      expect(result?.decision).toBe("denied");
+      expect(result?.reasons).toEqual(["global-acl explicitly denies consumer alice"]);
+
+      // Control: with the group config eligible it shadows the global deny.
+      const eligible = plugins.map((entry) =>
+        entry.id === "group-acl" ? { ...entry, proxy_id: null } : entry,
+      );
+      expect(analyzeProxyPolicy(target, eligible, [alice]).consumers[0]?.decision).toBe(
+        "allowed",
+      );
     },
   );
 
