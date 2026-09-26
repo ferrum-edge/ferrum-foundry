@@ -462,62 +462,68 @@ function mappingValue(text: string): string | null {
  * scalar on the next line: the scalar joins the lines without it.
  */
 function withoutContinuation(text: string): string {
-  const backslashes = /\\+$/.exec(text)?.[0].length ?? 0;
+  let end = text.length;
+  while (end > 0 && text[end - 1] === "\\") end -= 1;
+  const backslashes = text.length - end;
   return backslashes % 2 === 1 ? text.slice(0, -1) : text;
 }
 
-function addScalar(raw: string, found: Set<string>): void {
-  const text = raw.trim();
-  // A block scalar's indicator; its content is on the lines that follow.
-  if (!text || /^[|>][-+0-9]*(?:\s+#.*)?$/.test(text)) return;
-  found.add(text);
-  const bare = text.replace(/^(?:[&!]\S*\s+)+/, "");
-  if (bare !== text) {
-    addScalar(bare, found);
-    return;
-  }
-  // Each element of a flow collection, and each of several pairs on one line
-  // (`"a": "x", "b": "y",`, or a flow mapping continued from a line above
-  // with `key: x, other: y}`). Every piece is shorter than `text`.
-  const flow = text.startsWith("{") || text.startsWith("[");
-  const pieces = flowPieces(text);
-  if (flow || pieces.length > 1) {
-    for (const piece of pieces) {
-      addScalar(piece, found);
-      const value = mappingValue(piece);
-      if (value !== null) addScalar(value, found);
+function addScalar(raw: string, found: Set<string>, visited = new Set<string>()): void {
+  const pending = [raw];
+  while (pending.length > 0) {
+    const text = pending.pop()?.trim() ?? "";
+    // A block scalar's indicator; its content is on the lines that follow.
+    if (!text || visited.has(text) || /^[|>][-+0-9]*(?:\s+#.*)?$/.test(text)) continue;
+    visited.add(text);
+    found.add(text);
+    const bare = text.replace(/^(?:[&!]\S*\s+)+/, "");
+    if (bare !== text) {
+      pending.push(bare);
+      continue;
     }
-    if (flow) return;
-  }
-  if (text.startsWith('"') || text.startsWith("'")) {
-    // A quoted key's value, with or without a space after the `:`.
-    const value = mappingValue(text);
-    if (value) addScalar(value, found);
-    const end = quotedEnd(text);
-    const doubled = text.startsWith('"');
-    // A scalar left open continues on the next line, a double-quoted one
-    // perhaps with a trailing `\`.
-    const inner = end !== -1
-      ? text.slice(1, end - 1)
-      : doubled
-        ? withoutContinuation(text.slice(1))
-        : text.slice(1);
-    if (!inner.trim()) return;
-    found.add(inner);
-    found.add(doubled ? unescapeDoubleQuoted(inner) : inner.replaceAll("''", "'"));
-    return;
-  }
-  // A plain scalar, or a line of a multi-line one: without a trailing comment
-  // or a stray quote from the line that closes a quoted scalar, and unescaped
-  // in case it continues a double-quoted one, itself continued with a `\`.
-  const unquoted = text.replace(/^["']|["']$/g, "");
-  for (const variant of [
-    text.replace(/\s+#.*$/, ""),
-    unquoted,
-    unescapeDoubleQuoted(text),
-    unescapeDoubleQuoted(withoutContinuation(unquoted)),
-  ]) {
-    if (variant.trim()) found.add(variant.trim());
+    // Each element of a flow collection, and each of several pairs on one line
+    // (`"a": "x", "b": "y",`, or a flow mapping continued from a line above
+    // with `key: x, other: y}`). Overlapping suffixes are scanned only once.
+    const flow = text.startsWith("{") || text.startsWith("[");
+    const pieces = flowPieces(text);
+    if (flow || pieces.length > 1) {
+      for (const piece of pieces) {
+        pending.push(piece);
+        const value = mappingValue(piece);
+        if (value !== null) pending.push(value);
+      }
+      if (flow) continue;
+    }
+    if (text.startsWith('"') || text.startsWith("'")) {
+      // A quoted key's value, with or without a space after the colon.
+      const value = mappingValue(text);
+      if (value) pending.push(value);
+      const end = quotedEnd(text);
+      const doubled = text.startsWith('"');
+      // A scalar left open continues on the next line, a double-quoted one
+      // perhaps with a trailing backslash.
+      const inner = end !== -1
+        ? text.slice(1, end - 1)
+        : doubled
+          ? withoutContinuation(text.slice(1))
+          : text.slice(1);
+      if (!inner.trim()) continue;
+      found.add(inner);
+      found.add(doubled ? unescapeDoubleQuoted(inner) : inner.replaceAll("''", "'"));
+      continue;
+    }
+    // A plain scalar, or a line of a multi-line one: without a trailing comment
+    // or a stray quote from the line that closes a quoted scalar, and unescaped
+    // in case it continues a double-quoted one, itself continued with a backslash.
+    const unquoted = text.replace(/^["']|["']$/g, "");
+    for (const variant of [
+      text.replace(/\s+#.*$/, ""),
+      unquoted,
+      unescapeDoubleQuoted(text),
+      unescapeDoubleQuoted(withoutContinuation(unquoted)),
+    ]) {
+      if (variant.trim()) found.add(variant.trim());
+    }
   }
 }
 
@@ -540,6 +546,8 @@ function openDoubleQuoted(text: string): string | null {
           quote = null;
         }
       }
+    } else if (character === "#" && (index === 0 || /\s/.test(text[index - 1]))) {
+      break;
     } else if (
       (character === '"' || character === "'") &&
       (index === 0 || /[\s,[\]{}:]/.test(text[index - 1]))
@@ -575,14 +583,25 @@ export function yamlScalars(document: string): string[] {
   // The raw text of an open double-quoted scalar since its last unescaped
   // line break, which a trailing `\` joins to the next line without one.
   let open: string | null = null;
+  let openContinues = false;
+  // A second tracker starts each line independently, so a quote in comment or
+  // block-scalar prose cannot hide a continued secret from the primary tracker.
+  let continuation: string | null = null;
+  let blockIndent: number | null = null;
   for (const line of document.split(/\r\n|\r|\n/)) {
+    const indentation = line.length - line.trimStart().length;
+    const inBlock = blockIndent !== null && (line.trim() === "" || indentation > blockIndent);
+    if (blockIndent !== null && !inBlock) blockIndent = null;
+    const withoutTrailingSlash = withoutContinuation(line);
+    const hasContinuation = withoutTrailingSlash !== line;
     if (open === null) {
       open = openDoubleQuoted(line);
+      openContinues = open !== null && hasContinuation;
     } else {
       const text = line.trimStart();
       const end = quotedEnd(`"${text}`);
       const chunk = end === -1 ? text : text.slice(0, end - 2);
-      if (withoutContinuation(open) !== open) {
+      if (openContinues) {
         open = withoutContinuation(open) + chunk;
       } else {
         addQuotedRun(open, found);
@@ -591,15 +610,35 @@ export function yamlScalars(document: string): string[] {
       if (end !== -1) {
         addQuotedRun(open, found);
         open = openDoubleQuoted(text.slice(end - 1));
+        openContinues = open !== null && hasContinuation;
+      } else {
+        openContinues = hasContinuation;
       }
+    }
+    if (continuation !== null) {
+      const text = line.trimStart();
+      const end = quotedEnd(`"${text}`);
+      const chunk = end === -1 ? text : text.slice(0, end - 2);
+      continuation += chunk;
+      if (!hasContinuation) {
+        addQuotedRun(continuation, found);
+        continuation = null;
+      }
+    }
+    const lineOpen = openDoubleQuoted(line);
+    if (continuation === null && hasContinuation && lineOpen !== null) {
+      continuation = withoutTrailingSlash(lineOpen);
     }
     const rest = line.trim().replace(/^(?:[-?:](?:\s+|$))+/, "");
     const value = mappingValue(rest);
-    if (value === "") continue;
-    addScalar(rest, found);
-    if (value !== null) addScalar(value, found);
+    if (value === "" && !inBlock) continue;
+    const visited = new Set<string>();
+    addScalar(rest, found, visited);
+    if (value !== null) addScalar(value, found, visited);
+    if (value !== null && /^[|>][-+0-9]*(?:\s+#.*)?$/.test(value)) blockIndent = indentation;
   }
   if (open !== null) addQuotedRun(open, found);
+  if (continuation !== null) addQuotedRun(continuation, found);
   return [...found];
 }
 
