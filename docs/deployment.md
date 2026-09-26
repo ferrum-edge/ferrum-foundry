@@ -113,14 +113,14 @@ strings `true` and `false`. Duration variables are integers.
 | `FERRUM_JWT_NAMESPACES` | No | - (unrestricted) | comma-separated names matching `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$`, or `*` alone | Namespace grants (`ns` claim) for the static principal and for the readiness probe; `*` grants every namespace and omits `ns` |
 
 Each comma-separated `FERRUM_JWT_NAMESPACES` entry must be an exact namespace
-name; whitespace around an entry is allowed and duplicates are merged. Only
-`*` on its own grants every namespace. Leaving the variable unset in `static`
-mode also leaves the static principal unrestricted, with no `ns` claim, and the
-BFF logs a startup warning naming the variable; set it to names or `*` to make
-the scope explicit. A value that is set but names no namespace — empty,
-whitespace only, or commas only — fails startup instead of being treated as
-unset, and so do an empty entry (`tenant-a,`), an invalid name, and `*`
-combined with names. In `trusted-proxy` mode the identity proxy supplies each
+name; whitespace around an entry is allowed, duplicates are merged, and empty
+entries are dropped (`tenant-a,,tenant-b` is `tenant-a,tenant-b`, and `*,` is
+`*`). Only `*` on its own grants every namespace. Leaving the variable unset in
+`static` mode also leaves the static principal unrestricted, with no `ns`
+claim, and the BFF logs a startup warning naming the variable; set it to names
+or `*` to make the scope explicit. A value that is set but names no namespace —
+empty, whitespace only, or commas only — fails startup instead of being treated
+as unset, and so do an invalid name and `*` combined with names. In `trusted-proxy` mode the identity proxy supplies each
 user's grants and this variable only scopes the readiness probe, which reads
 fleet-global endpoints; it may be left unset there without a warning, but a
 set value is validated the same way.
@@ -166,15 +166,20 @@ removes the `aud` claim from subsequent BFF-generated JWTs. The Settings form
 displays the canonical values returned by the BFF after each successful save.
 For `PUT /api/settings`, an omitted field leaves its current value unchanged;
 send `jwtAudience: ""` (or `[]`) to clear the audience. `jwtNamespaces` follows
-the `FERRUM_JWT_NAMESPACES` rules: a non-empty array of exact names, or `["*"]`
-for every namespace. `GET /api/settings` always includes `jwtNamespaces`: the
-exact grants, or `["*"]` for an unrestricted static principal, whether it was
-configured with `*` or with `FERRUM_JWT_NAMESPACES` unset. An empty array, an empty or invalid entry, and `*` combined with names are refused
-with `400 FERRUM_BFF_INVALID_SETTINGS` without applying any part of the update.
-A session that holds namespace grants may narrow the defaults to grants it
-holds but cannot widen them — to another namespace or to `["*"]` — and gets
-`403 FERRUM_BFF_NAMESPACE_GRANT_EXCEEDED`. Runtime overrides reset to
-environment values when the BFF restarts.
+the `FERRUM_JWT_NAMESPACES` rules: an array naming at least one exact
+namespace (empty entries are dropped), or `["*"]` for every namespace.
+`GET /api/settings` always includes `jwtNamespaces`: the exact grants, or
+`["*"]` for an unrestricted static principal, whether it was configured with
+`*` or with `FERRUM_JWT_NAMESPACES` unset. In `trusted-proxy` mode the value
+describes only the readiness probe's scope, not any user's grants. An array
+with no namespace left, an invalid entry, and `*` combined with names are
+refused with `400 FERRUM_BFF_INVALID_SETTINGS` without applying any part of the
+update. A session that holds namespace grants may narrow the defaults to grants
+it holds but cannot widen them — to another namespace or to `["*"]` — and gets
+`403 FERRUM_BFF_NAMESPACE_GRANT_EXCEEDED`; the BFF logs the refusal as a
+warning with the actor and the requested grants. The Settings form omits
+untouched grants from a save, so such a session can still change unrelated
+settings. Runtime overrides reset to environment values when the BFF restarts.
 
 Changing `adminUrl` replaces the gateway every open tab is working against.
 Each tab is bound to the gateway it loaded against: the BFF refuses its later
@@ -333,7 +338,11 @@ Notes:
   match `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$` invalidates the whole header.
 - A `viewer` or `operator` identity is rejected outright when the namespace
   header is missing or empty. Only `admin` may omit it, and only when global
-  administration is the intent.
+  administration is the intent. A header that is present but empty or
+  whitespace only is rejected for every role, admins included: absent and
+  empty are not the same. nginx does not forward a `proxy_set_header` whose
+  value is empty, so an nginx proxy that maps an identity to no namespaces
+  omits the header rather than sending it empty.
 - Namespace grants scope resources that carry `X-Ferrum-Namespace`. They do not
   scope fleet-global surfaces such as TLS inventory, managed TLS material, ACME,
   rotation, and validation. Restrict those routes at the proxy when a scoped

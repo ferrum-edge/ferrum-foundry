@@ -130,14 +130,16 @@ function parseAudience(value: string | undefined): string | string[] | undefined
 }
 
 /**
- * Parse a present namespace grant setting. Every entry must be an exact name,
- * so an empty, comma-only, or whitespace-only value is invalid configuration
- * rather than an absent restriction. Only the lone wildcard grants every
- * namespace; it is returned as `undefined`, which omits the JWT `ns` claim.
+ * Parse a present namespace grant setting. Entries are trimmed and empty ones
+ * dropped (`a,,b` is `a,b`), but a value with no entry left — empty, comma-only,
+ * or whitespace-only — is invalid configuration rather than an absent
+ * restriction. Every remaining entry must be an exact name, or the list is the
+ * lone wildcard, which grants every namespace and is returned as `undefined`
+ * so the JWT `ns` claim is omitted.
  */
 function parseNamespaceGrants(entries: readonly string[], name: string): string[] | undefined {
-  const values = [...new Set(entries.map((entry) => entry.trim()))];
-  if (values.every((entry) => entry === '')) {
+  const values = [...new Set(entries.map((entry) => entry.trim()).filter((entry) => entry !== ''))];
+  if (values.length === 0) {
     throw new Error(`${name} must list at least one namespace, or ${NAMESPACE_WILDCARD} for every namespace`);
   }
   if (values.includes(NAMESPACE_WILDCARD)) {

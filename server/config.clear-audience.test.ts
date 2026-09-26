@@ -67,7 +67,14 @@ describe('runtime namespace grants', () => {
 
   it('normalizes exact runtime grants', async () => {
     const config = await import('./config.js');
-    await config.updateRuntimeConfig({ jwtNamespaces: [' tenant-b ', 'tenant-c', 'tenant-b'] });
+    await config.updateRuntimeConfig({ jwtNamespaces: [' tenant-b ', '', 'tenant-c', 'tenant-b'] });
     expect(config.loadConfig().jwtNamespaces).toEqual(['tenant-b', 'tenant-c']);
+  });
+
+  it('reads a wildcard with empty entries as the lone wildcard', async () => {
+    const config = await import('./config.js');
+    await config.updateRuntimeConfig({ jwtNamespaces: ['*', ' '] });
+    expect(config.loadConfig().jwtNamespaces).toBeUndefined();
+    expect(config.getPublicRuntimeConfig().jwtNamespaces).toEqual(['*']);
   });
 });

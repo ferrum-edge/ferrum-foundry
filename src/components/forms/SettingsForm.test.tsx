@@ -218,7 +218,7 @@ describe("SettingsForm editing drafts", () => {
     expect(grants.value).toBe("tenant-a, bad grant");
   });
 
-  it("resubmits an untouched every-namespace grant as the explicit wildcard", async () => {
+  it("omits an untouched every-namespace grant so the server keeps it", async () => {
     currentSettings.jwtNamespaces = ["*"];
     await renderForm();
     expect(inputByLabel("Namespace grants").value).toBe("*");
@@ -226,7 +226,50 @@ describe("SettingsForm editing drafts", () => {
     await save();
 
     expect(put).toHaveBeenCalledOnce();
-    expect(submitted).toMatchObject({ jwtIssuer: "issuer-2", jwtRole: "admin", jwtNamespaces: ["*"] });
+    expect(submitted).toMatchObject({ jwtIssuer: "issuer-2", jwtRole: "admin" });
+    expect(submitted).not.toHaveProperty("jwtNamespaces");
+  });
+
+  it("lets a session narrower than the defaults save unrelated settings", async () => {
+    // The defaults grant more than a scoped session holds; resubmitting them
+    // would be refused as a widening, so an untouched field is left out.
+    currentSettings.jwtNamespaces = ["tenant-a", "tenant-b"];
+    savedSettings = { ...currentSettings, jwtIssuer: "issuer-2" };
+    await renderForm();
+    await change("JWT Issuer", "issuer-2");
+    await change("Namespace grants", "tenant-b, tenant-a");
+    await change("Namespace grants", "tenant-a, tenant-b");
+    await save();
+
+    expect(put).toHaveBeenCalledOnce();
+    expect(submitted).toMatchObject({ jwtIssuer: "issuer-2", jwtRole: "admin" });
+    expect(submitted).not.toHaveProperty("jwtNamespaces");
+    expect(toast).toHaveBeenCalledWith("success", "Settings saved successfully");
+  });
+
+  it("shows a refused widening as a field error instead of a generic toast", async () => {
+    put.mockImplementation(() => ({
+      json: async () => {
+        throw Object.assign(new Error("Forbidden"), {
+          response: { status: 403 },
+          data: {
+            error: "Namespace grants cannot exceed the grants of this session",
+            code: "FERRUM_BFF_NAMESPACE_GRANT_EXCEEDED",
+          },
+        });
+      },
+    }));
+    await renderForm();
+    const grants = inputByLabel("Namespace grants");
+    await change("Namespace grants", "tenant-a, tenant-z");
+    await save();
+
+    expect(put).toHaveBeenCalledOnce();
+    expect(grants.getAttribute("aria-invalid")).toBe("true");
+    const description = document.getElementById(grants.getAttribute("aria-describedby")!);
+    expect(description?.textContent).toContain("namespaces this session does not hold");
+    expect(toast).not.toHaveBeenCalled();
+    expect(grants.value).toBe("tenant-a, tenant-z");
   });
 
   it.each([

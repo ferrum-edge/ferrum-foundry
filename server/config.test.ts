@@ -224,7 +224,7 @@ describe('config', () => {
   });
 
   it('grants every namespace only through the lone wildcard', async () => {
-    for (const value of ['*', ' * ', '*,*']) {
+    for (const value of ['*', ' * ', '*,*', '*,', ', * ,']) {
       clearTestEnv();
       setValidEnv({ FERRUM_JWT_NAMESPACES: value });
       const { loadConfig, getConfigWarnings, getPublicRuntimeConfig } = await loadModule();
@@ -258,11 +258,22 @@ describe('config', () => {
     }
   });
 
+  it('drops empty namespace entries when at least one entry remains', async () => {
+    for (const [value, expected] of [
+      ['tenant-a,', ['tenant-a']],
+      [',tenant-a', ['tenant-a']],
+      ['tenant-a,,tenant-b', ['tenant-a', 'tenant-b']],
+      [' tenant-a , , tenant-b ,', ['tenant-a', 'tenant-b']],
+    ] as const) {
+      clearTestEnv();
+      setValidEnv({ FERRUM_JWT_NAMESPACES: value });
+      const { loadConfig } = await loadModule();
+      expect(loadConfig().jwtNamespaces, value).toEqual(expected);
+    }
+  });
+
   it('rejects malformed namespace entries and a wildcard mixed with names', async () => {
     for (const [value, message] of [
-      ['tenant-a,', /FERRUM_JWT_NAMESPACES contains an invalid namespace/],
-      [',tenant-a', /FERRUM_JWT_NAMESPACES contains an invalid namespace/],
-      ['tenant-a,,tenant-b', /FERRUM_JWT_NAMESPACES contains an invalid namespace/],
       ['tenant a', /FERRUM_JWT_NAMESPACES contains an invalid namespace/],
       ['tenant-*', /FERRUM_JWT_NAMESPACES contains an invalid namespace/],
       ['*,tenant-a', /FERRUM_JWT_NAMESPACES must not combine \* with namespace names/],
