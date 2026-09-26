@@ -250,18 +250,21 @@ function keepAliveRequest(
   method: string,
   path: string,
   body?: Buffer,
+  target: { port: number; headers: Record<string, string>; timeoutMs?: number } = {
+    port: (app.server.address() as AddressInfo).port,
+    headers: sessionHeaders,
+  },
 ): Promise<KeepAliveOutcome> {
-  const port = (app.server.address() as AddressInfo).port;
   return new Promise((resolve) => {
     const request = httpRequest(
       {
         host: '127.0.0.1',
-        port,
+        port: target.port,
         path,
         method,
         agent,
         headers: {
-          ...sessionHeaders,
+          ...target.headers,
           ...(body && { 'content-type': 'application/json', 'content-length': String(body.length) }),
         },
       },
@@ -276,7 +279,7 @@ function keepAliveRequest(
     const timer = setTimeout(() => {
       request.destroy();
       resolve({ status: 0, reusedSocket: request.reusedSocket });
-    }, 2_000);
+    }, target.timeoutMs ?? 2_000);
     timer.unref();
     request.on('error', (error: NodeJS.ErrnoException) => resolve({
       status: -1,
@@ -394,26 +397,18 @@ describe('streaming gateway proxy', () => {
     expect(observed.at(-1)?.url).toBe('/echo');
   });
 
-  it.each([
-    ['rejects the upload unread', '/api/proxy/reject-unread'],
-    ['is unreachable', '/api/proxy/proxies/unreachable'],
-  ])('does not strand a keep-alive connection when the gateway %s', async (_case, path) => {
+  it('does not strand a keep-alive connection when the gateway is unreachable', async () => {
+    const path = '/api/proxy/proxies/unreachable';
     const agent = new Agent({ keepAlive: true, maxSockets: 1 });
     try {
-      const unreachable = path.endsWith('/unreachable');
       const configModule = await import('./config.js');
-      const configSpy = unreachable
-        ? vi.spyOn(configModule, 'loadConfig').mockReturnValue({
-            ...configModule.loadConfig(),
-            adminUrl: 'http://127.0.0.1:1',
-          })
-        : undefined;
+      const configSpy = vi.spyOn(configModule, 'loadConfig').mockReturnValue({
+        ...configModule.loadConfig(),
+        adminUrl: 'http://127.0.0.1:1',
+      });
       try {
-        // The rejection must reach the client in full. Closing the socket over
-        // the unread body would let the kernel reset it, which can discard the
-        // response and surface EPIPE/ECONNRESET to this still-writing client.
         const upload = await keepAliveRequest(agent, 'PUT', path, Buffer.alloc(1_900_000, 'a'));
-        expect(upload).toEqual({ status: unreachable ? 502 : 400, reusedSocket: false });
+        expect(upload).toEqual({ status: 502, reusedSocket: false });
       } finally {
         configSpy?.mockRestore();
       }
@@ -469,8 +464,62 @@ describe('streaming gateway proxy', () => {
     if (outcome.errorAfterResponse !== undefined) {
       expect(['ECONNRESET', 'EPIPE']).toContain(outcome.errorAfterResponse);
     }
-    // Closed by the 100ms idle bound, well inside the 1000ms upload budget.
+    // The drain's idle bound closes this sender within the remaining route budget.
     expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  it('closes the connection after an upload-timeout response without draining the remainder', async () => {
+    const before = abandonedUploads.length;
+    const port = (app.server.address() as AddressInfo).port;
+    const outcome = await new Promise<{ status: number; body: string; closed: boolean }>(
+      (resolve, reject) => {
+        const request = httpRequest({
+          host: '127.0.0.1',
+          port,
+          path: '/api/proxy/echo',
+          method: 'POST',
+          headers: {
+            ...sessionHeaders,
+            'content-type': 'application/octet-stream',
+            'content-length': '1900000',
+          },
+        });
+        let status = 0;
+        let body = '';
+        let responseEnded = false;
+        let requestClosed = false;
+        const finish = () => {
+          if (responseEnded && requestClosed) resolve({ status, body, closed: true });
+        };
+        request.on('response', (incoming) => {
+          status = incoming.statusCode ?? 0;
+          incoming.setEncoding('utf8');
+          incoming.on('data', (chunk: string) => {
+            body += chunk;
+          });
+          incoming.on('end', () => {
+            responseEnded = true;
+            finish();
+          });
+        });
+        request.on('close', () => {
+          requestClosed = true;
+          finish();
+        });
+        request.on('error', (error) => {
+          if (status === 0) reject(error);
+        });
+        // Leave most of the declared body unsent. The idle upload timeout
+        // should answer and close this connection instead of draining it.
+        request.write(Buffer.alloc(64 * 1024, 'a'));
+      },
+    );
+
+    expect(outcome.status).toBe(504);
+    expect(JSON.parse(outcome.body)).toMatchObject({ phase: 'upload', reason: 'idle' });
+    expect(outcome.closed).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(abandonedUploads.slice(before)).toContain('/echo');
   });
 
   it('enforces a small default streaming body limit without buffering the request', async () => {
@@ -853,6 +902,33 @@ describe('unread upload drains', () => {
     expect(outcome.errorBeforeResponse).toBeUndefined();
     expect(outcome.status).toBe(413);
     expect(outcome.closedAfterResponseMs).toBeLessThan(3_000);
+  });
+
+  it('does not strand a keep-alive connection when the gateway rejects an unread upload', async () => {
+    const agent = new Agent({ keepAlive: true, maxSockets: 1 });
+    const target = {
+      port: (lingering.server.address() as AddressInfo).port,
+      headers: lingeringHeaders,
+      timeoutMs: 30_000,
+    };
+    try {
+      // The rejection must reach the client in full, and discarding the
+      // remainder must leave the connection reusable for the next request.
+      const upload = await keepAliveRequest(
+        agent,
+        'PUT',
+        '/api/proxy/reject-unread',
+        Buffer.alloc(1_900_000, 'a'),
+        target,
+      );
+      expect(upload).toEqual({ status: 400, reusedSocket: false });
+      expect(await keepAliveRequest(agent, 'GET', '/api/auth/session', undefined, target)).toEqual({
+        status: 200,
+        reusedSocket: true,
+      });
+    } finally {
+      agent.destroy();
+    }
   });
 
   it('abandons a stalled drain when the server shuts down', async () => {
