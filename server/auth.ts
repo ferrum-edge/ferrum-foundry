@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import type { AuthPrincipal } from './auth-types.js';
-import { loadConfig, NAMESPACE_WILDCARD, type Config, type GatewayRole } from './config.js';
+import { loadConfig, type Config, type GatewayRole } from './config.js';
 import { GATEWAY_TARGET_HEADER, gatewayTargetId } from './gateway-target.js';
 import { proxyPathIsFleetGlobal, requestIsProxyRoute } from './proxy-path.js';
 
@@ -124,20 +124,14 @@ function parseRole(value: string | undefined): GatewayRole | undefined {
 
 /**
  * `undefined` only when the header is absent. A present header must name at
- * least one namespace, or be the lone `*` for every namespace, as
- * `FERRUM_JWT_NAMESPACES` is: an empty or whitespace-only value, or `*`
- * combined with names, is `null` (refused), never the absent header's
- * unrestricted admin grant. Empty entries between names are dropped.
+ * least one namespace: an empty or whitespace-only value is `null` (refused),
+ * never the absent header's unrestricted admin grant. Empty entries between
+ * names are dropped, as they are for `FERRUM_JWT_NAMESPACES`.
  */
-function parseTrustedNamespaces(
-  value: string | string[] | undefined,
-): string[] | typeof NAMESPACE_WILDCARD | undefined | null {
+function parseTrustedNamespaces(value: string | string[] | undefined): string[] | undefined | null {
   if (value === undefined) return undefined;
   if (Array.isArray(value)) return null;
   const namespaces = [...new Set(value.split(',').map((entry) => entry.trim()).filter(Boolean))];
-  if (namespaces.includes(NAMESPACE_WILDCARD)) {
-    return namespaces.length === 1 ? NAMESPACE_WILDCARD : null;
-  }
   if (namespaces.length === 0 || namespaces.some((namespace) => !NAMESPACE_PATTERN.test(namespace))) {
     return null;
   }
@@ -176,16 +170,14 @@ function trustedProxyPrincipal(request: FastifyRequest, config: Config): AuthPri
     return undefined;
   }
   // Non-admin identities must receive explicit namespace grants. Admins may
-  // intentionally be global, by omitting the namespace header or by sending
-  // the lone `*` (for a proxy that always sends the header).
-  const unrestricted = namespaces === undefined || namespaces === NAMESPACE_WILDCARD;
-  if (role !== 'admin' && unrestricted) return undefined;
+  // intentionally be global by omitting the namespace header.
+  if (role !== 'admin' && namespaces === undefined) return undefined;
 
   return {
     subject,
     displayName: subject,
     role,
-    namespaces: unrestricted ? undefined : namespaces,
+    namespaces,
     authMode: 'trusted-proxy',
   };
 }

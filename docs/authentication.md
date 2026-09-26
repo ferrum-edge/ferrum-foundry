@@ -29,15 +29,18 @@ The trusted proxy must remove client-supplied copies and inject these headers:
 | `X-Ferrum-Auth-Secret` | Exact `FERRUM_TRUSTED_PROXY_SECRET` proof |
 | `X-Forwarded-User` | Stable person/service identity used as JWT `sub` |
 | `X-Ferrum-Role` | `viewer`, `operator`, or `admin` after group mapping |
-| `X-Ferrum-Namespaces` | Comma-separated exact namespace grants, or `*` alone (admins only) |
+| `X-Ferrum-Namespaces` | Comma-separated exact namespace grants; omitted for a global admin |
 
-Non-admin identities are rejected when the namespace header is missing. An
-admin is granted global administration only when policy deliberately does so,
-in one of two equivalent ways: by omitting the header, or — for an identity
-proxy that always sends it — by sending `*` alone, as `FERRUM_JWT_NAMESPACES`
-accepts it. A non-admin identity whose header is `*` is rejected with `401`,
-exactly as one with no header is, and `*` combined with names
-(`*,tenant-a`) is refused for every role.
+Non-admin identities are rejected when the namespace header is missing. A
+global admin is expressed only by **omitting** the namespace header: when
+policy deliberately grants an admin global administration, the identity proxy
+must not send the header for that identity, or must strip it. There is no
+wildcard spelling. A literal `*` — alone (`*`, ` * `, `*,`), repeated, or
+combined with names — and namespace glob patterns such as `tenant-*` are
+rejected with `401` for every role, admins included, so an identity proxy that
+forwards a raw `*` claim fails closed instead of granting every namespace.
+`*` is accepted only by `FERRUM_JWT_NAMESPACES` and the runtime settings,
+which configure the static principal, never in this header.
 Absent and empty are different: a namespace header that is present but empty
 or whitespace only is rejected with `401` for every role, admins included,
 rather than read as the omitted header. Empty entries between names
@@ -48,8 +51,9 @@ namespaces and its behavior is unchanged.
 Header names can be changed with `FERRUM_TRUSTED_PROXY_*_HEADER` variables.
 Each identity/proof header may occur only once on the wire, including configured
 header names. A single namespace header may contain multiple comma-separated
-exact grants. Namespace glob patterns (`tenant-*`) are invalid; the only
-wildcard is the lone `*` for an admin described above.
+exact grants. Literal `*` and namespace glob patterns are invalid (`401`);
+unrestricted administration uses the deliberately omitted header described
+above.
 
 The namespace registry is authorized by its actual target: GET/PUT/DELETE
 require the path name, POST requires the body's name, and rename requires both
@@ -322,7 +326,7 @@ Foundry JWTs contain `iss`, `sub`, `exp`, `iat`, `nbf`, `jti`, and `role`.
 `aud` is emitted only when configured, because Ferrum rejects an unexpected
 audience. `ns` contains one exact string or an array of exact namespace grants;
 Foundry does not invent wildcard behavior. An unrestricted principal — a
-trusted-proxy admin without a namespace header or with `*` alone, or a static principal
+trusted-proxy admin without a namespace header, or a static principal
 configured with `*` or with `FERRUM_JWT_NAMESPACES` unset — gets no `ns` claim; `*` is a Foundry configuration value
 and is never sent as a claim. Tokens are cached by every signing
 input and authenticated principal, so a configuration or identity change can
