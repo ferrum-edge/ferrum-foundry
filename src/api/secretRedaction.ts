@@ -411,32 +411,37 @@ function quotedEnd(text: string): number {
 /** The elements of a flow collection, split at `,`, `[`, `]`, `{` and `}` outside quotes. */
 function flowPieces(text: string): string[] {
   const pieces: string[] = [];
-  let current = "";
+  let start = 0;
   let quote: string | null = null;
+  // The last character of the current piece other than whitespace, or null if
+  // there is none: a quote opens a scalar only where that is null or a `:`.
+  let lastVisible: string | null = null;
   for (let index = 0; index < text.length; index += 1) {
     const character = text[index];
-    current += character;
     if (quote) {
       if (quote === '"' && character === "\\") {
-        current += text[index + 1] ?? "";
         index += 1;
       } else if (character === quote) {
         if (quote === "'" && text[index + 1] === "'") {
-          current += "'";
           index += 1;
         } else {
           quote = null;
+          lastVisible = character;
         }
       }
     } else if (character === '"' || character === "'") {
       // A quote opens a scalar only where one can start, not inside a word.
-      if (/^\s*$|:\s*$/.test(current.slice(0, -1))) quote = character;
+      if (lastVisible === null || lastVisible === ":") quote = character;
+      lastVisible = character;
     } else if (",[]{}".includes(character)) {
-      pieces.push(current.slice(0, -1));
-      current = "";
+      pieces.push(text.slice(start, index));
+      start = index + 1;
+      lastVisible = null;
+    } else if (!/\s/.test(character)) {
+      lastVisible = character;
     }
   }
-  pieces.push(current);
+  pieces.push(text.slice(start));
   return pieces.map((piece) => piece.trim()).filter(Boolean);
 }
 
@@ -468,12 +473,15 @@ function withoutContinuation(text: string): string {
   return backslashes % 2 === 1 ? text.slice(0, -1) : text;
 }
 
+/** A block scalar's header (`|`, `>-`, `|2 # note`): its content follows on later lines. */
+const BLOCK_SCALAR_HEADER = /^[|>][-+0-9]*(?:\s+#.*)?$/;
+
 function addScalar(raw: string, found: Set<string>, visited = new Set<string>()): void {
   const pending = [raw];
   while (pending.length > 0) {
     const text = pending.pop()?.trim() ?? "";
     // A block scalar's indicator; its content is on the lines that follow.
-    if (!text || visited.has(text) || /^[|>][-+0-9]*(?:\s+#.*)?$/.test(text)) continue;
+    if (!text || visited.has(text) || BLOCK_SCALAR_HEADER.test(text)) continue;
     visited.add(text);
     found.add(text);
     const bare = text.replace(/^(?:[&!]\S*\s+)+/, "");
@@ -546,8 +554,6 @@ function openDoubleQuoted(text: string): string | null {
           quote = null;
         }
       }
-    } else if (character === "#" && (index === 0 || /\s/.test(text[index - 1]))) {
-      break;
     } else if (
       (character === '"' || character === "'") &&
       (index === 0 || /[\s,[\]{}:]/.test(text[index - 1]))
@@ -567,6 +573,15 @@ function addQuotedRun(raw: string, found: Set<string>): void {
 }
 
 /**
+ * Joins `chunk` to the lines of a double-quoted scalar whose last line ends in
+ * the `\` that continues it, as the scalar joins them: without that `\`.
+ */
+function continueRun(run: string[], chunk: string): void {
+  run[run.length - 1] = withoutContinuation(run[run.length - 1]);
+  run.push(chunk);
+}
+
+/**
  * Every scalar a YAML document could hold, found without parsing it. Over-
  * inclusive by design: each line after any sequence or mapping indicator,
  * whole; the value of each `key: value` pair, several on one line included;
@@ -577,40 +592,43 @@ function addQuotedRun(raw: string, found: Set<string>): void {
  * joined, as the scalar joins them, since short pieces joined without a space
  * are no whole token. A line that is only a key (`x-ferrum-plugins:`) holds no
  * scalar: taken whole, it would redact the gateway's own reference to that key.
+ * Inside a block scalar it is content, and is kept.
  */
 export function yamlScalars(document: string): string[] {
   const found = new Set<string>();
-  // The raw text of an open double-quoted scalar since its last unescaped
+  // The raw lines of an open double-quoted scalar since its last unescaped
   // line break, which a trailing `\` joins to the next line without one.
-  let open: string | null = null;
+  let open: string[] | null = null;
   let openContinues = false;
-  // A second tracker starts each line independently, so a quote in comment or
-  // block-scalar prose cannot hide a continued secret from the primary tracker.
-  let continuation: string | null = null;
+  // A second tracker starts on each line independently, so a quote in a
+  // comment or in block-scalar prose cannot hide a continued scalar from it.
+  let continuation: string[] | null = null;
+  // The column a block scalar's content lines are indented past.
   let blockIndent: number | null = null;
   for (const line of document.split(/\r\n|\r|\n/)) {
     const indentation = line.length - line.trimStart().length;
     const inBlock = blockIndent !== null && (line.trim() === "" || indentation > blockIndent);
-    if (blockIndent !== null && !inBlock) blockIndent = null;
-    const withoutTrailingSlash = withoutContinuation(line);
-    const hasContinuation = withoutTrailingSlash !== line;
+    if (!inBlock) blockIndent = null;
+    const hasContinuation = withoutContinuation(line) !== line;
     if (open === null) {
-      open = openDoubleQuoted(line);
-      openContinues = open !== null && hasContinuation;
+      const opened = openDoubleQuoted(line);
+      open = opened === null ? null : [opened];
+      openContinues = opened !== null && hasContinuation;
     } else {
       const text = line.trimStart();
       const end = quotedEnd(`"${text}`);
       const chunk = end === -1 ? text : text.slice(0, end - 2);
       if (openContinues) {
-        open = withoutContinuation(open) + chunk;
+        continueRun(open, chunk);
       } else {
-        addQuotedRun(open, found);
-        open = chunk;
+        addQuotedRun(open.join(""), found);
+        open = [chunk];
       }
       if (end !== -1) {
-        addQuotedRun(open, found);
-        open = openDoubleQuoted(text.slice(end - 1));
-        openContinues = open !== null && hasContinuation;
+        addQuotedRun(open.join(""), found);
+        const reopened = openDoubleQuoted(text.slice(end - 1));
+        open = reopened === null ? null : [reopened];
+        openContinues = reopened !== null && hasContinuation;
       } else {
         openContinues = hasContinuation;
       }
@@ -618,27 +636,33 @@ export function yamlScalars(document: string): string[] {
     if (continuation !== null) {
       const text = line.trimStart();
       const end = quotedEnd(`"${text}`);
-      const chunk = end === -1 ? text : text.slice(0, end - 2);
-      continuation += chunk;
-      if (!hasContinuation) {
-        addQuotedRun(continuation, found);
+      continueRun(continuation, end === -1 ? text : text.slice(0, end - 2));
+      if (end !== -1 || !hasContinuation) {
+        addQuotedRun(continuation.join(""), found);
         continuation = null;
       }
     }
-    const lineOpen = openDoubleQuoted(line);
-    if (continuation === null && hasContinuation && lineOpen !== null) {
-      continuation = withoutContinuation(lineOpen);
+    if (continuation === null && hasContinuation) {
+      const lineOpen = openDoubleQuoted(line);
+      if (lineOpen !== null) continuation = [lineOpen];
     }
-    const rest = line.trim().replace(/^(?:[-?:](?:\s+|$))+/, "");
+    const trimmed = line.trim();
+    const rest = trimmed.replace(/^(?:[-?:](?:\s+|$))+/, "");
     const value = mappingValue(rest);
+    // A block scalar's content is indented past the key that introduces it,
+    // wherever a `- ` or `? ` before the key puts it, or past the `-` of `- |`.
+    if (!inBlock && value !== null && BLOCK_SCALAR_HEADER.test(value)) {
+      blockIndent = indentation + trimmed.length - rest.length;
+    } else if (!inBlock && rest !== trimmed && BLOCK_SCALAR_HEADER.test(rest)) {
+      blockIndent = indentation;
+    }
     if (value === "" && !inBlock) continue;
     const visited = new Set<string>();
     addScalar(rest, found, visited);
     if (value !== null) addScalar(value, found, visited);
-    if (value !== null && /^[|>][-+0-9]*(?:\s+#.*)?$/.test(value)) blockIndent = indentation;
   }
-  if (open !== null) addQuotedRun(open, found);
-  if (continuation !== null) addQuotedRun(continuation, found);
+  if (open !== null) addQuotedRun(open.join(""), found);
+  if (continuation !== null) addQuotedRun(withoutContinuation(continuation.join("")), found);
   return [...found];
 }
 

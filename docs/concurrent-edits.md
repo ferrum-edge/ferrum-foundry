@@ -437,7 +437,11 @@ with a key) are each found. A quoted key needs no space before its value
 (`"api_key":"…"`), as in a JSON-like document that is not valid JSON, and a
 double-quoted scalar continued with a trailing `\` is recorded without it, both
 line by line and joined as the scalar joins it, so short pieces cannot leak as
-one longer value. A folded echo of a multi-line scalar is therefore redacted
+one longer value. A second scan starts on every line, so the joined value is
+found even when a quote earlier in the document, in a comment or block-scalar
+prose, has put the line scan out of step. A line that is only a key holds no
+scalar and is skipped, except inside a block scalar (`key: |`, `- |`), where
+every line is content. A folded echo of a multi-line scalar is therefore redacted
 piece by piece. Both surfaces report every failure themselves (`SILENT_ERRORS`),
 and a spec write's unknown outcome keeps only the redacted error as its `cause`.
 

@@ -1028,4 +1028,48 @@ describe("API spec import and replacement (#485)", () => {
 
     expect(yamlScalars(yaml)).toContain("secretpart:");
   });
+
+  it("opens a double-quoted scalar after a comment marker, as the line scan did", () => {
+    const yaml = [
+      'url: http://x # "abcdefgh',
+      '  ijklmnop"',
+      'note: y # "short\\',
+      '  value"',
+    ].join("\n");
+
+    expect(yamlScalars(yaml)).toEqual(expect.arrayContaining(["abcdefgh", "shortvalue"]));
+  });
+
+  it("joins every line of a continuation the primary tracker has lost track of", () => {
+    // The quote in the block scalar's prose leaves the primary tracker out of
+    // step, so only the tracker that starts on each line joins the value.
+    const yaml = [
+      "description: |",
+      '  He said "hello',
+      'api_secret: "abc\\',
+      "  def\\",
+      '  ghi"',
+    ].join("\n");
+    const scalars = yamlScalars(yaml);
+
+    expect(scalars).toContain("abcdefghi");
+    expect(scalars).not.toContain("abcdef\\ghi");
+  });
+
+  it("indents block-scalar content past the key that introduces it", () => {
+    const scalars = yamlScalars([
+      "paths:",
+      "  - description: |",
+      "      firstpart:",
+      "      note: |",
+      "      secondpart:",
+      "    x-ferrum-plugins:",
+      "  - |",
+      "    thirdpart:",
+      "x-ferrum-plugins:",
+    ].join("\n"));
+
+    expect(scalars).toEqual(expect.arrayContaining(["firstpart:", "secondpart:", "thirdpart:"]));
+    expect(scalars).not.toContain("x-ferrum-plugins:");
+  });
 });
