@@ -8,6 +8,8 @@
 /* ------------------------------------------------------------------ */
 
 import {
+  extractApiErrorData,
+  extractApiErrorDetail,
   getCommittedWrite,
   isCommittedWrite,
   isUnobservedWrite,
@@ -165,6 +167,89 @@ function refreshConsumer(qc: QueryClient, namespace: string, consumerId: string)
 }
 
 /**
+ * A credential write whose answer was lost. `revision` is the consumer read's
+ * `dataUpdatedAt` when the lost answer arrived, before this write's own
+ * re-read: the form stays locked until a read newer than it succeeds. The
+ * revision the form rendered when the write was issued is not a substitute —
+ * a refetch that lands mid-write advances it, and a failed re-read would then
+ * unlock the form on a read that predates the error (#466).
+ */
+export class UnobservedCredentialWriteError extends Error {
+  readonly revision: number;
+
+  constructor(revision: number) {
+    super(UNOBSERVED_WRITE_MESSAGE);
+    this.name = "UnobservedCredentialWriteError";
+    this.revision = revision;
+    markUnobservedWrite(this);
+  }
+}
+
+/** Every string a credential payload carries, the values a failure must not echo. */
+function submittedValues(data: unknown): string[] {
+  if (typeof data === "string") return data ? [data] : [];
+  if (Array.isArray(data)) return data.flatMap(submittedValues);
+  if (data && typeof data === "object") return Object.values(data).flatMap(submittedValues);
+  return [];
+}
+
+/**
+ * Every form in which a submitted value can be echoed: raw, JSON-escaped, and
+ * both again with surrounding whitespace trimmed. Longest first, so a form is
+ * never left partially exposed by a shorter one replaced inside it.
+ */
+function redactionForms(values: readonly string[]): string[] {
+  const forms = new Set<string>();
+  for (const value of values) {
+    for (const candidate of [value, value.trim()]) {
+      if (!candidate) continue;
+      forms.add(candidate);
+      forms.add(JSON.stringify(candidate).slice(1, -1));
+    }
+  }
+  return [...forms].sort((a, b) => b.length - a.length);
+}
+
+/** `text` with every form of every submitted value replaced by `[REDACTED]`. */
+function redactSubmitted(text: string, forms: readonly string[]): string {
+  let redacted = text;
+  for (const form of forms) redacted = redacted.split(form).join("[REDACTED]");
+  return redacted;
+}
+
+/** A parsed error body with every string in it — keys included — redacted. */
+function redactBody(value: unknown, forms: readonly string[]): unknown {
+  if (typeof value === "string") return redactSubmitted(value, forms);
+  if (Array.isArray(value)) return value.map((item) => redactBody(item, forms));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) =>
+      [redactSubmitted(key, forms), redactBody(item, forms)]));
+  }
+  return value;
+}
+
+/**
+ * The gateway's detail for a rejected credential write, redacted before it is
+ * extracted. Extraction trims and truncates each field, which would leave a
+ * long or whitespace-padded secret no longer matching its submitted value, so
+ * redaction must see the body exactly as the gateway sent it (#466).
+ */
+async function redactedErrorDetail(error: Error, forms: readonly string[]): Promise<string> {
+  if ("data" in error) {
+    const detail = extractApiErrorData(redactBody((error as { data?: unknown }).data, forms));
+    if (detail) return redactSubmitted(detail, forms);
+  }
+  const response = "response" in error ? (error as { response?: Response }).response : undefined;
+  if (!response) return "";
+  try {
+    const body = redactSubmitted(await response.clone().text(), forms);
+    return redactSubmitted(extractApiErrorDetail(body), forms);
+  } catch {
+    return "";
+  }
+}
+
+/**
  * Run a credential write, resolving a committed-but-not-live answer as the
  * completed write it is rather than as a failure (#451). The mutation then
  * refreshes the consumer exactly as for a `2xx`, and the form closes instead
@@ -172,15 +257,17 @@ function refreshConsumer(qc: QueryClient, namespace: string, consumerId: string)
  *
  * A write whose answer was lost refreshes the consumer before it rejects, so
  * the form's retry is judged against a re-read rather than the pre-write list.
- * Neither outcome rethrows the ky error: it holds the secret-bearing request
+ * No outcome rethrows the ky error: it holds the secret-bearing request
  * options and possibly an echoed body, and would otherwise be retained in the
- * mutation cache. A definite pre-commit failure is rethrown as is, or replaced
- * with `failure` when the caller must not surface gateway detail.
+ * mutation cache. A definite pre-commit failure is replaced with a plain
+ * error carrying the gateway's detail with every submitted value removed
+ * (#466), or with `failure` when the caller must not surface gateway detail.
  */
 async function writeCredential(
   qc: QueryClient,
   namespace: string,
   consumerId: string,
+  submitted: unknown,
   write: () => Promise<unknown>,
   failure?: string,
 ): Promise<CredentialWriteOutcome> {
@@ -191,12 +278,20 @@ async function writeCredential(
     const committed = getCommittedWrite(error);
     if (committed) return { namespace, consumerId, committed };
     if (isUnobservedWrite(error)) {
+      const queryKey = ["consumer", namespace, consumerId];
+      const revision = qc.getQueryState(queryKey)?.dataUpdatedAt ?? 0;
       await refreshConsumer(qc, namespace, consumerId);
-      throw markUnobservedWrite(new Error(UNOBSERVED_WRITE_MESSAGE));
+      throw new UnobservedCredentialWriteError(revision);
     }
-    if (failure === undefined) throw error;
     // eslint-disable-next-line preserve-caught-error -- the cause is the secret-bearing error
-    throw new Error(failure);
+    if (failure !== undefined) throw new Error(failure);
+    // eslint-disable-next-line preserve-caught-error -- the cause is the secret-bearing error
+    if (!(error instanceof Error)) throw new Error("Credential write failed");
+    const forms = redactionForms(submittedValues(submitted));
+    const detail = await redactedErrorDetail(error, forms);
+    const message = redactSubmitted(error.message, forms);
+    // eslint-disable-next-line preserve-caught-error -- the cause is the secret-bearing error
+    throw new Error(detail ? `${message}: ${detail}` : message);
   }
 }
 
@@ -219,6 +314,7 @@ export function useUpdateCredentials() {
         qc,
         scope.namespace,
         consumerId,
+        data,
         () => consumers.updateCredentials(scope, consumerId, credType, data),
         "Credential replacement failed. Check the gateway state before retrying.",
       ),
@@ -240,7 +336,7 @@ export function useAppendCredential() {
       credType: BuiltInCredentialType;
       data: ConsumerCredentialInput;
     }) =>
-      writeCredential(qc, scope.namespace, consumerId, () =>
+      writeCredential(qc, scope.namespace, consumerId, data, () =>
         consumers.appendCredential(scope, consumerId, credType, data),
       ),
     onSuccess: ({ namespace, consumerId }) => refreshConsumer(qc, namespace, consumerId),
@@ -259,7 +355,7 @@ export function useDeleteCredentials() {
       consumerId: string;
       credType: string;
     }) =>
-      writeCredential(qc, scope.namespace, consumerId, () =>
+      writeCredential(qc, scope.namespace, consumerId, null, () =>
         consumers.deleteCredentials(scope, consumerId, credType),
       ),
     onSuccess: ({ namespace, consumerId }) => refreshConsumer(qc, namespace, consumerId),
@@ -280,7 +376,7 @@ export function useDeleteCredentialByIndex() {
       credType: string;
       index: number;
     }) =>
-      writeCredential(qc, scope.namespace, consumerId, () =>
+      writeCredential(qc, scope.namespace, consumerId, null, () =>
         consumers.deleteCredentialByIndex(scope, consumerId, credType, index),
       ),
     onSuccess: ({ namespace, consumerId }) => refreshConsumer(qc, namespace, consumerId),

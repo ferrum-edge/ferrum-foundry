@@ -54,7 +54,7 @@ that already carries a valid proof secret is an administrator.
 | `X-Ferrum-Auth-Secret` | Exact `FERRUM_TRUSTED_PROXY_SECRET` value |
 | `X-Forwarded-User` | Stable actor identity, becomes the JWT `sub` |
 | `X-Ferrum-Role` | `viewer`, `operator`, or `admin` after group mapping |
-| `X-Ferrum-Namespaces` | Comma-separated exact namespace grants |
+| `X-Ferrum-Namespaces` | Comma-separated exact namespace grants; omitted for a global admin |
 
 The header names are configurable for the last three
 (`FERRUM_TRUSTED_PROXY_USER_HEADER`, `FERRUM_TRUSTED_PROXY_ROLE_HEADER`,
@@ -334,11 +334,16 @@ FERRUM_AUTH_LOGOUT_URL=/oauth2/sign_out
 Notes:
 
 - `X-Ferrum-Namespaces` must be an exact comma-separated list of namespace
-  names. Foundry does not expand wildcards or prefixes. A name that does not
-  match `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$` invalidates the whole header.
+  names. Foundry does not expand wildcards or prefixes: a literal `*` (alone
+  or with names) or a glob such as `tenant-*` is rejected with `401` for every
+  role, admins included. A name that does not match
+  `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$` invalidates the whole header.
 - A `viewer` or `operator` identity is rejected outright when the namespace
-  header is missing or empty. Only `admin` may omit it, and only when global
-  administration is the intent. A header that is present but empty or
+  header is missing or empty. Only `admin` may be global, and only when global
+  administration is the intent: the identity proxy must omit the header for
+  that identity (or strip it), which gives an unrestricted admin with no `ns`
+  claim. Do not map a global admin to `*`; unlike `FERRUM_JWT_NAMESPACES`,
+  this header has no wildcard spelling. A header that is present but empty or
   whitespace only is rejected for every role, admins included: absent and
   empty are not the same. nginx does not forward a `proxy_set_header` whose
   value is empty, so an nginx proxy that maps an identity to no namespaces
@@ -711,24 +716,42 @@ headroom to match.
 
 When a reply goes out before its request body has fully arrived — the gateway
 refused the upload unread, the gateway was unreachable, or the BFF refused it
-itself (for example, an early `413` on a declared length over the route limit)
-— the BFF discards the unread remainder rather than closing the connection
-over it, so the client reliably receives the response and a keep-alive
-connection stays reusable. A drain is bounded by the request's remaining upload
-budget or 5 seconds, whichever ends first, and by `FERRUM_WRITE_TIMEOUT`
-between chunks. A remainder larger than 4 MiB (by declared `content-length` or
-by bytes discarded) lingers for at most 1 second, long enough for the client to
-read the response, and the connection is then closed. A request that failed its
-own upload bound (`504`, `phase: "upload"`) is not drained: its connection is
-closed as soon as the response is written, and so is every draining connection
-when shutdown begins.
+itself (for example, an early `413` on a declared length over the route limit,
+or a `401`, `403`, or upload-capacity `429` returned before the request reaches
+its handler, on any route) — the BFF discards the unread remainder rather than
+closing the connection over it, so the client reliably receives the response
+and a keep-alive connection stays reusable. A drain is bounded by the request's
+remaining upload budget or 5 seconds, whichever ends first, and by
+`FERRUM_WRITE_TIMEOUT` between chunks. A drain whose request declared a
+`content-length` over 4 MiB lasts at most 1 second; any other drain, once it
+has discarded more than 4 MiB, continues for at most 1 more second. That is
+long enough for the client to read the response; the connection is then
+closed. A request that failed its own upload bound (`504`, `phase: "upload"`)
+is not drained: its connection is closed as soon as the response is written,
+and so is every draining connection when shutdown begins.
 
-Drains have their own pool, also sized by `FERRUM_MAX_ACTIVE_UPLOADS`, separate
-from the in-flight upload pool; a drain that would exceed it closes its
-connection instead. A request leaves the upload pool once its response is
-written, so an instance can hold up to twice `FERRUM_MAX_ACTIVE_UPLOADS`
-body-bearing sockets at once — size socket and file-descriptor headroom for
-that.
+A request with no authenticated principal — a `401`, or a `403` for a failed
+CSRF or namespace check — drains from a smaller pool of its own, of 8 slots or
+`FERRUM_MAX_ACTIVE_UPLOADS` if that is lower, for at most 1 second (still
+within the bounds above). Because the `401` needs no credentials, a client that
+fills this pool only makes other signed-out rejections close instead of drain;
+drains for signed-in requests, including an upload-capacity `429`, use the
+signed-in pool, sized by `FERRUM_MAX_ACTIVE_UPLOADS`. A drain that would
+exceed its pool closes its connection instead. A client whose upload outlasts
+its drain sees its write fail with `EPIPE` or `ECONNRESET` after the response
+has been sent; one that reads its response only after it finishes sending can
+then lose that response to the reset.
+
+Neither drain pool is part of the in-flight upload pool, and a request leaves
+the upload pool once its response is written. An instance can therefore hold
+up to twice `FERRUM_MAX_ACTIVE_UPLOADS`, plus the signed-out drain slots,
+body-bearing proxied sockets at once. Those pools are not a ceiling on
+body-bearing sockets overall: a request on a non-proxy route (sign-in, runtime
+settings) whose small body is still arriving is bounded only by the HTTP
+server's request timeout, `FERRUM_UPLOAD_TIMEOUT` plus five seconds. Size
+socket and file-descriptor headroom for these, and cap connections per client
+at the ingress proxy as well, for example with nginx `limit_conn`, so one
+client cannot hold many sockets open.
 
 ### Graceful shutdown
 

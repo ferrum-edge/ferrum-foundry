@@ -29,10 +29,18 @@ The trusted proxy must remove client-supplied copies and inject these headers:
 | `X-Ferrum-Auth-Secret` | Exact `FERRUM_TRUSTED_PROXY_SECRET` proof |
 | `X-Forwarded-User` | Stable person/service identity used as JWT `sub` |
 | `X-Ferrum-Role` | `viewer`, `operator`, or `admin` after group mapping |
-| `X-Ferrum-Namespaces` | Comma-separated exact namespace grants |
+| `X-Ferrum-Namespaces` | Comma-separated exact namespace grants; omitted for a global admin |
 
-Non-admin identities are rejected when the namespace header is missing. An
-admin may omit it only when policy deliberately grants global administration.
+Non-admin identities are rejected when the namespace header is missing. A
+global admin is expressed only by **omitting** the namespace header: when
+policy deliberately grants an admin global administration, the identity proxy
+must not send the header for that identity, or must strip it. There is no
+wildcard spelling. A literal `*` — alone (`*`, ` * `, `*,`), repeated, or
+combined with names — and namespace glob patterns such as `tenant-*` are
+rejected with `401` for every role, admins included, so an identity proxy that
+forwards a raw `*` claim fails closed instead of granting every namespace.
+`*` is accepted only by `FERRUM_JWT_NAMESPACES` and the runtime settings,
+which configure the static principal, never in this header.
 Absent and empty are different: a namespace header that is present but empty
 or whitespace only is rejected with `401` for every role, admins included,
 rather than read as the omitted header. Empty entries between names
@@ -43,8 +51,9 @@ namespaces and its behavior is unchanged.
 Header names can be changed with `FERRUM_TRUSTED_PROXY_*_HEADER` variables.
 Each identity/proof header may occur only once on the wire, including configured
 header names. A single namespace header may contain multiple comma-separated
-exact grants. Literal `*` and namespace glob patterns are invalid; unrestricted
-administration uses the deliberately omitted header described above.
+exact grants. Literal `*` and namespace glob patterns are invalid (`401`);
+unrestricted administration uses the deliberately omitted header described
+above.
 
 The namespace registry is authorized by its actual target: GET/PUT/DELETE
 require the path name, POST requires the body's name, and rename requires both
@@ -97,7 +106,9 @@ An update never clears the static namespace defaults by omission: an omitted
 at least one exact namespace, or be `["*"]` to grant every namespace; empty
 entries are dropped, and an array with no name left, an invalid name, or `*`
 mixed with names is refused with `400 FERRUM_BFF_INVALID_SETTINGS` and nothing
-in the update is applied. `GET /api/settings` always includes `jwtNamespaces`,
+in the update is applied. A `jwtNamespaces` that is not an array of strings is
+the same `400` for every session, checked before the widening check below, so
+a malformed body is never reported or logged as a widening. `GET /api/settings` always includes `jwtNamespaces`,
 reporting an unrestricted static principal as `["*"]`. In trusted-proxy mode
 that value describes only the readiness probe's scope; each user's grants come
 from the identity proxy. A session that holds namespace grants cannot use the
@@ -105,8 +116,12 @@ defaults to widen access: it may only choose grants it holds, and anything
 else — including `["*"]` — is refused with
 `403 FERRUM_BFF_NAMESPACE_GRANT_EXCEEDED` and logged as a warning naming the
 actor and the requested grants. The Settings form leaves the field out of a
-save when it is untouched, so a session narrower than the defaults can still
-save unrelated settings, and shows a refused widening on the field itself.
+save when it is untouched — grants are a set, so text naming the same grants
+in another order or spacing counts as untouched — so a session narrower than
+the defaults can still save unrelated settings. It shows a refused widening on
+the field itself, and only there: the save tells the global error popup it
+handles a `403`, and reports any other `403` once, as a toast with the BFF's
+reason.
 
 ### Namespace binding
 

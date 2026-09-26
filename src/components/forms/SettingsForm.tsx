@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { api } from "@/api/client";
+import { api, getApiErrorMessage, HANDLED_STATUSES } from "@/api/client";
 import { isGatewayTargetRetired } from "@/api/gatewayTarget";
 import { validateNamespaceName } from "@/api/namespaces";
 import { Card } from "@/components/ui/Card";
@@ -90,6 +90,19 @@ function isNamespaceGrantExceeded(error: unknown): boolean {
     (data as { code?: unknown }).code === NAMESPACE_GRANT_EXCEEDED_CODE;
 }
 
+function errorStatus(error: unknown): number | undefined {
+  if (!(error instanceof Error)) return undefined;
+  const status = (error as { response?: { status?: unknown } }).response?.status;
+  return typeof status === "number" ? status : undefined;
+}
+
+/** Whether two grant lists name the same grants, in any order. */
+function sameGrantSet(a: readonly string[], b: readonly string[]): boolean {
+  const left = new Set(a);
+  const right = new Set(b);
+  return left.size === right.size && [...left].every((grant) => right.has(grant));
+}
+
 interface StatusResult {
   reachable: boolean;
   status?: number;
@@ -173,9 +186,14 @@ export function SettingsForm() {
     });
   }
 
-  /** Untouched grant text is omitted from the save, which leaves them unchanged. */
+  /**
+   * Untouched grants are omitted from the save, which leaves them unchanged.
+   * Grants are a set, so text naming the same grants in another order or
+   * spacing is untouched too.
+   */
   function namespaceGrantsTouched(): boolean {
-    return settings !== null && namespaceText !== formatCommaList(settings.jwtNamespaces);
+    if (settings === null) return false;
+    return !sameGrantSet(parseCommaList(namespaceText), settings.jwtNamespaces);
   }
 
   function validate(): boolean {
@@ -235,6 +253,9 @@ export function SettingsForm() {
       const data = await api
         .put("api/settings", {
           json: authMode === "static" ? { ...updates, ...identity } : updates,
+          // A refused widening becomes the field error below, and any other
+          // 403 this toast; neither is reported a second time by the popup.
+          context: { [HANDLED_STATUSES]: [403] },
         })
         .json<Settings>();
       // A save that re-pointed the BFF retired this workspace; the gateway
@@ -251,6 +272,10 @@ export function SettingsForm() {
           ...prev,
           jwtNamespaces: "Grants cannot include namespaces this session does not hold, or *",
         }));
+        return;
+      }
+      if (errorStatus(error) === 403) {
+        toast("error", await getApiErrorMessage(error, "Failed to save settings"));
         return;
       }
       toast("error", "Failed to save settings");

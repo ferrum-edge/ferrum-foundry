@@ -468,6 +468,55 @@ describe('streaming gateway proxy', () => {
     expect(Date.now() - started).toBeLessThan(1000);
   });
 
+  it('delivers the 401 to a slow unauthenticated upload before closing it', async () => {
+    // A legitimate 3 MB upload arriving slowly, refused because the session
+    // expired. FERRUM_WRITE_TIMEOUT is 100ms here, so the drain gives up long
+    // before the body ends; the 401 must reach the client before it does.
+    const port = (app.server.address() as AddressInfo).port;
+    const total = 3 * 1024 * 1024;
+    const outcome = await new Promise<StalledUploadOutcome>((resolve) => {
+      const request = httpRequest({
+        host: '127.0.0.1',
+        port,
+        path: '/api/proxy/echo',
+        method: 'PUT',
+        headers: { 'content-type': 'application/json', 'content-length': String(total) },
+      });
+      const seen: StalledUploadOutcome = {};
+      const chunk = Buffer.alloc(64 * 1024, 'a');
+      let sent = 0;
+      const send = () => {
+        if (request.destroyed || sent >= total) return;
+        sent += chunk.length;
+        if (sent >= total) request.end(chunk);
+        else request.write(chunk);
+      };
+      const timer = setInterval(send, 50);
+      timer.unref();
+      request.on('response', (incoming) => {
+        seen.status = incoming.statusCode;
+        incoming.resume();
+      });
+      request.on('error', (error: NodeJS.ErrnoException) => {
+        const code = error.code ?? error.message;
+        if (seen.status === undefined) seen.errorBeforeResponse = code;
+        else seen.errorAfterResponse = code;
+      });
+      request.on('close', () => {
+        clearInterval(timer);
+        resolve(seen);
+      });
+      send();
+    });
+    expect(outcome.errorBeforeResponse).toBeUndefined();
+    expect(outcome.status).toBe(401);
+    // The remainder outlasts the drain, so the connection is then closed under
+    // the unfinished write.
+    if (outcome.errorAfterResponse !== undefined) {
+      expect(['ECONNRESET', 'EPIPE']).toContain(outcome.errorAfterResponse);
+    }
+  });
+
   it('closes the connection after an upload-timeout response without draining the remainder', async () => {
     const before = abandonedUploads.length;
     const port = (app.server.address() as AddressInfo).port;
@@ -848,14 +897,17 @@ describe('unread upload drains', () => {
   });
 
   /**
-   * Declare `declaredLength` bytes, send one chunk, then either keep sending
-   * (`keepSending`) or go quiet. `onResponse` runs once the status arrives.
+   * Declare `declaredLength` bytes (or none, sending chunked, when it is
+   * `null`), send one chunk, then either keep sending (`keepSending`) or go
+   * quiet. `onResponse` runs once the status arrives. `headers` defaults to the
+   * signed-in session's.
    */
   function unreadUpload(
     path: string,
-    declaredLength: number,
+    declaredLength: number | null,
     keepSending: boolean,
     onResponse?: () => void,
+    headers: Record<string, string> = lingeringHeaders,
   ): Promise<DrainedUploadOutcome> {
     const port = (lingering.server.address() as AddressInfo).port;
     return new Promise((resolve) => {
@@ -865,9 +917,9 @@ describe('unread upload drains', () => {
         path,
         method: 'PUT',
         headers: {
-          ...lingeringHeaders,
+          ...headers,
           'content-type': 'application/json',
-          'content-length': String(declaredLength),
+          ...(declaredLength !== null && { 'content-length': String(declaredLength) }),
         },
       });
       const seen: DrainedUploadOutcome = {};
@@ -935,6 +987,92 @@ describe('unread upload drains', () => {
     }
   });
 
+  // Refusals from an onRequest hook never reach the proxy handler. Without a
+  // bound of the BFF's own, Node discards their bodies until the server's
+  // request timeout, and the 401 is reachable without signing in (#468).
+  it('bounds the drain of an upload refused before authentication', async () => {
+    const outcome = await unreadUpload('/api/proxy/echo', 64 * 1024 * 1024, true, undefined, {});
+    expect(outcome.errorBeforeResponse).toBeUndefined();
+    expect(outcome.status).toBe(401);
+    expect(outcome.closedAfterResponseMs).toBeLessThan(3_000);
+  });
+
+  // Undeclared, so only the bytes the drain counts can end it early. Node's own
+  // discard, once started, hides those bytes from the drain.
+  it('bounds the drain of a chunked upload refused before authentication', async () => {
+    const outcome = await unreadUpload('/api/proxy/echo', null, true, undefined, {});
+    expect(outcome.errorBeforeResponse).toBeUndefined();
+    expect(outcome.status).toBe(401);
+    expect(outcome.closedAfterResponseMs).toBeLessThan(3_000);
+  });
+
+  it('bounds the drain of an upload refused before authentication outside the proxy', async () => {
+    const outcome = await unreadUpload('/api/settings', 64 * 1024 * 1024, true, undefined, {});
+    expect(outcome.errorBeforeResponse).toBeUndefined();
+    expect(outcome.status).toBe(401);
+    expect(outcome.closedAfterResponseMs).toBeLessThan(3_000);
+  });
+
+  it('bounds the drain of an upload refused for upload capacity', async () => {
+    const configModule = await import('./config.js');
+    const configSpy = vi.spyOn(configModule, 'loadConfig').mockReturnValue({
+      ...configModule.loadConfig(),
+      maxLargeUploads: 0,
+    });
+    try {
+      const outcome = await unreadUpload('/api/proxy/api-specs', 64 * 1024 * 1024, true);
+      expect(outcome.errorBeforeResponse).toBeUndefined();
+      expect(outcome.status).toBe(429);
+      expect(outcome.closedAfterResponseMs).toBeLessThan(3_000);
+    } finally {
+      configSpy.mockRestore();
+    }
+  });
+
+  it('counts the bytes it discards from a chunked upload refused before the handler', async () => {
+    // Signed in, so the drain may linger its full 5 seconds; a sender that
+    // never stops is cut short only by the byte cap, which needs the drain to
+    // see what it discards.
+    const configModule = await import('./config.js');
+    const configSpy = vi.spyOn(configModule, 'loadConfig').mockReturnValue({
+      ...configModule.loadConfig(),
+      maxLargeUploads: 0,
+    });
+    try {
+      const outcome = await unreadUpload('/api/proxy/api-specs', null, true);
+      expect(outcome.errorBeforeResponse).toBeUndefined();
+      expect(outcome.status).toBe(429);
+      expect(outcome.closedAfterResponseMs).toBeLessThan(3_000);
+    } finally {
+      configSpy.mockRestore();
+    }
+  });
+
+  it('keeps a keep-alive connection reusable after refusing an upload before authentication', async () => {
+    const agent = new Agent({ keepAlive: true, maxSockets: 1 });
+    const target = {
+      port: (lingering.server.address() as AddressInfo).port,
+      headers: {},
+      timeoutMs: 30_000,
+    };
+    try {
+      const upload = await keepAliveRequest(
+        agent,
+        'PUT',
+        '/api/proxy/echo',
+        Buffer.alloc(1_900_000, 'a'),
+        target,
+      );
+      expect(upload).toEqual({ status: 401, reusedSocket: false });
+      expect(await keepAliveRequest(agent, 'GET', '/api/auth/session', undefined, target)).toEqual({
+        status: 401,
+        reusedSocket: true,
+      });
+    } finally {
+      agent.destroy();
+    }
+  });
+
   it('abandons a stalled drain when the server shuts down', async () => {
     let closedIn: number | undefined;
     let closing: Promise<void> | undefined;
@@ -953,5 +1091,92 @@ describe('unread upload drains', () => {
     expect(outcome.status).toBe(400);
     expect(outcome.closedAfterResponseMs).toBeLessThan(1_000);
     expect(closedIn).toBeLessThan(1_000);
+  });
+});
+
+describe('signed-out drain pool', () => {
+  const poolSnapshot: Record<string, string | undefined> = {};
+  let pooled: FastifyInstance;
+  let pooledHeaders: Record<string, string>;
+
+  beforeAll(async () => {
+    // Two drain slots, so two signed-out senders fill the signed-out pool
+    // (min(8, FERRUM_MAX_ACTIVE_UPLOADS)) and, were the pools shared, every
+    // drain slot the instance has.
+    const overrides = {
+      FERRUM_MAX_ACTIVE_UPLOADS: '2',
+      FERRUM_WRITE_TIMEOUT: '30000',
+      FERRUM_UPLOAD_TIMEOUT: '60000',
+    };
+    for (const [key, value] of Object.entries(overrides)) {
+      poolSnapshot[key] = process.env[key];
+      process.env[key] = value;
+    }
+    vi.resetModules();
+    const { buildApp } = await import('./app.js');
+    pooled = await buildApp({ serveStatic: false, logger: false });
+    await pooled.listen({ host: '127.0.0.1', port: 0 });
+    const login = await pooled.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { token: BFF_TOKEN },
+    });
+    const { csrfToken } = login.json() as { csrfToken: string };
+    pooledHeaders = {
+      cookie: login.cookies.map((entry) => `${entry.name}=${entry.value}`).join('; '),
+      'x-csrf-token': csrfToken,
+    };
+  });
+
+  afterAll(async () => {
+    await pooled.close();
+    for (const [key, value] of Object.entries(poolSnapshot)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  it('keeps signed-in drains available while signed-out senders fill their pool', async () => {
+    const port = (pooled.server.address() as AddressInfo).port;
+    const stalled: Array<ReturnType<typeof httpRequest>> = [];
+    const agent = new Agent({ keepAlive: true, maxSockets: 1 });
+    try {
+      // Each refused sender promises far more than it sends, then goes quiet,
+      // so it holds its drain slot for the signed-out linger.
+      const statuses = await Promise.all([0, 1].map(() => new Promise<number>((resolve, reject) => {
+        const request = httpRequest({
+          host: '127.0.0.1',
+          port,
+          path: '/api/proxy/echo',
+          method: 'PUT',
+          headers: { 'content-type': 'application/json', 'content-length': '1900000' },
+        });
+        stalled.push(request);
+        request.on('response', (incoming) => {
+          incoming.resume();
+          resolve(incoming.statusCode ?? 0);
+        });
+        request.on('error', reject);
+        request.write(Buffer.alloc(64 * 1024, 'a'));
+      })));
+      expect(statuses).toEqual([401, 401]);
+      // A signed-in rejection still drains rather than closing its connection.
+      const target = { port, headers: pooledHeaders, timeoutMs: 30_000 };
+      const upload = await keepAliveRequest(
+        agent,
+        'PUT',
+        '/api/proxy/reject-unread',
+        Buffer.alloc(1_900_000, 'a'),
+        target,
+      );
+      expect(upload).toEqual({ status: 400, reusedSocket: false });
+      expect(await keepAliveRequest(agent, 'GET', '/api/auth/session', undefined, target)).toEqual({
+        status: 200,
+        reusedSocket: true,
+      });
+    } finally {
+      agent.destroy();
+      for (const request of stalled) request.destroy();
+    }
   });
 });

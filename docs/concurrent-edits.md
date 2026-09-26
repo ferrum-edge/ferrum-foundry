@@ -346,12 +346,40 @@ credential action. Treating the commit as a failure left the submitted secret
 armed, so a second click appended it again (#451).
 
 A credential write whose answer was lost may also have committed. The hook
-re-reads the consumer before it rejects, and the card keeps the draft — it may
-be the only copy of a stored secret — but refuses to submit it again until
-that re-read has landed (the consumer revision moved). An indexed delete
-whose answer was lost closes its confirmation, since the index may now name a
-different credential. Neither path rethrows the ky error, which holds the
-secret-bearing request options.
+records the consumer revision when the lost answer arrives, re-reads the
+consumer, and rejects with that revision (`UnobservedCredentialWriteError`).
+The card keeps the draft — it may be the only copy of a stored secret — but
+refuses any add or replacement until a read newer than that revision has
+landed. The revision the form rendered when it submitted is not used: a
+refetch that landed mid-write would already have passed it, and a failed
+re-read would then re-arm the form on a read older than the error (#466). An
+add is also refused while one is in flight, checked synchronously so a
+double submit cannot write twice.
+
+The re-read cannot confirm presence: secrets are listed as `[REDACTED]` and
+basic credentials are not listed at all. For a key, JWT, or HMAC add, the card
+compares the count it listed when the write was issued with the re-read and
+says the credential was *likely* stored (or likely not). For a basic add it
+says presence cannot be observed and points to "Replace basic credentials",
+which is safe to repeat but revokes every existing basic password. This
+"outcome unknown" status line survives Cancel and reopening the form, and is
+cleared only when a later add, replacement, or delete of all basic credentials
+from the card completes. Deleting one listed credential does not clear it: the
+card keeps the lock and, when the deleted entry was listed before the add,
+lowers the recorded count by one so the comparison stays valid. The lock is
+monotonic — only a read strictly newer than the recorded revision re-arms the
+form.
+
+An indexed delete whose answer was lost closes its confirmation, since the
+index may now name a different credential. No failure rethrows the ky error,
+which holds the secret-bearing request options: a definite rejection becomes a
+plain error whose message carries the gateway's detail. Every submitted value
+is replaced by `[REDACTED]` throughout the parsed error body — every string,
+keys included, in raw, JSON-escaped, and whitespace-trimmed forms — before the
+detail is extracted, since extraction trims each field and cuts it to 600
+characters and a shortened or trimmed echo would no longer match the submitted
+value. An append opts out of the global error popup, which would show the raw
+gateway body.
 
 ## What the operator sees
 
@@ -407,7 +435,7 @@ so the next successful read seeds a fresh baseline for the new tenant.
 | `If-Match` from the verified read, a writer in the gap refused, re-send after a `412` on unowned fields, bounded retries, untagged and weak-tag fallback, popup opt-out | `src/api/conditionalWrite.test.ts` |
 | Draft preserved, no reapply control, keep/discard behavior | `src/routes/proxies/concurrentEdit.test.tsx` |
 | Same-client write ordering still composes | `src/api/upstreams.targetWrites.test.ts` |
-| Target form basis survives a background refetch; unrelated settings still compose; the form follows its target identity when rows shift; a committed-but-not-live removal is adopted only when the read holds exactly its result | `src/routes/upstreams/TargetEditor.test.tsx` |
+| Target form basis survives a background refetch; unrelated settings still compose; the form follows its target identity when rows shift, including a renumbered duplicate `host:port`; a committed-but-not-live removal is adopted only when the read holds exactly its result, up to omitted empty optional members | `src/routes/upstreams/TargetEditor.test.tsx`, `src/lib/upstreamTargets.test.ts`, `scripts/gateway-contract-smoke.mjs` |
 | Restore retires the restored namespace's detail caches and inactive lists | `src/hooks/restoreDetailCache.test.tsx`, `src/components/forms/BackupRestoreCard.recovery.test.tsx` |
 | Guarded deletes, consumer saves and rotation re-send, nested redaction of plugin `config` | `src/api/conditionalWrite.test.ts`, `src/lib/resourceBaseline.test.ts` |
 | Plugin editor baseline, membership writes conditional on their reads | `src/lib/pluginMembership.test.ts`, `src/lib/pluginMembership.binding.test.ts` |

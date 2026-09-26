@@ -201,7 +201,9 @@ export async function appendCredential(
     return proxyApi
       .post(
         `consumers/${consumerId}/credentials/${credType}`,
-        scoped(scope, { json: data }),
+        // The form reports failure with submitted values removed; the global
+        // popup would show a gateway body that echoes the secret.
+        scoped(scope, { json: data, context: { [SILENT_ERRORS]: true } }),
       )
       .json<Consumer>();
   });
