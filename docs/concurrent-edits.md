@@ -346,12 +346,31 @@ credential action. Treating the commit as a failure left the submitted secret
 armed, so a second click appended it again (#451).
 
 A credential write whose answer was lost may also have committed. The hook
-re-reads the consumer before it rejects, and the card keeps the draft — it may
-be the only copy of a stored secret — but refuses to submit it again until
-that re-read has landed (the consumer revision moved). An indexed delete
-whose answer was lost closes its confirmation, since the index may now name a
-different credential. Neither path rethrows the ky error, which holds the
-secret-bearing request options.
+records the consumer revision when the lost answer arrives, re-reads the
+consumer, and rejects with that revision (`UnobservedCredentialWriteError`).
+The card keeps the draft — it may be the only copy of a stored secret — but
+refuses any add or replacement until a read newer than that revision has
+landed. The revision the form rendered when it submitted is not used: a
+refetch that landed mid-write would already have passed it, and a failed
+re-read would then re-arm the form on a read older than the error (#466). An
+add is also refused while one is in flight, checked synchronously so a
+double submit cannot write twice.
+
+The re-read cannot confirm presence: secrets are listed as `[REDACTED]` and
+basic credentials are not listed at all. For a key, JWT, or HMAC add, the card
+compares the count it listed when the write was issued with the re-read and
+says the credential was *likely* stored (or likely not). For a basic add it
+says presence cannot be observed and points to "Replace basic credentials",
+which is safe to repeat. This "outcome unknown" status line survives Cancel
+and reopening the form, and is cleared only when a later credential write from
+the card completes.
+
+An indexed delete whose answer was lost closes its confirmation, since the
+index may now name a different credential. No failure rethrows the ky error,
+which holds the secret-bearing request options: a definite rejection becomes a
+plain error whose message carries the gateway's detail with every submitted
+value (raw or JSON-escaped) replaced by `[REDACTED]`, and an append opts out of
+the global error popup, which would show the raw gateway body.
 
 ## What the operator sees
 

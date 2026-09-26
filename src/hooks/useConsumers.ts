@@ -8,6 +8,7 @@
 /* ------------------------------------------------------------------ */
 
 import {
+  getApiErrorDetail,
   getCommittedWrite,
   isCommittedWrite,
   isUnobservedWrite,
@@ -165,6 +166,44 @@ function refreshConsumer(qc: QueryClient, namespace: string, consumerId: string)
 }
 
 /**
+ * A credential write whose answer was lost. `revision` is the consumer read's
+ * `dataUpdatedAt` when the lost answer arrived, before this write's own
+ * re-read: the form stays locked until a read newer than it succeeds. The
+ * revision the form rendered when the write was issued is not a substitute —
+ * a refetch that lands mid-write advances it, and a failed re-read would then
+ * unlock the form on a read that predates the error (#466).
+ */
+export class UnobservedCredentialWriteError extends Error {
+  readonly revision: number;
+
+  constructor(revision: number) {
+    super(UNOBSERVED_WRITE_MESSAGE);
+    this.name = "UnobservedCredentialWriteError";
+    this.revision = revision;
+    markUnobservedWrite(this);
+  }
+}
+
+/** Every string a credential payload carries, the values a failure must not echo. */
+function submittedValues(data: unknown): string[] {
+  if (typeof data === "string") return data ? [data] : [];
+  if (Array.isArray(data)) return data.flatMap(submittedValues);
+  if (data && typeof data === "object") return Object.values(data).flatMap(submittedValues);
+  return [];
+}
+
+/** `text` with each submitted value, raw or JSON-escaped, replaced by `[REDACTED]`. */
+function redactSubmitted(text: string, values: readonly string[]): string {
+  let redacted = text;
+  for (const value of values) {
+    for (const form of new Set([value, JSON.stringify(value).slice(1, -1)])) {
+      redacted = redacted.split(form).join("[REDACTED]");
+    }
+  }
+  return redacted;
+}
+
+/**
  * Run a credential write, resolving a committed-but-not-live answer as the
  * completed write it is rather than as a failure (#451). The mutation then
  * refreshes the consumer exactly as for a `2xx`, and the form closes instead
@@ -172,15 +211,17 @@ function refreshConsumer(qc: QueryClient, namespace: string, consumerId: string)
  *
  * A write whose answer was lost refreshes the consumer before it rejects, so
  * the form's retry is judged against a re-read rather than the pre-write list.
- * Neither outcome rethrows the ky error: it holds the secret-bearing request
+ * No outcome rethrows the ky error: it holds the secret-bearing request
  * options and possibly an echoed body, and would otherwise be retained in the
- * mutation cache. A definite pre-commit failure is rethrown as is, or replaced
- * with `failure` when the caller must not surface gateway detail.
+ * mutation cache. A definite pre-commit failure is replaced with a plain
+ * error carrying the gateway's detail with every submitted value removed
+ * (#466), or with `failure` when the caller must not surface gateway detail.
  */
 async function writeCredential(
   qc: QueryClient,
   namespace: string,
   consumerId: string,
+  submitted: unknown,
   write: () => Promise<unknown>,
   failure?: string,
 ): Promise<CredentialWriteOutcome> {
@@ -191,12 +232,21 @@ async function writeCredential(
     const committed = getCommittedWrite(error);
     if (committed) return { namespace, consumerId, committed };
     if (isUnobservedWrite(error)) {
+      const queryKey = ["consumer", namespace, consumerId];
+      const revision = qc.getQueryState(queryKey)?.dataUpdatedAt ?? 0;
       await refreshConsumer(qc, namespace, consumerId);
-      throw markUnobservedWrite(new Error(UNOBSERVED_WRITE_MESSAGE));
+      // eslint-disable-next-line preserve-caught-error -- the cause is the secret-bearing error
+      throw new UnobservedCredentialWriteError(revision);
     }
-    if (failure === undefined) throw error;
     // eslint-disable-next-line preserve-caught-error -- the cause is the secret-bearing error
-    throw new Error(failure);
+    if (failure !== undefined) throw new Error(failure);
+    // eslint-disable-next-line preserve-caught-error -- the cause is the secret-bearing error
+    if (!(error instanceof Error)) throw new Error("Credential write failed");
+    const values = submittedValues(submitted);
+    const detail = await getApiErrorDetail(error);
+    const message = redactSubmitted(error.message, values);
+    // eslint-disable-next-line preserve-caught-error -- the cause is the secret-bearing error
+    throw new Error(detail ? `${message}: ${redactSubmitted(detail, values)}` : message);
   }
 }
 
@@ -219,6 +269,7 @@ export function useUpdateCredentials() {
         qc,
         scope.namespace,
         consumerId,
+        data,
         () => consumers.updateCredentials(scope, consumerId, credType, data),
         "Credential replacement failed. Check the gateway state before retrying.",
       ),
@@ -240,7 +291,7 @@ export function useAppendCredential() {
       credType: BuiltInCredentialType;
       data: ConsumerCredentialInput;
     }) =>
-      writeCredential(qc, scope.namespace, consumerId, () =>
+      writeCredential(qc, scope.namespace, consumerId, data, () =>
         consumers.appendCredential(scope, consumerId, credType, data),
       ),
     onSuccess: ({ namespace, consumerId }) => refreshConsumer(qc, namespace, consumerId),
@@ -259,7 +310,7 @@ export function useDeleteCredentials() {
       consumerId: string;
       credType: string;
     }) =>
-      writeCredential(qc, scope.namespace, consumerId, () =>
+      writeCredential(qc, scope.namespace, consumerId, null, () =>
         consumers.deleteCredentials(scope, consumerId, credType),
       ),
     onSuccess: ({ namespace, consumerId }) => refreshConsumer(qc, namespace, consumerId),
@@ -280,7 +331,7 @@ export function useDeleteCredentialByIndex() {
       credType: string;
       index: number;
     }) =>
-      writeCredential(qc, scope.namespace, consumerId, () =>
+      writeCredential(qc, scope.namespace, consumerId, null, () =>
         consumers.deleteCredentialByIndex(scope, consumerId, credType, index),
       ),
     onSuccess: ({ namespace, consumerId }) => refreshConsumer(qc, namespace, consumerId),
