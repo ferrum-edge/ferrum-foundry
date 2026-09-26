@@ -10,7 +10,7 @@ import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
-import { getApiErrorMessage } from "@/api/client";
+import { committedWriteMessage, getApiErrorMessage, isUnobservedWrite } from "@/api/client";
 import {
   useAppendCredential,
   useDeleteCredentialByIndex,
@@ -207,6 +207,13 @@ export function CredentialForm({
   const [writeMode, setWriteMode] = useState<"append" | "replace">("append");
   const [deleteAllRevision, setDeleteAllRevision] = useState<number | null>(null);
   const [receipt, setReceipt] = useState<SubmittedSecret[] | null>(null);
+  // The committed-but-not-live report of this card's last write. The toast is
+  // transient; this stays until the operator's next credential action.
+  const [committedNotice, setCommittedNotice] = useState<string | null>(null);
+  // The consumer revision an add or replacement whose answer was lost was
+  // issued against. The write may have committed, so the kept draft cannot be
+  // submitted again until the consumer has been re-read.
+  const [unresolvedRevision, setUnresolvedRevision] = useState<number | null>(null);
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -219,6 +226,8 @@ export function CredentialForm({
   const credentials = isBasic ? [] : normalizeCredentials(existingCredentials);
   const writePending = appendCredential.isPending || updateCredentials.isPending;
   const busy = writePending || deleteCredentials.isPending;
+  const awaitingReread = unresolvedRevision !== null
+    && (revision === unresolvedRevision || isRefreshing);
   const badgeVariant = CRED_BADGE_VARIANT[credentialType] ?? "default";
 
   if (!config) {
@@ -233,9 +242,21 @@ export function CredentialForm({
 
   /* ---------- Handlers ---------- */
 
+  const openForm = (mode: "append" | "replace") => {
+    setWriteMode(mode);
+    setCommittedNotice(null);
+    setUnresolvedRevision(null);
+    setShowForm(true);
+  };
+
+  const reportCommitted = (message: string) => {
+    setCommittedNotice(message);
+    toast("warning", message);
+  };
+
   const addCredential = session.bind(async () => {
     if (readOnly) return;
-    if (busy) return;
+    if (busy || awaitingReread) return;
     let data;
     try {
       data = buildCredentialInput(credentialType, formValues);
@@ -251,23 +272,38 @@ export function CredentialForm({
       throw error;
     }
 
+    setCommittedNotice(null);
     try {
       const mutation = writeMode === "replace" ? updateCredentials : appendCredential;
-      await mutation.mutateAsync({
+      const outcome = await mutation.mutateAsync({
         consumerId,
         credType: credentialType,
         data,
       });
       if (!mounted.current) return;
+      // A committed-but-not-live answer completes the form exactly as a 2xx
+      // does: the gateway holds the credential, so the secret is shown once,
+      // the draft is cleared, and the submit action goes away. Keeping the
+      // form armed would let a second click write the same secret again (#451).
       const secrets = submittedSecrets({ [credentialType]: [data] });
       if (secrets.length > 0) setReceipt(secrets);
-      toast("success", writeMode === "replace" ? "Basic credentials replaced" : `${config.label} credential added`);
+      const summary = writeMode === "replace"
+        ? "Basic credentials replaced"
+        : `${config.label} credential added`;
+      if (outcome.committed) reportCommitted(committedWriteMessage(summary, outcome.committed));
+      else toast("success", summary);
       setFormValues({});
       setErrors({});
+      setUnresolvedRevision(null);
       setShowForm(false);
     } catch (err: unknown) {
       const message = await getApiErrorMessage(err, "Failed to add credential");
-      if (mounted.current) toast("error", message);
+      if (!mounted.current) return;
+      // Not a pre-commit failure: the gateway may hold this credential. Keep
+      // the draft (it may be the only copy of a stored secret), but refuse to
+      // resubmit it until the consumer has been re-read.
+      if (isUnobservedWrite(err)) setUnresolvedRevision(revision);
+      toast("error", message);
     } finally {
       appendCredential.reset();
       updateCredentials.reset();
@@ -287,18 +323,26 @@ export function CredentialForm({
       toast("warning", "The credential list refreshed. Select the credential again before deleting it.");
       return;
     }
+    setCommittedNotice(null);
     try {
-      await deleteCredentialByIndex.mutateAsync({
+      const outcome = await deleteCredentialByIndex.mutateAsync({
         consumerId,
         credType: credentialType,
         index: deleteSelection.index,
       });
       if (!mounted.current) return;
-      toast("success", `${config.label} credential removed`);
+      const summary = `${config.label} credential removed`;
+      if (outcome.committed) reportCommitted(committedWriteMessage(summary, outcome.committed));
+      else toast("success", summary);
       setDeleteSelection(null);
     } catch (err: unknown) {
       const message = await getApiErrorMessage(err, "Failed to delete credential");
-      if (mounted.current) toast("error", message);
+      if (!mounted.current) return;
+      // A lost answer may already have removed this index; confirming it again
+      // could remove the credential that moved into its place. Require a fresh
+      // selection from the re-read list.
+      if (isUnobservedWrite(err)) setDeleteSelection(null);
+      toast("error", message);
     } finally {
       deleteCredentialByIndex.reset();
     }
@@ -312,16 +356,21 @@ export function CredentialForm({
       toast("warning", "The consumer refreshed. Confirm deletion of all basic credentials again.");
       return;
     }
+    setCommittedNotice(null);
     try {
-      await deleteCredentials.mutateAsync({ consumerId, credType: "basicauth" });
+      const outcome = await deleteCredentials.mutateAsync({ consumerId, credType: "basicauth" });
       if (!mounted.current) return;
       setDeleteAllRevision(null);
       setReceipt(null);
       setFormValues({});
-      toast("success", "All basic credentials deleted");
+      const summary = "All basic credentials deleted";
+      if (outcome.committed) reportCommitted(committedWriteMessage(summary, outcome.committed));
+      else toast("success", summary);
     } catch (err: unknown) {
       const message = await getApiErrorMessage(err, "Failed to delete basic credentials");
-      if (mounted.current) toast("error", message);
+      if (!mounted.current) return;
+      if (isUnobservedWrite(err)) setDeleteAllRevision(null);
+      toast("error", message);
     } finally {
       deleteCredentials.reset();
     }
@@ -344,7 +393,7 @@ export function CredentialForm({
             size="sm"
             variant="secondary"
             disabled={busy}
-            onClick={() => { setWriteMode("append"); setShowForm(true); }}
+            onClick={() => openForm("append")}
           >
             <svg
               className="w-3.5 h-3.5"
@@ -374,7 +423,7 @@ export function CredentialForm({
           {!showForm && !receipt && (
             <div className="flex flex-wrap gap-2">
               <Button size="sm" variant="secondary" disabled={busy}
-                onClick={() => { setWriteMode("replace"); setShowForm(true); }}>
+                onClick={() => openForm("replace")}>
                 Replace basic credentials
               </Button>
               <Button size="sm" variant="danger" disabled={busy || isRefreshing}
@@ -429,6 +478,12 @@ export function CredentialForm({
         </p>
       )}
 
+      {committedNotice && (
+        <p role="status" className="text-sm text-warning">
+          {committedNotice}
+        </p>
+      )}
+
       {receipt && <CredentialCopyOnce secrets={receipt} onDone={() => setReceipt(null)} />}
 
       {/* Add credential form */}
@@ -442,6 +497,13 @@ export function CredentialForm({
               {writeMode === "replace"
                 ? "Replaces every existing basic password for this consumer with this password. Existing passwords will stop working."
                 : "Adds another basic password while preserving existing passwords. Their count is not observable."}
+            </p>
+          )}
+          {unresolvedRevision !== null && (
+            <p role="alert" className="text-sm text-warning">
+              {awaitingReread
+                ? "Outcome unknown: the gateway may already hold this credential. Submitting it again is disabled until the consumer has been re-read."
+                : "Outcome unknown: the gateway may already hold this credential. The consumer has been re-read; confirm the credential is not already present before submitting it again."}
             </p>
           )}
           {config.fields.map((field) => (
@@ -467,6 +529,7 @@ export function CredentialForm({
               type="submit"
               size="sm"
               loading={writePending}
+              disabled={awaitingReread}
             >
               {writeMode === "replace" ? "Replace basic credentials" : "Add Credential"}
             </Button>
@@ -478,6 +541,7 @@ export function CredentialForm({
                 setShowForm(false);
                 setFormValues({});
                 setErrors({});
+                setUnresolvedRevision(null);
               }}
               disabled={writePending}
             >

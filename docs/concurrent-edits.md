@@ -333,6 +333,26 @@ and the detail page leaves with "Proxy deleted: committed, not yet proven live"
 instead of "Failed to delete proxy". Until then the cached detail would have
 seeded an editor for a resource the gateway no longer holds.
 
+### Committed credential writes
+
+A consumer credential append, basic replacement, indexed delete, or delete of
+all basic credentials that commits is a completed write too. The credential
+hooks (`writeCredential()` in `src/hooks/useConsumers.ts`) resolve with
+`committed` set, refresh the consumer exactly as for a `2xx`, and the
+credential card completes: the secret is shown once in the copy-once receipt,
+the draft is cleared, the form and its submit action close, and the card keeps
+a "committed, not yet proven live" status line until the operator's next
+credential action. Treating the commit as a failure left the submitted secret
+armed, so a second click appended it again (#451).
+
+A credential write whose answer was lost may also have committed. The hook
+re-reads the consumer before it rejects, and the card keeps the draft — it may
+be the only copy of a stored secret — but refuses to submit it again until
+that re-read has landed (the consumer revision moved). An indexed delete
+whose answer was lost closes its confirmation, since the index may now name a
+different credential. Neither path rethrows the ky error, which holds the
+secret-bearing request options.
+
 ## What the operator sees
 
 `StaleWriteDialog` is shown when a save or a delete is refused. For a save it
@@ -395,6 +415,7 @@ so the next successful read seeds a fresh baseline for the new tenant.
 | Committed-but-not-live classification, popup suppression, cache refresh, save-twice regression | `src/api/committedWrite.test.ts`, `src/lib/queryClient.test.ts` |
 | Editor reseed after a committed save; committed delete reported as deleted | `src/routes/proxies/concurrentEdit.test.tsx` |
 | Committed delete retires the seeded detail and list caches | `src/hooks/deleteDetailCache.test.tsx` |
+| Committed and unobserved credential writes disarm the card and reconcile before a retry | `src/routes/consumers/credentialCommittedWrite.test.tsx` |
 | Mock gateway precondition contract | `scripts/mock-admin-gateway.test.mjs` |
 | Real gateway behavior and the `If-Match` contract | `scripts/concurrent-edit-contract.mjs` |
 
