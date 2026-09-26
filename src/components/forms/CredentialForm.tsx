@@ -12,6 +12,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
 import { committedWriteMessage, getApiErrorMessage, isUnobservedWrite } from "@/api/client";
 import {
+  UnobservedCredentialWriteError,
   useAppendCredential,
   useDeleteCredentialByIndex,
   useDeleteCredentials,
@@ -179,6 +180,44 @@ function normalizeCredentials(
   return [];
 }
 
+/* ------------------------------------------------------------------ */
+/*  Helper: an add or replacement whose answer was lost                */
+/* ------------------------------------------------------------------ */
+
+interface UnresolvedWrite {
+  /** The consumer revision a re-read must pass before the form re-arms. */
+  revision: number;
+  /** How many credentials of this type the card listed when it was issued. */
+  countBefore: number;
+  mode: "append" | "replace";
+}
+
+/**
+ * What the operator can honestly be told about a lost answer. Secrets are
+ * listed as `[REDACTED]` and basic credentials are not listed at all, so the
+ * re-read never confirms presence: a keyed type can only compare counts, and
+ * a basic write cannot be observed (#466).
+ */
+function unresolvedMessage(
+  write: UnresolvedWrite,
+  view: { awaitingReread: boolean; isBasic: boolean; label: string; count: number },
+): string {
+  const lead = "Outcome unknown: the gateway may already hold this credential.";
+  if (view.awaitingReread) {
+    return `${lead} Submitting again is disabled until the consumer has been re-read.`;
+  }
+  if (view.isBasic) {
+    const unobservable = `${lead} The consumer has been re-read, but the gateway does not list basic credentials, so whether the password was stored cannot be observed.`;
+    return write.mode === "replace"
+      ? `${unobservable} Replacing basic credentials again is safe to repeat: it leaves only the password you submit.`
+      : `${unobservable} Adding it again could store a duplicate; use “Replace basic credentials” instead, which is safe to repeat but revokes every existing basic password.`;
+  }
+  const kind = `${view.label.toLowerCase()} credentials`;
+  return view.count > write.countBefore
+    ? `${lead} The consumer has been re-read and now lists more ${kind} than before this write, so it was likely stored. Secrets are listed redacted, so this cannot be confirmed; submitting it again would likely add a duplicate.`
+    : `${lead} The consumer has been re-read and lists no more ${kind} than before this write, so it was likely not stored. Secrets are listed redacted and a concurrent change could hide it; check before submitting again.`;
+}
+
 /* ================================================================== */
 /*  CredentialForm                                                     */
 /* ================================================================== */
@@ -210,10 +249,14 @@ export function CredentialForm({
   // The committed-but-not-live report of this card's last write. The toast is
   // transient; this stays until the operator's next credential action.
   const [committedNotice, setCommittedNotice] = useState<string | null>(null);
-  // The consumer revision an add or replacement whose answer was lost was
-  // issued against. The write may have committed, so the kept draft cannot be
-  // submitted again until the consumer has been re-read.
-  const [unresolvedRevision, setUnresolvedRevision] = useState<number | null>(null);
+  // An add or replacement whose answer was lost. The write may have committed,
+  // so nothing can be submitted again until the consumer has been re-read
+  // past `revision`. It survives Cancel and reopening the form, and is cleared
+  // only when a later credential write completes (#466).
+  const [unresolved, setUnresolved] = useState<UnresolvedWrite | null>(null);
+  // Set synchronously for the life of an add, so a second submit dispatched
+  // before React re-renders with the pending mutation cannot write again.
+  const addInFlight = useRef(false);
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -226,8 +269,10 @@ export function CredentialForm({
   const credentials = isBasic ? [] : normalizeCredentials(existingCredentials);
   const writePending = appendCredential.isPending || updateCredentials.isPending;
   const busy = writePending || deleteCredentials.isPending;
-  const awaitingReread = unresolvedRevision !== null
-    && (revision === unresolvedRevision || isRefreshing);
+  // Monotonic: only a read strictly newer than the recorded revision re-arms
+  // the form, so an older or missing revision can never unlock it.
+  const awaitingReread = unresolved !== null
+    && (revision <= unresolved.revision || isRefreshing);
   const badgeVariant = CRED_BADGE_VARIANT[credentialType] ?? "default";
 
   if (!config) {
@@ -245,7 +290,6 @@ export function CredentialForm({
   const openForm = (mode: "append" | "replace") => {
     setWriteMode(mode);
     setCommittedNotice(null);
-    setUnresolvedRevision(null);
     setShowForm(true);
   };
 
@@ -256,7 +300,7 @@ export function CredentialForm({
 
   const addCredential = session.bind(async () => {
     if (readOnly) return;
-    if (busy || awaitingReread) return;
+    if (busy || awaitingReread || addInFlight.current) return;
     let data;
     try {
       data = buildCredentialInput(credentialType, formValues);
@@ -273,6 +317,11 @@ export function CredentialForm({
     }
 
     setCommittedNotice(null);
+    addInFlight.current = true;
+    // What the card listed when the write was issued, so a lost answer can be
+    // judged against the re-read.
+    const countBefore = credentials.length;
+    const mode = writeMode;
     try {
       const mutation = writeMode === "replace" ? updateCredentials : appendCredential;
       const outcome = await mutation.mutateAsync({
@@ -294,17 +343,26 @@ export function CredentialForm({
       else toast("success", summary);
       setFormValues({});
       setErrors({});
-      setUnresolvedRevision(null);
+      setUnresolved(null);
       setShowForm(false);
     } catch (err: unknown) {
       const message = await getApiErrorMessage(err, "Failed to add credential");
       if (!mounted.current) return;
       // Not a pre-commit failure: the gateway may hold this credential. Keep
       // the draft (it may be the only copy of a stored secret), but refuse to
-      // resubmit it until the consumer has been re-read.
-      if (isUnobservedWrite(err)) setUnresolvedRevision(revision);
+      // resubmit it until the consumer has been re-read past the revision the
+      // write recorded when its answer was lost — not the one this handler
+      // rendered, which a refetch during the write may already have passed.
+      if (isUnobservedWrite(err)) {
+        setUnresolved({
+          revision: err instanceof UnobservedCredentialWriteError ? err.revision : revision,
+          countBefore,
+          mode,
+        });
+      }
       toast("error", message);
     } finally {
+      addInFlight.current = false;
       appendCredential.reset();
       updateCredentials.reset();
     }
@@ -334,6 +392,13 @@ export function CredentialForm({
       const summary = `${config.label} credential removed`;
       if (outcome.committed) reportCommitted(committedWriteMessage(summary, outcome.committed));
       else toast("success", summary);
+      // Deleting one entry does not resolve a lost add, which may still be
+      // stored. Keep the lock, and keep its count comparison valid by
+      // discounting an entry that was counted when the add was issued.
+      const deletedIndex = deleteSelection.index;
+      setUnresolved((current) => current && deletedIndex < current.countBefore
+        ? { ...current, countBefore: current.countBefore - 1 }
+        : current);
       setDeleteSelection(null);
     } catch (err: unknown) {
       const message = await getApiErrorMessage(err, "Failed to delete credential");
@@ -363,6 +428,7 @@ export function CredentialForm({
       setDeleteAllRevision(null);
       setReceipt(null);
       setFormValues({});
+      setUnresolved(null);
       const summary = "All basic credentials deleted";
       if (outcome.committed) reportCommitted(committedWriteMessage(summary, outcome.committed));
       else toast("success", summary);
@@ -478,6 +544,17 @@ export function CredentialForm({
         </p>
       )}
 
+      {unresolved && (
+        <p role="status" className="text-sm text-warning">
+          {unresolvedMessage(unresolved, {
+            awaitingReread,
+            isBasic,
+            label: config.label,
+            count: credentials.length,
+          })}
+        </p>
+      )}
+
       {committedNotice && (
         <p role="status" className="text-sm text-warning">
           {committedNotice}
@@ -497,13 +574,6 @@ export function CredentialForm({
               {writeMode === "replace"
                 ? "Replaces every existing basic password for this consumer with this password. Existing passwords will stop working."
                 : "Adds another basic password while preserving existing passwords. Their count is not observable."}
-            </p>
-          )}
-          {unresolvedRevision !== null && (
-            <p role="alert" className="text-sm text-warning">
-              {awaitingReread
-                ? "Outcome unknown: the gateway may already hold this credential. Submitting it again is disabled until the consumer has been re-read."
-                : "Outcome unknown: the gateway may already hold this credential. The consumer has been re-read; confirm the credential is not already present before submitting it again."}
             </p>
           )}
           {config.fields.map((field) => (
@@ -541,7 +611,6 @@ export function CredentialForm({
                 setShowForm(false);
                 setFormValues({});
                 setErrors({});
-                setUnresolvedRevision(null);
               }}
               disabled={writePending}
             >

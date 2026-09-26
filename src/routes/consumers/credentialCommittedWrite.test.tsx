@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { NamespaceProvider, NAMESPACE_STORAGE_KEY } from "@/stores/namespace";
 import { ToastProvider } from "@/components/ui/Toast";
+import { setApiErrorHandler } from "@/api/client";
 import { CredentialForm } from "@/components/forms/CredentialForm";
 import { useEditorIdentity } from "@/hooks/useEditorIdentity";
 import { useConsumer } from "@/hooks/useConsumers";
@@ -27,12 +28,20 @@ function Page() {
     revision={query.dataUpdatedAt} isRefreshing={query.isFetching} /> : null;
 }
 
-type WriteAnswer = "ok" | "committed" | "unobserved" | "rejected";
+type WriteAnswer = "ok" | "committed" | "unobserved" | "rejected" | "echo";
 let root: Root;
 let host: HTMLDivElement;
 let qc: QueryClient;
 let answer: WriteAnswer;
 let readStatus: number;
+// Holds each write's answer until released, to land a read mid-write.
+let gate: Promise<void> | null;
+// Whether the first write's credential shows up in later reads.
+let grown: boolean;
+// Whether a delete removes the first JWT credential from later reads.
+let shrinkOnDelete: boolean;
+// The body an "echo" answer returns in place of the default echo.
+let echoBody: unknown;
 const writes: { method: string; path: string; body: unknown }[] = [];
 const reads: string[] = [];
 const settled: { status: string; data: unknown; error: unknown }[] = [];
@@ -45,9 +54,11 @@ const LABELS: Record<string, string> = {
 };
 
 function record(namespace: string): Consumer {
+  const added = grown && writes.length > 0 ? [{ secret: "[REDACTED]" }] : [];
+  const removed = shrinkOnDelete && writes.some((write) => write.method === "DELETE");
   return { id: "first", namespace, username: "first", acl_groups: [], credentials: {
     keyauth: [{ key: "[REDACTED]" }, { key: "[REDACTED]" }],
-    jwt: [{ secret: "[REDACTED]" }],
+    jwt: [...(removed ? [] : [{ secret: "[REDACTED]" }]), ...added],
     hmac_auth: [{ secret: "[REDACTED]" }],
   }, created_at: "v1", updated_at: "v1" } as Consumer;
 }
@@ -107,6 +118,10 @@ beforeEach(() => {
   type = "jwt";
   answer = "ok";
   readStatus = 200;
+  gate = null;
+  grown = false;
+  shrinkOnDelete = false;
+  echoBody = null;
   writes.length = 0;
   reads.length = 0;
   settled.length = 0;
@@ -118,6 +133,7 @@ beforeEach(() => {
     if (request.method !== "GET") {
       writes.push({ method: request.method, path,
         body: request.method === "DELETE" ? undefined : await request.json() });
+      if (gate) await gate;
       if (answer === "committed") {
         // Edge's committed-but-not-live family: the row is durable, the live
         // apply lagged. No cursor, so no apply-status poll joins the reads.
@@ -129,6 +145,11 @@ beforeEach(() => {
           code: "FERRUM_BFF_UPSTREAM_FAILURE" }, { status: 502 });
       }
       if (answer === "rejected") return Response.json({ error: "validation failed" }, { status: 400 });
+      if (answer === "echo") {
+        // A gateway that repeats the submitted value, raw and JSON-escaped.
+        return Response.json(echoBody ?? { error: `duplicate secret ${secret}`,
+          details: JSON.stringify({ secret }) }, { status: 400 });
+      }
       if (request.method === "DELETE") return new Response(null, { status: 204 });
       return Response.json(record(tenant), { status: request.method === "POST" ? 201 : 200 });
     }
@@ -157,6 +178,7 @@ afterEach(async () => {
   qc.clear();
   host.remove();
   localStorage.removeItem(NAMESPACE_STORAGE_KEY);
+  setApiErrorHandler(undefined);
   vi.unstubAllGlobals();
 });
 
@@ -221,7 +243,7 @@ describe("credential append outcomes (#451)", () => {
     expect(host.querySelector("textarea")).toBeNull();
     expect(host.querySelector("input")?.value).toBe(secret);
     expect(findButton("Add Credential")?.disabled).toBe(false);
-    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(notice()).not.toContain("Outcome unknown");
     expect(writes).toHaveLength(1);
   });
 
@@ -240,8 +262,7 @@ describe("credential append outcomes (#451)", () => {
     expect(host.querySelector("textarea")).toBeNull();
     expect(host.querySelector("input")?.value).toBe(secret);
     expect(findButton("Add Credential")?.disabled).toBe(true);
-    expect(host.querySelector('[role="alert"]')?.textContent)
-      .toContain("disabled until the consumer has been re-read");
+    expect(notice()).toContain("disabled until the consumer has been re-read");
     await submit();
     expect(writes).toHaveLength(1);
     await assertNoRetainedSecret();
@@ -253,8 +274,7 @@ describe("credential append outcomes (#451)", () => {
       await qc.refetchQueries({ queryKey: ["consumer", "tenant-a", "first"], exact: true });
     });
     await waitFor(() => expect(findButton("Add Credential")?.disabled).toBe(false));
-    expect(host.querySelector('[role="alert"]')?.textContent)
-      .toContain("The consumer has been re-read");
+    expect(notice()).toContain("The consumer has been re-read");
     answer = "ok";
     await submit();
     await waitFor(() => expect(host.querySelector("textarea")?.value).toBe(secret));
@@ -271,12 +291,142 @@ describe("credential append outcomes (#451)", () => {
     expect(reads).toEqual(["/api/proxy/consumers/first"]);
     expect(host.querySelector("input")?.value).toBe(secret);
     expect(findButton("Add Credential")?.disabled).toBe(false);
-    expect(host.querySelector('[role="alert"]')?.textContent)
-      .toContain("confirm the credential is not already present");
+    // The re-read lists no more JWT credentials than before the write.
+    expect(notice()).toContain("lists no more jwt credentials than before this write");
+    expect(notice()).toContain("likely not stored");
     await assertNoRetainedSecret();
+
+    // The unknown outcome is not forgotten by Cancel or by reopening the form
+    // (#466); only the next completed write clears it.
     await click("Cancel");
+    expect(host.querySelector("form")).toBeNull();
+    expect(notice()).toContain("Outcome unknown");
     await click("Add");
-    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(host.querySelector("input")?.value).toBe("");
+    expect(notice()).toContain("Outcome unknown");
+    answer = "ok";
+    await enterSecret();
+    await submit();
+    await waitFor(() => expect(host.querySelector("textarea")?.value).toBe(secret));
+    expect(notice()).not.toContain("Outcome unknown");
+    expect(writes).toHaveLength(2);
+  });
+
+  it("says a lost append was likely stored when the re-read lists one more credential", async () => {
+    answer = "unobserved";
+    grown = true;
+    await mount();
+    expect(host.querySelectorAll('[aria-label^="Delete JWT credential"]')).toHaveLength(1);
+    await click("Add");
+    await enterSecret();
+    await submit();
+    await waitFor(() => expect(notice()).toContain("Outcome unknown"));
+    expect(host.querySelectorAll('[aria-label^="Delete JWT credential"]')).toHaveLength(2);
+    expect(notice()).toContain("now lists more jwt credentials than before this write");
+    expect(notice()).toContain("likely stored");
+    expect(notice()).toContain("cannot be confirmed");
+    expect(writes).toHaveLength(1);
+  });
+
+  it("keeps the lock when a refetch lands mid-write and the re-read after the error fails", async () => {
+    answer = "unobserved";
+    let release!: () => void;
+    gate = new Promise<void>((resolve) => { release = resolve; });
+    await mount();
+    await click("Add");
+    await enterSecret();
+    await submit();
+    await waitFor(() => expect(writes).toHaveLength(1));
+
+    // A focus refetch succeeds while the write is still in flight, advancing
+    // the revision the submit handler rendered with.
+    await act(async () => {
+      await qc.refetchQueries({ queryKey: ["consumer", "tenant-a", "first"], exact: true });
+    });
+    expect(reads).toEqual(["/api/proxy/consumers/first"]);
+
+    // The answer is then lost, and the write's own re-read fails: nothing
+    // read after the error establishes whether the credential committed.
+    readStatus = 400;
+    await act(async () => { release(); });
+    await waitFor(() => expect(notice()).toContain("Outcome unknown"));
+    expect(reads).toEqual(["/api/proxy/consumers/first", "/api/proxy/consumers/first"]);
+    expect(findButton("Add Credential")?.disabled).toBe(true);
+    expect(notice()).toContain("disabled until the consumer has been re-read");
+    gate = null;
+    await submit();
+    expect(writes).toHaveLength(1);
+  });
+
+  it("writes once when the form is submitted twice before it re-renders", async () => {
+    await mount();
+    await click("Add");
+    await enterSecret();
+    await act(async () => {
+      const form = host.querySelector("form")!;
+      form.requestSubmit();
+      form.requestSubmit();
+    });
+    await waitFor(() => expect(host.querySelector("textarea")?.value).toBe(secret));
+    expect(writes).toHaveLength(1);
+  });
+
+  it.each<BuiltInCredentialType>(["keyauth", "jwt", "hmac_auth"])(
+    "reports a rejected %s append without the secret the gateway echoed",
+    async (kind) => {
+      type = kind;
+      answer = "echo";
+      const reported: unknown[] = [];
+      setApiErrorHandler((error) => { reported.push(error); });
+      await mount();
+      await click("Add");
+      await enterSecret();
+      await submit();
+      await waitFor(() => expect(host.textContent).toContain("duplicate secret [REDACTED]"));
+      expect(host.textContent).not.toContain(secret);
+      // The global popup would show the raw gateway body.
+      expect(reported).toEqual([]);
+      // The draft stays editable for a corrected retry.
+      expect(host.querySelector("input")?.value).toBe(secret);
+      expect(findButton("Add Credential")?.disabled).toBe(false);
+      await assertNoRetainedSecret();
+      expect(settled.map((s) => s.status)).toEqual(["error"]);
+    },
+  );
+});
+
+describe("echoed secrets are redacted before the detail is bounded (#466)", () => {
+  // Deterministic but non-repeating, so any fragment of it is distinctive.
+  const long = Array.from({ length: 1000 }, (_, i) => ((i * 2654435761) % 36).toString(36))
+    .join("");
+  const quoted = 'synthetic "quoted" \\ backslash secret 0123456789';
+  const padded = "   synthetic padded secret 0123456789abcdef   ";
+  it.each([
+    { name: "a 1000-character secret echoed in details", value: long,
+      body: { error: "duplicate secret", details: `rejected ${long}` } },
+    { name: "a secret with quotes and backslashes echoed JSON-escaped", value: quoted,
+      body: { error: "duplicate secret", details: JSON.stringify({ secret: quoted }) } },
+    { name: "a whitespace-padded secret echoed as the whole field", value: padded,
+      body: { error: "duplicate secret", code: padded, details: padded } },
+  ])("keeps no fragment of $name", async ({ value, body }) => {
+    answer = "echo";
+    echoBody = body;
+    await mount();
+    await click("Add");
+    await enterSecret(value);
+    await submit();
+    await waitFor(() => expect(host.textContent).toContain("[REDACTED]"));
+    const fragments = [value.trim(), JSON.stringify(value.trim()).slice(1, -1)];
+    for (let start = 0; start + 32 <= value.length; start += 16) {
+      fragments.push(value.slice(start, start + 32));
+    }
+    await waitFor(() => expect(qc.getMutationCache().getAll()).toHaveLength(0));
+    const messages = settled.map((outcome) => (outcome.error as Error | null)?.message ?? "");
+    expect(messages.join("")).toContain("[REDACTED]");
+    for (const fragment of fragments) {
+      expect(host.textContent).not.toContain(fragment);
+      for (const message of messages) expect(message).not.toContain(fragment);
+    }
     expect(writes).toHaveLength(1);
   });
 });
@@ -298,6 +448,47 @@ describe("basic credential and delete outcomes (#451)", () => {
       body: { password: secret } }]);
     expect(reads).toEqual(["/api/proxy/consumers/first"]);
     await assertNoRetainedSecret();
+  });
+
+  it("points a lost basic append at the replacement, which is safe to repeat", async () => {
+    type = "basicauth";
+    answer = "unobserved";
+    await mount();
+    await click("Add");
+    await enterSecret();
+    await submit();
+    await waitFor(() => expect(notice()).toContain("Outcome unknown"));
+    expect(notice()).toContain("does not list basic credentials");
+    expect(notice()).toContain("cannot be observed");
+    expect(notice()).toContain(
+      "use “Replace basic credentials” instead, which is safe to repeat but revokes every existing basic password",
+    );
+    expect(writes).toEqual([{ method: "POST", path: "/api/proxy/consumers/first/credentials/basicauth",
+      body: { password: secret } }]);
+
+    // The outcome stays reported while the operator switches to the replacement.
+    await click("Cancel");
+    await click("Replace basic credentials");
+    expect(notice()).toContain("Outcome unknown");
+    answer = "ok";
+    await enterSecret();
+    await submit();
+    await waitFor(() => expect(host.querySelector("textarea")?.value).toBe(secret));
+    expect(notice()).not.toContain("Outcome unknown");
+    expect(writes).toHaveLength(2);
+    expect(writes[1]).toMatchObject({ method: "PUT" });
+  });
+
+  it("says a lost basic replacement is safe to repeat", async () => {
+    type = "basicauth";
+    answer = "unobserved";
+    await mount();
+    await click("Replace basic credentials");
+    await enterSecret();
+    await submit();
+    await waitFor(() => expect(notice()).toContain("Outcome unknown"));
+    expect(notice()).toContain("cannot be observed");
+    expect(notice()).toContain("Replacing basic credentials again is safe to repeat");
   });
 
   it("closes the confirmation after a committed-but-not-live indexed delete", async () => {
@@ -328,6 +519,33 @@ describe("basic credential and delete outcomes (#451)", () => {
     expect(host.textContent).toContain("Outcome unknown");
     expect(writes).toHaveLength(1);
     expect(reads).toEqual(["/api/proxy/consumers/first"]);
+  });
+
+  it("keeps a lost add's outcome and count across an indexed delete (#466)", async () => {
+    answer = "unobserved";
+    grown = true;
+    shrinkOnDelete = true;
+    await mount();
+    await click("Add");
+    await enterSecret();
+    await submit();
+    await waitFor(() => expect(notice()).toContain("likely stored"));
+    expect(host.querySelectorAll('[aria-label^="Delete JWT credential"]')).toHaveLength(2);
+
+    // Deleting the credential that was listed before the add does not resolve
+    // it: the outcome stays reported, and the comparison discounts the entry.
+    answer = "ok";
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>('[aria-label="Delete JWT credential 1"]')!.click();
+    });
+    await click("Delete Credential", dialog()!);
+    await waitFor(() => expect(dialog()).toBeNull());
+    await waitFor(() =>
+      expect(host.querySelectorAll('[aria-label^="Delete JWT credential"]')).toHaveLength(1));
+    expect(notice()).toContain("Outcome unknown");
+    expect(notice()).toContain("now lists more jwt credentials than before this write");
+    expect(notice()).toContain("likely stored");
+    expect(writes.map((write) => write.method)).toEqual(["POST", "DELETE"]);
   });
 
   it("closes the confirmation after a committed-but-not-live delete of all basic credentials", async () => {
