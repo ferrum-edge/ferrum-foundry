@@ -977,4 +977,99 @@ describe("API spec import and replacement (#485)", () => {
     expect(scalars).not.toContain("x-ferrum-plugins:");
     expect(scalars).toEqual(expect.arrayContaining(["it's", "aA", "t0ken-value", "x", "y, z"]));
   });
+
+  it("scans a long comma list and retains its last scalar", () => {
+    const last = "comma-list-secret-0123456789";
+    const items = Array.from({ length: 2000 }, (_, index) => `item-${index}`);
+    const document = `[${items.join(", ")}, ${last}]`;
+
+    expect(yamlScalars(document)).toContain(last);
+  });
+
+  it("scans a long chain of quoted keys without recursive expansion", () => {
+    const secret = "quoted-chain-secret-0123456789";
+    const document = `${'"a": '.repeat(2000)}"${secret}"`;
+
+    expect(yamlScalars(document)).toContain(secret);
+  });
+
+  it("scans deeply nested flow brackets without recursive expansion", () => {
+    const secret = "nested-flow-secret-0123456789";
+    const document = `${"[".repeat(2000)}${secret}${"]".repeat(2000)}`;
+
+    expect(yamlScalars(document)).toContain(secret);
+  });
+
+  it("joins short continued secrets even when a comment contains an unmatched quote", () => {
+    const yaml = ['# "unmatched comment quote', 'api_secret: "abc\\', '  defghij"'].join("\n");
+
+    expect(yamlScalars(yaml)).toContain("abcdefghij");
+  });
+
+  it("joins a long sequence of continued lines", () => {
+    const parts = Array.from({ length: 300 }, (_, index) => `piece${index}`);
+    const yaml = [
+      `api_secret: "${parts[0]}\\`,
+      ...parts.slice(1, -1).map((part) => `  ${part}\\`),
+      `  ${parts.at(-1)}"`,
+    ].join("\n");
+
+    expect(yamlScalars(yaml)).toContain(parts.join(""));
+  });
+
+  it("keeps block-scalar lines that end in a colon", () => {
+    const yaml = [
+      "description: |",
+      "",
+      "  secretpart:",
+      "  another secret line",
+      "next: value",
+    ].join("\n");
+
+    expect(yamlScalars(yaml)).toContain("secretpart:");
+  });
+
+  it("opens a double-quoted scalar after a comment marker, as the line scan did", () => {
+    const yaml = [
+      'url: http://x # "abcdefgh',
+      '  ijklmnop"',
+      'note: y # "short\\',
+      '  value"',
+    ].join("\n");
+
+    expect(yamlScalars(yaml)).toEqual(expect.arrayContaining(["abcdefgh", "shortvalue"]));
+  });
+
+  it("joins every line of a continuation the primary tracker has lost track of", () => {
+    // The quote in the block scalar's prose leaves the primary tracker out of
+    // step, so only the tracker that starts on each line joins the value.
+    const yaml = [
+      "description: |",
+      '  He said "hello',
+      'api_secret: "abc\\',
+      "  def\\",
+      '  ghi"',
+    ].join("\n");
+    const scalars = yamlScalars(yaml);
+
+    expect(scalars).toContain("abcdefghi");
+    expect(scalars).not.toContain("abcdef\\ghi");
+  });
+
+  it("indents block-scalar content past the key that introduces it", () => {
+    const scalars = yamlScalars([
+      "paths:",
+      "  - description: |",
+      "      firstpart:",
+      "      note: |",
+      "      secondpart:",
+      "    x-ferrum-plugins:",
+      "  - |",
+      "    thirdpart:",
+      "x-ferrum-plugins:",
+    ].join("\n"));
+
+    expect(scalars).toEqual(expect.arrayContaining(["firstpart:", "secondpart:", "thirdpart:"]));
+    expect(scalars).not.toContain("x-ferrum-plugins:");
+  });
 });
