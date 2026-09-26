@@ -1,3 +1,4 @@
+import { Socket } from 'node:net';
 import { Readable, Transform, type TransformCallback } from 'node:stream';
 import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
@@ -227,6 +228,63 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
     }
   };
 
+  // A gateway may answer (400/403/412/413, or not at all) without reading the
+  // whole upload, and the BFF may refuse one itself. Once the reply is out the
+  // unread remainder sits paused on the client's socket. Left there, it strands
+  // the next keep-alive request until the server's request timeout (#418).
+  // Closing the socket over it is no better: unread bytes make the kernel reset
+  // the connection, which can discard the response before the client reads it
+  // and fails the client's in-flight write with EPIPE/ECONNRESET (#453). So
+  // discard the remainder instead, within the idle and wall-clock bounds the
+  // BFF grants any upload, so the response arrives and the connection stays
+  // reusable. A sender that outlasts either bound, or arrives while every drain
+  // slot is taken, has its connection closed.
+  let activeDrains = 0;
+  const drainUnreadUpload = (request: FastifyRequest) => {
+    const incoming = request.raw;
+    const socket = incoming.socket;
+    if (incoming.complete || !(socket instanceof Socket) || socket.destroyed) return;
+    const config = loadConfig();
+    if (activeDrains >= config.maxActiveUploads) {
+      socket.destroy();
+      return;
+    }
+    activeDrains += 1;
+    let settled = false;
+    let idleTimer: NodeJS.Timeout | undefined;
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      activeDrains = Math.max(0, activeDrains - 1);
+      clearTimeout(deadlineTimer);
+      if (idleTimer) clearTimeout(idleTimer);
+      incoming.off('data', resetIdleTimer);
+      incoming.off('end', settle);
+      incoming.off('error', settle);
+      socket.off('close', settle);
+    };
+    const abandon = () => {
+      settle();
+      socket.destroy();
+    };
+    const resetIdleTimer = () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(abandon, config.writeTimeout);
+      idleTimer.unref();
+    };
+    const deadlineTimer = setTimeout(abandon, config.uploadTimeout);
+    deadlineTimer.unref();
+    resetIdleTimer();
+    incoming.once('end', settle);
+    incoming.once('error', settle);
+    socket.once('close', settle);
+    // Detach whatever was consuming the body, then let the bytes fall on the
+    // floor: a 'data' listener with nowhere to forward them.
+    incoming.unpipe();
+    incoming.on('data', resetIdleTimer);
+    incoming.resume();
+  };
+
   fastify.addHook('onResponse', async (request) => releaseUpload(request));
   fastify.addHook('onRequestAbort', async (request) => releaseUpload(request));
 
@@ -256,14 +314,13 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
     bodyLimit: RESTORE_BODY_LIMIT,
   }, async (request, reply) => {
     const config = loadConfig();
+    // Registered before any reply can be sent, so every exit below is covered.
+    if (carriesRequestBody(request)) reply.raw.once('finish', () => drainUnreadUpload(request));
     const principal = request.authPrincipal;
     if (!principal) return reply.status(401).send({ error: 'Unauthorized' });
     // Checked against the same `config` this request is forwarded with, so an
     // operation issued against a replaced gateway never reaches its successor.
-    if (!stampGatewayTarget(request, reply, config)) {
-      if (carriesRequestBody(request) && !request.raw.complete) reply.header('connection', 'close');
-      return rejectStaleGatewayTarget(reply);
-    }
+    if (!stampGatewayTarget(request, reply, config)) return rejectStaleGatewayTarget(reply);
 
     const target = proxyTargetUrl(request, config.adminUrl);
     const targetPath = target.pathname;
@@ -309,16 +366,6 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
     reply.raw.once('finish', () => {
       if (!controller.signal.aborted) controller.abort(new Error('Response complete'));
     });
-    // A gateway may answer (400/403/412/413, or not at all) without reading
-    // the whole upload. The unread remainder sits paused on the client's
-    // socket, so a keep-alive connection would hang the next request on it
-    // until the server's request timeout. Close it instead of reusing it.
-    const closeIfUploadUnread = () => {
-      if (carriesRequestBody(request) && !request.raw.complete) {
-        reply.header('connection', 'close');
-      }
-    };
-
     try {
       const token = await generateToken(config, principal);
       controller.signal.throwIfAborted();
@@ -392,7 +439,6 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
         }
       }
       if (response.status === 401) reply.header('x-ferrum-auth-layer', 'gateway');
-      closeIfUploadUnread();
 
       if (!response.body) {
         clearResponseDeadline();
@@ -414,7 +460,6 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
     } catch (error: unknown) {
       clearResponseDeadline();
       reply.raw.off('close', abortOnDisconnect);
-      closeIfUploadUnread();
       if (error instanceof RegistryRequestError) {
         return reply.status(error.status).send({ error: error.message });
       }

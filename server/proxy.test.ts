@@ -227,13 +227,30 @@ async function rawGet(path: string): Promise<{ statusCode: number; body: string;
   });
 }
 
-/** Send on one keep-alive socket; resolves with the status, or 0 if nothing answered in time. */
+interface KeepAliveOutcome {
+  /** The response status, or 0 if nothing answered in time. */
+  status: number;
+  /** Whether the agent sent this request on a socket an earlier request used. */
+  reusedSocket: boolean;
+  /** The client-side error code, if the exchange failed before a response. */
+  error?: string;
+}
+
+interface StalledUploadOutcome {
+  status?: number;
+  /** A client error seen before any response: the rejection was lost. */
+  errorBeforeResponse?: string;
+  /** A client error seen after the response: the server closed a stalled sender. */
+  errorAfterResponse?: string;
+}
+
+/** Send on one keep-alive socket and report exactly what the client saw. */
 function keepAliveRequest(
   agent: Agent,
   method: string,
   path: string,
   body?: Buffer,
-): Promise<number> {
+): Promise<KeepAliveOutcome> {
   const port = (app.server.address() as AddressInfo).port;
   return new Promise((resolve) => {
     const request = httpRequest(
@@ -250,15 +267,22 @@ function keepAliveRequest(
       },
       (incoming) => {
         incoming.resume();
-        incoming.on('end', () => resolve(incoming.statusCode ?? 0));
+        incoming.on('end', () => resolve({
+          status: incoming.statusCode ?? 0,
+          reusedSocket: request.reusedSocket,
+        }));
       },
     );
     const timer = setTimeout(() => {
       request.destroy();
-      resolve(0);
+      resolve({ status: 0, reusedSocket: request.reusedSocket });
     }, 2_000);
     timer.unref();
-    request.on('error', () => resolve(-1));
+    request.on('error', (error: NodeJS.ErrnoException) => resolve({
+      status: -1,
+      reusedSocket: request.reusedSocket,
+      error: error.code ?? error.message,
+    }));
     request.on('close', () => clearTimeout(timer));
     request.end(body);
   });
@@ -385,17 +409,66 @@ describe('streaming gateway proxy', () => {
           })
         : undefined;
       try {
-        const status = await keepAliveRequest(agent, 'PUT', path, Buffer.alloc(1_900_000, 'a'));
-        expect(status).toBe(unreachable ? 502 : 400);
+        // The rejection must reach the client in full. Closing the socket over
+        // the unread body would let the kernel reset it, which can discard the
+        // response and surface EPIPE/ECONNRESET to this still-writing client.
+        const upload = await keepAliveRequest(agent, 'PUT', path, Buffer.alloc(1_900_000, 'a'));
+        expect(upload).toEqual({ status: unreachable ? 502 : 400, reusedSocket: false });
       } finally {
         configSpy?.mockRestore();
       }
       // The next request on the same agent must be answered, not queued
-      // behind an unread upload until the server's request timeout.
-      expect(await keepAliveRequest(agent, 'GET', '/api/auth/session')).toBe(200);
+      // behind an unread upload until the server's request timeout, and on
+      // the same connection, because the BFF discarded the unread remainder.
+      expect(await keepAliveRequest(agent, 'GET', '/api/auth/session')).toEqual({
+        status: 200,
+        reusedSocket: true,
+      });
     } finally {
       agent.destroy();
     }
+  });
+
+  it('closes a sender that stalls after its upload was rejected unread', async () => {
+    const port = (app.server.address() as AddressInfo).port;
+    const started = Date.now();
+    const outcome = await new Promise<StalledUploadOutcome>((resolve) => {
+      const request = httpRequest({
+        host: '127.0.0.1',
+        port,
+        path: '/api/proxy/reject-unread',
+        method: 'PUT',
+        headers: {
+          ...sessionHeaders,
+          'content-type': 'application/json',
+          'content-length': '1900000',
+        },
+      });
+      const seen: StalledUploadOutcome = {};
+      request.on('response', (incoming) => {
+        seen.status = incoming.statusCode;
+        incoming.resume();
+      });
+      request.on('error', (error: NodeJS.ErrnoException) => {
+        const code = error.code ?? error.message;
+        if (seen.status === undefined) seen.errorBeforeResponse = code;
+        else seen.errorAfterResponse = code;
+      });
+      request.on('close', () => resolve(seen));
+      // Promise far more than is sent, then go quiet: the drain must give up
+      // on this sender rather than hold its connection open indefinitely.
+      request.write(Buffer.alloc(64 * 1024, 'a'));
+    });
+    // The rejection is delivered before the connection goes away.
+    expect(outcome.errorBeforeResponse).toBeUndefined();
+    expect(outcome.status).toBe(400);
+    // Only once that response was observed is a reset of the unfinished write
+    // an expected consequence of the server closing a stalled sender.
+    if (outcome.errorAfterResponse !== undefined) {
+      expect(['ECONNRESET', 'EPIPE']).toContain(outcome.errorAfterResponse);
+    }
+    // Closed by the 100ms idle bound, well inside the 1000ms upload budget.
+    expect(Date.now() - started).toBeLessThan(1000);
   });
 
   it('enforces a small default streaming body limit without buffering the request', async () => {
