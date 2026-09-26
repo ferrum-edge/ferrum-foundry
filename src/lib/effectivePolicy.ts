@@ -4,6 +4,7 @@ import type {
   PluginConfig,
   Proxy,
 } from "@/api/types";
+import { PLUGIN_METADATA } from "@/lib/pluginConfigDefaults";
 import { pluginAppliesToProxy } from "@/lib/pluginProtocols";
 
 const LOCAL_AUTH_CREDENTIALS: Readonly<Record<string, BuiltInCredentialType>> = {
@@ -43,6 +44,76 @@ function isAuthPlugin(plugin: PluginConfig): boolean {
   return EXTERNAL_AUTH_PLUGINS.has(plugin.plugin_name) && soapEstablishesIdentity(plugin);
 }
 
+/**
+ * An effective plugin Foundry's catalog does not describe (a custom plugin
+ * compiled into the gateway, or one newer than the paired release). Any such
+ * plugin may establish a consumer or external identity, so it keeps an
+ * identity-dependent conclusion from being definitive in either direction.
+ */
+function isUnmodelledPlugin(plugin: PluginConfig): boolean {
+  return !Object.prototype.hasOwnProperty.call(PLUGIN_METADATA, plugin.plugin_name);
+}
+
+function isAccessControl(plugin: PluginConfig): boolean {
+  return plugin.plugin_name === "access_control";
+}
+
+const UNIDENTIFIED_ACL_REASON =
+  "rejects every request with 401: access_control requires an identified consumer or " +
+  "authenticated identity, and no effective plugin establishes one";
+
+/**
+ * How the gateway treats a proxy on which no recognized plugin establishes an
+ * identity.
+ *
+ * Ferrum Edge v0.9.7 `src/plugins/access_control.rs` (`authorize_identity`)
+ * rejects a request with 401 "No consumer identified" when neither
+ * `identified_consumer` nor `authenticated_identity` is set, before any allow
+ * or deny list is consulted, and `allow_authenticated_identity` only admits an
+ * identity some other plugin already established. On a proxied request those
+ * fields are set only by authentication plugins (`src/plugins/utils/auth_flow.rs`,
+ * plus `hmac_auth` and `mtls_auth`), so an untriggered ACL without one denies
+ * every caller rather than leaving the route public. A triggered ACL denies only the
+ * requests its trigger matches, and a plugin outside Foundry's catalog may
+ * itself establish an identity; both leave the outcome request-dependent.
+ */
+function unidentifiedAccess(effectivePlugins: EffectivePlugin[]): {
+  decision: "public" | "denied" | "conditional";
+  reasons: string[];
+} {
+  const unmodelled = effectivePlugins.filter(isUnmodelledPlugin);
+  const acls = effectivePlugins.filter(isAccessControl);
+
+  if (unmodelled.length > 0) {
+    return {
+      decision: "conditional",
+      reasons: [
+        `Unrecognized plugin(s) may establish an identity that Foundry cannot model (${unmodelled.map((p) => p.plugin_name).join(", ")})`,
+      ],
+    };
+  }
+
+  const untriggered = acls.filter((plugin) => plugin.trigger == null);
+  if (untriggered.length > 0) {
+    return {
+      decision: "denied",
+      reasons: untriggered.map((plugin) => `${plugin.id} ${UNIDENTIFIED_ACL_REASON}`),
+    };
+  }
+
+  if (acls.length > 0) {
+    return {
+      decision: "conditional",
+      reasons: [
+        "Request-dependent access-control trigger rejects the requests it matches with 401 " +
+          "(no effective plugin establishes an identity); other requests are unauthenticated",
+      ],
+    };
+  }
+
+  return { decision: "public", reasons: ["No recognized effective authentication plugin"] };
+}
+
 export type AccessDecision = "public" | "allowed" | "denied" | "conditional";
 
 export interface EffectivePlugin extends PluginConfig {
@@ -60,6 +131,12 @@ export interface ProxyPolicyAnalysis {
   effectivePlugins: EffectivePlugin[];
   authPlugins: EffectivePlugin[];
   accessControlPlugins: EffectivePlugin[];
+  /**
+   * Configuration that makes the proxy unusable for every caller, e.g. an
+   * access_control plugin with nothing to identify the caller. Unlike
+   * `reasons`, these do not make the analysis conditional.
+   */
+  configurationProblems: string[];
   consumers: ConsumerAccessResult[];
   conditional: boolean;
   reasons: string[];
@@ -312,17 +389,10 @@ export function resolveConsumerAccess(
   void proxy;
   const authPlugins = effectivePlugins.filter(isAuthPlugin);
   if (authPlugins.length === 0) {
-    return {
-      consumer,
-      decision: "public",
-      reasons: ["No recognized effective authentication plugin"],
-    };
+    return { consumer, ...unidentifiedAccess(effectivePlugins) };
   }
 
-  const acl = aclDecision(
-    consumer,
-    effectivePlugins.filter((plugin) => plugin.plugin_name === "access_control"),
-  );
+  const acl = aclDecision(consumer, effectivePlugins.filter(isAccessControl));
   if (acl.denied) {
     return { consumer, decision: "denied", reasons: acl.reasons };
   }
@@ -390,10 +460,15 @@ export function analyzeProxyPolicy(
 ): ProxyPolicyAnalysis {
   const effectivePlugins = effectivePluginsForProxy(proxy, pluginConfigs);
   const authPlugins = effectivePlugins.filter(isAuthPlugin);
-  const accessControlPlugins = effectivePlugins.filter(
-    (plugin) => plugin.plugin_name === "access_control",
-  );
+  const accessControlPlugins = effectivePlugins.filter(isAccessControl);
   const reasons: string[] = [];
+  const configurationProblems: string[] = [];
+
+  if (authPlugins.length === 0) {
+    const unidentified = unidentifiedAccess(effectivePlugins);
+    if (unidentified.decision === "denied") configurationProblems.push(...unidentified.reasons);
+    if (effectivePlugins.some(isUnmodelledPlugin)) reasons.push(...unidentified.reasons);
+  }
 
   if (authPlugins.some((plugin) => UNOBSERVABLE_LOCAL_AUTH.has(plugin.plugin_name))) {
     reasons.push(BASIC_AUTH_UNKNOWN_REASON);
@@ -419,6 +494,7 @@ export function analyzeProxyPolicy(
     effectivePlugins,
     authPlugins,
     accessControlPlugins,
+    configurationProblems,
     consumers: consumers.map((consumer) =>
       resolveConsumerAccess(proxy, effectivePlugins, consumer),
     ),
