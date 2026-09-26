@@ -9,6 +9,8 @@ import { verifyPluginDefaults } from "./plugin-defaults-contract.mjs";
 import { verifyBasicAuthContract } from "./basic-auth-contract.mjs";
 import { verifyConcurrentEditContract } from "./concurrent-edit-contract.mjs";
 import { gatewaySender, verifyCapabilityParity } from "./capability-parity-contract.mjs";
+import { resourceFingerprint } from "../src/lib/resourceBaseline.ts";
+import { normalizedTargets } from "../src/lib/upstreamTargets.ts";
 
 const config = readSeedConfig();
 confirmDestructiveTarget(config);
@@ -94,6 +96,32 @@ await request(`/upstreams/${upstreamId}?apply=sync`, {
   method: "PUT",
   body: { ...upstream, name: "Contract smoke upstream updated" },
 });
+// The upstream page adopts a committed-but-not-live target write only when a
+// fresh read holds exactly the list it sent, compared the way `holdsTargets`
+// in `src/routes/upstreams/$upstreamId.tsx` compares them. A gateway that
+// normalises targets on read beyond what `normalizedTargets` accepts would
+// turn every such save into a refusal, so check a list shaped as Foundry's
+// target form writes it — duplicate addresses, cleared and set optional
+// members — reads back as the same list.
+{
+  const [seedTarget] = upstream.targets;
+  const address = { host: seedTarget.host, port: seedTarget.port };
+  const written = [
+    { ...address, weight: 1, path: null, locality: null, tags: {} },
+    { ...address, weight: 2, path: "/dup", locality: null, tags: { zone: "b" } },
+    { ...seedTarget, weight: 3 },
+  ];
+  await request(`/upstreams/${upstreamId}?apply=sync`, {
+    method: "PUT",
+    body: { ...upstream, targets: written },
+  });
+  const readBack = await request(`/upstreams/${upstreamId}`);
+  assert.equal(
+    resourceFingerprint({ targets: normalizedTargets(readBack.targets) }),
+    resourceFingerprint({ targets: normalizedTargets(written) }),
+    `upstream targets did not read back as written: ${JSON.stringify(readBack.targets)}`,
+  );
+}
 // Edge v0.9.7 refuses probe targets it used to accept (ferrum-edge#5683,
 // #5688); the upstream form checks the same rules before submitting.
 for (const [active, field] of [

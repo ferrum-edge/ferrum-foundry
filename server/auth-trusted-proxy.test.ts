@@ -173,6 +173,21 @@ describe('trusted OIDC proxy authentication', () => {
     }
   });
 
+  it('refuses a literal * or a glob in the namespace header for every role (#464)', async () => {
+    const app = await buildApp();
+    try {
+      for (const role of ['viewer', 'operator', 'admin']) {
+        for (const value of ['*', ' * ', '*,', ',*', '*,*', '*,tenant-a', 'tenant-*']) {
+          const headers = identityHeaders({ 'x-ferrum-role': role, 'x-ferrum-namespaces': value });
+          const response = await app.inject({ method: 'GET', url: '/protected', headers });
+          expect(response.statusCode, `${role} ${JSON.stringify(value)}`).toBe(401);
+        }
+      }
+    } finally {
+      await app.close();
+    }
+  });
+
   it('drops empty entries between namespace grants', async () => {
     const app = await buildApp();
     try {

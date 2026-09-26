@@ -435,7 +435,7 @@ so the next successful read seeds a fresh baseline for the new tenant.
 | `If-Match` from the verified read, a writer in the gap refused, re-send after a `412` on unowned fields, bounded retries, untagged and weak-tag fallback, popup opt-out | `src/api/conditionalWrite.test.ts` |
 | Draft preserved, no reapply control, keep/discard behavior | `src/routes/proxies/concurrentEdit.test.tsx` |
 | Same-client write ordering still composes | `src/api/upstreams.targetWrites.test.ts` |
-| Target form basis survives a background refetch; unrelated settings still compose; the form follows its target identity when rows shift; a committed-but-not-live removal is adopted only when the read holds exactly its result | `src/routes/upstreams/TargetEditor.test.tsx` |
+| Target form basis survives a background refetch; unrelated settings still compose; the form follows its target identity when rows shift, including a renumbered duplicate `host:port`; a committed-but-not-live removal is adopted only when the read holds exactly its result, up to omitted empty optional members | `src/routes/upstreams/TargetEditor.test.tsx`, `src/lib/upstreamTargets.test.ts`, `scripts/gateway-contract-smoke.mjs` |
 | Restore retires the restored namespace's detail caches and inactive lists | `src/hooks/restoreDetailCache.test.tsx`, `src/components/forms/BackupRestoreCard.recovery.test.tsx` |
 | Guarded deletes, consumer saves and rotation re-send, nested redaction of plugin `config` | `src/api/conditionalWrite.test.ts`, `src/lib/resourceBaseline.test.ts` |
 | Plugin editor baseline, membership writes conditional on their reads | `src/lib/pluginMembership.test.ts`, `src/lib/pluginMembership.binding.test.ts` |
