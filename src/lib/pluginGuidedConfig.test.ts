@@ -108,6 +108,40 @@ describe("omission and clear semantics", () => {
     expect(result.limit_by).toBeNull();
   });
 
+  it("keeps literal `null` strings and surrounding whitespace when another field changes", () => {
+    const config: JsonObject = {
+      limits: [{ scope: "default", requests_per_second: 100 }],
+      redis_key_prefix: "  null  ",
+      redis_username: "null",
+    };
+    const values = readGuidedConfig(rateLimiting, config);
+    const edited = writeGuidedConfig(
+      rateLimiting,
+      config,
+      { ...values, "limits.0.requests_per_second": { present: true, text: "200" } },
+      values,
+    );
+
+    expect(edited.redis_key_prefix).toBe("  null  ");
+    expect(edited.redis_username).toBe("null");
+  });
+
+  it("keeps explicitly null text fields null until the field is edited", () => {
+    const config: JsonObject = {
+      limits: [{ scope: "default", requests_per_second: 100 }],
+      redis_key_prefix: null,
+    };
+    const values = readGuidedConfig(rateLimiting, config);
+    const edited = writeGuidedConfig(
+      rateLimiting,
+      config,
+      { ...values, "limits.0.requests_per_second": { present: true, text: "200" } },
+      values,
+    );
+
+    expect(edited.redis_key_prefix).toBeNull();
+  });
+
   it("keeps an explicit null boolean when another field is edited", () => {
     const config: JsonObject = {
       key_location: "header:X-API-Key",
