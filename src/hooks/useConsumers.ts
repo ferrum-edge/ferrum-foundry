@@ -235,7 +235,6 @@ async function writeCredential(
       const queryKey = ["consumer", namespace, consumerId];
       const revision = qc.getQueryState(queryKey)?.dataUpdatedAt ?? 0;
       await refreshConsumer(qc, namespace, consumerId);
-      // eslint-disable-next-line preserve-caught-error -- the cause is the secret-bearing error
       throw new UnobservedCredentialWriteError(revision);
     }
     // eslint-disable-next-line preserve-caught-error -- the cause is the secret-bearing error
