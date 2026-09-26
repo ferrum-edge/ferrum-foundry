@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { boundGatewayTarget, isGatewayTargetRetired } from "@/api/gatewayTarget";
 import type { AdminMetrics } from "@/api/types";
 import { useNamespace } from "@/stores/namespace";
 
@@ -11,7 +12,17 @@ const REQUEST_SAMPLE_STORAGE_KEY = "ferrum:metricsRequestSample";
  */
 export const STORED_SAMPLE_MAX_AGE_MS = 15 * 60_000;
 
+/**
+ * Counters are only comparable within one gateway, and the namespace does not
+ * identify one (`src/api/gatewayTarget.ts`). So the stored sample names the
+ * gateway target it was observed on, and a sample for any other target — or
+ * one naming none — is never diffed against. Each namespace keeps a single
+ * slot, so the first reading from a new target also replaces the old
+ * target's sample: switching back later starts from nothing rather than from
+ * a reading taken before the switch.
+ */
 interface RequestSample {
+  target: string;
   timestamp: number;
   uptimeSeconds: number;
   totalRequests: number;
@@ -28,13 +39,17 @@ function storageKey(namespace: string): string {
   return `${REQUEST_SAMPLE_STORAGE_KEY}:${namespace}`;
 }
 
-function readStoredSample(namespace: string): RequestSample | undefined {
+function readStoredSample(namespace: string, target: string): RequestSample | undefined {
   try {
     const stored = localStorage.getItem(storageKey(namespace));
     if (!stored) return undefined;
 
-    const parsed = JSON.parse(stored) as RequestSample;
+    const parsed = JSON.parse(stored) as RequestSample | null;
     if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      typeof parsed.target !== "string" ||
+      parsed.target !== target ||
       !Number.isFinite(parsed.timestamp) ||
       !Number.isFinite(parsed.uptimeSeconds) ||
       !Number.isFinite(parsed.totalRequests)
@@ -59,8 +74,10 @@ function writeStoredSample(namespace: string, sample: RequestSample): void {
 function toSample(
   gateway: AdminMetrics["gateway"],
   timestamp: number,
+  target: string,
 ): RequestSample {
   return {
+    target,
     timestamp,
     uptimeSeconds: gateway.uptime_seconds,
     totalRequests: gateway.total_requests,
@@ -74,6 +91,7 @@ function calculateStats(
 ): GatewayRequestStats {
   if (
     !previous ||
+    previous.target !== current.target ||
     current.timestamp <= previous.timestamp ||
     current.uptimeSeconds < previous.uptimeSeconds ||
     current.totalRequests < previous.totalRequests
@@ -121,10 +139,19 @@ export function useGatewayRequestStats(
 
     if (!gateway || !dataUpdatedAt) return;
 
-    const currentSample = toSample(gateway, dataUpdatedAt);
+    // A reading with no bound target, or on a retired page, cannot be
+    // attributed to a gateway: show the total but neither diff nor keep it.
+    const target = boundGatewayTarget();
+    if (!target || isGatewayTargetRetired()) {
+      previousSampleRef.current = undefined;
+      setStats({ totalRequests: gateway.total_requests });
+      return;
+    }
+
+    const currentSample = toSample(gateway, dataUpdatedAt, target);
     const storedSample = previousSampleRef.current
       ? undefined
-      : readStoredSample(selectedNamespace);
+      : readStoredSample(selectedNamespace, target);
     const previousSample =
       previousSampleRef.current ??
       (storedSample && currentSample.timestamp - storedSample.timestamp <= STORED_SAMPLE_MAX_AGE_MS
