@@ -711,8 +711,9 @@ headroom to match.
 
 When a reply goes out before its request body has fully arrived — the gateway
 refused the upload unread, the gateway was unreachable, or the BFF refused it
-itself (for example, an early `413` on a declared length over the route limit)
-— the BFF discards the unread remainder rather than closing the connection
+itself (for example, an early `413` on a declared length over the route limit,
+or a `401`, `403`, or upload-capacity `429` returned before the request reaches
+its handler, on any route) — the BFF discards the unread remainder rather than closing the connection
 over it, so the client reliably receives the response and a keep-alive
 connection stays reusable. A drain is bounded by the request's remaining upload
 budget or 5 seconds, whichever ends first, and by `FERRUM_WRITE_TIMEOUT`
@@ -729,6 +730,13 @@ connection instead. A request leaves the upload pool once its response is
 written, so an instance can hold up to twice `FERRUM_MAX_ACTIVE_UPLOADS`
 body-bearing sockets at once — size socket and file-descriptor headroom for
 that.
+
+A request refused before authentication shares those bounds: it drains for at
+most 5 seconds (1 second over a remainder beyond 4 MiB) and only while a drain
+slot is free, otherwise its connection is closed. Because the `401` needs no
+credentials, cap connections per client at the ingress proxy as well, for
+example with nginx `limit_conn`, so one client cannot hold the drain pool and
+make other rejected uploads close instead of drain.
 
 ### Graceful shutdown
 

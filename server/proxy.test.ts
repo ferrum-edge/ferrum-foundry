@@ -850,12 +850,14 @@ describe('unread upload drains', () => {
   /**
    * Declare `declaredLength` bytes, send one chunk, then either keep sending
    * (`keepSending`) or go quiet. `onResponse` runs once the status arrives.
+   * `headers` defaults to the signed-in session's.
    */
   function unreadUpload(
     path: string,
     declaredLength: number,
     keepSending: boolean,
     onResponse?: () => void,
+    headers: Record<string, string> = lingeringHeaders,
   ): Promise<DrainedUploadOutcome> {
     const port = (lingering.server.address() as AddressInfo).port;
     return new Promise((resolve) => {
@@ -865,7 +867,7 @@ describe('unread upload drains', () => {
         path,
         method: 'PUT',
         headers: {
-          ...lingeringHeaders,
+          ...headers,
           'content-type': 'application/json',
           'content-length': String(declaredLength),
         },
@@ -928,6 +930,64 @@ describe('unread upload drains', () => {
       expect(upload).toEqual({ status: 400, reusedSocket: false });
       expect(await keepAliveRequest(agent, 'GET', '/api/auth/session', undefined, target)).toEqual({
         status: 200,
+        reusedSocket: true,
+      });
+    } finally {
+      agent.destroy();
+    }
+  });
+
+  // Refusals from an onRequest hook never reach the proxy handler. Without a
+  // bound of the BFF's own, Node discards their bodies until the server's
+  // request timeout, and the 401 is reachable without signing in (#468).
+  it('bounds the drain of an upload refused before authentication', async () => {
+    const outcome = await unreadUpload('/api/proxy/echo', 64 * 1024 * 1024, true, undefined, {});
+    expect(outcome.errorBeforeResponse).toBeUndefined();
+    expect(outcome.status).toBe(401);
+    expect(outcome.closedAfterResponseMs).toBeLessThan(3_000);
+  });
+
+  it('bounds the drain of an upload refused before authentication outside the proxy', async () => {
+    const outcome = await unreadUpload('/api/settings', 64 * 1024 * 1024, true, undefined, {});
+    expect(outcome.errorBeforeResponse).toBeUndefined();
+    expect(outcome.status).toBe(401);
+    expect(outcome.closedAfterResponseMs).toBeLessThan(3_000);
+  });
+
+  it('bounds the drain of an upload refused for upload capacity', async () => {
+    const configModule = await import('./config.js');
+    const configSpy = vi.spyOn(configModule, 'loadConfig').mockReturnValue({
+      ...configModule.loadConfig(),
+      maxLargeUploads: 0,
+    });
+    try {
+      const outcome = await unreadUpload('/api/proxy/api-specs', 64 * 1024 * 1024, true);
+      expect(outcome.errorBeforeResponse).toBeUndefined();
+      expect(outcome.status).toBe(429);
+      expect(outcome.closedAfterResponseMs).toBeLessThan(3_000);
+    } finally {
+      configSpy.mockRestore();
+    }
+  });
+
+  it('keeps a keep-alive connection reusable after refusing an upload before authentication', async () => {
+    const agent = new Agent({ keepAlive: true, maxSockets: 1 });
+    const target = {
+      port: (lingering.server.address() as AddressInfo).port,
+      headers: {},
+      timeoutMs: 30_000,
+    };
+    try {
+      const upload = await keepAliveRequest(
+        agent,
+        'PUT',
+        '/api/proxy/echo',
+        Buffer.alloc(1_900_000, 'a'),
+        target,
+      );
+      expect(upload).toEqual({ status: 401, reusedSocket: false });
+      expect(await keepAliveRequest(agent, 'GET', '/api/auth/session', undefined, target)).toEqual({
+        status: 401,
         reusedSocket: true,
       });
     } finally {
