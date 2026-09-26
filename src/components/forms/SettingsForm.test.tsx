@@ -89,8 +89,9 @@ beforeEach(() => {
     jwtAudience: "old-audience",
     jwtNamespaces: ["tenant-a"],
   };
-  // Cleared optional claims are absent from the canonical HTTP response.
-  savedSettings = { ...baseSettings };
+  // Cleared optional claims are absent from the canonical HTTP response; the
+  // every-namespace grant is always the explicit wildcard.
+  savedSettings = { ...baseSettings, jwtNamespaces: ["*"] };
   get.mockImplementation(() => ({ json: async () => currentSettings }));
   put.mockImplementation((_path, options: { json: Record<string, unknown> }) => ({
     json: async () => {
@@ -120,20 +121,20 @@ describe("SettingsForm runtime saves", () => {
     await renderForm();
     expect(inputByLabel("JWT Audience").value).toBe("old-audience");
     await change("JWT Audience", "");
-    await change("Namespace grants", "");
+    await change("Namespace grants", " * ");
     await save();
 
     expect(put).toHaveBeenCalledWith("api/settings", expect.any(Object));
-    expect(submitted).toMatchObject({ jwtAudience: "", jwtNamespaces: [] });
+    expect(submitted).toMatchObject({ jwtAudience: "", jwtNamespaces: ["*"] });
     expect(toast).toHaveBeenCalledWith("success", "Settings saved successfully");
     expect(queryClient.getQueryData(["settings"])).toEqual(savedSettings);
     expect(inputByLabel("JWT Audience").value).toBe("");
-    expect(inputByLabel("Namespace grants").value).toBe("");
+    expect(inputByLabel("Namespace grants").value).toBe("*");
 
     await act(async () => root.render(null));
     await renderForm();
     expect(inputByLabel("JWT Audience").value).toBe("");
-    expect(inputByLabel("Namespace grants").value).toBe("");
+    expect(inputByLabel("Namespace grants").value).toBe("*");
   });
 
   it("replaces the draft and cached settings with the canonical save response", async () => {
@@ -217,16 +218,33 @@ describe("SettingsForm editing drafts", () => {
     expect(grants.value).toBe("tenant-a, bad grant");
   });
 
-  it("leaves an unrestricted (absent) grant list absent when untouched", async () => {
-    delete currentSettings.jwtNamespaces;
+  it("resubmits an untouched every-namespace grant as the explicit wildcard", async () => {
+    currentSettings.jwtNamespaces = ["*"];
     await renderForm();
-    expect(inputByLabel("Namespace grants").value).toBe("");
+    expect(inputByLabel("Namespace grants").value).toBe("*");
     await change("JWT Issuer", "issuer-2");
     await save();
 
     expect(put).toHaveBeenCalledOnce();
-    expect(submitted).toMatchObject({ jwtIssuer: "issuer-2", jwtRole: "admin" });
-    expect(submitted).not.toHaveProperty("jwtNamespaces");
+    expect(submitted).toMatchObject({ jwtIssuer: "issuer-2", jwtRole: "admin", jwtNamespaces: ["*"] });
+  });
+
+  it.each([
+    ["", "Enter at least one namespace, or * for every namespace"],
+    [" , ", "Enter at least one namespace, or * for every namespace"],
+    ["*, tenant-a", "* grants every namespace and cannot be combined with names"],
+  ])("refuses grant text %j instead of saving an unrestricted scope", async (text, message) => {
+    await renderForm();
+    const grants = inputByLabel("Namespace grants");
+    await change("Namespace grants", text);
+    await blurField(grants);
+    expect(grants.getAttribute("aria-invalid")).toBe("true");
+    const description = document.getElementById(grants.getAttribute("aria-describedby")!);
+    expect(description?.textContent).toContain(message);
+
+    await save();
+    expect(put).not.toHaveBeenCalled();
+    expect(grants.value).toBe(text);
   });
 
   it("clears and retypes numeric settings without inserting 0 (#402)", async () => {

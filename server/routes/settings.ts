@@ -30,6 +30,11 @@ const ALLOWED_UPDATE_FIELDS = new Set<keyof RuntimeConfig>([
   'writeTimeout',
 ]);
 
+function grantsAreWithin(requested: unknown, held: readonly string[]): boolean {
+  return Array.isArray(requested)
+    && requested.every((entry) => typeof entry === 'string' && held.includes(entry.trim()));
+}
+
 async function readBoundedBody(response: Awaited<ReturnType<typeof fetch>>, maxBytes = 64 * 1024): Promise<string> {
   if (!response.body) return '';
   const reader = response.body.getReader();
@@ -81,6 +86,16 @@ const settingsPlugin: FastifyPluginAsync = async (fastify) => {
       return reply.status(400).send({
         error: 'Role and namespace grants are managed by the trusted identity proxy',
         code: 'FERRUM_BFF_PROXY_MANAGED_IDENTITY',
+      });
+    }
+
+    // A scoped session may narrow the static grants but never widen them: it
+    // cannot grant a namespace it does not hold, or every namespace.
+    const heldGrants = request.authPrincipal?.namespaces;
+    if (heldGrants && 'jwtNamespaces' in body && !grantsAreWithin(body.jwtNamespaces, heldGrants)) {
+      return reply.status(403).send({
+        error: 'Namespace grants cannot exceed the grants of this session',
+        code: 'FERRUM_BFF_NAMESPACE_GRANT_EXCEEDED',
       });
     }
 

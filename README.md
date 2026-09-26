@@ -143,6 +143,7 @@ Set required environment variables:
 export FERRUM_ADMIN_URL=http://localhost:9000   # Ferrum Admin API URL
 export FERRUM_JWT_SECRET=$(openssl rand -hex 32)       # HS256 signing key (32+ chars)
 export FERRUM_BFF_AUTH_TOKEN=$(openssl rand -hex 32)  # Development login exchange token
+export FERRUM_JWT_NAMESPACES='*'                       # Static scope: exact names, or * for every namespace
 ```
 
 Static-token authentication is intended for local development only. The SPA
@@ -150,6 +151,12 @@ exchanges `FERRUM_BFF_AUTH_TOKEN` once for a bounded HttpOnly, SameSite session;
 the deployment credential is never stored in browser storage or reused as a
 bearer token. Production startup fails closed unless a trusted identity proxy
 mode is configured. See [Production authentication](docs/authentication.md).
+
+`FERRUM_JWT_NAMESPACES` sets the static principal's namespace grants and is
+required in static mode: a comma-separated list of exact namespace names, or
+`*` alone for every namespace. A value with no namespace names (empty,
+whitespace, or commas only) is refused at startup rather than treated as
+unrestricted.
 
 The most commonly adjusted optional variables:
 

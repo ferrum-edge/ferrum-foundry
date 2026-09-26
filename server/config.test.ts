@@ -43,6 +43,7 @@ function setValidEnv(overrides: Record<string, string | undefined> = {}): void {
   process.env.FERRUM_ADMIN_URL = 'http://127.0.0.1:9000';
   process.env.FERRUM_JWT_SECRET = 'j'.repeat(40);
   process.env.FERRUM_BFF_AUTH_TOKEN = 'b'.repeat(40);
+  process.env.FERRUM_JWT_NAMESPACES = '*';
   for (const [key, value] of Object.entries(overrides)) {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
@@ -211,6 +212,65 @@ describe('config', () => {
       jwtAudience: ['admin-a', 'admin-b'],
       jwtNamespaces: ['ferrum', 'tenant-a'],
     });
+  });
+
+  it('requires an explicit namespace scope for the static principal', async () => {
+    setValidEnv({ FERRUM_JWT_NAMESPACES: undefined });
+    const { loadConfig } = await loadModule();
+    expect(() => loadConfig()).toThrow(/FERRUM_JWT_NAMESPACES is required in static mode/);
+  });
+
+  it('grants every namespace only through the lone wildcard', async () => {
+    for (const value of ['*', ' * ', '*,*']) {
+      clearTestEnv();
+      setValidEnv({ FERRUM_JWT_NAMESPACES: value });
+      const { loadConfig, getPublicRuntimeConfig } = await loadModule();
+      expect(loadConfig().jwtNamespaces).toBeUndefined();
+      expect(getPublicRuntimeConfig().jwtNamespaces).toEqual(['*']);
+    }
+  });
+
+  it('rejects a present namespace setting with no namespace instead of dropping the restriction', async () => {
+    for (const authMode of ['static', 'trusted-proxy']) {
+      for (const value of ['', ' ', ',', ' , ', ',,', '\t']) {
+        clearTestEnv();
+        setValidEnv({
+          FERRUM_AUTH_MODE: authMode,
+          FERRUM_TRUSTED_PROXY_SECRET: 'p'.repeat(40),
+          FERRUM_JWT_NAMESPACES: value,
+        });
+        const { loadConfig } = await loadModule();
+        expect(() => loadConfig(), JSON.stringify({ authMode, value }))
+          .toThrow(/FERRUM_JWT_NAMESPACES must list at least one namespace, or \* for every namespace/);
+      }
+    }
+  });
+
+  it('rejects malformed namespace entries and a wildcard mixed with names', async () => {
+    for (const [value, message] of [
+      ['tenant-a,', /FERRUM_JWT_NAMESPACES contains an invalid namespace/],
+      [',tenant-a', /FERRUM_JWT_NAMESPACES contains an invalid namespace/],
+      ['tenant-a,,tenant-b', /FERRUM_JWT_NAMESPACES contains an invalid namespace/],
+      ['tenant a', /FERRUM_JWT_NAMESPACES contains an invalid namespace/],
+      ['tenant-*', /FERRUM_JWT_NAMESPACES contains an invalid namespace/],
+      ['*,tenant-a', /FERRUM_JWT_NAMESPACES must not combine \* with namespace names/],
+    ] as const) {
+      clearTestEnv();
+      setValidEnv({ FERRUM_JWT_NAMESPACES: value });
+      const { loadConfig } = await loadModule();
+      expect(() => loadConfig(), value).toThrow(message);
+    }
+  });
+
+  it('leaves the trusted-proxy readiness probe unscoped when no static scope is set', async () => {
+    setValidEnv({
+      FERRUM_AUTH_MODE: 'trusted-proxy',
+      FERRUM_BFF_AUTH_TOKEN: undefined,
+      FERRUM_TRUSTED_PROXY_SECRET: 'p'.repeat(40),
+      FERRUM_JWT_NAMESPACES: undefined,
+    });
+    const { loadConfig } = await loadModule();
+    expect(loadConfig().jwtNamespaces).toBeUndefined();
   });
 
   it('rejects invalid URL forms and schemes', async () => {

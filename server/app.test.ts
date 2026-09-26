@@ -6,6 +6,7 @@ const ENV = {
   FERRUM_JWT_SECRET: 'test-signing-secret-is-long-enough-123',
   FERRUM_AUTH_MODE: 'trusted-proxy',
   FERRUM_TRUSTED_PROXY_SECRET: 'trusted-proxy-shared-secret-is-long-enough',
+  FERRUM_JWT_NAMESPACES: '*',
 };
 const snapshot: Record<string, string | undefined> = {};
 

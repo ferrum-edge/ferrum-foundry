@@ -35,7 +35,8 @@ interface Settings {
   jwtTtl: number;
   jwtRole: "viewer" | "operator" | "admin";
   jwtAudience: string | string[] | undefined;
-  jwtNamespaces: string[] | undefined;
+  /** Exact grants, or `["*"]` for the explicit every-namespace grant. */
+  jwtNamespaces: string[];
   tlsCaConfigured: boolean;
   tlsVerify: boolean;
   connectTimeout: number;
@@ -55,9 +56,24 @@ const SETTINGS_NUMBER_FIELDS = [
 const SETTINGS_NUMBER_KEYS = SETTINGS_NUMBER_FIELDS.map(([key]) => key);
 type SettingsDraft = WithNumberDrafts<Settings, (typeof SETTINGS_NUMBER_KEYS)[number]>;
 
-/** Each comma-separated grant must be a valid namespace name. */
+/** The BFF's only spelling of a grant for every namespace. */
+const NAMESPACE_WILDCARD = "*";
+
+/**
+ * Each comma-separated grant must be a valid namespace name, or the whole
+ * list is the lone wildcard. An empty list is never "unrestricted".
+ */
 function namespaceGrantsError(text: string): string | undefined {
-  for (const grant of parseCommaList(text)) {
+  const grants = parseCommaList(text);
+  if (grants.length === 0) {
+    return `Enter at least one namespace, or ${NAMESPACE_WILDCARD} for every namespace`;
+  }
+  if (grants.includes(NAMESPACE_WILDCARD)) {
+    return grants.every((grant) => grant === NAMESPACE_WILDCARD)
+      ? undefined
+      : `${NAMESPACE_WILDCARD} grants every namespace and cannot be combined with names`;
+  }
+  for (const grant of grants) {
     const error = validateNamespaceName(grant);
     if (error) return `${error} ("${grant}")`;
   }
@@ -196,8 +212,7 @@ export function SettingsForm() {
         runtimeSettingsEnabled: _runtimeSettingsEnabled,
         ...updates
       } = resolveNumberDrafts(settings, SETTINGS_NUMBER_KEYS);
-      // Untouched text keeps the server's value, so an unrestricted
-      // (absent) grant list is not rewritten as `[]`.
+      // Untouched text resubmits the server's canonical value unchanged.
       const jwtNamespaces = namespaceText === formatCommaList(seededNamespaces)
         ? seededNamespaces
         : parseCommaList(namespaceText);
@@ -345,7 +360,7 @@ export function SettingsForm() {
             value={namespaceText}
             onChange={(event) => setNamespaceText(event.target.value)}
             onBlur={checkNamespaceGrants}
-            helpText="Applies to new static logins: exact comma-separated namespace grants."
+            helpText="Applies to new static logins: exact comma-separated namespace grants, or * for every namespace."
             error={errors.jwtNamespaces}
             disabled={!settings.runtimeSettingsEnabled || settings.authMode !== "static"}
           />

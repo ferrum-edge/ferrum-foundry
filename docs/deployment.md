@@ -110,7 +110,18 @@ strings `true` and `false`. Duration variables are integers.
 | `FERRUM_JWT_MAX_TTL` | No | `3600` | 0-86400 seconds, `0` disables the ceiling | Gateway-configured maximum TTL that `FERRUM_JWT_TTL` is validated against |
 | `FERRUM_JWT_ROLE` | No | `admin` | `viewer`, `operator`, or `admin` | Role for the static development principal; trusted-proxy requests take the role from the header instead |
 | `FERRUM_JWT_AUDIENCE` | No | - | comma-separated exact values | `aud` claim, emitted only when set; must match the gateway's `FERRUM_ADMIN_JWT_AUDIENCE` |
-| `FERRUM_JWT_NAMESPACES` | No | - | comma-separated names matching `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$` | `ns` claim for the static principal and for the readiness probe |
+| `FERRUM_JWT_NAMESPACES` | Yes in `static` | - | comma-separated names matching `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$`, or `*` alone | Namespace grants (`ns` claim) for the static principal and for the readiness probe; `*` grants every namespace and omits `ns` |
+
+`FERRUM_JWT_NAMESPACES` is required in `static` mode, so the static
+principal's scope is always an explicit decision. Each comma-separated entry
+must be an exact namespace name; whitespace around an entry is allowed and
+duplicates are merged. Only `*` on its own grants every namespace. A value that
+is set but names no namespace — empty, whitespace only, or commas only — fails
+startup instead of being treated as unrestricted, and so do an empty entry
+(`tenant-a,`), an invalid name, and `*` combined with names. In
+`trusted-proxy` mode the identity proxy supplies each user's grants and this
+variable only scopes the readiness probe, which reads fleet-global endpoints;
+it may be left unset there, but a set value is validated the same way.
 
 ### Gateway transport
 
@@ -152,9 +163,15 @@ With `FERRUM_ALLOW_RUNTIME_SETTINGS=true`, clearing **JWT Audience** and saving
 removes the `aud` claim from subsequent BFF-generated JWTs. The Settings form
 displays the canonical values returned by the BFF after each successful save.
 For `PUT /api/settings`, an omitted field leaves its current value unchanged;
-send `jwtAudience: ""` (or `[]`) to clear the audience, and `jwtNamespaces: []`
-to clear the default namespace grants. Runtime overrides reset to environment
-values when the BFF restarts.
+send `jwtAudience: ""` (or `[]`) to clear the audience. `jwtNamespaces` follows
+the `FERRUM_JWT_NAMESPACES` rules: a non-empty array of exact names, or `["*"]`
+for every namespace, which `GET /api/settings` also reports as `["*"]`. An
+empty array, an empty or invalid entry, and `*` combined with names are refused
+with `400 FERRUM_BFF_INVALID_SETTINGS` without applying any part of the update.
+A session that holds namespace grants may narrow the defaults to grants it
+holds but cannot widen them — to another namespace or to `["*"]` — and gets
+`403 FERRUM_BFF_NAMESPACE_GRANT_EXCEEDED`. Runtime overrides reset to
+environment values when the BFF restarts.
 
 Changing `adminUrl` replaces the gateway every open tab is working against.
 Each tab is bound to the gateway it loaded against: the BFF refuses its later

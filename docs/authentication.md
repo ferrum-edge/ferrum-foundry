@@ -85,6 +85,14 @@ These defaults remain editable in static development mode and apply to its
 principal on subsequent logins. Existing static sessions retain their original grants. Issuer, audience, and token lifetime remain
 separate signing settings in both modes.
 
+Static namespace defaults are never unrestricted by omission. `jwtNamespaces`
+must be a non-empty array of exact names, or `["*"]` to grant every namespace;
+an empty array, an empty entry, or `*` mixed with names is refused with
+`400 FERRUM_BFF_INVALID_SETTINGS` and nothing in the update is applied. A
+session that holds namespace grants cannot use the defaults to widen access:
+it may only choose grants it holds, and anything else — including `["*"]` —
+is refused with `403 FERRUM_BFF_NAMESPACE_GRANT_EXCEEDED`.
+
 ### Namespace binding
 
 Consumer, proxy, upstream, and plugin create forms discard their drafts when
@@ -255,6 +263,14 @@ is not stored in `localStorage` or sent on later requests. Static mode is
 refused when `NODE_ENV=production` unless the deliberately unsafe
 `FERRUM_ALLOW_INSECURE_STATIC_AUTH=true` escape hatch is present.
 
+The static principal's namespace scope must be stated explicitly: startup
+requires `FERRUM_JWT_NAMESPACES`, either a comma-separated list of exact
+namespace names or `*` alone for every namespace. A value that names no
+namespace — empty, whitespace only, or commas only — is a startup error rather
+than an absent restriction, so a scoped deployment can never silently mint JWTs
+without an `ns` claim. See the
+[configuration reference](deployment.md#downstream-jwt-claims).
+
 The session cookie is host-scoped. The SPA origin host must match the host
 the BFF issued the cookie for. `localhost` and `127.0.0.1` are different
 hosts, so a login against `http://127.0.0.1:$PORT` is not sent on later
@@ -270,7 +286,10 @@ opt-in; see the [Quick Start](../README.md#local-development) env table.
 Foundry JWTs contain `iss`, `sub`, `exp`, `iat`, `nbf`, `jti`, and `role`.
 `aud` is emitted only when configured, because Ferrum rejects an unexpected
 audience. `ns` contains one exact string or an array of exact namespace grants;
-Foundry does not invent wildcard behavior. Tokens are cached by every signing
+Foundry does not invent wildcard behavior. An unrestricted principal — a
+trusted-proxy admin without a namespace header, or a static principal
+configured with `*` — gets no `ns` claim; `*` is a Foundry configuration value
+and is never sent as a claim. Tokens are cached by every signing
 input and authenticated principal, so a configuration or identity change can
 never reuse an earlier token.
 

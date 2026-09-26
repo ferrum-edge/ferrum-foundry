@@ -10,6 +10,7 @@ const ENV = {
   FERRUM_ALLOW_RUNTIME_SETTINGS: 'true',
   FERRUM_JWT_SECRET: JWT_SECRET,
   FERRUM_BFF_AUTH_TOKEN: BFF_TOKEN,
+  FERRUM_JWT_NAMESPACES: '*',
   FERRUM_SECURE_COOKIES: 'false',
 };
 const snapshot: Record<string, string | undefined> = {};

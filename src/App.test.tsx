@@ -16,7 +16,7 @@ let requests: Request[];
 let clients: Set<QueryClient>;
 const settings = {
   authMode: "static", adminUrl: "https://gateway.example.test", jwtIssuer: "ferrum-edge",
-  jwtTtl: 900, jwtRole: "admin", tlsCaConfigured: false, tlsVerify: true,
+  jwtTtl: 900, jwtRole: "admin", jwtNamespaces: ["*"], tlsCaConfigured: false, tlsVerify: true,
   connectTimeout: 5000, readTimeout: 60000, writeTimeout: 60000, runtimeSettingsEnabled: true,
 };
 
