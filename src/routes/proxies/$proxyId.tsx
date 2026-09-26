@@ -482,12 +482,17 @@ function ProxyEditor({ session }: { session: EditorSession }) {
         {/* ── Consumers Tab ──────────────────────────────────────── */}
         <TabsContent value="consumers">
           <ReadState queries={policyQueries} label="Authorized consumers">
-            {!policy || policy.authPlugins.length === 0 ? (
+            {!policy || (policy.authPlugins.length === 0 && visibleConsumers.length === 0) ? (
               <Card>
                 <div className="flex flex-col items-center text-center py-8">
                   <p className="text-text-secondary">
                     No consumers are authorized for this proxy.
                   </p>
+                  {policy?.configurationProblems.map((problem) => (
+                    <p key={problem} className="text-danger text-sm mt-2 max-w-md">
+                      {problem}
+                    </p>
+                  ))}
                   <p className="text-text-muted text-sm mt-2 max-w-md">
                     Attach an authentication plugin such as key auth, basic auth,
                     JWT, or mTLS to this proxy, or globally, to control who can

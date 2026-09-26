@@ -794,3 +794,126 @@ describe("gateway scope merge: scoped instances shadow same-name globals", () =>
     );
   });
 });
+
+describe("access_control without an identity source (#470)", () => {
+  // Ferrum Edge v0.9.7 `src/plugins/access_control.rs` `authorize_identity`
+  // rejects with 401 "No consumer identified" whenever neither a consumer nor
+  // an authenticated identity was established, before any list is consulted.
+  const bare = proxy({ id: "p", plugins: [] });
+  const people = [
+    consumer("1", "alice", ["operators"], { keyauth: [{ key: "[REDACTED]" }] }),
+    consumer("2", "bob", [], {}),
+  ];
+  const adminOnly = { trigger: { when: { match: { path: { prefix: ["/admin"] } } } } };
+
+  it.each([
+    { label: "allow-list only", config: { allowed_consumers: ["alice"] } },
+    { label: "group allow-list only", config: { allowed_groups: ["operators"] } },
+    { label: "deny-list only", config: { disallowed_consumers: ["mallory"] } },
+    { label: "group deny-list only", config: { disallowed_groups: ["suspended"] } },
+    { label: "external-identity bypass only", config: { allow_authenticated_identity: true } },
+  ])("denies every consumer for an untriggered $label ACL with no auth plugin", ({ config }) => {
+    const analysis = analyzeProxyPolicy(bare, [
+      plugin("acl", "access_control", "global", config),
+      plugin("logging", "stdout_logging", "global"),
+    ], people);
+
+    expect(analysis.authPlugins).toEqual([]);
+    expect(analysis.consumers.map((entry) => entry.decision)).toEqual(["denied", "denied"]);
+    for (const entry of analysis.consumers) {
+      expect(entry.reasons.join(" ")).toContain("acl rejects every request with 401");
+    }
+    expect(analysis.configurationProblems).toHaveLength(1);
+    expect(analysis.configurationProblems[0]).toContain("no effective plugin establishes one");
+    expect(analysis.conditional).toBe(false);
+  });
+
+  it("reproduces the reported global allow-list case as denied, not public", () => {
+    const result = analyzeProxyPolicy(
+      { ...bare, backend_scheme: "https" },
+      [plugin("acl", "access_control", "global", { allowed_consumers: ["alice"] })],
+      [consumer("alice-id", "alice", [], {})],
+    ).consumers[0];
+    expect(result?.decision).toBe("denied");
+    expect(result?.reasons.join(" ")).not.toContain("No recognized effective authentication");
+  });
+
+  it("denies on a stream proxy whose only auth plugin is HTTP-only", () => {
+    const streamProxy = proxy({
+      backend_scheme: "tcp",
+      listen_port: 18_443,
+      listen_path: null,
+      plugins: [],
+    });
+    const analysis = analyzeProxyPolicy(streamProxy, [
+      plugin("global-jwt", "jwt_auth", "global"),
+      plugin("acl", "access_control", "global", { allowed_consumers: ["alice"] }),
+    ], people);
+    expect(analysis.authPlugins).toEqual([]);
+    expect(analysis.consumers.map((entry) => entry.decision)).toEqual(["denied", "denied"]);
+    expect(analysis.configurationProblems).toHaveLength(1);
+  });
+
+  it("keeps a triggered ACL without auth conditional rather than public or denied", () => {
+    const analysis = analyzeProxyPolicy(bare, [
+      plugin("acl", "access_control", "global", { allowed_consumers: ["alice"] }, adminOnly),
+    ], people);
+    expect(analysis.consumers.map((entry) => entry.decision)).toEqual([
+      "conditional",
+      "conditional",
+    ]);
+    expect(analysis.consumers[0]?.reasons.join(" ")).toContain("401");
+    expect(analysis.configurationProblems).toEqual([]);
+    expect(analysis.conditional).toBe(true);
+  });
+
+  it("lets an untriggered ACL decide even beside a triggered one", () => {
+    const analysis = analyzeProxyPolicy(bare, [
+      plugin("acl-a", "access_control", "global", { allowed_consumers: ["alice"] }, adminOnly),
+      plugin("acl-b", "access_control", "global", { disallowed_groups: ["suspended"] }),
+    ], people);
+    expect(analysis.consumers.map((entry) => entry.decision)).toEqual(["denied", "denied"]);
+    expect(analysis.consumers[0]?.reasons).toEqual([
+      expect.stringContaining("acl-b rejects every request with 401"),
+    ]);
+    expect(analysis.configurationProblems).toHaveLength(1);
+  });
+
+  it("treats an unrecognized plugin as an identity source it cannot model", () => {
+    for (const plugins of [
+      [
+        plugin("acl", "access_control", "global", { allowed_consumers: ["alice"] }),
+        plugin("custom", "acme_custom_auth", "global"),
+      ],
+      [plugin("custom", "acme_custom_auth", "global")],
+    ]) {
+      const analysis = analyzeProxyPolicy(bare, plugins, people);
+      expect(analysis.consumers.map((entry) => entry.decision)).toEqual([
+        "conditional",
+        "conditional",
+      ]);
+      expect(analysis.consumers[0]?.reasons.join(" ")).toContain("acme_custom_auth");
+      expect(analysis.configurationProblems).toEqual([]);
+      expect(analysis.conditional).toBe(true);
+    }
+  });
+
+  it("keeps a proxy with neither authentication nor ACL public", () => {
+    const analysis = analyzeProxyPolicy(bare, [
+      plugin("logging", "stdout_logging", "global"),
+      plugin("rate", "rate_limiting", "global"),
+    ], people);
+    expect(analysis.consumers.map((entry) => entry.decision)).toEqual(["public", "public"]);
+    expect(analysis.configurationProblems).toEqual([]);
+    expect(analysis.conditional).toBe(false);
+  });
+
+  it("leaves ACL evaluation unchanged once an auth plugin establishes identity", () => {
+    const analysis = analyzeProxyPolicy(bare, [
+      plugin("key", "key_auth", "global"),
+      plugin("acl", "access_control", "global", { allowed_consumers: ["alice"] }),
+    ], people);
+    expect(analysis.consumers.map((entry) => entry.decision)).toEqual(["allowed", "denied"]);
+    expect(analysis.configurationProblems).toEqual([]);
+  });
+});
