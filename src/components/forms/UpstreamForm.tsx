@@ -15,6 +15,13 @@ import { TargetForm } from "./TargetForm";
 import { useCollapsibleFormValidation } from "@/lib/collapsedFormValidation";
 import { targetActionLabels } from "@/lib/upstreamTargets";
 import {
+  subsetLabelsDraft,
+  subsetLabelsForSubmit,
+  validateSubsetLabels,
+  type SubsetLabelErrors,
+  type SubsetLabelsDraft,
+} from "@/lib/subsetLabels";
+import {
   missingNumberError,
   numberDraftFromInput,
   numberDraftText,
@@ -65,7 +72,7 @@ const UPSTREAM_COLLAPSIBLE_SECTIONS = [
       "sd_default_weight",
     ],
   },
-  { id: "subsets", errorKeys: [] },
+  { id: "subsets", errorKeys: ["subset_labels"] },
   { id: "backend-tls", errorKeys: [] },
 ] as const;
 
@@ -322,21 +329,37 @@ export function UpstreamForm({
   });
 
   /* ---------- Subsets ---------- */
+  // Labels are key/value rows, and a selector left untouched is written back
+  // as the exact map that was read (#479).
+  const nextSubsetRowId = useRef(0);
+  const newSubsetRowId = () => nextSubsetRowId.current++;
   const [subsets, setSubsets] = useState<Array<{
+    id: number;
     name: string;
-    labels: string;
+    labels: SubsetLabelsDraft;
     algorithm: Upstream["algorithm"] | "";
     hashOn: string;
-  }>>(
+  }>>(() =>
     (initialData?.subsets ?? []).map((s) => ({
+      id: newSubsetRowId(),
       name: s.name,
-      labels: Object.entries(s.labels)
-        .map(([k, v]) => `${k}=${v}`)
-        .join(", "),
+      labels: subsetLabelsDraft(s.labels, newSubsetRowId),
       algorithm: s.traffic_policy?.load_balancer_algorithm ?? "",
       hashOn: s.traffic_policy?.hash_on ?? "",
     })),
   );
+  const [subsetLabelErrors, setSubsetLabelErrors] = useState<Record<number, SubsetLabelErrors>>({});
+  const editSubsetLabels = (
+    subsetId: number,
+    update: (rows: SubsetLabelsDraft["rows"]) => SubsetLabelsDraft["rows"],
+  ) =>
+    setSubsets((prev) =>
+      prev.map((s) =>
+        s.id === subsetId
+          ? { ...s, labels: { ...s.labels, rows: update(s.labels.rows), edited: true } }
+          : s,
+      ),
+    );
 
   /* ---------- Backend TLS ---------- */
   const [tlsCertPath, setTlsCertPath] = useState(initialData?.backend_tls_client_cert_path ?? "");
@@ -432,6 +455,19 @@ export function UpstreamForm({
       if (!sdServiceName.trim()) {
         errs.sd_service_name = "Consul service name is required";
       }
+    }
+    // A subset with a blank name is dropped on save, so only named subsets
+    // have selectors to check. Each problem is shown on its own row; the
+    // summary counts them as one.
+    const labelErrs: Record<number, SubsetLabelErrors> = {};
+    for (const subset of subsets) {
+      if (!subset.name.trim()) continue;
+      const result = validateSubsetLabels(subset.labels);
+      if (result) labelErrs[subset.id] = result;
+    }
+    setSubsetLabelErrors(labelErrs);
+    if (Object.keys(labelErrs).length > 0) {
+      errs.subset_labels = "Fix the subset labels";
     }
     setErrors(errs);
     const ok = Object.keys(errs).length === 0;
@@ -548,16 +584,7 @@ export function UpstreamForm({
       .filter((s) => s.name.trim())
       .map((s) => ({
         name: s.name.trim(),
-        labels: Object.fromEntries(
-          s.labels
-            .split(",")
-            .map((pair) => pair.trim())
-            .filter((pair) => pair.includes("="))
-            .map((pair) => {
-              const eq = pair.indexOf("=");
-              return [pair.slice(0, eq).trim(), pair.slice(eq + 1).trim()];
-            }),
-        ),
+        labels: subsetLabelsForSubmit(s.labels),
         ...((s.algorithm || s.hashOn.trim()) && {
           traffic_policy: {
             ...(s.algorithm && { load_balancer_algorithm: s.algorithm }),
@@ -1225,78 +1252,151 @@ export function UpstreamForm({
           <p className="text-text-muted text-xs">
             Named target subsets for DestinationRule-style routing. A proxy's
             "Upstream Subset" selects one by name; a target matches when its tags
-            contain every label listed here.
+            contain every label listed here, compared exactly.
           </p>
-          {subsets.map((subset, index) => (
-            <div key={index} className="flex items-start gap-2">
-              <div className="flex-1 grid grid-cols-2 gap-2">
-                <Input
-                  label={index === 0 ? "Name" : undefined}
-                  value={subset.name}
-                  onChange={(e) =>
-                    setSubsets((prev) =>
-                      prev.map((s, i) => (i === index ? { ...s, name: e.target.value } : s)),
-                    )
-                  }
-                  placeholder="v2"
-                />
-                <Input
-                  label={index === 0 ? "Labels (key=value)" : undefined}
-                  value={subset.labels}
-                  onChange={(e) =>
-                    setSubsets((prev) =>
-                      prev.map((s, i) => (i === index ? { ...s, labels: e.target.value } : s)),
-                    )
-                  }
-                  placeholder="version=v2, tier=canary"
-                />
-                <Select
-                  label={index === 0 ? "Subset Algorithm" : undefined}
-                  value={subset.algorithm || "inherit"}
-                  onValueChange={(value) =>
-                    setSubsets((prev) =>
-                      prev.map((s, i) => i === index
-                        ? { ...s, algorithm: value === "inherit" ? "" : value as Upstream["algorithm"] }
-                        : s),
-                    )
-                  }
-                  options={[
-                    { value: "inherit", label: "Inherit upstream algorithm" },
-                    ...ALGORITHM_OPTIONS,
-                  ]}
-                />
-                <Input
-                  label={index === 0 ? "Subset Hash Key" : undefined}
-                  value={subset.hashOn}
-                  onChange={(e) =>
-                    setSubsets((prev) =>
-                      prev.map((s, i) => i === index ? { ...s, hashOn: e.target.value } : s),
-                    )
-                  }
-                  placeholder="Optional hash key"
-                />
-              </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className={index === 0 ? "mt-7" : ""}
-                aria-label={`Remove subset ${subset.name.trim() || index + 1}`}
-                onClick={() => setSubsets((prev) => prev.filter((_, i) => i !== index))}
+          {subsets.map((subset, index) => {
+            const subsetLabel = subset.name.trim() || String(index + 1);
+            const labelErrors = subsetLabelErrors[subset.id];
+            return (
+              <div
+                key={subset.id}
+                role="group"
+                aria-label={`Subset ${subsetLabel}`}
+                className="flex items-start gap-2 border border-border rounded-lg p-3"
               >
-                <svg className="w-4 h-4 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </Button>
-            </div>
-          ))}
+                <div className="flex-1 flex flex-col gap-3">
+                  <div className="grid grid-cols-3 gap-2">
+                    <Input
+                      label="Subset Name"
+                      value={subset.name}
+                      onChange={(e) =>
+                        setSubsets((prev) =>
+                          prev.map((s) => (s.id === subset.id ? { ...s, name: e.target.value } : s)),
+                        )
+                      }
+                      placeholder="v2"
+                    />
+                    <Select
+                      label="Subset Algorithm"
+                      value={subset.algorithm || "inherit"}
+                      onValueChange={(value) =>
+                        setSubsets((prev) =>
+                          prev.map((s) => s.id === subset.id
+                            ? { ...s, algorithm: value === "inherit" ? "" : value as Upstream["algorithm"] }
+                            : s),
+                        )
+                      }
+                      options={[
+                        { value: "inherit", label: "Inherit upstream algorithm" },
+                        ...ALGORITHM_OPTIONS,
+                      ]}
+                    />
+                    <Input
+                      label="Subset Hash Key"
+                      value={subset.hashOn}
+                      onChange={(e) =>
+                        setSubsets((prev) =>
+                          prev.map((s) => s.id === subset.id ? { ...s, hashOn: e.target.value } : s),
+                        )
+                      }
+                      placeholder="Optional hash key"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <span className="text-text-secondary text-sm font-medium">Labels</span>
+                    {subset.labels.rows.map((row, rowIndex) => (
+                      <div key={row.id} className="flex items-start gap-2">
+                        <div className="flex-1 grid grid-cols-2 gap-2">
+                          <Input
+                            aria-label={`Subset ${subsetLabel} label ${rowIndex + 1} key`}
+                            value={row.key}
+                            error={labelErrors?.rows[row.id]}
+                            onChange={(e) =>
+                              editSubsetLabels(subset.id, (rows) =>
+                                rows.map((r) => (r.id === row.id ? { ...r, key: e.target.value } : r)),
+                              )
+                            }
+                            placeholder="version"
+                          />
+                          <Input
+                            aria-label={`Subset ${subsetLabel} label ${rowIndex + 1} value`}
+                            value={row.value}
+                            onChange={(e) =>
+                              editSubsetLabels(subset.id, (rows) =>
+                                rows.map((r) => (r.id === row.id ? { ...r, value: e.target.value } : r)),
+                              )
+                            }
+                            placeholder="v2"
+                          />
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          aria-label={`Remove label ${row.key || rowIndex + 1} from subset ${subsetLabel}`}
+                          onClick={() =>
+                            editSubsetLabels(subset.id, (rows) => rows.filter((r) => r.id !== row.id))
+                          }
+                        >
+                          <svg className="w-4 h-4 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </Button>
+                      </div>
+                    ))}
+                    {labelErrors?.selector && (
+                      <p className="text-danger text-xs">{labelErrors.selector}</p>
+                    )}
+                    <div>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        aria-label={`Add label to subset ${subsetLabel}`}
+                        onClick={() =>
+                          editSubsetLabels(subset.id, (rows) => [
+                            ...rows,
+                            { id: newSubsetRowId(), key: "", value: "" },
+                          ])
+                        }
+                      >
+                        Add Label
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="mt-7"
+                  aria-label={`Remove subset ${subsetLabel}`}
+                  onClick={() => setSubsets((prev) => prev.filter((s) => s.id !== subset.id))}
+                >
+                  <svg className="w-4 h-4 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </Button>
+              </div>
+            );
+          })}
           <Button
             type="button"
             variant="secondary"
             size="sm"
             onClick={() => setSubsets((prev) => [
               ...prev,
-              { name: "", labels: "", algorithm: "", hashOn: "" },
+              {
+                id: newSubsetRowId(),
+                name: "",
+                labels: {
+                  rows: [{ id: newSubsetRowId(), key: "", value: "" }],
+                  original: null,
+                  edited: true,
+                },
+                algorithm: "",
+                hashOn: "",
+              },
             ])}
           >
             Add Subset
