@@ -85,6 +85,8 @@ export function useImportApiSpec() {
   const { scope } = useNamespace();
   return useMutation({
     retry: false,
+    // A document can carry plugin secrets: discard it once the page is gone.
+    gcTime: 0,
     mutationFn: async (document: string) => {
       const created = await apiSpecs.create(scope, document);
       // Carry the mutation's namespace through completion, even after a switch.
@@ -101,6 +103,7 @@ export function useUpdateApiSpec() {
   const { scope } = useNamespace();
   return useMutation({
     retry: false,
+    gcTime: 0,
     mutationFn: async ({ id, document }: { id: string; document: string }) => {
       const replaced = await apiSpecs.update(scope, id, document);
       return { ...replaced, namespace: scope.namespace };

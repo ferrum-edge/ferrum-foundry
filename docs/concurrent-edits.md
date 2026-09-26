@@ -432,8 +432,10 @@ plugin configuration unclassified throughout. Foundry has no YAML parser, so a
 YAML (or malformed JSON) document is unclassified throughout: every scalar it
 could hold, found line by line without parsing (each `key: value` value,
 sequence entry, flow element, and quoted scalar unquoted and unescaped). A
-folded or joined echo of a multi-line scalar is therefore redacted piece by
-piece. Both surfaces report every failure themselves (`SILENT_ERRORS`), and a
+quoted key needs no space before its value (`"api_key":"…"`), as in a
+JSON-like document that is not valid JSON, and a double-quoted scalar
+continued with a trailing `\` is recorded without it. A folded or joined echo
+of a multi-line scalar is therefore redacted piece by piece. Both surfaces report every failure themselves (`SILENT_ERRORS`), and a
 spec write's unknown outcome keeps only the redacted error as its `cause`.
 
 A value that is secret only because nothing classifies it — every string of an
@@ -444,13 +446,20 @@ error body, and in the `[REDACTED]` marker itself, so it is redacted only
 where it stands as a whole token of a string value, and never in an object
 key: the body's `error` and `code` stay readable and the restore card's
 recovery details stay recognizable. A value that is classified is redacted
-wherever it occurs whatever its length. Every match is found in the original
-text and replaced in one pass, overlapping matches as one marker, so no
-replacement can split a marker another one wrote (#487).
+wherever it occurs in a string value whatever its length. No value shorter
+than 8 characters, classified or not, is matched in the body's structure:
+its object keys, and the fixed vocabulary callers recognize a failure by —
+`code`, `phase`, `rollback`, `failure_class`, and `confirmation_required`. A
+restore whose backup holds a credential such as `api`, `ro`, or `true` still
+gets a recognizable `api_specs_at_risk` confirmation, rollback outcome, and
+upload-phase timeout (#485). Every match is found in the original text and
+replaced in one pass, overlapping matches as one marker, so no replacement
+can split a marker another one wrote (#487).
 
 `withRedactedFailure()` replaces any failure of such a write with a
-`RedactedWriteError`: the redacted message, a bodiless copy of the response
-(status and headers), and the redacted parsed body as `data`, with no
+`RedactedWriteError`: the redacted message, the original error's `name`
+(`HTTPError`, `TimeoutError`, `UnboundNamespaceError`), a bodiless copy of the
+response (status and headers), and the redacted parsed body as `data`, with no
 `request`, `options`, or `cause`. `getApiErrorDetail()`,
 `isPreconditionFailed()`, and the outcome classifiers read it as they read a ky
 `HTTPError`, and the committed-write and unobserved-write markers are carried
@@ -466,9 +475,10 @@ answer was lost still opens the "Outcome unknown" dialog, BFF code included
 write, a guarded save's handled `412`) is not held. Writes whose form renders
 every refusal itself (consumer credential writes, managed TLS create, ACME
 order creation and renewal, TLS validation) keep `SILENT_ERRORS` instead. A plugin membership plan includes the
-gateway's redacted reason in its own message. Every such mutation hook sets
-`gcTime: 0`, so the submitted body does not linger in the mutation cache's
-variables after the form is gone. Consumer metadata saves are not
+gateway's redacted reason in its own message. Every such mutation hook —
+restore and API spec import and replacement included — sets `gcTime: 0`, so
+the submitted body does not linger in the mutation cache's variables after
+the form is gone. Consumer metadata saves are not
 covered because their body carries no submitted secret: credentials in it come
 from the read the save is sent against, where they are `[REDACTED]`.
 

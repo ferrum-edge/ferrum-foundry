@@ -229,9 +229,9 @@ describe('spec and ACME mutation deadlines', () => {
       vi.stubGlobal('fetch', fetcher);
       // ACME writes carry account credentials and spec documents plugin
       // secrets, so their failure is redacted (#478, #485); it keeps the
-      // status and body the classification reads.
+      // status, body, and error name the classification reads.
       await expect(invoke(operation)).rejects.toMatchObject({
-        name: 'RedactedWriteError',
+        name: 'HTTPError',
         data: { code: 'FERRUM_BFF_TIMEOUT', phase: 'upload' },
       });
       fetcher.mockImplementation(async () => Response.json({

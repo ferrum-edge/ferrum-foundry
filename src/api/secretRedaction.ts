@@ -49,7 +49,7 @@ export interface Secrets {
   /**
    * Short values that are secret only because nothing classifies them (an
    * unknown plugin's config, a spec document Foundry cannot parse), redacted
-   * only where they stand as a whole token (`MIN_UNCLASSIFIED_SUBSTRING`).
+   * only where they stand as a whole token (`MIN_DISTINCTIVE`).
    */
   readonly tokens: readonly string[];
 }
@@ -68,22 +68,25 @@ function mergeSecrets(sets: readonly Secrets[]): Secrets {
 }
 
 /**
- * The shortest value Foundry cannot classify that is redacted wherever it
- * occurs. Such a value is redacted anyway, failing closed, but a short one —
- * `a`, `1`, `on`, `error` — also occurs inside ordinary words, in the keys of
- * the gateway's error body (`error`, `code`), and in the `[REDACTED]` marker
- * itself. Replacing every occurrence would destroy the detail that diagnoses
- * the failure. A shorter one is redacted only where it stands as a whole token
- * of a string value, and never in an object key.
+ * The shortest value distinctive enough to be matched inside other text. A
+ * shorter one — `a`, `1`, `on`, `api`, `true`, `error` — also occurs inside
+ * ordinary words, in the keys of the gateway's error body (`error`,
+ * `api_specs_at_risk`), in the fixed vocabulary callers recognize a failure by
+ * (`confirm_api_spec_deletion=true`), and in the `[REDACTED]` marker itself.
+ * Replacing it there would destroy the detail that diagnoses the failure and
+ * the fields that decide what the page offers next. A shorter value that is
+ * unclassified is redacted only where it stands as a whole token of a string
+ * value; a shorter classified one wherever it occurs in a string value. Neither
+ * is matched in the body's structure (`RedactionForms.structural`).
  */
-const MIN_UNCLASSIFIED_SUBSTRING = 8;
+const MIN_DISTINCTIVE = 8;
 
 /** `values` that are secret only because nothing classifies them. */
 export function unclassified(values: readonly string[]): Secrets {
   const long: string[] = [];
   const short: string[] = [];
   for (const value of values) {
-    (value.trim().length < MIN_UNCLASSIFIED_SUBSTRING ? short : long).push(value);
+    (value.trim().length < MIN_DISTINCTIVE ? short : long).push(value);
   }
   return { values: long, tokens: short };
 }
@@ -437,17 +440,30 @@ function flowPieces(text: string): string[] {
   return pieces.map((piece) => piece.trim()).filter(Boolean);
 }
 
-/** The value of a `key: value` pair, the key plain or quoted, or null if `text` is not one. */
+/**
+ * The value of a `key: value` pair, the key plain or quoted, or null if `text`
+ * is not one. After a quoted key the `:` needs no space (`"key":"value"`), as
+ * in JSON, which a document Edge falls back to reading as YAML can be.
+ */
 function mappingValue(text: string): string | null {
   if (text.startsWith('"') || text.startsWith("'")) {
     const end = quotedEnd(text);
     if (end === -1) return null;
-    const separator = /^\s*:(?:\s|$)/.exec(text.slice(end));
+    const separator = /^\s*:/.exec(text.slice(end));
     return separator ? text.slice(end + separator[0].length).trim() : null;
   }
   if (text.startsWith("{") || text.startsWith("[")) return null;
   const separator = /:(?:\s|$)/.exec(text);
   return separator ? text.slice(separator.index + separator[0].length).trim() : null;
+}
+
+/**
+ * `text` without a trailing unescaped `\`, which continues a double-quoted
+ * scalar on the next line: the scalar joins the lines without it.
+ */
+function withoutContinuation(text: string): string {
+  const backslashes = /\\+$/.exec(text)?.[0].length ?? 0;
+  return backslashes % 2 === 1 ? text.slice(0, -1) : text;
 }
 
 function addScalar(raw: string, found: Set<string>): void {
@@ -461,11 +477,21 @@ function addScalar(raw: string, found: Set<string>): void {
     return;
   }
   if (text.startsWith('"') || text.startsWith("'")) {
+    // A quoted key's value, with or without a space after the `:`.
+    const value = mappingValue(text);
+    if (value) addScalar(value, found);
     const end = quotedEnd(text);
-    const inner = end === -1 ? text.slice(1) : text.slice(1, end - 1);
+    const doubled = text.startsWith('"');
+    // A scalar left open continues on the next line, a double-quoted one
+    // perhaps with a trailing `\`.
+    const inner = end !== -1
+      ? text.slice(1, end - 1)
+      : doubled
+        ? withoutContinuation(text.slice(1))
+        : text.slice(1);
     if (!inner.trim()) return;
     found.add(inner);
-    found.add(text.startsWith('"') ? unescapeDoubleQuoted(inner) : inner.replaceAll("''", "'"));
+    found.add(doubled ? unescapeDoubleQuoted(inner) : inner.replaceAll("''", "'"));
     return;
   }
   if (text.startsWith("{") || text.startsWith("[")) {
@@ -478,11 +504,13 @@ function addScalar(raw: string, found: Set<string>): void {
   }
   // A plain scalar, or a line of a multi-line one: without a trailing comment
   // or a stray quote from the line that closes a quoted scalar, and unescaped
-  // in case it continues a double-quoted one.
+  // in case it continues a double-quoted one, itself continued with a `\`.
+  const unquoted = text.replace(/^["']|["']$/g, "");
   for (const variant of [
     text.replace(/\s+#.*$/, ""),
-    text.replace(/^["']|["']$/g, ""),
+    unquoted,
     unescapeDoubleQuoted(text),
+    unescapeDoubleQuoted(withoutContinuation(unquoted)),
   ]) {
     if (variant.trim()) found.add(variant.trim());
   }
@@ -537,10 +565,17 @@ function secretLines(value: string): string[] {
 
 /** Every form of every submitted secret, as matched in a failure's body. */
 export interface RedactionForms {
-  /** Matched wherever they occur, in a string or an object key. Longest first. */
+  /** Matched wherever they occur in a string value. Longest first. */
   readonly substrings: readonly string[];
-  /** Matched only as a whole token of a string (`MIN_UNCLASSIFIED_SUBSTRING`). */
+  /** Matched only as a whole token of a string value (`MIN_DISTINCTIVE`). */
   readonly tokens: readonly string[];
+  /**
+   * The substrings at least `MIN_DISTINCTIVE` long, the only forms matched in
+   * the body's structure: an object key, a fixed-vocabulary field
+   * (`FIXED_VOCABULARY_FIELDS`), and text serialized from a body whose values
+   * were each redacted already. Longest first.
+   */
+  readonly structural: readonly string[];
 }
 
 /**
@@ -569,9 +604,11 @@ export function redactionForms(secrets: Secrets | readonly string[]): RedactionF
   const whole = new Set<string>();
   for (const value of tokens) addForms(value, whole);
   const longestFirst = (a: string, b: string) => b.length - a.length;
+  const sorted = [...substrings].sort(longestFirst);
   return {
-    substrings: [...substrings].sort(longestFirst),
+    substrings: sorted,
     tokens: [...whole].filter((form) => form.trim() && !substrings.has(form)).sort(longestFirst),
+    structural: sorted.filter((form) => form.trim().length >= MIN_DISTINCTIVE),
   };
 }
 
@@ -631,25 +668,45 @@ export function redactSubmitted(text: string, forms: RedactionForms): string {
 }
 
 /**
- * `text` with only the substring forms replaced: an object key, or text built
- * from a body whose strings were each redacted already. A whole-token form
- * matched there would find the body's structure — its keys, serialized — not
- * anything submitted.
+ * `text` with only the structural forms replaced: an object key, a
+ * fixed-vocabulary field, or text built from a body whose strings were each
+ * redacted already. A short form matched there would find the body's
+ * structure — its keys, its codes, serialized — not anything submitted.
  */
 function redactStructure(text: string, forms: RedactionForms): string {
-  return replaceSpans(text, occurrences(text, forms.substrings, false));
+  return replaceSpans(text, occurrences(text, forms.structural, false));
 }
 
 /**
- * A parsed error body with every string in it redacted, and every key too,
- * except against a short unclassified value (`MIN_UNCLASSIFIED_SUBSTRING`).
+ * Fields whose value is the gateway's or the BFF's own vocabulary, which
+ * callers recognize a failure by: the error `code`, the BFF timeout's `phase`,
+ * and a restore's `rollback`, `failure_class`, and `confirmation_required`.
+ * Each is redacted like an object key, so a short submitted value (`api`,
+ * `true`, `load`) cannot turn `confirm_api_spec_deletion=true` or `upload`
+ * into something no caller recognizes.
+ */
+const FIXED_VOCABULARY_FIELDS = new Set([
+  "code",
+  "phase",
+  "rollback",
+  "failure_class",
+  "confirmation_required",
+]);
+
+/**
+ * A parsed error body with every string in it redacted, and its keys and
+ * fixed-vocabulary fields against the structural forms only (`MIN_DISTINCTIVE`).
  */
 export function redactBody(value: unknown, forms: RedactionForms): unknown {
   if (typeof value === "string") return redactSubmitted(value, forms);
   if (Array.isArray(value)) return value.map((item) => redactBody(item, forms));
   if (value && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value).map(([key, item]) =>
-      [redactStructure(key, forms), redactBody(item, forms)]));
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [
+      redactStructure(key, forms),
+      typeof item === "string" && FIXED_VOCABULARY_FIELDS.has(key)
+        ? redactStructure(item, forms)
+        : redactBody(item, forms),
+    ]));
   }
   return value;
 }
@@ -714,9 +771,19 @@ export class RedactedWriteError extends Error {
   declare readonly response?: Response;
   declare readonly data?: unknown;
 
-  constructor(message: string, response: Response | undefined, data: unknown) {
+  /**
+   * `name` is the original error's (`HTTPError`, `TimeoutError`,
+   * `UnboundNamespaceError`), which the outcome classifiers and ky's own type
+   * guards decide on. Nothing else of the original is copied.
+   */
+  constructor(
+    message: string,
+    response: Response | undefined,
+    data: unknown,
+    name = "RedactedWriteError",
+  ) {
     super(message);
-    this.name = "RedactedWriteError";
+    this.name = name;
     if (response) Object.defineProperty(this, "response", { value: response, enumerable: true });
     if (data !== undefined) Object.defineProperty(this, "data", { value: data, enumerable: true });
   }
@@ -761,10 +828,15 @@ export async function redactWriteFailure(
       // Already consumed — nothing further to recover.
     }
   }
+  const response = bodilessResponse(source?.response);
+  const name = source?.name;
   const redacted = new RedactedWriteError(
     source ? redactSubmitted(source.message, forms) : "Request failed",
-    bodilessResponse(source?.response),
+    response,
     data,
+    // ky's `isHTTPError` recognizes an `HTTPError` by name, then reads its
+    // response, so the name is kept only while there is one to read.
+    name && (response || name !== "HTTPError") ? name : undefined,
   );
   const committed = getCommittedWrite(error);
   if (committed) markCommittedWrite(redacted, committed);

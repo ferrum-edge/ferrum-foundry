@@ -20,6 +20,7 @@ import {
   getCommittedWrite,
   isUnobservedWrite,
   setApiErrorHandler,
+  UnboundNamespaceError,
 } from "./client";
 import { isPreconditionFailed } from "./conditionalWrite";
 import { resetGatewayMetadata, setApplyStatusFetcher } from "./gatewayMetadata";
@@ -34,6 +35,7 @@ import {
   pluginConfigSecrets,
   redactionForms,
   RedactedWriteError,
+  redactWriteFailure,
   secretValues,
   type Secrets,
   yamlScalars,
@@ -360,6 +362,39 @@ describe("consumer create (#478)", () => {
   });
 });
 
+describe("the original error's name", () => {
+  it("is kept on a refusal, with nothing else of the ky error", async () => {
+    echo(LONG);
+    const failure = await consumers.create(scope, consumerWith(LONG)).catch((e: unknown) => e);
+
+    expectDetached(failure);
+    expect((failure as Error).name).toBe("HTTPError");
+    expect((failure as RedactedWriteError).response?.status).toBe(400);
+    expectRedacted(await exposure(failure), LONG);
+  });
+
+  it("classifies a client timeout and an unbound namespace as the original would be", async () => {
+    const timeout = Object.assign(
+      new Error(`Request timed out: POST /api/proxy/consumers ${LONG}`),
+      { name: "TimeoutError" },
+    );
+    const timedOut = await redactWriteFailure(timeout, [LONG]);
+    expectDetached(timedOut);
+    expect(timedOut.name).toBe("TimeoutError");
+    expectRedacted(timedOut.message, LONG);
+    expect(classifyUnobservedOutcome(timedOut)).toEqual({ reason: "client_timeout", detail: null });
+
+    // Raised before a byte is sent: not an unknown outcome.
+    const unbound = await redactWriteFailure(
+      new UnboundNamespaceError("/api/proxy/consumers"),
+      [LONG],
+    );
+    expectDetached(unbound);
+    expect(unbound.name).toBe("UnboundNamespaceError");
+    expect(classifyUnobservedOutcome(unbound)).toBeNull();
+  });
+});
+
 describe("plugin configuration writes (#478)", () => {
   it.each([
     ["a 1000-character client secret", LONG],
@@ -636,6 +671,66 @@ describe("backup restore (#485)", () => {
     expect(classifyUnobservedOutcome(lost)?.reason).toBe("transport");
     expect(reported).toEqual([]);
   });
+
+  it("keeps the body's keys and fixed vocabulary when a credential is a short word", async () => {
+    // Each credential is classified, and each occurs in a key (`api_specs_at_risk`,
+    // `error`, `rollback`) or a value callers decide on
+    // (`confirm_api_spec_deletion=true`, `upload`). Free text is still redacted.
+    const shortWords = {
+      version: "1",
+      consumers: [{
+        id: "alice",
+        username: "alice",
+        credentials: {
+          basicauth: [{ username: "api", password: "true" }],
+          keyauth: [{ key: "ro" }, { key: "load" }],
+        },
+      }],
+    };
+
+    respond = () => Response.json({
+      error: "restore would delete api specs for ro users",
+      api_specs_at_risk: 2,
+      confirmation_required: "confirm_api_spec_deletion=true",
+    }, { status: 409 });
+    const conflict = await ops.restore(scope, shortWords).catch((e: unknown) => e);
+    expectDetached(conflict);
+    expect(ops.getRestoreApiSpecConfirmation(conflict)).toEqual({
+      error: "restore would delete [REDACTED] specs for [REDACTED] users",
+      api_specs_at_risk: 2,
+      confirmation_required: "confirm_api_spec_deletion=true",
+    });
+
+    respond = () => Response.json({
+      error: "restore import failed",
+      rollback: "completed",
+      failure_class: "data_integrity",
+      restore_errors: ["consumer alice: duplicate basic auth username api"],
+    }, { status: 500 });
+    const failed = await ops.restore(scope, shortWords).catch((e: unknown) => e);
+    expectDetached(failed);
+    expect(ops.getRestoreFailure(failed)).toEqual({
+      error: "restore import failed",
+      rollback: "completed",
+      failure_class: "data_integrity",
+      restore_errors: ["consumer alice: duplicate basic auth username [REDACTED]"],
+    });
+
+    respond = () => Response.json(
+      { error: "upload timed out", code: "FERRUM_BFF_TIMEOUT", phase: "upload" },
+      { status: 504 },
+    );
+    const timedOut = await ops.restore(scope, shortWords).catch((e: unknown) => e);
+    expectDetached(timedOut);
+    expect((timedOut as RedactedWriteError).data).toEqual({
+      error: "up[REDACTED] timed out",
+      code: "FERRUM_BFF_TIMEOUT",
+      phase: "upload",
+    });
+    // The upload phase still proves the body never reached the gateway.
+    expect(classifyUnobservedOutcome(timedOut)).toBeNull();
+    expect(reported).toEqual([]);
+  });
 });
 
 describe("API spec import and replacement (#485)", () => {
@@ -727,6 +822,49 @@ describe("API spec import and replacement (#485)", () => {
     expectDetached(cause);
     expectRedacted(await exposure(cause), QUOTED);
     expect(reported).toEqual([]);
+  });
+
+  it("finds a quoted key's value with no space after the colon", async () => {
+    // A trailing comma: not JSON, so the document is scanned as YAML, where
+    // `"api_key":"…"` is still a key and its value.
+    const secret = "sk-compact-0123456789";
+    const compact = '{"openapi":"3.1.0","x-ferrum-plugins":[{"plugin_name":"key_auth",' +
+      `"config":{"api_key":"${secret}"}}]},`;
+    expect(yamlScalars(compact)).toContain(secret);
+    respond = () => Response.json({
+      error: "Spec parse failed",
+      details: `x-ferrum-plugins[0].config: api_key ${secret} rejected`,
+    }, { status: 400 });
+    const failure = await apiSpecs.create(scope, compact).catch((e: unknown) => e);
+
+    expectDetached(failure);
+    expectRedacted(await exposure(failure), secret);
+    expect(reported).toEqual([]);
+  });
+
+  it("joins a double-quoted scalar continued with a trailing backslash", async () => {
+    const first = "first-half-of-the-secret-";
+    const second = "second-half-of-the-secret";
+    const yaml = [
+      "x-ferrum-plugins:",
+      "  - plugin_name: acme_custom",
+      "    config:",
+      `      api_secret: "${first}\\`,
+      `        ${second}"`,
+      "",
+    ].join("\n");
+    expect(yamlScalars(yaml)).toEqual(expect.arrayContaining([first, second]));
+    respond = () => Response.json({
+      error: "Spec parse failed",
+      details: `api_secret ${first}${second} rejected`,
+    }, { status: 400 });
+    const failure = await apiSpecs.update(scope, "orders-spec", yaml).catch((e: unknown) => e);
+
+    expectDetached(failure);
+    expectRedacted(await exposure(failure), `${first}${second}`);
+    expect(await getApiErrorDetail(failure)).toBe(
+      "Spec parse failed\napi_secret [REDACTED][REDACTED] rejected",
+    );
   });
 
   it("finds YAML scalars without a parser, but not a line that is only a key", () => {

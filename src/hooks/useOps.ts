@@ -162,6 +162,9 @@ export function useRestore() {
     qc.invalidateQueries();
   };
   return useMutation({
+    // A backup carries credentials, plugin secrets, and spec documents:
+    // discard it as soon as the restore card resets or unmounts.
+    gcTime: 0,
     mutationFn: ({
       data,
       namespace,
