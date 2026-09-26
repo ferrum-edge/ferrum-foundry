@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { Consumer, PluginConfig, Proxy } from "@/api/types";
+import { pluginAppliesToProxy } from "./pluginProtocols";
 import {
   analyzeProxyPolicy,
   effectivePluginsForProxy,
   inapplicablePluginsForProxy,
+  pluginAttachmentIndex,
+  resolveConsumerAccess,
+  type EffectivePlugin,
 } from "./effectivePolicy";
 
 function proxy(overrides: Partial<Proxy> = {}): Proxy {
@@ -64,6 +68,38 @@ function consumer(
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
   };
+}
+
+/**
+ * The pre-index implementation, kept here as the equivalence oracle: it filters
+ * the whole collection for one proxy exactly as the route used to on every
+ * iteration. The indexed path must return byte-for-byte the same plugins,
+ * ordering, and sources.
+ */
+function referenceAttachedPlugins(
+  proxy: Proxy,
+  pluginConfigs: PluginConfig[],
+): EffectivePlugin[] {
+  const associated = new Set(
+    (proxy.plugins ?? []).map((association) => association.plugin_config_id),
+  );
+
+  return pluginConfigs
+    .filter((plugin) => {
+      if (!plugin.enabled) return false;
+      if (plugin.scope === "global") return true;
+      if (plugin.scope === "proxy") {
+        return plugin.proxy_id === proxy.id && associated.has(plugin.id);
+      }
+      return associated.has(plugin.id);
+    })
+    .map((plugin) => ({ ...plugin, effectiveSource: plugin.scope }))
+    .sort(
+      (left, right) =>
+        (left.priority_override ?? Number.MAX_SAFE_INTEGER) -
+          (right.priority_override ?? Number.MAX_SAFE_INTEGER) ||
+        left.id.localeCompare(right.id),
+    );
 }
 
 describe("effective authorization policy", () => {
@@ -282,5 +318,134 @@ describe("effective authorization policy", () => {
       }),
     ], [consumer("1", "alice", [], { keyauth: [{ key: "[REDACTED]" }] })]);
     expect(analysis.consumers[0]?.decision).toBe("conditional");
+  });
+
+  it("resolves each proxy identically to a whole-collection scan on a mixed fixture", () => {
+    const plugins = [
+      plugin("global-auth", "key_auth", "global", {}, { priority_override: 30 }),
+      plugin("global-logging", "stdout_logging", "global"),
+      plugin("global-cors", "cors", "global"),
+      plugin("direct-p1", "jwt_auth", "proxy", {}, { proxy_id: "p1", priority_override: 10 }),
+      plugin("direct-p2", "key_auth", "proxy", {}, { proxy_id: "p2", priority_override: 5 }),
+      plugin("group-acl", "access_control", "proxy_group", {}, { priority_override: 20 }),
+      plugin("group-rate", "rate_limiting", "proxy_group"),
+      plugin("group-unattached", "hmac_auth", "proxy_group", {}, { priority_override: 1 }),
+      plugin("disabled-global", "basic_auth", "global", {}, { enabled: false }),
+    ];
+    const fixtures: Proxy[] = [
+      proxy({
+        id: "p1",
+        plugins: [
+          { plugin_config_id: "direct-p1" },
+          { plugin_config_id: "group-acl" },
+          // Targets p2: `proxy_id` is intent, not attachment to p1.
+          { plugin_config_id: "direct-p2" },
+          { plugin_config_id: "disabled-global" },
+        ],
+      }),
+      proxy({
+        id: "p2",
+        plugins: [
+          { plugin_config_id: "direct-p2" },
+          { plugin_config_id: "group-rate" },
+          { plugin_config_id: "missing" },
+        ],
+      }),
+      proxy({
+        id: "s1",
+        backend_scheme: "tcp",
+        listen_port: 18_443,
+        listen_path: null,
+        plugins: [
+          { plugin_config_id: "direct-p1" },
+          { plugin_config_id: "group-acl" },
+          { plugin_config_id: "group-rate" },
+        ],
+      }),
+    ];
+    const expectedAttached: Record<string, string[]> = {
+      p1: ["direct-p1", "group-acl", "global-auth", "global-cors", "global-logging"],
+      p2: ["direct-p2", "global-auth", "global-cors", "global-logging", "group-rate"],
+      s1: ["group-acl", "global-auth", "global-cors", "global-logging", "group-rate"],
+    };
+    // A stream proxy runs only the stream-capable plugins it is attached to.
+    const expectedEffective: Record<string, string[]> = {
+      p1: expectedAttached.p1,
+      p2: expectedAttached.p2,
+      s1: ["group-acl", "global-logging", "group-rate"],
+    };
+    const consumers = [
+      consumer("1", "alice", [], { keyauth: [{ key: "[REDACTED]" }] }),
+      consumer("2", "bob", ["operators"], {}),
+      consumer("3", "carol", ["suspended"], { jwt: [{ secret: "[REDACTED]" }] }),
+    ];
+
+    for (const fixture of fixtures) {
+      const reference = referenceAttachedPlugins(fixture, plugins);
+      const referenceEffective = reference.filter((entry) =>
+        pluginAppliesToProxy(entry.plugin_name, fixture),
+      );
+      const referenceInapplicable = reference.filter(
+        (entry) => !pluginAppliesToProxy(entry.plugin_name, fixture),
+      );
+
+      expect(reference.map((entry) => entry.id), fixture.id).toEqual(expectedAttached[fixture.id]);
+      expect(
+        effectivePluginsForProxy(fixture, plugins).map((entry) => entry.id),
+        fixture.id,
+      ).toEqual(expectedEffective[fixture.id]);
+      expect(
+        inapplicablePluginsForProxy(fixture, plugins).map((entry) => entry.id),
+        fixture.id,
+      ).toEqual(referenceInapplicable.map((entry) => entry.id));
+
+      const analysis = analyzeProxyPolicy(fixture, plugins, consumers);
+      expect(analysis.effectivePlugins, fixture.id).toEqual(
+        effectivePluginsForProxy(fixture, plugins),
+      );
+      expect(analysis.consumers, fixture.id).toEqual(
+        consumers.map((entry) => resolveConsumerAccess(fixture, referenceEffective, entry)),
+      );
+    }
+  });
+
+  it("reuses one index build while resolving many proxies from an unchanged collection", () => {
+    let elementReads = 0;
+    const raw = Array.from({ length: 600 }, (_, index) =>
+      plugin(
+        `config-${index}`,
+        index % 2 === 0 ? "key_auth" : "rate_limiting",
+        index % 3 === 0 ? "global" : "proxy_group",
+      ),
+    );
+    // A read of any element means the collection was traversed. The index
+    // build reads every element once; nothing after it may read the
+    // collection again, no matter how many proxies are resolved.
+    const counted = new Proxy(raw, {
+      get(target, property, receiver) {
+        if (typeof property === "string" && Number.isInteger(Number(property))) {
+          elementReads += 1;
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    }) as PluginConfig[];
+
+    const index = pluginAttachmentIndex(counted);
+    expect(elementReads).toBeGreaterThan(0);
+    const readsAfterBuild = elementReads;
+    expect(pluginAttachmentIndex(counted)).toBe(index);
+
+    // Re-rendering and resolving a policy for every proxy on screen must not
+    // rescan the collection once per proxy.
+    for (let i = 0; i < 600; i += 1) {
+      const target = proxy({
+        id: `proxy-${i}`,
+        plugins: [{ plugin_config_id: `config-${i}` }],
+      });
+      expect(effectivePluginsForProxy(target, counted)).toBeDefined();
+      expect(inapplicablePluginsForProxy(target, counted)).toBeDefined();
+      expect(analyzeProxyPolicy(target, counted, [consumer("1", "alice", [], {})])).toBeDefined();
+    }
+    expect(elementReads).toBe(readsAfterBuild);
   });
 });

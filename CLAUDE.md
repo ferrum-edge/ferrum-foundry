@@ -103,8 +103,11 @@ Production uses `FERRUM_AUTH_MODE=trusted-proxy`: an OIDC/OAuth2-capable proxy
 asserts a stable actor, Ferrum role, and exact namespace grants behind a shared
 proof header. Static-token mode is development-only; the login route exchanges
 `FERRUM_BFF_AUTH_TOKEN` for a bounded server-side session in an HttpOnly,
-SameSite cookie plus CSRF protection. No reusable administrator credential is
-stored in browser storage. Auth executes in `onRequest`, before content parsing.
+SameSite cookie plus CSRF protection. `FERRUM_JWT_NAMESPACES` scopes the static
+principal — exact names, or `*` alone for every namespace; unset stays
+unrestricted with a startup warning, and a set value with no names is a startup
+error, never "unrestricted". No reusable administrator credential is stored in
+browser storage. Auth executes in `onRequest`, before content parsing.
 The authenticated actor/role/namespaces become downstream JWT `sub`, `role`,
 and `ns` claims. See `docs/authentication.md`.
 

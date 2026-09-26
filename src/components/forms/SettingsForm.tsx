@@ -35,7 +35,8 @@ interface Settings {
   jwtTtl: number;
   jwtRole: "viewer" | "operator" | "admin";
   jwtAudience: string | string[] | undefined;
-  jwtNamespaces: string[] | undefined;
+  /** Exact grants, or `["*"]` for the explicit every-namespace grant. */
+  jwtNamespaces: string[];
   tlsCaConfigured: boolean;
   tlsVerify: boolean;
   connectTimeout: number;
@@ -55,13 +56,38 @@ const SETTINGS_NUMBER_FIELDS = [
 const SETTINGS_NUMBER_KEYS = SETTINGS_NUMBER_FIELDS.map(([key]) => key);
 type SettingsDraft = WithNumberDrafts<Settings, (typeof SETTINGS_NUMBER_KEYS)[number]>;
 
-/** Each comma-separated grant must be a valid namespace name. */
+/** The BFF's only spelling of a grant for every namespace. */
+const NAMESPACE_WILDCARD = "*";
+
+/**
+ * Each comma-separated grant must be a valid namespace name, or the whole
+ * list is the lone wildcard. An empty list is never "unrestricted".
+ */
 function namespaceGrantsError(text: string): string | undefined {
-  for (const grant of parseCommaList(text)) {
+  const grants = parseCommaList(text);
+  if (grants.length === 0) {
+    return `Enter at least one namespace, or ${NAMESPACE_WILDCARD} for every namespace`;
+  }
+  if (grants.includes(NAMESPACE_WILDCARD)) {
+    return grants.every((grant) => grant === NAMESPACE_WILDCARD)
+      ? undefined
+      : `${NAMESPACE_WILDCARD} grants every namespace and cannot be combined with names`;
+  }
+  for (const grant of grants) {
     const error = validateNamespaceName(grant);
     if (error) return `${error} ("${grant}")`;
   }
   return undefined;
+}
+
+/** The BFF refused grants wider than the ones this session holds. */
+const NAMESPACE_GRANT_EXCEEDED_CODE = "FERRUM_BFF_NAMESPACE_GRANT_EXCEEDED";
+
+function isNamespaceGrantExceeded(error: unknown): boolean {
+  // ky has already parsed the error body into `data`; the response is spent.
+  const data = error instanceof Error ? (error as { data?: unknown }).data : undefined;
+  return typeof data === "object" && data !== null &&
+    (data as { code?: unknown }).code === NAMESPACE_GRANT_EXCEEDED_CODE;
 }
 
 interface StatusResult {
@@ -147,6 +173,11 @@ export function SettingsForm() {
     });
   }
 
+  /** Untouched grant text is omitted from the save, which leaves them unchanged. */
+  function namespaceGrantsTouched(): boolean {
+    return settings !== null && namespaceText !== formatCommaList(settings.jwtNamespaces);
+  }
+
   function validate(): boolean {
     if (!settings) return false;
     const errs: Record<string, string> = {};
@@ -154,7 +185,7 @@ export function SettingsForm() {
       const error = missingNumberError(settings[key], label);
       if (error) errs[key] = error;
     }
-    if (settings.authMode === "static") {
+    if (settings.authMode === "static" && namespaceGrantsTouched()) {
       const error = namespaceGrantsError(namespaceText);
       if (error) errs.jwtNamespaces = error;
     }
@@ -191,19 +222,19 @@ export function SettingsForm() {
       const {
         authMode,
         jwtRole,
-        jwtNamespaces: seededNamespaces,
+        jwtNamespaces: _seededNamespaces,
         tlsCaConfigured: _tlsCaConfigured,
         runtimeSettingsEnabled: _runtimeSettingsEnabled,
         ...updates
       } = resolveNumberDrafts(settings, SETTINGS_NUMBER_KEYS);
-      // Untouched text keeps the server's value, so an unrestricted
-      // (absent) grant list is not rewritten as `[]`.
-      const jwtNamespaces = namespaceText === formatCommaList(seededNamespaces)
-        ? seededNamespaces
-        : parseCommaList(namespaceText);
+      // Omitted grants stay unchanged on the server, so a session holding
+      // narrower grants than the defaults can still save unrelated settings.
+      const identity = namespaceGrantsTouched()
+        ? { jwtRole, jwtNamespaces: parseCommaList(namespaceText) }
+        : { jwtRole };
       const data = await api
         .put("api/settings", {
-          json: authMode === "static" ? { ...updates, jwtRole, jwtNamespaces } : updates,
+          json: authMode === "static" ? { ...updates, ...identity } : updates,
         })
         .json<Settings>();
       // A save that re-pointed the BFF retired this workspace; the gateway
@@ -211,10 +242,18 @@ export function SettingsForm() {
       if (isGatewayTargetRetired()) return;
       adoptSettings(data);
       toast("success", "Settings saved successfully");
-    } catch {
+    } catch (error) {
       // A save refused because this tab's target was replaced is not a
       // failure of the save; the gateway target gate explains it.
-      if (!isGatewayTargetRetired()) toast("error", "Failed to save settings");
+      if (isGatewayTargetRetired()) return;
+      if (isNamespaceGrantExceeded(error)) {
+        setErrors((prev) => ({
+          ...prev,
+          jwtNamespaces: "Grants cannot include namespaces this session does not hold, or *",
+        }));
+        return;
+      }
+      toast("error", "Failed to save settings");
     } finally {
       setSaving(false);
     }
@@ -345,7 +384,7 @@ export function SettingsForm() {
             value={namespaceText}
             onChange={(event) => setNamespaceText(event.target.value)}
             onBlur={checkNamespaceGrants}
-            helpText="Applies to new static logins: exact comma-separated namespace grants."
+            helpText="Applies to new static logins: exact comma-separated namespace grants, or * for every namespace."
             error={errors.jwtNamespaces}
             disabled={!settings.runtimeSettingsEnabled || settings.authMode !== "static"}
           />

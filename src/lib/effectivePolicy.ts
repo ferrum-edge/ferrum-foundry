@@ -72,28 +72,84 @@ function priority(plugin: PluginConfig): number {
 }
 
 /**
+ * Enabled plugin configurations arranged so a single proxy's attached set
+ * can be assembled without rescanning the whole collection.
+ *
+ * `globals` and `byId` together encode exactly what the previous
+ * collection-wide filter did: an enabled global plugin attaches to every
+ * proxy, while a proxy- or proxy-group-scoped plugin attaches only when the
+ * proxy's own `plugins` list names its configuration (and, for a
+ * proxy-scoped one, it targets that proxy). The index depends only on the
+ * plugin collection, so it is memoized on that collection's identity and
+ * rebuilt when the data changes.
+ */
+export interface PluginAttachmentIndex {
+  /** Enabled global configurations, in collection order. */
+  readonly globals: readonly PluginConfig[];
+  /** Enabled proxy- and proxy-group-scoped configurations, by configuration id. */
+  readonly byId: ReadonlyMap<string, PluginConfig>;
+}
+
+/** Build the attachment index for one complete plugin collection. */
+export function buildPluginAttachmentIndex(
+  pluginConfigs: PluginConfig[],
+): PluginAttachmentIndex {
+  const globals: PluginConfig[] = [];
+  const byId = new Map<string, PluginConfig>();
+
+  for (const plugin of pluginConfigs) {
+    if (!plugin.enabled) continue;
+    if (plugin.scope === "global") globals.push(plugin);
+    else byId.set(plugin.id, plugin);
+  }
+
+  return { globals, byId };
+}
+
+const attachmentIndexCache = new WeakMap<readonly PluginConfig[], PluginAttachmentIndex>();
+
+/**
+ * The attachment index for `pluginConfigs`, built once per collection.
+ *
+ * TanStack Query hands back the same array reference until the collection
+ * changes, so a render that resolves this index for every proxy on screen
+ * reuses one build instead of rescanning the collection per proxy. The
+ * collection is treated as immutable, as everywhere else query data is read.
+ */
+export function pluginAttachmentIndex(
+  pluginConfigs: PluginConfig[],
+): PluginAttachmentIndex {
+  const cached = attachmentIndexCache.get(pluginConfigs);
+  if (cached) return cached;
+
+  const built = buildPluginAttachmentIndex(pluginConfigs);
+  attachmentIndexCache.set(pluginConfigs, built);
+  return built;
+}
+
+/**
  * Every enabled plugin config attached to this proxy by global, direct, or
  * proxy-group scope, before the gateway's protocol filter is applied.
  */
 function attachedPluginsForProxy(
   proxy: Proxy,
-  pluginConfigs: PluginConfig[],
+  index: PluginAttachmentIndex,
 ): EffectivePlugin[] {
   const associated = new Set(
     (proxy.plugins ?? []).map((association) => association.plugin_config_id),
   );
+  const matched: PluginConfig[] = [...index.globals];
 
-  return pluginConfigs
-    .filter((plugin) => {
-      if (!plugin.enabled) return false;
-      if (plugin.scope === "global") return true;
-      // `proxy_id` records intent, not attachment: a proxy-scoped plugin runs
-      // only when the proxy's own `plugins` list names it, like a group one.
-      if (plugin.scope === "proxy") {
-        return plugin.proxy_id === proxy.id && associated.has(plugin.id);
-      }
-      return associated.has(plugin.id);
-    })
+  for (const id of associated) {
+    const plugin = index.byId.get(id);
+    if (!plugin) continue;
+    // `proxy_id` records intent, not attachment: a proxy-scoped plugin runs
+    // only when the proxy's own `plugins` list names it, like a group one.
+    if (plugin.scope === "proxy" && plugin.proxy_id !== proxy.id) continue;
+    matched.push(plugin);
+  }
+
+  return matched
     .map((plugin) => ({
       ...plugin,
       effectiveSource: plugin.scope,
@@ -113,8 +169,8 @@ export function effectivePluginsForProxy(
   proxy: Proxy,
   pluginConfigs: PluginConfig[],
 ): EffectivePlugin[] {
-  return attachedPluginsForProxy(proxy, pluginConfigs).filter((plugin) =>
-    pluginAppliesToProxy(plugin.plugin_name, proxy),
+  return attachedPluginsForProxy(proxy, pluginAttachmentIndex(pluginConfigs)).filter(
+    (plugin) => pluginAppliesToProxy(plugin.plugin_name, proxy),
   );
 }
 
@@ -128,7 +184,7 @@ export function inapplicablePluginsForProxy(
   proxy: Proxy,
   pluginConfigs: PluginConfig[],
 ): EffectivePlugin[] {
-  return attachedPluginsForProxy(proxy, pluginConfigs).filter(
+  return attachedPluginsForProxy(proxy, pluginAttachmentIndex(pluginConfigs)).filter(
     (plugin) => !pluginAppliesToProxy(plugin.plugin_name, proxy),
   );
 }
