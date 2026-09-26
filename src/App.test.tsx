@@ -84,11 +84,12 @@ it("loads an authenticated deep link, navigates the shell, saves settings, and s
   expect(ui.host.querySelector("h1")?.textContent).toBe("TLS Management");
   expect(ui.host.querySelectorAll("aside")).toHaveLength(1);
   await click("Toggle sidebar");
-  expect(ui.host.querySelectorAll("aside")).toHaveLength(2);
-  const meshLink = ui.host.querySelectorAll("aside")[1].querySelector<HTMLAnchorElement>('a[href="/mesh"]')!;
+  const mobileSidebar = document.querySelector<HTMLElement>('[role="dialog"]');
+  expect(mobileSidebar?.querySelectorAll("aside")).toHaveLength(1);
+  const meshLink = mobileSidebar!.querySelector<HTMLAnchorElement>('a[href="/mesh"]')!;
   await act(async () => meshLink.click());
   await settle(() => expect(ui.host.querySelector("h1")?.textContent).toBe("Mesh"));
-  expect(ui.host.querySelectorAll("aside")).toHaveLength(1);
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
   await click("Switch to light theme");
   expect(document.documentElement.dataset.theme).toBe("light");
   expect(localStorage.getItem("ferrum:theme")).toBe("light");
