@@ -1,6 +1,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mergeFormUpdatePayload } from "@/api/proxies";
 import type { Proxy, ProxyCreate } from "@/api/types";
 import { clearText, inputByLabel, inputByLabelOrNull, typeText } from "@/test/fields";
 import { ProxyForm } from "./ProxyForm";
@@ -92,6 +93,43 @@ describe("ProxyForm collapsed validation", () => {
       backend_scheme: "tcp",
       listen_port: 9100,
     });
+  });
+});
+
+describe("ProxyForm listen path round-trip (#447)", () => {
+  it.each(["http", "https"] as const)(
+    "preserves a host-only %s proxy without adding a root listen path",
+    async (backendScheme) => {
+      await renderForm({
+        ...httpProxy,
+        backend_scheme: backendScheme,
+        listen_path: null,
+        hosts: ["api.example.test"],
+      });
+      await save();
+      const payload = mergeFormUpdatePayload(
+        { ...httpProxy, backend_scheme: backendScheme, listen_path: null },
+        submitted(),
+      );
+      expect(payload.listen_path).toBeNull();
+      expect(payload.backend_path).toBeNull();
+      expect(payload.dns_override).toBeNull();
+      expect(payload.pool_idle_timeout_seconds).toBeNull();
+    },
+  );
+
+  it("keeps an absent listen path host-only when editing an existing proxy", async () => {
+    const { listen_path: _listenPath, ...hostOnlyProxy } = httpProxy;
+    await renderForm({ ...hostOnlyProxy, hosts: ["api.example.test"] });
+    await save();
+    expect(
+      mergeFormUpdatePayload(hostOnlyProxy, submitted()).listen_path,
+    ).toBeNull();
+  });
+
+  it("defaults a new proxy to the root listen path", async () => {
+    await renderForm();
+    expect(inputByLabel(host, "Listen Path").value).toBe("/");
   });
 });
 

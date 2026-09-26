@@ -266,7 +266,7 @@ export function ProxyForm({
   // while a background refetch of the same identity never rewrites fields
   // (see the refresh policy in `src/lib/editorIdentity.ts`).
   const [name, setName] = useState(initialData?.name ?? "");
-  const [listenPath, setListenPath] = useState(initialData?.listen_path ?? "/");
+  const [listenPath, setListenPath] = useState(initialData ? initialData.listen_path ?? "" : "/");
   const [hosts, setHosts] = useState<string[]>(initialData?.hosts ?? []);
   const [backendScheme, setBackendScheme] = useState<NonNullable<Proxy["backend_scheme"]>>(
     initialData?.backend_scheme ?? "https",
