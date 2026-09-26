@@ -471,12 +471,16 @@ describe('streaming gateway proxy', () => {
   it('closes the connection after an upload-timeout response without draining the remainder', async () => {
     const before = abandonedUploads.length;
     const port = (app.server.address() as AddressInfo).port;
+    // An API-spec upload, because its whole-body deadline (FERRUM_UPLOAD_TIMEOUT,
+    // 1000ms here) sits well beyond the 100ms idle bound. On an ordinary route
+    // both bounds equal FERRUM_WRITE_TIMEOUT and are armed together, so which
+    // one fires first would be a race rather than the idle path under test.
     const outcome = await new Promise<{ status: number; body: string; closed: boolean }>(
       (resolve, reject) => {
         const request = httpRequest({
           host: '127.0.0.1',
           port,
-          path: '/api/proxy/echo',
+          path: '/api/proxy/api-specs',
           method: 'POST',
           headers: {
             ...sessionHeaders,
@@ -519,7 +523,7 @@ describe('streaming gateway proxy', () => {
     expect(JSON.parse(outcome.body)).toMatchObject({ phase: 'upload', reason: 'idle' });
     expect(outcome.closed).toBe(true);
     await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(abandonedUploads.slice(before)).toContain('/echo');
+    expect(abandonedUploads.slice(before)).toContain('/api-specs');
   });
 
   it('enforces a small default streaming body limit without buffering the request', async () => {
