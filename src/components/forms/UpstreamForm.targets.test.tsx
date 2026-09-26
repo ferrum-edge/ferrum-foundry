@@ -1,6 +1,6 @@
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ServiceDiscoveryConfig, Upstream, UpstreamCreate } from "@/api/types";
+import type { HashOnCookieConfig, ServiceDiscoveryConfig, Upstream, UpstreamCreate } from "@/api/types";
 import { inputByLabel } from "@/test/fields";
 import { click, createHarness, fill, selectOption } from "@/test/__tests__/harness";
 import { UpstreamForm } from "./UpstreamForm";
@@ -207,5 +207,85 @@ describe("TargetForm inside the upstream payload editor", () => {
         ...entry.expected, default_weight: 4, max_stale_seconds: 120, stale_policy: "withdraw",
       });
     }
+  });
+
+  it("keeps an open target draft on its own target when another row is removed (#448)", async () => {
+    const hosts = ["a", "b", "c", "d"];
+    await mount({ ...initial, targets: hosts.map((host) => ({ host, port: 80, weight: 1 })) });
+    await click("Edit target b:80", ui.host);
+    await fill(inputByLabel(ui.host, "Host"), "b-draft");
+    // A row before the edited one, then a row after it.
+    await click("Remove target a:80", ui.host);
+    expect(inputByLabel(ui.host, "Host").value).toBe("b-draft");
+    await click("Remove target d:80", ui.host);
+    expect(inputByLabel(ui.host, "Host").value).toBe("b-draft");
+    expect(ui.host.textContent).toContain("c:80");
+    await click("Update Target", ui.host);
+    await save();
+    expect(submit.mock.calls[0][0].targets).toEqual([
+      { host: "b-draft", port: 80, weight: 1, path: null, locality: null, tags: {} },
+      { host: "c", port: 80, weight: 1 },
+    ]);
+  });
+
+  it("names each target row action after its target and hides the icons (#455)", async () => {
+    await mount({ ...initial, targets: [
+      { host: "backend", port: 8080, weight: 1 }, { host: "backup", port: 9090, weight: 1 },
+    ] });
+    for (const name of ["Edit target backend:8080", "Remove target backend:8080",
+      "Edit target backup:9090", "Remove target backup:9090"]) {
+      const action = ui.host.querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`);
+      expect(action, name).not.toBeNull();
+      expect(action!.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+    }
+    await click("Remove target backend:8080", ui.host);
+    expect(ui.host.textContent).not.toContain("backend:8080");
+    expect(ui.host.textContent).toContain("backup:9090");
+  });
+
+  describe("sticky-cookie SameSite through an unrelated save (#449)", () => {
+    type SameSite = Pick<HashOnCookieConfig, "same_site">;
+    const cookieUpstream = (sameSite: SameSite): Upstream => ({
+      ...initial, algorithm: "consistent_hashing", hash_on: "cookie:route",
+      hash_on_cookie_config: {
+        path: "/", ttl_seconds: 3600, http_only: true, secure: false, session_cookie: false, ...sameSite,
+      },
+    });
+
+    const stored: [string, SameSite][] = [
+      ["null", { same_site: null }],
+      ["Strict", { same_site: "Strict" }],
+      ["Lax", { same_site: "Lax" }],
+      ["None", { same_site: "None" }],
+    ];
+
+    it.each(stored)("keeps a stored %s SameSite", async (_label, sameSite) => {
+      await mount(cookieUpstream(sameSite));
+      await fill(inputByLabel(ui.host, "Name"), "Renamed");
+      await save();
+      expect(submit.mock.calls[0][0].name).toBe("Renamed");
+      expect(submit.mock.calls[0][0].hash_on_cookie_config).toHaveProperty("same_site", sameSite.same_site);
+    });
+
+    it("keeps an omitted SameSite omitted", async () => {
+      await mount(cookieUpstream({}));
+      await fill(inputByLabel(ui.host, "Name"), "Renamed");
+      await save();
+      expect(submit.mock.calls[0][0].hash_on_cookie_config).not.toHaveProperty("same_site");
+    });
+
+    it("lets the operator clear a stored SameSite", async () => {
+      await mount(cookieUpstream({ same_site: "Strict" }));
+      await section("Hash Cookie Config");
+      await selectOption("SameSite", "Not set");
+      await save();
+      expect(submit.mock.calls[0][0].hash_on_cookie_config).not.toHaveProperty("same_site");
+    });
+
+    it("defaults only a cookie config the form creates to Lax", async () => {
+      await mount({ ...initial, algorithm: "consistent_hashing", hash_on: "cookie:route" });
+      await save();
+      expect(submit.mock.calls[0][0].hash_on_cookie_config).toHaveProperty("same_site", "Lax");
+    });
   });
 });
