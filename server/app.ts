@@ -3,9 +3,9 @@ import { fileURLToPath } from 'node:url';
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import { authPlugin } from './auth.js';
-import { loadConfig } from './config.js';
+import { getConfigWarnings, loadConfig } from './config.js';
 import proxyPlugin from './proxy.js';
 import { requestIsApiRoute, servesSpaShell } from './proxy-path.js';
 import healthPlugin from './routes/health.js';
@@ -14,7 +14,7 @@ import { closeDispatchers } from './tls.js';
 
 export interface BuildAppOptions {
   serveStatic?: boolean;
-  logger?: boolean;
+  logger?: FastifyServerOptions['logger'];
 }
 
 const HASHED_ASSET_PATTERN = /-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$/;
@@ -45,6 +45,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     // socket peer, and anything a client could append further out is ignored.
     trustProxy: isProduction ? trustDirectlyConnectedProxy : false,
   });
+  for (const warning of getConfigWarnings()) fastify.log.warn(warning);
 
   await fastify.register(cookie);
   await fastify.register(cors, { origin: isProduction ? false : true });

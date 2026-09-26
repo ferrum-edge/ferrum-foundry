@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { BuildAppOptions } from './app.js';
 
 const ENV = {
   NODE_ENV: 'production',
@@ -6,17 +7,21 @@ const ENV = {
   FERRUM_JWT_SECRET: 'test-signing-secret-is-long-enough-123',
   FERRUM_AUTH_MODE: 'trusted-proxy',
   FERRUM_TRUSTED_PROXY_SECRET: 'trusted-proxy-shared-secret-is-long-enough',
+  FERRUM_JWT_NAMESPACES: undefined,
 };
 const snapshot: Record<string, string | undefined> = {};
 
-async function loadApp(overrides: Record<string, string | undefined> = {}) {
+async function loadApp(
+  overrides: Record<string, string | undefined> = {},
+  logger: BuildAppOptions['logger'] = false,
+) {
   for (const [key, value] of Object.entries({ ...ENV, ...overrides })) {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
   vi.resetModules();
   const { buildApp } = await import('./app.js');
-  const app = await buildApp({ serveStatic: false, logger: false });
+  const app = await buildApp({ serveStatic: false, logger });
   app.get('/ip', async (request) => ({ ip: request.ip }));
   return app;
 }
@@ -90,5 +95,44 @@ describe('forwarded client address', () => {
     } finally {
       await app.close();
     }
+  });
+});
+
+describe('static namespace scope at startup', () => {
+  const STATIC_MODE = {
+    NODE_ENV: 'test',
+    FERRUM_AUTH_MODE: 'static',
+    FERRUM_BFF_AUTH_TOKEN: 'development-bff-token-is-long-enough-123',
+  };
+
+  async function startupWarnings(overrides: Record<string, string | undefined>): Promise<string[]> {
+    const lines: string[] = [];
+    const stream = { write: (line: string) => void lines.push(line) };
+    const app = await loadApp({ ...STATIC_MODE, ...overrides }, { level: 'warn', stream });
+    await app.close();
+    return lines
+      .map((line) => JSON.parse(line) as { level: number; msg: string })
+      .filter((entry) => entry.level === 40)
+      .map((entry) => entry.msg);
+  }
+
+  it('starts unrestricted when FERRUM_JWT_NAMESPACES is unset and warns once', async () => {
+    const { UNSCOPED_STATIC_PRINCIPAL_WARNING } = await import('./config.js');
+    const warnings = await startupWarnings({ FERRUM_JWT_NAMESPACES: undefined });
+    expect(warnings).toEqual([UNSCOPED_STATIC_PRINCIPAL_WARNING]);
+    expect(UNSCOPED_STATIC_PRINCIPAL_WARNING).toMatch(/static principal is unrestricted/);
+  });
+
+  it.each(['*', 'tenant-a'])('does not warn for an explicit scope %j', async (value) => {
+    expect(await startupWarnings({ FERRUM_JWT_NAMESPACES: value })).toEqual([]);
+  });
+
+  it('does not warn in trusted-proxy mode, where the identity proxy supplies grants', async () => {
+    const warnings = await startupWarnings({
+      FERRUM_AUTH_MODE: 'trusted-proxy',
+      FERRUM_BFF_AUTH_TOKEN: undefined,
+      FERRUM_JWT_NAMESPACES: undefined,
+    });
+    expect(warnings).toEqual([]);
   });
 });

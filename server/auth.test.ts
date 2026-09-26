@@ -1,5 +1,6 @@
 import cookie from '@fastify/cookie';
 import Fastify, { type FastifyInstance } from 'fastify';
+import { decodeJwt } from 'jose';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 const BFF_TOKEN = 'development-bff-token-is-long-enough-123';
@@ -11,6 +12,8 @@ const ENV = {
   FERRUM_SECURE_COOKIES: 'false',
 };
 const snapshot: Record<string, string | undefined> = {};
+// Unset by default: the released static semantics are an unrestricted principal.
+const namespacesSnapshot = process.env.FERRUM_JWT_NAMESPACES;
 
 let authPlugin: typeof import('./auth.js').authPlugin;
 let requireAdminAuth: typeof import('./auth.js').requireAdminAuth;
@@ -20,6 +23,7 @@ beforeAll(async () => {
     snapshot[key] = process.env[key];
     process.env[key] = value;
   }
+  delete process.env.FERRUM_JWT_NAMESPACES;
   vi.resetModules();
   const auth = await import('./auth.js');
   authPlugin = auth.authPlugin;
@@ -32,6 +36,8 @@ afterAll(() => {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
+  if (namespacesSnapshot === undefined) delete process.env.FERRUM_JWT_NAMESPACES;
+  else process.env.FERRUM_JWT_NAMESPACES = namespacesSnapshot;
 });
 
 async function buildApp(): Promise<FastifyInstance> {
@@ -124,6 +130,21 @@ describe('static development sessions', () => {
     }
   });
 
+  it('keeps an unscoped static principal unrestricted when FERRUM_JWT_NAMESPACES is unset', async () => {
+    const config = await import('./config.js');
+    const { generateToken } = await import('./jwt.js');
+    const app = await buildApp();
+    try {
+      const { response } = await login(app);
+      const principal = response.json().principal;
+      expect(principal).not.toHaveProperty('namespaces');
+      expect(decodeJwt(await generateToken(config.loadConfig(), principal))).not.toHaveProperty('ns');
+      expect(config.getConfigWarnings()).toEqual([config.UNSCOPED_STATIC_PRINCIPAL_WARNING]);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('requires the session-bound CSRF token for mutations', async () => {
     const app = await buildApp();
     try {
@@ -198,6 +219,62 @@ describe('static development sessions', () => {
       });
       expect(response.statusCode).toBe(401);
       expect(response.json()).toEqual({ error: 'Unauthorized' });
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('scoped static principal', () => {
+  let scopedAuth: typeof import('./auth.js');
+  let scopedConfig: typeof import('./config.js');
+  let scopedJwt: typeof import('./jwt.js');
+
+  beforeAll(async () => {
+    process.env.FERRUM_JWT_NAMESPACES = ' tenant-a , tenant-b ';
+    vi.resetModules();
+    scopedAuth = await import('./auth.js');
+    scopedConfig = await import('./config.js');
+    scopedJwt = await import('./jwt.js');
+  });
+
+  afterAll(() => {
+    delete process.env.FERRUM_JWT_NAMESPACES;
+  });
+
+  async function buildScopedApp(): Promise<FastifyInstance> {
+    const app = Fastify();
+    await app.register(cookie);
+    await app.register(scopedAuth.authPlugin);
+    app.get('/api/proxy/*', { onRequest: scopedAuth.requireAdminAuth }, async () => ({ ok: true }));
+    return app;
+  }
+
+  it('carries exact grants into the session and every minted JWT', async () => {
+    const app = await buildScopedApp();
+    try {
+      const { response, cookieHeader } = await login(app);
+      const principal = response.json().principal;
+      expect(principal.namespaces).toEqual(['tenant-a', 'tenant-b']);
+
+      const token = await scopedJwt.generateToken(scopedConfig.loadConfig(), principal);
+      expect(decodeJwt(token).ns).toEqual(['tenant-a', 'tenant-b']);
+
+      const granted = await app.inject({
+        method: 'GET',
+        url: '/api/proxy/proxies',
+        headers: { cookie: cookieHeader, 'x-ferrum-namespace': 'tenant-b' },
+      });
+      expect(granted.statusCode).toBe(200);
+      for (const namespace of ['tenant-c', undefined]) {
+        const denied = await app.inject({
+          method: 'GET',
+          url: '/api/proxy/proxies',
+          headers: { cookie: cookieHeader, ...(namespace ? { 'x-ferrum-namespace': namespace } : {}) },
+        });
+        expect(denied.statusCode).toBe(403);
+        expect(denied.json()).toEqual({ error: 'Namespace access denied' });
+      }
     } finally {
       await app.close();
     }

@@ -213,6 +213,90 @@ describe('config', () => {
     });
   });
 
+  it('keeps an unset static namespace scope unrestricted and warns about it', async () => {
+    setValidEnv({ FERRUM_JWT_NAMESPACES: undefined });
+    const { loadConfig, getConfigWarnings, getPublicRuntimeConfig, UNSCOPED_STATIC_PRINCIPAL_WARNING } =
+      await loadModule();
+    expect(loadConfig()).toMatchObject({ authMode: 'static', jwtNamespaces: undefined });
+    expect(getPublicRuntimeConfig().jwtNamespaces).toEqual(['*']);
+    expect(getConfigWarnings()).toEqual([UNSCOPED_STATIC_PRINCIPAL_WARNING]);
+    expect(UNSCOPED_STATIC_PRINCIPAL_WARNING).toMatch(/FERRUM_JWT_NAMESPACES is not set/);
+  });
+
+  it('grants every namespace only through the lone wildcard', async () => {
+    for (const value of ['*', ' * ', '*,*', '*,', ', * ,']) {
+      clearTestEnv();
+      setValidEnv({ FERRUM_JWT_NAMESPACES: value });
+      const { loadConfig, getConfigWarnings, getPublicRuntimeConfig } = await loadModule();
+      expect(loadConfig().jwtNamespaces).toBeUndefined();
+      expect(getPublicRuntimeConfig().jwtNamespaces).toEqual(['*']);
+      expect(getConfigWarnings()).toEqual([]);
+    }
+  });
+
+  it('reports exact static grants without a warning', async () => {
+    setValidEnv({ FERRUM_JWT_NAMESPACES: ' tenant-a , tenant-b ' });
+    const { loadConfig, getConfigWarnings, getPublicRuntimeConfig } = await loadModule();
+    expect(loadConfig().jwtNamespaces).toEqual(['tenant-a', 'tenant-b']);
+    expect(getPublicRuntimeConfig().jwtNamespaces).toEqual(['tenant-a', 'tenant-b']);
+    expect(getConfigWarnings()).toEqual([]);
+  });
+
+  it('rejects a present namespace setting with no namespace instead of dropping the restriction', async () => {
+    for (const authMode of ['static', 'trusted-proxy']) {
+      for (const value of ['', ' ', ',', ' , ', ',,', '\t']) {
+        clearTestEnv();
+        setValidEnv({
+          FERRUM_AUTH_MODE: authMode,
+          FERRUM_TRUSTED_PROXY_SECRET: 'p'.repeat(40),
+          FERRUM_JWT_NAMESPACES: value,
+        });
+        const { loadConfig } = await loadModule();
+        expect(() => loadConfig(), JSON.stringify({ authMode, value }))
+          .toThrow(/FERRUM_JWT_NAMESPACES must list at least one namespace, or \* for every namespace/);
+      }
+    }
+  });
+
+  it('drops empty namespace entries when at least one entry remains', async () => {
+    for (const [value, expected] of [
+      ['tenant-a,', ['tenant-a']],
+      [',tenant-a', ['tenant-a']],
+      ['tenant-a,,tenant-b', ['tenant-a', 'tenant-b']],
+      [' tenant-a , , tenant-b ,', ['tenant-a', 'tenant-b']],
+    ] as const) {
+      clearTestEnv();
+      setValidEnv({ FERRUM_JWT_NAMESPACES: value });
+      const { loadConfig } = await loadModule();
+      expect(loadConfig().jwtNamespaces, value).toEqual(expected);
+    }
+  });
+
+  it('rejects malformed namespace entries and a wildcard mixed with names', async () => {
+    for (const [value, message] of [
+      ['tenant a', /FERRUM_JWT_NAMESPACES contains an invalid namespace/],
+      ['tenant-*', /FERRUM_JWT_NAMESPACES contains an invalid namespace/],
+      ['*,tenant-a', /FERRUM_JWT_NAMESPACES must not combine \* with namespace names/],
+    ] as const) {
+      clearTestEnv();
+      setValidEnv({ FERRUM_JWT_NAMESPACES: value });
+      const { loadConfig } = await loadModule();
+      expect(() => loadConfig(), value).toThrow(message);
+    }
+  });
+
+  it('leaves the trusted-proxy readiness probe unscoped when no static scope is set', async () => {
+    setValidEnv({
+      FERRUM_AUTH_MODE: 'trusted-proxy',
+      FERRUM_BFF_AUTH_TOKEN: undefined,
+      FERRUM_TRUSTED_PROXY_SECRET: 'p'.repeat(40),
+      FERRUM_JWT_NAMESPACES: undefined,
+    });
+    const { loadConfig, getConfigWarnings } = await loadModule();
+    expect(loadConfig().jwtNamespaces).toBeUndefined();
+    expect(getConfigWarnings()).toEqual([]);
+  });
+
   it('rejects invalid URL forms and schemes', async () => {
     for (const url of ['file:///etc/passwd', 'http://user:pass@example.test', 'http://example.test/admin']) {
       clearTestEnv();

@@ -30,6 +30,22 @@ const ALLOWED_UPDATE_FIELDS = new Set<keyof RuntimeConfig>([
   'writeTimeout',
 ]);
 
+// Empty entries are dropped by the grant parser, so they widen nothing; a list
+// with no entry left is refused there as malformed.
+function grantsAreWithin(requested: unknown, held: readonly string[]): boolean {
+  return Array.isArray(requested) && requested.every((entry) => (
+    typeof entry === 'string' && (entry.trim() === '' || held.includes(entry.trim()))
+  ));
+}
+
+/** Bounded, log-safe summary of a refused grant request (grants are not secrets). */
+function describeRequestedGrants(requested: unknown): unknown {
+  if (!Array.isArray(requested)) return `[${typeof requested}]`;
+  return requested.slice(0, 32).map((entry) => (
+    typeof entry === 'string' ? entry.slice(0, 254) : `[${typeof entry}]`
+  ));
+}
+
 async function readBoundedBody(response: Awaited<ReturnType<typeof fetch>>, maxBytes = 64 * 1024): Promise<string> {
   if (!response.body) return '';
   const reader = response.body.getReader();
@@ -81,6 +97,20 @@ const settingsPlugin: FastifyPluginAsync = async (fastify) => {
       return reply.status(400).send({
         error: 'Role and namespace grants are managed by the trusted identity proxy',
         code: 'FERRUM_BFF_PROXY_MANAGED_IDENTITY',
+      });
+    }
+
+    // A scoped session may narrow the static grants but never widen them: it
+    // cannot grant a namespace it does not hold, or every namespace.
+    const heldGrants = request.authPrincipal?.namespaces;
+    if (heldGrants && 'jwtNamespaces' in body && !grantsAreWithin(body.jwtNamespaces, heldGrants)) {
+      request.log.warn({
+        actor: request.authPrincipal?.subject,
+        requested: describeRequestedGrants(body.jwtNamespaces),
+      }, 'Namespace grant widening refused');
+      return reply.status(403).send({
+        error: 'Namespace grants cannot exceed the grants of this session',
+        code: 'FERRUM_BFF_NAMESPACE_GRANT_EXCEEDED',
       });
     }
 

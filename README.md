@@ -151,6 +151,12 @@ the deployment credential is never stored in browser storage or reused as a
 bearer token. Production startup fails closed unless a trusted identity proxy
 mode is configured. See [Production authentication](docs/authentication.md).
 
+`FERRUM_JWT_NAMESPACES` sets the static principal's namespace grants: a
+comma-separated list of exact namespace names, or `*` alone for every
+namespace. Left unset, the static principal is unrestricted and the BFF logs a
+startup warning. A value with no namespace names (empty, whitespace, or commas
+only) is refused at startup rather than treated as unrestricted.
+
 The most commonly adjusted optional variables:
 
 | Variable | Default | Description |

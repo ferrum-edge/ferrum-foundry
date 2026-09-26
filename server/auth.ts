@@ -122,8 +122,15 @@ function parseRole(value: string | undefined): GatewayRole | undefined {
   return value === 'viewer' || value === 'operator' || value === 'admin' ? value : undefined;
 }
 
-function parseTrustedNamespaces(value: string | undefined): string[] | undefined | null {
+/**
+ * `undefined` only when the header is absent. A present header must name at
+ * least one namespace: an empty or whitespace-only value is `null` (refused),
+ * never the absent header's unrestricted admin grant. Empty entries between
+ * names are dropped, as they are for `FERRUM_JWT_NAMESPACES`.
+ */
+function parseTrustedNamespaces(value: string | string[] | undefined): string[] | undefined | null {
   if (value === undefined) return undefined;
+  if (Array.isArray(value)) return null;
   const namespaces = [...new Set(value.split(',').map((entry) => entry.trim()).filter(Boolean))];
   if (namespaces.length === 0 || namespaces.some((namespace) => !NAMESPACE_PATTERN.test(namespace))) {
     return null;
@@ -157,7 +164,8 @@ function trustedProxyPrincipal(request: FastifyRequest, config: Config): AuthPri
 
   const subject = singleHeader(request, config.trustedProxyUserHeader);
   const role = parseRole(singleHeader(request, config.trustedProxyRoleHeader));
-  const namespaces = parseTrustedNamespaces(singleHeader(request, config.trustedProxyNamespacesHeader));
+  // Read raw: trimming first would turn a present-but-empty grant into an absent one.
+  const namespaces = parseTrustedNamespaces(request.headers[config.trustedProxyNamespacesHeader]);
   if (!subject || subject.length > 254 || containsControlCharacter(subject) || !role || namespaces === null) {
     return undefined;
   }
