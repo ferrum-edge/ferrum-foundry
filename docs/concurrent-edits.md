@@ -387,7 +387,8 @@ The same redaction (`src/api/secretRedaction.ts`) covers every write whose
 body carries a secret: consumer create, plugin configuration create and update
 (so a membership plan's rollback too), upstream create and update, TLS managed
 record and ACME certificate writes, ACME order creation and renewal, TLS
-validation, and batch create (#478). `secretValues()` finds the secrets by
+validation, and batch create (#478), backup restore, and API spec import and
+replacement (#485). `secretValues()` finds the secrets by
 position rather than by resource: every string under a credential-shaped field
 name at any depth (the conflict dialog's `isRedactedField` list, plus
 `headers` maps, webhooks, service-account documents, and camelCase `*Key`
@@ -412,9 +413,57 @@ the paired release — has no schema to classify by, so every string in its
 `config` is treated as secret. Edge's operator-configured
 `FERRUM_LOG_REDACT_METADATA_KEYS` extras are not visible to Foundry.
 
+The table lives in `src/api/pluginSensitivity.ts` with the Edge commit it was
+checked against (`PLUGIN_SENSITIVITY_SOURCE`). The Pinned Gateway Contract job
+runs `scripts/plugin-sensitivity-drift.mjs`, which fetches
+`plugin_config_projection.rs` at `edge.source_commit`, parses
+`PLUGIN_SENSITIVITY_SCHEMAS` and `KAFKA_SAFE_PRODUCER_PROPERTIES`, and fails on
+any plugin or rule that differs, and on any rule shape or sensitivity kind it
+cannot read. Its unit test fails when the recorded commit is not the pinned
+one, so moving the Edge pin cannot leave the table unchecked (#487).
+
+A backup restore carries every resource of a namespace. `restoreSecrets()` is
+`secretValues()` over the backup plus each API spec document it holds, which
+travels gzip-compressed and base64-encoded and is taken whole. An API spec
+document for import or replacement is text: `specDocumentSecrets()` classifies a
+JSON document by position — each `x-ferrum-plugins` entry by its plugin's rules,
+anything else by field name and URL — with an entry that is not a plugin
+configuration unclassified throughout. Foundry has no YAML parser, so a YAML (or
+malformed JSON) document is unclassified throughout: every scalar it could hold,
+found line by line without parsing (each `key: value` value, sequence entry,
+flow element, and quoted scalar unquoted and unescaped). Several pairs on one
+line (`"a": "x", "b": "y",`, or a flow mapping continued onto a line that starts
+with a key) are each found. A quoted key needs no space before its value
+(`"api_key":"…"`), as in a JSON-like document that is not valid JSON, and a
+double-quoted scalar continued with a trailing `\` is recorded without it, both
+line by line and joined as the scalar joins it, so short pieces cannot leak as
+one longer value. A folded echo of a multi-line scalar is therefore redacted
+piece by piece. Both surfaces report every failure themselves (`SILENT_ERRORS`),
+and a spec write's unknown outcome keeps only the redacted error as its `cause`.
+
+A value that is secret only because nothing classifies it — every string of an
+unknown plugin's config, every scalar of a YAML spec document — is redacted
+wherever it occurs when it is 8 characters or longer. A shorter one (`a`, `1`,
+`on`, `error`) also occurs in ordinary words, in the keys of the gateway's
+error body, and in the `[REDACTED]` marker itself, so it is redacted only
+where it stands as a whole token of a string value, and never in an object
+key: the body's `error` and `code` stay readable and the restore card's
+recovery details stay recognizable. A value that is classified is redacted
+wherever it occurs in a string value whatever its length. No value shorter
+than 8 characters, classified or not, is matched in the body's structure:
+its object keys, and the fixed vocabulary callers recognize a failure by —
+the body's top-level `code`, `phase`, `rollback`, `failure_class`, and
+`confirmation_required`; a nested field of the same name is redacted in full. A
+restore whose backup holds a credential such as `api`, `ro`, or `true` still
+gets a recognizable `api_specs_at_risk` confirmation, rollback outcome, and
+upload-phase timeout (#485). Every match is found in the original text and
+replaced in one pass, overlapping matches as one marker, so no replacement
+can split a marker another one wrote (#487).
+
 `withRedactedFailure()` replaces any failure of such a write with a
-`RedactedWriteError`: the redacted message, a bodiless copy of the response
-(status and headers), and the redacted parsed body as `data`, with no
+`RedactedWriteError`: the redacted message, the original error's `name`
+(`HTTPError`, `TimeoutError`, `UnboundNamespaceError`), a bodiless copy of the
+response (status and headers), and the redacted parsed body as `data`, with no
 `request`, `options`, or `cause`. `getApiErrorDetail()`,
 `isPreconditionFailed()`, and the outcome classifiers read it as they read a ky
 `HTTPError`, and the committed-write and unobserved-write markers are carried
@@ -430,9 +479,10 @@ answer was lost still opens the "Outcome unknown" dialog, BFF code included
 write, a guarded save's handled `412`) is not held. Writes whose form renders
 every refusal itself (consumer credential writes, managed TLS create, ACME
 order creation and renewal, TLS validation) keep `SILENT_ERRORS` instead. A plugin membership plan includes the
-gateway's redacted reason in its own message. Every such mutation hook sets
-`gcTime: 0`, so the submitted body does not linger in the mutation cache's
-variables after the form is gone. Consumer metadata saves are not
+gateway's redacted reason in its own message. Every such mutation hook —
+restore and API spec import and replacement included — sets `gcTime: 0`, so
+the submitted body does not linger in the mutation cache's variables after
+the form is gone. Consumer metadata saves are not
 covered because their body carries no submitted secret: credentials in it come
 from the read the save is sent against, where they are `[REDACTED]`.
 

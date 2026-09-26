@@ -20,10 +20,12 @@ import {
   getCommittedWrite,
   isUnobservedWrite,
   setApiErrorHandler,
+  UnboundNamespaceError,
 } from "./client";
 import { isPreconditionFailed } from "./conditionalWrite";
 import { resetGatewayMetadata, setApplyStatusFetcher } from "./gatewayMetadata";
-import { MutationOutcomeUnknownError } from "./mutationOutcome";
+import { classifyUnobservedOutcome, MutationOutcomeUnknownError } from "./mutationOutcome";
+import * as apiSpecs from "./apiSpecs";
 import * as consumers from "./consumers";
 import * as ops from "./ops";
 import * as plugins from "./plugins";
@@ -33,7 +35,10 @@ import {
   pluginConfigSecrets,
   redactionForms,
   RedactedWriteError,
+  redactWriteFailure,
   secretValues,
+  type Secrets,
+  yamlScalars,
 } from "./secretRedaction";
 
 class BasedRequest extends Request {
@@ -157,9 +162,15 @@ function pluginWith(secret: string): PluginConfigCreate {
   };
 }
 
+/** A classification with nothing left unclassified, as a sorted list. */
+function classifiedValues(secrets: Secrets): string[] {
+  expect(secrets.tokens).toEqual([]);
+  return [...secrets.values].sort();
+}
+
 describe("secretValues", () => {
   it("takes every string under a credential-shaped field, at any depth, and nothing else", () => {
-    expect(secretValues({
+    expect(classifiedValues(secretValues({
       username: "alice",
       acl_groups: ["admins"],
       credentials: { keyauth: [{ key: "k-1" }], hmac_auth: [{ secret: "h-1" }] },
@@ -171,31 +182,33 @@ describe("secretValues", () => {
         accessKey: "ak-1",
         webhook_url: "https://hooks.internal/T0/B0",
       },
-    }).sort()).toEqual(["ak-1", "cs-1", "cs-2", "h-1", "hc-1", "https://hooks.internal/T0/B0",
+    }))).toEqual(["ak-1", "cs-1", "cs-2", "h-1", "hc-1", "https://hooks.internal/T0/B0",
       "k-1"].sort());
   });
 
   it("takes the credential-bearing parts of a URL anywhere, but not a bare origin", () => {
-    expect(secretValues({ endpoint: "https://collector.internal:4318" })).toEqual([]);
-    expect(secretValues({ endpoint: "https://collector.internal/" })).toEqual([]);
-    expect(secretValues({ redis_url: "redis://user:pa55@cache.internal:6379/0" }))
-      .toEqual(["redis://user:pa55@cache.internal:6379/0", "user:pa55", "/0"]);
-    expect(secretValues({ endpoint: "https://logs.internal/v1/push/t0ken?code=c0de" }))
-      .toEqual(["https://logs.internal/v1/push/t0ken?code=c0de", "/v1/push/t0ken?code=c0de"]);
+    expect(classifiedValues(secretValues({ endpoint: "https://collector.internal:4318" })))
+      .toEqual([]);
+    expect(classifiedValues(secretValues({ endpoint: "https://collector.internal/" }))).toEqual([]);
+    expect(classifiedValues(secretValues({ redis_url: "redis://user:pa55@cache.internal:6379/0" })))
+      .toEqual(["redis://user:pa55@cache.internal:6379/0", "user:pa55", "/0"].sort());
+    expect(classifiedValues(secretValues({ endpoint: "https://logs.internal/v1/push/t0ken?code=c0de" })))
+      .toEqual(["https://logs.internal/v1/push/t0ken?code=c0de", "/v1/push/t0ken?code=c0de"].sort());
   });
 
   it("does not treat a path to key material as the material", () => {
-    expect(secretValues({ backend_tls_client_key_path: "/etc/ferrum/client.key" })).toEqual([]);
+    expect(classifiedValues(secretValues({ backend_tls_client_key_path: "/etc/ferrum/client.key" })))
+      .toEqual([]);
   });
 
   it("redacts each substantial line of a multi-line value, but not the PEM armor", () => {
-    const forms = redactionForms([PEM]);
+    const forms = redactionForms([PEM]).substrings;
     expect(forms).toContain(PEM.split("\n")[1]);
     expect(forms).toContain(PEM.split("\n")[2]);
     expect(forms).not.toContain("");
     expect(forms).not.toContain("-----BEGIN PRIVATE KEY-----");
     expect(forms).not.toContain("-----END PRIVATE KEY-----");
-    expect(redactionForms([CERT])).not.toContain("-----BEGIN CERTIFICATE-----");
+    expect(redactionForms([CERT]).substrings).not.toContain("-----BEGIN CERTIFICATE-----");
   });
 });
 
@@ -215,7 +228,7 @@ describe("plugin configurations follow Ferrum Edge's projection", () => {
     ["serverless_function", { azure_function_key: "fk-1", provider: "azure" }, ["fk-1"]],
     ["loki_logging", { authorization_header: "Basic b64-1", batch_size: "100" }, ["Basic b64-1"]],
   ])("%s: takes the paths Edge redacts and nothing else", (plugin, config, expected) => {
-    expect(pluginConfigSecrets(plugin, config).sort()).toEqual([...expected].sort());
+    expect(classifiedValues(pluginConfigSecrets(plugin, config))).toEqual([...expected].sort());
   });
 
   it("takes every kafka producer property off Edge's safe list, a PEM key included", () => {
@@ -232,37 +245,51 @@ describe("plugin configurations follow Ferrum Edge's projection", () => {
         },
       },
     });
-    expect(secrets.sort()).toEqual([PEM, "principal=edge secret=s-1"].sort());
-    const forms = redactionForms(secrets);
+    expect(classifiedValues(secrets)).toEqual([PEM, "principal=edge secret=s-1"].sort());
+    const forms = redactionForms(secrets).substrings;
     expect(forms).toContain(PEM.split("\n")[1]);
     expect(forms).not.toContain("all");
     expect(forms).not.toContain("-----BEGIN PRIVATE KEY-----");
   });
 
   it("fails closed where Edge does: a scalar where a map is expected, a non-URL endpoint", () => {
-    expect(pluginConfigSecrets("kafka_logging", { producer_config: "ssl.key.pem=pk-1" }))
+    expect(classifiedValues(pluginConfigSecrets("kafka_logging", { producer_config: "ssl.key.pem=pk-1" })))
       .toEqual(["ssl.key.pem=pk-1"]);
-    expect(pluginConfigSecrets("opa", { headers: "Bearer opa-1" })).toEqual(["Bearer opa-1"]);
-    expect(pluginConfigSecrets("http_logging", { endpoint_url: "collector.internal/t0ken" }))
+    expect(classifiedValues(pluginConfigSecrets("opa", { headers: "Bearer opa-1" })))
+      .toEqual(["Bearer opa-1"]);
+    expect(classifiedValues(pluginConfigSecrets("http_logging", { endpoint_url: "collector.internal/t0ken" })))
       .toEqual(["collector.internal/t0ken"]);
-    expect(pluginConfigSecrets("http_logging", { endpoint_url: "https://collector.internal" }))
+    expect(classifiedValues(pluginConfigSecrets("http_logging", { endpoint_url: "https://collector.internal" })))
       .toEqual([]);
   });
 
   it("matches Edge's normalized key spellings and its name floor", () => {
-    expect(pluginConfigSecrets("http_logging", { customHeaders: { "X-Tenant": "t-1" } }))
+    expect(classifiedValues(pluginConfigSecrets("http_logging", { customHeaders: { "X-Tenant": "t-1" } })))
       .toEqual(["t-1"]);
-    expect(pluginConfigSecrets("http_logging", { nested: { "private.key": "pk-2", APIKey: "ak-2" } })
-      .sort()).toEqual(["ak-2", "pk-2"]);
+    expect(classifiedValues(pluginConfigSecrets("http_logging", {
+      nested: { "private.key": "pk-2", APIKey: "ak-2" },
+    }))).toEqual(["ak-2", "pk-2"]);
   });
 
-  it("treats every string of a plugin with no known schema as secret", () => {
-    expect(pluginConfigSecrets("acme_custom_auth", {
+  it("treats every string of a plugin with no known schema as secret, short ones as whole tokens", () => {
+    const secrets = pluginConfigSecrets("acme_custom_auth", {
       mode: "strict",
-      upstream: { realm: "r-1" },
-      tags: ["t-2"],
-    }).sort()).toEqual(["r-1", "strict", "t-2"]);
-    expect(pluginConfigSecrets("rate_limiting", ["not", "an object"])).toEqual(["not", "an object"]);
+      upstream: { realm: "r-1", callback: "https://idp.internal/cb?state=s-1" },
+      tags: ["t-2", "a longer unclassified value"],
+      client_secret: "c",
+    });
+    // Edge's name floor and URL sweep still classify what they recognize.
+    expect(new Set(secrets.values)).toEqual(new Set([
+      "a longer unclassified value",
+      "c",
+      "https://idp.internal/cb?state=s-1",
+      "/cb?state=s-1",
+    ]));
+    expect([...secrets.tokens].sort()).toEqual(["c", "r-1", "strict", "t-2"]);
+    // A short value that is also classified is matched wherever it occurs.
+    expect(redactionForms(secrets).tokens).not.toContain("c");
+    expect(classifiedValues(pluginConfigSecrets("rate_limiting", ["not", "an object"])))
+      .toEqual(["an object", "not"]);
   });
 });
 
@@ -332,6 +359,39 @@ describe("consumer create (#478)", () => {
     expect(new URL(reported[0].url).pathname).toBe("/api/proxy/consumers");
     for (const fragment of fragments(LONG)) expect(JSON.stringify(reported[0])).not.toContain(fragment);
     expect(sent).toHaveLength(1);
+  });
+});
+
+describe("the original error's name", () => {
+  it("is kept on a refusal, with nothing else of the ky error", async () => {
+    echo(LONG);
+    const failure = await consumers.create(scope, consumerWith(LONG)).catch((e: unknown) => e);
+
+    expectDetached(failure);
+    expect((failure as Error).name).toBe("HTTPError");
+    expect((failure as RedactedWriteError).response?.status).toBe(400);
+    expectRedacted(await exposure(failure), LONG);
+  });
+
+  it("classifies a client timeout and an unbound namespace as the original would be", async () => {
+    const timeout = Object.assign(
+      new Error(`Request timed out: POST /api/proxy/consumers ${LONG}`),
+      { name: "TimeoutError" },
+    );
+    const timedOut = await redactWriteFailure(timeout, [LONG]);
+    expectDetached(timedOut);
+    expect(timedOut.name).toBe("TimeoutError");
+    expectRedacted(timedOut.message, LONG);
+    expect(classifyUnobservedOutcome(timedOut)).toEqual({ reason: "client_timeout", detail: null });
+
+    // Raised before a byte is sent: not an unknown outcome.
+    const unbound = await redactWriteFailure(
+      new UnboundNamespaceError("/api/proxy/consumers"),
+      [LONG],
+    );
+    expectDetached(unbound);
+    expect(unbound.name).toBe("UnboundNamespaceError");
+    expect(classifyUnobservedOutcome(unbound)).toBeNull();
   });
 });
 
@@ -502,5 +562,419 @@ describe("batch create (#478)", () => {
     expectDetached(failure);
     expectRedacted(await exposure(failure), QUOTED);
     expectRedactedReport(QUOTED, 400, "/api/proxy/batch");
+  });
+});
+
+describe("short unclassified values (#487)", () => {
+  it("are redacted only as whole tokens, never in a key, and never split a marker", async () => {
+    respond = () => Response.json({
+      error: "error: mode error rejected; toggle on is not a configuration option",
+      code: "FERRUM_PLUGIN_INVALID",
+      details: "level a, retries 1",
+    }, { status: 400 });
+    // A plugin with no known schema: every string of its config is secret.
+    const failure = await plugins.createConfig(scope, {
+      plugin_name: "acme_custom",
+      scope: "global",
+      config: { mode: "error", level: "a", retries: "1", toggle: "on", marker: "E" },
+    }).catch((e: unknown) => e);
+
+    expectDetached(failure);
+    const data = (failure as RedactedWriteError).data as Record<string, string>;
+    expect(data).toEqual({
+      error: "[REDACTED]: mode [REDACTED] rejected; toggle [REDACTED] is not [REDACTED] configuration option",
+      code: "FERRUM_PLUGIN_INVALID",
+      details: "level [REDACTED], retries [REDACTED]",
+    });
+    expect(await getApiErrorDetail(failure))
+      .toBe(`${data.error}\nFERRUM_PLUGIN_INVALID: level [REDACTED], retries [REDACTED]`);
+    expect(reported).toHaveLength(1);
+    expect(JSON.parse(reported[0].body)).toEqual(data);
+  });
+
+  it("are still redacted wherever they occur when a long unclassified value is echoed", async () => {
+    echo(LONG);
+    const failure = await plugins.createConfig(scope, {
+      plugin_name: "acme_custom",
+      scope: "global",
+      config: { blob: LONG },
+    }).catch((e: unknown) => e);
+
+    expectDetached(failure);
+    expectRedacted(await exposure(failure), LONG);
+    expectRedactedReport(LONG, 400, "/api/proxy/plugins/config");
+  });
+});
+
+describe("backup restore (#485)", () => {
+  const BLOB = "H4sIAAAAAAAA/6tWSs7PS8tMVbJSMDI2MTZRqgUAKmHVExgAAAA=synthetic-spec-document";
+  const backup = (key: string) => ({
+    version: "1",
+    consumers: [{ id: "alice", username: "alice", credentials: { keyauth: [{ key }] } }],
+    plugin_configs: [
+      { id: "p1", plugin_name: "acme_custom", scope: "global", config: { mode: "error" } },
+    ],
+    api_specs: {
+      section_version: "2",
+      items: [{ id: "spec-1", proxy_id: "orders", spec_content_base64: BLOB }],
+    },
+  });
+
+  it("keeps no fragment of a credential or a spec document, and the recovery details readable", async () => {
+    respond = () => Response.json({
+      error: `restore import failed for key ${LONG}`,
+      rollback: "completed",
+      restore_errors: [
+        `consumer alice: duplicate key ${LONG}`,
+        `api_spec 'spec-1': bad content ${BLOB}`,
+        "plugin p1: mode error",
+      ],
+    }, { status: 500 });
+    const failure = await ops.restore(scope, backup(LONG)).catch((e: unknown) => e);
+
+    expectDetached(failure);
+    const text = await exposure(failure);
+    expectRedacted(text, LONG);
+    expect(text).not.toContain(BLOB);
+    expect(ops.getRestoreFailure(failure)).toEqual({
+      error: "restore import failed for key [REDACTED]",
+      rollback: "completed",
+      restore_errors: [
+        "consumer alice: duplicate key [REDACTED]",
+        "api_spec 'spec-1': bad content [REDACTED]",
+        "plugin p1: mode [REDACTED]",
+      ],
+    });
+    // The card reports every restore failure itself.
+    expect(reported).toEqual([]);
+    expect(sent).toHaveLength(1);
+    expect(JSON.parse(sent[0].body).consumers[0].credentials.keyauth[0].key).toBe(LONG);
+  });
+
+  it("still recognizes the API spec deletion confirmation and an unobserved outcome", async () => {
+    respond = () => Response.json({
+      error: "restore would delete API specs",
+      api_specs_at_risk: 2,
+      confirmation_required: "confirm_api_spec_deletion=true",
+    }, { status: 409 });
+    const conflict = await ops.restore(scope, backup(LONG)).catch((e: unknown) => e);
+    expectDetached(conflict);
+    expect(ops.getRestoreApiSpecConfirmation(conflict)).toEqual({
+      error: "restore would delete API specs",
+      api_specs_at_risk: 2,
+      confirmation_required: "confirm_api_spec_deletion=true",
+    });
+
+    respond = () => { throw new TypeError("Failed to fetch"); };
+    const lost = await ops.restore(scope, backup(LONG)).catch((e: unknown) => e);
+    expectDetached(lost);
+    expect(classifyUnobservedOutcome(lost)?.reason).toBe("transport");
+    expect(reported).toEqual([]);
+  });
+
+  it("keeps the body's keys and fixed vocabulary when a credential is a short word", async () => {
+    // Each credential is classified, and each occurs in a key (`api_specs_at_risk`,
+    // `error`, `rollback`) or a value callers decide on
+    // (`confirm_api_spec_deletion=true`, `upload`). Free text is still redacted.
+    const shortWords = {
+      version: "1",
+      consumers: [{
+        id: "alice",
+        username: "alice",
+        credentials: {
+          basicauth: [{ username: "api", password: "true" }],
+          keyauth: [{ key: "ro" }, { key: "load" }],
+        },
+      }],
+    };
+
+    respond = () => Response.json({
+      error: "restore would delete api specs for ro users",
+      api_specs_at_risk: 2,
+      confirmation_required: "confirm_api_spec_deletion=true",
+    }, { status: 409 });
+    const conflict = await ops.restore(scope, shortWords).catch((e: unknown) => e);
+    expectDetached(conflict);
+    expect(ops.getRestoreApiSpecConfirmation(conflict)).toEqual({
+      error: "restore would delete [REDACTED] specs for [REDACTED] users",
+      api_specs_at_risk: 2,
+      confirmation_required: "confirm_api_spec_deletion=true",
+    });
+
+    respond = () => Response.json({
+      error: "restore import failed",
+      rollback: "completed",
+      failure_class: "data_integrity",
+      restore_errors: ["consumer alice: duplicate basic auth username api"],
+    }, { status: 500 });
+    const failed = await ops.restore(scope, shortWords).catch((e: unknown) => e);
+    expectDetached(failed);
+    expect(ops.getRestoreFailure(failed)).toEqual({
+      error: "restore import failed",
+      rollback: "completed",
+      failure_class: "data_integrity",
+      restore_errors: ["consumer alice: duplicate basic auth username [REDACTED]"],
+    });
+
+    respond = () => Response.json(
+      { error: "upload timed out", code: "FERRUM_BFF_TIMEOUT", phase: "upload" },
+      { status: 504 },
+    );
+    const timedOut = await ops.restore(scope, shortWords).catch((e: unknown) => e);
+    expectDetached(timedOut);
+    expect((timedOut as RedactedWriteError).data).toEqual({
+      error: "up[REDACTED] timed out",
+      code: "FERRUM_BFF_TIMEOUT",
+      phase: "upload",
+    });
+    // The upload phase still proves the body never reached the gateway.
+    expect(classifyUnobservedOutcome(timedOut)).toBeNull();
+    expect(reported).toEqual([]);
+  });
+
+  it("keeps the fixed vocabulary only in the body's top-level fields", async () => {
+    // No caller reads a nested `code`, `phase`, or `rollback`: each is free
+    // text, redacted like any other string.
+    const shortWords = {
+      version: "1",
+      consumers: [{
+        id: "alice",
+        username: "alice",
+        credentials: {
+          basicauth: [{ username: "api", password: "s3" }],
+          keyauth: [{ key: "load" }],
+        },
+      }],
+    };
+    respond = () => Response.json({
+      error: "restore import failed",
+      rollback: "completed",
+      phase: "upload",
+      details: { code: "api_error", phase: "upload", rollback: "reload s3" },
+    }, { status: 500 });
+    const failure = await ops.restore(scope, shortWords).catch((e: unknown) => e);
+
+    expectDetached(failure);
+    expect((failure as RedactedWriteError).data).toEqual({
+      error: "restore import failed",
+      rollback: "completed",
+      phase: "upload",
+      details: {
+        code: "[REDACTED]_error",
+        phase: "up[REDACTED]",
+        rollback: "re[REDACTED] [REDACTED]",
+      },
+    });
+    expect(reported).toEqual([]);
+  });
+});
+
+describe("API spec import and replacement (#485)", () => {
+  const collector = `https://ops:${LONG}@collector.internal/v1/push`;
+  const json = JSON.stringify({
+    openapi: "3.1.0",
+    info: { title: "Orders", version: "1" },
+    "x-ferrum-proxy": { name: "orders", listen_path: "/orders" },
+    "x-ferrum-plugins": [
+      {
+        plugin_name: "http_logging",
+        config: { endpoint_url: collector, custom_headers: { "X-Tenant": QUOTED } },
+      },
+      { plugin_name: "acme_custom", config: { mode: "error", seed: PADDED } },
+      "not a plugin configuration 0123456789",
+    ],
+  });
+
+  it("classifies a JSON document by position: secrets redacted, the rest readable", async () => {
+    respond = () => Response.json({
+      error: "Validation failed",
+      failures: [
+        { resource_type: "plugin_config", id: "p1", errors: [`header X-Tenant ${QUOTED}`, `endpoint ${collector}`] },
+        {
+          resource_type: "plugin_config",
+          id: "p2",
+          errors: [`seed ${PADDED.trim()}`, "mode error", "entry not a plugin configuration 0123456789"],
+        },
+        { resource_type: "proxy", id: "orders", errors: ["Proxy name 'orders' already exists"] },
+      ],
+    }, { status: 400 });
+    const failure = await apiSpecs.create(scope, json).catch((e: unknown) => e);
+
+    expectDetached(failure);
+    const text = await exposure(failure);
+    for (const secret of [QUOTED, collector, PADDED]) expectRedacted(text, secret);
+    expect(await getApiErrorDetail(failure)).toBe([
+      "Validation failed",
+      "plugin_config (p1): header X-Tenant [REDACTED]",
+      "plugin_config (p1): endpoint [REDACTED]",
+      "plugin_config (p2): seed [REDACTED]",
+      "plugin_config (p2): mode [REDACTED]",
+      "plugin_config (p2): entry [REDACTED]",
+      "proxy (orders): Proxy name 'orders' already exists",
+    ].join("\n"));
+    expect(reported).toEqual([]);
+    expect(sent[0].body).toBe(json);
+  });
+
+  it("treats every scalar of a YAML document as secret and keeps the gateway's keys", async () => {
+    const yaml = [
+      "openapi: 3.1.0",
+      "x-ferrum-plugins:",
+      "  - plugin_name: acme_custom",
+      "    config:",
+      "      mode: error",
+      '      api_secret: "sk-live-\\u0041BC\\"xyz"',
+      "      region: 'eu west'",
+      "      note: >-",
+      "        folded secret part one",
+      "        folded secret part two",
+      '      flags: [on, "tight, spaced"]',
+      "",
+    ].join("\n");
+    respond = () => Response.json({
+      error: "Spec parse failed",
+      code: "invalid_plugin",
+      details: "x-ferrum-plugins[0]: api_secret sk-live-ABC\"xyz rejected; note folded secret part " +
+        "one folded secret part two; flag tight, spaced; region eu west; mode error",
+    }, { status: 400 });
+    const failure = await apiSpecs.update(scope, "orders-spec", yaml).catch((e: unknown) => e);
+
+    expectDetached(failure);
+    expect(Object.keys((failure as RedactedWriteError).data as object))
+      .toEqual(["error", "code", "details"]);
+    expect(await getApiErrorDetail(failure)).toBe(
+      "invalid_plugin: x-ferrum-plugins[0]: api_secret [REDACTED] rejected; note [REDACTED] " +
+        "[REDACTED]; flag [REDACTED]; region [REDACTED]; mode [REDACTED]",
+    );
+    expect(reported).toEqual([]);
+  });
+
+  it("keeps the document out of an unknown outcome's cause", async () => {
+    respond = () => Response.json({ error: `upstream said ${QUOTED}` }, { status: 503 });
+    const failure = await apiSpecs.create(scope, json).catch((e: unknown) => e);
+
+    expect(failure).toBeInstanceOf(MutationOutcomeUnknownError);
+    const cause = (failure as Error).cause;
+    expectDetached(cause);
+    expectRedacted(await exposure(cause), QUOTED);
+    expect(reported).toEqual([]);
+  });
+
+  it("finds a quoted key's value with no space after the colon", async () => {
+    // A trailing comma: not JSON, so the document is scanned as YAML, where
+    // `"api_key":"…"` is still a key and its value.
+    const secret = "sk-compact-0123456789";
+    const compact = '{"openapi":"3.1.0","x-ferrum-plugins":[{"plugin_name":"key_auth",' +
+      `"config":{"api_key":"${secret}"}}]},`;
+    expect(yamlScalars(compact)).toContain(secret);
+    respond = () => Response.json({
+      error: "Spec parse failed",
+      details: `x-ferrum-plugins[0].config: api_key ${secret} rejected`,
+    }, { status: 400 });
+    const failure = await apiSpecs.create(scope, compact).catch((e: unknown) => e);
+
+    expectDetached(failure);
+    expectRedacted(await exposure(failure), secret);
+    expect(reported).toEqual([]);
+  });
+
+  it("joins a double-quoted scalar continued with a trailing backslash", async () => {
+    const first = "first-half-of-the-secret-";
+    const second = "second-half-of-the-secret";
+    const yaml = [
+      "x-ferrum-plugins:",
+      "  - plugin_name: acme_custom",
+      "    config:",
+      `      api_secret: "${first}\\`,
+      `        ${second}"`,
+      "",
+    ].join("\n");
+    expect(yamlScalars(yaml)).toEqual(expect.arrayContaining([first, second, first + second]));
+    respond = () => Response.json({
+      error: "Spec parse failed",
+      details: `api_secret ${first}${second} rejected`,
+    }, { status: 400 });
+    const failure = await apiSpecs.update(scope, "orders-spec", yaml).catch((e: unknown) => e);
+
+    expectDetached(failure);
+    expectRedacted(await exposure(failure), `${first}${second}`);
+    expect(await getApiErrorDetail(failure))
+      .toBe("Spec parse failed\napi_secret [REDACTED] rejected");
+  });
+
+  it("joins a continued double-quoted scalar whose pieces are too short to match", async () => {
+    // Neither `abc` nor `defghij` is a whole token of the joined echo.
+    const yaml = [
+      "x-ferrum-plugins:",
+      "  - plugin_name: acme_custom",
+      "    config:",
+      '      api_secret: "abc\\',
+      '        defghij"',
+      "",
+    ].join("\n");
+    expect(yamlScalars(yaml)).toContain("abcdefghij");
+    respond = () => Response.json({
+      error: "Spec parse failed",
+      details: "api_secret abcdefghij rejected",
+    }, { status: 400 });
+    const failure = await apiSpecs.update(scope, "orders-spec", yaml).catch((e: unknown) => e);
+
+    expectDetached(failure);
+    expect(await exposure(failure)).not.toContain("abcdefghij");
+    expect(await getApiErrorDetail(failure))
+      .toBe("Spec parse failed\napi_secret [REDACTED] rejected");
+  });
+
+  it("finds every key and value pair when several share a line", async () => {
+    // A trailing comma: not JSON, so each line is scanned as YAML.
+    const secret = "sk-shared-line-0123456789";
+    const document = [
+      "{",
+      '  "openapi": "3.1.0", "x-ferrum-plugins": [{"plugin_name": "key_auth", ' +
+        `"config": {"api_key": "${secret}"}}],`,
+      '  "info": {"title": "Orders", "version": "1"},',
+      "},",
+    ].join("\n");
+    expect(yamlScalars(document)).toContain(secret);
+    respond = () => Response.json({
+      error: "Spec parse failed",
+      details: `x-ferrum-plugins[0].config: api_key ${secret} rejected`,
+    }, { status: 400 });
+    const failure = await apiSpecs.create(scope, document).catch((e: unknown) => e);
+
+    expectDetached(failure);
+    expectRedacted(await exposure(failure), secret);
+    expect(reported).toEqual([]);
+  });
+
+  it("finds each pair of a flow mapping continued onto a line that starts with a key", async () => {
+    const yaml = [
+      "x-ferrum-plugins:",
+      "  - plugin_name: acme_custom",
+      "    config: {mode: strict,",
+      "      api_key: s3cretvalue, header: X}",
+      "",
+    ].join("\n");
+    expect(yamlScalars(yaml)).toEqual(expect.arrayContaining(["strict", "s3cretvalue", "X"]));
+    respond = () => Response.json({
+      error: "Spec parse failed",
+      details: "api_key s3cretvalue rejected",
+    }, { status: 400 });
+    const failure = await apiSpecs.update(scope, "orders-spec", yaml).catch((e: unknown) => e);
+
+    expectDetached(failure);
+    expect(await exposure(failure)).not.toContain("s3cretvalue");
+    expect(await getApiErrorDetail(failure)).toBe("Spec parse failed\napi_key [REDACTED] rejected");
+  });
+
+  it("finds YAML scalars without a parser, but not a line that is only a key", () => {
+    const scalars = yamlScalars([
+      "x-ferrum-plugins:",
+      "  - &cfg !!str 'it''s'",
+      '  - "a\\x41"',
+      "  - {token: t0ken-value, nested: [x, 'y, z']}",
+    ].join("\n"));
+    expect(scalars).not.toContain("x-ferrum-plugins:");
+    expect(scalars).toEqual(expect.arrayContaining(["it's", "aA", "t0ken-value", "x", "y, z"]));
   });
 });

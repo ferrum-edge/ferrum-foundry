@@ -22,6 +22,11 @@ import {
   onApiError,
   takeHeldReport,
 } from "./client";
+import {
+  KAFKA_SAFE_PRODUCER_PROPERTIES,
+  PLUGIN_SENSITIVITY,
+  type Sensitivity,
+} from "./pluginSensitivity";
 
 /** What a submitted secret is replaced with, the gateway's own read marker. */
 export const REDACTION_MARKER = "[REDACTED]";
@@ -32,6 +37,58 @@ export function submittedValues(data: unknown): string[] {
   if (Array.isArray(data)) return data.flatMap(submittedValues);
   if (data && typeof data === "object") return Object.values(data).flatMap(submittedValues);
   return [];
+}
+
+/**
+ * The submitted values a failed write must not echo, by how surely each one
+ * is a secret.
+ */
+export interface Secrets {
+  /** Redacted wherever they occur: in any string of the body, and in its keys. */
+  readonly values: readonly string[];
+  /**
+   * Short values that are secret only because nothing classifies them (an
+   * unknown plugin's config, a spec document Foundry cannot parse), redacted
+   * only where they stand as a whole token (`MIN_DISTINCTIVE`).
+   */
+  readonly tokens: readonly string[];
+}
+
+const NO_SECRETS: Secrets = { values: [], tokens: [] };
+
+function classified(values: readonly string[]): Secrets {
+  return { values, tokens: [] };
+}
+
+function mergeSecrets(sets: readonly Secrets[]): Secrets {
+  return {
+    values: sets.flatMap((set) => set.values),
+    tokens: sets.flatMap((set) => set.tokens),
+  };
+}
+
+/**
+ * The shortest value distinctive enough to be matched inside other text. A
+ * shorter one — `a`, `1`, `on`, `api`, `true`, `error` — also occurs inside
+ * ordinary words, in the keys of the gateway's error body (`error`,
+ * `api_specs_at_risk`), in the fixed vocabulary callers recognize a failure by
+ * (`confirm_api_spec_deletion=true`), and in the `[REDACTED]` marker itself.
+ * Replacing it there would destroy the detail that diagnoses the failure and
+ * the fields that decide what the page offers next. A shorter value that is
+ * unclassified is redacted only where it stands as a whole token of a string
+ * value; a shorter classified one wherever it occurs in a string value. Neither
+ * is matched in the body's structure (`RedactionForms.structural`).
+ */
+const MIN_DISTINCTIVE = 8;
+
+/** `values` that are secret only because nothing classifies them. */
+export function unclassified(values: readonly string[]): Secrets {
+  const long: string[] = [];
+  const short: string[] = [];
+  for (const value of values) {
+    (value.trim().length < MIN_DISTINCTIVE ? short : long).push(value);
+  }
+  return { values: long, tokens: short };
 }
 
 /**
@@ -66,216 +123,6 @@ function urlSecrets(value: string): string[] {
 }
 
 /* ---------- Plugin configurations: Ferrum Edge's projection ---------- */
-
-/**
- * How Ferrum Edge projects a schema-declared plugin `config` path for a
- * non-admin read (`FieldSensitivity` in Edge v0.9.7
- * `src/admin/plugin_config_projection.rs`), and so which of its values a
- * failed write must not echo: a `secret` wholesale, the credential-bearing
- * parts of an `endpoint` or `redis` URL (the whole value when it is not a
- * URL), and every `kafka` producer property off the safe list.
- */
-type Sensitivity = "secret" | "endpoint" | "redis" | "kafka";
-
-interface SensitivityRule {
-  readonly path: readonly string[];
-  readonly sensitivity: Sensitivity;
-}
-
-const secret = (...path: string[]): SensitivityRule => ({ path, sensitivity: "secret" });
-const endpoint = (...path: string[]): SensitivityRule => ({ path, sensitivity: "endpoint" });
-const redis = (...path: string[]): SensitivityRule => ({ path, sensitivity: "redis" });
-const REDIS_BACKED = [redis("redis_url")];
-const NONE: readonly SensitivityRule[] = [];
-
-/**
- * Edge v0.9.7's `PLUGIN_SENSITIVITY_SCHEMAS`, transcribed rule for rule. A
- * plugin named here gets its rules plus the name floor and URL sweep below; a
- * plugin not named here (a custom plugin, or a built-in added after v0.9.7)
- * has no schema Foundry can classify by, so every string it carries is secret.
- */
-const PLUGIN_SENSITIVITY = new Map<string, readonly SensitivityRule[]>([
-  ["otel_tracing", [endpoint("endpoint"), secret("authorization"), secret("headers", "*")]],
-  ["correlation_id", NONE],
-  ["cors", NONE],
-  ["request_termination", NONE],
-  ["mesh_outbound_registry", NONE],
-  ["ip_restriction", NONE],
-  ["geo_restriction", NONE],
-  ["bot_detection", NONE],
-  ["spec_expose", [endpoint("spec_url")]],
-  ["sse", NONE],
-  ["grpc_web", NONE],
-  ["grpc_method_router", REDIS_BACKED],
-  ["spiffe_identity", NONE],
-  ["mtls_auth", NONE],
-  ["jwks_auth", [
-    endpoint("providers", "*", "discovery_url"),
-    endpoint("providers", "*", "jwks_uri"),
-    endpoint("discovery_url"),
-    endpoint("jwks_uri"),
-  ]],
-  ["oauth2_introspection", [
-    endpoint("providers", "*", "discovery_url"),
-    endpoint("providers", "*", "introspection_endpoint"),
-    endpoint("discovery_url"),
-    endpoint("introspection_endpoint"),
-  ]],
-  ["oidc_relying_party", [
-    endpoint("providers", "*", "discovery_url"),
-    endpoint("providers", "*", "jwks_uri"),
-    endpoint("providers", "*", "token_endpoint"),
-    endpoint("providers", "*", "authorization_endpoint"),
-    endpoint("providers", "*", "userinfo_endpoint"),
-    endpoint("providers", "*", "end_session_endpoint"),
-    endpoint("discovery_url"),
-    endpoint("jwks_uri"),
-    endpoint("token_endpoint"),
-    endpoint("authorization_endpoint"),
-    endpoint("userinfo_endpoint"),
-    endpoint("end_session_endpoint"),
-  ]],
-  ["jwt_auth", NONE],
-  ["key_auth", NONE],
-  ["ldap_auth", [endpoint("ldap_url")]],
-  ["basic_auth", NONE],
-  ["hmac_auth", NONE],
-  ["soap_ws_security", NONE],
-  ["access_control", NONE],
-  ["tcp_connection_throttle", NONE],
-  ["mesh_authz", NONE],
-  ["opa", [secret("headers", "*")]],
-  ["adaptive_concurrency", NONE],
-  ["request_deduplication", REDIS_BACKED],
-  ["request_size_limiting", NONE],
-  ["ws_message_size_limiting", NONE],
-  ["graphql", REDIS_BACKED],
-  ["rate_limiting", REDIS_BACKED],
-  ["ws_rate_limiting", REDIS_BACKED],
-  ["udp_rate_limiting", REDIS_BACKED],
-  ["ai_transcript_audit", [
-    endpoint("sink", "endpoint_url"),
-    secret("sink", "custom_headers", "*"),
-    endpoint("endpoint_url"),
-    secret("headers", "*"),
-    secret("custom_headers", "*"),
-  ]],
-  ["ai_prompt_shield", NONE],
-  ["waf", NONE],
-  ["fault_injection", NONE],
-  ["body_validator", NONE],
-  ["openapi_validator", NONE],
-  ["ai_semantic_firewall", [endpoint("provider", "endpoint")]],
-  ["ai_request_guard", NONE],
-  ["ai_tool_governor", [endpoint("endpoint_url"), endpoint("approval", "endpoint_url")]],
-  ["ai_stream_router", [endpoint("providers", "*", "endpoint")]],
-  ["mcp_gateway", [endpoint("servers", "*", "upstream_url"), endpoint("upstream_url")]],
-  ["a2a_gateway", NONE],
-  ["mesh_route_dispatch", NONE],
-  ["ai_semantic_cache", [
-    redis("redis_url"),
-    endpoint("semantic_embedding_endpoint"),
-    secret("semantic_embedding_auth_header"),
-  ]],
-  ["request_transformer", NONE],
-  ["serverless_function", [
-    endpoint("function_url"),
-    endpoint("aws_endpoint_url"),
-    secret("azure_function_key"),
-  ]],
-  ["response_mock", NONE],
-  ["grpc_deadline", NONE],
-  ["load_testing", NONE],
-  ["request_mirror", NONE],
-  ["response_size_limiting", NONE],
-  ["response_caching", NONE],
-  ["response_transformer", NONE],
-  ["compression", NONE],
-  ["ai_prompt_compressor", NONE],
-  ["ai_federation", [endpoint("base_url"), endpoint("providers", "*", "base_url")]],
-  ["ai_response_guard", NONE],
-  ["security_headers", NONE],
-  ["ai_token_metrics", NONE],
-  ["ai_rate_limiter", REDIS_BACKED],
-  ["stdout_logging", NONE],
-  ["ws_frame_logging", NONE],
-  ["statsd_logging", NONE],
-  ["http_logging", [endpoint("endpoint_url"), secret("custom_headers", "*")]],
-  ["tcp_logging", NONE],
-  ["kafka_logging", [{ path: ["producer_config"], sensitivity: "kafka" }]],
-  ["loki_logging", [
-    endpoint("endpoint_url"),
-    secret("authorization_header"),
-    secret("custom_headers", "*"),
-  ]],
-  ["udp_logging", NONE],
-  ["ws_logging", [endpoint("endpoint_url")]],
-  ["transaction_debugger", NONE],
-  ["proxy_alerts", [
-    endpoint("channels", "*", "webhook_url"),
-    endpoint("channels", "*", "url"),
-    secret("channels", "*", "headers", "*"),
-    secret("channels", "*", "body_template"),
-  ]],
-  ["prometheus_metrics", NONE],
-  ["api_chargeback", NONE],
-  ["api_chargeback_sink", [
-    endpoint("clickhouse", "url"),
-    secret("clickhouse", "insert_query_params", "*"),
-  ]],
-  ["workload_metrics", [
-    endpoint("tracing_provider", "config", "url"),
-    endpoint("tracing_provider", "config", "agent_url"),
-    endpoint("tracing_provider", "config", "collector_url"),
-    endpoint("tracing_provider", "config", "endpoint"),
-    endpoint("tracing_providers", "*", "config", "url"),
-    endpoint("tracing_providers", "*", "config", "agent_url"),
-    endpoint("tracing_providers", "*", "config", "collector_url"),
-    endpoint("tracing_providers", "*", "config", "endpoint"),
-  ]],
-  ["__mesh_bpf_metrics", NONE],
-  ["transaction_log_schema", NONE],
-]);
-
-/**
- * Edge's `KAFKA_SAFE_PRODUCER_PROPERTIES`: the librdkafka properties that carry
- * no credential. Every other `producer_config` property — `ssl.key.pem`,
- * `sasl.password`, and whatever librdkafka marks sensitive next — is secret.
- */
-const KAFKA_SAFE_PRODUCER_PROPERTIES = new Set([
-  "acks",
-  "batch.num.messages",
-  "batch.size",
-  "client.id",
-  "compression.codec",
-  "compression.level",
-  "compression.type",
-  "delivery.timeout.ms",
-  "enable.idempotence",
-  "linger.ms",
-  "max.in.flight",
-  "max.in.flight.requests.per.connection",
-  "message.max.bytes",
-  "message.send.max.retries",
-  "message.timeout.ms",
-  "metadata.max.age.ms",
-  "partitioner",
-  "queue.buffering.max.kbytes",
-  "queue.buffering.max.messages",
-  "queue.buffering.max.ms",
-  "reconnect.backoff.max.ms",
-  "reconnect.backoff.ms",
-  "request.required.acks",
-  "request.timeout.ms",
-  "retries",
-  "retry.backoff.max.ms",
-  "retry.backoff.ms",
-  "socket.keepalive.enable",
-  "socket.nagle.disable",
-  "socket.timeout.ms",
-  "sticky.partitioning.linger.ms",
-  "topic.metadata.refresh.interval.ms",
-]);
 
 /** Edge's `normalize_config_key`: case and `-`, `.`, `_` do not distinguish keys. */
 function normalizeConfigKey(key: string): string {
@@ -402,19 +249,27 @@ function configFloorSecrets(data: unknown): string[] {
 /**
  * The secrets a plugin `config` carries, as Ferrum Edge's projection decides
  * them for a non-admin read (`project_plugin_config`): the plugin's schema
- * rules, then the name floor and URL sweep. A config that is not an object,
- * or belongs to a plugin with no known schema, is secret throughout.
+ * rules, then the name floor and URL sweep. A config of a known plugin that is
+ * not an object is secret throughout, as Edge replaces it wholesale. A plugin
+ * with no known schema has only the name floor and URL sweep to classify it
+ * by, so every other string it carries is secret too, unclassified.
  */
-export function pluginConfigSecrets(pluginName: string, config: unknown): string[] {
-  if (config === null || config === undefined) return [];
+export function pluginConfigSecrets(pluginName: string, config: unknown): Secrets {
+  if (config === null || config === undefined) return NO_SECRETS;
   const rules = PLUGIN_SENSITIVITY.get(pluginName);
-  if (!rules || typeof config !== "object" || Array.isArray(config)) {
-    return submittedValues(config);
+  if (!rules) {
+    return mergeSecrets([
+      classified(configFloorSecrets(config)),
+      unclassified(submittedValues(config)),
+    ]);
   }
-  return [...new Set([
+  if (typeof config !== "object" || Array.isArray(config)) {
+    return classified(submittedValues(config));
+  }
+  return classified([...new Set([
     ...rules.flatMap((rule) => ruleSecrets(config, rule.path, rule.sensitivity)),
     ...configFloorSecrets(config),
-  ])];
+  ])]);
 }
 
 /**
@@ -427,20 +282,325 @@ export function pluginConfigSecrets(pluginName: string, config: unknown): string
  * or one entry of a batch — has its `config` classified by
  * `pluginConfigSecrets`.
  */
-export function secretValues(data: unknown): string[] {
-  if (typeof data === "string") return urlSecrets(data);
-  if (Array.isArray(data)) return data.flatMap(secretValues);
+export function secretValues(data: unknown): Secrets {
+  if (typeof data === "string") return classified(urlSecrets(data));
+  if (Array.isArray(data)) return mergeSecrets(data.map(secretValues));
   if (data && typeof data === "object") {
     const record = data as Record<string, unknown>;
     const pluginName = record.plugin_name;
     if (typeof pluginName === "string" && "config" in record) {
       const { config, ...rest } = record;
-      return [...pluginConfigSecrets(pluginName, config), ...secretValues(rest)];
+      return mergeSecrets([pluginConfigSecrets(pluginName, config), secretValues(rest)]);
     }
-    return Object.entries(record).flatMap(([field, value]) =>
-      isSecretField(field) ? submittedValues(value) : secretValues(value));
+    return mergeSecrets(Object.entries(record).map(([field, value]) =>
+      isSecretField(field) ? classified(submittedValues(value)) : secretValues(value)));
   }
-  return [];
+  return NO_SECRETS;
+}
+
+/* ---------- Restore and API spec documents ---------- */
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * The secrets a backup carries into a restore: what `secretValues` finds in
+ * its resources — consumer credentials, plugin configurations, upstream
+ * discovery tokens — and every API spec document in it. A document travels
+ * gzip-compressed and base64-encoded (`spec_content_base64`, and its
+ * external-`$ref` snapshot), which no position inside it can be read from, so
+ * each is taken whole.
+ */
+export function restoreSecrets(backup: unknown): Secrets {
+  const section = isRecord(backup) ? backup.api_specs : undefined;
+  const items = isRecord(section) && Array.isArray(section.items) ? section.items : [];
+  const documents = items.flatMap((item) => isRecord(item)
+    ? [item.spec_content_base64, item.external_ref_snapshot_base64]
+      .filter((value): value is string => typeof value === "string" && value !== "")
+    : []);
+  return mergeSecrets([secretValues(backup), classified(documents)]);
+}
+
+/**
+ * The secrets an API spec document carries into an import or replacement.
+ * Its secrets live in the `x-ferrum-*` extensions — above all plugin
+ * configurations in `x-ferrum-plugins` — but anything in the document can be
+ * quoted back by a parse or validation error.
+ *
+ * A JSON document is classified by position like any other write: each
+ * `x-ferrum-plugins` entry by its plugin's projection, credential-named fields
+ * and URL credentials wherever they are. An entry that is not a plugin
+ * configuration is unclassified throughout. A document Foundry cannot parse —
+ * YAML, for which it has no parser, or malformed JSON — cannot be classified,
+ * so every scalar it could hold is unclassified (`yamlScalars`).
+ */
+export function specDocumentSecrets(document: string): Secrets {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(document);
+  } catch {
+    return unclassified(yamlScalars(document));
+  }
+  if (!isRecord(parsed)) return unclassified(yamlScalars(document));
+  const { "x-ferrum-plugins": plugins, ...rest } = parsed;
+  const entries: unknown[] = Array.isArray(plugins) ? plugins : plugins === undefined ? [] : [plugins];
+  return mergeSecrets([
+    secretValues(rest),
+    ...entries.map((entry) => isRecord(entry) && typeof entry.plugin_name === "string"
+      ? secretValues(entry)
+      : unclassified(submittedValues(entry))),
+  ]);
+}
+
+/** YAML's double-quoted escapes (YAML 1.2 §5.7), other than the numeric ones. */
+const YAML_ESCAPES: Readonly<Record<string, string>> = {
+  "0": "\0",
+  a: "\x07",
+  b: "\b",
+  t: "\t",
+  "\t": "\t",
+  n: "\n",
+  v: "\v",
+  f: "\f",
+  r: "\r",
+  e: "\x1b",
+  " ": " ",
+  '"': '"',
+  "/": "/",
+  "\\": "\\",
+  N: "\u0085",
+  _: "\u00a0",
+  L: "\u2028",
+  P: "\u2029",
+};
+
+function unescapeDoubleQuoted(text: string): string {
+  return text.replace(
+    /\\(x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|[\s\S])/g,
+    (escape, code: string) => {
+      if (code.length > 1) {
+        try {
+          return String.fromCodePoint(Number.parseInt(code.slice(1), 16));
+        } catch {
+          return escape;
+        }
+      }
+      return YAML_ESCAPES[code] ?? escape;
+    },
+  );
+}
+
+/** The index just past the quoted scalar `text` opens with, or -1 if it does not close. */
+function quotedEnd(text: string): number {
+  const quote = text[0];
+  for (let index = 1; index < text.length; index += 1) {
+    if (quote === '"' && text[index] === "\\") {
+      index += 1;
+    } else if (text[index] === quote) {
+      if (quote === "'" && text[index + 1] === "'") {
+        index += 1;
+      } else {
+        return index + 1;
+      }
+    }
+  }
+  return -1;
+}
+
+/** The elements of a flow collection, split at `,`, `[`, `]`, `{` and `}` outside quotes. */
+function flowPieces(text: string): string[] {
+  const pieces: string[] = [];
+  let current = "";
+  let quote: string | null = null;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    current += character;
+    if (quote) {
+      if (quote === '"' && character === "\\") {
+        current += text[index + 1] ?? "";
+        index += 1;
+      } else if (character === quote) {
+        if (quote === "'" && text[index + 1] === "'") {
+          current += "'";
+          index += 1;
+        } else {
+          quote = null;
+        }
+      }
+    } else if (character === '"' || character === "'") {
+      // A quote opens a scalar only where one can start, not inside a word.
+      if (/^\s*$|:\s*$/.test(current.slice(0, -1))) quote = character;
+    } else if (",[]{}".includes(character)) {
+      pieces.push(current.slice(0, -1));
+      current = "";
+    }
+  }
+  pieces.push(current);
+  return pieces.map((piece) => piece.trim()).filter(Boolean);
+}
+
+/**
+ * The value of a `key: value` pair, the key plain or quoted, or null if `text`
+ * is not one. After a quoted key the `:` needs no space (`"key":"value"`), as
+ * in JSON, which a document Edge falls back to reading as YAML can be.
+ */
+function mappingValue(text: string): string | null {
+  if (text.startsWith('"') || text.startsWith("'")) {
+    const end = quotedEnd(text);
+    if (end === -1) return null;
+    const separator = /^\s*:/.exec(text.slice(end));
+    return separator ? text.slice(end + separator[0].length).trim() : null;
+  }
+  if (text.startsWith("{") || text.startsWith("[")) return null;
+  const separator = /:(?:\s|$)/.exec(text);
+  return separator ? text.slice(separator.index + separator[0].length).trim() : null;
+}
+
+/**
+ * `text` without a trailing unescaped `\`, which continues a double-quoted
+ * scalar on the next line: the scalar joins the lines without it.
+ */
+function withoutContinuation(text: string): string {
+  const backslashes = /\\+$/.exec(text)?.[0].length ?? 0;
+  return backslashes % 2 === 1 ? text.slice(0, -1) : text;
+}
+
+function addScalar(raw: string, found: Set<string>): void {
+  const text = raw.trim();
+  // A block scalar's indicator; its content is on the lines that follow.
+  if (!text || /^[|>][-+0-9]*(?:\s+#.*)?$/.test(text)) return;
+  found.add(text);
+  const bare = text.replace(/^(?:[&!]\S*\s+)+/, "");
+  if (bare !== text) {
+    addScalar(bare, found);
+    return;
+  }
+  // Each element of a flow collection, and each of several pairs on one line
+  // (`"a": "x", "b": "y",`, or a flow mapping continued from a line above
+  // with `key: x, other: y}`). Every piece is shorter than `text`.
+  const flow = text.startsWith("{") || text.startsWith("[");
+  const pieces = flowPieces(text);
+  if (flow || pieces.length > 1) {
+    for (const piece of pieces) {
+      addScalar(piece, found);
+      const value = mappingValue(piece);
+      if (value !== null) addScalar(value, found);
+    }
+    if (flow) return;
+  }
+  if (text.startsWith('"') || text.startsWith("'")) {
+    // A quoted key's value, with or without a space after the `:`.
+    const value = mappingValue(text);
+    if (value) addScalar(value, found);
+    const end = quotedEnd(text);
+    const doubled = text.startsWith('"');
+    // A scalar left open continues on the next line, a double-quoted one
+    // perhaps with a trailing `\`.
+    const inner = end !== -1
+      ? text.slice(1, end - 1)
+      : doubled
+        ? withoutContinuation(text.slice(1))
+        : text.slice(1);
+    if (!inner.trim()) return;
+    found.add(inner);
+    found.add(doubled ? unescapeDoubleQuoted(inner) : inner.replaceAll("''", "'"));
+    return;
+  }
+  // A plain scalar, or a line of a multi-line one: without a trailing comment
+  // or a stray quote from the line that closes a quoted scalar, and unescaped
+  // in case it continues a double-quoted one, itself continued with a `\`.
+  const unquoted = text.replace(/^["']|["']$/g, "");
+  for (const variant of [
+    text.replace(/\s+#.*$/, ""),
+    unquoted,
+    unescapeDoubleQuoted(text),
+    unescapeDoubleQuoted(withoutContinuation(unquoted)),
+  ]) {
+    if (variant.trim()) found.add(variant.trim());
+  }
+}
+
+/**
+ * The text after the `"` of a double-quoted scalar that `text` leaves open,
+ * or null. Over-inclusive: a `"` after any space or indicator opens one.
+ */
+function openDoubleQuoted(text: string): string | null {
+  let quote: string | null = null;
+  let start = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (quote) {
+      if (quote === '"' && character === "\\") {
+        index += 1;
+      } else if (character === quote) {
+        if (quote === "'" && text[index + 1] === "'") {
+          index += 1;
+        } else {
+          quote = null;
+        }
+      }
+    } else if (
+      (character === '"' || character === "'") &&
+      (index === 0 || /[\s,[\]{}:]/.test(text[index - 1]))
+    ) {
+      quote = character;
+      start = index + 1;
+    }
+  }
+  return quote === '"' ? text.slice(start) : null;
+}
+
+/** A double-quoted scalar's raw text, as written and unescaped. */
+function addQuotedRun(raw: string, found: Set<string>): void {
+  if (!raw.trim()) return;
+  found.add(raw);
+  found.add(unescapeDoubleQuoted(raw));
+}
+
+/**
+ * Every scalar a YAML document could hold, found without parsing it. Over-
+ * inclusive by design: each line after any sequence or mapping indicator,
+ * whole; the value of each `key: value` pair, several on one line included;
+ * each element of a flow collection; and each quoted scalar unquoted and
+ * unescaped. A block or multi-line scalar is covered line by line, so a value
+ * the gateway echoes folded is redacted piece by piece. The lines of a
+ * double-quoted scalar continued with a trailing `\` are also recorded
+ * joined, as the scalar joins them, since short pieces joined without a space
+ * are no whole token. A line that is only a key (`x-ferrum-plugins:`) holds no
+ * scalar: taken whole, it would redact the gateway's own reference to that key.
+ */
+export function yamlScalars(document: string): string[] {
+  const found = new Set<string>();
+  // The raw text of an open double-quoted scalar since its last unescaped
+  // line break, which a trailing `\` joins to the next line without one.
+  let open: string | null = null;
+  for (const line of document.split(/\r\n|\r|\n/)) {
+    if (open === null) {
+      open = openDoubleQuoted(line);
+    } else {
+      const text = line.trimStart();
+      const end = quotedEnd(`"${text}`);
+      const chunk = end === -1 ? text : text.slice(0, end - 2);
+      if (withoutContinuation(open) !== open) {
+        open = withoutContinuation(open) + chunk;
+      } else {
+        addQuotedRun(open, found);
+        open = chunk;
+      }
+      if (end !== -1) {
+        addQuotedRun(open, found);
+        open = openDoubleQuoted(text.slice(end - 1));
+      }
+    }
+    const rest = line.trim().replace(/^(?:[-?:](?:\s+|$))+/, "");
+    const value = mappingValue(rest);
+    if (value === "") continue;
+    addScalar(rest, found);
+    if (value !== null) addScalar(value, found);
+  }
+  if (open !== null) addQuotedRun(open, found);
+  return [...found];
 }
 
 /**
@@ -468,41 +628,183 @@ function secretLines(value: string): string[] {
   });
 }
 
+/** Every form of every submitted secret, as matched in a failure's body. */
+export interface RedactionForms {
+  /** Matched wherever they occur in a string value. Longest first. */
+  readonly substrings: readonly string[];
+  /** Matched only as a whole token of a string value (`MIN_DISTINCTIVE`). */
+  readonly tokens: readonly string[];
+  /**
+   * The substrings at least `MIN_DISTINCTIVE` long, the only forms matched in
+   * the body's structure: an object key, a fixed-vocabulary field
+   * (`FIXED_VOCABULARY_FIELDS`), and text serialized from a body whose values
+   * were each redacted already. Longest first.
+   */
+  readonly structural: readonly string[];
+}
+
 /**
  * Every form in which a submitted value can be echoed: raw, JSON-escaped, and
  * both again with surrounding whitespace trimmed — for the whole value and for
- * each substantial line of a multi-line one. Longest first, so a form is never
- * left partially exposed by a shorter one replaced inside it.
+ * each substantial line of a multi-line one.
  */
-export function redactionForms(values: readonly string[]): string[] {
-  const forms = new Set<string>();
-  for (const value of values) {
-    const lines = secretLines(value).flatMap((line) => [line, line.trim()]);
-    for (const candidate of [value, value.trim(), ...lines]) {
-      if (!candidate) continue;
-      forms.add(candidate);
-      forms.add(JSON.stringify(candidate).slice(1, -1));
+function addForms(value: string, forms: Set<string>): void {
+  const lines = secretLines(value).flatMap((line) => [line, line.trim()]);
+  for (const candidate of [value, value.trim(), ...lines]) {
+    if (!candidate) continue;
+    forms.add(candidate);
+    forms.add(JSON.stringify(candidate).slice(1, -1));
+  }
+}
+
+/**
+ * The forms of `secrets` to redact. A plain list is classified throughout. A
+ * short unclassified value that is also classified is matched wherever it
+ * occurs, as the classified one must be.
+ */
+export function redactionForms(secrets: Secrets | readonly string[]): RedactionForms {
+  const { values, tokens } = "tokens" in secrets ? secrets : classified(secrets);
+  const substrings = new Set<string>();
+  for (const value of values) addForms(value, substrings);
+  const whole = new Set<string>();
+  for (const value of tokens) addForms(value, whole);
+  const longestFirst = (a: string, b: string) => b.length - a.length;
+  const sorted = [...substrings].sort(longestFirst);
+  return {
+    substrings: sorted,
+    tokens: [...whole].filter((form) => form.trim() && !substrings.has(form)).sort(longestFirst),
+    structural: sorted.filter((form) => form.trim().length >= MIN_DISTINCTIVE),
+  };
+}
+
+function isTokenCharacter(character: string | undefined): boolean {
+  return character !== undefined && /[\p{L}\p{N}_]/u.test(character);
+}
+
+/** Where each of `forms` occurs in `text`, as `[start, end)` spans. */
+function occurrences(
+  text: string,
+  forms: readonly string[],
+  wholeToken: boolean,
+): [number, number][] {
+  const spans: [number, number][] = [];
+  for (const form of forms) {
+    if (!form) continue;
+    for (let at = text.indexOf(form); at !== -1; at = text.indexOf(form, at + 1)) {
+      const end = at + form.length;
+      if (!wholeToken || (!isTokenCharacter(text[at - 1]) && !isTokenCharacter(text[end]))) {
+        spans.push([at, end]);
+      }
     }
   }
-  return [...forms].sort((a, b) => b.length - a.length);
+  return spans;
+}
+
+/**
+ * `text` with each span replaced by `[REDACTED]`, overlapping spans as one.
+ * Every span is found in the original text and replaced in one pass, so every
+ * occurrence of every form is covered whatever their lengths and overlaps, and
+ * a marker already written is never matched and split by a later form.
+ */
+function replaceSpans(text: string, spans: [number, number][]): string {
+  if (spans.length === 0) return text;
+  spans.sort(([a], [b]) => a - b);
+  let redacted = "";
+  let cursor = 0;
+  let [start, end] = spans[0];
+  for (const [nextStart, nextEnd] of spans.slice(1)) {
+    if (nextStart < end) {
+      end = Math.max(end, nextEnd);
+      continue;
+    }
+    redacted += text.slice(cursor, start) + REDACTION_MARKER;
+    cursor = end;
+    [start, end] = [nextStart, nextEnd];
+  }
+  return redacted + text.slice(cursor, start) + REDACTION_MARKER + text.slice(end);
 }
 
 /** `text` with every form of every submitted value replaced by `[REDACTED]`. */
-export function redactSubmitted(text: string, forms: readonly string[]): string {
-  let redacted = text;
-  for (const form of forms) redacted = redacted.split(form).join(REDACTION_MARKER);
-  return redacted;
+export function redactSubmitted(text: string, forms: RedactionForms): string {
+  return replaceSpans(text, [
+    ...occurrences(text, forms.substrings, false),
+    ...occurrences(text, forms.tokens, true),
+  ]);
 }
 
-/** A parsed error body with every string in it — keys included — redacted. */
-export function redactBody(value: unknown, forms: readonly string[]): unknown {
+/**
+ * `text` with only the structural forms replaced: an object key, a
+ * fixed-vocabulary field, or text built from a body whose strings were each
+ * redacted already. A short form matched there would find the body's
+ * structure — its keys, its codes, serialized — not anything submitted.
+ */
+function redactStructure(text: string, forms: RedactionForms): string {
+  return replaceSpans(text, occurrences(text, forms.structural, false));
+}
+
+/**
+ * Fields whose value is the gateway's or the BFF's own vocabulary, which
+ * callers recognize a failure by: the error `code`, the BFF timeout's `phase`,
+ * and a restore's `rollback`, `failure_class`, and `confirmation_required`.
+ * Each is redacted like an object key, so a short submitted value (`api`,
+ * `true`, `load`) cannot turn `confirm_api_spec_deletion=true` or `upload`
+ * into something no caller recognizes.
+ */
+const FIXED_VOCABULARY_FIELDS = new Set([
+  "code",
+  "phase",
+  "rollback",
+  "failure_class",
+  "confirmation_required",
+]);
+
+/** `value` with every string in it redacted, and its keys against the structural forms. */
+function redactValue(value: unknown, forms: RedactionForms): unknown {
   if (typeof value === "string") return redactSubmitted(value, forms);
-  if (Array.isArray(value)) return value.map((item) => redactBody(item, forms));
+  if (Array.isArray(value)) return value.map((item) => redactValue(item, forms));
   if (value && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value).map(([key, item]) =>
-      [redactSubmitted(key, forms), redactBody(item, forms)]));
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [
+      redactStructure(key, forms),
+      redactValue(item, forms),
+    ]));
   }
   return value;
+}
+
+/**
+ * A parsed error body with every string in it redacted, and its keys and
+ * fixed-vocabulary fields against the structural forms only (`MIN_DISTINCTIVE`).
+ * The fixed vocabulary is the body's own top-level fields, the only ones
+ * callers read; a field of the same name nested deeper is redacted in full.
+ */
+export function redactBody(value: unknown, forms: RedactionForms): unknown {
+  if (!isRecord(value)) return redactValue(value, forms);
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [
+    redactStructure(key, forms),
+    typeof item === "string" && FIXED_VOCABULARY_FIELDS.has(key)
+      ? redactStructure(item, forms)
+      : redactValue(item, forms),
+  ]));
+}
+
+/**
+ * An error body the client did not parse, redacted. JSON text is redacted
+ * value by value, as a parsed body is, so its keys keep the same protection;
+ * anything else as text.
+ */
+function redactBodyText(text: string, forms: RedactionForms): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return redactSubmitted(text, forms);
+  }
+  if (!parsed || typeof parsed !== "object") return redactSubmitted(text, forms);
+  return redactStructure(JSON.stringify(redactBody(parsed, forms)), forms);
+}
+
+function redactData(data: unknown, forms: RedactionForms): unknown {
+  return typeof data === "string" ? redactBodyText(data, forms) : redactBody(data, forms);
 }
 
 /**
@@ -513,17 +815,17 @@ export function redactBody(value: unknown, forms: readonly string[]): unknown {
  */
 export async function redactedErrorDetail(
   error: Error,
-  forms: readonly string[],
+  forms: RedactionForms,
 ): Promise<string> {
   if ("data" in error) {
-    const detail = extractApiErrorData(redactBody((error as { data?: unknown }).data, forms));
-    if (detail) return redactSubmitted(detail, forms);
+    const detail = extractApiErrorData(redactData((error as { data?: unknown }).data, forms));
+    if (detail) return redactStructure(detail, forms);
   }
   const response = "response" in error ? (error as { response?: Response }).response : undefined;
   if (!response) return "";
   try {
-    const body = redactSubmitted(await response.clone().text(), forms);
-    return redactSubmitted(extractApiErrorDetail(body), forms);
+    const body = redactBodyText(await response.clone().text(), forms);
+    return redactStructure(extractApiErrorDetail(body), forms);
   } catch {
     return "";
   }
@@ -545,9 +847,19 @@ export class RedactedWriteError extends Error {
   declare readonly response?: Response;
   declare readonly data?: unknown;
 
-  constructor(message: string, response: Response | undefined, data: unknown) {
+  /**
+   * `name` is the original error's (`HTTPError`, `TimeoutError`,
+   * `UnboundNamespaceError`), which the outcome classifiers and ky's own type
+   * guards decide on. Nothing else of the original is copied.
+   */
+  constructor(
+    message: string,
+    response: Response | undefined,
+    data: unknown,
+    name = "RedactedWriteError",
+  ) {
     super(message);
-    this.name = "RedactedWriteError";
+    this.name = name;
     if (response) Object.defineProperty(this, "response", { value: response, enumerable: true });
     if (data !== undefined) Object.defineProperty(this, "data", { value: data, enumerable: true });
   }
@@ -574,7 +886,7 @@ function bodilessResponse(response: unknown): Response | undefined {
  */
 export async function redactWriteFailure(
   error: unknown,
-  secrets: readonly string[],
+  secrets: Secrets | readonly string[],
 ): Promise<RedactedWriteError> {
   const forms = redactionForms(secrets);
   const source = error instanceof Error
@@ -582,20 +894,25 @@ export async function redactWriteFailure(
     : undefined;
   let data: unknown;
   if (source && source.data !== undefined) {
-    data = redactBody(source.data, forms);
+    data = redactData(source.data, forms);
   } else if (source?.response instanceof Response) {
     // A body ky did not parse is still unread on the response.
     try {
       const text = await source.response.clone().text();
-      if (text) data = redactSubmitted(text, forms);
+      if (text) data = redactBodyText(text, forms);
     } catch {
       // Already consumed — nothing further to recover.
     }
   }
+  const response = bodilessResponse(source?.response);
+  const name = source?.name;
   const redacted = new RedactedWriteError(
     source ? redactSubmitted(source.message, forms) : "Request failed",
-    bodilessResponse(source?.response),
+    response,
     data,
+    // ky's `isHTTPError` recognizes an `HTTPError` by name, then reads its
+    // response, so the name is kept only while there is one to read.
+    name && (response || name !== "HTTPError") ? name : undefined,
   );
   const committed = getCommittedWrite(error);
   if (committed) markCommittedWrite(redacted, committed);
@@ -617,7 +934,7 @@ export async function redactWriteFailure(
  * not held, so nothing is raised for it here either.
  */
 export async function withRedactedFailure<T>(
-  secrets: readonly string[],
+  secrets: Secrets | readonly string[],
   write: () => Promise<T>,
 ): Promise<T> {
   try {
@@ -641,14 +958,14 @@ export async function withRedactedFailure<T>(
 function redactReport(
   report: ApiError,
   redacted: RedactedWriteError,
-  forms: readonly string[],
+  forms: RedactionForms,
 ): ApiError {
   const { outcome } = report;
   const data = report.statusCode === 0 ? redacted.message : redacted.data;
   const body = typeof data === "string" ? data : data === undefined ? "" : JSON.stringify(data);
   return {
     ...report,
-    body: redactSubmitted(body, forms),
+    body: redactStructure(body, forms),
     ...(outcome && {
       outcome: {
         ...outcome,

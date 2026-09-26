@@ -6,6 +6,7 @@ import { isHTTPError } from 'ky';
 import { proxyApi, scoped, SILENT_ERRORS, extractApiErrorData, type NamespaceScope } from "./client";
 import { longRunningClientTimeout } from '../../server/waitBudget';
 import { observeMutation } from './mutationOutcome';
+import { specDocumentSecrets, withRedactedFailure } from './secretRedaction';
 
 const readOptions = { timeout: longRunningClientTimeout('GET', '/api-specs'), retry: 0 };
 
@@ -205,20 +206,26 @@ function specBodyOptions(document: string): {
   };
 }
 
-/** Import a spec document (YAML or JSON text), creating proxy/upstream/plugins. */
+/**
+ * Import a spec document (YAML or JSON text), creating proxy/upstream/plugins.
+ * The document can carry plugin secrets, so a failure is redacted and holds
+ * no request (`specDocumentSecrets`, #485); the page reports it itself.
+ */
 export async function create(
   scope: NamespaceScope,
   document: string,
 ): Promise<ApiSpecCreateResponse> {
   return observeMutation(
     'Spec import',
-    proxyApi
-      .post('api-specs', scoped(scope, specBodyOptions(document)))
-      .json<ApiSpecCreateResponse>(),
+    withRedactedFailure(specDocumentSecrets(document), () =>
+      proxyApi
+        .post('api-specs', scoped(scope, specBodyOptions(document)))
+        .json<ApiSpecCreateResponse>(),
+    ),
   );
 }
 
-/** Replace a spec's document and its spec-owned resources. */
+/** Replace a spec's document and its spec-owned resources, redacted like `create`. */
 export async function update(
   scope: NamespaceScope,
   id: string,
@@ -226,9 +233,11 @@ export async function update(
 ): Promise<ApiSpecCreateResponse> {
   return observeMutation(
     'Spec replacement',
-    proxyApi
-      .put(`api-specs/${id}`, scoped(scope, specBodyOptions(document)))
-      .json<ApiSpecCreateResponse>(),
+    withRedactedFailure(specDocumentSecrets(document), () =>
+      proxyApi
+        .put(`api-specs/${id}`, scoped(scope, specBodyOptions(document)))
+        .json<ApiSpecCreateResponse>(),
+    ),
   );
 }
 

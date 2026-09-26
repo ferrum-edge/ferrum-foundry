@@ -236,6 +236,12 @@ Moving the Edge pin is a re-qualification, not a tag edit:
    local-run command in `CLAUDE.md`, the tables on this page, and the draft
    release notes. `scripts/supported-pairing.test.mjs` fails until every one of
    them agrees, and finds any other file still naming a different Edge image.
+   Re-read Edge's plugin configuration projection table at the new
+   `edge.source_commit`, bring `src/api/pluginSensitivity.ts` in line with it,
+   and record that commit in `PLUGIN_SENSITIVITY_SOURCE`:
+   `scripts/plugin-sensitivity-drift.test.mjs` fails until the recorded commit
+   is the pinned one, and `npm run check:plugin-sensitivity` (Pinned Gateway
+   Contract) fails while the table differs from Edge's.
 3. Open a pull request. Every gateway-backed gate — contract, capability
    parity, starter, critical journeys, container — runs against the new image.
    A failure is a compatibility finding to review, not a test to relax.
