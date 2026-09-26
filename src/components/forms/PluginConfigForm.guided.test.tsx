@@ -169,6 +169,15 @@ describe("guided configuration", () => {
     await renderForm("rate_limiting", {
       limits: [{ scope: "default", requests_per_second: 100 }],
     });
+
+    const passwordLabel = [...host.querySelectorAll("label")].find(
+      (element) => element.textContent?.trim() === "Redis password",
+    );
+    expect(passwordLabel).toBeTruthy();
+    const setValueButton = passwordLabel?.parentElement?.querySelector("button");
+    expect(setValueButton?.textContent?.trim()).toBe("Set a value");
+    await act(async () => setValueButton?.click());
+
     await type("Redis password", "null");
     await submit();
 
