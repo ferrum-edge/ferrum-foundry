@@ -63,7 +63,9 @@ export interface RuntimeConfig {
   writeTimeout: number;
 }
 
-export interface PublicRuntimeConfig extends Omit<RuntimeConfig, 'tlsCaPath'> {
+export interface PublicRuntimeConfig extends Omit<RuntimeConfig, 'tlsCaPath' | 'jwtNamespaces'> {
+  /** Exact grants, or `['*']` for the explicit every-namespace grant. */
+  jwtNamespaces: string[];
   authMode: AuthMode;
   tlsCaConfigured: boolean;
   runtimeSettingsEnabled: boolean;
@@ -71,6 +73,8 @@ export interface PublicRuntimeConfig extends Omit<RuntimeConfig, 'tlsCaPath'> {
 
 const MIN_SECRET_LENGTH = 32;
 const NAMESPACE_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$/;
+/** The only spelling of a grant for every namespace. */
+export const NAMESPACE_WILDCARD = '*';
 const HEADER_NAME_PATTERN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 
 function requireEnv(name: string): string {
@@ -125,15 +129,51 @@ function parseAudience(value: string | undefined): string | string[] | undefined
   return values.length === 1 ? values[0] : values;
 }
 
-function parseNamespaces(value: string | undefined, name: string): string[] | undefined {
-  const values = parseList(value);
-  if (!values) return undefined;
+/**
+ * Parse a present namespace grant setting. Entries are trimmed and empty ones
+ * dropped (`a,,b` is `a,b`), but a value with no entry left — empty, comma-only,
+ * or whitespace-only — is invalid configuration rather than an absent
+ * restriction. Every remaining entry must be an exact name, or the list is the
+ * lone wildcard, which grants every namespace and is returned as `undefined`
+ * so the JWT `ns` claim is omitted.
+ */
+function parseNamespaceGrants(entries: readonly string[], name: string): string[] | undefined {
+  const values = [...new Set(entries.map((entry) => entry.trim()).filter((entry) => entry !== ''))];
+  if (values.length === 0) {
+    throw new Error(`${name} must list at least one namespace, or ${NAMESPACE_WILDCARD} for every namespace`);
+  }
+  if (values.includes(NAMESPACE_WILDCARD)) {
+    if (values.length === 1) return undefined;
+    throw new Error(`${name} must not combine ${NAMESPACE_WILDCARD} with namespace names`);
+  }
   for (const namespace of values) {
     if (!NAMESPACE_PATTERN.test(namespace)) {
       throw new Error(`${name} contains an invalid namespace`);
     }
   }
   return values;
+}
+
+/** Set when the static principal loads unrestricted because no scope was configured. */
+export const UNSCOPED_STATIC_PRINCIPAL_WARNING = [
+  'FERRUM_JWT_NAMESPACES is not set, so the static principal is unrestricted',
+  'and its gateway JWTs carry no ns claim;',
+  `set it to namespace names, or ${NAMESPACE_WILDCARD} for every namespace, to scope it`,
+].join(' ');
+
+function parseEnvNamespaceGrants(authMode: AuthMode, warnings: string[]): string[] | undefined {
+  const name = 'FERRUM_JWT_NAMESPACES';
+  // Presence is read before trimming: a set-but-empty value is a malformed
+  // restriction, never the same as leaving the variable unset.
+  const raw = process.env[name];
+  if (raw === undefined) {
+    // Unset keeps the static principal unrestricted. Trusted-proxy grants come
+    // from the identity proxy; there this only scopes the readiness probe,
+    // which reads fleet-global endpoints.
+    if (authMode === 'static') warnings.push(UNSCOPED_STATIC_PRINCIPAL_WARNING);
+    return undefined;
+  }
+  return parseNamespaceGrants(raw.split(','), name);
 }
 
 export function normalizeAdminUrl(value: string, name = 'FERRUM_ADMIN_URL'): string {
@@ -209,7 +249,7 @@ function validateRuntimeNumber(name: string, value: unknown, minimum: number, ma
   return value as number;
 }
 
-function parseBaseConfig(): Config {
+function parseBaseConfig(warnings: string[]): Config {
   const adminUrl = normalizeAdminUrl(requireEnv('FERRUM_ADMIN_URL'));
   const jwtSecret = validateSecret(requireEnv('FERRUM_JWT_SECRET'), 'FERRUM_JWT_SECRET');
   const jwtMaxTtl = parseInteger('FERRUM_JWT_MAX_TTL', 3600, 0, 86_400);
@@ -267,7 +307,7 @@ function parseBaseConfig(): Config {
     jwtMaxTtl,
     jwtRole: parseRole(optionalEnv('FERRUM_JWT_ROLE') ?? 'admin', 'FERRUM_JWT_ROLE'),
     jwtAudience: parseAudience(optionalEnv('FERRUM_JWT_AUDIENCE')),
-    jwtNamespaces: parseNamespaces(optionalEnv('FERRUM_JWT_NAMESPACES'), 'FERRUM_JWT_NAMESPACES'),
+    jwtNamespaces: parseEnvNamespaceGrants(authMode, warnings),
     tlsCaPath,
     tlsCaRoot,
     tlsVerify: parseBoolean('FERRUM_TLS_VERIFY', true),
@@ -307,9 +347,14 @@ function parseBaseConfig(): Config {
 const runtimeOverrides: Partial<RuntimeConfig> = {};
 const runtimeListeners = new Set<() => void | Promise<void>>();
 let baseConfig: Config | undefined;
+let baseWarnings: readonly string[] = [];
 
 export function loadConfig(): Config {
-  if (!baseConfig) baseConfig = parseBaseConfig();
+  if (!baseConfig) {
+    const warnings: string[] = [];
+    baseConfig = parseBaseConfig(warnings);
+    baseWarnings = warnings;
+  }
   const config = { ...baseConfig, ...runtimeOverrides };
   return {
     ...config,
@@ -318,6 +363,12 @@ export function loadConfig(): Config {
     jwtAudience: Array.isArray(config.jwtAudience) ? [...config.jwtAudience] : config.jwtAudience,
     jwtNamespaces: config.jwtNamespaces ? [...config.jwtNamespaces] : undefined,
   };
+}
+
+/** Advisories about the environment configuration, logged once when the server starts. */
+export function getConfigWarnings(): string[] {
+  loadConfig();
+  return [...baseWarnings];
 }
 
 export function getRuntimeConfig(): RuntimeConfig {
@@ -341,6 +392,7 @@ export function getPublicRuntimeConfig(accepted = getRuntimeConfig()): PublicRun
   const { tlsCaPath, ...runtime } = accepted;
   return {
     ...runtime,
+    jwtNamespaces: runtime.jwtNamespaces ?? [NAMESPACE_WILDCARD],
     authMode: loadConfig().authMode,
     tlsCaConfigured: Boolean(tlsCaPath),
     runtimeSettingsEnabled: loadConfig().allowRuntimeSettings,
@@ -394,7 +446,7 @@ export async function updateRuntimeConfig(updates: Partial<RuntimeConfig>): Prom
     if (!Array.isArray(updates.jwtNamespaces) || updates.jwtNamespaces.some((value) => typeof value !== 'string')) {
       throw new Error('jwtNamespaces must be a string array');
     }
-    nextOverrides.jwtNamespaces = parseNamespaces(updates.jwtNamespaces.join(','), 'jwtNamespaces');
+    nextOverrides.jwtNamespaces = parseNamespaceGrants(updates.jwtNamespaces, 'jwtNamespaces');
   }
   if (updates.tlsCaPath !== undefined) {
     if (typeof updates.tlsCaPath !== 'string') throw new Error('tlsCaPath must be a string');

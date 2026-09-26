@@ -139,6 +139,52 @@ describe('trusted OIDC proxy authentication', () => {
     }
   });
 
+  it('refuses a present but empty namespace header instead of reading it as absent', async () => {
+    const app = await buildApp();
+    try {
+      for (const value of ['', ' ', '\t', ' , ', ',']) {
+        const headers = identityHeaders({ 'x-ferrum-role': 'admin', 'x-ferrum-namespaces': value });
+        const response = await app.inject({ method: 'GET', url: '/protected', headers });
+        expect(response.statusCode, JSON.stringify(value)).toBe(401);
+        const session = await app.inject({ method: 'GET', url: '/api/auth/session', headers });
+        expect(session.statusCode, JSON.stringify(value)).toBe(401);
+      }
+      // Over a real socket as well, where the empty value reaches rawHeaders.
+      const raw = await rawGet(app, '/protected', identityHeaders({
+        'x-ferrum-role': 'admin',
+        'x-ferrum-namespaces': '',
+      }));
+      expect(raw.statusCode).toBe(401);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('keeps an admin that omits the namespace header unrestricted', async () => {
+    const app = await buildApp();
+    try {
+      const headers = identityHeaders({ 'x-ferrum-role': 'admin' });
+      delete (headers as Partial<typeof headers>)['x-ferrum-namespaces'];
+      const response = await app.inject({ method: 'GET', url: '/protected', headers });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).not.toHaveProperty('namespaces');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('drops empty entries between namespace grants', async () => {
+    const app = await buildApp();
+    try {
+      const headers = identityHeaders({ 'x-ferrum-namespaces': ' tenant-a,, tenant-b ,' });
+      const response = await app.inject({ method: 'GET', url: '/protected', headers });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().namespaces).toEqual(['tenant-a', 'tenant-b']);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('requires a granted namespace on namespace-scoped gateway requests', async () => {
     const app = await buildApp();
     try {
