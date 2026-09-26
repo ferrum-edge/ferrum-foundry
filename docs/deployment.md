@@ -80,7 +80,7 @@ strings `true` and `false`. Duration variables are integers.
 | Variable | Required | Default | Range or format | Meaning |
 |---|---|---|---|---|
 | `FERRUM_ADMIN_URL` | Yes | - | `http`/`https` origin, no path, query, fragment, or credentials | Ferrum Edge admin API origin |
-| `FERRUM_JWT_SECRET` | Yes | - | 32 characters or more | HS256 key for downstream admin JWTs; must equal the gateway's `FERRUM_ADMIN_JWT_SECRET` |
+| `FERRUM_JWT_SECRET` | Yes | - | 32 UTF-8 bytes or more, not blank | HS256 key for downstream admin JWTs; must equal the gateway's `FERRUM_ADMIN_JWT_SECRET`. Used verbatim, like the gateway: surrounding whitespace is part of the key |
 | `PORT` | No | `3001` (`8080` in the image) | 1-65535 | TCP port the BFF listens on |
 | `NODE_ENV` | No | unset (`production` in the image) | any string | `production` enables production logging, static SPA serving, secure cookies, one-hop proxy trust, and the static-auth refusal |
 | `FERRUM_BIND_ADDRESS` | No | `0.0.0.0` | literal IPv4/IPv6 address or `localhost` | Interface the BFF listens on |

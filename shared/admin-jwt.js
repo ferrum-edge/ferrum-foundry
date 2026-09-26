@@ -50,8 +50,10 @@ export async function signAdminJwt({
   jti = randomUUID(),
 }) {
   requireNonEmpty(secret, 'secret');
-  if (secret.length < MIN_SECRET_LENGTH) {
-    throw new Error(`secret must be at least ${MIN_SECRET_LENGTH} characters`);
+  // The key is used verbatim, and measured in UTF-8 bytes, as Ferrum Edge does.
+  const key = new TextEncoder().encode(secret);
+  if (key.length < MIN_SECRET_LENGTH) {
+    throw new Error(`secret must be at least ${MIN_SECRET_LENGTH} bytes`);
   }
   requireNonEmpty(issuer, 'issuer');
   requireNonEmpty(subject, 'subject');
@@ -79,5 +81,5 @@ export async function signAdminJwt({
     .setJti(jti);
 
   if (normalizedAudience) signer = signer.setAudience(normalizedAudience);
-  return signer.sign(new TextEncoder().encode(secret));
+  return signer.sign(key);
 }
