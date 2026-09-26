@@ -1,3 +1,4 @@
+import { Socket } from 'node:net';
 import { Readable, Transform, type TransformCallback } from 'node:stream';
 import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
@@ -15,6 +16,10 @@ const DEFAULT_BODY_LIMIT = 2 * 1024 * 1024;
 const API_SPEC_BODY_LIMIT = 30 * 1024 * 1024;
 const RESTORE_BODY_LIMIT = 110 * 1024 * 1024;
 const BACKUP_RESTORE_OPERATION_TIMEOUT = 120_000;
+// Bounds on discarding an upload the reply no longer needs; see drainUnreadUpload.
+const DRAIN_LINGER_MS = 5_000;
+const DRAIN_OVERSIZE_LINGER_MS = 1_000;
+const DRAIN_BYTE_CAP = 4 * 1024 * 1024;
 
 const REQUEST_HEADER_ALLOWLIST = [
   'accept',
@@ -227,6 +232,111 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
     }
   };
 
+  // A gateway may answer (400/403/412/413, or not at all) without reading the
+  // whole upload, and the BFF may refuse one itself. Once the reply is out the
+  // unread remainder sits paused on the client's socket. Left there, it strands
+  // the next keep-alive request until the server's request timeout (#418).
+  // Closing the socket over it is no better: unread bytes make the kernel reset
+  // the connection, which can discard the response before the client reads it
+  // and fails the client's in-flight write with EPIPE/ECONNRESET (#453). So
+  // discard the remainder instead, so the response arrives and the connection
+  // stays reusable. A drain never outlives the request's remaining upload
+  // budget or DRAIN_LINGER_MS, whichever ends first; a remainder larger than
+  // DRAIN_BYTE_CAP only lingers for DRAIN_OVERSIZE_LINGER_MS, long enough for
+  // the response to be read. A sender that outlasts its bound, arrives while
+  // every drain slot is taken, or is still sending when the server begins
+  // shutting down has its connection closed.
+  let activeDrains = 0;
+  let closing = false;
+  const drainAbandons = new Set<() => void>();
+  fastify.addHook('preClose', async () => {
+    // A draining connection is not idle, so the HTTP server's close would wait
+    // for the drain's own timers and hold shutdown past FERRUM_SHUTDOWN_TIMEOUT.
+    closing = true;
+    for (const abandon of [...drainAbandons]) abandon();
+  });
+
+  const drainUnreadUpload = (
+    request: FastifyRequest,
+    budgetEndsAt: number,
+    destroyUnread: boolean,
+  ) => {
+    const incoming = request.raw;
+    const socket = incoming.socket;
+    // Assumes HTTP/1.1, which is all the BFF serves: the socket carries only
+    // this connection's exchanges. Under HTTP/2 it would be the whole session
+    // (the compatibility layer's socket proxy still passes this instanceof
+    // check), and destroy() would kill every stream on it. Revisit this before
+    // enabling HTTP/2.
+    if (incoming.complete || !(socket instanceof Socket) || socket.destroyed) return;
+    const config = loadConfig();
+    const now = performance.now();
+    const lingerFor = Math.min(budgetEndsAt - now, DRAIN_LINGER_MS);
+    if (destroyUnread || closing || lingerFor <= 0 || activeDrains >= config.maxActiveUploads) {
+      socket.destroy();
+      return;
+    }
+    activeDrains += 1;
+    let settled = false;
+    let drained = 0;
+    let idleTimer: NodeJS.Timeout | undefined;
+    let deadlineTimer: NodeJS.Timeout | undefined;
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      activeDrains = Math.max(0, activeDrains - 1);
+      drainAbandons.delete(abandon);
+      if (deadlineTimer) clearTimeout(deadlineTimer);
+      if (idleTimer) clearTimeout(idleTimer);
+      incoming.off('data', onData);
+      incoming.off('end', settle);
+      incoming.off('error', settle);
+      socket.off('close', settle);
+    };
+    const abandon = () => {
+      settle();
+      socket.destroy();
+    };
+    const armDeadline = (ms: number) => {
+      if (deadlineTimer) clearTimeout(deadlineTimer);
+      deadlineTimer = setTimeout(abandon, ms);
+      deadlineTimer.unref();
+    };
+    const idleTimeout = Math.min(config.writeTimeout, lingerFor);
+    const resetIdleTimer = () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(abandon, idleTimeout);
+      idleTimer.unref();
+    };
+    let oversize = false;
+    const lingerBriefly = () => {
+      oversize = true;
+      const remaining = lingerFor - (performance.now() - now);
+      armDeadline(Math.max(0, Math.min(remaining, DRAIN_OVERSIZE_LINGER_MS)));
+    };
+    const onData = (chunk: Buffer) => {
+      drained += chunk.length;
+      if (!oversize && drained > DRAIN_BYTE_CAP) lingerBriefly();
+      resetIdleTimer();
+    };
+    armDeadline(lingerFor);
+    // A declared body over the cap may leave a remainder over it too, so treat
+    // it as one before the first byte is discarded (the early 413 on a huge
+    // declared upload); an undeclared one is caught by the running count.
+    const declaredLength = Number(request.headers['content-length']);
+    if (Number.isFinite(declaredLength) && declaredLength > DRAIN_BYTE_CAP) lingerBriefly();
+    resetIdleTimer();
+    drainAbandons.add(abandon);
+    incoming.once('end', settle);
+    incoming.once('error', settle);
+    socket.once('close', settle);
+    // Detach whatever was consuming the body, then let the bytes fall on the
+    // floor: a 'data' listener with nowhere to forward them.
+    incoming.unpipe();
+    incoming.on('data', onData);
+    incoming.resume();
+  };
+
   fastify.addHook('onResponse', async (request) => releaseUpload(request));
   fastify.addHook('onRequestAbort', async (request) => releaseUpload(request));
 
@@ -256,20 +366,32 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
     bodyLimit: RESTORE_BODY_LIMIT,
   }, async (request, reply) => {
     const config = loadConfig();
+    const routeBodyLimit = bodyLimitFor(proxyTargetPath(request));
+    // The large-upload routes get their own, longer wall-clock budget. A 2 MiB
+    // body has no business outlasting the write timeout, so ordinary routes
+    // reuse it as their absolute budget as well as their idle one.
+    const uploadDeadline = routeBodyLimit > DEFAULT_BODY_LIMIT
+      ? config.uploadTimeout
+      : config.writeTimeout;
+    const uploadBudgetEndsAt = performance.now() + uploadDeadline;
+    // Set when the upload itself ran out of time: its sender gets no further.
+    let destroyUnreadUpload = false;
+    // Registered before any reply can be sent, so every exit below is covered.
+    if (carriesRequestBody(request)) {
+      reply.raw.once('finish', () => {
+        drainUnreadUpload(request, uploadBudgetEndsAt, destroyUnreadUpload);
+      });
+    }
     const principal = request.authPrincipal;
     if (!principal) return reply.status(401).send({ error: 'Unauthorized' });
     // Checked against the same `config` this request is forwarded with, so an
     // operation issued against a replaced gateway never reaches its successor.
-    if (!stampGatewayTarget(request, reply, config)) {
-      if (carriesRequestBody(request) && !request.raw.complete) reply.header('connection', 'close');
-      return rejectStaleGatewayTarget(reply);
-    }
+    if (!stampGatewayTarget(request, reply, config)) return rejectStaleGatewayTarget(reply);
 
     const target = proxyTargetUrl(request, config.adminUrl);
     const targetPath = target.pathname;
 
     const declaredLength = Number(request.headers['content-length']);
-    const routeBodyLimit = bodyLimitFor(targetPath);
     if (Number.isFinite(declaredLength) && declaredLength > routeBodyLimit) {
       return reply.status(413).send({
         error: 'Payload Too Large',
@@ -309,16 +431,6 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
     reply.raw.once('finish', () => {
       if (!controller.signal.aborted) controller.abort(new Error('Response complete'));
     });
-    // A gateway may answer (400/403/412/413, or not at all) without reading
-    // the whole upload. The unread remainder sits paused on the client's
-    // socket, so a keep-alive connection would hang the next request on it
-    // until the server's request timeout. Close it instead of reusing it.
-    const closeIfUploadUnread = () => {
-      if (carriesRequestBody(request) && !request.raw.complete) {
-        reply.header('connection', 'close');
-      }
-    };
-
     try {
       const token = await generateToken(config, principal);
       controller.signal.throwIfAborted();
@@ -327,12 +439,6 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
       let body: GuardedUpload | string | undefined;
       if (hasBody && request.body && typeof (request.body as NodeJS.ReadableStream).pipe === 'function') {
         timeoutPhase = 'upload';
-        // The large-upload routes get their own, longer wall-clock budget. A
-        // 2 MiB body has no business outlasting the write timeout, so ordinary
-        // routes reuse it as their absolute budget as well as their idle one.
-        const uploadDeadline = routeBodyLimit > DEFAULT_BODY_LIMIT
-          ? config.uploadTimeout
-          : config.writeTimeout;
         const guarded = (request.body as Readable).pipe(
           new GuardedUpload(routeBodyLimit, config.writeTimeout, uploadDeadline, controller),
         );
@@ -392,7 +498,6 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
         }
       }
       if (response.status === 401) reply.header('x-ferrum-auth-layer', 'gateway');
-      closeIfUploadUnread();
 
       if (!response.body) {
         clearResponseDeadline();
@@ -414,7 +519,6 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
     } catch (error: unknown) {
       clearResponseDeadline();
       reply.raw.off('close', abortOnDisconnect);
-      closeIfUploadUnread();
       if (error instanceof RegistryRequestError) {
         return reply.status(error.status).send({ error: error.message });
       }
@@ -429,6 +533,8 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
       if (uploadTimeout) {
         // `reason` tells an operator which bound fired: a sender that stopped
         // ("idle") or one that kept trickling past its budget ("deadline").
+        // Its budget is spent, so the remainder is not drained either.
+        destroyUnreadUpload = true;
         return reply.status(504).send(timeoutResponse('upload', uploadTimeout.reason));
       }
       if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
