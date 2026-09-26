@@ -16,7 +16,12 @@
 import type { QueryClient } from "@tanstack/react-query";
 
 /** Detail query-key roots a cascading mutation can destroy. */
-export type CascadeKind = "proxy" | "upstream" | "pluginConfig" | "apiSpecDocument";
+export type CascadeKind =
+  | "proxy"
+  | "upstream"
+  | "pluginConfig"
+  | "apiSpecDocument"
+  | "consumer";
 
 /** The plural list key that accompanies each detail key. */
 const LIST_KEY: Record<CascadeKind, string> = {
@@ -24,6 +29,7 @@ const LIST_KEY: Record<CascadeKind, string> = {
   upstream: "upstreams",
   pluginConfig: "pluginConfigs",
   apiSpecDocument: "apiSpecs",
+  consumer: "consumers",
 };
 
 /**

@@ -20,6 +20,13 @@ const initial: Upstream = {
   created_at: "2026-09-01T00:00:00Z", updated_at: "2026-09-01T00:00:00Z",
 };
 
+/** A strong tag that changes whenever the stored upstream does. */
+function etagOf(upstream: Upstream): string {
+  let hash = 0;
+  for (const char of JSON.stringify(upstream)) hash = (hash * 31 + char.charCodeAt(0)) | 0;
+  return `"${(hash >>> 0).toString(16)}"`;
+}
+
 beforeEach(() => {
   ui = createHarness();
   current = initial;
@@ -31,11 +38,16 @@ beforeEach(() => {
     if (request.method === "GET") {
       if (path === "/api/proxy/upstreams") return Response.json(page(current ? [current] : []));
       if (path === "/api/proxy/upstreams/orders") return current
-        ? Response.json(current) : Response.json({ error: "upstream missing" }, { status: 404 });
+        ? Response.json(current, { headers: { ETag: etagOf(current) } })
+        : Response.json({ error: "upstream missing" }, { status: 404 });
       throw new Error(`Unexpected upstream read: ${path}`);
     }
     writes.push(request);
     if (failure) return Response.json({ error: "target policy rejected" }, { status: 400 });
+    const ifMatch = request.headers.get("If-Match");
+    if (ifMatch !== null && (!current || ifMatch !== etagOf(current))) {
+      return Response.json({ error: "precondition failed" }, { status: 412 });
+    }
     if (request.method === "DELETE") {
       current = undefined;
       return new Response(null, { status: 204 });
@@ -206,6 +218,83 @@ describe("upstream target route integration", () => {
     await settle(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull());
     expect(writes).toHaveLength(0);
     expect(inputByLabel(panel(), "Host").value).toBe("my-backend");
+  });
+
+  it("refuses a target edit when a background refetch brought a concurrent change to that target (#445)", async () => {
+    await mount();
+    await settle(() => expect(ui.host.textContent).toContain("Targets (1)"));
+    await selectTab("Targets (1)");
+    await act(async () => rowActions()[0].click());
+    await fill(inputByLabel(panel(), "Path"), "/v2");
+    // Another operator changes the same target's weight, and this page's
+    // upstream query refetches successfully while the draft is open.
+    current = {
+      ...initial,
+      targets: [{ ...initial.targets[0], weight: 50 }],
+      updated_at: "2026-09-02T00:00:00Z",
+    };
+    const cached = () => ui.client.getQueryData<Upstream>(["upstream", "tenant-a", "orders"]);
+    await act(async () => {
+      await ui.client.refetchQueries({ queryKey: ["upstream", "tenant-a", "orders"], exact: true });
+    });
+    await settle(() => expect(cached()?.targets[0].weight).toBe(50));
+    // The open form keeps its draft, seeded before the concurrent change.
+    expect(inputByLabel(panel(), "Weight").value).toBe("1");
+    expect(inputByLabel(panel(), "Path").value).toBe("/v2");
+
+    await click("Update Target", panel());
+    await settle(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull());
+    // Judged against the list the draft was edited from: nothing is sent, and
+    // the other operator's weight survives.
+    expect(writes).toHaveLength(0);
+    expect(current?.targets).toEqual([{ ...initial.targets[0], weight: 50 }]);
+    expect(inputByLabel(panel(), "Path").value).toBe("/v2");
+    expect(inputByLabel(panel(), "Weight").value).toBe("1");
+
+    // Discarding drops only the target draft and shows the current target.
+    await click("Discard my draft and reload");
+    await settle(() => expect(panel().textContent).toContain("weight 50"));
+    expect(panel().querySelector("input")).toBeNull();
+    expect(writes).toHaveLength(0);
+  });
+
+  it("refuses an add when a background refetch brought a concurrent target change", async () => {
+    await mount();
+    await settle(() => expect(ui.host.textContent).toContain("Targets (1)"));
+    await selectTab("Targets (1)");
+    await click("Add Target", panel());
+    await fill(inputByLabel(panel(), "Host"), "my-backend");
+    current = { ...initial, targets: [{ host: "their-backend", port: 9090, weight: 1 }] };
+    await act(async () => {
+      await ui.client.refetchQueries({ queryKey: ["upstream", "tenant-a", "orders"], exact: true });
+    });
+    await settle(() => expect(panel().textContent).toContain("their-backend:9090"));
+    await click("Add Target", panel());
+    await settle(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull());
+    expect(writes).toHaveLength(0);
+    expect(inputByLabel(panel(), "Host").value).toBe("my-backend");
+  });
+
+  it("still composes a target edit with an unrelated settings change picked up by a refetch", async () => {
+    await mount();
+    await settle(() => expect(ui.host.textContent).toContain("Targets (1)"));
+    await selectTab("Targets (1)");
+    await act(async () => rowActions()[0].click());
+    await fill(inputByLabel(panel(), "Path"), "/v2");
+    current = { ...initial, backend_tls_sni: "orders.example", updated_at: "2026-09-02T00:00:00Z" };
+    const tag = etagOf(current);
+    await act(async () => {
+      await ui.client.refetchQueries({ queryKey: ["upstream", "tenant-a", "orders"], exact: true });
+    });
+    await click("Update Target", panel());
+    await settle(() => expect(panel().textContent).toContain("/v2"));
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(writes).toHaveLength(1);
+    expect(writes[0].headers.get("If-Match")).toBe(tag);
+    expect(await writes[0].json()).toMatchObject({
+      backend_tls_sni: "orders.example",
+      targets: [{ ...initial.targets[0], path: "/v2" }],
+    });
   });
 
   it("offers a route back when the requested upstream no longer exists", async () => {

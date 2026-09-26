@@ -116,7 +116,8 @@ describe("restore recovery presentation", () => {
     expect(requests.filter((request) => request.method === "GET")).toHaveLength(1);
     const lastWrite = requests.filter((request) => request.method === "POST").at(-1)!;
     expect(new URL(lastWrite.url).searchParams.get("confirm_api_spec_deletion")).toBe(confirmSpecs ? "true" : null);
-    expect(qc.getQueryState(["consumer", "tenant-a", "old"])?.isInvalidated).toBe(true);
+    // Retired, not merely invalidated: a cached detail must not seed an editor (#446).
+    expect(qc.getQueryState(["consumer", "tenant-a", "old"])).toBeUndefined();
   });
 
   it("retains committed-but-unverifiable copy without inventing a cursor or repeating restore", async () => {
@@ -189,7 +190,7 @@ describe("restore recovery presentation", () => {
       (button) => button.textContent?.trim() === "Restore",
     )).toBe(false);
     expect(requests.filter((request) => request.method === "POST")).toHaveLength(1);
-    expect(qc.getQueryState(["consumer", "tenant-a", "old"])?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(["consumer", "tenant-a", "old"])).toBeUndefined();
   });
 
   it("keeps the confirmation armed when the upload phase proves the restore did not run", async () => {
@@ -242,5 +243,7 @@ describe("restore recovery presentation", () => {
     expect(document.body.textContent).toContain("spec replay failed");
     expect(document.body.textContent).toContain("2 API specs may still be missing");
     expect(requests).toHaveLength(1);
+    // A rollback that did not complete may have left restored content behind.
+    expect(qc.getQueryState(["consumer", "tenant-a", "old"])).toBeUndefined();
   });
 });

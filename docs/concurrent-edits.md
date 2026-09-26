@@ -174,7 +174,7 @@ can lose.
 | --- | --- | --- |
 | Proxy settings save | the editor's seed, every field except `plugins` (never sent) | the verification read |
 | Upstream settings save | the editor's seed, minus mesh-projected fields | the verification read |
-| Upstream targets save | `targets` of the render the new list was built from | the read its settings are rebuilt from |
+| Upstream targets save | `targets` the add/edit form was opened against (a row removal: the list on screen when it was clicked) | the read its settings are rebuilt from |
 | Consumer Details save | the editor's seed, minus `credentials` and `labels` (never sent) | the read its credentials are taken from |
 | Consumer ACL add/remove | the consumer the group list was computed from | the read its credentials are taken from |
 | Plugin configuration save | the editor's seed, minus `labels` (never sent) | the membership plan's fresh read |
@@ -281,11 +281,23 @@ and a further Save is judged against the old baseline — the honest outcome
 when Foundry cannot say what the gateway holds, which the stale-write dialog's
 "Discard my draft and reload" resolves.
 
-The two single-field editors build their guard from the rendered resource
-rather than a form seed. The update hooks refresh that resource before the
-rejection reaches them, so an upstream **targets** save or a consumer **ACL**
-change that commits closes its editor like a success, and the next edit is
-computed from the committed list.
+The two single-field editors take their guard from the list they were
+computed from rather than the settings form's seed. The update hooks refresh
+that resource before the rejection reaches them, so an upstream **targets**
+save or a consumer **ACL** change that commits closes its editor like a
+success, and the next edit is computed from the committed list.
+
+An upstream target add or edit form holds a draft, so it follows the seed-once
+rule too: opening it captures the target list on screen and the guard built
+from it, and the new list is computed from that capture. A background refetch
+that brings a concurrent change to the targets updates the rows on screen but
+not the open form's basis, so its save is refused instead of being approved
+against a list the draft was never edited from (#445). Only `targets` is
+compared, so a settings change picked up by the same refetch still composes.
+A row removal from the same page moves an open form's basis only when the form
+was opened against the very list the removal was computed from and the gateway
+returned the result. "Discard my draft and reload" from a targets refusal
+closes the target form and leaves any settings draft alone.
 
 A read served from the cached-config fallback (`X-Data-Source: cached`) can
 lag the commit, and the form would then show the older content. That is the
@@ -359,6 +371,8 @@ so the next successful read seeds a fresh baseline for the new tenant.
 | `If-Match` from the verified read, a writer in the gap refused, re-send after a `412` on unowned fields, bounded retries, untagged and weak-tag fallback, popup opt-out | `src/api/conditionalWrite.test.ts` |
 | Draft preserved, no reapply control, keep/discard behavior | `src/routes/proxies/concurrentEdit.test.tsx` |
 | Same-client write ordering still composes | `src/api/upstreams.targetWrites.test.ts` |
+| Target form basis survives a background refetch; unrelated settings still compose | `src/routes/upstreams/TargetEditor.test.tsx` |
+| Restore retires the restored namespace's detail caches | `src/hooks/restoreDetailCache.test.tsx`, `src/components/forms/BackupRestoreCard.recovery.test.tsx` |
 | Guarded deletes, consumer saves and rotation re-send, nested redaction of plugin `config` | `src/api/conditionalWrite.test.ts`, `src/lib/resourceBaseline.test.ts` |
 | Plugin editor baseline, membership writes conditional on their reads | `src/lib/pluginMembership.test.ts`, `src/lib/pluginMembership.binding.test.ts` |
 | Refused delete dialog | `src/routes/proxies/concurrentEdit.test.tsx` |
