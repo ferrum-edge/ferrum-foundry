@@ -41,15 +41,40 @@ describe('runtime audience clearing', () => {
     });
 
     // This is the explicit clear payload asserted by SettingsForm.test.tsx.
-    await config.updateRuntimeConfig({ jwtAudience: '', jwtNamespaces: [] });
+    await config.updateRuntimeConfig({ jwtAudience: '', jwtNamespaces: ['*'] });
 
     const after = await generateToken(config.loadConfig(), principal);
     expect(after).not.toBe(before);
     expect(decodeJwt(after)).not.toHaveProperty('aud');
     expect(config.getPublicRuntimeConfig().jwtAudience).toBeUndefined();
-    expect(config.getPublicRuntimeConfig().jwtNamespaces).toBeUndefined();
+    expect(config.loadConfig().jwtNamespaces).toBeUndefined();
     const response = JSON.parse(JSON.stringify(config.getPublicRuntimeConfig()));
     expect(response).not.toHaveProperty('jwtAudience');
-    expect(response).not.toHaveProperty('jwtNamespaces');
+    expect(response.jwtNamespaces).toEqual(['*']);
+  });
+});
+
+describe('runtime namespace grants', () => {
+  it.each([[[]], [['']], [[' ', ' ']], [[',']], [['*', 'tenant-b']], [['tenant b']]])(
+    'refuses %j instead of clearing the restriction',
+    async (jwtNamespaces) => {
+      const config = await import('./config.js');
+      await expect(config.updateRuntimeConfig({ jwtAudience: '', jwtNamespaces })).rejects.toThrow(/jwtNamespaces/);
+      expect(config.loadConfig()).toMatchObject({ jwtAudience: 'old-audience', jwtNamespaces: ['tenant-a'] });
+      expect(config.getPublicRuntimeConfig().jwtNamespaces).toEqual(['tenant-a']);
+    },
+  );
+
+  it('normalizes exact runtime grants', async () => {
+    const config = await import('./config.js');
+    await config.updateRuntimeConfig({ jwtNamespaces: [' tenant-b ', '', 'tenant-c', 'tenant-b'] });
+    expect(config.loadConfig().jwtNamespaces).toEqual(['tenant-b', 'tenant-c']);
+  });
+
+  it('reads a wildcard with empty entries as the lone wildcard', async () => {
+    const config = await import('./config.js');
+    await config.updateRuntimeConfig({ jwtNamespaces: ['*', ' '] });
+    expect(config.loadConfig().jwtNamespaces).toBeUndefined();
+    expect(config.getPublicRuntimeConfig().jwtNamespaces).toEqual(['*']);
   });
 });
