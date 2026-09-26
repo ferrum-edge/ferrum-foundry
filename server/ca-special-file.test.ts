@@ -59,7 +59,6 @@ describe.skipIf(process.platform === 'win32')('CA special-file validation', () =
           FERRUM_ALLOW_RUNTIME_SETTINGS: 'true',
           FERRUM_JWT_SECRET: 'ca-special-signing-fixture-at-least-32-characters',
           FERRUM_BFF_AUTH_TOKEN: 'ca-special-login-fixture-at-least-32-characters',
-          FERRUM_JWT_NAMESPACES: '*',
           FERRUM_TLS_CA_ROOT: root,
           FERRUM_TLS_CA_PATH: selected,
         },

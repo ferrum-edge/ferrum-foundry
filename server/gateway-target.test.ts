@@ -56,7 +56,6 @@ async function buildBff(a: Gateway, b: Gateway, runtimeSettings = 'true'): Promi
     FERRUM_ALLOW_RUNTIME_SETTINGS: runtimeSettings,
     FERRUM_JWT_SECRET: SECRET,
     FERRUM_BFF_AUTH_TOKEN: TOKEN,
-    FERRUM_JWT_NAMESPACES: '*',
     FERRUM_SECURE_COOKIES: 'false',
   })) vi.stubEnv(key, value);
   const { buildApp } = await import('./app.js');

@@ -28,7 +28,6 @@ beforeEach(() => {
     FERRUM_AUTH_MODE: "static",
     FERRUM_JWT_SECRET: "settings-status-signing-fixture-long-enough",
     FERRUM_BFF_AUTH_TOKEN: loginToken,
-    FERRUM_JWT_NAMESPACES: "*",
     FERRUM_SECURE_COOKIES: "false",
   })) vi.stubEnv(key, value);
 });

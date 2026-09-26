@@ -43,7 +43,6 @@ function setValidEnv(overrides: Record<string, string | undefined> = {}): void {
   process.env.FERRUM_ADMIN_URL = 'http://127.0.0.1:9000';
   process.env.FERRUM_JWT_SECRET = 'j'.repeat(40);
   process.env.FERRUM_BFF_AUTH_TOKEN = 'b'.repeat(40);
-  process.env.FERRUM_JWT_NAMESPACES = '*';
   for (const [key, value] of Object.entries(overrides)) {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
@@ -214,20 +213,33 @@ describe('config', () => {
     });
   });
 
-  it('requires an explicit namespace scope for the static principal', async () => {
+  it('keeps an unset static namespace scope unrestricted and warns about it', async () => {
     setValidEnv({ FERRUM_JWT_NAMESPACES: undefined });
-    const { loadConfig } = await loadModule();
-    expect(() => loadConfig()).toThrow(/FERRUM_JWT_NAMESPACES is required in static mode/);
+    const { loadConfig, getConfigWarnings, getPublicRuntimeConfig, UNSCOPED_STATIC_PRINCIPAL_WARNING } =
+      await loadModule();
+    expect(loadConfig()).toMatchObject({ authMode: 'static', jwtNamespaces: undefined });
+    expect(getPublicRuntimeConfig().jwtNamespaces).toEqual(['*']);
+    expect(getConfigWarnings()).toEqual([UNSCOPED_STATIC_PRINCIPAL_WARNING]);
+    expect(UNSCOPED_STATIC_PRINCIPAL_WARNING).toMatch(/FERRUM_JWT_NAMESPACES is not set/);
   });
 
   it('grants every namespace only through the lone wildcard', async () => {
     for (const value of ['*', ' * ', '*,*']) {
       clearTestEnv();
       setValidEnv({ FERRUM_JWT_NAMESPACES: value });
-      const { loadConfig, getPublicRuntimeConfig } = await loadModule();
+      const { loadConfig, getConfigWarnings, getPublicRuntimeConfig } = await loadModule();
       expect(loadConfig().jwtNamespaces).toBeUndefined();
       expect(getPublicRuntimeConfig().jwtNamespaces).toEqual(['*']);
+      expect(getConfigWarnings()).toEqual([]);
     }
+  });
+
+  it('reports exact static grants without a warning', async () => {
+    setValidEnv({ FERRUM_JWT_NAMESPACES: ' tenant-a , tenant-b ' });
+    const { loadConfig, getConfigWarnings, getPublicRuntimeConfig } = await loadModule();
+    expect(loadConfig().jwtNamespaces).toEqual(['tenant-a', 'tenant-b']);
+    expect(getPublicRuntimeConfig().jwtNamespaces).toEqual(['tenant-a', 'tenant-b']);
+    expect(getConfigWarnings()).toEqual([]);
   });
 
   it('rejects a present namespace setting with no namespace instead of dropping the restriction', async () => {
@@ -269,8 +281,9 @@ describe('config', () => {
       FERRUM_TRUSTED_PROXY_SECRET: 'p'.repeat(40),
       FERRUM_JWT_NAMESPACES: undefined,
     });
-    const { loadConfig } = await loadModule();
+    const { loadConfig, getConfigWarnings } = await loadModule();
     expect(loadConfig().jwtNamespaces).toBeUndefined();
+    expect(getConfigWarnings()).toEqual([]);
   });
 
   it('rejects invalid URL forms and schemes', async () => {

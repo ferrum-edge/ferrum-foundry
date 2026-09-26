@@ -85,13 +85,15 @@ These defaults remain editable in static development mode and apply to its
 principal on subsequent logins. Existing static sessions retain their original grants. Issuer, audience, and token lifetime remain
 separate signing settings in both modes.
 
-Static namespace defaults are never unrestricted by omission. `jwtNamespaces`
-must be a non-empty array of exact names, or `["*"]` to grant every namespace;
-an empty array, an empty entry, or `*` mixed with names is refused with
-`400 FERRUM_BFF_INVALID_SETTINGS` and nothing in the update is applied. A
-session that holds namespace grants cannot use the defaults to widen access:
-it may only choose grants it holds, and anything else — including `["*"]` —
-is refused with `403 FERRUM_BFF_NAMESPACE_GRANT_EXCEEDED`.
+An update never clears the static namespace defaults by omission. A submitted
+`jwtNamespaces` must be a non-empty array of exact names, or `["*"]` to grant
+every namespace; an empty array, an empty entry, or `*` mixed with names is
+refused with `400 FERRUM_BFF_INVALID_SETTINGS` and nothing in the update is
+applied. `GET /api/settings` always includes `jwtNamespaces`, reporting an
+unrestricted static principal as `["*"]`. A session that holds namespace grants
+cannot use the defaults to widen access: it may only choose grants it holds,
+and anything else — including `["*"]` — is refused with
+`403 FERRUM_BFF_NAMESPACE_GRANT_EXCEEDED`.
 
 ### Namespace binding
 
@@ -263,11 +265,12 @@ is not stored in `localStorage` or sent on later requests. Static mode is
 refused when `NODE_ENV=production` unless the deliberately unsafe
 `FERRUM_ALLOW_INSECURE_STATIC_AUTH=true` escape hatch is present.
 
-The static principal's namespace scope must be stated explicitly: startup
-requires `FERRUM_JWT_NAMESPACES`, either a comma-separated list of exact
-namespace names or `*` alone for every namespace. A value that names no
-namespace — empty, whitespace only, or commas only — is a startup error rather
-than an absent restriction, so a scoped deployment can never silently mint JWTs
+`FERRUM_JWT_NAMESPACES` scopes the static principal: a comma-separated list of
+exact namespace names, or `*` alone for every namespace. Left unset, the
+static principal is unrestricted and its JWTs carry no `ns` claim; the BFF
+logs a startup warning saying so. A value that is set but names no namespace —
+empty, whitespace only, or commas only — is a startup error rather than an
+absent restriction, so a scoped deployment can never silently mint JWTs
 without an `ns` claim. See the
 [configuration reference](deployment.md#downstream-jwt-claims).
 
@@ -288,7 +291,7 @@ Foundry JWTs contain `iss`, `sub`, `exp`, `iat`, `nbf`, `jti`, and `role`.
 audience. `ns` contains one exact string or an array of exact namespace grants;
 Foundry does not invent wildcard behavior. An unrestricted principal — a
 trusted-proxy admin without a namespace header, or a static principal
-configured with `*` — gets no `ns` claim; `*` is a Foundry configuration value
+configured with `*` or with `FERRUM_JWT_NAMESPACES` unset — gets no `ns` claim; `*` is a Foundry configuration value
 and is never sent as a claim. Tokens are cached by every signing
 input and authenticated principal, so a configuration or identity change can
 never reuse an earlier token.

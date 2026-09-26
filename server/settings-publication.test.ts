@@ -44,7 +44,7 @@ beforeEach(async () => {
     NODE_ENV: 'test', FERRUM_ADMIN_URL: origin, FERRUM_ADMIN_ALLOWED_ORIGINS: origin,
     FERRUM_ALLOW_RUNTIME_SETTINGS: 'true', FERRUM_AUTH_MODE: 'static',
     FERRUM_JWT_SECRET: 'settings-publication-signing-fixture-long-enough',
-    FERRUM_BFF_AUTH_TOKEN: TOKEN, FERRUM_JWT_NAMESPACES: '*', FERRUM_SECURE_COOKIES: 'false',
+    FERRUM_BFF_AUTH_TOKEN: TOKEN, FERRUM_SECURE_COOKIES: 'false',
   })) vi.stubEnv(key, value);
   const { buildApp } = await import('./app.js');
   app = await buildApp({ serveStatic: false, logger: false });

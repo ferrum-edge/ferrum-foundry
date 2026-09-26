@@ -37,7 +37,6 @@ beforeEach(() => {
     FERRUM_ADMIN_URL: 'https://initial.example',
     FERRUM_JWT_SECRET: 'cidr-signing-fixture-at-least-32-characters',
     FERRUM_BFF_AUTH_TOKEN: 'cidr-login-fixture-at-least-32-characters',
-    FERRUM_JWT_NAMESPACES: '*',
     FERRUM_ALLOW_RUNTIME_SETTINGS: 'true',
     FERRUM_ADMIN_ALLOWED_ORIGINS: 'https://runtime.example',
   })) vi.stubEnv(key, value);

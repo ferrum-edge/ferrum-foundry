@@ -9,7 +9,6 @@
         "FERRUM_ADMIN_URL=http://127.0.0.1:9000",
         "FERRUM_JWT_SECRET=dev-secret-at-least-32-characters-long",
         "FERRUM_BFF_AUTH_TOKEN=dev-bff-token-at-least-32-characters-long",
-        "FERRUM_JWT_NAMESPACES=*",
         "npm",
         "run",
         "dev"

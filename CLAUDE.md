@@ -40,8 +40,6 @@ Always reference the upstream spec when validating types or form fields. The spe
 export FERRUM_ADMIN_URL=http://127.0.0.1:9000
 export FERRUM_JWT_SECRET=dev-secret-at-least-32-characters-long
 export FERRUM_BFF_AUTH_TOKEN=dev-bff-token-at-least-32-characters-long
-# Static mode needs an explicit scope: exact namespace names, or * for every one
-export FERRUM_JWT_NAMESPACES='*'
 
 # Start frontend + BFF
 npm run dev
@@ -105,10 +103,11 @@ Production uses `FERRUM_AUTH_MODE=trusted-proxy`: an OIDC/OAuth2-capable proxy
 asserts a stable actor, Ferrum role, and exact namespace grants behind a shared
 proof header. Static-token mode is development-only; the login route exchanges
 `FERRUM_BFF_AUTH_TOKEN` for a bounded server-side session in an HttpOnly,
-SameSite cookie plus CSRF protection. Static mode requires an explicit
-`FERRUM_JWT_NAMESPACES` scope — exact names, or `*` alone for every namespace;
-a set value with no names is a startup error, never "unrestricted". No reusable
-administrator credential is stored in browser storage. Auth executes in `onRequest`, before content parsing.
+SameSite cookie plus CSRF protection. `FERRUM_JWT_NAMESPACES` scopes the static
+principal — exact names, or `*` alone for every namespace; unset stays
+unrestricted with a startup warning, and a set value with no names is a startup
+error, never "unrestricted". No reusable administrator credential is stored in
+browser storage. Auth executes in `onRequest`, before content parsing.
 The authenticated actor/role/namespaces become downstream JWT `sub`, `role`,
 and `ns` claims. See `docs/authentication.md`.
 

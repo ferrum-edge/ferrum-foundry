@@ -51,7 +51,7 @@ beforeEach(async () => {
     FERRUM_TLS_CA_PATH: selectedPath, FERRUM_TLS_CA_ROOT: directory,
     FERRUM_ALLOW_RUNTIME_SETTINGS: 'true', FERRUM_AUTH_MODE: 'static',
     FERRUM_JWT_SECRET: 'runtime-ca-signing-fixture-secret-long-enough',
-    FERRUM_BFF_AUTH_TOKEN: TOKEN, FERRUM_JWT_NAMESPACES: '*', FERRUM_SECURE_COOKIES: 'false',
+    FERRUM_BFF_AUTH_TOKEN: TOKEN, FERRUM_SECURE_COOKIES: 'false',
   })) vi.stubEnv(key, value);
   const { buildApp } = await import('./app.js');
   app = await buildApp({ serveStatic: false, logger: false });

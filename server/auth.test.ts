@@ -9,10 +9,11 @@ const ENV = {
   FERRUM_JWT_SECRET: 'test-signing-secret-is-long-enough-123',
   FERRUM_BFF_AUTH_TOKEN: BFF_TOKEN,
   FERRUM_AUTH_MODE: 'static',
-  FERRUM_JWT_NAMESPACES: '*',
   FERRUM_SECURE_COOKIES: 'false',
 };
 const snapshot: Record<string, string | undefined> = {};
+// Unset by default: the released static semantics are an unrestricted principal.
+const namespacesSnapshot = process.env.FERRUM_JWT_NAMESPACES;
 
 let authPlugin: typeof import('./auth.js').authPlugin;
 let requireAdminAuth: typeof import('./auth.js').requireAdminAuth;
@@ -22,6 +23,7 @@ beforeAll(async () => {
     snapshot[key] = process.env[key];
     process.env[key] = value;
   }
+  delete process.env.FERRUM_JWT_NAMESPACES;
   vi.resetModules();
   const auth = await import('./auth.js');
   authPlugin = auth.authPlugin;
@@ -34,6 +36,8 @@ afterAll(() => {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
+  if (namespacesSnapshot === undefined) delete process.env.FERRUM_JWT_NAMESPACES;
+  else process.env.FERRUM_JWT_NAMESPACES = namespacesSnapshot;
 });
 
 async function buildApp(): Promise<FastifyInstance> {
@@ -121,6 +125,21 @@ describe('static development sessions', () => {
         role: 'admin',
         authMode: 'static',
       });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('keeps an unscoped static principal unrestricted when FERRUM_JWT_NAMESPACES is unset', async () => {
+    const config = await import('./config.js');
+    const { generateToken } = await import('./jwt.js');
+    const app = await buildApp();
+    try {
+      const { response } = await login(app);
+      const principal = response.json().principal;
+      expect(principal).not.toHaveProperty('namespaces');
+      expect(decodeJwt(await generateToken(config.loadConfig(), principal))).not.toHaveProperty('ns');
+      expect(config.getConfigWarnings()).toEqual([config.UNSCOPED_STATIC_PRINCIPAL_WARNING]);
     } finally {
       await app.close();
     }
@@ -220,7 +239,7 @@ describe('scoped static principal', () => {
   });
 
   afterAll(() => {
-    process.env.FERRUM_JWT_NAMESPACES = ENV.FERRUM_JWT_NAMESPACES;
+    delete process.env.FERRUM_JWT_NAMESPACES;
   });
 
   async function buildScopedApp(): Promise<FastifyInstance> {

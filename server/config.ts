@@ -152,20 +152,23 @@ function parseNamespaceGrants(entries: readonly string[], name: string): string[
   return values;
 }
 
-function parseEnvNamespaceGrants(authMode: AuthMode): string[] | undefined {
+/** Set when the static principal loads unrestricted because no scope was configured. */
+export const UNSCOPED_STATIC_PRINCIPAL_WARNING = [
+  'FERRUM_JWT_NAMESPACES is not set, so the static principal is unrestricted',
+  'and its gateway JWTs carry no ns claim;',
+  `set it to namespace names, or ${NAMESPACE_WILDCARD} for every namespace, to scope it`,
+].join(' ');
+
+function parseEnvNamespaceGrants(authMode: AuthMode, warnings: string[]): string[] | undefined {
   const name = 'FERRUM_JWT_NAMESPACES';
   // Presence is read before trimming: a set-but-empty value is a malformed
   // restriction, never the same as leaving the variable unset.
   const raw = process.env[name];
   if (raw === undefined) {
-    // The static principal's scope is always an explicit decision. Trusted-proxy
-    // grants come from the identity proxy; there this only scopes the readiness
-    // probe, which reads fleet-global endpoints.
-    if (authMode === 'static') {
-      throw new Error(
-        `${name} is required in static mode: list namespace names, or ${NAMESPACE_WILDCARD} for every namespace`,
-      );
-    }
+    // Unset keeps the static principal unrestricted. Trusted-proxy grants come
+    // from the identity proxy; there this only scopes the readiness probe,
+    // which reads fleet-global endpoints.
+    if (authMode === 'static') warnings.push(UNSCOPED_STATIC_PRINCIPAL_WARNING);
     return undefined;
   }
   return parseNamespaceGrants(raw.split(','), name);
@@ -244,7 +247,7 @@ function validateRuntimeNumber(name: string, value: unknown, minimum: number, ma
   return value as number;
 }
 
-function parseBaseConfig(): Config {
+function parseBaseConfig(warnings: string[]): Config {
   const adminUrl = normalizeAdminUrl(requireEnv('FERRUM_ADMIN_URL'));
   const jwtSecret = validateSecret(requireEnv('FERRUM_JWT_SECRET'), 'FERRUM_JWT_SECRET');
   const jwtMaxTtl = parseInteger('FERRUM_JWT_MAX_TTL', 3600, 0, 86_400);
@@ -302,7 +305,7 @@ function parseBaseConfig(): Config {
     jwtMaxTtl,
     jwtRole: parseRole(optionalEnv('FERRUM_JWT_ROLE') ?? 'admin', 'FERRUM_JWT_ROLE'),
     jwtAudience: parseAudience(optionalEnv('FERRUM_JWT_AUDIENCE')),
-    jwtNamespaces: parseEnvNamespaceGrants(authMode),
+    jwtNamespaces: parseEnvNamespaceGrants(authMode, warnings),
     tlsCaPath,
     tlsCaRoot,
     tlsVerify: parseBoolean('FERRUM_TLS_VERIFY', true),
@@ -342,9 +345,14 @@ function parseBaseConfig(): Config {
 const runtimeOverrides: Partial<RuntimeConfig> = {};
 const runtimeListeners = new Set<() => void | Promise<void>>();
 let baseConfig: Config | undefined;
+let baseWarnings: readonly string[] = [];
 
 export function loadConfig(): Config {
-  if (!baseConfig) baseConfig = parseBaseConfig();
+  if (!baseConfig) {
+    const warnings: string[] = [];
+    baseConfig = parseBaseConfig(warnings);
+    baseWarnings = warnings;
+  }
   const config = { ...baseConfig, ...runtimeOverrides };
   return {
     ...config,
@@ -353,6 +361,12 @@ export function loadConfig(): Config {
     jwtAudience: Array.isArray(config.jwtAudience) ? [...config.jwtAudience] : config.jwtAudience,
     jwtNamespaces: config.jwtNamespaces ? [...config.jwtNamespaces] : undefined,
   };
+}
+
+/** Advisories about the environment configuration, logged once when the server starts. */
+export function getConfigWarnings(): string[] {
+  loadConfig();
+  return [...baseWarnings];
 }
 
 export function getRuntimeConfig(): RuntimeConfig {
