@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A consumer credential write the gateway answered as committed but not yet live no longer leaves the credential form armed. Appending a key, JWT, or HMAC secret, replacing basic credentials, and deleting a credential now complete as the durable writes they are: the secret is shown once, the draft and its submit action are cleared, the consumer is re-read, and the card states that the change is committed but not yet proven live, so a second click can no longer append the same secret again. A credential add whose answer was lost keeps its draft but cannot be resubmitted until the consumer has been re-read, and an indexed delete whose answer was lost requires a fresh selection. Neither outcome retains the secret-bearing request in the mutation's error (#451).
 - The mobile navigation drawer now opens as a modal dialog, moves and contains keyboard focus, closes with Escape or its close button, and returns focus to the sidebar toggle. The toggle exposes its expanded state and controls relationship (#450).
 - Editing a host-only HTTP or HTTPS proxy now keeps its `listen_path` absent instead of changing it to `/`; new proxies still default to the root path (#447).
 - Raise the supported Node.js minimums to 22.22.2 and 24.15.0 to match the locked jsdom toolchain; the Quality Gate now tests both minimum patch versions (#452).
