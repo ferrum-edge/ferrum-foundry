@@ -649,11 +649,22 @@ export function yamlScalars(document: string): string[] {
     const trimmed = line.trim();
     const rest = trimmed.replace(/^(?:[-?:](?:\s+|$))+/, "");
     const value = mappingValue(rest);
+    const blockHeader = value?.replace(/^(?:[&!]\S*\s+)+/, "");
     // A block scalar's content is indented past the key that introduces it,
     // wherever a `- ` or `? ` before the key puts it, or past the `-` of `- |`.
-    if (!inBlock && value !== null && BLOCK_SCALAR_HEADER.test(value)) {
+    if (
+      !inBlock &&
+      !trimmed.startsWith("#") &&
+      blockHeader !== undefined &&
+      BLOCK_SCALAR_HEADER.test(blockHeader)
+    ) {
       blockIndent = indentation + trimmed.length - rest.length;
-    } else if (!inBlock && rest !== trimmed && BLOCK_SCALAR_HEADER.test(rest)) {
+    } else if (
+      !inBlock &&
+      !trimmed.startsWith("#") &&
+      rest !== trimmed &&
+      BLOCK_SCALAR_HEADER.test(rest)
+    ) {
       blockIndent = indentation;
     }
     if (value === "" && !inBlock) continue;
