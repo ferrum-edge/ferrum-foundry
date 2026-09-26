@@ -627,7 +627,7 @@ export function yamlScalars(document: string): string[] {
     }
     const lineOpen = openDoubleQuoted(line);
     if (continuation === null && hasContinuation && lineOpen !== null) {
-      continuation = withoutTrailingSlash(lineOpen);
+      continuation = withoutContinuation(lineOpen);
     }
     const rest = line.trim().replace(/^(?:[-?:](?:\s+|$))+/, "");
     const value = mappingValue(rest);
