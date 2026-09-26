@@ -21,15 +21,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Test the minimum supported patch on each maintained major line.
-        node: [22.22.2, 24.15.0]
+        # Keep the major line in the job name and test its minimum supported patch.
+        include:
+          - node: 22
+            node-version: 22.22.2
+          - node: 24
+            node-version: 24.15.0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: ${{ matrix.node }}
+          node-version: ${{ matrix.node-version }}
           cache: npm
 
       - name: Install locked dependencies
