@@ -666,6 +666,13 @@ export function yamlScalars(document: string): string[] {
       BLOCK_SCALAR_HEADER.test(rest)
     ) {
       blockIndent = indentation;
+    } else if (
+      !inBlock &&
+      /^---\s+/.test(trimmed) &&
+      BLOCK_SCALAR_HEADER.test(trimmed.replace(/^---\s+/, "").replace(/^(?:[&!]\S*\s+)+/, ""))
+    ) {
+      // A document-level block scalar: `--- |` starts its content on the next lines.
+      blockIndent = indentation;
     }
     if (value === "" && !inBlock) continue;
     const visited = new Set<string>();
