@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – Plugin API functions                             */
 /* ------------------------------------------------------------------ */
 
-import { proxyApi, scoped, type NamespaceScope } from "./client";
+import { proxyApi, scoped, SILENT_ERRORS, type NamespaceScope } from "./client";
 import type {
   PaginatedResponse,
   PaginationParams,
@@ -26,6 +26,7 @@ import {
   SUMMARY_SCAN_BUDGET,
   type BoundedCollection,
 } from "./pagination";
+import { secretValues, withRedactedFailure } from "./secretRedaction";
 
 function withPluginConfigId(
   data: PluginConfigCreate,
@@ -171,17 +172,29 @@ export function toUpdatePayload(plugin: PluginConfig): PluginConfigCreate {
   return rest;
 }
 
+/**
+ * A plugin `config` can carry credentials anywhere — client secrets, API keys,
+ * authentication headers, a password in a URL — and a non-admin read does not
+ * return them. A failed write is therefore reported with every such submitted
+ * value removed and without the request (#478), and the global error popup,
+ * which would show the raw gateway body, stays closed: the caller reports it.
+ */
 export async function createConfig(
   scope: NamespaceScope,
   data: PluginConfigCreate,
 ): Promise<PluginConfig> {
-  return proxyApi
-    .post("plugins/config", scoped(scope, { json: withPluginConfigId(data) }))
-    .json<PluginConfig>();
+  const body = withPluginConfigId(data);
+  return withRedactedFailure(secretValues(body), () =>
+    proxyApi
+      .post("plugins/config", scoped(scope, { json: body, context: { [SILENT_ERRORS]: true } }))
+      .json<PluginConfig>(),
+  );
 }
 
 /**
- * Full-replacement `PUT`, conditional on `ifMatch` when there is one.
+ * Full-replacement `PUT`, conditional on `ifMatch` when there is one. A
+ * failure is redacted as for `createConfig`; a `412` stays recognisable to
+ * `isPreconditionFailed`.
  *
  * Plugin configurations are written by the membership plan
  * (`src/lib/pluginMembership.ts`), which compares its own fresh reads and
@@ -194,11 +207,11 @@ export async function updateConfig(
   data: PluginConfigCreate,
   ifMatch: string | null,
 ): Promise<PluginConfig> {
-  return conditionalPut<PluginConfig>(
-    scope,
-    `plugins/config/${id}`,
-    withPluginConfigId(data, id),
-    ifMatch,
+  const body = withPluginConfigId(data, id);
+  return withRedactedFailure(secretValues(body), () =>
+    conditionalPut<PluginConfig>(scope, `plugins/config/${id}`, body, ifMatch, {
+      silentErrors: true,
+    }),
   );
 }
 

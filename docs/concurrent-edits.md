@@ -381,6 +381,37 @@ characters and a shortened or trimmed echo would no longer match the submitted
 value. An append opts out of the global error popup, which would show the raw
 gateway body.
 
+### Every other secret-bearing write
+
+The same redaction (`src/api/secretRedaction.ts`) covers every write whose
+body carries a secret: consumer create, plugin configuration create and update
+(so a membership plan's rollback too), upstream create and update, TLS managed
+record and ACME certificate writes, ACME order creation and renewal, TLS
+validation, and batch create (#478). `secretValues()` finds the secrets by
+position rather than by resource: every string under a credential-shaped field
+name at any depth (the conflict dialog's `isRedactedField` list, plus
+`headers` maps, webhooks, service-account documents, and camelCase `*Key`
+fields — Ferrum Edge's plugin projection treats these as secret, and a
+non-admin read never returns them), and the userinfo, path, query, and
+fragment of any URL; a bare `scheme://host[:port]` stays readable. A
+multi-line value such as a PEM key is also redacted line by line, for any line
+of 16 characters or more, since a parser that rejects one line quotes it
+rather than the document.
+
+`withRedactedFailure()` replaces any failure of such a write with a
+`RedactedWriteError`: the redacted message, a bodiless copy of the response
+(status and headers), and the redacted parsed body as `data`, with no
+`request`, `options`, or `cause`. `getApiErrorDetail()`,
+`isPreconditionFailed()`, and the outcome classifiers read it as they read a ky
+`HTTPError`, and the committed-write and unobserved-write markers are carried
+over, so a guarded save's `412` handling, "committed, not yet proven live",
+and "outcome unknown" are unchanged. Each such request opts out of the global
+error popup, which is raised from ky's own error before redaction could run;
+the page reports the failure, and a plugin membership plan includes the
+gateway's redacted reason in its own message. Consumer metadata saves are not
+covered because their body carries no submitted secret: credentials in it come
+from the read the save is sent against, where they are `[REDACTED]`.
+
 ## What the operator sees
 
 `StaleWriteDialog` is shown when a save or a delete is refused. For a save it
@@ -440,6 +471,7 @@ so the next successful read seeds a fresh baseline for the new tenant.
 | Guarded deletes, consumer saves and rotation re-send, nested redaction of plugin `config` | `src/api/conditionalWrite.test.ts`, `src/lib/resourceBaseline.test.ts` |
 | Plugin editor baseline, membership writes conditional on their reads | `src/lib/pluginMembership.test.ts`, `src/lib/pluginMembership.binding.test.ts` |
 | Refused delete dialog | `src/routes/proxies/concurrentEdit.test.tsx` |
+| Echoed secrets redacted on consumer create, plugin, upstream, TLS, and batch writes; no request retained; status, `412`, and outcome markers kept | `src/api/secretRedaction.test.ts`, `src/routes/consumers/createSecretEcho.test.tsx` |
 | Committed-but-not-live classification, popup suppression, cache refresh, save-twice regression | `src/api/committedWrite.test.ts`, `src/lib/queryClient.test.ts` |
 | Editor reseed after a committed save; committed delete reported as deleted | `src/routes/proxies/concurrentEdit.test.tsx` |
 | Committed delete retires the seeded detail and list caches | `src/hooks/deleteDetailCache.test.tsx` |

@@ -10,6 +10,7 @@ import type {
   UpstreamCreate,
 } from "./types";
 import { collectAllPages } from "./pagination";
+import { secretValues, withRedactedFailure } from "./secretRedaction";
 import {
   conditionalDelete,
   conditionalPut,
@@ -27,6 +28,23 @@ import {
 } from "@/lib/resourceBaseline";
 
 const upstreamWrites = new Map<string, Promise<void>>();
+
+/**
+ * An upstream body can carry a service-discovery credential (the Consul ACL
+ * `token`, a password in a discovery address). A failed write is reported with
+ * those values removed and without the request (#478); the global error popup,
+ * which would show the raw gateway body, stays closed and the caller reports it.
+ */
+function putUpstream(
+  scope: NamespaceScope,
+  path: string,
+  body: UpstreamCreate,
+  ifMatch: string | null,
+): Promise<Upstream> {
+  return withRedactedFailure(secretValues(body), () =>
+    conditionalPut<Upstream>(scope, path, body, ifMatch, { silentErrors: true }),
+  );
+}
 
 async function serializeWrite<T>(scope: NamespaceScope, id: string, write: () => Promise<T>): Promise<T> {
   const key = JSON.stringify([scope.namespace, id]);
@@ -166,9 +184,12 @@ export async function create(
   scope: NamespaceScope,
   data: UpstreamCreate,
 ): Promise<Upstream> {
-  return proxyApi
-    .post("upstreams", scoped(scope, { json: withUpstreamId(data) }))
-    .json<Upstream>();
+  const body = withUpstreamId(data);
+  return withRedactedFailure(secretValues(body), () =>
+    proxyApi
+      .post("upstreams", scoped(scope, { json: body, context: { [SILENT_ERRORS]: true } }))
+      .json<Upstream>(),
+  );
 }
 
 /** Reduce an upstream, or an upstream payload, to the content a save replaces. */
@@ -218,7 +239,7 @@ export async function update(
   const payload = withUpstreamId(data, id);
   const path = `upstreams/${id}`;
   if (!guard) {
-    return serializeWrite(scope, id, () => conditionalPut<Upstream>(scope, path, payload, null));
+    return serializeWrite(scope, id, () => putUpstream(scope, path, payload, null));
   }
 
   return serializeWrite(scope, id, () =>
@@ -229,7 +250,7 @@ export async function update(
       guard,
       read: () => readTagged<Upstream>(scope, path),
       propose: () => payload,
-      write: (body, ifMatch) => conditionalPut<Upstream>(scope, path, body, ifMatch),
+      write: (body, ifMatch) => putUpstream(scope, path, body, ifMatch),
     }),
   );
 }
@@ -266,7 +287,7 @@ export async function updateTargets(
       guard: guard ?? uncomparedGuard(),
       read: () => readTagged<Upstream>(scope, path),
       propose,
-      write: (body, ifMatch) => conditionalPut<Upstream>(scope, path, body, ifMatch),
+      write: (body, ifMatch) => putUpstream(scope, path, body, ifMatch),
     });
   });
 }

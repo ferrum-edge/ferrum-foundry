@@ -12,6 +12,7 @@ import type {
   PaginationParams,
 } from "./types";
 import { collectAllPages } from "./pagination";
+import { secretValues, withRedactedFailure } from "./secretRedaction";
 import {
   conditionalDelete,
   conditionalPut,
@@ -86,13 +87,23 @@ export async function get(scope: NamespaceScope, id: string): Promise<Consumer> 
   return (await readTagged<Consumer>(scope, `consumers/${id}`)).value;
 }
 
+/**
+ * Create a consumer with its initial credentials. The body carries the keys,
+ * passwords and secrets entered in the form, so a failure is reported with
+ * every submitted secret removed and without the request (#478), and the
+ * global error popup — which would show the raw gateway body — stays closed.
+ * The caller reports the failure.
+ */
 export async function create(
   scope: NamespaceScope,
   data: ConsumerCreate,
 ): Promise<Consumer> {
-  return proxyApi
-    .post("consumers", scoped(scope, { json: withConsumerId(data) }))
-    .json<Consumer>();
+  const body = withConsumerId(data);
+  return withRedactedFailure(secretValues(body), () =>
+    proxyApi
+      .post("consumers", scoped(scope, { json: body, context: { [SILENT_ERRORS]: true } }))
+      .json<Consumer>(),
+  );
 }
 
 /** Reduce a consumer, or a consumer payload, to the metadata a save replaces. */
