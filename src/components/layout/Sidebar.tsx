@@ -242,6 +242,7 @@ export function Sidebar({ open, onClose, triggerRef }: SidebarProps) {
           <DialogPrimitive.Content
             id="mobile-sidebar-dialog"
             aria-label="Main navigation"
+            aria-modal="true"
             onCloseAutoFocus={(event) => {
               event.preventDefault();
               if (closingForDesktop.current) {
