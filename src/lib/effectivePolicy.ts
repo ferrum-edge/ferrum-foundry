@@ -166,11 +166,12 @@ function shadowsGlobal(plugin: PluginConfig, proxy: Proxy): boolean {
  *
  * Mirrors the gateway's scope merge (Ferrum Edge v0.9.7 `plugin_cache.rs`,
  * `remove_shadowed_global_plugin` and `is_istio_route_transform_consumer`):
- * an enabled, attached proxy- or proxy-group-scoped configuration replaces
- * every global configuration with the same plugin name, except for the
- * request/response size limiters and the Istio route-transform consumer,
- * which are additive. A disabled or unattached scoped configuration shadows
- * nothing, because the gateway never merges it.
+ * an enabled, attached proxy- or eligible proxy-group-scoped configuration
+ * replaces every global configuration with the same plugin name, except for
+ * the request/response size limiters and the Istio route-transform consumer,
+ * which are additive. A proxy-group configuration with any `proxy_id` is not
+ * eligible; a disabled or unattached scoped configuration shadows nothing,
+ * because the gateway never merges it.
  */
 function attachedPluginsForProxy(
   proxy: Proxy,
@@ -188,6 +189,9 @@ function attachedPluginsForProxy(
     // `proxy_id` records intent, not attachment: a proxy-scoped plugin runs
     // only when the proxy's own `plugins` list names it, like a group one.
     if (plugin.scope === "proxy" && plugin.proxy_id !== proxy.id) continue;
+    // Ferrum Edge's full composition rebuild admits proxy-group configs only
+    // when `proxy_id` is absent (PluginScope::ProxyGroup && proxy_id.is_none()).
+    if (plugin.scope === "proxy_group" && plugin.proxy_id != null) continue;
     scoped.push(plugin);
     if (shadowsGlobal(plugin, proxy)) shadowed.add(plugin.plugin_name);
   }

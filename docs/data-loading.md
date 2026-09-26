@@ -107,14 +107,21 @@ under-report what runs on a proxy.
 
 The complete graph is then merged the way the gateway merges scopes
 (Ferrum Edge v0.9.7 `src/plugin_cache.rs`, `remove_shadowed_global_plugin`):
-an enabled proxy- or proxy-group-scoped configuration that the proxy's
-`plugins` list attaches replaces every global configuration with the same
-plugin name, before the protocol filter runs. The request and response size
-limiters, and the exact no-static-rules transformer the Istio VirtualService
-translator emits for a proxy, are additive and leave the global instance in
-place. A disabled or unattached scoped configuration shadows nothing. Plugin
-counts, the proxy's consumer analysis, and a consumer's Matched Proxies all use
-this one merge (#469).
+an enabled proxy-scoped configuration that the proxy's `plugins` list
+attaches, or an attached proxy-group configuration with no `proxy_id`, replaces
+every global configuration with the same plugin name, before the protocol
+filter runs. Edge's full composition check
+(`validate_plugin_security_composition_candidate`, `group_configs`) admits a
+group configuration only when `pc.scope == PluginScope::ProxyGroup && pc.proxy_id.is_none()`.
+Foundry treats both an omitted and `null` `proxy_id` as
+absent and excludes any present value, including an empty string. Since the
+exclusion happens before shadowing, such a group configuration neither runs
+nor hides a same-name global. The request and response size limiters, and the
+exact no-static-rules transformer the Istio VirtualService translator emits
+for a proxy, are additive and leave the global instance in place. A disabled
+or unattached scoped configuration shadows nothing. Plugin counts, the
+proxy's consumer analysis, and a consumer's Matched Proxies all use this one
+merge (#469, #472).
 
 The Plugins tab also lists the proxy-scoped configurations that name this
 proxy but do not run on it — disabled, or not in the proxy's `plugins` list.
