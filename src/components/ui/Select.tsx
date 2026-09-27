@@ -1,5 +1,6 @@
 import { useId } from "react";
 import * as SelectPrimitive from "@radix-ui/react-select";
+import { READ_ONLY_CLASSES } from "./Input";
 
 export interface SelectOption {
   value: string;
@@ -20,6 +21,8 @@ interface SelectBaseProps {
   error?: string;
   helpText?: string;
   disabled?: boolean;
+  /** Show the value as fixed configuration rather than a greyed-out control. Implies `disabled`. */
+  readOnly?: boolean;
   "aria-labelledby"?: string;
 }
 
@@ -43,6 +46,7 @@ export function Select({
   error,
   helpText,
   disabled,
+  readOnly = false,
   "aria-labelledby": ariaLabelledBy,
 }: SelectProps) {
   const id = useId();
@@ -75,17 +79,17 @@ export function Select({
       <SelectPrimitive.Root
         value={value}
         onValueChange={onValueChange}
-        disabled={disabled}
+        disabled={disabled || readOnly}
       >
         <SelectPrimitive.Trigger
           aria-labelledby={label ? labelId : ariaLabelledBy}
           aria-describedby={error || helpText ? descriptionId : undefined}
           aria-invalid={error ? true : undefined}
           title={triggerTitle}
-          className={`flex w-full min-w-0 max-w-full items-center justify-between overflow-hidden bg-bg-input border rounded-lg px-3 py-2 text-sm transition-colors duration-150 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed ${error ? "border-danger" : "border-border focus:border-orange focus:ring-1 focus:ring-orange/30"} ${value ? "text-text-primary" : "text-text-muted"}`}
+          className={`flex w-full min-w-0 max-w-full items-center justify-between overflow-hidden border rounded-lg px-3 py-2 text-sm transition-colors duration-150 ${readOnly ? READ_ONLY_CLASSES : `bg-bg-input cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed ${error ? "border-danger" : "border-border focus:border-orange focus:ring-1 focus:ring-orange/30"} ${value ? "text-text-primary" : "text-text-muted"}`}`}
         >
           <span className="min-w-0 flex-1 truncate text-left"><SelectPrimitive.Value placeholder={placeholder} /></span>
-          <SelectPrimitive.Icon className="ml-2 shrink-0 text-text-muted">
+          <SelectPrimitive.Icon className={`ml-2 shrink-0 text-text-muted ${readOnly ? "invisible" : ""}`}>
             <svg
               width="12"
               height="12"
