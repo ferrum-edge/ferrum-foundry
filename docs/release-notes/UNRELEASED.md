@@ -51,6 +51,15 @@ Best-effort and not qualified: *release step* — from `best_effort` and
 *Release step:* Edge first if the pairing moved, then Foundry; what changed in
 configuration; how to confirm `GET /api/health/ready`.
 
+Configuration changes in this release:
+
+- **Breaking, static authentication mode only:** `FERRUM_JWT_NAMESPACES` is
+  required. A static-mode BFF without it refuses to start, where v0.2.0 granted
+  the static principal every namespace. To keep the v0.2.0 behavior, set
+  `FERRUM_JWT_NAMESPACES=*` before replacing the image; to scope the principal,
+  list exact namespace names instead. `trusted-proxy` deployments, including
+  the deployment starter, need no change.
+
 ### Rolling back
 
 *Release step:* Foundry by immutable tag or digest; Ferrum Edge by its own

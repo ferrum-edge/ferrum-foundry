@@ -42,6 +42,7 @@ a local copy would go stale.
 export FERRUM_ADMIN_URL=http://127.0.0.1:9000
 export FERRUM_JWT_SECRET=dev-secret-at-least-32-characters-long
 export FERRUM_BFF_AUTH_TOKEN=dev-bff-token-at-least-32-characters-long
+export FERRUM_JWT_NAMESPACES='*'  # static mode: exact names, or * for every namespace
 
 # Start frontend + BFF. In the browser, paste FERRUM_BFF_AUTH_TOKEN once to
 # exchange it for an HttpOnly session.
@@ -107,9 +108,9 @@ See `docs/authentication.md`.
 - Static-token mode is development-only. The login route exchanges
   `FERRUM_BFF_AUTH_TOKEN` for a bounded server-side session in an HttpOnly,
   SameSite cookie, plus CSRF protection.
-- `FERRUM_JWT_NAMESPACES` scopes the static principal: exact names, or `*` alone
-  for every namespace. Unset stays unrestricted with a startup warning. A set
-  value with no names is a startup error, never "unrestricted".
+- `FERRUM_JWT_NAMESPACES` scopes the static principal and is required in static
+  mode: exact names, or `*` alone for every namespace. Unset, or set with no
+  names, is a startup error, never "unrestricted".
 - No reusable administrator credential is stored in browser storage.
 - Auth runs in `onRequest`, before content parsing.
 - The authenticated actor, role, and namespaces become the downstream JWT

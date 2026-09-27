@@ -115,20 +115,20 @@ Durations are integers.
 | `FERRUM_JWT_MAX_TTL` | No | `3600` | 0-86400 seconds; `0` disables the ceiling | Gateway maximum TTL that `FERRUM_JWT_TTL` is checked against |
 | `FERRUM_JWT_ROLE` | No | `admin` | `viewer`, `operator`, or `admin` | Role of the static development principal. Trusted-proxy requests take the role from the header |
 | `FERRUM_JWT_AUDIENCE` | No | - | comma-separated exact values | `aud` claim, sent only when set. Must match the gateway's `FERRUM_ADMIN_JWT_AUDIENCE` |
-| `FERRUM_JWT_NAMESPACES` | No | - (unrestricted) | comma-separated names matching `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$`, or `*` alone | `ns` grants for the static principal and the readiness probe. `*` grants every namespace and omits `ns` |
+| `FERRUM_JWT_NAMESPACES` | In `static` | - | comma-separated names matching `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$`, or `*` alone | `ns` grants for the static principal and the readiness probe. `*` grants every namespace and omits `ns` |
 
 `FERRUM_JWT_NAMESPACES` rules:
 
 - Whitespace around entries is allowed, duplicates merge, and empty entries are
   dropped (`tenant-a,,tenant-b` is `tenant-a,tenant-b`; `*,` is `*`).
 - Only `*` on its own grants every namespace.
-- Unset in `static` mode, the static principal is unrestricted (no `ns` claim)
-  and the BFF logs a startup warning.
+- `static` mode refuses to start while it is unset. Set `*` for an
+  unrestricted static principal (no `ns` claim).
 - A value that names no namespace (empty, whitespace, or commas only), an
   invalid name, or `*` mixed with names fails startup.
 - In `trusted-proxy` mode the proxy supplies each user's grants. This variable
   only scopes the readiness probe, which reads fleet-global endpoints, so it
-  can be left unset there without a warning.
+  can be left unset there.
 
 ### Gateway transport
 

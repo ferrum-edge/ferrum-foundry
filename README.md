@@ -158,6 +158,7 @@ npm install
 export FERRUM_ADMIN_URL=http://localhost:9000         # Ferrum Admin API URL
 export FERRUM_JWT_SECRET=$(openssl rand -hex 32)      # HS256 signing key, 32+ bytes; must match the gateway
 export FERRUM_BFF_AUTH_TOKEN=$(openssl rand -hex 32)  # development sign-in token
+export FERRUM_JWT_NAMESPACES='*'                      # namespace scope: exact names, or * for every namespace
 
 npm run dev
 ```
@@ -171,10 +172,10 @@ token is never stored in the browser or reused as a bearer token. Production
 startup refuses static auth unless a trusted identity proxy is configured. See
 [Production authentication](docs/authentication.md).
 
-`FERRUM_JWT_NAMESPACES` scopes the development principal: a comma-separated
-list of exact namespace names, or `*` alone for every namespace. Left unset,
-the principal is unrestricted and the BFF logs a warning. A value that names no
-namespace (empty, whitespace, or commas only) fails startup.
+`FERRUM_JWT_NAMESPACES` scopes the development principal and is required in
+static mode: a comma-separated list of exact namespace names, or `*` alone for
+every namespace. Startup fails when it is unset or names no namespace (empty,
+whitespace, or commas only).
 
 Common optional variables:
 
