@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking
 
-- Static authentication mode now refuses to start when `FERRUM_JWT_NAMESPACES` is unset, and the error names both options: exact namespace names, or `*` for every namespace. An unset variable previously granted the static principal every namespace without saying so. To keep that behavior, set `FERRUM_JWT_NAMESPACES=*`: the static principal stays unrestricted and its gateway JWTs carry no `ns` claim. The startup warning for an unset value is removed. `trusted-proxy` mode is unchanged: there the variable only scopes the readiness probe and may stay unset. See `docs/release-notes/UNRELEASED.md` → "Upgrading from v0.2.0" (#462).
+- Static authentication mode now refuses to start when `FERRUM_JWT_NAMESPACES` is unset, and the error names both options: exact namespace names, or `*` for every namespace. An unset variable previously granted the static principal every namespace without saying so. To keep that behavior, set `FERRUM_JWT_NAMESPACES=*`: the static principal stays unrestricted and its gateway JWTs carry no `ns` claim. `trusted-proxy` mode is unchanged: there the variable only scopes the readiness probe and may stay unset. See `docs/release-notes/UNRELEASED.md` → "Upgrading from v0.2.0" (#462).
 
 ### Fixed
 

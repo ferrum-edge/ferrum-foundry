@@ -258,7 +258,7 @@ describe('config', () => {
     setValidEnv({ FERRUM_JWT_NAMESPACES: undefined });
     const { loadConfig } = await loadModule();
     expect(() => loadConfig()).toThrow(
-      /FERRUM_JWT_NAMESPACES is required in static authentication mode; set it to namespace names, or \* for every namespace/,
+      /FERRUM_JWT_NAMESPACES is required in static authentication mode \(FERRUM_AUTH_MODE=static, the default\); set it to namespace names, or \* for every namespace/,
     );
   });
 

@@ -58,7 +58,13 @@ Configuration changes in this release:
   the static principal every namespace. To keep the v0.2.0 behavior, set
   `FERRUM_JWT_NAMESPACES=*` before replacing the image; to scope the principal,
   list exact namespace names instead. `trusted-proxy` deployments, including
-  the deployment starter, need no change.
+  the deployment starter, need no change as long as they leave
+  `FERRUM_JWT_NAMESPACES` unset.
+- **Breaking, either authentication mode:** a set-but-empty
+  `FERRUM_JWT_NAMESPACES` — empty, whitespace, or commas only — is now a startup
+  error, where v0.2.0 treated it as if the variable were unset and left the
+  principal unrestricted. Operators who set such a value should unset it in
+  `trusted-proxy` mode, or set `*` or exact namespace names in `static` mode.
 
 ### Rolling back
 

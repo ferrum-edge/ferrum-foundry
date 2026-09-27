@@ -112,7 +112,7 @@ describe('static namespace scope at startup', () => {
 
   it('refuses to start when FERRUM_JWT_NAMESPACES is unset, naming both options', async () => {
     await expect(loadApp({ ...STATIC_MODE, FERRUM_JWT_NAMESPACES: undefined })).rejects.toThrow(
-      /FERRUM_JWT_NAMESPACES is required in static authentication mode; set it to namespace names, or \* for every namespace/,
+      /FERRUM_JWT_NAMESPACES is required in static authentication mode \(FERRUM_AUTH_MODE=static, the default\); set it to namespace names, or \* for every namespace/,
     );
   });
 

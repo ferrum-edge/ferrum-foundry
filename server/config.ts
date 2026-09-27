@@ -179,7 +179,7 @@ function parseEnvNamespaceGrants(authMode: AuthMode): string[] | undefined {
     // fleet-global endpoints.
     if (authMode === 'static') {
       throw new Error(
-        `${name} is required in static authentication mode; set it to namespace names, or ${NAMESPACE_WILDCARD} for every namespace`,
+        `${name} is required in static authentication mode (FERRUM_AUTH_MODE=static, the default); set it to namespace names, or ${NAMESPACE_WILDCARD} for every namespace`,
       );
     }
     return undefined;
