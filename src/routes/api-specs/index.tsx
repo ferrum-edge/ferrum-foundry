@@ -12,6 +12,8 @@ import { Button } from "@/components/ui/Button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/Dialog";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { PageHeader } from "@/components/shared/PageHeader";
+import { PlusIcon } from "@/components/ui/icons";
 import { SearchBar } from "@/components/shared/SearchBar";
 import { PaginationControls } from "@/components/shared/PaginationControls";
 import { useToast } from "@/components/ui/Toast";
@@ -31,21 +33,12 @@ import { filterAndPage } from "@/lib/collectionSearch";
 import { useNamespace } from "@/stores/namespace";
 import { useCapabilities } from "@/stores/capabilities";
 import { CapabilityNotice } from "@/components/shared/CapabilityGate";
+import { formatDateTime } from "@/lib/format";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 const IMPORT_TEMPLATE = `openapi: 3.1.0
@@ -211,32 +204,25 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-text-primary">API Specs</h1>
-          <p className="text-text-muted text-sm mt-1">
-            Import OpenAPI documents to declaratively create proxies, upstreams,
-            and plugins. Replacing a spec re-syncs its owned resources; deleting
-            it cascades.
-          </p>
-        </div>
-        <Button
-          disabled={!canWrite.allowed}
-          onClick={() => {
-            importGeneration.current += 1;
-            setImportLoading(false);
-            setReplaceTarget(null);
-            setImportDoc(IMPORT_TEMPLATE);
-            setImportOpen(true);
-          }}
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-          </svg>
-          Import Spec
-        </Button>
-      </div>
+      <PageHeader
+        title="API Specs"
+        description="Import OpenAPI documents to declaratively create proxies, upstreams, and plugins. Replacing a spec re-syncs its owned resources; deleting it cascades."
+        actions={
+          <Button
+            disabled={!canWrite.allowed}
+            onClick={() => {
+              importGeneration.current += 1;
+              setImportLoading(false);
+              setReplaceTarget(null);
+              setImportDoc(IMPORT_TEMPLATE);
+              setImportOpen(true);
+            }}
+          >
+            <PlusIcon />
+            Import Spec
+          </Button>
+        }
+      />
 
       <CapabilityNotice verdict={canWrite} />
 
@@ -251,7 +237,7 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
       />
 
       <ReadState queries={[collectionQuery]} label="API specs" optionalFeature>
-        <Card className="overflow-hidden p-0">
+        <Card padding="none" className="overflow-hidden">
           {specs.length === 0 && (
             <EmptyState
               title={total > 0 ? "No results on this page" : search ? "No matching specs" : "No API specs yet"}
@@ -267,7 +253,7 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
           {specs.map((spec) => (
             <div
               key={spec.id}
-              className="px-6 py-4 border-b border-border/50 last:border-b-0 flex items-center justify-between gap-4"
+              className="px-4 py-3 border-b border-border/50 last:border-b-0 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
             >
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -283,10 +269,10 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
                 </div>
                 <p
                   className="text-xs text-text-muted mt-1 font-mono truncate"
-                  title={`proxy: ${spec.proxy_id} · ${formatBytes(spec.uncompressed_size)} · updated ${formatDate(spec.updated_at)}`}
+                  title={`proxy: ${spec.proxy_id} · ${formatBytes(spec.uncompressed_size)} · updated ${formatDateTime(spec.updated_at)}`}
                 >
                   proxy: {spec.proxy_id} · {formatBytes(spec.uncompressed_size)} ·
-                  updated {formatDate(spec.updated_at)}
+                  updated {formatDateTime(spec.updated_at)}
                 </p>
               </div>
               <div className="flex items-center gap-2 shrink-0">

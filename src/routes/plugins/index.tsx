@@ -7,30 +7,23 @@ import { useNavigate } from "@tanstack/react-router";
 import { useAllPluginConfigs, usePluginConfigs } from "@/hooks/usePlugins";
 import { usePaginationParams } from "@/hooks/usePagination";
 import { Button } from "@/components/ui/Button";
-import { ResourceGrid } from "@/components/ui/ResourceGrid";
+import { GRID_HEADER_CLASS, GRID_ROW_CLASS, ResourceGrid } from "@/components/ui/ResourceGrid";
 import { Badge } from "@/components/ui/Badge";
 import { SearchBar } from "@/components/shared/SearchBar";
 import { PaginationControls } from "@/components/shared/PaginationControls";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { PageHeader } from "@/components/shared/PageHeader";
+import { PlusIcon } from "@/components/ui/icons";
 import { WriteAction } from "@/components/shared/CapabilityGate";
 import { useCapabilities } from "@/stores/capabilities";
 import { SkeletonRow } from "@/components/ui/Skeleton";
 import { formatPluginName, getPluginMeta } from "@/lib/pluginConfigDefaults";
 import { filterAndPage } from "@/lib/collectionSearch";
+import { EMPTY_VALUE, formatDateTime } from "@/lib/format";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 
 /** Built-in plugin priorities from ferrum-edge (lower = runs first). */
 const DEFAULT_PLUGIN_PRIORITY: Record<string, number> = {
@@ -94,6 +87,27 @@ const DEFAULT_PLUGIN_PRIORITY: Record<string, number> = {
   spec_expose: 9900,
 };
 
+function PriorityCell({ override, builtIn }: { override?: number | null; builtIn?: number }) {
+  if (override != null) {
+    return (
+      <span
+        className="text-sm"
+        title={builtIn !== undefined
+          ? `Priority override (built-in priority ${builtIn})`
+          : "Priority override"}
+      >
+        <span className="block text-text-primary tabular-nums">{override}</span>
+        <span className="block text-[11px] text-text-muted">override</span>
+      </span>
+    );
+  }
+  return (
+    <span className="text-sm text-text-muted tabular-nums" title="Built-in priority">
+      {builtIn ?? EMPTY_VALUE}
+    </span>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /*  Column definitions                                                 */
 /* ------------------------------------------------------------------ */
@@ -120,7 +134,7 @@ const columns = [
  * a fixed length or a `minmax(0, fr)`, so both containers agree by
  * construction.
  */
-const GRID_TEMPLATE = "grid grid-cols-[minmax(0,2fr)_4rem_minmax(0,1.5fr)_4rem_4rem_10rem] gap-4";
+const GRID_TEMPLATE = "grid grid-cols-[minmax(0,2fr)_4.5rem_minmax(0,1.5fr)_5rem_5rem_10rem] gap-4";
 
 export default function PluginsPage() {
   const navigate = useNavigate();
@@ -160,23 +174,18 @@ export default function PluginsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-text-primary">Plugins</h1>
-          <p className="text-text-muted text-sm mt-1">
-            Browse and configure gateway plugin instances for authentication, rate limiting, transforms, and more.
-          </p>
-        </div>
-        <WriteAction verdict={canWrite}>
-          <Button onClick={() => navigate({ to: "/plugins/new" })}>
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-            </svg>
-            Create Plugin
-          </Button>
-        </WriteAction>
-      </div>
+      <PageHeader
+        title="Plugins"
+        description="Browse and configure gateway plugin instances for authentication, rate limiting, transforms, and more."
+        actions={
+          <WriteAction verdict={canWrite}>
+            <Button onClick={() => navigate({ to: "/plugins/new" })}>
+              <PlusIcon />
+              Create Plugin
+            </Button>
+          </WriteAction>
+        }
+      />
 
       {/* Search */}
       <SearchBar
@@ -226,7 +235,7 @@ export default function PluginsPage() {
         }
       >
         {/* Header row */}
-        <div className={`${GRID_TEMPLATE} px-6 py-3 border-b border-border bg-bg-card text-text-muted text-xs font-semibold uppercase tracking-wider`}>
+        <div className={`${GRID_TEMPLATE} ${GRID_HEADER_CLASS}`}>
           {columns.map((col) => (
             <span key={col.key} className="whitespace-nowrap">
               {col.label}
@@ -236,7 +245,7 @@ export default function PluginsPage() {
 
         {/* Body */}
         {isLoading && (
-          <div className="px-6 divide-y divide-border/50">
+          <div className="px-4 divide-y divide-border/50">
             {Array.from({ length: 5 }).map((_, i) => (
               <SkeletonRow key={i} />
             ))}
@@ -249,7 +258,7 @@ export default function PluginsPage() {
               <button
                 key={config.id}
                 type="button"
-                className={`${GRID_TEMPLATE} px-6 py-3.5 w-full text-left hover:bg-bg-card-hover transition-colors cursor-pointer`}
+                className={`${GRID_TEMPLATE} ${GRID_ROW_CLASS} w-full text-left hover:bg-bg-card-hover transition-colors cursor-pointer`}
                 onClick={() =>
                   navigate({
                     to: "/plugins/$pluginId",
@@ -283,9 +292,7 @@ export default function PluginsPage() {
                   className="text-sm text-text-muted font-mono truncate block min-w-0"
                   title={config.proxy_id ?? undefined}
                 >
-                  {config.proxy_id ?? (
-                    <span className="italic">--</span>
-                  )}
+                  {config.proxy_id ?? EMPTY_VALUE}
                 </span>
 
                 {/* Enabled */}
@@ -295,23 +302,17 @@ export default function PluginsPage() {
                   </Badge>
                 </span>
 
-                {/* Priority — treat null the same as absent so rows without an
-                    override never render an empty red pill. */}
-                <span>
-                  {config.priority_override != null ? (
-                    <span className="inline-block text-sm font-bold text-danger border border-danger/40 bg-danger/10 rounded px-1.5 py-0.5">
-                      {config.priority_override}
-                    </span>
-                  ) : (
-                    <span className="text-sm text-text-muted">
-                      {DEFAULT_PLUGIN_PRIORITY[config.plugin_name] ?? "\u2014"}
-                    </span>
-                  )}
-                </span>
+                {/* Priority — an override is an ordinary setting, not an error:
+                    the number reads like any other, with a quiet label. Null
+                    counts as absent, so a row never shows an empty override. */}
+                <PriorityCell
+                  override={config.priority_override}
+                  builtIn={DEFAULT_PLUGIN_PRIORITY[config.plugin_name]}
+                />
 
                 {/* Created at */}
                 <span className="text-sm text-text-muted whitespace-nowrap">
-                  {formatDate(config.created_at)}
+                  {formatDateTime(config.created_at)}
                 </span>
               </button>
             ))}

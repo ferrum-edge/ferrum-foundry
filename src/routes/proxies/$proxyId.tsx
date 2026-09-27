@@ -15,7 +15,9 @@ import { resolveReadState } from '@/lib/readState';
 import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { ResourceGrid } from "@/components/ui/ResourceGrid";
+import { GRID_HEADER_CLASS, GRID_ROW_CLASS, ResourceGrid } from "@/components/ui/ResourceGrid";
+import { PageHeader } from "@/components/shared/PageHeader";
+import { TrashIcon } from "@/components/ui/icons";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { ProxyForm } from "@/components/forms/ProxyForm";
@@ -36,6 +38,7 @@ import { StaleWriteDialog } from "@/components/shared/StaleWriteDialog";
 import { useCapabilities } from "@/stores/capabilities";
 import { WriteAction } from "@/components/shared/CapabilityGate";
 import type { ProxyCreate, PluginConfig } from "@/api/types";
+import { formatDateTime } from "@/lib/format";
 
 /**
  * Plugin config JSON preview. Scrolls in both axes inside a bounded box so a
@@ -292,27 +295,19 @@ function ProxyEditor({ session }: { session: EditorSession }) {
       {resourceQuery.isError && (
         <ReadStateNotice query={resourceQuery} label="Proxy configuration" />
       )}
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-text-primary">
-            {proxy.name || "Proxy Detail"}
-          </h1>
-          <p className="text-text-muted text-sm mt-1 font-mono">{proxy.id}</p>
-        </div>
-        <WriteAction verdict={capability}>
-          <Button variant="danger" onClick={() => setDeleteOpen(true)}>
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-              />
-            </svg>
-            Delete
-          </Button>
-        </WriteAction>
-      </div>
+      <PageHeader
+        title={proxy.name || "Proxy Detail"}
+        meta={proxy.id}
+        breadcrumbs={[{ label: "Proxies", to: "/proxies" }, { label: proxy.name || proxy.id }]}
+        actions={
+          <WriteAction verdict={capability}>
+            <Button variant="danger" onClick={() => setDeleteOpen(true)}>
+              <TrashIcon />
+              Delete
+            </Button>
+          </WriteAction>
+        }
+      />
 
       <ResourceLabels labels={proxy.labels} />
       <ProxyApiSpecsCard proxyId={proxyId} enabled={detailLive && !resourceQuery.isError} />
@@ -519,9 +514,9 @@ function ProxyEditor({ session }: { session: EditorSession }) {
                     ))}
                   </div>
                   <p className="text-text-muted text-xs">
-                    Complete gateway pagination · evaluated {new Date(policy.evaluatedAt).toLocaleString()}
+                    Complete gateway pagination · evaluated {formatDateTime(policy.evaluatedAt)}
                     {policy.latestConfigUpdate
-                      ? ` · newest policy update ${new Date(policy.latestConfigUpdate).toLocaleString()}`
+                      ? ` · newest policy update ${formatDateTime(policy.latestConfigUpdate)}`
                       : ""}
                   </p>
                   {policy.reasons.map((reason) => (
@@ -538,7 +533,7 @@ function ProxyEditor({ session }: { session: EditorSession }) {
                     </p>
                   )}
                 >
-                  <div className="grid grid-cols-[2fr_1fr_2fr] gap-4 px-5 py-2.5 border-b border-border text-text-muted text-xs font-semibold uppercase tracking-wider">
+                  <div className={`grid grid-cols-[2fr_1fr_2fr] gap-4 ${GRID_HEADER_CLASS}`}>
                     <span>Username</span>
                     <span>Decision</span>
                     <span>Evidence</span>
@@ -549,7 +544,7 @@ function ProxyEditor({ session }: { session: EditorSession }) {
                         key={result.consumer.id}
                         to="/consumers/$consumerId"
                         params={{ consumerId: result.consumer.id }}
-                        className="grid grid-cols-[2fr_1fr_2fr] gap-4 px-5 py-3 text-sm hover:bg-bg-card-hover transition-colors"
+                        className={`grid grid-cols-[2fr_1fr_2fr] gap-4 ${GRID_ROW_CLASS} text-sm hover:bg-bg-card-hover transition-colors`}
                       >
                         <span className="text-text-primary font-medium break-all">
                           {result.consumer.username}

@@ -7,30 +7,23 @@ import { useNavigate } from "@tanstack/react-router";
 import { useAllConsumers, useConsumers } from "@/hooks/useConsumers";
 import { usePaginationParams } from "@/hooks/usePagination";
 import { Button } from "@/components/ui/Button";
-import { ResourceGrid } from "@/components/ui/ResourceGrid";
+import { GRID_HEADER_CLASS, GRID_ROW_CLASS, ResourceGrid } from "@/components/ui/ResourceGrid";
 import { Badge } from "@/components/ui/Badge";
 import { SearchBar } from "@/components/shared/SearchBar";
 import { PaginationControls } from "@/components/shared/PaginationControls";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { PageHeader } from "@/components/shared/PageHeader";
+import { PlusIcon } from "@/components/ui/icons";
 import { WriteAction } from "@/components/shared/CapabilityGate";
 import { useCapabilities } from "@/stores/capabilities";
 import { SkeletonRow } from "@/components/ui/Skeleton";
 import type { Consumer } from "@/api/types";
 import { filterAndPage } from "@/lib/collectionSearch";
+import { EMPTY_VALUE, formatDateTime } from "@/lib/format";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 
 const CREDENTIAL_TYPE_LABELS: Record<string, string> = {
   keyauth: "Key Auth",
@@ -128,35 +121,24 @@ export default function ConsumersPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-text-primary">Consumers</h1>
-          <p className="text-text-muted text-sm mt-1">
+      <PageHeader
+        title="Consumers"
+        description={
+          <>
             Manage API consumers, their credentials, and access control
-            policies.
-            {" "}Basic credential presence is unknown because the gateway omits it.
-          </p>
-        </div>
-        <WriteAction verdict={canWrite}>
-          <Button onClick={() => navigate({ to: "/consumers/new" })}>
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M12 4v16m8-8H4"
-              />
-            </svg>
-            Create Consumer
-          </Button>
-        </WriteAction>
-      </div>
+            policies. Basic credential presence is unknown because the gateway
+            omits it.
+          </>
+        }
+        actions={
+          <WriteAction verdict={canWrite}>
+            <Button onClick={() => navigate({ to: "/consumers/new" })}>
+              <PlusIcon />
+              Create Consumer
+            </Button>
+          </WriteAction>
+        }
+      />
 
       {/* Search */}
       <SearchBar
@@ -209,7 +191,7 @@ export default function ConsumersPage() {
         }
       >
         {/* Header row */}
-        <div className={`${GRID_TEMPLATE} px-6 py-3 border-b border-border bg-bg-card text-text-muted text-xs font-semibold uppercase tracking-wider`}>
+        <div className={`${GRID_TEMPLATE} ${GRID_HEADER_CLASS}`}>
           {columns.map((col) => (
             <span key={col.key} className="whitespace-nowrap">
               {col.label}
@@ -219,7 +201,7 @@ export default function ConsumersPage() {
 
         {/* Body */}
         {isLoading && (
-          <div className="px-6 divide-y divide-border/50">
+          <div className="px-4 divide-y divide-border/50">
             {Array.from({ length: 5 }).map((_, i) => (
               <SkeletonRow key={i} />
             ))}
@@ -237,7 +219,7 @@ export default function ConsumersPage() {
                 <button
                   key={consumer.id}
                   type="button"
-                  className={`${GRID_TEMPLATE} px-6 py-3.5 w-full text-left hover:bg-bg-card-hover transition-colors cursor-pointer`}
+                  className={`${GRID_TEMPLATE} ${GRID_ROW_CLASS} w-full text-left hover:bg-bg-card-hover transition-colors cursor-pointer`}
                   onClick={() =>
                     navigate({
                       to: "/consumers/$consumerId",
@@ -261,7 +243,7 @@ export default function ConsumersPage() {
                     title={consumer.custom_id ?? undefined}
                   >
                     {consumer.custom_id || (
-                      <span className="text-text-muted italic">None</span>
+                      <span className="text-text-muted">{EMPTY_VALUE}</span>
                     )}
                   </span>
 
@@ -279,9 +261,7 @@ export default function ConsumersPage() {
                         )}
                       </>
                     ) : (
-                      <span className="text-text-muted text-sm italic">
-                        None
-                      </span>
+                      <span className="text-text-muted text-sm">{EMPTY_VALUE}</span>
                     )}
                   </div>
 
@@ -300,7 +280,7 @@ export default function ConsumersPage() {
 
                   {/* Created at */}
                   <span className="text-sm text-text-muted whitespace-nowrap">
-                    {formatDate(consumer.created_at)}
+                    {formatDateTime(consumer.created_at)}
                   </span>
                 </button>
               );

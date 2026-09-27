@@ -16,6 +16,7 @@ vi.mock("@/stores/namespace", () => ({
 vi.mock("@tanstack/react-router", () => ({
   useParams: () => ({ pluginId: "same-id" }),
   useNavigate: () => vi.fn(),
+  Link: ({ children, to }: { children?: ReactNode; to?: string }) => <a href={to}>{children}</a>,
 }));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

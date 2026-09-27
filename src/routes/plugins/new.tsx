@@ -10,6 +10,7 @@ import {
 } from "@/hooks/usePlugins";
 import { useToast } from "@/components/ui/Toast";
 import { Card } from "@/components/ui/Card";
+import { PageHeader } from "@/components/shared/PageHeader";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { PluginConfigForm } from "@/components/forms/PluginConfigForm";
 import { PluginMembershipRecovery } from "@/components/forms/PluginMembershipRecovery";
@@ -82,12 +83,11 @@ function PluginCreateEditor({ session, allowProxyDefault }: {
 
   return (
     <div className="space-y-6 max-w-3xl">
-      <div>
-        <h1 className="text-2xl font-bold text-text-primary">Create Plugin</h1>
-        <p className="text-text-muted text-sm mt-1">
-          Add a new plugin instance and configure its settings.
-        </p>
-      </div>
+      <PageHeader
+        title="Create Plugin"
+        description="Add a new plugin instance and configure its settings."
+        breadcrumbs={[{ label: "Plugins", to: "/plugins" }, { label: "New plugin" }]}
+      />
 
       <PluginMembershipRecovery error={createPlugin.error} />
       <Card>

@@ -6,6 +6,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useCreateUpstream } from "@/hooks/useUpstreams";
 import { useToast } from "@/components/ui/Toast";
 import { Card } from "@/components/ui/Card";
+import { PageHeader } from "@/components/shared/PageHeader";
 import { UpstreamForm } from "@/components/forms/UpstreamForm";
 import { getApiErrorMessage } from "@/api/client";
 import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
@@ -46,12 +47,11 @@ function UpstreamCreateEditor({ session }: { session: EditorSession }) {
 
   return (
     <div className="space-y-6 max-w-3xl">
-      <div>
-        <h1 className="text-2xl font-bold text-text-primary">Create Upstream</h1>
-        <p className="text-text-muted text-sm mt-1">
-          Define a new upstream service with targets and health check configuration.
-        </p>
-      </div>
+      <PageHeader
+        title="Create Upstream"
+        description="Define a new upstream service with targets and health check configuration."
+        breadcrumbs={[{ label: "Upstreams", to: "/upstreams" }, { label: "New upstream" }]}
+      />
 
       <Card>
         <UpstreamForm

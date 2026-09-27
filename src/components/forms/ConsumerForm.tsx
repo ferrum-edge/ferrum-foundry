@@ -15,6 +15,13 @@ import { useCollapsibleFormValidation } from "@/lib/collapsedFormValidation";
 import { ReadOnlySurface } from "@/components/shared/CapabilityGate";
 import type { CapabilityVerdict } from "@/lib/capabilities";
 
+/**
+ * A button beside a labelled Input: offset by the label row (a text-sm line
+ * plus the field's 6px gap) so it lines up with the input box itself, not
+ * with the help text below it.
+ */
+const SIDE_BUTTON_CLASS = "shrink-0 mt-[1.625rem]";
+
 /* ------------------------------------------------------------------ */
 /*  Props                                                              */
 /* ------------------------------------------------------------------ */
@@ -167,8 +174,8 @@ export function ConsumerForm({
             Consumer Details
           </h3>
           {!isEdit && (
-            <div className="flex items-end gap-2">
-              <div className="flex-1">
+            <div className="flex items-start gap-2">
+              <div className="min-w-0 flex-1">
                 <Input
                   label="ID"
                   value={resourceId}
@@ -180,8 +187,7 @@ export function ConsumerForm({
               <Button
                 type="button"
                 variant="secondary"
-                size="sm"
-                className="shrink-0 mb-[1px]"
+                className={SIDE_BUTTON_CLASS}
                 onClick={() => setResourceId(crypto.randomUUID())}
               >
                 Generate UUID
@@ -225,8 +231,8 @@ export function ConsumerForm({
             </p>
             <div className="space-y-4">
               {CREDENTIAL_TYPES.map((typeDef) => (
-                <div key={typeDef.value} className="flex items-end gap-2">
-                  <div className="flex-1">
+                <div key={typeDef.value} className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1">
                     <Input
                       label={typeDef.label}
                       value={credValues[typeDef.value]}
@@ -241,8 +247,7 @@ export function ConsumerForm({
                     <Button
                       type="button"
                       variant="secondary"
-                      size="sm"
-                      className="shrink-0 mb-[1px]"
+                      className={SIDE_BUTTON_CLASS}
                       onClick={() => updateCred(typeDef.value, generateSecret())}
                     >
                       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, useEffect, useState, type ComponentType } from "react";
+import { act, useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { NamespaceProvider, NAMESPACE_STORAGE_KEY, useNamespace } from "@/stores/namespace";
 import ConsumerNewPage from "./consumers/new";
@@ -51,6 +51,7 @@ vi.mock("@/stores/auth", () => ({ useAuth: () => ({ principal: null }) }));
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => navigate,
   useSearch: () => ({ proxyId: "tenant-a-proxy" }),
+  Link: ({ children, to }: { children?: ReactNode; to?: string }) => <a href={to}>{children}</a>,
 }));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
 vi.mock("@/components/forms/ConsumerForm", () => ({ ConsumerForm: DraftForm }));

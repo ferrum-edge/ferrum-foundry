@@ -7,29 +7,22 @@ import { useNavigate } from "@tanstack/react-router";
 import { useAllUpstreams, useUpstreams } from "@/hooks/useUpstreams";
 import { usePaginationParams } from "@/hooks/usePagination";
 import { Button } from "@/components/ui/Button";
-import { ResourceGrid } from "@/components/ui/ResourceGrid";
+import { GRID_HEADER_CLASS, GRID_ROW_CLASS, ResourceGrid } from "@/components/ui/ResourceGrid";
 import { Badge } from "@/components/ui/Badge";
 import { SearchBar } from "@/components/shared/SearchBar";
 import { PaginationControls } from "@/components/shared/PaginationControls";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { PageHeader } from "@/components/shared/PageHeader";
+import { PlusIcon } from "@/components/ui/icons";
 import { WriteAction } from "@/components/shared/CapabilityGate";
 import { useCapabilities } from "@/stores/capabilities";
 import { SkeletonRow } from "@/components/ui/Skeleton";
 import { filterAndPage } from "@/lib/collectionSearch";
+import { formatDateTime } from "@/lib/format";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 
 function formatAlgorithm(algo: string): string {
   return algo.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -127,23 +120,18 @@ export default function UpstreamsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-text-primary">Upstreams</h1>
-          <p className="text-text-muted text-sm mt-1">
-            Manage upstream services, targets, health checks, and load balancing strategies.
-          </p>
-        </div>
-        <WriteAction verdict={canWrite}>
-          <Button onClick={() => navigate({ to: "/upstreams/new" })}>
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-            </svg>
-            Create Upstream
-          </Button>
-        </WriteAction>
-      </div>
+      <PageHeader
+        title="Upstreams"
+        description="Manage upstream services, targets, health checks, and load balancing strategies."
+        actions={
+          <WriteAction verdict={canWrite}>
+            <Button onClick={() => navigate({ to: "/upstreams/new" })}>
+              <PlusIcon />
+              Create Upstream
+            </Button>
+          </WriteAction>
+        }
+      />
 
       {/* Search */}
       <SearchBar
@@ -194,7 +182,7 @@ export default function UpstreamsPage() {
       >
         {/* Header row */}
         <div
-          className={`${GRID_TEMPLATE} px-6 py-3 border-b border-border bg-bg-card text-text-muted text-xs font-semibold uppercase tracking-wider`}
+          className={`${GRID_TEMPLATE} ${GRID_HEADER_CLASS}`}
         >
           {columns.map((col) => (
             <span key={col.key} className="whitespace-nowrap">
@@ -205,7 +193,7 @@ export default function UpstreamsPage() {
 
         {/* Body */}
         {isLoading && (
-          <div className="px-6 divide-y divide-border/50">
+          <div className="px-4 divide-y divide-border/50">
             {Array.from({ length: 5 }).map((_, i) => (
               <SkeletonRow key={i} />
             ))}
@@ -218,7 +206,7 @@ export default function UpstreamsPage() {
               <button
                 key={upstream.id}
                 type="button"
-                className={`${GRID_TEMPLATE} px-6 py-3.5 w-full text-left hover:bg-bg-card-hover transition-colors cursor-pointer`}
+                className={`${GRID_TEMPLATE} ${GRID_ROW_CLASS} w-full text-left hover:bg-bg-card-hover transition-colors cursor-pointer`}
                 onClick={() =>
                   navigate({
                     to: "/upstreams/$upstreamId",
@@ -269,7 +257,7 @@ export default function UpstreamsPage() {
 
                 {/* Created at */}
                 <span className="text-sm text-text-muted whitespace-nowrap">
-                  {formatDate(upstream.created_at)}
+                  {formatDateTime(upstream.created_at)}
                 </span>
               </button>
             ))}
