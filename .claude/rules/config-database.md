@@ -34,8 +34,10 @@ paths:
 ## Current State
 
 - `server/config.ts` reads startup configuration from the environment. Runtime
-  settings in `server/routes/settings.ts` update process memory and are lost on
-  restart; they do not write a settings database or file.
+  settings (`PUT /api/settings` in `server/routes/settings.ts`, off unless
+  `FERRUM_ALLOW_RUNTIME_SETTINGS=true`) are held as in-memory overrides in
+  `server/config.ts` and are lost on restart; they do not write a settings
+  database or file.
 - Development static-auth sessions in `server/auth.ts` live in a process-local
   map. Trusted-proxy mode relies on the identity asserted by the reverse proxy.
 - Browser theme and namespace preferences live in `src/stores/`; they are not

@@ -23,8 +23,8 @@ vulnerability, and do not disclose it publicly before a fix is available.
 Please include:
 
 - the affected version, image tag, or commit;
-- the deployment mode (`static` or `trusted-proxy`) and the reverse proxy in
-  front of the BFF, if relevant;
+- the authentication mode (`FERRUM_AUTH_MODE`: `static` or `trusted-proxy`) and
+  the reverse proxy in front of the BFF, if relevant;
 - reproduction steps or a proof of concept;
 - the impact you believe the issue has.
 

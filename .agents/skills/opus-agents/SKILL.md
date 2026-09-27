@@ -52,7 +52,7 @@ prompt, including continuation prompts and any permitted nested delegation.
    - `claude` on `PATH`.
 3. Confirm that the installed CLI exposes `--effort` with `low`, `medium`, `high`, `xhigh`, and `max`.
 4. Use the pinned model `claude-opus-5-5[1m]`. Use `opus[1m]` only when the user explicitly asks
-   for the rolling latest Opus rather than Opus 5.
+   for the rolling latest Opus rather than Opus 5.5.
 5. If the user explicitly requests fast mode, confirm the CLI accepts the `fastMode` setting and
    that the account and selected Opus model are eligible. Fast mode requires separate usage-credit
    availability and can be disabled by organization policy.

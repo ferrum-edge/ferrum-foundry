@@ -1,30 +1,37 @@
 # TLS material validation
 
-TLS → Validate submits material to the gateway without persisting it. Like the
-other TLS surfaces, validation is fleet-global and does not send a namespace
-header. The [canonical Edge request and response contract](https://github.com/ferrum-edge/ferrum-edge/blob/main/openapi.yaml)
-defines all six supported inputs:
+TLS → Validate sends PEM material to the gateway's `POST /admin/tls/validate`
+without storing it. Like the other TLS surfaces, it is fleet-global and sends no
+namespace header. It needs the operator role or higher. The
+[Edge OpenAPI contract](https://github.com/ferrum-edge/ferrum-edge/blob/main/openapi.yaml)
+defines the request and response.
 
 | Control | Request field | Behavior |
 | --- | --- | --- |
-| Certificate (PEM) | `cert_pem` | Submit together with its matching private key. |
-| Private Key (PEM) | `key_pem` | Submit together with its certificate chain. |
+| Certificate (PEM) | `cert_pem` | Submit together with its private key. |
+| Private Key (PEM) | `key_pem` | Submit together with its certificate. |
 | CA Bundle (PEM) | `ca_bundle_pem` | Can be validated alone or with other material. |
 | CRL (PEM) | `crl_pem` | Can be validated alone or with other material. |
-| Allow expired certificates | `allow_expired` | Off by default; when checked, skips certificate `notBefore`/`notAfter` checks, including CA certificates. |
-| Certificate expiry warning (days) | `cert_expiry_warning_days` | Optional non-negative whole number, default 30 at the gateway. Zero is accepted. The UI requires an exactly representable JavaScript integer. |
+| Allow expired certificates | `allow_expired` | Off by default. When checked, skips certificate `notBefore`/`notAfter` checks, including on CA certificates. |
+| Certificate expiry warning (days) | `cert_expiry_warning_days` | Optional non-negative whole number; the gateway default is 30. Zero is accepted. |
 
-Blank or whitespace-only PEM fields are omitted; populated PEM values are sent
-unchanged. An unchecked allow-expired option and a blank warning threshold are
-omitted so the gateway applies its defaults. Invalid thresholds produce an inline
-error before any request is sent. Field-specific gateway failures appear beside
-the corresponding control.
+Submit at least one kind of material. Foundry builds the request like this:
 
-Allowing expired certificates never relaxes CRL checks. A future `thisUpdate`,
-missing `nextUpdate`, or reached `nextUpdate` rejects the entire CRL bundle.
+- Blank or whitespace-only PEM fields are left out. Populated PEM values are sent
+  unchanged.
+- An unchecked allow-expired box and a blank warning threshold are left out, so
+  the gateway applies its defaults.
+- A threshold that is negative, fractional, or not a safe JavaScript integer
+  shows an inline error, and nothing is sent.
 
-The result displays the gateway's validity flag and complete `validated` object,
-including certificate counts, CRL counts, and any warning details it returns.
-The current Edge implementation logs certificate expiry warnings while returning
-per-material validity and counts; Foundry does not infer warnings that are absent
-from the response.
+When the gateway rejects a specific field (`field: message`), the error appears
+under that control. Other failures appear as a toast. Submitted secrets are
+removed from any reported error.
+
+Allowing expired certificates never relaxes CRL checks. A CRL with a future
+`thisUpdate`, a missing `nextUpdate`, or a `nextUpdate` that has passed rejects
+the whole CRL bundle.
+
+The result shows the gateway's `valid` flag and its full `validated` object as
+returned. Foundry does not compute expiry warnings itself; it shows only what
+the response contains.

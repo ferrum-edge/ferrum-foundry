@@ -61,32 +61,54 @@ envelope, and the tested scale.
 
 ## Development status
 
-Ferrum Foundry is in active buildout and has no users yet. Breaking changes are
-expected; backward compatibility and upgrade paths for earlier development
-versions are not required. Update the implementation, tests, demo data, and docs
-together when a contract changes.
+Ferrum Foundry is in active buildout and has no users yet. Expect breaking
+changes; earlier development versions get no compatibility or upgrade path.
+When a contract changes, update the code, tests, demo data, and docs together.
 
-Foundry has no application database, SQL schema, or database migrations. Gateway
-data and its schema belong to Ferrum Edge. If Foundry introduces its own database
-during buildout, keep one canonical initial schema and fold schema changes into
-it instead of accumulating incremental migrations. Recreate disposable local
-data as needed. Revisit this policy before onboarding users.
-
+Foundry has no database, SQL schema, or migrations. Gateway data and its schema
+belong to Ferrum Edge. If Foundry ever adds its own database during buildout,
+keep one canonical initial schema instead of a chain of migrations. Revisit
+this policy before onboarding users.
 
 ## Features
 
-- **Resource Management** - Full CRUD for Proxies (HTTP + TCP/UDP/DTLS stream routes), Consumers, Plugins, and Upstreams with server-paginated tables and complete-collection search
-- **Relational Browsing** - Navigate Proxy -> Plugins -> Upstream -> Targets (with subsets and locality) via tabs and breadcrumbs
-- **Consumer Credentials** - Manage key-auth, JWT, HMAC, and mTLS rotation arrays with ACL groups; append, replace, or delete all basic passwords while showing their presence as unknown (the gateway omits basic credentials from ordinary responses)
-- **Plugin Configuration** - Category-grouped catalog of 80+ gateway plugins (auth, security/WAF, traffic control, AI gateway, mesh, observability, billing) with default config templates, per-instance execution triggers, and scope (global/proxy/group) support
-- **TLS Management** - Fleet-global certificate/CA/CRL/OCSP/JWKS stores, ACME order automation (HTTP-01/TLS-ALPN-01/DNS-01), material inventory with expiry tracking, surface rotation, and PEM validation. [Waiting-operation deadlines](docs/deployment.md#live-apply-monitoring-and-acme-issuance-deadlines) cover live-apply monitoring and safe status re-checks after interrupted issuance.
-- **API Spec Import** - Create spec-managed proxies, upstreams, and plugins from OpenAPI documents (`x-ferrum-proxy` extensions) with replace/delete lifecycle
-- **Metrics Dashboard** - Gateway stats, overload protection, host runtime, circuit breakers, connection pools, health checks, load balancers, caches, API chargeback, and Prometheus metrics with one refresh policy across all panels, including per-route metrics. Manual stops periodic reads; Refresh Now refreshes every panel. Each independently fetched panel identifies its last successful sample, while the toolbar timestamp applies only to admin metrics. Control-plane and node-agent gateways show omitted pool/cache metrics as not reported; available gateway metrics remain visible
-- **Operations** - Audit log with filters and redacted diffs, CP/DP cluster topology, backend protocol capability probes, and full configuration backup/restore
-- **Mesh Observability** - Service graph, config/slice drift, policy denies, accepted runtime overlays, remote clusters and federation, egress scope testing, waypoints, and SPIFFE gateway trust (mesh-mode gateways)
-- **Health Monitoring** - Gateway readiness, listeners, audit/logging loss, database polling, trust freshness, and mode-specific runtime diagnostics
-- **Namespace Support** - Browse and manage tenant resources across namespaces via `X-Ferrum-Namespace`; every operation is bound to the namespace active when it started (see `docs/authentication.md` → "Namespace binding"), and process/runtime surfaces such as TLS management remain fleet-global
-- **Dark / Light Theme** - Dark theme by default with a light theme toggle in the header
+- **Resource management**: create, edit, and delete proxies (HTTP and
+  TCP/UDP/DTLS stream routes), consumers, plugins, and upstreams, with
+  server-paginated tables and complete-collection search.
+- **Relational browsing**: move between a proxy, its plugins, its upstream,
+  and targets (with subsets and locality) through tabs and breadcrumbs.
+- **Consumer credentials**: key-auth, JWT, HMAC, and mTLS rotation arrays with
+  ACL groups. Basic-auth passwords can be appended, replaced, or deleted; the
+  gateway never returns them, so their presence shows as unknown.
+- **Plugins**: a category-grouped catalog of 80+ gateway plugins (auth,
+  security/WAF, traffic control, AI gateway, mesh, observability, billing) with
+  default config templates, per-instance execution triggers, and
+  global/proxy/group scope.
+- **TLS management**: fleet-global certificate, CA, CRL, OCSP, and JWKS
+  stores; ACME order automation (HTTP-01, TLS-ALPN-01, DNS-01); inventory with
+  expiry tracking; surface rotation; and PEM validation. See
+  [waiting-operation deadlines](docs/deployment.md#live-apply-monitoring-and-acme-issuance-deadlines)
+  for live-apply monitoring and re-checking interrupted issuance.
+- **API spec import**: create spec-managed proxies, upstreams, and plugins from
+  OpenAPI documents (`x-ferrum-proxy` extensions), then replace or delete them
+  as a unit.
+- **Metrics**: gateway stats, overload protection, host runtime, circuit
+  breakers, connection pools, health checks, load balancers, caches, API
+  chargeback, Prometheus, and per-route metrics, under one refresh policy.
+  Each panel shows when its own data was last fetched.
+- **Operations**: audit log with filters and redacted diffs, CP/DP cluster
+  topology, backend protocol capability probes, and full configuration backup
+  and restore.
+- **Mesh observability** (mesh-mode gateways): service graph, config and slice
+  drift, policy denies, runtime overlays, remote clusters and federation,
+  egress scope testing, waypoints, and SPIFFE gateway trust.
+- **Health**: gateway readiness, listeners, audit and logging loss, database
+  polling, trust freshness, and mode-specific runtime diagnostics.
+- **Namespaces**: work across tenant namespaces with `X-Ferrum-Namespace`.
+  Each operation stays bound to the namespace it started in (see
+  [namespace binding](docs/authentication.md#namespace-binding)).
+  Process-wide surfaces such as TLS stay fleet-global.
+- **Dark and light themes**: dark by default, with a toggle in the header.
 
 ## Architecture
 
@@ -99,191 +121,159 @@ Browser <-> Fastify BFF (Node.js) <-> Ferrum Admin API
           SPA serving (prod)
 ```
 
-The BFF (Backend-for-Frontend) handles TLS trust stores, connection/read/write timeouts, and JWT generation server-side - capabilities browsers cannot provide.
+The BFF (backend-for-frontend) does what a browser cannot: it holds the TLS
+trust store, enforces connect/read/write timeouts, and signs admin JWTs.
 
-Read truthfulness is an explicit UI invariant: a failed read cannot establish an
-empty collection, current health, or an authorization conclusion. Shared
-`ReadState` handling distinguishes loading, successful reads, unavailable reads,
-and failed refreshes with retained data. Each independent input reports its own
-failure and retry; failed refreshes identify the last successful observation.
-Policy and trust conclusions become **unknown**, and unavailable audit/API-spec
-collections hide their rows and row actions. Pending spec replacement and deletion
-also require an available collection. The dashboard offers manual refresh and
-labels its observation times.
+The UI never presents a failed read as fact. A failed read cannot show an empty
+collection, current health, or an authorization decision. Each input reports
+its own failure and retry, a failed refresh names its last successful
+observation, and policy or trust conclusions become **unknown**. Collections
+that fail to load (such as audit and API specs) hide their rows and row
+actions.
 
-Detail editors follow a separate draft-preservation rule: a failed refresh with
-cached data keeps the editor mounted and shows a non-blocking retry notice. Plugin
-membership must load completely before the first edit; subsequent failures disable
-the picker without clearing selections or other fields. Recovery never reseeds a
-draft for the same identity. See [editor identity](docs/authentication.md#editor-identity)
-and [plugin membership](docs/plugin-membership.md).
+Editors keep your draft when a refresh fails: the form stays mounted and shows
+a retry notice, and recovery never overwrites a draft for the same resource.
+See [editor identity](docs/authentication.md#editor-identity) and
+[plugin membership](docs/plugin-membership.md).
 
 ## Quick Start
 
-Deploying it rather than developing on it? Start at
-[Getting started](docs/getting-started.md): a runnable stack in
+Deploying rather than developing? Start with
+[Getting started](docs/getting-started.md). The runnable stack in
 [`deploy/starter/`](deploy/starter/README.md) takes you from nothing to an
-authenticated request through the real data plane, with a `demo` profile that
-needs no gateway and no identity provider of your own.
+authenticated request through the real data plane. Its `demo` profile needs no
+gateway or identity provider of your own.
 
 ### Prerequisites
 
-- Node.js 22.22.2+ within 22.x, 24.15.0+ within 24.x, or 26+. The published container image runs Node.js 24 LTS. These minimums satisfy the locked jsdom toolchain and Undici's runtime floor.
+- Node.js 22.22.2+ (22.x), 24.15.0+ (24.x), or 26+. The container image runs
+  Node.js 24 LTS.
 - npm 10+
 
 ### Local Development
 
 ```bash
 npm install
+
+export FERRUM_ADMIN_URL=http://localhost:9000         # Ferrum Admin API URL
+export FERRUM_JWT_SECRET=$(openssl rand -hex 32)      # HS256 signing key, 32+ bytes; must match the gateway
+export FERRUM_BFF_AUTH_TOKEN=$(openssl rand -hex 32)  # development sign-in token
+
+npm run dev
 ```
 
-Set required environment variables:
+`npm run dev` starts Vite on port 5173 and the BFF on port 3001. Open
+http://localhost:5173.
 
-```bash
-export FERRUM_ADMIN_URL=http://localhost:9000   # Ferrum Admin API URL
-export FERRUM_JWT_SECRET=$(openssl rand -hex 32)       # HS256 signing key (32+ chars)
-export FERRUM_BFF_AUTH_TOKEN=$(openssl rand -hex 32)  # Development login exchange token
-```
+Static-token sign-in is for local development only. The SPA exchanges
+`FERRUM_BFF_AUTH_TOKEN` once for an HttpOnly, SameSite session cookie; the
+token is never stored in the browser or reused as a bearer token. Production
+startup refuses static auth unless a trusted identity proxy is configured. See
+[Production authentication](docs/authentication.md).
 
-Static-token authentication is intended for local development only. The SPA
-exchanges `FERRUM_BFF_AUTH_TOKEN` once for a bounded HttpOnly, SameSite session;
-the deployment credential is never stored in browser storage or reused as a
-bearer token. Production startup fails closed unless a trusted identity proxy
-mode is configured. See [Production authentication](docs/authentication.md).
+`FERRUM_JWT_NAMESPACES` scopes the development principal: a comma-separated
+list of exact namespace names, or `*` alone for every namespace. Left unset,
+the principal is unrestricted and the BFF logs a warning. A value that names no
+namespace (empty, whitespace, or commas only) fails startup.
 
-`FERRUM_JWT_NAMESPACES` sets the static principal's namespace grants: a
-comma-separated list of exact namespace names, or `*` alone for every
-namespace. Left unset, the static principal is unrestricted and the BFF logs a
-startup warning. A value with no namespace names (empty, whitespace, or commas
-only) is refused at startup rather than treated as unrestricted.
-
-The most commonly adjusted optional variables:
+Common optional variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `PORT` | `3001` | BFF server port. Vite also uses this as the `/api` proxy port when `VITE_BFF_URL` is unset |
-| `VITE_DEV_HOST` | `localhost` | Vite listen address: `localhost`, `127.0.0.1`, `::1`, or an explicit IP. Binding a non-loopback address (`0.0.0.0`, `::`) is an operator opt-in. Invalid values fail Vite startup |
-| `VITE_DEV_PORT` | `5173` | Vite dev-server listen port (1-65535) |
-| `VITE_BFF_URL` | `http://localhost:$PORT` | Absolute `http`/`https` origin Vite proxies `/api` to; wins over `PORT` when set |
-| `FERRUM_JWT_TTL` | `900` | JWT token TTL (seconds) |
-| `FERRUM_JWT_ROLE` | `admin` | Static development role: viewer/operator/admin |
-| `FERRUM_JWT_AUDIENCE` | - | Optional exact audience claim(s), comma separated |
-| `FERRUM_TLS_CA_PATH` | - | Path to a .pem truststore (contained projected-volume symlinks are supported) |
-| `FERRUM_TLS_VERIFY` | `true` | Verify TLS certificates |
+| `PORT` | `3001` | BFF port. Vite also proxies `/api` to it when `VITE_BFF_URL` is unset |
+| `VITE_DEV_HOST` | `localhost` | Vite listen address: `localhost`, `127.0.0.1`, `::1`, or an explicit IP. A non-loopback address (`0.0.0.0`, `::`) is an explicit opt-in |
+| `VITE_DEV_PORT` | `5173` | Vite port (1-65535) |
+| `VITE_BFF_URL` | `http://localhost:$PORT` | `http`/`https` origin Vite proxies `/api` to; overrides `PORT` |
+| `FERRUM_JWT_TTL` | `900` | JWT lifetime in seconds |
+| `FERRUM_JWT_ROLE` | `admin` | Development role: `viewer`, `operator`, or `admin` |
+| `FERRUM_JWT_AUDIENCE` | - | Exact `aud` value(s), comma separated |
+| `FERRUM_TLS_CA_PATH` | - | PEM truststore for an `https` admin API |
+| `FERRUM_TLS_VERIFY` | `true` | Verify the admin API certificate |
 
-Every environment variable the BFF reads, with its default, allowed range, and
-meaning, is listed in the
+Invalid values fail startup. The full list, with ranges, is in the
 [configuration reference](docs/deployment.md#2-configuration-reference).
 
-Start the dev server:
+**Use one hostname.** The session cookie is host-scoped, and `localhost` and
+`127.0.0.1` are different hosts. The examples use `localhost` throughout. On
+dual-stack hosts Vite's `localhost` may bind only `[::1]`, so
+`http://127.0.0.1:5173` is refused; set `VITE_DEV_HOST=127.0.0.1` (and the
+same host in `VITE_BFF_URL`) to force IPv4.
+
+**Running next to another Vite app.** Change the ports. One `PORT` value keeps
+the BFF and Vite's `/api` proxy aligned:
 
 ```bash
-npm run dev
+VITE_DEV_PORT=5174 PORT=3002 npm run dev
 ```
 
-This starts Vite (port 5173) and Fastify (port 3001) concurrently. Open
-http://localhost:5173.
+To use a BFF that is already running elsewhere, set `VITE_BFF_URL` (for
+example `http://localhost:3002`) instead of `PORT`.
 
-Open the SPA at the same hostname the BFF session cookie was issued for.
-`localhost` and `127.0.0.1` are different hosts: a cookie from
-`http://127.0.0.1:3001` is not sent to `http://localhost:5173`. Dev examples
-use `localhost` for Vite, `PORT`, and `VITE_BFF_URL`.
+### Mock gateway
 
-On dual-stack hosts, Vite's default `localhost` bind follows whatever
-`localhost` resolves to (often `[::1]` only), so `http://127.0.0.1:5173` is
-refused while `http://localhost:5173` works. Force IPv4 loopback with
-`VITE_DEV_HOST=127.0.0.1` and use that same host in `VITE_BFF_URL` if you
-reach the BFF by IPv4. Foundry does not bind all interfaces unless you set
-an explicit non-loopback address.
-
-Those ports are defaults. Set `VITE_DEV_PORT` and `PORT` (or `VITE_BFF_URL`) to
-run Foundry next to another Vite app such as Nexus, which uses 5173 for its UI
-and 8787 for its API. Invalid values fail Vite startup rather than being coerced.
-`npm run dev` starts both processes, so a single `PORT` value keeps the BFF
-listen port and the Vite `/api` proxy aligned:
+No gateway handy? The bundled mock admin API serves sample data for most
+surfaces (CRUD, TLS/ACME, audit, cluster, overload, chargeback, gateway trust
+bundles):
 
 ```bash
-export VITE_DEV_PORT=5174
-export PORT=3002
-npm run dev
+node scripts/mock-admin-gateway.mjs   # listens on :9000 (MOCK_ADMIN_PORT)
 ```
 
-To point Vite at a BFF that is already listening elsewhere, set `VITE_BFF_URL`
-to that origin (`http://localhost:3002`, for example) instead of `PORT`.
+`MOCK_GATEWAY_MODE=file` makes it a read-only gateway. Writes follow the live
+Edge contract:
 
-No gateway handy? Run the bundled mock admin API, which serves realistic
-sample data for most admin surfaces (CRUD, TLS/ACME, audit, cluster,
-overload/chargeback, gateway trust bundles). Write paths follow the live Edge
-contract: proxy `auth_mode` is only `single` or `multi` (not `none`); plugin
-configs require `plugin_name` and `scope` — a top-level `name` field is unknown;
-and CRUD creates of proxies, consumers, upstreams, and plugin configs record
-`labels.provisioned-by` from `X-Ferrum-Provisioned-By` when the body omits that
-key (explicit values win). Empty label maps are omitted from responses, matching
-Edge. PUT does not stamp the header: omitting `labels` preserves the stored map.
+- proxy `auth_mode` is `single` or `multi`;
+- plugin configs need `plugin_name` and `scope` (a top-level `name` is
+  rejected as unknown);
+- creates of proxies, consumers, upstreams, and plugin configs record
+  `labels.provisioned-by` from `X-Ferrum-Provisioned-By` unless the body sets
+  it; `PUT` without `labels` keeps the stored labels; empty label maps are
+  omitted.
 
-```bash
-node scripts/mock-admin-gateway.mjs   # listens on :9000
-```
+The mock is a **non-mesh** gateway. Only `GET /mesh/service-graph` returns
+data; other `/mesh/*`, `/node-waypoint/*`, and `/service-waypoint/*` routes
+answer `404`, and the UI shows empty states. Use a mesh-mode Ferrum Edge
+gateway to see the mesh surfaces.
 
-For mesh observability the mock emulates a **non-mesh** gateway: only
-`GET /mesh/service-graph` returns sample data. These mesh routes respond
-404 `{error:"mesh mode not active"}` (the UI shows empty states):
+### Seeding a real gateway
 
-- `/mesh/federation`, `/mesh/remote-clusters`
-- `/mesh/config-drift`, `/mesh/slice-drift`, `/mesh/config-revision/reset`
-- `/mesh/policy-denies/recent`
-- `/mesh/egress-scope`, `/mesh/egress-scope/test`
-- `/node-waypoint/identities`, `/service-waypoint/services`
-
-Use a live mesh-mode Ferrum Edge gateway for the full mesh observability
-surfaces above.
-
-To seed a real gateway, use a dedicated namespace. Seeding performs a full
-replacement of that namespace, so it refuses to run without an explicit opt-in.
-Preflight checks run after that confirmation and **before** `POST /restore`:
-
-- **Global `prometheus_metrics`**: Ferrum Edge permits only one enabled
-  global instance process-wide. The seeder lists plugin configs in every
-  namespace it can see. If another namespace already owns that registry, the
-  seed **omits** its own `demo-global-prometheus` fixture and prints the
-  owning namespace. Demo routes do not depend on that plugin. A previous seed
-  in the *target* namespace is replaced as usual.
-- **Basic auth**: demo `basic_auth` plugins and `basicauth` consumers need
-  Edge `FERRUM_BASIC_AUTH_HMAC_SECRET` (>= 32 bytes). They are **off by
-  default**, and the corresponding routes and upstreams are omitted rather
-  than exposed without authentication. Set
-  `FERRUM_DEMO_INCLUDE_BASIC_AUTH=true` to include them; the seeder then creates
-  and deletes a probe credential in the target namespace and aborts with exit
-  status 1 if the secret is missing, still before restore.
+`scripts/seed-demo-gateway.mjs` loads demo resources into a real gateway. It
+**replaces the whole target namespace**, so use a dedicated namespace and
+confirm the exact target:
 
 ```bash
-# FERRUM_JWT_SECRET is the same 32+ character admin signing key used by Ferrum.
+# FERRUM_JWT_SECRET must be the gateway's admin signing key.
 FERRUM_NAMESPACE=ferrum-foundry-demo \
 FERRUM_DEMO_CONFIRM_TARGET='http://127.0.0.1:9000#ferrum-foundry-demo' \
 node scripts/seed-demo-gateway.mjs
-
-# Optional: include basic-auth demo routes (requires the HMAC secret on Edge).
-FERRUM_NAMESPACE=ferrum-foundry-demo \
-FERRUM_DEMO_CONFIRM_TARGET='http://127.0.0.1:9000#ferrum-foundry-demo' \
-FERRUM_DEMO_INCLUDE_BASIC_AUTH=true \
-node scripts/seed-demo-gateway.mjs
 ```
 
-The confirmation must exactly match `<FERRUM_ADMIN_URL>#<FERRUM_NAMESPACE>`;
-changing either target invalidates a previously copied confirmation before any
-HTTP request is made. `scripts/verify-demo-gateway.mjs` and
-`scripts/demo-route-smoke.mjs` follow the written seed manifest so they assert
-the same optional basic-auth and prometheus choices the seeder actually restored.
+`FERRUM_DEMO_CONFIRM_TARGET` must equal `<FERRUM_ADMIN_URL>#<FERRUM_NAMESPACE>`
+exactly, or the script stops before sending any request. After confirmation it
+runs preflight checks, then restores the namespace with `POST /restore`:
 
-The payload uses deterministic resource IDs and can be run repeatedly. It
-includes the current versioned API-spec backup section, current credential-array
-shapes, and the same admin JWT signer used by the BFF. If Ferrum requires an
-admin audience, set the same value in `FERRUM_JWT_AUDIENCE`. Configure the demo
-gateway itself with `FERRUM_NAMESPACE=ferrum-foundry-demo` so it serves the
-seeded routes. Containerized gateways can reach a host-side demo backend by
-setting `FERRUM_DEMO_BACKEND_HOST` to a Docker host alias; override
-`FERRUM_DEMO_PROXY_URL` when the data-plane origin is not
-`http://127.0.0.1:8000`.
+- **Global `prometheus_metrics`**: Ferrum Edge allows one enabled global
+  instance. If another namespace already has one, the seed leaves out its own
+  and prints the owning namespace. Demo routes do not depend on it.
+- **Basic auth**: off by default; those routes and upstreams are left out
+  rather than exposed unauthenticated. Set `FERRUM_DEMO_INCLUDE_BASIC_AUTH=true`
+  to include them. The gateway then needs `FERRUM_BASIC_AUTH_HMAC_SECRET`
+  (32+ bytes); the seeder checks it with a probe credential and exits with
+  status 1, before restoring, if it is missing.
+
+Other inputs:
+
+- The seed is deterministic and safe to rerun.
+- `FERRUM_JWT_AUDIENCE`: set it if the gateway requires an admin audience.
+- `FERRUM_DEMO_BACKEND_HOST`: host of the demo backends (default
+  `127.0.0.1`); use a Docker host alias for a containerized gateway.
+- `FERRUM_DEMO_PROXY_URL`: data-plane origin (default `http://127.0.0.1:8000`).
+- Run the gateway with `FERRUM_NAMESPACE=ferrum-foundry-demo` so it serves the
+  seeded routes.
+
+`scripts/verify-demo-gateway.mjs` and `scripts/demo-route-smoke.mjs` read the
+manifest the seeder writes, so they check the same basic-auth and Prometheus
+choices it made.
 
 ### Production Build
 
@@ -309,52 +299,49 @@ docker run \
   ferrum-foundry
 ```
 
-The production BFF must be reachable only through the configured identity
-proxy. The Docker image uses `gcr.io/distroless/nodejs24-debian13:nonroot` for
-a minimal attack surface. Build inputs are allowlisted by `.dockerignore`, base
-images are digest-pinned, and published images carry provenance and SBOM
-attestations. See [Release and supply-chain gates](docs/release-security.md).
+In production the BFF must be reachable only through the identity proxy; see
+[Deployment](docs/deployment.md). The image is based on
+`gcr.io/distroless/nodejs24-debian13:nonroot`, build inputs are allowlisted by
+`.dockerignore`, base images are pinned by digest, and published images carry
+provenance and SBOM attestations. See
+[Release and supply-chain gates](docs/release-security.md).
 
 ## Documentation
 
-- [Getting started](docs/getting-started.md) - install to first authenticated request, using the starter in [`deploy/starter/`](deploy/starter/README.md)
-- [Critical journeys](e2e/README.md) - the browser-to-gateway release gate: what each journey proves and how to run it locally
-- [Deployment](docs/deployment.md) - production topology, full configuration reference, reverse proxy / Compose / Kubernetes examples, and a go-live checklist
-- [Operator visibility](docs/operator-visibility.md) - health and audit evidence, proxy-bound specs, and mesh Runtime
-- [Production authentication](docs/authentication.md) - trusted-proxy identity contract and downstream JWT claims
-- [Supported pairing](docs/compatibility.md) - the Ferrum Edge image CI qualifies, the release the next Foundry release must pair with, tested envelope, best-effort and unqualified modes
-- [Release and supply-chain gates](docs/release-security.md) - publication gates, image tags, provenance and SBOM
-- [Security](SECURITY.md) - supported versions and how to report a vulnerability privately
-- [Changelog](CHANGELOG.md) - notable changes
+- [Getting started](docs/getting-started.md): from install to a first authenticated request, using [`deploy/starter/`](deploy/starter/README.md)
+- [Deployment](docs/deployment.md): production topology, configuration reference, reverse proxy and Kubernetes examples, go-live checklist
+- [Production authentication](docs/authentication.md): trusted-proxy identity contract and downstream JWT claims
+- [Operator visibility](docs/operator-visibility.md): health and audit evidence, proxy-bound specs, mesh runtime
+- [Supported pairing](docs/compatibility.md): the qualified Ferrum Edge image, tested envelope, best-effort and unqualified modes
+- [Critical journeys](e2e/README.md): the browser-to-gateway release gate and how to run it locally
+- [Release and supply-chain gates](docs/release-security.md): publication gates, image tags, provenance and SBOM
+- [Security](SECURITY.md): supported versions and private vulnerability reporting
+- [Changelog](CHANGELOG.md)
 
 ## Tech Stack
 
 | Layer | Technology |
 |---|---|
-| Frontend | React 19, TypeScript, Tailwind CSS v4 |
+| Frontend | React 19, TypeScript 6, Tailwind CSS v4 |
 | Routing | TanStack Router v1 |
 | Data | TanStack Query v5, TanStack Table v8, TanStack Virtual v3 |
-| UI | Radix UI primitives (Dialog, Select, Tabs, Tooltip) |
+| UI | Radix UI primitives (Dialog, Dropdown Menu, Select, Tabs, Tooltip) |
 | Backend | Node.js, Fastify 5 |
 | JWT | jose (HS256) |
 | Docker | Distroless Node.js 24 |
 
 ## Resource attribution
 
-Foundry's authenticated BFF sends `X-Ferrum-Provisioned-By: ferrum-foundry`.
-A gateway with resource-label support records `labels.provisioned-by` on newly
-created proxies, consumers, upstreams and plugin configurations, including
-batch creates and resources generated by JSON/YAML API-spec imports. This
-keeps streamed upload bodies unchanged. The demo seeder sends the same header.
-Resource detail pages display all labels, including attribution recorded by
-Git Forge Ops and Nexus. Existing labels survive edits; restore preserves
-recorded origins and spec-owned graphs. Labels are informational, not a change
-to authentication, resource ownership or routing.
+The BFF sends `X-Ferrum-Provisioned-By: ferrum-foundry` on every proxied admin
+request, and the demo seeder does the same. A gateway with resource-label
+support records it as `labels.provisioned-by` on newly created proxies,
+consumers, upstreams, and plugin configs, including batch creates and API-spec
+imports. Existing labels survive edits, and restore keeps recorded origins.
+Detail pages show all labels, including those set by other tools.
 
-Deploy Ferrum Edge's resource-label feature first. Older gateways ignore the
-header and do not record attribution. This does not retroactively identify the
-creator of already-unlabeled resources.
-
+Labels are informational. They do not affect authentication, ownership, or
+routing. Gateways without label support ignore the header, and resources
+created before it are not labeled retroactively.
 
 ## License
 

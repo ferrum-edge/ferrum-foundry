@@ -48,7 +48,7 @@ explicitly assigns that operation.
   proxy `PUT`s built with `proxies.toUpdatePayload(proxy)`; every namespace-scoped API call takes
   a `NamespaceScope`; detail editors bound to `{ namespace, resourceId }`; no local copy of
   `openapi.yaml`; and no credential material in browser storage.
-- Add tests beside the code they cover (`src/**/*.test.tsx` and `server/**/*.test.ts` under
+- Add tests beside the code they cover (`src/**/*.test.{ts,tsx}` and `server/**/*.test.ts` under
   Vitest, `scripts/*.test.mjs` under `node --test`); extend the gateway-contract scripts when a
   request shape changes.
 - Keep edits surgical. Do not rewrite unrelated changes or clean up neighboring code without

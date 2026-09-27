@@ -1,81 +1,94 @@
 # Release and supply-chain gates
 
-No container or GitHub release is published until the reusable CI workflow has
-completed every launch gate:
+No image or GitHub release is published until every job in the reusable CI
+workflow (`.github/workflows/ci.yml`) has passed:
 
-1. the quality gate runs zero-warning lint, frontend and server type checks,
-   the complete test suite with coverage floors, a production-only dependency
-   audit, and a production build;
-2. the gateway-contract gate seeds the same destructive payload twice against
-   the Ferrum Edge image pinned by digest as `edge.image` in
-   `docs/compatibility.json`, the single source CI reads it from, with
-   audience and namespace enforcement enabled, then verifies the exported
-   backup state plus live public, rejected-anonymous, key, basic, JWT,
-   multi-auth, and response-mock traffic, and compares the UI's capability
-   model with the gateway's own answers as `viewer`, `operator`, and `admin`,
-   on that image and on a second copy started with `FERRUM_ADMIN_READ_ONLY`;
-3. the deployment-starter and critical-journey gates bring up the checked-in
-   starter with the production image and the same gateway image, and drive
-   the first-success walkthrough and the browser journeys (`e2e/README.md`);
-   and
-4. the container gate builds and starts the release Dockerfile for both amd64
-   and arm64, verifies an excluded canary cannot enter image history or layers,
-   checks non-root liveness plus a protected BFF-to-gateway request, fails on
-   fixed high/critical vulnerabilities, and uploads per-architecture CycloneDX
-   SBOMs.
+1. **Quality Gate** (Node 22 and 24): zero-warning lint, frontend, server, and
+   E2E type checks, the full test suite with coverage floors, a
+   production-dependency audit (`npm audit --omit=dev --audit-level=high`), and
+   a production build.
+2. **Pinned Gateway Contract**: runs against the Ferrum Edge image pinned as
+   `edge.image` in `docs/compatibility.json`, with admin JWT audience and
+   namespace-claim enforcement on. It checks the guided plugin schemas and the
+   plugin sensitivity table against their pinned sources, admits every
+   [plugin template](plugin-defaults.md), seeds the same destructive demo
+   payload twice, verifies the exported backup state, and sends live public,
+   anonymous (must be rejected), key, basic, JWT, multi-auth, and response-mock
+   traffic. It also compares the UI's capability model with the gateway's
+   answers as `viewer`, `operator`, and `admin`, on that image and on a second
+   copy started with `FERRUM_ADMIN_READ_ONLY=true`.
+3. **Deployment Starter** and **Critical Journeys**: bring up the checked-in
+   starter with the freshly built image and the same gateway image, then run the
+   first-success walkthrough and the [browser journeys](../e2e/README.md).
+4. **Container Gate** (amd64 and arm64): builds the release Dockerfile, checks
+   that a planted `.env` canary is absent from image history and layers,
+   requires a non-root user, checks liveness, readiness, and one authenticated
+   BFF-to-gateway request, fails on fixable high or critical vulnerabilities,
+   and uploads a CycloneDX SBOM per architecture.
 
-Passing these gates qualifies Foundry with that one Ferrum Edge image, not with
-any other Edge build. Today `edge.image` is the published Ferrum Edge v0.9.7
-release, which is also `edge.release`, the published Edge release Foundry
-v0.2.0 pairs with; its requirements, the images evaluated and rejected, what else is best-effort,
-and what is not qualified are recorded in `docs/compatibility.md`. Moving the
-Edge pin is a re-qualification: change `edge.image` in
-`docs/compatibility.json`, and the pull request re-runs every gate above
-against the new image; `scripts/supported-pairing.test.mjs` fails if the
-starter, the workflow, or the launch documents still name another one.
+## Supported Edge image
 
-The Docker build context is deny-by-default. Only package manifests, TypeScript
-and Vite build configuration, application/server/shared source, and public
-assets are sent. Files such as `.env`, Git history, documentation, local build
-output, test coverage, and developer caches are outside the context.
+Passing these gates qualifies Foundry with that one Ferrum Edge image and no
+other build. `edge.image` is currently the published Ferrum Edge v0.9.7 release,
+which is also `edge.release`, the Edge release Foundry v0.2.0 pairs with.
+Requirements, best-effort and unqualified setups, and rejected images are in
+[the compatibility record](compatibility.md).
 
-The Dockerfile frontend, Node 24 builder, and distroless Node 24 runtime use
-immutable multi-platform image digests. Main and tagged multi-architecture
-publications request maximum-mode build provenance and SBOM attestations from
-BuildKit. Each manifest job requires exactly two build digests, verifies their
-platforms before creating any public tag, publishes and re-checks the immutable
-commit or release tag, and only then promotes mutable channels. The required
-runtime platforms are exactly `linux/amd64` and `linux/arm64`. The image's OCI
-revision label is set to the exact Git commit being published.
+Moving the pin is a re-qualification: change `edge.image` in
+`docs/compatibility.json`, and the pull request re-runs every gate above against
+the new image. `scripts/supported-pairing.test.mjs` fails if any file outside the
+history files names a different Ferrum Edge image, or if the starter Compose file
+or `CLAUDE.md` does not name `edge.image`.
 
-Every third-party GitHub Action is pinned to a full commit SHA. Release tags
-are validated as safe semantic versions and must point to a commit reachable
-from `main` before any registry login or build. The `version` field in
-`package.json` must equal the tag without its `v` prefix (`v1.2.3` requires
-`1.2.3`), because the BFF reports that field from `/api/health/live` and
-`/api/health/ready`; a mismatch fails the release before anything is built.
-The same step requires `foundry.version` in `docs/compatibility.json` to equal
-that version, `docs/release-notes/vX.Y.Z.md` to exist, and
-`node scripts/supported-pairing.mjs release-ready` to pass: `edge.release` must
-name a published Edge release and `edge.image` must be that release, so the
-gates that ran for the tag qualified the release it names. The GitHub release
-is published with those notes, so every release names the Edge release it was
-qualified against. A
-prerelease is marked as such on GitHub and never advances the stable
-major/minor or `latest` image tags. A stable backport advances its major/minor
-channel only when it is the newest patch in that line, and advances `latest`
-only when it is the newest stable version in the repository. Per-tag workflows
-remain independently queued; each manifest job waits for earlier release run
-numbers to finish before promotion. Tag state is then re-fetched immediately
-before image promotion and GitHub release creation, preventing a slower older
-run from overwriting a newer one without canceling an intervening release.
+## Build inputs
 
-Channel tags are explicit: every `main` publication advances `main` and an
-immutable `main-<commit>` tag, while only the newest stable semantic-version
-release advances `latest`. Consequently, an untagged commit or an older stable
-backport can never replace the image operators receive from an unqualified
-`docker pull ferrumedge/ferrum-foundry`.
+The Docker build context is deny-by-default (`.dockerignore`). Only package
+manifests, TypeScript and Vite configuration, `src/`, `server/`, `shared/`, and
+`public/` are sent. `.env` files, Git history, documentation, build output,
+coverage, and caches never enter the context.
 
-Coverage floors are intentional baseline ratchets, not a claim that the UI is
-fully covered. Server security code has a separate, higher aggregate floor.
-Raise both floors as coverage grows; do not lower them to make a release pass.
+The Dockerfile frontend, the Node 24 builder, and the distroless Node 24 runtime
+are pinned by multi-platform image digest. The image's OCI revision label is the
+Git commit being built.
+
+Every third-party GitHub Action is pinned to a full commit SHA.
+
+## Publishing
+
+Pushes to `main` and release tags publish multi-architecture images with
+BuildKit provenance (`mode=max`) and SBOM attestations. Each manifest job
+requires exactly two per-platform digests, checks that they are `linux/amd64`
+and `linux/arm64`, publishes and re-checks the immutable tag, and only then
+moves channel tags.
+
+| Trigger | Immutable tag | Channel tags |
+| --- | --- | --- |
+| Push to `main` | `main-<commit>` | `main` |
+| Release tag `vX.Y.Z` | `vX.Y.Z` | `X.Y.Z`; `X.Y` if it is the newest patch in that line; `latest` if it is the newest stable version |
+
+A prerelease tag (`vX.Y.Z-suffix`) is marked as a prerelease on GitHub and never
+moves `X.Y` or `latest`. An untagged commit or an older stable backport can
+therefore never replace what `docker pull ferrumedge/ferrum-foundry` returns.
+
+Before any registry login or build, the release workflow requires that:
+
+- the tag is a safe semantic version and points to a commit reachable from
+  `main`;
+- `package.json` `version` equals the tag without its `v` (`v1.2.3` needs
+  `1.2.3`), because the BFF reports it from `/api/health/live` and
+  `/api/health/ready`;
+- `foundry.version` in `docs/compatibility.json` equals that version;
+- `docs/release-notes/vX.Y.Z.md` exists and is not empty;
+- `node scripts/supported-pairing.mjs release-ready` passes: `edge.release` names
+  a published Edge release and `edge.image` is that release.
+
+The GitHub release is published with those notes. Release runs for different
+tags are queued independently: each manifest job waits for earlier release runs
+to finish, and tags are re-fetched just before image promotion and GitHub
+release creation, so a slower older run cannot overwrite a newer one.
+
+## Coverage floors
+
+Coverage floors in `vitest.config.ts` are ratchets from a measured baseline, not
+a claim that the UI is fully covered. `server/` has a separate, higher floor.
+Raise the floors as coverage grows; never lower them to make a release pass.

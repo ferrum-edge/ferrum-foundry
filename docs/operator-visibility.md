@@ -1,87 +1,95 @@
 # Operator visibility
 
-Health Status and Audit Log share the authenticated `/health` query and the
-same admin audit pipeline card. All requests use the Foundry BFF. These views
-refresh health every 30 seconds while mounted. Their cache is keyed by the
-namespace used to authorize the read; process-wide health is not a promise that
-its contents are namespace-local.
+## Health and audit evidence
 
-Only a fresh, successful detailed health snapshot can prove ordinary mutation
-collection disabled by omitting `audit_pipeline`. The detailed tier always
-includes `mode`, `timestamp`, `admin_writes_enabled`, and `cached_config`.
-Minimal health, loading, a pending refresh, an expired observation, and failed
-reads conclude nothing about collection. A valid readiness HTTP 503 snapshot
-is still a health observation; a BFF error or invalid body is not.
+Health Status and Audit Log share one authenticated `/health` query, read
+through the Foundry BFF, and the same Admin audit pipeline card. Both refresh
+health every 30 seconds while open. The cache is keyed by the request
+namespace, but process-wide health contents are not namespace-local.
 
-The Audit Log names `FERRUM_ADMIN_AUDIT_ENABLED` when collection is disabled.
-Stored historical records can still exist. An empty list describes only the
-selected namespace, filter, and page. Enabled collection is not a guarantee
-that every mutation already appears: delivery can lag, and policy can permit
-unaudited writes. `available: false` with `policy: fail_closed` explains the
-pre-mutation HTTP 503 refusal; `fail_open` instead permits an audit gap. Sticky
-`degraded` and `evidence_lost` remain distinct from current availability.
+Audit collection counts as disabled only when a fresh, successful health
+snapshot either reports `audit_pipeline.enabled: false` or is a detailed
+snapshot (it carries `mode`, `timestamp`, `admin_writes_enabled`, and
+`cached_config`) that omits `audit_pipeline`. Minimal health, loading, a
+pending refresh, a stale snapshot, or a failed read leaves collection unknown.
+A valid HTTP 503 readiness snapshot is still a health observation; a BFF error
+or an invalid body is not.
 
-Health cards show dynamic listener realization and its truncated/overflowed
-bounds separately from sticky serving-task exits. They expose polling backoff
-and the optional change watcher, per-sink logging, record loss, Kafka and AI
-transcript audit, remote JWKS freshness, namespace serving scope, mesh stream
-and waypoint state, discovery, CP/DP trust, DP configuration freshness, and
-shared replay authority when supplied. Missing sections are not synthesized
-as healthy zeroes. Counters are explicitly historical; recovered sinks can
-have prior loss. Known adverse details add a prominent notice even if the
-coarse process status is `ok`. Scope exclusions and policy denies alone do not
-prove a runtime outage.
+When collection is disabled, the Audit Log names `FERRUM_ADMIN_AUDIT_ENABLED`.
+Stored historical records can still exist. Keep these limits in mind:
+
+- An empty list describes only the selected namespace, filter, and page.
+- Enabled collection does not mean every mutation already appears: delivery
+  can lag, and policy can allow unaudited writes.
+- `available: false` with `policy: fail_closed` means audited mutations are
+  refused with HTTP 503 before they run. With `fail_open`, they proceed and
+  can leave an audit gap.
+- Sticky `degraded` and `evidence_lost` are separate from current availability.
+
+Health Status shows a card for each section the gateway supplies: gateway
+listeners (including truncated/overflowed bounds), sticky serving-listener
+failures, database polling backoff and the config-change watcher, per-sink
+process logging, plugin log record loss, Kafka logging, AI transcript audit,
+remote JWKS freshness, namespace serving scope, service discovery, CP/DP
+verification trust, data plane configuration, shared replay authority, and
+mesh runtime health (config stream and waypoint state).
+
+Missing sections are not shown as healthy zeroes. Counters are historical, so
+a recovered sink can still show earlier loss. Known adverse details raise a
+prominent notice even when the coarse process status is `ok`. Scope exclusions
+and policy denies on their own do not indicate an outage.
 
 ## Proxy-bound API specs
 
-The upstream contract differs from the issue's proposed list shape:
-`GET /api-specs/by-proxy/{proxy_id}` returns **one raw document**, or
-`404 {"error":"API spec not found"}`. It requires admin and has no spec UUID
-metadata envelope. `(namespace, proxy_id)` is unique.
+Upstream, `GET /api-specs/by-proxy/{proxy_id}` returns **one raw document**,
+or `404 {"error":"API spec not found"}`. It requires admin, carries no spec
+UUID or metadata, and `(namespace, proxy_id)` is unique.
 
-`apiSpecs.listByProxy(scope, proxyId)` therefore uses the supported
-`GET /api-specs?proxy_id=...` summary filter, validates the zero-or-one binding,
-and keeps the returned spec `id` distinct from `proxy_id`. The proxy detail
-card links to `/api-specs?spec=<spec-id>`, opening the existing searchable list
-at that UUID. Its “View bound document” action calls the actual by-proxy
-endpoint through `getDocumentByProxy`, negotiating YAML. Known non-admin roles
-see the reason the raw document cannot be opened. A documented missing binding
-is distinguished from authorization, connectivity, and other failures.
+The proxy detail page's Bound API specs card therefore works in two steps:
 
-Summary keys are `['apiSpecs', namespace, 'byProxy', proxyId]`; document keys
-are `['apiSpecDocument', namespace, 'byProxy', proxyId]`. Existing spec/proxy
-cascade invalidation and retirement cover these prefixes. The card lives in
-the existing identity-keyed proxy editor, so a namespace or proxy route switch
-retires its view and cannot display a late response from the prior identity.
-The binding is not a live-route diff or a claim of spec/config convergence.
+- `apiSpecs.listByProxy(scope, proxyId)` reads metadata from
+  `GET /api-specs?proxy_id=...`, checks there is at most one binding, and keeps
+  the spec `id` separate from `proxy_id`. The card links to
+  `/api-specs?spec=<spec-id>`, which opens the searchable spec list at that ID.
+- **View bound document** calls the by-proxy endpoint through
+  `apiSpecs.getDocumentByProxy`, requesting YAML. Known non-admin roles see why
+  they cannot open the raw document. A missing binding is reported separately
+  from authorization, connectivity, and other failures.
+
+Query keys are `['apiSpecs', namespace, 'byProxy', proxyId]` for the summary
+and `['apiSpecDocument', namespace, 'byProxy', proxyId]` for the document.
+Existing spec and proxy cascade invalidation covers both prefixes. The card
+sits inside the identity-keyed proxy editor, so switching namespace or proxy
+discards it and a late response for the previous proxy is never shown. The
+binding is stored metadata, not a comparison with live routes.
 
 ## Mesh Runtime
 
-The Runtime tab uses `GET /mesh/runtime-overlay`, which reports the connected
-workload's **last proxy-accepted slice**:
+The Mesh Runtime tab reads `GET /mesh/runtime-overlay`. It returns the
+connected workload's **last proxy-accepted slice**:
 `{namespace, version, runtime_overlay: {fields?: {...}}}`. It is not a fleet
-node list and returns no node ID. Values retain their upstream tags: `number`,
-`string`, `bool`, and `fractional_percent` (`numerator` plus `hundred`,
-`ten_thousand`, or `million` denominator). The displayed percentage uses the
-upstream consumer's saturation at 100%, alongside the unmodified numerator.
+node list and has no node ID.
 
-An accepted empty overlay (`runtime_overlay: {}` or `fields: {}`) is distinct
-from `404 {"error":"No active mesh runtime overlay"}` (outside mesh mode or
-before any accepted slice). HTTP 503 is temporarily unavailable, with current
-state unknown. Other errors, including authorization and malformed payloads,
-are failures rather than empty overlays. The existing `mesh/` silent-probe
-pattern suppresses expected 404/503 popups. The query key includes the request
-namespace even though the response describes the connected process, preserving
-namespace authorization and late-response isolation.
+Each value keeps its upstream `kind`: `number`, `string`, `bool`, or
+`fractional_percent` (a `numerator` with a `hundred`, `ten_thousand`, or
+`million` denominator). Fractional percentages show the raw numerator and a
+percentage capped at 100%.
 
-The mock gateway follows these response shapes, filters spec and audit reads
-by namespace, and serves a populated runtime overlay for `MOCK_GATEWAY_MODE=mesh`.
-Its ordinary audit collection is disabled; seeded historical audit rows remain
-readable. Behavioral/API tests cover these surfaces through the fetch boundary.
-They must run in GitHub-hosted CI; no local execution was used for this change.
+| Response | Meaning |
+| --- | --- |
+| `200` with `runtime_overlay: {}` or `fields: {}` | An accepted slice with no runtime fields. |
+| `404 {"error":"No active mesh runtime overlay"}` | Not in mesh mode, or no slice accepted yet. |
+| `503` | Temporarily unavailable; current state unknown. |
+| Anything else, including 401/403 and malformed bodies | A failure, never an empty overlay. |
 
-Contracts were checked against Ferrum Edge's canonical OpenAPI and serializers
-at reviewed main `9cd539828ac963adc4eb18b2cacad3e456c1e5db`, especially
-`src/admin/mod.rs`, `src/admin/audit.rs`, `src/admin/api_specs/handlers.rs`,
-`src/modes/mesh/config.rs`, and subsystem health snapshot serializers. No local
-copy of the upstream OpenAPI is stored in Foundry.
+Mesh reads use the silent-probe pattern, so expected 404/503 responses do not
+raise error popups. The query key includes the request namespace, even though
+the response describes the connected process, to keep authorization and
+late-response isolation per namespace.
+
+## Mock gateway
+
+`scripts/mock-admin-gateway.mjs` follows these response shapes, filters spec
+and audit reads by namespace, and serves a populated runtime overlay when
+`MOCK_GATEWAY_MODE=mesh`. Its ordinary audit collection is disabled; seeded
+historical audit rows stay readable.

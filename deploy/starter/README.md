@@ -8,20 +8,18 @@ browser -> reverse proxy (the only published port) -> Foundry BFF -> Ferrum Edge
 
 The reverse proxy owns TLS and the OIDC login, maps identity-provider groups to
 a Ferrum role and namespace grants, and asserts them to Foundry. Foundry turns
-that assertion into the `sub`, `role`, and `ns` claims of the admin JWT it signs
-per request.
+that into the `sub`, `role`, and `ns` claims of the admin JWT it signs for each
+request.
 
-For the walkthrough that ends in an authenticated request through the data
+For a walkthrough that ends in an authenticated request through the data
 plane, see [`docs/getting-started.md`](../../docs/getting-started.md).
 
-**Supported pairing.** This stack is qualified with exactly one Ferrum Edge
-image, recorded by digest in
-[`docs/compatibility.md`](../../docs/compatibility.md) together with what is
-tested, what is best-effort, and what is not qualified. That image is the
-published Ferrum Edge v0.9.7 release, the release Foundry v0.2.0 pairs with.
-The `demo` profile runs the pinned image. The Foundry default, `ferrumedge/ferrum-foundry:main`,
-is the development channel; pin the released Foundry image named in the same
-record.
+**Supported pairing.** The stack is qualified with one Ferrum Edge image: the
+published v0.9.7 release that Foundry v0.2.0 pairs with, recorded by digest in
+[`docs/compatibility.md`](../../docs/compatibility.md). The `demo` profile runs
+that image. The default Foundry image, `ferrumedge/ferrum-foundry:main`, is the
+development channel; for production, pin the released Foundry image named in
+the same record.
 
 ## Two profiles
 
@@ -33,12 +31,11 @@ record.
 | Backend | yours | a disposable echo origin |
 | Data | yours | throwaway; `down -v` removes it |
 
-**Everything below the identity source is the same in both.** The
-group-to-role policy (`nginx/identity/policy.conf`) and the four identity
-headers (`nginx/identity/inject.conf`) are included by both configurations, so
-the demo exercises the real authorization path rather than a look-alike. A test
-(`scripts/starter-preflight.test.mjs`) fails if either config grows its own
-copy.
+**Only the identity source differs.** Both profiles include the same
+group-to-role policy (`nginx/identity/policy.conf`) and the same four identity
+headers (`nginx/identity/inject.conf`), so the demo exercises the real
+authorization path. `scripts/starter-preflight.test.mjs` fails if either
+config grows its own copy.
 
 ## Files
 
@@ -52,7 +49,7 @@ copy.
 | `nginx/foundry.demo.conf` | Demo reverse proxy plus the stub identity provider |
 | `nginx/identity/policy.conf` | Group → role and group → namespace policy (**shared**) |
 | `nginx/identity/inject.conf` | The four identity headers (**shared**) |
-| `secrets/`, `tls/`, `ca/` | Mount points. Contents are git-ignored |
+| `secrets/`, `tls/`, `ca/` | Mount points; contents are git-ignored |
 
 ## Demo
 
@@ -68,22 +65,24 @@ node ../../scripts/starter-preflight.mjs --env .env
 Then open <http://127.0.0.1:8088> and follow
 [`docs/getting-started.md`](../../docs/getting-started.md).
 
-The demo stack publishes only loopback ports and its identity stub trusts a
-request header. It is for a first run and for CI. Do not expose it.
+The demo publishes only loopback ports (`FOUNDRY_DEMO_PORT` 8088,
+`FERRUM_DEMO_PROXY_PORT` 8000, `FERRUM_DEMO_ADMIN_PORT` 9000), and its identity
+stub trusts a request header (`X-Demo-Identity: admin`, `operator`, `viewer`,
+or `unmapped`). It is for a first run and for CI. Do not expose it.
 
 ## Production
 
 1. `cp .env.example .env` and `cp oauth2-proxy.env.example oauth2-proxy.env`,
-   fill both in, `chmod 600` both. Generate secrets with
+   fill both in, and `chmod 600` both. Generate secrets with
    `openssl rand -base64 48`. `FERRUM_JWT_SECRET` must equal the gateway's
-   `FERRUM_ADMIN_JWT_SECRET`. The identity-provider settings are the
-   `OAUTH2_PROXY_*` names oauth2-proxy reads itself, in their own file: an
-   `env_file` hands a service every variable in it, and `.env` holds the
-   gateway admin signing key and the proof secret, which oauth2-proxy has no
-   use for. They are passed as environment rather than through compose
-   interpolation because Compose interpolates the whole file before it filters
-   by profile, and a production-only requirement would stop the demo profile
-   from starting.
+   `FERRUM_ADMIN_JWT_SECRET`.
+
+   The files are separate on purpose. `.env` holds the gateway signing key and
+   the proof secret; `oauth2-proxy.env` holds the `OAUTH2_PROXY_*` settings,
+   which oauth2-proxy reads directly. Each service gets only its own file.
+   (The IdP settings are not Compose variables because Compose interpolates the
+   whole file for every profile, and a production-only requirement would stop
+   the demo from starting.)
 2. Write `secrets/ferrum-proxy-secret.conf` with the **same** value as
    `FERRUM_TRUSTED_PROXY_SECRET`:
 
@@ -93,42 +92,44 @@ request header. It is for a first run and for CI. Do not expose it.
    chmod 600 secrets/ferrum-proxy-secret.conf
    ```
 
-   The secret is kept out of the checked-in nginx configuration on purpose, and
-   out of the BFF's `env_file` so the OAuth client secret never reaches it.
-3. Put your certificate and key in `tls/`, and the gateway's CA in `ca/` if it
-   presents a private certificate.
+   This keeps the secret out of the checked-in nginx configuration.
+3. Put your certificate and key in `tls/` (`foundry.crt`, `foundry.key`). If
+   the gateway presents a private certificate, put its CA in `ca/` and set
+   `FERRUM_TLS_CA_ROOT=/etc/ferrum/ca` and `FERRUM_TLS_CA_PATH` in `.env`.
 4. Edit `nginx/foundry.conf` for your `server_name` and certificate paths, and
    `nginx/identity/policy.conf` for your IdP's group names and your namespaces.
 5. Pin `FOUNDRY_IMAGE` to a released digest, and run the Ferrum Edge release
    named in [`docs/compatibility.md`](../../docs/compatibility.md).
 6. `docker compose --profile production up -d`, then run the preflight.
 
-### Things this stack gets right, and why
+### What the stack gets right
 
 - **The BFF publishes no host port.** Anyone who can reach it and knows the
-  proof secret is a gateway administrator. Only the proxy is published.
+  proof secret is a gateway administrator, so only the proxy is published.
 - **All four identity headers are set with `proxy_set_header`,** which replaces
-  any client-supplied copy. That is the stripping guarantee as much as the
-  injection: without it a browser could send `X-Ferrum-Role: admin`.
-- **An unmapped user is denied twice** — by oauth2-proxy's `--allowed-group` at
-  login, and by the empty `map` default, which asserts no role so Foundry
-  refuses the request.
-- **`FERRUM_AUTH_MODE=trusted-proxy` with `NODE_ENV=production`.** Static-token
-  authentication is development-only and the BFF refuses it in production.
+  any client-supplied copy. Without that, a browser could send
+  `X-Ferrum-Role: admin`.
+- **An unmapped user is denied twice:** by oauth2-proxy's `--allowed-group` at
+  login, and by the empty `map` default, which asserts no role.
+- **`FERRUM_AUTH_MODE=trusted-proxy` with `NODE_ENV=production`.** The BFF
+  refuses static-token auth in production.
 - **Third-party images are pinned by digest**, so a rebuild cannot silently
   change what runs.
 
 ### Still yours to decide
 
-- Where secrets come from. The files here are the simplest thing that works;
-  a secret manager rendering the same files is strictly better.
-- Namespace grants. `nginx/identity/policy.conf` ships one namespace. Real
-  grants are exact names — Foundry expands no wildcards or prefixes.
-- Fleet-global surfaces. Namespace grants do not scope TLS inventory, managed
-  TLS material, ACME, rotation, or validation. Restrict those routes at the
-  proxy when a scoped identity must not reach them.
-- TLS to the gateway. The production profile assumes an `https://` admin API.
+- **Secrets.** Plain files are the simplest thing that works; a secret manager
+  that renders the same files is better.
+- **Namespace grants.** `nginx/identity/policy.conf` ships one namespace. Use
+  exact names; Foundry expands no wildcards or prefixes.
+- **Fleet-global surfaces.** Namespace grants do not scope TLS inventory,
+  managed TLS material, ACME, rotation, or validation. Restrict those routes at
+  the proxy if a scoped identity must not reach them.
+- **Gateway TLS.** The production profile assumes an `https://` admin API.
   Never set `FERRUM_TLS_VERIFY=false`.
+
+See [`docs/deployment.md`](../../docs/deployment.md) for the full configuration
+reference and production checklist.
 
 ## Teardown
 
@@ -137,9 +138,9 @@ docker compose --profile demo down -v          # disposable: removes its data
 docker compose --profile production down       # leaves your gateway alone
 ```
 
-Foundry stores nothing of its own — no database, no migrations. Every resource
-lives in the gateway.
+Foundry stores nothing of its own; every resource lives in the gateway.
+`down -v` leaves `.env` and `secrets/ferrum-proxy-secret.conf` in place.
 
-`scripts/seed-demo-gateway.mjs` is **not** part of setup. It replaces the
-contents of a namespace and requires `FERRUM_DEMO_CONFIRM_TARGET` to equal its
-exact target for that reason.
+`scripts/seed-demo-gateway.mjs` is **not** part of setup. It replaces a whole
+namespace, which is why it requires `FERRUM_DEMO_CONFIRM_TARGET` to name the
+exact target.
