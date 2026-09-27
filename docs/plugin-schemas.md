@@ -1,19 +1,14 @@
 # Guided plugin configuration
 
 Four plugins — `key_auth`, `rate_limiting`, `cors`, and `prometheus_metrics` —
-can be configured through labelled controls instead of a JSON textarea. This
-document records where those controls come from, what they will and will not
-do to a configuration, and how the derivation is kept honest.
-
-The advanced raw-JSON editor is unchanged and remains the complete surface.
-Guided editing is assistance; the gateway is still the only authority on
-whether a configuration is valid.
+can be edited with labelled controls instead of raw JSON. The raw JSON editor
+is still available and remains the complete surface. Guided editing is
+assistance: the gateway alone decides whether a configuration is valid.
 
 ## Where the fields come from
 
 Every label, description, enum, bound, and pattern in `src/lib/pluginSchemas.ts`
-is a transcription of a named schema component in the canonical Ferrum Edge
-`openapi.yaml` — not invented UI copy:
+is transcribed from a named schema component in the Ferrum Edge `openapi.yaml`:
 
 | Plugin | Components |
 | --- | --- |
@@ -24,120 +19,106 @@ is a transcription of a named schema component in the canonical Ferrum Edge
 
 ## Provenance and the drift check
 
-Foundry deliberately keeps **no copy** of `openapi.yaml` (see CLAUDE.md), so
-what is stored instead is the reviewed reduction plus the SHA-256 of each
-source block. That digest is the record of what the field set was checked
-against.
+Foundry keeps no copy of `openapi.yaml`. It stores the reviewed descriptors and
+the SHA-256 of each source component block instead:
 
-`PLUGIN_SCHEMA_SPEC` pins the upstream revision
-(`ferrum-edge/ferrum-edge@65a2341`, `info.version: 0.2.0`) and
-`PLUGIN_SCHEMA_PROVENANCE` pins the digests.
-`scripts/plugin-schema-drift.mjs` re-fetches the spec on every pull request —
-it runs in the `Pinned Gateway Contract` job, and as `npm run
-check:plugin-schemas` locally — extracts each block and compares. A changed or
-removed block fails the job, naming the component.
+- `PLUGIN_SCHEMA_SPEC` pins the upstream commit
+  (`ferrum-edge/ferrum-edge@65a2341`, `info.version: 0.2.0`).
+- `PLUGIN_SCHEMA_PROVENANCE` pins one digest per component.
+
+`scripts/plugin-schema-drift.mjs` (`npm run check:plugin-schemas`) fetches
+`openapi.yaml`, extracts each block, and compares digests. A changed or missing
+block fails, naming the component. By default it fetches the pinned commit, and
+that is what the **Pinned Gateway Contract** CI job runs. To check against a
+newer spec, set the ref:
+
+```bash
+FERRUM_SPEC_REF=main npm run check:plugin-schemas
+```
 
 **Do not update a digest without re-reading the schema.** A structured editor
-derived from an older schema is exactly how fields a newer gateway understands
-start getting stripped; the digest exists so that cannot happen quietly. The
-extraction rule (a block runs from its four-space key line to the next key at
-that indentation, trailing blank lines dropped) is fixed by
-`scripts/plugin-schema-drift.test.mjs`, which also asserts that every guided
-plugin's components are pinned.
+built from an older schema is how fields a newer gateway understands get
+stripped. When you re-review, update `PLUGIN_SCHEMA_SPEC.ref` and the digests
+together.
 
-The drift check retries transport failures and fails on anything else: a
-GitHub outage must not be reported as drift, and must not pass either.
+A block runs from its four-space key line to the next key at that indentation,
+with trailing blank lines dropped. `scripts/plugin-schema-drift.test.mjs` fixes
+that rule and checks that every guided plugin's components are pinned.
+
+Transport failures are retried; any other fetch error, including an HTTP error,
+fails the check. An outage is never reported as drift, and never passes.
 
 ## What guided editing does to a configuration
 
 ### It is lossless
 
 `writeGuidedConfig` starts from a structural copy of the configuration and
-touches only the keys the descriptors name. Therefore:
+touches only the keys the descriptors name:
 
-- **Unmodelled keys round-trip.** A newer gateway field, or one this reduction
-  deliberately leaves out, is carried through untouched.
+- **Unmodelled keys round-trip**, including fields from a newer gateway.
 - **Key order is preserved**, so JSON → guided → JSON of an untouched
   configuration is byte-identical.
-- **Nested siblings survive.** Editing the rate limit inside `limits[0]` does
-  not disturb other keys in that rule.
+- **Nested siblings survive.** Editing the rate limit in `limits[0]` leaves the
+  rule's other keys alone.
 
 ### Omission is a value
 
-A full-replacement `PUT` treats an absent key, an explicit `null`, and an empty
-string as three different instructions. The guided view keeps them apart: an
-unset field renders as *Not set*, states what the gateway does in its absence,
-and has an explicit control to set or omit it. It never materialises a default
-into the configuration just because a control needed something to show.
+A full-replacement `PUT` treats an absent key, `null`, and an empty string
+differently, and the guided view keeps them apart. An unset field shows
+*Not set* with what the gateway does in its absence, and has an explicit control
+to set or omit it. A default is never written just because a control needed
+something to display.
 
-### A shape it cannot model is refused, not reshaped
+### Unsupported shapes fall back to JSON
 
-Some configurations are outside what these descriptors represent. Each one is
-reported with its reason and the editor stays on raw JSON:
+When a configuration is outside what the descriptors model, the editor stays on
+raw JSON and states why. Nothing is changed.
 
 | Situation | Why |
 | --- | --- |
-| A `rate_limiting` policy with more than one rule, or whose single rule is not `scope: default` | Per-consumer rules carry their own counters and cross-rule identity constraints the field set does not express |
-| `cors.allowed_origins` containing Istio `StringMatch` objects | Object `exact`/`prefix`/`regex` have deliberately different matching semantics from the native string form, and must not be broadened by rewriting |
-| A `cors` policy with `unmatched_preflights` | That marker changes what omitted method, header, and max-age fields mean; editing it structurally would rewrite those omissions |
-| An enum field stored in a spelling the gateway accepts but the control does not offer (`limit_by: "Consumer"`, the `spiffe` alias, `sync_mode: "Redis"`) | The schema parses these case-insensitively, so they are valid; the control can only show canonical values, and silently canonicalising them would rewrite the operator's configuration |
-
-This is a supported outcome, not a failure. Nothing is changed, and the whole
-configuration remains editable.
+| `rate_limiting` without a `limits` array, with more than one rule, or whose single rule is not `scope: default` | Per-consumer rules carry their own counters and cross-rule constraints the field set does not express |
+| `cors` without an `allowed_origins` array, or with Istio `StringMatch` objects in it | `exact`/`prefix`/`regex` objects match differently from the native string form and must not be rewritten |
+| `cors` with `unmatched_preflights` | That marker changes what omitted method, header, and max-age fields mean |
+| An enum value in a spelling the gateway accepts but the control does not offer (`limit_by: "Consumer"`, the `spiffe` alias, `sync_mode: "Redis"`) | The schema parses these case-insensitively; canonicalising them would rewrite the operator's configuration |
 
 ### Secrets are never displayed
 
-`redis_password` is marked secret. It is read as present-but-blank, so it never
-reaches the DOM, browser storage, or a validation message. Leaving it blank
-keeps the stored value; typing a new one replaces it; omitting the field
-removes it. Editing an unrelated rate-limit field never requires re-entering
-it.
+`redis_password` is marked secret and read as present-but-blank, so it never
+reaches the page, browser storage, or a validation message. Leave it blank to
+keep the stored value, type a new one to replace it, or omit the field to remove
+it. Editing other fields never requires re-entering it.
 
-## Never stricter than the gateway
+## Validation
 
-Client validation may be looser than the schema — the gateway is the
-authority and will refuse what this lets through — but it must never refuse
-something the gateway admits. Where a transcribed pattern cannot express the
-schema exactly (the Redis URL's `2^31-1` database bound, for example), the
-guided pattern is the looser one.
+Client-side checks cover what the schema states: required fields, enum
+membership, numeric bounds, patterns, list bounds, and cross-field rules (a
+rate-limit rule uses preset rates **or** the custom window pair, never both;
+`sync_mode: redis` needs `redis_url`; CORS credentials cannot be combined with
+a wildcard origin). Errors are inline, set `aria-invalid` and
+`aria-describedby`, and are announced with `role="alert"`.
 
-## Validation, and what it is not
+Client validation may be looser than the gateway but never stricter. Where a
+pattern cannot express the schema exactly (for example the Redis URL's `2^31-1`
+database bound), the guided pattern is the looser one. A configuration that
+passes here can still be refused; the gateway's error is shown unchanged.
 
-Client-side validation reports what the schema states: required fields, enum
-membership, numeric bounds, patterns, list bounds, and the cross-field rules
-the schema expresses (a rate-limit rule uses preset rates **or** the custom
-window pair, never both; `sync_mode: redis` needs `redis_url`; credentials
-cannot be combined with a wildcard origin). Errors are inline, carry
-`aria-invalid` and `aria-describedby`, and are announced with `role="alert"`.
+Prerequisites only the deployment can satisfy — consumers holding a key-auth
+credential, Redis reachable through the gateway's egress policy, TLS trust
+material — are shown as unconfirmed notes, never as satisfied.
 
-It is **not** a substitute for gateway admission. A configuration that passes
-here can still be refused, and the gateway's own error is displayed unchanged.
+## Templates and tests
 
-Prerequisites that only the deployment can satisfy — consumers holding a
-keyauth credential, Redis reachable through the gateway's egress policy, TLS
-trust material present — are shown as explicitly unconfirmed notes. Foundry
-does not know whether they hold, and never presents them as satisfied.
-
-## Interaction with the defaults contract
-
-Guided editing starts from the same templates as before, so the real-gateway
-admission checks in `scripts/plugin-defaults-contract.mjs` still cover every
-guided plugin's starting configuration. `pluginGuidedConfig.test.ts` asserts
-that each of those templates is representable and round-trips unchanged, so a
-template change that the guided view could not express would fail here rather
-than silently degrade the editor.
-
-## Coverage
+Guided editing starts from the [plugin templates](plugin-defaults.md), which the
+gateway contract admits against the pinned gateway. `pluginGuidedConfig.test.ts`
+checks that each guided plugin's template is representable and round-trips
+unchanged.
 
 | Concern | Test |
 | --- | --- |
 | Losslessness, omission/clear semantics, secrets, unsupported shapes, validation | `src/lib/pluginGuidedConfig.test.ts` |
 | Labelled controls, inline accessible errors, submit refusal, JSON round trip, fallback reason | `src/components/forms/PluginConfigForm.guided.test.tsx` |
 | Block extraction, digest stability, pinned-component coverage | `scripts/plugin-schema-drift.test.mjs` |
-| The digests still match upstream | `scripts/plugin-schema-drift.mjs` (CI) |
+| Digests match the pinned spec | `scripts/plugin-schema-drift.mjs` (CI) |
 
-## Not in scope
-
-A visual designer for every plugin, a universal form builder, and any Foundry
-database. Adding a plugin means adding its descriptors and its pinned digest —
-the rest of the machinery is shared.
+Adding a guided plugin means adding its descriptors and pinned digests; the rest
+is shared. There is no per-plugin form builder and no Foundry database.

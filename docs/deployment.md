@@ -1,19 +1,17 @@
 # Deployment guide
 
-This guide covers running Ferrum Foundry in production. Foundry is a React
-single-page application served by a Fastify BFF (backend-for-frontend). The BFF
-holds the Ferrum Edge admin signing key, mints short-lived admin JWTs, and
-proxies admin API calls to the gateway.
+How to run Ferrum Foundry in production. Foundry is a React single-page app
+served by a Fastify BFF (backend-for-frontend). The BFF holds the Ferrum Edge
+admin signing key, mints a short-lived admin JWT per request, and proxies admin
+API calls to the gateway.
 
-Foundry is in [active buildout](../README.md#development-status) with no users
-yet. These deployment instructions describe the intended production setup;
-development versions may introduce breaking changes without an upgrade path.
-Foundry has no application database or schema migration step. Gateway database
-setup belongs to Ferrum Edge.
+Foundry is in [active buildout](../README.md#development-status): development
+versions may break without an upgrade path. Foundry has no database or
+migrations of its own; gateway storage belongs to Ferrum Edge.
 
 Foundry does not authenticate people. An identity-aware reverse proxy in front
-of it does. Read [Production authentication](authentication.md) before
-deploying.
+of it does. Read [Production authentication](authentication.md) first. For a
+runnable version of everything below, see [`deploy/starter/`](../deploy/starter/README.md).
 
 ## 1. Topology
 
@@ -30,114 +28,125 @@ Ferrum Foundry BFF                (port 8080 in the published image)
 Ferrum Edge admin API             (default port 9000)
 ```
 
-The proxy owns the OIDC authorization-code flow, multi-factor authentication,
-the user session cookie, session revocation, and the group-to-role policy. It
-asserts the result to Foundry with four headers. Foundry translates the asserted
-actor, role, and namespace grants into the `sub`, `role`, and `ns` claims of the
-downstream Ferrum JWT.
+The proxy owns the OIDC login, MFA, the user session, session revocation, and
+the group-to-role policy. It asserts the result to Foundry in four headers.
+Foundry turns the asserted actor, role, and namespace grants into the `sub`,
+`role`, and `ns` claims of the downstream Ferrum JWT.
 
 ### The BFF must never be reachable except through the proxy
 
 Anyone who can reach the BFF port and knows `FERRUM_TRUSTED_PROXY_SECRET` is a
-gateway administrator. Bind the BFF to a private interface, put it on a private
-network or namespace, and firewall the port so only the proxy can connect. Do
-not publish the BFF port on a host that is reachable from a user network.
+gateway administrator. Put the BFF on a private network, firewall its port so
+only the proxy can connect, and never publish it on a host users can reach.
 
 ### The proxy must strip and inject these headers
 
-The proxy must remove any client-supplied copy of each header below and set its
-own trusted value. A client that can set `X-Ferrum-Role: admin` on a request
-that already carries a valid proof secret is an administrator.
+The proxy must drop any client-supplied copy of each header and set its own
+value. A client that can send `X-Ferrum-Role: admin` alongside a valid proof
+secret is an administrator.
 
 | Header | Injected value |
 |---|---|
 | `X-Ferrum-Auth-Secret` | Exact `FERRUM_TRUSTED_PROXY_SECRET` value |
-| `X-Forwarded-User` | Stable actor identity, becomes the JWT `sub` |
+| `X-Forwarded-User` | Stable actor identity; becomes the JWT `sub` |
 | `X-Ferrum-Role` | `viewer`, `operator`, or `admin` after group mapping |
 | `X-Ferrum-Namespaces` | Comma-separated exact namespace grants; omitted for a global admin |
 
-The header names are configurable for the last three
-(`FERRUM_TRUSTED_PROXY_USER_HEADER`, `FERRUM_TRUSTED_PROXY_ROLE_HEADER`,
-`FERRUM_TRUSTED_PROXY_NAMESPACES_HEADER`). The proof header name
+The last three names are configurable (`FERRUM_TRUSTED_PROXY_USER_HEADER`,
+`FERRUM_TRUSTED_PROXY_ROLE_HEADER`, `FERRUM_TRUSTED_PROXY_NAMESPACES_HEADER`).
 `X-Ferrum-Auth-Secret` is fixed.
 
-Foundry rejects a request when the proof secret does not match, when the actor
-is missing or contains control characters, when the role is not one of the three
-values, or when a non-admin role arrives without namespace grants.
-Authentication runs in Fastify's `onRequest` hook, before any body parsing.
+Foundry answers `401` when:
 
-In production the BFF sets Fastify `trustProxy` to 1, so it trusts exactly one
-hop of `X-Forwarded-*`. Run exactly one proxy directly in front of it.
+- the proof secret does not match;
+- any of the four headers appears more than once;
+- the actor is missing, longer than 254 characters, or contains control characters;
+- the role is not one of the three values;
+- the namespace header is present but empty, contains `*` or a glob, or has a
+  name that does not match `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$`;
+- a `viewer` or `operator` arrives without the namespace header.
+
+Only an `admin` may be global, and only by omitting the namespace header. There
+is no wildcard spelling. See [Production authentication](authentication.md)
+for the full contract. Authentication runs in Fastify's `onRequest` hook,
+before any body is parsed.
+
+In production the BFF trusts `X-Forwarded-*` only from the directly connected
+peer, so run exactly one proxy hop in front of it.
 
 ## 2. Configuration reference
 
-Every variable below is read by `server/config.ts` at startup. Invalid values
-fail startup rather than being coerced. Boolean variables accept only the exact
-strings `true` and `false`. Duration variables are integers.
+`server/config.ts` reads every variable below at startup. Invalid values fail
+startup instead of being coerced. Booleans accept only `true` and `false`.
+Durations are integers.
 
 ### Core
 
 | Variable | Required | Default | Range or format | Meaning |
 |---|---|---|---|---|
 | `FERRUM_ADMIN_URL` | Yes | - | `http`/`https` origin, no path, query, fragment, or credentials | Ferrum Edge admin API origin |
-| `FERRUM_JWT_SECRET` | Yes | - | 32 UTF-8 bytes or more, not blank | HS256 key for downstream admin JWTs; must equal the gateway's `FERRUM_ADMIN_JWT_SECRET`. Used verbatim, like the gateway: surrounding whitespace is part of the key |
-| `PORT` | No | `3001` (`8080` in the image) | 1-65535 | TCP port the BFF listens on |
-| `NODE_ENV` | No | unset (`production` in the image) | any string | `production` enables production logging, static SPA serving, secure cookies, one-hop proxy trust, and the static-auth refusal |
+| `FERRUM_JWT_SECRET` | Yes | - | 32 UTF-8 bytes or more, not blank | HS256 key for downstream admin JWTs. Must equal the gateway's `FERRUM_ADMIN_JWT_SECRET`. Used verbatim, like the gateway: surrounding whitespace is part of the key |
+| `PORT` | No | `3001` (`8080` in the image) | 1-65535 | BFF listen port |
+| `NODE_ENV` | No | unset (`production` in the image) | any string | `production` turns on production logging, static SPA serving, secure cookies, one-hop proxy trust, and the static-auth refusal |
 | `FERRUM_BIND_ADDRESS` | No | `0.0.0.0` | literal IPv4/IPv6 address or `localhost` | Interface the BFF listens on |
 
 ### Authentication
 
 | Variable | Required | Default | Range or format | Meaning |
 |---|---|---|---|---|
-| `FERRUM_AUTH_MODE` | No | `static` | `static` or `trusted-proxy` | Browser authentication mode; `static` is refused when `NODE_ENV=production` |
-| `FERRUM_TRUSTED_PROXY_SECRET` | Yes in `trusted-proxy` | - | 32 characters or more | Value the proxy must send in `X-Ferrum-Auth-Secret` |
-| `FERRUM_TRUSTED_PROXY_USER_HEADER` | No | `x-forwarded-user` | valid HTTP header name, lowercased | Header carrying the asserted actor |
-| `FERRUM_TRUSTED_PROXY_ROLE_HEADER` | No | `x-ferrum-role` | valid HTTP header name, lowercased | Header carrying the asserted role |
-| `FERRUM_TRUSTED_PROXY_NAMESPACES_HEADER` | No | `x-ferrum-namespaces` | valid HTTP header name, lowercased | Header carrying comma-separated namespace grants |
-| `FERRUM_AUTH_LOGIN_URL` | No | - | root-relative path (not `//`, no backslash) or an `https://` URL | Where the SPA sends an unauthenticated user to sign in |
+| `FERRUM_AUTH_MODE` | No | `static` | `static` or `trusted-proxy` | Browser authentication mode. `static` is refused when `NODE_ENV=production` |
+| `FERRUM_TRUSTED_PROXY_SECRET` | In `trusted-proxy` | - | 32 characters or more | Value the proxy sends in `X-Ferrum-Auth-Secret` |
+| `FERRUM_TRUSTED_PROXY_USER_HEADER` | No | `x-forwarded-user` | valid HTTP header name | Header carrying the actor |
+| `FERRUM_TRUSTED_PROXY_ROLE_HEADER` | No | `x-ferrum-role` | valid HTTP header name | Header carrying the role |
+| `FERRUM_TRUSTED_PROXY_NAMESPACES_HEADER` | No | `x-ferrum-namespaces` | valid HTTP header name | Header carrying namespace grants |
+| `FERRUM_AUTH_LOGIN_URL` | No | - | root-relative path (not `//`, no backslash) or an `https://` URL | Where the SPA sends a signed-out user |
 | `FERRUM_AUTH_LOGOUT_URL` | No | - | root-relative path or an `https://` URL | Where the SPA sends a user to sign out of the proxy |
-| `FERRUM_SESSION_TTL` | No | `3600` | 60-86400 seconds | Lifetime of the BFF session cookie and of a trusted-proxy CSRF grant |
-| `FERRUM_SECURE_COOKIES` | No | `true` when `NODE_ENV=production`, else `false` | `true`/`false` | Sets the `Secure` attribute and the `__Host-` cookie name prefix |
-| `FERRUM_BFF_AUTH_TOKEN` | Yes in `static` | - | 32 characters or more | Development-only token exchanged once at `POST /api/auth/login` |
-| `FERRUM_ALLOW_INSECURE_STATIC_AUTH` | No | `false` | `true`/`false` | Escape hatch that permits static auth under `NODE_ENV=production`; do not use it |
+| `FERRUM_SESSION_TTL` | No | `3600` | 60-86400 seconds | Lifetime of the BFF session cookie and of a trusted-proxy CSRF token |
+| `FERRUM_SECURE_COOKIES` | No | `true` when `NODE_ENV=production`, else `false` | `true`/`false` | Sets `Secure` and the `__Host-` cookie name prefix |
+| `FERRUM_BFF_AUTH_TOKEN` | In `static` | - | 32 characters or more | Development-only token exchanged once at `POST /api/auth/login` |
+| `FERRUM_ALLOW_INSECURE_STATIC_AUTH` | No | `false` | `true`/`false` | Allows static auth under `NODE_ENV=production`. Do not use it |
 
 ### Downstream JWT claims
 
 | Variable | Required | Default | Range or format | Meaning |
 |---|---|---|---|---|
 | `FERRUM_JWT_ISSUER` | No | `ferrum-edge` | non-empty string | `iss` claim |
-| `FERRUM_JWT_TTL` | No | `900` | 1-86400 seconds, must not exceed `FERRUM_JWT_MAX_TTL` | Lifetime of each minted admin JWT |
-| `FERRUM_JWT_MAX_TTL` | No | `3600` | 0-86400 seconds, `0` disables the ceiling | Gateway-configured maximum TTL that `FERRUM_JWT_TTL` is validated against |
-| `FERRUM_JWT_ROLE` | No | `admin` | `viewer`, `operator`, or `admin` | Role for the static development principal; trusted-proxy requests take the role from the header instead |
-| `FERRUM_JWT_AUDIENCE` | No | - | comma-separated exact values | `aud` claim, emitted only when set; must match the gateway's `FERRUM_ADMIN_JWT_AUDIENCE` |
-| `FERRUM_JWT_NAMESPACES` | No | - (unrestricted) | comma-separated names matching `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$`, or `*` alone | Namespace grants (`ns` claim) for the static principal and for the readiness probe; `*` grants every namespace and omits `ns` |
+| `FERRUM_JWT_TTL` | No | `900` | 1-86400 seconds, at most `FERRUM_JWT_MAX_TTL` | Lifetime of each minted JWT |
+| `FERRUM_JWT_MAX_TTL` | No | `3600` | 0-86400 seconds; `0` disables the ceiling | Gateway maximum TTL that `FERRUM_JWT_TTL` is checked against |
+| `FERRUM_JWT_ROLE` | No | `admin` | `viewer`, `operator`, or `admin` | Role of the static development principal. Trusted-proxy requests take the role from the header |
+| `FERRUM_JWT_AUDIENCE` | No | - | comma-separated exact values | `aud` claim, sent only when set. Must match the gateway's `FERRUM_ADMIN_JWT_AUDIENCE` |
+| `FERRUM_JWT_NAMESPACES` | No | - (unrestricted) | comma-separated names matching `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$`, or `*` alone | `ns` grants for the static principal and the readiness probe. `*` grants every namespace and omits `ns` |
 
-Each comma-separated `FERRUM_JWT_NAMESPACES` entry must be an exact namespace
-name; whitespace around an entry is allowed, duplicates are merged, and empty
-entries are dropped (`tenant-a,,tenant-b` is `tenant-a,tenant-b`, and `*,` is
-`*`). Only `*` on its own grants every namespace. Leaving the variable unset in
-`static` mode also leaves the static principal unrestricted, with no `ns`
-claim, and the BFF logs a startup warning naming the variable; set it to names
-or `*` to make the scope explicit. A value that is set but names no namespace —
-empty, whitespace only, or commas only — fails startup instead of being treated
-as unset, and so do an invalid name and `*` combined with names. In `trusted-proxy` mode the identity proxy supplies each
-user's grants and this variable only scopes the readiness probe, which reads
-fleet-global endpoints; it may be left unset there without a warning, but a
-set value is validated the same way.
+`FERRUM_JWT_NAMESPACES` rules:
+
+- Whitespace around entries is allowed, duplicates merge, and empty entries are
+  dropped (`tenant-a,,tenant-b` is `tenant-a,tenant-b`; `*,` is `*`).
+- Only `*` on its own grants every namespace.
+- Unset in `static` mode, the static principal is unrestricted (no `ns` claim)
+  and the BFF logs a startup warning.
+- A value that names no namespace (empty, whitespace, or commas only), an
+  invalid name, or `*` mixed with names fails startup.
+- In `trusted-proxy` mode the proxy supplies each user's grants. This variable
+  only scopes the readiness probe, which reads fleet-global endpoints, so it
+  can be left unset there without a warning.
 
 ### Gateway transport
 
 | Variable | Required | Default | Range or format | Meaning |
 |---|---|---|---|---|
-| `FERRUM_TLS_CA_PATH` | No | - | path to a PEM file, 1 byte to 1 MiB, regular file inside the CA root | Extra trust anchors for the admin API connection |
-| `FERRUM_TLS_CA_ROOT` | No | directory of `FERRUM_TLS_CA_PATH` | directory path | Approved root that a CA bundle path must resolve inside; contained projected-volume symlinks are allowed |
-| `FERRUM_TLS_VERIFY` | No | `true` | `true`/`false` | Verify the admin API certificate; never set to `false` in production |
+| `FERRUM_TLS_CA_PATH` | No | - | PEM file, 1 byte to 1 MiB, regular file inside the CA root | Extra trust anchors for an `https` admin API |
+| `FERRUM_TLS_CA_ROOT` | No | directory of `FERRUM_TLS_CA_PATH` | directory path | Root the CA bundle path must resolve inside. Symlinks that stay inside it (such as Kubernetes projected volumes) are allowed |
+| `FERRUM_TLS_VERIFY` | No | `true` | `true`/`false` | Verify the admin API certificate. Never `false` in production |
 | `FERRUM_CONNECT_TIMEOUT` | No | `5000` | 100-300000 ms | TCP/TLS connect timeout to the admin API |
-| `FERRUM_READ_TIMEOUT` | No | `60000` | 100-3600000 ms | Response read timeout |
-| `FERRUM_WRITE_TIMEOUT` | No | `60000` | 100-3600000 ms | Request write timeout: the idle gap allowed between request body chunks, and the absolute body deadline on ordinary (2 MiB) routes |
-| `FERRUM_UPLOAD_TIMEOUT` | No | `300000` | 1000-3600000 ms | Absolute wall-clock deadline for a restore or API-spec request body to finish arriving; measured from the first byte and never extended by progress |
-| `FERRUM_MAX_LARGE_UPLOADS` | No | `2` | 1-32, must not exceed `FERRUM_MAX_ACTIVE_UPLOADS` | Concurrent restore and API-spec uploads before the BFF returns `429` |
-| `FERRUM_MAX_ACTIVE_UPLOADS` | No | `32` | 1-1024 | Concurrent proxied requests carrying a request body, of any size, before the BFF returns `429` |
+| `FERRUM_READ_TIMEOUT` | No | `60000` | 100-3600000 ms | Response deadline. Backup and restore get at least 120 s; see [waiting routes](#live-apply-monitoring-and-acme-issuance-deadlines) |
+| `FERRUM_WRITE_TIMEOUT` | No | `60000` | 100-3600000 ms | Longest idle gap between request body chunks, and the whole-body deadline on ordinary (2 MiB) routes |
+| `FERRUM_UPLOAD_TIMEOUT` | No | `300000` | 1000-3600000 ms | Whole-body deadline for restore and API-spec uploads. Progress never extends it |
+| `FERRUM_MAX_LARGE_UPLOADS` | No | `2` | 1-32, at most `FERRUM_MAX_ACTIVE_UPLOADS` | Concurrent restore and API-spec uploads before `429` |
+| `FERRUM_MAX_ACTIVE_UPLOADS` | No | `32` | 1-1024 | Concurrent proxied requests with a body, of any size, before `429` |
+
+A CA bundle must hold one or more parseable PEM X.509 certificates (blank and
+`#` comment lines are allowed). Parsing checks the encoding, not whether the
+bundle actually trusts the gateway.
 
 ### Browser security
 
@@ -149,44 +158,41 @@ set value is validated the same way.
 
 | Variable | Required | Default | Range or format | Meaning |
 |---|---|---|---|---|
-| `FERRUM_ALLOW_RUNTIME_SETTINGS` | No | `false` | `true`/`false` | Permits admins to change an allowlist of connection settings through the UI at runtime |
-| `FERRUM_ADMIN_ALLOWED_ORIGINS` | Required when runtime settings are enabled | - | comma-separated `http`/`https` origins | Origins a runtime `adminUrl` change may select |
-| `FERRUM_ADMIN_ALLOWED_CIDRS` | No | - | comma-separated CIDRs | Private or special-purpose ranges a changed admin URL may resolve to; the startup origin is always permitted. IPv4-mapped, IPv4-compatible, NAT64 (`64:ff9b::/96`), and 6to4 (`2002::/16`) addresses are judged by the IPv4 address they embed, so an IPv4 CIDR here also authorizes those spellings |
+| `FERRUM_ALLOW_RUNTIME_SETTINGS` | No | `false` | `true`/`false` | Lets admins change an allowlist of connection settings from the UI |
+| `FERRUM_ADMIN_ALLOWED_ORIGINS` | When runtime settings are on | - | comma-separated `http`/`https` origins | Origins a runtime `adminUrl` change may select |
+| `FERRUM_ADMIN_ALLOWED_CIDRS` | No | - | comma-separated CIDRs | Private or special-purpose ranges a changed admin URL may resolve to |
 
-CIDRs require a literal IPv4 or IPv6 address and an explicit decimal prefix:
-`0`–`32` for IPv4, `0`–`128` for IPv6. Prefixes use ASCII digits without signs,
-leading zeros, or internal whitespace; whitespace around each comma-separated
-entry is allowed. Explicit `/0` permits the entire address family, while `/32`
-and `/128` select individual addresses. The origin allowlist still applies to
-runtime changes, and the initial environment origin retains its network-policy
-exemption. Hostnames are checked against the network policy on DNS resolution.
+Leave runtime settings off. When they are on, any `admin` can repoint the whole
+BFF process at another allowlisted gateway. Overrides live in memory and reset
+to the environment on restart.
 
-With `FERRUM_ALLOW_RUNTIME_SETTINGS=true`, clearing **JWT Audience** and saving
-removes the `aud` claim from subsequent BFF-generated JWTs. The Settings form
-displays the canonical values returned by the BFF after each successful save.
-For `PUT /api/settings`, an omitted field leaves its current value unchanged;
-send `jwtAudience: ""` (or `[]`) to clear the audience. `jwtNamespaces` follows
-the `FERRUM_JWT_NAMESPACES` rules: an array naming at least one exact
-namespace (empty entries are dropped), or `["*"]` for every namespace.
-`GET /api/settings` always includes `jwtNamespaces`: the exact grants, or
-`["*"]` for an unrestricted static principal, whether it was configured with
-`*` or with `FERRUM_JWT_NAMESPACES` unset. In `trusted-proxy` mode the value
-describes only the readiness probe's scope, not any user's grants. An array
-with no namespace left, an invalid entry, and `*` combined with names are
-refused with `400 FERRUM_BFF_INVALID_SETTINGS` without applying any part of the
-update. A session that holds namespace grants may narrow the defaults to grants
-it holds but cannot widen them — to another namespace or to `["*"]` — and gets
-`403 FERRUM_BFF_NAMESPACE_GRANT_EXCEEDED`; the BFF logs the refusal as a
-warning with the actor and the requested grants. The Settings form omits
-untouched grants from a save, so such a session can still change unrelated
-settings. Runtime overrides reset to environment values when the BFF restarts.
+When runtime settings are on:
 
-Changing `adminUrl` replaces the gateway every open tab is working against.
-Each tab is bound to the gateway it loaded against: the BFF refuses its later
-gateway requests with `409 FERRUM_BFF_GATEWAY_TARGET_CHANGED` instead of
-forwarding them to the new gateway, and the tab discards its cached data,
-drafts, and live-apply state and asks for a reload. See
-[Gateway target binding](authentication.md#gateway-target-binding).
+- The startup `FERRUM_ADMIN_URL` is always permitted. Any other origin must be
+  in `FERRUM_ADMIN_ALLOWED_ORIGINS`, and its addresses (checked at DNS
+  resolution for hostnames) must not be private or special-purpose unless
+  `FERRUM_ADMIN_ALLOWED_CIDRS` allows them.
+- CIDRs need a literal address and an explicit decimal prefix (`0`-`32` for
+  IPv4, `0`-`128` for IPv6; no signs or leading zeros). `/0` allows a whole
+  address family. IPv4-mapped, IPv4-compatible, NAT64 (`64:ff9b::/96`), and
+  6to4 (`2002::/16`) addresses are judged by the IPv4 address they embed.
+- A runtime CA path change needs a CA root (`FERRUM_TLS_CA_ROOT`, or the one
+  implied by `FERRUM_TLS_CA_PATH`).
+- `PUT /api/settings` answers `403 FERRUM_BFF_SETTINGS_IMMUTABLE` when runtime
+  settings are off, and `400 FERRUM_BFF_INVALID_SETTINGS` for any invalid
+  field, applying nothing. An omitted field keeps its value; send
+  `jwtAudience: ""` (or `[]`) to drop the `aud` claim.
+- In `trusted-proxy` mode, `jwtRole` and `jwtNamespaces` are refused with
+  `400 FERRUM_BFF_PROXY_MANAGED_IDENTITY`. The rest of the namespace-default
+  rules are in [Runtime identity defaults](authentication.md#runtime-identity-defaults).
+- Changing `adminUrl` changes the gateway every open tab works against. Each
+  tab stays bound to the gateway it loaded against: its later requests get
+  `409 FERRUM_BFF_GATEWAY_TARGET_CHANGED`, and it drops its cached data and
+  asks for a reload. See [Gateway target binding](authentication.md#gateway-target-binding).
+
+Accepted changes apply to new requests. A connection change (origin, connect
+timeout, TLS verification, CA, allowed CIDRs) opens a new connection pool while
+the old one finishes the requests already on it.
 
 ### Process lifecycle
 
@@ -194,311 +200,116 @@ drafts, and live-apply state and asks for a reload. See
 |---|---|---|---|---|
 | `FERRUM_SHUTDOWN_TIMEOUT` | No | `10000` | 1000-300000 ms | How long `SIGTERM`/`SIGINT` waits for in-flight requests before the process exits non-zero |
 
-Runtime settings are off by default and should stay off. When they are enabled,
-any `admin` identity can repoint the BFF at another allowlisted gateway origin
-for the whole process.
-
 ## 3. Reverse proxy example (nginx and oauth2-proxy)
 
-This example terminates TLS at nginx, delegates login to oauth2-proxy, maps the
-identity provider's groups to a Ferrum role and namespace list, and injects the
-four identity headers. Run oauth2-proxy with `--set-xauthrequest` so
-`/oauth2/auth` returns `X-Auth-Request-User` and `X-Auth-Request-Groups`, and
-with `--reverse-proxy` because it sits behind nginx.
+The starter ships a working nginx + oauth2-proxy setup. Copy it rather than
+writing your own:
 
-```bash
-oauth2-proxy \
-  --provider=oidc \
-  --oidc-issuer-url=https://idp.example.com/ \
-  --client-id="$OAUTH2_CLIENT_ID" \
-  --client-secret="$OAUTH2_CLIENT_SECRET" \
-  --cookie-secret="$OAUTH2_COOKIE_SECRET" \
-  --redirect-url=https://foundry.example.com/oauth2/callback \
-  --scope="openid email profile groups" \
-  --oidc-groups-claim=groups \
-  --email-domain=example.com \
-  --allowed-group=ferrum-admins \
-  --allowed-group=ferrum-operators \
-  --allowed-group=ferrum-viewers \
-  --set-xauthrequest=true \
-  --reverse-proxy=true \
-  --http-address=0.0.0.0:4180
-```
+| File | What it does |
+|---|---|
+| [`deploy/starter/nginx/foundry.conf`](../deploy/starter/nginx/foundry.conf) | Terminates TLS, runs `auth_request` against oauth2-proxy, proxies to the BFF |
+| [`deploy/starter/nginx/identity/policy.conf`](../deploy/starter/nginx/identity/policy.conf) | Group-to-role and group-to-namespace `map` blocks (`http` context) |
+| [`deploy/starter/nginx/identity/inject.conf`](../deploy/starter/nginx/identity/inject.conf) | The four `proxy_set_header` lines, with the proof secret read from `secrets/ferrum-proxy-secret.conf` |
+| [`deploy/starter/compose.yaml`](../deploy/starter/compose.yaml) | oauth2-proxy flags (`--set-xauthrequest`, `--reverse-proxy`, `--allowed-group=...`) |
 
-`--allowed-group` denies a user who is in none of the Ferrum groups at login,
-before nginx ever reaches the mapping below.
-
-Keep the proof secret out of the checked-in nginx configuration. The block below
-pulls it from a separate file that holds one line,
-`set $ferrum_proxy_secret "<FERRUM_TRUSTED_PROXY_SECRET>";`, deployed with
-restrictive file permissions or rendered from a secret manager.
-
-```nginx
-# http context: group-to-role and group-to-namespace policy.
-# The default is empty so an unmapped user is denied. nginx takes the first
-# matching pattern, so the highest privilege is listed first.
-map $auth_groups $ferrum_role {
-    default                          "";
-    "~(^|,)ferrum-admins(,|$)"       "admin";
-    "~(^|,)ferrum-operators(,|$)"    "operator";
-    "~(^|,)ferrum-viewers(,|$)"      "viewer";
-}
-
-map $auth_groups $ferrum_namespaces {
-    default                          "";
-    "~(^|,)ferrum-admins(,|$)"       "production,staging";
-    "~(^|,)ferrum-operators(,|$)"    "production";
-    "~(^|,)ferrum-viewers(,|$)"      "staging";
-}
-
-server {
-    listen 443 ssl;
-    http2 on;
-    server_name foundry.example.com;
-
-    ssl_certificate     /etc/nginx/tls/foundry.crt;
-    ssl_certificate_key /etc/nginx/tls/foundry.key;
-
-    # Restore uploads are streamed and can reach 110 MB; API-spec imports 30 MB.
-    client_max_body_size 110m;
-
-    # oauth2-proxy endpoints.
-    location /oauth2/ {
-        proxy_pass       http://oauth2-proxy:4180;
-        proxy_set_header Host             $host;
-        proxy_set_header X-Real-IP        $remote_addr;
-        proxy_set_header X-Forwarded-For  $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Auth-Request-Redirect $request_uri;
-    }
-
-    # Internal subrequest target for auth_request.
-    location = /oauth2/auth {
-        internal;
-        proxy_pass       http://oauth2-proxy:4180;
-        proxy_pass_request_body off;
-        proxy_set_header Content-Length "";
-        proxy_set_header Host             $host;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    location / {
-        auth_request /oauth2/auth;
-        error_page 401 = @signin;
-
-        auth_request_set $auth_user   $upstream_http_x_auth_request_user;
-        auth_request_set $auth_groups $upstream_http_x_auth_request_groups;
-
-        include /etc/nginx/secrets/ferrum-proxy-secret.conf;
-
-        # proxy_set_header REPLACES any client-supplied header of the same name.
-        # These four lines are the stripping guarantee as well as the injection.
-        proxy_set_header X-Ferrum-Auth-Secret $ferrum_proxy_secret;
-        proxy_set_header X-Forwarded-User     $auth_user;
-        proxy_set_header X-Ferrum-Role        $ferrum_role;
-        proxy_set_header X-Ferrum-Namespaces  $ferrum_namespaces;
-
-        proxy_set_header Host              $host;
-        proxy_set_header X-Real-IP         $remote_addr;
-        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-
-        # Stream large restores instead of buffering them to disk. A restore may
-        # take up to two minutes on the gateway.
-        proxy_request_buffering off;
-        proxy_read_timeout 180s;
-
-        proxy_pass http://foundry:8080;
-    }
-
-    # A browser loading a page is sent through the login flow. An XHR from the
-    # SPA keeps the raw 401 so the app can offer "Continue with SSO" itself and
-    # never receives a sign-in page where it expects JSON.
-    location @signin {
-        if ($request_uri ~ ^/api/) {
-            return 401;
-        }
-        return 302 /oauth2/start?rd=$request_uri;
-    }
-}
-```
-
-On the Foundry side, point the SPA's sign-in and sign-out actions at the same
-proxy endpoints:
+Point the SPA's sign-in and sign-out actions at the proxy:
 
 ```bash
 FERRUM_AUTH_LOGIN_URL=/oauth2/start
 FERRUM_AUTH_LOGOUT_URL=/oauth2/sign_out
 ```
 
-Notes:
+Things that are easy to get wrong:
 
-- `X-Ferrum-Namespaces` must be an exact comma-separated list of namespace
-  names. Foundry does not expand wildcards or prefixes: a literal `*` (alone
-  or with names) or a glob such as `tenant-*` is rejected with `401` for every
-  role, admins included. A name that does not match
-  `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$` invalidates the whole header.
-- A `viewer` or `operator` identity is rejected outright when the namespace
-  header is missing or empty. Only `admin` may be global, and only when global
-  administration is the intent: the identity proxy must omit the header for
-  that identity (or strip it), which gives an unrestricted admin with no `ns`
-  claim. Do not map a global admin to `*`; unlike `FERRUM_JWT_NAMESPACES`,
-  this header has no wildcard spelling. A header that is present but empty or
-  whitespace only is rejected for every role, admins included: absent and
-  empty are not the same. nginx does not forward a `proxy_set_header` whose
-  value is empty, so an nginx proxy that maps an identity to no namespaces
-  omits the header rather than sending it empty.
-- Namespace grants scope resources that carry `X-Ferrum-Namespace`. They do not
-  scope fleet-global surfaces such as TLS inventory, managed TLS material, ACME,
-  rotation, and validation. Restrict those routes at the proxy when a scoped
-  identity must not reach them.
-- `map` blocks belong in the `http` context, outside the `server` block. The
-  mapped variables resolve when `proxy_set_header` uses them, which is after
-  `auth_request` has run. Do not try to gate on `$ferrum_role` with an `if`:
-  `if` runs in the rewrite phase, before the auth subrequest, so it would always
-  see an empty value. The `if` inside `@signin` is safe because it tests only
-  `$request_uri`, and a named location entered through `error_page` runs after
-  the auth subrequest has already failed.
-- Keep the split in `@signin`. The SPA calls `/api/auth/session` on load and
-  every minute afterwards and expects a `401` when the proxy session is gone;
-  a redirect or an HTML sign-in page in its place shows a generic session error
-  instead of the sign-in button.
-- Denial for an unmapped user happens twice. oauth2-proxy's `--allowed-group`
-  refuses the login, and the empty `map` default means no role is asserted, so
-  Foundry rejects the request with `401` and an `x-ferrum-auth-layer: bff`
-  header.
-- Any header you do not overwrite with `proxy_set_header` is forwarded from the
-  client as-is, so keep all four lines even when a value is empty.
-- `proxy_request_buffering off` streams a client's body straight through, so
-  keep `proxy_read_timeout` and `client_body_timeout` at or below Foundry's
-  upload budget (`FERRUM_UPLOAD_TIMEOUT`, and `FERRUM_WRITE_TIMEOUT` for
-  ordinary routes). A proxy willing to hold a request open longer than the BFF
-  will accept a body only ties up a connection on both sides.
+- **Keep all four `proxy_set_header` lines**, even when a value is empty.
+  `proxy_set_header` replaces a client's copy of the header; any header you do
+  not set is forwarded from the client as-is. nginx drops a header whose value
+  is empty, so an identity mapped to no namespaces arrives without the header
+  rather than with an empty one.
+- **Deny by default.** The `map` default is empty, so an unmapped user gets no
+  role and Foundry answers `401` with `x-ferrum-auth-layer: bff`. oauth2-proxy's
+  `--allowed-group` also refuses such a user at login.
+- **Use exact namespace names.** Foundry expands no wildcards or prefixes. Do
+  not map a global admin to `*`; omit the header for that identity instead.
+- **Keep `map` in the `http` context and never gate on `$ferrum_role` with
+  `if`.** `if` runs before the auth subrequest, so it always sees an empty
+  value. The mapped variables resolve later, when `proxy_set_header` uses them.
+- **Keep the `/api/` split in `@signin`.** The SPA calls `/api/auth/session`
+  on load and every minute, and needs a raw `401` when the proxy session is
+  gone. A redirect or HTML page there shows a session error instead of the
+  sign-in button:
+
+  ```nginx
+  location @signin {
+      if ($request_uri ~ ^/api/) {
+          return 401;
+      }
+      return 302 /oauth2/start?rd=$request_uri;
+  }
+  ```
+
+- **Size for large uploads.** Restores can reach 110 MiB and API-spec imports
+  30 MiB, so set `client_max_body_size 110m`. With
+  `proxy_request_buffering off`, keep `client_body_timeout` and
+  `proxy_read_timeout` at or below Foundry's own budgets
+  (`FERRUM_UPLOAD_TIMEOUT`, and `FERRUM_WRITE_TIMEOUT` for ordinary routes).
+- **Fleet-global surfaces are not namespace-scoped.** TLS inventory, managed
+  TLS material, ACME, rotation, and validation ignore namespace grants.
+  Restrict those routes at the proxy if a scoped identity must not reach them.
 
 ### Live-apply monitoring and ACME issuance deadlines
 
-Foundry requests 25-second config apply-status long polls with a 30-second
-browser deadline. Pending responses continue monitoring; they do not mean the
-status endpoint is unavailable. The BFF allows at least 35 seconds for this GET,
-even when `FERRUM_READ_TIMEOUT` is lower.
+Some admin calls wait on the gateway. The BFF gives them longer deadlines than
+`FERRUM_READ_TIMEOUT`, and the browser allows a little more:
 
-ACME finalization waits synchronously in the gateway. Foundry explicitly sends
-the requested polling budget (default 60 seconds; accepted range 1–600) and gives
-the browser five additional seconds. Invalid budgets are rejected before sending.
-The BFF allows at least 610 seconds specifically for the finalize POST, including
-its upstream HTTP transport deadlines. These route allowances override a lower
-`FERRUM_READ_TIMEOUT`; other routes retain their ordinary deadlines.
+| Call | BFF deadline | Browser deadline |
+|---|---|---|
+| Config apply-status long poll (25 s wait) | at least 35 s | 30 s |
+| ACME order finalize | at least 610 s | requested polling budget + 5 s |
+| API-spec import or replace | `FERRUM_UPLOAD_TIMEOUT`, then `FERRUM_READ_TIMEOUT` | 365 s |
+| API-spec read or document download | `FERRUM_READ_TIMEOUT` | 65 s |
+| ACME order create or renew | `FERRUM_WRITE_TIMEOUT`, then `FERRUM_READ_TIMEOUT` | 125 s |
 
-Configure any outer reverse proxy or load balancer to allow at least 35 seconds
-for apply-status and 610 seconds for ACME finalization responses. In particular,
-the general 180-second nginx example above needs a larger response timeout for
-finalizations requesting more than 175 seconds. A lower infrastructure maximum
-can still interrupt the response; it does not prove the gateway stopped issuing.
+The ACME polling budget defaults to 60 s and must be 1-600 s. The browser
+figures use the shipped BFF defaults; it cannot see runtime overrides, so a
+deployment with larger budgets can outlast them. None of these calls retry
+automatically.
 
-On timeout, disconnect, or a server error, Foundry reports finalization as
-**in progress / unknown** and replaces Finalize with **Re-check status**, which
-GETs the order without repeating the POST. Continue checking until the gateway
-reports a terminal status. Do not blindly retry issuance after navigating away
-or reloading the page; the interrupted-operation warning is local to the open
-ACME view. Finalization has no automatic HTTP or mutation retries.
+Give any outer proxy or load balancer at least 35 s for apply-status and 610 s
+for ACME finalize. The starter's 180 s `proxy_read_timeout` is too short for a
+finalize that requests more than 175 s. A shorter infrastructure timeout can
+cut the response off; it does not stop the gateway from issuing.
 
-API-spec imports and replacements allow 365 seconds in the browser: the
-shipped 300-second upload budget, 60-second response budget, and five seconds
-of transport margin. Spec reads (including document downloads) allow 65 seconds.
-ACME order creation and renewal allow 125 seconds, covering the ordinary
-60-second upload and 60-second response budgets plus transport margin. These
-calls disable automatic retries. Their defaults share the BFF policy module;
-runtime timeout overrides are not visible to the SPA, so a deployment with
-larger budgets can still outlast these browser deadlines.
+When a finalize times out, disconnects, or gets a server error, Foundry shows
+it as **in progress / unknown** and replaces Finalize with **Re-check status**,
+which reads the order without repeating the POST. Keep checking until the
+gateway reports a terminal state.
 
-An interrupted spec import/replacement or ACME creation/renewal reports
-**outcome unknown** and disables resubmission in the current view, including
-when its dialog is closed and reopened. Inspect the spec resources or ACME
-orders/certificates before navigating away or reloading to retry; these warnings
-are not durable across page loads. Only an explicit BFF timeout with
-`phase: "upload"` proves the complete request was not admitted and permits a
-retry. A response-phase timeout, bare 504, network interruption, or upstream
-server error cannot prove that remote state was not created.
+An interrupted spec import or replacement, or an ACME create or renew, shows
+**outcome unknown** and blocks resubmission in that view. Inspect the spec
+resources or ACME orders before you reload or retry; the warning does not
+survive a page load. Only a BFF timeout with `phase: "upload"` proves the
+request never reached the gateway. A response-phase timeout, bare `504`,
+network error, or upstream `5xx` does not prove nothing was created.
 
 ## 4. Docker Compose example
 
-The BFF publishes no host port. Only the proxy does.
+[`deploy/starter/compose.yaml`](../deploy/starter/compose.yaml) is the
+Compose version of this topology, with third-party images pinned by digest.
+Its `production` profile runs Foundry, oauth2-proxy, and nginx against your
+own gateway; see the [starter README](../deploy/starter/README.md#production)
+for setup. What it gets right:
 
-```yaml
-services:
-  foundry:
-    image: ferrumedge/ferrum-foundry:vX.Y.Z
-    restart: unless-stopped
-    expose:
-      - "8080"
-    environment:
-      NODE_ENV: production
-      FERRUM_ADMIN_URL: https://ferrum-admin.internal:9000
-      FERRUM_JWT_SECRET: ${FERRUM_JWT_SECRET}
-      FERRUM_JWT_AUDIENCE: ferrum-admin
-      FERRUM_AUTH_MODE: trusted-proxy
-      FERRUM_TRUSTED_PROXY_SECRET: ${FERRUM_TRUSTED_PROXY_SECRET}
-      FERRUM_AUTH_LOGIN_URL: /oauth2/start
-      FERRUM_AUTH_LOGOUT_URL: /oauth2/sign_out
-      FERRUM_TLS_CA_ROOT: /etc/ferrum/ca
-      FERRUM_TLS_CA_PATH: /etc/ferrum/ca/gateway-ca.pem
-      FERRUM_ENABLE_HSTS: "true"
-      FERRUM_SHUTDOWN_TIMEOUT: "10000"
-    volumes:
-      - ./ca:/etc/ferrum/ca:ro
+- The `foundry` service publishes no host port. Only the proxy does.
+- Secrets are split. `.env` holds `FERRUM_JWT_SECRET` and
+  `FERRUM_TRUSTED_PROXY_SECRET`; `oauth2-proxy.env` holds the
+  `OAUTH2_PROXY_*` settings. `foundry` has no `env_file`, so the OAuth client
+  secret never reaches the BFF, and oauth2-proxy never sees the gateway key or
+  the proof secret. Keep both files `chmod 600` and out of version control.
 
-  oauth2-proxy:
-    image: quay.io/oauth2-proxy/oauth2-proxy:v7.7.1
-    restart: unless-stopped
-    expose:
-      - "4180"
-    # Its own file: an env_file hands a service every variable in it, and
-    # .env holds FERRUM_JWT_SECRET and the proxy proof secret.
-    env_file:
-      - oauth2-proxy.env
-    command:
-      - --provider=oidc
-      - --oidc-issuer-url=https://idp.example.com/
-      - --redirect-url=https://foundry.example.com/oauth2/callback
-      - --scope=openid email profile groups
-      - --oidc-groups-claim=groups
-      - --email-domain=example.com
-      - --allowed-group=ferrum-admins
-      - --allowed-group=ferrum-operators
-      - --allowed-group=ferrum-viewers
-      - --set-xauthrequest=true
-      - --reverse-proxy=true
-      - --http-address=0.0.0.0:4180
-
-  proxy:
-    image: nginx:1.27-alpine
-    restart: unless-stopped
-    depends_on:
-      - foundry
-      - oauth2-proxy
-    ports:
-      - "443:443"
-    volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./secrets:/etc/nginx/secrets:ro
-      - ./tls:/etc/nginx/tls:ro
-```
-
-Put `FERRUM_JWT_SECRET` and `FERRUM_TRUSTED_PROXY_SECRET` in `.env`, and
-`OAUTH2_PROXY_CLIENT_ID`, `OAUTH2_PROXY_CLIENT_SECRET`, and
-`OAUTH2_PROXY_COOKIE_SECRET` in a separate `oauth2-proxy.env`. Give both
-restrictive permissions and keep both out of version control. Compose
-substitutes the `${...}` references in the `foundry` service from `.env`;
-oauth2-proxy reads its `OAUTH2_PROXY_*` variables from its own file through
-`env_file`. The split matters in both directions: the `foundry` service has no
-`env_file`, so the OAuth client secret never enters the BFF's environment, and
-oauth2-proxy never receives the gateway admin signing key or the proof secret.
-A runnable version of this stack is in `deploy/starter/`.
-
-The image ships a `HEALTHCHECK` that requests `/api/health/live` on the
-container's own `PORT`, so `docker ps` reports the container unhealthy when the
-process stops answering. It deliberately does not use readiness, because a
-gateway outage should not make Docker restart Foundry.
+The image's `HEALTHCHECK` requests `/api/health/live` on the container's
+`PORT`. It deliberately does not use readiness, so a gateway outage does not
+make Docker restart Foundry.
 
 ## 5. Kubernetes example
 
@@ -608,45 +419,20 @@ spec:
 
 Notes:
 
-- The Service is `ClusterIP` on purpose. Do not add a `LoadBalancer`, a
-  `NodePort`, or an Ingress rule that reaches this Service without going through
-  the identity-aware proxy. The Ingress controller, gateway, or service mesh in
-  front must perform the OIDC login and inject the four identity headers, and
-  must strip client copies of them. A `NetworkPolicy` that admits ingress only
-  from the proxy's pods is the enforcement, not a convention.
-- `FERRUM_TLS_CA_PATH` points at a file inside the Secret mount and
-  `FERRUM_TLS_CA_ROOT` at the mount directory. Kubernetes projects Secret keys
-  through a rotating `..data` symlink; the BFF resolves the symlink inside the
-  approved root and reloads the bundle after a rotation, including when an
-  administrator selected that projected path through runtime settings. The
-  selected absolute path is retained; each read revalidates the resolved target.
-  CA files are opened nonblocking and validated through the descriptor as
-  regular files before reading at most the validated size plus one byte, with
-  a 1 MiB bundle limit. Non-regular files are rejected at startup and runtime
-  selection; failed validation closes the descriptor.
-  Startup and runtime selection require one or more parseable PEM X.509
-  certificates (whitespace and `#` comment lines are accepted). Invalid material
-  is rejected before publishing runtime settings and preserves the prior
-  connection configuration. Parsing validates certificate encoding, not whether
-  the bundle trusts a reachable gateway.
-- Accepted runtime settings return their own canonical values without waiting
-  for unrelated gateway calls to drain. Signing-only changes reuse the existing
-  transport. Per-request read deadlines also reuse that transport: the
-  dispatcher fingerprint includes origin, connect timeout, TLS verification,
-  CA identity/material and allowed CIDRs, but excludes response/upload deadlines.
-  Agent-level header/body timers are disabled; each request's upload guard and
-  response controller enforce its own bounds, including waiting routes.
-  A subsequent request with changed connection settings selects a
-  new dispatcher while the previous one drains its captured requests. Shutdown
-  waits for active and retired dispatchers within the existing process deadline.
-  Concurrent saves publish when validation completes; responses may finish in
-  a different order and each describes the settings that request accepted.
-- `terminationGracePeriodSeconds` must be larger than `FERRUM_SHUTDOWN_TIMEOUT`
-  so the process finishes its own bounded drain before the kubelet sends
-  `SIGKILL`. 30 seconds against a 10000 ms timeout leaves room.
+- The Service is `ClusterIP` on purpose. Do not expose it through a
+  `LoadBalancer`, `NodePort`, or an Ingress rule that skips the identity proxy.
+  Whatever sits in front must do the OIDC login and strip and inject the four
+  identity headers. Enforce this with a `NetworkPolicy` that admits only the
+  proxy's pods.
+- `FERRUM_TLS_CA_PATH` points into the Secret mount and `FERRUM_TLS_CA_ROOT`
+  at the mount directory. Kubernetes rotates Secret files through a `..data`
+  symlink; the BFF follows it inside the root and picks up the rotated bundle.
+- `terminationGracePeriodSeconds` must exceed `FERRUM_SHUTDOWN_TIMEOUT`, so the
+  process finishes its own drain before the kubelet sends `SIGKILL`.
 - Trusted-proxy mode keeps no per-user server state, so replicas need no sticky
-  sessions and can scale freely. Static mode keeps sessions in one process's
-  memory and is development-only and single-replica.
+  sessions ([Horizontal scaling](authentication.md#horizontal-scaling)).
+  Static mode keeps sessions in process memory and is single-replica,
+  development only.
 - `readOnlyRootFilesystem: true` works because the BFF writes nothing to disk.
 
 ## 6. Health, logging, and operations
@@ -655,172 +441,157 @@ Notes:
 
 | Path | Meaning |
 |---|---|
-| `GET /api/health/live` | Process liveness. Returns `200` with `{"status":"ok","version":"..."}` as long as the event loop is serving. Never touches the gateway. |
-| `GET /api/health/ready` | Downstream readiness. Probes the gateway and reports the result. |
-| `GET /api/health` | Alias of `/api/health/live`. |
+| `GET /api/health/live` | Liveness. `200` with `{"status":"ok","version":"..."}` while the process serves requests. Never calls the gateway |
+| `GET /api/health/ready` | Readiness. Probes the gateway and reports the result |
+| `GET /api/health` | Same as `/api/health/live` |
 
-Readiness makes two authenticated calls to the gateway: `GET /health`, and then
-`GET /namespaces?offset=0&limit=1` to prove that the minted JWT is actually
-accepted. `/namespaces` is used because it is authenticated but fleet-global, so
-the probe does not have to invent a tenant. The result is cached for 5 seconds
-and concurrent probes share one in-flight check, so a probe interval below 5
-seconds does not multiply gateway load.
+Readiness signs a `viewer` JWT (scoped by `FERRUM_JWT_NAMESPACES`) and makes
+two gateway calls: `GET /health`, then `GET /namespaces?offset=0&limit=1` to
+prove the gateway accepts the JWT. `/namespaces` is authenticated but
+fleet-global, so the probe needs no tenant. Results are cached for 5 seconds
+and concurrent probes share one check, so a short probe interval does not
+multiply gateway load.
 
-Readiness returns `200` with `status` of `ready` or `degraded` when the gateway
-answers both calls, and `503` with a JSON body and `status: "unavailable"` when
-the gateway is unreachable, unhealthy, or rejects the JWT. Wire the readiness
-probe so a gateway outage or a signing-key mismatch takes Foundry out of
-rotation instead of serving an admin UI that cannot reach anything.
+It returns `200` with `status` `ready` or `degraded` when both calls succeed,
+and `503` with `status: "unavailable"` when the gateway is unreachable,
+unhealthy, or rejects the JWT. Wire it as the readiness probe so a gateway
+outage or signing-key mismatch takes Foundry out of rotation.
 
-The header checks BFF readiness every 15 seconds. It shows **Unreachable** when
-the browser's readiness request fails, even if a previous check succeeded, and
-returns to **Connected** after a successful ready response. Gateway responses
-with `degraded` or `unavailable` status show **Degraded** or **Disconnected**.
+The UI header polls readiness every 15 seconds. It shows **Connected** for
+`ready`, **Degraded** for `degraded`, **Disconnected** for `unavailable`, and
+**Unreachable** when the readiness request itself fails, even if an earlier
+check succeeded.
 
-All three endpoints are unauthenticated, which is why liveness carries no
-gateway detail and readiness reports only component status, HTTP status, and the
+All three endpoints are unauthenticated. Liveness carries no gateway detail;
+readiness reports only component status, the gateway HTTP status, and the
 Foundry version.
 
 ### Logging
 
-Logs are pino JSON on stdout. The level is `info` when `NODE_ENV=production` and
-`debug` otherwise. Ship stdout to your log pipeline; the BFF writes no log
-files.
+Logs are pino JSON on stdout, at `info` when `NODE_ENV=production` and `debug`
+otherwise. The BFF writes no log files.
 
-The BFF never logs the CA bundle PEM, `FERRUM_JWT_SECRET`,
-`FERRUM_TRUSTED_PROXY_SECRET`, `FERRUM_BFF_AUTH_TOKEN`, or a minted JWT. Runtime
-settings changes are logged with the acting subject and the changed field names;
-`adminUrl` and `tlsCaPath` values are replaced with a redaction marker.
+The BFF never logs the CA bundle, `FERRUM_JWT_SECRET`,
+`FERRUM_TRUSTED_PROXY_SECRET`, `FERRUM_BFF_AUTH_TOKEN`, or a minted JWT.
+Runtime settings changes are logged with the actor and each changed field;
+`adminUrl` and `tlsCaPath` values are redacted.
 
-API responses are sent with `cache-control: no-store`. Hashed static assets are
-immutable for a year; `index.html` and `theme-bootstrap.js` are never cached.
+API responses carry `cache-control: no-store`. Hashed static assets are cached
+for a year; `index.html` and `theme-bootstrap.js` are never cached.
 
 ### Upload bounds
 
-A proxied request body is bounded twice. `FERRUM_WRITE_TIMEOUT` limits the idle
-gap between chunks, and `FERRUM_UPLOAD_TIMEOUT` is an absolute deadline for the
-whole body that a slowly progressing sender cannot extend; ordinary 2 MiB routes
-use `FERRUM_WRITE_TIMEOUT` for both. Either bound answers `504` with `code:
-FERRUM_BFF_TIMEOUT`, `phase: "upload"`, and a `reason` of `idle` or `deadline`,
-so a response says which bound fired. As a backstop, the HTTP server closes any
-request that has still not fully arrived five seconds past
-`FERRUM_UPLOAD_TIMEOUT`.
+Body size limits per proxied route: 110 MiB for restore, 30 MiB for API specs,
+2 MiB for everything else. A larger declared `content-length` gets `413`.
 
-Concurrency is bounded twice as well: `FERRUM_MAX_ACTIVE_UPLOADS` covers every
-proxied request carrying a body, and `FERRUM_MAX_LARGE_UPLOADS` is a stricter
-inner bound on the restore and API-spec routes. Both answer `429` with `code:
-FERRUM_BFF_UPLOAD_CAPACITY`, `retry-after: 1`, and a `scope` of `all` or
-`large`. Sustained `429`s at `scope: "all"` mean the instance is at its
-body-bearing request ceiling; raise the cap only alongside the socket and memory
-headroom to match.
+Time limits:
 
-When a reply goes out before its request body has fully arrived — the gateway
-refused the upload unread, the gateway was unreachable, or the BFF refused it
-itself (for example, an early `413` on a declared length over the route limit,
-or a `401`, `403`, or upload-capacity `429` returned before the request reaches
-its handler, on any route) — the BFF discards the unread remainder rather than
-closing the connection over it, so the client reliably receives the response
-and a keep-alive connection stays reusable. A drain is bounded by the request's
-remaining upload budget or 5 seconds, whichever ends first, and by
-`FERRUM_WRITE_TIMEOUT` between chunks. A drain whose request declared a
-`content-length` over 4 MiB lasts at most 1 second; any other drain, once it
-has discarded more than 4 MiB, continues for at most 1 more second. That is
-long enough for the client to read the response; the connection is then
-closed. A request that failed its own upload bound (`504`, `phase: "upload"`)
-is not drained: its connection is closed as soon as the response is written,
-and so is every draining connection when shutdown begins.
+- `FERRUM_WRITE_TIMEOUT` bounds the idle gap between chunks.
+- `FERRUM_UPLOAD_TIMEOUT` bounds the whole restore or API-spec body. Ordinary
+  routes use `FERRUM_WRITE_TIMEOUT` for both.
+- Either limit answers `504` with `code: FERRUM_BFF_TIMEOUT`,
+  `phase: "upload"`, and `reason` `idle` or `deadline`.
+- As a backstop, the HTTP server closes any request still arriving 5 seconds
+  after `FERRUM_UPLOAD_TIMEOUT`.
 
-A request with no authenticated principal — a `401`, or a `403` for a failed
-CSRF or namespace check — drains from a smaller pool of its own, of 8 slots or
-`FERRUM_MAX_ACTIVE_UPLOADS` if that is lower, for at most 1 second (still
-within the bounds above). Because the `401` needs no credentials, a client that
-fills this pool only makes other signed-out rejections close instead of drain;
-drains for signed-in requests, including an upload-capacity `429`, use the
-signed-in pool, sized by `FERRUM_MAX_ACTIVE_UPLOADS`. A drain that would
-exceed its pool closes its connection instead. A client whose upload outlasts
-its drain sees its write fail with `EPIPE` or `ECONNRESET` after the response
-has been sent; one that reads its response only after it finishes sending can
-then lose that response to the reset.
+Concurrency limits: `FERRUM_MAX_ACTIVE_UPLOADS` covers every proxied request
+with a body, and `FERRUM_MAX_LARGE_UPLOADS` is a tighter limit on restore and
+API-spec uploads. Both answer `429` with `code: FERRUM_BFF_UPLOAD_CAPACITY`,
+`retry-after: 1`, and `scope` `all` or `large`. Steady `429`s with
+`scope: "all"` mean the instance is at its ceiling; raise it only with matching
+socket and memory headroom.
 
-Neither drain pool is part of the in-flight upload pool, and a request leaves
-the upload pool once its response is written. An instance can therefore hold
-up to twice `FERRUM_MAX_ACTIVE_UPLOADS`, plus the signed-out drain slots,
-body-bearing proxied sockets at once. Those pools are not a ceiling on
-body-bearing sockets overall: a request on a non-proxy route (sign-in, runtime
-settings) whose small body is still arriving is bounded only by the HTTP
-server's request timeout, `FERRUM_UPLOAD_TIMEOUT` plus five seconds. Size
-socket and file-descriptor headroom for these, and cap connections per client
-at the ingress proxy as well, for example with nginx `limit_conn`, so one
-client cannot hold many sockets open.
+When the BFF answers before a body has fully arrived (for example a `401`,
+`403`, `413`, or capacity `429`, or a gateway that refused the upload unread),
+it discards the rest of the body so the client still receives the response and
+the keep-alive connection stays usable. That drain is bounded:
+
+- by the request's remaining upload budget or 5 seconds, whichever is first,
+  and by `FERRUM_WRITE_TIMEOUT` between chunks;
+- to 1 more second once it has discarded 4 MiB, or from the start if the
+  request declared more than 4 MiB;
+- to 1 second, from a separate pool of 8 slots (or
+  `FERRUM_MAX_ACTIVE_UPLOADS` if lower), for requests with no authenticated
+  principal, so anonymous senders cannot crowd out signed-in drains.
+
+A drain that hits its bound, finds its pool full, or is running when shutdown
+starts closes the connection. A request that failed its own upload deadline is
+closed without draining. A client still sending when its connection closes sees
+`EPIPE` or `ECONNRESET`, and may lose the response if it reads only after
+sending.
+
+Drains do not count against the upload pools, so one instance can hold up to
+twice `FERRUM_MAX_ACTIVE_UPLOADS`, plus the signed-out drain slots, of
+body-bearing proxied sockets. Non-proxy routes (sign-in, runtime settings) are
+bounded only by the server's request timeout. Size file-descriptor headroom for
+this and cap connections per client at the proxy (for example nginx
+`limit_conn`).
 
 ### Graceful shutdown
 
-On `SIGTERM` or `SIGINT` the BFF stops accepting new connections, waits for
-in-flight requests to finish, and closes its gateway connection pool.
-`FERRUM_SHUTDOWN_TIMEOUT` bounds that wait: if requests are still running when
-it expires, the process exits with a non-zero status rather than hanging. Set
-the orchestrator's grace period above this value.
+On `SIGTERM` or `SIGINT` the BFF stops accepting connections, waits for
+in-flight requests, and closes its gateway connection pool. If requests are
+still running after `FERRUM_SHUTDOWN_TIMEOUT`, it exits non-zero instead of
+hanging. Set the orchestrator's grace period above this value.
 
 ### Upgrade and rollback
 
-Published images carry immutable and mutable tags:
+Published image tags:
 
 | Tag | Moves? | Use |
 |---|---|---|
 | `vX.Y.Z` | Never | Production deployments |
+| `X.Y.Z` | Never | Same release, without the `v` |
+| `X.Y` | Yes, to the newest patch | Tracking a minor line |
+| `latest` | Yes, to the newest stable release | Convenience only |
 | `main-<commit>` | Never | Staging a specific `main` build |
 | `main` | Yes | Tracking `main`, non-production only |
-| `latest` | Yes | Convenience only; it follows the newest stable release |
 
-Deploy an immutable tag, and pin by digest when you need byte-identical
-rollouts:
+Deploy an immutable tag. Pin by digest when you need byte-identical rollouts:
 
 ```bash
 docker pull ferrumedge/ferrum-foundry:vX.Y.Z
 docker image inspect --format '{{index .RepoDigests 0}}' ferrumedge/ferrum-foundry:vX.Y.Z
 ```
 
-Roll back by redeploying the previous immutable tag or digest. Foundry keeps no
-persistent state of its own, so a rollback is a pod or container replacement.
-Confirm that the previous version's admin API contract, `FERRUM_JWT_AUDIENCE`,
-and `FERRUM_JWT_SECRET` still match the gateway before rolling back across a
-gateway change. Compatibility between development versions is not guaranteed
-during buildout.
+Roll back by redeploying the previous tag or digest. Foundry keeps no state of
+its own, so a rollback is just a container replacement. If the gateway also
+changed, first confirm the older Foundry still matches its admin API,
+`FERRUM_JWT_AUDIENCE`, and `FERRUM_JWT_SECRET`.
 
-Images are built for `linux/amd64` and `linux/arm64`, and published images carry
-build provenance and SBOM attestations. See
-[Release and supply-chain gates](release-security.md).
+Images are built for `linux/amd64` and `linux/arm64` and carry provenance and
+SBOM attestations. See [Release and supply-chain gates](release-security.md).
 
 ## 7. Production checklist
 
 - [ ] TLS terminates at the identity-aware proxy, with a current certificate.
 - [ ] The proxy strips client copies of `X-Ferrum-Auth-Secret`,
-      `X-Forwarded-User`, `X-Ferrum-Role`, and `X-Ferrum-Namespaces` and injects
+      `X-Forwarded-User`, `X-Ferrum-Role`, and `X-Ferrum-Namespaces` and sets
       its own values for all four.
 - [ ] Group-to-role mapping denies by default, so an unmapped user gets no role.
 - [ ] Every non-admin identity receives an exact `X-Ferrum-Namespaces` list.
 - [ ] `FERRUM_JWT_SECRET` and `FERRUM_TRUSTED_PROXY_SECRET` are at least 32
-      characters, generated from a CSPRNG, held in a secret store, and on a
-      rotation schedule.
+      characters, generated from a CSPRNG, kept in a secret store, and rotated
+      on a schedule.
 - [ ] `FERRUM_JWT_SECRET` matches the gateway's `FERRUM_ADMIN_JWT_SECRET`.
 - [ ] `NODE_ENV=production` is set.
 - [ ] `FERRUM_AUTH_MODE=trusted-proxy` is set and
       `FERRUM_ALLOW_INSECURE_STATIC_AUTH` is unset.
-- [ ] `FERRUM_BFF_AUTH_TOKEN` is not present in the production environment.
-- [ ] The BFF port is reachable only from the proxy, enforced by firewall,
-      network policy, or private network.
+- [ ] `FERRUM_BFF_AUTH_TOKEN` is not in the production environment.
+- [ ] Only the proxy can reach the BFF port, enforced by firewall, network
+      policy, or private network.
 - [ ] `FERRUM_ADMIN_URL` uses `https`, and `FERRUM_TLS_CA_PATH` plus
       `FERRUM_TLS_CA_ROOT` are set when the gateway uses a private CA.
 - [ ] `FERRUM_TLS_VERIFY` is left at `true`.
 - [ ] `FERRUM_ALLOW_RUNTIME_SETTINGS` is left at `false`.
-- [ ] `FERRUM_ENABLE_HSTS=true` only when the proxy serves this host over HTTPS
-      exclusively, including every subdomain.
+- [ ] `FERRUM_ENABLE_HSTS=true` only when this host and all its subdomains are
+      served over HTTPS only.
 - [ ] `FERRUM_JWT_AUDIENCE` matches the gateway's `FERRUM_ADMIN_JWT_AUDIENCE`,
       or both are unset.
 - [ ] `FERRUM_AUTH_LOGIN_URL` and `FERRUM_AUTH_LOGOUT_URL` point at the proxy's
       real sign-in and sign-out endpoints.
-- [ ] The readiness probe is wired to `/api/health/ready` and the liveness probe
-      to `/api/health/live`.
+- [ ] Readiness is probed at `/api/health/ready` and liveness at
+      `/api/health/live`.
 - [ ] The orchestrator grace period exceeds `FERRUM_SHUTDOWN_TIMEOUT`.
-- [ ] Container stdout is shipped to a log pipeline and retained.
+- [ ] Container stdout goes to a log pipeline and is retained.
 - [ ] The deployed image is an immutable `vX.Y.Z` tag or a digest.

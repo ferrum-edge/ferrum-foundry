@@ -1,92 +1,85 @@
 # Table sorting and pagination
 
-`DataTable` sorts complete collections in the browser. When `pagination` is
-present, it defaults to server pagination and disables sorting for every column,
-even a column with `enableSorting: true`. A page of gateway results cannot be
-sorted as though it were the entire collection.
+## `DataTable` sorting
 
-For a complete collection, pass unsliced `data` and `paginationMode="client"`.
-The table applies TanStack's sorted row model before slicing by offset and limit.
-The footer uses the collection length, and a sort change calls
-`onPaginationChange` with offset zero. Without `pagination`, the table treats
-`data` as the complete collection and sorts without slicing. Columns can opt out
-with `enableSorting: false`.
+`DataTable` (`src/components/ui/DataTable.tsx`) sorts only complete
+collections, in the browser. A single page of gateway results cannot be sorted
+as if it were the whole collection.
 
-Every record must have a unique, stable string `id`. Equal sort values are
-ordered by ascending ID in both directions, independent of fetch order. The
-table does not mutate the supplied array. Clearing sorting restores the supplied
-order. `aria-sort` describes the active direction; server-page headers have no
-sort indicator or click handler. The unused `onSortingChange` notification prop
-was removed: sorting and slicing now belong to the table itself.
+| Props | Sorting |
+| --- | --- |
+| `pagination` with the default `paginationMode="server"` | Disabled for every column, even one with `enableSorting: true`. Headers have no sort indicator or click handler. |
+| `pagination` with `paginationMode="client"` and unsliced `data` | Sorts the whole collection, then slices by offset and limit. The footer counts the full collection, and a sort change calls `onPaginationChange` with offset zero. |
+| No `pagination` | Treats `data` as the complete collection and sorts it without slicing. |
 
-## Gateway contract and current pages
+Columns can opt out with `enableSorting: false`.
 
-The **Pinned Gateway Contract** job in `.github/workflows/ci.yml` runs the
-Ferrum Edge image pinned as `edge.image` in [`docs/compatibility.md`](compatibility.md).
-It exercises live requests through `scripts/gateway-contract-smoke.mjs`; it does
-not check out an OpenAPI fixture or record a corresponding gateway source SHA.
-Do not infer sorting support from acceptance of an unknown query parameter.
+Every record needs a unique, stable string `id`. Rows with equal sort values
+are ordered by ascending ID in both directions, regardless of fetch order. The
+table does not mutate the supplied array, and clearing the sort restores the
+supplied order. `aria-sort` reflects the active direction.
 
-The [canonical upstream OpenAPI specification](https://github.com/ferrum-edge/ferrum-edge/blob/main/openapi.yaml)
-was inspected at revision
-[`c27e5e55eda97047a35af0bb0fd87fea760dcb82`](https://github.com/ferrum-edge/ferrum-edge/blob/c27e5e55eda97047a35af0bb0fd87fea760dcb82/openapi.yaml).
-Core resource lists declare offset/limit pagination without configurable sorting.
-API specs separately declare `sort_by` and `order`; that does not establish sort
-support for other endpoints or for the pinned image. No local spec copy is kept.
+## Current pages
 
-At the time of this change, no application page imports `DataTable`. The current
-page strategies are:
+No application page uses `DataTable` today. Current strategies:
 
 | Surface | Data available | Sort behavior |
 | --- | --- | --- |
-| Proxies, consumers, upstreams, plugin configs | A server page normally; complete collection during search | Existing custom grid headers remain static, with no sort affordance in either mode. |
-| API specs | A server page normally; complete collection during search | Existing cards have no sort affordance. |
-| Other inventory and observability tables | Endpoint-specific snapshots or pages | Existing headers remain static, with no sort affordance. |
-| Shared `DataTable`, server pagination | One server page | All sorting disabled. |
-| Shared `DataTable`, complete collection | All records, optionally filtered | Sort the entire collection, then paginate if requested. |
+| Proxies, consumers, upstreams, plugin configs | A server page normally; the complete collection during search | Static headers, no sort control. |
+| API specs | A server page normally; the complete collection during search | Cards, no sort control. |
+| Other inventory and observability tables | Endpoint-specific snapshots or pages | Static headers, no sort control. |
 
 When adopting `DataTable` for a `listAll()` caller, pass the complete filtered
 collection, not `filterAndPage(...).items`. Keep namespace binding in the data
-hook: every `listAll(scope)` request must retain the operation's `NamespaceScope`.
-This change adds no gateway requests or query parameters and changes no query
-keys. Any future server sorting integration must verify the deployed contract,
-include ordering in query keys and every page request, and establish an ID
-tie-break before enabling its headers.
+hook: every `listAll(scope)` request must keep the operation's
+`NamespaceScope`.
+
+## Gateway sorting support
+
+The [upstream OpenAPI specification](https://github.com/ferrum-edge/ferrum-edge/blob/main/openapi.yaml)
+(inspected at
+[`c27e5e55`](https://github.com/ferrum-edge/ferrum-edge/blob/c27e5e55eda97047a35af0bb0fd87fea760dcb82/openapi.yaml))
+gives core resource lists offset/limit pagination with no sorting. Only API
+specs declare `sort_by` and `order`, which does not imply sorting on other
+endpoints. Foundry sends no sort parameters, and a gateway accepting an unknown
+query parameter is not evidence that it sorts.
+
+Server-side sorting would need to verify the deployed contract, include the
+ordering in query keys and every page request, and use an ID tie-break before
+enabling sortable headers.
 
 ## Narrow resource grids
 
-Custom resource grids use `ResourceGrid` for an inner horizontal scroller. The
-header and rows share a canvas at least 52rem wide, so fixed columns and gaps
-cannot consume the space reserved for resource identity. The existing desktop
-track templates still fill the card when there is enough room. Cluster backend
-capabilities retain their 48rem minimum; the smaller authorization grids in
-proxy and consumer details use 40rem. Scrolling follows the available card width
-rather than a viewport breakpoint, including when the desktop sidebar is open.
+Custom resource grids wrap their header and rows in `ResourceGrid`
+(`src/components/ui/ResourceGrid.tsx`), an inner horizontal scroller. Header
+and rows share one canvas at least 52rem wide, so fixed columns cannot squeeze
+out the resource identity column. Cluster backend capabilities use 48rem; the
+authorization grids in proxy and consumer details use 40rem. On wide cards the
+existing column templates still fill the space. Scrolling depends on the card
+width, not a viewport breakpoint, so it also applies with the desktop sidebar
+open.
 
-The scroller has an accessible region name and is keyboard focusable. Pass empty
-and error feedback through `emptyState` to keep messages and create buttons
-within the card width, outside the wide canvas. Keep column headers inside the
-scroller even when a collection is empty.
+The scroller is a named, keyboard-focusable region. Pass empty and error
+messages through `emptyState` so they, and any create buttons, stay within the
+card width outside the wide canvas. Keep column headers inside the scroller
+even when the collection is empty.
 
-`src/routes/resourceGrids.test.tsx` mounts all nine affected surfaces and asserts
-the inner scroller, minimum width, shared header/row template, identity cell,
-and placement of empty/error feedback. This is structural regression coverage:
-Vitest uses jsdom, which cannot calculate column bounds or prove text is visible.
-There is no browser mode or browser lane in the current CI workflow, and
-`scripts/demo-route-smoke.mjs` exercises gateway HTTP responses, not UI layout.
+## Test coverage
 
-Browser verification remains necessary at 390×844 for populated and empty lists,
-mesh service graph, TLS inventory, cluster capabilities, and the authorization
-tabs in proxy/consumer details. Check that identity text has space, horizontal
-scrolling reaches every column without page overflow, headers stay aligned with
-rows, and empty-state actions remain visible. Also check a desktop viewport in
-both themes to confirm the existing presentation.
+- `src/components/ui/DataTable.test.tsx` mounts the real component and checks
+  row order and indicators in both directions, clearing the sort, sorting
+  across page boundaries, the offset reset, ID tie-breaks (including after
+  reordered input), input immutability, and disabled server-page and column
+  sorting.
+- `src/routes/resourceGrids.test.tsx` mounts all nine `ResourceGrid` surfaces
+  and checks the scroller, minimum width, shared header/row template, identity
+  cell, and placement of empty/error feedback. Vitest runs these in jsdom,
+  which cannot measure layout or prove text is visible.
 
-## Regression coverage
-
-`src/components/ui/DataTable.test.tsx` mounts the real component and checks
-ascending/descending tbody order and indicators, clearing the sort, sorting
-across page boundaries, resetting the offset, ID ties in both directions and
-after reordered input, input immutability, and disabled server-page/column
-affordances. Execution, lint, type checking, and build validation run only in
-GitHub-hosted CI.
+No CI job checks narrow-viewport layout. The Critical Journeys job drives
+Chromium through Playwright, but its journeys do not test layout. Check by hand
+in a browser at 390×844: populated and empty lists, the mesh service graph, TLS
+inventory, cluster capabilities, and the authorization tabs in proxy and
+consumer details. Confirm identity text has room, horizontal scrolling reaches
+every column without page overflow, headers stay aligned with rows, and
+empty-state actions stay visible. Also check a desktop viewport in both themes.

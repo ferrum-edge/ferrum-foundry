@@ -1,16 +1,18 @@
 # Production authentication
 
-Ferrum Foundry separates browser authentication from the JWT it mints for the
-Ferrum Edge Admin API. A browser never receives the gateway signing key or a
-reusable deployment-wide administrator token.
+Ferrum Foundry keeps browser authentication separate from the JWT it mints for
+the Ferrum Edge Admin API. The browser never receives the gateway signing key
+or a reusable administrator token.
+
+Every environment variable named here is listed with its default and range in
+the [configuration reference](deployment.md#2-configuration-reference).
 
 ## Production: trusted identity proxy
 
-Run Foundry behind an OIDC/OAuth2-capable reverse proxy or policy gateway. The
-proxy owns the authorization-code flow, MFA, its Secure/HttpOnly user session,
-account revocation, and group-to-role policy. Foundry validates a separate
-high-entropy proof header on every request and translates the asserted actor,
-role, and exact namespace grants into the downstream Ferrum JWT.
+Run Foundry behind an OIDC/OAuth2-capable reverse proxy. The proxy owns the
+login flow, MFA, the user session, account revocation, and group-to-role
+policy. On every request Foundry checks a shared proof header, then turns the
+asserted actor, role, and namespace grants into the downstream Ferrum JWT.
 
 ```bash
 export NODE_ENV=production
@@ -22,386 +24,356 @@ export FERRUM_AUTH_LOGIN_URL=/oauth2/start
 export FERRUM_AUTH_LOGOUT_URL=/oauth2/sign_out
 ```
 
-The trusted proxy must remove client-supplied copies and inject these headers:
+The proxy must strip any client-supplied copy of these headers and inject its
+own:
 
 | Header | Meaning |
 |---|---|
-| `X-Ferrum-Auth-Secret` | Exact `FERRUM_TRUSTED_PROXY_SECRET` proof |
-| `X-Forwarded-User` | Stable person/service identity used as JWT `sub` |
+| `X-Ferrum-Auth-Secret` | Exactly `FERRUM_TRUSTED_PROXY_SECRET` |
+| `X-Forwarded-User` | Stable person or service identity, used as JWT `sub` |
 | `X-Ferrum-Role` | `viewer`, `operator`, or `admin` after group mapping |
 | `X-Ferrum-Namespaces` | Comma-separated exact namespace grants; omitted for a global admin |
 
-Non-admin identities are rejected when the namespace header is missing. A
-global admin is expressed only by **omitting** the namespace header: when
-policy deliberately grants an admin global administration, the identity proxy
-must not send the header for that identity, or must strip it. There is no
-wildcard spelling. A literal `*` — alone (`*`, ` * `, `*,`), repeated, or
-combined with names — and namespace glob patterns such as `tenant-*` are
-rejected with `401` for every role, admins included, so an identity proxy that
-forwards a raw `*` claim fails closed instead of granting every namespace.
-`*` is accepted only by `FERRUM_JWT_NAMESPACES` and the runtime settings,
-which configure the static principal, never in this header.
-Absent and empty are different: a namespace header that is present but empty
-or whitespace only is rejected with `401` for every role, admins included,
-rather than read as the omitted header. Empty entries between names
-(`tenant-a,,tenant-b`) are dropped, but a header left with no name is refused.
+The last three names can be changed with `FERRUM_TRUSTED_PROXY_USER_HEADER`,
+`FERRUM_TRUSTED_PROXY_ROLE_HEADER`, and
+`FERRUM_TRUSTED_PROXY_NAMESPACES_HEADER`. Each of the four headers may appear
+only once per request.
+
+Namespace header rules:
+
+- A non-admin identity without the namespace header is rejected.
+- A global admin is expressed only by **omitting** the header. There is no
+  wildcard: `*` in any form (alone, repeated, or mixed with names) and glob
+  patterns such as `tenant-*` are rejected with `401` for every role, admins
+  included. `*` is valid only in `FERRUM_JWT_NAMESPACES` and the runtime
+  settings, which configure the static principal.
+- A header that is present but empty or whitespace-only is rejected with `401`
+  for every role. It is never read as "omitted".
+- Empty entries between names (`tenant-a,,tenant-b`) are dropped, but at least
+  one name must remain.
+
 nginx does not forward a `proxy_set_header` whose value is empty, so the
-starter's identity proxy still omits the header for an identity with no mapped
-namespaces and its behavior is unchanged.
-Header names can be changed with `FERRUM_TRUSTED_PROXY_*_HEADER` variables.
-Each identity/proof header may occur only once on the wire, including configured
-header names. A single namespace header may contain multiple comma-separated
-exact grants. Literal `*` and namespace glob patterns are invalid (`401`);
-unrestricted administration uses the deliberately omitted header described
-above.
+starter's identity proxy omits the header for an identity with no mapped
+namespaces.
 
-The namespace registry is authorized by its actual target: GET/PUT/DELETE
-require the path name, POST requires the body's name, and rename requires both
-old and new names. Registry writes require admin role. The selected
-`X-Ferrum-Namespace` cannot grant access to another registry target. Foundry
-validates registry JSON within the ordinary 2 MiB upload limit before forwarding;
-bulk import/restore routes retain their separate streaming limits and deadlines.
-Registry lists are filtered to exact grants before pagination, including totals,
-under one response deadline. The manager and header selector use the same grants.
-These BFF checks apply even when gateway namespace-claim enforcement is disabled.
-For another enforcement layer on multi-tenant deployments, configure Ferrum Edge
-with `FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM=true` as well.
+### Network exposure
 
-Foundry mirrors this role model in the UI: a surface whose write the current
-role or gateway mode cannot perform is presented read-only with the reason
-visible before anything is edited. See [Capabilities](capabilities.md) for the
-role x mode matrix and how to extend it. That presentation is a usability
-layer only — the BFF and Ferrum Edge remain the enforcement points.
+Do not expose the BFF port to an untrusted network. Terminate TLS at the
+identity proxy, strip every identity and proof header the client sends, inject
+the trusted values after authentication, and firewall the BFF so only that
+proxy can connect. When the proxy runs on the same host, set
+`FERRUM_BIND_ADDRESS` (default `0.0.0.0`) to a loopback or private address such
+as `127.0.0.1` or `::1`. Configure the proxy to revoke a user's session as soon
+as the identity provider disables the user.
 
-Namespace grants constrain Ferrum operations that declare
-`X-Ferrum-Namespace`; they do not turn fleet-global process/runtime APIs into
-tenant APIs. TLS inventory, managed TLS material, ACME, rotation, and validation
-are fleet-global, so Foundry deliberately omits the tenant header and labels the
-surface accordingly. Map roles with that blast radius in mind, and restrict
-fleet-global routes at the identity proxy when scoped identities must not use
-them.
+### Namespace registry
 
-The BFF validates proxy paths from the raw request target before forwarding.
-Path segments are decoded once; controls, dot segments, encoded separators,
-repeated separators, malformed escapes, and nested escapes are refused.
-Ordinary escaped identifiers remain supported, and query parameters are handled
-separately. Namespace authorization, body limits, upload admission, and deadlines
-all use the same serialized pathname sent upstream. Only the known TLS operation
-paths and methods receive the fleet-global namespace exemption; new upstream TLS
-operations must be added to the BFF's explicit route list.
+Registry requests are authorized against the namespace they actually target:
+`GET`, `PUT`, and `DELETE` check the name in the path, `POST` checks the name
+in the body, and a rename checks both the old and new names. Registry writes
+require `admin`. The selected `X-Ferrum-Namespace` header cannot grant access
+to a different registry target.
+
+Foundry validates registry JSON within the ordinary 2 MiB body limit before
+forwarding it. A scoped principal's registry list is filtered to its exact
+grants before pagination, so totals count only granted names. The namespace
+manager and the header selector use the same grants.
+
+These BFF checks apply even when the gateway does not enforce namespace
+claims. For a second enforcement layer on multi-tenant deployments, also set
+`FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM=true` on Ferrum Edge.
+
+### Roles in the UI
+
+A surface whose write the current role or gateway mode cannot perform is shown
+read-only, with the reason visible before anything is edited. This is a
+usability layer only; the BFF and Ferrum Edge remain the enforcement points.
+See [Capabilities](capabilities.md) for the role and mode matrix.
+
+### Fleet-global TLS routes
+
+Namespace grants apply to Ferrum operations that take `X-Ferrum-Namespace`.
+They do not make fleet-global APIs tenant-scoped. TLS inventory, managed TLS
+material, ACME, rotation, and validation are fleet-global, so Foundry sends no
+namespace header for them and labels the surface as fleet-global. Map roles
+with that blast radius in mind, and block these routes at the identity proxy
+if scoped identities must not use them.
+
+Only the TLS paths and methods listed in `server/proxy-path.ts`
+(`FLEET_GLOBAL_ROUTES`) are exempt from the namespace check. A new Edge TLS
+operation must be added to that list.
+
+### Proxy path validation
+
+The BFF validates each proxied path from the raw request target. Each segment
+is decoded exactly once. Control characters, dot segments, encoded separators,
+repeated separators, malformed escapes, and nested escapes are refused with
+`400 FERRUM_BFF_UNSAFE_PATH`. Ordinary escaped identifiers still work. Namespace
+authorization, body limits, upload admission, and deadlines all use the same
+normalized path that is sent upstream.
 
 ### Runtime identity defaults
 
-`GET /api/settings` includes the active `authMode`. In `trusted-proxy` mode,
-Settings disables the role and namespace defaults and omits them from saves.
-`PUT /api/settings` rejects `jwtRole` or `jwtNamespaces` with
-`FERRUM_BFF_PROXY_MANAGED_IDENTITY` before applying any part of the update.
-Change the identity proxy's role and namespace policy to change user access.
-These defaults remain editable in static development mode and apply to its
-principal on subsequent logins. Existing static sessions retain their original grants. Issuer, audience, and token lifetime remain
-separate signing settings in both modes.
+`GET /api/settings` includes the active `authMode`. In `trusted-proxy` mode:
 
-An update never clears the static namespace defaults by omission: an omitted
-`jwtNamespaces` leaves them unchanged. A submitted `jwtNamespaces` must name
-at least one exact namespace, or be `["*"]` to grant every namespace; empty
-entries are dropped, and an array with no name left, an invalid name, or `*`
-mixed with names is refused with `400 FERRUM_BFF_INVALID_SETTINGS` and nothing
-in the update is applied. A `jwtNamespaces` that is not an array of strings is
-the same `400` for every session, checked before the widening check below, so
-a malformed body is never reported or logged as a widening. `GET /api/settings` always includes `jwtNamespaces`,
-reporting an unrestricted static principal as `["*"]`. In trusted-proxy mode
-that value describes only the readiness probe's scope; each user's grants come
-from the identity proxy. A session that holds namespace grants cannot use the
-defaults to widen access: it may only choose grants it holds, and anything
-else — including `["*"]` — is refused with
+- The Settings page disables the role and namespace defaults and leaves them
+  out of saves.
+- `PUT /api/settings` with `jwtRole` or `jwtNamespaces` is refused with
+  `400 FERRUM_BFF_PROXY_MANAGED_IDENTITY`, and nothing is applied. Change the
+  identity proxy's policy to change user access.
+- The reported `jwtNamespaces` describes only the readiness probe's scope.
+
+In static development mode the defaults are editable and apply to the static
+principal on its next login. Existing sessions keep their original grants.
+Issuer, audience, and token lifetime are signing settings in both modes.
+
+`jwtNamespaces` follows the `FERRUM_JWT_NAMESPACES` rules:
+
+- Omitting it leaves the current value unchanged.
+- A value must be an array of strings naming at least one exact namespace, or
+  `["*"]` for every namespace. Empty entries are dropped.
+- An array with no name left, an invalid name, `*` mixed with names, or a value
+  that is not an array of strings is refused with
+  `400 FERRUM_BFF_INVALID_SETTINGS`, and nothing is applied. The shape check
+  runs first, so a malformed body is never reported as a widening.
+- `GET /api/settings` always includes it, reporting an unrestricted static
+  principal as `["*"]`.
+
+A session that holds namespace grants may only choose grants it holds.
+Anything wider, including `["*"]`, is refused with
 `403 FERRUM_BFF_NAMESPACE_GRANT_EXCEEDED` and logged as a warning naming the
 actor and the requested grants. The Settings form leaves the field out of a
-save when it is untouched — grants are a set, so text naming the same grants
-in another order or spacing counts as untouched — so a session narrower than
-the defaults can still save unrelated settings. It shows a refused widening on
-the field itself, and only there: the save tells the global error popup it
-handles a `403`, and reports any other `403` once, as a toast with the BFF's
-reason.
+save when it is untouched (the same grants in another order or spacing count
+as untouched), so a narrower session can still save other settings. A refused
+widening is shown on the field; any other `403` is shown once as a toast with
+the BFF's reason.
 
 ### Namespace binding
 
-Consumer, proxy, upstream, and plugin create forms discard their drafts when
-this tab switches namespaces. This also clears plugin membership selections;
-a proxy ID supplied by the create link is only used in the namespace where
-that link opened. Returning to a namespace starts a fresh draft. Background
-refreshes within the same namespace leave an in-progress draft intact.
+**An operation is bound to the namespace that was active when it started, and
+every request it makes carries that binding.** The namespace in the header
+selector is therefore the namespace every gateway request from that tab
+carries.
 
-The namespace shown in the header selector is the namespace every gateway
-request from that tab carries. Foundry enforces this with one rule: **an
-operation is bound to the namespace that was active when it started, and every
-request it makes carries that binding.** In practice:
+- `NamespaceProvider` (`src/stores/namespace.tsx`) owns the active namespace
+  for each tab. A hook or page captures it as an immutable scope when a query
+  or mutation starts, and the API layer stamps `X-Ferrum-Namespace` from that
+  scope. The HTTP client never picks a namespace. A gateway request with no
+  binding that is not a known fleet-global call is refused before it is sent.
+- The binding covers every request in an operation: each page of a listing,
+  query retries, a plugin membership plan's reads, writes, and rollbacks, a
+  namespace restore, and the apply-status poll after a mutation. A later
+  switch, in this tab or another, does not retarget it.
+- Registry rename and delete update the affected cache entries even if the
+  dialog has closed. The tab follows the renamed namespace (or leaves the
+  deleted one) only if that namespace is still the current selection; a newer
+  user selection is kept.
+- The active namespace is checked against the principal's grants during
+  render, not in an effect, so the first queries after a load or a grant change
+  already carry a granted namespace. A retired name is replaced and the
+  corrected value saved. A global admin keeps its stored preference.
+- `localStorage` (`ferrum:namespace`) holds a *preference*, not the active
+  namespace. It is read once when a tab loads and written when the user
+  switches. Cross-tab `storage` events are ignored, so another tab's switch
+  never changes what this tab shows or sends. Two tabs can work in different
+  namespaces at once.
+- When storage is unavailable, the provider starts from the default namespace
+  `ferrum` and keeps state in memory. Only the preference is lost between
+  loads.
 
-- The `NamespaceProvider` in each tab owns the active namespace. A hook or
-  page captures it as an immutable scope when a query or mutation starts and
-  passes that scope to the API layer, which stamps `X-Ferrum-Namespace` on
-  each request it sends. The HTTP client never chooses a namespace itself; a
-  gateway request that reaches it without a binding (and is not a documented
-  fleet-global call) is refused before it goes on the wire.
-- The binding covers every request an operation makes, not just the first:
-  each page of a "fetch all" listing, query retries, a plugin membership
-  plan's preflight reads, association writes and compensating rollbacks, a
-  namespace restore, and the apply-status poll that follows a mutation. A
-  switch made after an operation has started, in this tab or any other,
-  does not retarget it.
-- Registry rename/delete completion reconciles the affected cache entries
-  even if its dialog has closed. It follows the renamed namespace (or leaves
-  the deleted namespace) only if that target is still the provider's current
-  selection. A later user selection is preserved, including its request scope
-  and persisted preference.
-- The active namespace is resolved against the principal's grants **during
-  render**, not in an effect. React flushes a child's effects before its
-  parent's, so a correction made in the provider's effect would arrive only
-  after the subtree had already mounted and dispatched its first queries under
-  a stored — possibly retired — name, collecting a `403 Namespace access
-  denied` from the BFF. Resolving during render means the first request of a
-  load, and the first request after the authorization-key remount that follows
-  a grant change, already carry a granted namespace. The corrected value is
-  then written back to the preference, so a retired name is not re-read on the
-  next load. A principal with no namespace grants (a global admin) is not
-  restricted and keeps its stored preference.
-- `localStorage` (`ferrum:namespace`) stores a *preference*, not the active
-  namespace. It is read once when a tab loads, so a new tab opens on the
-  namespace last chosen anywhere, and it is written when the user switches.
-  Foundry deliberately does not react to cross-tab `storage` events: another
-  tab's switch neither changes what this tab displays nor what it sends. It
-  takes effect here only on the next load. Two tabs can therefore show and
-  operate on different namespaces at the same time, each consistently.
-- When storage is unavailable (private browsing, a disabled or throwing
-  storage accessor), the provider runs purely on in-memory state from the
-  default namespace `ferrum`. The displayed namespace and the request header
-  come from the same value, so they cannot diverge; only the preference is
-  lost between loads.
+Create forms for consumers, proxies, upstreams, and plugins discard their
+draft, including plugin membership selections, when the tab switches
+namespaces. A proxy id supplied by a create link applies only in the namespace
+where the link was opened. Background refreshes in the same namespace leave a
+draft alone.
 
-Operators who need a hard guarantee that an identity can never write outside
-one namespace should still grant exactly that namespace at the identity
-proxy; the binding rule keeps the UI honest, and the BFF's grant check keeps
-the gateway honest.
+To guarantee an identity can never write outside one namespace, grant exactly
+that namespace at the identity proxy. The binding keeps the UI consistent; the
+BFF's grant check is what enforces access.
 
 ### Proxy form updates
 
-Saving proxy settings omits the `plugins` field from the request, so Edge
-preserves the current live plugin associations. A cached association list is
-never replayed by an unrelated name, routing, or timeout edit. Plugin membership
-operations still send an explicit list when changing or clearing associations.
+A proxy settings save omits `plugins`, so Edge keeps the live plugin
+associations. An unrelated edit never replays a cached association list.
+Plugin membership operations still send an explicit list when they change or
+clear associations.
 
 ### Editor identity
 
-Binding the request is not enough on its own. A detail page whose data for
-both tenants is already cached re-renders on a switch without passing through
-its loading state, so a form that seeded its fields once could keep showing
-the previous tenant's values under the new tenant's heading and then submit
-them, correctly addressed, to the wrong consumer. Foundry therefore binds the
-**editor** as well as the request (`src/lib/editorIdentity.ts`):
+Binding requests is not enough on its own. If both tenants' data is cached, a
+detail page re-renders on a namespace switch without a loading state, so a form
+seeded once could show the previous tenant's values under the new heading and
+submit them to the new tenant. Foundry therefore binds the **editor** too
+(`src/lib/editorIdentity.ts`, `src/hooks/useEditorIdentity.ts`):
 
-- An editor's identity is `{ namespace, resourceId }`. The detail pages for
-  proxies, consumers, plugins, and upstreams key their entire editor subtree
-  on it — the form, credential drafts, inline target editors, the membership
-  recovery notice, and every confirmation dialog — so a namespace switch or a
-  route change to another resource remounts the editor against the newly
-  selected resource. Nothing carries across: fields are re-seeded, an open
-  "Delete …" confirmation closes, a half-typed credential is discarded. When
-  the new resource is not cached the editor shows its loading state rather
-  than the old fields. The API-specs list page applies the same rule with the
-  namespace alone as its identity, since its import, replace, and delete
-  targets are pending state for one tenant.
+- An editor's identity is `{ namespace, resourceId }`. The proxy, consumer,
+  plugin, and upstream detail pages key their whole editor subtree on it: the
+  form, credential drafts, inline target editors, the membership recovery
+  notice, and every confirmation dialog. A namespace switch or a route change
+  remounts the editor. Fields are re-seeded, an open delete confirmation
+  closes, and a half-typed credential is discarded. If the new resource is not
+  cached, the editor shows its loading state. The API specs list page uses the
+  namespace alone as its identity.
 - Submit and confirm handlers capture the identity they were created under
-  (`useEditorIdentity().bind`) and are refused if the page's live identity has
-  moved on by the time they run; the page reports the discard in a toast. The
-  remount makes such a call unreachable through the UI, so the guard covers a
-  closure that outlives its editor. The request itself is still pinned to the
-  namespace active when the mutation started, so a write that is already in
-  flight when the operator switches completes against its original tenant
-  and never touches the editor now on screen.
-- **Refresh policy for the same identity.** Fields are seeded once, when the
-  editor mounts for an identity. A background refetch of the same identity —
-  a poll, an invalidation after a save, a new response object with a newer
-  `updated_at` — never rewrites fields, dirty or clean, so an in-progress edit
-  is never clobbered. Live data still drives the heading, counts, and
-  read-only panels. A successful save leaves the submitted values in place
-  because they are what the gateway now holds; to pick up a change made
-  elsewhere, leave and reopen the resource. Only an identity change resets
-  the editor. A failed refetch with retained data keeps the form mounted and
-  shows a retry notice; it cannot reset an unsaved draft. Supplementary plugin
-  membership failures disable the picker after initialization without changing
-  its selections. Read-only policy conclusions require all inputs to have
-  succeeded and otherwise report unknown rather than absence.
-- **Cache retirement after a cascade.** Because fields are seeded once, a
-  superseded cache entry is what the operator edits and submits. A mutation
-  must therefore *retire* (`removeQueries`) the scoped detail entry of every
-  resource it deleted or re-created, not merely invalidate it — invalidation
-  leaves the stale entry resident and an editor mounting against it seeds from
-  the old values. Deletions that cascade across resource *types* — spec
-  import/replace/delete, and `DELETE /proxies/{id}`, which also removes the
-  proxy's plugin configs, the owning API-spec row, and an orphaned hand-owned
-  upstream — go through `retireCascade()` (`src/hooks/retireCascade.ts`). The
-  destroyed ids are not all known client-side, so those kinds are retired by
-  namespace prefix: over-retiring a detail entry costs a refetch, while
-  under-retiring is the defect. The namespace is the one the mutation was
-  *issued* under, carried through completion, so a switch after the click
-  cannot retire another tenant's cache. A namespace **restore** replaces every
-  proxy, upstream, consumer, plugin configuration, and API spec in the
-  namespace it was confirmed for, so it retires all five detail kinds there,
-  plus that namespace's inactive lists of them (the plugin editor seeds
-  proxy-group membership from the whole proxy list) — after a success, a
-  committed-but-not-live answer, an unobserved outcome, and every server
-  failure whose answer does not prove the namespace unchanged — and
-  invalidates everything else (#446). See `docs/client-recovery.md`.
-
-Do not expose the BFF port directly to an untrusted network. Terminate TLS at
-the identity proxy, strip every identity/proof header supplied by the client,
-inject the trusted values after authentication, and firewall the BFF so only
-that proxy can connect. When the identity proxy runs on the same host, set
-`FERRUM_BIND_ADDRESS` (default `0.0.0.0`) to a loopback or private interface —
-for example `127.0.0.1` or `::1` — so the port is never published beyond that
-proxy. Configure the identity proxy to disable a user and revoke its session
-immediately when the identity provider does so.
+  (`bind()`). If the page has moved on when they run, they are discarded and a
+  toast says so. A write already in flight still completes against the
+  namespace it started in and never touches the editor now on screen.
+- **Fields are seeded once per identity.** A background refetch of the same
+  resource (a poll, an invalidation after a save, a newer `updated_at`) never
+  rewrites fields, dirty or clean. Live data still drives the heading, counts,
+  and read-only panels. After a successful save the form keeps the submitted
+  values, because that is what the gateway now holds. To pick up a change made
+  elsewhere, leave and reopen the resource. A failed refetch with retained data
+  keeps the form and shows a retry notice. A failed supplementary membership
+  read disables the plugin picker without changing its selections. Read-only
+  policy conclusions need every input to have loaded; otherwise they report
+  unknown.
+- **Mutations retire the caches they invalidate.** Because fields are seeded
+  once, a stale cache entry is what the operator would edit. A mutation must
+  therefore *remove* (`removeQueries`) the scoped detail entry of every
+  resource it deleted or re-created, not just invalidate it. Mutations that
+  cascade across resource types (spec import, replace, and delete, and
+  `DELETE /proxies/{id}`, which also removes the proxy's plugin configs, its
+  API spec row, and an orphaned hand-owned upstream) use `retireCascade()`
+  (`src/hooks/retireCascade.ts`). It retires by namespace prefix, because not
+  every destroyed id is known client-side, and it uses the namespace the
+  mutation was issued under. A namespace **restore** retires all five detail
+  kinds (proxy, upstream, consumer, plugin configuration, API spec) and their
+  inactive lists in the restored namespace, and invalidates everything else.
+  It does this on success, on a committed-but-not-live answer, on an unknown
+  outcome, and on every server failure that does not prove the namespace
+  unchanged. See [client-recovery.md](client-recovery.md).
 
 ### Horizontal scaling
 
-Trusted-proxy mode keeps no per-user server state, so replicas are
-interchangeable and no sticky sessions or shared cache are required. CSRF
-tokens are HMAC-signed with a key derived from `FERRUM_TRUSTED_PROXY_SECRET`
-and bound to the asserted subject plus an expiry of `FERRUM_SESSION_TTL`
-seconds, so any replica configured with the same secret validates a token
-another replica minted. A restart or a rollout loses nothing.
+Trusted-proxy mode keeps no per-user server state. Replicas are
+interchangeable, and no sticky sessions or shared cache are needed. CSRF tokens
+are HMAC-signed with a key derived from `FERRUM_TRUSTED_PROXY_SECRET` and bound
+to the asserted subject and an expiry `FERRUM_SESSION_TTL` seconds out. Any
+replica with the same secret accepts a token another replica issued, so
+restarts and rollouts lose nothing.
 
 Rotating `FERRUM_TRUSTED_PROXY_SECRET` invalidates every outstanding CSRF
 token; the SPA re-fetches `/api/auth/session` and recovers on its own. Static
-development mode is different: it stores sessions in process memory and is
-therefore single-process only.
+development mode keeps sessions in process memory and is single-process only.
 
-Every tab of one browser shares the CSRF cookie. `GET /api/auth/session`
-reissues it once the token is inside its final quarter, which replaces it for
-all tabs at once, so the SPA does not send the token its own tab last
-accepted: each unsafe request carries the current value of the readable cookie
-the session response names (`csrfCookie`), falling back to the accepted token
-only when the cookie cannot be read, and nothing at all while signed out. The
-BFF's checks are unchanged — the header must equal the cookie the browser sent
-and be validly signed for the asserted subject — so a tab another tab renewed
-keeps writing and can still sign out without waiting for its own refresh,
-while missing, forged, expired, wrong-subject, and mismatched values are still
-refused. A refused write is never replayed (#436).
+All tabs of one browser share the CSRF cookie. `GET /api/auth/session` reissues
+it once the token is in the last quarter of its lifetime, which replaces it for
+every tab at once. So each unsafe request sends the current value of the
+readable cookie named in the session response (`csrfCookie`), falls back to the
+last accepted token only if the cookie cannot be read, and sends nothing while
+signed out. The BFF still requires the header to equal the cookie and to be
+validly signed for the subject. A refused write is never replayed.
 
-Graceful shutdown is bounded by `FERRUM_SHUTDOWN_TIMEOUT` (milliseconds,
-default `10000`), so a drain that outlasts the deadline exits non-zero instead
-of waiting for the orchestrator's SIGKILL.
+`FERRUM_SHUTDOWN_TIMEOUT` (milliseconds, default `10000`) bounds graceful
+shutdown. A drain that outlasts it exits non-zero instead of waiting for the
+orchestrator's SIGKILL.
 
 ## Development: static exchange token
 
 The default non-production mode accepts `FERRUM_BFF_AUTH_TOKEN` only at
 `POST /api/auth/login`. A successful exchange creates an opaque server-side
-session in an HttpOnly, SameSite cookie plus a non-secret CSRF value. The token
-is not stored in `localStorage` or sent on later requests. Static mode is
-refused when `NODE_ENV=production` unless the deliberately unsafe
-`FERRUM_ALLOW_INSECURE_STATIC_AUTH=true` escape hatch is present.
+session in an HttpOnly, `SameSite=Strict` cookie plus a non-secret CSRF value.
+The token is not stored in `localStorage` or sent on later requests. Static
+mode is refused when `NODE_ENV=production` unless the unsafe
+`FERRUM_ALLOW_INSECURE_STATIC_AUTH=true` escape hatch is set.
 
 `FERRUM_JWT_NAMESPACES` scopes the static principal: a comma-separated list of
 exact namespace names, or `*` alone for every namespace. Empty entries are
-dropped, so `tenant-a,,tenant-b` and `*,` are accepted. Left unset, the
-static principal is unrestricted and its JWTs carry no `ns` claim; the BFF
-logs a startup warning saying so. A value that is set but names no namespace —
-empty, whitespace only, or commas only — is a startup error rather than an
-absent restriction, so a scoped deployment can never silently mint JWTs
-without an `ns` claim. See the
-[configuration reference](deployment.md#downstream-jwt-claims).
+dropped, so `tenant-a,,tenant-b` and `*,` are accepted. Left unset, the static
+principal is unrestricted, its JWTs carry no `ns` claim, and the BFF logs a
+startup warning. A value that is set but names no namespace (empty,
+whitespace, or commas only) fails startup. See
+[Downstream JWT claims](deployment.md#downstream-jwt-claims).
 
-The session cookie is host-scoped. The SPA origin host must match the host
-the BFF issued the cookie for. `localhost` and `127.0.0.1` are different
-hosts, so a login against `http://127.0.0.1:$PORT` is not sent on later
-requests to `http://localhost:$VITE_DEV_PORT`. Development examples use
-`localhost` for both. On dual-stack hosts Vite's default `localhost` bind
-follows DNS (`[::1]` is common), so `http://127.0.0.1:$VITE_DEV_PORT` is
-refused. Set `VITE_DEV_HOST=127.0.0.1` to force IPv4 loopback, and use that
-same host for `VITE_BFF_URL`. Binding a non-loopback address is an operator
-opt-in; see the [Quick Start](../README.md#local-development) env table.
+The session cookie is host-scoped, so the SPA must use the same host the BFF
+issued the cookie for. `localhost` and `127.0.0.1` are different hosts: a login
+at `http://127.0.0.1:$PORT` is not sent to `http://localhost:$VITE_DEV_PORT`.
+The development examples use `localhost` for both. On dual-stack hosts Vite's
+`localhost` bind may resolve to `[::1]`, so `http://127.0.0.1:$VITE_DEV_PORT`
+is refused. Set `VITE_DEV_HOST=127.0.0.1` to force IPv4, and use the same host
+in `VITE_BFF_URL`. Binding a non-loopback address is an explicit opt-in; see
+[Local Development](../README.md#local-development).
 
 ## Downstream claims
 
 Foundry JWTs contain `iss`, `sub`, `exp`, `iat`, `nbf`, `jti`, and `role`.
-`aud` is emitted only when configured, because Ferrum rejects an unexpected
-audience. `ns` contains one exact string or an array of exact namespace grants;
-Foundry does not invent wildcard behavior. An unrestricted principal — a
-trusted-proxy admin without a namespace header, or a static principal
-configured with `*` or with `FERRUM_JWT_NAMESPACES` unset — gets no `ns` claim; `*` is a Foundry configuration value
-and is never sent as a claim. Tokens are cached by every signing
-input and authenticated principal, so a configuration or identity change can
-never reuse an earlier token.
+`aud` is added only when configured, because Ferrum rejects an unexpected
+audience. `ns` is one exact namespace string or an array of them. An
+unrestricted principal (a trusted-proxy admin with no namespace header, or a
+static principal configured with `*` or with `FERRUM_JWT_NAMESPACES` unset)
+gets no `ns` claim. `*` is only a Foundry configuration value and is never sent
+as a claim.
+
+Tokens are cached per signing input and principal, so a configuration or
+identity change never reuses an earlier token.
 
 ### Session authorization changes
 
-A refreshed session with a different subject, authentication mode, role, or
-namespace-grant set clears cached gateway data and remounts the authenticated
-workspace. This discards previously loaded form state as well as query results
-when access changes, including a downgrade for the same user. Reordered or
-duplicated namespace grants and display-name-only updates preserve the workspace.
-The periodic session refresh applies this rule every 60 seconds; backend role
-and namespace checks continue to authorize each request independently.
+When a refreshed session has a different subject, authentication mode, role,
+or set of namespace grants, Foundry clears cached gateway data and remounts the
+authenticated workspace, discarding query results and form state. This
+includes a downgrade for the same user. Reordered or duplicated grants and
+display-name changes keep the workspace. The session is refreshed every 60
+seconds; the BFF and gateway still authorize every request independently.
 
 Session results are applied in the order their requests were sent, not the
-order they arrive. Every request takes a ticket from the client when it is
-sent. A session read, or any request's BFF `401`, changes the session only if
-nothing newer has been accepted since that request went out; a `401` reaches
-the provider with its request's ticket through `setOnUnauthorized`. A
-confirmed sign-in or sign-out, and unmounting the provider, retire every
-request already in flight — including one sent while the sign-out was pending
-— and abort pending session reads. So a read that completes after a sign-out
-cannot restore the old principal and CSRF value, an older privileged snapshot
-cannot overwrite a newer reduced grant, an older `401` cannot clear a newer
-session, and a replaced provider can neither publish a token nor clear its
-replacement's cache. A `401` for a request sent after the current session was
-accepted still signs the tab out (#435).
+order they arrive. Each request takes a ticket when it is sent. A session read,
+or any request's BFF `401`, changes the session only if nothing newer has been
+accepted since that request went out (`setOnUnauthorized` passes the ticket
+along). A confirmed sign-in or sign-out, or unmounting the provider, retires
+every request already in flight and aborts pending session reads. As a result:
+
+- a read that completes after sign-out cannot restore the old session;
+- an older, more privileged snapshot cannot overwrite a newer reduced grant;
+- an older `401` cannot clear a newer session;
+- a replaced provider cannot publish a token or clear its successor's cache.
+
+A `401` for a request sent after the current session was accepted still signs
+the tab out.
 
 ### Gateway target binding
 
-With `FERRUM_ALLOW_RUNTIME_SETTINGS=true` an administrator can re-point the BFF
+With `FERRUM_ALLOW_RUNTIME_SETTINGS=true`, an administrator can point the BFF
 at another allowlisted gateway while tabs are open. The namespace header cannot
-tell the `demo` namespace on gateway A from the `demo` namespace on gateway B,
-and query keys, editor identities, the live-apply banner, and capability
-observations carry no gateway at all, so Foundry binds each page load to one
-**gateway target** and never lets it cross to another:
+tell `demo` on gateway A from `demo` on gateway B, and query keys, editor
+identities, the live-apply banner, and capability observations do not record a
+gateway. So Foundry binds each page load to one **gateway target** and never
+lets it cross to another:
 
-- Every gateway-facing BFF response — `/api/proxy/*`, `/api/settings`,
-  `/api/settings/status` — and every login and session response carries
-  `X-Foundry-Gateway-Target`, a keyed digest of the configured admin origin
+- Every gateway-facing BFF response (`/api/proxy/*`, `/api/settings`,
+  `/api/settings/status`) and every login and session response carries
+  `X-Foundry-Gateway-Target`: a keyed digest of the configured admin origin
   (`server/gateway-target.ts`). It changes exactly when the destination does,
-  is the same on every replica and across restarts that point at the same
-  gateway, and does not disclose the origin.
-- The first target a page observes is its target for the page's lifetime
-  (`src/api/gatewayTarget.ts`). Every later gateway-facing request declares it
-  in the same header. The BFF compares it with the target it is about to
-  forward to — in the same synchronous step that reads the configuration it
-  forwards with — and refuses a mismatch with `409`
-  `FERRUM_BFF_GATEWAY_TARGET_CHANGED` before signing a token or forwarding
-  anything. A multi-request operation therefore stays on its original gateway
-  or stops: the next page of a listing, a membership plan's apply or rollback,
-  the apply-status poll, a guarded write's verification read and `PUT`, and a
-  draft submitted from a tab that has not noticed the change are all refused
-  rather than sent to the replacement.
-- A settings save is refused the same way when its tab was opened against a
-  replaced target. The form resubmits every field it was seeded with,
-  `adminUrl` included, so a stale tab saving only a timeout would otherwise
-  silently revert the other administrator's target change.
-- A page that observes any other target — its own settings save, the 60-second
-  session check, or the `409` above — **retires**: it sends no further gateway
-  request, drops live-apply monitoring (so a late answer from the old gateway
-  cannot repopulate the banner), discards every cached read, and unmounts the
-  workspace — editors, drafts, confirmation dialogs, and the capability
-  provider's retained health observation — in favour of a "Gateway target
-  changed" screen. Only a reload leaves it; the reload binds the new target
-  with nothing carried across. The `409` retires the page by its `code` even
-  if an intermediary dropped the target header from it, so a refused read —
-  the Settings form's first load, say — never lands on a "try again" state
-  that every retry would be refused from.
-- A refresh, save, or session check that names the same target changes
-  nothing, so drafts survive ordinary refreshes and non-target settings saves.
-  Runtime settings stay disabled by default, and a disallowed origin is still
-  refused before anything is published.
+  is the same across replicas and restarts for the same gateway, and does not
+  reveal the origin.
+- The first target a page sees is its target for the page's lifetime
+  (`src/api/gatewayTarget.ts`). Every later gateway-facing request sends it in
+  the same header. The BFF compares it with the target it is about to use, in
+  the same step that reads the configuration it forwards with, and refuses a
+  mismatch with `409 FERRUM_BFF_GATEWAY_TARGET_CHANGED` before signing a token
+  or forwarding anything. A multi-request operation therefore stays on its
+  original gateway or stops: the next page of a listing, a membership plan's
+  apply or rollback, the apply-status poll, a guarded write's verification
+  read and `PUT`, and a draft from a tab that has not noticed the change are
+  all refused.
+- A settings save from a tab opened against a replaced target is refused the
+  same way. The form resubmits every field it was seeded with, `adminUrl`
+  included, so otherwise a stale tab saving only a timeout would silently
+  revert the other administrator's change.
+- A page that sees any other target (from its own settings save, the 60-second
+  session check, or the `409`) **retires**. It sends no further gateway
+  requests, stops live-apply monitoring, discards cached reads, and unmounts
+  the workspace (editors, drafts, dialogs, and the capability provider's
+  health observation) in favor of a "Gateway target changed" screen. Only a
+  reload leaves it, and the reload binds the new target with nothing carried
+  over. The `409` retires the page by its `code` even if an intermediary
+  dropped the header, so a refused read never lands on a "try again" state
+  that every retry would also fail.
+- A refresh, save, or session check that reports the same target changes
+  nothing, so drafts survive ordinary refreshes and other settings saves.
 
-A request that declares no target (a script calling the BFF directly) is not
-bound and is forwarded to the current target as before. The request header is
-not forwarded to the gateway.
+Runtime settings are off by default, and a disallowed origin is refused before
+anything changes. A request that declares no target (for example a script
+calling the BFF directly) is not bound and goes to the current target. The
+target header is never forwarded to the gateway.

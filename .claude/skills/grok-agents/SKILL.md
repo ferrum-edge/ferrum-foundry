@@ -17,7 +17,7 @@ do not duplicate them in this directory.
   --effort <low|medium|high|xhigh|max>
 ```
 
-`--effort` selects the `cursor-grok-4.6-*` SKU (the launcher defaults to `high`). Append
+`--effort` selects the `cursor-grok-4.6-*` SKU (default `high`; `max` clamps to `xhigh`). Append
 `--fast` only when the user explicitly requests fast mode for that dispatch or fleet, and
 `--name NAME` only to label a worker.
 

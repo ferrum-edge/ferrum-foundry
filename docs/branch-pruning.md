@@ -1,31 +1,41 @@
 # Safe pull-request branch pruning
 
-The `Prune Stale PR Branches` workflow never deletes during a scheduled run.
-Schedules and ordinary manual runs only print a dry-run plan. Live deletion is
-available solely through `workflow_dispatch` with `delete_live` enabled, the
-exact repository name entered as confirmation, and approval from the protected
-`branch-pruning` GitHub environment.
+The `Prune Stale PR Branches` workflow (`.github/workflows/prune-stale-prs.yml`,
+running `scripts/prune-pr-branches.mjs`) deletes head branches of closed pull
+requests. It runs weekly and can be started manually.
+
+Scheduled runs and ordinary manual runs only print a dry-run plan. Live deletion
+needs all three of:
+
+- a `workflow_dispatch` run with `delete_live` enabled;
+- `confirm_repository` set to the exact repository name
+  (`ferrum-edge/ferrum-foundry`); without it the live job fails; and
+- approval on the protected `branch-pruning` GitHub environment.
 
 Repository administrators must configure required reviewers on that environment
-before enabling live cleanup. Without the typed repository confirmation the live
-job fails closed even after environment approval.
+before enabling live cleanup.
 
-Immediately before each deletion, the workflow re-fetches GitHub state and
-requires all of the following:
+## Which branches are candidates
 
-- the pull request is still closed;
-- the head repository is this repository, not a fork;
+- Merged pull-request branches are candidates immediately.
+- Closed, unmerged pull requests become candidates after `days_stale` days
+  (default 30, allowed range 1–3650).
+- If several closed pull requests used the same branch name, the most recently
+  closed one decides. An older merged request cannot bypass the waiting period
+  of a newer closed, unmerged one.
+
+## Checks before each deletion
+
+Just before deleting, the live job re-reads GitHub state and skips the branch
+unless all of these still hold:
+
+- the pull request is still closed and still eligible;
+- its head repository is this repository, not a fork;
 - no open pull request uses the branch;
-- the branch is not the default, `main`, `master`, `develop`, or any
-  `release*` branch;
+- the branch is not the default branch, `main`, `master`, `develop`, or any
+  branch starting with `release`;
 - GitHub does not mark the branch as protected; and
-- the current branch ref still equals the exact pull-request head SHA.
+- the branch still points at the exact pull-request head SHA.
 
-If a branch name was reused by multiple closed pull requests, the newest closed
-request controls eligibility. An older merged request can never bypass the
-retention period of a newer closed-unmerged request with the same branch name.
-
-Merged pull-request branches are candidates immediately. Closed, unmerged pull
-requests become candidates only after `days_stale` (30 days by default). GitHub
-API pagination is followed for both open and closed pull requests. A failed API
-read or delete fails the workflow; it is never reported as a successful cleanup.
+All pages of open and closed pull requests are read. A failed API read or
+delete fails the workflow; it is never reported as a successful cleanup.

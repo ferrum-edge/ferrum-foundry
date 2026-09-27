@@ -1,93 +1,74 @@
 # Plugin configuration templates
 
-The plugin picker and JSON editor use `src/lib/pluginConfigDefaults.ts` as the
-single source of template configuration. Templates are starting points: replace
-example endpoints, identities, keys, and policy values for your deployment.
-Admission does not prove that a directory, provider, or logging destination is
-reachable. Consult the [current Edge OpenAPI contract](https://github.com/ferrum-edge/ferrum-edge/blob/main/openapi.yaml)
-and [plugin documentation](https://github.com/ferrum-edge/ferrum-edge/blob/main/docs/plugins.md)
-for deployment requirements.
+The plugin picker and JSON editor take their starting configuration from
+`src/lib/pluginConfigDefaults.ts`. Templates are starting points: replace the
+example endpoints, identities, keys, and policy values with your own. A template
+the gateway admits has not proved that a directory, provider, or log destination
+is reachable. For deployment requirements, see the Edge
+[OpenAPI contract](https://github.com/ferrum-edge/ferrum-edge/blob/main/openapi.yaml)
+and [plugin documentation](https://github.com/ferrum-edge/ferrum-edge/blob/main/docs/plugins.md).
 
-The following templates use the current constructor fields:
+## Template notes
 
-| Plugin | Configuration and behavior |
+| Plugin | What the template sets |
 | --- | --- |
-| `ldap_auth` | `ldap_url`, `bind_dn_template`, and `canonical_identity_attribute` configure direct bind, with `{username}` in the DN. Set `canonical_identity_attribute` to your directory's authoritative attribute (`uid` in the example). The loopback LDAP example needs a directory; use LDAPS or STARTTLS for a remote directory. Search-then-bind is a different configuration with service-account fields. |
-| `mcp_gateway` | Aggregate-router mode exposes endpoint, upstream `servers`, and tool `policy`. `discovery.public_base_url` belongs to the A2A gateway schema and is omitted from the MCP template. |
-| `mesh_authz` | Native Edge `MeshPolicy` documents under `mesh_policies` (`name`, `namespace`, `scope`, `rules`). The example is the documented direct-config shape: a namespace-scoped DENY of `/admin/*` plus ALLOW for one SPIFFE service account, with proxy `namespace`/`labels` for construction-time `PolicyScope` filtering. Direct config does not require mesh mode. |
-| `soap_ws_security` | `username_token.credentials`, `x509_signature.trusted_certs`, and `nonce.max_cache_size` replace the old nested shapes. Timestamp checking remains enabled; credential-based modes remain disabled. Before enabling PasswordDigest or SAML, supply credentials/trust and explicitly choose the documented replay scope. Nonce retention is gateway-controlled; there is no configurable `cache_ttl_seconds`. |
-| `tcp_connection_throttle` | `max_connections_per_key: 100` limits each consumer, falling back to client IP, per gateway process. Use TCP/TCP+TLS proxy scope or a global policy covering a TCP listener. |
-| `response_caching` | `cacheable_methods` and `cacheable_status_codes` retain the GET/HEAD and 200/301/404 example policy. |
-| `compression` | Strong ETags are always preserved. The removed `disable_on_etag` switch is omitted. |
-| `loki_logging` | `include_proxy_id_label` identifies the proxy instead of using the removed listen-path label. |
-| `transaction_debugger` | `redacted_headers` adds sensitive-header redaction; body capture remains off. It is not a header-capture allowlist. |
-| `ai_federation` | The removed `preserve_original_model` switch is omitted. Provider `default_model`/`model_mapping` govern model selection. |
-| `ai_prompt_shield` | `patterns`, `redaction_placeholder`, and `exclude_roles` configure detection and redaction. The built-in US phone token is `phone_us`; `phone` is invalid. |
-| `ai_response_guard` | `pii_patterns` and `redaction_placeholder` configure response PII redaction, using the same `phone_us` token. |
-| `ai_request_guard` | The unsupported `required_fields` key is omitted; model, token, message, prompt-length, and temperature restrictions remain. |
-| `ws_message_size_limiting`, `ws_rate_limiting` | `close_reason` supplies the WebSocket close text. |
+| `ldap_auth` | Direct bind: `ldap_url`, `bind_dn_template` (with `{username}`), and `canonical_identity_attribute` (`uid` in the example; set it to your directory's authoritative attribute). The loopback URL needs a local directory; use LDAPS or STARTTLS for a remote one. Search-then-bind uses different, service-account fields. |
+| `mcp_gateway` | Aggregate-router mode with `endpoint`, upstream `servers`, and tool `policy`. `discovery.public_base_url` belongs to the A2A gateway schema and is not set. |
+| `mesh_authz` | Native Edge `MeshPolicy` documents under `mesh_policies` (`name`, `namespace`, `scope`, `rules`, and a per-rule `action`), not a Kubernetes CRD envelope. The example denies `/admin/*` namespace-wide and allows one SPIFFE service account. The proxy `namespace` and `labels` drive `PolicyScope` filtering. Mesh mode is not required. |
+| `soap_ws_security` | Timestamp checking is on. UsernameToken (`username_token.credentials`), X.509 (`x509_signature.trusted_certs`), and SAML are off. Before enabling one, supply credentials or trust material and choose a replay scope. `nonce.max_cache_size` bounds the nonce cache; retention time is set by the gateway. |
+| `tcp_connection_throttle` | `max_connections_per_key: 100`, per consumer (falling back to client IP) per gateway process. Attach it to a TCP or TCP+TLS proxy, or to a global policy that covers a TCP listener. |
+| `response_caching` | Caches `GET`/`HEAD` responses with status 200, 301, or 404. |
+| `compression` | Strong ETags are always preserved; there is no ETag switch. |
+| `loki_logging` | `include_proxy_id_label` labels streams by proxy. |
+| `transaction_debugger` | `redacted_headers` lists headers to redact (it is not a capture allowlist). Body capture is off. |
+| `ai_federation` | One OpenAI provider with `default_model` and `model_patterns`, plus status-code fallback. There is no `preserve_original_model` switch. |
+| `ai_prompt_shield` | `patterns`, `redaction_placeholder`, and `exclude_roles` configure detection and redaction. The built-in US phone pattern is `phone_us`; `phone` is invalid. |
+| `ai_response_guard` | `pii_patterns` (also `phone_us`) and `redaction_placeholder` configure response redaction. |
+| `ai_request_guard` | Model allow/block lists, token caps, message count, prompt length, and temperature range. There is no `required_fields` key. |
+| `ws_message_size_limiting`, `ws_rate_limiting` | `close_reason` sets the WebSocket close text. |
 
-Seven templates still require explicit operator configuration or gateway policy.
-The contract gate records each entire error and its HTTP 400 status separately:
+## Templates that need operator input
 
-| Template | Expected prerequisite in the disposable gateway |
+Seven templates are rejected as shipped, because they need something only the
+operator or the gateway environment can supply. The contract records each exact
+error body and its `400` status.
+
+| Template | What to supply |
 | --- | --- |
-| `hmac_auth` | Declare the `ferrum-hmac-v2` replay scope for your replica topology. |
-| `mtls_auth` | Supply `allowed_issuers[0].ca_certificate_pem`; an issuer name alone cannot pin trust. |
-| `ai_stream_router` | Set `OPENAI_API_KEY` (then the other configured provider credentials) in the gateway environment. |
-| `load_testing` | Replace the example trigger key with a key of at least 32 characters. |
-| `proxy_alerts` | Set `FERRUM_ALERTS_SLACK_WEBHOOK` in the gateway environment. |
-| `kafka_logging` | The default restrictive backend egress policy prevents admission of librdkafka during field validation. Its exact error starts with `Invalid plugin config fields: kafka_logging:`, before plugin construction or broker contact. Prefer another log sink when egress must remain restricted. |
-| `openapi_validator` | Select proxy scope and a proxy with an attached API spec. The gate uses proxy scope and checks the missing attached-spec diagnostic. |
+| `hmac_auth` | A `replay_scope` for `ferrum-hmac-v2` that matches your replica topology. |
+| `mtls_auth` | `allowed_issuers[0].ca_certificate_pem`; an issuer name alone cannot pin trust. |
+| `ai_stream_router` | Provider API keys in the gateway environment (the template references `${OPENAI_API_KEY}` first). |
+| `load_testing` | A trigger `key` of at least 32 characters. |
+| `proxy_alerts` | `FERRUM_ALERTS_SLACK_WEBHOOK` in the gateway environment. |
+| `kafka_logging` | An unrestricted backend egress policy. Under the default restrictive policy the gateway refuses librdkafka during field validation (the error starts with `Invalid plugin config fields: kafka_logging:`), before contacting a broker. Use another log sink if egress must stay restricted. |
+| `openapi_validator` | Proxy scope, on a proxy with an attached API spec. |
 
-## Hosted contract coverage
+## Contract gate
 
-The existing **Pinned Gateway Contract** job runs
-`scripts/gateway-contract-smoke.mjs`, which imports the real TypeScript templates
-directly through Node's type stripping. It checks all 81 catalog names against
-`GET /plugins`, then submits every unmodified default with `enabled: true` in a
-separate disposable namespace. The smoke runs **before both demo seeds**, because
-the enabled demo `prometheus_metrics` fixture owns a process-wide registry even
-across namespaces. Each template is deleted before the next is submitted. TCP
-throttling gets a TCP proxy fixture; OpenAPI validation gets an HTTP proxy fixture.
-After catalog cleanup, the job still seeds twice, verifies canonical backup state
-(including the exact enabled demo Prometheus fixture), and checks demo routes.
-It never disables or deletes unknown fixtures to make room for the catalog.
+The **Pinned Gateway Contract** CI job runs `scripts/gateway-contract-smoke.mjs`,
+which calls `verifyPluginDefaults` in `scripts/plugin-defaults-contract.mjs`
+against the Ferrum Edge image pinned as `edge.image` in
+[the compatibility record](compatibility.md). It imports the real TypeScript
+templates and:
 
-The expected result is 74 HTTP 201 admissions (the previous 73 admitted templates
-plus native `mesh_authz`) and the seven exact prerequisite rejections above. Accepted
-plugins are read back as enabled. Unexpected success, a changed error body or
-status, a missing/extra catalog member, or failed cleanup fails the gate. Admission
-failures are collected across the catalog; cleanup failure stops further probes
-because isolation is no longer assured. The contract transport tests exercise
-unexpected acceptance, unknown-key diagnostics, status changes, and cleanup,
-including simultaneous admission/cleanup failures and rejecting Prometheus 409s.
+1. checks that Foundry's 81 non-internal templates match the gateway's
+   `GET /plugins` catalog;
+2. in a separate disposable namespace, submits each unmodified template with
+   `enabled: true`, one at a time, and deletes it before the next. TCP
+   throttling gets a TCP proxy fixture and OpenAPI validation an HTTP proxy
+   fixture; every other template is global;
+3. expects 74 `201` admissions (each read back as enabled) and the seven exact
+   rejections above.
 
-The job runs the Ferrum Edge image pinned as `edge.image` in
-[the compatibility record](compatibility.md): the published v0.9.7 release,
-digest `sha256:4c9530e09443649526dc4fbbec0720ba7b47ceb91b0dd5cb06db85430908874a`,
-built from Edge revision `8fed1346ce2e267eb69c03683cb89ea44d785e0b` (the `v0.9.7`
-tag). The source notes below were taken at v0.9.5 (revision
-`20e76030a05dc49c3804e969516c94ab101110b9`), the previous pin; the contract
-re-checks the behaviour they describe against `edge.image` on every run, and at
-v0.9.7 `builtin_pii_pattern` still defines `phone_us` and `kafka_logging` still
-screens broker egress. Issue #291's reproduction used a different digest (`sha256:f2c3eb7696677fed4a90551c7c8adfccae547c0e540452011f98a53b34233c2d`),
-and the interim pin before #409 was development build `b96cfaadd41a676d39a409d47b48e0b0588fa86e`.
-Native `mesh_authz` `MeshPolicy` input (`name`, `namespace`, `scope`, `rules`,
-plus required per-rule `action`) is the same document on v0.9.5 and on current
-Edge `main`; mesh mode is not required for admission. The previous Kubernetes
-CRD envelope is not that document: v0.9.5 and current `main` reject `apiVersion`
-first under `deny_unknown_fields` (the pre-#409 development build ignored
-unknown members and then reported `missing field name`). At v0.9.5, both guards
-call the shared
-[built-in PII pattern table](https://github.com/ferrum-edge/ferrum-edge/blob/20e76030a05dc49c3804e969516c94ab101110b9/src/plugins/utils/ai_pii.rs#L46),
-which defines `phone_us`. Kafka's
-[egress screening](https://github.com/ferrum-edge/ferrum-edge/blob/20e76030a05dc49c3804e969516c94ab101110b9/src/plugins/kafka_logging.rs#L349)
-returns the restrictive-policy diagnostic through the admin
-[field-validation boundary](https://github.com/ferrum-edge/ferrum-edge/blob/20e76030a05dc49c3804e969516c94ab101110b9/src/admin/crud.rs#L3926).
-The [initial Foundry contract run](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/34172111334/job/101894263227)
-confirmed the complete Kafka diagnostic and exposed the invalid phone tokens and
-seeded Prometheus conflict. Hosted results establish compatibility with the pinned
-image, not with every newer Edge release. Any divergence must be reviewed as a
-compatibility dependency; do not broaden the rejection table or silently change
-the image pin to make a failure disappear.
+It runs before the demo seeds, because the seeded `prometheus_metrics` plugin
+owns a process-wide registry that a separate namespace cannot isolate.
+
+The gate fails on an unexpected success, a changed error body or status, a
+missing or extra catalog member, or a failed cleanup. Admission failures are
+collected across the catalog; a cleanup failure stops further submissions,
+because isolation is no longer assured. `scripts/plugin-defaults-contract.test.mjs`
+covers these failure paths.
+
+Passing establishes compatibility with the pinned image only. Treat any
+divergence as a compatibility change to review: do not widen the rejection
+table or move the image pin to make a failure go away.

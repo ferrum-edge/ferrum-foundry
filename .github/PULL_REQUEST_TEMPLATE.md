@@ -30,8 +30,10 @@ Fixes # (issue number)
 
 <!-- Describe the testing you have performed -->
 
-- [ ] TypeScript type-check passes (`npm run typecheck`)
-- [ ] Vite production build passes (`npm run build`)
+- [ ] Lint passes with zero warnings (`npm run lint -- --max-warnings 0`)
+- [ ] Type-check passes (`npm run typecheck`)
+- [ ] Tests pass (`npm test`)
+- [ ] Production build passes (`npm run build`)
 - [ ] Manually tested affected pages in browser
 - [ ] Docker image builds successfully
 
@@ -47,7 +49,6 @@ Fixes # (issue number)
 
 - [ ] I have added tests that prove my fix is effective or that my feature works
 - [ ] I have updated the documentation accordingly (if applicable)
-- [ ] My changes don't introduce new TypeScript errors
 - [ ] My code follows the project's style guidelines
 - [ ] I have described any breaking changes and updated affected callers, fixtures, and docs
 
