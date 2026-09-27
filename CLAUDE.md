@@ -72,7 +72,7 @@ node scripts/demo-traffic-client.mjs mixed
 ### Running the gateway locally
 
 Run the Ferrum Edge image CI pins, by digest, so local results match CI. It is
-the published Ferrum Edge v0.9.7 release, which Foundry v0.2.0 pairs with.
+the published Ferrum Edge v0.9.8 release, which Foundry v0.3.0 pairs with.
 `edge.image` in `docs/compatibility.json` is the single source: CI reads it
 (`node scripts/supported-pairing.mjs edge-image`), and
 `scripts/supported-pairing.test.mjs` fails if the starter, this command, or any
@@ -91,7 +91,7 @@ docker run --rm -d --name ferrum-edge \
   -e FERRUM_ADMIN_BIND_ADDRESS=0.0.0.0 \
   -e FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true \
   -p 127.0.0.1:9000:9000 -p 127.0.0.1:8000:8000 \
-  ferrumedge/ferrum-edge@sha256:4c9530e09443649526dc4fbbec0720ba7b47ceb91b0dd5cb06db85430908874a run -m database -v
+  ferrumedge/ferrum-edge@sha256:e5b204f9448d4ec210a57dbd2badece5f4359d5d544522fa48dcdfeef033b385 run -m database -v
 ```
 
 The plaintext admin bind above is a local-development exception; Docker's port

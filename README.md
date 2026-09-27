@@ -49,9 +49,9 @@ works the same way against a live Ferrum Edge gateway.
 
 ## Supported Ferrum Edge version
 
-Foundry is qualified against one Ferrum Edge image at a time. Foundry v0.2.0
-pairs with the published **Ferrum Edge v0.9.7** release,
-`ferrumedge/ferrum-edge@sha256:4c9530e09443649526dc4fbbec0720ba7b47ceb91b0dd5cb06db85430908874a`,
+Foundry is qualified against one Ferrum Edge image at a time. Foundry v0.3.0
+pairs with the published **Ferrum Edge v0.9.8** release,
+`ferrumedge/ferrum-edge@sha256:e5b204f9448d4ec210a57dbd2badece5f4359d5d544522fa48dcdfeef033b385`,
 qualified in `database` mode (writable and `FERRUM_ADMIN_READ_ONLY`), behind
 the trusted-proxy starter, in Chromium, on `linux/amd64` and `linux/arm64`.
 Other Ferrum Edge releases, other gateway modes, and other browsers are
