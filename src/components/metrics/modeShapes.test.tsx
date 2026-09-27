@@ -50,7 +50,7 @@ describe("metrics mode shapes", () => {
       const html = renderToStaticMarkup(
         <QueryClientProvider client={client}><MetricsPage /></QueryClientProvider>,
       );
-      expect(html).toContain("Metrics Dashboard");
+      expect(html).toContain(">Metrics</h1>");
       expect(html).toContain("Connection pool metrics are not reported");
       expect(html).toContain("Cache metrics are not reported");
       expect(html).not.toContain("HTTP Pools");

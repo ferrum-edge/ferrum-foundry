@@ -4,6 +4,8 @@
 
 import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/Badge";
+import { GRID_HEADER_CLASS, GRID_ROW_CLASS, ResourceGrid } from "@/components/ui/ResourceGrid";
+import { EMPTY_VALUE } from "@/lib/format";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -148,12 +150,12 @@ function statusCodeVariant(
 }
 
 function fmtMs(v: number | null): string {
-  if (v === null) return "--";
+  if (v === null) return EMPTY_VALUE;
   return v >= 1000 ? `${(v / 1000).toFixed(2)}s` : `${v.toFixed(1)}ms`;
 }
 
 function fmtPercentile(v: Percentile | null): string {
-  if (v === null) return "--";
+  if (v === null) return EMPTY_VALUE;
   return v.atLeast ? `> ${fmtMs(v.ms)}` : fmtMs(v.ms);
 }
 
@@ -257,9 +259,9 @@ export function PrometheusStatsPanel({ text }: { text: string }) {
               </Badge>
             )}
           </div>
-          <div className="bg-bg-card border border-border rounded-xl overflow-hidden">
+          <ResourceGrid label="Requests by route" minWidth="40rem">
             {/* Header */}
-            <div className="grid grid-cols-[minmax(0,2fr)_6rem_minmax(0,2fr)_5rem_5rem_5rem] gap-4 px-5 py-2.5 border-b border-border text-text-muted text-xs font-semibold uppercase tracking-wider">
+            <div className={`grid grid-cols-[minmax(0,2fr)_6rem_minmax(0,2fr)_5rem_5rem_5rem] gap-4 ${GRID_HEADER_CLASS}`}>
               <span>Proxy</span>
               <span className="text-right">Requests</span>
               <span>Status Codes</span>
@@ -272,7 +274,7 @@ export function PrometheusStatsPanel({ text }: { text: string }) {
               {summaries.map((s) => (
                 <div
                   key={s.proxyId}
-                  className="grid grid-cols-[minmax(0,2fr)_6rem_minmax(0,2fr)_5rem_5rem_5rem] gap-4 px-5 py-3 text-sm"
+                  className={`grid grid-cols-[minmax(0,2fr)_6rem_minmax(0,2fr)_5rem_5rem_5rem] gap-4 ${GRID_ROW_CLASS} text-sm`}
                 >
                   <span
                     className="text-text-primary font-mono truncate"
@@ -302,7 +304,7 @@ export function PrometheusStatsPanel({ text }: { text: string }) {
                 </div>
               ))}
             </div>
-          </div>
+          </ResourceGrid>
         </div>
       )}
 

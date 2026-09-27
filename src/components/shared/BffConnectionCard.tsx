@@ -5,11 +5,11 @@ import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 
-export function BffConnectionCard() {
+export function BffConnectionCard({ className = "" }: { className?: string }) {
   const readiness = useBffReadiness();
   const connection = readinessPresentation(readiness);
   return (
-    <Card>
+    <Card className={className}>
       <h2 className="text-sm font-semibold text-text-primary mb-3">Foundry connection</h2>
       <Badge variant={connection.variant}>{connection.label}</Badge>
       <p className="text-text-secondary text-sm mt-3">

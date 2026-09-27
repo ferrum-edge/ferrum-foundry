@@ -5,6 +5,7 @@
 import type { AdminMetrics } from "@/api/types";
 import { Badge } from "@/components/ui/Badge";
 import { StatCard } from "./StatCard";
+import { formatDateTime } from "@/lib/format";
 import type { GatewayRequestStats } from "@/hooks/useGatewayRequestStats";
 
 interface GatewayStatsProps {
@@ -31,6 +32,12 @@ function statusCodeVariant(code: string): "green" | "yellow" | "red" | "blue" {
   return "blue";
 }
 
+const CONFIG_SOURCE_LABELS: Record<string, string> = {
+  online: "Online",
+  offline: "Offline",
+  "n/a": "Not applicable",
+};
+
 function formatRate(rate?: number): string {
   if (rate === undefined) return "Collecting";
   return rate >= 10 ? rate.toFixed(0) : rate.toFixed(1);
@@ -44,7 +51,8 @@ export function GatewayStats({ metrics, requestStats }: GatewayStatsProps) {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      {/* Ten cards: two full rows of five on wide screens, pairs below. */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         <StatCard label="Version" value={metrics.ferrum_version} />
         <StatCard label="Mode" value={metrics.mode} />
         <StatCard
@@ -64,22 +72,22 @@ export function GatewayStats({ metrics, requestStats }: GatewayStatsProps) {
           label="Total Requests"
           value={requestStats.totalRequests.toLocaleString()}
         />
-        <StatCard
-          label="Config Source"
-          value={metrics.config_source_status}
-          variant={metrics.config_source_status === "online" ? "success" : "warning"}
-        />
         <StatCard label="Proxies" value={metrics.proxy_count} />
         <StatCard label="Consumers" value={metrics.consumer_count} />
         <StatCard label="Upstreams" value={metrics.upstream_count} />
         <StatCard label="Plugin Configs" value={metrics.plugin_config_count} />
-        {metrics.config_last_updated_at && (
-          <StatCard
-            label="Config Updated"
-            value={new Date(metrics.config_last_updated_at).toLocaleTimeString()}
-            subtitle={new Date(metrics.config_last_updated_at).toLocaleDateString()}
-          />
-        )}
+        {/* Source status and last update describe one thing, so they share a
+            card. Only an offline source is coloured: that is a warning. */}
+        <StatCard
+          label="Config Source"
+          value={CONFIG_SOURCE_LABELS[metrics.config_source_status] ?? metrics.config_source_status}
+          variant={metrics.config_source_status === "offline" ? "warning" : "default"}
+          subtitle={
+            metrics.config_last_updated_at
+              ? `Updated ${formatDateTime(metrics.config_last_updated_at)}`
+              : "Last update not reported"
+          }
+        />
       </div>
 
       {statusCodes.length > 0 && (
