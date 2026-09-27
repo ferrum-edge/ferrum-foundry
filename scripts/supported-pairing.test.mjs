@@ -125,6 +125,12 @@ describe("the supported pairing record", () => {
       for (const field of ["source_commit", "image", "ci_evidence"]) {
         assert.ok(!isPlaceholder(record.foundry[field]), `foundry.${field} after release`);
       }
+      // docs/compatibility.md mirrors them, with no release-step marker left.
+      const doc = repoFile("docs/compatibility.md");
+      for (const field of ["source_commit", "image", "ci_evidence"]) {
+        assert.ok(doc.includes(record.foundry[field]), `compatibility.md names foundry.${field}`);
+      }
+      assert.ok(!doc.includes("*release step*"), "compatibility.md has no release-step marker");
     }
     assert.deepEqual(record.foundry.platforms, ["linux/amd64", "linux/arm64"]);
   });
