@@ -278,12 +278,12 @@ The token is not stored in `localStorage` or sent on later requests. Static
 mode is refused when `NODE_ENV=production` unless the unsafe
 `FERRUM_ALLOW_INSECURE_STATIC_AUTH=true` escape hatch is set.
 
-`FERRUM_JWT_NAMESPACES` scopes the static principal: a comma-separated list of
-exact namespace names, or `*` alone for every namespace. Empty entries are
-dropped, so `tenant-a,,tenant-b` and `*,` are accepted. Left unset, the static
-principal is unrestricted, its JWTs carry no `ns` claim, and the BFF logs a
-startup warning. A value that is set but names no namespace (empty,
-whitespace, or commas only) fails startup. See
+`FERRUM_JWT_NAMESPACES` scopes the static principal and is required in static
+mode: a comma-separated list of exact namespace names, or `*` alone for every
+namespace. `*` leaves the static principal unrestricted, and its JWTs carry no
+`ns` claim. Empty entries are dropped, so `tenant-a,,tenant-b` and `*,` are
+accepted. Startup fails when the variable is unset, or set but naming no
+namespace (empty, whitespace, or commas only). See
 [Downstream JWT claims](deployment.md#downstream-jwt-claims).
 
 The session cookie is host-scoped, so the SPA must use the same host the BFF
@@ -301,9 +301,8 @@ Foundry JWTs contain `iss`, `sub`, `exp`, `iat`, `nbf`, `jti`, and `role`.
 `aud` is added only when configured, because Ferrum rejects an unexpected
 audience. `ns` is one exact namespace string or an array of them. An
 unrestricted principal (a trusted-proxy admin with no namespace header, or a
-static principal configured with `*` or with `FERRUM_JWT_NAMESPACES` unset)
-gets no `ns` claim. `*` is only a Foundry configuration value and is never sent
-as a claim.
+static principal configured with `*`) gets no `ns` claim. `*` is only a Foundry
+configuration value and is never sent as a claim.
 
 Tokens are cached per signing input and principal, so a configuration or
 identity change never reuses an earlier token.

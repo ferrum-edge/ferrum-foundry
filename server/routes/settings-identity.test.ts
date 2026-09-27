@@ -25,9 +25,14 @@ afterEach(async () => {
   vi.unstubAllEnvs();
 });
 
-async function setup(mode: 'static' | 'trusted-proxy', staticGrants?: string, logLines?: string[]) {
+async function setup(
+  mode: 'static' | 'trusted-proxy',
+  // Static mode requires an explicit scope; `*` is its every-namespace grant.
+  staticGrants: string | undefined = mode === 'static' ? '*' : undefined,
+  logLines?: string[],
+) {
   vi.stubEnv('FERRUM_AUTH_MODE', mode);
-  // Always set, so an unscoped setup never inherits a scope from the shell.
+  // Always set, so a setup never inherits a scope from the shell.
   vi.stubEnv('FERRUM_JWT_NAMESPACES', staticGrants);
   vi.stubEnv('FERRUM_BFF_AUTH_TOKEN', BFF_TOKEN);
   vi.stubEnv('FERRUM_TRUSTED_PROXY_SECRET', PROXY_SECRET);
@@ -261,8 +266,8 @@ describe('settings identity authority', () => {
   });
 
   it('grants every namespace only through the explicit wildcard', async () => {
-    // Unset FERRUM_JWT_NAMESPACES leaves the static principal unrestricted,
-    // which the settings response reports as the wildcard.
+    // FERRUM_JWT_NAMESPACES=* leaves the static principal unrestricted, which
+    // the settings response reports as the wildcard.
     const { app, headers } = await setup('static');
     const initial = await app.inject({ method: 'GET', url: '/api/settings', headers });
     expect(initial.json().jwtNamespaces).toEqual(['*']);

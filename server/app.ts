@@ -5,7 +5,7 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import { authPlugin } from './auth.js';
-import { getConfigWarnings, loadConfig } from './config.js';
+import { loadConfig } from './config.js';
 import proxyPlugin from './proxy.js';
 import { requestIsApiRoute, servesSpaShell } from './proxy-path.js';
 import healthPlugin from './routes/health.js';
@@ -46,7 +46,6 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     // socket peer, and anything a client could append further out is ignored.
     trustProxy: isProduction ? trustDirectlyConnectedProxy : false,
   });
-  for (const warning of getConfigWarnings()) fastify.log.warn(warning);
   // First, so a body refused by any later onRequest hook is discarded under
   // the BFF's own bounds rather than Node's unbounded one.
   installUploadDrain(fastify);
