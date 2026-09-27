@@ -254,7 +254,7 @@ describe('detail drafts survive terminal background errors (#299)', () => {
     expect(input.value).toBe(value);
     failures.delete(c.endpoint);
     const retry = [...host.querySelectorAll<HTMLButtonElement>('button')]
-      .find((button) => button.textContent === `Retry ${c.name} configuration`)!;
+      .find((button) => button.getAttribute('aria-label') === `Retry ${c.name} configuration`)!;
     await act(async () => retry.click());
     await settle(() => expect(client.getQueryState(key)?.status).toBe('success'));
     expect(field(c.field)).toBe(input);
@@ -307,7 +307,7 @@ describe('detail drafts survive terminal background errors (#299)', () => {
     expect(host.querySelector('[aria-label="Remove /orders"]')).toBeNull();
     failures.delete('proxies');
     const retryCatalog = [...host.querySelectorAll<HTMLButtonElement>('button')]
-      .find((button) => button.textContent === 'Retry Proxy catalog')!;
+      .find((button) => button.getAttribute('aria-label') === 'Retry Proxy catalog')!;
     expect(retryCatalog.type).toBe('button');
     await act(async () => retryCatalog.click());
     await settle(() => expect(picker.disabled).toBe(false));

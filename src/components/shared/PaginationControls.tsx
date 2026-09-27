@@ -40,7 +40,7 @@ export function PaginationControls({
 
   if (total > 0 && offset >= total) {
     return (
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <span className="text-text-muted text-sm">
           Page out of range — {total} results available
         </span>
@@ -55,19 +55,27 @@ export function PaginationControls({
     );
   }
 
+  // Both labels stay on one line at phone width: the range drops its
+  // "Showing" prefix and the page indicator shortens to "n / m" below sm.
   return (
-    <div className="flex items-center justify-between">
-      <span className="text-text-muted text-sm">
-        {total === 0
-          ? "No results"
-          : `Showing ${rangeStart}-${rangeEnd} of ${total}`}
+    <div className="flex items-center justify-between gap-3">
+      <span className="min-w-0 text-text-muted text-xs sm:text-sm whitespace-nowrap tabular-nums">
+        {total === 0 ? (
+          "No results"
+        ) : (
+          <>
+            <span className="hidden sm:inline">Showing </span>
+            {rangeStart}–{rangeEnd} of {total}
+          </>
+        )}
       </span>
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2">
         <Button
           variant="secondary"
           size="sm"
           onClick={goToPrev}
           disabled={!canGoPrev}
+          aria-label="Previous page"
         >
           <svg
             width="14"
@@ -75,6 +83,7 @@ export function PaginationControls({
             viewBox="0 0 24 24"
             fill="none"
             xmlns="http://www.w3.org/2000/svg"
+            aria-hidden="true"
           >
             <path
               d="M15 18L9 12L15 6"
@@ -86,14 +95,20 @@ export function PaginationControls({
           </svg>
           Prev
         </Button>
-        <span className="text-text-secondary text-sm px-2">
-          Page {currentPage} of {totalPages}
+        <span className="text-text-secondary text-xs sm:text-sm whitespace-nowrap tabular-nums px-1">
+          <span className="sm:hidden">
+            {currentPage} / {totalPages}
+          </span>
+          <span className="hidden sm:inline">
+            Page {currentPage} of {totalPages}
+          </span>
         </span>
         <Button
           variant="secondary"
           size="sm"
           onClick={goToNext}
           disabled={!canGoNext}
+          aria-label="Next page"
         >
           Next
           <svg
@@ -102,6 +117,7 @@ export function PaginationControls({
             viewBox="0 0 24 24"
             fill="none"
             xmlns="http://www.w3.org/2000/svg"
+            aria-hidden="true"
           >
             <path
               d="M9 18L15 12L9 6"

@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { SkeletonCard } from '@/components/ui/Skeleton';
 import { resolveReadState, type ReadQuery } from '@/lib/readState';
+import { formatDateTime } from '@/lib/format';
 
 function errorStatus(error: unknown): number | undefined {
   return (error as { response?: { status?: number } } | null)?.response?.status;
@@ -65,7 +66,7 @@ export function ReadStateNotice({
         )}
         {state === 'stale' && ' The last response is stale.'}
         {query.dataUpdatedAt > 0 && (
-          <> Last successful observation: {new Date(query.dataUpdatedAt).toLocaleString()}.</>
+          <> Last successful observation: {formatDateTime(query.dataUpdatedAt)}.</>
         )}
       </p>
       <Button
@@ -75,8 +76,9 @@ export function ReadStateNotice({
         className="mt-3"
         loading={query.isFetching}
         onClick={() => void query.refetch()}
+        aria-label={`Retry ${label}`}
       >
-        Retry {label}
+        Retry
       </Button>
     </Card>
   );
