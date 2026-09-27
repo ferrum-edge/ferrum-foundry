@@ -77,7 +77,7 @@ If a change fails, Foundry attempts a compensating rollback:
 
 Every write is guarded against concurrent changes. Foundry compares
 `updated_at` with the read it just made, and sends `If-Match` with that read's
-`ETag`. On the paired Ferrum Edge release (ferrum-edge#5661, v0.9.7) this makes
+`ETag`. On the paired Ferrum Edge release (ferrum-edge#5661, since v0.9.7) this makes
 the check and the write atomic and also catches changes that did not move
 `updated_at`. A save or delete from the plugin page is also refused if the
 configuration no longer matches what the editor opened; see

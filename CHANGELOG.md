@@ -7,12 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-27
+
+Pairs with the published **Ferrum Edge v0.9.8** release,
+`ferrumedge/ferrum-edge@sha256:e5b204f9448d4ec210a57dbd2badece5f4359d5d544522fa48dcdfeef033b385`.
+Static authentication mode now requires `FERRUM_JWT_NAMESPACES` (see "Breaking").
+See `docs/compatibility.md` and `docs/release-notes/v0.3.0.md`.
+
 ### Breaking
 
-- Static authentication mode now refuses to start when `FERRUM_JWT_NAMESPACES` is unset, and the error names both options: exact namespace names, or `*` for every namespace. An unset variable previously granted the static principal every namespace without saying so. To keep that behavior, set `FERRUM_JWT_NAMESPACES=*`: the static principal stays unrestricted and its gateway JWTs carry no `ns` claim. `trusted-proxy` mode is unchanged: there the variable only scopes the readiness probe and may stay unset. See `docs/release-notes/UNRELEASED.md` → "Upgrading from v0.2.0" (#462).
+- Static authentication mode now refuses to start when `FERRUM_JWT_NAMESPACES` is unset, and the error names both options: exact namespace names, or `*` for every namespace. An unset variable previously granted the static principal every namespace without saying so. To keep that behavior, set `FERRUM_JWT_NAMESPACES=*`: the static principal stays unrestricted and its gateway JWTs carry no `ns` claim. `trusted-proxy` mode is unchanged: there the variable only scopes the readiness probe and may stay unset. See `docs/release-notes/v0.3.0.md` → "Upgrading from v0.2.0" (#462).
 
 ### Changed
 
+- Foundry v0.3.0 pairs with the published Ferrum Edge v0.9.8 release (commit `e27f2109216352c3fe9e67a7014611f3f66daa91`; `linux/amd64` `sha256:0e629633ad55368002c415bbf76d4c91f3741519a33dd310045531d791d9a592`, `linux/arm64` `sha256:1e900bd537814fdc864ee1830bbd7a1e1f2785074a5da088a3d9cdd738b532f9`). It is recorded as `edge.release` and is `edge.image`, so CI, the deployment starter, and the local-run instructions run it instead of v0.9.7. Edge's admin API source, plugin configuration projection, and plugin scope merge are unchanged from v0.9.7, so conditional writes (ferrum-edge#5661) and the `proxy_id` filter (ferrum-edge#5726) behave as before; `PLUGIN_SENSITIVITY_SOURCE` records the re-read at the v0.9.8 commit. `package.json` and `foundry.version` are `0.3.0`, and the release notes are `docs/release-notes/v0.3.0.md`.
 - UI polish pass. Every page opens with the same title bar, whose actions wrap under the description on a phone, and create and detail pages link back to their list. The dashboard shows Foundry connection and gateway health side by side, keeps its refresh controls in the title bar, and uses the sidebar's icon for each resource. Resource tables sit flush with their cards with aligned cells and one em dash for an empty value; a stream proxy lists its listen port, a plugin priority override is a plain number marked "override", and pagination stays on one line on a phone. Dates share one format, machine keys read as labels ("Half-open", "mTLS credentials", sentence-case health fields), buttons beside inputs match their height, the Health page uses two columns on wide screens, environment-configured Settings are shown read-only, and a small brand mark replaces the 515 KB illustration in the sidebar, favicon, phone header, and sign-in page.
 
 ### Fixed
@@ -165,6 +173,7 @@ First public release of Ferrum Foundry.
 - Release channels are monotonic: tags are validated and ancestry-checked before registry access, prereleases never advance stable tags, and promotion runs through a fail-closed FIFO queue (#155).
 - Scheduled live branch deletion replaced with dry-run planning plus a separately approved, exact-SHA-revalidated deletion path (#155).
 
-[Unreleased]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ferrum-edge/ferrum-foundry/releases/tag/v0.1.0

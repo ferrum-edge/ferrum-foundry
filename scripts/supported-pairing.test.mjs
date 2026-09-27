@@ -62,21 +62,21 @@ describe("the supported pairing record", () => {
     }
   });
 
-  it("pairs with and runs CI against the published v0.9.7 release", () => {
+  it("pairs with and runs CI against the published v0.9.8 release", () => {
     const image =
-      "ferrumedge/ferrum-edge@sha256:4c9530e09443649526dc4fbbec0720ba7b47ceb91b0dd5cb06db85430908874a";
-    const sourceCommit = "8fed1346ce2e267eb69c03683cb89ea44d785e0b";
+      "ferrumedge/ferrum-edge@sha256:e5b204f9448d4ec210a57dbd2badece5f4359d5d544522fa48dcdfeef033b385";
+    const sourceCommit = "e27f2109216352c3fe9e67a7014611f3f66daa91";
     const manifests = {
-      "linux/amd64": "sha256:e4d4367e815e86f510c28d8f831ca3502b7c9d5f21fd0eeabeb609a8c8e6f47f",
-      "linux/arm64": "sha256:7d3d28d2529dfb6a303b734fad0bf35ebec07caa95f5632e81d92170baf15fab",
+      "linux/amd64": "sha256:0e629633ad55368002c415bbf76d4c91f3741519a33dd310045531d791d9a592",
+      "linux/arm64": "sha256:1e900bd537814fdc864ee1830bbd7a1e1f2785074a5da088a3d9cdd738b532f9",
     };
     assert.equal(record.edge.image, image);
     assert.equal(record.edge.source_commit, sourceCommit);
     assert.deepEqual(record.edge.platform_manifests, manifests);
-    assert.match(record.edge.build, /v0\.9\.7/);
+    assert.match(record.edge.build, /v0\.9\.8/);
 
     const release = record.edge.release;
-    assert.equal(release.version, "v0.9.7");
+    assert.equal(release.version, "v0.9.8");
     assert.equal(release.image, image);
     assert.equal(release.source_commit, sourceCommit);
     assert.deepEqual(release.platform_manifests, manifests);
@@ -107,8 +107,8 @@ describe("the supported pairing record", () => {
   });
 
   it("names its version and previous release, and no Foundry artifact it cannot know yet", () => {
-    assert.equal(record.foundry.version, "0.2.0");
-    assert.equal(record.foundry.previous_release, "v0.1.0");
+    assert.equal(record.foundry.version, "0.3.0");
+    assert.equal(record.foundry.previous_release, "v0.2.0");
     const pkg = JSON.parse(repoFile("package.json"));
     const lock = JSON.parse(repoFile("package-lock.json"));
     // The release workflow requires the tag, package.json, and the record to agree.

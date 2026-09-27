@@ -6,8 +6,8 @@
 > GitHub release body and refuses a tag without it. It also requires
 > `package.json` and `foundry.version` in `docs/compatibility.json` to be
 > `X.Y.Z`, and `node scripts/supported-pairing.mjs release-ready` to pass.
-> Changes since [v0.2.0](https://github.com/ferrum-edge/ferrum-foundry/releases/tag/v0.2.0):
-> `git log v0.2.0..vX.Y.Z`.
+> Changes since [v0.3.0](https://github.com/ferrum-edge/ferrum-foundry/releases/tag/v0.3.0):
+> `git log v0.3.0..vX.Y.Z`.
 >
 > Name a Ferrum Edge image here only at the release step, and only
 > `edge.release.image`: `scripts/supported-pairing.test.mjs` fails if this
@@ -32,7 +32,7 @@ Best-effort and not qualified: *release step* — from `best_effort` and
 `not_qualified`, linking
 `https://github.com/ferrum-edge/ferrum-foundry/blob/vX.Y.Z/docs/compatibility.md`.
 
-### Highlights since v0.2.0
+### Highlights since v0.3.0
 
 *Release step:* grouped highlights from the `[Unreleased]` section of
 `CHANGELOG.md`, which moves under `[X.Y.Z]` in the same change.
@@ -46,25 +46,10 @@ Best-effort and not qualified: *release step* — from `best_effort` and
 *Release step:* both images by digest, and the starter and deployment links at
 `vX.Y.Z`.
 
-### Upgrading from v0.2.0
+### Upgrading from v0.3.0
 
 *Release step:* Edge first if the pairing moved, then Foundry; what changed in
 configuration; how to confirm `GET /api/health/ready`.
-
-Configuration changes in this release:
-
-- **Breaking, static authentication mode only:** `FERRUM_JWT_NAMESPACES` is
-  required. A static-mode BFF without it refuses to start, where v0.2.0 granted
-  the static principal every namespace. To keep the v0.2.0 behavior, set
-  `FERRUM_JWT_NAMESPACES=*` before replacing the image; to scope the principal,
-  list exact namespace names instead. `trusted-proxy` deployments, including
-  the deployment starter, need no change as long as they leave
-  `FERRUM_JWT_NAMESPACES` unset.
-- **Breaking, either authentication mode:** a set-but-empty
-  `FERRUM_JWT_NAMESPACES` — empty, whitespace, or commas only — is now a startup
-  error, where v0.2.0 treated it as if the variable were unset and left the
-  principal unrestricted. Operators who set such a value should unset it in
-  `trusted-proxy` mode, or set `*` or exact namespace names in `static` mode.
 
 ### Rolling back
 

@@ -25,7 +25,8 @@ records:
 | `PUT` with a malformed `If-Match`, or `POST /proxies` with any `If-Match` | **`400`, nothing written** (`malformedIfMatchStatus: 400`, `createIfMatchStatus: 400`) |
 
 Conditional writes come from ferrum-edge#5661, first released in Ferrum Edge
-v0.9.7, the release Foundry pairs with ([compatibility.md](compatibility.md)).
+v0.9.7 and unchanged in v0.9.8, the release Foundry pairs with
+([compatibility.md](compatibility.md)).
 `gateway-contract-smoke.mjs` fails if the pinned gateway issues no tag. The
 contract itself also checks that the two halves agree on any gateway: one that
 tags reads must refuse a stale tag, and one that issues no tag must not enforce

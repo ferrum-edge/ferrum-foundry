@@ -1,36 +1,36 @@
 {
   "$comment": "Supported Foundry-Edge pairing. docs/compatibility.md is the human-readable record; scripts/supported-pairing.mjs reads and validates this file, CI starts the gateway edge.image names, and scripts/supported-pairing.test.mjs fails when any other file pins a different Ferrum Edge image. edge.release is the Edge release the next Foundry release pairs with; the release workflow refuses a tag until it is filled and edge.image equals it. Values beginning with RELEASE-STEP are filled by the release step, never guessed.",
   "record_version": 1,
-  "status": "released",
+  "status": "candidate",
   "foundry": {
-    "version": "0.2.0",
-    "previous_release": "v0.1.0",
-    "source_commit": "c028c235fd83bb7a1962f3e06b0280d8d8ed8878",
-    "image": "ferrumedge/ferrum-foundry@sha256:54e784c9a7f658e7f7d2d3bcab32d5ca0b113a417726ad1736c1765e0834fe7f",
-    "ci_evidence": "https://github.com/ferrum-edge/ferrum-foundry/actions/runs/36125598365",
+    "version": "0.3.0",
+    "previous_release": "v0.2.0",
+    "source_commit": "RELEASE-STEP: the commit v0.3.0 points to (also the image's org.opencontainers.image.revision label)",
+    "image": "RELEASE-STEP: ferrumedge/ferrum-foundry@sha256:<multi-arch index digest from the release run>",
+    "ci_evidence": "RELEASE-STEP: https://github.com/ferrum-edge/ferrum-foundry/actions/runs/<release run id>",
     "platforms": ["linux/amd64", "linux/arm64"]
   },
   "edge": {
-    "image": "ferrumedge/ferrum-edge@sha256:4c9530e09443649526dc4fbbec0720ba7b47ceb91b0dd5cb06db85430908874a",
-    "build": "published release v0.9.7 (https://github.com/ferrum-edge/ferrum-edge/releases/tag/v0.9.7), the Edge release Foundry v0.2.0 pairs with (edge.release). v0.9.6 was tagged but never published; v0.9.7 is the first published release after v0.9.5",
-    "source_commit": "8fed1346ce2e267eb69c03683cb89ea44d785e0b",
-    "source_evidence": "https://github.com/ferrum-edge/ferrum-edge/actions/runs/36110533284",
+    "image": "ferrumedge/ferrum-edge@sha256:e5b204f9448d4ec210a57dbd2badece5f4359d5d544522fa48dcdfeef033b385",
+    "build": "published release v0.9.8 (https://github.com/ferrum-edge/ferrum-edge/releases/tag/v0.9.8), the Edge release Foundry v0.3.0 pairs with (edge.release). It follows v0.9.7, which Foundry v0.2.0 paired with, and leaves Edge's admin API source (src/admin, src/config), plugin_config_projection.rs, and plugin_cache.rs unchanged",
+    "source_commit": "e27f2109216352c3fe9e67a7014611f3f66daa91",
+    "source_evidence": "https://github.com/ferrum-edge/ferrum-edge/actions/runs/36317719202",
     "platform_manifests": {
-      "linux/amd64": "sha256:e4d4367e815e86f510c28d8f831ca3502b7c9d5f21fd0eeabeb609a8c8e6f47f",
-      "linux/arm64": "sha256:7d3d28d2529dfb6a303b734fad0bf35ebec07caa95f5632e81d92170baf15fab"
+      "linux/amd64": "sha256:0e629633ad55368002c415bbf76d4c91f3741519a33dd310045531d791d9a592",
+      "linux/arm64": "sha256:1e900bd537814fdc864ee1830bbd7a1e1f2785074a5da088a3d9cdd738b532f9"
     },
     "release": {
-      "version": "v0.9.7",
-      "github_release": "https://github.com/ferrum-edge/ferrum-edge/releases/tag/v0.9.7",
-      "source_commit": "8fed1346ce2e267eb69c03683cb89ea44d785e0b",
-      "image": "ferrumedge/ferrum-edge@sha256:4c9530e09443649526dc4fbbec0720ba7b47ceb91b0dd5cb06db85430908874a",
+      "version": "v0.9.8",
+      "github_release": "https://github.com/ferrum-edge/ferrum-edge/releases/tag/v0.9.8",
+      "source_commit": "e27f2109216352c3fe9e67a7014611f3f66daa91",
+      "image": "ferrumedge/ferrum-edge@sha256:e5b204f9448d4ec210a57dbd2badece5f4359d5d544522fa48dcdfeef033b385",
       "platform_manifests": {
-        "linux/amd64": "sha256:e4d4367e815e86f510c28d8f831ca3502b7c9d5f21fd0eeabeb609a8c8e6f47f",
-        "linux/arm64": "sha256:7d3d28d2529dfb6a303b734fad0bf35ebec07caa95f5632e81d92170baf15fab"
+        "linux/amd64": "sha256:0e629633ad55368002c415bbf76d4c91f3741519a33dd310045531d791d9a592",
+        "linux/arm64": "sha256:1e900bd537814fdc864ee1830bbd7a1e1f2785074a5da088a3d9cdd738b532f9"
       },
       "requirements": [
         "It includes ferrum-edge#5661: a strong ETag on resource reads and If-Match on PUT/DELETE of proxies, upstreams, consumers, and plugin configs.",
-        "Its proxy-association and namespace-identity semantics are those Foundry's walkthrough and critical journeys assert: it attaches the proxy association when a proxy-scoped plugin config is written (ferrum-edge#4611) and keys proxies, upstreams, plugin configs, and API specs on (namespace, id) (ferrum-edge 5db1d77a8), as v0.9.5 (edge.image) does. scripts/starter-journey.mjs and e2e/journeys/namespace-isolation.spec.ts were aligned with those semantics in #409. A release that changes either must pass the gates unchanged in intent.",
+        "Its proxy-association and namespace-identity semantics are those Foundry's walkthrough and critical journeys assert: it attaches the proxy association when a proxy-scoped plugin config is written (ferrum-edge#4611) and keys proxies, upstreams, plugin configs, and API specs on (namespace, id) (ferrum-edge 5db1d77a8), as v0.9.5 and v0.9.7 do. scripts/starter-journey.mjs and e2e/journeys/namespace-isolation.spec.ts were aligned with those semantics in #409. A release that changes either must pass the gates unchanged in intent.",
         "The full qualification is re-run with edge.image moved to that release, and every job is green on the pull request that moves it, before any Foundry release is published: Quality Gate, Pinned Gateway Contract (including capability parity, writable and read-only), Deployment Starter, Critical Journeys, and Container Gate."
       ]
     },
@@ -72,21 +72,21 @@
   ],
   "not_qualified": [
     "file, dp, mesh, and node_agent gateway modes (modelled read-only in the UI, not run in CI)",
-    "any Ferrum Edge release other than v0.9.7 (edge.release), older or newer",
-    "any Ferrum Edge image other than edge.image, including the 0.9.7-ebpf and 0.9.7-ebpf-tools variants",
+    "any Ferrum Edge release other than v0.9.8 (edge.release), older or newer",
+    "any Ferrum Edge image other than edge.image, including the 0.9.8-ebpf and 0.9.8-ebpf-tools variants",
     "browser latency and more than one concurrent operator at scale"
   ],
   "edge_dependencies": [
     {
       "change": "ferrum-edge#5661",
       "what": "strong ETag on resource reads and If-Match on PUT/DELETE of proxies, upstreams, consumers, and plugin configs; a malformed If-Match, or one on a route that does not evaluate it, is 400",
-      "status": "released in Ferrum Edge v0.9.7 (edge.release and edge.image)",
+      "status": "first released in Ferrum Edge v0.9.7; released in Ferrum Edge v0.9.8 (edge.release and edge.image) unchanged",
       "effect_on_pinned_edge": "Foundry's write guard sends If-Match with the ETag of its verification read, so a writer that commits between that read and the write is refused with 412; the gateway contract asserts the 412s and the 400s"
     },
     {
       "change": "ferrum-edge#5726",
       "what": "optional proxy_id filter on GET /plugins/config (exact match, paginated over the filtered set, invalid value is 400)",
-      "status": "released in Ferrum Edge v0.9.7 (edge.release and edge.image)",
+      "status": "first released in Ferrum Edge v0.9.7; released in Ferrum Edge v0.9.8 (edge.release and edge.image) unchanged",
       "effect_on_pinned_edge": "a proxy's Plugins tab lists the proxy-scoped configurations targeting it from the filtered collection instead of the whole namespace; a response the filter did not narrow is refused rather than shown"
     }
   ]

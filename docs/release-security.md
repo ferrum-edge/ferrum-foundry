@@ -29,8 +29,8 @@ workflow (`.github/workflows/ci.yml`) has passed:
 ## Supported Edge image
 
 Passing these gates qualifies Foundry with that one Ferrum Edge image and no
-other build. `edge.image` is currently the published Ferrum Edge v0.9.7 release,
-which is also `edge.release`, the Edge release Foundry v0.2.0 pairs with.
+other build. `edge.image` is currently the published Ferrum Edge v0.9.8 release,
+which is also `edge.release`, the Edge release Foundry v0.3.0 pairs with.
 Requirements, best-effort and unqualified setups, and rejected images are in
 [the compatibility record](compatibility.md).
 
