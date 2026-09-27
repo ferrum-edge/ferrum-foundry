@@ -4,10 +4,17 @@
 
 import type { AdminMetrics } from "@/api/types";
 import { Badge } from "@/components/ui/Badge";
+import { humanizeKey } from "@/lib/format";
 
 interface CircuitBreakerPanelProps {
   breakers: AdminMetrics["circuit_breakers"];
 }
+
+const STATE_LABELS: Record<string, string> = {
+  closed: "Closed",
+  open: "Open",
+  half_open: "Half-open",
+};
 
 function stateVariant(state: string): "green" | "red" | "yellow" | "default" {
   switch (state) {
@@ -20,6 +27,15 @@ function stateVariant(state: string): "green" | "red" | "yellow" | "default" {
     default:
       return "default";
   }
+}
+
+/** A breaker state as a readable label in its status colour. */
+export function CircuitStateBadge({ state }: { state: string }) {
+  return (
+    <Badge variant={stateVariant(state)} className="whitespace-nowrap">
+      {STATE_LABELS[state] ?? humanizeKey(state)}
+    </Badge>
+  );
 }
 
 export function CircuitBreakerPanel({ breakers }: CircuitBreakerPanelProps) {
@@ -53,12 +69,12 @@ export function CircuitBreakerPanel({ breakers }: CircuitBreakerPanelProps) {
                 )}
               </td>
               <td className="py-2 pr-4">
-                <Badge variant={stateVariant(cb.state)}>{cb.state}</Badge>
+                <CircuitStateBadge state={cb.state} />
               </td>
-              <td className="py-2 pr-4 text-right text-text-primary">
+              <td className="py-2 pr-4 text-right text-text-primary tabular-nums">
                 {cb.failure_count}
               </td>
-              <td className="py-2 text-right text-text-primary">
+              <td className="py-2 text-right text-text-primary tabular-nums">
                 {cb.success_count}
               </td>
             </tr>

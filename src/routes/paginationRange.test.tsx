@@ -92,7 +92,7 @@ describe("bookmarked pagination beyond the live total", () => {
     await settle(() => expect(host.textContent).toContain("Page out of range"));
     expect(host.textContent).toContain("No results on this page");
     expect(host.textContent).not.toContain(emptyTitle);
-    expect(host.textContent).not.toContain("Showing 101-15");
+    expect(host.textContent).not.toContain("Showing 101–15");
     const button = [...host.querySelectorAll("button")].find((entry) => entry.textContent === "Go to last page")!;
     expect(button).toBeTruthy();
     await act(async () => button.click());

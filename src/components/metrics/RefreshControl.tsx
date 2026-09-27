@@ -47,7 +47,7 @@ export function RefreshControl({
   );
 
   return (
-    <div className="flex min-w-0 flex-col flex-wrap items-stretch gap-3 sm:flex-row sm:items-center">
+    <div className="flex w-full min-w-0 flex-col flex-wrap items-stretch gap-3 sm:w-auto sm:flex-row sm:items-center">
       {agoText && (
         <span className="text-text-muted text-xs sm:whitespace-nowrap">
           {lastUpdatedLabel}: {agoText}
@@ -63,7 +63,6 @@ export function RefreshControl({
       </div>
       <Button
         variant="secondary"
-        size="sm"
         loading={isRefreshing}
         onClick={() => {
           void onRefreshNow();

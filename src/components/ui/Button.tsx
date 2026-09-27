@@ -9,15 +9,17 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   loading?: boolean;
 }
 
+// Every variant carries a 1px border (transparent where it is not drawn) so a
+// button is exactly as tall as the Input and Select it sits beside.
 const variantClasses: Record<ButtonVariant, string> = {
   primary:
-    "bg-orange text-white hover:bg-orange-light hover:-translate-y-px shadow-md hover:shadow-lg hover:shadow-orange/20 active:translate-y-0",
+    "border border-transparent bg-orange text-white hover:bg-orange-light hover:-translate-y-px shadow-md hover:shadow-lg hover:shadow-orange/20 active:translate-y-0",
   secondary:
     "bg-transparent border border-border text-text-secondary hover:bg-bg-card-hover hover:text-text-primary hover:border-border-hover",
   danger:
-    "bg-danger text-white hover:bg-red-500 shadow-md hover:shadow-lg hover:shadow-danger/20",
+    "border border-transparent bg-danger text-white hover:bg-red-500 shadow-md hover:shadow-lg hover:shadow-danger/20",
   ghost:
-    "bg-transparent text-text-secondary hover:bg-bg-card-hover hover:text-text-primary",
+    "border border-transparent bg-transparent text-text-secondary hover:bg-bg-card-hover hover:text-text-primary",
 };
 
 const sizeClasses: Record<ButtonSize, string> = {

@@ -9,7 +9,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
 import { Card } from "@/components/ui/Card";
-import { ResourceGrid } from "@/components/ui/ResourceGrid";
+import { GRID_HEADER_CLASS, GRID_ROW_CLASS, ResourceGrid } from "@/components/ui/ResourceGrid";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/Dialog";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { PageHeader } from "@/components/shared/PageHeader";
 import { ReadDeniedNotice, isReadDenied } from "@/components/shared/ReadState";
 import { SkeletonRow } from "@/components/ui/Skeleton";
 import { PaginationControls } from "@/components/shared/PaginationControls";
@@ -69,21 +70,11 @@ import {
   AcmeCertificateFormError,
   type AcmeCertificateFormState,
 } from "@/lib/acmeCertificateForm";
+import { formatDateTime } from "@/lib/format";
 
 /* ------------------------------------------------------------------ */
 /*  Small helpers                                                      */
 /* ------------------------------------------------------------------ */
-
-function formatDate(iso?: string): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 
 function expiryBadge(notAfter?: string): ReactNode {
   if (!notAfter) return null;
@@ -278,9 +269,9 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
         </Button>
       </div>
 
-      <Card className="overflow-hidden p-0">
+      <Card padding="none" className="overflow-hidden">
         {isLoading && (
-          <div className="px-6 divide-y divide-border/50">
+          <div className="px-4 divide-y divide-border/50">
             {Array.from({ length: 3 }).map((_, i) => (
               <SkeletonRow key={i} />
             ))}
@@ -296,7 +287,7 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
         {!isLoading && records.length > 0 && (
           <div className="divide-y divide-border/50">
             {records.map((record) => (
-              <div key={record.id} className="px-6 py-3.5 flex items-center justify-between gap-4">
+              <div key={record.id} className="px-4 py-3 flex items-center justify-between gap-4">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-medium text-text-primary">
@@ -311,7 +302,7 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
                   {record.subject && (
                     <p className="text-xs text-text-muted mt-0.5 truncate">
                       {record.subject}
-                      {record.not_after ? ` · expires ${formatDate(record.not_after)}` : ""}
+                      {record.not_after ? ` · expires ${formatDateTime(record.not_after)}` : ""}
                     </p>
                   )}
                 </div>
@@ -464,8 +455,8 @@ function InventoryTab() {
   return (
     <div className="space-y-4">
       <Card>
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="w-64">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <div className="w-full sm:w-64">
             <Select
               label="Rotate surface"
               value={surface}
@@ -474,7 +465,7 @@ function InventoryTab() {
             />
           </div>
           <Button
-            size="sm"
+            className="sm:self-end"
             loading={rotate.isPending}
             disabled={!canRotate.allowed}
             onClick={async () => {
@@ -489,11 +480,11 @@ function InventoryTab() {
           >
             Rotate Now
           </Button>
-          <p className="text-xs text-text-muted flex-1 min-w-48">
-            Enqueues an immediate source poll for the surface. Success or failure is
-            reported asynchronously on the Events tab.
-          </p>
         </div>
+        <p className="text-xs text-text-muted mt-2">
+          Enqueues an immediate source poll for the surface. Success or failure is
+          reported asynchronously on the Events tab.
+        </p>
       </Card>
 
       <ResourceGrid
@@ -507,7 +498,7 @@ function InventoryTab() {
           />
         )}
       >
-        <div className="grid grid-cols-[1.2fr_5rem_5rem_2fr_6rem] gap-4 px-6 py-3 border-b border-border text-text-muted text-xs font-semibold uppercase tracking-wider">
+        <div className={`grid grid-cols-[1.2fr_5rem_5rem_2fr_6rem] gap-4 ${GRID_HEADER_CLASS}`}>
           <span>Material</span>
           <span>Kind</span>
           <span>State</span>
@@ -515,7 +506,7 @@ function InventoryTab() {
           <span>Expiry</span>
         </div>
         {isLoading && (
-          <div className="px-6 divide-y divide-border/50">
+          <div className="px-4 divide-y divide-border/50">
             {Array.from({ length: 5 }).map((_, i) => (
               <SkeletonRow key={i} />
             ))}
@@ -525,7 +516,7 @@ function InventoryTab() {
           entries.map((entry) => (
             <div
               key={entry.id}
-              className="grid grid-cols-[1.2fr_5rem_5rem_2fr_6rem] gap-4 px-6 py-3 border-b border-border/50 last:border-b-0 items-center"
+              className={`grid grid-cols-[1.2fr_5rem_5rem_2fr_6rem] gap-4 ${GRID_ROW_CLASS} border-b border-border/50 last:border-b-0`}
             >
               <div className="min-w-0">
                 <p className="text-sm text-text-primary truncate" title={entry.subject || entry.id}>
@@ -593,9 +584,9 @@ function EventsTab() {
           ]}
         />
       </div>
-      <Card className="overflow-hidden p-0">
+      <Card padding="none" className="overflow-hidden">
         {isLoading && (
-          <div className="px-6 divide-y divide-border/50">
+          <div className="px-4 divide-y divide-border/50">
             {Array.from({ length: 4 }).map((_, i) => (
               <SkeletonRow key={i} />
             ))}
@@ -612,7 +603,7 @@ function EventsTab() {
         )}
         {!isLoading &&
           events.map((event) => (
-            <div key={event.id} className="px-6 py-3 border-b border-border/50 last:border-b-0">
+            <div key={event.id} className="px-4 py-3 border-b border-border/50 last:border-b-0">
               <div className="flex items-center gap-3 flex-wrap">
                 <Badge variant={event.outcome === "rotated" ? "green" : "red"}>
                   {event.outcome}
@@ -621,7 +612,7 @@ function EventsTab() {
                 {event.revision != null && (
                   <span className="text-xs text-text-muted">rev {event.revision}</span>
                 )}
-                <span className="text-xs text-text-muted ml-auto">{formatDate(event.at)}</span>
+                <span className="text-xs text-text-muted ml-auto">{formatDateTime(event.at)}</span>
               </div>
               {event.error && <p className="text-xs text-danger mt-1">{event.error}</p>}
               {event.sources.length > 0 && (
@@ -841,9 +832,9 @@ function AcmeTab() {
             </Button>
           </div>
         </div>
-        <Card className="overflow-hidden p-0">
+        <Card padding="none" className="overflow-hidden">
           {certsLoading && (
-            <div className="px-6 divide-y divide-border/50">
+            <div className="px-4 divide-y divide-border/50">
               {Array.from({ length: 2 }).map((_, i) => (
                 <SkeletonRow key={i} />
               ))}
@@ -857,7 +848,7 @@ function AcmeTab() {
             />
           )}
           {visibleCertificates.map((cert) => (
-            <div key={cert.id} className="px-6 py-3.5 border-b border-border/50 last:border-b-0 flex items-center justify-between gap-4">
+            <div key={cert.id} className="px-4 py-3 border-b border-border/50 last:border-b-0 flex items-center justify-between gap-4">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-sm font-medium text-text-primary">
@@ -943,9 +934,9 @@ function AcmeTab() {
       {/* Orders */}
       <div className="space-y-3">
         <h3 className="text-sm font-semibold text-text-primary">Orders</h3>
-        <Card className="overflow-hidden p-0">
+        <Card padding="none" className="overflow-hidden">
           {ordersLoading && (
-            <div className="px-6 divide-y divide-border/50">
+            <div className="px-4 divide-y divide-border/50">
               {Array.from({ length: 2 }).map((_, i) => (
                 <SkeletonRow key={i} />
               ))}
@@ -959,7 +950,7 @@ function AcmeTab() {
             />
           )}
           {visibleOrders.map((order) => (
-            <div key={order.id} className="px-6 py-3.5 border-b border-border/50 last:border-b-0">
+            <div key={order.id} className="px-4 py-3 border-b border-border/50 last:border-b-0">
               <div className="flex items-center justify-between gap-4">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
@@ -1103,9 +1094,9 @@ function AcmeTab() {
       {(accounts?.pagination.total ?? 0) > 0 && (
         <div className="space-y-3">
           <h3 className="text-sm font-semibold text-text-primary">Accounts</h3>
-          <Card className="overflow-hidden p-0">
+          <Card padding="none" className="overflow-hidden">
             {(accounts?.data ?? []).map((account) => (
-              <div key={account.account_id} className="px-6 py-3 border-b border-border/50 last:border-b-0 flex items-center justify-between gap-4">
+              <div key={account.account_id} className="px-4 py-3 border-b border-border/50 last:border-b-0 flex items-center justify-between gap-4">
                 <div className="min-w-0">
                   <Mono>{account.account_id}</Mono>
                   <p className="text-xs text-text-muted mt-0.5">
@@ -1289,7 +1280,7 @@ function AcmeTab() {
               <p><span className="text-text-muted">Directory:</span> <span className="font-mono break-all">{detailQuery.data.directory_url}</span></p>
               <p><span className="text-text-muted">Subject:</span> {detailQuery.data.subject ?? "—"}</p>
               <p><span className="text-text-muted">Issuer:</span> {detailQuery.data.issuer ?? "—"}</p>
-              <p><span className="text-text-muted">Valid:</span> {formatDate(detailQuery.data.not_before)} – {formatDate(detailQuery.data.not_after)}</p>
+              <p><span className="text-text-muted">Valid:</span> {formatDateTime(detailQuery.data.not_before)} – {formatDateTime(detailQuery.data.not_after)}</p>
               <p><span className="text-text-muted">Fingerprint:</span> <span className="font-mono break-all">{detailQuery.data.fingerprint_sha256 ?? "—"}</span></p>
               <p className="text-xs text-text-muted">
                 Private-key material is intentionally absent from all detail responses.
@@ -1631,13 +1622,10 @@ export default function TlsPage() {
   };
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-text-primary">TLS Management</h1>
-        <p className="text-text-muted text-sm mt-1">
-          Inventory, managed certificate stores, ACME automation, rotation, and
-          validation for every TLS surface of the gateway.
-        </p>
-      </div>
+      <PageHeader
+        title="TLS Management"
+        description="Inventory, managed certificate stores, ACME automation, rotation, and validation for every TLS surface of the gateway."
+      />
 
       <div
         role="note"

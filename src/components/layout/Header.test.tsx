@@ -113,7 +113,7 @@ describe("Header readiness and accessibility", () => {
     const label = document.getElementById(
       trigger!.getAttribute("aria-labelledby") ?? "",
     );
-    expect(label?.textContent?.trim()).toBe("Active Namespace:");
+    expect(label?.textContent?.trim()).toBe("Namespace");
   });
 
   // jsdom has no layout engine. These assertions protect the responsive

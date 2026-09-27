@@ -149,7 +149,8 @@ export function RuntimePanel({ refetchInterval }: RefreshPolicy = {}) {
   return (
     <div className="space-y-4">
       <MetricsSampleTime timestamp={dataUpdatedAt} />
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      {/* Four across only where the panel is wide enough for "392.9 MB". */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-2 2xl:grid-cols-4 gap-3">
         <StatCard
           label="CPU (process)"
           value={

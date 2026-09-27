@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { PlusIcon } from "@/components/ui/icons";
 import { Input } from "@/components/ui/Input";
 import {
   Dialog,
@@ -497,7 +498,8 @@ export function NamespaceManagerCard() {
         <h3 className="text-sm font-semibold text-text-primary">
           Manage Namespaces
         </h3>
-        {canManage && registry.allowed && <Button size="sm" onClick={() => setCreateSession(++generation.current)}>
+        {canManage && registry.allowed && <Button onClick={() => setCreateSession(++generation.current)}>
+          <PlusIcon />
           New Namespace
         </Button>}
       </div>

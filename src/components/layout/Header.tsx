@@ -7,6 +7,7 @@ import { useAuth } from "@/stores/auth";
 import { useBffReadiness } from "@/hooks/useBffHealth";
 import { readinessPresentation } from "@/lib/readiness";
 import { namespaceGranted } from "@/lib/namespaceGrants";
+import { BrandMark } from "./BrandMark";
 
 interface HeaderProps {
   onToggleSidebar: () => void;
@@ -57,14 +58,14 @@ export function Header({
   const noNamespaces = registryReady && namespaceList.length === 0;
 
   return (
-    <header className="fixed top-0 right-0 left-0 md:left-[var(--sidebar-width)] h-[var(--nav-height)] bg-bg-card border-b border-border z-20 flex items-center justify-between px-4">
+    <header className="fixed top-0 right-0 left-0 md:left-[var(--sidebar-width)] h-[var(--nav-height)] bg-bg-card border-b border-border z-20 flex items-center justify-between gap-2 px-3 sm:gap-3 sm:px-4">
       {/* Left side */}
-      <div className="flex items-center gap-3">
+      <div className="flex min-w-0 items-center gap-2">
         {/* Hamburger - mobile only */}
         <button
           ref={sidebarToggleRef}
           onClick={onToggleSidebar}
-          className="md:hidden p-1.5 rounded-lg text-text-secondary hover:bg-bg-card-hover hover:text-text-primary transition-colors cursor-pointer"
+          className="md:hidden p-1 sm:p-1.5 rounded-lg text-text-secondary hover:bg-bg-card-hover hover:text-text-primary transition-colors cursor-pointer"
           aria-label="Toggle sidebar"
           aria-expanded={sidebarOpen}
           aria-controls="mobile-sidebar-dialog"
@@ -83,17 +84,20 @@ export function Header({
             />
           </svg>
         </button>
+        {/* The sidebar carries the brand on desktop; the mobile bar has room
+            for it once the sidebar collapses behind the menu button. */}
+        <BrandMark className="md:hidden" />
       </div>
 
       {/* Right side */}
-      <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+      <div className="flex min-w-0 shrink-0 items-center gap-1.5 sm:gap-4">
         {/* Namespace selector */}
         <div className="flex min-w-0 items-center gap-2">
           <span
             id={namespaceLabelId}
             className="hidden sm:inline text-sm font-semibold text-text-secondary whitespace-nowrap"
           >
-            Active Namespace:
+            Namespace
           </span>
           <div className="min-w-0 max-w-36 sm:max-w-44 md:max-w-52">
             <Select
@@ -110,7 +114,7 @@ export function Header({
         {/* Theme toggle */}
         <button
           onClick={toggleTheme}
-          className="shrink-0 p-1.5 rounded-lg text-text-secondary hover:bg-bg-card-hover hover:text-text-primary transition-colors cursor-pointer"
+          className="shrink-0 p-1 sm:p-1.5 rounded-lg text-text-secondary hover:bg-bg-card-hover hover:text-text-primary transition-colors cursor-pointer"
           aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
         >
           {theme === "dark" ? (
@@ -141,7 +145,7 @@ export function Header({
         {/* Sign out */}
         <button
           onClick={() => void logout()}
-          className="shrink-0 p-1.5 rounded-lg text-text-secondary hover:bg-bg-card-hover hover:text-text-primary transition-colors cursor-pointer"
+          className="shrink-0 p-1 sm:p-1.5 rounded-lg text-text-secondary hover:bg-bg-card-hover hover:text-text-primary transition-colors cursor-pointer"
           aria-label="Sign out"
           title="Sign out"
         >

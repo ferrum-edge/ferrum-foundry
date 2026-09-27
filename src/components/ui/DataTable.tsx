@@ -171,7 +171,7 @@ export function DataTable<T extends { id: string }>({
       onClick={() => onRowClick?.(row.original)}
     >
       {row.getVisibleCells().map((cell) => (
-        <td key={cell.id} className="px-4 py-3 text-sm text-text-primary">
+        <td key={cell.id} className="px-4 py-3 align-top text-sm text-text-primary">
           {flexRender(cell.column.columnDef.cell, cell.getContext())}
         </td>
       ))}
@@ -205,7 +205,7 @@ export function DataTable<T extends { id: string }>({
               {row.getVisibleCells().map((cell) => (
                 <td
                   key={cell.id}
-                  className="px-4 py-3 text-sm text-text-primary"
+                  className="px-4 py-3 align-top text-sm text-text-primary"
                 >
                   {flexRender(cell.column.columnDef.cell, cell.getContext())}
                 </td>

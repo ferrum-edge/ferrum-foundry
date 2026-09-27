@@ -29,7 +29,10 @@ vi.mock("@/hooks/useMetrics", () => ({
     refetch: async () => undefined,
   }),
 }));
-vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn() }));
+vi.mock("@tanstack/react-router", () => ({
+  useNavigate: () => vi.fn(),
+  Link: ({ children, to }: { children?: ReactNode; to?: string }) => <a href={to}>{children}</a>,
+}));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
 
 const createProxy = vi.fn(async () => ({ id: "created" }));

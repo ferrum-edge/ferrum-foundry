@@ -17,7 +17,9 @@ import { resolveReadState } from '@/lib/readState';
 import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { ResourceGrid } from "@/components/ui/ResourceGrid";
+import { GRID_HEADER_CLASS, GRID_ROW_CLASS, ResourceGrid } from "@/components/ui/ResourceGrid";
+import { PageHeader } from "@/components/shared/PageHeader";
+import { TrashIcon } from "@/components/ui/icons";
 import { Badge } from "@/components/ui/Badge";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { SkeletonCard } from "@/components/ui/Skeleton";
@@ -39,6 +41,7 @@ import * as consumersApi from "@/api/consumers";
 import { isStaleResourceError, type StaleResourceDetail } from "@/api/conditionalWrite";
 import { StaleWriteDialog } from "@/components/shared/StaleWriteDialog";
 import { reseedAfterCommit, useEditBaseline } from "@/hooks/useEditBaseline";
+import { formatDateTime } from "@/lib/format";
 
 /* ================================================================== */
 /*  ConsumerDetailPage                                                 */
@@ -241,35 +244,22 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
       {resourceQuery.isError && (
         <ReadStateNotice query={resourceQuery} label="Consumer configuration" />
       )}
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-text-primary">
-            {consumer.username}
-          </h1>
-          <p className="text-text-muted text-sm mt-1 font-mono">
-            {consumer.id}
-          </p>
-        </div>
-        <WriteAction verdict={capability}>
-          <Button variant="danger" onClick={() => setDeleteOpen(true)}>
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-              />
-            </svg>
-            Delete
-          </Button>
-        </WriteAction>
-      </div>
+      <PageHeader
+        title={consumer.username}
+        meta={consumer.id}
+        breadcrumbs={[
+          { label: "Consumers", to: "/consumers" },
+          { label: consumer.username },
+        ]}
+        actions={
+          <WriteAction verdict={capability}>
+            <Button variant="danger" onClick={() => setDeleteOpen(true)}>
+              <TrashIcon />
+              Delete
+            </Button>
+          </WriteAction>
+        }
+      />
 
       <ResourceLabels labels={consumer.labels} />
 
@@ -354,7 +344,7 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
               </Card>
             ) : (
               <ResourceGrid label="Authorized proxies" minWidth="40rem">
-                <div className="grid grid-cols-[2fr_1.5fr_1fr_2fr] gap-4 px-5 py-2.5 border-b border-border text-text-muted text-xs font-semibold uppercase tracking-wider">
+                <div className={`grid grid-cols-[2fr_1.5fr_1fr_2fr] gap-4 ${GRID_HEADER_CLASS}`}>
                   <span>Proxy</span>
                   <span>Listen Path</span>
                   <span>Auth Type</span>
@@ -366,7 +356,7 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
                       key={proxy.id}
                       to="/proxies/$proxyId"
                       params={{ proxyId: proxy.id }}
-                      className="grid grid-cols-[2fr_1.5fr_1fr_2fr] gap-4 px-5 py-3 text-sm hover:bg-bg-card-hover transition-colors"
+                      className={`grid grid-cols-[2fr_1.5fr_1fr_2fr] gap-4 ${GRID_ROW_CLASS} text-sm hover:bg-bg-card-hover transition-colors`}
                     >
                       <div className="min-w-0">
                         <span className="text-text-primary font-medium break-all block">
@@ -396,7 +386,7 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
                           {result.reasons.join("; ")}
                         </p>
                         <p className="text-text-muted text-[11px] mt-1">
-                          evaluated {new Date(evaluatedAt).toLocaleString()}
+                          evaluated {formatDateTime(evaluatedAt)}
                         </p>
                       </div>
                     </Link>

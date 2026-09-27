@@ -2,6 +2,7 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { useAuth } from "@/stores/auth";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { BrandMark } from "@/components/layout/BrandMark";
 
 export function LoginGate({ children }: { children: ReactNode }) {
   const { status, mode, loginUrl, error, login, refreshSession } = useAuth();
@@ -36,7 +37,8 @@ export function LoginGate({ children }: { children: ReactNode }) {
 
   if (mode === "trusted-proxy") {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-bg-primary px-4">
+      <div className="min-h-screen flex flex-col items-center justify-center gap-6 bg-bg-primary px-4">
+        <BrandMark size="lg" />
         <Card className="w-full max-w-md">
           <h1 className="text-lg font-semibold text-text-primary mb-1">Sign in to Ferrum Foundry</h1>
           <p className="text-text-muted text-sm mb-6">
@@ -58,7 +60,8 @@ export function LoginGate({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-bg-primary px-4">
+    <div className="min-h-screen flex flex-col items-center justify-center gap-6 bg-bg-primary px-4">
+      <BrandMark size="lg" />
       <Card className="w-full max-w-md">
         <h1 className="text-lg font-semibold text-text-primary mb-1">Local development sign in</h1>
         <p className="text-text-muted text-sm mb-6">
@@ -80,13 +83,13 @@ export function LoginGate({ children }: { children: ReactNode }) {
                 onChange={(event) => setInput(event.target.value)}
                 autoFocus
                 autoComplete="off"
-                className="w-full min-w-0 bg-bg-input border border-border rounded-lg px-3 py-2 pr-10 text-text-primary text-sm placeholder:text-text-muted focus:border-orange focus:ring-1 focus:ring-orange/30"
-                placeholder="paste token"
+                className="w-full min-w-0 bg-bg-input border border-border rounded-lg px-3 py-2 pr-16 text-text-primary text-sm placeholder:text-text-muted focus:border-orange focus:ring-1 focus:ring-orange/30"
+                placeholder="Paste the development token"
               />
               <button
                 type="button"
                 onClick={() => setShowSecret((visible) => !visible)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-text-muted hover:text-text-secondary cursor-pointer"
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-1.5 py-1 text-xs font-medium text-text-muted hover:text-text-secondary cursor-pointer"
                 aria-label={showSecret ? "Hide token" : "Show token"}
               >
                 {showSecret ? "Hide" : "Show"}

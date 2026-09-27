@@ -9,11 +9,13 @@ import { useUpstreamReferences } from "@/hooks/useUpstreams";
 import { useBoundedPluginConfigs } from "@/hooks/usePlugins";
 import { usePaginationParams } from "@/hooks/usePagination";
 import { Button } from "@/components/ui/Button";
-import { ResourceGrid } from "@/components/ui/ResourceGrid";
+import { GRID_HEADER_CLASS, GRID_ROW_CLASS, ResourceGrid } from "@/components/ui/ResourceGrid";
 import { Badge } from "@/components/ui/Badge";
 import { SearchBar } from "@/components/shared/SearchBar";
 import { PaginationControls } from "@/components/shared/PaginationControls";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { PageHeader } from "@/components/shared/PageHeader";
+import { PlusIcon } from "@/components/ui/icons";
 import { WriteAction } from "@/components/shared/CapabilityGate";
 import { useCapabilities } from "@/stores/capabilities";
 import { SkeletonRow } from "@/components/ui/Skeleton";
@@ -25,6 +27,7 @@ import {
   inapplicablePluginsForProxy,
   type EffectivePlugin,
 } from "@/lib/effectivePolicy";
+import { EMPTY_VALUE, formatDateTime } from "@/lib/format";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -34,14 +37,16 @@ function formatBackend(proxy: Proxy): string {
   return `${proxy.backend_scheme ?? "https"}://${proxy.backend_host}:${proxy.backend_port}`;
 }
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+/**
+ * Where the proxy accepts traffic: an HTTP proxy's listen path, or a stream
+ * proxy's dedicated listen port (stream proxies have no listen path).
+ */
+function formatListen(proxy: Proxy): { text: string; title?: string } {
+  if (proxy.listen_path) return { text: proxy.listen_path, title: proxy.listen_path };
+  if (proxy.listen_port != null) {
+    return { text: `:${proxy.listen_port}`, title: `Listen port ${proxy.listen_port}` };
+  }
+  return { text: EMPTY_VALUE };
 }
 
 interface PluginSummary {
@@ -125,7 +130,7 @@ function PluginCountCell({
 
 const columns = [
   { key: "name", label: "Name / ID" },
-  { key: "listen_path", label: "Listen Path" },
+  { key: "listen_path", label: "Listen" },
   { key: "backend", label: "Backend / Upstream" },
   { key: "plugins", label: "Plugins", className: "text-center" },
   { key: "created_at", label: "Created" },
@@ -217,23 +222,18 @@ export default function ProxiesPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-text-primary">Proxies</h1>
-          <p className="text-text-muted text-sm mt-1">
-            Manage API proxy configurations, routes, and upstream mappings.
-          </p>
-        </div>
-        <WriteAction verdict={canWrite}>
-          <Button onClick={() => navigate({ to: "/proxies/new" })}>
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-            </svg>
-            Create Proxy
-          </Button>
-        </WriteAction>
-      </div>
+      <PageHeader
+        title="Proxies"
+        description="Manage API proxy configurations, routes, and upstream mappings."
+        actions={
+          <WriteAction verdict={canWrite}>
+            <Button onClick={() => navigate({ to: "/proxies/new" })}>
+              <PlusIcon />
+              Create Proxy
+            </Button>
+          </WriteAction>
+        }
+      />
 
       {/* Search */}
       <SearchBar
@@ -283,7 +283,7 @@ export default function ProxiesPage() {
         }
       >
         {/* Header row */}
-        <div className={`${GRID_TEMPLATE} px-6 py-3 border-b border-border bg-bg-card text-text-muted text-xs font-semibold uppercase tracking-wider`}>
+        <div className={`${GRID_TEMPLATE} ${GRID_HEADER_CLASS}`}>
           {columns.map((col) => (
             <span key={col.key} className={`whitespace-nowrap ${"className" in col ? col.className : ""}`}>
               {col.label}
@@ -293,7 +293,7 @@ export default function ProxiesPage() {
 
         {/* Body */}
         {isLoading && (
-          <div className="px-6 divide-y divide-border/50">
+          <div className="px-4 divide-y divide-border/50">
             {Array.from({ length: 5 }).map((_, i) => (
               <SkeletonRow key={i} />
             ))}
@@ -306,7 +306,7 @@ export default function ProxiesPage() {
               <button
                 key={proxy.id}
                 type="button"
-                className={`${GRID_TEMPLATE} px-6 py-3.5 w-full text-left hover:bg-bg-card-hover transition-colors cursor-pointer`}
+                className={`${GRID_TEMPLATE} ${GRID_ROW_CLASS} w-full text-left hover:bg-bg-card-hover transition-colors cursor-pointer`}
                 onClick={() =>
                   navigate({
                     to: "/proxies/$proxyId",
@@ -332,12 +332,12 @@ export default function ProxiesPage() {
                   )}
                 </div>
 
-                {/* Listen Path */}
+                {/* Listen path, or listen port for a stream proxy */}
                 <span
                   className="text-sm text-text-secondary font-mono truncate min-w-0"
-                  title={proxy.listen_path ?? undefined}
+                  title={formatListen(proxy).title}
                 >
-                  {proxy.listen_path}
+                  {formatListen(proxy).text}
                 </span>
 
                 {/* Backend / Upstream */}
@@ -380,7 +380,7 @@ export default function ProxiesPage() {
 
                 {/* Created at */}
                 <span className="text-sm text-text-muted whitespace-nowrap">
-                  {formatDate(proxy.created_at)}
+                  {formatDateTime(proxy.created_at)}
                 </span>
               </button>
             ))}

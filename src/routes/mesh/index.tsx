@@ -10,11 +10,12 @@ import type { ReadQuery } from '@/lib/readState';
 import { useState } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
 import { Card } from "@/components/ui/Card";
-import { ResourceGrid } from "@/components/ui/ResourceGrid";
+import { GRID_HEADER_CLASS, GRID_ROW_CLASS, ResourceGrid } from "@/components/ui/ResourceGrid";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { PageHeader } from "@/components/shared/PageHeader";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
 import { getApiErrorMessage } from "@/api/client";
@@ -33,6 +34,7 @@ import {
 import { GatewayTrustManager } from "@/components/forms/GatewayTrustManager";
 import { useCapabilities } from "@/stores/capabilities";
 import { CapabilityNotice } from "@/components/shared/CapabilityGate";
+import { formatDateTime, formatTime } from "@/lib/format";
 
 function NotMeshEmpty({ what }: { what: string }) {
   return (
@@ -81,7 +83,7 @@ function OverviewTab() {
           <p className="text-sm text-warning">Mesh configuration refresh failed</p>
           <p className="text-xs text-text-muted mt-1">
             Current convergence and quarantine state are unavailable. Last successful observation:{" "}
-            {new Date(configQuery.dataUpdatedAt).toLocaleString()}.
+            {formatDateTime(configQuery.dataUpdatedAt)}.
           </p>
           <Button variant="secondary" size="sm" className="mt-3" loading={configQuery.isFetching}
             onClick={() => void configQuery.refetch()}>Retry configuration</Button>
@@ -159,15 +161,15 @@ function OverviewTab() {
           <p className="text-sm text-warning">Data plane convergence refresh failed</p>
           <p className="text-xs text-text-muted mt-1">
             Current data plane convergence is unavailable. Last successful observation:{" "}
-            {new Date(sliceQuery.dataUpdatedAt).toLocaleString()}.
+            {formatDateTime(sliceQuery.dataUpdatedAt)}.
           </p>
           <Button variant="secondary" size="sm" className="mt-3" loading={sliceQuery.isFetching}
             onClick={() => void sliceQuery.refetch()}>Retry convergence</Button>
         </Card>
       ) : <MeshReadFailure query={sliceQuery} what="Data plane convergence" />)}
       {sliceDrift && !sliceError && (
-        <Card className="overflow-hidden p-0">
-          <div className="px-6 py-3 border-b border-border flex items-center gap-3">
+        <Card padding="none" className="overflow-hidden">
+          <div className="px-4 py-3 border-b border-border flex items-center gap-3">
             <h3 className="text-sm font-semibold text-text-primary">
               Data Plane Convergence (CP view)
             </h3>
@@ -176,7 +178,7 @@ function OverviewTab() {
             </span>
           </div>
           {sliceDrift.data_planes.map((dp) => (
-            <div key={dp.node_id} className="px-6 py-3 border-b border-border/50 last:border-b-0 flex items-center justify-between gap-4">
+            <div key={dp.node_id} className="px-4 py-3 border-b border-border/50 last:border-b-0 flex items-center justify-between gap-4">
               <div className="min-w-0">
                 <p className="text-sm text-text-primary font-medium">{dp.node_id}</p>
                 <p className="text-xs text-text-muted">
@@ -227,15 +229,15 @@ function ServiceGraphTab() {
           <EmptyState title="No traffic observed" description="Edges appear as mesh traffic flows." />
         )}
       >
-        <div className="px-6 py-3 border-b border-border flex items-center justify-between">
+        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
           <h3 className="text-sm font-semibold text-text-primary">
             {data.edge_count} edge(s)
           </h3>
           <span className="text-xs text-text-muted">
-            generated {new Date(data.generated_at).toLocaleTimeString()}
+            generated {formatTime(data.generated_at)}
           </span>
         </div>
-        <div className="grid grid-cols-[2fr_2fr_5rem_5rem_5rem_6rem] gap-3 px-6 py-3 border-b border-border text-text-muted text-xs font-semibold uppercase tracking-wider">
+        <div className={`grid grid-cols-[2fr_2fr_5rem_5rem_5rem_6rem] gap-3 ${GRID_HEADER_CLASS}`}>
           <span>Source</span>
           <span>Destination</span>
           <span>Requests</span>
@@ -246,7 +248,7 @@ function ServiceGraphTab() {
         {data.edges.map((edge, i) => (
           <div
             key={i}
-            className="grid grid-cols-[2fr_2fr_5rem_5rem_5rem_6rem] gap-3 px-6 py-3 border-b border-border/50 last:border-b-0 items-center"
+            className={`grid grid-cols-[2fr_2fr_5rem_5rem_5rem_6rem] gap-3 ${GRID_ROW_CLASS} border-b border-border/50 last:border-b-0`}
           >
             <div className="min-w-0">
               <p className="text-sm text-text-primary truncate">
@@ -296,18 +298,18 @@ function PolicyDeniesTab() {
           tone={data.total_denies > 0 ? "warn" : "good"}
         />
       </div>
-      <Card className="overflow-hidden p-0">
+      <Card padding="none" className="overflow-hidden">
         {data.grouped.length === 0 && (
           <EmptyState title="No recent denies" description="mesh_authz denials will be aggregated here." />
         )}
         {data.grouped.map((group, i) => (
-          <div key={i} className="px-6 py-3 border-b border-border/50 last:border-b-0">
+          <div key={i} className="px-4 py-3 border-b border-border/50 last:border-b-0">
             <div className="flex items-center gap-3 flex-wrap">
               <Badge variant="red">{group.count}×</Badge>
               <span className="text-sm text-text-primary font-medium">{group.rule}</span>
               <span className="text-xs text-text-muted">{group.reason}</span>
               <span className="text-xs text-text-muted ml-auto">
-                last {new Date(group.last_at).toLocaleTimeString()}
+                last {formatTime(group.last_at)}
               </span>
             </div>
             {(group.source || group.destination) && (
@@ -341,12 +343,12 @@ function ClustersTab() {
                 discovery {remote.discovery_enabled ? "on" : "off"}
               </Badge>
             </div>
-            <Card className="overflow-hidden p-0">
+            <Card padding="none" className="overflow-hidden">
               {remote.configured.length === 0 && remote.discovered.length === 0 && (
                 <EmptyState title="No remote clusters" description="Configured and discovered clusters appear here." />
               )}
               {remote.configured.map((cluster) => (
-                <div key={cluster.cluster_name} className="px-6 py-3.5 border-b border-border/50 last:border-b-0">
+                <div key={cluster.cluster_name} className="px-4 py-3 border-b border-border/50 last:border-b-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-medium text-text-primary">{cluster.cluster_name}</span>
                     <Badge variant={cluster.discovered ? "green" : "yellow"}>
@@ -368,7 +370,7 @@ function ClustersTab() {
               {remote.discovered
                 .filter((d) => !remote.configured.some((c) => c.cluster_name === d.cluster_name))
                 .map((cluster) => (
-                  <div key={cluster.cluster_name} className="px-6 py-3.5 border-b border-border/50 last:border-b-0">
+                  <div key={cluster.cluster_name} className="px-4 py-3 border-b border-border/50 last:border-b-0">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium text-text-primary">{cluster.cluster_name}</span>
                       <Badge variant="blue">discovered only</Badge>
@@ -388,9 +390,9 @@ function ClustersTab() {
         {federation && federation.bundles.length > 0 && (
           <>
             <h3 className="text-sm font-semibold text-text-primary">Federated Trust Bundles</h3>
-            <Card className="overflow-hidden p-0">
+            <Card padding="none" className="overflow-hidden">
               {federation.bundles.map((bundle) => (
-                <div key={bundle.cluster} className="px-6 py-3 border-b border-border/50 last:border-b-0 flex items-center justify-between gap-4">
+                <div key={bundle.cluster} className="px-4 py-3 border-b border-border/50 last:border-b-0 flex items-center justify-between gap-4">
                   <div className="min-w-0">
                     <p className="text-sm text-text-primary font-medium">{bundle.cluster}</p>
                     <p className="text-xs text-text-muted truncate">
@@ -458,7 +460,6 @@ function EgressTab() {
             <Input label="Port" type="number" value={testPort} onChange={(e) => setTestPort(e.target.value)} placeholder="443" />
           </div>
           <Button
-            size="sm"
             loading={testEgress.isPending}
             disabled={!canTest.allowed}
             onClick={async () => {
@@ -516,9 +517,9 @@ function WaypointsTab() {
               <h3 className="text-sm font-semibold text-text-primary">Node Waypoint Identities</h3>
               <Badge variant="blue">{nodeIdentities.identity_count}</Badge>
             </div>
-            <Card className="overflow-hidden p-0">
+            <Card padding="none" className="overflow-hidden">
               {nodeIdentities.identities.map((identity) => (
-                <div key={identity.pod_uid} className="px-6 py-3 border-b border-border/50 last:border-b-0 flex items-center justify-between gap-4">
+                <div key={identity.pod_uid} className="px-4 py-3 border-b border-border/50 last:border-b-0 flex items-center justify-between gap-4">
                   <div className="min-w-0">
                     <p className="text-xs font-mono text-text-primary truncate">{identity.spiffe_id}</p>
                     <p className="text-xs text-text-muted">pod {identity.pod_uid}</p>
@@ -545,9 +546,9 @@ function WaypointsTab() {
               </h3>
               <Badge variant="blue">{services.service_count} services</Badge>
             </div>
-            <Card className="overflow-hidden p-0">
+            <Card padding="none" className="overflow-hidden">
               {services.services.map((service) => (
-                <div key={`${service.namespace}/${service.name}`} className="px-6 py-3 border-b border-border/50 last:border-b-0 flex items-center justify-between gap-4">
+                <div key={`${service.namespace}/${service.name}`} className="px-4 py-3 border-b border-border/50 last:border-b-0 flex items-center justify-between gap-4">
                   <span className="text-sm text-text-primary">
                     {service.namespace}/{service.name}
                   </span>
@@ -580,13 +581,10 @@ function TrustTab() {
 export default function MeshPage() {
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-text-primary">Mesh</h1>
-        <p className="text-text-muted text-sm mt-1">
-          Service graph, config convergence, multicluster trust, egress scope,
-          and waypoint topology for mesh-mode gateways.
-        </p>
-      </div>
+      <PageHeader
+        title="Mesh"
+        description="Service graph, config convergence, multicluster trust, egress scope, and waypoint topology for mesh-mode gateways."
+      />
 
       <Tabs defaultValue="overview">
         <TabsList>

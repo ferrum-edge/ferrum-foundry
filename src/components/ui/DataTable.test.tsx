@@ -115,7 +115,7 @@ describe("DataTable sorting", () => {
     await click(header);
     expect(header.getAttribute("aria-sort")).toBe("ascending");
     expect(bodyValues(host, 1)).toEqual(["a", "b"]);
-    expect(host.textContent).toContain("Showing 1-2 of 4");
+    expect(host.textContent).toContain("Showing 1–2 of 4");
 
     await click(nextButton);
     expect(bodyValues(host, 1)).toEqual(["m", "z"]);
@@ -124,7 +124,7 @@ describe("DataTable sorting", () => {
     await click(header);
     expect(header.getAttribute("aria-sort")).toBe("descending");
     expect(bodyValues(host, 1)).toEqual(["z", "m"]);
-    expect(host.textContent).toContain("Showing 1-2 of 4");
+    expect(host.textContent).toContain("Showing 1–2 of 4");
 
     await click(nextButton);
     expect(bodyValues(host, 1)).toEqual(["a", "b"]);
@@ -284,7 +284,7 @@ describe("DataTable out-of-range recovery", () => {
     const button = [...host.querySelectorAll("button")].find((entry) => entry.textContent === "Go to last page")!;
     await click(button);
     expect(bodyValues(host)).toEqual(["Item 20", "Item 21", "Item 22", "Item 23", "Item 24"]);
-    expect(host.textContent).toContain("Showing 21-25 of 25");
+    expect(host.textContent).toContain("Showing 21–25 of 25");
     expect(host.textContent).toContain("Page 2 of 2");
   });
 });

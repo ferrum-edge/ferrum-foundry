@@ -10,6 +10,7 @@ import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Select } from "@/components/ui/Select";
 import { Input } from "@/components/ui/Input";
+import { PageHeader } from "@/components/shared/PageHeader";
 import { useToast } from "@/components/ui/Toast";
 import { useNamespace } from "@/stores/namespace";
 import { useNamespaces } from "@/hooks/useNamespaces";
@@ -48,7 +49,10 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-8 max-w-3xl">
-      <h1 className="text-2xl font-bold text-text-primary">Settings</h1>
+      <PageHeader
+        title="Settings"
+        description="Foundry's gateway connection, namespaces, backup and restore, and display preferences."
+      />
 
       {/* ── BFF Connection Settings ────────────────────────────────── */}
       <section>

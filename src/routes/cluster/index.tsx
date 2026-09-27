@@ -3,10 +3,11 @@
 /* ------------------------------------------------------------------ */
 
 import { Card } from "@/components/ui/Card";
-import { ResourceGrid } from "@/components/ui/ResourceGrid";
+import { GRID_HEADER_CLASS, GRID_ROW_CLASS, ResourceGrid } from "@/components/ui/ResourceGrid";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { PageHeader } from "@/components/shared/PageHeader";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
 import { getApiErrorMessage } from "@/api/client";
@@ -25,17 +26,13 @@ import {
   type BackendCapabilitiesResponse,
   type ProtocolSupport,
 } from "@/api/ops";
+import { formatDateTime, formatTime } from "@/lib/format";
 
 function supportBadge(support: ProtocolSupport, stale = false) {
   if (stale) return <Badge variant="default">{support === "supported" ? "yes" : support === "unsupported" ? "no" : "?"}</Badge>;
   if (support === "supported") return <Badge variant="green">yes</Badge>;
   if (support === "unsupported") return <Badge variant="red">no</Badge>;
   return <Badge variant="default">?</Badge>;
-}
-
-function formatDate(iso?: string | null): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString();
 }
 
 function unsupportedProbeMessage(connectedDataPlanes: number): string {
@@ -73,8 +70,8 @@ type BackendCapabilitiesPanelProps =
 function BackendCapabilitiesPanel(props: BackendCapabilitiesPanelProps) {
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
           <h2 className="text-lg font-semibold text-text-primary">
             Backend Capabilities
           </h2>
@@ -86,7 +83,6 @@ function BackendCapabilitiesPanel(props: BackendCapabilitiesPanelProps) {
           <WriteAction verdict={props.reprobeCapability}>
             <Button
               variant="secondary"
-              size="sm"
               loading={props.reprobePending}
               onClick={() => { void props.onReprobe(); }}
             >
@@ -133,7 +129,7 @@ function ProbeResults({
       ) : null}
       {capabilities ? (
         <p className="text-xs text-text-muted">
-          {isError ? "Last known capabilities" : "Capabilities"} observed: {formatDate(new Date(dataUpdatedAt).toISOString())}
+          {isError ? "Last known capabilities" : "Capabilities"} observed: {formatDateTime(dataUpdatedAt)}
         </p>
       ) : null}
       <ResourceGrid
@@ -148,7 +144,7 @@ function ProbeResults({
           ) : null
         }
       >
-        <div className="grid grid-cols-[2fr_4rem_4rem_4rem_6rem_5rem_4rem_5rem] gap-3 px-6 py-3 border-b border-border text-text-muted text-xs font-semibold uppercase tracking-wider">
+        <div className={`grid grid-cols-[2fr_4rem_4rem_4rem_6rem_5rem_4rem_5rem] gap-3 ${GRID_HEADER_CLASS}`}>
           <span>Backend</span>
           <span>H1</span>
           <span>H2/TLS</span>
@@ -158,11 +154,11 @@ function ProbeResults({
           <span>HBONE</span>
           <span>Probed</span>
         </div>
-        {isLoading ? <div className="px-6 py-8 text-text-muted text-sm">Loading…</div> : null}
+        {isLoading ? <div className="px-4 py-8 text-text-muted text-sm">Loading…</div> : null}
         {(capabilities?.entries ?? []).map((entry) => (
           <div
             key={entry.key}
-            className="grid grid-cols-[2fr_4rem_4rem_4rem_6rem_5rem_4rem_5rem] gap-3 px-6 py-3 border-b border-border/50 last:border-b-0 items-center"
+            className={`grid grid-cols-[2fr_4rem_4rem_4rem_6rem_5rem_4rem_5rem] gap-3 ${GRID_ROW_CLASS} border-b border-border/50 last:border-b-0`}
           >
             <div className="min-w-0">
               <p className="text-xs font-mono text-text-primary truncate">
@@ -180,7 +176,7 @@ function ProbeResults({
             <span>{supportBadge(entry.hbone, isError)}</span>
             <span className="text-xs text-text-muted">
               {entry.last_probe_at_unix_secs
-                ? new Date(entry.last_probe_at_unix_secs * 1000).toLocaleTimeString()
+                ? formatTime(entry.last_probe_at_unix_secs * 1000)
                 : "—"}
             </span>
           </div>
@@ -204,13 +200,10 @@ export default function ClusterPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-text-primary">Cluster</h1>
-        <p className="text-text-muted text-sm mt-1">
-          Control-plane / data-plane topology and probed backend protocol
-          capabilities.
-        </p>
-      </div>
+      <PageHeader
+        title="Cluster"
+        description="Control-plane / data-plane topology and probed backend protocol capabilities."
+      />
 
       {/* Cluster status */}
       {clusterLoading && <SkeletonCard />}
@@ -224,7 +217,7 @@ export default function ClusterPage() {
       )}
       {cluster && (
         <p className="text-xs text-text-muted">
-          Topology observed: {formatDate(new Date(clusterQuery.dataUpdatedAt).toISOString())}
+          Topology observed: {formatDateTime(clusterQuery.dataUpdatedAt)}
         </p>
       )}
       {cluster && isCpStatus(cluster) && (
@@ -242,8 +235,8 @@ export default function ClusterPage() {
             { title: "Data Planes", nodes: cluster.data_planes },
             { title: "Mesh Nodes", nodes: cluster.mesh_nodes },
           ].map(({ title, nodes }) => (
-            <Card key={title} className="overflow-hidden p-0">
-              <div className="px-6 py-3 border-b border-border">
+            <Card key={title} padding="none" className="overflow-hidden">
+              <div className="px-4 py-3 border-b border-border">
                 <h2 className="text-sm font-semibold text-text-primary">{title}</h2>
               </div>
               {nodes.length === 0 && (
@@ -252,13 +245,13 @@ export default function ClusterPage() {
               {nodes.map((node) => (
                 <div
                   key={node.node_id}
-                  className="px-6 py-3 border-b border-border/50 last:border-b-0 flex items-center justify-between gap-4"
+                  className="px-4 py-3 border-b border-border/50 last:border-b-0 flex items-center justify-between gap-4"
                 >
                   <div className="min-w-0">
                     <p className="text-sm text-text-primary font-medium">{node.node_id}</p>
                     <p className="text-xs text-text-muted">
                       v{node.version} · ns {node.namespace} · connected{" "}
-                      {formatDate(node.connected_at)} · last sync {formatDate(node.last_sync_at)}
+                      {formatDateTime(node.connected_at)} · last sync {formatDateTime(node.last_sync_at)}
                     </p>
                   </div>
                   <Badge variant={clusterError ? "default" : "green"}>{clusterError ? "last known online" : "online"}</Badge>
@@ -285,8 +278,8 @@ export default function ClusterPage() {
               <span className="font-mono text-text-primary">{cluster.control_plane.url}</span>
               {cluster.control_plane.is_primary ? " (primary)" : ""}
             </p>
-            <p>Connected since: {formatDate(cluster.control_plane.connected_since)}</p>
-            <p>Last config received: {formatDate(cluster.control_plane.last_config_received_at)}</p>
+            <p>Connected since: {formatDateTime(cluster.control_plane.connected_since)}</p>
+            <p>Last config received: {formatDateTime(cluster.control_plane.last_config_received_at)}</p>
             <p>
               Divergence recoveries:{" "}
               {cluster.control_plane.config_divergence_recoveries_total}

@@ -8,6 +8,8 @@ import { MetricsSampleTime } from "@/components/metrics/MetricsSampleTime";
 import { useAdminMetrics, usePrometheusMetrics } from "@/hooks/useMetrics";
 import { useGatewayRequestStats } from "@/hooks/useGatewayRequestStats";
 import { Card } from "@/components/ui/Card";
+import { PageHeader } from "@/components/shared/PageHeader";
+import { humanizeKey } from "@/lib/format";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { RefreshControl } from "@/components/metrics/RefreshControl";
 import { StatCard } from "@/components/metrics/StatCard";
@@ -94,6 +96,14 @@ export default function MetricsPage() {
     />
   );
 
+  const header = (
+    <PageHeader
+      title="Metrics"
+      description="Gateway traffic, resilience, and runtime metrics from the admin API and Prometheus endpoint."
+      actions={refreshControl}
+    />
+  );
+
   /* ---------------------------------------------------------------- */
   /*  Loading state                                                    */
   /* ---------------------------------------------------------------- */
@@ -101,12 +111,7 @@ export default function MetricsPage() {
   if (isLoading) {
     return (
       <div className="space-y-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <h1 className="text-2xl font-bold text-text-primary">
-            Metrics Dashboard
-          </h1>
-          {refreshControl}
-        </div>
+        {header}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <SkeletonCard />
           <SkeletonCard />
@@ -124,10 +129,7 @@ export default function MetricsPage() {
   if (isError) {
     return (
       <div className="space-y-6">
-        <h1 className="text-2xl font-bold text-text-primary">
-          Metrics Dashboard
-        </h1>
-        {refreshControl}
+        {header}
         <Card>
           <p className="text-danger font-medium">Failed to load metrics</p>
           <p className="text-text-muted text-sm mt-1">
@@ -146,13 +148,7 @@ export default function MetricsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <h1 className="text-2xl font-bold text-text-primary">
-          Metrics Dashboard
-        </h1>
-        {refreshControl}
-      </div>
+      {header}
 
       {/* Gateway Stats */}
       <section>
@@ -225,15 +221,11 @@ export default function MetricsPage() {
             Consumer Index
           </h3>
           <div className="grid grid-cols-2 gap-3">
-            <StatCard label="Total Consumers" value={metrics.consumer_index.total_consumers} />
+            <StatCard label="Total consumers" value={metrics.consumer_index.total_consumers} />
             {(Object.entries(metrics.consumer_index) as [string, number][])
               .filter(([key, val]) => key !== "total_consumers" && val > 0)
               .map(([key, val]) => (
-                <StatCard
-                  key={key}
-                  label={key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
-                  value={val}
-                />
+                <StatCard key={key} label={humanizeKey(key)} value={val} />
               ))}
           </div>
         </Card>

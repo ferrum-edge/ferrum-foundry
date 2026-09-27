@@ -13,9 +13,11 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { PageHeader } from "@/components/shared/PageHeader";
 import { useAuditEvents } from "@/hooks/useOps";
 import { useNamespace } from "@/stores/namespace";
 import type { AuditEvent } from "@/api/ops";
+import { formatDateTime } from "@/lib/format";
 
 const PAGE_SIZE = 50;
 
@@ -65,21 +67,19 @@ function AuditLog() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-text-primary">Audit Log</h1>
-        <p className="text-text-muted text-sm mt-1">
-          Recorded admin API mutations with actor, outcome, and a redacted diff.
-        </p>
-      </div>
+      <PageHeader
+        title="Audit Log"
+        description="Recorded admin API mutations with actor, outcome, and a redacted diff."
+      />
 
       <AuditPipelineCard query={healthQuery} />
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-3 items-end">
-        <div className="w-48">
+      <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-end">
+        <div className="sm:w-48">
           <Input label="Actor" value={actor} onChange={(e) => { setActor(e.target.value); setOffset(0); }} placeholder="JWT subject" />
         </div>
-        <div className="w-44">
+        <div className="sm:w-44">
           <Select
             label="Action"
             value={action || "all"}
@@ -94,7 +94,7 @@ function AuditLog() {
             ]}
           />
         </div>
-        <div className="w-48">
+        <div className="sm:w-48">
           <Select
             label="Resource"
             value={resourceType || "all"}
@@ -113,7 +113,7 @@ function AuditLog() {
       </div>
 
       <ReadState queries={[query]} label="Audit log" optionalFeature>
-        <Card className="overflow-hidden p-0">
+        <Card padding="none" className="overflow-hidden">
           {events.length === 0 && offset > 0 && (
             <EmptyState
               title="No results on this page"
@@ -136,7 +136,7 @@ function AuditLog() {
               key={event.id}
               type="button"
               onClick={() => setExpanded(expanded === event.id ? null : event.id)}
-              className="w-full text-left px-6 py-3 border-b border-border/50 last:border-b-0 hover:bg-bg-card-hover transition-colors"
+              className="w-full text-left px-4 py-3 border-b border-border/50 last:border-b-0 hover:bg-bg-card-hover transition-colors"
             >
               <div className="flex items-center gap-3 flex-wrap">
                 {actionBadge(event.action)}
@@ -146,7 +146,7 @@ function AuditLog() {
                 <span className="text-xs text-text-muted font-mono">{event.resource_id}</span>
                 {outcomeBadge(event.outcome)}
                 <span className="text-xs text-text-muted ml-auto">
-                  {event.actor} · {new Date(event.ts).toLocaleString()}
+                  {event.actor} · {formatDateTime(event.ts)}
                 </span>
               </div>
               {expanded === event.id && (

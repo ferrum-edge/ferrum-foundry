@@ -4,6 +4,7 @@
 
 import type { AdminMetrics } from "@/api/types";
 import { StatCard } from "./StatCard";
+import { formatDateTime } from "@/lib/format";
 
 interface HealthCheckPanelProps {
   healthCheck: AdminMetrics["health_check"];
@@ -38,7 +39,7 @@ export function HealthCheckPanel({ healthCheck }: HealthCheckPanelProps) {
                   </span>
                 </span>
                 <span className="text-text-muted text-xs shrink-0">
-                  since {new Date(t.since_epoch_ms).toLocaleString()}
+                  since {formatDateTime(t.since_epoch_ms)}
                 </span>
               </li>
             ))}

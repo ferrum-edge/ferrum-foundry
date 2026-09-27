@@ -1,4 +1,4 @@
-import { act, type ReactElement } from "react";
+import { act, type ReactElement, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -25,6 +25,7 @@ vi.mock("@/stores/namespace", () => ({
 vi.mock("@tanstack/react-router", () => ({
   useParams: () => ({ pluginId: "group-1" }),
   useNavigate: () => vi.fn(),
+  Link: ({ children, to }: { children?: ReactNode; to?: string }) => <a href={to}>{children}</a>,
 }));
 vi.mock("@/components/ui/Toast", () => ({
   useToast: () => ({ toast: vi.fn() }),

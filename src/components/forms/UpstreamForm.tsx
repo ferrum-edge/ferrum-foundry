@@ -725,7 +725,7 @@ export function UpstreamForm({
                       onCancel={() => setEditingTargetId(null)}
                     />
                   ) : (
-                    <Card className="p-3 flex items-center justify-between">
+                    <Card padding="compact" className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <span className="text-sm text-text-primary font-mono">
                           {target.host}:{target.port}

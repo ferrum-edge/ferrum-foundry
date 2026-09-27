@@ -1,6 +1,7 @@
 import type { HealthResponse } from '@/api/types';
 import type { LoggingSink, KafkaSink } from '@/api/health';
 import { CounterNote, HealthFields, HealthSection, namedFields } from './HealthSection';
+import { formatDateTime, humanizeKey } from '@/lib/format';
 
 const LOG_COUNTERS = ['accepted_records_total', 'saturation_dropped_records_total', 'oversized_dropped_records_total', 'closed_dropped_records_total', 'writer_failures_total', 'flush_failures_total', 'shutdown_timeouts_total', 'shutdown_incomplete_records_total'] as const;
 const KAFKA_COUNTERS = ['admitted_total', 'delivered_total', 'delivery_failed_total', 'queue_rejected_total', 'ferrum_dropped_total', 'entry_oversize_total', 'byte_budget_exhausted_total', 'flush_failures_total', 'flush_timeouts_total', 'shutdown_incomplete_total'] as const;
@@ -60,8 +61,8 @@ export function OperationalHealthCards({ health: h }: { health: HealthResponse }
         <p className="text-sm text-text-secondary break-words">{f.detail}</p>
         <HealthFields fields={namedFields(f, ['origin', 'config_generation', 'observations'])} />
         <HealthFields fields={[
-          ['First observed', new Date(f.first_observed_unix_ms).toLocaleString()],
-          ['Last observed', new Date(f.last_observed_unix_ms).toLocaleString()],
+          ['First observed', formatDateTime(f.first_observed_unix_ms)],
+          ['Last observed', formatDateTime(f.last_observed_unix_ms)],
         ]} />
       </div>)}
     </HealthSection>}
@@ -109,7 +110,7 @@ export function OperationalHealthCards({ health: h }: { health: HealthResponse }
       <HealthFields fields={namedFields(h.log_sink_record_loss, ['dropped_total', 'accepted_total'])} />
       {Object.entries(h.log_sink_record_loss.dropped_by_plugin ?? {}).map(([plugin, reasons]) => <div key={plugin}>
         <h3 className="text-sm font-medium text-text-primary mb-2">{plugin}</h3>
-        <HealthFields fields={Object.entries(reasons).map(([reason, count]) => [reason.replaceAll('_', ' '), count])} />
+        <HealthFields fields={Object.entries(reasons).map(([reason, count]) => [humanizeKey(reason), count])} />
       </div>)}
     </HealthSection>}
     {h.kafka_logging && <HealthSection title="Kafka logging" tone={h.kafka_logging.some(s => s.healthy === false || (!s.finalized && s.accepting === false)) ? 'red' : h.kafka_logging.some(kafkaLoss) ? 'yellow' : 'default'}>

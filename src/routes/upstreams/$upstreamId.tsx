@@ -14,6 +14,8 @@ import { ReadStateNotice } from '@/components/shared/ReadState';
 import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { PageHeader } from "@/components/shared/PageHeader";
+import { TrashIcon } from "@/components/ui/icons";
 import { Badge } from "@/components/ui/Badge";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { SkeletonCard } from "@/components/ui/Skeleton";
@@ -433,27 +435,22 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
       {resourceQuery.isError && (
         <ReadStateNotice query={resourceQuery} label="Upstream configuration" />
       )}
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-text-primary">
-            {upstream.name || "Upstream Detail"}
-          </h1>
-          <p className="text-text-muted text-sm mt-1 font-mono">{upstream.id}</p>
-        </div>
-        <WriteAction verdict={capability}>
-          <Button variant="danger" onClick={() => setDeleteOpen(true)}>
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-              />
-            </svg>
-            Delete
-          </Button>
-        </WriteAction>
-      </div>
+      <PageHeader
+        title={upstream.name || "Upstream Detail"}
+        meta={upstream.id}
+        breadcrumbs={[
+          { label: "Upstreams", to: "/upstreams" },
+          { label: upstream.name || upstream.id },
+        ]}
+        actions={
+          <WriteAction verdict={capability}>
+            <Button variant="danger" onClick={() => setDeleteOpen(true)}>
+              <TrashIcon />
+              Delete
+            </Button>
+          </WriteAction>
+        }
+      />
 
       <ResourceLabels labels={upstream.labels} />
 

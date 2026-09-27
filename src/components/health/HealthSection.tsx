@@ -1,26 +1,50 @@
 import type { ReactNode } from 'react';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
+import { formatDateTime, humanizeKey, isIsoTimestamp } from '@/lib/format';
 
 export type HealthTone = 'red' | 'yellow' | 'green' | 'default';
 export type HealthField = readonly [string, string | number | boolean | null | undefined];
 
-export function HealthFields({ fields }: { fields: readonly HealthField[] }) {
-  return <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
-    {fields.map(([label, value]) => <div key={label} className="flex justify-between gap-3">
-      <dt className="text-text-secondary">{label}</dt>
-      <dd className="text-text-primary text-right break-all">
-        {value == null ? 'Not reported' : typeof value === 'boolean' ? (value ? 'Yes' : 'No') : value}
-      </dd>
-    </div>)}
-  </dl>;
+function displayValue(value: HealthField[1]) {
+  if (value == null) return 'Not reported';
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  // Timestamps arrive as ISO strings; show them like every other date.
+  if (isIsoTimestamp(value)) return formatDateTime(value);
+  return value;
 }
 
-/** Explicit scalar fields only; nested contracts get their own UI, never a JSON flattener. */
+/**
+ * Pairs of fields go two across only when the card itself is wide (a
+ * container query, not the viewport), so half-width cards on a two-column
+ * page never squeeze values into broken fragments.
+ */
+export function HealthFields({ fields }: { fields: readonly HealthField[] }) {
+  return <div className="@container">
+    <dl className="grid grid-cols-1 @xl:grid-cols-2 gap-x-6 gap-y-2 text-sm">
+      {fields.map(([label, value]) => <div key={label} className="flex justify-between gap-3">
+        <dt className="text-text-secondary">{label}</dt>
+        <dd className="min-w-0 text-text-primary text-right [overflow-wrap:anywhere] tabular-nums">{displayValue(value)}</dd>
+      </div>)}
+    </dl>
+  </div>;
+}
+
+const UNIX_MS_SUFFIX = '_unix_ms';
+
+/**
+ * Explicit scalar fields only; nested contracts get their own UI, never a JSON
+ * flattener. Keys become sentence-case labels, and a `*_unix_ms` epoch is
+ * shown as a date under the label without its unit suffix.
+ */
 export function namedFields<T extends object>(data: T, keys: readonly (keyof T)[]): HealthField[] {
   return keys.map((key) => {
+    const name = String(key);
     const value = data[key];
-    return [String(key).replaceAll('_', ' '),
+    if (name.endsWith(UNIX_MS_SUFFIX) && typeof value === 'number') {
+      return [humanizeKey(name.slice(0, -UNIX_MS_SUFFIX.length)), formatDateTime(value)];
+    }
+    return [humanizeKey(name),
       typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' ? value : undefined];
   });
 }

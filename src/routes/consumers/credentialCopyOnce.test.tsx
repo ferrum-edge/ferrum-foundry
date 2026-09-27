@@ -128,7 +128,7 @@ describe("submitted credential recovery", () => {
     await typeInto(inputByLabel(host, "Username"), "new-user");
     await click("Credentials");
     const field = inputByLabel(host, label);
-    await act(async () => { field.closest(".items-end")!.querySelector<HTMLButtonElement>("button")!.click(); });
+    await act(async () => { field.closest(".items-start")!.querySelector<HTMLButtonElement>("button")!.click(); });
     const secret = field.value;
     expect(secret).toHaveLength(32);
     await submit();

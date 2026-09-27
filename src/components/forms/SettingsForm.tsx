@@ -8,7 +8,7 @@ import { api, getApiErrorMessage, HANDLED_STATUSES } from "@/api/client";
 import { isGatewayTargetRetired } from "@/api/gatewayTarget";
 import { validateNamespaceName } from "@/api/namespaces";
 import { Card } from "@/components/ui/Card";
-import { Input } from "@/components/ui/Input";
+import { Input, READ_ONLY_CLASSES } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Select } from "@/components/ui/Select";
@@ -325,9 +325,26 @@ export function SettingsForm() {
 
   /* ── Render ─────────────────────────────────────────────────────── */
 
+  // Environment/secret-mounted configuration: shown as values, not as
+  // greyed-out controls, and explained once above the fields it covers.
+  const immutable = !settings.runtimeSettingsEnabled;
+
   return (
     <div className="space-y-6">
       <CapabilityNotice verdict={canWrite} />
+      {immutable && (
+        <div
+          role="note"
+          className="flex flex-col gap-2 rounded-lg border border-border bg-bg-card px-4 py-3 sm:flex-row sm:items-center sm:gap-3"
+        >
+          <Badge variant="default" className="self-start whitespace-nowrap sm:self-auto">
+            Read-only · set via environment
+          </Badge>
+          <p className="text-text-muted text-xs">
+            Connection and signing settings are immutable environment/secret-mounted configuration.
+          </p>
+        </div>
+      )}
       {/* Admin URL + TLS */}
       <Card>
         <h2 className="text-sm font-semibold text-text-primary mb-4">
@@ -340,14 +357,15 @@ export function SettingsForm() {
             onChange={(e) => update("adminUrl", e.target.value)}
             placeholder="http://localhost:9876"
             helpText="The Ferrum Admin API URL that this BFF server connects to"
-            disabled={!settings.runtimeSettingsEnabled}
+            disabled={immutable}
+            readOnly={immutable}
           />
 
           <div className="flex min-w-0 flex-col gap-1.5">
             <span className="text-text-secondary text-sm font-medium">
               JWT Secret
             </span>
-            <div className="rounded-lg border border-border bg-bg-input px-3 py-2 text-text-muted text-sm">
+            <div className={`rounded-lg border px-3 py-2 text-sm ${READ_ONLY_CLASSES}`}>
               Configured via the <code className="font-mono text-text-secondary">FERRUM_JWT_SECRET</code> environment variable.
             </div>
             <p className="text-text-muted text-xs">
@@ -363,7 +381,8 @@ export function SettingsForm() {
               onChange={(e) => update("jwtIssuer", e.target.value)}
               placeholder="ferrum-edge"
               helpText="JWT 'iss' claim. Must match gateway's FERRUM_ADMIN_JWT_ISSUER."
-              disabled={!settings.runtimeSettingsEnabled}
+              disabled={immutable}
+              readOnly={immutable}
             />
             <Input
               label="JWT TTL (seconds)"
@@ -373,7 +392,8 @@ export function SettingsForm() {
               onChange={(e) => update("jwtTtl", numberDraftFromInput(e.target.value))}
               error={errors.jwtTtl}
               helpText="Token lifetime in seconds. Maps to FERRUM_JWT_TTL."
-              disabled={!settings.runtimeSettingsEnabled}
+              disabled={immutable}
+              readOnly={immutable}
             />
           </div>
           {settings.authMode === "trusted-proxy" && (
@@ -394,14 +414,17 @@ export function SettingsForm() {
                 { value: "operator", label: "Operator" },
                 { value: "admin", label: "Admin" },
               ]}
-              disabled={!settings.runtimeSettingsEnabled || settings.authMode !== "static"}
+              disabled={immutable || settings.authMode !== "static"}
+              readOnly={immutable}
             />
             <Input
               label="JWT Audience"
               value={Array.isArray(settings.jwtAudience) ? settings.jwtAudience.join(", ") : settings.jwtAudience ?? ""}
               onChange={(event) => update("jwtAudience", event.target.value)}
               helpText="Optional comma-separated aud claim; leave empty unless the gateway requires it."
-              disabled={!settings.runtimeSettingsEnabled}
+              placeholder={immutable ? "Not set" : undefined}
+              disabled={immutable}
+              readOnly={immutable}
             />
           </div>
           <Input
@@ -411,7 +434,8 @@ export function SettingsForm() {
             onBlur={checkNamespaceGrants}
             helpText="Applies to new static logins: exact comma-separated namespace grants, or * for every namespace."
             error={errors.jwtNamespaces}
-            disabled={!settings.runtimeSettingsEnabled || settings.authMode !== "static"}
+            disabled={immutable || settings.authMode !== "static"}
+            readOnly={immutable}
           />
         </div>
       </Card>
@@ -423,7 +447,7 @@ export function SettingsForm() {
             TLS
           </h2>
           <div className="space-y-4">
-            <div className="rounded-lg border border-border bg-bg-input px-3 py-2 text-sm text-text-secondary">
+            <div className={`rounded-lg border px-3 py-2 text-sm ${READ_ONLY_CLASSES}`}>
               Custom CA bundle: {settings.tlsCaConfigured ? "configured by the server" : "not configured"}
             </div>
             <label className="flex items-center gap-3 cursor-pointer">
@@ -432,7 +456,7 @@ export function SettingsForm() {
                 checked={settings.tlsVerify}
                 onChange={(e) => update("tlsVerify", e.target.checked)}
                 className="h-4 w-4 rounded border-border bg-bg-input accent-orange"
-                disabled={!settings.runtimeSettingsEnabled}
+                disabled={immutable}
               />
               <div>
                 <span className="text-sm font-medium text-text-secondary">
@@ -460,7 +484,8 @@ export function SettingsForm() {
             value={numberDraftText(settings.connectTimeout)}
             onChange={(e) => update("connectTimeout", numberDraftFromInput(e.target.value))}
             error={errors.connectTimeout}
-            disabled={!settings.runtimeSettingsEnabled}
+            disabled={immutable}
+            readOnly={immutable}
           />
           <Input
             label="Read Timeout (ms)"
@@ -469,7 +494,8 @@ export function SettingsForm() {
             value={numberDraftText(settings.readTimeout)}
             onChange={(e) => update("readTimeout", numberDraftFromInput(e.target.value))}
             error={errors.readTimeout}
-            disabled={!settings.runtimeSettingsEnabled}
+            disabled={immutable}
+            readOnly={immutable}
           />
           <Input
             label="Write Timeout (ms)"
@@ -478,7 +504,8 @@ export function SettingsForm() {
             value={numberDraftText(settings.writeTimeout)}
             onChange={(e) => update("writeTimeout", numberDraftFromInput(e.target.value))}
             error={errors.writeTimeout}
-            disabled={!settings.runtimeSettingsEnabled}
+            disabled={immutable}
+            readOnly={immutable}
           />
         </div>
       </Card>
@@ -508,18 +535,16 @@ export function SettingsForm() {
       </Card>
 
       {/* Actions */}
-      <div className="flex items-center justify-between gap-4">
-        <p className="text-text-muted text-xs max-w-md">
-          {settings.runtimeSettingsEnabled
-            ? "Overrides reset to environment values on BFF restart and are restricted to the server allowlist."
-            : "Connection and signing settings are immutable environment/secret-mounted configuration."}
-        </p>
-        {settings.runtimeSettingsEnabled && (
+      {!immutable && (
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+          <p className="text-text-muted text-xs max-w-md">
+            Overrides reset to environment values on BFF restart and are restricted to the server allowlist.
+          </p>
           <Button onClick={handleSave} loading={saving} disabled={!canWrite.allowed}>
             Save Settings
           </Button>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

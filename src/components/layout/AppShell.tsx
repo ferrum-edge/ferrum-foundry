@@ -22,7 +22,7 @@ export function AppShell() {
         sidebarToggleRef={sidebarToggleRef}
       />
 
-      <main className="md:ml-[var(--sidebar-width)] mt-[var(--nav-height)] p-6">
+      <main className="md:ml-[var(--sidebar-width)] mt-[var(--nav-height)] p-4 sm:p-6">
         <GatewayMetadataBanner />
         <ErrorBoundary>
           <Outlet />

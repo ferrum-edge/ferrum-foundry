@@ -1,5 +1,13 @@
 import { forwardRef, useId, type InputHTMLAttributes } from "react";
 
+/**
+ * A value the user can read but not change (e.g. environment-configured
+ * settings): a dashed, unfilled box at full text contrast, so it reads as a
+ * displayed value rather than a greyed-out control.
+ */
+export const READ_ONLY_CLASSES =
+  "bg-bg-primary/40 border-dashed border-border text-text-secondary cursor-default";
+
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string;
   error?: string;
@@ -27,7 +35,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
           id={inputId}
           aria-describedby={error || helpText ? descriptionId : undefined}
           aria-invalid={error ? true : undefined}
-          className={`w-full min-w-0 bg-bg-input border rounded-lg px-3 py-2 text-text-primary text-sm placeholder:text-text-muted transition-colors duration-150 disabled:opacity-60 disabled:cursor-not-allowed ${error ? "border-danger focus:border-danger focus:ring-1 focus:ring-danger/30" : "border-border focus:border-orange focus:ring-1 focus:ring-orange/30"} ${className}`}
+          className={`w-full min-w-0 border rounded-lg px-3 py-2 text-sm placeholder:text-text-muted transition-colors duration-150 ${props.readOnly ? READ_ONLY_CLASSES : `bg-bg-input text-text-primary disabled:opacity-60 disabled:cursor-not-allowed ${error ? "border-danger focus:border-danger focus:ring-1 focus:ring-danger/30" : "border-border focus:border-orange focus:ring-1 focus:ring-orange/30"}`} ${className}`}
           {...props}
         />
         {helpText && !error && (

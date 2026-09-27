@@ -38,6 +38,7 @@ import {
   type TrustBundleFormState,
 } from "@/lib/trustBundleForm";
 import { useNamespace } from "@/stores/namespace";
+import { formatDateTime } from "@/lib/format";
 
 interface EditorState {
   mode: "create" | "edit";
@@ -294,7 +295,7 @@ export function GatewayTrustManager() {
                 </div>
                 <p className="text-xs text-text-muted mt-2">
                   {counts.x509} X.509 · {counts.jwt} JWT · {counts.federated} federated
-                  {bundle.updated_at ? ` · updated ${new Date(bundle.updated_at).toLocaleString()}` : ""}
+                  {bundle.updated_at ? ` · updated ${formatDateTime(bundle.updated_at)}` : ""}
                 </p>
                 <p className="text-xs text-text-muted mt-1">
                   namespace <span className="font-mono">{bundle.namespace}</span> · id {" "}
