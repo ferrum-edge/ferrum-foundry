@@ -132,6 +132,14 @@ function ProxyEditor({ session }: { session: EditorSession }) {
   const pluginsKnown =
     pluginPolicyRequested &&
     pluginQueries.every((query) => resolveReadState(query) === 'loaded');
+  // The tab count is read lazily: before the tab is opened (or while it loads)
+  // the label carries no count at all, and only a failed read says "unknown".
+  const pluginsReadFailed =
+    pluginPolicyRequested &&
+    pluginQueries.some((query) => {
+      const state = resolveReadState(query);
+      return state === 'unavailable' || state === 'stale';
+    });
 
   // Fetch the linked upstream when its tab is opened. The tab's own label is
   // decided by `proxy.upstream_id`, which the detail read already carries, so
@@ -317,7 +325,12 @@ function ProxyEditor({ session }: { session: EditorSession }) {
         <TabsList>
           <TabsTrigger value="config">Config</TabsTrigger>
           <TabsTrigger value="plugins">
-            Plugins ({pluginsKnown ? proxyPlugins.length : 'unknown'})
+            Plugins
+            {pluginsKnown
+              ? ` (${proxyPlugins.length})`
+              : pluginsReadFailed
+                ? " (unknown)"
+                : ""}
           </TabsTrigger>
           <TabsTrigger value="consumers">
             Consumers
