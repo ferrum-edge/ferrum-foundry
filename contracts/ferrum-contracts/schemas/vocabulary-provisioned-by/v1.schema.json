@@ -1,0 +1,267 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ferrum-edge/ferrum-contracts/schemas/vocabulary-provisioned-by/v1.schema.json",
+  "title": "Provisioned-by values v1",
+  "description": "Shape of vocabularies/provisioned-by.json: the provisioned-by resource label, the X-Ferrum-Provisioned-By header rules, and companion product values.",
+  "x-contract": {
+    "name": "vocabulary-provisioned-by",
+    "version": 1,
+    "status": "implemented",
+    "owner": "ferrum-edge/ferrum-contracts",
+    "instance": "vocabularies/provisioned-by.json"
+  },
+  "type": "object",
+  "required": [
+    "$schema",
+    "vocabulary",
+    "version",
+    "edge_release",
+    "description",
+    "provenance",
+    "label",
+    "header",
+    "values",
+    "open_set"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "const": "https://github.com/ferrum-edge/ferrum-contracts/schemas/vocabulary-provisioned-by/v1.schema.json"
+    },
+    "vocabulary": {
+      "type": "string",
+      "const": "provisioned-by"
+    },
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "edge_release": {
+      "type": "string",
+      "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "Edge release tag the vocabulary was read from."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provenance": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/Provenance"
+      }
+    },
+    "main_branch_delta": {
+      "$ref": "#/$defs/BranchDelta"
+    },
+    "label": {
+      "type": "object",
+      "required": [
+        "key",
+        "resources",
+        "available_since"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "const": "provisioned-by"
+        },
+        "resources": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "Proxy",
+              "Consumer",
+              "Upstream",
+              "PluginConfig"
+            ]
+          }
+        },
+        "available_since": {
+          "type": "string",
+          "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
+        }
+      }
+    },
+    "header": {
+      "type": "object",
+      "required": [
+        "name",
+        "occurrences",
+        "min_length",
+        "max_length_bytes",
+        "control_characters",
+        "trimmed",
+        "behavior"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "const": "X-Ferrum-Provisioned-By"
+        },
+        "occurrences": {
+          "const": 1
+        },
+        "min_length": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_length_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "control_characters": {
+          "type": "boolean"
+        },
+        "trimmed": {
+          "type": "boolean"
+        },
+        "behavior": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "values": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/Value"
+      }
+    },
+    "open_set": {
+      "type": "boolean",
+      "description": "true: Edge accepts values outside this list."
+    },
+    "open_set_note": {
+      "type": "string"
+    }
+  },
+  "$defs": {
+    "Provenance": {
+      "type": "object",
+      "required": [
+        "repo",
+        "commit",
+        "path"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "repo": {
+          "type": "string",
+          "pattern": "^ferrum-edge/[A-Za-z0-9._-]+$"
+        },
+        "ref": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Tag or branch the commit was read from."
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "symbols": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "sections": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    },
+    "BranchDelta": {
+      "type": "object",
+      "required": [
+        "repo",
+        "ref",
+        "commit",
+        "summary"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "repo": {
+          "type": "string",
+          "pattern": "^ferrum-edge/[A-Za-z0-9._-]+$"
+        },
+        "ref": {
+          "type": "string"
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "description": "How the owner's default branch differs from the pinned release, as of the recorded commit."
+    },
+    "Value": {
+      "type": "object",
+      "required": [
+        "value",
+        "product",
+        "repo",
+        "sets"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^[^\\s](.*[^\\s])?$"
+        },
+        "product": {
+          "type": "string",
+          "minLength": 1
+        },
+        "repo": {
+          "type": "string",
+          "pattern": "^ferrum-edge/[A-Za-z0-9._-]+$"
+        },
+        "sets": {
+          "enum": [
+            "label",
+            "header"
+          ],
+          "description": "Whether the product writes the label itself or sends the header."
+        },
+        "introduced_in": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]+#[0-9]+$",
+          "description": "Pull request that made the product send this value (repo#number)."
+        },
+        "observed_in": {
+          "$ref": "#/$defs/Provenance"
+        }
+      }
+    }
+  }
+}

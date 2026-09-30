@@ -1,0 +1,345 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ferrum-edge/ferrum-contracts/schemas/vocabulary-plugin-catalog/v1.schema.json",
+  "title": "Plugin catalog index v1",
+  "description": "Shape of vocabularies/plugin-catalog.json: every built-in Ferrum Edge plugin with its metadata and a pointer to its config schema in Edge's openapi.yaml.",
+  "x-contract": {
+    "name": "vocabulary-plugin-catalog",
+    "version": 1,
+    "status": "implemented",
+    "owner": "ferrum-edge/ferrum-contracts",
+    "instance": "vocabularies/plugin-catalog.json"
+  },
+  "type": "object",
+  "required": [
+    "$schema",
+    "vocabulary",
+    "version",
+    "edge_release",
+    "description",
+    "provenance",
+    "config_schema_document",
+    "protocol_values",
+    "plugins",
+    "removed_plugins"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "const": "https://github.com/ferrum-edge/ferrum-contracts/schemas/vocabulary-plugin-catalog/v1.schema.json"
+    },
+    "vocabulary": {
+      "type": "string",
+      "const": "plugin-catalog"
+    },
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "edge_release": {
+      "type": "string",
+      "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "Edge release tag the vocabulary was read from."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provenance": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/Provenance"
+      }
+    },
+    "main_branch_delta": {
+      "$ref": "#/$defs/BranchDelta"
+    },
+    "config_schema_document": {
+      "type": "object",
+      "required": [
+        "repo",
+        "ref",
+        "commit",
+        "path",
+        "sha256",
+        "openapi"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "repo": {
+          "const": "ferrum-edge/ferrum-edge"
+        },
+        "ref": {
+          "type": "string"
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "openapi": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    },
+    "protocol_values": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "http",
+        "grpc",
+        "websocket",
+        "tcp",
+        "udp"
+      ],
+      "properties": {
+        "http": {
+          "type": "string"
+        },
+        "grpc": {
+          "type": "string"
+        },
+        "websocket": {
+          "type": "string"
+        },
+        "tcp": {
+          "type": "string"
+        },
+        "udp": {
+          "type": "string"
+        }
+      }
+    },
+    "plugins": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/Plugin"
+      }
+    },
+    "removed_plugins": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "failure_policy"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "$ref": "#/$defs/PluginName"
+          },
+          "failure_policy": {
+            "$ref": "#/$defs/FailurePolicy"
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "Provenance": {
+      "type": "object",
+      "required": [
+        "repo",
+        "commit",
+        "path"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "repo": {
+          "type": "string",
+          "pattern": "^ferrum-edge/[A-Za-z0-9._-]+$"
+        },
+        "ref": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Tag or branch the commit was read from."
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "symbols": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "sections": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    },
+    "BranchDelta": {
+      "type": "object",
+      "required": [
+        "repo",
+        "ref",
+        "commit",
+        "summary"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "repo": {
+          "type": "string",
+          "pattern": "^ferrum-edge/[A-Za-z0-9._-]+$"
+        },
+        "ref": {
+          "type": "string"
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "description": "How the owner's default branch differs from the pinned release, as of the recorded commit."
+    },
+    "PluginName": {
+      "type": "string",
+      "pattern": "^[a-z_][a-z0-9_]*$",
+      "maxLength": 255
+    },
+    "FailurePolicy": {
+      "enum": [
+        "fail_closed",
+        "keep_last_known_good",
+        "optional_fail_open"
+      ],
+      "description": "PluginFailurePolicy: what the gateway does when an enabled config fails to construct while loading a snapshot."
+    },
+    "Plugin": {
+      "type": "object",
+      "required": [
+        "name",
+        "classification",
+        "priority",
+        "failure_policy",
+        "active_phases",
+        "protocols",
+        "protocol_rationale",
+        "response_body_producer",
+        "config_schema"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/PluginName"
+        },
+        "classification": {
+          "enum": [
+            "public",
+            "reserved",
+            "config_only"
+          ]
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000,
+          "description": "Built-in priority; lower runs first."
+        },
+        "failure_policy": {
+          "$ref": "#/$defs/FailurePolicy"
+        },
+        "active_phases": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Active-phases cell of Edge's documented execution order. Documentation text, not a closed enum."
+        },
+        "active_phases_note": {
+          "type": "string"
+        },
+        "protocols": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "http",
+              "grpc",
+              "websocket",
+              "tcp",
+              "udp"
+            ]
+          },
+          "description": "Documented protocol surface. Empty for config-only plugins."
+        },
+        "protocol_rationale": {
+          "type": "string"
+        },
+        "response_body_producer": {
+          "type": "boolean",
+          "description": "Member of BUILTIN_RESPONSE_BODY_PRODUCERS: its response hooks can return a replacement body."
+        },
+        "config_schema": {
+          "type": "object",
+          "required": [
+            "document",
+            "pointer",
+            "config_required_when_enabled"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "document": {
+              "const": "openapi.yaml"
+            },
+            "pointer": {
+              "type": "string",
+              "pattern": "^#/components/schemas/[A-Za-z0-9]+$"
+            },
+            "config_required_when_enabled": {
+              "type": "boolean"
+            },
+            "scope_constraint": {
+              "enum": [
+                "global",
+                "proxy",
+                "proxy_group"
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}
