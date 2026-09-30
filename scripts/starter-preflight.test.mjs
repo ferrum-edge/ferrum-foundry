@@ -359,27 +359,41 @@ test("every demo service can prove it is ready", async () => {
 
 test("the demo backend runs and probes with the image's own Node", async () => {
   // The demo backend's command is bare Node arguments and its probe names a
-  // Node binary, so both depend on the Foundry runtime base. A base change
-  // that moves Node (distroless ships /nodejs/bin/node, the slim image
-  // /usr/local/bin/node) must move the entrypoint, the image HEALTHCHECK, and
-  // this probe together, or `up --wait` fails on an unhealthy backend.
+  // Node binary, so both depend on the Foundry runtime base. The starter also
+  // runs already-published images (the released digest, a cached `:main`),
+  // which are distroless and have Node only at /nodejs/bin/node. The probe
+  // therefore names that path, and the runtime stage must provide it: natively
+  // on distroless, or by linking it on the temporary slim runtime (#504). The
+  // entrypoint and the image HEALTHCHECK use the same path.
+  const DISTROLESS_NODE = "/nodejs/bin/node";
   const dockerfile = await readFile(new URL("../docker/Dockerfile", import.meta.url), "utf8");
-  const runtime = dockerfile.slice(dockerfile.lastIndexOf("\nFROM "));
+  const runtime = dockerfile.slice(dockerfile.lastIndexOf("\nFROM ") + 1);
+  const base = runtime.slice(0, runtime.indexOf("\n"));
   const entrypoint = runtime.match(/^ENTRYPOINT \["([^"]+)"\]$/m);
   assert.ok(entrypoint, "the runtime stage must name Node as its exec-form entrypoint");
-  const node = entrypoint[1];
-  assert.match(node, /^\/.*\/node$/, "the entrypoint must be an absolute path to Node");
+  assert.equal(entrypoint[1], DISTROLESS_NODE, "the entrypoint must be Node at the distroless path");
   assert.ok(
-    runtime.includes(`CMD ["${node}", "-e",`),
+    runtime.includes(`CMD ["${DISTROLESS_NODE}", "-e",`),
     "the image HEALTHCHECK must use the entrypoint's Node binary",
+  );
+  const DISTROLESS_BASE = /^FROM gcr\.io\/distroless\/nodejs\d+-debian\d+:nonroot@sha256:[0-9a-f]{64}$/;
+  const SLIM_BASE = /^FROM node:\d+-[a-z]+-slim@sha256:[0-9a-f]{64}$/;
+  const native = DISTROLESS_BASE.test(base);
+  const linked =
+    SLIM_BASE.test(base) &&
+    runtime.includes("mkdir -p /nodejs/bin") &&
+    runtime.includes(`ln -s /usr/local/bin/node ${DISTROLESS_NODE}`);
+  assert.ok(
+    native || linked,
+    `the runtime base must ship ${DISTROLESS_NODE} (distroless) or link it (${base})`,
   );
 
   const compose = await readFile(new URL("compose.yaml", STARTER), "utf8");
   const backend = compose.slice(compose.indexOf("  demo-backend:"));
   assert.match(backend, /^ {4}command:\n {6}- "-e"\n/m, "the command must be Node arguments");
   assert.ok(
-    backend.includes(`- CMD\n        - ${node}\n`),
-    "the demo probe must use the image's Node binary",
+    backend.includes(`- CMD\n        - ${DISTROLESS_NODE}\n`),
+    "the demo probe must use the Node path every published Foundry image has",
   );
 });
 

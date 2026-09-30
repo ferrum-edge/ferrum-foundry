@@ -2,7 +2,8 @@
 
 # Keep the build and runtime on the same active LTS Node.js major (24 until
 # Node 26 enters LTS). Both multi-platform base indexes are digest-pinned so
-# release provenance identifies exact inputs; move both majors together.
+# release provenance identifies the base images (until #504 the runtime also
+# fetches pinned OpenSSL packages at build time); move both majors together.
 FROM node:24-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS builder
 WORKDIR /app
 
@@ -22,21 +23,27 @@ RUN npm run build \
 # TODO(#504): return the runtime to gcr.io/distroless/nodejs24-debian13:nonroot
 # once upstream publishes a digest whose libssl3t64 carries the Debian 13 fix
 # for CVE-2026-75804 and CVE-2026-84782. Until then the runtime is the Debian 13
-# Node slim image, cut back toward what distroless ships: Node and its shared
-# libraries, no package manager, running as UID/GID 65532 with Node itself as
-# the entrypoint. The deployment starter's demo backend relies on that
-# entrypoint and on the Node path below (scripts/starter-preflight.test.mjs).
+# Node slim image with the Node package managers removed, running as UID/GID
+# 65532 with Node itself as the entrypoint. It is not distroless: a shell and
+# apt/dpkg remain (dpkg's status data also lets the scanner see OS packages).
+#
+# Node is exposed at /nodejs/bin/node, the distroless path, so the entrypoint,
+# the HEALTHCHECK, and the deployment starter's demo-backend probe work
+# unchanged on this image, on already-published distroless images, and after
+# #504 (scripts/starter-preflight.test.mjs).
 FROM node:24-trixie-slim@sha256:8ec5d7557396cfe32d21c3f9c13072355ceab22b584578ca4bb28af31120cffe
 
-# - Upgrade only the OpenSSL packages, to the fixed 3.5.7-1~deb13u3, until the
-#   pinned base carries it; drop this step when it does.
-# - Remove npm, npx, corepack, and yarn: the runtime never installs packages,
-#   and npm's bundled dependencies carry their own scanner findings.
+# - Upgrade only the OpenSSL packages, pinned to the fixed 3.5.7-1~deb13u3, so
+#   the build fails loudly if the security feed no longer offers exactly that
+#   version. Drop this step once the pinned base carries it.
+# - Remove npm, npx, corepack, and yarn: the runtime never installs Node
+#   packages, and npm's bundled dependencies carry their own scanner findings.
+# - Link /nodejs/bin/node to the image's Node.
 # - Create the distroless-equivalent nonroot user with a numeric UID, so
 #   Kubernetes `runAsNonRoot` can verify it.
 RUN apt-get update \
   && apt-get install --no-install-recommends --only-upgrade --yes \
-    libssl3t64 openssl openssl-provider-legacy \
+    libssl3t64=3.5.7-1~deb13u3 openssl-provider-legacy=3.5.7-1~deb13u3 \
   && rm -rf /var/lib/apt/lists/* \
   && rm -rf /usr/local/lib/node_modules /usr/local/include/node /usr/local/share/doc/node \
     /opt/yarn-v* \
@@ -45,6 +52,8 @@ RUN apt-get update \
   && for tool in npm npx corepack yarn yarnpkg; do \
     if command -v "$tool" >/dev/null; then echo "$tool is still installed" >&2; exit 1; fi; \
   done \
+  && mkdir -p /nodejs/bin \
+  && ln -s /usr/local/bin/node /nodejs/bin/node \
   && groupadd --system --gid 65532 nonroot \
   && useradd --system --uid 65532 --gid nonroot --no-log-init \
     --home-dir /home/nonroot --create-home --shell /usr/sbin/nologin nonroot
@@ -69,7 +78,7 @@ USER 65532:65532
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD ["/usr/local/bin/node", "-e", "const p=process.env.PORT||8080;fetch('http://127.0.0.1:'+p+'/api/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+  CMD ["/nodejs/bin/node", "-e", "const p=process.env.PORT||8080;fetch('http://127.0.0.1:'+p+'/api/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
 
-ENTRYPOINT ["/usr/local/bin/node"]
+ENTRYPOINT ["/nodejs/bin/node"]
 CMD ["dist-server/index.js"]
