@@ -72,3 +72,17 @@ covers these failure paths.
 Passing establishes compatibility with the pinned image only. Treat any
 divergence as a compatibility change to review: do not widen the rejection
 table or move the image pin to make a failure go away.
+
+## Shared plugin catalog contract
+
+Foundry pins the plugin catalog and the `provisioned-by` vocabulary from
+Ferrum Contracts in
+[`contracts/ferrum-contracts/PIN`](../contracts/ferrum-contracts/PIN).
+The pinned files and the local plugin names and provisioning markers are checked
+by `scripts/ferrum-contracts.test.mjs` in the normal contract test suite.
+
+To bump the pin, choose a `contracts-edge-*` release, download the adopted
+vocabulary and schema files from that tag into the same paths, resolve the tag
+to its commit SHA, and update `PIN` with the new commit and each file's SHA-256.
+Then update this document if the adopted file set changes and run CI; the
+contract test fails if a vendored file or local copy drifts.

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Pin Ferrum Contracts `contracts-edge-0.9.8` for the plugin catalog and
+  `provisioned-by` vocabulary, with CI checks for vendored file integrity and
+  Foundry's local catalog and provisioning markers.
+
 ### Security
 
 - Update production dependencies `brace-expansion` and `fast-uri` to versions
