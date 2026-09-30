@@ -40,10 +40,12 @@ updates:
     labels:
       - "dependencies"
     ignore:
-      # The builder's Node major is deliberately coupled to the distroless
-      # runtime major in docker/Dockerfile: a major bump here alone would build
-      # against one Node and run on another. The pair is moved by hand once
-      # the matching distroless nodejs image exists.
+      # The builder's Node major is deliberately coupled to the runtime major
+      # in docker/Dockerfile: a major bump here alone would build against one
+      # Node and run on another. The runtime is temporarily the node slim image
+      # rather than distroless (return tracked in #504), so this rule now
+      # covers both stages; move the pair by hand, and once back on distroless
+      # only after the matching distroless nodejs image exists.
       - dependency-name: "node"
         update-types:
           - "version-update:semver-major"

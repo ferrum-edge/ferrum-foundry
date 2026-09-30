@@ -445,6 +445,31 @@ jobs:
             echo "Unsafe runtime user: ${runtime_user:-unset}" >&2
             exit 1
           fi
+          # Kubernetes runAsNonRoot can only verify a numeric user.
+          if ! printf '%s\n' "$runtime_user" | grep --quiet --extended-regexp '^[0-9]+(:[0-9]+)?$'; then
+            echo "Runtime user must be numeric UID[:GID]: $runtime_user" >&2
+            exit 1
+          fi
+          # Run Node as the image's entrypoint, as the starter's demo backend
+          # does: prove the effective IDs are not root, and that there are no
+          # Node package managers (npm, npx, corepack, yarn) in the runtime.
+          docker run --rm --network none ferrum-foundry:ci -e '
+            const fs = require("node:fs");
+            const path = require("node:path");
+            if (process.getuid() === 0 || process.getgid() === 0) {
+              throw new Error("runtime runs with root user or group");
+            }
+            const tools = ["npm", "npx", "corepack", "yarn", "yarnpkg"];
+            const dirs = (process.env.PATH || "").split(":").filter(Boolean);
+            const found = dirs
+              .flatMap((dir) => tools.map((tool) => path.join(dir, tool)))
+              .filter((file) => fs.existsSync(file));
+            const modules = path.join(path.dirname(process.execPath), "..", "lib", "node_modules");
+            if (fs.existsSync(modules)) found.push(modules);
+            if (found.length > 0) {
+              throw new Error("Node package managers in the runtime image: " + found.join(", "));
+            }
+          '
           docker network create ferrum-foundry-contract
           docker run --detach --name ferrum-edge-for-foundry \
             --network ferrum-foundry-contract \

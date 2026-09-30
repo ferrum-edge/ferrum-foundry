@@ -155,8 +155,8 @@ services:
     restart: unless-stopped
     profiles: [demo]
     # A disposable origin for the proxy created in the walkthrough. The
-    # Foundry image is distroless with Node as its entrypoint, so this needs
-    # no extra image and no shell.
+    # Foundry image has Node itself as its entrypoint, so this needs no extra
+    # image and no shell.
     command:
       - "-e"
       - |
@@ -173,7 +173,10 @@ services:
       - "8081"
     # The image's own HEALTHCHECK probes the BFF's port, which this service
     # does not run, so it would report unhealthy forever and `up --wait` would
-    # never return. Probe what this container actually serves instead.
+    # never return. Probe what this container actually serves instead, with
+    # the Node path the image's own HEALTHCHECK uses (docker/Dockerfile). Every
+    # Foundry image, distroless or the temporary slim runtime (#504), has
+    # Node at /nodejs/bin/node.
     healthcheck:
       test:
         - CMD

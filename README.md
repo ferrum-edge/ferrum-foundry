@@ -301,10 +301,15 @@ docker run \
 ```
 
 In production the BFF must be reachable only through the identity proxy; see
-[Deployment](docs/deployment.md). The image is based on
-`gcr.io/distroless/nodejs24-debian13:nonroot`, build inputs are allowlisted by
-`.dockerignore`, base images are pinned by digest, and published images carry
-provenance and SBOM attestations. See
+[Deployment](docs/deployment.md). The image is temporarily based on
+`node:24-trixie-slim` instead of `gcr.io/distroless/nodejs24-debian13:nonroot`,
+until upstream ships a fixed OpenSSL
+([#504](https://github.com/ferrum-edge/ferrum-foundry/issues/504)). Node package
+managers are removed; a shell and apt/dpkg remain until #504. It runs as the
+numeric non-root user `65532`. Build inputs are allowlisted by `.dockerignore`,
+base images are pinned by digest (the OpenSSL packages are pinned by version
+and fetched at build time until #504), and published images carry provenance
+and SBOM attestations. See
 [Release and supply-chain gates](docs/release-security.md).
 
 ## Documentation
@@ -329,7 +334,7 @@ provenance and SBOM attestations. See
 | UI | Radix UI primitives (Dialog, Dropdown Menu, Select, Tabs, Tooltip) |
 | Backend | Node.js, Fastify 5 |
 | JWT | jose (HS256) |
-| Docker | Distroless Node.js 24 |
+| Docker | Node.js 24 slim (Debian 13), non-root; distroless return tracked in #504 |
 
 ## Resource attribution
 
