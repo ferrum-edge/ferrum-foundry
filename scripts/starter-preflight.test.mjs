@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
+import { mayCarrySecret as e2eMayCarrySecret } from "../e2e/support/may-carry-secret.mjs";
 import {
   FAIL,
   PASS,
@@ -213,6 +214,20 @@ test("without a front-door URL the boundary is unknown, not assumed sound", asyn
   assert.equal(result.status, UNKNOWN);
 });
 
+test("an invalid front-door URL is unknown and sends no requests", async () => {
+  let requests = 0;
+  const results = await checkTrustBoundary(
+    { ...workingEnv, FOUNDRY_PREFLIGHT_URL: "not a url" },
+    async () => {
+      requests += 1;
+      return new Response("", { status: 401 });
+    },
+  );
+
+  assert.deepEqual(results.map((result) => result.status), [UNKNOWN, UNKNOWN]);
+  assert.equal(requests, 0);
+});
+
 /* ---------------- runner ---------------- */
 
 test("the report counts failures and unknowns separately", async () => {
@@ -422,31 +437,30 @@ test("a CA path merely sharing the root's prefix is outside it", async () => {
   assert.equal(result.status, FAIL);
 });
 
-test("the proof secret is only ever sent over TLS or to this machine", () => {
-  for (const url of [
-    "https://foundry.example.com",
-    "http://127.0.0.1:8088",
-    "http://localhost:8088",
-    "http://[::1]:8088",
-    "http://LOCALHOST",
-    "http://[0:0:0:0:0:0:0:1]",
-    "https://gateway.example",
-  ]) {
-    assert.equal(mayCarrySecret(url), true, url);
-  }
-  for (const url of [
-    "http://foundry.example.com",
-    "http://10.0.0.5:8088",
-    "http://127.0.0.1.gateway.example",
-    "http://127.ops.example",
-    "http://127.0.0.1@evil.example",
-    "http://localhost.evil.example",
-    "http://[::ffff:127.0.0.1]",
-    "http://localhost.",
-    "ftp://localhost:8088",
-    "not a url",
-  ]) {
-    assert.equal(mayCarrySecret(url), false, url);
+test("the e2e proof guard matches the canonical rule over the same URL table", () => {
+  const cases = [
+    ["https://foundry.example.com", true],
+    ["http://127.0.0.1:8088", true],
+    ["http://localhost:8088", true],
+    ["http://[::1]:8088", true],
+    ["http://LOCALHOST", true],
+    ["http://[0:0:0:0:0:0:0:1]", true],
+    ["https://gateway.example", true],
+    ["http://foundry.example.com", false],
+    ["http://10.0.0.5:8088", false],
+    ["http://127.0.0.1.gateway.example", false],
+    ["http://127.ops.example", false],
+    ["http://127.0.0.1@evil.example", false],
+    ["http://localhost.evil.example", false],
+    ["http://[::ffff:127.0.0.1]", false],
+    ["http://localhost.", false],
+    ["ftp://localhost:8088", false],
+    ["not a url", false],
+  ];
+
+  for (const [url, expected] of cases) {
+    assert.equal(mayCarrySecret(url), expected, `canonical: ${url}`);
+    assert.equal(e2eMayCarrySecret(url), expected, `e2e: ${url}`);
   }
 });
 
