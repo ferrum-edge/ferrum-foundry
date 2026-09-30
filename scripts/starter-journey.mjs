@@ -70,7 +70,7 @@ function record(name, detail) {
   console.log(`  ok  ${name}${detail ? ` — ${detail}` : ""}`);
 }
 
-async function status(path, init = {}, fetchImpl = fetch, foundry = FOUNDRY) {
+export async function status(path, init = {}, fetchImpl = fetch, foundry = FOUNDRY) {
   const url = new URL(path, foundry);
   if (
     init.headers &&

@@ -2,7 +2,6 @@
 /*  Who may do what, through the real proxy (issue #380)               */
 /* ------------------------------------------------------------------ */
 
-import { isIP } from "node:net";
 import {
   expect,
   test,
@@ -12,17 +11,7 @@ import {
   NAMESPACE_B,
   proofSecret,
 } from "../support/stack";
-
-function mayCarrySecret(url: URL): boolean {
-  if (url.protocol === "https:") return true;
-  if (url.protocol !== "http:") return false;
-  const host = url.hostname.replace(/^\[|\]$/g, "");
-  return (
-    host === "localhost" ||
-    (isIP(host) === 4 && host.startsWith("127.")) ||
-    host === "::1"
-  );
-}
+import { mayCarrySecret } from "../support/may-carry-secret.mjs";
 
 const ADMIN_ROUTE = "/api/proxy/proxies?offset=0&limit=1";
 

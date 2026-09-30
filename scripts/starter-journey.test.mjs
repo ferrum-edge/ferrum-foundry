@@ -1,6 +1,25 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { confirmTarget, runIdentityBoundary } from "./starter-journey.mjs";
+import { confirmTarget, runIdentityBoundary, status } from "./starter-journey.mjs";
+
+test("status refuses to send the proof header to a remote plaintext URL", async () => {
+  let requests = 0;
+
+  await assert.rejects(
+    status(
+      "/api/proxy/proxies",
+      { headers: { "X-Ferrum-Auth-Secret": "proof" } },
+      async () => {
+        requests += 1;
+        return new Response("", { status: 200 });
+      },
+      "http://foundry.example.com",
+    ),
+    /Refusing to send the proof secret/,
+  );
+
+  assert.equal(requests, 0, "status must refuse before making a request");
+});
 
 test("the journey rejects a confirmed 127-prefixed DNS target before its first request", async () => {
   let requests = 0;
