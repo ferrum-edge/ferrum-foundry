@@ -61,6 +61,8 @@ Out of scope:
 
 ## Security architecture
 
+- [Threat model](docs/threat-model.md) records security boundaries for operator
+  helper scripts and their network probes.
 - [Production authentication](docs/authentication.md) covers the trusted-proxy
   identity contract, the development static-token flow, and the downstream JWT
   claims.

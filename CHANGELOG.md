@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Update production dependencies `brace-expansion` and `fast-uri` to versions
   that fix reported denial-of-service and URI parsing vulnerabilities.
 - Temporarily run the container on `node:24-trixie-slim` (digest-pinned) instead of `gcr.io/distroless/nodejs24-debian13:nonroot`, whose pinned `libssl3t64` carries fixable high-severity findings (CVE-2026-75804, CVE-2026-84782) that upstream has not rebuilt. This is not a distroless image: Node package managers (npm, npx, corepack, yarn, whose bundled dependencies carry their own findings) are removed, but a shell and apt/dpkg remain until #504. The runtime stage upgrades only `libssl3t64` and `openssl-provider-legacy`, pinned to `3.5.7-1~deb13u3` from the live Debian security feed (the build fails if that version is gone, and each publish or release rebuild fetches it again). It runs as the numeric user `65532:65532`, so Kubernetes `runAsNonRoot` can verify it, and keeps Node as the entrypoint at the distroless path `/nodejs/bin/node`, so the starter's demo backend works with this image and with already-published distroless images. The Container Gate now also requires a numeric runtime user and proves the process is not root and that there are no Node package managers in the image. Return to distroless: #504.
+- GHSA-gg76-x87w-mj4v: starter preflight and walkthrough helpers now send the trusted-proxy proof over HTTPS or HTTP only to exact `localhost` or verified IPv4/IPv6 loopback literals. DNS hostnames are never treated as loopback based on their text.
 
 ## [0.3.0] - 2026-09-27
 
@@ -120,7 +121,6 @@ See `docs/compatibility.md` and `docs/release-notes/v0.2.0.md`.
 
 - Request bodies proxied to the gateway are bounded by an absolute upload deadline (`FERRUM_UPLOAD_TIMEOUT`) and a global in-flight upload cap (`FERRUM_MAX_ACTIVE_UPLOADS`) in addition to the idle write timeout, so a slowly progressing upload can no longer hold sockets, upstream requests, or upload permits indefinitely.
 - The agent-dispatch skills no longer tell dispatched workers to run `npm ci`, builds, tests, typecheck, or lint locally. Those commands execute repository-controlled code from the branch under review on a host that holds provider and maintainer credentials. Workers now inspect source only and use remote CI on the exact pushed head as the build and test gate.
-- GHSA-gg76-x87w-mj4v: starter preflight and walkthrough helpers now send the trusted-proxy proof over HTTPS or HTTP only to exact `localhost` or verified IPv4/IPv6 loopback literals. DNS hostnames are never treated as loopback based on their text.
 
 ## [0.1.0] - 2026-09-03
 

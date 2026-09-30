@@ -2,6 +2,7 @@
 /*  Who may do what, through the real proxy (issue #380)               */
 /* ------------------------------------------------------------------ */
 
+import { isIP } from "node:net";
 import {
   expect,
   test,
@@ -11,6 +12,17 @@ import {
   NAMESPACE_B,
   proofSecret,
 } from "../support/stack";
+
+function mayCarrySecret(url: URL): boolean {
+  if (url.protocol === "https:") return true;
+  if (url.protocol !== "http:") return false;
+  const host = url.hostname.replace(/^\[|\]$/g, "");
+  return (
+    host === "localhost" ||
+    (isIP(host) === 4 && host.startsWith("127.")) ||
+    host === "::1"
+  );
+}
 
 const ADMIN_ROUTE = "/api/proxy/proxies?offset=0&limit=1";
 
@@ -55,7 +67,14 @@ test.describe("authorization through the identity proxy", () => {
   test("a client cannot elevate itself with identity headers", async ({ request }) => {
     // Every one of these is overwritten by the proxy. If any were forwarded,
     // a browser could make itself an administrator.
-    const forged = await request.get(`${FOUNDRY_URL}${ADMIN_ROUTE}`, {
+    const proofUrl = new URL(ADMIN_ROUTE, FOUNDRY_URL);
+    if (!mayCarrySecret(proofUrl)) {
+      throw new Error(
+        `Refusing to send the proof secret to ${proofUrl}: use https or a loopback address.`,
+      );
+    }
+    const forged = await request.get(proofUrl.href, {
+      maxRedirects: 0,
       headers: {
         // The real secret: a client holding it must still be unable to assert
         // its own identity. A guessed one would be refused regardless.

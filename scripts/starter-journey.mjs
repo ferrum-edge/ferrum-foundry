@@ -22,6 +22,7 @@
  */
 
 import assert from "node:assert/strict";
+import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { mayCarrySecret } from "./starter-preflight.mjs";
 
@@ -70,7 +71,17 @@ function record(name, detail) {
 }
 
 async function status(path, init = {}, fetchImpl = fetch, foundry = FOUNDRY) {
-  const response = await fetchImpl(`${foundry}${path}`, {
+  const url = new URL(path, foundry);
+  if (
+    init.headers &&
+    Object.hasOwn(init.headers, "X-Ferrum-Auth-Secret") &&
+    !mayCarrySecret(url)
+  ) {
+    throw new Error(
+      `Refusing to send the proof secret to ${url}: use https or a loopback address.`,
+    );
+  }
+  const response = await fetchImpl(url, {
     redirect: "manual",
     signal: AbortSignal.timeout(20_000),
     ...init,
@@ -178,7 +189,7 @@ async function checkIdentityBoundary(
 
 /** An administrator session, as the SPA establishes one. */
 async function openSession() {
-  const response = await fetch(`${FOUNDRY}/api/auth/session`, {
+  const response = await fetch(new URL("/api/auth/session", FOUNDRY), {
     headers: { [IDENTITY_HEADER]: "admin" },
     signal: AbortSignal.timeout(20_000),
   });
@@ -200,7 +211,7 @@ async function openSession() {
 }
 
 async function write(session, method, path, body) {
-  const response = await fetch(`${FOUNDRY}${path}`, {
+  const response = await fetch(new URL(path, FOUNDRY), {
     method,
     headers: session.headers,
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -211,7 +222,7 @@ async function write(session, method, path, body) {
 }
 
 async function read(session, path) {
-  const response = await fetch(`${FOUNDRY}${path}`, {
+  const response = await fetch(new URL(path, FOUNDRY), {
     headers: session.headers,
     signal: AbortSignal.timeout(20_000),
   });
@@ -220,7 +231,7 @@ async function read(session, path) {
 }
 
 async function dataPlane(headers = {}) {
-  const response = await fetch(`${DATA_PLANE}/starter/hello`, {
+  const response = await fetch(new URL("/starter/hello", DATA_PLANE), {
     headers,
     signal: AbortSignal.timeout(20_000),
   });
@@ -409,6 +420,9 @@ async function main() {
   console.log(`\n${checks.length} checks passed.`);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
+) {
   await main();
 }

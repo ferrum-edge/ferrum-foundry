@@ -423,7 +423,15 @@ test("a CA path merely sharing the root's prefix is outside it", async () => {
 });
 
 test("the proof secret is only ever sent over TLS or to this machine", () => {
-  for (const url of ["https://foundry.example.com", "http://127.0.0.1:8088", "http://localhost:8088", "http://[::1]:8088"]) {
+  for (const url of [
+    "https://foundry.example.com",
+    "http://127.0.0.1:8088",
+    "http://localhost:8088",
+    "http://[::1]:8088",
+    "http://LOCALHOST",
+    "http://[0:0:0:0:0:0:0:1]",
+    "https://gateway.example",
+  ]) {
     assert.equal(mayCarrySecret(url), true, url);
   }
   for (const url of [
@@ -431,6 +439,10 @@ test("the proof secret is only ever sent over TLS or to this machine", () => {
     "http://10.0.0.5:8088",
     "http://127.0.0.1.gateway.example",
     "http://127.ops.example",
+    "http://127.0.0.1@evil.example",
+    "http://localhost.evil.example",
+    "http://[::ffff:127.0.0.1]",
+    "http://localhost.",
     "ftp://localhost:8088",
     "not a url",
   ]) {

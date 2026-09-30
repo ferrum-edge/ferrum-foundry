@@ -376,8 +376,10 @@ export async function checkTrustBoundary(env, fetchImpl = fetch) {
   }
 
   const results = [];
+  let probeUrl;
   try {
-    const response = await fetchImpl(`${front}/api/proxy/proxies?offset=0&limit=1`, {
+    probeUrl = new URL("/api/proxy/proxies?offset=0&limit=1", front);
+    const response = await fetchImpl(probeUrl, {
       signal: AbortSignal.timeout(10_000),
       redirect: "manual",
     });
@@ -405,13 +407,24 @@ export async function checkTrustBoundary(env, fetchImpl = fetch) {
     );
   }
 
+  if (!probeUrl) {
+    results.push(
+      check(
+        "client identity headers are stripped",
+        UNKNOWN,
+        `not tested: ${front} is not a valid URL`,
+      ),
+    );
+    return results;
+  }
+
   // A client that can set its own identity headers is an administrator. The
   // proxy must overwrite every one of them — including the proof secret, so
   // the probe has to send the real one: with a guessed secret, a proxy that
   // forwarded client headers would still be refused and the check would
   // pass for the wrong reason. That makes the probe itself a disclosure risk,
   // so the real secret is only ever sent over TLS or to this machine.
-  if (!mayCarrySecret(front)) {
+  if (!mayCarrySecret(probeUrl)) {
     results.push(
       check(
         "client identity headers are stripped",
@@ -424,7 +437,7 @@ export async function checkTrustBoundary(env, fetchImpl = fetch) {
   }
 
   try {
-    const response = await fetchImpl(`${front}/api/proxy/proxies?offset=0&limit=1`, {
+    const response = await fetchImpl(probeUrl, {
       signal: AbortSignal.timeout(10_000),
       redirect: "manual",
       headers: {
