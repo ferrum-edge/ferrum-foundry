@@ -22,6 +22,8 @@
  */
 
 import assert from "node:assert/strict";
+import { realpathSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { mayCarrySecret } from "./starter-preflight.mjs";
 
 const FOUNDRY = process.env.FOUNDRY_URL ?? "http://127.0.0.1:8088";
@@ -39,18 +41,22 @@ const RESOURCES = {
   consumer: "starter-consumer",
 };
 
-function confirmTarget() {
+export function confirmTarget(
+  foundry = FOUNDRY,
+  namespace = NAMESPACE,
+  confirmation = process.env.FERRUM_STARTER_CONFIRM_TARGET,
+) {
   // The boundary check sends the real proof secret (see
   // starter-preflight.mjs → mayCarrySecret); never in the clear to another host.
-  if (!mayCarrySecret(FOUNDRY)) {
+  if (!mayCarrySecret(foundry)) {
     throw new Error(
-      `Refusing to send the proof secret to ${FOUNDRY}: use https or a loopback address.`,
+      `Refusing to send the proof secret to ${foundry}: use https or a loopback address.`,
     );
   }
-  const expected = `${FOUNDRY}#${NAMESPACE}`;
-  if (process.env.FERRUM_STARTER_CONFIRM_TARGET !== expected) {
+  const expected = `${foundry}#${namespace}`;
+  if (confirmation !== expected) {
     throw new Error(
-      `Refusing to write to ${JSON.stringify(NAMESPACE)}. ` +
+      `Refusing to write to ${JSON.stringify(namespace)}. ` +
         `FERRUM_STARTER_CONFIRM_TARGET must exactly equal ${JSON.stringify(expected)}.`,
     );
   }
@@ -64,8 +70,18 @@ function record(name, detail) {
   console.log(`  ok  ${name}${detail ? ` — ${detail}` : ""}`);
 }
 
-async function status(path, init = {}) {
-  const response = await fetch(`${FOUNDRY}${path}`, {
+async function status(path, init = {}, fetchImpl = fetch, foundry = FOUNDRY) {
+  const url = new URL(path, foundry);
+  if (
+    init.headers &&
+    Object.hasOwn(init.headers, "X-Ferrum-Auth-Secret") &&
+    !mayCarrySecret(url)
+  ) {
+    throw new Error(
+      `Refusing to send the proof secret to ${url}: use https or a loopback address.`,
+    );
+  }
+  const response = await fetchImpl(url, {
     redirect: "manual",
     signal: AbortSignal.timeout(20_000),
     ...init,
@@ -74,34 +90,48 @@ async function status(path, init = {}) {
 }
 
 /** The identity boundary, before anything is created. */
-async function checkIdentityBoundary() {
+async function checkIdentityBoundary(
+  fetchImpl = fetch,
+  foundry = FOUNDRY,
+  namespace = NAMESPACE,
+) {
   const admin = `/api/proxy/proxies?offset=0&limit=1`;
-  const scoped = { "X-Ferrum-Namespace": NAMESPACE };
+  const scoped = { "X-Ferrum-Namespace": namespace };
 
   assert.equal(
-    await status(admin, { headers: scoped }),
+    await status(admin, { headers: scoped }, fetchImpl, foundry),
     401,
     "an anonymous caller reached an admin route",
   );
   record("anonymous is refused");
 
   assert.equal(
-    await status(admin, { headers: { ...scoped, [IDENTITY_HEADER]: "unmapped" } }),
+    await status(
+      admin,
+      { headers: { ...scoped, [IDENTITY_HEADER]: "unmapped" } },
+      fetchImpl,
+      foundry,
+    ),
     401,
     "an identity in no Ferrum group was admitted",
   );
   record("an authenticated user in no Ferrum group is refused");
 
   assert.equal(
-    await status(admin, {
-      headers: {
-        ...scoped,
-        "X-Ferrum-Auth-Secret": process.env.FERRUM_TRUSTED_PROXY_SECRET ?? "forged",
-        "X-Forwarded-User": "mallory",
-        "X-Ferrum-Role": "admin",
-        "X-Ferrum-Namespaces": NAMESPACE,
+    await status(
+      admin,
+      {
+        headers: {
+          ...scoped,
+          "X-Ferrum-Auth-Secret": process.env.FERRUM_TRUSTED_PROXY_SECRET ?? "forged",
+          "X-Forwarded-User": "mallory",
+          "X-Ferrum-Role": "admin",
+          "X-Ferrum-Namespaces": namespace,
+        },
       },
-    }),
+      fetchImpl,
+      foundry,
+    ),
     401,
     "a forged identity header was served; the proxy is not replacing it",
   );
@@ -109,7 +139,12 @@ async function checkIdentityBoundary() {
 
   for (const role of ["viewer", "operator", "admin"]) {
     assert.equal(
-      await status(admin, { headers: { ...scoped, [IDENTITY_HEADER]: role } }),
+      await status(
+        admin,
+        { headers: { ...scoped, [IDENTITY_HEADER]: role } },
+        fetchImpl,
+        foundry,
+      ),
       200,
       `${role} could not read`,
     );
@@ -117,20 +152,33 @@ async function checkIdentityBoundary() {
   record("viewer, operator, and admin can read the granted namespace");
 
   assert.equal(
-    await status(admin, {
-      headers: { "X-Ferrum-Namespace": "a-namespace-nobody-granted", [IDENTITY_HEADER]: "admin" },
-    }),
+    await status(
+      admin,
+      {
+        headers: {
+          "X-Ferrum-Namespace": "a-namespace-nobody-granted",
+          [IDENTITY_HEADER]: "admin",
+        },
+      },
+      fetchImpl,
+      foundry,
+    ),
     403,
     "a namespace outside the grant was served",
   );
   record("a namespace outside the grant is refused");
 
   assert.equal(
-    await status("/api/proxy/upstreams", {
-      method: "POST",
-      headers: { ...scoped, [IDENTITY_HEADER]: "viewer", "content-type": "application/json" },
-      body: JSON.stringify({ id: "should-not-exist", algorithm: "round_robin", targets: [] }),
-    }),
+    await status(
+      "/api/proxy/upstreams",
+      {
+        method: "POST",
+        headers: { ...scoped, [IDENTITY_HEADER]: "viewer", "content-type": "application/json" },
+        body: JSON.stringify({ id: "should-not-exist", algorithm: "round_robin", targets: [] }),
+      },
+      fetchImpl,
+      foundry,
+    ),
     403,
     "a write without a CSRF grant was accepted",
   );
@@ -141,7 +189,7 @@ async function checkIdentityBoundary() {
 
 /** An administrator session, as the SPA establishes one. */
 async function openSession() {
-  const response = await fetch(`${FOUNDRY}/api/auth/session`, {
+  const response = await fetch(new URL("/api/auth/session", FOUNDRY), {
     headers: { [IDENTITY_HEADER]: "admin" },
     signal: AbortSignal.timeout(20_000),
   });
@@ -163,7 +211,7 @@ async function openSession() {
 }
 
 async function write(session, method, path, body) {
-  const response = await fetch(`${FOUNDRY}${path}`, {
+  const response = await fetch(new URL(path, FOUNDRY), {
     method,
     headers: session.headers,
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -174,7 +222,7 @@ async function write(session, method, path, body) {
 }
 
 async function read(session, path) {
-  const response = await fetch(`${FOUNDRY}${path}`, {
+  const response = await fetch(new URL(path, FOUNDRY), {
     headers: session.headers,
     signal: AbortSignal.timeout(20_000),
   });
@@ -183,7 +231,7 @@ async function read(session, path) {
 }
 
 async function dataPlane(headers = {}) {
-  const response = await fetch(`${DATA_PLANE}/starter/hello`, {
+  const response = await fetch(new URL("/starter/hello", DATA_PLANE), {
     headers,
     signal: AbortSignal.timeout(20_000),
   });
@@ -312,7 +360,7 @@ async function runWalkthrough(session) {
   const stored = await read(session, `/api/proxy/consumers/${RESOURCES.consumer}`);
   const storedKey = stored.credentials?.keyauth?.[0]?.key;
   assert.notEqual(storedKey, API_KEY, "a stored credential was returned in the clear");
-  record("the stored credential is redacted on read", String(storedKey));
+  record("the stored credential is redacted on read");
 
   const anonymous = await dataPlane();
   assert.equal(
@@ -344,19 +392,37 @@ async function runWalkthrough(session) {
 
 /* ------------------------------------------------------------------ */
 
-confirmTarget();
-console.log(`Starter journey against ${FOUNDRY} (namespace ${NAMESPACE})\n`);
-
-console.log("Identity boundary:");
-await checkIdentityBoundary();
-
-console.log("\nFirst route:");
-const session = await openSession();
-await removeResources(session);
-try {
-  await runWalkthrough(session);
-} finally {
-  await removeResources(session);
+export async function runIdentityBoundary({
+  foundry = FOUNDRY,
+  namespace = NAMESPACE,
+  confirmation = process.env.FERRUM_STARTER_CONFIRM_TARGET,
+  fetchImpl = fetch,
+} = {}) {
+  confirmTarget(foundry, namespace, confirmation);
+  await checkIdentityBoundary(fetchImpl, foundry, namespace);
 }
 
-console.log(`\n${checks.length} checks passed.`);
+async function main() {
+  console.log(`Starter journey against ${FOUNDRY} (namespace ${NAMESPACE})\n`);
+
+  console.log("Identity boundary:");
+  await runIdentityBoundary();
+
+  console.log("\nFirst route:");
+  const session = await openSession();
+  await removeResources(session);
+  try {
+    await runWalkthrough(session);
+  } finally {
+    await removeResources(session);
+  }
+
+  console.log(`\n${checks.length} checks passed.`);
+}
+
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
+) {
+  await main();
+}
