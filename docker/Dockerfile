@@ -19,25 +19,57 @@ RUN npm run build \
   && npm prune --omit=dev \
   && npm cache clean --force
 
-FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:bb6b03d81066993293a10feda7250e8e1cc034035fe9b61cfceededa7c8bf04d
+# TODO(#504): return the runtime to gcr.io/distroless/nodejs24-debian13:nonroot
+# once upstream publishes a digest whose libssl3t64 carries the Debian 13 fix
+# for CVE-2026-75804 and CVE-2026-84782. Until then the runtime is the Debian 13
+# Node slim image, cut back toward what distroless ships: Node and its shared
+# libraries, no package manager, running as UID/GID 65532 with Node itself as
+# the entrypoint. The deployment starter's demo backend relies on that
+# entrypoint and on the Node path below (scripts/starter-preflight.test.mjs).
+FROM node:24-trixie-slim@sha256:8ec5d7557396cfe32d21c3f9c13072355ceab22b584578ca4bb28af31120cffe
+
+# - Upgrade only the OpenSSL packages, to the fixed 3.5.7-1~deb13u3, until the
+#   pinned base carries it; drop this step when it does.
+# - Remove npm, npx, corepack, and yarn: the runtime never installs packages,
+#   and npm's bundled dependencies carry their own scanner findings.
+# - Create the distroless-equivalent nonroot user with a numeric UID, so
+#   Kubernetes `runAsNonRoot` can verify it.
+RUN apt-get update \
+  && apt-get install --no-install-recommends --only-upgrade --yes \
+    libssl3t64 openssl openssl-provider-legacy \
+  && rm -rf /var/lib/apt/lists/* \
+  && rm -rf /usr/local/lib/node_modules /usr/local/include/node /usr/local/share/doc/node \
+    /opt/yarn-v* \
+  && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
+    /usr/local/bin/yarn /usr/local/bin/yarnpkg /usr/local/bin/docker-entrypoint.sh \
+  && for tool in npm npx corepack yarn yarnpkg; do \
+    if command -v "$tool" >/dev/null; then echo "$tool is still installed" >&2; exit 1; fi; \
+  done \
+  && groupadd --system --gid 65532 nonroot \
+  && useradd --system --uid 65532 --gid nonroot --no-log-init \
+    --home-dir /home/nonroot --create-home --shell /usr/sbin/nologin nonroot
+
 WORKDIR /app
 
 ARG SOURCE_REVISION=unknown
 LABEL org.opencontainers.image.source="https://github.com/ferrum-edge/ferrum-foundry" \
   org.opencontainers.image.revision="$SOURCE_REVISION"
 
-COPY --from=builder --chown=nonroot:nonroot /app/dist ./dist
-COPY --from=builder --chown=nonroot:nonroot /app/dist-server ./dist-server
-COPY --from=builder --chown=nonroot:nonroot /app/shared/admin-jwt.js ./shared/admin-jwt.js
-COPY --from=builder --chown=nonroot:nonroot /app/node_modules ./node_modules
-COPY --from=builder --chown=nonroot:nonroot /app/package.json ./
+COPY --from=builder --chown=65532:65532 /app/dist ./dist
+COPY --from=builder --chown=65532:65532 /app/dist-server ./dist-server
+COPY --from=builder --chown=65532:65532 /app/shared/admin-jwt.js ./shared/admin-jwt.js
+COPY --from=builder --chown=65532:65532 /app/node_modules ./node_modules
+COPY --from=builder --chown=65532:65532 /app/package.json ./
 
 ENV NODE_ENV=production
 ENV PORT=8080
 
+USER 65532:65532
+
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD ["/nodejs/bin/node", "-e", "const p=process.env.PORT||8080;fetch('http://127.0.0.1:'+p+'/api/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+  CMD ["/usr/local/bin/node", "-e", "const p=process.env.PORT||8080;fetch('http://127.0.0.1:'+p+'/api/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
 
+ENTRYPOINT ["/usr/local/bin/node"]
 CMD ["dist-server/index.js"]

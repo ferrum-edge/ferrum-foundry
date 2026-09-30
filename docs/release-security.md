@@ -22,7 +22,9 @@ workflow (`.github/workflows/ci.yml`) has passed:
    first-success walkthrough and the [browser journeys](../e2e/README.md).
 4. **Container Gate** (amd64 and arm64): builds the release Dockerfile, checks
    that a planted `.env` canary is absent from image history and layers,
-   requires a non-root user, checks liveness, readiness, and one authenticated
+   requires a numeric non-root user and runs Node as the entrypoint to prove
+   the process is not root and that no package manager (npm, npx, corepack,
+   yarn) is in the image, checks liveness, readiness, and one authenticated
    BFF-to-gateway request, fails on fixable high or critical vulnerabilities,
    and uploads a CycloneDX SBOM per architecture.
 
@@ -47,9 +49,18 @@ manifests, TypeScript and Vite configuration, `src/`, `server/`, `shared/`, and
 `public/` are sent. `.env` files, Git history, documentation, build output,
 coverage, and caches never enter the context.
 
-The Dockerfile frontend, the Node 24 builder, and the distroless Node 24 runtime
-are pinned by multi-platform image digest. The image's OCI revision label is the
-Git commit being built.
+The Dockerfile frontend, the Node 24 builder, and the Node 24 runtime are pinned
+by multi-platform image digest. The image's OCI revision label is the Git commit
+being built.
+
+The runtime is temporarily `node:24-trixie-slim` (Debian 13) instead of
+`gcr.io/distroless/nodejs24-debian13:nonroot`, because the pinned distroless
+image ships a `libssl3t64` with fixable high-severity findings (CVE-2026-75804,
+CVE-2026-84782) that upstream has not rebuilt. The runtime stage keeps the
+distroless contract: it upgrades only the OpenSSL packages, removes npm, npx,
+corepack, and yarn, runs as UID/GID `65532:65532`, and has Node as its
+entrypoint. Returning to distroless is tracked in
+[#504](https://github.com/ferrum-edge/ferrum-foundry/issues/504).
 
 Every third-party GitHub Action is pinned to a full commit SHA.
 

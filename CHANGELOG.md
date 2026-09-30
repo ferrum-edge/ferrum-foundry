@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Update production dependencies `brace-expansion` and `fast-uri` to versions
   that fix reported denial-of-service and URI parsing vulnerabilities.
+- Temporarily run the container on `node:24-trixie-slim` (digest-pinned) instead of `gcr.io/distroless/nodejs24-debian13:nonroot`, whose pinned `libssl3t64` carries fixable high-severity findings (CVE-2026-75804, CVE-2026-84782) that upstream has not rebuilt. The runtime stage upgrades only the OpenSSL packages to `3.5.7-1~deb13u3`, removes npm, npx, corepack, and yarn (whose bundled dependencies carry their own findings), runs as the numeric distroless-equivalent user `65532:65532`, and keeps Node as the entrypoint, so the starter's demo backend and Kubernetes `runAsNonRoot` work unchanged. Node moved from `/nodejs/bin/node` to `/usr/local/bin/node` in the image and the starter's demo-backend probe. The Container Gate now also requires a numeric runtime user and proves the process is not root and that no package manager ships in the image. Return to distroless: #504.
 
 ## [0.3.0] - 2026-09-27
 

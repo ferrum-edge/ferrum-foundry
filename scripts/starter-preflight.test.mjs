@@ -357,6 +357,32 @@ test("every demo service can prove it is ready", async () => {
   assert.match(backend, /127\.0\.0\.1:8081/, "the probe must target this service's own port");
 });
 
+test("the demo backend runs and probes with the image's own Node", async () => {
+  // The demo backend's command is bare Node arguments and its probe names a
+  // Node binary, so both depend on the Foundry runtime base. A base change
+  // that moves Node (distroless ships /nodejs/bin/node, the slim image
+  // /usr/local/bin/node) must move the entrypoint, the image HEALTHCHECK, and
+  // this probe together, or `up --wait` fails on an unhealthy backend.
+  const dockerfile = await readFile(new URL("../docker/Dockerfile", import.meta.url), "utf8");
+  const runtime = dockerfile.slice(dockerfile.lastIndexOf("\nFROM "));
+  const entrypoint = runtime.match(/^ENTRYPOINT \["([^"]+)"\]$/m);
+  assert.ok(entrypoint, "the runtime stage must name Node as its exec-form entrypoint");
+  const node = entrypoint[1];
+  assert.match(node, /^\/.*\/node$/, "the entrypoint must be an absolute path to Node");
+  assert.ok(
+    runtime.includes(`CMD ["${node}", "-e",`),
+    "the image HEALTHCHECK must use the entrypoint's Node binary",
+  );
+
+  const compose = await readFile(new URL("compose.yaml", STARTER), "utf8");
+  const backend = compose.slice(compose.indexOf("  demo-backend:"));
+  assert.match(backend, /^ {4}command:\n {6}- "-e"\n/m, "the command must be Node arguments");
+  assert.ok(
+    backend.includes(`- CMD\n        - ${node}\n`),
+    "the demo probe must use the image's Node binary",
+  );
+});
+
 test("oauth2-proxy never receives the gateway admin secrets", async () => {
   // An env_file hands a service every variable in it. `.env` holds the key
   // that signs gateway admin tokens and the proxy proof secret.
