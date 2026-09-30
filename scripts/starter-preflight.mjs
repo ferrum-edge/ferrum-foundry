@@ -23,6 +23,7 @@
  */
 
 import { readFile, stat } from "node:fs/promises";
+import { isIP } from "node:net";
 import { resolve, sep } from "node:path";
 import { signAdminJwt } from "../shared/admin-jwt.js";
 
@@ -352,8 +353,13 @@ export function mayCarrySecret(url) {
     return false;
   }
   if (parsed.protocol === "https:") return true;
+  if (parsed.protocol !== "http:") return false;
   const host = parsed.hostname.replace(/^\[|\]$/g, "");
-  return host === "localhost" || host === "::1" || /^127\./.test(host);
+  return (
+    host === "localhost" ||
+    (isIP(host) === 4 && host.startsWith("127.")) ||
+    host === "::1"
+  );
 }
 
 export async function checkTrustBoundary(env, fetchImpl = fetch) {

@@ -426,8 +426,21 @@ test("the proof secret is only ever sent over TLS or to this machine", () => {
   for (const url of ["https://foundry.example.com", "http://127.0.0.1:8088", "http://localhost:8088", "http://[::1]:8088"]) {
     assert.equal(mayCarrySecret(url), true, url);
   }
-  for (const url of ["http://foundry.example.com", "http://10.0.0.5:8088", "not a url"]) {
+  for (const url of [
+    "http://foundry.example.com",
+    "http://10.0.0.5:8088",
+    "http://127.0.0.1.gateway.example",
+    "http://127.ops.example",
+    "ftp://localhost:8088",
+    "not a url",
+  ]) {
     assert.equal(mayCarrySecret(url), false, url);
+  }
+});
+
+test("HTTP accepts only literal IPv4 loopback addresses", () => {
+  for (const url of ["http://127.0.0.1:8088", "http://127.255.255.255:8088"]) {
+    assert.equal(mayCarrySecret(url), true, url);
   }
 });
 
@@ -444,5 +457,24 @@ test("the stripping probe is not run against a plaintext remote front door", asy
   assert.ok(
     !sent.some((headers) => headers["X-Ferrum-Auth-Secret"] === workingEnv.FERRUM_TRUSTED_PROXY_SECRET),
     "the proof secret must not have been sent",
+  );
+});
+
+test("a 127-prefixed DNS name never receives the proof after other checks fail", async () => {
+  const sent = [];
+  const results = await checkTrustBoundary(
+    { ...workingEnv, FOUNDRY_PREFLIGHT_URL: "http://127.0.0.1.gateway.example" },
+    async (_url, init) => {
+      sent.push(init.headers ?? {});
+      return new Response("", { status: 500 });
+    },
+  );
+
+  assert.equal(results[0].status, FAIL);
+  assert.equal(results[1].status, UNKNOWN);
+  assert.equal(sent.length, 1);
+  assert.ok(
+    sent.every((headers) => !Object.hasOwn(headers, "X-Ferrum-Auth-Secret")),
+    "the proof header must be absent for a non-loopback HTTP hostname",
   );
 });
