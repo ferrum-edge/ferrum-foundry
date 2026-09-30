@@ -10,9 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - Update production dependencies `brace-expansion` and `fast-uri` to versions
-  that fix reported denial-of-service and URI parsing vulnerabilities. The
-  runtime image also upgrades Debian's OpenSSL packages until the pinned Node
-  base includes the fixed package release.
+  that fix reported denial-of-service and URI parsing vulnerabilities.
 
 ## [0.3.0] - 2026-09-27
 

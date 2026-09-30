@@ -47,10 +47,9 @@ manifests, TypeScript and Vite configuration, `src/`, `server/`, `shared/`, and
 `public/` are sent. `.env` files, Git history, documentation, build output,
 coverage, and caches never enter the context.
 
-The Dockerfile frontend, Node 24 builder, and Node 24 runtime are pinned by
-multi-platform image digest. The runtime temporarily upgrades only OpenSSL
-packages until its pinned base includes the fixed Debian 13 package. The image's
-OCI revision label is the Git commit being built.
+The Dockerfile frontend, the Node 24 builder, and the distroless Node 24 runtime
+are pinned by multi-platform image digest. The image's OCI revision label is the
+Git commit being built.
 
 Every third-party GitHub Action is pinned to a full commit SHA.
 

@@ -40,9 +40,10 @@ updates:
     labels:
       - "dependencies"
     ignore:
-      # The builder's Node major is deliberately coupled to the runtime major
-      # in docker/Dockerfile: a major bump here alone would build against one
-      # Node version and run on another. Move the pair by hand together.
+      # The builder's Node major is deliberately coupled to the distroless
+      # runtime major in docker/Dockerfile: a major bump here alone would build
+      # against one Node and run on another. The pair is moved by hand once
+      # the matching distroless nodejs image exists.
       - dependency-name: "node"
         update-types:
           - "version-update:semver-major"
