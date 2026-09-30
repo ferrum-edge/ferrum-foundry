@@ -19,25 +19,35 @@ RUN npm run build \
   && npm prune --omit=dev \
   && npm cache clean --force
 
-FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:bb6b03d81066993293a10feda7250e8e1cc034035fe9b61cfceededa7c8bf04d
+FROM node:24-trixie-slim@sha256:8ec5d7557396cfe32d21c3f9c13072355ceab22b584578ca4bb28af31120cffe
+
+# The pinned Node image currently ships libssl3t64 3.5.7-1~deb13u2. Upgrade
+# only OpenSSL packages until the upstream digest includes 3.5.7-1~deb13u3.
+# Remove this workaround when the pinned runtime base carries that fix.
+RUN apt-get update \
+  && apt-get install --no-install-recommends --only-upgrade --yes libssl3t64 openssl \
+  && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 ARG SOURCE_REVISION=unknown
 LABEL org.opencontainers.image.source="https://github.com/ferrum-edge/ferrum-foundry" \
   org.opencontainers.image.revision="$SOURCE_REVISION"
 
-COPY --from=builder --chown=nonroot:nonroot /app/dist ./dist
-COPY --from=builder --chown=nonroot:nonroot /app/dist-server ./dist-server
-COPY --from=builder --chown=nonroot:nonroot /app/shared/admin-jwt.js ./shared/admin-jwt.js
-COPY --from=builder --chown=nonroot:nonroot /app/node_modules ./node_modules
-COPY --from=builder --chown=nonroot:nonroot /app/package.json ./
+COPY --from=builder --chown=node:node /app/dist ./dist
+COPY --from=builder --chown=node:node /app/dist-server ./dist-server
+COPY --from=builder --chown=node:node /app/shared/admin-jwt.js ./shared/admin-jwt.js
+COPY --from=builder --chown=node:node /app/node_modules ./node_modules
+COPY --from=builder --chown=node:node /app/package.json ./
 
 ENV NODE_ENV=production
 ENV PORT=8080
 
+USER node
+
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD ["/nodejs/bin/node", "-e", "const p=process.env.PORT||8080;fetch('http://127.0.0.1:'+p+'/api/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+  CMD ["node", "-e", "const p=process.env.PORT||8080;fetch('http://127.0.0.1:'+p+'/api/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
 
-CMD ["dist-server/index.js"]
+CMD ["node", "dist-server/index.js"]
