@@ -37,7 +37,14 @@ const EDGE_ROUTES = [
   { method: "GET", prefix: "/gateway-trust-bundles", role: "operator", gate: "none", ok: 200, collection: true },
   { method: "GET", prefix: "/audit", role: "admin", gate: "none", ok: 200 },
   { method: "GET", prefix: "/proxies", role: "viewer", gate: "none", ok: 200, collection: true },
-  { method: "GET", prefix: `/proxies/${PROBE_ID}/mcp/tools`, role: "viewer", gate: "none", ok: 404 },
+  {
+    method: "GET",
+    prefix: `/proxies/${PROBE_ID}/mcp/tools`,
+    role: "viewer",
+    gate: "none",
+    ok: 404,
+    body: { error: "Proxy not found" },
+  },
   { method: "GET", prefix: "/upstreams", role: "viewer", gate: "none", ok: 200, collection: true },
   { method: "GET", prefix: "/consumers", role: "viewer", gate: "none", ok: 200, collection: true },
   { method: "GET", prefix: "/plugins/config", role: "viewer", gate: "none", ok: 200, collection: true },
@@ -73,7 +80,8 @@ function fakeGateway({ readOnly = false, override = () => undefined } = {}) {
     }
     return {
       status: rule.ok,
-      body: rule.collection ? { data: [], pagination: { offset: 0, limit: 1, total: 0 } } : {},
+      body: rule.body
+        ?? (rule.collection ? { data: [], pagination: { offset: 0, limit: 1, total: 0 } } : {}),
     };
   };
   return { send, requests };
@@ -113,6 +121,18 @@ describe("capability parity contract", () => {
       /expected a writable gateway/,
     );
     await assert.rejects(verifyCapabilityParity(fakeGateway().send, {}), /expectation must be/);
+  });
+
+  it("fails when the MCP catalog 404 is not the handler's missing-proxy answer", async () => {
+    const { send } = fakeGateway({
+      override: (_role, request) => request.path.includes("/mcp/tools")
+        ? { status: 404, body: { error: "Not Found" } }
+        : undefined,
+    });
+    await assert.rejects(
+      verifyCapabilityParity(send, { expectation: "writable" }),
+      /viewer read of MCP tool catalog answered "Not Found", expected the handler's "Proxy not found"/,
+    );
   });
 
   it("fails when the gateway requires a different role than the model", async () => {

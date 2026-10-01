@@ -227,8 +227,9 @@ compares against this model rather than a second copy.
   mode, so it cannot pass vacuously.
 
 The MCP tool catalog read (`GET /proxies/{id}/mcp/tools`) is also probed as a
-viewer-readable, namespace-scoped endpoint; its disposable missing-proxy probe
-must reach the handler and return `404`.
+viewer-readable, namespace-scoped endpoint. Its disposable missing-proxy probe
+must reach the handler: a `404` whose body is the handler's own
+`{"error":"Proxy not found"}`, not a router's generic `Not Found`.
 
 The contract also checks reads, because a denial must not look like missing
 data. Every role must get real collections for the launch surfaces, and a read

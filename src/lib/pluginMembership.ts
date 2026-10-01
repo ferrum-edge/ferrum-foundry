@@ -6,6 +6,7 @@ import {
   type GuardedOperation,
   type WriteGuard,
 } from "@/api/conditionalWrite";
+import { pluginConfigPlaceholderPointers } from "@/api/maskedSecrets";
 import * as pluginsApi from "@/api/plugins";
 import * as proxiesApi from "@/api/proxies";
 import { resourceFingerprint } from "@/lib/resourceBaseline";
@@ -382,11 +383,27 @@ async function rollbackAssociations(
   return failures;
 }
 
+/**
+ * Put `before` back. A `before` read through a masked projection carries a
+ * placeholder for each withheld secret; writing it would be refused
+ * (ferrum-edge#5925), or on an older gateway store the placeholder as the
+ * secret. That rollback is not attempted: it is reported, naming the fields
+ * that could not be restored, for manual recovery.
+ */
 async function rollbackPlugin(
   before: PluginConfig,
   after: PluginConfig,
   deps: PluginMembershipDependencies,
 ): Promise<string[]> {
+  const masked = pluginConfigPlaceholderPointers(before.config);
+  if (masked.length > 0) {
+    return [
+      `plugin ${before.id} was not restored: its previous configuration was read with ` +
+        `${masked.join(", ")} hidden from your role, and Ferrum Edge refuses those ` +
+        "placeholders. Manual recovery is needed: restore the previous configuration " +
+        "with the real values, or have an admin do it",
+    ];
+  }
   try {
     const current = await getPluginIfPresent(after.id, deps);
     if (!current) {

@@ -22,6 +22,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { PluginConfigForm } from "@/components/forms/PluginConfigForm";
 import { PluginMembershipRecovery } from "@/components/forms/PluginMembershipRecovery";
+import { MaskedSecretRefusal } from "@/components/shared/MaskedSecretRefusal";
 import { getApiErrorMessage } from "@/api/client";
 import { formatPluginName } from "@/lib/pluginConfigDefaults";
 import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
@@ -229,6 +230,7 @@ function PluginEditor({ session }: { session: EditorSession }) {
         <ReadStateNotice query={proxiesQuery} label="Proxy group membership" />
       )}
       {/* Form */}
+      <MaskedSecretRefusal error={membershipError} />
       <PluginMembershipRecovery error={membershipError} />
       <Card>
         <ResourceLabels labels={plugin.labels} />

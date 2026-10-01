@@ -96,7 +96,12 @@ export const READ_PROBES = [
     label: "MCP tool catalog",
     path: `/proxies/${PROBE_ID}/mcp/tools?offset=0&limit=1`,
     minimumRole: "viewer",
+    // The catalog handler's own answer for a missing proxy
+    // (`Proxy::NOT_FOUND_MESSAGE`, ferrum-edge v0.9.9 `mcp_tool_catalog.rs`).
+    // A router's generic `{"error":"Not Found"}` would mean the route does not
+    // exist, so the status alone proves nothing.
     expectedStatus: 404,
+    expectedError: "Proxy not found",
   },
   { label: "upstreams", path: "/upstreams?offset=0&limit=1", minimumRole: "viewer", collection: true },
   { label: "consumers", path: "/consumers?offset=0&limit=1", minimumRole: "viewer", collection: true },
@@ -233,6 +238,13 @@ export async function verifyCapabilityParity(send, { expectation } = {}) {
         } else if (probe.expectedStatus !== undefined && response.status !== probe.expectedStatus) {
           mismatches.push(
             `${role} read of ${probe.label} returned ${response.status}, expected ${probe.expectedStatus}`,
+          );
+        } else if (
+          probe.expectedError !== undefined && response.body?.error !== probe.expectedError
+        ) {
+          mismatches.push(
+            `${role} read of ${probe.label} answered ${JSON.stringify(response.body?.error)}, `
+            + `expected the handler's ${JSON.stringify(probe.expectedError)}`,
           );
         } else if (probe.collection && !(response.status === 200 && isCollection(response.body))) {
           mismatches.push(

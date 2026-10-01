@@ -58,15 +58,49 @@ against a fake gateway that attaches, advances `updated_at`, and enforces
 
 ## Masked plugin secrets
 
-Ferrum Edge v0.9.9 can mask plugin configuration secrets in operator reads and
-refuses a write that echoes one of those masked placeholders. The gateway does
-this before its update merge, so a literal `[REDACTED]` no longer preserves the
-stored value on a `PUT`. Review the resource as an admin before editing a
-configuration whose secret fields are masked; do not attempt to save a
-projected operator response as a full replacement. Foundry's guided plugin
-editor currently preserves the values it reads, so operator edits to a
-configuration containing masked secrets may be refused until the editor can
-preserve those fields safely.
+An `operator` (or `viewer`) read of a plugin configuration does not return its
+secrets. Ferrum Edge replaces each one with a placeholder:
+
+- a secret value (a header value, a password, an integrity key) becomes
+  `[REDACTED]`;
+- an endpoint URL keeps only `scheme://host[:port]`, with `redacted@` for any
+  userinfo and `/[REDACTED_PATH]`, `?[REDACTED_QUERY]`, and
+  `#[REDACTED_FRAGMENT]` for a path, query, or fragment that was present
+  (`https://collector.example.com/[REDACTED_PATH]?[REDACTED_QUERY]`);
+- a Redis URL keeps its scheme, host, port, and database, with the same
+  `redacted@`, `?[REDACTED_QUERY]`, and `#[REDACTED_FRAGMENT]` markers.
+
+Upstreams work the same way for one field: an `operator` read shows the Consul
+ACL token (`service_discovery.consul.token`) as `[REDACTED]`. `admin` reads of
+both resources are raw.
+
+Since v0.9.9, Edge refuses with `400` a `POST` or `PUT` of a plugin
+configuration or upstream that sends one of those placeholders back at a field
+the caller's read masks (ferrum-edge#5925), and the error names each field by
+JSON pointer. The check runs before Edge's update merge, so a placeholder never
+stands in for the stored value. `PUT` stays a full replace: omitting the field
+clears the stored secret rather than keeping it.
+
+Foundry recognises the placeholders exactly as Edge does
+(`src/api/maskedSecrets.ts`) and handles them as follows:
+
+- **Plugin and upstream editors.** Each field that still holds a placeholder is
+  marked "Hidden from your role: re-enter it, or clear it (clearing deletes the
+  stored secret)". Save stays blocked until every one is re-entered with the
+  real value or cleared with its **Clear** action, which omits the field. In the
+  guided plugin editor and the JSON editor alike, any placeholder in `config`
+  counts.
+- **Refused saves.** If Edge refuses a save anyway, the page lists the JSON
+  pointers from Edge's error as written, never a value.
+- **Upstream targets.** A targets save resends every upstream setting from a
+  fresh read. When that read masks the Consul token, Foundry refuses the save
+  before sending it; re-enter or clear the token on the Configuration tab
+  first, or have an admin make the change.
+- **Rollback.** A failed membership change restores the plugin configuration it
+  read first. When that read was masked, the restore is not attempted: the
+  recovery report names the fields that could not be restored, and the previous
+  configuration must be restored manually, with the real values, or by an
+  admin.
 
 ## Deleting a group
 

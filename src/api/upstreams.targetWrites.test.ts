@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { update, updateTargets } from "./upstreams";
 import { resetGatewayMetadata } from "./gatewayMetadata";
+import { MaskedSecretWriteError } from "./maskedSecrets";
 import type { Upstream } from "./types";
 
 class BasedRequest extends Request {
@@ -86,6 +87,36 @@ describe("upstream target writes", () => {
     vi.stubGlobal("fetch", fetcher);
     await expect(updateTargets(scope, "payments", targets, null))
       .rejects.toMatchObject({ response: { status: 404 } });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a target write whose settings read masks the Consul token, sending nothing", async () => {
+    const fetcher = vi.fn(async (request: Request) => {
+      expect(request.method).toBe("GET");
+      return Response.json({
+        id: "payments",
+        namespace: "tenant-a",
+        algorithm: "round_robin",
+        targets: settings.targets,
+        service_discovery: {
+          provider: "consul",
+          consul: { address: "http://consul:8500", service_name: "payments", token: "[REDACTED]" },
+        },
+        created_at: "v0",
+        updated_at: "v0",
+      });
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const refused = await updateTargets(scope, "payments", targets, null).catch(
+      (error: unknown) => error,
+    );
+    expect(refused).toBeInstanceOf(MaskedSecretWriteError);
+    expect((refused as MaskedSecretWriteError).pointers).toEqual([
+      "/service_discovery/consul/token",
+    ]);
+    expect((refused as Error).message).toContain("hidden from your role");
+    expect((refused as Error).message).not.toContain("[REDACTED]");
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 

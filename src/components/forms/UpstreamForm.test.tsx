@@ -107,6 +107,78 @@ describe("Consul required fields", () => {
   });
 });
 
+describe("UpstreamForm masked Consul token (ferrum-edge#5925)", () => {
+  async function mountMasked(token: string) {
+    const initialData: Upstream = {
+      id: "upstream-1",
+      name: "payments",
+      algorithm: "round_robin",
+      targets: [{ host: "backend", port: 8080, weight: 1 }],
+      created_at: "2026-09-30T00:00:00Z",
+      updated_at: "2026-09-30T00:00:00Z",
+      service_discovery: {
+        provider: "consul",
+        consul: { address: "http://consul:8500", service_name: "payments", token },
+      },
+    };
+    await act(async () => {
+      root.render(
+        <UpstreamForm initialData={initialData} onSubmit={submit} isLoading={false} />,
+      );
+    });
+  }
+
+  function clearTokenButton(): HTMLButtonElement | undefined {
+    return Array.from(host.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Clear token",
+    );
+  }
+
+  it("blocks Save while the token is the placeholder an operator read returns", async () => {
+    await mountMasked("[REDACTED]");
+    // Service Discovery is collapsed; the refusal reopens it at the token.
+    await save();
+    expect(submit).not.toHaveBeenCalled();
+    expect(host.textContent).toContain(
+      "Hidden from your role: re-enter it, or clear it (clearing deletes the stored secret).",
+    );
+    expect(inputByLabel(host, "Token").getAttribute("aria-invalid")).toBe("true");
+  });
+
+  it("saves a re-entered token", async () => {
+    await mountMasked("[REDACTED]");
+    await save();
+    const token = inputByLabel(host, "Token");
+    await clearText(token);
+    await typeText(token, "rotated-acl-token");
+    await save();
+    expect(submit).toHaveBeenCalledOnce();
+    expect(submit.mock.calls[0]?.[0].service_discovery?.consul?.token).toBe("rotated-acl-token");
+  });
+
+  it("clears the token, omitting it so the save deletes the stored secret", async () => {
+    await mountMasked("[REDACTED]");
+    await save();
+    const clear = clearTokenButton();
+    expect(clear).toBeTruthy();
+    await act(async () => clear!.click());
+    expect(clearTokenButton()).toBeUndefined();
+    await save();
+    expect(submit).toHaveBeenCalledOnce();
+    const consul = submit.mock.calls[0]?.[0].service_discovery?.consul;
+    expect(consul).toMatchObject({ address: "http://consul:8500", service_name: "payments" });
+    expect(consul?.token).toBeUndefined();
+  });
+
+  it("leaves a real token alone", async () => {
+    await mountMasked("real-acl-token");
+    expect(clearTokenButton()).toBeUndefined();
+    await save();
+    expect(submit).toHaveBeenCalledOnce();
+    expect(submit.mock.calls[0]?.[0].service_discovery?.consul?.token).toBe("real-acl-token");
+  });
+});
+
 describe("UpstreamForm collapsed validation", () => {
   it("shows Consul errors when Service Discovery stays collapsed", async () => {
     const initialData: Upstream = {

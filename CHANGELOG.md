@@ -9,16 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Qualify the published Ferrum Edge v0.9.9 release for the next Foundry pairing.
-  Gateway-backed CI, the deployment starter, and local-run instructions use its
-  multi-architecture image digest. Foundry v0.3.0 remains the last released
-  Foundry version. Edge v0.9.9 adds a viewer-readable MCP catalog route, proxy
-  support for semicolon path parameters, and rejects writes that echo masked
-  secret placeholders.
+- Qualify the published Ferrum Edge v0.9.9 release for the next Foundry pairing
+  (#512). Gateway-backed CI, the deployment starter, and local-run instructions
+  use its multi-architecture image digest. Foundry v0.3.0 remains the last
+  released Foundry version. Edge v0.9.9 adds a viewer-readable MCP catalog
+  route, which the capability parity contract probes and requires to answer
+  with the handler's own `Proxy not found`; proxy support for semicolon path
+  parameters, which the proxy form edits for HTTP proxies only; and a `400` for
+  writes that echo masked secret placeholders, which the Pinned Gateway
+  Contract checks with an `operator` read-modify-write of a plugin
+  configuration whose endpoint path is masked.
+
+- Plugin configuration and upstream editors no longer treat a masked secret as
+  a value that survives a save. An `operator` read shows plugin secrets,
+  credential-bearing endpoint URL components, and an upstream's Consul token as
+  placeholders (`[REDACTED]`, `redacted@`, `/[REDACTED_PATH]`,
+  `?[REDACTED_QUERY]`, `#[REDACTED_FRAGMENT]`), which Edge v0.9.9 refuses to
+  accept back (ferrum-edge#5925). Each such field is now marked "Hidden from
+  your role", and Save stays blocked until it is re-entered or cleared with its
+  Clear action; clearing omits the field, which deletes the stored secret
+  because `PUT` is a full replace. Foundry's placeholder check mirrors Edge's
+  `is_redaction_placeholder` exactly.
 
 - Pin Ferrum Contracts `contracts-edge-0.9.8` for the plugin catalog and
   `provisioned-by` vocabulary, with CI checks for vendored file integrity and
   Foundry's local catalog and provisioning markers.
+
+### Fixed
+
+- An `operator` can save plugin configurations and upstreams against Ferrum
+  Edge v0.9.9: the editors no longer send the placeholders their masked read
+  returned, which Edge refuses with `400`. When Edge does refuse a save, the
+  page lists the JSON pointers it names. A targets save on an upstream whose
+  Consul token is masked is refused before anything is sent, with the reason,
+  instead of resending the placeholder. A failed membership change no longer
+  tries to restore a plugin configuration that was read masked; the recovery
+  report names the fields that need manual recovery.
 
 ### Security
 

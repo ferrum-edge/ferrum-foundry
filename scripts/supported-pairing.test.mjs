@@ -137,9 +137,16 @@ describe("the supported pairing record", () => {
   it("records the Edge changes the pairing depends on as released in it", () => {
     const changes = record.edge_dependencies.map((entry) => entry.change);
     assert.deepEqual(changes, ["ferrum-edge#5661", "ferrum-edge#5726"]);
-    const released = `retained in Ferrum Edge v0.9.8 and ${record.edge.release.version}`;
+    // The status's last clause lists the releases that carry the change
+    // ("released in Ferrum Edge vA" or "retained in Ferrum Edge vA and vB");
+    // edge.release must be one of them, whatever the others are.
     for (const dependency of record.edge_dependencies) {
-      assert.ok(dependency.status.includes(released), `${dependency.change}: ${dependency.status}`);
+      const clause = dependency.status.split(";").at(-1);
+      const carriedBy = /(?:released|retained) in Ferrum Edge (.+)$/.exec(clause)?.[1] ?? "";
+      assert.ok(
+        carriedBy.split(/,\s*|\s+and\s+/).includes(record.edge.release.version),
+        `${dependency.change}: ${dependency.status}`,
+      );
     }
   });
 });

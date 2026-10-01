@@ -137,9 +137,20 @@ describe("ProxyForm listen path round-trip (#447)", () => {
 describe("ProxyForm path parameter setting", () => {
   it("loads and submits the Edge path parameter setting", async () => {
     await renderForm({ ...httpProxy, allow_path_parameters: true });
-    expect(inputByLabel(host, "Allow semicolon path parameters").checked).toBe(true);
+    await toggleSection("Routing Options");
+    const checkbox = inputByLabel(host, "Allow semicolon path parameters");
+    expect(checkbox.checked).toBe(true);
+    await act(async () => checkbox.click());
+    expect(checkbox.checked).toBe(false);
     await save();
-    expect(submitted().allow_path_parameters).toBe(true);
+    expect(submitted().allow_path_parameters).toBe(false);
+  });
+
+  it("never sends path parameters for a stream proxy", async () => {
+    await renderForm({ ...streamProxy, listen_port: 9100, allow_path_parameters: true });
+    expect(host.textContent).not.toContain("Allow semicolon path parameters");
+    await save();
+    expect(submitted().allow_path_parameters).toBe(false);
   });
 });
 

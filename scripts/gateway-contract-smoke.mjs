@@ -11,12 +11,21 @@ import { verifyConcurrentEditContract } from "./concurrent-edit-contract.mjs";
 import { gatewaySender, verifyCapabilityParity } from "./capability-parity-contract.mjs";
 import { resourceFingerprint } from "../src/lib/resourceBaseline.ts";
 import { normalizedTargets } from "../src/lib/upstreamTargets.ts";
+import {
+  isRedactionPlaceholder,
+  parseMaskedPlaceholderMessage,
+  REDACTED_PATH_PLACEHOLDER,
+} from "../src/api/maskedSecrets.ts";
 
 const config = readSeedConfig();
 confirmDestructiveTarget(config);
 
-async function exchange(path, { method = "GET", body, headers = {} } = {}, requestConfig = config) {
-  const token = await adminToken(requestConfig);
+async function exchange(
+  path,
+  { method = "GET", body, headers = {}, role } = {},
+  requestConfig = config,
+) {
+  const token = await adminToken(requestConfig, role ? { role } : {});
   const response = await fetch(`${config.adminUrl}${path}`, {
     method,
     signal: AbortSignal.timeout(30_000),
@@ -173,6 +182,48 @@ assert.deepEqual(untargeted.data, []);
 assert.equal(untargeted.pagination.total, 0);
 await request("/plugins/config?proxy_id=has%20space", { expected: [400] });
 
+// An operator's read of a plugin configuration masks its endpoint path, and
+// Edge v0.9.9 refuses a write that echoes that placeholder (ferrum-edge#5925)
+// instead of storing it. Foundry's editors block that save; this proves the
+// gateway answers the way they assume, naming the field by JSON pointer.
+{
+  const maskedId = "contract-smoke-masked-endpoint";
+  const maskedPath = `/plugins/config/${maskedId}`;
+  const endpointUrl = "https://collector.example.com/contract-smoke/ingest";
+  await request("/plugins/config?apply=sync", {
+    method: "POST",
+    body: {
+      id: maskedId,
+      plugin_name: "http_logging",
+      scope: "global",
+      enabled: false,
+      config: { endpoint_url: endpointUrl, batch_size: 50 },
+    },
+  });
+  const operatorRead = await exchange(maskedPath, { role: "operator" });
+  assert.equal(operatorRead.status, 200, JSON.stringify(operatorRead.body));
+  const maskedUrl = operatorRead.body.config.endpoint_url;
+  assert.equal(maskedUrl, `https://collector.example.com/${REDACTED_PATH_PLACEHOLDER}`);
+  assert.ok(isRedactionPlaceholder(maskedUrl));
+  const echoed = {
+    ...operatorRead.body,
+    config: { ...operatorRead.body.config, batch_size: 75 },
+  };
+  const refused = await exchange(`${maskedPath}?apply=sync`, {
+    method: "PUT",
+    body: echoed,
+    role: "operator",
+  });
+  assert.equal(refused.status, 400, JSON.stringify(refused.body));
+  assert.deepEqual(parseMaskedPlaceholderMessage(refused.body?.error ?? "")?.pointers, [
+    "/config/endpoint_url",
+  ]);
+  const stored = await request(maskedPath);
+  assert.equal(stored.config.endpoint_url, endpointUrl);
+  assert.equal(stored.config.batch_size, 50);
+  await request(`${maskedPath}?apply=sync`, { method: "DELETE", expected: [200, 204] });
+}
+
 for (const endpoint of ["upstreams", "consumers", "proxies", "plugins/config"]) {
   const page = await request(`/${endpoint}?offset=0&limit=20`);
   assert.ok(Array.isArray(page.data));
@@ -250,6 +301,7 @@ console.log(JSON.stringify({
     "TLS validation",
     "plugin configs by proxy_id",
     "health-check probe validation",
+    "masked placeholder write refusal",
   ],
   resources: ["upstreams", "consumers", "proxies", "plugin configs", "namespaces"],
 }));

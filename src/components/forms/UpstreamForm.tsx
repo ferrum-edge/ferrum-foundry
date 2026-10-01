@@ -33,6 +33,7 @@ import {
   type WithNumberDrafts,
 } from "@/lib/formDrafts";
 import { ReadOnlySurface } from "@/components/shared/CapabilityGate";
+import { isRedactionPlaceholder, MASKED_FIELD_NOTICE } from "@/api/maskedSecrets";
 import type { CapabilityVerdict } from "@/lib/capabilities";
 import type {
   Upstream,
@@ -67,6 +68,7 @@ const UPSTREAM_COLLAPSIBLE_SECTIONS = [
     id: "service-discovery",
     errorKeys: [
       "consul_address",
+      "consul_token",
       "sd_service_name",
       "sd_poll_interval_seconds",
       "sd_default_weight",
@@ -400,6 +402,12 @@ export function UpstreamForm({
     initialData?.service_discovery?.stale_policy ?? "",
   );
 
+  // An `operator` read shows the Consul ACL token as a placeholder
+  // (ferrum-edge#5925). It cannot be written back: Save stays blocked until the
+  // token is re-entered or cleared.
+  const consulTokenMasked =
+    sdEnabled && sdProvider === "consul" && isRedactionPlaceholder(sdConfig.token);
+
   /* ---------- Validation ---------- */
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -455,6 +463,7 @@ export function UpstreamForm({
       if (!sdServiceName.trim()) {
         errs.sd_service_name = "Consul service name is required";
       }
+      if (consulTokenMasked) errs.consul_token = MASKED_FIELD_NOTICE;
     }
     // A subset with a blank name is dropped on save, so only named subsets
     // have selectors to check. Each problem is shown on its own row; the
@@ -1194,9 +1203,31 @@ export function UpstreamForm({
                   <Input
                     label="Token"
                     value={String(sdConfig.token ?? "")}
-                    onChange={(e) => updateSdConfig("token", e.target.value)}
+                    onChange={(e) => {
+                      updateSdConfig("token", e.target.value);
+                      setErrors(({ consul_token: _token, ...rest }) => rest);
+                    }}
                     placeholder="consul-acl-token"
+                    helpText={consulTokenMasked ? MASKED_FIELD_NOTICE : undefined}
+                    error={errors.consul_token}
                   />
+                  {consulTokenMasked && (
+                    <div>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => {
+                          // Omitted on save, which deletes the stored token:
+                          // PUT is a full replace.
+                          updateSdConfig("token", "");
+                          setErrors(({ consul_token: _token, ...rest }) => rest);
+                        }}
+                      >
+                        Clear token
+                      </Button>
+                    </div>
+                  )}
                   <Input
                     label="Poll Interval (seconds)"
                     type="number"

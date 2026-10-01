@@ -71,7 +71,6 @@ describe("proxy full-replacement builders", () => {
     const payload = mergeFormUpdatePayload(snapshot, {
       backend_host: snapshot.backend_host,
       backend_port: snapshot.backend_port,
-      allow_path_parameters: true,
     });
 
     expect(payload.allow_path_parameters).toBe(true);

@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – Proxy create / edit form                         */
 /* ------------------------------------------------------------------ */
 
-import { useRef, useState, type FormEvent } from "react";
+import { useId, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -181,10 +181,15 @@ function Checkbox({
   onChange: (checked: boolean) => void;
   helpText?: string;
 }) {
+  const id = useId();
   return (
     <div className="flex flex-col gap-1">
-      <label className="inline-flex items-center gap-2 cursor-pointer select-none has-[:disabled]:cursor-not-allowed">
+      <label
+        htmlFor={id}
+        className="inline-flex items-center gap-2 cursor-pointer select-none has-[:disabled]:cursor-not-allowed"
+      >
         <input
+          id={id}
           type="checkbox"
           checked={checked}
           onChange={(e) => onChange(e.target.checked)}
@@ -483,7 +488,8 @@ export function ProxyForm({
       ...(backendPath && { backend_path: backendPath }),
       strip_listen_path: stripListenPath,
       preserve_host_header: preserveHostHeader,
-      allow_path_parameters: allowPathParameters,
+      // Edge reads it only for HTTP-family proxies; a stream proxy sends false.
+      allow_path_parameters: isHttpLike && allowPathParameters,
       auth_mode: authMode,
       response_body_mode: responseBodyMode,
       allowed_methods: restrictMethods
@@ -657,13 +663,11 @@ export function ProxyForm({
           >
             <Checkbox label="Strip listen path" checked={stripListenPath} onChange={setStripListenPath} />
             <Checkbox label="Preserve host header" checked={preserveHostHeader} onChange={setPreserveHostHeader} />
-            {isHttpLike && (
-              <Checkbox
-                label="Allow semicolon path parameters"
-                checked={allowPathParameters}
-                onChange={setAllowPathParameters}
-              />
-            )}
+            <Checkbox
+              label="Allow semicolon path parameters"
+              checked={allowPathParameters}
+              onChange={setAllowPathParameters}
+            />
             <Select
               label="Auth Mode"
               value={authMode}

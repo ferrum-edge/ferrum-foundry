@@ -31,7 +31,7 @@
       "requirements": [
         "It retains ferrum-edge#5661 conditional writes, ferrum-edge#4611 proxy association, and namespace-qualified resource identity (ferrum-edge 5db1d77a8, aligned in #409). The qualification checks these contracts against the published release.",
         "GET /proxies/{id}/mcp/tools is a viewer-readable, namespace-scoped MCP catalog read; viewer-key namespace ceilings apply to every namespace route and deny global routes outside the documented allowlist. Capability parity includes the new read route.",
-        "Operator reads may mask plugin configuration secrets and endpoint credentials. A write that echoes a masked placeholder is refused with 400 before update merging; clients must not claim [REDACTED] is a valid round-trip marker.",
+        "Operator reads of upstreams mask the Consul ACL token, and operator reads of plugin configs mask secrets and credential-bearing endpoint URL components, with redaction placeholders. A POST or PUT of an upstream or plugin config that echoes a placeholder at a masked field is refused with 400 before update merging (ferrum-edge#5925), so for upstreams and plugin configs a placeholder is not a round-trip marker; admin-only consumer credential entries still round-trip [REDACTED]. Foundry's editors block such a save until each field is re-entered or cleared.",
         "The full qualification is re-run with edge.image moved to that release, and every job is green on the pull request that moves it, before any Foundry release is published: Quality Gate, Pinned Gateway Contract (including capability parity, writable and read-only), Deployment Starter, Critical Journeys, and Container Gate."
       ]
     },
@@ -74,7 +74,7 @@
   "not_qualified": [
     "file, dp, mesh, and node_agent gateway modes (modelled read-only in the UI, not run in CI)",
     "any Ferrum Edge release other than v0.9.9 for the next Foundry release; Foundry v0.3.0 remains paired with v0.9.8",
-    "any Ferrum Edge image other than edge.image for this qualification, including the 0.9.9-ebpf and 0.9.9-ebpf-tools variants",
+    "any Ferrum Edge image other than edge.image for the #512 qualification, including the 0.9.9-ebpf and 0.9.9-ebpf-tools variants",
     "browser latency and more than one concurrent operator at scale"
   ],
   "edge_dependencies": [

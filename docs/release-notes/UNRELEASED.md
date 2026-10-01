@@ -20,8 +20,12 @@
 ### Qualification
 
 - The next Foundry pairing is being qualified against the published Ferrum Edge
-  v0.9.9 release. This qualification is tracked separately from Foundry release
-  preparation.
+  v0.9.9 release in [#512](https://github.com/ferrum-edge/ferrum-foundry/pull/512),
+  separately from Foundry release preparation.
+- Plugin configuration and upstream editors handle the secrets an `operator`
+  read masks: each placeholder is marked, Save stays blocked until it is
+  re-entered or cleared (clearing deletes the stored secret), and Ferrum Edge's
+  refusal lists the fields it names.
 
 ### Supported pairing
 
