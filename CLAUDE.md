@@ -35,6 +35,9 @@ https://github.com/ferrum-edge/ferrum-edge/blob/main/openapi.yaml.
 Check types and form fields against the upstream spec. It changes regularly, so
 a local copy would go stale.
 
+Shared org contracts are vendored under `contracts/ferrum-contracts/`; see
+[Contracts](README.md#contracts).
+
 ## Development
 
 ```bash

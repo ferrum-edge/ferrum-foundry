@@ -76,7 +76,8 @@ table or move the image pin to make a failure go away.
 ## Shared plugin catalog contract
 
 Foundry pins the plugin catalog and the `provisioned-by` vocabulary from
-Ferrum Contracts in
+[ferrum-edge/ferrum-contracts](https://github.com/ferrum-edge/ferrum-contracts),
+the org's central contract store, in
 [`contracts/ferrum-contracts/PIN`](../contracts/ferrum-contracts/PIN).
 The pinned files and the local plugin names and provisioning markers are checked
 by `scripts/ferrum-contracts.test.mjs` in the normal contract test suite.

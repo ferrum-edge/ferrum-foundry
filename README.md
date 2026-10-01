@@ -60,6 +60,22 @@ best-effort or not qualified.
 [Supported pairing](docs/compatibility.md) has the requirements, the full
 envelope, and the tested scale.
 
+## Contracts
+
+The org's shared vocabularies, JSON schemas, and fixtures live in
+[ferrum-edge/ferrum-contracts](https://github.com/ferrum-edge/ferrum-contracts).
+Foundry vendors the `plugin-catalog` and `provisioned-by` vocabularies with
+their vocabulary schemas under
+[`contracts/ferrum-contracts/`](contracts/ferrum-contracts/), pinned to
+`contracts-edge-0.9.9` in
+[`contracts/ferrum-contracts/PIN`](contracts/ferrum-contracts/PIN). The vendored
+files, Foundry's local plugin names and provisioning markers, and the pin's tie
+to the qualified Edge release are checked by
+[Plugin configuration templates](docs/plugin-defaults.md#shared-plugin-catalog-contract).
+
+A shared contract changes in `ferrum-contracts` first, then is re-vendored here;
+never edit a vendored file locally.
+
 ## Development status
 
 Ferrum Foundry is in active buildout and has no users yet. Expect breaking
