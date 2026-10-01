@@ -23,13 +23,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   default action, plus allowed and denied groups. A save replaces one
   `policy.tools` entry through the conditional-write path (`If-Match` from the
   read every other field is rebuilt from), omits `labels` so `provisioned-by`
-  survives, checks Edge's grant rules first, and is refused before sending
+  survives, says that removing an entry leaves a tool hidden until configured
+  under Edge's default `discovery.on_new_tool`, checks Edge's grant rules first, and is refused before sending
   when the session's read masks a value. A saved change is marked "not yet
   live on this node" until the catalog reports it.
 - An AI governance summary on the same tab: whether `ai_tool_governor`,
   `ai_prompt_shield`, `ai_transcript_audit`, and a `rate_limiting` tool-call
-  limit run on the proxy, whether each is configured for MCP `tools/call`, and
-  a warning when an agent-facing endpoint has none.
+  limit run on the proxy, whether each is configured for MCP `tools/call`
+  (a limit whose `mcp_tool_calls.endpoint_path` misses the gateway endpoint,
+  or whose `tools` names a subset, is marked partial), and a warning when an
+  agent-facing endpoint has none.
 - The mock admin gateway serves `GET /proxies/{id}/mcp/tools` with the v0.9.9
   shape and node-local states, has an `mcp_gateway` demo proxy, and refuses
   the `policy.tools` shapes Edge refuses.

@@ -102,6 +102,26 @@ export function defaultToolAction(config: unknown): "allow" | "deny" {
   return isPlainObject(policy) && policy.default_action === "allow" ? "allow" : "deny";
 }
 
+/**
+ * Whether a tool with no `policy.tools` entry stays hidden: Edge v0.9.9
+ * (`mcp_gateway.rs`, catalog construction) hides a tool new to a session's
+ * catalog while `discovery.on_new_tool` is `hide_until_configured`, its
+ * default, until `policy.tools` names it. `allow`, `allow_immediately`, and
+ * `expose` let it through to `default_action`.
+ */
+export function hidesUnconfiguredTools(config: unknown): boolean {
+  const discovery = isPlainObject(config) ? config.discovery : undefined;
+  const onNewTool = isPlainObject(discovery) ? discovery.on_new_tool : undefined;
+  return onNewTool === undefined || onNewTool === null || onNewTool === "hide_until_configured";
+}
+
+/** What removing an entry leaves the tool with, in words. */
+export function unconfiguredToolSummary(config: unknown): string {
+  return hidesUnconfiguredTools(config)
+    ? "No entry (hidden until configured)"
+    : `No entry (default: ${MCP_TOOL_ACTION_LABELS[defaultToolAction(config)]})`;
+}
+
 /** The `policy.tools` map, or an empty map when there is none. */
 export function configuredToolPolicies(config: unknown): JsonObject {
   const policy = isPlainObject(config) ? config.policy : undefined;

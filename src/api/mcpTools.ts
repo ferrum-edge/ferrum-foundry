@@ -271,6 +271,30 @@ export async function getToolCatalog(
 
 /* ---------- Per-tool policy write ---------- */
 
+/**
+ * What an operator blocked by masked values can do. A server's
+ * `upstream_url` is required (Edge refuses a server without `upstream_url` or
+ * `openapi`) and is not a secret, so it cannot be cleared: it has to be
+ * re-entered. Any other masked value may be re-entered or cleared.
+ */
+export function maskedToolPolicyAdvice(pointers: readonly string[]): string {
+  const isUrl = (pointer: string) => pointer.endsWith("/upstream_url");
+  if (pointers.length > 0 && pointers.every(isUrl)) {
+    return "Re-enter the URL on the plugin page first, or have an admin make the change.";
+  }
+  if (pointers.some(isUrl)) {
+    return (
+      "Re-enter them on the plugin page first (a server URL must be re-entered; other " +
+      "values may instead be cleared, which deletes the stored secret), or have an admin " +
+      "make the change."
+    );
+  }
+  return (
+    "Re-enter or clear them on the plugin page first (clearing deletes the stored " +
+    "secret), or have an admin make the change."
+  );
+}
+
 /** A tool-policy save refused before sending; the message says why. */
 export class McpToolPolicyError extends Error {
   constructor(message: string) {
@@ -343,8 +367,7 @@ export async function updateToolPolicy(
       throw new MaskedSecretWriteError(
         `Tool policy was not saved: plugin configuration ${pluginId} has values hidden from ` +
           `your role (${masked.join(", ")}), and a policy save resends the whole ` +
-          "configuration with them. Re-enter or clear them on the plugin page first " +
-          "(clearing deletes the stored secret), or have an admin make the change.",
+          `configuration with them. ${maskedToolPolicyAdvice(masked)}`,
         [...masked],
       );
     }

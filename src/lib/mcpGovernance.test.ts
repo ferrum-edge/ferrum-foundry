@@ -86,4 +86,39 @@ describe("MCP governance summary", () => {
     expect(shield.mcpAware).toBe(true);
     expect(shield.conditional).toBe(true);
   });
+
+  it("marks a tool-call limit partial when it misses the endpoint or names a subset", () => {
+    const gateway = plugin("mcp_gateway", { mode: "aggregate_router", endpoint: { path: "/mcp" } });
+    const limit = (counted: Record<string, unknown>) =>
+      plugin("rate_limiting", { limit_by: "consumer", mcp_tool_calls: counted });
+
+    const full = summarizeMcpGovernance([gateway, limit({ endpoint_path: "/mcp" })]);
+    expect(control(full, "tool_call_limit").partial).toBe(false);
+    expect(control(full, "tool_call_limit").instances[0].partial).toBeNull();
+    // An unset endpoint_path inspects every path.
+    expect(control(summarizeMcpGovernance([gateway, limit({})]), "tool_call_limit").partial)
+      .toBe(false);
+
+    const elsewhere = summarizeMcpGovernance([gateway, limit({ endpoint_path: "/agents" })]);
+    expect(control(elsewhere, "tool_call_limit").partial).toBe(true);
+    expect(control(elsewhere, "tool_call_limit").instances[0].partial)
+      .toContain("counts only /agents, not the mcp_gateway endpoint (/mcp)");
+
+    const subset = summarizeMcpGovernance([
+      gateway,
+      limit({ endpoint_path: "/mcp", tools: ["github.search"], per_tool: true }),
+    ]);
+    expect(control(subset, "tool_call_limit").partial).toBe(true);
+    expect(control(subset, "tool_call_limit").instances[0].partial).toContain("1 named tool(s)");
+    // A partial limit still governs the calls it counts.
+    expect(subset.mcpGoverned).toBe(true);
+
+    // One full instance beside a partial one covers the endpoint.
+    const mixed = summarizeMcpGovernance([
+      gateway,
+      limit({ endpoint_path: "/agents" }),
+      { ...limit({ endpoint_path: "/mcp" }), id: "rate_limiting-2" },
+    ]);
+    expect(control(mixed, "tool_call_limit").partial).toBe(false);
+  });
 });

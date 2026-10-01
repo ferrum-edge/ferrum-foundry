@@ -8,9 +8,22 @@ import { Card } from "@/components/ui/Card";
 import type { EffectivePlugin } from "@/lib/effectivePolicy";
 import {
   MCP_UNAWARE_GOVERNANCE_WARNING,
+  type McpGovernanceControl,
   summarizeMcpGovernance,
   UNGOVERNED_MCP_WARNING,
 } from "@/lib/mcpGovernance";
+
+function badgeLabel(control: McpGovernanceControl): string {
+  if (control.instances.length === 0) return "Not attached";
+  if (control.gap) return "Attached, not MCP-aware";
+  if (control.partial) return "Attached, partial";
+  return "Attached";
+}
+
+function badgeVariant(control: McpGovernanceControl): "default" | "yellow" | "green" {
+  if (control.instances.length === 0) return "default";
+  return control.gap || control.partial ? "yellow" : "green";
+}
 
 /**
  * Which of the recommended agent-facing controls run on this proxy, from its
@@ -35,7 +48,10 @@ export function McpGovernanceCard({ plugins }: { plugins: readonly EffectivePlug
         attempts, including calls the gateway then refuses.
       </p>
       {warning && (
-        <p role="alert" className="mt-3 rounded-lg border border-warning/40 bg-warning/5 px-4 py-3 text-sm text-warning">
+        <p
+          role="alert"
+          className="mt-3 rounded-lg border border-warning/40 bg-warning/5 px-4 py-3 text-sm text-warning"
+        >
           {warning}
         </p>
       )}
@@ -44,16 +60,17 @@ export function McpGovernanceCard({ plugins }: { plugins: readonly EffectivePlug
           <li key={control.key} className="py-2.5" data-governance={control.key}>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-sm font-medium text-text-primary">{control.label}</span>
-              <Badge variant={control.instances.length === 0 ? "default" : control.gap ? "yellow" : "green"}>
-                {control.instances.length === 0
-                  ? "Not attached"
-                  : control.gap
-                    ? "Attached, not MCP-aware"
-                    : "Attached"}
-              </Badge>
+              <Badge variant={badgeVariant(control)}>{badgeLabel(control)}</Badge>
             </div>
             <p className="text-xs text-text-muted mt-0.5">{control.role}</p>
             {control.gap && <p className="text-xs text-warning mt-1">{control.gap}</p>}
+            {control.instances
+              .filter((instance) => instance.mcpAware && instance.partial)
+              .map(({ plugin, partial }) => (
+                <p key={plugin.id} className="text-xs text-warning mt-1">
+                  {plugin.id}: {partial}
+                </p>
+              ))}
             {control.instances.length > 0 && (
               <div className="mt-1 flex flex-wrap gap-2">
                 {control.instances.map(({ plugin, conditional }) => (

@@ -11,10 +11,15 @@
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import { committedWriteMessage, getApiErrorMessage, getCommittedWrite } from "@/api/client";
-import { isStaleResourceError, type StaleResourceDetail, type WriteGuard } from "@/api/conditionalWrite";
+import {
+  isStaleResourceError,
+  type StaleResourceDetail,
+  type WriteGuard,
+} from "@/api/conditionalWrite";
 import { maskedPlaceholderRefusal } from "@/api/maskedSecrets";
 import { pluginConfigPlaceholderSites } from "@/api/maskedSecretSites";
 import {
+  maskedToolPolicyAdvice,
   McpToolPolicyError,
   newToolPolicyWriteGuard,
   toolPolicyWriteGuard,
@@ -49,8 +54,10 @@ import {
 } from "@/lib/mcpToolCatalog";
 import {
   defaultToolAction,
+  hidesUnconfiguredTools,
   mcpGatewayMode,
   MCP_TOOL_ACTION_LABELS,
+  unconfiguredToolSummary,
   validateToolPolicy,
   type McpToolAction,
   type McpToolPolicyEntry,
@@ -137,14 +144,19 @@ function ToolSource({ tool }: { tool: McpToolCatalogTool }) {
 }
 
 /** What the stored configuration says, in words. */
-function configuredSummary(row: McpToolRow, config: Record<string, unknown> | undefined): string {
+function configuredSummary(
+  row: McpToolRow,
+  config: Record<string, unknown> | undefined,
+): string {
   if (row.configured === undefined || !config) {
-    return row.tool
-      ? `${MCP_TOOL_ACTION_LABELS[row.tool.policy.action]}${row.tool.policy.configured ? "" : " (default)"}`
-      : "Unknown";
+    if (!row.tool) return "Unknown";
+    const action = MCP_TOOL_ACTION_LABELS[row.tool.policy.action];
+    return row.tool.policy.configured ? action : `${action} (default)`;
   }
   if (row.unparsedEntry) return "Entry Foundry cannot edit; see the plugin configuration";
-  if (row.configured === null) return `${MCP_TOOL_ACTION_LABELS[defaultToolAction(config)]} (default)`;
+  // Without an entry, Edge keeps a tool new to a session hidden while
+  // `discovery.on_new_tool` is `hide_until_configured` (its default).
+  if (row.configured === null) return unconfiguredToolSummary(config);
   return MCP_TOOL_ACTION_LABELS[row.configured.action];
 }
 
@@ -212,6 +224,7 @@ function ToolPolicyEditor({
   };
 
   const fallback = MCP_TOOL_ACTION_LABELS[defaultToolAction(config)];
+  const hidesNew = hidesUnconfiguredTools(config);
   return (
     <form
       onSubmit={submit}
@@ -231,8 +244,20 @@ function ToolPolicyEditor({
         label="Action"
         value={choice}
         onValueChange={setChoice}
+        helpText={
+          hidesNew
+            ? "Without an entry, discovery.on_new_tool hide_until_configured keeps the tool " +
+              `hidden from every session that discovers it, instead of applying the ${fallback} ` +
+              "default."
+            : `Without an entry, the default action (${fallback}) applies.`
+        }
         options={[
-          { value: DEFAULT_CHOICE, label: `Default (${fallback}, no entry)` },
+          {
+            value: DEFAULT_CHOICE,
+            label: hidesNew
+              ? "Remove entry (hidden until configured)"
+              : `Remove entry (default: ${fallback})`,
+          },
           { value: "allow", label: MCP_TOOL_ACTION_LABELS.allow },
           { value: "deny", label: MCP_TOOL_ACTION_LABELS.deny },
           { value: "hide_from_discovery", label: MCP_TOOL_ACTION_LABELS.hide_from_discovery },
@@ -245,7 +270,10 @@ function ToolPolicyEditor({
             values={allowed}
             onChange={(values) => setAllowed(values.map(String))}
             placeholder="Every mapped consumer when empty"
-            helpText="A consumer must hold at least one of these acl_groups. Leave empty to admit every consumer the action allows."
+            helpText={
+              "A consumer must hold at least one of these acl_groups. Leave empty to " +
+              "admit every consumer the action allows."
+            }
             variant="green"
           />
           <TagInput
@@ -253,7 +281,10 @@ function ToolPolicyEditor({
             values={denied}
             onChange={(values) => setDenied(values.map(String))}
             placeholder="None"
-            helpText="A consumer holding any of these is never granted the tool. Any group requires a gateway-mapped consumer."
+            helpText={
+              "A consumer holding any of these is never granted the tool. Any group " +
+              "requires a gateway-mapped consumer."
+            }
             variant="red"
           />
         </>
@@ -287,7 +318,15 @@ interface ToolRowViewProps {
   editor: ReactNode;
 }
 
-function ToolRowView({ row, config, editAllowed, editing, noticeId, onEdit, editor }: ToolRowViewProps) {
+function ToolRowView({
+  row,
+  config,
+  editAllowed,
+  editing,
+  noticeId,
+  onEdit,
+  editor,
+}: ToolRowViewProps) {
   const { tool } = row;
   const groups = rowGroups(row);
   const awaiting = config ? policyAwaitingNode(row, config) : false;
@@ -341,7 +380,8 @@ function ToolRowView({ row, config, editAllowed, editing, noticeId, onEdit, edit
       </div>
       <div className="mt-1 flex flex-wrap gap-x-4">
         {groups.allowed === null ? (
-          (row.configured?.action === "allow" || (row.configured === undefined && tool?.policy.action === "allow")) && (
+          (row.configured?.action === "allow" ||
+            (row.configured === undefined && tool?.policy.action === "allow")) && (
             <span className="text-xs text-text-muted">Every consumer the action allows</span>
           )
         ) : (
@@ -438,7 +478,8 @@ function McpGatewayInstance({
     [plugin, role],
   );
   const aggregate = config !== undefined && mcpGatewayMode(config) === "aggregate_router";
-  const editAllowed = capability.allowed && plugin !== undefined && aggregate && masked.length === 0;
+  const editAllowed =
+    capability.allowed && plugin !== undefined && aggregate && masked.length === 0;
   const noticeId = `mcp-policy-notice-${catalog.plugin_config_id}`;
   const provisioner = plugin?.labels?.["provisioned-by"];
 
@@ -474,7 +515,10 @@ function McpGatewayInstance({
         guard,
       });
       setEditing(null);
-      toast("success", `Policy for ${name} saved. The catalog shows it once this node has loaded it.`);
+      toast(
+        "success",
+        `Policy for ${name} saved. The catalog shows it once this node has loaded it.`,
+      );
     } catch (err: unknown) {
       if (isStaleResourceError(err)) {
         setConflict(err.detail);
@@ -562,9 +606,13 @@ function McpGatewayInstance({
         <p className="mt-1 text-xs text-text-muted">
           Default action {catalog.policy.default_action} · denied tools{" "}
           {catalog.policy.hide_denied_tools ? "hidden" : "listed"} · new tools{" "}
-          {catalog.discovery.on_new_tool === "hide_until_configured" ? "hidden until configured" : "allowed"}{" "}
+          {catalog.discovery.on_new_tool === "hide_until_configured"
+            ? "hidden until configured"
+            : "allowed"}{" "}
           · changed schemas{" "}
-          {catalog.discovery.on_schema_change === "hide_until_configured" ? "hidden until configured" : "allowed"}
+          {catalog.discovery.on_schema_change === "hide_until_configured"
+            ? "hidden until configured"
+            : "allowed"}
         </p>
       )}
       {catalog.tools_unavailable && (
@@ -587,20 +635,24 @@ function McpGatewayInstance({
             </p>
           )}
           {plugin && capability.allowed && aggregate && masked.length > 0 && (
-            <div role="status" className="rounded-lg border border-warning/40 bg-warning/5 px-4 py-3">
-              <p className="text-sm font-medium text-warning">Tool policy cannot be saved by your role</p>
+            <div
+              role="status"
+              className="rounded-lg border border-warning/40 bg-warning/5 px-4 py-3"
+            >
+              <p className="text-sm font-medium text-warning">
+                Tool policy cannot be saved by your role
+              </p>
               <p className="text-xs text-text-muted mt-1">
                 This configuration has values hidden from your role ({masked.join(", ")}). A
                 policy save resends the whole configuration, and Ferrum Edge refuses those
-                placeholders. Re-enter or clear them on the{" "}
+                placeholders. {maskedToolPolicyAdvice(masked)}{" "}
                 <Link
                   to="/plugins/$pluginId"
                   params={{ pluginId: catalog.plugin_config_id }}
                   className="text-orange hover:text-orange-light"
                 >
-                  plugin page
-                </Link>{" "}
-                first (clearing deletes the stored secret), or have an admin make the change.
+                  Open the plugin page
+                </Link>
               </p>
             </div>
           )}
@@ -688,9 +740,20 @@ interface McpToolsPanelProps {
   session: EditorSession;
   /** Rendered once the proxy is known to have `mcp_gateway`. */
   governance?: ReactNode;
+  /**
+   * Whether the proxy's effective plugins, as Foundry merges them from the
+   * stored configuration, include an `mcp_gateway`; `undefined` while unknown.
+   */
+  gatewayConfigured?: boolean;
 }
 
-export function McpToolsPanel({ proxyId, enabled, session, governance }: McpToolsPanelProps) {
+export function McpToolsPanel({
+  proxyId,
+  enabled,
+  session,
+  governance,
+  gatewayConfigured,
+}: McpToolsPanelProps) {
   const query = useMcpToolCatalog(proxyId, enabled);
   const { capabilities, facts } = useCapabilities();
   const response = query.data;
@@ -698,20 +761,39 @@ export function McpToolsPanel({ proxyId, enabled, session, governance }: McpTool
   return (
     <ReadState queries={[query]} label="MCP tool catalog">
       {response === null ? (
-        <Card>
-          <div className="text-center py-8 space-y-2">
-            <p className="text-text-secondary">No enabled mcp_gateway plugin applies to this proxy.</p>
-            <p className="text-text-muted text-sm">
-              Attach an mcp_gateway configuration to publish tools to agents through this proxy.
-            </p>
-            <Link
-              to="/plugins/new"
-              className="inline-block text-orange hover:text-orange-light font-medium transition-colors"
-            >
-              Create a plugin
-            </Link>
-          </div>
-        </Card>
+        gatewayConfigured ? (
+          <Card>
+            <div className="text-center py-8 space-y-2">
+              <p className="text-text-secondary">
+                This gateway node has not loaded the proxy&apos;s mcp_gateway.
+              </p>
+              <p className="text-text-muted text-sm">
+                The stored configuration attaches an mcp_gateway to this proxy, but the node
+                answers that none applies. It has not loaded that configuration yet: for
+                example a global mcp_gateway in a namespace this node has not cached (database
+                mode), or a change that is not live yet. Reload the catalog once it is.
+              </p>
+            </div>
+          </Card>
+        ) : (
+          <Card>
+            <div className="text-center py-8 space-y-2">
+              <p className="text-text-secondary">
+                This gateway node reports no enabled mcp_gateway plugin for this proxy.
+              </p>
+              <p className="text-text-muted text-sm">
+                Attach an mcp_gateway configuration to publish tools to agents through this
+                proxy.
+              </p>
+              <Link
+                to="/plugins/new"
+                className="inline-block text-orange hover:text-orange-light font-medium transition-colors"
+              >
+                Create a plugin
+              </Link>
+            </div>
+          </Card>
+        )
       ) : response ? (
         <div className="space-y-3">
           <Card padding="compact">

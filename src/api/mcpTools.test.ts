@@ -4,6 +4,7 @@ import { resetGatewayMetadata } from "./gatewayMetadata";
 import { MaskedSecretWriteError } from "./maskedSecrets";
 import {
   getToolCatalog,
+  maskedToolPolicyAdvice,
   McpCatalogChangedError,
   McpToolPolicyError,
   newToolPolicyWriteGuard,
@@ -326,6 +327,7 @@ describe("per-tool policy write", () => {
       "/config/servers/github/upstream_url",
     ]);
     expect((refused as Error).message).toContain("hidden from your role");
+    expect((refused as Error).message).toContain("Re-enter the URL");
     expect(gateway.wire.map((call) => call.method)).toEqual(["GET"]);
   });
 
@@ -359,5 +361,20 @@ describe("per-tool policy write", () => {
       allowed_groups: ["eng"],
     }, null, "admin")).rejects.toThrow("only to an allow entry");
     expect(gateway.wire.map((call) => call.method)).toEqual(["GET"]);
+  });
+});
+
+describe("masked-value advice", () => {
+  it("never suggests clearing a required server URL", () => {
+    expect(maskedToolPolicyAdvice(["/config/servers/github/upstream_url"]))
+      .toBe("Re-enter the URL on the plugin page first, or have an admin make the change.");
+    expect(maskedToolPolicyAdvice(["/config/upstream_url"])).toContain("Re-enter the URL");
+    const mixed = maskedToolPolicyAdvice([
+      "/config/servers/github/upstream_url",
+      "/config/servers/github/headers/authorization",
+    ]);
+    expect(mixed).toContain("a server URL must be re-entered");
+    expect(maskedToolPolicyAdvice(["/config/servers/github/headers/authorization"]))
+      .toContain("clearing deletes the stored secret");
   });
 });

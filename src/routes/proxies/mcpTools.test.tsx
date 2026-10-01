@@ -168,6 +168,11 @@ beforeEach(() => {
   stored = mcpPlugin();
   pluginList = [stored, toolCallLimit];
   revision = 1;
+  // Radix Select scrolls the highlighted option into view; jsdom has no layout.
+  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+    configurable: true,
+    value: vi.fn(),
+  });
   harness = createHarness();
   stubFetch(async (request) => {
     requests.push(request);
@@ -196,6 +201,7 @@ beforeEach(() => {
 afterEach(async () => {
   await harness.dispose();
   vi.unstubAllGlobals();
+  Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
 });
 
 async function openTools() {
@@ -331,8 +337,12 @@ describe("MCP Tools tab", () => {
     stored = mcpPlugin("https://mcp.example.com/[REDACTED_PATH]");
     pluginList = [stored, toolCallLimit];
     await openTools();
-    await settle(() => expect(panel().textContent).toContain("Tool policy cannot be saved by your role"));
+    await settle(() =>
+      expect(panel().textContent).toContain("Tool policy cannot be saved by your role"));
     expect(panel().textContent).toContain("/config/servers/github/upstream_url");
+    // A server URL is required and not a secret: it cannot be cleared.
+    expect(panel().textContent).toContain("Re-enter the URL on the plugin page first");
+    expect(panel().textContent).not.toContain("clearing deletes the stored secret");
     expect(button("Edit policy for github.search").disabled).toBe(true);
   });
 
@@ -349,10 +359,37 @@ describe("MCP Tools tab", () => {
 
   it("says when no mcp_gateway applies to the proxy", async () => {
     catalog = "none";
+    pluginList = [toolCallLimit];
     await openTools();
     await settle(() =>
-      expect(panel().textContent).toContain("No enabled mcp_gateway plugin applies to this proxy."));
+      expect(panel().textContent).toContain("reports no enabled mcp_gateway plugin for this proxy"));
+    await settle(() => expect(requests.some((request) =>
+      new URL(request.url).pathname === "/api/proxy/plugins/config")).toBe(true));
+    expect(panel().textContent).toContain("reports no enabled mcp_gateway plugin");
     expect(panel().textContent).not.toContain("AI governance");
+  });
+
+  it("does not deny an mcp_gateway the stored configuration attaches but the node has not loaded", async () => {
+    catalog = "none";
+    await openTools();
+    await settle(() =>
+      expect(panel().textContent).toContain("This gateway node has not loaded the proxy's mcp_gateway"));
+    expect(panel().textContent).toContain("namespace this node has not cached");
+    expect(panel().textContent).not.toContain("reports no enabled mcp_gateway");
+  });
+
+  it("says that removing an entry leaves the tool hidden until configured", async () => {
+    await openTools();
+    await settle(() => expect(panel().textContent).toContain("orders.cancel"));
+    await act(async () => button("Edit policy for orders.cancel").click());
+    expect(panel().textContent).toContain("keeps the tool hidden from every session");
+    await selectOption("Action", "Remove entry (hidden until configured)");
+    await act(async () => button("Save policy").click());
+    await settle(() => expect(puts).toHaveLength(1));
+    const tools = (puts[0].body.config as { policy: { tools: Record<string, unknown> } }).policy.tools;
+    expect(tools).not.toHaveProperty(["orders.cancel"]);
+    await settle(() => expect(toolRow("orders.cancel").textContent)
+      .toContain("Configured: No entry (hidden until configured)"));
   });
 
   it("summarizes AI governance and warns when an agent-facing endpoint has none", async () => {

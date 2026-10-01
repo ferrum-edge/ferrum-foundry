@@ -677,6 +677,11 @@ function ProxyEditor({ session }: { session: EditorSession }) {
               proxyId={proxyId}
               enabled={detailLive && openedTabs.has("tools")}
               session={session}
+              gatewayConfigured={
+                pluginsKnown
+                  ? proxyPlugins.some((plugin) => plugin.plugin_name === "mcp_gateway")
+                  : undefined
+              }
               governance={
                 <ReadState queries={pluginQueries} label="AI governance">
                   <McpGovernanceCard plugins={proxyPlugins} />

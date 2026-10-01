@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   configuredToolPolicies,
+  hidesUnconfiguredTools,
+  unconfiguredToolSummary,
   defaultToolAction,
   groupProblem,
   isGroupConditioned,
@@ -185,5 +187,27 @@ describe("validation mirrors Edge", () => {
     expect(
       validateToolPolicy(config, "github.b", { action: "allow", allowed_groups: ["extra"] }).join(" "),
     ).toContain("513 distinct groups");
+  });
+});
+
+describe("a tool with no entry", () => {
+  it("stays hidden under Edge's default discovery.on_new_tool", () => {
+    expect(hidesUnconfiguredTools({})).toBe(true);
+    expect(hidesUnconfiguredTools({ discovery: null })).toBe(true);
+    expect(hidesUnconfiguredTools({ discovery: { on_new_tool: null } })).toBe(true);
+    expect(hidesUnconfiguredTools({ discovery: { on_new_tool: "hide_until_configured" } })).toBe(true);
+    expect(unconfiguredToolSummary(gateway())).toBe("No entry (hidden until configured)");
+  });
+
+  it("gets the default action when new tools are let through", () => {
+    for (const onNewTool of ["allow", "allow_immediately", "expose"]) {
+      expect(hidesUnconfiguredTools({ discovery: { on_new_tool: onNewTool } })).toBe(false);
+    }
+    expect(unconfiguredToolSummary(gateway({ discovery: { on_new_tool: "allow" } })))
+      .toBe("No entry (default: Deny)");
+    expect(unconfiguredToolSummary({
+      discovery: { on_new_tool: "expose" },
+      policy: { default_action: "allow" },
+    })).toBe("No entry (default: Allow)");
   });
 });
