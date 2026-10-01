@@ -5,13 +5,14 @@
 /**
  * A gateway validation detail that named one request field.
  *
- * `field` is the request key exactly as the gateway wrote it (`cert_pem`,
- * `ca_bundle_pem`, ...), so a form can attach the message to the control that
- * produced it.
+ * `field` is the primary request key blamed by the gateway (`cert_pem`,
+ * `ca_bundle_pem`, ...). `fields` names every related control when a gateway
+ * error describes a pair, so forms can mark both inputs.
  */
 export interface ParsedFieldError {
   field: string;
   message: string;
+  fields?: string[];
 }
 
 /**
@@ -32,14 +33,36 @@ export function parseFieldError(
   detail: string,
   knownFields: readonly string[],
 ): ParsedFieldError | null {
+  const certificatePairPrefix = "cert_pem and key_pem do not form a valid pair:";
+  const certificatePair = detail.startsWith(certificatePairPrefix);
+  const validationPrefixes = [
+    ["ocsp_der_base64", "ocsp_der_base64 must be valid base64:"],
+    ["jwks_json", "jwks_json must be valid JSON:"],
+  ] as const;
+  const validationPrefix = validationPrefixes.find(([, prefix]) => detail.startsWith(prefix));
+  const field = certificatePair ? "cert_pem" : validationPrefix?.[0];
+  const prefix = certificatePair ? certificatePairPrefix : validationPrefix?.[1];
+
+  if (field && prefix) {
+    if (!knownFields.includes(field)) return null;
+    if (certificatePair && !knownFields.includes("key_pem")) return null;
+    const message = detail.slice(prefix.length).trim();
+    if (!message) return null;
+    return {
+      field,
+      message: message.charAt(0).toUpperCase() + message.slice(1),
+      ...(certificatePair && { fields: ["cert_pem", "key_pem"] }),
+    };
+  }
+
   const separator = detail.indexOf(":");
   if (separator === -1) return null;
 
-  const field = detail.slice(0, separator).trim();
-  if (!field || !knownFields.includes(field)) return null;
+  const regularField = detail.slice(0, separator).trim();
+  if (!regularField || !knownFields.includes(regularField)) return null;
 
   const message = detail.slice(separator + 1).trim();
   if (!message) return null;
 
-  return { field, message: message.charAt(0).toUpperCase() + message.slice(1) };
+  return { field: regularField, message: message.charAt(0).toUpperCase() + message.slice(1) };
 }
