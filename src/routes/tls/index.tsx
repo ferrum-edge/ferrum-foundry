@@ -23,11 +23,11 @@ import {
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { PageHeader } from "@/components/shared/PageHeader";
-import { ReadDeniedNotice, isReadDenied } from "@/components/shared/ReadState";
+import { ReadStateNotice } from "@/components/shared/ReadState";
 import { SkeletonRow } from "@/components/ui/Skeleton";
 import { PaginationControls } from "@/components/shared/PaginationControls";
 import { useToast } from "@/components/ui/Toast";
-import { getApiErrorDetail, getApiErrorMessage } from "@/api/client";
+import { extractApiErrorData, getApiErrorDetail, getApiErrorMessage } from "@/api/client";
 import { parseFieldError } from "@/lib/apiFieldErrors";
 import {
   useTlsInventory,
@@ -71,6 +71,7 @@ import {
   type AcmeCertificateFormState,
 } from "@/lib/acmeCertificateForm";
 import { formatDateTime } from "@/lib/format";
+import type { ReadQuery } from "@/lib/readState";
 
 /* ------------------------------------------------------------------ */
 /*  Small helpers                                                      */
@@ -90,6 +91,46 @@ function Mono({ children }: { children: ReactNode }) {
 }
 
 const TLS_PAGE_SIZE = 20;
+
+function tlsReadError(error: unknown): string {
+  if (!(error instanceof Error)) return "Unknown read error";
+  const data = (error as Error & { data?: unknown }).data;
+  const detail = extractApiErrorData(data);
+  if (detail) return detail.length > 600 ? `${detail.slice(0, 600)}…` : detail;
+  const status = (error as Error & { response?: { status?: number } }).response?.status;
+  return status ? `HTTP ${status}` : error.message;
+}
+
+function TlsReadNotice({ query, label }: { query: ReadQuery; label: string }) {
+  return (
+    <div className="space-y-2">
+      <ReadStateNotice query={query} label={label} />
+      <p className="text-xs text-danger" role="alert">
+        Read error: {tlsReadError(query.error)}
+      </p>
+    </div>
+  );
+}
+
+function clearTlsFieldError(
+  errors: Record<string, string>,
+  field: string,
+): Record<string, string> {
+  const pairError =
+    (field === "cert_pem" || field === "key_pem") &&
+    errors.cert_pem &&
+    errors.cert_pem === errors.key_pem;
+  if (!pairError && !(field in errors)) return errors;
+
+  const next = { ...errors };
+  if (pairError) {
+    delete next.cert_pem;
+    delete next.key_pem;
+  } else {
+    delete next[field];
+  }
+  return next;
+}
 
 /* ------------------------------------------------------------------ */
 /*  Managed record collections                                         */
@@ -190,7 +231,7 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
   const { toast } = useToast();
   const [offset, setOffset] = useState(0);
   const page = useManagedTlsRecords(config.collection, { offset, limit: TLS_PAGE_SIZE });
-  const { data, isLoading, error } = page;
+  const { data, isLoading } = page;
   const createRecord = useCreateManagedTlsRecord(config.collection);
   const deleteRecord = useDeleteManagedTlsRecord(config.collection);
   const { capabilities } = useCapabilities();
@@ -202,20 +243,11 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const records = data?.data ?? [];
-  // A viewer is refused these reads (Edge requires operator). That is an
-  // answer about the session, not an empty store.
-  const denied = data === undefined && isReadDenied(error);
-
   const setField = (key: string, value: string) => {
     setForm((f) => ({ ...f, [key]: value }));
     // The message described the material that was submitted; it stops being
     // true the moment the operator edits that field.
-    setFieldErrors((errors) => {
-      if (!(key in errors)) return errors;
-      const next = { ...errors };
-      delete next[key];
-      return next;
-    });
+    setFieldErrors((errors) => clearTlsFieldError(errors, key));
   };
 
   const closeCreate = () => {
@@ -253,7 +285,11 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
         config.fields.map((field) => field.key),
       );
       if (fieldError) {
-        setFieldErrors({ [fieldError.field]: fieldError.message });
+        setFieldErrors(
+          Object.fromEntries(
+            (fieldError.fields ?? [fieldError.field]).map((field) => [field, fieldError.message]),
+          ),
+        );
         return;
       }
       toast("error", detail || `Could not save ${config.title}`);
@@ -277,8 +313,8 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
             ))}
           </div>
         )}
-        {denied && <ReadDeniedNotice label={`Managed ${config.title}`} />}
-        {!isLoading && !denied && (data?.pagination.total ?? 0) === 0 && (
+        {page.isError && <TlsReadNotice query={page} label={`Managed ${config.title}`} />}
+        {!isLoading && !page.isError && (data?.pagination.total ?? 0) === 0 && (
           <EmptyState
             title={config.emptyTitle}
             description={`${config.emptyDescription} Reference it as managed://${config.collection}/{id}.`}
@@ -443,14 +479,14 @@ function stateBadge(state: string): ReactNode {
 function InventoryTab() {
   const { toast } = useToast();
   const pagination = usePaginationParams({ defaultLimit: 50 });
-  const { data, isLoading, error } = useTlsInventory(pagination.paginationParams);
+  const page = useTlsInventory(pagination.paginationParams);
+  const { data, isLoading } = page;
   const rotate = useRotateTlsSurface();
   const { capabilities } = useCapabilities();
   const canRotate = capabilities.operationalActions;
   const [surface, setSurface] = useState<TlsRotateSurface>("proxy_https");
 
   const entries = data?.data ?? [];
-  const denied = data === undefined && isReadDenied(error);
 
   return (
     <div className="space-y-4">
@@ -489,14 +525,27 @@ function InventoryTab() {
 
       <ResourceGrid
         label="TLS inventory"
-        emptyState={denied ? <ReadDeniedNotice label="TLS inventory" /> : !isLoading && entries.length === 0 && (
-          <EmptyState
-            title={(data?.pagination.total ?? 0) > 0 ? "No results on this page" : "No TLS material found"}
-            description={(data?.pagination.total ?? 0) > 0
-              ? "Use Go to last page below to return to the available results."
-              : "The gateway reports no configured TLS sources."}
-          />
-        )}
+        emptyState={
+          page.isError ? (
+            <TlsReadNotice query={page} label="TLS inventory" />
+          ) : (
+            !isLoading &&
+            entries.length === 0 && (
+              <EmptyState
+                title={
+                  (data?.pagination.total ?? 0) > 0
+                    ? "No results on this page"
+                    : "No TLS material found"
+                }
+                description={
+                  (data?.pagination.total ?? 0) > 0
+                    ? "Use Go to last page below to return to the available results."
+                    : "The gateway reports no configured TLS sources."
+                }
+              />
+            )
+          )
+        }
       >
         <div className={`grid grid-cols-[1.2fr_5rem_5rem_2fr_6rem] gap-4 ${GRID_HEADER_CLASS}`}>
           <span>Material</span>
@@ -559,12 +608,12 @@ function InventoryTab() {
 function EventsTab() {
   const [outcome, setOutcome] = useState<string>("");
   const pagination = usePaginationParams({ defaultLimit: 50 });
-  const { data, isLoading, error } = useTlsEvents({
+  const page = useTlsEvents({
     ...pagination.paginationParams,
     ...(outcome && { outcome: outcome as "rotated" | "load_error" | "rebuild_error" }),
   });
+  const { data, isLoading } = page;
   const events = data?.data ?? [];
-  const denied = data === undefined && isReadDenied(error);
 
   return (
     <div className="space-y-4">
@@ -592,8 +641,8 @@ function EventsTab() {
             ))}
           </div>
         )}
-        {denied && <ReadDeniedNotice label="TLS events" />}
-        {!isLoading && !denied && events.length === 0 && (
+        {page.isError && <TlsReadNotice query={page} label="TLS events" />}
+        {!isLoading && !page.isError && events.length === 0 && (
           <EmptyState
             title={(data?.pagination.total ?? 0) > 0 ? "No results on this page" : "No TLS events"}
             description={(data?.pagination.total ?? 0) > 0
@@ -672,16 +721,18 @@ function AcmeTab() {
   const [certificateOffset, setCertificateOffset] = useState(0);
   const [orderOffset, setOrderOffset] = useState(0);
   const [accountOffset, setAccountOffset] = useState(0);
-  const { data: certs, isLoading: certsLoading, error: certsError } =
-    useAcmeCertificates({ offset: certificateOffset, limit: TLS_PAGE_SIZE });
-  const { data: orders, isLoading: ordersLoading, error: ordersError } =
-    useAcmeOrders({ offset: orderOffset, limit: TLS_PAGE_SIZE });
-  const certsDenied = certs === undefined && isReadDenied(certsError);
-  const ordersDenied = orders === undefined && isReadDenied(ordersError);
-  const { data: accounts } = useAcmeAccounts({
+  const certificatesQuery = useAcmeCertificates({
+    offset: certificateOffset,
+    limit: TLS_PAGE_SIZE,
+  });
+  const ordersQuery = useAcmeOrders({ offset: orderOffset, limit: TLS_PAGE_SIZE });
+  const accountsQuery = useAcmeAccounts({
     offset: accountOffset,
     limit: TLS_PAGE_SIZE,
   });
+  const { data: certs, isLoading: certsLoading } = certificatesQuery;
+  const { data: orders, isLoading: ordersLoading } = ordersQuery;
+  const { data: accounts } = accountsQuery;
   const importCert = useImportAcmeCertificate();
   const updateCert = useUpdateAcmeCertificate();
   const createOrder = useCreateAcmeOrder();
@@ -840,8 +891,10 @@ function AcmeTab() {
               ))}
             </div>
           )}
-          {certsDenied && <ReadDeniedNotice label="ACME certificates" />}
-          {!certsLoading && !certsDenied && (certs?.pagination.total ?? 0) === 0 && (
+          {certificatesQuery.isError && (
+            <TlsReadNotice query={certificatesQuery} label="ACME certificates" />
+          )}
+          {!certsLoading && !certificatesQuery.isError && (certs?.pagination.total ?? 0) === 0 && (
             <EmptyState
               title="No ACME certificates"
               description="Create an order to obtain a certificate, or import issued material."
@@ -921,7 +974,7 @@ function AcmeTab() {
             </div>
           ))}
         </Card>
-        {(certs?.pagination.total ?? 0) > 0 && (
+        {!certificatesQuery.isError && (certs?.pagination.total ?? 0) > 0 && (
           <PaginationControls
             offset={certificateOffset}
             limit={TLS_PAGE_SIZE}
@@ -942,8 +995,10 @@ function AcmeTab() {
               ))}
             </div>
           )}
-          {ordersDenied && <ReadDeniedNotice label="ACME orders" />}
-          {!ordersLoading && !ordersDenied && (orders?.pagination.total ?? 0) === 0 && (
+          {ordersQuery.isError && (
+            <TlsReadNotice query={ordersQuery} label="ACME orders" />
+          )}
+          {!ordersLoading && !ordersQuery.isError && (orders?.pagination.total ?? 0) === 0 && (
             <EmptyState
               title="No active orders"
               description="ACME orders and their pending challenges appear here."
@@ -1080,7 +1135,7 @@ function AcmeTab() {
             </div>
           ))}
         </Card>
-        {(orders?.pagination.total ?? 0) > 0 && (
+        {!ordersQuery.isError && (orders?.pagination.total ?? 0) > 0 && (
           <PaginationControls
             offset={orderOffset}
             limit={TLS_PAGE_SIZE}
@@ -1091,7 +1146,15 @@ function AcmeTab() {
       </div>
 
       {/* Accounts */}
-      {(accounts?.pagination.total ?? 0) > 0 && (
+      {accountsQuery.isError && (
+        <div className="space-y-3">
+          <h3 className="text-sm font-semibold text-text-primary">Accounts</h3>
+          <Card padding="none" className="overflow-hidden">
+            <TlsReadNotice query={accountsQuery} label="ACME accounts" />
+          </Card>
+        </div>
+      )}
+      {!accountsQuery.isError && (accounts?.pagination.total ?? 0) > 0 && (
         <div className="space-y-3">
           <h3 className="text-sm font-semibold text-text-primary">Accounts</h3>
           <Card padding="none" className="overflow-hidden">
@@ -1451,12 +1514,7 @@ function ValidateTab() {
   const [result, setResult] = useState<{ valid: boolean; validated: Record<string, unknown> } | null>(null);
 
   const clearFieldError = (key: string) => {
-    setFieldErrors((errors) => {
-      if (!(key in errors)) return errors;
-      const next = { ...errors };
-      delete next[key];
-      return next;
-    });
+    setFieldErrors((errors) => clearTlsFieldError(errors, key));
   };
 
   const setField = (key: string, value: string) => {
@@ -1494,7 +1552,11 @@ function ValidateTab() {
       const detail = await getApiErrorDetail(err);
       const fieldError = parseFieldError(detail, TLS_VALIDATE_FIELDS);
       if (fieldError) {
-        setFieldErrors({ [fieldError.field]: fieldError.message });
+        setFieldErrors(
+          Object.fromEntries(
+            (fieldError.fields ?? [fieldError.field]).map((field) => [field, fieldError.message]),
+          ),
+        );
         return;
       }
       toast("error", detail || "Could not validate this material");

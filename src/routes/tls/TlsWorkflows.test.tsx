@@ -46,7 +46,8 @@ const account: AcmeAccount = {
 let ui: ReturnType<typeof createHarness>;
 let collections: Record<string, unknown[]>;
 let requests: Request[];
-let readStatus: number | undefined;
+let failReads: boolean;
+let readFailureStatus: number;
 const mutate = vi.fn<(request: Request) => Promise<Response>>();
 const popup = vi.fn();
 
@@ -57,7 +58,8 @@ beforeEach(() => {
     "acme/certificates": [], "acme/orders": [], "acme/accounts": [],
   };
   requests = [];
-  readStatus = undefined;
+  failReads = false;
+  readFailureStatus = 500;
   mutate.mockReset();
   mutate.mockImplementation(async () => { throw new Error("Unexpected TLS mutation"); });
   popup.mockClear();
@@ -68,7 +70,12 @@ beforeEach(() => {
   stubFetch(async (request) => {
     requests.push(request);
     if (request.method !== "GET") return mutate(request);
-    if (readStatus) return Response.json({ error: "TLS unavailable" }, { status: readStatus, headers: { "retry-after": "0" } });
+    if (failReads) {
+      return Response.json({ error: "TLS unavailable" }, {
+        status: readFailureStatus,
+        headers: { "retry-after": "0" },
+      });
+    }
     const path = new URL(request.url).pathname.replace("/api/proxy/admin/tls/", "");
     if (path === "acme/certificates/acme-edge") return Response.json(certificate);
     if (path === "acme/orders/order-edge") return Response.json({ ...order, status: "valid" });
@@ -91,13 +98,24 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  await ui.dispose();
-  setApiErrorHandler(undefined);
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-  localStorage.clear();
-  Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
+  try {
+    await ui.dispose();
+  } finally {
+    failReads = false;
+    setApiErrorHandler(undefined);
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    localStorage.clear();
+    Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
+  }
 });
+
+async function settleRead(check: () => void) {
+  await vi.waitFor(async () => {
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    check();
+  }, { timeout: 8000 });
+}
 
 async function mount(tab = "Inventory", entry = "/tls") {
   const parent = createRootRoute();
@@ -248,8 +266,7 @@ describe("TLS inventory and events", () => {
     expect(requests.every((request) => !request.headers.has("X-Ferrum-Namespace"))).toBe(true);
   });
 
-  it.each([undefined, 404, 503])("renders empty stores after an empty or unavailable response (%s)", async (status) => {
-    readStatus = status;
+  it("renders empty stores after successful empty responses", async () => {
     await mount();
     await settle(() => expect(panel().textContent).toContain("No TLS material found"));
     for (const [tab, message] of [
@@ -264,12 +281,54 @@ describe("TLS inventory and events", () => {
     expect(requests.every((request) => !request.headers.has("X-Ferrum-Namespace"))).toBe(true);
   });
 
+  it.each([404, 500, 503])(
+    "renders TLS read failures as unavailable instead of empty (%s)",
+    async (status) => {
+      failReads = true;
+      readFailureStatus = status;
+      await mount();
+      await settleRead(() => {
+        expect(panel().textContent).toContain("TLS inventory unavailable");
+        expect(panel().textContent).toContain("TLS unavailable");
+        expect(panel().textContent).not.toContain("No TLS material found");
+        expect(getByRole(panel(), "button", { name: "Retry TLS inventory" })).not.toBeNull();
+      });
+      for (const [tab, label, empty] of [
+        ["Certificates", "Managed Certificates unavailable", "No certificates yet"],
+        ["CA Bundles", "Managed CA Bundles unavailable", "No CA bundles yet"],
+        ["CRLs", "Managed CRLs unavailable", "No CRLs yet"],
+        ["OCSP", "Managed OCSP unavailable", "No OCSP responses yet"],
+        ["JWKS", "Managed JWKS unavailable", "No JWKS documents yet"],
+        ["Events", "TLS events unavailable", "No TLS events"],
+        ["ACME", "ACME certificates unavailable", "No ACME certificates"],
+      ]) {
+        await selectTab(tab);
+        await settleRead(() => {
+          expect(panel().textContent).toContain(label);
+          expect(panel().textContent).toContain("TLS unavailable");
+          expect(panel().textContent).not.toContain(empty);
+        });
+      }
+      await settleRead(() => {
+        expect(panel().textContent).toContain("ACME orders unavailable");
+        expect(panel().textContent).toContain("ACME accounts unavailable");
+        expect(panel().textContent).not.toContain("No active orders");
+      });
+      expect(writes()).toHaveLength(0);
+      expect(requests.every((request) => !request.headers.has("X-Ferrum-Namespace"))).toBe(true);
+    },
+    20_000,
+  );
+
   it("presents a refused read as a denial, never as an empty store", async () => {
     // Edge requires operator for every TLS read. A viewer's 403 is an answer
     // about the session: claiming "no TLS material" would be a false fact.
-    readStatus = 403;
+    failReads = true;
+    readFailureStatus = 403;
     await mount();
-    await settle(() => expect(panel().textContent).toContain("TLS inventory: read not permitted for this session"));
+    await settleRead(() => expect(panel().textContent).toContain(
+      "TLS inventory: read not permitted for this session",
+    ));
     expect(panel().textContent).not.toContain("No TLS material found");
     for (const [tab, label, empty] of [
       ["Certificates", "Managed Certificates", "No certificates yet"],
@@ -282,14 +341,18 @@ describe("TLS inventory and events", () => {
       ["ACME", "ACME certificates", "No ACME certificates"],
     ]) {
       await selectTab(tab);
-      await settle(() => expect(panel().textContent).toContain(`${label}: read not permitted for this session`));
+      await settleRead(() => expect(panel().textContent).toContain(
+        `${label}: read not permitted for this session`,
+      ));
       expect(panel().textContent).not.toContain(empty);
       expect(panel().querySelector("[data-read-denied]")).not.toBeNull();
     }
-    await settle(() => expect(panel().textContent).toContain("ACME orders: read not permitted for this session"));
+    await settleRead(() => expect(panel().textContent).toContain(
+      "ACME orders: read not permitted for this session",
+    ));
     expect(panel().textContent).not.toContain("No active orders");
     expect(writes()).toHaveLength(0);
-  });
+  }, 20_000);
 
   it("rotates the selected surface and reports acceptance and failure", async () => {
     mutate.mockResolvedValueOnce(Response.json({ accepted: true, requested_surface: "backend_tls" }, { status: 202 }))
@@ -372,6 +435,54 @@ describe("managed TLS material", () => {
     expect(writes()[1].method).toBe("DELETE");
     expect(new URL(writes()[1].url).pathname).toBe(`/api/proxy/admin/tls/${collection}/edge-cert`);
     expect(writes().every((request) => !request.headers.has("X-Ferrum-Namespace"))).toBe(true);
+  });
+
+  it.each([
+    [
+      "Certificates",
+      "Add Certificate",
+      "Certificate (PEM)",
+      "cert_pem and key_pem do not form a valid pair: keys may not be consistent: KeyMismatch",
+      "Keys may not be consistent: KeyMismatch",
+    ],
+    [
+      "OCSP",
+      "Add OCSP",
+      "OCSP Response (base64 DER)",
+      "ocsp_der_base64 must be valid base64: Invalid symbol 32, offset 7.",
+      "Invalid symbol 32, offset 7.",
+    ],
+    [
+      "JWKS",
+      "Add JWKS",
+      "JWKS Document (JSON)",
+      "jwks_json must be valid JSON: expected value at line 1 column 1",
+      "Expected value at line 1 column 1",
+    ],
+  ] as const)("attaches the Edge v0.9.9 %s validation error to its field", async (
+    tab, add, fieldLabel, detail, message,
+  ) => {
+    mutate.mockResolvedValue(Response.json({ error: detail }, { status: 400 }));
+    await mount(tab);
+    await click(add, panel());
+    const field = getByRole(dialog(), "textbox", { name: fieldLabel });
+    await fill(field, "invalid disposable material");
+    if (tab === "Certificates") {
+      await fill(getByRole(dialog(), "textbox", { name: "Private Key (PEM)" }), keyPem);
+    }
+    await click("Create", dialog());
+    await settle(() => expect(dialog().textContent).toContain(message));
+    expect(field.getAttribute("aria-invalid")).toBe("true");
+    expect(describedText(field)).toBe(message);
+    if (tab === "Certificates") {
+      const key = getByRole(dialog(), "textbox", { name: "Private Key (PEM)" });
+      expect(key.getAttribute("aria-invalid")).toBe("true");
+      expect(describedText(key)).toBe(message);
+      await fill(field, "edited certificate");
+      expect(key.hasAttribute("aria-invalid")).toBe(false);
+      expect(dialog().textContent).not.toContain(message);
+    }
+    expect(popup).not.toHaveBeenCalled();
   });
 
   it("shows material errors inline, clears them on edit, and keeps referenced records on delete conflict", async () => {

@@ -80,6 +80,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   duplicate. A pair is a duplicate only when both paths match segment for
   segment after normalization and the sensitivity is equal (#515).
 
+- TLS inventory, managed material, ACME, and event reads now show an
+  unavailable or stale state with the read error instead of reporting an empty
+  store when the gateway read fails (#511). Managed certificate, OCSP, and
+  JWKS material validation errors from Ferrum Edge v0.9.9 now attach to their
+  corresponding form fields (#517).
 - The capability-parity contract no longer misclassifies a `file`/`dp` gateway
   as admitting `POST /restore`. In those modes Edge has no configuration
   database, so `handle_restore` calls `require_db` before its write gate and

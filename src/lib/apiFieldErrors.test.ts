@@ -18,6 +18,27 @@ describe("parseFieldError", () => {
     ).toEqual({ field: "cert_pem", message: "No PEM certificates found" });
   });
 
+  it.each([
+    [
+      "cert_pem and key_pem do not form a valid pair: keys may not be consistent: KeyMismatch",
+      {
+        field: "cert_pem",
+        message: "Keys may not be consistent: KeyMismatch",
+        fields: ["cert_pem", "key_pem"],
+      },
+    ],
+    [
+      "ocsp_der_base64 must be valid base64: Invalid symbol 32, offset 7.",
+      { field: "ocsp_der_base64", message: "Invalid symbol 32, offset 7." },
+    ],
+    [
+      "jwks_json must be valid JSON: expected value at line 1 column 1",
+      { field: "jwks_json", message: "Expected value at line 1 column 1" },
+    ],
+  ] as const)("parses the Edge v0.9.9 TLS validation detail %s", (detail, expected) => {
+    expect(parseFieldError(detail, TLS_FIELDS)).toEqual(expected);
+  });
+
   it("leaves the rest of the message untouched", () => {
     expect(
       parseFieldError(
