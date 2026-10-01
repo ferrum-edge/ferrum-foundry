@@ -21,7 +21,11 @@ describe("parseFieldError", () => {
   it.each([
     [
       "cert_pem and key_pem do not form a valid pair: keys may not be consistent: KeyMismatch",
-      { field: "cert_pem", message: "Keys may not be consistent: KeyMismatch" },
+      {
+        field: "cert_pem",
+        message: "Keys may not be consistent: KeyMismatch",
+        fields: ["cert_pem", "key_pem"],
+      },
     ],
     [
       "ocsp_der_base64 must be valid base64: Invalid symbol 32, offset 7.",

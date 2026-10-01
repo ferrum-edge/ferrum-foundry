@@ -5,13 +5,14 @@
 /**
  * A gateway validation detail that named one request field.
  *
- * `field` is the request key exactly as the gateway wrote it (`cert_pem`,
- * `ca_bundle_pem`, ...), so a form can attach the message to the control that
- * produced it.
+ * `field` is the primary request key blamed by the gateway (`cert_pem`,
+ * `ca_bundle_pem`, ...). `fields` names every related control when a gateway
+ * error describes a pair, so forms can mark both inputs.
  */
 export interface ParsedFieldError {
   field: string;
   message: string;
+  fields?: string[];
 }
 
 /**
@@ -47,7 +48,11 @@ export function parseFieldError(
     if (certificatePair && !knownFields.includes("key_pem")) return null;
     const message = detail.slice(prefix.length).trim();
     if (!message) return null;
-    return { field, message: message.charAt(0).toUpperCase() + message.slice(1) };
+    return {
+      field,
+      message: message.charAt(0).toUpperCase() + message.slice(1),
+      ...(certificatePair && { fields: ["cert_pem", "key_pem"] }),
+    };
   }
 
   const separator = detail.indexOf(":");

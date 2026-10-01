@@ -447,6 +447,14 @@ describe("managed TLS material", () => {
     await settle(() => expect(dialog().textContent).toContain(message));
     expect(field.getAttribute("aria-invalid")).toBe("true");
     expect(describedText(field)).toBe(message);
+    if (tab === "Certificates") {
+      const key = getByRole(dialog(), "textbox", { name: "Private Key (PEM)" });
+      expect(key.getAttribute("aria-invalid")).toBe("true");
+      expect(describedText(key)).toBe(message);
+      await fill(field, "edited certificate");
+      expect(key.hasAttribute("aria-invalid")).toBe(false);
+      expect(dialog().textContent).not.toContain(message);
+    }
     expect(popup).not.toHaveBeenCalled();
   });
 

@@ -112,6 +112,26 @@ function TlsReadNotice({ query, label }: { query: ReadQuery; label: string }) {
   );
 }
 
+function clearTlsFieldError(
+  errors: Record<string, string>,
+  field: string,
+): Record<string, string> {
+  const pairError =
+    (field === "cert_pem" || field === "key_pem") &&
+    errors.cert_pem &&
+    errors.cert_pem === errors.key_pem;
+  if (!pairError && !(field in errors)) return errors;
+
+  const next = { ...errors };
+  if (pairError) {
+    delete next.cert_pem;
+    delete next.key_pem;
+  } else {
+    delete next[field];
+  }
+  return next;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Managed record collections                                         */
 /* ------------------------------------------------------------------ */
@@ -227,12 +247,7 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
     setForm((f) => ({ ...f, [key]: value }));
     // The message described the material that was submitted; it stops being
     // true the moment the operator edits that field.
-    setFieldErrors((errors) => {
-      if (!(key in errors)) return errors;
-      const next = { ...errors };
-      delete next[key];
-      return next;
-    });
+    setFieldErrors((errors) => clearTlsFieldError(errors, key));
   };
 
   const closeCreate = () => {
@@ -270,7 +285,11 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
         config.fields.map((field) => field.key),
       );
       if (fieldError) {
-        setFieldErrors({ [fieldError.field]: fieldError.message });
+        setFieldErrors(
+          Object.fromEntries(
+            (fieldError.fields ?? [fieldError.field]).map((field) => [field, fieldError.message]),
+          ),
+        );
         return;
       }
       toast("error", detail || `Could not save ${config.title}`);
@@ -1495,12 +1514,7 @@ function ValidateTab() {
   const [result, setResult] = useState<{ valid: boolean; validated: Record<string, unknown> } | null>(null);
 
   const clearFieldError = (key: string) => {
-    setFieldErrors((errors) => {
-      if (!(key in errors)) return errors;
-      const next = { ...errors };
-      delete next[key];
-      return next;
-    });
+    setFieldErrors((errors) => clearTlsFieldError(errors, key));
   };
 
   const setField = (key: string, value: string) => {
@@ -1538,7 +1552,11 @@ function ValidateTab() {
       const detail = await getApiErrorDetail(err);
       const fieldError = parseFieldError(detail, TLS_VALIDATE_FIELDS);
       if (fieldError) {
-        setFieldErrors({ [fieldError.field]: fieldError.message });
+        setFieldErrors(
+          Object.fromEntries(
+            (fieldError.fields ?? [fieldError.field]).map((field) => [field, fieldError.message]),
+          ),
+        );
         return;
       }
       toast("error", detail || "Could not validate this material");
