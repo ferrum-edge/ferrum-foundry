@@ -23,6 +23,7 @@ import { SkeletonCard } from "@/components/ui/Skeleton";
 import { PluginConfigForm } from "@/components/forms/PluginConfigForm";
 import { PluginMembershipRecovery } from "@/components/forms/PluginMembershipRecovery";
 import { MaskedSecretRefusal } from "@/components/shared/MaskedSecretRefusal";
+import { maskedPlaceholderRefusal } from "@/api/maskedSecrets";
 import { getApiErrorMessage } from "@/api/client";
 import { formatPluginName } from "@/lib/pluginConfigDefaults";
 import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
@@ -56,7 +57,7 @@ function PluginEditor({ session }: { session: EditorSession }) {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const { capabilities } = useCapabilities();
+  const { capabilities, facts } = useCapabilities();
   const capability = capabilities.pluginConfigs;
   const updatePlugin = useUpdatePluginWithMembership();
   const deletePlugin = useDeletePluginWithMembership();
@@ -230,8 +231,14 @@ function PluginEditor({ session }: { session: EditorSession }) {
         <ReadStateNotice query={proxiesQuery} label="Proxy group membership" />
       )}
       {/* Form */}
-      <MaskedSecretRefusal error={membershipError} />
-      <PluginMembershipRecovery error={membershipError} />
+      {/* A masked-placeholder refusal is the plugin write itself being
+          refused, before anything changed: list its fields once instead of
+          repeating Edge's message as a recovery report. */}
+      {maskedPlaceholderRefusal(membershipError) ? (
+        <MaskedSecretRefusal error={membershipError} />
+      ) : (
+        <PluginMembershipRecovery error={membershipError} />
+      )}
       <Card>
         <ResourceLabels labels={plugin.labels} />
         <PluginConfigForm
@@ -240,6 +247,7 @@ function PluginEditor({ session }: { session: EditorSession }) {
           onSubmit={handleSubmit}
           isLoading={updatePlugin.isPending}
           capability={capability}
+          role={facts.role}
           availablePlugins={availablePlugins ?? []}
           initialProxyGroupIds={initialProxyGroupIds}
           initialProxyGroupIdsLoaded={!needsMembership || allProxies !== undefined}

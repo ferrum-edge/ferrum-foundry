@@ -642,6 +642,30 @@ describe("proxy-group membership reconciliation", () => {
     expect(state.plugins.get("plugin-1")?.config).toEqual(groupInput().config);
   });
 
+  it("restores an admin's snapshot, which was read raw", async () => {
+    const literal: PluginConfig = {
+      ...makePlugin("plugin-1", "global"),
+      config: { requests: 10, redis_password: "[REDACTED]" },
+    };
+    const state = harness(
+      [makeProxy("p1"), makeProxy("p2"), makeProxy("p3")],
+      [literal],
+      { failProxyOnce: "p3" },
+    );
+    await expect(
+      updatePluginWithMembership(
+        "plugin-1",
+        groupInput(),
+        ["p2", "p3"],
+        { ...state.deps, role: "admin" },
+        null,
+      ),
+    ).rejects.toThrow("rollback was attempted");
+    expect(state.counts().updatePluginCalls).toBe(2);
+    expect(state.plugins.get("plugin-1")?.config).toEqual(literal.config);
+    expect(state.plugins.get("plugin-1")?.scope).toBe("global");
+  });
+
   it("restores associations when a scope transition config update fails", async () => {
     const state = harness(
       [makeProxy("p1", ["plugin-1"]), makeProxy("p2", ["plugin-1"])],

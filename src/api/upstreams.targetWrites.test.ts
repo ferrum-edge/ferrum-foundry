@@ -120,6 +120,33 @@ describe("upstream target writes", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
+  it("sends an admin's target write, whose read of the token is raw", async () => {
+    const stored = {
+      id: "payments",
+      namespace: "tenant-a",
+      algorithm: "round_robin",
+      targets: settings.targets,
+      service_discovery: {
+        provider: "consul",
+        consul: { address: "http://consul:8500", service_name: "payments", token: "[REDACTED]" },
+      },
+      created_at: "v0",
+      updated_at: "v0",
+    };
+    const bodies: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
+      if (request.method === "PUT") bodies.push(await request.json());
+      return Response.json(stored);
+    }));
+
+    await updateTargets(scope, "payments", targets, null, "admin");
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]).toMatchObject({
+      targets,
+      service_discovery: { consul: { token: "[REDACTED]" } },
+    });
+  });
+
   it("releases failed writes and keeps another namespace independent", async () => {
     const started = barrier();
     const finish = barrier();

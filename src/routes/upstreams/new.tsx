@@ -27,7 +27,7 @@ function UpstreamCreateEditor({ session }: { session: EditorSession }) {
   const navigate = useNavigate();
   const createUpstream = useCreateUpstream();
   const { toast } = useToast();
-  const { capabilities } = useCapabilities();
+  const { capabilities, facts } = useCapabilities();
   const capability = capabilities.upstreams;
 
   const handleSubmit = session.bind(async (data: UpstreamCreate) => {
@@ -58,6 +58,7 @@ function UpstreamCreateEditor({ session }: { session: EditorSession }) {
           onSubmit={handleSubmit}
           isLoading={createUpstream.isPending}
           capability={capability}
+          role={facts.role}
         />
       </Card>
     </div>

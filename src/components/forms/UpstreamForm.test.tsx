@@ -108,7 +108,7 @@ describe("Consul required fields", () => {
 });
 
 describe("UpstreamForm masked Consul token (ferrum-edge#5925)", () => {
-  async function mountMasked(token: string) {
+  async function mountMasked(token: string, role?: "admin" | "operator") {
     const initialData: Upstream = {
       id: "upstream-1",
       name: "payments",
@@ -123,7 +123,12 @@ describe("UpstreamForm masked Consul token (ferrum-edge#5925)", () => {
     };
     await act(async () => {
       root.render(
-        <UpstreamForm initialData={initialData} onSubmit={submit} isLoading={false} />,
+        <UpstreamForm
+          initialData={initialData}
+          onSubmit={submit}
+          isLoading={false}
+          role={role}
+        />,
       );
     });
   }
@@ -168,6 +173,14 @@ describe("UpstreamForm masked Consul token (ferrum-edge#5925)", () => {
     const consul = submit.mock.calls[0]?.[0].service_discovery?.consul;
     expect(consul).toMatchObject({ address: "http://consul:8500", service_name: "payments" });
     expect(consul?.token).toBeUndefined();
+  });
+
+  it("saves an admin's literal placeholder token as written", async () => {
+    await mountMasked("[REDACTED]", "admin");
+    await save();
+    expect(submit).toHaveBeenCalledOnce();
+    expect(submit.mock.calls[0]?.[0].service_discovery?.consul?.token).toBe("[REDACTED]");
+    expect(host.textContent).not.toContain("Hidden from your role");
   });
 
   it("leaves a real token alone", async () => {

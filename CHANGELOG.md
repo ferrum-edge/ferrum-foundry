@@ -29,7 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   your role", and Save stays blocked until it is re-entered or cleared with its
   Clear action; clearing omits the field, which deletes the stored secret
   because `PUT` is a full replace. Foundry's placeholder check mirrors Edge's
-  `is_redaction_placeholder` exactly.
+  `is_redaction_placeholder` exactly, and it blocks only where Edge refuses:
+  never for an `admin`, whose reads are raw, and for other roles only at the
+  fields the read masks, found by replaying Edge's schema rules, name floor,
+  and URL-userinfo sweep. A placeholder-shaped value anywhere else (such as
+  `ai_prompt_shield`'s `redaction_placeholder`) gets a warning and is saved as
+  written; a plugin Foundry has no rules for keeps every placeholder blocked.
 
 - Pin Ferrum Contracts `contracts-edge-0.9.8` for the plugin catalog and
   `provisioned-by` vocabulary, with CI checks for vendored file integrity and
@@ -40,11 +45,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An `operator` can save plugin configurations and upstreams against Ferrum
   Edge v0.9.9: the editors no longer send the placeholders their masked read
   returned, which Edge refuses with `400`. When Edge does refuse a save, the
-  page lists the JSON pointers it names. A targets save on an upstream whose
-  Consul token is masked is refused before anything is sent, with the reason,
-  instead of resending the placeholder. A failed membership change no longer
-  tries to restore a plugin configuration that was read masked; the recovery
-  report names the fields that need manual recovery.
+  page lists the JSON pointers it names, once. A non-admin targets save on an
+  upstream whose Consul token is masked is refused before anything is sent,
+  with the reason, instead of resending the placeholder. A failed membership
+  change no longer tries to restore a plugin configuration that was read
+  masked for the session's role; the recovery report names the fields that
+  need manual recovery.
 
 ### Security
 

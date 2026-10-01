@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PluginConfigForm } from "./PluginConfigForm";
 import type { PluginConfig, PluginConfigCreate } from "@/api/types";
 import { MASKED_FIELD_NOTICE } from "@/api/maskedSecrets";
+import type { GatewayRole } from "@/lib/capabilities";
 
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn() }));
 
@@ -37,7 +38,11 @@ afterEach(async () => {
   Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
 });
 
-async function renderForm(pluginName: string, config: Record<string, unknown>) {
+async function renderForm(
+  pluginName: string,
+  config: Record<string, unknown>,
+  role?: GatewayRole | null,
+) {
   const initialData: PluginConfig = {
     id: `${pluginName}-1`,
     plugin_name: pluginName,
@@ -54,6 +59,7 @@ async function renderForm(pluginName: string, config: Record<string, unknown>) {
         availablePlugins={[pluginName]}
         isLoading={false}
         onSubmit={onSubmit}
+        role={role}
       />,
     );
   });
@@ -67,9 +73,17 @@ async function submit() {
   });
 }
 
-function maskedList(): string[] {
-  const region = host.querySelector('[aria-label="Fields hidden from your role"]');
+function codesIn(label: string): string[] {
+  const region = host.querySelector(`[aria-label="${label}"]`);
   return [...(region?.querySelectorAll("code") ?? [])].map((code) => code.textContent ?? "");
+}
+
+function maskedList(): string[] {
+  return codesIn("Fields hidden from your role");
+}
+
+function warnedList(): string[] {
+  return codesIn("Values that look like placeholders");
 }
 
 async function clear(pointer: string) {
@@ -179,5 +193,51 @@ describe("plugin configuration with masked secrets", () => {
     expect(maskedList()).toEqual([]);
     await submit();
     expect(onSubmit).toHaveBeenCalledOnce();
+  });
+
+  it("lets an admin save a literal placeholder, whose reads are raw", async () => {
+    await renderForm("http_logging", maskedHttpLogging, "admin");
+
+    expect(maskedList()).toEqual([]);
+    expect(host.textContent).not.toContain("Hidden from your role");
+    expect(warnedList()).toEqual([
+      "/config/endpoint_url",
+      "/config/custom_headers/x-honeycomb-team",
+    ]);
+
+    await submit();
+    expect(onSubmit).toHaveBeenCalledOnce();
+    expect(onSubmit.mock.calls[0]![0].config).toEqual(maskedHttpLogging);
+  });
+
+  it("blocks an operator only where the read masks the field", async () => {
+    const config = {
+      action: "redact",
+      redaction_placeholder: "[REDACTED]",
+      webhook_secret: "[REDACTED]",
+    };
+    await renderForm("ai_prompt_shield", config, "operator");
+
+    expect(maskedList()).toEqual(["/config/webhook_secret"]);
+    expect(warnedList()).toEqual(["/config/redaction_placeholder"]);
+    await submit();
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    await clear("/config/webhook_secret");
+    expect(maskedList()).toEqual([]);
+    await submit();
+    expect(onSubmit).toHaveBeenCalledOnce();
+    expect(onSubmit.mock.calls[0]![0].config).toEqual({
+      action: "redact",
+      redaction_placeholder: "[REDACTED]",
+    });
+  });
+
+  it("keeps every placeholder blocking for a plugin it has no rules for", async () => {
+    await renderForm("custom_plugin", { redaction_placeholder: "[REDACTED]" }, "operator");
+    expect(maskedList()).toEqual(["/config/redaction_placeholder"]);
+    expect(warnedList()).toEqual([]);
+    await submit();
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 });

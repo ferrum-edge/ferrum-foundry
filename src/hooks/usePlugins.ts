@@ -20,6 +20,7 @@ import { SUMMARY_SCAN_BUDGET } from "@/api/pagination";
 import type { WriteGuard } from "@/api/conditionalWrite";
 import type { PaginationParams, PluginConfig, PluginConfigCreate } from "@/api/types";
 import { useNamespace } from "@/stores/namespace";
+import { useCapabilities } from "@/stores/capabilities";
 import {
   bindPluginMembership,
   createPluginWithMembership,
@@ -158,6 +159,7 @@ export function useCreatePluginWithMembership() {
 export function useUpdatePluginWithMembership() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
+  const { facts } = useCapabilities();
   return useMutation({
     // Discard submitted secret variables as soon as the form resets/unmounts.
     gcTime: 0,
@@ -172,7 +174,13 @@ export function useUpdatePluginWithMembership() {
       proxyIds?: string[];
       guard: WriteGuard<PluginConfig | PluginConfigCreate> | null;
     }) =>
-      updatePluginWithMembership(id, data, proxyIds, bindPluginMembership(scope), guard),
+      updatePluginWithMembership(
+        id,
+        data,
+        proxyIds,
+        bindPluginMembership(scope, facts.role),
+        guard,
+      ),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ["pluginConfig"] });
       invalidateMembership(qc);

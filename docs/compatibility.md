@@ -114,13 +114,19 @@ plugin configurations a placeholder is therefore not a round-trip marker.
 Consumers are different: they are `admin`-only, and a `[REDACTED]` credential
 entry is still restored from the stored one.
 
-Foundry mirrors Edge's placeholder check (`src/api/maskedSecrets.ts`). The
-plugin and upstream editors mark each field that still holds a placeholder,
+Foundry mirrors Edge's placeholder check (`src/api/maskedSecrets.ts`) and the
+sites where Edge applies it (`src/api/maskedSecretSites.ts`): nowhere for an
+`admin`, whose reads are raw; for other roles, only where the read projection
+masks the field, replayed from the CI-checked copy of Edge's schema rules
+(`pluginSensitivity.ts`), its name floor, and its URL-userinfo sweep. A plugin
+Foundry has no rules for has every placeholder treated as masked. The plugin
+and upstream editors mark each masked field that still holds a placeholder,
 block Save until it is re-entered or cleared (clearing omits it, which deletes
-the stored secret, because `PUT` is a full replace), and show Edge's `400`
-field list when a save is refused anyway. A targets save on an upstream whose
-Consul token is masked, and a plugin rollback whose earlier read was masked,
-are refused locally and reported instead of being sent. The Pinned Gateway
+the stored secret, because `PUT` is a full replace), only point out a
+placeholder-shaped value anywhere else, and show Edge's `400` field list when a
+save is refused anyway. A non-admin targets save on an upstream whose Consul
+token is masked, and a plugin rollback whose earlier read was masked for the
+session's role, are refused locally and reported instead of being sent. The Pinned Gateway
 Contract checks that an `operator` read-modify-write of a plugin configuration
 with a masked endpoint path is refused. The plugin sensitivity schema rules are
 unchanged from v0.9.8, and Foundry records their source commit at v0.9.9.

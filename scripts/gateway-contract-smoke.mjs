@@ -190,6 +190,8 @@ await request("/plugins/config?proxy_id=has%20space", { expected: [400] });
   const maskedId = "contract-smoke-masked-endpoint";
   const maskedPath = `/plugins/config/${maskedId}`;
   const endpointUrl = "https://collector.example.com/contract-smoke/ingest";
+  // A run that died against a persistent gateway may have left it behind.
+  await request(`${maskedPath}?apply=sync`, { method: "DELETE", expected: [200, 204, 404] });
   await request("/plugins/config?apply=sync", {
     method: "POST",
     body: {
@@ -200,28 +202,31 @@ await request("/plugins/config?proxy_id=has%20space", { expected: [400] });
       config: { endpoint_url: endpointUrl, batch_size: 50 },
     },
   });
-  const operatorRead = await exchange(maskedPath, { role: "operator" });
-  assert.equal(operatorRead.status, 200, JSON.stringify(operatorRead.body));
-  const maskedUrl = operatorRead.body.config.endpoint_url;
-  assert.equal(maskedUrl, `https://collector.example.com/${REDACTED_PATH_PLACEHOLDER}`);
-  assert.ok(isRedactionPlaceholder(maskedUrl));
-  const echoed = {
-    ...operatorRead.body,
-    config: { ...operatorRead.body.config, batch_size: 75 },
-  };
-  const refused = await exchange(`${maskedPath}?apply=sync`, {
-    method: "PUT",
-    body: echoed,
-    role: "operator",
-  });
-  assert.equal(refused.status, 400, JSON.stringify(refused.body));
-  assert.deepEqual(parseMaskedPlaceholderMessage(refused.body?.error ?? "")?.pointers, [
-    "/config/endpoint_url",
-  ]);
-  const stored = await request(maskedPath);
-  assert.equal(stored.config.endpoint_url, endpointUrl);
-  assert.equal(stored.config.batch_size, 50);
-  await request(`${maskedPath}?apply=sync`, { method: "DELETE", expected: [200, 204] });
+  try {
+    const operatorRead = await exchange(maskedPath, { role: "operator" });
+    assert.equal(operatorRead.status, 200, JSON.stringify(operatorRead.body));
+    const maskedUrl = operatorRead.body.config.endpoint_url;
+    assert.equal(maskedUrl, `https://collector.example.com/${REDACTED_PATH_PLACEHOLDER}`);
+    assert.ok(isRedactionPlaceholder(maskedUrl));
+    const echoed = {
+      ...operatorRead.body,
+      config: { ...operatorRead.body.config, batch_size: 75 },
+    };
+    const refused = await exchange(`${maskedPath}?apply=sync`, {
+      method: "PUT",
+      body: echoed,
+      role: "operator",
+    });
+    assert.equal(refused.status, 400, JSON.stringify(refused.body));
+    assert.deepEqual(parseMaskedPlaceholderMessage(refused.body?.error ?? "")?.pointers, [
+      "/config/endpoint_url",
+    ]);
+    const stored = await request(maskedPath);
+    assert.equal(stored.config.endpoint_url, endpointUrl);
+    assert.equal(stored.config.batch_size, 50);
+  } finally {
+    await request(`${maskedPath}?apply=sync`, { method: "DELETE", expected: [200, 204, 404] });
+  }
 }
 
 for (const endpoint of ["upstreams", "consumers", "proxies", "plugins/config"]) {

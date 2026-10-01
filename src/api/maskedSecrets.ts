@@ -183,7 +183,14 @@ export interface MaskedPlaceholderRefusal {
 // the redaction placeholder that '<role>' reads return in place of ...".
 const EDGE_REFUSAL = /field\(s\) (.+?) carry the redaction placeholder that '([^']*)' reads return/s;
 
-/** Parse Edge's masked-placeholder `400` message, or `null` for any other text. */
+/**
+ * Parse Edge's masked-placeholder `400` message, or `null` for any other text.
+ *
+ * Edge joins the pointers with `", "` and escapes only `~` and `/` in them
+ * (RFC 6901), so a config key that itself contains `", "` is split into two
+ * entries here. The message carries no other delimiter to recover it by; the
+ * pieces are still shown verbatim and together still name the field.
+ */
 export function parseMaskedPlaceholderMessage(message: string): MaskedPlaceholderRefusal | null {
   const match = EDGE_REFUSAL.exec(message);
   if (!match) return null;

@@ -38,12 +38,9 @@ import { ProxySearchPicker } from "@/components/forms/ProxySearchPicker";
 import { PluginGuidedConfig } from "@/components/forms/PluginGuidedConfig";
 import { getGuidedSchema } from "@/lib/pluginSchemas";
 import { unmodelledEnumSpelling, type FieldIssue, type JsonObject } from "@/lib/pluginGuidedConfig";
-import {
-  MASKED_FIELD_NOTICE,
-  PLUGIN_CONFIG_POINTER,
-  pluginConfigPlaceholderPointers,
-  removeAtPointer,
-} from "@/api/maskedSecrets";
+import { MASKED_FIELD_NOTICE, PLUGIN_CONFIG_POINTER, removeAtPointer } from "@/api/maskedSecrets";
+import { pluginConfigPlaceholderSites, type PlaceholderSites } from "@/api/maskedSecretSites";
+import type { GatewayRole } from "@/lib/capabilities";
 
 /* ------------------------------------------------------------------ */
 /*  Props                                                              */
@@ -73,7 +70,15 @@ export interface PluginConfigFormProps {
    * still enforces the same rule for anything the UI has not observed.
    */
   capability?: CapabilityVerdict;
+  /**
+   * The session's gateway role, which decides where a masked-secret
+   * placeholder blocks Save (`pluginConfigPlaceholderSites`). Unknown (`null`
+   * or omitted) is treated as a non-admin role.
+   */
+  role?: GatewayRole | null;
 }
+
+const NO_PLACEHOLDERS: PlaceholderSites = { blocking: [], other: [] };
 
 /* ------------------------------------------------------------------ */
 /*  Helper: Checkbox                                                   */
@@ -127,6 +132,7 @@ function PluginConfigFormFields({
   availablePlugins,
   initialProxyGroupIds,
   capability,
+  role,
 }: PluginConfigFormProps) {
   const readOnly = capability !== undefined && !capability.allowed;
   const navigate = useNavigate();
@@ -318,15 +324,17 @@ function PluginConfigFormFields({
 
   /* ---------- Masked secrets (ferrum-edge#5925) ---------- */
   // A non-admin read puts a placeholder where a stored secret is withheld, and
-  // the editors are seeded from that read. Every placeholder still in the
-  // configuration blocks Save until it is re-entered or cleared.
-  const maskedSites = useMemo(() => {
+  // the editors are seeded from that read. A placeholder at a site Edge would
+  // refuse for this role blocks Save until it is re-entered or cleared; one
+  // anywhere else is only pointed out, since Edge stores it as written.
+  const placeholderSites = useMemo(() => {
     try {
-      return pluginConfigPlaceholderPointers(JSON.parse(configJson) as unknown);
+      return pluginConfigPlaceholderSites(pluginName, JSON.parse(configJson) as unknown, role);
     } catch {
-      return [];
+      return NO_PLACEHOLDERS;
     }
-  }, [configJson]);
+  }, [configJson, pluginName, role]);
+  const maskedSites = placeholderSites.blocking;
 
   // PUT is a full replace, so omitting the field deletes the stored secret.
   const clearMaskedSite = (pointer: string) => {
@@ -581,6 +589,28 @@ function PluginConfigFormFields({
                         Clear
                       </Button>
                     )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {placeholderSites.other.length > 0 && (
+            <div
+              role="note"
+              aria-label="Values that look like placeholders"
+              className="mb-4 space-y-2 rounded-lg border border-border p-3"
+            >
+              <p className="text-xs text-text-secondary">
+                {role === "admin"
+                  ? "These values are exactly a redaction placeholder. Your reads are not masked, so this is what is stored, and Ferrum Edge saves it as written."
+                  : "These values are exactly a redaction placeholder, but your role's read does not mask these fields, so Ferrum Edge saves them as written."}{" "}
+                If one was copied from a masked read, replace it with the real value.
+              </p>
+              <ul className="space-y-1">
+                {placeholderSites.other.map((pointer) => (
+                  <li key={pointer} className="text-xs">
+                    <code className="font-mono text-text-primary">{pointer}</code>
                   </li>
                 ))}
               </ul>

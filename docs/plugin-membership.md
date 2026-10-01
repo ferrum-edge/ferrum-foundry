@@ -81,23 +81,35 @@ JSON pointer. The check runs before Edge's update merge, so a placeholder never
 stands in for the stored value. `PUT` stays a full replace: omitting the field
 clears the stored secret rather than keeping it.
 
-Foundry recognises the placeholders exactly as Edge does
-(`src/api/maskedSecrets.ts`) and handles them as follows:
+Edge applies the check only where it would apply: never to an `admin`, and
+for other roles only at a field the caller's read masks. A placeholder-shaped
+value anywhere else (`ai_prompt_shield`'s `redaction_placeholder: "[REDACTED]"`,
+say) is saved as written.
 
-- **Plugin and upstream editors.** Each field that still holds a placeholder is
-  marked "Hidden from your role: re-enter it, or clear it (clearing deletes the
-  stored secret)". Save stays blocked until every one is re-entered with the
-  real value or cleared with its **Clear** action, which omits the field. In the
-  guided plugin editor and the JSON editor alike, any placeholder in `config`
-  counts.
+Foundry recognises the placeholders exactly as Edge does
+(`src/api/maskedSecrets.ts`), finds the masked fields by replaying Edge's
+projection (`src/api/maskedSecretSites.ts`: the CI-checked schema rules in
+`pluginSensitivity.ts`, Edge's name floor, and its URL-userinfo sweep), and
+handles them as follows:
+
+- **Plugin and upstream editors.** For a non-admin session, each masked field
+  that still holds a placeholder is marked "Hidden from your role: re-enter it,
+  or clear it (clearing deletes the stored secret)". Save stays blocked until
+  every one is re-entered with the real value or cleared with its **Clear**
+  action, which omits the field. A placeholder-shaped value anywhere else, and
+  every one in an admin's editor, is listed as a warning and saved as written.
+  A plugin Foundry has no rules for (a custom plugin, or a built-in newer than
+  Foundry's copy of the rules) has every placeholder in its `config` treated
+  as masked. An unknown session role is treated as a non-admin one.
 - **Refused saves.** If Edge refuses a save anyway, the page lists the JSON
   pointers from Edge's error as written, never a value.
 - **Upstream targets.** A targets save resends every upstream setting from a
-  fresh read. When that read masks the Consul token, Foundry refuses the save
-  before sending it; re-enter or clear the token on the Configuration tab
+  fresh read. When that read masks the Consul token (a non-admin session),
+  Foundry refuses the save before sending it; re-enter or clear the token on the Configuration tab
   first, or have an admin make the change.
 - **Rollback.** A failed membership change restores the plugin configuration it
-  read first. When that read was masked, the restore is not attempted: the
+  read first. When that read has a placeholder at a field masked for the
+  session's role, the restore is not attempted: the
   recovery report names the fields that could not be restored, and the previous
   configuration must be restored manually, with the real values, or by an
   admin.

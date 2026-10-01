@@ -34,7 +34,7 @@ import {
 } from "@/lib/formDrafts";
 import { ReadOnlySurface } from "@/components/shared/CapabilityGate";
 import { isRedactionPlaceholder, MASKED_FIELD_NOTICE } from "@/api/maskedSecrets";
-import type { CapabilityVerdict } from "@/lib/capabilities";
+import type { CapabilityVerdict, GatewayRole } from "@/lib/capabilities";
 import type {
   Upstream,
   UpstreamCreate,
@@ -92,6 +92,12 @@ export interface UpstreamFormProps {
    * still enforces the same rule for anything the UI has not observed.
    */
   capability?: CapabilityVerdict;
+  /**
+   * The session's gateway role. Only a non-admin read masks the Consul token,
+   * so only then does a placeholder there block Save. Unknown (`null` or
+   * omitted) is treated as a non-admin role.
+   */
+  role?: GatewayRole | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -262,6 +268,7 @@ export function UpstreamForm({
   onSubmit,
   isLoading,
   capability,
+  role,
 }: UpstreamFormProps) {
   const readOnly = capability !== undefined && !capability.allowed;
   const navigate = useNavigate();
@@ -404,9 +411,11 @@ export function UpstreamForm({
 
   // An `operator` read shows the Consul ACL token as a placeholder
   // (ferrum-edge#5925). It cannot be written back: Save stays blocked until the
-  // token is re-entered or cleared.
-  const consulTokenMasked =
+  // token is re-entered or cleared. An admin's read is raw, so for an admin
+  // the same string is the stored token, which Edge saves as written.
+  const consulTokenIsPlaceholder =
     sdEnabled && sdProvider === "consul" && isRedactionPlaceholder(sdConfig.token);
+  const consulTokenMasked = consulTokenIsPlaceholder && role !== "admin";
 
   /* ---------- Validation ---------- */
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -463,7 +472,9 @@ export function UpstreamForm({
       if (!sdServiceName.trim()) {
         errs.sd_service_name = "Consul service name is required";
       }
-      if (consulTokenMasked) errs.consul_token = MASKED_FIELD_NOTICE;
+      if (consulTokenMasked) {
+        errs.consul_token = "Re-enter or clear the token before saving.";
+      }
     }
     // A subset with a blank name is dropped on save, so only named subsets
     // have selectors to check. Each problem is shown on its own row; the
@@ -1208,11 +1219,11 @@ export function UpstreamForm({
                       setErrors(({ consul_token: _token, ...rest }) => rest);
                     }}
                     placeholder="consul-acl-token"
-                    helpText={consulTokenMasked ? MASKED_FIELD_NOTICE : undefined}
                     error={errors.consul_token}
                   />
                   {consulTokenMasked && (
-                    <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-xs text-warning">{MASKED_FIELD_NOTICE}</p>
                       <Button
                         type="button"
                         variant="secondary"
@@ -1227,6 +1238,13 @@ export function UpstreamForm({
                         Clear token
                       </Button>
                     </div>
+                  )}
+                  {consulTokenIsPlaceholder && !consulTokenMasked && (
+                    <p className="text-xs text-text-muted">
+                      This token is exactly a redaction placeholder. Your reads are
+                      not masked, so it is the stored value, and Ferrum Edge saves
+                      it as written.
+                    </p>
                   )}
                   <Input
                     label="Poll Interval (seconds)"

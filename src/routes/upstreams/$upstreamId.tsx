@@ -129,7 +129,7 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const { capabilities } = useCapabilities();
+  const { capabilities, facts } = useCapabilities();
   const capability = capabilities.upstreams;
   const updateUpstream = useUpdateUpstream();
   const deleteUpstream = useDeleteUpstream();
@@ -481,6 +481,7 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
               onSubmit={handleSubmit}
               isLoading={updateUpstream.isPending}
               capability={capability}
+              role={facts.role}
             />
           </Card>
         </TabsContent>

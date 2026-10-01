@@ -125,7 +125,7 @@ function urlSecrets(value: string): string[] {
 /* ---------- Plugin configurations: Ferrum Edge's projection ---------- */
 
 /** Edge's `normalize_config_key`: case and `-`, `.`, `_` do not distinguish keys. */
-function normalizeConfigKey(key: string): string {
+export function normalizeConfigKey(key: string): string {
   return key.replace(/[-._]/g, "").toLowerCase();
 }
 
@@ -170,7 +170,7 @@ function keySegments(key: string): string[] {
  * over `is_sensitive_metadata_key`), without the operator's
  * `FERRUM_LOG_REDACT_METADATA_KEYS` extras, which Foundry cannot see.
  */
-function isEdgeSensitiveConfigKey(key: string): boolean {
+export function isEdgeSensitiveConfigKey(key: string): boolean {
   const lower = key.toLowerCase();
   const segments = keySegments(key).map((segment) => segment.toLowerCase());
   const normalized = normalizeConfigKey(key);

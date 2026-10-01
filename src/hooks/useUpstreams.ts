@@ -20,6 +20,7 @@ import * as upstreams from "@/api/upstreams";
 import type { WriteGuard } from "@/api/conditionalWrite";
 import type { PaginationParams, Upstream, UpstreamCreate } from "@/api/types";
 import { useNamespace } from "@/stores/namespace";
+import { useCapabilities } from "@/stores/capabilities";
 import {
   removeCommitted,
   retireDeletedDetail,
@@ -181,6 +182,7 @@ export function useCreateUpstream() {
 export function useUpdateUpstream() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
+  const { facts } = useCapabilities();
   return useMutation({
     // Discard submitted secret variables as soon as the form resets/unmounts.
     gcTime: 0,
@@ -189,7 +191,7 @@ export function useUpdateUpstream() {
       guard: WriteGuard<Upstream | UpstreamCreate> | null;
     } & ({ data: UpstreamCreate } | { targets: UpstreamCreate["targets"] })) =>
       "targets" in input
-        ? upstreams.updateTargets(scope, input.id, input.targets, input.guard)
+        ? upstreams.updateTargets(scope, input.id, input.targets, input.guard, facts.role)
         : upstreams.update(scope, input.id, input.data, input.guard),
     onSuccess: async (upstream, { id }) => {
       const queryKey = ["upstream", scope.namespace, id];
