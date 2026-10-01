@@ -66,10 +66,10 @@ Node as its entrypoint, and exposes Node at the distroless path
 While this workaround is in place, the base digests alone do not identify the
 exact image inputs. The runtime stage installs `libssl3t64` and
 `openssl-provider-legacy` pinned to `3.5.7-1~deb13u3`, and `libpcre2-8-0`
-pinned to `10.46-1~deb13u3`, from the live Debian security feed at build time, so the build fails if that exact version is no
-longer offered, and each publish or release rebuild fetches the packages
-again. The SBOM attached to each published image records the package versions
-it actually contains.
+pinned to `10.46-1~deb13u3`, from the live Debian security feed at build
+time, so the build fails if either exact version is no longer offered, and
+each publish or release rebuild fetches the packages again. The SBOM attached
+to each published image records the package versions it actually contains.
 
 Every third-party GitHub Action is pinned to a full commit SHA.
 
