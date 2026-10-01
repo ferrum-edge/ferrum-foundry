@@ -31,11 +31,10 @@ workflow (`.github/workflows/ci.yml`) has passed:
 ## Supported Edge image
 
 Passing these gates qualifies Foundry with that one Ferrum Edge image and no
-other build. This qualification runs every gateway-backed gate against the
-published Ferrum Edge v0.9.10 candidate in `edge.image`, including the MCP
-security fixes in ferrum-edge#5954. The v0.9.9 image remains the most recently
-supported release until this qualification passes. Foundry v0.3.0 remains
-paired with v0.9.8 until a later release-preparation change.
+other build. Every gateway-backed gate runs against the published Ferrum Edge
+v0.9.10 release in `edge.image`, including the MCP security fixes in
+ferrum-edge#5954. Foundry v0.4.0 pairs with v0.9.10; the previous Foundry
+v0.3.0 release paired with v0.9.8.
 Requirements, best-effort and unqualified setups, and rejected images are in
 [the compatibility record](compatibility.md).
 

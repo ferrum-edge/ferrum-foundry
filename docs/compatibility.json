@@ -1,18 +1,18 @@
 {
-  "$comment": "Supported Foundry-Edge pairing. docs/compatibility.md is the human-readable record; scripts/supported-pairing.mjs reads and validates this file, CI starts the gateway edge.image names, and scripts/supported-pairing.test.mjs fails when any other file pins a different Ferrum Edge image. During qualification, status is candidate and edge.image/edge.release name the candidate; after the gates pass they name the release the next Foundry release pairs with. Foundry artifact fields record the latest Foundry release until its separate release-preparation change. Values beginning with RELEASE-STEP are filled by the release step, never guessed.",
+  "$comment": "Supported Foundry-Edge pairing. docs/compatibility.md is the human-readable record; scripts/supported-pairing.mjs reads and validates this file, CI starts the gateway edge.image names, and scripts/supported-pairing.test.mjs fails if another file pins a different Ferrum Edge image. edge.release is the published Edge release the Foundry release pairs with, and edge.image names that same release. Foundry artifact fields are filled by the release step, never guessed.",
   "record_version": 1,
   "status": "candidate",
   "foundry": {
-    "version": "0.3.0",
-    "previous_release": "v0.2.0",
-    "source_commit": "b0762e61f7138de0fcabc6173308f2c6c78076e1",
-    "image": "ferrumedge/ferrum-foundry@sha256:0f8064151f264d8afafef3f581bb44c56af3c88398db21df3b65457e195ab7d6",
-    "ci_evidence": "https://github.com/ferrum-edge/ferrum-foundry/actions/runs/36325287150",
+    "version": "0.4.0",
+    "previous_release": "v0.3.0",
+    "source_commit": "RELEASE-STEP: the commit v0.4.0 points to (also the image's org.opencontainers.image.revision label)",
+    "image": "RELEASE-STEP: ferrumedge/ferrum-foundry@sha256:<multi-arch index digest from the release run>",
+    "ci_evidence": "RELEASE-STEP: https://github.com/ferrum-edge/ferrum-foundry/actions/runs/<release run id>",
     "platforms": ["linux/amd64", "linux/arm64"]
   },
   "edge": {
     "image": "ferrumedge/ferrum-edge@sha256:430d6a7d41361de5ad12562786481f97f1e97fef72a0b5f1a0699eced7cdd4cc",
-    "build": "published release v0.9.10 (https://github.com/ferrum-edge/ferrum-edge/releases/tag/v0.9.10), the qualification candidate for the next Foundry release. It follows v0.9.9; Foundry v0.3.0 remains paired with v0.9.8",
+    "build": "published release v0.9.10 (https://github.com/ferrum-edge/ferrum-edge/releases/tag/v0.9.10), the Edge release Foundry v0.4.0 pairs with (edge.release). It follows v0.9.9, which was qualified (#512) but never paired with a Foundry release; Foundry v0.3.0 pairs with v0.9.8",
     "source_commit": "ee040d5e3281fde424aa65f5b18004852c5b53b0",
     "source_evidence": "https://github.com/ferrum-edge/ferrum-edge/actions/runs/36852417185",
     "platform_manifests": {
@@ -74,7 +74,7 @@
   ],
   "not_qualified": [
     "file, dp, mesh, and node_agent gateway modes (modelled read-only in the UI, not run in CI)",
-    "any Ferrum Edge release other than v0.9.10 for the next Foundry release; Foundry v0.3.0 remains paired with v0.9.8",
+    "any Ferrum Edge release other than v0.9.10 (edge.release)",
     "any Ferrum Edge image other than edge.image for this qualification, including the 0.9.10-ebpf and 0.9.10-ebpf-tools variants",
     "browser latency and more than one concurrent operator at scale"
   ],

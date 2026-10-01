@@ -105,19 +105,21 @@ describe("the supported pairing record", () => {
     assert.match(semantics, /#409/);
   });
 
-  it("keeps the latest Foundry release record during Edge qualification", () => {
-    assert.equal(record.foundry.version, "0.3.0");
-    assert.equal(record.foundry.previous_release, "v0.2.0");
+  it("records the Foundry release preparation against the qualified Edge pairing", () => {
+    assert.equal(record.foundry.version, "0.4.0");
+    assert.equal(record.foundry.previous_release, "v0.3.0");
     const pkg = JSON.parse(repoFile("package.json"));
     const lock = JSON.parse(repoFile("package-lock.json"));
     // The release workflow requires the tag, package.json, and the record to agree.
     assert.equal(pkg.version, record.foundry.version);
     assert.equal(lock.version, record.foundry.version);
     assert.equal(lock.packages[""].version, record.foundry.version);
-    // This qualification does not prepare a new Foundry release. Keep the most
-    // recent Foundry release artifacts while the Edge candidate is evaluated.
     for (const field of ["source_commit", "image", "ci_evidence"]) {
-      assert.ok(!isPlaceholder(record.foundry[field]), `latest Foundry ${field} is recorded`);
+      assert.equal(
+        isPlaceholder(record.foundry[field]),
+        record.status !== "released",
+        `foundry.${field} reflects whether this release has been published`,
+      );
     }
     if (record.status === "released") {
       // A released record also mirrors the recorded Foundry artifacts in docs.
@@ -130,6 +132,11 @@ describe("the supported pairing record", () => {
         assert.ok(doc.includes(record.foundry[field]), `compatibility.md names foundry.${field}`);
       }
       assert.ok(!doc.includes("*release step*"), "compatibility.md has no release-step marker");
+    } else {
+      assert.ok(
+        repoFile("docs/compatibility.md").includes("*release step*"),
+        "the prepared release's unpublished artifacts remain marked",
+      );
     }
     assert.deepEqual(record.foundry.platforms, ["linux/amd64", "linux/arm64"]);
   });
@@ -291,18 +298,6 @@ describe("repository alignment", () => {
       // The notes must not present the CI pin, which is not the pairing, as the pairing.
       assert.ok(!notes.includes(record.edge.image), "the draft must not pair with edge.image");
       assert.match(notes, /\| Ferrum Edge \| \*release step\*/);
-    } else if (record.status === "candidate") {
-      // An Edge release under qualification pairs with no published Foundry
-      // release yet: the released version's notes keep the pairing they
-      // shipped with and must not claim the candidate.
-      assert.ok(
-        !notes.includes(release.image),
-        `${path} must not pair with the candidate ${release.version} image`,
-      );
-      assert.ok(
-        !notes.includes(release.source_commit),
-        `${path} must not pair with the candidate ${release.version} source commit`,
-      );
     } else {
       assert.ok(notes.includes(release.image));
       assert.ok(notes.includes(release.source_commit));
