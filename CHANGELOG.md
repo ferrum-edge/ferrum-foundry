@@ -79,6 +79,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   store when the gateway read fails (#511). Managed certificate, OCSP, and
   JWKS material validation errors from Ferrum Edge v0.9.9 now attach to their
   corresponding form fields (#517).
+- The capability-parity contract no longer misclassifies a `file`/`dp` gateway
+  as admitting `POST /restore`. In those modes Edge has no configuration
+  database, so `handle_restore` calls `require_db` before its write gate and
+  answers the documented `503 {"error":"No database"}` rather than the
+  read-only `403`. The contract accepts that exact typed `503` as an expected
+  read-only outcome under a read-only expectation, never describes a `503` as
+  admitted, and still fails on a `2xx` the model treats as read-only or on a
+  `503` of any other shape (#516).
+
+- Settings namespace selection now reports a failed registry read as
+  unavailable with a retry action. Manual namespace entry remains available as
+  a clearly labeled fallback during an outage, while a successfully empty
+  registry keeps the manual-entry flow.
 - An `operator` can save plugin configurations and upstreams against Ferrum
   Edge v0.9.9: the editors no longer send the placeholders their masked read
   returned, which Edge refuses with `400`. When Edge does refuse a save, the

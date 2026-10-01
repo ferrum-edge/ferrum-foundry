@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Select } from "@/components/ui/Select";
 import { Input } from "@/components/ui/Input";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { ReadStateNotice } from "@/components/shared/ReadState";
 import { useToast } from "@/components/ui/Toast";
 import { useNamespace } from "@/stores/namespace";
 import { useNamespaces } from "@/hooks/useNamespaces";
@@ -27,7 +28,8 @@ import {
 export default function SettingsPage() {
   const { toast } = useToast();
   const { selectedNamespace, setNamespace } = useNamespace();
-  const { data: namespaces, isLoading: nsLoading } = useNamespaces();
+  const namespaceQuery = useNamespaces();
+  const { data: namespaces, isLoading: nsLoading } = namespaceQuery;
 
   const [refreshInterval, setRefreshInterval] = useState(() =>
     String(getStoredMetricsRefreshInterval()),
@@ -78,6 +80,28 @@ export default function SettingsPage() {
 
             {nsLoading ? (
               <div className="h-10 w-48 bg-bg-card-hover rounded animate-pulse" />
+            ) : namespaceQuery.isError ? (
+              <div className="space-y-3">
+                <ReadStateNotice query={namespaceQuery} label="Namespace registry" />
+                {namespaces && namespaces.length > 0 ? (
+                  <Select
+                    label="Switch Namespace"
+                    value={selectedNamespace}
+                    onValueChange={setNamespace}
+                    options={namespaces.map((ns: string) => ({
+                      value: ns,
+                      label: ns,
+                    }))}
+                  />
+                ) : (
+                  <Input
+                    label="Namespace fallback"
+                    value={selectedNamespace}
+                    onChange={(e) => setNamespace(e.target.value)}
+                    helpText="The registry is unavailable. You can enter a namespace manually as a fallback."
+                  />
+                )}
+              </div>
             ) : namespaces && namespaces.length > 0 ? (
               <Select
                 label="Switch Namespace"
@@ -93,7 +117,7 @@ export default function SettingsPage() {
                 label="Namespace"
                 value={selectedNamespace}
                 onChange={(e) => setNamespace(e.target.value)}
-                helpText="Enter the namespace name manually (no namespaces returned from server)"
+                helpText="No namespaces are currently listed. Enter a namespace name manually."
               />
             )}
           </div>
