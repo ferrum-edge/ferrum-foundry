@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-01
+
+Pairs with the published **Ferrum Edge v0.9.10** release,
+`ferrumedge/ferrum-edge@sha256:430d6a7d41361de5ad12562786481f97f1e97fef72a0b5f1a0699eced7cdd4cc`.
+See `docs/compatibility.md` and `docs/release-notes/v0.4.0.md`.
+
 ### Added
 
 - Proxy pages gain an MCP Tools tab for `mcp_gateway` proxies (#505). It reads
@@ -41,9 +47,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Qualify the published Ferrum Edge v0.9.10 multi-architecture image for
-  the next Foundry pairing. Foundry v0.3.0 remains paired with v0.9.8
-  until a separate Foundry release preparation. Edge v0.9.10 contains
+- Foundry v0.4.0 pairs with the published Ferrum Edge v0.9.10 multi-architecture
+  release, qualified in [#524](https://github.com/ferrum-edge/ferrum-foundry/pull/524).
+  Edge v0.9.10 contains
   ferrum-edge#5954: `mcp_gateway` and `ai_prompt_shield` refuse non-UTF-8
   charset inputs and fail closed on uninspectable or over-nested JSON-RPC
   batches (GHSA-4f9m-cfqg-fhx9, GHSA-f2jp-59r9-fp64). No admin API or
@@ -122,12 +128,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Upgrade the runtime image's `libpcre2-8-0` to `10.46-1~deb13u3` (pinned, from
   the Debian security feed) for CVE-2026-103111, an out-of-bounds write via a
-  crafted regular expression. The pinned `node:24-trixie-slim` base still
+  crafted regular expression (#513). The pinned `node:24-trixie-slim` base still
   carries `10.46-1~deb13u2`.
 - Update production dependencies `brace-expansion` and `fast-uri` to versions
   that fix reported denial-of-service and URI parsing vulnerabilities.
 - Temporarily run the container on `node:24-trixie-slim` (digest-pinned) instead of `gcr.io/distroless/nodejs24-debian13:nonroot`, whose pinned `libssl3t64` carries fixable high-severity findings (CVE-2026-75804, CVE-2026-84782) that upstream has not rebuilt. This is not a distroless image: Node package managers (npm, npx, corepack, yarn, whose bundled dependencies carry their own findings) are removed, but a shell and apt/dpkg remain until #504. The runtime stage upgrades only `libssl3t64` and `openssl-provider-legacy`, pinned to `3.5.7-1~deb13u3` (and, since the entry above, `libpcre2-8-0` pinned to `10.46-1~deb13u3`) from the live Debian security feed (the build fails if a pinned version is gone, and each publish or release rebuild fetches it again). It runs as the numeric user `65532:65532`, so Kubernetes `runAsNonRoot` can verify it, and keeps Node as the entrypoint at the distroless path `/nodejs/bin/node`, so the starter's demo backend works with this image and with already-published distroless images. The Container Gate now also requires a numeric runtime user and proves the process is not root and that there are no Node package managers in the image. Return to distroless: #504.
-- GHSA-gg76-x87w-mj4v: starter preflight and walkthrough helpers now send the trusted-proxy proof over HTTPS or HTTP only to exact `localhost` or verified IPv4/IPv6 loopback literals. DNS hostnames are never treated as loopback based on their text.
+- GHSA-gg76-x87w-mj4v: starter preflight and walkthrough helpers now send the trusted-proxy proof over HTTPS or HTTP only to exact `localhost` or verified IPv4/IPv6 loopback literals. DNS hostnames are never treated as loopback based on their text (#507).
 
 ## [0.3.0] - 2026-09-27
 
@@ -295,7 +301,8 @@ First public release of Ferrum Foundry.
 - Release channels are monotonic: tags are validated and ancestry-checked before registry access, prereleases never advance stable tags, and promotion runs through a fail-closed FIFO queue (#155).
 - Scheduled live branch deletion replaced with dry-run planning plus a separately approved, exact-SHA-revalidated deletion path (#155).
 
-[Unreleased]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ferrum-edge/ferrum-foundry/releases/tag/v0.1.0

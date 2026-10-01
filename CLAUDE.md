@@ -75,8 +75,7 @@ node scripts/demo-traffic-client.mjs mixed
 ### Running the gateway locally
 
 Run the Ferrum Edge image CI pins, by digest, so local results match CI. It is
-the published Ferrum Edge v0.9.10 qualification candidate. Foundry v0.3.0
-paired with v0.9.8.
+the published Ferrum Edge v0.9.10 release, which Foundry v0.4.0 pairs with.
 `edge.image` in `docs/compatibility.json` is the single source: CI reads it
 (`node scripts/supported-pairing.mjs edge-image`), and
 `scripts/supported-pairing.test.mjs` fails if the starter, this command, or any

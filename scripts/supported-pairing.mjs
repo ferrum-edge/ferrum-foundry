@@ -10,10 +10,10 @@
  * Foundry with a gateway nobody tested.
  *
  * `edge.image` may be an Edge build or release that is not the pairing;
- * `edge.release` is the published Edge release the next Foundry release pairs
- * with. `release-ready` refuses a release until that release is recorded and
- * `edge.image` is it, so the gates that qualified the tag ran against the
- * release it names.
+ * `edge.release` is the published Edge release the Foundry version recorded
+ * in `foundry.version` pairs with. `release-ready` refuses a release until
+ * that release is recorded and `edge.image` is it, so the gates that qualified
+ * the tag ran against the release it names.
  *
  * Changing `edge.image` is a re-qualification, not a tag edit: the pull request
  * that changes it runs every gateway-backed gate against the new image.
