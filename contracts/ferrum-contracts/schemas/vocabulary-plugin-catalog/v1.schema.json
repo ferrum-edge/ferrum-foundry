@@ -121,6 +121,21 @@
         }
       }
     },
+    "websocket_framing_plugins": {
+      "type": "array",
+      "description": "Built-ins that may require parsed WebSocket framing and therefore cannot be effective with websocket_permessage_deflate passthrough.",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "waf",
+          "ws_frame_logging",
+          "ws_message_size_limiting",
+          "ws_rate_limiting"
+        ]
+      }
+    },
     "plugins": {
       "type": "array",
       "minItems": 1,

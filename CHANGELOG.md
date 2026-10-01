@@ -68,9 +68,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ai_prompt_shield`'s `redaction_placeholder`) gets a warning and is saved as
   written; a plugin Foundry has no rules for keeps every placeholder blocked.
 
-- Pin Ferrum Contracts `contracts-edge-0.9.8` for the plugin catalog and
+- Pin Ferrum Contracts `contracts-edge-0.9.9` for the plugin catalog and
   `provisioned-by` vocabulary, with CI checks for vendored file integrity and
-  Foundry's local catalog and provisioning markers.
+  Foundry's local catalog and provisioning markers. The contract test also ties
+  the pin to the Ferrum Edge release qualified in `docs/compatibility.json`, and
+  the README names ferrum-contracts as the org's central contract store.
 
 ### Fixed
 

@@ -25,6 +25,16 @@ function pinnedFiles() {
   return files;
 }
 
+// Which Ferrum Edge releases each contracts tag may back. An Edge release with
+// no contract changes reuses the latest contracts tag (v0.9.10 ->
+// contracts-edge-0.9.9), so this is a mapping, not string equality. Advance a
+// tag here only after re-vendoring it; the test fails when the qualified Edge
+// release in docs/compatibility.json has no tag that maps to it.
+const CONTRACTS_TAG_EDGE_VERSIONS = {
+  "contracts-edge-0.9.8": ["v0.9.8"],
+  "contracts-edge-0.9.9": ["v0.9.9", "v0.9.10"],
+};
+
 function describeSetDrift(actual, expected, label) {
   const actualSet = new Set(actual);
   const expectedSet = new Set(expected);
@@ -47,6 +57,27 @@ test("vendored Ferrum Contracts files match their PIN digests", () => {
     const actual = createHash("sha256").update(contents).digest("hex");
     assert.equal(actual, expected, `${path} differs from its Ferrum Contracts PIN digest`);
   }
+});
+
+test("the contracts pin tracks the qualified Ferrum Edge release", () => {
+  const tag = /^tag=(contracts-edge-[0-9.]+)$/m.exec(pinText)?.[1];
+  assert.ok(tag, "PIN must name a contracts-edge tag");
+  const compatibility = JSON.parse(
+    readFileSync(new URL("../docs/compatibility.json", import.meta.url), "utf8"),
+  );
+  const edgeVersion = compatibility.edge?.release?.version;
+  assert.ok(edgeVersion, "docs/compatibility.json must name the qualified Edge release version");
+  const allowed = CONTRACTS_TAG_EDGE_VERSIONS[tag];
+  assert.ok(
+    allowed,
+    `PIN tag ${tag} has no Edge-version mapping; re-vendor a contracts tag for ` +
+      `${edgeVersion} and add it to CONTRACTS_TAG_EDGE_VERSIONS`,
+  );
+  assert.ok(
+    allowed.includes(edgeVersion),
+    `PIN tag ${tag} maps to ${allowed.join(", ")}, but docs/compatibility.json ` +
+      `qualifies ${edgeVersion}`,
+  );
 });
 
 test("Foundry plugin metadata and defaults use the pinned plugin catalog", () => {
