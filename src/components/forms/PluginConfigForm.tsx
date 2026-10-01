@@ -80,6 +80,13 @@ export interface PluginConfigFormProps {
 
 const NO_PLACEHOLDERS: PlaceholderSites = { blocking: [], other: [] };
 
+const ADMIN_PLACEHOLDER_NOTE =
+  "These values are exactly a redaction placeholder. Your reads are not masked, " +
+  "so this is what is stored, and Ferrum Edge saves it as written.";
+const UNMASKED_PLACEHOLDER_NOTE =
+  "These values are exactly a redaction placeholder, but your role's read does not " +
+  "mask these fields, so Ferrum Edge saves them as written.";
+
 /* ------------------------------------------------------------------ */
 /*  Helper: Checkbox                                                   */
 /* ------------------------------------------------------------------ */
@@ -602,9 +609,7 @@ function PluginConfigFormFields({
               className="mb-4 space-y-2 rounded-lg border border-border p-3"
             >
               <p className="text-xs text-text-secondary">
-                {role === "admin"
-                  ? "These values are exactly a redaction placeholder. Your reads are not masked, so this is what is stored, and Ferrum Edge saves it as written."
-                  : "These values are exactly a redaction placeholder, but your role's read does not mask these fields, so Ferrum Edge saves them as written."}{" "}
+                {role === "admin" ? ADMIN_PLACEHOLDER_NOTE : UNMASKED_PLACEHOLDER_NOTE}{" "}
                 If one was copied from a masked read, replace it with the real value.
               </p>
               <ul className="space-y-1">

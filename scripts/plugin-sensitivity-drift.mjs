@@ -272,13 +272,62 @@ function ruleKeys(rules) {
   return [...new Set(rules.map(ruleKey))].sort();
 }
 
+/** Edge's `normalize_config_key`: case and `-`, `.`, `_` do not distinguish keys. */
+function normalizeKey(key) {
+  return key.replace(/[-._]/g, "").toLowerCase();
+}
+
+function segmentsOverlap(a, b) {
+  return a === "*" || b === "*" || normalizeKey(a) === normalizeKey(b);
+}
+
+/**
+ * Pairs of one plugin's rules whose order matters. Edge's projection, and the
+ * masked-placeholder check that replays it, act on a site the first time a
+ * rule reaches it: a rule that withholds a container wholesale hides every
+ * site inside it from a later rule, and two different handlings of the same
+ * site (`kafka` walks properties, `secret` withholds the object) depend on
+ * which runs first. That happens only when one rule's path, segment by
+ * segment (`*` matching any key, keys compared normalized), is a prefix of
+ * another's. A named segment also passes through arrays, so `a.b` and `a.*.b`
+ * can reach the same elements; both still render the same leaf, which no
+ * order changes.
+ */
+export function orderDependentRules(rules) {
+  const pairs = [];
+  for (let i = 0; i < rules.length; i += 1) {
+    for (let j = i + 1; j < rules.length; j += 1) {
+      const [shorter, longer] = rules[i].path.length <= rules[j].path.length
+        ? [rules[i], rules[j]]
+        : [rules[j], rules[i]];
+      const prefix = shorter.path.every((segment, index) =>
+        segmentsOverlap(segment, longer.path[index]));
+      if (!prefix) continue;
+      // The same site handled the same way is a duplicate, not an ordering.
+      const samePath = shorter.path.length === longer.path.length;
+      if (samePath && shorter.sensitivity === longer.sensitivity) continue;
+      pairs.push(`${ruleKey(rules[i])} / ${ruleKey(rules[j])}`);
+    }
+  }
+  return pairs;
+}
+
 /**
  * Every difference between Edge's tables and Foundry's. Rules are compared as
- * sets per plugin: their order does not change what is redacted.
+ * sets per plugin, which is sound only while no two of a plugin's rules reach
+ * overlapping sites: then each site is handled by one rule, whatever the order.
+ * Foundry's placeholder check (`src/api/maskedSecretSites.ts`) relies on that,
+ * so an Edge table with order-dependent rules is reported too
+ * (`orderDependentRules`), and Foundry must then transcribe and compare them
+ * in order.
  */
 export function compareSensitivity(edge, foundry) {
   const findings = [];
   for (const [plugin, rules] of edge.schemas) {
+    const overlapping = orderDependentRules(rules);
+    if (overlapping.length > 0) {
+      findings.push({ plugin, status: "order-dependent", edge: overlapping, foundry: null });
+    }
     const ours = foundry.schemas.get(plugin);
     if (!ours) {
       findings.push({ plugin, status: "missing", edge: ruleKeys(rules), foundry: null });

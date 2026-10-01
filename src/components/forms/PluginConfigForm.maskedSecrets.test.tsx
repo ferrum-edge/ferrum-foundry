@@ -33,6 +33,11 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  // A blocked submit schedules focusing the first invalid field for the next
+  // frame; let it run while the form and the scrollIntoView stub still exist.
+  await act(async () => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  });
   await act(async () => root.unmount());
   host.remove();
   Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");

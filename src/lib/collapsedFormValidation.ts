@@ -38,6 +38,8 @@ export function focusFirstInvalidField(form: HTMLFormElement): void {
 function scheduleFocusFirstInvalid(form: HTMLFormElement | null): void {
   if (!form) return;
   requestAnimationFrame(() => {
+    // The form may have unmounted before the frame ran.
+    if (!form.isConnected) return;
     focusFirstInvalidField(form);
   });
 }

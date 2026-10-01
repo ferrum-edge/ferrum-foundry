@@ -128,7 +128,12 @@ save is refused anyway. A non-admin targets save on an upstream whose Consul
 token is masked, and a plugin rollback whose earlier read was masked for the
 session's role, are refused locally and reported instead of being sent. The Pinned Gateway
 Contract checks that an `operator` read-modify-write of a plugin configuration
-with a masked endpoint path is refused. The plugin sensitivity schema rules are
+with a masked endpoint path is refused, that the fields Edge refuses for an
+`operator` are exactly the ones Foundry's replay predicts (a placeholder in
+`otel_tracing`'s `authorization` is refused, one in its `service_name` is not),
+and that an `admin` may write a placeholder. `npm run check:plugin-sensitivity`
+also fails if Edge's table ever gains rules whose order would change the sites
+the replay finds. The plugin sensitivity schema rules are
 unchanged from v0.9.8, and Foundry records their source commit at v0.9.9.
 
 ### Admin API changes in v0.9.7 that Foundry reflects

@@ -15,7 +15,13 @@ import {
   isRedactionPlaceholder,
   parseMaskedPlaceholderMessage,
   REDACTED_PATH_PLACEHOLDER,
+  REDACTED_PLACEHOLDER,
+  refusedPlaceholderSites,
 } from "../src/api/maskedSecrets.ts";
+import {
+  KAFKA_SAFE_PRODUCER_PROPERTIES,
+  PLUGIN_SENSITIVITY,
+} from "../src/api/pluginSensitivity.ts";
 
 const config = readSeedConfig();
 confirmDestructiveTarget(config);
@@ -229,6 +235,72 @@ await request("/plugins/config?proxy_id=has%20space", { expected: [400] });
   }
 }
 
+// Foundry blocks a placeholder only where Edge refuses it, by replaying Edge's
+// projection (`refusedPlaceholderSites`). Check the replay against the gateway:
+// a placeholder in a sensitive field (`authorization`, a schema rule) and one
+// in an ordinary string (`service_name`). Edge must name exactly the sites the
+// replay predicts for an operator, and accept the same body from an admin.
+{
+  const replayId = `contract-smoke-replay-${Date.now().toString(36)}`;
+  const replayPath = `/plugins/config/${replayId}`;
+  const created = {
+    id: replayId,
+    plugin_name: "otel_tracing",
+    scope: "global",
+    enabled: false,
+    config: {
+      endpoint: "https://collector.example.com",
+      service_name: "contract-smoke",
+      authorization: "Bearer contract-smoke",
+    },
+  };
+  const echoed = {
+    ...created,
+    config: {
+      ...created.config,
+      service_name: REDACTED_PLACEHOLDER,
+      authorization: REDACTED_PLACEHOLDER,
+    },
+  };
+  const predicted = refusedPlaceholderSites(
+    PLUGIN_SENSITIVITY.get("otel_tracing"),
+    KAFKA_SAFE_PRODUCER_PROPERTIES,
+    echoed.config,
+  );
+  assert.deepEqual(predicted, ["/config/authorization"]);
+
+  await request(`${replayPath}?apply=sync`, { method: "DELETE", expected: [200, 204, 404] });
+  await request("/plugins/config?apply=sync", { method: "POST", body: created });
+  try {
+    const refused = await exchange(`${replayPath}?apply=sync`, {
+      method: "PUT",
+      body: echoed,
+      role: "operator",
+    });
+    assert.equal(refused.status, 400, JSON.stringify(refused.body));
+    assert.deepEqual(
+      parseMaskedPlaceholderMessage(refused.body?.error ?? "")?.pointers,
+      predicted,
+    );
+
+    // The ordinary string alone is not a masked site, so an operator may send it.
+    const unmasked = await exchange(`${replayPath}?apply=sync`, {
+      method: "PUT",
+      body: { ...echoed, config: { ...echoed.config, authorization: "Bearer rotated" } },
+      role: "operator",
+    });
+    assert.equal(unmasked.status, 200, JSON.stringify(unmasked.body));
+
+    // An admin's reads are raw, so an admin's write is never checked.
+    await request(`${replayPath}?apply=sync`, { method: "PUT", body: echoed });
+    const stored = await request(replayPath);
+    assert.equal(stored.config.authorization, REDACTED_PLACEHOLDER);
+    assert.equal(stored.config.service_name, REDACTED_PLACEHOLDER);
+  } finally {
+    await request(`${replayPath}?apply=sync`, { method: "DELETE", expected: [200, 204, 404] });
+  }
+}
+
 for (const endpoint of ["upstreams", "consumers", "proxies", "plugins/config"]) {
   const page = await request(`/${endpoint}?offset=0&limit=20`);
   assert.ok(Array.isArray(page.data));
@@ -307,6 +379,7 @@ console.log(JSON.stringify({
     "plugin configs by proxy_id",
     "health-check probe validation",
     "masked placeholder write refusal",
+    "masked placeholder sites match Foundry's replay",
   ],
   resources: ["upstreams", "consumers", "proxies", "plugin configs", "namespaces"],
 }));

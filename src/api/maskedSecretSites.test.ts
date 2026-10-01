@@ -57,6 +57,23 @@ describe("plugin config sites Edge refuses for a non-admin role", () => {
     ]);
   });
 
+  it("treats a container withheld wholesale as one site, not its contents", () => {
+    // Edge withholds a name-floor key's object whole: the object is the site,
+    // and it is not a placeholder, so nothing inside it is refused.
+    const nested = { credentials: { x: "[REDACTED]" } };
+    expect(pluginConfigRefusedSites("ai_prompt_shield", nested)).toEqual([]);
+    expect(pluginConfigPlaceholderSites("ai_prompt_shield", nested, "operator")).toEqual({
+      blocking: [],
+      other: ["/config/credentials/x"],
+    });
+    // The same key holding the placeholder itself is the site, and is refused.
+    const whole = { credentials: "[REDACTED]" };
+    expect(pluginConfigPlaceholderSites("ai_prompt_shield", whole, "operator")).toEqual({
+      blocking: ["/config/credentials"],
+      other: [],
+    });
+  });
+
   it("treats a config that is not an object as one withheld site", () => {
     expect(pluginConfigRefusedSites("http_logging", "[REDACTED]")).toEqual(["/config"]);
     expect(pluginConfigRefusedSites("http_logging", null)).toEqual([]);
