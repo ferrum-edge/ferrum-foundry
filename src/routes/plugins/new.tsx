@@ -14,6 +14,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { PluginConfigForm } from "@/components/forms/PluginConfigForm";
 import { PluginMembershipRecovery } from "@/components/forms/PluginMembershipRecovery";
+import { MaskedSecretRefusal } from "@/components/shared/MaskedSecretRefusal";
 import type { PluginFormDefaults } from "@/components/forms/PluginConfigForm";
 import { getApiErrorMessage } from "@/api/client";
 import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
@@ -48,7 +49,7 @@ function PluginCreateEditor({ session, allowProxyDefault }: {
   const createPlugin = useCreatePluginWithMembership();
   const { toast } = useToast();
   const { data: availablePlugins, isLoading: pluginsLoading } = useAvailablePlugins();
-  const { capabilities } = useCapabilities();
+  const { capabilities, facts } = useCapabilities();
   const capability = capabilities.pluginConfigs;
 
   const handleSubmit = session.bind(async (data: PluginConfigCreate, proxyGroupIds?: string[]) => {
@@ -89,12 +90,14 @@ function PluginCreateEditor({ session, allowProxyDefault }: {
         breadcrumbs={[{ label: "Plugins", to: "/plugins" }, { label: "New plugin" }]}
       />
 
+      <MaskedSecretRefusal error={createPlugin.error} />
       <PluginMembershipRecovery error={createPlugin.error} />
       <Card>
         <PluginConfigForm
           onSubmit={handleSubmit}
           isLoading={createPlugin.isPending}
           capability={capability}
+          role={facts.role}
           availablePlugins={availablePlugins ?? []}
           defaults={{
             pluginName: search.plugin ?? undefined,

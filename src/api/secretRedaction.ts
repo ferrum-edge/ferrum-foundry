@@ -27,6 +27,7 @@ import {
   PLUGIN_SENSITIVITY,
   type Sensitivity,
 } from "./pluginSensitivity";
+import { isEdgeSensitiveConfigKey, normalizeConfigKey } from "./maskedSecrets";
 
 /** What a submitted secret is replaced with, the gateway's own read marker. */
 export const REDACTION_MARKER = "[REDACTED]";
@@ -123,70 +124,6 @@ function urlSecrets(value: string): string[] {
 }
 
 /* ---------- Plugin configurations: Ferrum Edge's projection ---------- */
-
-/** Edge's `normalize_config_key`: case and `-`, `.`, `_` do not distinguish keys. */
-function normalizeConfigKey(key: string): string {
-  return key.replace(/[-._]/g, "").toLowerCase();
-}
-
-/** Edge's `DEFAULT_SENSITIVE_METADATA_KEYS`, matched as case-insensitive substrings. */
-const SENSITIVE_METADATA_SUBSTRINGS = [
-  "authorization",
-  "cookie",
-  "set-cookie",
-  "x-api-key",
-  "x-auth-token",
-  "x-csrf-token",
-  "cache_request_headers_snapshot",
-  "grpc_web_shadowed_trailers",
-  "claim_header.",
-  "bearer",
-  "password",
-  "secret",
-  "last_event_id",
-  "last-event-id",
-];
-
-/** The substrings Edge's `is_sensitive_plugin_config_key` matches on a normalized key. */
-const SENSITIVE_NORMALIZED_SUBSTRINGS = [
-  "integritykey",
-  "apikey",
-  "accesskey",
-  "functionkey",
-  "clientsecret",
-  "credential",
-  "privatekey",
-  "serviceaccountjson",
-  "webhook",
-];
-
-/** A key's words, split at delimiters and case changes (`APIKey` → `API`, `Key`). */
-function keySegments(key: string): string[] {
-  return key.match(/[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z0-9]+|[A-Z0-9]+/g) ?? [];
-}
-
-/**
- * Edge's name floor for a plugin `config` key (`is_sensitive_plugin_config_key`
- * over `is_sensitive_metadata_key`), without the operator's
- * `FERRUM_LOG_REDACT_METADATA_KEYS` extras, which Foundry cannot see.
- */
-function isEdgeSensitiveConfigKey(key: string): boolean {
-  const lower = key.toLowerCase();
-  const segments = keySegments(key).map((segment) => segment.toLowerCase());
-  const normalized = normalizeConfigKey(key);
-  return (
-    // Internal-only metadata keys, which Edge also treats as sensitive.
-    lower.startsWith("mesh.metrics.") ||
-    lower === "grpc_web.request_trailers" ||
-    (key.startsWith("_") && segments[0] === "dedup") ||
-    SENSITIVE_METADATA_SUBSTRINGS.some((needle) => lower.includes(needle)) ||
-    segments.includes("token") ||
-    segments.includes("apikey") ||
-    (segments.includes("api") && segments.includes("key")) ||
-    normalized === "key" ||
-    SENSITIVE_NORMALIZED_SUBSTRINGS.some((needle) => normalized.includes(needle))
-  );
-}
 
 /** A value Edge projects as `sensitivity`, as the submitted strings it must not echo. */
 function projectedSecrets(value: unknown, sensitivity: Sensitivity): string[] {

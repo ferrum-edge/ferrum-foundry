@@ -11,6 +11,9 @@ import type {
 } from "./types";
 import { collectAllPages } from "./pagination";
 import { secretValues, withRedactedFailure } from "./secretRedaction";
+import { MaskedSecretWriteError } from "./maskedSecrets";
+import { upstreamPlaceholderSites } from "./maskedSecretSites";
+import type { GatewayRole } from "@/lib/capabilities";
 import {
   conditionalDelete,
   conditionalPut,
@@ -265,16 +268,35 @@ export async function update(
  * targets unchanged, and re-sends with the new settings. `guard` must be built
  * from the list the operator actually edited (`targetsWriteGuard(upstream)` on
  * the render whose targets produced this array), not from a later refetch.
+ *
+ * Settings rebuilt from a read that masks a secret (a non-admin read of a
+ * Consul token) would carry its placeholder, which Edge refuses
+ * (ferrum-edge#5925) and an older gateway would store as the token. Such a
+ * write is refused here with `MaskedSecretWriteError`, before it is sent.
+ * `role` is the session's; an admin's read is raw, so nothing is refused for
+ * it, and an unknown role (`null`) is treated as a non-admin one.
  */
 export async function updateTargets(
   scope: NamespaceScope,
   id: string,
   targets: UpstreamCreate["targets"],
   guard: WriteGuard<Upstream | UpstreamCreate> | null,
+  role: GatewayRole | null = null,
 ): Promise<Upstream> {
   const path = `upstreams/${id}`;
-  const propose = (current: Upstream): UpstreamCreate =>
-    withUpstreamId({ ...toUpdatePayload(current), targets }, id);
+  const propose = (current: Upstream): UpstreamCreate => {
+    const masked = upstreamPlaceholderSites(current, role).blocking;
+    if (masked.length > 0) {
+      throw new MaskedSecretWriteError(
+        `Targets were not saved: upstream ${id} has a value hidden from your role ` +
+          `(${masked.join(", ")}), and a targets save resends every setting with it. ` +
+          "Re-enter or clear it on the Configuration tab first (clearing deletes the " +
+          "stored secret), or have an admin make the change.",
+        [...masked],
+      );
+    }
+    return withUpstreamId({ ...toUpdatePayload(current), targets }, id);
+  };
 
   return serializeWrite(scope, id, async () => {
     return guardedReplace<Upstream, UpstreamCreate>({

@@ -607,6 +607,65 @@ describe("proxy-group membership reconciliation", () => {
     },
   );
 
+  it("skips restoring a configuration read with masked secrets and reports it", async () => {
+    const masked: PluginConfig = {
+      ...makePlugin("plugin-1", "global"),
+      config: {
+        requests: 10,
+        sync_mode: "redis",
+        redis_url: "redis://redacted@cache.internal:6379/3",
+        redis_password: "[REDACTED]",
+      },
+    };
+    const state = harness(
+      [makeProxy("p1"), makeProxy("p2"), makeProxy("p3")],
+      [masked],
+      { failProxyOnce: "p3" },
+    );
+    const failure = await updatePluginWithMembership(
+      "plugin-1",
+      groupInput(),
+      ["p2", "p3"],
+      state.deps,
+      null,
+    ).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(PluginMembershipError);
+    const recovery = (failure as PluginMembershipError).recovery;
+    const skipped = recovery.find((entry) => entry.includes("was not restored"));
+    expect(skipped).toContain("/config/redis_url, /config/redis_password");
+    expect(skipped).toContain("Manual recovery is needed");
+    expect(skipped).not.toContain("[REDACTED]");
+    expect(skipped).not.toContain("redacted@");
+    // Only the forward write: the masked snapshot was never PUT back.
+    expect(state.counts().updatePluginCalls).toBe(1);
+    expect(state.plugins.get("plugin-1")?.config).toEqual(groupInput().config);
+  });
+
+  it("restores an admin's snapshot, which was read raw", async () => {
+    const literal: PluginConfig = {
+      ...makePlugin("plugin-1", "global"),
+      config: { requests: 10, redis_password: "[REDACTED]" },
+    };
+    const state = harness(
+      [makeProxy("p1"), makeProxy("p2"), makeProxy("p3")],
+      [literal],
+      { failProxyOnce: "p3" },
+    );
+    await expect(
+      updatePluginWithMembership(
+        "plugin-1",
+        groupInput(),
+        ["p2", "p3"],
+        { ...state.deps, role: "admin" },
+        null,
+      ),
+    ).rejects.toThrow("rollback was attempted");
+    expect(state.counts().updatePluginCalls).toBe(2);
+    expect(state.plugins.get("plugin-1")?.config).toEqual(literal.config);
+    expect(state.plugins.get("plugin-1")?.scope).toBe("global");
+  });
+
   it("restores associations when a scope transition config update fails", async () => {
     const state = harness(
       [makeProxy("p1", ["plugin-1"]), makeProxy("p2", ["plugin-1"])],

@@ -33,7 +33,8 @@ import {
   type WithNumberDrafts,
 } from "@/lib/formDrafts";
 import { ReadOnlySurface } from "@/components/shared/CapabilityGate";
-import type { CapabilityVerdict } from "@/lib/capabilities";
+import { isRedactionPlaceholder, MASKED_FIELD_NOTICE } from "@/api/maskedSecrets";
+import type { CapabilityVerdict, GatewayRole } from "@/lib/capabilities";
 import type {
   Upstream,
   UpstreamCreate,
@@ -67,6 +68,7 @@ const UPSTREAM_COLLAPSIBLE_SECTIONS = [
     id: "service-discovery",
     errorKeys: [
       "consul_address",
+      "consul_token",
       "sd_service_name",
       "sd_poll_interval_seconds",
       "sd_default_weight",
@@ -90,6 +92,12 @@ export interface UpstreamFormProps {
    * still enforces the same rule for anything the UI has not observed.
    */
   capability?: CapabilityVerdict;
+  /**
+   * The session's gateway role. Only a non-admin read masks the Consul token,
+   * so only then does a placeholder there block Save. Unknown (`null` or
+   * omitted) is treated as a non-admin role.
+   */
+  role?: GatewayRole | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -260,6 +268,7 @@ export function UpstreamForm({
   onSubmit,
   isLoading,
   capability,
+  role,
 }: UpstreamFormProps) {
   const readOnly = capability !== undefined && !capability.allowed;
   const navigate = useNavigate();
@@ -400,6 +409,14 @@ export function UpstreamForm({
     initialData?.service_discovery?.stale_policy ?? "",
   );
 
+  // An `operator` read shows the Consul ACL token as a placeholder
+  // (ferrum-edge#5925). It cannot be written back: Save stays blocked until the
+  // token is re-entered or cleared. An admin's read is raw, so for an admin
+  // the same string is the stored token, which Edge saves as written.
+  const consulTokenIsPlaceholder =
+    sdEnabled && sdProvider === "consul" && isRedactionPlaceholder(sdConfig.token);
+  const consulTokenMasked = consulTokenIsPlaceholder && role !== "admin";
+
   /* ---------- Validation ---------- */
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -454,6 +471,9 @@ export function UpstreamForm({
       }
       if (!sdServiceName.trim()) {
         errs.sd_service_name = "Consul service name is required";
+      }
+      if (consulTokenMasked) {
+        errs.consul_token = "Re-enter or clear the token before saving.";
       }
     }
     // A subset with a blank name is dropped on save, so only named subsets
@@ -1194,9 +1214,38 @@ export function UpstreamForm({
                   <Input
                     label="Token"
                     value={String(sdConfig.token ?? "")}
-                    onChange={(e) => updateSdConfig("token", e.target.value)}
+                    onChange={(e) => {
+                      updateSdConfig("token", e.target.value);
+                      setErrors(({ consul_token: _token, ...rest }) => rest);
+                    }}
                     placeholder="consul-acl-token"
+                    error={errors.consul_token}
                   />
+                  {consulTokenMasked && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-xs text-warning">{MASKED_FIELD_NOTICE}</p>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => {
+                          // Omitted on save, which deletes the stored token:
+                          // PUT is a full replace.
+                          updateSdConfig("token", "");
+                          setErrors(({ consul_token: _token, ...rest }) => rest);
+                        }}
+                      >
+                        Clear token
+                      </Button>
+                    </div>
+                  )}
+                  {consulTokenIsPlaceholder && !consulTokenMasked && (
+                    <p className="text-xs text-text-muted">
+                      This token is exactly a redaction placeholder. Your reads are
+                      not masked, so it is the stored value, and Ferrum Edge saves
+                      it as written.
+                    </p>
+                  )}
                   <Input
                     label="Poll Interval (seconds)"
                     type="number"

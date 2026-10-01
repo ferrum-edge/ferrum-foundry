@@ -17,6 +17,18 @@
 
 *Release step:* one paragraph on who this release is for and what it changes.
 
+### Qualification
+
+- The next Foundry pairing is being qualified against the published Ferrum Edge
+  v0.9.9 release in [#512](https://github.com/ferrum-edge/ferrum-foundry/pull/512),
+  separately from Foundry release preparation.
+- Plugin configuration and upstream editors handle the secrets an `operator`
+  read masks: each masked field holding a placeholder is marked, Save stays
+  blocked until it is re-entered or cleared (clearing deletes the stored
+  secret), and Ferrum Edge's refusal lists the fields it names. Admins, whose
+  reads are raw, are never blocked, and a placeholder-shaped value in a field
+  the read does not mask only gets a warning.
+
 ### Supported pairing
 
 | | |

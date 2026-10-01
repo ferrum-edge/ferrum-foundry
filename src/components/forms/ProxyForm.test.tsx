@@ -54,6 +54,7 @@ const streamProxy: Proxy = {
   created_at: "2026-09-06T00:00:00Z",
   updated_at: "2026-09-06T00:00:00Z",
   hosts: [],
+  allow_path_parameters: false,
   backend_scheme: "tcp",
   backend_host: "backend",
   backend_port: 8080,
@@ -130,6 +131,26 @@ describe("ProxyForm listen path round-trip (#447)", () => {
   it("defaults a new proxy to the root listen path", async () => {
     await renderForm();
     expect(inputByLabel(host, "Listen Path").value).toBe("/");
+  });
+});
+
+describe("ProxyForm path parameter setting", () => {
+  it("loads and submits the Edge path parameter setting", async () => {
+    await renderForm({ ...httpProxy, allow_path_parameters: true });
+    await toggleSection("Routing Options");
+    const checkbox = inputByLabel(host, "Allow semicolon path parameters");
+    expect(checkbox.checked).toBe(true);
+    await act(async () => checkbox.click());
+    expect(checkbox.checked).toBe(false);
+    await save();
+    expect(submitted().allow_path_parameters).toBe(false);
+  });
+
+  it("never sends path parameters for a stream proxy", async () => {
+    await renderForm({ ...streamProxy, listen_port: 9100, allow_path_parameters: true });
+    expect(host.textContent).not.toContain("Allow semicolon path parameters");
+    await save();
+    expect(submitted().allow_path_parameters).toBe(false);
   });
 });
 

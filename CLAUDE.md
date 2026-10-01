@@ -72,7 +72,8 @@ node scripts/demo-traffic-client.mjs mixed
 ### Running the gateway locally
 
 Run the Ferrum Edge image CI pins, by digest, so local results match CI. It is
-the published Ferrum Edge v0.9.8 release, which Foundry v0.3.0 pairs with.
+the published Ferrum Edge v0.9.9 qualification candidate. Foundry v0.3.0
+paired with v0.9.8.
 `edge.image` in `docs/compatibility.json` is the single source: CI reads it
 (`node scripts/supported-pairing.mjs edge-image`), and
 `scripts/supported-pairing.test.mjs` fails if the starter, this command, or any
@@ -91,7 +92,7 @@ docker run --rm -d --name ferrum-edge \
   -e FERRUM_ADMIN_BIND_ADDRESS=0.0.0.0 \
   -e FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true \
   -p 127.0.0.1:9000:9000 -p 127.0.0.1:8000:8000 \
-  ferrumedge/ferrum-edge@sha256:e5b204f9448d4ec210a57dbd2badece5f4359d5d544522fa48dcdfeef033b385 run -m database -v
+  ferrumedge/ferrum-edge@sha256:83bb4de2ea264d5bed18d8f01f94e0e17a29b43aa1458b8984a0e9e1e784ede6 run -m database -v
 ```
 
 The plaintext admin bind above is a local-development exception; Docker's port
@@ -207,8 +208,8 @@ Dark and light themes via CSS custom properties. Dark is the default.
 - `src/api/types.ts` mirrors the Ferrum Edge admin API response shapes, NOT the OpenAPI schemas directly. Field names must match what the API actually returns
 - Form components submit `*Create` types
 - Proxies use `backend_scheme` (`http`/`https`/`tcp`/`tcps`/`udp`/`dtls`). gRPC and WebSocket are detected per request and are NOT schemes. Proxies have no `backend_protocol` field
-- HTTP proxies need `hosts` and/or `listen_path`; stream proxies must omit `listen_path` and set `listen_port`
-- Consumer credentials are maps of rotation ARRAYS per type (`keyauth`, `basicauth`, `jwt`, `hmac_auth`, `mtls_auth`). Ordinary responses redact secrets as the literal `[REDACTED]`, which PUT accepts as a round-trip marker
+- HTTP proxies need `hosts` and/or `listen_path`; stream proxies must omit `listen_path` and set `listen_port`. `allow_path_parameters` opts an HTTP proxy into RFC 3986 semicolon path parameters
+- Consumer credentials are maps of rotation ARRAYS per type (`keyauth`, `basicauth`, `jwt`, `hmac_auth`, `mtls_auth`). Ordinary consumer responses redact secrets as the literal `[REDACTED]`; consumer writes preserve hidden credentials and use dedicated rotation endpoints
 - Proxy PUT is full-replace: build update payloads with `proxies.toUpdatePayload(proxy)` and override fields. Never send partial bodies
 - Health check enablement is controlled by presence/absence, not an `enabled` field
 - `ServiceDiscoveryConfig` uses nested provider-specific objects (`dns_sd`, `kubernetes`, `consul`, `mesh`)

@@ -38,6 +38,9 @@ import { ProxySearchPicker } from "@/components/forms/ProxySearchPicker";
 import { PluginGuidedConfig } from "@/components/forms/PluginGuidedConfig";
 import { getGuidedSchema } from "@/lib/pluginSchemas";
 import { unmodelledEnumSpelling, type FieldIssue, type JsonObject } from "@/lib/pluginGuidedConfig";
+import { MASKED_FIELD_NOTICE, PLUGIN_CONFIG_POINTER, removeAtPointer } from "@/api/maskedSecrets";
+import { pluginConfigPlaceholderSites, type PlaceholderSites } from "@/api/maskedSecretSites";
+import type { GatewayRole } from "@/lib/capabilities";
 
 /* ------------------------------------------------------------------ */
 /*  Props                                                              */
@@ -67,7 +70,22 @@ export interface PluginConfigFormProps {
    * still enforces the same rule for anything the UI has not observed.
    */
   capability?: CapabilityVerdict;
+  /**
+   * The session's gateway role, which decides where a masked-secret
+   * placeholder blocks Save (`pluginConfigPlaceholderSites`). Unknown (`null`
+   * or omitted) is treated as a non-admin role.
+   */
+  role?: GatewayRole | null;
 }
+
+const NO_PLACEHOLDERS: PlaceholderSites = { blocking: [], other: [] };
+
+const ADMIN_PLACEHOLDER_NOTE =
+  "These values are exactly a redaction placeholder. Your reads are not masked, " +
+  "so this is what is stored, and Ferrum Edge saves it as written.";
+const UNMASKED_PLACEHOLDER_NOTE =
+  "These values are exactly a redaction placeholder, but your role's read does not " +
+  "mask these fields, so Ferrum Edge saves them as written.";
 
 /* ------------------------------------------------------------------ */
 /*  Helper: Checkbox                                                   */
@@ -121,6 +139,7 @@ function PluginConfigFormFields({
   availablePlugins,
   initialProxyGroupIds,
   capability,
+  role,
 }: PluginConfigFormProps) {
   const readOnly = capability !== undefined && !capability.allowed;
   const navigate = useNavigate();
@@ -198,6 +217,15 @@ function PluginConfigFormFields({
       errs.config = `${guidedIssues.length} field${
         guidedIssues.length === 1 ? "" : "s"
       } need attention before this can be saved`;
+    }
+    // A placeholder from a masked read cannot be written back: Edge refuses it
+    // (ferrum-edge#5925), and an older gateway would store it as the secret.
+    if (!errs.config && maskedSites.length > 0) {
+      errs.config = `${maskedSites.length} field${
+        maskedSites.length === 1 ? " is" : "s are"
+      } hidden from your role. Re-enter or clear ${
+        maskedSites.length === 1 ? "it" : "each"
+      } before this can be saved.`;
     }
     if (triggerEnabled) {
       try {
@@ -300,6 +328,37 @@ function PluginConfigFormFields({
   }, [guidedSchema, parsedConfig]);
   const guidedAvailable = Boolean(guidedSchema) && guidedUnsupported === null;
   const guidedActive = guidedAvailable && configMode === "guided";
+
+  /* ---------- Masked secrets (ferrum-edge#5925) ---------- */
+  // A non-admin read puts a placeholder where a stored secret is withheld, and
+  // the editors are seeded from that read. A placeholder at a site Edge would
+  // refuse for this role blocks Save until it is re-entered or cleared; one
+  // anywhere else is only pointed out, since Edge stores it as written.
+  const placeholderSites = useMemo(() => {
+    try {
+      return pluginConfigPlaceholderSites(pluginName, JSON.parse(configJson) as unknown, role);
+    } catch {
+      return NO_PLACEHOLDERS;
+    }
+  }, [configJson, pluginName, role]);
+  const maskedSites = placeholderSites.blocking;
+
+  // PUT is a full replace, so omitting the field deletes the stored secret.
+  const clearMaskedSite = (pointer: string) => {
+    if (readOnly) return;
+    let current: unknown;
+    try {
+      current = JSON.parse(configJson) as unknown;
+    } catch {
+      return;
+    }
+    const next = removeAtPointer(current, pointer.slice(PLUGIN_CONFIG_POINTER.length)) ?? {};
+    setConfigJson(JSON.stringify(next, null, 2));
+    setUserEditedConfig(true);
+    // The guided fields keep their own draft; remount them on the result.
+    setGuidedGeneration((value) => value + 1);
+    setErrors(({ config: _config, ...rest }) => rest);
+  };
 
   const numVal = (v: number | ""): string => (v === "" ? "" : String(v));
 
@@ -507,6 +566,61 @@ function PluginConfigFormFields({
               )}
             </div>
           </div>
+
+          {maskedSites.length > 0 && (
+            <div
+              role="status"
+              aria-label="Fields hidden from your role"
+              className="mb-4 space-y-2 rounded-lg border border-warning/30 p-3"
+            >
+              <p className="text-xs text-warning">
+                Your role&apos;s read of this configuration shows a placeholder in
+                place of each stored secret below. Saving is blocked until every
+                one is re-entered or cleared. Clearing omits the field; a save
+                replaces the whole configuration, so that deletes the stored
+                secret.
+              </p>
+              <ul className="space-y-2">
+                {maskedSites.map((pointer) => (
+                  <li key={pointer} className="flex flex-wrap items-center gap-2 text-xs">
+                    <code className="font-mono text-text-primary">{pointer}</code>
+                    <span className="text-text-secondary">{MASKED_FIELD_NOTICE}</span>
+                    {!readOnly && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        aria-label={`Clear ${pointer}`}
+                        onClick={() => clearMaskedSite(pointer)}
+                      >
+                        Clear
+                      </Button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {placeholderSites.other.length > 0 && (
+            <div
+              role="note"
+              aria-label="Values that look like placeholders"
+              className="mb-4 space-y-2 rounded-lg border border-border p-3"
+            >
+              <p className="text-xs text-text-secondary">
+                {role === "admin" ? ADMIN_PLACEHOLDER_NOTE : UNMASKED_PLACEHOLDER_NOTE}{" "}
+                If one was copied from a masked read, replace it with the real value.
+              </p>
+              <ul className="space-y-1">
+                {placeholderSites.other.map((pointer) => (
+                  <li key={pointer} className="text-xs">
+                    <code className="font-mono text-text-primary">{pointer}</code>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {guidedSchema && guidedUnsupported && (
             <p className="text-warning text-xs mb-4">

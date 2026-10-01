@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   compareSensitivity,
   foundryTables,
+  orderDependentRules,
   parseKafkaSafeProperties,
   parseSensitivitySchemas,
 } from "./plugin-sensitivity-drift.mjs";
@@ -132,6 +133,42 @@ test("a faithful transcription has no findings, whatever the rule order", () => 
   const reordered = new Map(PARSED);
   reordered.set("otel_tracing", [...PARSED.get("otel_tracing")].reverse());
   assert.deepEqual(compareSensitivity(tables(PARSED), tables(reordered)), []);
+});
+
+test("reports rules whose order would change which sites Edge handles first", () => {
+  const overlapping = new Map(PARSED);
+  overlapping.set("otel_tracing", [
+    { path: ["Headers"], sensitivity: "secret" },
+    { path: ["headers", "*"], sensitivity: "secret" },
+  ]);
+  overlapping.set("kafka_logging", [
+    { path: ["producer_config"], sensitivity: "kafka" },
+    { path: ["producer_config"], sensitivity: "secret" },
+  ]);
+  const findings = compareSensitivity(tables(overlapping), tables(overlapping));
+  assert.deepEqual(findings, [
+    {
+      plugin: "otel_tracing",
+      status: "order-dependent",
+      edge: ["secret Headers / secret headers.*"],
+      foundry: null,
+    },
+    {
+      plugin: "kafka_logging",
+      status: "order-dependent",
+      edge: ["kafka producer_config / secret producer_config"],
+      foundry: null,
+    },
+  ]);
+  // Sibling paths, duplicates, and the pinned tables overlap nowhere.
+  assert.deepEqual(orderDependentRules(PARSED.get("otel_tracing")), []);
+  assert.deepEqual(orderDependentRules([
+    { path: ["a"], sensitivity: "secret" },
+    { path: ["a"], sensitivity: "secret" },
+  ]), []);
+  for (const [plugin, rules] of foundryTables().schemas) {
+    assert.deepEqual(orderDependentRules(rules), [], plugin);
+  }
 });
 
 test("reports a built-in Foundry is missing, a changed rule, an extra plugin, and Kafka drift", () => {

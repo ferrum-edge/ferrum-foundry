@@ -6,6 +6,8 @@ import {
   type GuardedOperation,
   type WriteGuard,
 } from "@/api/conditionalWrite";
+import { pluginConfigPlaceholderSites } from "@/api/maskedSecretSites";
+import type { GatewayRole } from "@/lib/capabilities";
 import * as pluginsApi from "@/api/plugins";
 import * as proxiesApi from "@/api/proxies";
 import { resourceFingerprint } from "@/lib/resourceBaseline";
@@ -26,6 +28,12 @@ import type {
 export interface PluginMembershipDependencies {
   /** The namespace every request of the plan is bound to. */
   readonly namespace: string;
+  /**
+   * The session's gateway role, which decides whether a snapshot read with
+   * masked secrets can be written back on rollback. Unknown (`null` or
+   * omitted) is treated as a non-admin role.
+   */
+  readonly role?: GatewayRole | null;
   listProxies: () => Promise<Proxy[]>;
   getProxy: (id: string) => Promise<Proxy>;
   updateProxy: (
@@ -54,9 +62,11 @@ export interface PluginMembershipDependencies {
  */
 export function bindPluginMembership(
   scope: NamespaceScope,
+  role: GatewayRole | null = null,
 ): PluginMembershipDependencies {
   return {
     namespace: scope.namespace,
+    role,
     listProxies: () => proxiesApi.listAll(scope),
     getProxy: (id) => proxiesApi.get(scope, id),
     // A membership plan runs its own concurrency contract (#244): every write
@@ -382,11 +392,30 @@ async function rollbackAssociations(
   return failures;
 }
 
+/**
+ * Put `before` back. A `before` read through a masked projection carries a
+ * placeholder for each withheld secret; writing it would be refused
+ * (ferrum-edge#5925), or on an older gateway store the placeholder as the
+ * secret. When a placeholder sits at a site Edge refuses for the session's
+ * role, the rollback is not attempted: it is reported, naming the fields that
+ * could not be restored, for manual recovery. An admin's snapshot is raw, so
+ * it is always restored.
+ */
 async function rollbackPlugin(
   before: PluginConfig,
   after: PluginConfig,
   deps: PluginMembershipDependencies,
 ): Promise<string[]> {
+  const masked = pluginConfigPlaceholderSites(before.plugin_name, before.config, deps.role)
+    .blocking;
+  if (masked.length > 0) {
+    return [
+      `plugin ${before.id} was not restored: its previous configuration was read with ` +
+        `${masked.join(", ")} hidden from your role, and Ferrum Edge refuses those ` +
+        "placeholders. Manual recovery is needed: restore the previous configuration " +
+        "with the real values, or have an admin do it",
+    ];
+  }
   try {
     const current = await getPluginIfPresent(after.id, deps);
     if (!current) {

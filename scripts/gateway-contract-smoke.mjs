@@ -11,12 +11,27 @@ import { verifyConcurrentEditContract } from "./concurrent-edit-contract.mjs";
 import { gatewaySender, verifyCapabilityParity } from "./capability-parity-contract.mjs";
 import { resourceFingerprint } from "../src/lib/resourceBaseline.ts";
 import { normalizedTargets } from "../src/lib/upstreamTargets.ts";
+import {
+  isRedactionPlaceholder,
+  parseMaskedPlaceholderMessage,
+  REDACTED_PATH_PLACEHOLDER,
+  REDACTED_PLACEHOLDER,
+  refusedPlaceholderSites,
+} from "../src/api/maskedSecrets.ts";
+import {
+  KAFKA_SAFE_PRODUCER_PROPERTIES,
+  PLUGIN_SENSITIVITY,
+} from "../src/api/pluginSensitivity.ts";
 
 const config = readSeedConfig();
 confirmDestructiveTarget(config);
 
-async function exchange(path, { method = "GET", body, headers = {} } = {}, requestConfig = config) {
-  const token = await adminToken(requestConfig);
+async function exchange(
+  path,
+  { method = "GET", body, headers = {}, role } = {},
+  requestConfig = config,
+) {
+  const token = await adminToken(requestConfig, role ? { role } : {});
   const response = await fetch(`${config.adminUrl}${path}`, {
     method,
     signal: AbortSignal.timeout(30_000),
@@ -173,6 +188,119 @@ assert.deepEqual(untargeted.data, []);
 assert.equal(untargeted.pagination.total, 0);
 await request("/plugins/config?proxy_id=has%20space", { expected: [400] });
 
+// An operator's read of a plugin configuration masks its endpoint path, and
+// Edge v0.9.9 refuses a write that echoes that placeholder (ferrum-edge#5925)
+// instead of storing it. Foundry's editors block that save; this proves the
+// gateway answers the way they assume, naming the field by JSON pointer.
+{
+  const maskedId = "contract-smoke-masked-endpoint";
+  const maskedPath = `/plugins/config/${maskedId}`;
+  const endpointUrl = "https://collector.example.com/contract-smoke/ingest";
+  // A run that died against a persistent gateway may have left it behind.
+  await request(`${maskedPath}?apply=sync`, { method: "DELETE", expected: [200, 204, 404] });
+  await request("/plugins/config?apply=sync", {
+    method: "POST",
+    body: {
+      id: maskedId,
+      plugin_name: "http_logging",
+      scope: "global",
+      enabled: false,
+      config: { endpoint_url: endpointUrl, batch_size: 50 },
+    },
+  });
+  try {
+    const operatorRead = await exchange(maskedPath, { role: "operator" });
+    assert.equal(operatorRead.status, 200, JSON.stringify(operatorRead.body));
+    const maskedUrl = operatorRead.body.config.endpoint_url;
+    assert.equal(maskedUrl, `https://collector.example.com/${REDACTED_PATH_PLACEHOLDER}`);
+    assert.ok(isRedactionPlaceholder(maskedUrl));
+    const echoed = {
+      ...operatorRead.body,
+      config: { ...operatorRead.body.config, batch_size: 75 },
+    };
+    const refused = await exchange(`${maskedPath}?apply=sync`, {
+      method: "PUT",
+      body: echoed,
+      role: "operator",
+    });
+    assert.equal(refused.status, 400, JSON.stringify(refused.body));
+    assert.deepEqual(parseMaskedPlaceholderMessage(refused.body?.error ?? "")?.pointers, [
+      "/config/endpoint_url",
+    ]);
+    const stored = await request(maskedPath);
+    assert.equal(stored.config.endpoint_url, endpointUrl);
+    assert.equal(stored.config.batch_size, 50);
+  } finally {
+    await request(`${maskedPath}?apply=sync`, { method: "DELETE", expected: [200, 204, 404] });
+  }
+}
+
+// Foundry blocks a placeholder only where Edge refuses it, by replaying Edge's
+// projection (`refusedPlaceholderSites`). Check the replay against the gateway:
+// a placeholder in a sensitive field (`authorization`, a schema rule) and one
+// in an ordinary string (`service_name`). Edge must name exactly the sites the
+// replay predicts for an operator, and accept the same body from an admin.
+{
+  const replayId = `contract-smoke-replay-${Date.now().toString(36)}`;
+  const replayPath = `/plugins/config/${replayId}`;
+  const created = {
+    id: replayId,
+    plugin_name: "otel_tracing",
+    scope: "global",
+    enabled: false,
+    config: {
+      endpoint: "https://collector.example.com",
+      service_name: "contract-smoke",
+      authorization: "Bearer contract-smoke",
+    },
+  };
+  const echoed = {
+    ...created,
+    config: {
+      ...created.config,
+      service_name: REDACTED_PLACEHOLDER,
+      authorization: REDACTED_PLACEHOLDER,
+    },
+  };
+  const predicted = refusedPlaceholderSites(
+    PLUGIN_SENSITIVITY.get("otel_tracing"),
+    KAFKA_SAFE_PRODUCER_PROPERTIES,
+    echoed.config,
+  );
+  assert.deepEqual(predicted, ["/config/authorization"]);
+
+  await request(`${replayPath}?apply=sync`, { method: "DELETE", expected: [200, 204, 404] });
+  await request("/plugins/config?apply=sync", { method: "POST", body: created });
+  try {
+    const refused = await exchange(`${replayPath}?apply=sync`, {
+      method: "PUT",
+      body: echoed,
+      role: "operator",
+    });
+    assert.equal(refused.status, 400, JSON.stringify(refused.body));
+    assert.deepEqual(
+      parseMaskedPlaceholderMessage(refused.body?.error ?? "")?.pointers,
+      predicted,
+    );
+
+    // The ordinary string alone is not a masked site, so an operator may send it.
+    const unmasked = await exchange(`${replayPath}?apply=sync`, {
+      method: "PUT",
+      body: { ...echoed, config: { ...echoed.config, authorization: "Bearer rotated" } },
+      role: "operator",
+    });
+    assert.equal(unmasked.status, 200, JSON.stringify(unmasked.body));
+
+    // An admin's reads are raw, so an admin's write is never checked.
+    await request(`${replayPath}?apply=sync`, { method: "PUT", body: echoed });
+    const stored = await request(replayPath);
+    assert.equal(stored.config.authorization, REDACTED_PLACEHOLDER);
+    assert.equal(stored.config.service_name, REDACTED_PLACEHOLDER);
+  } finally {
+    await request(`${replayPath}?apply=sync`, { method: "DELETE", expected: [200, 204, 404] });
+  }
+}
+
 for (const endpoint of ["upstreams", "consumers", "proxies", "plugins/config"]) {
   const page = await request(`/${endpoint}?offset=0&limit=20`);
   assert.ok(Array.isArray(page.data));
@@ -250,6 +378,8 @@ console.log(JSON.stringify({
     "TLS validation",
     "plugin configs by proxy_id",
     "health-check probe validation",
+    "masked placeholder write refusal",
+    "masked placeholder sites match Foundry's replay",
   ],
   resources: ["upstreams", "consumers", "proxies", "plugin configs", "namespaces"],
 }));

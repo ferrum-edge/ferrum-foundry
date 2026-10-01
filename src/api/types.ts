@@ -89,6 +89,8 @@ export interface Proxy {
   namespace?: string;
   name?: string | null;
   listen_path?: string | null;
+  /** Allow RFC 3986 semicolon path parameters in routed request paths. */
+  allow_path_parameters?: boolean;
   hosts: string[];
   backend_scheme?: BackendScheme | null;
   backend_host: string;

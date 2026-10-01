@@ -50,10 +50,11 @@ works the same way against a live Ferrum Edge gateway.
 ## Supported Ferrum Edge version
 
 Foundry is qualified against one Ferrum Edge image at a time. Foundry v0.3.0
-pairs with the published **Ferrum Edge v0.9.8** release,
-`ferrumedge/ferrum-edge@sha256:e5b204f9448d4ec210a57dbd2badece5f4359d5d544522fa48dcdfeef033b385`,
-qualified in `database` mode (writable and `FERRUM_ADMIN_READ_ONLY`), behind
-the trusted-proxy starter, in Chromium, on `linux/amd64` and `linux/arm64`.
+paired with the published **Ferrum Edge v0.9.8** release. The next pairing is
+being qualified against Ferrum Edge v0.9.9 using the release digest recorded
+in `docs/compatibility.json`. The qualification covers `database` mode
+(writable and `FERRUM_ADMIN_READ_ONLY`), the trusted-proxy starter, Chromium,
+and `linux/amd64` and `linux/arm64`.
 Other Ferrum Edge releases, other gateway modes, and other browsers are
 best-effort or not qualified.
 [Supported pairing](docs/compatibility.md) has the requirements, the full

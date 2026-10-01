@@ -31,7 +31,8 @@
  * or a `POST /restore` without `?confirm=true` and with a body that is not
  * JSON. Each still passes through exactly the role check and the admission
  * gate the surface mirrors, because Edge applies both before it looks the
- * resource up (ferrum-edge v0.9.8, the pinned release, v0.9.7, v0.9.5, and the
+ * resource up (ferrum-edge v0.9.9, the qualification candidate, v0.9.8,
+ * v0.9.7, v0.9.5, and the
  * earlier b96cfaa build alike: `crud::handle_delete`, `handle_restore`,
  * `tls_management::handle_delete_managed`).
  *
@@ -91,6 +92,17 @@ export const BFF_ONLY_SURFACES = new Set(["bffSettings"]);
  */
 export const READ_PROBES = [
   { label: "proxies", path: "/proxies?offset=0&limit=1", minimumRole: "viewer", collection: true },
+  {
+    label: "MCP tool catalog",
+    path: `/proxies/${PROBE_ID}/mcp/tools?offset=0&limit=1`,
+    minimumRole: "viewer",
+    // The catalog handler's own answer for a missing proxy
+    // (`Proxy::NOT_FOUND_MESSAGE`, ferrum-edge v0.9.9 `mcp_tool_catalog.rs`).
+    // A router's generic `{"error":"Not Found"}` would mean the route does not
+    // exist, so the status alone proves nothing.
+    expectedStatus: 404,
+    expectedError: "Proxy not found",
+  },
   { label: "upstreams", path: "/upstreams?offset=0&limit=1", minimumRole: "viewer", collection: true },
   { label: "consumers", path: "/consumers?offset=0&limit=1", minimumRole: "viewer", collection: true },
   { label: "plugin configs", path: "/plugins/config?offset=0&limit=1", minimumRole: "viewer", collection: true },
@@ -223,6 +235,17 @@ export async function verifyCapabilityParity(send, { expectation } = {}) {
       if (ROLE_RANK[role] >= ROLE_RANK[probe.minimumRole]) {
         if (response.status === 401 || denial) {
           mismatches.push(`${role} read of ${probe.label} was refused (${response.status})`);
+        } else if (probe.expectedStatus !== undefined && response.status !== probe.expectedStatus) {
+          mismatches.push(
+            `${role} read of ${probe.label} returned ${response.status}, expected ${probe.expectedStatus}`,
+          );
+        } else if (
+          probe.expectedError !== undefined && response.body?.error !== probe.expectedError
+        ) {
+          mismatches.push(
+            `${role} read of ${probe.label} answered ${JSON.stringify(response.body?.error)}, `
+            + `expected the handler's ${JSON.stringify(probe.expectedError)}`,
+          );
         } else if (probe.collection && !(response.status === 200 && isCollection(response.body))) {
           mismatches.push(
             `${role} read of ${probe.label} returned ${response.status} without a collection`,

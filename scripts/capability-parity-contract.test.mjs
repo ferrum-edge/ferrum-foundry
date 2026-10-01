@@ -14,8 +14,9 @@ import {
 const RANK = { viewer: 0, operator: 1, admin: 2 };
 
 /**
- * An independent transcription of the pinned ferrum-edge release's (v0.9.8;
- * identical in v0.9.7, v0.9.5, and the earlier b96cfaa build) route roles
+ * An independent transcription of ferrum-edge v0.9.9's route roles, including
+ * its viewer-readable MCP catalog read. The unchanged CRUD role matrix matches
+ * v0.9.8, v0.9.7, v0.9.5, and the earlier b96cfaa build.
  * (`require_admin_role` in each `src/admin/mod.rs` arm) and the admission
  * function each handler calls first — not derived from the probe table or the
  * capability model it is checking.
@@ -36,6 +37,14 @@ const EDGE_ROUTES = [
   { method: "GET", prefix: "/gateway-trust-bundles", role: "operator", gate: "none", ok: 200, collection: true },
   { method: "GET", prefix: "/audit", role: "admin", gate: "none", ok: 200 },
   { method: "GET", prefix: "/proxies", role: "viewer", gate: "none", ok: 200, collection: true },
+  {
+    method: "GET",
+    prefix: `/proxies/${PROBE_ID}/mcp/tools`,
+    role: "viewer",
+    gate: "none",
+    ok: 404,
+    body: { error: "Proxy not found" },
+  },
   { method: "GET", prefix: "/upstreams", role: "viewer", gate: "none", ok: 200, collection: true },
   { method: "GET", prefix: "/consumers", role: "viewer", gate: "none", ok: 200, collection: true },
   { method: "GET", prefix: "/plugins/config", role: "viewer", gate: "none", ok: 200, collection: true },
@@ -71,7 +80,8 @@ function fakeGateway({ readOnly = false, override = () => undefined } = {}) {
     }
     return {
       status: rule.ok,
-      body: rule.collection ? { data: [], pagination: { offset: 0, limit: 1, total: 0 } } : {},
+      body: rule.body
+        ?? (rule.collection ? { data: [], pagination: { offset: 0, limit: 1, total: 0 } } : {}),
     };
   };
   return { send, requests };
@@ -86,6 +96,7 @@ describe("capability parity contract", () => {
     assert.equal(result.writes.operator.consumers, 403);
     assert.equal(result.writes.admin.configBackup, 400);
     assert.equal(result.reads.viewer.proxies, 200);
+    assert.equal(result.reads.viewer["MCP tool catalog"], 404);
     assert.equal(result.reads.viewer["TLS inventory"], 403);
   });
 
@@ -110,6 +121,18 @@ describe("capability parity contract", () => {
       /expected a writable gateway/,
     );
     await assert.rejects(verifyCapabilityParity(fakeGateway().send, {}), /expectation must be/);
+  });
+
+  it("fails when the MCP catalog 404 is not the handler's missing-proxy answer", async () => {
+    const { send } = fakeGateway({
+      override: (_role, request) => request.path.includes("/mcp/tools")
+        ? { status: 404, body: { error: "Not Found" } }
+        : undefined,
+    });
+    await assert.rejects(
+      verifyCapabilityParity(send, { expectation: "writable" }),
+      /viewer read of MCP tool catalog answered "Not Found", expected the handler's "Proxy not found"/,
+    );
   });
 
   it("fails when the gateway requires a different role than the model", async () => {
@@ -223,7 +246,10 @@ describe("capability parity contract", () => {
       assert.equal(probe.path.includes("confirm=true"), false, `${surface} must never confirm`);
     }
     assert.throws(() => JSON.parse(WRITE_PROBES.configBackup.rawBody));
-    assert.ok(READ_PROBES.every((probe) => !probe.path.includes(PROBE_ID)));
+    assert.ok(
+      READ_PROBES.filter((probe) => probe.label !== "MCP tool catalog")
+        .every((probe) => !probe.path.includes(PROBE_ID)),
+    );
   });
 
   it("classifies only the gateway's own 403 bodies", () => {

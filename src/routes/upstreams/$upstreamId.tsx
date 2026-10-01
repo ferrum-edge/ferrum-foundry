@@ -23,6 +23,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
 import { UpstreamForm } from "@/components/forms/UpstreamForm";
 import { TargetForm } from "@/components/forms/TargetForm";
 import { committedWriteMessage, getApiErrorMessage, getCommittedWrite } from "@/api/client";
+import { MaskedSecretRefusal } from "@/components/shared/MaskedSecretRefusal";
 import * as upstreamsApi from "@/api/upstreams";
 import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
 import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
@@ -128,7 +129,7 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const { capabilities } = useCapabilities();
+  const { capabilities, facts } = useCapabilities();
   const capability = capabilities.upstreams;
   const updateUpstream = useUpdateUpstream();
   const deleteUpstream = useDeleteUpstream();
@@ -145,6 +146,8 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
   } | null>(null);
   // Bumped only by an explicit "discard my draft and reload".
   const [formGeneration, setFormGeneration] = useState(0);
+  // The last failed save, kept so a masked-secret refusal can list its fields.
+  const [saveError, setSaveError] = useState<unknown>(null);
 
   // Settings are a whole-resource replacement, so the baseline is the resource
   // this editor was seeded with, captured once and advanced only by an
@@ -172,6 +175,7 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
 
   const handleSubmit = session.bind(async (data: UpstreamCreate) => {
     if (!upstream || !capability.allowed || refuseWhileSaving()) return;
+    setSaveError(null);
     try {
       const updated = await updateUpstream.mutateAsync({
         id: upstreamId,
@@ -199,6 +203,7 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
         );
         return;
       }
+      setSaveError(err);
       const message = await getApiErrorMessage(err, "Failed to update upstream");
       toast("error", message);
     }
@@ -288,6 +293,7 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
     ) => {
       if (!upstream || !capability.allowed || refuseWhileSaving()) return;
       let accepted: Upstream;
+      setSaveError(null);
       try {
         accepted = await updateUpstream.mutateAsync({
           id: upstreamId,
@@ -311,6 +317,7 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
           onSaved(fresh && holdsTargets(fresh, newTargets) ? fresh : null, fresh ?? null);
           return;
         }
+        setSaveError(err);
         const message = await getApiErrorMessage(err, "Failed to update targets");
         toast("error", message);
         return;
@@ -454,6 +461,8 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
 
       <ResourceLabels labels={upstream.labels} />
 
+      <MaskedSecretRefusal error={saveError} />
+
       {/* Tabs */}
       <Tabs defaultValue="config">
         <TabsList>
@@ -472,6 +481,7 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
               onSubmit={handleSubmit}
               isLoading={updateUpstream.isPending}
               capability={capability}
+              role={facts.role}
             />
           </Card>
         </TabsContent>
