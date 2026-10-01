@@ -144,7 +144,7 @@ describe("the supported pairing record", () => {
       const clause = dependency.status.split(";").at(-1);
       const carriedBy = /(?:released|retained) in Ferrum Edge (.+)$/.exec(clause)?.[1] ?? "";
       assert.ok(
-        carriedBy.split(/,\s*|\s+and\s+/).includes(record.edge.release.version),
+        carriedBy.split(/,\s*(?:and\s+)?|\s+and\s+/).includes(record.edge.release.version),
         `${dependency.change}: ${dependency.status}`,
       );
     }
