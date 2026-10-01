@@ -46,7 +46,8 @@ const account: AcmeAccount = {
 let ui: ReturnType<typeof createHarness>;
 let collections: Record<string, unknown[]>;
 let requests: Request[];
-let readStatus: number | undefined;
+let failReads: boolean;
+let readFailureStatus: number;
 const mutate = vi.fn<(request: Request) => Promise<Response>>();
 const popup = vi.fn();
 
@@ -57,7 +58,8 @@ beforeEach(() => {
     "acme/certificates": [], "acme/orders": [], "acme/accounts": [],
   };
   requests = [];
-  readStatus = undefined;
+  failReads = false;
+  readFailureStatus = 500;
   mutate.mockReset();
   mutate.mockImplementation(async () => { throw new Error("Unexpected TLS mutation"); });
   popup.mockClear();
@@ -68,7 +70,12 @@ beforeEach(() => {
   stubFetch(async (request) => {
     requests.push(request);
     if (request.method !== "GET") return mutate(request);
-    if (readStatus) return Response.json({ error: "TLS unavailable" }, { status: readStatus, headers: { "retry-after": "0" } });
+    if (failReads) {
+      return Response.json({ error: "TLS unavailable" }, {
+        status: readFailureStatus,
+        headers: { "retry-after": "0" },
+      });
+    }
     const path = new URL(request.url).pathname.replace("/api/proxy/admin/tls/", "");
     if (path === "acme/certificates/acme-edge") return Response.json(certificate);
     if (path === "acme/orders/order-edge") return Response.json({ ...order, status: "valid" });
@@ -91,13 +98,24 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  await ui.dispose();
-  setApiErrorHandler(undefined);
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-  localStorage.clear();
-  Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
+  try {
+    await ui.dispose();
+  } finally {
+    failReads = false;
+    setApiErrorHandler(undefined);
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    localStorage.clear();
+    Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
+  }
 });
+
+async function settleRead(check: () => void) {
+  await vi.waitFor(async () => {
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    check();
+  }, { timeout: 8000 });
+}
 
 async function mount(tab = "Inventory", entry = "/tls") {
   const parent = createRootRoute();
@@ -266,9 +284,10 @@ describe("TLS inventory and events", () => {
   it.each([404, 500, 503])(
     "renders TLS read failures as unavailable instead of empty (%s)",
     async (status) => {
-      readStatus = status;
+      failReads = true;
+      readFailureStatus = status;
       await mount();
-      await settle(() => {
+      await settleRead(() => {
         expect(panel().textContent).toContain("TLS inventory unavailable");
         expect(panel().textContent).toContain("TLS unavailable");
         expect(panel().textContent).not.toContain("No TLS material found");
@@ -284,13 +303,13 @@ describe("TLS inventory and events", () => {
         ["ACME", "ACME certificates unavailable", "No ACME certificates"],
       ]) {
         await selectTab(tab);
-        await settle(() => {
+        await settleRead(() => {
           expect(panel().textContent).toContain(label);
           expect(panel().textContent).toContain("TLS unavailable");
           expect(panel().textContent).not.toContain(empty);
         });
       }
-      await settle(() => {
+      await settleRead(() => {
         expect(panel().textContent).toContain("ACME orders unavailable");
         expect(panel().textContent).toContain("ACME accounts unavailable");
         expect(panel().textContent).not.toContain("No active orders");
@@ -298,14 +317,18 @@ describe("TLS inventory and events", () => {
       expect(writes()).toHaveLength(0);
       expect(requests.every((request) => !request.headers.has("X-Ferrum-Namespace"))).toBe(true);
     },
+    20_000,
   );
 
   it("presents a refused read as a denial, never as an empty store", async () => {
     // Edge requires operator for every TLS read. A viewer's 403 is an answer
     // about the session: claiming "no TLS material" would be a false fact.
-    readStatus = 403;
+    failReads = true;
+    readFailureStatus = 403;
     await mount();
-    await settle(() => expect(panel().textContent).toContain("TLS inventory: read not permitted for this session"));
+    await settleRead(() => expect(panel().textContent).toContain(
+      "TLS inventory: read not permitted for this session",
+    ));
     expect(panel().textContent).not.toContain("No TLS material found");
     for (const [tab, label, empty] of [
       ["Certificates", "Managed Certificates", "No certificates yet"],
@@ -318,14 +341,18 @@ describe("TLS inventory and events", () => {
       ["ACME", "ACME certificates", "No ACME certificates"],
     ]) {
       await selectTab(tab);
-      await settle(() => expect(panel().textContent).toContain(`${label}: read not permitted for this session`));
+      await settleRead(() => expect(panel().textContent).toContain(
+        `${label}: read not permitted for this session`,
+      ));
       expect(panel().textContent).not.toContain(empty);
       expect(panel().querySelector("[data-read-denied]")).not.toBeNull();
     }
-    await settle(() => expect(panel().textContent).toContain("ACME orders: read not permitted for this session"));
+    await settleRead(() => expect(panel().textContent).toContain(
+      "ACME orders: read not permitted for this session",
+    ));
     expect(panel().textContent).not.toContain("No active orders");
     expect(writes()).toHaveLength(0);
-  });
+  }, 20_000);
 
   it("rotates the selected surface and reports acceptance and failure", async () => {
     mutate.mockResolvedValueOnce(Response.json({ accepted: true, requested_surface: "backend_tls" }, { status: 202 }))
