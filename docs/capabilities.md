@@ -104,13 +104,23 @@ namespace registry, and audit.
 | `consumerCredentials` | `admin` | `config-store` | `admit_write` on `/consumers/{id}/credentials/{type}` |
 | `apiSpecs` | `admin` | `config-store` | `admit_write` on `/api-specs` |
 | `namespaceRegistry` | `admin` | `config-store` | `admit_write` on `/namespaces` |
-| `configBackup` (`POST /restore`) | `admin` | `config-store` | `admit_write` on `/restore` |
+| `configBackup` (`POST /restore`) | `admin` | `config-store` | `admit_write` on `/restore`, after `require_db` in file/DP mode |
 | `gatewayTrust` | `admin` | `config-store` | `admit_write` on `/gateway-trust-bundles` |
 | `configExport` (`GET /backup`) | `admin` | `none` (denied on `node_agent`) | `handle_backup`: a read with no write gate; `node_agent` has no cached config |
 | `tlsMaterial` (certificates, CA bundles, CRLs, OCSP, JWKS, ACME) | `admin` | `read-only-mode` | `admit_non_config_db_write`, called by all 18 mutation handlers in `src/admin/tls_management.rs` |
 | `bffSettings` (`PUT /api/settings`, BFF-local) | `admin` | `none` | `requireRole('admin')` in `server/routes/settings.ts`; never reaches the gateway |
 
-Two rows need explaining.
+A few rows need explaining.
+
+**`configBackup` (`POST /restore`) reports a no-database precondition.** In
+`file` and `dp` mode there is no configuration database, so `handle_restore`
+calls `require_db` *before* `admit_write` and answers the documented
+`503 {"error":"No database"}` rather than the read-only `403` the other
+config-store writes return. The model still shows restore read-only, because
+the mode is read-only, and the parity contract accepts that exact typed `503`
+as an expected read-only outcome. A `503` is never treated as admitted: the
+restore did not run, and a writable database gateway that answers `503` — or a
+`2xx` from a surface the model treats as read-only — still fails the contract.
 
 **`tlsMaterial` is `read-only-mode`, not `none`.** Managed TLS and ACME records
 live in stores separate from the configuration database, so
@@ -219,6 +229,11 @@ one admitted, a different required role named, or a read-only denial missing.
 compares against this model rather than a second copy.
 
 - `DELETE` probes must return `404`; a successful deletion fails the contract.
+- The `POST /restore` probe in `file`/`dp` mode may answer the documented
+  `503 {"error":"No database"}` instead of the read-only `403`; the contract
+  accepts it as an unavailable no-writable-store outcome, never as an
+  admission. A differently-shaped `503`, or a `503` on any other surface,
+  fails.
 - Writable runs require `FERRUM_DEMO_CONFIRM_TARGET` to name the gateway and
   namespace exactly, and must only target a disposable gateway.
 - It runs against a writable `database` gateway (inside
