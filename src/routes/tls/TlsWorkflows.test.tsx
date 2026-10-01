@@ -248,8 +248,7 @@ describe("TLS inventory and events", () => {
     expect(requests.every((request) => !request.headers.has("X-Ferrum-Namespace"))).toBe(true);
   });
 
-  it.each([undefined, 404, 503])("renders empty stores after an empty or unavailable response (%s)", async (status) => {
-    readStatus = status;
+  it("renders empty stores after successful empty responses", async () => {
     await mount();
     await settle(() => expect(panel().textContent).toContain("No TLS material found"));
     for (const [tab, message] of [
@@ -263,6 +262,43 @@ describe("TLS inventory and events", () => {
     expect(writes()).toHaveLength(0);
     expect(requests.every((request) => !request.headers.has("X-Ferrum-Namespace"))).toBe(true);
   });
+
+  it.each([404, 500, 503])(
+    "renders TLS read failures as unavailable instead of empty (%s)",
+    async (status) => {
+      readStatus = status;
+      await mount();
+      await settle(() => {
+        expect(panel().textContent).toContain("TLS inventory unavailable");
+        expect(panel().textContent).toContain("TLS unavailable");
+        expect(panel().textContent).not.toContain("No TLS material found");
+        expect(getByRole(panel(), "button", { name: "Retry TLS inventory" })).not.toBeNull();
+      });
+      for (const [tab, label, empty] of [
+        ["Certificates", "Managed Certificates unavailable", "No certificates yet"],
+        ["CA Bundles", "Managed CA Bundles unavailable", "No CA bundles yet"],
+        ["CRLs", "Managed CRLs unavailable", "No CRLs yet"],
+        ["OCSP", "Managed OCSP unavailable", "No OCSP responses yet"],
+        ["JWKS", "Managed JWKS unavailable", "No JWKS documents yet"],
+        ["Events", "TLS events unavailable", "No TLS events"],
+        ["ACME", "ACME certificates unavailable", "No ACME certificates"],
+      ]) {
+        await selectTab(tab);
+        await settle(() => {
+          expect(panel().textContent).toContain(label);
+          expect(panel().textContent).toContain("TLS unavailable");
+          expect(panel().textContent).not.toContain(empty);
+        });
+      }
+      await settle(() => {
+        expect(panel().textContent).toContain("ACME orders unavailable");
+        expect(panel().textContent).toContain("ACME accounts unavailable");
+        expect(panel().textContent).not.toContain("No active orders");
+      });
+      expect(writes()).toHaveLength(0);
+      expect(requests.every((request) => !request.headers.has("X-Ferrum-Namespace"))).toBe(true);
+    },
+  );
 
   it("presents a refused read as a denial, never as an empty store", async () => {
     // Edge requires operator for every TLS read. A viewer's 403 is an answer
@@ -372,6 +408,46 @@ describe("managed TLS material", () => {
     expect(writes()[1].method).toBe("DELETE");
     expect(new URL(writes()[1].url).pathname).toBe(`/api/proxy/admin/tls/${collection}/edge-cert`);
     expect(writes().every((request) => !request.headers.has("X-Ferrum-Namespace"))).toBe(true);
+  });
+
+  it.each([
+    [
+      "Certificates",
+      "Add Certificate",
+      "Certificate (PEM)",
+      "cert_pem and key_pem do not form a valid pair: keys may not be consistent: KeyMismatch",
+      "Keys may not be consistent: KeyMismatch",
+    ],
+    [
+      "OCSP",
+      "Add OCSP",
+      "OCSP Response (base64 DER)",
+      "ocsp_der_base64 must be valid base64: Invalid symbol 32, offset 7.",
+      "Invalid symbol 32, offset 7.",
+    ],
+    [
+      "JWKS",
+      "Add JWKS",
+      "JWKS Document (JSON)",
+      "jwks_json must be valid JSON: expected value at line 1 column 1",
+      "Expected value at line 1 column 1",
+    ],
+  ] as const)("attaches the Edge v0.9.9 %s validation error to its field", async (
+    tab, add, fieldLabel, detail, message,
+  ) => {
+    mutate.mockResolvedValue(Response.json({ error: detail }, { status: 400 }));
+    await mount(tab);
+    await click(add, panel());
+    const field = getByRole(dialog(), "textbox", { name: fieldLabel });
+    await fill(field, "invalid disposable material");
+    if (tab === "Certificates") {
+      await fill(getByRole(dialog(), "textbox", { name: "Private Key (PEM)" }), keyPem);
+    }
+    await click("Create", dialog());
+    await settle(() => expect(dialog().textContent).toContain(message));
+    expect(field.getAttribute("aria-invalid")).toBe("true");
+    expect(describedText(field)).toBe(message);
+    expect(popup).not.toHaveBeenCalled();
   });
 
   it("shows material errors inline, clears them on edit, and keeps referenced records on delete conflict", async () => {

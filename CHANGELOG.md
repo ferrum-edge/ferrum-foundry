@@ -74,6 +74,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- TLS inventory, managed material, ACME, and event reads now show an
+  unavailable or stale state with the read error instead of reporting an empty
+  store when the gateway read fails (#511). Managed certificate, OCSP, and
+  JWKS material validation errors from Ferrum Edge v0.9.9 now attach to their
+  corresponding form fields (#517).
 - An `operator` can save plugin configurations and upstreams against Ferrum
   Edge v0.9.9: the editors no longer send the placeholders their masked read
   returned, which Edge refuses with `400`. When Edge does refuse a save, the
