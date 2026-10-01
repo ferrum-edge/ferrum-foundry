@@ -166,6 +166,12 @@ test("reports rules whose order would change which sites Edge handles first", ()
     { path: ["a"], sensitivity: "secret" },
     { path: ["a"], sensitivity: "secret" },
   ]), []);
+  // Equal length is not a duplicate when a segment differs: `x.*` renders
+  // `/config/x/0` as an object before `x.b` can record `/config/x/0/b`.
+  assert.deepEqual(orderDependentRules([
+    { path: ["x", "*"], sensitivity: "secret" },
+    { path: ["x", "b"], sensitivity: "secret" },
+  ]), ["secret x.* / secret x.b"]);
   for (const [plugin, rules] of foundryTables().schemas) {
     assert.deepEqual(orderDependentRules(rules), [], plugin);
   }

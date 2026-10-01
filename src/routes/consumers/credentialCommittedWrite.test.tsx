@@ -288,9 +288,11 @@ describe("credential append outcomes (#451)", () => {
     await enterSecret();
     await submit();
     await waitFor(() => expect(host.textContent).toContain("Outcome unknown"));
+    // The form re-arms when the re-read settles, which can land a render after
+    // the outcome notice first appears.
+    await waitFor(() => expect(findButton("Add Credential")?.disabled).toBe(false));
     expect(reads).toEqual(["/api/proxy/consumers/first"]);
     expect(host.querySelector("input")?.value).toBe(secret);
-    expect(findButton("Add Credential")?.disabled).toBe(false);
     // The re-read lists no more JWT credentials than before the write.
     expect(notice()).toContain("lists no more jwt credentials than before this write");
     expect(notice()).toContain("likely not stored");

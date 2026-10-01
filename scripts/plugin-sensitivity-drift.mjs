@@ -281,17 +281,28 @@ function segmentsOverlap(a, b) {
   return a === "*" || b === "*" || normalizeKey(a) === normalizeKey(b);
 }
 
+/** The same path, segment for segment, keys compared normalized. */
+function samePath(a, b) {
+  return (
+    a.length === b.length &&
+    a.every((segment, index) => normalizeKey(segment) === normalizeKey(b[index]))
+  );
+}
+
 /**
  * Pairs of one plugin's rules whose order matters. Edge's projection, and the
  * masked-placeholder check that replays it, act on a site the first time a
  * rule reaches it: a rule that withholds a container wholesale hides every
  * site inside it from a later rule, and two different handlings of the same
  * site (`kafka` walks properties, `secret` withholds the object) depend on
- * which runs first. That happens only when one rule's path, segment by
- * segment (`*` matching any key, keys compared normalized), is a prefix of
- * another's. A named segment also passes through arrays, so `a.b` and `a.*.b`
- * can reach the same elements; both still render the same leaf, which no
- * order changes.
+ * which runs first. That happens when one rule's path, segment by segment
+ * (`*` matching any key, keys compared normalized), is a prefix of another's.
+ * A named segment also passes through arrays, so `a.b` and `a.*.b` reach the
+ * same elements and are reported even though neither order changes the leaf:
+ * that is a harmless false positive. Two equal-length paths are a duplicate,
+ * not an ordering, only when they match segment for segment after
+ * normalization and the sensitivity is equal; `x.*` against `x.b` differs at
+ * a segment, so it is reported.
  */
 export function orderDependentRules(rules) {
   const pairs = [];
@@ -304,8 +315,9 @@ export function orderDependentRules(rules) {
         segmentsOverlap(segment, longer.path[index]));
       if (!prefix) continue;
       // The same site handled the same way is a duplicate, not an ordering.
-      const samePath = shorter.path.length === longer.path.length;
-      if (samePath && shorter.sensitivity === longer.sensitivity) continue;
+      if (shorter.sensitivity === longer.sensitivity && samePath(shorter.path, longer.path)) {
+        continue;
+      }
       pairs.push(`${ruleKey(rules[i])} / ${ruleKey(rules[j])}`);
     }
   }

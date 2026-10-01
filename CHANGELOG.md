@@ -74,6 +74,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The plugin-sensitivity drift check now reports an equal-length rule pair that
+  differs only by a wildcard (`x.*` against `x.b`), whose order changes which
+  masked-placeholder sites Edge handles first, instead of skipping it as a
+  duplicate. A pair is a duplicate only when both paths match segment for
+  segment after normalization and the sensitivity is equal (#515).
+
 - TLS inventory, managed material, ACME, and event reads now show an
   unavailable or stale state with the read error instead of reporting an empty
   store when the gateway read fails (#511). Managed certificate, OCSP, and
