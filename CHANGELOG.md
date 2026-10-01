@@ -83,6 +83,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   admitted, and still fails on a `2xx` the model treats as read-only or on a
   `503` of any other shape (#516).
 
+- Settings namespace selection now reports a failed registry read as
+  unavailable with a retry action. Manual namespace entry remains available as
+  a clearly labeled fallback during an outage, while a successfully empty
+  registry keeps the manual-entry flow.
 - An `operator` can save plugin configurations and upstreams against Ferrum
   Edge v0.9.9: the editors no longer send the placeholders their masked read
   returned, which Edge refuses with `400`. When Edge does refuse a save, the
