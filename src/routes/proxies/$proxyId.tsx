@@ -39,6 +39,9 @@ import { useCapabilities } from "@/stores/capabilities";
 import { WriteAction } from "@/components/shared/CapabilityGate";
 import type { ProxyCreate, PluginConfig } from "@/api/types";
 import { formatDateTime } from "@/lib/format";
+import { isStreamProxy } from "@/lib/pluginProtocols";
+import { McpToolsPanel } from "@/components/mcp/McpToolsPanel";
+import { McpGovernanceCard } from "@/components/mcp/McpGovernanceCard";
 
 /**
  * Plugin config JSON preview. Scrolls in both axes inside a bounded box so a
@@ -109,7 +112,9 @@ function ProxyEditor({ session }: { session: EditorSession }) {
   const openTab = useCallback((tab: string) => {
     setOpenedTabs((opened) => (opened.has(tab) ? opened : new Set([...opened, tab])));
   }, []);
-  const pluginPolicyRequested = openedTabs.has("plugins") || openedTabs.has("consumers");
+  // The MCP Tools tab's governance summary reads the same effective plugins.
+  const pluginPolicyRequested =
+    openedTabs.has("plugins") || openedTabs.has("consumers") || openedTabs.has("tools");
   const consumerPolicyRequested = openedTabs.has("consumers");
 
   const pluginsQuery = useAllPluginConfigs(pluginPolicyRequested);
@@ -338,6 +343,8 @@ function ProxyEditor({ session }: { session: EditorSession }) {
           <TabsTrigger value="upstream">
             {proxy.upstream_id ? "Upstream (linked)" : "Upstream"}
           </TabsTrigger>
+          {/* mcp_gateway is HTTP-only; a stream listener never runs it. */}
+          {!isStreamProxy(proxy) && <TabsTrigger value="tools">MCP Tools</TabsTrigger>}
         </TabsList>
 
         {/* ── Config Tab ─────────────────────────────────────────── */}
@@ -662,6 +669,27 @@ function ProxyEditor({ session }: { session: EditorSession }) {
             </div>
           )}
         </TabsContent>
+
+        {/* ── MCP Tools Tab ──────────────────────────────────────── */}
+        {!isStreamProxy(proxy) && (
+          <TabsContent value="tools">
+            <McpToolsPanel
+              proxyId={proxyId}
+              enabled={detailLive && openedTabs.has("tools")}
+              session={session}
+              gatewayConfigured={
+                pluginsKnown
+                  ? proxyPlugins.some((plugin) => plugin.plugin_name === "mcp_gateway")
+                  : undefined
+              }
+              governance={
+                <ReadState queries={pluginQueries} label="AI governance">
+                  <McpGovernanceCard plugins={proxyPlugins} />
+                </ReadState>
+              }
+            />
+          </TabsContent>
+        )}
       </Tabs>
 
       {/* Refused concurrent-edit save */}

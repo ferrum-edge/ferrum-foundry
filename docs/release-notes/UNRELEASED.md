@@ -29,6 +29,23 @@
   reads are raw, are never blocked, and a placeholder-shaped value in a field
   the read does not mask only gets a warning.
 
+### MCP tool catalog
+
+- A proxy with `mcp_gateway` shows an MCP Tools tab: every tool the gateway
+  node has cached, its source (upstream MCP server or generated OpenAPI
+  operation), annotations, configured and effective policy, and per-group
+  grants, with catalog state and refresh errors. It needs Ferrum Edge v0.9.9.
+  The catalog is node-local, so a Foundry connected to a control plane shows
+  `not_served` and explains that each data plane reports its own catalog; the
+  stored policy is still listed and editable.
+- Per-tool policy (allow, deny, hide from discovery, or default, plus allowed
+  and denied groups) is edited inline and saved through conditional writes.
+  An `operator` whose read masks an MCP server URL path cannot save it, since
+  Edge refuses the masked placeholder; an `admin` can.
+- An AI governance summary says whether a tool governor, prompt shield,
+  transcript audit, and tool-call limit run on the proxy and act on MCP tool
+  calls, and warns when an agent-facing endpoint has none.
+
 ### Supported pairing
 
 | | |

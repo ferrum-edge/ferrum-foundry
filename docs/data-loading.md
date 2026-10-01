@@ -127,6 +127,16 @@ proxy and have no `proxy_id`. If the response includes a configuration for
 another proxy, the gateway ignored the filter, and the read fails rather than
 showing or traversing the namespace.
 
+The MCP Tools tab (HTTP proxies only; `mcp_gateway` never runs on a stream
+listener) reads `GET /proxies/{id}/mcp/tools` when it is first opened. That is
+the node's cached catalog, paged at the 1,000-item maximum and bounded by each
+instance's `validation.max_catalog_items_per_list`; it never contacts an
+upstream. The read is complete or unknown: a catalog whose total or any
+instance's `catalog_version` changes between pages fails the read instead of
+mixing two catalogs. Each instance's plugin configuration is read by id, and
+the AI governance summary uses the same complete plugin traversal as the
+Plugins tab.
+
 ### Consumer and plugin detail pages
 
 A consumer editor makes one request for the consumer. The proxy and plugin
