@@ -55,11 +55,11 @@ export function createHarness() {
   };
 }
 
-export async function settle(check: () => void) {
+export async function settle(check: () => void, options?: { timeout?: number }) {
   await vi.waitFor(async () => {
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     check();
-  });
+  }, options);
 }
 
 export async function fill(input: HTMLInputElement | HTMLTextAreaElement, value: string) {

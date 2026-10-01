@@ -30,9 +30,10 @@ afterEach(async () => {
 
 describe("Settings namespace selection", () => {
   it("shows an unavailable retry state after a 500 instead of claiming the registry is empty", async () => {
-    // Only the namespace registry read fails, and only the first time; the
-    // page's other reads (e.g. the gateway connection card) are answered
-    // normally so they cannot consume the failure.
+    // The namespace registry read keeps failing (including the query's own
+    // automatic retries) until the test clicks Retry; the page's other reads
+    // are answered normally so they cannot consume the failure.
+    let failing = true;
     let requests = 0;
     stubFetch((request) => {
       const path = new URL(request.url).pathname;
@@ -40,13 +41,18 @@ describe("Settings namespace selection", () => {
         return Response.json({});
       }
       requests += 1;
-      return requests === 1
+      return failing
         ? Response.json({ error: "synthetic namespace unavailable" }, { status: 500 })
         : Response.json({ data: [], pagination: { offset: 0, limit: 250, total: 0 } });
     });
 
     await harness.render(<SettingsPage />);
-    await settle(() => expect(harness.host.textContent).toContain("Namespace registry unavailable"));
+    // ky retries a failed GET twice with backoff before the read is reported
+    // failed, which takes longer than settle's default wait.
+    await settle(
+      () => expect(harness.host.textContent).toContain("Namespace registry unavailable"),
+      { timeout: 5000 },
+    );
 
     expect(harness.host.textContent).not.toContain("no namespaces returned from server");
     expect(harness.host.textContent).toContain("The registry is unavailable");
@@ -56,8 +62,10 @@ describe("Settings namespace selection", () => {
     expect(harness.host.textContent).toContain("ferrum");
     expect(setNamespace).not.toHaveBeenCalled();
 
+    const failedRequests = requests;
+    failing = false;
     await click("Retry Namespace registry", harness.host);
-    await settle(() => expect(requests).toBe(2));
+    await settle(() => expect(requests).toBeGreaterThan(failedRequests));
     await settle(() => expect([...harness.host.querySelectorAll("input")]
       .some((input) => input.labels?.[0]?.textContent === "Namespace")).toBe(true));
     expect(harness.host.textContent).not.toContain("The registry is unavailable");
