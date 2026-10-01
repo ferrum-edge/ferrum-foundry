@@ -62,25 +62,24 @@ describe("the supported pairing record", () => {
     }
   });
 
-  it("pairs with and runs CI against the published v0.9.8 release", () => {
+  it("qualifies the published v0.9.9 release by its recorded image and manifests", () => {
     const image =
-      "ferrumedge/ferrum-edge@sha256:e5b204f9448d4ec210a57dbd2badece5f4359d5d544522fa48dcdfeef033b385";
-    const sourceCommit = "e27f2109216352c3fe9e67a7014611f3f66daa91";
+      "ferrumedge/ferrum-edge@sha256:83bb4de2ea264d5bed18d8f01f94e0e17a29b43aa1458b8984a0e9e1e784ede6";
+    const sourceCommit = "234717ce41965cd1e2b5c6c761a25475c5d7628c";
     const manifests = {
-      "linux/amd64": "sha256:0e629633ad55368002c415bbf76d4c91f3741519a33dd310045531d791d9a592",
-      "linux/arm64": "sha256:1e900bd537814fdc864ee1830bbd7a1e1f2785074a5da088a3d9cdd738b532f9",
+      "linux/amd64": "sha256:558fba9a1a9d7826e5ff9d84a1c80f24903c202a3a755072f45af0372ce1b477",
+      "linux/arm64": "sha256:33a8acceab1bee27e999b235cb24311619e44209b865cd68971cd9f3928a8379",
     };
     assert.equal(record.edge.image, image);
     assert.equal(record.edge.source_commit, sourceCommit);
     assert.deepEqual(record.edge.platform_manifests, manifests);
-    assert.match(record.edge.build, /v0\.9\.8/);
+    assert.match(record.edge.build, /v0\.9\.9/);
 
     const release = record.edge.release;
-    assert.equal(release.version, "v0.9.8");
+    assert.equal(release.version, "v0.9.9");
     assert.equal(release.image, image);
     assert.equal(release.source_commit, sourceCommit);
     assert.deepEqual(release.platform_manifests, manifests);
-    // CI ran the release it names, so the release workflow may tag against it.
     assert.deepEqual(edgeReleaseErrors(record), []);
     assert.ok(!record.edge.rejected_images.some((entry) => entry.image === record.edge.image));
   });
@@ -106,7 +105,7 @@ describe("the supported pairing record", () => {
     assert.match(semantics, /#409/);
   });
 
-  it("names its version and previous release, and no Foundry artifact it cannot know yet", () => {
+  it("keeps the latest Foundry release record during Edge qualification", () => {
     assert.equal(record.foundry.version, "0.3.0");
     assert.equal(record.foundry.previous_release, "v0.2.0");
     const pkg = JSON.parse(repoFile("package.json"));
@@ -115,13 +114,13 @@ describe("the supported pairing record", () => {
     assert.equal(pkg.version, record.foundry.version);
     assert.equal(lock.version, record.foundry.version);
     assert.equal(lock.packages[""].version, record.foundry.version);
-    if (record.status === "candidate") {
-      // The commit, digest, and CI run of a release exist only once it is cut.
-      for (const field of ["source_commit", "image", "ci_evidence"]) {
-        assert.ok(isPlaceholder(record.foundry[field]), `foundry.${field} before release`);
-      }
-    } else {
-      // Once the release is recorded, those artifacts are filled from its run.
+    // This qualification does not prepare a new Foundry release. Keep the most
+    // recent Foundry release artifacts while the Edge candidate is evaluated.
+    for (const field of ["source_commit", "image", "ci_evidence"]) {
+      assert.ok(!isPlaceholder(record.foundry[field]), `latest Foundry ${field} is recorded`);
+    }
+    if (record.status === "released") {
+      // A released record also mirrors the recorded Foundry artifacts in docs.
       for (const field of ["source_commit", "image", "ci_evidence"]) {
         assert.ok(!isPlaceholder(record.foundry[field]), `foundry.${field} after release`);
       }
@@ -138,7 +137,7 @@ describe("the supported pairing record", () => {
   it("records the Edge changes the pairing depends on as released in it", () => {
     const changes = record.edge_dependencies.map((entry) => entry.change);
     assert.deepEqual(changes, ["ferrum-edge#5661", "ferrum-edge#5726"]);
-    const released = `released in Ferrum Edge ${record.edge.release.version}`;
+    const released = `retained in Ferrum Edge v0.9.8 and ${record.edge.release.version}`;
     for (const dependency of record.edge_dependencies) {
       assert.ok(dependency.status.includes(released), `${dependency.change}: ${dependency.status}`);
     }

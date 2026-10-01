@@ -278,6 +278,9 @@ export function ProxyForm({
   /* ---------- Routing Options ---------- */
   const [stripListenPath, setStripListenPath] = useState(initialData?.strip_listen_path ?? true);
   const [preserveHostHeader, setPreserveHostHeader] = useState(initialData?.preserve_host_header ?? false);
+  const [allowPathParameters, setAllowPathParameters] = useState(
+    initialData?.allow_path_parameters ?? false,
+  );
   const [authMode, setAuthMode] = useState<"single" | "multi">(initialData?.auth_mode ?? "single");
   const [responseBodyMode, setResponseBodyMode] = useState<"stream" | "buffer">(
     initialData?.response_body_mode ?? "stream",
@@ -480,6 +483,7 @@ export function ProxyForm({
       ...(backendPath && { backend_path: backendPath }),
       strip_listen_path: stripListenPath,
       preserve_host_header: preserveHostHeader,
+      allow_path_parameters: allowPathParameters,
       auth_mode: authMode,
       response_body_mode: responseBodyMode,
       allowed_methods: restrictMethods
@@ -653,6 +657,13 @@ export function ProxyForm({
           >
             <Checkbox label="Strip listen path" checked={stripListenPath} onChange={setStripListenPath} />
             <Checkbox label="Preserve host header" checked={preserveHostHeader} onChange={setPreserveHostHeader} />
+            {isHttpLike && (
+              <Checkbox
+                label="Allow semicolon path parameters"
+                checked={allowPathParameters}
+                onChange={setAllowPathParameters}
+              />
+            )}
             <Select
               label="Auth Mode"
               value={authMode}

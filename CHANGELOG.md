@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Qualify the published Ferrum Edge v0.9.9 release for the next Foundry pairing.
+  Gateway-backed CI, the deployment starter, and local-run instructions use its
+  multi-architecture image digest. Foundry v0.3.0 remains the last released
+  Foundry version. Edge v0.9.9 adds a viewer-readable MCP catalog route, proxy
+  support for semicolon path parameters, and rejects writes that echo masked
+  secret placeholders.
+
 - Pin Ferrum Contracts `contracts-edge-0.9.8` for the plugin catalog and
   `provisioned-by` vocabulary, with CI checks for vendored file integrity and
   Foundry's local catalog and provisioning markers.

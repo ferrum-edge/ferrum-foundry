@@ -15,7 +15,7 @@ For a walkthrough that ends in an authenticated request through the data
 plane, see [`docs/getting-started.md`](../../docs/getting-started.md).
 
 **Supported pairing.** The stack is qualified with one Ferrum Edge image: the
-published v0.9.8 release that Foundry v0.3.0 pairs with, recorded by digest in
+published v0.9.9 release currently under qualification, recorded by digest in
 [`docs/compatibility.md`](../../docs/compatibility.md). The `demo` profile runs
 that image. The default Foundry image, `ferrumedge/ferrum-foundry:main`, is the
 development channel; for production, pin the released Foundry image named in

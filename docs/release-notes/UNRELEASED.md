@@ -17,6 +17,12 @@
 
 *Release step:* one paragraph on who this release is for and what it changes.
 
+### Qualification
+
+- The next Foundry pairing is being qualified against the published Ferrum Edge
+  v0.9.9 release. This qualification is tracked separately from Foundry release
+  preparation.
+
 ### Supported pairing
 
 | | |

@@ -66,6 +66,17 @@ describe("proxy full-replacement builders", () => {
     expect(payload.pool_http2_adaptive_window).toBeNull();
   });
 
+  it("preserves the Edge path parameter setting during a proxy form update", () => {
+    const snapshot = { ...fullProxy(), allow_path_parameters: true };
+    const payload = mergeFormUpdatePayload(snapshot, {
+      backend_host: snapshot.backend_host,
+      backend_port: snapshot.backend_port,
+      allow_path_parameters: true,
+    });
+
+    expect(payload.allow_path_parameters).toBe(true);
+  });
+
   it("omits membership from form writes while retaining explicit membership payloads", () => {
     const snapshot = fullProxy();
     for (const plugins of [snapshot.plugins, []]) {

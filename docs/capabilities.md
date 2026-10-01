@@ -226,6 +226,10 @@ compares against this model rather than a second copy.
   `FERRUM_ADMIN_READ_ONLY=true`. It first proves the gateway is in the expected
   mode, so it cannot pass vacuously.
 
+The MCP tool catalog read (`GET /proxies/{id}/mcp/tools`) is also probed as a
+viewer-readable, namespace-scoped endpoint; its disposable missing-proxy probe
+must reach the handler and return `404`.
+
 The contract also checks reads, because a denial must not look like missing
 data. Every role must get real collections for the launch surfaces, and a read
 the gateway withholds from a role (TLS inventory and trust bundles below

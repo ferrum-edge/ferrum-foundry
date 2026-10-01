@@ -56,6 +56,18 @@ against a fake gateway that attaches, advances `updated_at`, and enforces
 `If-Match`. The **Pinned Gateway Contract** CI job runs
 `scripts/gateway-contract-smoke.mjs` against the pinned gateway image.
 
+## Masked plugin secrets
+
+Ferrum Edge v0.9.9 can mask plugin configuration secrets in operator reads and
+refuses a write that echoes one of those masked placeholders. The gateway does
+this before its update merge, so a literal `[REDACTED]` no longer preserves the
+stored value on a `PUT`. Review the resource as an admin before editing a
+configuration whose secret fields are masked; do not attempt to save a
+projected operator response as a full replacement. Foundry's guided plugin
+editor currently preserves the values it reads, so operator edits to a
+configuration containing masked secrets may be refused until the editor can
+preserve those fields safely.
+
 ## Deleting a group
 
 Deleting a group detaches every member, then reads the plugin configuration.
@@ -77,8 +89,8 @@ If a change fails, Foundry attempts a compensating rollback:
 
 Every write is guarded against concurrent changes. Foundry compares
 `updated_at` with the read it just made, and sends `If-Match` with that read's
-`ETag`. On the paired Ferrum Edge release (ferrum-edge#5661, since v0.9.7) this makes
-the check and the write atomic and also catches changes that did not move
+`ETag`. On the Ferrum Edge v0.9.9 qualification candidate, ferrum-edge#5661
+(since v0.9.7) makes the check and write atomic and catches changes that did not move
 `updated_at`. A save or delete from the plugin page is also refused if the
 configuration no longer matches what the editor opened; see
 [concurrent edits](concurrent-edits.md).
