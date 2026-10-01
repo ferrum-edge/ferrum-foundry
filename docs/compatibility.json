@@ -1,13 +1,13 @@
 {
   "$comment": "Supported Foundry-Edge pairing. docs/compatibility.md is the human-readable record; scripts/supported-pairing.mjs reads and validates this file, CI starts the gateway edge.image names, and scripts/supported-pairing.test.mjs fails if another file pins a different Ferrum Edge image. edge.release is the published Edge release the Foundry release pairs with, and edge.image names that same release. Foundry artifact fields are filled by the release step, never guessed.",
   "record_version": 1,
-  "status": "candidate",
+  "status": "released",
   "foundry": {
     "version": "0.4.0",
     "previous_release": "v0.3.0",
-    "source_commit": "RELEASE-STEP: the commit v0.4.0 points to (also the image's org.opencontainers.image.revision label)",
-    "image": "RELEASE-STEP: ferrumedge/ferrum-foundry@sha256:<multi-arch index digest from the release run>",
-    "ci_evidence": "RELEASE-STEP: https://github.com/ferrum-edge/ferrum-foundry/actions/runs/<release run id>",
+    "source_commit": "cb6dbe5b2b2e3f3ed211d5e829322d867ecb7a36",
+    "image": "ferrumedge/ferrum-foundry@sha256:03d4baa0e424c4438abb65da4ee3a4441f50cde9f2eb4e28664e5cf0698c0241",
+    "ci_evidence": "https://github.com/ferrum-edge/ferrum-foundry/actions/runs/36874319153",
     "platforms": ["linux/amd64", "linux/arm64"]
   },
   "edge": {
