@@ -30,8 +30,15 @@ afterEach(async () => {
 
 describe("Settings namespace selection", () => {
   it("shows an unavailable retry state after a 500 instead of claiming the registry is empty", async () => {
+    // Only the namespace registry read fails, and only the first time; the
+    // page's other reads (e.g. the gateway connection card) are answered
+    // normally so they cannot consume the failure.
     let requests = 0;
-    stubFetch(() => {
+    stubFetch((request) => {
+      const path = new URL(request.url).pathname;
+      if (!/\/namespaces\/?$/.test(path)) {
+        return Response.json({});
+      }
       requests += 1;
       return requests === 1
         ? Response.json({ error: "synthetic namespace unavailable" }, { status: 500 })
