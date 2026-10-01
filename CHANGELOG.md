@@ -41,6 +41,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Qualify the published Ferrum Edge v0.9.10 multi-architecture image for
+  the next Foundry pairing. Foundry v0.3.0 remains paired with v0.9.8
+  until a separate Foundry release preparation. Edge v0.9.10 contains
+  ferrum-edge#5954: `mcp_gateway` and `ai_prompt_shield` refuse non-UTF-8
+  charset inputs and fail closed on uninspectable or over-nested JSON-RPC
+  batches (GHSA-4f9m-cfqg-fhx9, GHSA-f2jp-59r9-fp64). No admin API or
+  plugin sensitivity rules changed from v0.9.9.
+
 - Qualify the published Ferrum Edge v0.9.9 release for the next Foundry pairing
   (#512). Gateway-backed CI, the deployment starter, and local-run instructions
   use its multi-architecture image digest. Foundry v0.3.0 remains the last

@@ -62,21 +62,21 @@ describe("the supported pairing record", () => {
     }
   });
 
-  it("qualifies the published v0.9.9 release by its recorded image and manifests", () => {
+  it("qualifies the published v0.9.10 release by its recorded image and manifests", () => {
     const image =
-      "ferrumedge/ferrum-edge@sha256:83bb4de2ea264d5bed18d8f01f94e0e17a29b43aa1458b8984a0e9e1e784ede6";
-    const sourceCommit = "234717ce41965cd1e2b5c6c761a25475c5d7628c";
+      "ferrumedge/ferrum-edge@sha256:430d6a7d41361de5ad12562786481f97f1e97fef72a0b5f1a0699eced7cdd4cc";
+    const sourceCommit = "ee040d5e3281fde424aa65f5b18004852c5b53b0";
     const manifests = {
-      "linux/amd64": "sha256:558fba9a1a9d7826e5ff9d84a1c80f24903c202a3a755072f45af0372ce1b477",
-      "linux/arm64": "sha256:33a8acceab1bee27e999b235cb24311619e44209b865cd68971cd9f3928a8379",
+      "linux/amd64": "sha256:18a8a962ad13bacb2505a122330bb25ce921b21a2f3cb5362a6ea93f11fe44d5",
+      "linux/arm64": "sha256:c35253bed87153afa6e193074f9b644eb3feeedb35459d1c15de5a23a78e4891",
     };
     assert.equal(record.edge.image, image);
     assert.equal(record.edge.source_commit, sourceCommit);
     assert.deepEqual(record.edge.platform_manifests, manifests);
-    assert.match(record.edge.build, /v0\.9\.9/);
+    assert.match(record.edge.build, /v0\.9\.10/);
 
     const release = record.edge.release;
-    assert.equal(release.version, "v0.9.9");
+    assert.equal(release.version, "v0.9.10");
     assert.equal(release.image, image);
     assert.equal(release.source_commit, sourceCommit);
     assert.deepEqual(release.platform_manifests, manifests);

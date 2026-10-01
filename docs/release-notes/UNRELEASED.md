@@ -20,8 +20,9 @@
 ### Qualification
 
 - The next Foundry pairing is being qualified against the published Ferrum Edge
-  v0.9.9 release in [#512](https://github.com/ferrum-edge/ferrum-foundry/pull/512),
-  separately from Foundry release preparation.
+  v0.9.10 release, separately from Foundry release preparation. This release
+  includes fail-closed MCP charset and JSON-RPC batch handling (ferrum-edge#5954;
+  GHSA-4f9m-cfqg-fhx9, GHSA-f2jp-59r9-fp64).
 - Plugin configuration and upstream editors handle the secrets an `operator`
   read masks: each masked field holding a placeholder is marked, Save stays
   blocked until it is re-entered or cleared (clearing deletes the stored
