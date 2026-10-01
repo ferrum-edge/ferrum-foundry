@@ -247,8 +247,8 @@ function ToolPolicyEditor({
         helpText={
           hidesNew
             ? "Without an entry, discovery.on_new_tool hide_until_configured keeps the tool " +
-              `hidden from every session that discovers it, instead of applying the ${fallback} ` +
-              "default."
+              "hidden from new sessions until configured; sessions that already list it " +
+              `fall back to the default (${fallback}).`
             : `Without an entry, the default action (${fallback}) applies.`
         }
         options={[

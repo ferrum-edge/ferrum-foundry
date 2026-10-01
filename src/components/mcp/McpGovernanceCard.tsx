@@ -71,6 +71,12 @@ export function McpGovernanceCard({ plugins }: { plugins: readonly EffectivePlug
                   {plugin.id}: {partial}
                 </p>
               ))}
+            {control.partial && (
+              <p className="text-xs text-warning mt-1">
+                No {control.label.toLowerCase()} counts every tool call on{" "}
+                {control.uncovered.join(", ")}.
+              </p>
+            )}
             {control.instances.length > 0 && (
               <div className="mt-1 flex flex-wrap gap-2">
                 {control.instances.map(({ plugin, conditional }) => (

@@ -382,7 +382,10 @@ describe("MCP Tools tab", () => {
     await openTools();
     await settle(() => expect(panel().textContent).toContain("orders.cancel"));
     await act(async () => button("Edit policy for orders.cancel").click());
-    expect(panel().textContent).toContain("keeps the tool hidden from every session");
+    expect(panel().textContent).toContain(
+      "hidden from new sessions until configured; sessions that already list it fall back " +
+        "to the default (Deny)",
+    );
     await selectOption("Action", "Remove entry (hidden until configured)");
     await act(async () => button("Save policy").click());
     await settle(() => expect(puts).toHaveLength(1));

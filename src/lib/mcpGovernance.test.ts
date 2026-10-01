@@ -87,7 +87,7 @@ describe("MCP governance summary", () => {
     expect(shield.conditional).toBe(true);
   });
 
-  it("marks a tool-call limit partial when it misses the endpoint or names a subset", () => {
+  it("marks a tool-call limit partial when it names a subset of tools", () => {
     const gateway = plugin("mcp_gateway", { mode: "aggregate_router", endpoint: { path: "/mcp" } });
     const limit = (counted: Record<string, unknown>) =>
       plugin("rate_limiting", { limit_by: "consumer", mcp_tool_calls: counted });
@@ -99,26 +99,72 @@ describe("MCP governance summary", () => {
     expect(control(summarizeMcpGovernance([gateway, limit({})]), "tool_call_limit").partial)
       .toBe(false);
 
-    const elsewhere = summarizeMcpGovernance([gateway, limit({ endpoint_path: "/agents" })]);
-    expect(control(elsewhere, "tool_call_limit").partial).toBe(true);
-    expect(control(elsewhere, "tool_call_limit").instances[0].partial)
-      .toContain("counts only /agents, not the mcp_gateway endpoint (/mcp)");
-
     const subset = summarizeMcpGovernance([
       gateway,
       limit({ endpoint_path: "/mcp", tools: ["github.search"], per_tool: true }),
     ]);
     expect(control(subset, "tool_call_limit").partial).toBe(true);
+    expect(control(subset, "tool_call_limit").uncovered).toEqual(["/mcp"]);
     expect(control(subset, "tool_call_limit").instances[0].partial).toContain("1 named tool(s)");
     // A partial limit still governs the calls it counts.
     expect(subset.mcpGoverned).toBe(true);
+  });
 
-    // One full instance beside a partial one covers the endpoint.
+  it("treats a limit on a path no mcp_gateway serves as a gap, not partial coverage", () => {
+    const gateway = plugin("mcp_gateway", { mode: "aggregate_router", endpoint: { path: "/mcp" } });
+    const limit = (counted: Record<string, unknown>, id = "rate_limiting-1") =>
+      plugin("rate_limiting", { limit_by: "consumer", mcp_tool_calls: counted }, { id });
+
+    // Edge counts zero tool calls there.
+    const elsewhere = summarizeMcpGovernance([gateway, limit({ endpoint_path: "/agents" })]);
+    const limitControl = control(elsewhere, "tool_call_limit");
+    expect(limitControl.instances[0].mcpAware).toBe(false);
+    expect(limitControl.partial).toBe(false);
+    expect(limitControl.gap).toContain("only on /agents");
+    expect(limitControl.gap).toContain("(/mcp)");
+    // It is the only control, so nothing on the proxy governs MCP tool calls.
+    expect(elsewhere.governed).toBe(true);
+    expect(elsewhere.mcpGoverned).toBe(false);
+
+    // One limit on the endpoint beside one elsewhere covers the endpoint.
     const mixed = summarizeMcpGovernance([
       gateway,
       limit({ endpoint_path: "/agents" }),
-      { ...limit({ endpoint_path: "/mcp" }), id: "rate_limiting-2" },
+      limit({ endpoint_path: "/mcp" }, "rate_limiting-2"),
     ]);
+    expect(control(mixed, "tool_call_limit").gap).toBeNull();
     expect(control(mixed, "tool_call_limit").partial).toBe(false);
+  });
+
+  it("requires every mcp_gateway endpoint to be counted for full coverage", () => {
+    const gateways = [
+      plugin("mcp_gateway", { endpoint: { path: "/mcp" } }, { id: "mcp-a" }),
+      plugin("mcp_gateway", { endpoint: { path: "/tools" } }, { id: "mcp-b" }),
+    ];
+    const limit = (counted: Record<string, unknown>, id = "rate_limiting-1") =>
+      plugin("rate_limiting", { limit_by: "consumer", mcp_tool_calls: counted }, { id });
+
+    const one = summarizeMcpGovernance([...gateways, limit({ endpoint_path: "/mcp" })]);
+    expect(control(one, "tool_call_limit").partial).toBe(true);
+    expect(control(one, "tool_call_limit").uncovered).toEqual(["/tools"]);
+    expect(control(one, "tool_call_limit").gap).toBeNull();
+
+    const both = summarizeMcpGovernance([
+      ...gateways,
+      limit({ endpoint_path: "/mcp" }),
+      limit({ endpoint_path: "/tools" }, "rate_limiting-2"),
+    ]);
+    expect(control(both, "tool_call_limit").partial).toBe(false);
+
+    // A subset limit on the second endpoint does not complete the coverage.
+    const subsetSecond = summarizeMcpGovernance([
+      ...gateways,
+      limit({ endpoint_path: "/mcp" }),
+      limit({ endpoint_path: "/tools", tools: ["a.b"] }, "rate_limiting-2"),
+    ]);
+    expect(control(subsetSecond, "tool_call_limit").uncovered).toEqual(["/tools"]);
+
+    const everywhere = summarizeMcpGovernance([...gateways, limit({})]);
+    expect(control(everywhere, "tool_call_limit").partial).toBe(false);
   });
 });

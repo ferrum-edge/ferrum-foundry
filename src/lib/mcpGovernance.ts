@@ -38,8 +38,13 @@ export interface McpGovernanceControl {
   instances: McpGovernanceInstance[];
   /** Attached, but no instance looks at `tools/call`; the sentence says why. */
   gap: string | null;
-  /** Attached and MCP-aware, but every instance covers only part of the calls. */
+  /**
+   * Attached and MCP-aware, but together the instances cover only part of the
+   * proxy's tool calls (a subset of tools, or not every endpoint).
+   */
   partial: boolean;
+  /** mcp_gateway endpoint paths no full-coverage instance counts. */
+  uncovered: string[];
 }
 
 export interface McpGovernanceSummary {
@@ -66,10 +71,21 @@ interface ControlDefinition {
   role: string;
   /** Which effective plugins count as an instance of this control. */
   matches: (plugin: EffectivePlugin) => boolean;
-  mcpAware: (plugin: EffectivePlugin) => boolean;
-  /** Why an instance covers only some tool calls on `endpoints`, or `null`. */
-  partial?: (plugin: EffectivePlugin, endpoints: ReadonlySet<string>) => string | null;
-  gap: string;
+  /** `endpoints` are the proxy's mcp_gateway endpoint paths (empty when unknown). */
+  mcpAware: (plugin: EffectivePlugin, endpoints: ReadonlySet<string>) => boolean;
+  /** Why an aware instance covers only some tools, or `null`. */
+  partial?: (plugin: EffectivePlugin) => string | null;
+  /** The one endpoint path an instance is limited to, or `null` for every path. */
+  covers?: (plugin: EffectivePlugin) => string | null;
+  /** Why no instance acts on this proxy's tool calls. */
+  gap: (plugins: readonly EffectivePlugin[], endpoints: ReadonlySet<string>) => string;
+}
+
+/** `rate_limiting`'s `mcp_tool_calls.endpoint_path`, or `null` when unset. */
+function limitedPath(plugin: EffectivePlugin): string | null {
+  const counted = config(plugin).mcp_tool_calls;
+  const path = isPlainObject(counted) ? counted.endpoint_path : undefined;
+  return typeof path === "string" ? path : null;
 }
 
 const CONTROLS: readonly ControlDefinition[] = [
@@ -87,7 +103,7 @@ const CONTROLS: readonly ControlDefinition[] = [
         settings.enabled !== false && isPlainObject(inspect) && inspect.mcp_tool_calls === true
       );
     },
-    gap:
+    gap: () =>
       "ai_tool_governor runs here but does not inspect MCP tools/call " +
       "(set inspect.mcp_tool_calls to true).",
   },
@@ -102,7 +118,7 @@ const CONTROLS: readonly ControlDefinition[] = [
       const fields = config(plugin).scan_fields;
       return fields === "mcp_arguments" || fields === "all";
     },
-    gap:
+    gap: () =>
       "ai_prompt_shield runs here but scans only LLM prompt fields " +
       "(set scan_fields to mcp_arguments).",
   },
@@ -116,7 +132,7 @@ const CONTROLS: readonly ControlDefinition[] = [
       const capture = config(plugin).capture;
       return !(isPlainObject(capture) && capture.mcp_tool_calls === false);
     },
-    gap:
+    gap: () =>
       "ai_transcript_audit runs here but does not capture MCP tools/call " +
       "(capture.mcp_tool_calls is false).",
   },
@@ -128,26 +144,25 @@ const CONTROLS: readonly ControlDefinition[] = [
     // request-rate limiter does not charge tools/call.
     matches: (plugin) =>
       plugin.plugin_name === "rate_limiting" && isPlainObject(config(plugin).mcp_tool_calls),
-    mcpAware: () => true,
     // `mcp_tool_calls.endpoint_path` limits the limiter to one exact path
-    // (unset inspects every path), and `tools` to the named public tools.
-    partial: (plugin, endpoints) => {
-      const counted = config(plugin).mcp_tool_calls;
-      if (!isPlainObject(counted)) return null;
-      const reasons: string[] = [];
-      const path = counted.endpoint_path;
-      if (typeof path === "string" && endpoints.size > 0 && !endpoints.has(path)) {
-        reasons.push(
-          `it counts only ${path}, not the mcp_gateway endpoint ` +
-            `(${[...endpoints].join(", ")})`,
-        );
-      }
-      if (Array.isArray(counted.tools) && counted.tools.length > 0) {
-        reasons.push(`it counts only ${counted.tools.length} named tool(s)`);
-      }
-      return reasons.length > 0 ? `Partial: ${reasons.join("; ")}.` : null;
+    // (unset inspects every path). Set to a path no mcp_gateway on this proxy
+    // serves, it charges nothing here: a gap, not a partial limit.
+    mcpAware: (plugin, endpoints) => {
+      const path = limitedPath(plugin);
+      return path === null || endpoints.size === 0 || endpoints.has(path);
     },
-    gap: "",
+    // `tools` limits it to the named public tools.
+    partial: (plugin) => {
+      const tools = (config(plugin).mcp_tool_calls as JsonObject).tools;
+      return Array.isArray(tools) && tools.length > 0
+        ? `Partial: it counts only ${tools.length} named tool(s).`
+        : null;
+    },
+    covers: limitedPath,
+    gap: (plugins, endpoints) =>
+      `rate_limiting counts tool calls only on ${plugins.map(limitedPath).join(", ")}, ` +
+      `which is not this proxy's mcp_gateway endpoint (${[...endpoints].join(", ")}), ` +
+      "so it charges no tool call here.",
   },
 ];
 
@@ -162,24 +177,41 @@ export function summarizeMcpGovernance(plugins: readonly EffectivePlugin[]): Mcp
       .filter((path): path is string => typeof path === "string"),
   );
   const controls = CONTROLS.map((definition): McpGovernanceControl => {
-    const instances = plugins.filter(definition.matches).map((plugin) => ({
-      plugin,
-      mcpAware: definition.mcpAware(plugin),
-      conditional: plugin.trigger != null,
-      partial: definition.partial?.(plugin, endpoints) ?? null,
-    }));
+    const instances = plugins.filter(definition.matches).map((plugin) => {
+      const mcpAware = definition.mcpAware(plugin, endpoints);
+      return {
+        plugin,
+        mcpAware,
+        conditional: plugin.trigger != null,
+        partial: mcpAware ? (definition.partial?.(plugin) ?? null) : null,
+      };
+    });
     const gap =
       instances.length > 0 && !instances.some((instance) => instance.mcpAware)
-        ? definition.gap
+        ? definition.gap(instances.map((instance) => instance.plugin), endpoints)
         : null;
     const aware = instances.filter((instance) => instance.mcpAware);
+    // Full coverage: aware instances with no subset, which between them count
+    // every endpoint (one with no endpoint restriction counts all of them).
+    const paths = aware
+      .filter((instance) => instance.partial === null)
+      .map((instance) => definition.covers?.(instance.plugin) ?? null);
+    const uncovered =
+      aware.length === 0 || paths.includes(null)
+        ? []
+        : endpoints.size === 0
+          ? paths.length > 0
+            ? []
+            : ["the mcp_gateway endpoint"]
+          : [...endpoints].filter((path) => !paths.includes(path));
     return {
       key: definition.key,
       label: definition.label,
       role: definition.role,
       instances,
       gap,
-      partial: aware.length > 0 && aware.every((instance) => instance.partial !== null),
+      partial: uncovered.length > 0,
+      uncovered,
     };
   });
   return {
