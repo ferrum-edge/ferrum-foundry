@@ -33,9 +33,10 @@ RUN npm run build \
 # #504 (scripts/starter-preflight.test.mjs).
 FROM node:24-trixie-slim@sha256:8ec5d7557396cfe32d21c3f9c13072355ceab22b584578ca4bb28af31120cffe
 
-# - Upgrade only the OpenSSL packages, pinned to the fixed 3.5.7-1~deb13u3, so
-#   the build fails loudly if the security feed no longer offers exactly that
-#   version. Drop this step once the pinned base carries it.
+# - Upgrade only the OpenSSL packages, pinned to the fixed 3.5.7-1~deb13u3, and
+#   libpcre2-8-0, pinned to the fixed 10.46-1~deb13u3 (CVE-2026-103111), so the
+#   build fails loudly if the security feed no longer offers exactly those
+#   versions. Drop each pin once the pinned base carries it.
 # - Remove npm, npx, corepack, and yarn: the runtime never installs Node
 #   packages, and npm's bundled dependencies carry their own scanner findings.
 # - Link /nodejs/bin/node to the image's Node.
@@ -44,6 +45,7 @@ FROM node:24-trixie-slim@sha256:8ec5d7557396cfe32d21c3f9c13072355ceab22b584578ca
 RUN apt-get update \
   && apt-get install --no-install-recommends --only-upgrade --yes \
     libssl3t64=3.5.7-1~deb13u3 openssl-provider-legacy=3.5.7-1~deb13u3 \
+    libpcre2-8-0=10.46-1~deb13u3 \
   && rm -rf /var/lib/apt/lists/* \
   && rm -rf /usr/local/lib/node_modules /usr/local/include/node /usr/local/share/doc/node \
     /opt/yarn-v* \
