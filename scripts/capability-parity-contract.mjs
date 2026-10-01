@@ -36,6 +36,16 @@
  * earlier b96cfaa build alike: `crud::handle_delete`, `handle_restore`,
  * `tls_management::handle_delete_managed`).
  *
+ * `POST /restore` is the one exception to that order. `handle_restore` calls
+ * `require_db` *before* `admit_write`, so a `file` or `dp` gateway (no
+ * configuration database) answers the documented
+ * `503 {"error":"No database"}` instead of the read-only `403` the other
+ * config-store writes return. That typed `503` is a no-writable-store
+ * precondition — the restore never ran — not an admission. Under a read-only
+ * expectation the contract accepts it as an expected read-only outcome; a
+ * `503` is never described as admitted, and a `2xx` from a surface the model
+ * treats as read-only still fails.
+ *
  * Run directly against a gateway whose mode is fixed by
  * `FERRUM_CAPABILITY_EXPECT` (`writable` or `read-only`); the contract first
  * proves the gateway really is in that mode, so it cannot pass vacuously.
@@ -76,8 +86,16 @@ export const WRITE_PROBES = {
   namespaceRegistry: { method: "DELETE", path: `/namespaces/${PROBE_ID}`, admittedStatus: 404 },
   gatewayTrust: { method: "DELETE", path: `/gateway-trust-bundles/${PROBE_ID}`, admittedStatus: 404 },
   // No `?confirm=true` and not JSON: Edge refuses it after admission and
-  // before it would read the payload, so the restore can never run.
-  configBackup: { method: "POST", path: "/restore", rawBody: "{" },
+  // before it would read the payload, so the restore can never run. In file/DP
+  // mode `require_db` answers the documented `503 {"error":"No database"}`
+  // before the read-only gate, which a read-only expectation accepts as an
+  // unavailable no-writable-store outcome.
+  configBackup: {
+    method: "POST",
+    path: "/restore",
+    rawBody: "{",
+    acceptsNoDatabaseRestore: true,
+  },
   configExport: { method: "GET", path: "/backup" },
   tlsMaterial: { method: "DELETE", path: `/admin/tls/certificates/${PROBE_ID}`, admittedStatus: 404 },
   operationalActions: { method: "POST", path: "/admin/tls/validate", body: {} },
@@ -115,6 +133,17 @@ export const READ_PROBES = [
 const ROLE_DENIAL = /required role is '(viewer|operator|admin)'/;
 const READ_ONLY_DENIAL = /read-only mode/i;
 
+/**
+ * Edge's documented no-database refusal for `POST /restore`
+ * (`handle_restore` → `require_db`, `src/admin/mod.rs`, v0.9.9+). A `file` or
+ * `dp` gateway has no configuration database, so it answers this exact typed
+ * `503` before the read-only gate. The restore never ran, so it is a
+ * no-writable-store precondition, not an admission.
+ */
+export function isNoDatabaseRestore(response) {
+  return response.status === 503 && response.body?.error === "No database";
+}
+
 /** Classify a response as the gateway's own refusal, or `null` if admitted. */
 export function classifyDenial(response) {
   if (response.status !== 403) return null;
@@ -149,6 +178,11 @@ function describeExpected(verdict, surface) {
 
 function describeActual(response, denial) {
   if (response.status === 401) return "401: authentication failed, nothing was tested";
+  // A 503 is never an admission: the write did not run.
+  if (isNoDatabaseRestore(response)) return '503 "No database" (restore unavailable)';
+  if (response.status === 503) {
+    return `503 unavailable (${JSON.stringify(response.body?.error ?? response.body)})`;
+  }
   if (!denial) return `admitted (${response.status})`;
   if (denial.kind === "role") return `role denial requiring ${denial.requiredRole}`;
   if (denial.kind === "gateway-read-only") return "read-only denial";
@@ -207,13 +241,23 @@ export async function verifyCapabilityParity(send, { expectation } = {}) {
         agrees = false; // authentication failed: the probe tested nothing
       } else if (verdict.allowed) {
         const admittedStatus = WRITE_PROBES[surface].admittedStatus;
+        // A 503 is a failed or unavailable write, never an admission.
         agrees = denial === null
+          && response.status !== 503
           && (admittedStatus === undefined || response.status === admittedStatus);
       } else if (verdict.blockedBy === "role") {
         agrees = denial?.kind === "role"
           && denial.requiredRole === capabilityRequirement(surface).minimumRole;
       } else {
-        agrees = denial?.kind === "gateway-read-only";
+        // File/DP restore answers the documented `503 {"error":"No database"}`
+        // before the read-only gate; under a read-only expectation that is an
+        // expected no-writable-store outcome, not an admission.
+        const probe = WRITE_PROBES[surface];
+        const readOnlyDenial = denial?.kind === "gateway-read-only";
+        const noDatabaseRestore = expectation === "read-only"
+          && probe.acceptsNoDatabaseRestore === true
+          && isNoDatabaseRestore(response);
+        agrees = readOnlyDenial || noDatabaseRestore;
       }
       if (!agrees) {
         mismatches.push(

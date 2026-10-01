@@ -8,6 +8,7 @@ import {
   classifyDenial,
   confirmWritableParityTarget,
   gatewaySender,
+  isNoDatabaseRestore,
   verifyCapabilityParity,
 } from "./capability-parity-contract.mjs";
 
@@ -51,14 +52,14 @@ const EDGE_ROUTES = [
   { method: "GET", prefix: "/namespaces", role: "viewer", gate: "none", ok: 200, collection: true },
 ];
 
-function fakeGateway({ readOnly = false, override = () => undefined } = {}) {
+function fakeGateway({ readOnly = false, mode = "database", override = () => undefined } = {}) {
   const requests = [];
   const send = async (role, request) => {
     requests.push({ role, ...request });
     if (request.path === "/health") {
       return {
         status: 200,
-        body: { status: "ok", mode: "database", admin_writes_enabled: !readOnly },
+        body: { status: "ok", mode, admin_writes_enabled: !readOnly },
       };
     }
     const rule = EDGE_ROUTES
@@ -109,6 +110,59 @@ describe("capability parity contract", () => {
     // Rotate/validate and export are not behind the read-only gate.
     assert.equal(result.writes.operator.operationalActions, 400);
     assert.equal(result.writes.admin.configExport, 200);
+  });
+
+  it("accepts the documented file-mode restore 503 as a read-only outcome", async () => {
+    const { send } = fakeGateway({
+      readOnly: true,
+      mode: "file",
+      override: (role, request) => role === "admin" && request.path === "/restore"
+        ? { status: 503, body: { error: "No database" } }
+        : undefined,
+    });
+    const result = await verifyCapabilityParity(send, { expectation: "read-only" });
+    assert.equal(result.writes.admin.configBackup, 503);
+    // The other config-store surfaces still answer the read-only 403.
+    assert.equal(result.writes.admin.proxies, 403);
+  });
+
+  it("never treats a 503 as admitted, even for an allowed surface", async () => {
+    const { send } = fakeGateway({
+      override: (role, request) => role === "admin" && request.path === "/restore"
+        ? { status: 503, body: { error: "No database" } }
+        : undefined,
+    });
+    await assert.rejects(
+      verifyCapabilityParity(send, { expectation: "writable" }),
+      /configBackup .*model expects admitted, gateway answered 503 "No database"/,
+    );
+  });
+
+  it("does not accept an untyped or differently-shaped 503 under a read-only expectation", async () => {
+    const { send } = fakeGateway({
+      readOnly: true,
+      mode: "file",
+      override: (role, request) => role === "admin" && request.path === "/restore"
+        ? { status: 503, body: { error: "Service unavailable" } }
+        : undefined,
+    });
+    await assert.rejects(
+      verifyCapabilityParity(send, { expectation: "read-only" }),
+      /configBackup .*model expects read-only denial, gateway answered 503 unavailable/,
+    );
+  });
+
+  it("still fails when a surface the model denies actually admits the write", async () => {
+    const { send } = fakeGateway({
+      readOnly: true,
+      override: (role, request) => role === "admin" && request.path === "/restore"
+        ? { status: 200, body: { restored: { proxies: 0 } } }
+        : undefined,
+    });
+    await assert.rejects(
+      verifyCapabilityParity(send, { expectation: "read-only" }),
+      /configBackup .*model expects read-only denial, gateway answered admitted \(200\)/,
+    );
   });
 
   it("refuses to pass against a gateway in the wrong mode", async () => {
@@ -266,6 +320,13 @@ describe("capability parity contract", () => {
       { kind: "other", message: "Namespace access denied" },
     );
     assert.equal(classifyDenial({ status: 404, body: { error: "read-only mode" } }), null);
+  });
+
+  it("recognizes only the documented no-database restore 503", () => {
+    assert.equal(isNoDatabaseRestore({ status: 503, body: { error: "No database" } }), true);
+    assert.equal(isNoDatabaseRestore({ status: 503, body: { error: "Database unavailable" } }), false);
+    assert.equal(isNoDatabaseRestore({ status: 503, body: {} }), false);
+    assert.equal(isNoDatabaseRestore({ status: 403, body: { error: "No database" } }), false);
   });
 
   it("signs each probe as the requested role for the namespace under test", async () => {
