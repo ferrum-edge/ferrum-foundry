@@ -54,6 +54,19 @@ const proxies = [
     allowed_ws_origins: [], response_body_mode: 'stream',
     created_at: ago(5000), updated_at: ago(400),
   },
+  {
+    id: 'proxy-agent-tools', namespace: 'ferrum', name: 'Agent Tools (MCP)',
+    listen_path: '/agents', hosts: [], backend_scheme: 'https',
+    backend_host: 'agents.internal', backend_port: 8443, backend_path: null,
+    strip_listen_path: true, preserve_host_header: false,
+    backend_connect_timeout_ms: 5000, backend_read_timeout_ms: 30000,
+    backend_write_timeout_ms: 30000, backend_tls_verify_server_cert: true,
+    auth_mode: 'single',
+    plugins: [{ plugin_config_id: 'plg-mcp-gateway' }, { plugin_config_id: 'plg-tool-calls' }],
+    upstream_id: null, listen_port: null, frontend_tls: false, passthrough: false,
+    udp_idle_timeout_seconds: 60, allowed_ws_origins: [], response_body_mode: 'stream',
+    allowed_methods: null, created_at: ago(900), updated_at: ago(60),
+  },
 ];
 
 const upstreams = [
@@ -110,7 +123,81 @@ const pluginConfigs = [
     scope: 'global', proxy_id: null, enabled: false, priority_override: 2000,
     trigger: null, api_spec_id: null, created_at: ago(300), updated_at: ago(300),
   },
+  {
+    id: 'plg-mcp-gateway', namespace: 'ferrum', plugin_name: 'mcp_gateway',
+    labels: { 'provisioned-by': 'ferrum-nexus' },
+    config: {
+      mode: 'aggregate_router',
+      endpoint: { path: '/mcp' },
+      servers: {
+        github: {
+          upstream_url: 'https://mcp-github.internal.example.com/mcp',
+          namespace: 'github', expose_tools: true,
+        },
+        orders: {
+          namespace: 'orders',
+          openapi: {
+            operations: [
+              { name: 'list_orders', method: 'GET', path: '/agents/orders', description: 'List recent orders.' },
+              {
+                name: 'cancel_order', method: 'DELETE', path: '/agents/orders/{order_id}',
+                description: 'Cancel one order.',
+                parameters: [{ name: 'order_id', in: 'path', required: true }],
+              },
+            ],
+          },
+        },
+      },
+      discovery: { on_new_tool: 'hide_until_configured' },
+      policy: {
+        default_action: 'deny',
+        tools: {
+          'github.search_issues': { action: 'allow' },
+          'orders.list_orders': { action: 'allow', allowed_groups: ['support'] },
+          'orders.cancel_order': { action: 'deny' },
+        },
+      },
+    },
+    scope: 'proxy', proxy_id: 'proxy-agent-tools', enabled: true,
+    priority_override: null, trigger: null, api_spec_id: null,
+    created_at: ago(900), updated_at: ago(60),
+  },
+  {
+    id: 'plg-tool-calls', namespace: 'ferrum', plugin_name: 'rate_limiting',
+    config: {
+      limit_by: 'consumer', expose_headers: true,
+      limits: [{ scope: 'default', requests_per_minute: 60 }],
+      mcp_tool_calls: { endpoint_path: '/mcp' },
+    },
+    scope: 'proxy', proxy_id: 'proxy-agent-tools', enabled: true,
+    priority_override: null, trigger: null, api_spec_id: null,
+    created_at: ago(900), updated_at: ago(900),
+  },
 ];
+
+/**
+ * What the demo's upstream MCP servers list, by server id. The mock's catalog
+ * is built from these plus each `openapi` server's operations, with the
+ * policy read from the stored `mcp_gateway` configuration, so a policy save
+ * shows up in the next catalog read as it would once a real node reloads.
+ */
+export const MOCK_UPSTREAM_MCP_TOOLS = {
+  github: [
+    {
+      name: 'search_issues', title: 'Search issues',
+      description: 'Search issues across the organization.',
+      annotations: { readOnlyHint: true },
+      inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
+    },
+    {
+      name: 'create_issue', title: 'Create issue',
+      description: 'Open a new issue in a repository.',
+      annotations: { destructiveHint: false, openWorldHint: true },
+      inputSchema: { type: 'object', properties: { repo: { type: 'string' }, title: { type: 'string' } } },
+    },
+  ],
+};
+const MCP_CATALOG_REFRESHED_AT = ago(2);
 
 const AVAILABLE_PLUGINS = [
   'access_control', 'adaptive_concurrency', 'a2a_gateway', 'ai_federation',
@@ -357,6 +444,50 @@ export function validatePluginConfigWrite(body, method) {
     return {
       error: "PUT is a full replace: 'enabled' is required (openapi.yaml declares it required). Send the field explicitly.",
     };
+  }
+  if (body.plugin_name === 'mcp_gateway') return validateMcpGatewayPolicy(body.config);
+  return null;
+}
+
+const MCP_TOOL_ACTIONS = ['allow', 'deny', 'hide_from_discovery'];
+
+/**
+ * The `policy.tools` rules Ferrum Edge v0.9.9 applies to an `mcp_gateway`
+ * configuration (`McpGatewayConfig` schema plus plugin load): a closed entry
+ * with a known action, groups only on `allow`, never empty, never naming a
+ * group in both lists, and catalog policy only in `aggregate_router`.
+ * Edge's own wording is not reproduced; the status is.
+ */
+export function validateMcpGatewayPolicy(config) {
+  const tools = config?.policy?.tools;
+  if (tools == null) return null;
+  const refuse = (message) => ({ error: `Invalid mcp_gateway config: ${message}` });
+  if (config.mode !== 'aggregate_router') {
+    return refuse('policy.tools requires mode aggregate_router');
+  }
+  if (typeof tools !== 'object' || Array.isArray(tools)) return refuse('policy.tools must be an object');
+  for (const [name, entry] of Object.entries(tools)) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      return refuse(`policy.tools.${name} must be an object`);
+    }
+    const unknown = Object.keys(entry).find((key) => !['action', 'allowed_groups', 'denied_groups'].includes(key));
+    if (unknown) return refuse(`policy.tools.${name} has unknown field \`${unknown}\``);
+    if (!MCP_TOOL_ACTIONS.includes(entry.action)) {
+      return refuse(`policy.tools.${name}.action must be one of ${MCP_TOOL_ACTIONS.join(', ')}`);
+    }
+    for (const key of ['allowed_groups', 'denied_groups']) {
+      const groups = entry[key];
+      if (groups == null) continue;
+      if (entry.action !== 'allow') return refuse(`policy.tools.${name}.${key} requires action allow`);
+      if (!Array.isArray(groups) || groups.length === 0) {
+        return refuse(`policy.tools.${name}.${key} must be a non-empty array`);
+      }
+      if (groups.some((group) => typeof group !== 'string' || group.trim() === '')) {
+        return refuse(`policy.tools.${name}.${key} entries must be non-blank strings`);
+      }
+    }
+    const overlap = (entry.allowed_groups ?? []).find((group) => (entry.denied_groups ?? []).includes(group));
+    if (overlap !== undefined) return refuse(`policy.tools.${name} names group '${overlap}' as both allowed and denied`);
   }
   return null;
 }
@@ -768,9 +899,168 @@ export function runtimeOverlayResponse(mode) {
   } } }];
 }
 
+/* ---------------- MCP tool catalog (Edge v0.9.9, ferrum-edge#5949) ---------------- */
+
+/** The namespace a single-namespace node serves (`FERRUM_NAMESPACE`). */
+const MOCK_SERVED_NAMESPACE = 'ferrum';
+
+function mcpSchemaHash(value) {
+  return createHash('sha256').update(JSON.stringify(value ?? null)).digest('hex');
+}
+
+/** Edge's runtime merge restricted to `mcp_gateway`: associated, else global. */
+function effectiveMcpGateways(proxy, configs, namespace) {
+  const associated = new Set((proxy.plugins ?? []).map((assoc) => assoc.plugin_config_id));
+  const local = configs.filter((plugin) => plugin.enabled && plugin.plugin_name === 'mcp_gateway'
+    && (plugin.namespace ?? 'ferrum') === namespace && associated.has(plugin.id)
+    && (plugin.scope === 'proxy_group' || (plugin.scope === 'proxy' && plugin.proxy_id === proxy.id)));
+  if (local.length > 0) return local;
+  return configs.filter((plugin) => plugin.enabled && plugin.plugin_name === 'mcp_gateway'
+    && plugin.scope === 'global' && (plugin.namespace ?? 'ferrum') === namespace);
+}
+
+function mcpToolEntry(plugin, proxy, server, tool) {
+  const config = plugin.config ?? {};
+  const policy = config.policy ?? {};
+  const discovery = config.discovery ?? {};
+  const separator = discovery.namespace_separator ?? '.';
+  const name = `${server.namespace}${separator}${tool.name}`;
+  const tools = policy.tools ?? {};
+  const entry = Object.hasOwn(tools, name) ? tools[name] : null;
+  const action = entry?.action ?? policy.default_action ?? 'deny';
+  const hideUntilConfigured = (discovery.on_new_tool ?? 'hide_until_configured') === 'hide_until_configured';
+  const effective = !entry && hideUntilConfigured ? 'hidden_until_configured' : action;
+  const hideDenied = (policy.hide_denied_tools ?? true) || (discovery.hide_denied_items ?? true);
+  let listed = effective === 'allow' || (effective === 'deny' && !hideDenied);
+  let callable = effective === 'allow';
+  if (tool.method && Array.isArray(proxy.allowed_methods) && !proxy.allowed_methods.includes(tool.method)) {
+    listed = false;
+    callable = false;
+  }
+  const source = tool.method
+    ? { type: 'openapi', server_id: server.id, namespace: server.namespace, operation_name: tool.name, method: tool.method, path: tool.path }
+    : { type: 'upstream', server_id: server.id, namespace: server.namespace, upstream_name: tool.name };
+  return {
+    name, plugin_config_id: plugin.id, title: tool.title ?? null, description: tool.description ?? null,
+    annotations: tool.annotations ?? null, source,
+    policy: { action, configured: entry !== null, effective, listed, callable },
+    allowed_groups: Array.isArray(entry?.allowed_groups) ? [...entry.allowed_groups].sort() : null,
+    denied_groups: Array.isArray(entry?.denied_groups) ? [...entry.denied_groups].sort() : [],
+    schema_hash: mcpSchemaHash(tool.inputSchema),
+    discovered_at: MCP_CATALOG_REFRESHED_AT,
+  };
+}
+
+/** The bridge's method-derived hints: GET read-only, DELETE destructive, PUT idempotent. */
+function methodHints(method) {
+  if (method === 'GET') return { readOnlyHint: true };
+  if (method === 'DELETE') return { destructiveHint: true };
+  if (method === 'PUT') return { idempotentHint: true };
+  return null;
+}
+
+function mcpServerTools(server, discovered) {
+  if (server.openapi) {
+    return (server.openapi.operations ?? []).map((operation) => ({
+      name: operation.name, method: operation.method, path: operation.path,
+      title: operation.title ?? null, description: operation.description ?? null,
+      annotations: operation.annotations ?? methodHints(operation.method),
+      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    }));
+  }
+  return discovered[server.id] ?? [];
+}
+
+function notServedCatalog(plugin) {
+  return {
+    plugin_config_id: plugin.id, catalog_state: 'not_served', refreshed_at: null,
+    stale: true, tool_count: 0, servers: [],
+  };
+}
+
+function servedCatalog(plugin, proxy, discovered) {
+  const config = plugin.config ?? {};
+  const servers = Object.entries(config.servers ?? {}).map(([id, server]) => ({ id, ...server }));
+  const base = {
+    plugin_config_id: plugin.id, mode: config.mode, enabled: config.enabled ?? true,
+    endpoint_path: config.endpoint?.path ?? '/mcp', cache_ttl_seconds: config.discovery?.cache_ttl_seconds ?? 300,
+    cached_sessions: 1,
+    discovery: {
+      on_new_tool: (config.discovery?.on_new_tool ?? 'hide_until_configured') === 'hide_until_configured' ? 'hide_until_configured' : 'allow',
+      on_schema_change: (config.discovery?.on_schema_change ?? 'hide_until_configured') === 'hide_until_configured' ? 'hide_until_configured' : 'allow',
+    },
+    policy: {
+      default_action: config.policy?.default_action ?? 'deny',
+      hide_denied_tools: (config.policy?.hide_denied_tools ?? true) || (config.discovery?.hide_denied_items ?? true),
+    },
+    limits: { max_catalog_items_per_list: 10000, max_catalog_bytes_per_list: 8388608 },
+  };
+  if (config.mode !== 'aggregate_router') {
+    return {
+      catalog: {
+        ...base, catalog_state: 'unmediated', refreshed_at: null, stale: true, catalog_version: null,
+        tool_count: 0, tools_unavailable: false, servers: [],
+      },
+      tools: [],
+    };
+  }
+  const tools = [];
+  const serverRows = servers.map((server) => {
+    const exposed = server.enabled !== false && server.expose_tools !== false;
+    if (exposed) tools.push(...mcpServerTools(server, discovered).map((tool) => mcpToolEntry(plugin, proxy, server, tool)));
+    return {
+      server_id: server.id, namespace: server.namespace, kind: server.openapi ? 'openapi' : 'mcp',
+      upstream_url: server.upstream_url ? `${new URL(server.upstream_url).origin}/[REDACTED_PATH]` : null,
+      enabled: server.enabled !== false, expose_tools: server.expose_tools !== false,
+      tools_refresh: server.enabled === false ? 'disabled' : exposed ? 'ok' : 'not_listed',
+      refresh_error: null,
+    };
+  });
+  tools.sort((left, right) => left.name.localeCompare(right.name));
+  return {
+    catalog: {
+      ...base, catalog_state: 'fresh', refreshed_at: MCP_CATALOG_REFRESHED_AT, stale: false,
+      catalog_version: 1, tool_count: tools.length, tools_unavailable: false, servers: serverRows,
+    },
+    tools,
+  };
+}
+
+/**
+ * `GET /proxies/{id}/mcp/tools` (Edge v0.9.9). Node-local like Edge: a
+ * control plane (`cp`), a node agent, or a node that does not serve
+ * `namespace` reports every instance `not_served` with no tools. Returns
+ * `[status, body]`.
+ */
+export function mcpToolCatalogResponse({
+  proxies: proxyList, pluginConfigs: pluginList, mode, namespace, proxyId, url,
+  discovered = MOCK_UPSTREAM_MCP_TOOLS,
+}) {
+  if (!RESOURCE_ID.test(proxyId)) return [400, { error: `Invalid resource id '${proxyId}'` }];
+  const proxy = proxyList.find((item) => item.id === proxyId && (item.namespace ?? 'ferrum') === namespace);
+  if (!proxy) return [404, { error: 'Proxy not found' }];
+  const gateways = effectiveMcpGateways(proxy, pluginList, namespace);
+  if (gateways.length === 0) return [404, { error: 'Proxy has no mcp_gateway plugin' }];
+  const served = !['cp', 'node_agent'].includes(mode) && namespace === MOCK_SERVED_NAMESPACE;
+  const built = gateways.map((plugin) => (served
+    ? servedCatalog(plugin, proxy, discovered)
+    : { catalog: notServedCatalog(plugin), tools: [] }));
+  const catalogs = built.map((entry) => entry.catalog);
+  const refreshed = catalogs.map((catalog) => catalog.refreshed_at);
+  const body = paginate(built.flatMap((entry) => entry.tools), url);
+  return [200, {
+    ...body,
+    proxy_id: proxyId,
+    namespace,
+    refreshed_at: refreshed.includes(null) ? null : refreshed.sort()[0],
+    stale: catalogs.some((catalog) => catalog.catalog_state !== 'fresh'),
+    catalogs,
+  }];
+}
+
 /* ---------------- Server ---------------- */
 
-const server = createServer(async (req, res) => {
+export const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const path = url.pathname.replace(/\/+$/, '') || '/';
   const method = req.method ?? 'GET';
@@ -1045,6 +1335,16 @@ const server = createServer(async (req, res) => {
     return send(405, { error: 'method not allowed' });
   }
   if (path === '/plugins' && method === 'GET') return send(200, AVAILABLE_PLUGINS);
+
+  /* MCP tool catalog — read-only and node-local */
+  const mcpToolsMatch = path.match(/^\/proxies\/([^/]+)\/mcp\/tools$/);
+  if (mcpToolsMatch) {
+    if (method !== 'GET') return send(405, { error: 'method not allowed' });
+    return send(...mcpToolCatalogResponse({
+      proxies, pluginConfigs, mode: GATEWAY_MODE, namespace: ns,
+      proxyId: decodeURIComponent(mcpToolsMatch[1]), url,
+    }));
+  }
 
   /* core CRUD */
   const routes = [

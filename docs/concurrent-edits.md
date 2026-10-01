@@ -165,6 +165,7 @@ which is the only thing that write can lose.
 | Consumer Details save | the editor's seed, minus `credentials` and `labels` (never sent) | the read its credentials are taken from |
 | Consumer ACL add/remove | the consumer the group list was computed from | the read its credentials are taken from |
 | Plugin configuration save | the editor's seed, minus `labels` (never sent) | the membership plan's fresh read |
+| MCP tool policy save (proxy page, MCP Tools tab) | the one `config.policy.tools` entry the edit was opened against (for a new entry, its absence) | the read every other field is rebuilt from |
 | Proxy, upstream, consumer, or plugin delete from its detail page | the resource the page is displaying | the verification read |
 | Every write inside a plugin membership plan | the plan's own `updated_at` preflight | the read that preflight compared |
 
@@ -203,6 +204,22 @@ since the plan's preflight. On top of that:
   before any association is touched, and again at the read the plugin `PUT` is
   conditional on. If that `PUT` gets a `412`, the plan re-reads once more so a
   now-stale draft shows the comparison instead of a generic failure.
+
+### MCP tool policy
+
+The MCP Tools tab on a proxy edits one `config.policy.tools` entry of an
+`mcp_gateway` configuration at a time (`updateToolPolicy` in
+`src/api/mcpTools.ts`). Like a targets save, it owns only that entry: every
+other field comes from a fresh read, the guard compares just the entry the
+operator was looking at (`toolPolicyWriteGuard`), and the `PUT` carries that
+read's tag. A concurrent change to another tool, a server, or the scope is
+carried over on the re-sent write; a concurrent change to the same entry, or a
+new entry someone else already wrote, is refused with the comparison. The save
+omits `labels`, so a `provisioned-by` attribution is preserved, and it is
+refused before sending when the read masks a value for the session's role
+(`MaskedSecretWriteError`), because resending the placeholder would be refused
+by Edge v0.9.9 (an `admin`, whose reads are raw, is never refused). It does not
+go through the membership plan: it never changes scope or associations.
 
 ### Deletes
 

@@ -163,6 +163,11 @@ Dark and light themes via CSS custom properties. Dark is the default.
   drift, egress, waypoints, trust)
 - `src/components/forms/` - CRUD forms (`ProxyForm`, `ConsumerForm`, `PluginConfigForm`, `UpstreamForm`, etc.)
 - `src/components/metrics/` - metrics dashboard panels (`OpsPanels.tsx` covers overload, runtime, and chargeback)
+- `src/components/mcp/` - the proxy page's MCP Tools tab: the node-local
+  `mcp_gateway` tool catalog (`src/api/mcpTools.ts`), inline per-tool policy
+  edits (one `policy.tools` entry per guarded write, `src/lib/mcpToolPolicy.ts`),
+  and the AI governance summary (`src/lib/mcpGovernance.ts`). See the v0.9.9
+  section of `docs/compatibility.md`
 - `src/api/` - API client, types, and endpoint modules (`tls.ts`, `mesh.ts`, `ops.ts`, `apiSpecs.ts`, `trust.ts` carry their own response types)
 - `src/hooks/` - React Query hooks
 - `src/lib/pluginConfigDefaults.ts` - plugin catalog: per-plugin default configs plus `PLUGIN_METADATA` (category + description) for the plugin picker
