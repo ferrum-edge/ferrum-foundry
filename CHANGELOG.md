@@ -74,6 +74,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The plugin-sensitivity drift check now reports an equal-length rule pair that
+  differs only by a wildcard (`x.*` against `x.b`), whose order changes which
+  masked-placeholder sites Edge handles first, instead of skipping it as a
+  duplicate. A pair is a duplicate only when both paths match segment for
+  segment after normalization and the sensitivity is equal (#515).
+
 - The capability-parity contract no longer misclassifies a `file`/`dp` gateway
   as admitting `POST /restore`. In those modes Edge has no configuration
   database, so `handle_restore` calls `require_db` before its write gate and
