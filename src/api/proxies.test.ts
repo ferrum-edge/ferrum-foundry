@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Proxy } from "./types";
-import { listAll, mergeFormUpdatePayload, toUpdatePayload } from "./proxies";
+import { listAll, mergeFormUpdatePayload, remove, toUpdatePayload } from "./proxies";
 
 function fullProxy(): Proxy {
   return {
@@ -183,5 +183,50 @@ describe("listAll", () => {
       "tenant-a",
       "tenant-a",
     ]);
+  });
+});
+
+describe("proxy item path segments", () => {
+  const paths: string[] = [];
+
+  class BasedRequest extends Request {
+    constructor(input: RequestInfo | URL, init?: RequestInit) {
+      if (typeof input === "string" && input.startsWith("/")) {
+        input = new URL(input, "http://localhost").toString();
+      }
+      super(input, init);
+    }
+  }
+
+  beforeEach(() => {
+    paths.length = 0;
+    vi.stubGlobal("Request", BasedRequest);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request | string | URL) => {
+        const request = input instanceof Request ? input : new Request(String(input));
+        paths.push(new URL(request.url).pathname);
+        return new Response(null, { status: 204 });
+      }),
+    );
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it.each([
+    ["/", "/api/proxy/proxies/%2F"],
+    ["%2F", "/api/proxy/proxies/%252F"],
+    ["?", "/api/proxy/proxies/%3F"],
+    ["#", "/api/proxy/proxies/%23"],
+  ])("deletes only the proxy item for identifier %j", async (id, expectedPath) => {
+    await remove({ namespace: "tenant-a" }, id, null);
+
+    expect(paths).toEqual([expectedPath]);
+  });
+
+  it.each([".", ".."])("refuses dot segment identifier %j before sending", async (id) => {
+    await expect(remove({ namespace: "tenant-a" }, id, null)).rejects.toThrow(TypeError);
+
+    expect(paths).toEqual([]);
   });
 });

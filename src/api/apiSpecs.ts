@@ -7,6 +7,7 @@ import { proxyApi, scoped, SILENT_ERRORS, extractApiErrorData, type NamespaceSco
 import { longRunningClientTimeout } from '../../server/waitBudget';
 import { observeMutation } from './mutationOutcome';
 import { specDocumentSecrets, withRedactedFailure } from './secretRedaction';
+import { pathSegment } from './pathSegment';
 
 const readOptions = { timeout: longRunningClientTimeout('GET', '/api-specs'), retry: 0 };
 
@@ -112,7 +113,7 @@ export async function listByProxy(scope: NamespaceScope, proxyId: string): Promi
  */
 export async function getDocumentByProxy(scope: NamespaceScope, proxyId: string): Promise<string | null> {
   try {
-    const response = await proxyApi.get(`api-specs/by-proxy/${encodeURIComponent(proxyId)}`,
+    const response = await proxyApi.get(`api-specs/by-proxy/${pathSegment(proxyId)}`,
       scoped(scope, { ...readOptions, headers: { accept: 'application/yaml' } }));
     const document = await response.text();
     if (!response.headers.get('content-type')?.includes('yaml') || !document.trim()) {
@@ -181,7 +182,7 @@ export async function getDocument(
 ): Promise<string> {
   return proxyApi
     .get(
-      `api-specs/${id}`,
+      `api-specs/${pathSegment(id)}`,
       scoped(scope, { ...readOptions, headers: { accept: "application/yaml" } }),
     )
     .text();
@@ -235,7 +236,7 @@ export async function update(
     'Spec replacement',
     withRedactedFailure(specDocumentSecrets(document), () =>
       proxyApi
-        .put(`api-specs/${id}`, scoped(scope, specBodyOptions(document)))
+        .put(`api-specs/${pathSegment(id)}`, scoped(scope, specBodyOptions(document)))
         .json<ApiSpecCreateResponse>(),
     ),
   );
@@ -243,5 +244,5 @@ export async function update(
 
 /** Delete the spec and cascade its proxy, plugins, and spec-owned upstream. */
 export async function remove(scope: NamespaceScope, id: string): Promise<void> {
-  await proxyApi.delete(`api-specs/${id}`, scoped(scope, readOptions));
+  await proxyApi.delete(`api-specs/${pathSegment(id)}`, scoped(scope, readOptions));
 }

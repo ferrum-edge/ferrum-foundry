@@ -12,6 +12,7 @@ import {
 } from '../../server/waitBudget';
 import { observeMutation } from './mutationOutcome';
 import { secretValues, withRedactedFailure } from './secretRedaction';
+import { pathSegment } from "./pathSegment";
 
 /* ---------- Inventory ---------- */
 
@@ -436,7 +437,7 @@ export async function listManagedRecords(
   signal?: AbortSignal,
 ): Promise<PaginatedResponse<ManagedTlsRecord>> {
   return proxyApi
-    .get(`admin/tls/${collection}`, {
+    .get(`admin/tls/${pathSegment(collection)}`, {
       searchParams: paginationSearch(params),
       context: { ...context, ...FLEET_GLOBAL_CONTEXT },
       ...(signal && { signal }),
@@ -463,7 +464,7 @@ export async function createManagedRecord(
 ): Promise<ManagedTlsRecord> {
   return withRedactedFailure(secretValues(data), () =>
     proxyApi
-      .post(`admin/tls/${collection}`, {
+      .post(`admin/tls/${pathSegment(collection)}`, {
         json: data,
         context: FLEET_GLOBAL_SILENT_CONTEXT,
       })
@@ -478,7 +479,10 @@ export async function updateManagedRecord(
 ): Promise<ManagedTlsRecord> {
   return withRedactedFailure(secretValues(data), () =>
     proxyApi
-      .put(`admin/tls/${collection}/${id}`, { json: data, context: FLEET_GLOBAL_REDACTED_CONTEXT })
+      .put(
+        `admin/tls/${pathSegment(collection)}/${pathSegment(id)}`,
+        { json: data, context: FLEET_GLOBAL_REDACTED_CONTEXT },
+      )
       .json<ManagedTlsRecord>(),
   );
 }
@@ -487,7 +491,10 @@ export async function removeManagedRecord(
   collection: ManagedTlsCollection,
   id: string,
 ): Promise<void> {
-  await proxyApi.delete(`admin/tls/${collection}/${id}`, { context: FLEET_GLOBAL_CONTEXT });
+  await proxyApi.delete(
+    `admin/tls/${pathSegment(collection)}/${pathSegment(id)}`,
+    { context: FLEET_GLOBAL_CONTEXT },
+  );
 }
 
 /* ---------- ACME ---------- */
@@ -535,7 +542,7 @@ export async function getAcmeCertificate(
   context: Record<string, unknown> = {},
 ): Promise<AcmeCertificateRecord> {
   return proxyApi
-    .get(`admin/tls/acme/certificates/${id}`, {
+    .get(`admin/tls/acme/certificates/${pathSegment(id)}`, {
       context: { ...context, ...FLEET_GLOBAL_CONTEXT },
     })
     .json<AcmeCertificateRecord>();
@@ -548,7 +555,7 @@ export async function updateAcmeCertificate(
   const body = { ...data, id };
   return withRedactedFailure(secretValues(body), () =>
     proxyApi
-      .put(`admin/tls/acme/certificates/${id}`, {
+      .put(`admin/tls/acme/certificates/${pathSegment(id)}`, {
         json: body,
         context: FLEET_GLOBAL_REDACTED_CONTEXT,
       })
@@ -559,7 +566,7 @@ export async function updateAcmeCertificate(
 export async function removeAcmeCertificate(
   id: string,
 ): Promise<void> {
-  await proxyApi.delete(`admin/tls/acme/certificates/${id}`, {
+  await proxyApi.delete(`admin/tls/acme/certificates/${pathSegment(id)}`, {
     context: FLEET_GLOBAL_CONTEXT,
   });
 }
@@ -619,7 +626,10 @@ export async function createAcmeOrder(
 }
 
 export async function removeAcmeOrder(id: string): Promise<void> {
-  await proxyApi.delete(`admin/tls/acme/orders/${id}`, { context: FLEET_GLOBAL_CONTEXT });
+  await proxyApi.delete(
+    `admin/tls/acme/orders/${pathSegment(id)}`,
+    { context: FLEET_GLOBAL_CONTEXT },
+  );
 }
 
 export class AcmeFinalizationUnknownError extends Error {
@@ -634,7 +644,7 @@ export class AcmeFinalizationUnknownError extends Error {
 
 export async function getAcmeOrder(id: string): Promise<AcmeOrder> {
   return proxyApi
-    .get(`admin/tls/acme/orders/${encodeURIComponent(id)}`, {
+    .get(`admin/tls/acme/orders/${pathSegment(id)}`, {
       context: FLEET_GLOBAL_CONTEXT,
     })
     .json<AcmeOrder>();
@@ -650,7 +660,7 @@ export async function finalizeAcmeOrder(
   }
   try {
     return await proxyApi
-      .post(`admin/tls/acme/orders/${encodeURIComponent(id)}/finalize`, {
+      .post(`admin/tls/acme/orders/${pathSegment(id)}/finalize`, {
         json: { ...data, poll_timeout_seconds: seconds },
         timeout: serverWaitTimeout(seconds * 1000),
         retry: 0,
@@ -677,9 +687,9 @@ export async function renewAcmeCertificate(
     'ACME renewal',
     withRedactedFailure(secretValues(data), () =>
       proxyApi
-        .post(`admin/tls/acme/renew/${id}`, {
+        .post(`admin/tls/acme/renew/${pathSegment(id)}`, {
           json: data,
-          timeout: longRunningClientTimeout('POST', `/admin/tls/acme/renew/${id}`),
+          timeout: longRunningClientTimeout('POST', `/admin/tls/acme/renew/${pathSegment(id)}`),
           retry: 0,
           context: FLEET_GLOBAL_SILENT_CONTEXT,
         })
@@ -719,7 +729,7 @@ export async function rotateSurface(
   surface: TlsRotateSurface,
 ): Promise<TlsRotateAcceptedResponse> {
   return proxyApi
-    .post(`admin/tls/rotate/${surface}`, { context: FLEET_GLOBAL_CONTEXT })
+    .post(`admin/tls/rotate/${pathSegment(surface)}`, { context: FLEET_GLOBAL_CONTEXT })
     .json<TlsRotateAcceptedResponse>();
 }
 
