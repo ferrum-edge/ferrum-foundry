@@ -128,6 +128,24 @@ export function checkAdminUrl(env) {
       "The BFF requires a bare origin: scheme://host[:port].",
     );
   }
+  if (url.protocol === "http:" && !mayCarrySecret(url)) {
+    // The production BFF refuses this origin at startup unless explicitly told
+    // otherwise, because every request to it carries a signed admin token.
+    if (env.FERRUM_ALLOW_INSECURE_ADMIN_HTTP === "true") {
+      return check(
+        "FERRUM_ADMIN_URL",
+        UNKNOWN,
+        `${url.origin} is plaintext to another host, allowed by FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true`,
+        "Acceptable only for a disposable, isolated stack such as the demo profile. Use https and admin TLS elsewhere, and remove the override.",
+      );
+    }
+    return check(
+      "FERRUM_ADMIN_URL",
+      FAIL,
+      `${url.origin} is plaintext to another host; the production BFF refuses it`,
+      "Use the gateway's https origin with admin TLS. Plaintext is accepted only for a loopback address (127.0.0.0/8, ::1, or localhost).",
+    );
+  }
   if (url.protocol === "http:") {
     return check(
       "FERRUM_ADMIN_URL",
@@ -254,6 +272,19 @@ export async function checkAdminCredentials(env, fetchImpl = fetch) {
         UNKNOWN,
         "FERRUM_NAMESPACE is not set, so no namespace claim can be tested",
         "Set FERRUM_NAMESPACE to the namespace this deployment administers.",
+      ),
+    ];
+  }
+
+  // The probe carries a real admin token. It is minted only for a target it
+  // may be sent to: over TLS, or to this machine.
+  if (!mayCarrySecret(origin)) {
+    return [
+      check(
+        "admin API authentication",
+        UNKNOWN,
+        `not tested: ${origin} is neither https nor loopback`,
+        "The probe sends a signed admin token and will not send it in the clear to another host. Run it against the gateway's https origin, or against a published loopback port.",
       ),
     ];
   }

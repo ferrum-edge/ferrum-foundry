@@ -54,7 +54,20 @@ secret is an administrator.
 
 The last three names are configurable (`FERRUM_TRUSTED_PROXY_USER_HEADER`,
 `FERRUM_TRUSTED_PROXY_ROLE_HEADER`, `FERRUM_TRUSTED_PROXY_NAMESPACES_HEADER`).
-`X-Ferrum-Auth-Secret` is fixed.
+`X-Ferrum-Auth-Secret` is fixed. Startup fails unless, compared
+case-insensitively:
+
+- all four names are different, so one header can never be read as two
+  assertions (a namespace grant as a role, or the proof secret as the actor);
+- none is a header HTTP or the BFF already uses: hop-by-hop and connection
+  headers (`Connection`, `Keep-Alive`, `Transfer-Encoding`, `TE`, `Trailer`,
+  `Upgrade`, `Proxy-Connection`), credentials (`Authorization`,
+  `Proxy-Authorization`, `Proxy-Authenticate`, `WWW-Authenticate`, `Cookie`,
+  `Set-Cookie`), request framing and forwarding (`Host`, `Accept`,
+  `Content-Type`, `Content-Length`, `If-Match`, `If-None-Match`, `Range`,
+  `Prefer`, `Origin`, `Referer`, `Forwarded`, `X-Forwarded-For`,
+  `X-Forwarded-Host`, `X-Forwarded-Proto`, `X-Real-IP`), and the BFF's own
+  `X-CSRF-Token`, `X-Ferrum-Namespace`, and `X-Foundry-Gateway-Target`.
 
 Foundry answers `401` when:
 
@@ -84,10 +97,10 @@ Durations are integers.
 
 | Variable | Required | Default | Range or format | Meaning |
 |---|---|---|---|---|
-| `FERRUM_ADMIN_URL` | Yes | - | `http`/`https` origin, no path, query, fragment, or credentials | Ferrum Edge admin API origin |
+| `FERRUM_ADMIN_URL` | Yes | - | `http`/`https` origin, no path, query, fragment, or credentials. With `NODE_ENV=production`, `https` unless the host is loopback | Ferrum Edge admin API origin. See [Admin API transport](#admin-api-transport) |
 | `FERRUM_JWT_SECRET` | Yes | - | 32 UTF-8 bytes or more, not blank | HS256 key for downstream admin JWTs. Must equal the gateway's `FERRUM_ADMIN_JWT_SECRET`. Used verbatim, like the gateway: surrounding whitespace is part of the key |
 | `PORT` | No | `3001` (`8080` in the image) | 1-65535 | BFF listen port |
-| `NODE_ENV` | No | unset (`production` in the image) | any string | `production` turns on production logging, static SPA serving, secure cookies, one-hop proxy trust, and the static-auth refusal |
+| `NODE_ENV` | No | unset (`production` in the image) | any string | `production` turns on production logging, static SPA serving, secure cookies, one-hop proxy trust, the static-auth refusal, and the plaintext admin URL refusal |
 | `FERRUM_BIND_ADDRESS` | No | `0.0.0.0` | literal IPv4/IPv6 address or `localhost` | Interface the BFF listens on |
 
 ### Authentication
@@ -96,9 +109,9 @@ Durations are integers.
 |---|---|---|---|---|
 | `FERRUM_AUTH_MODE` | No | `static` | `static` or `trusted-proxy` | Browser authentication mode. `static` is refused when `NODE_ENV=production` |
 | `FERRUM_TRUSTED_PROXY_SECRET` | In `trusted-proxy` | - | 32 characters or more | Value the proxy sends in `X-Ferrum-Auth-Secret` |
-| `FERRUM_TRUSTED_PROXY_USER_HEADER` | No | `x-forwarded-user` | valid HTTP header name | Header carrying the actor |
-| `FERRUM_TRUSTED_PROXY_ROLE_HEADER` | No | `x-ferrum-role` | valid HTTP header name | Header carrying the role |
-| `FERRUM_TRUSTED_PROXY_NAMESPACES_HEADER` | No | `x-ferrum-namespaces` | valid HTTP header name | Header carrying namespace grants |
+| `FERRUM_TRUSTED_PROXY_USER_HEADER` | No | `x-forwarded-user` | valid, unreserved HTTP header name, distinct from the other identity headers | Header carrying the actor |
+| `FERRUM_TRUSTED_PROXY_ROLE_HEADER` | No | `x-ferrum-role` | valid, unreserved HTTP header name, distinct from the other identity headers | Header carrying the role |
+| `FERRUM_TRUSTED_PROXY_NAMESPACES_HEADER` | No | `x-ferrum-namespaces` | valid, unreserved HTTP header name, distinct from the other identity headers | Header carrying namespace grants |
 | `FERRUM_AUTH_LOGIN_URL` | No | - | root-relative path (not `//`, no backslash) or an `https://` URL | Where the SPA sends a signed-out user |
 | `FERRUM_AUTH_LOGOUT_URL` | No | - | root-relative path or an `https://` URL | Where the SPA sends a user to sign out of the proxy |
 | `FERRUM_SESSION_TTL` | No | `3600` | 60-86400 seconds | Lifetime of the BFF session cookie and of a trusted-proxy CSRF token |
@@ -134,6 +147,7 @@ Durations are integers.
 
 | Variable | Required | Default | Range or format | Meaning |
 |---|---|---|---|---|
+| `FERRUM_ALLOW_INSECURE_ADMIN_HTTP` | No | `false` | `true`/`false` | Under `NODE_ENV=production`, allows a plaintext `http://` admin origin on a host other than loopback. Only for a disposable, isolated stack such as the starter's demo profile. Never for a real gateway |
 | `FERRUM_TLS_CA_PATH` | No | - | PEM file, 1 byte to 1 MiB, regular file inside the CA root | Extra trust anchors for an `https` admin API |
 | `FERRUM_TLS_CA_ROOT` | No | directory of `FERRUM_TLS_CA_PATH` | directory path | Root the CA bundle path must resolve inside. Symlinks that stay inside it (such as Kubernetes projected volumes) are allowed |
 | `FERRUM_TLS_VERIFY` | No | `true` | `true`/`false` | Verify the admin API certificate. Never `false` in production |
@@ -148,6 +162,24 @@ A CA bundle must hold one or more parseable PEM X.509 certificates (blank and
 `#` comment lines are allowed). Parsing checks the encoding, not whether the
 bundle actually trusts the gateway.
 
+#### Admin API transport
+
+Every request the BFF sends to the admin API carries a signed admin JWT in
+`Authorization`. Over plaintext to another host, anyone on the path could
+replay that token or alter the gateway's answers. So with
+`NODE_ENV=production`, startup fails unless `FERRUM_ADMIN_URL` and every
+`FERRUM_ADMIN_ALLOWED_ORIGINS` entry either:
+
+- uses `https`; or
+- uses `http` to a loopback address: exact `localhost`, an IPv4 literal in
+  `127.0.0.0/8`, or `::1`. A hostname is never loopback because of how it is
+  spelled, so `127.0.0.1.example.com` is remote.
+
+A runtime `adminUrl` change follows the same rule and is refused with
+`400 FERRUM_BFF_INVALID_SETTINGS`. `FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true`
+lifts the rule, for a disposable stack whose gateway is reachable only on an
+isolated network. Outside production (`npm run dev`), the rule is not applied.
+
 ### Browser security
 
 | Variable | Required | Default | Range or format | Meaning |
@@ -159,7 +191,7 @@ bundle actually trusts the gateway.
 | Variable | Required | Default | Range or format | Meaning |
 |---|---|---|---|---|
 | `FERRUM_ALLOW_RUNTIME_SETTINGS` | No | `false` | `true`/`false` | Lets admins change an allowlist of connection settings from the UI |
-| `FERRUM_ADMIN_ALLOWED_ORIGINS` | When runtime settings are on | - | comma-separated `http`/`https` origins | Origins a runtime `adminUrl` change may select |
+| `FERRUM_ADMIN_ALLOWED_ORIGINS` | When runtime settings are on | - | comma-separated `http`/`https` origins; `https` or loopback in production, like `FERRUM_ADMIN_URL` | Origins a runtime `adminUrl` change may select |
 | `FERRUM_ADMIN_ALLOWED_CIDRS` | No | - | comma-separated CIDRs | Private or special-purpose ranges a changed admin URL may resolve to |
 
 Leave runtime settings off. When they are on, any `admin` can repoint the whole
@@ -582,6 +614,7 @@ SBOM attestations. See [Release and supply-chain gates](release-security.md).
       policy, or private network.
 - [ ] `FERRUM_ADMIN_URL` uses `https`, and `FERRUM_TLS_CA_PATH` plus
       `FERRUM_TLS_CA_ROOT` are set when the gateway uses a private CA.
+- [ ] `FERRUM_ALLOW_INSECURE_ADMIN_HTTP` is unset or `false`.
 - [ ] `FERRUM_TLS_VERIFY` is left at `true`.
 - [ ] `FERRUM_ALLOW_RUNTIME_SETTINGS` is left at `false`.
 - [ ] `FERRUM_ENABLE_HSTS=true` only when this host and all its subdomains are

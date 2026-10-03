@@ -42,6 +42,10 @@ services:
     environment:
       NODE_ENV: production
       FERRUM_ADMIN_URL: ${FERRUM_ADMIN_URL:?set FERRUM_ADMIN_URL in .env}
+      # Production refuses a plaintext admin URL to any host but loopback, since
+      # every request carries a signed admin token. Only bootstrap-demo.sh sets
+      # this, for the disposable gateway on the compose network.
+      FERRUM_ALLOW_INSECURE_ADMIN_HTTP: ${FERRUM_ALLOW_INSECURE_ADMIN_HTTP:-false}
       FERRUM_JWT_SECRET: ${FERRUM_JWT_SECRET:?set FERRUM_JWT_SECRET in .env}
       FERRUM_JWT_AUDIENCE: ${FERRUM_JWT_AUDIENCE:-ferrum-admin}
       FERRUM_AUTH_MODE: trusted-proxy
