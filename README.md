@@ -205,7 +205,7 @@ Common optional variables:
 | `FERRUM_JWT_ROLE` | `admin` | Development role: `viewer`, `operator`, or `admin` |
 | `FERRUM_JWT_AUDIENCE` | - | Exact `aud` value(s), comma separated |
 | `FERRUM_TLS_CA_PATH` | - | PEM truststore for an `https` admin API |
-| `FERRUM_TLS_VERIFY` | `true` | Verify the admin API certificate |
+| `FERRUM_TLS_VERIFY` | `true` | Verify the admin API certificate. Production requires verification for remote admin URLs unless `FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true` |
 
 Invalid values fail startup. The full list, with ranges, is in the
 [configuration reference](docs/deployment.md#2-configuration-reference).

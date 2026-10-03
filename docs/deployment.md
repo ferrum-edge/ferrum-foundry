@@ -147,10 +147,10 @@ Durations are integers.
 
 | Variable | Required | Default | Range or format | Meaning |
 |---|---|---|---|---|
-| `FERRUM_ALLOW_INSECURE_ADMIN_HTTP` | No | `false` | `true`/`false` | Under `NODE_ENV=production`, allows a plaintext `http://` admin origin on a host other than loopback. Only for a disposable, isolated stack such as the starter's demo profile. Never for a real gateway |
+| `FERRUM_ALLOW_INSECURE_ADMIN_HTTP` | No | `false` | `true`/`false` | Under `NODE_ENV=production`, allows a plaintext `http://` admin origin on a host other than loopback and disables the production refusal of `FERRUM_TLS_VERIFY=false` for remote admin URLs. Only for a disposable, isolated stack such as the starter's demo profile. Never for a real gateway |
 | `FERRUM_TLS_CA_PATH` | No | - | PEM file, 1 byte to 1 MiB, regular file inside the CA root | Extra trust anchors for an `https` admin API |
 | `FERRUM_TLS_CA_ROOT` | No | directory of `FERRUM_TLS_CA_PATH` | directory path | Root the CA bundle path must resolve inside. Symlinks that stay inside it (such as Kubernetes projected volumes) are allowed |
-| `FERRUM_TLS_VERIFY` | No | `true` | `true`/`false` | Verify the admin API certificate. Never `false` in production |
+| `FERRUM_TLS_VERIFY` | No | `true` | `true`/`false` | Verify the admin API certificate. Production refuses `false` for a remote admin URL unless `FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true` |
 | `FERRUM_CONNECT_TIMEOUT` | No | `5000` | 100-300000 ms | TCP/TLS connect timeout to the admin API |
 | `FERRUM_READ_TIMEOUT` | No | `60000` | 100-3600000 ms | Response deadline. Backup and restore get at least 120 s; see [waiting routes](#live-apply-monitoring-and-acme-issuance-deadlines) |
 | `FERRUM_WRITE_TIMEOUT` | No | `60000` | 100-3600000 ms | Longest idle gap between request body chunks, and the whole-body deadline on ordinary (2 MiB) routes |
@@ -182,7 +182,17 @@ replay that token or alter the gateway's answers. So with
 A runtime `adminUrl` change follows the same rule and is refused with
 `400 FERRUM_BFF_INVALID_SETTINGS`. `FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true`
 lifts the rule, for a disposable stack whose gateway is reachable only on an
-isolated network. Outside production (`npm run dev`), the rule is not applied.
+isolated network. The same override also permits `FERRUM_TLS_VERIFY=false` for
+a remote admin URL in production; without it, startup and runtime settings
+reject that combination. Keep TLS verification enabled for real gateways.
+
+Ferrum Edge also uses the environment variable
+`FERRUM_ALLOW_INSECURE_ADMIN_HTTP` to allow its own plaintext admin listener.
+If Foundry and Edge consume the same env file or ConfigMap, setting the Edge
+variable also disables Foundry's production transport checks. Keep the two
+deployments' settings separate, or use the shared value only for a disposable,
+isolated demo stack. Outside production (`npm run dev`), Foundry's production
+checks are not applied.
 
 ### Browser security
 
