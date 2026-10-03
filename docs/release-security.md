@@ -140,12 +140,46 @@ rebuilds the images, which are not bit-reproducible, so the comparison refuses
 to publish them over tags an earlier attempt already wrote. Once the GitHub
 release exists, the version is final; publish a new version instead.
 
+### A half-published version is stranded
+
+A release can fail after it has written a version tag to one registry but not
+the other, or after both writes but before the GitHub release exists. The
+version is then **half-published**: the tag that was written already names the
+first attempt's images, and a version tag is immutable.
+
+Re-running the **failed jobs** of that run can still finish it, because the
+per-platform images the first build pushed stay in the registries by digest and
+the run's digest artifacts let it rebuild the identical index. But artifact
+retention is finite (90 days here, the repository's maximum), and re-running
+**all jobs** rebuilds the images. Images are not bit-reproducible, so the
+rebuild's index digest differs from the one the written tag already names, and
+compare-before-set refuses it — as it must, because reassigning the tag is
+exactly what these controls prevent. Every later attempt is refused the same
+way, so that version can never be finished; expired digest artifacts have the
+same effect on a re-run of failed jobs.
+
+There is no in-place recovery that keeps the invariant that a version tag names
+one immutable digest. **Cut the next patch version (`X.Y.Z+1`) from a fresh
+commit and release that.** Leave the tag the partial attempt wrote in place; do
+not delete or move it.
+
+The manifest job persists the first run's plan so a partial publish stays
+diagnosable: the per-platform digests are the `release-docker-digest-*`
+artifacts, and the index digest they produce is recorded beside them in the
+`release-planned-digests` artifact, the job summary, and — once the release
+exists — the release notes. That is a 90-day window. An owner can raise the
+repository's artifact and log retention limit (below), but longer retention
+does not make a rebuild reproducible: it only keeps the earlier attempt's
+digests readable for longer, so it does not remove the need to cut the next
+version.
+
 The workflow cannot stop someone with registry credentials from writing a tag
 directly. These controls live outside the repository and are owner settings:
 immutable-tag rules on Docker Hub for release version tags (never for `main`,
 `X.Y`, or `latest`, which must move), a protected `release` environment with
-required reviewers, and the bypass list on the tag ruleset that blocks updating
-or deleting `v*` tags.
+required reviewers, the bypass list on the tag ruleset that blocks updating or
+deleting `v*` tags, and the artifact and log retention limit (currently 90
+days, which caps the digest artifacts above).
 
 ## Coverage floors
 

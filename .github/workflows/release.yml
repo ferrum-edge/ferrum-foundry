@@ -177,11 +177,15 @@ jobs:
           touch "/tmp/digests/${IMAGE_DIGEST#sha256:}"
 
       - name: Upload digest
+        # The per-platform digests this build pushed are the first run's plan.
+        # Keep them for as long as the repository allows so a later attempt can
+        # name what an earlier one wrote; see docs/release-security.md.
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: release-docker-digest-${{ matrix.arch_dir }}
           path: /tmp/digests/*
           if-no-files-found: error
+          retention-days: 90
 
   docker-manifest:
     name: Docker Manifest
@@ -311,6 +315,34 @@ jobs:
             done
           done
           echo "digest=$release_digest" >> "$GITHUB_OUTPUT"
+
+      - name: Record the first run's planned digests
+        # The per-platform digests are the release-docker-digest-* artifacts;
+        # this records the index digest they produce beside them, at the
+        # repository's maximum retention. It is a window, not a guarantee:
+        # once it lapses a half-published version is stranded (see
+        # docs/release-security.md).
+        working-directory: /tmp/digests
+        env:
+          RELEASE_TAG: ${{ needs.release-metadata.outputs.tag }}
+          RELEASE_DIGEST: ${{ steps.identity.outputs.digest }}
+        run: |
+          {
+            echo "tag=$RELEASE_TAG"
+            echo "index=$RELEASE_DIGEST"
+            for digest in *; do
+              [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || { echo "Invalid digest artifact: $digest" >&2; exit 1; }
+              echo "platform=sha256:$digest"
+            done
+          } > /tmp/release-plan.txt
+
+      - name: Upload the first run's planned digests
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-planned-digests
+          path: /tmp/release-plan.txt
+          if-no-files-found: error
+          retention-days: 90
 
       - name: Create and push multi-arch manifest (Docker Hub)
         working-directory: /tmp/digests

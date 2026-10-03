@@ -61,7 +61,16 @@ function releaseImage(revisions) {
  * A registry that demands an anonymous bearer token, serves `tags`, and
  * records every request. `status` forces an answer for a manifest path.
  */
-function fakeRegistry({ host, path, tags = {}, objects = new Map(), status = {} }) {
+function fakeRegistry({
+  host,
+  path,
+  tags = {},
+  objects = new Map(),
+  status = {},
+  token = {},
+  denyAuthenticated = false,
+  digestHeaders = {},
+}) {
   const calls = [];
   const issued = "anonymous-pull-token";
   const fetchImpl = async (input, init = {}) => {
@@ -70,12 +79,13 @@ function fakeRegistry({ host, path, tags = {}, objects = new Map(), status = {} 
     const headers = init.headers ?? {};
     calls.push({ method, url: url.href, headers });
     if (url.href.startsWith(REALM)) {
-      return new Response(JSON.stringify({ token: issued }), { status: 200 });
+      if (token.status && token.status !== 200) return new Response(null, { status: token.status });
+      return new Response(JSON.stringify(token.body ?? { token: issued }), { status: 200 });
     }
     assert.equal(url.host, host);
     const prefix = `/v2/${path}/`;
     assert.ok(url.pathname.startsWith(prefix), url.pathname);
-    if (headers.Authorization !== `Bearer ${issued}`) {
+    if (denyAuthenticated || headers.Authorization !== `Bearer ${issued}`) {
       return new Response(null, {
         status: 401,
         headers: {
@@ -91,10 +101,12 @@ function fakeRegistry({ host, path, tags = {}, objects = new Map(), status = {} 
     if (!content || (kind === "manifests" && !tags[ref] && !ref.startsWith("sha256:"))) {
       return new Response(null, { status: 404 });
     }
-    return new Response(method === "HEAD" ? null : content, {
-      status: 200,
-      headers: kind === "manifests" ? { "docker-content-digest": digest } : {},
-    });
+    const manifestHeaders = {};
+    if (kind === "manifests") {
+      const header = ref in digestHeaders ? digestHeaders[ref] : digest;
+      if (header !== null) manifestHeaders["docker-content-digest"] = header;
+    }
+    return new Response(method === "HEAD" ? null : content, { status: 200, headers: manifestHeaders });
   };
   return { fetchImpl, calls };
 }
@@ -174,6 +186,46 @@ describe("compareTag", () => {
       compareTag(registryClient(repository, denied.fetchImpl), "v1.2.3", `sha256:${"1".repeat(64)}`),
       /answered 403/,
     );
+  });
+
+  it("fails closed when the anonymous token request fails", async () => {
+    const registry = fakeRegistry({ ...target, token: { status: 503 } });
+    await assert.rejects(
+      compareTag(registryClient(repository, registry.fetchImpl), "v1.2.3", `sha256:${"1".repeat(64)}`),
+      /anonymous token request failed \(503\)/,
+    );
+  });
+
+  it("fails closed when the registry issues no token", async () => {
+    const registry = fakeRegistry({ ...target, token: { body: { access: "not-a-token" } } });
+    await assert.rejects(
+      compareTag(registryClient(repository, registry.fetchImpl), "v1.2.3", `sha256:${"1".repeat(64)}`),
+      /the registry issued no token/,
+    );
+  });
+
+  it("fails closed when an authenticated manifest request is still refused", async () => {
+    const registry = fakeRegistry({ ...target, denyAuthenticated: true });
+    await assert.rejects(
+      compareTag(registryClient(repository, registry.fetchImpl), "v1.2.3", `sha256:${"1".repeat(64)}`),
+      /answered 401; cannot tell whether it exists/,
+    );
+  });
+
+  it("fails closed when a manifest answer has no usable Docker-Content-Digest", async () => {
+    for (const digestHeader of [null, "not-a-sha256-digest"]) {
+      const { index, objects } = releaseImage({ amd64: THIS_COMMIT, arm64: THIS_COMMIT });
+      const registry = fakeRegistry({
+        ...target,
+        tags: { "v1.2.3": index },
+        objects,
+        digestHeaders: { "v1.2.3": digestHeader },
+      });
+      await assert.rejects(
+        compareTag(registryClient(repository, registry.fetchImpl), "v1.2.3", `sha256:${"1".repeat(64)}`),
+        /not a sha256 digest/,
+      );
+    }
   });
 
   it("refuses a malformed expected digest or tag before asking the registry", async () => {

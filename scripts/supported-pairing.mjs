@@ -287,6 +287,32 @@ export function missingRequiredReferences(record, root = REPO_ROOT) {
   );
 }
 
+/**
+ * The `release-ready` gate. It refuses a record that does not name a qualified
+ * Edge release, then one that is no longer the unreleased candidate: the latter
+ * is `foundryReleaseErrors`, so this is the test seam proving the command calls
+ * it rather than trusting it separately.
+ */
+export function requireReleaseReady(record) {
+  const unready = edgeReleaseErrors(record);
+  if (unready.length > 0) {
+    throw new Error([
+      `${RECORD_PATH} does not name a qualified Ferrum Edge release to pair with:`,
+      ...unready.map((error) => `  ${error}`),
+      "Record the release in edge.release, move edge.image to it, and re-run the full qualification first.",
+    ].join("\n"));
+  }
+  const released = foundryReleaseErrors(record);
+  if (released.length > 0) {
+    throw new Error([
+      `${RECORD_PATH} is not an unreleased candidate, so this commit cannot be released:`,
+      ...released.map((error) => `  ${error}`),
+      "Tag the commit that prepared this version. A published version is never re-released.",
+    ].join("\n"));
+  }
+  return { ready: true, edge: record.edge.release.version, image: record.edge.image };
+}
+
 function main(command) {
   const record = readSupportedPairing();
   const errors = validatePairing(record);
@@ -298,23 +324,7 @@ function main(command) {
     return;
   }
   if (command === "release-ready") {
-    const unready = edgeReleaseErrors(record);
-    if (unready.length > 0) {
-      throw new Error([
-        `${RECORD_PATH} does not name a qualified Ferrum Edge release to pair with:`,
-        ...unready.map((error) => `  ${error}`),
-        "Record the release in edge.release, move edge.image to it, and re-run the full qualification first.",
-      ].join("\n"));
-    }
-    const released = foundryReleaseErrors(record);
-    if (released.length > 0) {
-      throw new Error([
-        `${RECORD_PATH} is not an unreleased candidate, so this commit cannot be released:`,
-        ...released.map((error) => `  ${error}`),
-        "Tag the commit that prepared this version. A published version is never re-released.",
-      ].join("\n"));
-    }
-    console.log(JSON.stringify({ ready: true, edge: record.edge.release.version, image: record.edge.image }));
+    console.log(JSON.stringify(requireReleaseReady(record)));
     return;
   }
   if (command !== "check") {
