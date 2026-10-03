@@ -285,6 +285,12 @@ Other inputs:
 - `FERRUM_DEMO_BACKEND_HOST`: host of the demo backends (default
   `127.0.0.1`); use a Docker host alias for a containerized gateway.
 - `FERRUM_DEMO_PROXY_URL`: data-plane origin (default `http://127.0.0.1:8000`).
+- `FERRUM_ADMIN_URL` (default `http://127.0.0.1:9000`) must be `https`, or
+  `http` to a loopback address (`127.0.0.0/8`, `::1`, or `localhost`). The
+  seeder and the helpers that share its configuration (verify, route smoke,
+  contract smoke, capability parity) send signed admin tokens and stop before
+  signing anything for a plaintext origin on another host. They have no
+  override; reach a containerized gateway through a published loopback port.
 - Run the gateway with `FERRUM_NAMESPACE=ferrum-foundry-demo` so it serves the
   seeded routes.
 
@@ -308,7 +314,7 @@ export FERRUM_JWT_SECRET=$(openssl rand -hex 32) # also configure this on Ferrum
 export FERRUM_TRUSTED_PROXY_SECRET=$(openssl rand -hex 32)
 
 docker run \
-  -e FERRUM_ADMIN_URL=http://your-gateway:9000 \
+  -e FERRUM_ADMIN_URL=https://your-gateway:9443 \
   -e FERRUM_JWT_SECRET \
   -e FERRUM_AUTH_MODE=trusted-proxy \
   -e FERRUM_TRUSTED_PROXY_SECRET \
@@ -317,7 +323,10 @@ docker run \
 ```
 
 In production the BFF must be reachable only through the identity proxy; see
-[Deployment](docs/deployment.md). The image is temporarily based on
+[Deployment](docs/deployment.md). It also refuses to start with a plaintext
+`http://` admin URL unless the host is a loopback address (`127.0.0.0/8`,
+`::1`, or `localhost`), because every admin request carries a signed bearer
+token. The image is temporarily based on
 `node:24-trixie-slim` instead of `gcr.io/distroless/nodejs24-debian13:nonroot`,
 until upstream ships a fixed OpenSSL
 ([#504](https://github.com/ferrum-edge/ferrum-foundry/issues/504)). Node package

@@ -113,6 +113,48 @@ test("demo seeder has no fallback signing credential and requires a target-bound
   }), /DNS hostname without a port/);
 });
 
+test("real-gateway helpers refuse a plaintext admin origin to another host", () => {
+  for (const url of [
+    "http://gateway.internal:9000",
+    "http://ferrum-edge:9000",
+    "http://10.0.0.5:9000",
+    "http://127.0.0.1.gateway.example:9000",
+    "http://localhost.evil.example:9000",
+    "http://[::ffff:127.0.0.1]:9000",
+  ]) {
+    // Every helper (seed, verify, route smoke, contract smoke, capability
+    // parity) reads its target here, before it signs or sends anything.
+    assert.throws(
+      () => readSeedConfig({ FERRUM_JWT_SECRET: SIGNING_SECRET, FERRUM_ADMIN_URL: url }),
+      /FERRUM_ADMIN_URL must use https unless it is a loopback address/,
+      url,
+    );
+  }
+  // There is no plaintext override for the helpers.
+  assert.throws(
+    () => readSeedConfig({
+      FERRUM_JWT_SECRET: SIGNING_SECRET,
+      FERRUM_ADMIN_URL: "http://gateway.internal:9000",
+      FERRUM_ALLOW_INSECURE_ADMIN_HTTP: "true",
+    }),
+    /FERRUM_ADMIN_URL must use https/,
+  );
+});
+
+test("real-gateway helpers accept https and literal loopback admin origins", () => {
+  for (const [url, origin] of [
+    ["https://gateway.example", "https://gateway.example"],
+    ["https://gateway.internal:9443", "https://gateway.internal:9443"],
+    ["http://127.0.0.1:9000", "http://127.0.0.1:9000"],
+    ["http://127.0.0.1:9010", "http://127.0.0.1:9010"],
+    ["http://localhost:9000", "http://localhost:9000"],
+    ["http://[::1]:9000", "http://[::1]:9000"],
+  ]) {
+    const config = readSeedConfig({ FERRUM_JWT_SECRET: SIGNING_SECRET, FERRUM_ADMIN_URL: url });
+    assert.equal(config.adminUrl, origin, url);
+  }
+});
+
 test("demo seeder rejects a confirmation copied from a different target before HTTP", async () => {
   const config = readSeedConfig({
     FERRUM_JWT_SECRET: SIGNING_SECRET,

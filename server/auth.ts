@@ -1,7 +1,12 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import type { AuthPrincipal } from './auth-types.js';
-import { loadConfig, type Config, type GatewayRole } from './config.js';
+import {
+  loadConfig,
+  TRUSTED_PROXY_SECRET_HEADER,
+  type Config,
+  type GatewayRole,
+} from './config.js';
 import { GATEWAY_TARGET_HEADER, gatewayTargetId } from './gateway-target.js';
 import { proxyPathIsFleetGlobal, requestIsProxyRoute } from './proxy-path.js';
 
@@ -14,7 +19,6 @@ interface StaticSession {
 const MAX_STATIC_SESSIONS = 256;
 const staticSessions = new Map<string, StaticSession>();
 const NAMESPACE_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$/;
-const TRUSTED_PROXY_SECRET_HEADER = 'x-ferrum-auth-secret';
 // Domain-separated key derivation so the CSRF MAC can never be confused with
 // any other use of the trusted-proxy proof secret.
 const CSRF_KEY_LABEL = 'ferrum-foundry-csrf-v1';

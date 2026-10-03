@@ -3,7 +3,24 @@
 Foundry's security boundaries and supported deployment assumptions are
 described in [SECURITY.md](../SECURITY.md),
 [authentication.md](authentication.md), and [deployment.md](deployment.md).
-This document records the threat relevant to operator helper scripts.
+This document records the threats relevant to admin API transport and
+operator helper scripts.
+
+## Admin API token transport
+
+The BFF and the real-gateway helpers sign an admin JWT for every admin API
+request. Over plaintext to another host, an on-path observer could replay the
+token or alter the request and the gateway's answer. With
+`NODE_ENV=production`, the BFF refuses to start (and refuses a runtime
+`adminUrl` change) unless the admin origin uses HTTPS or HTTP to exact
+`localhost`, an IPv4 address in `127.0.0.0/8`, or IPv6 `::1`.
+`FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true` is an explicit exception for a
+disposable stack on an isolated network, such as the starter's demo profile.
+
+The seeder and the helpers that share its configuration apply the same rule
+with no exception, before they sign anything. The starter preflight may send
+its anonymous `/health` request to any configured admin URL, but it mints and
+sends its credentialed probe only to an HTTPS or loopback origin.
 
 ## Starter helper network probes
 

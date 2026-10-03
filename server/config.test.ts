@@ -18,8 +18,12 @@ const ENV_KEYS = [
   'FERRUM_AUTH_LOGIN_URL',
   'FERRUM_AUTH_LOGOUT_URL',
   'FERRUM_ALLOW_INSECURE_STATIC_AUTH',
+  'FERRUM_ALLOW_INSECURE_ADMIN_HTTP',
   'FERRUM_BFF_AUTH_TOKEN',
   'FERRUM_TRUSTED_PROXY_SECRET',
+  'FERRUM_TRUSTED_PROXY_USER_HEADER',
+  'FERRUM_TRUSTED_PROXY_ROLE_HEADER',
+  'FERRUM_TRUSTED_PROXY_NAMESPACES_HEADER',
   'FERRUM_TLS_CA_PATH',
   'FERRUM_TLS_CA_ROOT',
   'FERRUM_TLS_VERIFY',
@@ -50,6 +54,40 @@ function setValidEnv(overrides: Record<string, string | undefined> = {}): void {
     else process.env[key] = value;
   }
 }
+
+/** A production trusted-proxy configuration, the only supported production shape. */
+function setProductionEnv(overrides: Record<string, string | undefined> = {}): void {
+  setValidEnv({
+    NODE_ENV: 'production',
+    FERRUM_AUTH_MODE: 'trusted-proxy',
+    FERRUM_BFF_AUTH_TOKEN: undefined,
+    FERRUM_TRUSTED_PROXY_SECRET: 'p'.repeat(40),
+    ...overrides,
+  });
+}
+
+const REMOTE_PLAINTEXT_ORIGINS = [
+  'http://gateway.internal:9000',
+  'http://ferrum-edge:9000',
+  'http://10.0.0.5:9000',
+  'http://169.254.169.254',
+  'http://127.0.0.1.gateway.example:9000',
+  'http://127.ops.example:9000',
+  'http://localhost.evil.example:9000',
+  'http://localhost.:9000',
+  'http://[::ffff:127.0.0.1]:9000',
+];
+
+const SECURE_ORIGINS = [
+  'https://gateway.internal:9443',
+  'https://10.0.0.5:9443',
+  'http://127.0.0.1:9000',
+  'http://127.255.255.255:9000',
+  'http://localhost:9000',
+  'http://LOCALHOST:9000',
+  'http://[::1]:9000',
+  'http://[0:0:0:0:0:0:0:1]:9000',
+];
 
 async function loadModule(): Promise<typeof import('./config.js')> {
   vi.resetModules();
@@ -395,6 +433,174 @@ describe('config', () => {
     });
     const { loadConfig } = await loadModule();
     expect(loadConfig()).toMatchObject({ authMode: 'trusted-proxy', bffAuthToken: undefined });
+  });
+
+  it('classifies only https and literal loopback plaintext as secure admin origins', async () => {
+    const { isSecureAdminOrigin } = await loadModule();
+    for (const origin of SECURE_ORIGINS) expect(isSecureAdminOrigin(origin), origin).toBe(true);
+    for (const origin of [...REMOTE_PLAINTEXT_ORIGINS, 'ftp://localhost', 'not a url']) {
+      expect(isSecureAdminOrigin(origin), origin).toBe(false);
+    }
+  });
+
+  it('refuses a plaintext admin origin to another host in production', async () => {
+    for (const url of REMOTE_PLAINTEXT_ORIGINS) {
+      clearTestEnv();
+      setProductionEnv({ FERRUM_ADMIN_URL: url });
+      const { loadConfig } = await loadModule();
+      expect(() => loadConfig(), url).toThrow(/FERRUM_ADMIN_URL must use https unless it is a loopback/);
+    }
+  });
+
+  it('accepts https and literal loopback plaintext admin origins in production', async () => {
+    for (const url of SECURE_ORIGINS) {
+      clearTestEnv();
+      setProductionEnv({ FERRUM_ADMIN_URL: url });
+      const { loadConfig } = await loadModule();
+      expect(loadConfig().adminUrl, url).toBe(new URL(url).origin);
+      expect(loadConfig().requireSecureAdminOrigin).toBe(true);
+    }
+  });
+
+  it('permits remote plaintext in production only through the explicit override', async () => {
+    setProductionEnv({
+      FERRUM_ADMIN_URL: 'http://gateway.internal:9000',
+      FERRUM_ALLOW_INSECURE_ADMIN_HTTP: 'true',
+    });
+    const allowed = await loadModule();
+    expect(allowed.loadConfig()).toMatchObject({
+      adminUrl: 'http://gateway.internal:9000',
+      requireSecureAdminOrigin: false,
+    });
+
+    for (const value of ['false', 'yes', '1']) {
+      clearTestEnv();
+      setProductionEnv({
+        FERRUM_ADMIN_URL: 'http://gateway.internal:9000',
+        FERRUM_ALLOW_INSECURE_ADMIN_HTTP: value,
+      });
+      const { loadConfig } = await loadModule();
+      expect(() => loadConfig(), value).toThrow(/FERRUM_ADMIN_URL|FERRUM_ALLOW_INSECURE_ADMIN_HTTP/);
+    }
+  });
+
+  it('leaves plaintext admin origins to the operator outside production', async () => {
+    setValidEnv({ FERRUM_ADMIN_URL: 'http://gateway.internal:9000' });
+    const { loadConfig } = await loadModule();
+    expect(loadConfig()).toMatchObject({
+      adminUrl: 'http://gateway.internal:9000',
+      requireSecureAdminOrigin: false,
+    });
+  });
+
+  it('refuses a remote plaintext runtime origin allowlist entry in production', async () => {
+    setProductionEnv({
+      FERRUM_ALLOW_RUNTIME_SETTINGS: 'true',
+      FERRUM_ADMIN_ALLOWED_ORIGINS: 'https://gateway.example,http://gateway.internal:9000',
+    });
+    const { loadConfig } = await loadModule();
+    expect(() => loadConfig()).toThrow(/FERRUM_ADMIN_ALLOWED_ORIGINS must use https/);
+  });
+
+  it('refuses a remote plaintext runtime admin origin in production before the allowlist', async () => {
+    setProductionEnv({
+      FERRUM_ALLOW_RUNTIME_SETTINGS: 'true',
+      FERRUM_ADMIN_ALLOWED_ORIGINS: 'https://gateway.example',
+    });
+    const { loadConfig, updateRuntimeConfig } = await loadModule();
+    await expect(updateRuntimeConfig({ adminUrl: 'http://gateway.internal:9000' }))
+      .rejects.toThrow(/adminUrl must use https unless it is a loopback/);
+    expect(loadConfig().adminUrl).toBe('http://127.0.0.1:9000');
+    await updateRuntimeConfig({ adminUrl: 'https://gateway.example' });
+    expect(loadConfig().adminUrl).toBe('https://gateway.example');
+  });
+
+  it('normalizes distinct custom trusted-proxy header names', async () => {
+    setProductionEnv({
+      FERRUM_TRUSTED_PROXY_USER_HEADER: 'X-Registry-User',
+      FERRUM_TRUSTED_PROXY_ROLE_HEADER: 'X-Registry-Role',
+      FERRUM_TRUSTED_PROXY_NAMESPACES_HEADER: 'X-Registry-Grants',
+    });
+    const { loadConfig } = await loadModule();
+    expect(loadConfig()).toMatchObject({
+      trustedProxyUserHeader: 'x-registry-user',
+      trustedProxyRoleHeader: 'x-registry-role',
+      trustedProxyNamespacesHeader: 'x-registry-grants',
+    });
+  });
+
+  it('refuses every pair of colliding identity headers, ignoring case', async () => {
+    const collisions: Record<string, string>[] = [
+      // The fixed proof header against each configurable assertion.
+      { FERRUM_TRUSTED_PROXY_USER_HEADER: 'X-Ferrum-Auth-Secret' },
+      { FERRUM_TRUSTED_PROXY_ROLE_HEADER: 'X-FERRUM-AUTH-SECRET' },
+      { FERRUM_TRUSTED_PROXY_NAMESPACES_HEADER: 'x-ferrum-auth-SECRET' },
+      // Each configurable pair, against a default and with both customized.
+      { FERRUM_TRUSTED_PROXY_USER_HEADER: 'X-Ferrum-Role' },
+      { FERRUM_TRUSTED_PROXY_USER_HEADER: 'X-Ferrum-Namespaces' },
+      { FERRUM_TRUSTED_PROXY_ROLE_HEADER: 'X-Forwarded-User' },
+      { FERRUM_TRUSTED_PROXY_ROLE_HEADER: 'X-Ferrum-Namespaces' },
+      { FERRUM_TRUSTED_PROXY_NAMESPACES_HEADER: 'X-FORWARDED-USER' },
+      { FERRUM_TRUSTED_PROXY_NAMESPACES_HEADER: 'X-Ferrum-ROLE' },
+      {
+        FERRUM_TRUSTED_PROXY_USER_HEADER: 'X-Team-Assertion',
+        FERRUM_TRUSTED_PROXY_ROLE_HEADER: 'x-team-assertion',
+      },
+      {
+        FERRUM_TRUSTED_PROXY_USER_HEADER: 'X-Team-Assertion',
+        FERRUM_TRUSTED_PROXY_NAMESPACES_HEADER: 'X-TEAM-ASSERTION',
+      },
+      {
+        FERRUM_TRUSTED_PROXY_ROLE_HEADER: 'X-Team-Assertion',
+        FERRUM_TRUSTED_PROXY_NAMESPACES_HEADER: 'x-Team-assertion',
+      },
+    ];
+    for (const overrides of collisions) {
+      clearTestEnv();
+      setProductionEnv(overrides);
+      const { loadConfig } = await loadModule();
+      expect(() => loadConfig(), JSON.stringify(overrides)).toThrow(/must not reuse/);
+    }
+  });
+
+  it('refuses identity header names that HTTP or the BFF reserves', async () => {
+    const { RESERVED_IDENTITY_HEADERS } = await loadModule();
+    const { GATEWAY_TARGET_HEADER } = await import('./gateway-target.js');
+    for (const header of [
+      'authorization',
+      'cookie',
+      'host',
+      'connection',
+      'transfer-encoding',
+      'proxy-authorization',
+      'content-type',
+      'content-length',
+      'x-csrf-token',
+      'x-ferrum-namespace',
+      'if-match',
+      GATEWAY_TARGET_HEADER,
+    ]) {
+      expect(RESERVED_IDENTITY_HEADERS.has(header), header).toBe(true);
+    }
+
+    for (const setting of [
+      'FERRUM_TRUSTED_PROXY_USER_HEADER',
+      'FERRUM_TRUSTED_PROXY_ROLE_HEADER',
+      'FERRUM_TRUSTED_PROXY_NAMESPACES_HEADER',
+    ]) {
+      for (const header of [
+        'Authorization',
+        'Cookie',
+        'X-CSRF-Token',
+        'X-Ferrum-Namespace',
+        'X-Foundry-Gateway-Target',
+      ]) {
+        clearTestEnv();
+        setProductionEnv({ [setting]: header });
+        const { loadConfig } = await loadModule();
+        expect(() => loadConfig(), `${setting}=${header}`).toThrow(new RegExp(`${setting} must not be`));
+      }
+    }
   });
 
   it('keeps runtime connection mutation disabled by default', async () => {

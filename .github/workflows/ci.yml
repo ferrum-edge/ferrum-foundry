@@ -488,6 +488,7 @@ jobs:
             --network ferrum-foundry-contract \
             --publish 127.0.0.1:8080:8080 \
             --env FERRUM_ADMIN_URL=http://ferrum-edge:9000 \
+            --env FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true \
             --env FERRUM_JWT_SECRET=container-contract-signing-secret-at-least-32-characters \
             --env FERRUM_JWT_AUDIENCE=ferrum-admin \
             --env FERRUM_AUTH_MODE=trusted-proxy \
