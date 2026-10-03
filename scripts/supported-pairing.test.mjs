@@ -352,6 +352,15 @@ describe("requireReleaseReady", () => {
       /does not name a qualified Ferrum Edge release/,
     );
   });
+
+  it("wires the release-ready command to requireReleaseReady, not an inline check", () => {
+    // requireReleaseReady is the seam the tests above exercise; this pins that
+    // main() actually calls it rather than reverting to an inline edge check.
+    assert.match(
+      repoFile("scripts/supported-pairing.mjs"),
+      /command === "release-ready"\) \{\n\s+console\.log\(JSON\.stringify\(requireReleaseReady\(record\)\)\)/,
+    );
+  });
 });
 
 describe("repository alignment", () => {
@@ -484,6 +493,14 @@ describe("repository alignment", () => {
         manifest,
         /echo "index=\$RELEASE_DIGEST"\n[\s\S]*?echo "platform=sha256:\$digest"\n\s+done\n\s+\} > \/tmp\/release-plan\.txt/,
       );
+    });
+
+    it("records and uploads the plan before the first registry write", () => {
+      const record = manifest.indexOf("Record the first run's planned digests");
+      const upload = manifest.indexOf("Upload the first run's planned digests");
+      const firstWrite = manifest.search(/imagetools create (?!--dry-run)/);
+      assert.ok(record > 0 && record < upload, "the plan is recorded before it is uploaded");
+      assert.ok(upload < firstWrite, "the plan upload precedes every registry write");
     });
   });
 

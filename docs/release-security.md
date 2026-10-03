@@ -147,16 +147,19 @@ the other, or after both writes but before the GitHub release exists. The
 version is then **half-published**: the tag that was written already names the
 first attempt's images, and a version tag is immutable.
 
-Re-running the **failed jobs** of that run can still finish it, because the
-per-platform images the first build pushed stay in the registries by digest and
-the run's digest artifacts let it rebuild the identical index. But artifact
-retention is finite (90 days here, the repository's maximum), and re-running
-**all jobs** rebuilds the images. Images are not bit-reproducible, so the
-rebuild's index digest differs from the one the written tag already names, and
-compare-before-set refuses it — as it must, because reassigning the tag is
-exactly what these controls prevent. Every later attempt is refused the same
-way, so that version can never be finished; expired digest artifacts have the
-same effect on a re-run of failed jobs.
+Re-running the **failed jobs** of that run can still finish it within GitHub's
+30-day re-run window: the per-platform images the first build pushed stay in the
+registries by digest, and a run of the manifest job rebuilds the identical
+index. When both registry writes already landed and only the GitHub release
+failed, the only failed job is `create-release`, which reads the manifest job's
+recorded output digest rather than the digest artifacts. But GitHub allows a run
+to be re-run, whole or failed jobs only, for only **30 days** after it started.
+The 90-day digest artifacts outlive that window, so they help diagnose a
+stranded version, not recover it. Re-running **all jobs** rebuilds the images.
+Images are not bit-reproducible, so the rebuild's index digest differs from the
+one the written tag already names, and compare-before-set refuses it — as it
+must, because reassigning the tag is exactly what these controls prevent. Every
+later attempt is refused the same way, so that version can never be finished.
 
 There is no in-place recovery that keeps the invariant that a version tag names
 one immutable digest. **Cut the next patch version (`X.Y.Z+1`) from a fresh
@@ -164,22 +167,22 @@ commit and release that.** Leave the tag the partial attempt wrote in place; do
 not delete or move it.
 
 The manifest job persists the first run's plan so a partial publish stays
-diagnosable: the per-platform digests are the `release-docker-digest-*`
-artifacts, and the index digest they produce is recorded beside them in the
-`release-planned-digests` artifact, the job summary, and — once the release
-exists — the release notes. That is a 90-day window. An owner can raise the
-repository's artifact and log retention limit (below), but longer retention
-does not make a rebuild reproducible: it only keeps the earlier attempt's
-digests readable for longer, so it does not remove the need to cut the next
-version.
+diagnosable, and `release-planned-digests` is the authoritative record: it lists
+the tag, the index digest, and both `platform=` digests, and a re-run of all
+jobs does not overwrite it, because the new attempt stops at compare-before-set
+before the record step. `release-docker-digest-*` holds whatever the latest
+build pushed, so a re-run of all jobs replaces it with the rebuild's digests.
+The job summary records the index digest only when the whole Docker Hub step
+succeeds, and the release notes name it once the release exists. The record
+survives 90 days — `retention-days: 90` in the workflow equals GitHub's maximum
+for a public repository.
 
 The workflow cannot stop someone with registry credentials from writing a tag
 directly. These controls live outside the repository and are owner settings:
 immutable-tag rules on Docker Hub for release version tags (never for `main`,
 `X.Y`, or `latest`, which must move), a protected `release` environment with
-required reviewers, the bypass list on the tag ruleset that blocks updating or
-deleting `v*` tags, and the artifact and log retention limit (currently 90
-days, which caps the digest artifacts above).
+required reviewers, and the bypass list on the tag ruleset that blocks updating
+or deleting `v*` tags.
 
 ## Coverage floors
 

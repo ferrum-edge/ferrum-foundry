@@ -177,9 +177,11 @@ jobs:
           touch "/tmp/digests/${IMAGE_DIGEST#sha256:}"
 
       - name: Upload digest
-        # The per-platform digests this build pushed are the first run's plan.
-        # Keep them for as long as the repository allows so a later attempt can
-        # name what an earlier one wrote; see docs/release-security.md.
+        # The per-platform digests this build pushed. A re-run of all jobs
+        # re-uploads these with the rebuild's digests, so release-planned-digests
+        # in the manifest job, not this artifact, is the authoritative record.
+        # Both are diagnostic within GitHub's 30-day re-run window; see
+        # docs/release-security.md.
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: release-docker-digest-${{ matrix.arch_dir }}
@@ -317,11 +319,10 @@ jobs:
           echo "digest=$release_digest" >> "$GITHUB_OUTPUT"
 
       - name: Record the first run's planned digests
-        # The per-platform digests are the release-docker-digest-* artifacts;
-        # this records the index digest they produce beside them, at the
-        # repository's maximum retention. It is a window, not a guarantee:
-        # once it lapses a half-published version is stranded (see
-        # docs/release-security.md).
+        # The authoritative in-run record: this lists the tag, the index digest,
+        # and both platform= digests. A re-run of all jobs stops at
+        # compare-before-set before this step, so it is never overwritten; see
+        # docs/release-security.md.
         working-directory: /tmp/digests
         env:
           RELEASE_TAG: ${{ needs.release-metadata.outputs.tag }}
