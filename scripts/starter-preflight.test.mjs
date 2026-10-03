@@ -486,6 +486,11 @@ test("the demo backend runs and probes with the image's own Node", async () => {
   const dockerfile = await readFile(new URL("../docker/Dockerfile", import.meta.url), "utf8");
   const runtime = dockerfile.slice(dockerfile.lastIndexOf("\nFROM ") + 1);
   const base = runtime.slice(0, runtime.indexOf("\n"));
+  assert.match(
+    runtime,
+    /^COPY --from=builder --chown=65532:65532 \/app\/shared \.\/shared\/$/m,
+    "the runtime image must include every shared module imported by the server",
+  );
   const entrypoint = runtime.match(/^ENTRYPOINT \["([^"]+)"\]$/m);
   assert.ok(entrypoint, "the runtime stage must name Node as its exec-form entrypoint");
   assert.equal(entrypoint[1], DISTROLESS_NODE, "the entrypoint must be Node at the distroless path");

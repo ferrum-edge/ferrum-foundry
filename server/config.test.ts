@@ -612,6 +612,39 @@ describe('config', () => {
     expect(loadConfig().tlsVerify).toBe(true);
   });
 
+  it('blocks a remote runtime admin URL when TLS verification is disabled', async () => {
+    setProductionEnv({
+      FERRUM_TLS_VERIFY: 'false',
+      FERRUM_ALLOW_RUNTIME_SETTINGS: 'true',
+      FERRUM_ADMIN_ALLOWED_ORIGINS: 'https://gateway.internal:9443',
+    });
+    const { loadConfig, updateRuntimeConfig } = await loadModule();
+    expect(loadConfig()).toMatchObject({
+      adminUrl: 'http://127.0.0.1:9000',
+      tlsVerify: false,
+    });
+
+    await expect(updateRuntimeConfig({ adminUrl: 'https://gateway.internal:9443' }))
+      .rejects.toThrow(/FERRUM_TLS_VERIFY must be true in production/);
+    expect(loadConfig().adminUrl).toBe('http://127.0.0.1:9000');
+  });
+
+  it('allows a remote runtime admin URL with the insecure transport override', async () => {
+    setProductionEnv({
+      FERRUM_TLS_VERIFY: 'false',
+      FERRUM_ALLOW_INSECURE_ADMIN_HTTP: 'true',
+      FERRUM_ALLOW_RUNTIME_SETTINGS: 'true',
+      FERRUM_ADMIN_ALLOWED_ORIGINS: 'https://gateway.internal:9443',
+    });
+    const { loadConfig, updateRuntimeConfig } = await loadModule();
+
+    await updateRuntimeConfig({ adminUrl: 'https://gateway.internal:9443' });
+    expect(loadConfig()).toMatchObject({
+      adminUrl: 'https://gateway.internal:9443',
+      tlsVerify: false,
+    });
+  });
+
   it('normalizes distinct custom trusted-proxy header names', async () => {
     setProductionEnv({
       FERRUM_TRUSTED_PROXY_USER_HEADER: 'X-Registry-User',

@@ -32,7 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with no exception, and the starter preflight no longer mints or sends its
   credentialed probe to one; it reports a remote plaintext admin URL as a
   failure, or as unknown under the override. Breaking: a production
-  deployment using remote `http://` must move to `https` or set the override.
+  deployment using remote `http://` must move to `https` or set the override;
+  a deployment using remote `https` with `FERRUM_TLS_VERIFY=false` must enable
+  verification (and configure `FERRUM_TLS_CA_PATH` if needed) or set the same
+  override.
 - GHSA-74cv-h27v-866v: startup refuses trusted-proxy identity header names
   that collide. Compared case-insensitively, the user, role, and namespaces
   headers must differ from each other and from the fixed
