@@ -38,6 +38,38 @@ export function authorizeRegistryPath(path: string, method: string, principal: A
   }
 }
 
+/** Require a literal namespace echo before a cascade request is signed or forwarded. */
+export function authorizeRegistryDeleteConfirmation(
+  path: string,
+  method: string,
+  rawUrl: string,
+): void {
+  if (method !== 'DELETE' || !path.startsWith('/namespaces/')) return;
+  const targetName = path.slice('/namespaces/'.length);
+  const query = rawUrl.split('?', 2)[1] ?? '';
+  const confirmations: string[] = [];
+  for (const parameter of query.split('&')) {
+    const separator = parameter.indexOf('=');
+    const rawKey = separator < 0 ? parameter : parameter.slice(0, separator);
+    let key: string;
+    try {
+      key = decodeURIComponent(rawKey.replaceAll('+', ' '));
+    } catch {
+      continue;
+    }
+    if (key === 'confirm') confirmations.push(separator < 0 ? '' : parameter.slice(separator + 1));
+  }
+  if (
+    confirmations.length > 0
+    && (confirmations.length !== 1 || confirmations[0] !== targetName)
+  ) {
+    throw new RegistryRequestError(
+      400,
+      `Cascade deletion requires confirm=${targetName} exactly; confirm=true is not accepted`,
+    );
+  }
+}
+
 export function authorizeRegistryBody(bytes: Buffer, method: string, principal: AuthPrincipal): string {
   let value: unknown;
   try {

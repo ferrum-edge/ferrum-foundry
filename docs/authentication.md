@@ -83,6 +83,14 @@ in the body, and a rename checks both the old and new names. Registry writes
 require `admin`. The selected `X-Ferrum-Namespace` header cannot grant access
 to a different registry target.
 
+A namespace DELETE without `confirm` is the unconfirmed attempt used to let the
+gateway report whether the namespace is empty. If it returns the occupancy
+`409`, the cascade request must include the literal query value
+`confirm=<namespace-name>`. The BFF compares that value exactly with the
+once-decoded target name before forwarding the accepted request to Edge as its
+existing `confirm=true` contract. A caller-supplied `confirm=true`, a different
+name, or an encoded spelling of the name is rejected with `400`.
+
 Foundry validates registry JSON within the ordinary 2 MiB body limit before
 forwarding it. A scoped principal's registry list is filtered to its exact
 grants before pagination, so totals count only granted names. The namespace

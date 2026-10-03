@@ -336,7 +336,10 @@ function DeleteNamespaceDialog({
   async function handleDelete(confirm: boolean) {
     if (!target) return;
     try {
-      await deleteNamespace.mutateAsync({ name: target, confirm });
+      await deleteNamespace.mutateAsync({
+        name: target,
+        confirm: confirm ? typed.trim() : undefined,
+      });
       finish(target);
     } catch (err) {
       const status =

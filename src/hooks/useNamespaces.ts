@@ -111,7 +111,7 @@ export function useDeleteNamespace() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
   return useMutation({
-    mutationFn: ({ name, confirm }: { name: string; confirm?: boolean }) =>
+    mutationFn: ({ name, confirm }: { name: string; confirm?: string }) =>
       namespaces.remove(scope, name, { confirm }),
     onSuccess: (_result, { name }) => {
       reconcileNamespaceCache(qc, name, null);

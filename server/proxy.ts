@@ -13,6 +13,7 @@ import { waitingRouteTimeout } from './waitBudget.js';
 import {
   authorizeRegistryBody,
   authorizeRegistryPath,
+  authorizeRegistryDeleteConfirmation,
   isRegistryPath,
   NamespaceScanTimeoutError,
   RegistryRequestError,
@@ -323,7 +324,10 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
   ) => {
     try {
       const path = proxyTargetPath(request);
-      if (request.authPrincipal) authorizeRegistryPath(path, request.method, request.authPrincipal);
+      if (request.authPrincipal) {
+        authorizeRegistryPath(path, request.method, request.authPrincipal);
+        authorizeRegistryDeleteConfirmation(path, request.method, request.raw.url ?? request.url);
+      }
     } catch (error) {
       if (error instanceof RegistryRequestError) {
         return reply.status(error.status).send({ error: error.message });
@@ -360,6 +364,15 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
     if (!stampGatewayTarget(request, reply, config)) return rejectStaleGatewayTarget(reply);
 
     const target = proxyTargetUrl(request, config.adminUrl);
+    // Edge retains its existing boolean cascade contract; the BFF validates
+    // the caller's exact name echo first, then forwards the accepted cascade.
+    if (
+      request.method === 'DELETE'
+      && target.pathname.startsWith('/namespaces/')
+      && target.searchParams.has('confirm')
+    ) {
+      target.searchParams.set('confirm', 'true');
+    }
     const targetPath = target.pathname;
 
     const declaredLength = Number(request.headers['content-length']);

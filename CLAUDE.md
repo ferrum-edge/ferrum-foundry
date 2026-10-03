@@ -372,8 +372,10 @@ Namespaces are a full CRUD registry on the gateway, not just a header value.
 - PUT is a partial update, unlike proxy PUT: omit a field to keep it.
   `name: null` is a `400` (omit it instead); `description: null` or `""` clears
   the description. Build payloads with `buildNamespaceUpdate()`, not by hand.
-- DELETE needs `?confirm=true` to cascade-delete a non-empty namespace; without
-  it a non-empty namespace is a `409`.
+- The BFF's namespace DELETE uses `?confirm=<namespace-name>` for a cascade;
+  the BFF checks the literal value against the decoded target before forwarding
+  and translates an accepted request to Edge's existing `confirm=true` contract.
+  Without `confirm`, a non-empty namespace is a `409`.
 - The gateway's own configured namespaces (`FERRUM_NAMESPACE`,
   `FERRUM_CP_NAMESPACES`) and the last remaining registry row cannot be renamed
   or deleted; expect `409`.
@@ -391,8 +393,10 @@ Namespaces are a full CRUD registry on the gateway, not just a header value.
   cascade checkbox. Stage 1 always sends the **unconfirmed** DELETE, so an empty
   namespace goes in one click. The gateway's `409` ("not empty") promotes stage
   2, which shows real occupancy counts and gates the cascade behind typing the
-  namespace name. This is the only type-to-confirm in the app, because it is
-  the highest-blast-radius action.
+  namespace name. The cascade request sends `confirm=<namespace-name>`; the BFF
+  requires the literal value to match the once-decoded target namespace before
+  forwarding it to Edge as `confirm=true`. Bare `confirm=true`, a different
+  name, or an encoded spelling is rejected with `400`.
 - Only an occupancy `409` is cascadable. Protected-namespace and
   last-registry-row `409`s are terminal: `isCascadableDeleteError()` filters
   them out so the UI never offers a cascade that would fail again.
