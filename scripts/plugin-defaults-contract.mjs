@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import {
   DEFAULT_PLUGIN_CONFIGS,
   PLUGIN_METADATA,
@@ -19,7 +20,7 @@ export const ACCEPTED_PLUGIN_DEFAULTS = [
   "grpc_method_router", "grpc_web", "http_logging", "ip_restriction", "jwks_auth",
   "jwt_auth", "key_auth", "ldap_auth", "loki_logging", "mcp_gateway",
   "mesh_authz", "mesh_outbound_registry", "mesh_route_dispatch", "oauth2_introspection",
-  "opa", "otel_tracing", "prometheus_metrics", "rate_limiting",
+  "oidc_relying_party", "opa", "otel_tracing", "prometheus_metrics", "rate_limiting",
   "request_deduplication", "request_mirror", "request_size_limiting",
   "request_termination", "request_transformer", "response_caching", "response_mock",
   "response_size_limiting", "response_transformer", "security_headers",
@@ -30,8 +31,8 @@ export const ACCEPTED_PLUGIN_DEFAULTS = [
   "ws_message_size_limiting", "ws_rate_limiting",
 ];
 
-// The OIDC template intentionally has no usable key. Do not send it enabled
-// to Edge: Foundry must require an operator-owned value before making a write.
+// The OIDC template intentionally has no key; the contract injects a generated
+// operator-owned value when checking the remaining template fields with Edge.
 export const OPERATOR_INPUT_REQUIRED = {
   oidc_relying_party: "session.encryption_secret",
 };
@@ -75,13 +76,17 @@ function assertStatus(response, expected, context) {
     `${context}: expected ${expected.join("/")}, received ${response.status}: ${JSON.stringify(response.body)}`);
 }
 
+function valueAtPath(value, path) {
+  return path.split(".").reduce((current, key) => current?.[key], value);
+}
+
 export async function verifyPluginDefaults(exchange, { report = console.log } = {}) {
   const names = Object.keys(DEFAULT_PLUGIN_CONFIGS).sort();
   assert.deepEqual(names, Object.keys(PLUGIN_METADATA).filter((name) => !isInternalPlugin(name)).sort());
   const expectedNames = [
     ...ACCEPTED_PLUGIN_DEFAULTS,
     ...Object.keys(OPERATOR_INPUT_REJECTIONS),
-    ...Object.keys(OPERATOR_INPUT_REQUIRED),
+    ...Object.keys(OPERATOR_INPUT_REQUIRED).filter((name) => !ACCEPTED_PLUGIN_DEFAULTS.includes(name)),
   ].sort();
   assert.equal(new Set(expectedNames).size, 81, "review catalog membership when changing the 81-template baseline");
   assert.deepEqual(names, expectedNames, "every real template needs an explicit admission expectation");
@@ -95,15 +100,17 @@ export async function verifyPluginDefaults(exchange, { report = console.log } = 
   const results = [];
   for (const name of names) {
     const requiredInput = OPERATOR_INPUT_REQUIRED[name];
+    const config = getPluginConfigDefault(name);
     if (requiredInput) {
       try {
-        assert.equal(getPluginConfigDefault(name).session?.encryption_secret, "",
+        assert.equal(valueAtPath(config, requiredInput), "",
           `${name}: ${requiredInput} must not have a template value`);
-        results.push({ name, status: "operator-input-required", field: requiredInput });
+        config.session.encryption_secret = randomBytes(32).toString("base64");
+        // Continue through the normal admission path with safe operator input.
       } catch (error) {
         failures.push(new Error(`${name}: ${error.message}`, { cause: error }));
+        continue;
       }
-      continue;
     }
     const id = `contract-default-${name}`;
     // A TCP throttle must target a TCP listener. OpenAPI admission must reach
@@ -135,10 +142,16 @@ export async function verifyPluginDefaults(exchange, { report = console.log } = 
           scope: needsProxy ? "proxy" : "global",
           ...(needsProxy ? { proxy_id: proxyId } : {}),
           enabled: true,
-          config: getPluginConfigDefault(name),
+          config,
         },
       });
-      results.push({ name, scope: needsProxy ? "proxy" : "global", status: response.status, error: response.body?.error });
+      results.push({
+        name,
+        scope: needsProxy ? "proxy" : "global",
+        status: response.status,
+        ...(requiredInput ? { field: requiredInput } : {}),
+        error: response.body?.error,
+      });
       const rejection = OPERATOR_INPUT_REJECTIONS[name];
       assertStatus(response, [rejection?.status ?? 201], name);
       if (rejection) {

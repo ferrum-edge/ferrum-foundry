@@ -60,8 +60,11 @@ async function submit() {
   });
 }
 
-const configWithSecret = (encryptionSecret: string) => ({
-  session: { encryption_secret: encryptionSecret },
+const configWithSecret = (encryptionSecret: string, previous?: string | null) => ({
+  session: {
+    encryption_secret: encryptionSecret,
+    ...(previous !== undefined ? { encryption_secret_previous: previous } : {}),
+  },
 });
 
 describe("OIDC session encryption secret", () => {
@@ -70,12 +73,31 @@ describe("OIDC session encryption secret", () => {
     ["whitespace", "   "],
     ["the published default", "change-me-32-byte-minimum-secret!!"],
     ["a template placeholder", "replace-with-a-random-secret"],
+    ["Edge's documented placeholder", "${OIDC_SESSION_SECRET_32_BYTES_MIN}"],
+    ["a changeme placeholder", "ChAnGeMe"],
+    ["a change_me placeholder", "CHANGE_ME"],
+    ["a replace-me placeholder", "RePlAcE-Me-with-a-random-secret"],
+    ["a short secret", "too-short"],
   ])("blocks enabling with %s", async (_label, secret) => {
     await renderForm(configWithSecret(secret));
     await submit();
 
     expect(onSubmit).not.toHaveBeenCalled();
-    expect(host.textContent).toContain("unique session encryption secret");
+    expect(host.textContent).toContain("session encryption secret");
+  });
+
+  it.each([
+    ["the published default", "change-me-32-byte-minimum-secret!!"],
+    ["Edge's documented placeholder", "${OIDC_SESSION_SECRET_32_BYTES_MIN}"],
+    ["a change_me placeholder", "CHANGE_ME"],
+    ["a replace-me placeholder", "replace-me-with-a-random-secret"],
+    ["a short secret", "short"],
+  ])("blocks enabling with %s as the previous key", async (_label, previous) => {
+    await renderForm(configWithSecret("operator-generated-secret-value", previous));
+    await submit();
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(host.textContent).toContain("session encryption secret");
   });
 
   it("allows a disabled configuration to be saved before the operator sets the key", async () => {
@@ -87,6 +109,20 @@ describe("OIDC session encryption secret", () => {
 
   it("allows an operator-supplied key", async () => {
     await renderForm(configWithSecret("operator-generated-secret-value"));
+    await submit();
+
+    expect(onSubmit).toHaveBeenCalledOnce();
+  });
+
+  it("allows 32-byte current and previous keys", async () => {
+    await renderForm(configWithSecret("c".repeat(32), "p".repeat(32)));
+    await submit();
+
+    expect(onSubmit).toHaveBeenCalledOnce();
+  });
+
+  it("allows an omitted or null previous key", async () => {
+    await renderForm(configWithSecret("operator-generated-secret-value", null));
     await submit();
 
     expect(onSubmit).toHaveBeenCalledOnce();

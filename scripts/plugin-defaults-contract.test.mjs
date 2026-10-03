@@ -60,16 +60,25 @@ test("hosted lifecycle admits the catalog before seeding the process-wide metric
   );
 });
 
-test("submits safe enabled defaults and requires OIDC input before any write", async () => {
+test("submits enabled defaults with a generated OIDC key", async () => {
   const fixture = transport();
   assert.deepEqual(await verifyPluginDefaults(fixture.exchange, quiet), {
-    templates: 81, accepted: 73, operatorInput: 8,
+    templates: 81, accepted: 74, operatorInput: 8,
   });
-  assert.equal(fixture.writes.length, 80);
+  assert.equal(fixture.writes.length, 81);
   assert.ok(OPERATOR_INPUT_REQUIRED.oidc_relying_party);
-  assert.equal(fixture.writes.some((write) => write.plugin_name === "oidc_relying_party"), false);
+  const oidcWrite = fixture.writes.find((write) => write.plugin_name === "oidc_relying_party");
+  assert.ok(oidcWrite);
+  assert.equal(oidcWrite.enabled, true);
+  assert.ok(Buffer.from(oidcWrite.config.session.encryption_secret, "base64").length >= 32);
   for (const write of fixture.writes) {
-    assert.deepEqual(write.config, getPluginConfigDefault(write.plugin_name));
+    if (write.plugin_name === "oidc_relying_party") {
+      const expected = getPluginConfigDefault(write.plugin_name);
+      expected.session.encryption_secret = write.config.session.encryption_secret;
+      assert.deepEqual(write.config, expected);
+    } else {
+      assert.deepEqual(write.config, getPluginConfigDefault(write.plugin_name));
+    }
     assert.equal(write.enabled, true);
     const needsProxy = ["openapi_validator", "tcp_connection_throttle"].includes(write.plugin_name);
     assert.equal(write.scope, needsProxy ? "proxy" : "global");
@@ -107,13 +116,13 @@ for (const name of Object.keys(OPERATOR_INPUT_REJECTIONS)) {
       ? { status: 400, body: { error: `${OPERATOR_INPUT_REJECTIONS[name].error}; unknown config key 'drift'` } }
       : undefined);
     await assert.rejects(verifyPluginDefaults(fixture.exchange, quiet), /rejection reason drift/);
-    assert.equal(fixture.writes.length, 80, "continue through all templates after a failure");
+    assert.equal(fixture.writes.length, 81, "continue through all templates after a failure");
   });
 
   test(`${name}: unexpected acceptance fails and is cleaned up`, async () => {
     const fixture = transport((body) => body.plugin_name === name ? { status: 201, body } : undefined);
     await assert.rejects(verifyPluginDefaults(fixture.exchange, quiet), /expected 400, received 201/);
-    assert.equal(fixture.writes.length, 80);
+    assert.equal(fixture.writes.length, 81);
     assert.equal(fixture.plugins.size, 0);
     assert.equal(fixture.proxies.size, 0);
   });
@@ -130,7 +139,7 @@ test("an accepted control's rejection and an exemption's wrong status both fail"
     assert.match(error.message, /mtls_auth: expected 400, received 503/);
     return true;
   });
-  assert.equal(fixture.writes.length, 80);
+  assert.equal(fixture.writes.length, 81);
 });
 
 test("gateway catalog drift fails before any submission", async () => {
@@ -146,7 +155,7 @@ test("a Prometheus registry conflict fails rather than exempting the template", 
     ? { status: 409, body: { error: "prometheus_metrics permits at most one enabled global instance; another config already owns the process registry" } }
     : undefined);
   await assert.rejects(verifyPluginDefaults(fixture.exchange, quiet), /prometheus_metrics: expected 201, received 409/);
-  assert.equal(fixture.writes.length, 80);
+  assert.equal(fixture.writes.length, 81);
 });
 
 test("Kafka's constructor-error prefix cannot substitute for the egress field-validation error", async () => {
@@ -154,7 +163,7 @@ test("Kafka's constructor-error prefix cannot substitute for the egress field-va
     ? { status: 400, body: { error: OPERATOR_INPUT_REJECTIONS.kafka_logging.error.replace("Invalid plugin config fields:", "Invalid plugin config:") } }
     : undefined);
   await assert.rejects(verifyPluginDefaults(fixture.exchange, quiet), /kafka_logging: rejection reason drift/);
-  assert.equal(fixture.writes.length, 80);
+  assert.equal(fixture.writes.length, 81);
 });
 
 test("cleanup failure fails the gate and stops potentially contaminated submissions", async () => {
