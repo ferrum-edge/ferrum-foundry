@@ -812,7 +812,7 @@ export const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
       },
     ],
     session: {
-      encryption_secret: "change-me-32-byte-minimum-secret!!",
+      encryption_secret: "",
       cookie_name: "ferrum_session",
       ttl_secs: 3600,
       idle_ttl_secs: 1800,
@@ -1158,6 +1158,47 @@ export const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
 export function getPluginConfigDefault(pluginName: string): PluginConfigDefault {
   const config = DEFAULT_PLUGIN_CONFIGS[pluginName] ?? {};
   return JSON.parse(JSON.stringify(config)) as PluginConfigDefault;
+}
+
+/** Refuse to enable the OIDC template without an operator-owned session key. */
+export function oidcEncryptionSecretProblem(config: unknown): string | null {
+  const session = config && typeof config === "object" && !Array.isArray(config)
+    ? (config as Record<string, unknown>).session
+    : undefined;
+  const sessionConfig = session && typeof session === "object" && !Array.isArray(session)
+    ? session as Record<string, unknown>
+    : undefined;
+  const secret = sessionConfig?.encryption_secret;
+
+  if (typeof secret !== "string" || !secret.trim()) {
+    return "Enter a unique session encryption secret before enabling OIDC Relying Party.";
+  }
+  const secretProblem = oidcSecretValueProblem(secret);
+  if (secretProblem) return secretProblem;
+
+  const previous = sessionConfig?.encryption_secret_previous;
+  if (previous !== undefined && previous !== null) {
+    if (typeof previous !== "string") {
+      return "Enter a unique previous session encryption secret with at least 32 bytes.";
+    }
+    const previousProblem = oidcSecretValueProblem(previous, "previous ");
+    if (previousProblem) return previousProblem;
+  }
+  return null;
+}
+
+function oidcSecretValueProblem(value: string, label = ""): string | null {
+  const secret = value.trim();
+  if (
+    secret.startsWith("${") ||
+    /^(?:change[-_]?me(?:[-_].*)?|replace[-_](?:with|me)(?:[-_].*)?)$/i.test(secret)
+  ) {
+    return `Replace the placeholder with a unique ${label}session encryption secret.`;
+  }
+  if (new TextEncoder().encode(secret).length < 32) {
+    return `The ${label}session encryption secret must be at least 32 bytes.`;
+  }
+  return null;
 }
 
 export function formatPluginConfigDefault(pluginName: string): string {

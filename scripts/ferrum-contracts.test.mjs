@@ -105,16 +105,32 @@ test("Foundry plugin metadata and defaults use the pinned plugin catalog", () =>
       `${name} default must be an object matching its config schema`);
   }
 
-  // The Pinned Gateway Contract job submits these same defaults unchanged with
-  // enabled: true, so Edge validates each config against its pointed schema.
+  // The Pinned Gateway Contract job submits defaults unchanged except for
+  // declared, generated operator inputs, which are checked before submission.
   const gatewayContract = readFileSync(
     new URL("./plugin-defaults-contract.mjs", import.meta.url),
     "utf8",
   );
   assert.match(
     gatewayContract,
-    /config:\s*getPluginConfigDefault\(name\)/,
-    "the pinned-gateway schema check must submit Foundry's defaults unchanged");
+    /const config = getPluginConfigDefault\(name\);/,
+    "the pinned-gateway schema check must start from Foundry's defaults",
+  );
+  assert.match(
+    gatewayContract,
+    /config\.session\.encryption_secret = randomBytes\(32\)\.toString\("base64"\);/,
+    "the pinned-gateway schema check must generate a 32-byte OIDC operator secret",
+  );
+  assert.match(
+    gatewayContract,
+    /assertOnlyRequiredOperatorInputs\(name, config\);/,
+    "the pinned-gateway schema check must verify no undeclared default changes",
+  );
+  assert.match(
+    gatewayContract,
+    /config,\s*\},\s*\}\);/,
+    "the pinned-gateway schema check must submit the config it verified",
+  );
 });
 
 test("provisioned-by usage follows the pinned vocabulary", () => {
