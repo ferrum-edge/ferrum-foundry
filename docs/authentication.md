@@ -39,6 +39,15 @@ The last three names can be changed with `FERRUM_TRUSTED_PROXY_USER_HEADER`,
 `FERRUM_TRUSTED_PROXY_NAMESPACES_HEADER`. Each of the four headers may appear
 only once per request.
 
+Startup refuses identity header names that would let one header carry two
+meanings. Compared case-insensitively, the four names must all differ (a
+role header that is also the namespace header would read a grant as a role;
+a user header that is also `X-Ferrum-Auth-Secret` would return the proof as
+the actor), and none may be a header HTTP or the BFF already uses, such as
+`Authorization`, `Cookie`, `Host`, a hop-by-hop header, `X-CSRF-Token`,
+`X-Ferrum-Namespace`, or `X-Foundry-Gateway-Target`. The full list is in
+[Deployment](deployment.md#the-proxy-must-strip-and-inject-these-headers).
+
 Namespace header rules:
 
 - A non-admin identity without the namespace header is rejected.

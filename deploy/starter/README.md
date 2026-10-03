@@ -65,6 +65,11 @@ node ../../scripts/starter-preflight.mjs --env .env
 Then open <http://127.0.0.1:8088> and follow
 [`docs/getting-started.md`](../../docs/getting-started.md).
 
+`bootstrap-demo.sh` also sets `FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true`, so the
+BFF may reach the throwaway gateway over plaintext on the compose network.
+Without it, Foundry refuses a plaintext admin URL to any host but loopback;
+the production `.env` leaves it `false` and uses `https`.
+
 The demo publishes only loopback ports (`FOUNDRY_DEMO_PORT` 8088,
 `FERRUM_DEMO_PROXY_PORT` 8000, `FERRUM_DEMO_ADMIN_PORT` 9000), and its identity
 stub trusts a request header (`X-Demo-Identity: admin`, `operator`, `viewer`,

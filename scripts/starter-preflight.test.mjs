@@ -98,6 +98,34 @@ test("a plaintext admin URL is unknown, not a pass", () => {
   assert.match(result.remedy, /disposable local stack/);
 });
 
+test("a plaintext admin URL to another host fails, as the production BFF refuses it", () => {
+  for (const url of [
+    "http://ferrum-admin.internal:9000",
+    "http://10.0.0.5:9000",
+    "http://127.0.0.1.gateway.example:9000",
+  ]) {
+    const result = checkAdminUrl({ FERRUM_ADMIN_URL: url });
+    assert.equal(result.status, FAIL, url);
+    assert.match(result.remedy, /https/);
+  }
+});
+
+test("the explicit plaintext override is reported as unknown, never a pass", () => {
+  const result = checkAdminUrl({
+    FERRUM_ADMIN_URL: "http://demo-gateway:9000",
+    FERRUM_ALLOW_INSECURE_ADMIN_HTTP: "true",
+  });
+  assert.equal(result.status, UNKNOWN);
+  assert.match(result.detail, /FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true/);
+  assert.equal(
+    checkAdminUrl({
+      FERRUM_ADMIN_URL: "http://demo-gateway:9000",
+      FERRUM_ALLOW_INSECURE_ADMIN_HTTP: "1",
+    }).status,
+    FAIL,
+  );
+});
+
 /* ---------------- TLS trust ---------------- */
 
 test("a CA bundle outside its approved root fails", async () => {
@@ -185,6 +213,62 @@ test("a missing namespace is unknown rather than silently skipped", async () => 
   assert.equal(result.status, UNKNOWN);
 });
 
+test("no admin token is minted or sent to a plaintext remote admin URL", async () => {
+  for (const env of [
+    { ...workingEnv, FERRUM_ADMIN_URL: "http://ferrum-admin.internal:9000" },
+    {
+      ...workingEnv,
+      FERRUM_ADMIN_URL: "http://demo-gateway:9000",
+      FERRUM_ALLOW_INSECURE_ADMIN_HTTP: "true",
+    },
+    { ...workingEnv, FERRUM_ADMIN_URL: "http://127.0.0.1.gateway.example:9000" },
+  ]) {
+    let requests = 0;
+    const [result] = await checkAdminCredentials(env, async () => {
+      requests += 1;
+      return new Response("", { status: 200 });
+    });
+    assert.equal(result.status, UNKNOWN, env.FERRUM_ADMIN_URL);
+    assert.match(result.detail, /neither https nor loopback/);
+    assert.equal(requests, 0, `${env.FERRUM_ADMIN_URL} must receive no credentialed probe`);
+  }
+});
+
+test("a loopback plaintext admin URL still gets the credentialed probe", async () => {
+  let seen;
+  const results = await checkAdminCredentials(
+    { ...workingEnv, FERRUM_ADMIN_URL: "http://127.0.0.1:9000" },
+    async (url, init) => {
+      seen = { url, headers: init.headers };
+      return Response.json({ data: [] });
+    },
+  );
+  assert.deepEqual(results.map((result) => result.status), [PASS, PASS]);
+  assert.match(seen.url, /^http:\/\/127\.0\.0\.1:9000\/proxies/);
+  assert.match(seen.headers.authorization, /^Bearer ey/);
+});
+
+test("the full preflight sends only the anonymous health probe to a remote plaintext gateway", async () => {
+  const sent = [];
+  const report = await runPreflight(
+    { ...workingEnv, FERRUM_ADMIN_URL: "http://ferrum-admin.internal:9000" },
+    {
+      fetch: async (url, init = {}) => {
+        sent.push({ url: String(url), headers: init.headers ?? {} });
+        return new Response("", { status: 200 });
+      },
+      fs: statFor(),
+    },
+  );
+  assert.ok(report.failed > 0, "the plaintext remote admin URL must fail the preflight");
+  const toGateway = sent.filter(({ url }) => url.startsWith("http://ferrum-admin.internal:9000"));
+  assert.deepEqual(toGateway.map(({ url }) => url), ["http://ferrum-admin.internal:9000/health"]);
+  assert.ok(
+    sent.every(({ headers }) => !Object.keys(headers).some((key) => key.toLowerCase() === "authorization")),
+    "no request may carry an admin token",
+  );
+});
+
 /* ---------------- trust boundary ---------------- */
 
 test("a served forged-identity request fails", async () => {
@@ -253,6 +337,24 @@ test("the example env holds no working secret", async () => {
     [FAIL, FAIL],
     ".env.example must ship placeholders that the preflight refuses",
   );
+});
+
+test("only the demo bootstrap lets Foundry use a plaintext admin URL to another host", async () => {
+  const compose = await readFile(new URL("compose.yaml", STARTER), "utf8");
+  const foundry = compose.slice(compose.indexOf("  foundry:"), compose.indexOf("  oauth2-proxy:"));
+  assert.match(
+    foundry,
+    /FERRUM_ALLOW_INSECURE_ADMIN_HTTP: \$\{FERRUM_ALLOW_INSECURE_ADMIN_HTTP:-false\}/,
+    "the BFF must default to refusing remote plaintext in both profiles",
+  );
+
+  const example = parseEnvFile(await readFile(new URL(".env.example", STARTER), "utf8"));
+  assert.equal(example.FERRUM_ALLOW_INSECURE_ADMIN_HTTP, "false");
+  assert.equal(checkAdminUrl(example).status, PASS, "the production example must use https");
+
+  const bootstrap = await readFile(new URL("bootstrap-demo.sh", STARTER), "utf8");
+  assert.match(bootstrap, /^FERRUM_ADMIN_URL=http:\/\/demo-gateway:9000$/m);
+  assert.match(bootstrap, /^FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true$/m);
 });
 
 test("production and demo proxies share one authorization policy", async () => {

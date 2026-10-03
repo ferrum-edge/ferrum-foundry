@@ -11,8 +11,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The OIDC Relying Party template no longer includes a public session encryption
   key. Foundry blocks enabling it until an operator supplies a unique secret,
-  and the plugin defaults contract no longer enables the template without that
-  input (GHSA-hjw6-685j-p5hw).
+  and the plugin defaults contract supplies a generated key when checking the
+  remaining template fields (GHSA-hjw6-685j-p5hw). Deployments that enabled
+  OIDC from this template must rotate `session.encryption_secret` now. Do not
+  carry the old public key in `session.encryption_secret_previous`.
+- GHSA-27j6-vr5h-8p6v: with `NODE_ENV=production`, the BFF refuses to start
+  when `FERRUM_ADMIN_URL` or a `FERRUM_ADMIN_ALLOWED_ORIGINS` entry is a
+  plaintext `http://` origin on a host other than loopback (exact `localhost`,
+  `127.0.0.0/8`, or `::1`), and refuses such a runtime `adminUrl` change with
+  `400 FERRUM_BFF_INVALID_SETTINGS`, because every admin request carries a
+  signed bearer token. `FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true` is the explicit
+  exception for a disposable stack; the starter's demo bootstrap, the e2e
+  overlay, and the CI container gate set it for their in-network gateways. The
+  seeder and the helpers that share its configuration (verify, route smoke,
+  contract smoke, capability parity) refuse a remote plaintext admin origin
+  with no exception, and the starter preflight no longer mints or sends its
+  credentialed probe to one; it reports a remote plaintext admin URL as a
+  failure, or as unknown under the override. Breaking: a production
+  deployment using remote `http://` must move to `https` or set the override.
+- GHSA-74cv-h27v-866v: startup refuses trusted-proxy identity header names
+  that collide. Compared case-insensitively, the user, role, and namespaces
+  headers must differ from each other and from the fixed
+  `X-Ferrum-Auth-Secret`, and none may be a header HTTP or the BFF already
+  uses (hop-by-hop and credential headers, request framing and forwarding
+  headers, `X-CSRF-Token`, `X-Ferrum-Namespace`, `X-Foundry-Gateway-Target`).
 
 ## [0.4.0] - 2026-10-01
 

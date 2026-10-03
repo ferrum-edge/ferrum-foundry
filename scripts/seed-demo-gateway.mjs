@@ -8,6 +8,7 @@ import {
 import { isIP } from "node:net";
 import { pathToFileURL } from "node:url";
 import { signAdminJwt } from "../shared/admin-jwt.js";
+import { mayCarrySecret } from "./starter-preflight.mjs";
 
 const CONTRACT_REVISION = "50e65b5798555209114cbe08ab2d011b3896ad00";
 const COLLECTION_PAGE_SIZE = 100;
@@ -94,6 +95,23 @@ function parseHttpOrigin(value, name, fallback) {
   return parsed.origin;
 }
 
+/**
+ * Every request to the admin origin carries a signed admin token, so the
+ * origin must use https or be this machine's loopback. There is no override:
+ * these helpers run on a developer's or CI host, which can always reach a
+ * gateway through a published loopback port.
+ */
+function parseAdminOrigin(value, name, fallback) {
+  const origin = parseHttpOrigin(value, name, fallback);
+  if (!mayCarrySecret(origin)) {
+    throw new Error(
+      `${name} must use https unless it is a loopback address (127.0.0.0/8, ::1, or localhost); `
+      + "an admin token is never sent in plaintext to another host",
+    );
+  }
+  return origin;
+}
+
 function parseBackendHost(value) {
   const host = value?.trim() || "127.0.0.1";
   const validHostname = host.length <= 253 && host.split(".").every((label) => (
@@ -111,7 +129,7 @@ export function readSeedConfig(env = process.env) {
   if (!jwtSecret?.trim()) throw new Error("FERRUM_JWT_SECRET is required; the demo seeder has no fallback signing key");
 
   return {
-    adminUrl: parseHttpOrigin(env.FERRUM_ADMIN_URL, "FERRUM_ADMIN_URL", "http://127.0.0.1:9000"),
+    adminUrl: parseAdminOrigin(env.FERRUM_ADMIN_URL, "FERRUM_ADMIN_URL", "http://127.0.0.1:9000"),
     proxyBaseUrl: parseHttpOrigin(
       env.FERRUM_DEMO_PROXY_URL,
       "FERRUM_DEMO_PROXY_URL",
