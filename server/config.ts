@@ -2,6 +2,7 @@ import { dirname, resolve } from 'node:path';
 import { isIP } from 'node:net';
 import { loadCaBundle } from './ca.js';
 import { parseCidr } from './cidr.js';
+import { GATEWAY_TARGET_HEADER } from './gateway-target.js';
 import {
   DEFAULT_RESPONSE_TIMEOUT,
   DEFAULT_UPLOAD_TIMEOUT,
@@ -16,6 +17,12 @@ export interface Config {
   initialAdminOrigin: string;
   adminAllowedOrigins: string[];
   adminAllowedCidrs: string[];
+  /**
+   * Every admin origin must use https unless it is a literal loopback address.
+   * True under `NODE_ENV=production` unless `FERRUM_ALLOW_INSECURE_ADMIN_HTTP`
+   * explicitly permits plaintext to another host.
+   */
+  requireSecureAdminOrigin: boolean;
   jwtSecret: string;
   jwtIssuer: string;
   jwtTtl: number;
@@ -76,6 +83,47 @@ const NAMESPACE_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$/;
 /** The only spelling of a grant for every namespace. */
 export const NAMESPACE_WILDCARD = '*';
 const HEADER_NAME_PATTERN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+/** The fixed header carrying the trusted-proxy proof secret. */
+export const TRUSTED_PROXY_SECRET_HEADER = 'x-ferrum-auth-secret';
+/**
+ * Header names an identity assertion may never reuse: hop-by-hop and
+ * connection-management headers, credentials and cookies, the request framing
+ * the BFF forwards, and the BFF's own control headers. Reusing one would make a
+ * single wire header mean two different things.
+ */
+export const RESERVED_IDENTITY_HEADERS: ReadonlySet<string> = new Set([
+  'accept',
+  'authorization',
+  'connection',
+  'content-length',
+  'content-type',
+  'cookie',
+  'forwarded',
+  'host',
+  'if-match',
+  'if-none-match',
+  'keep-alive',
+  'origin',
+  'prefer',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'proxy-connection',
+  'range',
+  'referer',
+  'set-cookie',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+  'www-authenticate',
+  'x-csrf-token',
+  'x-ferrum-namespace',
+  'x-forwarded-for',
+  'x-forwarded-host',
+  'x-forwarded-proto',
+  'x-real-ip',
+  GATEWAY_TARGET_HEADER,
+]);
 
 function requireEnv(name: string): string {
   const value = process.env[name]?.trim();
@@ -207,8 +255,41 @@ export function normalizeAdminUrl(value: string, name = 'FERRUM_ADMIN_URL'): str
   return parsed.origin;
 }
 
-function parseOrigins(value: string | undefined): string[] {
-  return (parseList(value) ?? []).map((entry) => normalizeAdminUrl(entry, 'FERRUM_ADMIN_ALLOWED_ORIGINS'));
+/**
+ * True when an admin origin may carry a bearer token: over TLS, or in
+ * plaintext only to this machine. Loopback is exact `localhost`, an IPv4
+ * literal in `127.0.0.0/8`, or `::1`; a hostname is never judged by its
+ * spelling, so `127.0.0.1.example` is remote.
+ */
+export function isSecureAdminOrigin(origin: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol === 'https:') return true;
+  if (parsed.protocol !== 'http:') return false;
+  const host = parsed.hostname.replace(/^\[|\]$/g, '');
+  return host === 'localhost' || (isIP(host) === 4 && host.startsWith('127.')) || host === '::1';
+}
+
+function assertSecureAdminOrigin(origin: string, name: string, required: boolean): string {
+  if (required && !isSecureAdminOrigin(origin)) {
+    throw new Error(
+      `${name} must use https unless it is a loopback address (127.0.0.0/8, ::1, or localhost): `
+      + 'plaintext would expose signed admin tokens. FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true '
+      + 'permits it for a disposable, isolated development stack only',
+    );
+  }
+  return origin;
+}
+
+function parseOrigins(value: string | undefined, requireSecure: boolean): string[] {
+  const name = 'FERRUM_ADMIN_ALLOWED_ORIGINS';
+  return (parseList(value) ?? []).map((entry) => (
+    assertSecureAdminOrigin(normalizeAdminUrl(entry, name), name, requireSecure)
+  ));
 }
 
 function parseCidrs(value: string | undefined): string[] {
@@ -243,7 +324,44 @@ function validateSecret(value: string, name: string): string {
 function validateHeaderName(value: string, name: string): string {
   const normalized = value.toLowerCase();
   if (!HEADER_NAME_PATTERN.test(normalized)) throw new Error(`${name} is not a valid HTTP header name`);
+  if (RESERVED_IDENTITY_HEADERS.has(normalized)) {
+    throw new Error(`${name} must not be ${normalized}, which the BFF or HTTP reserves`);
+  }
   return normalized;
+}
+
+interface TrustedProxyHeaders {
+  trustedProxyUserHeader: string;
+  trustedProxyRoleHeader: string;
+  trustedProxyNamespacesHeader: string;
+}
+
+/**
+ * Each identity assertion needs its own wire header. Two settings naming the
+ * same header (after case folding) would let one value be read as both, for
+ * example a namespace grant as a role, or the proof secret as the actor.
+ */
+function parseTrustedProxyHeaders(): TrustedProxyHeaders {
+  const configured = [
+    ['FERRUM_TRUSTED_PROXY_USER_HEADER', 'x-forwarded-user'],
+    ['FERRUM_TRUSTED_PROXY_ROLE_HEADER', 'x-ferrum-role'],
+    ['FERRUM_TRUSTED_PROXY_NAMESPACES_HEADER', 'x-ferrum-namespaces'],
+  ].map(([name, fallback]) => ({
+    name,
+    header: validateHeaderName(optionalEnv(name) ?? fallback, name),
+  }));
+  const claimed = new Map<string, string>([[TRUSTED_PROXY_SECRET_HEADER, 'the proof secret header']]);
+  for (const { name, header } of configured) {
+    const owner = claimed.get(header);
+    if (owner) throw new Error(`${name} must not reuse ${header}, already used by ${owner}`);
+    claimed.set(header, name);
+  }
+  const [user, role, namespaces] = configured;
+  return {
+    trustedProxyUserHeader: user.header,
+    trustedProxyRoleHeader: role.header,
+    trustedProxyNamespacesHeader: namespaces.header,
+  };
 }
 
 function parseAuthRedirect(value: string | undefined, name: string): string | undefined {
@@ -269,7 +387,16 @@ function validateRuntimeNumber(name: string, value: unknown, minimum: number, ma
 }
 
 function parseBaseConfig(): Config {
-  const adminUrl = normalizeAdminUrl(requireEnv('FERRUM_ADMIN_URL'));
+  const isProduction = process.env.NODE_ENV === 'production';
+  // Plaintext to another host would hand every signed admin token, and the
+  // gateway's answers, to anyone on the path. Production refuses it unless
+  // the operator explicitly opts in for a disposable stack.
+  const requireSecure = isProduction && !parseBoolean('FERRUM_ALLOW_INSECURE_ADMIN_HTTP', false);
+  const adminUrl = assertSecureAdminOrigin(
+    normalizeAdminUrl(requireEnv('FERRUM_ADMIN_URL')),
+    'FERRUM_ADMIN_URL',
+    requireSecure,
+  );
   const jwtSecret = validateSigningKey(requireExactEnv('FERRUM_JWT_SECRET'), 'FERRUM_JWT_SECRET');
   const jwtMaxTtl = parseInteger('FERRUM_JWT_MAX_TTL', 3600, 0, 86_400);
   const jwtTtl = parseInteger('FERRUM_JWT_TTL', 900, 1, 86_400);
@@ -282,7 +409,6 @@ function parseBaseConfig(): Config {
     throw new Error('FERRUM_AUTH_MODE must be static or trusted-proxy');
   }
   const authMode: AuthMode = authModeRaw;
-  const isProduction = process.env.NODE_ENV === 'production';
   if (isProduction && authMode === 'static' && !parseBoolean('FERRUM_ALLOW_INSECURE_STATIC_AUTH', false)) {
     throw new Error(
       'Static authentication is disabled in production; configure FERRUM_AUTH_MODE=trusted-proxy',
@@ -310,7 +436,7 @@ function parseBaseConfig(): Config {
   }
 
   const allowRuntimeSettings = parseBoolean('FERRUM_ALLOW_RUNTIME_SETTINGS', false);
-  const adminAllowedOrigins = parseOrigins(optionalEnv('FERRUM_ADMIN_ALLOWED_ORIGINS'));
+  const adminAllowedOrigins = parseOrigins(optionalEnv('FERRUM_ADMIN_ALLOWED_ORIGINS'), requireSecure);
   if (allowRuntimeSettings && adminAllowedOrigins.length === 0) {
     throw new Error('FERRUM_ADMIN_ALLOWED_ORIGINS is required when runtime settings are enabled');
   }
@@ -320,6 +446,7 @@ function parseBaseConfig(): Config {
     initialAdminOrigin: adminUrl,
     adminAllowedOrigins,
     adminAllowedCidrs: parseCidrs(optionalEnv('FERRUM_ADMIN_ALLOWED_CIDRS')),
+    requireSecureAdminOrigin: requireSecure,
     jwtSecret,
     jwtIssuer: optionalEnv('FERRUM_JWT_ISSUER') ?? 'ferrum-edge',
     jwtTtl,
@@ -344,18 +471,7 @@ function parseBaseConfig(): Config {
     bffAuthToken,
     sessionTtl: parseInteger('FERRUM_SESSION_TTL', 3600, 60, 86_400),
     trustedProxySecret,
-    trustedProxyUserHeader: validateHeaderName(
-      optionalEnv('FERRUM_TRUSTED_PROXY_USER_HEADER') ?? 'x-forwarded-user',
-      'FERRUM_TRUSTED_PROXY_USER_HEADER',
-    ),
-    trustedProxyRoleHeader: validateHeaderName(
-      optionalEnv('FERRUM_TRUSTED_PROXY_ROLE_HEADER') ?? 'x-ferrum-role',
-      'FERRUM_TRUSTED_PROXY_ROLE_HEADER',
-    ),
-    trustedProxyNamespacesHeader: validateHeaderName(
-      optionalEnv('FERRUM_TRUSTED_PROXY_NAMESPACES_HEADER') ?? 'x-ferrum-namespaces',
-      'FERRUM_TRUSTED_PROXY_NAMESPACES_HEADER',
-    ),
+    ...parseTrustedProxyHeaders(),
     authLoginUrl: parseAuthRedirect(optionalEnv('FERRUM_AUTH_LOGIN_URL'), 'FERRUM_AUTH_LOGIN_URL'),
     authLogoutUrl: parseAuthRedirect(optionalEnv('FERRUM_AUTH_LOGOUT_URL'), 'FERRUM_AUTH_LOGOUT_URL'),
     secureCookies: parseBoolean('FERRUM_SECURE_COOKIES', isProduction),
@@ -419,7 +535,11 @@ export async function updateRuntimeConfig(updates: Partial<RuntimeConfig>): Prom
 
   if (updates.adminUrl !== undefined) {
     if (typeof updates.adminUrl !== 'string') throw new Error('adminUrl must be a string');
-    const normalized = normalizeAdminUrl(updates.adminUrl, 'adminUrl');
+    const normalized = assertSecureAdminOrigin(
+      normalizeAdminUrl(updates.adminUrl, 'adminUrl'),
+      'adminUrl',
+      current.requireSecureAdminOrigin,
+    );
     const allowed = new Set([current.initialAdminOrigin, ...current.adminAllowedOrigins]);
     if (!allowed.has(normalized)) throw new Error('adminUrl is not in FERRUM_ADMIN_ALLOWED_ORIGINS');
     nextOverrides.adminUrl = normalized;

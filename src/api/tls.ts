@@ -668,6 +668,7 @@ export async function finalizeAcmeOrder(
       })
       .json<AcmeOrderFinalizeResponse>();
   } catch (error) {
+    if (error instanceof Error && error.name === "PathSegmentError") throw error;
     // A transport failure or upstream 5xx cannot prove the mutation stopped.
     const status = error instanceof Error && "response" in error
       ? (error as { response: Response }).response.status

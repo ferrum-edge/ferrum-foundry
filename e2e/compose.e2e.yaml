@@ -20,6 +20,9 @@ services:
       - "host.docker.internal:host-gateway"
     environment:
       FERRUM_ADMIN_URL: http://host.docker.internal:9500
+      # The forwarder is a plaintext test fixture on the CI host, reached from
+      # the container. Production refuses this without the explicit override.
+      FERRUM_ALLOW_INSECURE_ADMIN_HTTP: "true"
   demo-proxy:
     volumes:
       - ./../../e2e/nginx/policy.conf:/etc/nginx/identity/policy.conf:ro

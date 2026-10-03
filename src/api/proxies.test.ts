@@ -229,4 +229,21 @@ describe("proxy item path segments", () => {
 
     expect(paths).toEqual([]);
   });
+
+  it("keeps the advisory cascade retargeting payload inside the proxy item path", async () => {
+    await remove({ namespace: "tenant-a" }, "../namespaces/victim?confirm=true", null);
+
+    expect(paths).toEqual([
+      "/api/proxy/proxies/..%2Fnamespaces%2Fvictim%3Fconfirm%3Dtrue",
+    ]);
+    expect(paths.some((path) => path.includes("/namespaces/"))).toBe(false);
+  });
+
+  it("double-encodes an already encoded slash in an identifier", async () => {
+    await remove({ namespace: "tenant-a" }, "..%2Fnamespaces%2Fvictim%3Fconfirm%3Dtrue", null);
+
+    expect(paths).toEqual([
+      "/api/proxy/proxies/..%252Fnamespaces%252Fvictim%253Fconfirm%253Dtrue",
+    ]);
+  });
 });
