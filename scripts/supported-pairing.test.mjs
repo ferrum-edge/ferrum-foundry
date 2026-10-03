@@ -15,6 +15,7 @@ import {
   isPlaceholder,
   missingRequiredReferences,
   readSupportedPairing,
+  requireReleaseReady,
   validatePairing,
 } from "./supported-pairing.mjs";
 
@@ -300,6 +301,68 @@ describe("validatePairing", () => {
   });
 });
 
+describe("requireReleaseReady", () => {
+  // The candidate commit that prepares a release: status candidate, Foundry
+  // artifacts still placeholders. Its Edge release is already qualified.
+  const candidate = structuredClone(record);
+  candidate.status = "candidate";
+  for (const field of FOUNDRY_RELEASE_STEP_FIELDS) {
+    candidate.foundry[field] = `${PLACEHOLDER_PREFIX}: ${field}`;
+  }
+
+  it("passes the unreleased candidate the release workflow tags", () => {
+    assert.deepEqual(requireReleaseReady(candidate), {
+      ready: true,
+      edge: candidate.edge.release.version,
+      image: candidate.edge.image,
+    });
+  });
+
+  it("refuses a published version through foundryReleaseErrors", () => {
+    // The command's second check is foundryReleaseErrors: a released status or
+    // a recorded artifact must stop the tag even when the record validates.
+    const recorded = {
+      source_commit: "a".repeat(40),
+      image: `ferrumedge/ferrum-foundry@sha256:${"b".repeat(64)}`,
+      ci_evidence: "https://github.com/ferrum-edge/ferrum-foundry/actions/runs/123",
+    };
+    const publishedStatus = structuredClone(candidate);
+    publishedStatus.status = "released";
+    Object.assign(publishedStatus.foundry, recorded);
+    const publishedArtifact = structuredClone(candidate);
+    Object.assign(publishedArtifact.foundry, recorded);
+    for (const published of [publishedStatus, publishedArtifact]) {
+      assert.deepEqual(validatePairing(published), []);
+      assert.throws(
+        () => requireReleaseReady(published),
+        (error) => {
+          assert.match(error.message, /is not an unreleased candidate/);
+          assert.match(error.message, /Tag the commit that prepared this version/);
+          return true;
+        },
+      );
+    }
+  });
+
+  it("refuses an unqualified Edge release before it checks the candidate status", () => {
+    const unqualified = structuredClone(candidate);
+    unqualified.edge.release.image = `${PLACEHOLDER_PREFIX}: edge release image`;
+    assert.throws(
+      () => requireReleaseReady(unqualified),
+      /does not name a qualified Ferrum Edge release/,
+    );
+  });
+
+  it("wires the release-ready command to requireReleaseReady, not an inline check", () => {
+    // requireReleaseReady is the seam the tests above exercise; this pins that
+    // main() actually calls it rather than reverting to an inline edge check.
+    assert.match(
+      repoFile("scripts/supported-pairing.mjs"),
+      /command === "release-ready"\) \{\n\s+console\.log\(JSON\.stringify\(requireReleaseReady\(record\)\)\)/,
+    );
+  });
+});
+
 describe("repository alignment", () => {
   it("pins no Ferrum Edge image but the supported one outside history", () => {
     assert.deepEqual(findPairingDrift(record), []);
@@ -410,6 +473,34 @@ describe("repository alignment", () => {
       assert.match(manifest, /outputs:\n\s+digest: \$\{\{ steps\.identity\.outputs\.digest \}\}/);
       assert.match(release, /RELEASE_DIGEST: \$\{\{ needs\.docker-manifest\.outputs\.digest \}\}/);
       assert.match(release, /ferrumedge\/ferrum-foundry@\{digest\}/);
+    });
+
+    it("persists the first run's planned digests for a later attempt to name", () => {
+      // A partial publish must stay diagnosable: the per-platform digests the
+      // build pushed are retained at the repository's maximum, and the
+      // manifest job records the index digest they produce beside them, so a
+      // later attempt can name what an earlier one wrote. See
+      // docs/release-security.md -> "A half-published version is stranded".
+      assert.match(
+        build,
+        /name: release-docker-digest-\$\{\{ matrix\.arch_dir \}\}\n\s+path: \/tmp\/digests\/\*\n\s+if-no-files-found: error\n\s+retention-days: 90/,
+      );
+      assert.match(
+        manifest,
+        /name: release-planned-digests\n\s+path: \/tmp\/release-plan\.txt\n\s+if-no-files-found: error\n\s+retention-days: 90/,
+      );
+      assert.match(
+        manifest,
+        /echo "index=\$RELEASE_DIGEST"\n[\s\S]*?echo "platform=sha256:\$digest"\n\s+done\n\s+\} > \/tmp\/release-plan\.txt/,
+      );
+    });
+
+    it("records and uploads the plan before the first registry write", () => {
+      const record = manifest.indexOf("Record the first run's planned digests");
+      const upload = manifest.indexOf("Upload the first run's planned digests");
+      const firstWrite = manifest.search(/imagetools create (?!--dry-run)/);
+      assert.ok(record > 0 && record < upload, "the plan is recorded before it is uploaded");
+      assert.ok(upload < firstWrite, "the plan upload precedes every registry write");
     });
   });
 
