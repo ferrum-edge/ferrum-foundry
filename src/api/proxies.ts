@@ -10,6 +10,7 @@ import type {
   ProxyCreate,
 } from "./types";
 import { collectAllPages } from "./pagination";
+import { pathSegment } from "./pathSegment";
 import {
   conditionalDelete,
   conditionalPut,
@@ -66,7 +67,7 @@ export async function listAll(
 }
 
 export async function get(scope: NamespaceScope, id: string): Promise<Proxy> {
-  return (await readTagged<Proxy>(scope, `proxies/${id}`)).value;
+  return (await readTagged<Proxy>(scope, `proxies/${pathSegment(id)}`)).value;
 }
 
 /**
@@ -84,7 +85,7 @@ export async function getReference(
 ): Promise<Proxy> {
   return proxyApi
     .get(
-      `proxies/${id}`,
+      `proxies/${pathSegment(id)}`,
       scoped(scope, { signal, context: { [SILENT_ERRORS]: true } }),
     )
     .json<Proxy>();
@@ -209,7 +210,7 @@ export async function update(
   guard: WriteGuard<Proxy | ProxyCreate> | null,
 ): Promise<Proxy> {
   const payload = withProxyId(data, id);
-  const path = `proxies/${id}`;
+  const path = `proxies/${pathSegment(id)}`;
 
   if (!guard) return replace(scope, id, payload, null);
 
@@ -242,7 +243,12 @@ export async function replace(
   data: ProxyCreate,
   ifMatch: string | null,
 ): Promise<Proxy> {
-  return conditionalPut<Proxy>(scope, `proxies/${id}`, withProxyId(data, id), ifMatch);
+  return conditionalPut<Proxy>(
+    scope,
+    `proxies/${pathSegment(id)}`,
+    withProxyId(data, id),
+    ifMatch,
+  );
 }
 
 /**
@@ -256,7 +262,7 @@ export async function remove(
   id: string,
   guard: WriteGuard<Proxy | ProxyCreate> | null,
 ): Promise<void> {
-  const path = `proxies/${id}`;
+  const path = `proxies/${pathSegment(id)}`;
   if (!guard) return conditionalDelete(scope, path, null);
   return guardedRemove<Proxy>({
     resource: "proxy",

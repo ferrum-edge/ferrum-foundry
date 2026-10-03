@@ -10,6 +10,7 @@ import type {
   UpstreamCreate,
 } from "./types";
 import { collectAllPages } from "./pagination";
+import { pathSegment } from "./pathSegment";
 import { secretValues, withRedactedFailure } from "./secretRedaction";
 import { MaskedSecretWriteError } from "./maskedSecrets";
 import { upstreamPlaceholderSites } from "./maskedSecretSites";
@@ -93,7 +94,7 @@ export async function listAll(
 }
 
 export async function get(scope: NamespaceScope, id: string): Promise<Upstream> {
-  return (await readTagged<Upstream>(scope, `upstreams/${id}`)).value;
+  return (await readTagged<Upstream>(scope, `upstreams/${pathSegment(id)}`)).value;
 }
 
 /**
@@ -111,7 +112,7 @@ export async function getReference(
 ): Promise<Upstream> {
   return proxyApi
     .get(
-      `upstreams/${id}`,
+      `upstreams/${pathSegment(id)}`,
       scoped(scope, { signal, context: { [SILENT_ERRORS]: true } }),
     )
     .json<Upstream>();
@@ -240,7 +241,7 @@ export async function update(
   guard: WriteGuard<Upstream | UpstreamCreate> | null,
 ): Promise<Upstream> {
   const payload = withUpstreamId(data, id);
-  const path = `upstreams/${id}`;
+  const path = `upstreams/${pathSegment(id)}`;
   if (!guard) {
     return serializeWrite(scope, id, () => putUpstream(scope, path, payload, null));
   }
@@ -283,7 +284,7 @@ export async function updateTargets(
   guard: WriteGuard<Upstream | UpstreamCreate> | null,
   role: GatewayRole | null = null,
 ): Promise<Upstream> {
-  const path = `upstreams/${id}`;
+  const path = `upstreams/${pathSegment(id)}`;
   const propose = (current: Upstream): UpstreamCreate => {
     const masked = upstreamPlaceholderSites(current, role).blocking;
     if (masked.length > 0) {
@@ -323,7 +324,7 @@ export async function remove(
   id: string,
   guard: WriteGuard<Upstream | UpstreamCreate> | null,
 ): Promise<void> {
-  const path = `upstreams/${id}`;
+  const path = `upstreams/${pathSegment(id)}`;
   await serializeWrite(scope, id, () =>
     guard
       ? guardedRemove<Upstream>({

@@ -10,6 +10,7 @@ import {
 } from "./client";
 import type { PaginatedResponse } from "./types";
 import { ALL_PAGE_SIZE, collectAllPages } from "./pagination";
+import { pathSegment } from "./pathSegment";
 
 // ── Types (mirror the upstream Namespace registry contract) ──────
 
@@ -247,7 +248,7 @@ export async function get(
   name: string,
 ): Promise<Namespace> {
   return proxyApi
-    .get(`namespaces/${encodeURIComponent(name)}`, scoped(scope))
+    .get(`namespaces/${pathSegment(name)}`, scoped(scope))
     .json<Namespace>();
 }
 
@@ -266,7 +267,7 @@ export async function update(
   data: NamespaceUpdate,
 ): Promise<Namespace> {
   return proxyApi
-    .put(`namespaces/${encodeURIComponent(name)}`, scoped(scope, { json: data }))
+    .put(`namespaces/${pathSegment(name)}`, scoped(scope, { json: data }))
     .json<Namespace>();
 }
 
@@ -280,7 +281,7 @@ export async function remove(
   options: { confirm?: boolean } = {},
 ): Promise<void> {
   await proxyApi.delete(
-    `namespaces/${encodeURIComponent(name)}`,
+    `namespaces/${pathSegment(name)}`,
     scoped(scope, {
       searchParams: options.confirm ? { confirm: "true" } : {},
       // The unconfirmed call is a deliberate probe — a 409 is the gateway

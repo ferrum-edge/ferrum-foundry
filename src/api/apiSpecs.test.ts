@@ -145,6 +145,16 @@ describe("API spec request contracts", () => {
     expect(requests[0].headers.get("X-Ferrum-Namespace")).toBe("tenant-a");
   });
 
+  it("reports a refused local path segment without an unknown-outcome warning", async () => {
+    const error = await specs
+      .update(scope, ".", "openapi: 3.1.0")
+      .catch((failure: unknown) => failure);
+
+    expect(error).toMatchObject({ name: "PathSegmentError" });
+    expect(requests).toHaveLength(0);
+    expect(popup).not.toHaveBeenCalled();
+  });
+
   it.each([
     [{ error: "Spec parse failed", code: "invalid_yaml", details: "line 3: expected mapping" },
       "invalid_yaml: line 3: expected mapping"],

@@ -12,6 +12,7 @@ import type {
   PaginationParams,
 } from "./types";
 import { collectAllPages } from "./pagination";
+import { pathSegment } from "./pathSegment";
 import { secretValues, withRedactedFailure } from "./secretRedaction";
 import {
   conditionalDelete,
@@ -84,7 +85,7 @@ export async function listAll(
 }
 
 export async function get(scope: NamespaceScope, id: string): Promise<Consumer> {
-  return (await readTagged<Consumer>(scope, `consumers/${id}`)).value;
+  return (await readTagged<Consumer>(scope, `consumers/${pathSegment(id)}`)).value;
 }
 
 /**
@@ -143,7 +144,7 @@ export async function update(
   data: ConsumerCreate,
   guard: WriteGuard<Consumer | ConsumerCreate> | null,
 ): Promise<Consumer> {
-  const path = `consumers/${id}`;
+  const path = `consumers/${pathSegment(id)}`;
   const metadata = toUpdatePayload(data);
   return serializeWrite(scope, id, () =>
     guardedReplace<Consumer, ConsumerCreate>({
@@ -168,7 +169,7 @@ export async function remove(
   id: string,
   guard: WriteGuard<Consumer | ConsumerCreate> | null,
 ): Promise<void> {
-  const path = `consumers/${id}`;
+  const path = `consumers/${pathSegment(id)}`;
   await serializeWrite(scope, id, () =>
     guard
       ? guardedRemove<Consumer>({
@@ -194,7 +195,7 @@ export async function updateCredentials(
   return serializeWrite(scope, consumerId, async () => {
     return proxyApi
       .put(
-        `consumers/${consumerId}/credentials/${credType}`,
+        `consumers/${pathSegment(consumerId)}/credentials/${pathSegment(credType)}`,
         // The replacement form handles failure without retaining echoed secrets.
         scoped(scope, { json: data, context: { [SILENT_ERRORS]: true } }),
       )
@@ -211,7 +212,7 @@ export async function appendCredential(
   return serializeWrite(scope, consumerId, async () => {
     return proxyApi
       .post(
-        `consumers/${consumerId}/credentials/${credType}`,
+        `consumers/${pathSegment(consumerId)}/credentials/${pathSegment(credType)}`,
         // The form reports failure with submitted values removed; the global
         // popup would show a gateway body that echoes the secret.
         scoped(scope, { json: data, context: { [SILENT_ERRORS]: true } }),
@@ -227,7 +228,7 @@ export async function deleteCredentials(
 ): Promise<void> {
   await serializeWrite(scope, consumerId, async () => {
     await proxyApi.delete(
-      `consumers/${consumerId}/credentials/${credType}`,
+      `consumers/${pathSegment(consumerId)}/credentials/${pathSegment(credType)}`,
       scoped(scope),
     );
   });
@@ -241,7 +242,8 @@ export async function deleteCredentialByIndex(
 ): Promise<void> {
   await serializeWrite(scope, consumerId, async () => {
     await proxyApi.delete(
-      `consumers/${consumerId}/credentials/${credType}/${index}`,
+      `consumers/${pathSegment(consumerId)}/credentials/${pathSegment(credType)}/` +
+        pathSegment(String(index)),
       scoped(scope),
     );
   });

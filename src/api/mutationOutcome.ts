@@ -29,7 +29,12 @@ export async function observeMutation<T>(operation: string, request: Promise<T>)
       data.code === 'FERRUM_BFF_TIMEOUT' &&
       'phase' in data &&
       data.phase === 'upload';
-    if (!uploadRejected && (status === undefined || status === 408 || status >= 500)) {
+    const localPathRefusal = error instanceof Error && error.name === 'PathSegmentError';
+    if (
+      !localPathRefusal &&
+      !uploadRejected &&
+      (status === undefined || status === 408 || status >= 500)
+    ) {
       throw new MutationOutcomeUnknownError(operation, error);
     }
     throw error;
@@ -77,12 +82,12 @@ function bffErrorBody(candidate: { data?: unknown }): Record<string, unknown> | 
  *
  * The non-HTTP branch is deliberately fail-safe: an unrecognized rejection
  * from a request that was already issued is treated as unobservable rather
- * than as a definite failure. `UnboundNamespaceError` is the one exclusion —
- * the client raises it before a byte goes on the wire.
+ * than as a definite failure. Namespace binding and path-segment validation
+ * errors are excluded because the client raises them before sending.
  */
 export function classifyUnobservedOutcome(error: unknown): UnobservedOutcome | null {
   if (!(error instanceof Error)) return null;
-  if (error.name === 'UnboundNamespaceError') return null;
+  if (error.name === 'UnboundNamespaceError' || error.name === 'PathSegmentError') return null;
 
   const candidate = error as { response?: { status?: unknown }; data?: unknown };
   const status = candidate.response?.status;

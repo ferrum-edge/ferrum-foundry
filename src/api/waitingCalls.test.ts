@@ -162,6 +162,15 @@ describe("configured client server-side waiting calls", () => {
     );
     expect(fetcher).not.toHaveBeenCalled();
   });
+
+  it("reports local ACME identifier rejection as unsent", async () => {
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+    const { finalizeAcmeOrder } = await import("./tls");
+
+    await expect(finalizeAcmeOrder(".")).rejects.toMatchObject({ name: "PathSegmentError" });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
 });
 
 // Exercise real ky deadlines so accidentally omitting an option fails at 10 s.
