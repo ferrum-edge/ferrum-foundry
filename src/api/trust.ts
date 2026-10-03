@@ -9,6 +9,7 @@ import {
   type NamespaceScope,
 } from "./client";
 import type { PaginatedResponse, PaginationParams } from "./types";
+import { pathSegment } from "./pathSegment";
 
 export interface TrustBundleJwtAuthority {
   key_id: string;
@@ -121,7 +122,7 @@ export async function get(
   id: string,
 ): Promise<GatewayTrustBundle> {
   return proxyApi
-    .get(`gateway-trust-bundles/${id}`, scoped(scope))
+    .get(`gateway-trust-bundles/${pathSegment(id)}`, scoped(scope))
     .json<GatewayTrustBundle>();
 }
 
@@ -144,7 +145,7 @@ export async function update(
 ): Promise<GatewayTrustBundle> {
   return proxyApi
     .put(
-      `gateway-trust-bundles/${id}`,
+      `gateway-trust-bundles/${pathSegment(id)}`,
       scoped(scope, { json: data, context: { [SILENT_ERRORS]: true } }),
     )
     .json<GatewayTrustBundle>();
@@ -152,7 +153,7 @@ export async function update(
 
 export async function remove(scope: NamespaceScope, id: string): Promise<void> {
   await proxyApi.delete(
-    `gateway-trust-bundles/${id}`,
+    `gateway-trust-bundles/${pathSegment(id)}`,
     scoped(scope, { context: { [SILENT_ERRORS]: true } }),
   );
 }

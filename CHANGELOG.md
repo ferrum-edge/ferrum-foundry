@@ -50,6 +50,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and query apart from `offset`/`limit`; nothing is cached afterwards), and
   counts against the long-running read pool.
 
+### Fixed
+
+- Encode dynamic Admin API path segments across resource endpoints and reject
+  empty or dot-segment identifiers, preventing decoded route identifiers from
+  retargeting requests. Addresses GHSA-64c9-hw76-jqmh.
+
 ## [0.4.0] - 2026-10-01
 
 Pairs with the published **Ferrum Edge v0.9.10** release,

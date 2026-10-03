@@ -31,6 +31,8 @@
 *Release step:* summarize the changes from the `[Unreleased]` section of
 `CHANGELOG.md`.
 
+- Admin API resource identifiers are encoded as single path segments and
+  empty or dot-segment identifiers are rejected. This fixes GHSA-64c9-hw76-jqmh.
 - **Bounded long-running reads.** Apply-status long polls, backup downloads,
   and namespace-scoped namespace lists share a new admission pool, bounded per
   instance (`FERRUM_MAX_ACTIVE_LONG_READS`, default 32) and per authenticated

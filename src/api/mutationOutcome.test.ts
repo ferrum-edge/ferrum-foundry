@@ -22,6 +22,11 @@ describe('mutation outcome classification', () => {
       .rejects.toBeInstanceOf(MutationOutcomeUnknownError);
   });
 
+  it('keeps local path validation failures definite', async () => {
+    const error = Object.assign(new TypeError('invalid path segment'), { name: 'PathSegmentError' });
+    await expect(observeMutation('Import', Promise.reject(error))).rejects.toBe(error);
+  });
+
   it.each([400, 401, 403, 409, 413, 429])('preserves a definite HTTP %s rejection', async (status) => {
     const error = Object.assign(new Error('rejected'), { response: new Response(null, { status }) });
     await expect(observeMutation('Import', Promise.reject(error))).rejects.toBe(error);
@@ -66,7 +71,11 @@ describe('classifyUnobservedOutcome', () => {
     const unbound = Object.assign(new Error('no namespace binding'), {
       name: 'UnboundNamespaceError',
     });
+    const invalidPath = Object.assign(new TypeError('invalid path segment'), {
+      name: 'PathSegmentError',
+    });
     expect(classifyUnobservedOutcome(unbound)).toBeNull();
+    expect(classifyUnobservedOutcome(invalidPath)).toBeNull();
     expect(classifyUnobservedOutcome(httpError(500, { error: 'restore failed' }))).toBeNull();
     expect(classifyUnobservedOutcome(httpError(503, { error: 'database unreachable' }))).toBeNull();
     expect(classifyUnobservedOutcome(httpError(409, { error: 'specs at risk' }))).toBeNull();
