@@ -1,3 +1,4 @@
+import { isIP } from 'node:net';
 import { dirname, resolve } from 'node:path';
 import { loadCaBundle } from './ca.js';
 import { parseCidr } from './cidr.js';
