@@ -19,6 +19,16 @@ interface CachedCaBundle {
 }
 
 const CA_RECHECK_INTERVAL_MS = 1_000;
+/**
+ * The readiness probe's own connections. It runs one coalesced check of two
+ * sequential calls at a time (two checks briefly overlap across a settings
+ * change). Keeping it off the proxy dispatcher means a saturated proxy pool
+ * cannot queue it and take the instance out of rotation.
+ */
+export const PROBE_CONNECTIONS = 4;
+
+/** Which dispatcher a request uses: proxied traffic, or the readiness probe. */
+type DispatcherPool = 'proxy' | 'probe';
 
 const blockedNetworks = new BlockList();
 for (const [address, prefix, family] of [
@@ -53,7 +63,7 @@ for (const [address, prefix, family] of [
   blockedNetworks.addSubnet(address, prefix, family);
 }
 
-let activeDispatcher: ManagedDispatcher | undefined;
+const activeDispatchers = new Map<DispatcherPool, ManagedDispatcher>();
 const retiringDispatchers = new Map<Agent, Promise<void>>();
 let cachedCaBundle: CachedCaBundle | undefined;
 
@@ -229,9 +239,10 @@ function currentCaBundle(config: Config): CaBundle | undefined {
   throw new Error('TLS CA bundle changed while it was being read');
 }
 
-function dispatcherFingerprint(config: Config, caBundle: CaBundle | undefined): string {
+function dispatcherFingerprint(config: Config, caBundle: CaBundle | undefined, connections: number): string {
   return JSON.stringify({
     origin: config.adminUrl,
+    connections,
     connectTimeout: config.connectTimeout,
     tlsVerify: config.tlsVerify,
     caPath: caBundle?.path,
@@ -245,10 +256,15 @@ function createDispatcher(
   config: Config,
   fingerprint: string,
   caBundle: CaBundle | undefined,
+  connections: number,
 ): ManagedDispatcher {
   assertLiteralAddressAllowed(config);
   const isHttps = config.adminUrl.startsWith('https://');
   const agent = new Agent({
+    // A ceiling on sockets to the admin API, whatever the route, method, or
+    // client read rate. A request past it waits in the Agent's queue; every
+    // caller's own deadline aborts it there, so the wait stays bounded.
+    connections,
     connect: {
       timeout: config.connectTimeout,
       lookup: secureLookup(config),
@@ -275,22 +291,33 @@ function retireDispatcher(agent: Agent): void {
   retiringDispatchers.set(agent, closing);
 }
 
-export function getDispatcher(config: Config): Agent {
+function selectDispatcher(pool: DispatcherPool, config: Config, connections: number): Agent {
   const caBundle = currentCaBundle(config);
-  const fingerprint = dispatcherFingerprint(config, caBundle);
-  if (activeDispatcher?.fingerprint === fingerprint) return activeDispatcher.agent;
+  const fingerprint = dispatcherFingerprint(config, caBundle, connections);
+  const active = activeDispatchers.get(pool);
+  if (active?.fingerprint === fingerprint) return active.agent;
 
-  const retired = activeDispatcher;
-  activeDispatcher = createDispatcher(config, fingerprint, caBundle);
-  if (retired) retireDispatcher(retired.agent);
-  return activeDispatcher.agent;
+  const next = createDispatcher(config, fingerprint, caBundle, connections);
+  activeDispatchers.set(pool, next);
+  if (active) retireDispatcher(active.agent);
+  return next.agent;
+}
+
+/** The dispatcher for proxied and settings traffic, capped at `gatewayMaxConnections`. */
+export function getDispatcher(config: Config): Agent {
+  return selectDispatcher('proxy', config, config.gatewayMaxConnections);
+}
+
+/** The readiness probe's separate dispatcher, capped at `PROBE_CONNECTIONS`. */
+export function getProbeDispatcher(config: Config): Agent {
+  return selectDispatcher('probe', config, PROBE_CONNECTIONS);
 }
 
 export async function closeDispatchers(): Promise<void> {
-  const dispatcher = activeDispatcher;
-  activeDispatcher = undefined;
+  const dispatchers = [...activeDispatchers.values()];
+  activeDispatchers.clear();
   cachedCaBundle = undefined;
-  if (dispatcher) retireDispatcher(dispatcher.agent);
+  for (const dispatcher of dispatchers) retireDispatcher(dispatcher.agent);
   await Promise.all([...retiringDispatchers.values()]);
 }
 
