@@ -32,7 +32,7 @@ LABEL org.opencontainers.image.source="https://github.com/ferrum-edge/ferrum-fou
 
 COPY --from=builder --chown=65532:65532 /app/dist ./dist
 COPY --from=builder --chown=65532:65532 /app/dist-server ./dist-server
-COPY --from=builder --chown=65532:65532 /app/shared/admin-jwt.js ./shared/admin-jwt.js
+COPY --from=builder --chown=65532:65532 /app/shared ./shared/
 COPY --from=builder --chown=65532:65532 /app/node_modules ./node_modules
 COPY --from=builder --chown=65532:65532 /app/package.json ./
 

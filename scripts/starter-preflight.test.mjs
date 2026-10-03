@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { mayCarrySecret as e2eMayCarrySecret } from "../e2e/support/may-carry-secret.mjs";
+import { isLoopbackAdminOrigin, mayCarrySecret } from "../shared/admin-origin.js";
 import {
   FAIL,
   PASS,
@@ -12,7 +13,6 @@ import {
   checkSecrets,
   checkTlsTrust,
   checkTrustBoundary,
-  mayCarrySecret,
   parseEnvFile,
   runPreflight,
 } from "./starter-preflight.mjs";
@@ -486,6 +486,11 @@ test("the demo backend runs and probes with the image's own Node", async () => {
   const dockerfile = await readFile(new URL("../docker/Dockerfile", import.meta.url), "utf8");
   const runtime = dockerfile.slice(dockerfile.lastIndexOf("\nFROM ") + 1);
   const base = runtime.slice(0, runtime.indexOf("\n"));
+  assert.match(
+    runtime,
+    /^COPY --from=builder --chown=65532:65532 \/app\/shared \.\/shared\/$/m,
+    "the runtime image must include every shared module imported by the server",
+  );
   const entrypoint = runtime.match(/^ENTRYPOINT \["([^"]+)"\]$/m);
   assert.ok(entrypoint, "the runtime stage must name Node as its exec-form entrypoint");
   assert.equal(entrypoint[1], DISTROLESS_NODE, "the entrypoint must be Node at the distroless path");
@@ -539,7 +544,10 @@ test("a CA path merely sharing the root's prefix is outside it", async () => {
 test("the e2e proof guard matches the canonical rule over the same URL table", () => {
   const cases = [
     ["https://foundry.example.com", true],
+    ["HTTP://localhost", true],
     ["http://127.0.0.1:8088", true],
+    ["http://127.1", true],
+    ["http://2130706433", true],
     ["http://localhost:8088", true],
     ["http://[::1]:8088", true],
     ["http://LOCALHOST", true],
@@ -552,6 +560,8 @@ test("the e2e proof guard matches the canonical rule over the same URL table", (
     ["http://127.0.0.1@evil.example", false],
     ["http://localhost.evil.example", false],
     ["http://[::ffff:127.0.0.1]", false],
+    ["http://0.0.0.0", false],
+    ["http://[::]", false],
     ["http://localhost.", false],
     ["ftp://localhost:8088", false],
     ["not a url", false],
@@ -566,6 +576,22 @@ test("the e2e proof guard matches the canonical rule over the same URL table", (
 test("HTTP accepts only literal IPv4 loopback addresses", () => {
   for (const url of ["http://127.0.0.1:8088", "http://127.255.255.255:8088"]) {
     assert.equal(mayCarrySecret(url), true, url);
+  }
+});
+
+test("the shared loopback classifier handles canonical and unusual URL spellings", () => {
+  const cases = [
+    ["http://0.0.0.0", false],
+    ["http://[::]", false],
+    ["HTTP://localhost", true],
+    ["http://127.1", true],
+    ["http://2130706433", true],
+    ["http://[::ffff:127.0.0.1]", false],
+    ["http://localhost.", false],
+  ];
+
+  for (const [url, expected] of cases) {
+    assert.equal(isLoopbackAdminOrigin(url), expected, url);
   }
 });
 

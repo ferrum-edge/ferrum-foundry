@@ -16,6 +16,15 @@ token or alter the request and the gateway's answer. With
 `localhost`, an IPv4 address in `127.0.0.0/8`, or IPv6 `::1`.
 `FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true` is an explicit exception for a
 disposable stack on an isolated network, such as the starter's demo profile.
+Production also requires `FERRUM_TLS_VERIFY=true` for a remote HTTPS admin
+origin, at startup and after runtime settings changes. A private gateway CA can
+be trusted with `FERRUM_TLS_CA_PATH`; disabling verification is allowed only
+with the explicit insecure transport override.
+
+Ferrum Edge uses `FERRUM_ALLOW_INSECURE_ADMIN_HTTP` for its own plaintext admin
+listener. Sharing an env file or ConfigMap with Edge therefore also disables
+Foundry's production transport checks. Keep the deployments' settings separate
+except for disposable, isolated demo stacks.
 
 The seeder and the helpers that share its configuration apply the same rule
 with no exception, before they sign anything. The starter preflight may send

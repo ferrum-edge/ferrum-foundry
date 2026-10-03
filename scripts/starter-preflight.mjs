@@ -23,9 +23,9 @@
  */
 
 import { readFile, stat } from "node:fs/promises";
-import { isIP } from "node:net";
 import { resolve, sep } from "node:path";
 import { signAdminJwt } from "../shared/admin-jwt.js";
+import { mayCarrySecret } from "../shared/admin-origin.js";
 
 export const PASS = "pass";
 export const FAIL = "fail";
@@ -375,24 +375,6 @@ export async function checkAdminCredentials(env, fetchImpl = fetch) {
  * The BFF must refuse a request that does not come through the proxy, and the
  * proxy must not be reachable without an identity.
  */
-/** True when a secret may be sent to `url`: over TLS, or to this machine. */
-export function mayCarrySecret(url) {
-  let parsed;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return false;
-  }
-  if (parsed.protocol === "https:") return true;
-  if (parsed.protocol !== "http:") return false;
-  const host = parsed.hostname.replace(/^\[|\]$/g, "");
-  return (
-    host === "localhost" ||
-    (isIP(host) === 4 && host.startsWith("127.")) ||
-    host === "::1"
-  );
-}
-
 export async function checkTrustBoundary(env, fetchImpl = fetch) {
   const front = env.FOUNDRY_PREFLIGHT_URL;
   if (!front) {

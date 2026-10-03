@@ -92,27 +92,20 @@ describe('settings identity authority', () => {
     expect(response.json()).toMatchObject({ authMode: 'trusted-proxy', jwtAudience: 'edge-admin' });
   });
 
-  it('refuses a plaintext remote adminUrl in production without applying other fields', async () => {
+  it('refuses a runtime remote adminUrl switch when TLS verification is disabled', async () => {
     vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('FERRUM_TLS_VERIFY', 'false');
     vi.stubEnv('FERRUM_ADMIN_ALLOWED_ORIGINS', 'https://gateway.example');
     const { app, headers } = await setup('trusted-proxy');
     const before = await app.inject({ method: 'GET', url: '/api/settings', headers });
     const response = await app.inject({
       method: 'PUT', url: '/api/settings', headers,
-      payload: { jwtIssuer: 'must-not-apply', adminUrl: 'http://gateway.internal:9000' },
+      payload: { adminUrl: 'https://gateway.example' },
     });
     expect(response.statusCode).toBe(400);
     expect(response.json().code).toBe('FERRUM_BFF_INVALID_SETTINGS');
-    expect(JSON.stringify(response.json())).not.toContain('gateway.internal');
     const after = await app.inject({ method: 'GET', url: '/api/settings', headers });
     expect(after.json()).toEqual(before.json());
-
-    const secure = await app.inject({
-      method: 'PUT', url: '/api/settings', headers,
-      payload: { adminUrl: 'https://gateway.example' },
-    });
-    expect(secure.statusCode).toBe(200);
-    expect(secure.json().adminUrl).toBe('https://gateway.example');
   });
 
   it('uses updated static defaults for subsequent logins', async () => {
