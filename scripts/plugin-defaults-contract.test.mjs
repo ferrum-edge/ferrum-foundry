@@ -5,6 +5,7 @@ import { DEFAULT_PLUGIN_CONFIGS, getPluginConfigDefault } from "../src/lib/plugi
 import {
   OPERATOR_INPUT_REQUIRED,
   OPERATOR_INPUT_REJECTIONS,
+  assertOnlyRequiredOperatorInputs,
   verifyPluginDefaults,
 } from "./plugin-defaults-contract.mjs";
 
@@ -72,13 +73,7 @@ test("submits enabled defaults with a generated OIDC key", async () => {
   assert.equal(oidcWrite.enabled, true);
   assert.ok(Buffer.from(oidcWrite.config.session.encryption_secret, "base64").length >= 32);
   for (const write of fixture.writes) {
-    if (write.plugin_name === "oidc_relying_party") {
-      const expected = getPluginConfigDefault(write.plugin_name);
-      expected.session.encryption_secret = write.config.session.encryption_secret;
-      assert.deepEqual(write.config, expected);
-    } else {
-      assert.deepEqual(write.config, getPluginConfigDefault(write.plugin_name));
-    }
+    assertOnlyRequiredOperatorInputs(write.plugin_name, write.config);
     assert.equal(write.enabled, true);
     const needsProxy = ["openapi_validator", "tcp_connection_throttle"].includes(write.plugin_name);
     assert.equal(write.scope, needsProxy ? "proxy" : "global");
@@ -86,6 +81,32 @@ test("submits enabled defaults with a generated OIDC key", async () => {
   }
   assert.equal(fixture.plugins.size, 0);
   assert.equal(fixture.proxies.size, 0);
+});
+
+test("operator-input admission permits only the declared generated secret", () => {
+  const name = "oidc_relying_party";
+  const requiredInput = OPERATOR_INPUT_REQUIRED[name];
+  const config = getPluginConfigDefault(name);
+  config.session.encryption_secret = Buffer.alloc(32, 0xab).toString("base64");
+  assertOnlyRequiredOperatorInputs(name, config);
+
+  const withUndeclaredChange = structuredClone(config);
+  withUndeclaredChange.session.cookie_name = "changed-cookie";
+  assert.throws(
+    () => assertOnlyRequiredOperatorInputs(name, withUndeclaredChange),
+    /only session\.encryption_secret may differ from Foundry's defaults/,
+  );
+
+  const shortSecret = structuredClone(config);
+  shortSecret.session.encryption_secret = Buffer.alloc(31, 0xab).toString("base64");
+  assert.throws(() => assertOnlyRequiredOperatorInputs(name, shortSecret), /encode 32 random bytes/);
+
+  const unchangedDefault = getPluginConfigDefault(name);
+  assert.equal(unchangedDefault.session.encryption_secret, "");
+  assert.throws(
+    () => assertOnlyRequiredOperatorInputs(name, unchangedDefault),
+    new RegExp(`${requiredInput.replaceAll(".", "\\.")} must differ from Foundry's default`),
+  );
 });
 
 test("mesh_authz template is native MeshPolicy input rather than a CRD rejection", () => {

@@ -80,6 +80,41 @@ function valueAtPath(value, path) {
   return path.split(".").reduce((current, key) => current?.[key], value);
 }
 
+function setValueAtPath(value, path, nextValue) {
+  const keys = path.split(".");
+  const parent = keys.slice(0, -1).reduce((current, key) => current?.[key], value);
+  assert.ok(parent && typeof parent === "object", `${path} must have an object parent`);
+  parent[keys.at(-1)] = nextValue;
+}
+
+export function assertOnlyRequiredOperatorInputs(name, config) {
+  const defaults = getPluginConfigDefault(name);
+  const requiredInput = OPERATOR_INPUT_REQUIRED[name];
+  if (requiredInput) {
+    const submitted = valueAtPath(config, requiredInput);
+    const defaultValue = valueAtPath(defaults, requiredInput);
+    assert.notEqual(submitted, defaultValue,
+      `${name}: ${requiredInput} must differ from Foundry's default`);
+    assert.equal(typeof submitted, "string", `${name}: ${requiredInput} must be a string`);
+    const secret = Buffer.from(submitted, "base64");
+    assert.equal(secret.length, 32, `${name}: ${requiredInput} must encode 32 random bytes`);
+    assert.equal(secret.toString("base64"), submitted,
+      `${name}: ${requiredInput} must be canonical base64`);
+
+    const restored = structuredClone(config);
+    setValueAtPath(restored, requiredInput, defaultValue);
+    assert.deepEqual(restored, defaults,
+      `${name}: only ${requiredInput} may differ from Foundry's defaults`);
+    assert.equal(JSON.stringify(restored), JSON.stringify(defaults),
+      `${name}: fields outside ${requiredInput} must retain their exact serialized values`);
+    return;
+  }
+
+  assert.deepEqual(config, defaults, `${name}: config must equal Foundry's defaults`);
+  assert.equal(JSON.stringify(config), JSON.stringify(defaults),
+    `${name}: config must preserve Foundry's exact serialized defaults`);
+}
+
 export async function verifyPluginDefaults(exchange, { report = console.log } = {}) {
   const names = Object.keys(DEFAULT_PLUGIN_CONFIGS).sort();
   assert.deepEqual(names, Object.keys(PLUGIN_METADATA).filter((name) => !isInternalPlugin(name)).sort());
@@ -111,6 +146,12 @@ export async function verifyPluginDefaults(exchange, { report = console.log } = 
         failures.push(new Error(`${name}: ${error.message}`, { cause: error }));
         continue;
       }
+    }
+    try {
+      assertOnlyRequiredOperatorInputs(name, config);
+    } catch (error) {
+      failures.push(new Error(`${name}: ${error.message}`, { cause: error }));
+      continue;
     }
     const id = `contract-default-${name}`;
     // A TCP throttle must target a TCP listener. OpenAPI admission must reach
