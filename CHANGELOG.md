@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- The OIDC Relying Party template no longer includes a public session encryption
+  key. Foundry blocks enabling it until an operator supplies a unique secret,
+  and the plugin defaults contract supplies a generated key when checking the
+  remaining template fields (GHSA-hjw6-685j-p5hw). Deployments that enabled
+  OIDC from this template must rotate `session.encryption_secret` now. Do not
+  carry the old public key in `session.encryption_secret_previous`.
 - GHSA-27j6-vr5h-8p6v: with `NODE_ENV=production`, the BFF refuses to start
   when `FERRUM_ADMIN_URL` or a `FERRUM_ADMIN_ALLOWED_ORIGINS` entry is a
   plaintext `http://` origin on a host other than loopback (exact `localhost`,
