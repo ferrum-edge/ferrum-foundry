@@ -31,6 +31,14 @@
 *Release step:* summarize the changes from the `[Unreleased]` section of
 `CHANGELOG.md`.
 
+- **Distroless runtime again (#504).** The image is back on
+  `gcr.io/distroless/nodejs24-debian13:nonroot` (no shell, no package
+  manager), running as `65532:65532` with Node as the entrypoint.
+- **Release tags are never reassigned (GHSA-rw8r-hrr2-vpc2).** A release must
+  be tagged on its unreleased candidate commit, and the release workflow
+  refuses to publish over an existing `vX.Y.Z` or `X.Y.Z` image with a
+  different digest or source commit. The release notes name the published
+  index digest.
 - Admin API resource identifiers are encoded as single path segments and
   empty or dot-segment identifiers are rejected. This fixes GHSA-64c9-hw76-jqmh.
 
