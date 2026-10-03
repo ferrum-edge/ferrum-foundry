@@ -45,6 +45,12 @@ describe("canonical plugin defaults", () => {
     });
   });
 
+  it("leaves the OIDC session encryption secret empty for operator input", () => {
+    expect(getPluginConfigDefault("oidc_relying_party").session).toMatchObject({
+      encryption_secret: "",
+    });
+  });
+
   it("omits A2A-only discovery.public_base_url from the mcp_gateway template", () => {
     expect(getPluginConfigDefault("mcp_gateway")).not.toHaveProperty("discovery");
   });

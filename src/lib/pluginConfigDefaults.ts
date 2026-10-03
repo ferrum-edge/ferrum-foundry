@@ -812,7 +812,7 @@ export const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
       },
     ],
     session: {
-      encryption_secret: "change-me-32-byte-minimum-secret!!",
+      encryption_secret: "",
       cookie_name: "ferrum_session",
       ttl_secs: 3600,
       idle_ttl_secs: 1800,
@@ -1158,6 +1158,24 @@ export const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
 export function getPluginConfigDefault(pluginName: string): PluginConfigDefault {
   const config = DEFAULT_PLUGIN_CONFIGS[pluginName] ?? {};
   return JSON.parse(JSON.stringify(config)) as PluginConfigDefault;
+}
+
+/** Refuse to enable the OIDC template without an operator-owned session key. */
+export function oidcEncryptionSecretProblem(config: unknown): string | null {
+  const session = config && typeof config === "object" && !Array.isArray(config)
+    ? (config as Record<string, unknown>).session
+    : undefined;
+  const secret = session && typeof session === "object" && !Array.isArray(session)
+    ? (session as Record<string, unknown>).encryption_secret
+    : undefined;
+
+  if (typeof secret !== "string" || !secret.trim()) {
+    return "Enter a unique session encryption secret before enabling OIDC Relying Party.";
+  }
+  if (/^(?:change-me(?:-.+)?|replace-with(?:-.+)?)$/i.test(secret.trim())) {
+    return "Replace the published template secret with a unique session encryption secret.";
+  }
+  return null;
 }
 
 export function formatPluginConfigDefault(pluginName: string): string {

@@ -19,7 +19,7 @@ export const ACCEPTED_PLUGIN_DEFAULTS = [
   "grpc_method_router", "grpc_web", "http_logging", "ip_restriction", "jwks_auth",
   "jwt_auth", "key_auth", "ldap_auth", "loki_logging", "mcp_gateway",
   "mesh_authz", "mesh_outbound_registry", "mesh_route_dispatch", "oauth2_introspection",
-  "oidc_relying_party", "opa", "otel_tracing", "prometheus_metrics", "rate_limiting",
+  "opa", "otel_tracing", "prometheus_metrics", "rate_limiting",
   "request_deduplication", "request_mirror", "request_size_limiting",
   "request_termination", "request_transformer", "response_caching", "response_mock",
   "response_size_limiting", "response_transformer", "security_headers",
@@ -29,6 +29,12 @@ export const ACCEPTED_PLUGIN_DEFAULTS = [
   "waf", "workload_metrics", "ws_frame_logging", "ws_logging",
   "ws_message_size_limiting", "ws_rate_limiting",
 ];
+
+// The OIDC template intentionally has no usable key. Do not send it enabled
+// to Edge: Foundry must require an operator-owned value before making a write.
+export const OPERATOR_INPUT_REQUIRED = {
+  oidc_relying_party: "session.encryption_secret",
+};
 
 // Exact whole diagnostics, not substrings or a general 400 allowance. A changed
 // reason or unexpected acceptance is a failure requiring contract review.
@@ -72,7 +78,11 @@ function assertStatus(response, expected, context) {
 export async function verifyPluginDefaults(exchange, { report = console.log } = {}) {
   const names = Object.keys(DEFAULT_PLUGIN_CONFIGS).sort();
   assert.deepEqual(names, Object.keys(PLUGIN_METADATA).filter((name) => !isInternalPlugin(name)).sort());
-  const expectedNames = [...ACCEPTED_PLUGIN_DEFAULTS, ...Object.keys(OPERATOR_INPUT_REJECTIONS)].sort();
+  const expectedNames = [
+    ...ACCEPTED_PLUGIN_DEFAULTS,
+    ...Object.keys(OPERATOR_INPUT_REJECTIONS),
+    ...Object.keys(OPERATOR_INPUT_REQUIRED),
+  ].sort();
   assert.equal(new Set(expectedNames).size, 81, "review catalog membership when changing the 81-template baseline");
   assert.deepEqual(names, expectedNames, "every real template needs an explicit admission expectation");
   const catalog = await exchange("/plugins");
@@ -84,6 +94,17 @@ export async function verifyPluginDefaults(exchange, { report = console.log } = 
   const failures = [];
   const results = [];
   for (const name of names) {
+    const requiredInput = OPERATOR_INPUT_REQUIRED[name];
+    if (requiredInput) {
+      try {
+        assert.equal(getPluginConfigDefault(name).session?.encryption_secret, "",
+          `${name}: ${requiredInput} must not have a template value`);
+        results.push({ name, status: "operator-input-required", field: requiredInput });
+      } catch (error) {
+        failures.push(new Error(`${name}: ${error.message}`, { cause: error }));
+      }
+      continue;
+    }
     const id = `contract-default-${name}`;
     // A TCP throttle must target a TCP listener. OpenAPI admission must reach
     // the attached-spec precondition, rather than stopping at incorrect scope.
@@ -151,5 +172,11 @@ export async function verifyPluginDefaults(exchange, { report = console.log } = 
   }
   report(JSON.stringify({ pluginDefaults: results }));
   if (failures.length) throw new AggregateError(failures, failures.map((error) => error.message).join("\n"));
-  return { templates: names.length, accepted: ACCEPTED_PLUGIN_DEFAULTS.length, operatorInput: Object.keys(OPERATOR_INPUT_REJECTIONS).length };
+  const operatorInput =
+    Object.keys(OPERATOR_INPUT_REJECTIONS).length + Object.keys(OPERATOR_INPUT_REQUIRED).length;
+  return {
+    templates: names.length,
+    accepted: ACCEPTED_PLUGIN_DEFAULTS.length,
+    operatorInput,
+  };
 }

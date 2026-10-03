@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- The OIDC Relying Party template no longer includes a public session encryption
+  key. Foundry blocks enabling it until an operator supplies a unique secret,
+  and the plugin defaults contract no longer enables the template without that
+  input (GHSA-hjw6-685j-p5hw).
+
 ## [0.4.0] - 2026-10-01
 
 Pairs with the published **Ferrum Edge v0.9.10** release,
