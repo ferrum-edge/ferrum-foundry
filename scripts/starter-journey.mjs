@@ -24,7 +24,7 @@
 import assert from "node:assert/strict";
 import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { mayCarrySecret } from "./starter-preflight.mjs";
+import { mayCarrySecret } from "../shared/admin-origin.js";
 
 const FOUNDRY = process.env.FOUNDRY_URL ?? "http://127.0.0.1:8088";
 const DATA_PLANE = process.env.FERRUM_DATA_PLANE_URL ?? "http://127.0.0.1:8000";
@@ -47,7 +47,7 @@ export function confirmTarget(
   confirmation = process.env.FERRUM_STARTER_CONFIRM_TARGET,
 ) {
   // The boundary check sends the real proof secret (see
-  // starter-preflight.mjs → mayCarrySecret); never in the clear to another host.
+  // shared/admin-origin.js → mayCarrySecret); never in the clear to another host.
   if (!mayCarrySecret(foundry)) {
     throw new Error(
       `Refusing to send the proof secret to ${foundry}: use https or a loopback address.`,

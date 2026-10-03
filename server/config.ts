@@ -1,8 +1,8 @@
 import { dirname, resolve } from 'node:path';
-import { isIP } from 'node:net';
 import { loadCaBundle } from './ca.js';
 import { parseCidr } from './cidr.js';
 import { GATEWAY_TARGET_HEADER } from './gateway-target.js';
+import { isLoopbackAdminOrigin, mayCarrySecret } from '../shared/admin-origin.js';
 import {
   DEFAULT_RESPONSE_TIMEOUT,
   DEFAULT_UPLOAD_TIMEOUT,
@@ -279,16 +279,7 @@ export function normalizeAdminUrl(value: string, name = 'FERRUM_ADMIN_URL'): str
  * spelling, so `127.0.0.1.example` is remote.
  */
 export function isSecureAdminOrigin(origin: string): boolean {
-  let parsed: URL;
-  try {
-    parsed = new URL(origin);
-  } catch {
-    return false;
-  }
-  if (parsed.protocol === 'https:') return true;
-  if (parsed.protocol !== 'http:') return false;
-  const host = parsed.hostname.replace(/^\[|\]$/g, '');
-  return host === 'localhost' || (isIP(host) === 4 && host.startsWith('127.')) || host === '::1';
+  return mayCarrySecret(origin);
 }
 
 function assertSecureAdminOrigin(origin: string, name: string, required: boolean): string {
@@ -300,6 +291,15 @@ function assertSecureAdminOrigin(origin: string, name: string, required: boolean
     );
   }
   return origin;
+}
+
+function assertTlsVerification(origin: string, tlsVerify: boolean, required: boolean): void {
+  if (required && !tlsVerify && !isLoopbackAdminOrigin(origin)) {
+    throw new Error(
+      'FERRUM_TLS_VERIFY must be true in production for a non-loopback admin URL; '
+      + 'FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true permits it only for a disposable, isolated development stack',
+    );
+  }
 }
 
 function parseOrigins(value: string | undefined, requireSecure: boolean): string[] {
@@ -483,6 +483,9 @@ function parseBaseConfig(): Config {
     throw new Error('FERRUM_ADMIN_ALLOWED_ORIGINS is required when runtime settings are enabled');
   }
 
+  const tlsVerify = parseBoolean('FERRUM_TLS_VERIFY', true);
+  assertTlsVerification(adminUrl, tlsVerify, requireSecure);
+
   return {
     adminUrl,
     initialAdminOrigin: adminUrl,
@@ -498,7 +501,7 @@ function parseBaseConfig(): Config {
     jwtNamespaces: parseEnvNamespaceGrants(authMode),
     tlsCaPath,
     tlsCaRoot,
-    tlsVerify: parseBoolean('FERRUM_TLS_VERIFY', true),
+    tlsVerify,
     connectTimeout: parseInteger('FERRUM_CONNECT_TIMEOUT', 5000, 100, 300_000),
     readTimeout: parseInteger('FERRUM_READ_TIMEOUT', DEFAULT_RESPONSE_TIMEOUT, 100, 3_600_000),
     writeTimeout: parseInteger('FERRUM_WRITE_TIMEOUT', DEFAULT_WRITE_TIMEOUT, 100, 3_600_000),
@@ -643,6 +646,12 @@ export async function updateRuntimeConfig(updates: Partial<RuntimeConfig>): Prom
   if (updates.writeTimeout !== undefined) {
     nextOverrides.writeTimeout = validateRuntimeNumber('writeTimeout', updates.writeTimeout, 100, 3_600_000);
   }
+
+  assertTlsVerification(
+    nextOverrides.adminUrl ?? current.adminUrl,
+    nextOverrides.tlsVerify ?? current.tlsVerify,
+    current.requireSecureAdminOrigin,
+  );
 
   Object.assign(runtimeOverrides, nextOverrides);
   // Each caller owns the generation it accepted, even if a later update

@@ -19,9 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when `FERRUM_ADMIN_URL` or a `FERRUM_ADMIN_ALLOWED_ORIGINS` entry is a
   plaintext `http://` origin on a host other than loopback (exact `localhost`,
   `127.0.0.0/8`, or `::1`), and refuses such a runtime `adminUrl` change with
-  `400 FERRUM_BFF_INVALID_SETTINGS`, because every admin request carries a
+  `400 FERRUM_BFF_INVALID_SETTINGS`. Production also requires
+  `FERRUM_TLS_VERIFY=true` for a remote admin URL, at startup and through
+  runtime settings, because every admin request carries a
   signed bearer token. `FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true` is the explicit
-  exception for a disposable stack; the starter's demo bootstrap, the e2e
+  exception for a disposable stack; Ferrum Edge uses the same variable for its
+  plaintext admin listener, so sharing its env file or ConfigMap also disables
+  Foundry's checks. The starter's demo bootstrap, the e2e
   overlay, and the CI container gate set it for their in-network gateways. The
   seeder and the helpers that share its configuration (verify, route smoke,
   contract smoke, capability parity) refuse a remote plaintext admin origin

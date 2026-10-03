@@ -546,6 +546,29 @@ describe('config', () => {
     }
   });
 
+  it('requires TLS verification for a remote production admin URL', async () => {
+    setProductionEnv({
+      FERRUM_ADMIN_URL: 'https://gateway.internal:9443',
+      FERRUM_TLS_VERIFY: 'false',
+    });
+    const { loadConfig } = await loadModule();
+    expect(() => loadConfig()).toThrow(/FERRUM_TLS_VERIFY must be true in production/);
+
+    clearTestEnv();
+    setProductionEnv({ FERRUM_TLS_VERIFY: 'false' });
+    const loopback = await loadModule();
+    expect(loopback.loadConfig().tlsVerify).toBe(false);
+
+    clearTestEnv();
+    setProductionEnv({
+      FERRUM_ADMIN_URL: 'https://gateway.internal:9443',
+      FERRUM_TLS_VERIFY: 'false',
+      FERRUM_ALLOW_INSECURE_ADMIN_HTTP: 'true',
+    });
+    const overridden = await loadModule();
+    expect(overridden.loadConfig().tlsVerify).toBe(false);
+  });
+
   it('leaves plaintext admin origins to the operator outside production', async () => {
     setValidEnv({ FERRUM_ADMIN_URL: 'http://gateway.internal:9000' });
     const { loadConfig } = await loadModule();
@@ -575,6 +598,18 @@ describe('config', () => {
     expect(loadConfig().adminUrl).toBe('http://127.0.0.1:9000');
     await updateRuntimeConfig({ adminUrl: 'https://gateway.example' });
     expect(loadConfig().adminUrl).toBe('https://gateway.example');
+  });
+
+  it('refuses disabling TLS verification for a remote production runtime admin URL', async () => {
+    setProductionEnv({
+      FERRUM_ADMIN_URL: 'https://gateway.internal:9443',
+      FERRUM_ALLOW_RUNTIME_SETTINGS: 'true',
+      FERRUM_ADMIN_ALLOWED_ORIGINS: 'https://gateway.internal:9443',
+    });
+    const { loadConfig, updateRuntimeConfig } = await loadModule();
+    await expect(updateRuntimeConfig({ tlsVerify: false }))
+      .rejects.toThrow(/FERRUM_TLS_VERIFY must be true in production/);
+    expect(loadConfig().tlsVerify).toBe(true);
   });
 
   it('normalizes distinct custom trusted-proxy header names', async () => {

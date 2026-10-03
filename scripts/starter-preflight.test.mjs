@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { mayCarrySecret as e2eMayCarrySecret } from "../e2e/support/may-carry-secret.mjs";
+import { isLoopbackAdminOrigin, mayCarrySecret } from "../shared/admin-origin.js";
 import {
   FAIL,
   PASS,
@@ -12,7 +13,6 @@ import {
   checkSecrets,
   checkTlsTrust,
   checkTrustBoundary,
-  mayCarrySecret,
   parseEnvFile,
   runPreflight,
 } from "./starter-preflight.mjs";
@@ -539,7 +539,10 @@ test("a CA path merely sharing the root's prefix is outside it", async () => {
 test("the e2e proof guard matches the canonical rule over the same URL table", () => {
   const cases = [
     ["https://foundry.example.com", true],
+    ["HTTP://localhost", true],
     ["http://127.0.0.1:8088", true],
+    ["http://127.1", true],
+    ["http://2130706433", true],
     ["http://localhost:8088", true],
     ["http://[::1]:8088", true],
     ["http://LOCALHOST", true],
@@ -552,6 +555,8 @@ test("the e2e proof guard matches the canonical rule over the same URL table", (
     ["http://127.0.0.1@evil.example", false],
     ["http://localhost.evil.example", false],
     ["http://[::ffff:127.0.0.1]", false],
+    ["http://0.0.0.0", false],
+    ["http://[::]", false],
     ["http://localhost.", false],
     ["ftp://localhost:8088", false],
     ["not a url", false],
@@ -566,6 +571,22 @@ test("the e2e proof guard matches the canonical rule over the same URL table", (
 test("HTTP accepts only literal IPv4 loopback addresses", () => {
   for (const url of ["http://127.0.0.1:8088", "http://127.255.255.255:8088"]) {
     assert.equal(mayCarrySecret(url), true, url);
+  }
+});
+
+test("the shared loopback classifier handles canonical and unusual URL spellings", () => {
+  const cases = [
+    ["http://0.0.0.0", false],
+    ["http://[::]", false],
+    ["HTTP://localhost", true],
+    ["http://127.1", true],
+    ["http://2130706433", true],
+    ["http://[::ffff:127.0.0.1]", false],
+    ["http://localhost.", false],
+  ];
+
+  for (const [url, expected] of cases) {
+    assert.equal(isLoopbackAdminOrigin(url), expected, url);
   }
 });
 

@@ -8,7 +8,7 @@ import {
 import { isIP } from "node:net";
 import { pathToFileURL } from "node:url";
 import { signAdminJwt } from "../shared/admin-jwt.js";
-import { mayCarrySecret } from "./starter-preflight.mjs";
+import { mayCarrySecret } from "../shared/admin-origin.js";
 
 const CONTRACT_REVISION = "50e65b5798555209114cbe08ab2d011b3896ad00";
 const COLLECTION_PAGE_SIZE = 100;

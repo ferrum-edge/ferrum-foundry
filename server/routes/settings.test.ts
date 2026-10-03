@@ -5,9 +5,11 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 const BFF_TOKEN = 'settings-test-bff-token-is-long-enough';
 const JWT_SECRET = 'settings-test-jwt-secret-is-long-enough';
 const ENV = {
-  FERRUM_ADMIN_URL: 'http://127.0.0.1:9999',
+  NODE_ENV: 'production',
+  FERRUM_ADMIN_URL: 'https://gateway.example',
   FERRUM_ADMIN_ALLOWED_ORIGINS: 'https://gateway.example',
   FERRUM_ALLOW_RUNTIME_SETTINGS: 'true',
+  FERRUM_ALLOW_INSECURE_STATIC_AUTH: 'true',
   FERRUM_JWT_SECRET: JWT_SECRET,
   FERRUM_BFF_AUTH_TOKEN: BFF_TOKEN,
   FERRUM_JWT_NAMESPACES: '*',
@@ -160,6 +162,24 @@ describe('settings routes', () => {
       });
       expect(response.statusCode).toBe(400);
       expect(JSON.stringify(response.json())).not.toContain('169.254.169.254');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('refuses disabling TLS verification for the remote production gateway', async () => {
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'PUT',
+        url: '/api/settings',
+        headers: await authenticatedHeaders(app),
+        payload: { tlsVerify: false },
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toMatchObject({
+        code: 'FERRUM_BFF_INVALID_SETTINGS',
+      });
     } finally {
       await app.close();
     }
