@@ -77,6 +77,12 @@ qualifies only if:
 `node scripts/supported-pairing.mjs release-ready` enforces the recorded part
 of this. The release workflow runs it and refuses a tag while `edge.release`
 still holds `RELEASE-STEP` placeholders or `edge.image` is not that release.
+It also refuses a record that is no longer the unreleased `candidate`: tag the
+commit that prepares the release, whose `foundry.source_commit`, `image`, and
+`ci_evidence` are still `RELEASE-STEP` placeholders. The release step fills
+them and sets `status: "released"` on `main` afterwards, so no later commit can
+publish the same version again (see `docs/release-security.md`, "Release
+version tags are never reassigned").
 
 ### Admin API changes in v0.9.8
 

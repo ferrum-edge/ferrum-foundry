@@ -478,10 +478,10 @@ test("the demo backend runs and probes with the image's own Node", async () => {
   // The demo backend's command is bare Node arguments and its probe names a
   // Node binary, so both depend on the Foundry runtime base. The starter also
   // runs already-published images (the released digest, a cached `:main`),
-  // which are distroless and have Node only at /nodejs/bin/node. The probe
-  // therefore names that path, and the runtime stage must provide it: natively
-  // on distroless, or by linking it on the temporary slim runtime (#504). The
-  // entrypoint and the image HEALTHCHECK use the same path.
+  // all of which have Node at /nodejs/bin/node. The probe therefore names that
+  // path, and the runtime stage must be the digest-pinned distroless nonroot
+  // Node image, which has Node only there. The entrypoint and the image
+  // HEALTHCHECK use the same path.
   const DISTROLESS_NODE = "/nodejs/bin/node";
   const dockerfile = await readFile(new URL("../docker/Dockerfile", import.meta.url), "utf8");
   const runtime = dockerfile.slice(dockerfile.lastIndexOf("\nFROM ") + 1);
@@ -494,16 +494,13 @@ test("the demo backend runs and probes with the image's own Node", async () => {
     "the image HEALTHCHECK must use the entrypoint's Node binary",
   );
   const DISTROLESS_BASE = /^FROM gcr\.io\/distroless\/nodejs\d+-debian\d+:nonroot@sha256:[0-9a-f]{64}$/;
-  const SLIM_BASE = /^FROM node:\d+-[a-z]+-slim@sha256:[0-9a-f]{64}$/;
-  const native = DISTROLESS_BASE.test(base);
-  const linked =
-    SLIM_BASE.test(base) &&
-    runtime.includes("mkdir -p /nodejs/bin") &&
-    runtime.includes(`ln -s /usr/local/bin/node ${DISTROLESS_NODE}`);
-  assert.ok(
-    native || linked,
-    `the runtime base must ship ${DISTROLESS_NODE} (distroless) or link it (${base})`,
+  assert.match(
+    base,
+    DISTROLESS_BASE,
+    `the runtime base must be the digest-pinned distroless nonroot Node image (${base})`,
   );
+  assert.doesNotMatch(runtime, /^RUN /m, "a distroless runtime stage has no shell to RUN in");
+  assert.match(runtime, /^USER 65532:65532$/m, "the runtime must run as the numeric nonroot user");
 
   const compose = await readFile(new URL("compose.yaml", STARTER), "utf8");
   const backend = compose.slice(compose.indexOf("  demo-backend:"));
