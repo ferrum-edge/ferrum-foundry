@@ -33,6 +33,9 @@ const ENV_KEYS = [
   'FERRUM_UPLOAD_TIMEOUT',
   'FERRUM_MAX_LARGE_UPLOADS',
   'FERRUM_MAX_ACTIVE_UPLOADS',
+  'FERRUM_MAX_ACTIVE_LONG_READS',
+  'FERRUM_MAX_LONG_READS_PER_PRINCIPAL',
+  'FERRUM_NAMESPACE_SCAN_MAX_PAGES',
   'FERRUM_BIND_ADDRESS',
   'FERRUM_SHUTDOWN_TIMEOUT',
   'PORT',
@@ -191,6 +194,9 @@ describe('config', () => {
       uploadTimeout: 300_000,
       maxLargeUploads: 2,
       maxActiveUploads: 32,
+      maxActiveLongReads: 32,
+      maxLongReadsPerPrincipal: 8,
+      namespaceScanMaxPages: 50,
       port: 3001,
       bindAddress: '0.0.0.0',
       shutdownTimeout: 10_000,
@@ -276,6 +282,41 @@ describe('config', () => {
     setValidEnv({ FERRUM_MAX_LARGE_UPLOADS: '8', FERRUM_MAX_ACTIVE_UPLOADS: '4' });
     const { loadConfig } = await loadModule();
     expect(() => loadConfig()).toThrow(/FERRUM_MAX_LARGE_UPLOADS must not exceed FERRUM_MAX_ACTIVE_UPLOADS/);
+  });
+
+  it('bounds the long-running read pool, its per-subject share, and the namespace scan budget', async () => {
+    setValidEnv({
+      FERRUM_MAX_ACTIVE_LONG_READS: '64',
+      FERRUM_MAX_LONG_READS_PER_PRINCIPAL: '16',
+      FERRUM_NAMESPACE_SCAN_MAX_PAGES: '200',
+    });
+    const { loadConfig } = await loadModule();
+    expect(loadConfig()).toMatchObject({
+      maxActiveLongReads: 64,
+      maxLongReadsPerPrincipal: 16,
+      namespaceScanMaxPages: 200,
+    });
+
+    for (const [name, value] of [
+      ['FERRUM_MAX_ACTIVE_LONG_READS', '0'],
+      ['FERRUM_MAX_ACTIVE_LONG_READS', '1025'],
+      ['FERRUM_MAX_LONG_READS_PER_PRINCIPAL', '0'],
+      ['FERRUM_NAMESPACE_SCAN_MAX_PAGES', '0'],
+      ['FERRUM_NAMESPACE_SCAN_MAX_PAGES', '1001'],
+      ['FERRUM_NAMESPACE_SCAN_MAX_PAGES', 'all'],
+    ]) {
+      clearTestEnv();
+      setValidEnv({ [name]: value });
+      const invalid = await loadModule();
+      expect(() => invalid.loadConfig()).toThrow(new RegExp(name));
+    }
+
+    clearTestEnv();
+    setValidEnv({ FERRUM_MAX_ACTIVE_LONG_READS: '4', FERRUM_MAX_LONG_READS_PER_PRINCIPAL: '8' });
+    const wider = await loadModule();
+    expect(() => wider.loadConfig()).toThrow(
+      /FERRUM_MAX_LONG_READS_PER_PRINCIPAL must not exceed FERRUM_MAX_ACTIVE_LONG_READS/,
+    );
   });
 
   it('parses role, audience, and exact namespace claims', async () => {

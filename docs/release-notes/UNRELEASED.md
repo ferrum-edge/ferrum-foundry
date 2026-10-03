@@ -31,6 +31,18 @@
 *Release step:* summarize the changes from the `[Unreleased]` section of
 `CHANGELOG.md`.
 
+- **Bounded long-running reads.** Apply-status long polls, backup downloads,
+  and namespace-scoped namespace lists share a new admission pool, bounded per
+  instance (`FERRUM_MAX_ACTIVE_LONG_READS`, default 32) and per authenticated
+  subject (`FERRUM_MAX_LONG_READS_PER_PRINCIPAL`, default 8). A full pool
+  answers `429` with `code: FERRUM_BFF_READ_CAPACITY`. The starter's nginx
+  configurations cap in-flight API requests at 64 per client address.
+- **Bounded namespace-scoped listing.** A scoped `GET /namespaces` stops once
+  every grant is found, reads at most `FERRUM_NAMESPACE_SCAN_MAX_PAGES` pages
+  (default 50, 50,000 names) and otherwise answers `503` with
+  `code: FERRUM_BFF_NAMESPACE_SCAN_BUDGET` rather than a partial list, and
+  identical concurrent lists share one gateway read.
+
 ### Known limitations
 
 *Release step.*

@@ -42,6 +42,12 @@ export interface Config {
   shutdownTimeout: number;
   maxLargeUploads: number;
   maxActiveUploads: number;
+  /** Concurrent long-running reads (apply-status waits, backups, scoped namespace lists). */
+  maxActiveLongReads: number;
+  /** The share of `maxActiveLongReads` one authenticated subject may hold. */
+  maxLongReadsPerPrincipal: number;
+  /** Upstream pages a scoped namespace list may read before it reports unavailable. */
+  namespaceScanMaxPages: number;
   allowRuntimeSettings: boolean;
   authMode: AuthMode;
   bffAuthToken: string | undefined;
@@ -434,6 +440,15 @@ function parseBaseConfig(): Config {
   if (maxLargeUploads > maxActiveUploads) {
     throw new Error('FERRUM_MAX_LARGE_UPLOADS must not exceed FERRUM_MAX_ACTIVE_UPLOADS');
   }
+  // Reads that hold a request and an upstream connection for longer than an
+  // ordinary read get their own pool, with a per-subject share of it so one
+  // identity cannot take the whole allowance. The same contradiction rule as
+  // the upload pools applies.
+  const maxActiveLongReads = parseInteger('FERRUM_MAX_ACTIVE_LONG_READS', 32, 1, 1024);
+  const maxLongReadsPerPrincipal = parseInteger('FERRUM_MAX_LONG_READS_PER_PRINCIPAL', 8, 1, 1024);
+  if (maxLongReadsPerPrincipal > maxActiveLongReads) {
+    throw new Error('FERRUM_MAX_LONG_READS_PER_PRINCIPAL must not exceed FERRUM_MAX_ACTIVE_LONG_READS');
+  }
 
   const allowRuntimeSettings = parseBoolean('FERRUM_ALLOW_RUNTIME_SETTINGS', false);
   const adminAllowedOrigins = parseOrigins(optionalEnv('FERRUM_ADMIN_ALLOWED_ORIGINS'), requireSecure);
@@ -466,6 +481,9 @@ function parseBaseConfig(): Config {
     shutdownTimeout: parseInteger('FERRUM_SHUTDOWN_TIMEOUT', 10_000, 1000, 300_000),
     maxLargeUploads,
     maxActiveUploads,
+    maxActiveLongReads,
+    maxLongReadsPerPrincipal,
+    namespaceScanMaxPages: parseInteger('FERRUM_NAMESPACE_SCAN_MAX_PAGES', 50, 1, 1000),
     allowRuntimeSettings,
     authMode,
     bffAuthToken,

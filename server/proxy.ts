@@ -1,7 +1,7 @@
 import { Readable, Transform, type TransformCallback } from 'node:stream';
 import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
-import { fetch, type RequestInit } from 'undici';
+import { fetch, type RequestInit, type Response } from 'undici';
 import { requireAdminAuth } from './auth.js';
 import { loadConfig } from './config.js';
 import { rejectStaleGatewayTarget, stampGatewayTarget } from './gateway-target.js';
@@ -10,7 +10,14 @@ import { proxyTargetPath, proxyTargetUrl, UnsafeProxyPathError } from './proxy-p
 import { getDispatcher } from './tls.js';
 import { closeUnreadUpload, setUploadBudget } from './upload-drain.js';
 import { waitingRouteTimeout } from './waitBudget.js';
-import { authorizeRegistryBody, authorizeRegistryPath, isRegistryPath, RegistryRequestError, scopedRegistryList } from './namespace-registry.js';
+import {
+  authorizeRegistryBody,
+  authorizeRegistryPath,
+  isRegistryPath,
+  NamespaceScanTimeoutError,
+  RegistryRequestError,
+  scopedRegistryList,
+} from './namespace-registry.js';
 
 const DEFAULT_BODY_LIMIT = 2 * 1024 * 1024;
 const API_SPEC_BODY_LIMIT = 30 * 1024 * 1024;
@@ -134,6 +141,22 @@ function isLargeUpload(request: FastifyRequest): boolean {
   return bodyLimitFor(proxyTargetPath(request)) > DEFAULT_BODY_LIMIT;
 }
 
+function isScopedNamespaceList(request: FastifyRequest, path: string): boolean {
+  return request.method === 'GET' && path === '/namespaces' && request.authPrincipal?.namespaces !== undefined;
+}
+
+/**
+ * Reads that hold a request and an upstream connection far longer than an
+ * ordinary read, or fan out into many upstream reads: the apply-status long
+ * poll, a backup download, and a scoped namespace list. HEAD is included
+ * because the gateway answers it with the same wait.
+ */
+function isLongRead(request: FastifyRequest): boolean {
+  if (request.method !== 'GET' && request.method !== 'HEAD') return false;
+  const path = proxyTargetPath(request);
+  return waitingRouteTimeout('GET', path) > 0 || path === '/backup' || isScopedNamespaceList(request, path);
+}
+
 function copyRequestHeaders(request: FastifyRequest, authorization: string): Record<string, string> {
   // Undici transparently decodes compressed fetch responses while preserving
   // the upstream content-length. Prefer an identity response so downstream
@@ -228,8 +251,54 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
     }
   };
 
-  fastify.addHook('onResponse', async (request) => releaseUpload(request));
-  fastify.addHook('onRequestAbort', async (request) => releaseUpload(request));
+  // Reads never enter the upload pools, so long-running ones get their own:
+  // a global bound, and a per-subject share of it so one identity cannot hold
+  // the whole allowance. Like the upload pools it never queues; a full pool
+  // answers 429 before a token is signed or the gateway is contacted.
+  let activeLongReads = 0;
+  const longReadsBySubject = new Map<string, number>();
+  const reservedLongReads = new WeakMap<FastifyRequest, string>();
+
+  const reserveLongRead = async (request: FastifyRequest, reply: Parameters<typeof requireAdminAuth>[1]) => {
+    const subject = request.authPrincipal?.subject;
+    if (subject === undefined || !isLongRead(request)) return;
+    const config = loadConfig();
+    const held = longReadsBySubject.get(subject) ?? 0;
+    const scope = held >= config.maxLongReadsPerPrincipal
+      ? 'principal'
+      : activeLongReads >= config.maxActiveLongReads ? 'all' : undefined;
+    if (scope) {
+      return reply.status(429).header('retry-after', '1').send({
+        error: 'Too Many Requests',
+        code: 'FERRUM_BFF_READ_CAPACITY',
+        scope,
+      });
+    }
+    activeLongReads += 1;
+    longReadsBySubject.set(subject, held + 1);
+    reservedLongReads.set(request, subject);
+    reply.raw.once('close', () => releaseLongRead(request));
+  };
+
+  // Keyed off WeakMap membership, so the permit is returned exactly once
+  // whichever terminal hook or raw response close fires first.
+  const releaseLongRead = (request: FastifyRequest) => {
+    const subject = reservedLongReads.get(request);
+    if (subject === undefined) return;
+    reservedLongReads.delete(request);
+    activeLongReads = Math.max(0, activeLongReads - 1);
+    const remaining = (longReadsBySubject.get(subject) ?? 1) - 1;
+    if (remaining > 0) longReadsBySubject.set(subject, remaining);
+    else longReadsBySubject.delete(subject);
+  };
+
+  const releaseCapacity = (request: FastifyRequest) => {
+    releaseUpload(request);
+    releaseLongRead(request);
+  };
+
+  fastify.addHook('onResponse', async (request) => releaseCapacity(request));
+  fastify.addHook('onRequestAbort', async (request) => releaseCapacity(request));
 
   const requireSafeProxyPath = async (
     request: FastifyRequest,
@@ -253,7 +322,7 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
   };
 
   fastify.all('/api/proxy/*', {
-    onRequest: [requireAdminAuth, requireSafeProxyPath, reserveUpload],
+    onRequest: [requireAdminAuth, requireSafeProxyPath, reserveUpload, reserveLongRead],
     bodyLimit: RESTORE_BODY_LIMIT,
   }, async (request, reply) => {
     const config = loadConfig();
@@ -358,15 +427,31 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
         redirect: 'error',
         ...(body && { duplex: 'half' }),
       };
-      const scopedList = targetPath === '/namespaces' && method === 'GET' && principal.namespaces !== undefined;
+      const scopedList = isScopedNamespaceList(request, targetPath);
       if (scopedList) {
         // Conditional/range headers address the original fleet representation.
         for (const name of ['if-match', 'if-none-match', 'range']) delete headers[name];
       }
       controller.signal.throwIfAborted();
-      const response = scopedList
-        ? await scopedRegistryList(target, principal, (url) => fetch(url, init))
-        : await fetch(target, init);
+      let response: Response;
+      if (scopedList) {
+        // The authorization header differs per signing; everything else that
+        // shapes the upstream answer decides which requests share a traversal.
+        const { authorization: _authorization, ...forwarded } = headers;
+        response = await scopedRegistryList(
+          target,
+          principal,
+          (url, signal) => fetch(url, { ...init, signal }),
+          {
+            maxPages: config.namespaceScanMaxPages,
+            deadline: responseTimeout,
+            identity: JSON.stringify([principal.subject, principal.role, forwarded]),
+            signal: controller.signal,
+          },
+        );
+      } else {
+        response = await fetch(target, init);
+      }
       // An upstream may answer before consuming the entire request body. Once
       // response headers exist, bound the downstream phase immediately.
       startResponseDeadline();
@@ -406,6 +491,9 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
       reply.raw.off('close', abortOnDisconnect);
       if (error instanceof RegistryRequestError) {
         return reply.status(error.status).send({ error: error.message });
+      }
+      if (error instanceof NamespaceScanTimeoutError) {
+        return reply.status(504).send(timeoutResponse('response'));
       }
       if (error instanceof PayloadTooLargeError || controller.signal.reason instanceof PayloadTooLargeError) {
         return reply.status(413).send({ error: 'Payload Too Large', code: 'FERRUM_BFF_BODY_LIMIT' });

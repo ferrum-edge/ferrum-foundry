@@ -29,6 +29,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `X-Ferrum-Auth-Secret`, and none may be a header HTTP or the BFF already
   uses (hop-by-hop and credential headers, request framing and forwarding
   headers, `X-CSRF-Token`, `X-Ferrum-Namespace`, `X-Foundry-Gateway-Target`).
+- GHSA-jw5q-qmrj-m87g: long-running reads now have their own admission pool.
+  The config apply-status long poll, backup downloads (`GET` or `HEAD`), and
+  namespace-scoped namespace lists previously held a request and a gateway
+  connection outside every concurrency limit, because only body-bearing
+  requests were counted. `FERRUM_MAX_ACTIVE_LONG_READS` (default 32) bounds
+  them per instance and `FERRUM_MAX_LONG_READS_PER_PRINCIPAL` (default 8, at
+  most the global value) per authenticated subject. A full pool answers `429`
+  with `code: FERRUM_BFF_READ_CAPACITY`, `retry-after: 1`, and `scope`
+  `principal` or `all`, without queueing, signing, or contacting the gateway.
+  Permits are returned on completion, abort, and disconnect. The starter's
+  nginx configurations also cap in-flight `/api/` requests at 64 per client
+  address (`429`).
+- GHSA-37q7-fc8p-hchr: a namespace-scoped `GET /namespaces` no longer reads
+  the whole fleet registry unconditionally. It stops once every granted name
+  is found, reads at most `FERRUM_NAMESPACE_SCAN_MAX_PAGES` pages of 1000
+  names (default 50) and otherwise answers `503` with
+  `code: FERRUM_BFF_NAMESPACE_SCAN_BUDGET` instead of a partial list, shares
+  one gateway read between identical lists in flight (same identity, grants,
+  and query apart from `offset`/`limit`; nothing is cached afterwards), and
+  counts against the long-running read pool.
 
 ## [0.4.0] - 2026-10-01
 

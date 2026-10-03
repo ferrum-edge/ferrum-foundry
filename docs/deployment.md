@@ -157,6 +157,9 @@ Durations are integers.
 | `FERRUM_UPLOAD_TIMEOUT` | No | `300000` | 1000-3600000 ms | Whole-body deadline for restore and API-spec uploads. Progress never extends it |
 | `FERRUM_MAX_LARGE_UPLOADS` | No | `2` | 1-32, at most `FERRUM_MAX_ACTIVE_UPLOADS` | Concurrent restore and API-spec uploads before `429` |
 | `FERRUM_MAX_ACTIVE_UPLOADS` | No | `32` | 1-1024 | Concurrent proxied requests with a body, of any size, before `429` |
+| `FERRUM_MAX_ACTIVE_LONG_READS` | No | `32` | 1-1024 | Concurrent [long-running reads](#long-running-reads) (apply-status long polls, backup downloads, namespace-scoped namespace lists) before `429` |
+| `FERRUM_MAX_LONG_READS_PER_PRINCIPAL` | No | `8` | 1-1024, at most `FERRUM_MAX_ACTIVE_LONG_READS` | Long-running reads one authenticated subject may hold at once before `429` |
+| `FERRUM_NAMESPACE_SCAN_MAX_PAGES` | No | `50` | 1-1000 | Upstream pages of 1000 names a namespace-scoped `GET /namespaces` may read before it answers `503` |
 
 A CA bundle must hold one or more parseable PEM X.509 certificates (blank and
 `#` comment lines are allowed). Parsing checks the encoding, not whether the
@@ -288,6 +291,12 @@ Things that are easy to get wrong:
 - **Fleet-global surfaces are not namespace-scoped.** TLS inventory, managed
   TLS material, ACME, rotation, and validation ignore namespace grants.
   Restrict those routes at the proxy if a scoped identity must not reach them.
+- **Cap in-flight API requests per client.** The starter allows 64 `/api/`
+  requests in flight per client address (`limit_conn foundry_api 64`, answered
+  with `429`). nginx applies it before `auth_request`, so it is keyed on the
+  address, not the identity; Foundry bounds each identity itself (see
+  [long-running reads](#long-running-reads)). Raise it if many users share one
+  address, such as behind a corporate NAT.
 
 ### Live-apply monitoring and ACME issuance deadlines
 
@@ -558,6 +567,46 @@ body-bearing proxied sockets. Non-proxy routes (sign-in, runtime settings) are
 bounded only by the server's request timeout. Size file-descriptor headroom for
 this and cap connections per client at the proxy (for example nginx
 `limit_conn`).
+
+### Long-running reads
+
+Reads carry no body, so they never enter the upload pools. Three kinds hold a
+request and a gateway connection far longer than an ordinary read, or fan out
+into many gateway reads, so they share a separate pool:
+
+- the config apply-status long poll (`GET` or `HEAD /config/apply-status`),
+- backup downloads (`GET` or `HEAD /backup`),
+- a `GET /namespaces` from an identity with namespace grants (see below).
+
+`FERRUM_MAX_ACTIVE_LONG_READS` bounds them for the whole instance, and
+`FERRUM_MAX_LONG_READS_PER_PRINCIPAL` bounds how many of them one
+authenticated subject may hold, so a single identity cannot take the whole
+pool. Neither queues: a full pool answers `429` with
+`code: FERRUM_BFF_READ_CAPACITY`, `retry-after: 1`, and `scope` `principal` or
+`all`, before a token is signed or the gateway is contacted. The SPA retries a
+`429` read on its own. A permit is returned when the response completes, the
+request is aborted, or the client disconnects. In static mode every user is
+the same subject, so all of them together get one per-subject share.
+
+A namespace-scoped `GET /namespaces` must not reveal names outside the
+identity's grants, so the BFF reads the gateway's registry in pages of 1000
+names, keeps only granted names, and paginates those itself. That read is
+bounded:
+
+- it stops as soon as every granted name has been found;
+- it reads at most `FERRUM_NAMESPACE_SCAN_MAX_PAGES` pages (50,000 names by
+  default). A registry too large to rule out every grant within that budget
+  answers `503` with `code: FERRUM_BFF_NAMESPACE_SCAN_BUDGET`, never a partial
+  list. Raise the budget for a fleet that large, or give the identity exact
+  grants that exist;
+- identical lists in flight at the same time (same identity, grants, and
+  query apart from `offset` and `limit`) share one read. Nothing is cached
+  after it finishes;
+- it runs under the response deadline (`FERRUM_READ_TIMEOUT`), answering
+  `504` with `code: FERRUM_BFF_TIMEOUT` when that runs out.
+
+An identity without grants gets the gateway's own paginated answer, one
+gateway read per request.
 
 ### Graceful shutdown
 

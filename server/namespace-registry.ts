@@ -120,32 +120,84 @@ async function readPage(response: Response): Promise<unknown> {
   }
 }
 
-// Filtering individual pages leaves gaps and exposes the fleet total. Scan
-// with a fixed page bound under the caller's single response deadline, retain
-// only granted names, then paginate that set. No upstream cache validators or
-// lengths describe this caller-specific representation.
-export async function scopedRegistryList(
+/** The shared traversal outlived its own deadline; no waiter may see a partial list. */
+export class NamespaceScanTimeoutError extends Error {
+  constructor() {
+    super('Namespace list scan exceeded its deadline');
+    this.name = 'NamespaceScanTimeoutError';
+  }
+}
+
+export interface ScopedListOptions {
+  /** Upstream pages one traversal may read before it reports unavailable. */
+  maxPages: number;
+  /** Bound on the shared traversal itself, independent of any one waiter. */
+  deadline: number;
+  /**
+   * Everything besides the URL and grants that shapes the upstream answer:
+   * the signing subject and role and the forwarded headers. Requests that
+   * agree on it, the URL, and the grants share one traversal.
+   */
+  identity: string;
+  /** The waiting request's own cancellation (deadline or disconnect). */
+  signal: AbortSignal;
+}
+
+type ScanOutcome =
+  | { names: string[] }
+  | { status: number; body: Record<string, string> };
+
+interface SharedScan {
+  outcome: Promise<ScanOutcome>;
+  controller: AbortController;
+  waiters: number;
+}
+
+const sharedScans = new Map<string, SharedScan>();
+
+function unavailable(outcome: Extract<ScanOutcome, { status: number }>): Response {
+  return new Response(JSON.stringify(outcome.body), {
+    status: outcome.status,
+    headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+  });
+}
+
+// Filtering individual pages leaves gaps and exposes the fleet total, so the
+// traversal retains only granted names and the caller paginates that set. Its
+// cost is bounded three ways: it stops as soon as every grant is found (the
+// result is a subset of the grants, so no later page can change it), it reads
+// at most `maxPages` pages and otherwise reports the list unavailable rather
+// than partial, and it runs under its own deadline.
+async function scanGrantedNames(
   target: URL,
-  principal: AuthPrincipal,
-  fetchPage: (url: URL) => Promise<Response>,
-): Promise<Response> {
-  const { offset, limit } = registryPagination(target.searchParams);
-  const grants = new Set(principal.namespaces);
+  grants: ReadonlySet<string>,
+  fetchPage: (url: URL, signal: AbortSignal) => Promise<Response>,
+  maxPages: number,
+  signal: AbortSignal,
+): Promise<ScanOutcome> {
   const names = new Set<string>();
   let upstreamOffset = 0;
+  let pages = 0;
   while (true) {
+    if (pages >= maxPages) {
+      return {
+        status: 503,
+        body: { error: 'Namespace list unavailable', code: 'FERRUM_BFF_NAMESPACE_SCAN_BUDGET' },
+      };
+    }
     const pageUrl = new URL(target);
     pageUrl.searchParams.set('offset', String(upstreamOffset));
     pageUrl.searchParams.set('limit', String(PAGE_SIZE));
-    const response = await fetchPage(pageUrl);
+    const response = await fetchPage(pageUrl, signal);
+    pages += 1;
     if (response.status !== 200) {
       await response.body?.cancel();
       // Never forward a partial list or an upstream error body containing
       // names outside the grant set.
-      return new Response(JSON.stringify({ error: 'Namespace list unavailable' }), {
+      return {
         status: response.status >= 400 ? response.status : 502,
-        headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
-      });
+        body: { error: 'Namespace list unavailable' },
+      };
     }
     const page: unknown = await readPage(response);
     const legacy = Array.isArray(page);
@@ -163,9 +215,86 @@ export async function scopedRegistryList(
     }
     upstreamOffset += data.length;
     if (upstreamOffset >= total) break;
+    // The first page always runs, so the gateway's own answer (including a
+    // refusal) still decides a request whose grants are all found.
+    if (names.size === grants.size) break;
     if (data.length === 0) throw new Error('Namespace pagination made no progress');
   }
-  const sorted = [...names].sort();
+  return { names: [...names].sort() };
+}
+
+function startScan(key: string, deadline: number, run: (signal: AbortSignal) => Promise<ScanOutcome>): SharedScan {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new NamespaceScanTimeoutError()), deadline);
+  timer.unref();
+  const scan = { controller, waiters: 0 } as SharedScan;
+  scan.outcome = run(controller.signal)
+    .catch((error: unknown) => {
+      // An aborted fetch or body read reports its own error shape; report why
+      // the traversal was stopped instead.
+      throw controller.signal.aborted ? controller.signal.reason : error;
+    })
+    .finally(() => {
+      clearTimeout(timer);
+      if (sharedScans.get(key) === scan) sharedScans.delete(key);
+    });
+  // Every waiter observes the outcome itself; this only keeps an abandoned
+  // traversal's rejection from surfacing as unhandled.
+  scan.outcome.catch(() => undefined);
+  sharedScans.set(key, scan);
+  return scan;
+}
+
+function untilAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+  });
+}
+
+// Identical concurrent lists join one in-flight traversal instead of each
+// walking the registry. A waiter that gives up leaves the traversal to the
+// others; the last one to leave stops it, so no upstream read outlives every
+// request that wanted it. No result is kept once the traversal settles.
+async function joinScan(
+  key: string,
+  options: ScopedListOptions,
+  run: (signal: AbortSignal) => Promise<ScanOutcome>,
+): Promise<ScanOutcome> {
+  const scan = sharedScans.get(key) ?? startScan(key, options.deadline, run);
+  scan.waiters += 1;
+  try {
+    return await untilAborted(scan.outcome, options.signal);
+  } finally {
+    scan.waiters -= 1;
+    if (scan.waiters === 0) {
+      if (sharedScans.get(key) === scan) sharedScans.delete(key);
+      scan.controller.abort(new Error('Namespace list scan abandoned'));
+    }
+  }
+}
+
+// No upstream cache validators or lengths describe this caller-specific
+// representation.
+export async function scopedRegistryList(
+  target: URL,
+  principal: AuthPrincipal,
+  fetchPage: (url: URL, signal: AbortSignal) => Promise<Response>,
+  options: ScopedListOptions,
+): Promise<Response> {
+  const { offset, limit } = registryPagination(target.searchParams);
+  const grants = new Set(principal.namespaces);
+  const scope = new URL(target);
+  scope.searchParams.delete('offset');
+  scope.searchParams.delete('limit');
+  const key = JSON.stringify([scope.href, [...grants].sort(), options.identity]);
+  const outcome = await joinScan(key, options, (signal) => (
+    scanGrantedNames(target, grants, fetchPage, options.maxPages, signal)
+  ));
+  if (!('names' in outcome)) return unavailable(outcome);
+  const sorted = outcome.names;
   const start = offset > BigInt(sorted.length) ? sorted.length : Number(offset);
   // Keep the full int64 offset in the wire JSON instead of rounding it through
   // a JS Number. The collection itself is bounded by the principal's grants.
