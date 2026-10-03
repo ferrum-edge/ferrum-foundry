@@ -587,7 +587,8 @@ authenticated subject may hold, so a single identity cannot take the whole
 pool. Neither queues: a full pool answers `429` with
 `code: FERRUM_BFF_READ_CAPACITY`, `retry-after: 1`, and `scope` `principal` or
 `all`, before a token is signed or the gateway is contacted. The SPA retries a
-refused namespace list or backup read up to twice. Its apply-status poll waits
+refused namespace list up to twice; a refused backup read is not retried. Its
+apply-status poll waits
 as `Retry-After` asks, doubling the wait up to 8 s, for up to four refusals
 before it counts one as a failure; after that it reports the write's live
 state as unverifiable. A permit is returned when the response completes, the
@@ -620,8 +621,19 @@ Every proxied request and settings check shares one connection pool to the
 admin API, capped at `FERRUM_MAX_GATEWAY_CONNECTIONS`. The cap bounds sockets
 to the gateway whatever the route or how slowly a client reads its response;
 a reader that stalls holds its connection only until the response deadline
-(`FERRUM_READ_TIMEOUT`). A request that finds every connection busy waits for
-one within its own deadline, and answers `504` if none frees up in time.
+(`FERRUM_READ_TIMEOUT`, or 120 s for a backup download). A request that finds
+every connection busy waits for one within its own deadline, and answers `504`
+if none frees up in time. Over HTTP/1.1 each request holds a socket; when the
+gateway negotiates HTTP/2, the cap limits sockets and each socket carries many
+requests.
+
+The cap is shared by every user. Without a buffering proxy in front of
+Foundry, one viewer holding about `FERRUM_MAX_GATEWAY_CONNECTIONS` slow
+downloads of large responses can occupy it until those deadlines expire, and
+other requests wait and may answer `504`. The starter's nginx buffers
+responses by default, which releases the gateway connection as soon as the
+response is read from the gateway; keep response buffering on in production
+proxies.
 
 The cap must exceed the two pools that refuse instead of waiting, long reads
 and uploads, by at least 16 connections. The default leaves 64, so ordinary
