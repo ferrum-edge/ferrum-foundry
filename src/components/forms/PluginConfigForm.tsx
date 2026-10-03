@@ -33,6 +33,7 @@ import {
   formatPluginName,
   getPluginMeta,
   isInternalPlugin,
+  oidcEncryptionSecretProblem,
 } from "@/lib/pluginConfigDefaults";
 import { ProxySearchPicker } from "@/components/forms/ProxySearchPicker";
 import { PluginGuidedConfig } from "@/components/forms/PluginGuidedConfig";
@@ -205,10 +206,15 @@ function PluginConfigFormFields({
     if (priorityOverride !== "" && (Number(priorityOverride) < 0 || Number(priorityOverride) > 10000)) {
       errs.priority_override = "Must be between 0 and 10000";
     }
+    let parsedConfig: unknown;
     try {
-      JSON.parse(configJson);
+      parsedConfig = JSON.parse(configJson);
     } catch {
       errs.config = "Invalid JSON";
+    }
+    if (!errs.config && pluginName === "oidc_relying_party" && enabled) {
+      const secretProblem = oidcEncryptionSecretProblem(parsedConfig);
+      if (secretProblem) errs.config = secretProblem;
     }
     // Guided validation is assistance before submission; the gateway is still
     // the authority. Blocking here keeps a value the schema rejects — a
@@ -536,6 +542,12 @@ function PluginConfigFormFields({
 
         {/* ── Config ── */}
         <div className="border-b border-border/50 py-4">
+          {pluginName === "oidc_relying_party" && (
+            <p className="mb-4 text-xs text-warning">
+              Set <code className="font-mono">session.encryption_secret</code> to a unique,
+              randomly generated secret before enabling this plugin. Keep the value private.
+            </p>
+          )}
           <div className="flex items-center justify-between gap-3 mb-4">
             <h3 className="text-sm font-semibold text-text-primary">
               {guidedActive ? "Configuration" : "Config (JSON)"}

@@ -15,6 +15,13 @@
  * that release is recorded and `edge.image` is it, so the gates that qualified
  * the tag ran against the release it names.
  *
+ * `release-ready` also binds the tag to an unreleased record
+ * (GHSA-rw8r-hrr2-vpc2): the tagged commit must still be the `candidate`
+ * prepared for release, with the Foundry artifacts unrecorded. The release
+ * step fills them and marks the record `released` on main afterwards (a commit
+ * cannot name its own hash), so a tag moved or re-created onto any later commit
+ * cannot publish the same version again.
+ *
  * Changing `edge.image` is a re-qualification, not a tag edit: the pull request
  * that changes it runs every gateway-backed gate against the new image.
  *
@@ -118,6 +125,32 @@ export function edgeReleaseErrors(record) {
   for (const platform of PLATFORMS) {
     if (edge.platform_manifests?.[platform] !== release.platform_manifests[platform]) {
       errors.push(`edge.platform_manifests["${platform}"] is not the release's`);
+    }
+  }
+  return errors;
+}
+
+/** The Foundry artifacts the release step records once the release is published. */
+export const FOUNDRY_RELEASE_STEP_FIELDS = ["source_commit", "image", "ci_evidence"];
+
+/**
+ * Why a tagged commit's record cannot be released. Empty only for the
+ * `candidate` record prepared for this release, whose Foundry artifacts are
+ * still release-step placeholders. A `released` record (every commit after a
+ * release step) or a recorded artifact means this version was already
+ * published.
+ */
+export function foundryReleaseErrors(record) {
+  const errors = [];
+  if (record?.status !== "candidate") {
+    errors.push(
+      `status is ${JSON.stringify(record?.status)}, not "candidate"; `
+        + `foundry.version ${record?.foundry?.version} was already released from another commit`,
+    );
+  }
+  for (const field of FOUNDRY_RELEASE_STEP_FIELDS) {
+    if (!isPlaceholder(record?.foundry?.[field])) {
+      errors.push(`foundry.${field} is already recorded; this version was already released`);
     }
   }
   return errors;
@@ -271,6 +304,14 @@ function main(command) {
         `${RECORD_PATH} does not name a qualified Ferrum Edge release to pair with:`,
         ...unready.map((error) => `  ${error}`),
         "Record the release in edge.release, move edge.image to it, and re-run the full qualification first.",
+      ].join("\n"));
+    }
+    const released = foundryReleaseErrors(record);
+    if (released.length > 0) {
+      throw new Error([
+        `${RECORD_PATH} is not an unreleased candidate, so this commit cannot be released:`,
+        ...released.map((error) => `  ${error}`),
+        "Tag the commit that prepared this version. A published version is never re-released.",
       ].join("\n"));
     }
     console.log(JSON.stringify({ ready: true, edge: record.edge.release.version, image: record.edge.image }));

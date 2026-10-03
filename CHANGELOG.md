@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- The OIDC Relying Party template no longer includes a public session encryption
+  key. Foundry blocks enabling it until an operator supplies a unique secret,
+  and the plugin defaults contract supplies a generated key when checking the
+  remaining template fields (GHSA-hjw6-685j-p5hw). Deployments that enabled
+  OIDC from this template must rotate `session.encryption_secret` now. Do not
+  carry the old public key in `session.encryption_secret_previous`.
 - GHSA-27j6-vr5h-8p6v: with `NODE_ENV=production`, the BFF refuses to start
   when `FERRUM_ADMIN_URL` or a `FERRUM_ADMIN_ALLOWED_ORIGINS` entry is a
   plaintext `http://` origin on a host other than loopback (exact `localhost`,
@@ -57,6 +63,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `offset`/`limit`; nothing is cached afterwards), ends that read at its own
   deadline or when the last waiting request leaves, and counts against the
   long-running read pool.
+- GHSA-rw8r-hrr2-vpc2: the release workflow never reassigns a release version
+  tag. The tag must name the commit the run builds, checked at the start and
+  again before the registries are written and before the GitHub release is
+  created. `supported-pairing.mjs release-ready` refuses a record that is no
+  longer the unreleased `candidate`, so a tag moved onto a commit after the
+  release step cannot republish the version. Before any build, the workflow
+  refuses a version that already has a GitHub release, or whose `vX.Y.Z` or
+  `X.Y.Z` tag on Docker Hub or GHCR carries another commit's
+  `org.opencontainers.image.revision` (`scripts/release-image-identity.mjs`).
+  The manifest job computes the index digest it would publish and compares
+  both version tags in both registries before writing either: an absent tag is
+  created, a tag already naming that digest is left alone (an idempotent
+  rerun), and any other digest fails the release. The published digest is
+  recorded in the job summary and the GitHub release notes.
+
+### Changed
+
+- The runtime image is distroless again (#504):
+  `gcr.io/distroless/nodejs24-debian13:nonroot`, pinned by index digest, now
+  that upstream ships the fixed `libssl3t64` 3.5.7-1~deb13u3. The temporary
+  `node:24-trixie-slim` runtime, its build-time OpenSSL and `libpcre2-8-0`
+  package pins, and its shell and apt/dpkg are gone. The image still runs as
+  `65532:65532` with `/nodejs/bin/node` as its entrypoint and in its
+  HEALTHCHECK, and the starter test again requires the distroless base.
 
 ### Fixed
 

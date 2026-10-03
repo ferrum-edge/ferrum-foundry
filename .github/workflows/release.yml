@@ -25,13 +25,19 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Require a safe semantic-version tag
+      - name: Require a safe semantic-version tag on this run's commit
         id: version
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           metadata="$(node scripts/release-channel-tags.mjs)"
           tag_commit="$(git rev-parse --verify "${RELEASE_TAG}^{commit}")"
+          # The release is bound to the commit the tag names: this run builds,
+          # labels, and publishes GITHUB_SHA, and nothing else.
+          if [[ "$tag_commit" != "$GITHUB_SHA" ]]; then
+            echo "Release tag ${RELEASE_TAG} names ${tag_commit}, but this run builds ${GITHUB_SHA}" >&2
+            exit 1
+          fi
           if ! git merge-base --is-ancestor "$tag_commit" origin/main; then
             echo "Release tags must point to commits reachable from main" >&2
             exit 1
@@ -53,8 +59,10 @@ jobs:
         # Every release names the published Ferrum Edge release it was
         # qualified against (docs/compatibility.md): release-ready refuses the
         # tag until edge.release is recorded and CI's edge.image is that
-        # release. The record and the notes are prepared on main before
-        # tagging; nothing here edits them.
+        # release. It also refuses a record that is no longer the unreleased
+        # candidate, so a tag moved onto a commit after the release step cannot
+        # publish the version again. The record and the notes are prepared on
+        # main before tagging; nothing here edits them.
         env:
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
@@ -69,6 +77,33 @@ jobs:
             echo "docs/release-notes/${RELEASE_TAG}.md is missing; move docs/release-notes/UNRELEASED.md there before tagging" >&2
             exit 1
           fi
+
+      - name: Refuse a version that already has a GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" --silent 2> "$RUNNER_TEMP/release-lookup.err"; then
+            echo "GitHub release ${RELEASE_TAG} already exists; a published version is never re-released" >&2
+            exit 1
+          fi
+          if ! grep --quiet 'HTTP 404' "$RUNNER_TEMP/release-lookup.err"; then
+            cat "$RUNNER_TEMP/release-lookup.err" >&2
+            echo "Could not tell whether GitHub release ${RELEASE_TAG} exists" >&2
+            exit 1
+          fi
+
+      - name: Refuse version tags already published from another commit
+        # Read anonymously, before any build or registry login. A version tag
+        # that exists must carry this commit as every platform image's
+        # org.opencontainers.image.revision; the manifest job then publishes
+        # nothing unless its digest is identical.
+        env:
+          IMAGE_REPOSITORIES: ferrumedge/ferrum-foundry ghcr.io/${{ github.repository }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          SOURCE_REVISION: ${{ github.sha }}
+        run: node scripts/release-image-identity.mjs preflight
 
   quality-gates:
     name: Pre-publication Gates
@@ -156,6 +191,8 @@ jobs:
       actions: read
       contents: read
       packages: write
+    outputs:
+      digest: ${{ steps.identity.outputs.digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -201,6 +238,17 @@ jobs:
           pattern: release-docker-digest-*
           merge-multiple: true
 
+      - name: Require the release tag to still name this run's commit
+        env:
+          RELEASE_TAG: ${{ needs.release-metadata.outputs.tag }}
+        run: |
+          git fetch --no-tags origin "+refs/tags/${RELEASE_TAG}:refs/release-check/tag"
+          tag_commit="$(git rev-parse --verify 'refs/release-check/tag^{commit}')"
+          if [[ "$tag_commit" != "$GITHUB_SHA" ]]; then
+            echo "Release tag ${RELEASE_TAG} now names ${tag_commit}, not ${GITHUB_SHA}; refusing to publish" >&2
+            exit 1
+          fi
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
 
@@ -225,10 +273,50 @@ jobs:
           git fetch --tags origin
           node scripts/release-channel-tags.mjs >> "$GITHUB_OUTPUT"
 
+      - name: Refuse to reassign published release version tags
+        # Compare before set (GHSA-rw8r-hrr2-vpc2). The index this run would
+        # publish is computed without pushing (`--dry-run` prints its exact
+        # bytes), and both version tags in both registries are checked before
+        # either registry is written. A tag that already names this digest is a
+        # rerun and is left alone; any other existing digest stops the release.
+        id: identity
+        working-directory: /tmp/digests
+        env:
+          RELEASE_TAG: ${{ needs.release-metadata.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.release-metadata.outputs.version }}
+          GHCR_REPOSITORY: ghcr.io/${{ github.repository }}
+        run: |
+          images=()
+          for digest in *; do
+            [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || { echo "Invalid digest artifact: $digest" >&2; exit 1; }
+            images+=("ferrumedge/ferrum-foundry@sha256:${digest}")
+          done
+          if [[ ${#images[@]} -ne 2 ]]; then
+            echo "Expected exactly two platform digests, found ${#images[@]}" >&2
+            exit 1
+          fi
+          docker buildx imagetools create --dry-run \
+            -t "ferrumedge/ferrum-foundry:$RELEASE_TAG" "${images[@]}" > /tmp/release-index.json
+          # The dry run prints the index's exact bytes followed by one newline.
+          if [[ "$(tail --bytes=1 /tmp/release-index.json | od -An -c | tr -d ' ')" != '\n' ]]; then
+            echo "Unexpected dry-run output for the release index" >&2
+            exit 1
+          fi
+          jq --exit-status '.manifests | length > 0' /tmp/release-index.json > /dev/null
+          release_digest="sha256:$(head --bytes=-1 /tmp/release-index.json | sha256sum | cut -d' ' -f1)"
+          for repository in ferrumedge/ferrum-foundry "$GHCR_REPOSITORY"; do
+            for tag in "$RELEASE_TAG" "$RELEASE_VERSION"; do
+              state="$(node "$GITHUB_WORKSPACE/scripts/release-image-identity.mjs" compare "$repository" "$release_digest" "$tag")"
+              echo "$repository:$tag: $state"
+            done
+          done
+          echo "digest=$release_digest" >> "$GITHUB_OUTPUT"
+
       - name: Create and push multi-arch manifest (Docker Hub)
         working-directory: /tmp/digests
         env:
           IMAGE_REPOSITORY: ferrumedge/ferrum-foundry
+          RELEASE_DIGEST: ${{ steps.identity.outputs.digest }}
           RELEASE_TAG: ${{ needs.release-metadata.outputs.tag }}
           RELEASE_VERSION: ${{ needs.release-metadata.outputs.version }}
           RELEASE_MAJOR_MINOR: ${{ needs.release-metadata.outputs.major_minor }}
@@ -253,8 +341,26 @@ jobs:
             echo "Source digests have unexpected platforms: ${source_platforms:-none}" >&2
             exit 1
           fi
+          # Version tags are written only when absent, and must then name
+          # exactly this run's index; an existing tag is never reassigned.
+          publish_version_tag() {
+            local tag="$1"
+            shift
+            local state
+            state="$(node "$GITHUB_WORKSPACE/scripts/release-image-identity.mjs" compare "$IMAGE_REPOSITORY" "$RELEASE_DIGEST" "$tag")"
+            if [[ "$state" == "absent" ]]; then
+              docker buildx imagetools create -t "$IMAGE_REPOSITORY:$tag" "$@"
+            else
+              echo "$IMAGE_REPOSITORY:$tag already names $RELEASE_DIGEST; leaving it"
+            fi
+            state="$(node "$GITHUB_WORKSPACE/scripts/release-image-identity.mjs" compare "$IMAGE_REPOSITORY" "$RELEASE_DIGEST" "$tag")"
+            if [[ "$state" != "published" ]]; then
+              echo "$IMAGE_REPOSITORY:$tag does not name $RELEASE_DIGEST after publishing" >&2
+              exit 1
+            fi
+          }
           immutable_tag="$IMAGE_REPOSITORY:$RELEASE_TAG"
-          docker buildx imagetools create -t "$immutable_tag" "${images[@]}"
+          publish_version_tag "$RELEASE_TAG" "${images[@]}"
           platforms="$(
             docker buildx imagetools inspect "$immutable_tag" --raw \
               | jq -r '[.manifests[]?.platform | select(.os != "unknown" or .architecture != "unknown") | "\(.os // "missing")/\(.architecture // "missing")"] | sort | join(",")'
@@ -263,19 +369,25 @@ jobs:
             echo "Published manifest has unexpected platforms: ${platforms:-none}" >&2
             exit 1
           fi
-          channel_tags=(-t "$IMAGE_REPOSITORY:$RELEASE_VERSION")
+          publish_version_tag "$RELEASE_VERSION" "$IMAGE_REPOSITORY@$RELEASE_DIGEST"
+          # X.Y and latest are channels: they move to the newest release.
+          channel_tags=()
           if [[ "$ADVANCE_MAJOR_MINOR" == "true" ]]; then
             channel_tags+=(-t "$IMAGE_REPOSITORY:$RELEASE_MAJOR_MINOR")
           fi
           if [[ "$ADVANCE_LATEST" == "true" ]]; then
             channel_tags+=(-t "$IMAGE_REPOSITORY:latest")
           fi
-          docker buildx imagetools create "${channel_tags[@]}" "$immutable_tag"
+          if [[ ${#channel_tags[@]} -gt 0 ]]; then
+            docker buildx imagetools create "${channel_tags[@]}" "$IMAGE_REPOSITORY@$RELEASE_DIGEST"
+          fi
+          echo "$IMAGE_REPOSITORY:$RELEASE_TAG is $IMAGE_REPOSITORY@$RELEASE_DIGEST" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Create and push multi-arch manifest (GHCR)
         working-directory: /tmp/digests
         env:
           IMAGE_REPOSITORY: ghcr.io/${{ github.repository }}
+          RELEASE_DIGEST: ${{ steps.identity.outputs.digest }}
           RELEASE_TAG: ${{ needs.release-metadata.outputs.tag }}
           RELEASE_VERSION: ${{ needs.release-metadata.outputs.version }}
           RELEASE_MAJOR_MINOR: ${{ needs.release-metadata.outputs.major_minor }}
@@ -300,8 +412,26 @@ jobs:
             echo "Source digests have unexpected platforms: ${source_platforms:-none}" >&2
             exit 1
           fi
+          # Version tags are written only when absent, and must then name
+          # exactly this run's index; an existing tag is never reassigned.
+          publish_version_tag() {
+            local tag="$1"
+            shift
+            local state
+            state="$(node "$GITHUB_WORKSPACE/scripts/release-image-identity.mjs" compare "$IMAGE_REPOSITORY" "$RELEASE_DIGEST" "$tag")"
+            if [[ "$state" == "absent" ]]; then
+              docker buildx imagetools create -t "$IMAGE_REPOSITORY:$tag" "$@"
+            else
+              echo "$IMAGE_REPOSITORY:$tag already names $RELEASE_DIGEST; leaving it"
+            fi
+            state="$(node "$GITHUB_WORKSPACE/scripts/release-image-identity.mjs" compare "$IMAGE_REPOSITORY" "$RELEASE_DIGEST" "$tag")"
+            if [[ "$state" != "published" ]]; then
+              echo "$IMAGE_REPOSITORY:$tag does not name $RELEASE_DIGEST after publishing" >&2
+              exit 1
+            fi
+          }
           immutable_tag="$IMAGE_REPOSITORY:$RELEASE_TAG"
-          docker buildx imagetools create -t "$immutable_tag" "${images[@]}"
+          publish_version_tag "$RELEASE_TAG" "${images[@]}"
           platforms="$(
             docker buildx imagetools inspect "$immutable_tag" --raw \
               | jq -r '[.manifests[]?.platform | select(.os != "unknown" or .architecture != "unknown") | "\(.os // "missing")/\(.architecture // "missing")"] | sort | join(",")'
@@ -310,14 +440,19 @@ jobs:
             echo "Published manifest has unexpected platforms: ${platforms:-none}" >&2
             exit 1
           fi
-          channel_tags=(-t "$IMAGE_REPOSITORY:$RELEASE_VERSION")
+          publish_version_tag "$RELEASE_VERSION" "$IMAGE_REPOSITORY@$RELEASE_DIGEST"
+          # X.Y and latest are channels: they move to the newest release.
+          channel_tags=()
           if [[ "$ADVANCE_MAJOR_MINOR" == "true" ]]; then
             channel_tags+=(-t "$IMAGE_REPOSITORY:$RELEASE_MAJOR_MINOR")
           fi
           if [[ "$ADVANCE_LATEST" == "true" ]]; then
             channel_tags+=(-t "$IMAGE_REPOSITORY:latest")
           fi
-          docker buildx imagetools create "${channel_tags[@]}" "$immutable_tag"
+          if [[ ${#channel_tags[@]} -gt 0 ]]; then
+            docker buildx imagetools create "${channel_tags[@]}" "$IMAGE_REPOSITORY@$RELEASE_DIGEST"
+          fi
+          echo "$IMAGE_REPOSITORY:$RELEASE_TAG is $IMAGE_REPOSITORY@$RELEASE_DIGEST" >> "$GITHUB_STEP_SUMMARY"
 
   create-release:
     name: Create GitHub Release
@@ -329,6 +464,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+
+      - name: Require the release tag to still name this run's commit
+        env:
+          RELEASE_TAG: ${{ needs.release-metadata.outputs.tag }}
+        run: |
+          git fetch --no-tags origin "+refs/tags/${RELEASE_TAG}:refs/release-check/tag"
+          tag_commit="$(git rev-parse --verify 'refs/release-check/tag^{commit}')"
+          if [[ "$tag_commit" != "$GITHUB_SHA" ]]; then
+            echo "Release tag ${RELEASE_TAG} now names ${tag_commit}, not ${GITHUB_SHA}; refusing to release" >&2
+            exit 1
+          fi
 
       - name: Resolve current release channels
         id: channels
@@ -342,6 +488,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ needs.release-metadata.outputs.tag }}
+          RELEASE_DIGEST: ${{ needs.docker-manifest.outputs.digest }}
           STABLE_RELEASE: ${{ needs.release-metadata.outputs.stable }}
           ADVANCE_LATEST: ${{ steps.channels.outputs.advance_latest }}
           IMAGE_REPOSITORY: ghcr.io/${{ github.repository }}
@@ -349,11 +496,16 @@ jobs:
         run: |
           python3 - <<'PY'
           import os
+          import re
           from pathlib import Path
 
           tag = os.environ["RELEASE_TAG"]
+          digest = os.environ["RELEASE_DIGEST"]
+          if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+              raise SystemExit("The manifest job recorded no release digest")
           ghcr = os.environ["IMAGE_REPOSITORY"]
           repository = os.environ["SOURCE_REPOSITORY"]
+          commit = os.environ["GITHUB_SHA"]
           # Checked to exist by the Validate Release Tag job. Its own title
           # line is replaced by the release heading below.
           drafted = Path(f"docs/release-notes/{tag}.md").read_text(encoding="utf-8").strip()
@@ -368,6 +520,14 @@ jobs:
           ```bash
           docker pull ferrumedge/ferrum-foundry:{tag}
           docker pull {ghcr}:{tag}
+          ```
+
+          Both tags name the multi-architecture index `{digest}`, built from
+          commit `{commit}`. Release version tags are never reassigned; pin
+          the digest for byte-identical deployments:
+
+          ```bash
+          docker pull ferrumedge/ferrum-foundry@{digest}
           ```
 
           ### Production quick start

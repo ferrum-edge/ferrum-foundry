@@ -41,11 +41,10 @@ updates:
       - "dependencies"
     ignore:
       # The builder's Node major is deliberately coupled to the runtime major
-      # in docker/Dockerfile: a major bump here alone would build against one
-      # Node and run on another. The runtime is temporarily the node slim image
-      # rather than distroless (return tracked in #504), so this rule now
-      # covers both stages; move the pair by hand, and once back on distroless
-      # only after the matching distroless nodejs image exists.
+      # in docker/Dockerfile (gcr.io/distroless/nodejs<major>-debian13): a major
+      # bump here alone would build against one Node and run on another. Move
+      # the pair by hand, and only once the matching distroless nodejs image
+      # exists.
       - dependency-name: "node"
         update-types:
           - "version-update:semver-major"

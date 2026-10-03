@@ -3,6 +3,7 @@ import {
   PLUGIN_METADATA,
   formatPluginName,
   getPluginConfigDefault,
+  oidcEncryptionSecretProblem,
 } from "./pluginConfigDefaults";
 
 describe("canonical plugin defaults", () => {
@@ -43,6 +44,39 @@ describe("canonical plugin defaults", () => {
       bind_dn_template: "uid={username},ou=people,dc=example,dc=org",
       canonical_identity_attribute: "uid",
     });
+  });
+
+  it("leaves the OIDC session encryption secret empty for operator input", () => {
+    expect(getPluginConfigDefault("oidc_relying_party").session).toMatchObject({
+      encryption_secret: "",
+    });
+  });
+
+  it("rejects public placeholders and keys shorter than 32 UTF-8 bytes", () => {
+    for (const secret of [
+      "${OIDC_SESSION_SECRET_32_BYTES_MIN}",
+      "changeme",
+      "change_me",
+      "replace-me-with-a-random-secret",
+      "change-me-32-byte-minimum-secret!!",
+      "é".repeat(15),
+    ]) {
+      expect(oidcEncryptionSecretProblem({ session: { encryption_secret: secret } })).not.toBeNull();
+    }
+    expect(oidcEncryptionSecretProblem({
+      session: { encryption_secret: "é".repeat(16) },
+    })).toBeNull();
+  });
+
+  it("rejects the published or undersized previous session key", () => {
+    for (const previous of ["${OIDC_SESSION_SECRET_32_BYTES_MIN}", "change_me", "too-short"]) {
+      expect(oidcEncryptionSecretProblem({
+        session: {
+          encryption_secret: "operator-generated-secret-value",
+          encryption_secret_previous: previous,
+        },
+      })).not.toBeNull();
+    }
   });
 
   it("omits A2A-only discovery.public_base_url from the mcp_gateway template", () => {
