@@ -27,6 +27,7 @@ import {
   type BoundedCollection,
 } from "./pagination";
 import { secretValues, withRedactedFailure } from "./secretRedaction";
+import { pathSegment } from "./pathSegment";
 
 function withPluginConfigId(
   data: PluginConfigCreate,
@@ -148,7 +149,9 @@ export async function getConfig(
   id: string,
   silentErrors = false,
 ): Promise<PluginConfig> {
-  return (await readTagged<PluginConfig>(scope, `plugins/config/${id}`, { silentErrors })).value;
+  return (
+    await readTagged<PluginConfig>(scope, `plugins/config/${pathSegment(id)}`, { silentErrors })
+  ).value;
 }
 
 /** Reduce a plugin configuration, or a payload, to the content a save replaces. */
@@ -209,7 +212,7 @@ export async function updateConfig(
 ): Promise<PluginConfig> {
   const body = withPluginConfigId(data, id);
   return withRedactedFailure(secretValues(body), () =>
-    conditionalPut<PluginConfig>(scope, `plugins/config/${id}`, body, ifMatch, {
+    conditionalPut<PluginConfig>(scope, `plugins/config/${pathSegment(id)}`, body, ifMatch, {
       redactErrors: true,
     }),
   );
@@ -221,5 +224,5 @@ export async function removeConfig(
   id: string,
   ifMatch: string | null,
 ): Promise<void> {
-  await conditionalDelete(scope, `plugins/config/${id}`, ifMatch);
+  await conditionalDelete(scope, `plugins/config/${pathSegment(id)}`, ifMatch);
 }

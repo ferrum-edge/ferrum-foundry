@@ -54,6 +54,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `65532:65532` with `/nodejs/bin/node` as its entrypoint and in its
   HEALTHCHECK, and the starter test again requires the distroless base.
 
+### Fixed
+
+- Encode dynamic Admin API path segments across resource endpoints and reject
+  empty or dot-segment identifiers, preventing decoded route identifiers from
+  retargeting requests. Addresses GHSA-64c9-hw76-jqmh.
+
 ## [0.4.0] - 2026-10-01
 
 Pairs with the published **Ferrum Edge v0.9.10** release,

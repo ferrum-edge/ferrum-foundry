@@ -33,6 +33,7 @@ import {
 import { MaskedSecretWriteError } from "./maskedSecrets";
 import { pluginConfigPlaceholderSites } from "./maskedSecretSites";
 import * as pluginsApi from "./plugins";
+import { pathSegment } from "./pathSegment";
 import type { PluginConfig, PluginConfigCreate } from "./types";
 import type { GatewayRole } from "@/lib/capabilities";
 import type { BaselineSnapshot } from "@/lib/resourceBaseline";
@@ -200,7 +201,7 @@ async function readCatalogPage(
 ): Promise<McpToolCatalogResponse> {
   const page: unknown = await proxyApi
     .get(
-      `proxies/${encodeURIComponent(proxyId)}/mcp/tools`,
+      `proxies/${pathSegment(proxyId)}/mcp/tools`,
       scoped(scope, {
         searchParams: { offset: String(offset), limit: String(MCP_CATALOG_PAGE_LIMIT) },
         signal,
@@ -353,7 +354,7 @@ export async function updateToolPolicy(
   guard: WriteGuard<PluginConfig | PluginConfigCreate> | null,
   role: GatewayRole | null = null,
 ): Promise<PluginConfig> {
-  const path = `plugins/config/${pluginId}`;
+  const path = `plugins/config/${pathSegment(pluginId)}`;
   const propose = (current: PluginConfig): PluginConfigCreate => {
     if (current.plugin_name !== "mcp_gateway") {
       throw new McpToolPolicyError(

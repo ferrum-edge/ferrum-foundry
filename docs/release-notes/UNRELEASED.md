@@ -39,6 +39,8 @@
   refuses to publish over an existing `vX.Y.Z` or `X.Y.Z` image with a
   different digest or source commit. The release notes name the published
   index digest.
+- Admin API resource identifiers are encoded as single path segments and
+  empty or dot-segment identifiers are rejected. This fixes GHSA-64c9-hw76-jqmh.
 
 ### Known limitations
 
