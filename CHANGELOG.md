@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Namespace cascade deletes now require the BFF request to echo the exact
+  target namespace as `confirm=<namespace-name>`. The BFF rejects bare
+  `confirm=true`, mismatched names, and encoded confirmation spellings before
+  contacting Ferrum Edge.
 - The OIDC Relying Party template no longer includes a public session encryption
   key. Foundry blocks enabling it until an operator supplies a unique secret,
   and the plugin defaults contract supplies a generated key when checking the

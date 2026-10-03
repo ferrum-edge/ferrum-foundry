@@ -196,7 +196,7 @@ describe('registry authorization at the forwarding boundary', () => {
       ['/namespaces/tenant-a', 'PUT', {}, 200],
       ['/namespaces/tenant-a', 'PUT', { name: 'tenant-c', description: '😀'.repeat(1024) }, 200],
       ['/namespaces/z-derived', 'DELETE', undefined, 204],
-      ['/namespaces/z-derived?confirm=true', 'DELETE', undefined, 204],
+      ['/namespaces/z-derived?confirm=z-derived', 'DELETE', undefined, 204],
     ] as const;
     for (const [path, method, body, status] of cases) {
       expect((await call(`/api/proxy${path}`, method, body ? JSON.stringify(body) : '')).status).toBe(status);
@@ -208,9 +208,43 @@ describe('registry authorization at the forwarding boundary', () => {
     expect((await call('/api/proxy/namespaces/tenant-b', 'GET', '', unrestricted)).status).toBe(200);
     expect((await call('/api/proxy/namespaces/tenant-b', 'PUT', '{"name":"new-name"}', unrestricted)).status).toBe(200);
     expect((await call('/api/proxy/namespaces', 'POST', '{"name":"new-name"}', unrestricted)).status).toBe(201);
-    expect((await call('/api/proxy/namespaces/tenant-b?confirm=true', 'DELETE', '', unrestricted)).status).toBe(204);
+    expect((await call(
+      '/api/proxy/namespaces/tenant-b?confirm=tenant-b',
+      'DELETE',
+      '',
+      unrestricted,
+    )).status).toBe(204);
     expect((await call('/api/proxy/namespaces/tenant-a', 'GET', '', identity({ 'x-registry-role': 'viewer' }))).status).toBe(200);
   });
+
+  it(
+    'requires a literal target-name confirmation for namespace cascades before forwarding',
+    async () => {
+      const before = arrivals.length;
+      const beforeWrites = writes.length;
+      // No confirmation remains the gateway-driven probe for empty namespaces.
+      expect((await call('/api/proxy/namespaces/tenant-a', 'DELETE')).status).toBe(204);
+      expect((await call('/api/proxy/namespaces/tenant-a?confirm=', 'DELETE')).status).toBe(400);
+      const bareConfirmation = await call(
+        '/api/proxy/namespaces/tenant-a?confirm=true',
+        'DELETE',
+      );
+      expect(bareConfirmation.status).toBe(400);
+      expect(bareConfirmation.body).toContain('confirm=tenant-a exactly');
+      const mismatched = await call(
+        '/api/proxy/namespaces/tenant-a?confirm=tenant-b',
+        'DELETE',
+      );
+      expect(mismatched.status).toBe(400);
+      expect((await call('/api/proxy/namespaces/tenant-a?confirm=%74enant-a', 'DELETE')).status)
+        .toBe(400);
+      expect((await call('/api/proxy/namespaces/%74enant-a?confirm=tenant-a', 'DELETE')).status)
+        .toBe(204);
+      expect(arrivals).toHaveLength(before + 2);
+      expect(writes).toHaveLength(before + 2);
+      expect(arrivals.at(-1)?.path).toBe('/namespaces/tenant-a?confirm=true');
+    },
+  );
 
   it('validates bounded JSON before publication and preserves authentication and roles', async () => {
     const before = arrivals.length;
