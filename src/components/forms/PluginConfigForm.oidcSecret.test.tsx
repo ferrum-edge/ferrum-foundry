@@ -108,7 +108,7 @@ describe("OIDC session encryption secret", () => {
   });
 
   it("allows an operator-supplied key", async () => {
-    await renderForm(configWithSecret("operator-generated-secret-value"));
+    await renderForm(configWithSecret("operator-generated-session-secret"));
     await submit();
 
     expect(onSubmit).toHaveBeenCalledOnce();
@@ -122,7 +122,7 @@ describe("OIDC session encryption secret", () => {
   });
 
   it("allows an omitted or null previous key", async () => {
-    await renderForm(configWithSecret("operator-generated-secret-value", null));
+    await renderForm(configWithSecret("operator-generated-session-secret", null));
     await submit();
 
     expect(onSubmit).toHaveBeenCalledOnce();
