@@ -3,7 +3,7 @@ import { fetch } from 'undici';
 import type { AuthPrincipal } from '../auth-types.js';
 import { loadConfig, registerRuntimeConfigListener } from '../config.js';
 import { generateToken } from '../jwt.js';
-import { getDispatcher } from '../tls.js';
+import { getProbeDispatcher } from '../tls.js';
 import { APP_VERSION } from '../version.js';
 
 interface ReadinessResult {
@@ -76,7 +76,7 @@ async function probeReadiness(): Promise<ReadinessResult> {
     const response = await fetch(new URL('/health', config.adminUrl), {
       headers: { authorization: `Bearer ${token}` },
       signal: controller.signal,
-      dispatcher: getDispatcher(config),
+      dispatcher: getProbeDispatcher(config),
       redirect: 'error',
     });
     const gatewayBody = await boundedJson(response);
@@ -91,7 +91,7 @@ async function probeReadiness(): Promise<ReadinessResult> {
       const authResponse = await fetch(new URL('/namespaces?offset=0&limit=1', config.adminUrl), {
         headers: { authorization: `Bearer ${token}` },
         signal: controller.signal,
-        dispatcher: getDispatcher(config),
+        dispatcher: getProbeDispatcher(config),
         redirect: 'error',
       });
       authStatus = authResponse.status;

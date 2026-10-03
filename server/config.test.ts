@@ -36,6 +36,7 @@ const ENV_KEYS = [
   'FERRUM_MAX_ACTIVE_LONG_READS',
   'FERRUM_MAX_LONG_READS_PER_PRINCIPAL',
   'FERRUM_NAMESPACE_SCAN_MAX_PAGES',
+  'FERRUM_MAX_GATEWAY_CONNECTIONS',
   'FERRUM_BIND_ADDRESS',
   'FERRUM_SHUTDOWN_TIMEOUT',
   'PORT',
@@ -197,6 +198,7 @@ describe('config', () => {
       maxActiveLongReads: 32,
       maxLongReadsPerPrincipal: 8,
       namespaceScanMaxPages: 50,
+      gatewayMaxConnections: 128,
       port: 3001,
       bindAddress: '0.0.0.0',
       shutdownTimeout: 10_000,
@@ -317,6 +319,25 @@ describe('config', () => {
     expect(() => wider.loadConfig()).toThrow(
       /FERRUM_MAX_LONG_READS_PER_PRINCIPAL must not exceed FERRUM_MAX_ACTIVE_LONG_READS/,
     );
+  });
+
+  it('keeps the gateway connection ceiling above both fail-fast pools', async () => {
+    setValidEnv({ FERRUM_MAX_ACTIVE_LONG_READS: '100', FERRUM_MAX_ACTIVE_UPLOADS: '50' });
+    const derived = await loadModule();
+    // The default follows the pools: their sum plus 64 connections of headroom.
+    expect(derived.loadConfig().gatewayMaxConnections).toBe(214);
+
+    clearTestEnv();
+    setValidEnv({ FERRUM_MAX_GATEWAY_CONNECTIONS: '80' });
+    const exact = await loadModule();
+    expect(exact.loadConfig().gatewayMaxConnections).toBe(80);
+
+    for (const value of ['79', '0', '4097', 'many']) {
+      clearTestEnv();
+      setValidEnv({ FERRUM_MAX_GATEWAY_CONNECTIONS: value });
+      const invalid = await loadModule();
+      expect(() => invalid.loadConfig()).toThrow(/FERRUM_MAX_GATEWAY_CONNECTIONS/);
+    }
   });
 
   it('parses role, audience, and exact namespace claims', async () => {

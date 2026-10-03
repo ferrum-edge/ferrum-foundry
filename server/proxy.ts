@@ -4,7 +4,7 @@ import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { fetch, type RequestInit, type Response } from 'undici';
 import { requireAdminAuth } from './auth.js';
 import { loadConfig } from './config.js';
-import { rejectStaleGatewayTarget, stampGatewayTarget } from './gateway-target.js';
+import { gatewayTargetId, rejectStaleGatewayTarget, stampGatewayTarget } from './gateway-target.js';
 import { generateToken } from './jwt.js';
 import { proxyTargetPath, proxyTargetUrl, UnsafeProxyPathError } from './proxy-path.js';
 import { getDispatcher } from './tls.js';
@@ -157,6 +157,21 @@ function isLongRead(request: FastifyRequest): boolean {
   return waitingRouteTimeout('GET', path) > 0 || path === '/backup' || isScopedNamespaceList(request, path);
 }
 
+// A stable number per dispatcher instance, so a namespace scan running on a
+// transport that has since been replaced is never joined by a later request.
+const transportIds = new WeakMap<object, number>();
+let lastTransportId = 0;
+
+function transportId(dispatcher: object): number {
+  let id = transportIds.get(dispatcher);
+  if (id === undefined) {
+    lastTransportId += 1;
+    id = lastTransportId;
+    transportIds.set(dispatcher, id);
+  }
+  return id;
+}
+
 function copyRequestHeaders(request: FastifyRequest, authorization: string): Record<string, string> {
   // Undici transparently decodes compressed fetch responses while preserving
   // the upstream content-length. Prefer an identity response so downstream
@@ -278,6 +293,8 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
     longReadsBySubject.set(subject, held + 1);
     reservedLongReads.set(request, subject);
     reply.raw.once('close', () => releaseLongRead(request));
+    // A socket that closed before the listener existed never emits again.
+    if (reply.raw.destroyed) releaseLongRead(request);
   };
 
   // Keyed off WeakMap membership, so the permit is returned exactly once
@@ -418,12 +435,13 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
         headers['content-type'] = 'application/json';
         headers['content-length'] = String(Buffer.byteLength(body));
       }
+      const dispatcher = getDispatcher(config);
       const init: RequestInit = {
         method,
         headers,
         body,
         signal: controller.signal,
-        dispatcher: getDispatcher(config),
+        dispatcher,
         redirect: 'error',
         ...(body && { duplex: 'half' }),
       };
@@ -436,7 +454,9 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
       let response: Response;
       if (scopedList) {
         // The authorization header differs per signing; everything else that
-        // shapes the upstream answer decides which requests share a traversal.
+        // shapes the upstream answer decides which requests share a traversal:
+        // the gateway target, the transport, the signing settings, the
+        // principal, and the forwarded headers.
         const { authorization: _authorization, ...forwarded } = headers;
         response = await scopedRegistryList(
           target,
@@ -445,7 +465,16 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
           {
             maxPages: config.namespaceScanMaxPages,
             deadline: responseTimeout,
-            identity: JSON.stringify([principal.subject, principal.role, forwarded]),
+            identity: JSON.stringify([
+              gatewayTargetId(config),
+              transportId(dispatcher),
+              config.jwtIssuer,
+              config.jwtAudience ?? null,
+              config.jwtTtl,
+              principal.subject,
+              principal.role,
+              forwarded,
+            ]),
             signal: controller.signal,
           },
         );

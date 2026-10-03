@@ -155,6 +155,13 @@ interface SharedScan {
 
 const sharedScans = new Map<string, SharedScan>();
 
+/** In-flight traversals and the requests waiting on them, for diagnostics and tests. */
+export function sharedScanStats(): { scans: number; waiters: number } {
+  let waiters = 0;
+  for (const scan of sharedScans.values()) waiters += scan.waiters;
+  return { scans: sharedScans.size, waiters };
+}
+
 function unavailable(outcome: Extract<ScanOutcome, { status: number }>): Response {
   return new Response(JSON.stringify(outcome.body), {
     status: outcome.status,

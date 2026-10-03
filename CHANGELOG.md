@@ -38,17 +38,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   most the global value) per authenticated subject. A full pool answers `429`
   with `code: FERRUM_BFF_READ_CAPACITY`, `retry-after: 1`, and `scope`
   `principal` or `all`, without queueing, signing, or contacting the gateway.
-  Permits are returned on completion, abort, and disconnect. The starter's
-  nginx configurations also cap in-flight `/api/` requests at 64 per client
-  address (`429`).
+  Permits are returned on completion, abort, and disconnect. The admin API
+  connection pool is now capped at `FERRUM_MAX_GATEWAY_CONNECTIONS` (default
+  the two pools plus 64, at least the two pools plus 16), so slow readers on
+  any route cannot hold unbounded gateway sockets; the readiness probe uses its
+  own small pool so saturation cannot take the instance out of rotation. The
+  SPA's apply-status poll now waits as `Retry-After` asks, with backoff,
+  instead of re-polling at once and reporting the status unavailable. The
+  starter's nginx configurations also cap in-flight `/api/` requests at 64 per
+  client address (`429`), matched on the decoded path.
 - GHSA-37q7-fc8p-hchr: a namespace-scoped `GET /namespaces` no longer reads
   the whole fleet registry unconditionally. It stops once every granted name
   is found, reads at most `FERRUM_NAMESPACE_SCAN_MAX_PAGES` pages of 1000
   names (default 50) and otherwise answers `503` with
   `code: FERRUM_BFF_NAMESPACE_SCAN_BUDGET` instead of a partial list, shares
-  one gateway read between identical lists in flight (same identity, grants,
-  and query apart from `offset`/`limit`; nothing is cached afterwards), and
-  counts against the long-running read pool.
+  one gateway read between identical lists in flight (same gateway target,
+  transport, signing settings, identity, grants, and query apart from
+  `offset`/`limit`; nothing is cached afterwards), ends that read at its own
+  deadline or when the last waiting request leaves, and counts against the
+  long-running read pool.
 
 ### Fixed
 

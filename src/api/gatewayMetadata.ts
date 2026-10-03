@@ -227,6 +227,30 @@ export function classifyCommittedWrite(error: unknown): CommittedWrite | null {
   );
 }
 
+/** Capacity refusals the poll waits out before it counts one as a failure. */
+const MAX_CAPACITY_WAITS = 4;
+/** The longest single wait for BFF capacity, whatever `Retry-After` asks. */
+const MAX_CAPACITY_WAIT_MS = 8_000;
+
+/**
+ * How long a BFF capacity refusal asks the poll to wait, or `null` for any
+ * other failure. The BFF answers a full long-read pool with `429` and
+ * `Retry-After` before contacting the gateway, so the poll was never served
+ * and polling again at once would only be refused again.
+ */
+export function capacityRetryDelay(error: unknown): number | null {
+  if (!error || typeof error !== "object") return null;
+  const response = (error as { response?: { status?: unknown; headers?: Headers } }).response;
+  if (response?.status !== 429) return null;
+  const header = response.headers?.get("retry-after")?.trim() ?? "";
+  const seconds = /^\d{1,6}$/.test(header) ? Number(header) : 1;
+  return Math.min(Math.max(seconds, 1) * 1000, MAX_CAPACITY_WAIT_MS);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function pollApplyStatus(
   cursor: ConfigCursor,
   generation: number,
@@ -242,6 +266,7 @@ async function pollApplyStatus(
     return;
   }
 
+  let capacityWaits = 0;
   for (let attempt = 0; attempt < 8; attempt += 1) {
     if (generation !== pollGeneration) return;
     try {
@@ -272,7 +297,16 @@ async function pollApplyStatus(
         },
       });
       return;
-    } catch {
+    } catch (error) {
+      const delay = capacityRetryDelay(error);
+      if (delay !== null && capacityWaits < MAX_CAPACITY_WAITS) {
+        // Wait as asked, doubling each time, and retry the same attempt: a
+        // refusal for capacity is not evidence that the status is unavailable.
+        capacityWaits += 1;
+        attempt -= 1;
+        await sleep(Math.min(delay * 2 ** (capacityWaits - 1), MAX_CAPACITY_WAIT_MS));
+        continue;
+      }
       if (attempt < 2) continue;
       if (generation === pollGeneration) {
         publish({

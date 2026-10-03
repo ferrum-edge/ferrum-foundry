@@ -160,6 +160,7 @@ Durations are integers.
 | `FERRUM_MAX_ACTIVE_LONG_READS` | No | `32` | 1-1024 | Concurrent [long-running reads](#long-running-reads) (apply-status long polls, backup downloads, namespace-scoped namespace lists) before `429` |
 | `FERRUM_MAX_LONG_READS_PER_PRINCIPAL` | No | `8` | 1-1024, at most `FERRUM_MAX_ACTIVE_LONG_READS` | Long-running reads one authenticated subject may hold at once before `429` |
 | `FERRUM_NAMESPACE_SCAN_MAX_PAGES` | No | `50` | 1-1000 | Upstream pages of 1000 names a namespace-scoped `GET /namespaces` may read before it answers `503` |
+| `FERRUM_MAX_GATEWAY_CONNECTIONS` | No | `FERRUM_MAX_ACTIVE_LONG_READS` + `FERRUM_MAX_ACTIVE_UPLOADS` + 64 (`128`) | 1-4096, at least `FERRUM_MAX_ACTIVE_LONG_READS` + `FERRUM_MAX_ACTIVE_UPLOADS` + 16 | Connections the BFF opens to the admin API for proxied and settings traffic; see [gateway connections](#gateway-connections) |
 
 A CA bundle must hold one or more parseable PEM X.509 certificates (blank and
 `#` comment lines are allowed). Parsing checks the encoding, not whether the
@@ -295,8 +296,10 @@ Things that are easy to get wrong:
   requests in flight per client address (`limit_conn foundry_api 64`, answered
   with `429`). nginx applies it before `auth_request`, so it is keyed on the
   address, not the identity; Foundry bounds each identity itself (see
-  [long-running reads](#long-running-reads)). Raise it if many users share one
-  address, such as behind a corporate NAT.
+  [long-running reads](#long-running-reads)). Match on the decoded `$uri`,
+  not `$request_uri`, or a percent-encoded `/%61pi/` prefix escapes the count.
+  Raise the limit if many users share one address, such as behind a corporate
+  NAT.
 
 ### Live-apply monitoring and ACME issuance deadlines
 
@@ -584,7 +587,10 @@ authenticated subject may hold, so a single identity cannot take the whole
 pool. Neither queues: a full pool answers `429` with
 `code: FERRUM_BFF_READ_CAPACITY`, `retry-after: 1`, and `scope` `principal` or
 `all`, before a token is signed or the gateway is contacted. The SPA retries a
-`429` read on its own. A permit is returned when the response completes, the
+refused namespace list or backup read up to twice. Its apply-status poll waits
+as `Retry-After` asks, doubling the wait up to 8 s, for up to four refusals
+before it counts one as a failure; after that it reports the write's live
+state as unverifiable. A permit is returned when the response completes, the
 request is aborted, or the client disconnects. In static mode every user is
 the same subject, so all of them together get one per-subject share.
 
@@ -607,6 +613,26 @@ bounded:
 
 An identity without grants gets the gateway's own paginated answer, one
 gateway read per request.
+
+### Gateway connections
+
+Every proxied request and settings check shares one connection pool to the
+admin API, capped at `FERRUM_MAX_GATEWAY_CONNECTIONS`. The cap bounds sockets
+to the gateway whatever the route or how slowly a client reads its response;
+a reader that stalls holds its connection only until the response deadline
+(`FERRUM_READ_TIMEOUT`). A request that finds every connection busy waits for
+one within its own deadline, and answers `504` if none frees up in time.
+
+The cap must exceed the two pools that refuse instead of waiting, long reads
+and uploads, by at least 16 connections. The default leaves 64, so ordinary
+reads still reach the gateway while both pools are full. Raise it with the
+pools; the gateway must accept that many admin connections from each Foundry
+replica.
+
+The readiness probe has its own connections (4), so a saturated pool cannot
+queue it and take the instance out of rotation. Replacing the transport with a
+runtime settings change briefly doubles the ceiling while the old connections
+drain.
 
 ### Graceful shutdown
 

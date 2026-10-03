@@ -1,10 +1,14 @@
+import { once } from 'node:events';
 import { mkdirSync, mkdtempSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createServer, type ServerResponse } from 'node:http';
+import type { AddressInfo, Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { rootCertificates } from 'node:tls';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from './config.js';
-import { closeDispatchers, getDispatcher } from './tls.js';
+import { fetch } from 'undici';
+import { closeDispatchers, getDispatcher, getProbeDispatcher } from './tls.js';
 
 const directories: string[] = [];
 
@@ -35,6 +39,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     writeTimeout: 60000,
     port: 3001,
     maxLargeUploads: 2,
+    gatewayMaxConnections: 128,
     allowRuntimeSettings: false,
     authMode: 'static',
     bffAuthToken: 'test-bff-token-is-long-enough-123456',
@@ -188,5 +193,56 @@ describe('managed Undici dispatchers', () => {
       adminAllowedCidrs: ['10.20.30.40/32'],
     });
     expect(() => getDispatcher(config)).not.toThrow();
+  });
+});
+
+describe('gateway connection ceiling', () => {
+  it('replaces the dispatcher when its connection ceiling changes', () => {
+    const first = getDispatcher(makeConfig());
+    expect(getDispatcher(makeConfig({ gatewayMaxConnections: 256 }))).not.toBe(first);
+    expect(first.closed).toBe(true);
+  });
+
+  it('opens at most the configured sockets, queues the rest, and keeps readiness on its own', async () => {
+    const waiting: ServerResponse[] = [];
+    const sockets = new Set<Socket>();
+    const server = createServer((_request, response) => { waiting.push(response); });
+    server.on('connection', (socket) => sockets.add(socket));
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const config = makeConfig({ adminUrl: origin, initialAdminOrigin: origin, gatewayMaxConnections: 2 });
+    const controller = new AbortController();
+    const request = (path: string, dispatcher = getDispatcher(config)) => fetch(`${origin}${path}`, {
+      dispatcher,
+      signal: controller.signal,
+    }).then((response) => response.text()).catch(() => undefined);
+    try {
+      const pending = [request('/held'), request('/held'), request('/queued')];
+      await vi.waitFor(() => expect(waiting).toHaveLength(2));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      // The third request waits for a connection instead of opening one.
+      expect(waiting).toHaveLength(2);
+      expect(sockets.size).toBe(2);
+
+      // Readiness does not queue behind a saturated proxy pool.
+      const probe = getProbeDispatcher(config);
+      expect(probe).not.toBe(getDispatcher(config));
+      const ready = request('/health', probe);
+      await vi.waitFor(() => expect(waiting).toHaveLength(3));
+      expect(sockets.size).toBe(3);
+
+      // A freed proxy connection serves the queued request.
+      waiting[0]!.end('done');
+      await vi.waitFor(() => expect(waiting).toHaveLength(4));
+      expect(sockets.size).toBe(3);
+      for (const response of waiting.slice(1)) response.end('done');
+      expect(await Promise.all([...pending, ready])).toEqual(['done', 'done', 'done', 'done']);
+    } finally {
+      controller.abort();
+      for (const response of waiting) response.destroy();
+      server.closeAllConnections();
+      server.close();
+    }
   });
 });

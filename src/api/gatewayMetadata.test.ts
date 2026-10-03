@@ -325,4 +325,85 @@ describe("observeGatewayResponse", () => {
 
     expect(getGatewayMetadataSnapshot().apply.state).toBe("succeeded");
   });
+
+  describe("BFF capacity refusals", () => {
+    const capacityRefusal = (retryAfter = "1") =>
+      Object.assign(new Error("Too Many Requests"), {
+        response: new Response(null, {
+          status: 429,
+          headers: { "retry-after": retryAfter },
+        }),
+      });
+    const applied = {
+      topology_epoch: "6",
+      sequence: "3",
+      state: "applied" as const,
+      accepted_topology_epoch: "6",
+      accepted_sequence: "3",
+    };
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("waits as Retry-After asks, backing off, without counting refusals as failures", async () => {
+      vi.useFakeTimers();
+      const fetchStatus = vi
+        .fn()
+        .mockRejectedValueOnce(capacityRefusal())
+        .mockRejectedValueOnce(capacityRefusal())
+        .mockRejectedValueOnce(capacityRefusal())
+        .mockResolvedValueOnce(applied);
+      setApplyStatusFetcher(fetchStatus);
+      await observeGatewayResponse(
+        mutationRequest(),
+        new Response("{}", {
+          status: 202,
+          headers: { "x-ferrum-config-cursor": "6:3" },
+        }),
+      );
+
+      // 1 s, then 2 s, then 4 s between attempts; never an immediate re-poll.
+      await vi.advanceTimersByTimeAsync(900);
+      expect(fetchStatus).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(200);
+      expect(fetchStatus).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1_700);
+      expect(fetchStatus).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(300);
+      expect(fetchStatus).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(3_700);
+      expect(fetchStatus).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(300);
+      expect(fetchStatus).toHaveBeenCalledTimes(4);
+      // Three refusals in a row used to exhaust the poll's failure budget.
+      expect(getGatewayMetadataSnapshot().apply).toMatchObject({
+        state: "applied",
+        cursor: "6:3",
+        polling: false,
+      });
+    });
+
+    it("gives up as unavailable once refusals outlast the bounded waits", async () => {
+      vi.useFakeTimers();
+      const fetchStatus = vi.fn().mockRejectedValue(capacityRefusal("30"));
+      setApplyStatusFetcher(fetchStatus);
+      await observeGatewayResponse(
+        mutationRequest(),
+        new Response("{}", {
+          status: 202,
+          headers: { "x-ferrum-config-cursor": "6:3" },
+        }),
+      );
+
+      // Four waits capped at 8 s each, then the ordinary three attempts.
+      await vi.advanceTimersByTimeAsync(4 * 8_000 + 100);
+      expect(fetchStatus).toHaveBeenCalledTimes(4 + 3);
+      expect(getGatewayMetadataSnapshot().apply).toMatchObject({
+        state: "unverifiable",
+        reason: "apply_status_unavailable",
+        polling: false,
+      });
+    });
+  });
 });

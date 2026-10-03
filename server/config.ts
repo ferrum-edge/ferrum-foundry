@@ -48,6 +48,11 @@ export interface Config {
   maxLongReadsPerPrincipal: number;
   /** Upstream pages a scoped namespace list may read before it reports unavailable. */
   namespaceScanMaxPages: number;
+  /**
+   * Connections the proxy dispatcher may open to the admin API. Requests past
+   * it wait (within their own deadlines) for a free connection.
+   */
+  gatewayMaxConnections: number;
   allowRuntimeSettings: boolean;
   authMode: AuthMode;
   bffAuthToken: string | undefined;
@@ -85,6 +90,12 @@ export interface PublicRuntimeConfig extends Omit<RuntimeConfig, 'tlsCaPath' | '
 }
 
 const MIN_SECRET_LENGTH = 32;
+/**
+ * Gateway connections kept free of the two fail-fast pools, so ordinary reads
+ * still reach the gateway while every long read and upload is in flight.
+ */
+export const MIN_GATEWAY_CONNECTION_HEADROOM = 16;
+const DEFAULT_GATEWAY_CONNECTION_HEADROOM = 64;
 const NAMESPACE_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$/;
 /** The only spelling of a grant for every namespace. */
 export const NAMESPACE_WILDCARD = '*';
@@ -449,6 +460,22 @@ function parseBaseConfig(): Config {
   if (maxLongReadsPerPrincipal > maxActiveLongReads) {
     throw new Error('FERRUM_MAX_LONG_READS_PER_PRINCIPAL must not exceed FERRUM_MAX_ACTIVE_LONG_READS');
   }
+  // Long reads and uploads may each fill their pool, and each holds a gateway
+  // connection while it does. A ceiling at or below their sum would let them
+  // take every connection and queue ordinary reads behind 35 s waits.
+  const pooledConnections = maxActiveLongReads + maxActiveUploads;
+  const gatewayMaxConnections = parseInteger(
+    'FERRUM_MAX_GATEWAY_CONNECTIONS',
+    pooledConnections + DEFAULT_GATEWAY_CONNECTION_HEADROOM,
+    1,
+    4096,
+  );
+  if (gatewayMaxConnections < pooledConnections + MIN_GATEWAY_CONNECTION_HEADROOM) {
+    throw new Error(
+      'FERRUM_MAX_GATEWAY_CONNECTIONS must be at least FERRUM_MAX_ACTIVE_LONG_READS + '
+      + `FERRUM_MAX_ACTIVE_UPLOADS + ${MIN_GATEWAY_CONNECTION_HEADROOM} (${pooledConnections + MIN_GATEWAY_CONNECTION_HEADROOM})`,
+    );
+  }
 
   const allowRuntimeSettings = parseBoolean('FERRUM_ALLOW_RUNTIME_SETTINGS', false);
   const adminAllowedOrigins = parseOrigins(optionalEnv('FERRUM_ADMIN_ALLOWED_ORIGINS'), requireSecure);
@@ -484,6 +511,7 @@ function parseBaseConfig(): Config {
     maxActiveLongReads,
     maxLongReadsPerPrincipal,
     namespaceScanMaxPages: parseInteger('FERRUM_NAMESPACE_SCAN_MAX_PAGES', 50, 1, 1000),
+    gatewayMaxConnections,
     allowRuntimeSettings,
     authMode,
     bffAuthToken,

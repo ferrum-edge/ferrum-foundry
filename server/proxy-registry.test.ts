@@ -12,6 +12,8 @@ const grants = 'tenant-a, tenant-c, z-derived';
 const arrivals: Array<{ path: string; method: string; token: string; headers: Record<string, unknown> }> = [];
 const writes: Array<{ path: string; body: string }> = [];
 const held = new Map<string, ServerResponse>();
+// Namespace pages held until a test opens them, keyed `${id}:${offset}`.
+const gates = new Map<string, { response: ServerResponse; page: string }>();
 const events = new EventEmitter();
 // Intentionally does not enforce JWT namespace claims. The BFF must enforce
 // its contract with a gateway that supports the documented optional setting.
@@ -61,9 +63,13 @@ const gateway = createServer((request, response) => {
       response.setHeader('etag', '"fleet-only"');
       const page = JSON.stringify({ data: names.slice(offset, offset + limit),
         pagination: { offset, limit, total: names.length } });
-      const delay = url.searchParams.has('slow-pages') ? 2300 : url.searchParams.has('page-delay') ? 300 : 0;
-      if (delay) {
-        const timer = setTimeout(() => response.end(page), delay);
+      if (url.searchParams.has('gate')) {
+        gates.set(`${id}:${offset}`, { response, page });
+        events.emit(`gated:${id}:${offset}`);
+        return;
+      }
+      if (url.searchParams.has('slow-pages')) {
+        const timer = setTimeout(() => response.end(page), 2300);
         response.once('close', () => clearTimeout(timer));
       } else response.end(page);
       return;
@@ -79,6 +85,7 @@ const gateway = createServer((request, response) => {
 });
 
 let app: FastifyInstance;
+let registry: typeof import('./namespace-registry.js');
 let csrf: Record<string, string> = {};
 function identity(extra: Record<string, string> = {}): Record<string, string> {
   return { 'x-ferrum-auth-secret': SECRET, 'x-registry-user': 'registry-user',
@@ -116,6 +123,12 @@ function start(path: string, method = 'GET', body = '', headers = identity(), du
 }
 const call = (path: string, method = 'GET', body = '', headers = identity()) => start(path, method, body, headers).result;
 const signal = (name: string) => once(events, name, { signal: AbortSignal.timeout(3000) });
+function openGate(key: string) {
+  const gate = gates.get(key)!;
+  gates.delete(key);
+  gate.response.end(gate.page);
+}
+const waiters = (count: number) => vi.waitFor(() => expect(registry.sharedScanStats().waiters).toBe(count));
 
 beforeAll(async () => {
   gateway.listen(0, '127.0.0.1');
@@ -135,6 +148,8 @@ beforeAll(async () => {
   })) vi.stubEnv(key, value);
   vi.resetModules();
   const { buildApp } = await import('./app.js');
+  // The same module instance the app uses, to observe shared traversals.
+  registry = await import('./namespace-registry.js');
   app = await buildApp({ serveStatic: false, logger: false });
   await app.listen({ host: '127.0.0.1', port: 0 });
   const session = await app.inject({ url: '/api/auth/session', headers: identity() });
@@ -145,6 +160,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   for (const response of held.values()) response.destroy();
+  for (const gate of gates.values()) gate.response.destroy();
   await app?.close();
   gateway.closeAllConnections();
   await new Promise<void>((resolve) => gateway.close(() => resolve()));
@@ -299,21 +315,88 @@ describe('registry authorization at the forwarding boundary', () => {
 
   it('shares one in-flight traversal between identical lists and keeps no result after it', async () => {
     const before = arrivals.length;
-    const query = 'page-delay=1&id=coalesce';
-    const arrived = signal('arrived:coalesce');
+    const query = 'gate=1&id=coalesce';
+    const firstPage = signal('gated:coalesce:0');
     const first = call(`/api/proxy/namespaces?${query}&offset=0&limit=1`);
-    await arrived;
-    // Joins while the first traversal is still reading its first page.
+    await firstPage;
+    // Joins while the first traversal is still waiting for its first page.
     const second = call(`/api/proxy/namespaces?limit=5&${query}`);
+    await waiters(2);
+    expect(registry.sharedScanStats().scans).toBe(1);
+    const secondPage = signal('gated:coalesce:1000');
+    openGate('coalesce:0');
+    await secondPage;
+    openGate('coalesce:1000');
     const [one, all] = await Promise.all([first, second]);
     expect(JSON.parse(one.body)).toEqual({ data: ['tenant-a'], pagination: { offset: 0, limit: 1, total: 3 } });
     expect(JSON.parse(all.body)).toEqual({ data: ['tenant-a', 'tenant-c', 'z-derived'], pagination: { offset: 0, limit: 5, total: 3 } });
     expect(arrivals.length - before).toBe(2);
+    expect(registry.sharedScanStats()).toEqual({ scans: 0, waiters: 0 });
 
     // A settled traversal is not a cache: the next list reads again.
-    expect((await call(`/api/proxy/namespaces?${query}`)).status).toBe(200);
+    expect((await call('/api/proxy/namespaces?id=coalesce')).status).toBe(200);
     expect(arrivals.length - before).toBe(4);
   });
+
+  it('stops the shared traversal when every waiting request has gone', async () => {
+    const query = 'gate=1&id=abandoned';
+    const firstPage = signal('gated:abandoned:0');
+    const first = start(`/api/proxy/namespaces?${query}`);
+    await firstPage;
+    const second = start(`/api/proxy/namespaces?limit=1&${query}`);
+    await waiters(2);
+    const before = arrivals.length;
+    const cancelled = signal('closed:abandoned');
+    first.request.destroy();
+    await waiters(1);
+    second.request.destroy();
+    // The pending upstream page is cancelled, and nothing reads further.
+    await cancelled;
+    gates.delete('abandoned:0');
+    expect(registry.sharedScanStats()).toEqual({ scans: 0, waiters: 0 });
+    expect(arrivals).toHaveLength(before);
+  });
+
+  it('keeps the traversal for the requests still waiting when one leaves', async () => {
+    const query = 'gate=1&id=survivor';
+    const firstPage = signal('gated:survivor:0');
+    const leaving = start(`/api/proxy/namespaces?${query}`);
+    await firstPage;
+    const staying = call(`/api/proxy/namespaces?limit=5&${query}`);
+    await waiters(2);
+    // The request that started the traversal leaves; the other still gets
+    // the whole result from the same traversal.
+    leaving.request.destroy();
+    await waiters(1);
+    const secondPage = signal('gated:survivor:1000');
+    openGate('survivor:0');
+    await secondPage;
+    openGate('survivor:1000');
+    const response = await staying;
+    expect(response.status).toBe(200);
+    expect(JSON.parse(response.body)).toEqual({ data: ['tenant-a', 'tenant-c', 'z-derived'], pagination: { offset: 0, limit: 5, total: 3 } });
+  });
+
+  it('ends a shared traversal at its own deadline, not at the latest waiter\'s', async () => {
+    const query = 'gate=1&id=deadline';
+    const firstPage = signal('gated:deadline:0');
+    const creator = call(`/api/proxy/namespaces?${query}`);
+    await firstPage;
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const joinedAt = performance.now();
+    const joiner = call(`/api/proxy/namespaces?limit=1&${query}`);
+    await waiters(2);
+    const responses = await Promise.all([creator, joiner]);
+    for (const response of responses) {
+      expect(response.status).toBe(504);
+      expect(JSON.parse(response.body)).toMatchObject({ code: 'FERRUM_BFF_TIMEOUT', phase: 'response' });
+    }
+    // The joiner's own 4 s deadline was still about 1.5 s away: the
+    // traversal's deadline, set when it started, ended it.
+    expect(performance.now() - joinedAt).toBeLessThan(3500);
+    gates.delete('deadline:0');
+    expect(registry.sharedScanStats()).toEqual({ scans: 0, waiters: 0 });
+  }, 10_000);
 
   it('bounds an incomplete registry body before opening an upstream request', async () => {
     const before = arrivals.length;
