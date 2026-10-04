@@ -318,6 +318,8 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
   fastify.addHook('onResponse', async (request) => releaseCapacity(request));
   fastify.addHook('onRequestAbort', async (request) => releaseCapacity(request));
 
+  const confirmedRegistryDeletes = new WeakSet<FastifyRequest>();
+
   const requireSafeProxyPath = async (
     request: FastifyRequest,
     reply: Parameters<typeof requireAdminAuth>[1],
@@ -326,7 +328,12 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
       const path = proxyTargetPath(request);
       if (request.authPrincipal) {
         authorizeRegistryPath(path, request.method, request.authPrincipal);
-        authorizeRegistryDeleteConfirmation(path, request.method, request.raw.url ?? request.url);
+        const confirmed = authorizeRegistryDeleteConfirmation(
+          path,
+          request.method,
+          request.raw.url ?? request.url,
+        );
+        if (confirmed) confirmedRegistryDeletes.add(request);
       }
     } catch (error) {
       if (error instanceof RegistryRequestError) {
@@ -364,14 +371,11 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
     if (!stampGatewayTarget(request, reply, config)) return rejectStaleGatewayTarget(reply);
 
     const target = proxyTargetUrl(request, config.adminUrl);
-    // Edge retains its existing boolean cascade contract; the BFF validates
-    // the caller's exact name echo first, then forwards the accepted cascade.
-    if (
-      request.method === 'DELETE'
-      && target.pathname.startsWith('/namespaces/')
-      && target.searchParams.has('confirm')
-    ) {
-      target.searchParams.set('confirm', 'true');
+    // Only the authorization decision may enable Edge's boolean cascade flag.
+    // Remove any reparsed confirmation before constructing the upstream value.
+    if (request.method === 'DELETE' && target.pathname.startsWith('/namespaces/')) {
+      target.searchParams.delete('confirm');
+      if (confirmedRegistryDeletes.has(request)) target.searchParams.set('confirm', 'true');
     }
     const targetPath = target.pathname;
 
