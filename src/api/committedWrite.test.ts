@@ -237,6 +237,7 @@ describe("saving twice after a committed-but-not-live save (#430)", () => {
     vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
       wire.push(`${request.method} ${new URL(request.url).pathname}`);
       if (request.method === "PUT") {
+        expect(request.headers.get("If-Match")).toBe(`"${stored.updated_at}"`);
         const body = (await request.json()) as Partial<Proxy>;
         stored = { ...stored, ...body, updated_at: `rev-${wire.length}` };
         if (committedPuts > 0) {
@@ -244,7 +245,9 @@ describe("saving twice after a committed-but-not-live save (#430)", () => {
           return committedNotLive();
         }
       }
-      return Response.json(stored);
+      return Response.json(stored, {
+        headers: request.method === "GET" ? { ETag: `"${stored.updated_at}"` } : {},
+      });
     }));
   });
 

@@ -21,6 +21,7 @@ let afterCommit: (() => void) | undefined;
 let hold: Promise<void> | undefined;
 // Reads leave out a target's empty optional members (`null`, `{}`).
 let omitEmptyOnRead: boolean;
+let tagReads: boolean;
 let writes: Request[];
 const initial: Upstream = {
   id: "orders", name: "Orders", namespace: "tenant-a", algorithm: "round_robin",
@@ -56,6 +57,7 @@ beforeEach(() => {
   afterCommit = undefined;
   hold = undefined;
   omitEmptyOnRead = false;
+  tagReads = true;
   writes = [];
   clearGatewayMetadata();
   Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
@@ -64,7 +66,7 @@ beforeEach(() => {
     if (request.method === "GET") {
       if (path === "/api/proxy/upstreams") return Response.json(page(current ? [current] : []));
       if (path === "/api/proxy/upstreams/orders") return current
-        ? Response.json(readShape(current), { headers: { ETag: etagOf(current) } })
+        ? Response.json(readShape(current), { headers: tagReads ? { ETag: etagOf(current) } : {} })
         : Response.json({ error: "upstream missing" }, { status: 404 });
       throw new Error(`Unexpected upstream read: ${path}`);
     }
@@ -217,6 +219,41 @@ describe("upstream target route integration", () => {
     await settle(() => expect(button("Delete Upstream").disabled).toBe(false));
     expect(document.querySelector('[role="dialog"]')).not.toBeNull();
     expect(current).toEqual(initial);
+  });
+
+  it("keeps settings and target drafts and the detail cache when a fresh read has no validator", async () => {
+    const router = await mount();
+    await settle(() => expect(panel().textContent).toContain("Update Upstream"));
+    // The editor seed was tagged. Only the subsequent verification loses its
+    // tag; the cached seed validator must never be substituted for it.
+    tagReads = false;
+    await fill(inputByLabel(panel(), "Name"), "Unsaved name");
+    await click("Update Upstream", panel());
+    await settle(() => expect(document.body.textContent).toContain("Your draft was not saved"));
+    expect(inputByLabel(panel(), "Name").value).toBe("Unsaved name");
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(cachedUpstream()).toEqual(initial);
+    expect(writes).toHaveLength(0);
+
+    await selectTab("Targets (1)");
+    await click("Add Target", panel());
+    await fill(inputByLabel(panel(), "Host"), "unsaved-backend");
+    await click("Add Target", panel());
+    await settle(() => expect(button("Add Target", panel()).disabled).toBe(false));
+    expect(inputByLabel(panel(), "Host").value).toBe("unsaved-backend");
+    expect(panel().textContent).toContain("old-backend:8080");
+    expect(writes).toHaveLength(0);
+
+    await click("Delete", ui.host);
+    await click("Delete Upstream");
+    await settle(() => expect(document.body.textContent).toContain("The resource was not deleted"));
+    expect(document.body.textContent).toContain("cannot establish an atomic write guard");
+    expect(document.body.textContent).not.toContain("changed after you opened");
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(router.state.location.pathname).toBe("/upstreams/orders");
+    expect(cachedUpstream()).toEqual(initial);
+    expect(current).toEqual(initial);
+    expect(writes).toHaveLength(0);
   });
 
   it("keeps editing the same target when a row above it is removed (#448)", async () => {

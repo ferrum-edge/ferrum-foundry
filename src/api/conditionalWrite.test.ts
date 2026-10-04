@@ -8,8 +8,8 @@
  * atomically with the write. These tests pin how Foundry uses that contract:
  * the tag always comes from the read the guard just verified, a writer that
  * commits in the gap between that read and the `PUT` is refused rather than
- * overwritten, and a gateway without the contract still gets the
- * verification-read guard alone.
+ * overwritten, and an initial read without a usable validator refuses the
+ * guarded write before any replacement or deletion.
  *
  * The stub below implements the contract as `docs/admin_api.md` states it —
  * a tag over the whole stored resource (plugin associations included), strong
@@ -18,9 +18,16 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  conditionalPut,
+  guardedRemove,
+  guardedReplace,
+  GuardVerificationError,
   isStaleResourceError,
   PRECONDITION_ATTEMPTS,
+  readTagged,
   strongEtag,
+  validatorOf,
+  type TaggedRead,
 } from "./conditionalWrite";
 import { setApiErrorHandler } from "./client";
 import { resetGatewayMetadata } from "./gatewayMetadata";
@@ -45,6 +52,8 @@ const scope = { namespace: "tenant-a" };
 interface GatewayOptions {
   /** How the gateway tags a read: strong (Edge), none (older Edge), or weak. */
   readonly tags?: "strong" | "none" | "weak";
+  /** An opaque tag or malformed header, used verbatim on every read. */
+  readonly readTag?: string;
   /** Another writer, committing after the verification read and before the PUT. */
   readonly interleave?: (stored: Record<string, unknown>) => Record<string, unknown>;
   /** How many PUTs the interleaved writer races. */
@@ -53,6 +62,8 @@ interface GatewayOptions {
   readonly failConditionalWith?: number;
   /** Tag only the first read, as when a re-read falls back to cached config. */
   readonly tagFirstReadOnly?: boolean;
+  /** Override the validator only on re-verification, without changing content. */
+  readonly laterReadTag?: string | null;
 }
 
 function stubGateway<T extends object>(seed: T, options: GatewayOptions = {}) {
@@ -61,7 +72,7 @@ function stubGateway<T extends object>(seed: T, options: GatewayOptions = {}) {
   let interleaves = options.interleaveTimes ?? 1;
   let reads = 0;
   const wire: string[] = [];
-  const tag = () => `"r${revision}"`;
+  const tag = () => options.readTag ?? `"r${revision}"`;
 
   const commit = (next: Record<string, unknown>) => {
     revision += 1;
@@ -81,7 +92,10 @@ function stubGateway<T extends object>(seed: T, options: GatewayOptions = {}) {
         const headers = new Headers();
         const untagged = options.tags === "none" || (options.tagFirstReadOnly && reads > 1);
         if (!untagged) {
-          headers.set("etag", options.tags === "weak" ? `W/${tag()}` : tag());
+          const readTag = reads > 1 && options.laterReadTag !== undefined
+            ? options.laterReadTag
+            : options.tags === "weak" ? `W/${tag()}` : tag();
+          if (readTag !== null) headers.set("etag", readTag);
         }
         return Response.json(stored, { headers });
       }
@@ -169,20 +183,130 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+const unusableTags = [
+  null,
+  "",
+  '""',
+  'W/"r1"',
+  "*",
+  "r1",
+  '"r"1"',
+  '"r1", "r2"',
+  '"r1", "r1"',
+  '"r 1"',
+  ' "r1" ',
+  '"r1"\n',
+  '"r1"\r\n',
+  '"r1"\t',
+  '"r\u00001"',
+  '"r\u001f1"',
+  '"r\u007f1"',
+  '"r\u00801"',
+  '"r\u00ff1"',
+  '"r\u20281"',
+];
+
 describe("strongEtag", () => {
-  it("accepts only a strong entity-tag", () => {
-    expect(strongEtag('"r1"')).toBe('"r1"');
-    expect(strongEtag(' "r1" ')).toBe('"r1"');
-    expect(strongEtag('""')).toBe('""');
-    expect(strongEtag('W/"r1"')).toBeNull();
-    expect(strongEtag("r1")).toBeNull();
-    expect(strongEtag('"r"1"')).toBeNull();
-    expect(strongEtag('"r1", "r2"')).toBeNull();
-    expect(strongEtag(null)).toBeNull();
+  it.each(['"r1"', '"opaque!#$%&()*+,-./:;<=>?@[\\]^_`{|}~"'])(
+    "preserves a nonempty opaque visible-ASCII token verbatim: %j",
+    (tag) => expect(strongEtag(tag)).toBe(tag),
+  );
+
+  it.each(unusableTags)("rejects unusable validators: %j", (tag) => {
+    expect(strongEtag(tag)).toBeNull();
+  });
+});
+
+describe("initial verification capability", () => {
+  it.each(unusableTags)("refuses save and delete before writing for %j", async (etag) => {
+    const value = { password: "read-secret-value" };
+    const read = vi.fn(async () => ({ value, etag }));
+    const propose = vi.fn(() => ({ password: "draft-secret-value" }));
+    const write = vi.fn(async () => value);
+    const remove = vi.fn(async () => {});
+    const options = {
+      resource: "resource-secret-value",
+      id: "id-secret-value",
+      namespace: "namespace-secret-value",
+      guard: { baseline: value, select: (current: typeof value) => current },
+      read,
+    };
+
+    for (const refusal of [
+      await settle(guardedReplace({ ...options, propose, write })),
+      await settle(guardedRemove({ ...options, remove })),
+    ]) {
+      expect(refusal).toBeInstanceOf(GuardVerificationError);
+      expect(isStaleResourceError(refusal)).toBe(false);
+      expect(refusal).not.toHaveProperty("detail");
+      expect(refusal).not.toHaveProperty("cause");
+      expect(refusal).not.toHaveProperty("response");
+      expect(refusal).not.toHaveProperty("request");
+      expect(refusal).not.toHaveProperty("options");
+      expect(refusal).not.toHaveProperty("data");
+      expect((refusal as Error).message).toContain("cannot establish an atomic write guard");
+      expect((refusal as Error).message).not.toContain("secret-value");
+      expect((refusal as Error).message).not.toContain("changed");
+      expect(JSON.stringify(refusal)).not.toContain("secret-value");
+    }
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(propose).not.toHaveBeenCalled();
+    expect(write).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+    expect(popups).not.toHaveBeenCalled();
   });
 });
 
 describe("guarded proxy saves on a gateway that honours If-Match", () => {
+  it("rebuilds each attempt from the exact compared read and uses only that read's validator", async () => {
+    const seed = { name: "original", setting: "before" };
+    const gateway = stubGateway(seed, {
+      interleave: (stored) => ({ ...stored, setting: "after" }),
+    });
+    const reads: TaggedRead<typeof seed>[] = [];
+    const compared: (typeof seed)[] = [];
+    const proposedFrom: (typeof seed)[] = [];
+
+    await guardedReplace({
+      resource: "proxy",
+      id: "checkout",
+      namespace: scope.namespace,
+      guard: {
+        baseline: { name: seed.name },
+        select: (value: typeof seed) => {
+          compared.push(value);
+          return { name: value.name };
+        },
+      },
+      read: async () => {
+        const read = await readTagged<typeof seed>(scope, "proxies/checkout");
+        reads.push(read);
+        return read;
+      },
+      propose: (current) => {
+        proposedFrom.push(current);
+        expect(validatorOf(current)).toBe(reads.at(-1)!.etag);
+        expect(validatorOf({ ...current })).toBeNull();
+        return { name: "edited", setting: current.setting };
+      },
+      write: (payload, ifMatch) => {
+        expect(ifMatch).toBe(reads.at(-1)!.etag);
+        expect(payload.setting).toBe(reads.at(-1)!.value.setting);
+        return conditionalPut<typeof seed>(scope, "proxies/checkout", payload, ifMatch);
+      },
+    });
+
+    expect(reads).toHaveLength(2);
+    for (let index = 0; index < reads.length; index += 1) {
+      expect(compared[index]).toBe(reads[index].value);
+      expect(proposedFrom[index]).toBe(reads[index].value);
+    }
+    expect(reads[0].value.setting).toBe("before");
+    expect(reads[1].value.setting).toBe("after");
+    expect(gateway.wire).toEqual(["GET", 'PUT if-match "r0"', "GET", 'PUT if-match "r1"']);
+    expect(gateway.read()).toMatchObject({ name: "edited", setting: "after" });
+  });
+
   it("sends the tag of the read it just verified", async () => {
     const seed = proxyFixture();
     const gateway = stubGateway(seed);
@@ -231,31 +355,32 @@ describe("guarded proxy saves on a gateway that honours If-Match", () => {
     expect(popups).not.toHaveBeenCalled();
   });
 
-  it("refuses rather than writing unconditionally when the re-read after a 412 is untagged", async () => {
-    // The 412 proves a commit happened. A re-read served from the cached
-    // config fallback carries no tag and can lag that commit, so it still
-    // matches the baseline; an unconditional PUT from it would revert the
-    // commit that caused the 412.
-    const seed = proxyFixture();
-    const gateway = stubGateway(seed, {
-      interleave: (stored) => ({ ...stored, plugins: [{ plugin_config_id: "rate-limit" }] }),
-      tagFirstReadOnly: true,
-    });
+  it.each([null, 'W/"r1"', '""', '"r1", "r2"', "malformed"])(
+    "keeps refusing an unusable re-read after 412, never downgrading: %j",
+    async (laterReadTag) => {
+      // The 412 proves a commit happened. A cached re-read can lag it while
+      // still matching the baseline. No unusable tag may cause a downgrade.
+      const seed = proxyFixture();
+      const gateway = stubGateway(seed, {
+        interleave: (stored) => ({ ...stored, plugins: [{ plugin_config_id: "rate-limit" }] }),
+        laterReadTag,
+      });
 
-    const refused = await settle(
-      proxies.update(
-        scope,
-        "checkout",
-        formDraft(seed, { backend_read_timeout_ms: 30_000 }),
-        proxies.proxyWriteGuard(seed),
-      ),
-    );
+      const refused = await settle(
+        proxies.update(
+          scope,
+          "checkout",
+          formDraft(seed, { backend_read_timeout_ms: 30_000 }),
+          proxies.proxyWriteGuard(seed),
+        ),
+      );
 
-    expect(isStaleResourceError(refused)).toBe(true);
-    expect(gateway.wire).toEqual(["GET", 'PUT if-match "r0"', "GET"]);
-    expect(gateway.read().backend_read_timeout_ms).toBe(5_000);
-    expect(popups).not.toHaveBeenCalled();
-  });
+      expect(isStaleResourceError(refused)).toBe(true);
+      expect(gateway.wire).toEqual(["GET", 'PUT if-match "r0"', "GET"]);
+      expect(gateway.read().backend_read_timeout_ms).toBe(5_000);
+      expect(popups).not.toHaveBeenCalled();
+    },
+  );
 
   it("re-sends against the fresh tag when only a field it does not replace moved", async () => {
     // A membership plan attached a plugin in the gap. The tag covers plugin
@@ -368,35 +493,47 @@ describe("guarded proxy saves on a gateway that honours If-Match", () => {
 });
 
 describe("guarded saves on a gateway without a usable tag", () => {
-  it("falls back to the verification read when the gateway issues no ETag", async () => {
-    // The pinned pre-contract gateway, a database-less mode, or the
-    // cached-config fallback. The guard still refuses a stale draft; it just
-    // cannot close the gap between its read and the write.
+  it.each([
+    { tags: "none" as const },
+    { tags: "weak" as const },
+    { readTag: "unquoted" },
+    { readTag: '""' },
+    { readTag: '"r0", "r1"' },
+    { readTag: '"r\u007f0"' },
+  ])("sends no PUT or DELETE for an unusable initial header: %j", async (options) => {
     const seed = proxyFixture();
-    const gateway = stubGateway(seed, { tags: "none" });
+    const gateway = stubGateway(seed, options);
+    const draft = formDraft(seed, { backend_read_timeout_ms: 30_000 });
 
-    await proxies.update(
-      scope,
-      "checkout",
-      formDraft(seed, { backend_read_timeout_ms: 30_000 }),
-      proxies.proxyWriteGuard(seed),
+    const save = await settle(
+      proxies.update(scope, "checkout", draft, proxies.proxyWriteGuard(seed)),
     );
-
-    expect(gateway.wire).toEqual(["GET", "PUT"]);
+    const remove = await settle(
+      proxies.remove(scope, "checkout", proxies.proxyWriteGuard(seed)),
+    );
+    expect(save).toBeInstanceOf(GuardVerificationError);
+    expect(remove).toBeInstanceOf(GuardVerificationError);
+    expect(gateway.wire).toEqual(["GET", "GET"]);
+    expect(gateway.read()).toEqual(seed);
+    expect(gateway.exists()).toBe(true);
+    expect(draft.backend_read_timeout_ms).toBe(30_000);
+    expect(popups).not.toHaveBeenCalled();
   });
 
-  it("never echoes a weak tag, which Edge's strong comparison could never match", async () => {
+  it("uses an ordinary opaque token from the fresh read, never the seed tag", async () => {
     const seed = proxyFixture();
-    const gateway = stubGateway(seed, { tags: "weak" });
+    stubGateway(seed, { readTag: '"seed-token"' });
+    const opened = await proxies.get(scope, "checkout");
+    const gateway = stubGateway(seed, { readTag: '"opaque!revision:next"' });
 
     await proxies.update(
       scope,
       "checkout",
       formDraft(seed, { backend_read_timeout_ms: 30_000 }),
-      proxies.proxyWriteGuard(seed),
+      proxies.proxyWriteGuard(opened),
     );
 
-    expect(gateway.wire).toEqual(["GET", "PUT"]);
+    expect(gateway.wire).toEqual(["GET", 'PUT if-match "opaque!revision:next"']);
     expect(gateway.read().backend_read_timeout_ms).toBe(30_000);
   });
 });
@@ -478,6 +615,28 @@ describe("guarded upstream saves on a gateway that honours If-Match", () => {
     expect(gateway.read().targets.map((target) => target.host)).toEqual(["two.internal"]);
   });
 
+  it("preserves the initial untagged fallback only for explicit unguarded targets", async () => {
+    const gateway = stubGateway(upstreamSeed, { tags: "none" });
+    const targets = [{ host: "two.internal", port: 443, weight: 1 }];
+    const refused = await settle(
+      upstreams.updateTargets(
+        scope,
+        "payments",
+        targets,
+        upstreams.targetsWriteGuard(upstreamSeed),
+      ),
+    );
+    expect(refused).toBeInstanceOf(GuardVerificationError);
+    expect(gateway.wire).toEqual(["GET"]);
+    expect(gateway.read()).toEqual(upstreamSeed);
+
+    await upstreams.updateTargets(scope, "payments", targets, null);
+
+    expect(gateway.wire).toEqual(["GET", "GET", "PUT"]);
+    expect(gateway.read().targets).toEqual(targets);
+    expect(gateway.read().algorithm).toBe(upstreamSeed.algorithm);
+  });
+
   it("keeps a settings change made in the gap and re-sends the targets over it", async () => {
     // The targets write takes every setting from the read it verified. A
     // settings change committed after that read would have been reverted by
@@ -539,6 +698,23 @@ describe("guarded deletes", () => {
     const seed = proxyFixture();
     const gateway = stubGateway(seed, {
       interleave: (stored) => ({ ...stored, backend_host: "backend-b.internal" }),
+    });
+
+    const refused = await settle(
+      proxies.remove(scope, "checkout", proxies.proxyWriteGuard(seed)),
+    );
+
+    expect(isStaleResourceError(refused)).toBe(true);
+    expect(gateway.wire).toEqual(["GET", 'DELETE if-match "r0"', "GET"]);
+    expect(gateway.exists()).toBe(true);
+    expect(popups).not.toHaveBeenCalled();
+  });
+
+  it("keeps refusing an untagged re-read after a delete gets 412", async () => {
+    const seed = proxyFixture();
+    const gateway = stubGateway(seed, {
+      interleave: (stored) => ({ ...stored, plugins: [{ plugin_config_id: "rate-limit" }] }),
+      tagFirstReadOnly: true,
     });
 
     const refused = await settle(
@@ -662,6 +838,27 @@ describe("consumer metadata saves", () => {
     await consumers.update(scope, "alice", { username: "alice" }, null);
 
     expect(gateway.wire).toEqual(["GET", 'PUT if-match "r0"']);
+  });
+
+  it("preserves credentials on an explicit unguarded initial untagged save only", async () => {
+    const gateway = stubGateway(consumerSeed, { tags: "none" });
+    const data = { username: "renamed" };
+    const refused = await settle(
+      consumers.update(scope, "alice", data, consumers.consumerWriteGuard(consumerSeed)),
+    );
+    const refusedDelete = await settle(
+      consumers.remove(scope, "alice", consumers.consumerWriteGuard(consumerSeed)),
+    );
+    expect(refused).toBeInstanceOf(GuardVerificationError);
+    expect(refusedDelete).toBeInstanceOf(GuardVerificationError);
+    expect(gateway.wire).toEqual(["GET", "GET"]);
+    expect(gateway.read()).toEqual(consumerSeed);
+
+    await consumers.update(scope, "alice", data, null);
+
+    expect(gateway.wire).toEqual(["GET", "GET", "GET", "PUT"]);
+    expect(gateway.read().username).toBe("renamed");
+    expect(gateway.read().credentials).toEqual(consumerSeed.credentials);
   });
 
   it("refuses to delete a consumer whose metadata changed since the page loaded", async () => {

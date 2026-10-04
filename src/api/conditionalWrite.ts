@@ -79,6 +79,24 @@ export function isStaleResourceError(error: unknown): error is StaleResourceErro
 }
 
 /**
+ * The fresh read cannot establish an atomic guard. This is not evidence of a
+ * content conflict. Keep diagnostics fixed: no resource, validator, payload,
+ * response, or request metadata is retained on this error.
+ */
+export class GuardVerificationError extends Error {
+  constructor(operation: GuardedOperation) {
+    super(
+      (operation === "delete" ? "The resource was not deleted. " : "Your draft was not saved. ") +
+        "The fresh verification read did not provide a usable strong ETag. " +
+        "Older gateways, modes without a database, and cached reads cannot establish an " +
+        "atomic write guard. Use a supported gateway with an authoritative tagged read " +
+        "before trying again.",
+    );
+    this.name = "GuardVerificationError";
+  }
+}
+
+/**
  * What an editor captured when it opened, plus how to reduce a resource or a
  * write payload of this kind to the comparable content.
  *
@@ -96,7 +114,7 @@ export interface WriteGuard<TShape> {
  * A guard that compares nothing, for a write that owns only the fields it
  * sends and takes every other field from the read it is sent against — an
  * unguarded upstream targets write, or a consumer metadata write's
- * credentials. Such a write still goes out conditionally on that read.
+ * credentials. Used by `replaceFromRead`; it is not an editor guard.
  */
 export function uncomparedGuard<TShape>(): WriteGuard<TShape> {
   return { baseline: {}, select: () => ({}) };
@@ -115,24 +133,24 @@ export interface TaggedRead<TResource> {
 }
 
 /**
- * RFC 9110 strong entity-tag: `DQUOTE *etagc DQUOTE`, with
- * `etagc = %x21 / %x23-7E / obs-text`.
+ * Edge's usable validator contract: one nonempty quoted visible-ASCII strong
+ * tag. The token is opaque; Foundry does not validate a MAC format.
+ * The final negative lookahead anchors the actual end, including line ends.
  */
-const STRONG_ETAG = /^"[\x21\x23-\x7e\x80-\xff]*"$/;
+const STRONG_ETAG = /^"[\x21\x23-\x7e]+"$(?![\s\S])/;
 
 /**
  * The `ETag` response header as a value that can be sent back in `If-Match`,
  * or `null` when there is nothing usable.
  *
  * Edge compares `If-Match` strongly, so a weak `W/"…"` tag — which only an
- * intermediary would produce here — can never match. Sending one would turn
- * every save into a `412`, so it is treated as no tag at all and the write
- * falls back to the verification read alone.
+ * intermediary would produce here — can never match. Weak, empty, malformed,
+ * non-ASCII, wildcard, list, or control-bearing values are unusable. A valid
+ * opaque strong tag is returned verbatim, never trimmed or reconstructed.
  */
 export function strongEtag(header: string | null): string | null {
   if (header === null) return null;
-  const value = header.trim();
-  return STRONG_ETAG.test(value) ? value : null;
+  return STRONG_ETAG.test(header) ? header : null;
 }
 
 // The validator each tagged read was issued with, keyed by the exact object
@@ -254,13 +272,13 @@ export interface GuardedReplaceOptions<TResource, TPayload> {
    */
   readonly propose: (current: TResource) => TPayload;
   /**
-   * The full-replacement `PUT`. When `ifMatch` is not `null` it must be sent
+   * The full-replacement `PUT`. `ifMatch` must be sent
    * as `If-Match`, and a `412` must reach this function's caller as an error
    * `isPreconditionFailed` recognises — ky's `HTTPError`, or the
    * `RedactedWriteError` a secret-bearing write replaces it with — and stay
    * out of the global error popup (see `HANDLED_STATUSES` in `client.ts`).
    */
-  readonly write: (payload: TPayload, ifMatch: string | null) => Promise<TResource>;
+  readonly write: (payload: TPayload, ifMatch: string) => Promise<TResource>;
 }
 
 /**
@@ -304,10 +322,10 @@ export interface GuardedReplaceOptions<TResource, TPayload> {
  *
  * ## Without a tag
  *
- * A gateway that returns no `ETag` — one predating the contract, or a read
- * served from the cached-config fallback — gets an unconditional `PUT`. The
- * guard then narrows the exposure to one gateway round trip rather than
- * closing it; see `docs/concurrent-edits.md`.
+ * An initial read without a usable strong `ETag` raises `GuardVerificationError`
+ * before any write. Older gateways, modes without a database, and the cached
+ * fallback cannot establish an atomic guard. The mounted draft stays intact;
+ * this refusal does not claim that another writer changed the content.
  *
  * Per-client write serialization (`upstreams.ts`) still matters and is not
  * replaced by this: it orders *this* client's writes so two of the operator's
@@ -318,8 +336,34 @@ export async function guardedReplace<TResource, TPayload>(
 ): Promise<TResource> {
   return verifiedAttempts({
     ...options,
+    requireInitialValidator: true,
     operation: "save",
     proposedSnapshot: (proposed: TPayload) => options.guard.select(proposed),
+    write: (payload, ifMatch) => {
+      if (ifMatch === null) throw new GuardVerificationError("save");
+      return options.write(payload, ifMatch);
+    },
+  });
+}
+
+/**
+ * Explicitly unguarded read-derived replacement. Only callers with no editor
+ * baseline use this: consumer credentials, upstream settings, and unowned MCP
+ * policy fields are rebuilt from each fresh read. Preserve their initial
+ * untagged fallback and bounded 412 re-verification; never use this to bypass
+ * a refused editor save.
+ */
+export async function replaceFromRead<TResource, TPayload>(
+  options: Omit<GuardedReplaceOptions<TResource, TPayload>, "guard" | "write"> & {
+    readonly write: (payload: TPayload, ifMatch: string | null) => Promise<TResource>;
+  },
+): Promise<TResource> {
+  return verifiedAttempts({
+    ...options,
+    guard: uncomparedGuard<TResource | TPayload>(),
+    requireInitialValidator: false,
+    operation: "save",
+    proposedSnapshot: () => ({}),
   });
 }
 
@@ -329,8 +373,8 @@ export interface GuardedRemoveOptions<TResource> {
   readonly namespace: string;
   readonly guard: WriteGuard<TResource>;
   readonly read: () => Promise<TaggedRead<TResource>>;
-  /** The `DELETE`, sent with `If-Match: ifMatch` when it is not `null`. */
-  readonly remove: (ifMatch: string | null) => Promise<void>;
+  /** The `DELETE`, sent with `If-Match: ifMatch`. */
+  readonly remove: (ifMatch: string) => Promise<void>;
 }
 
 /**
@@ -347,10 +391,14 @@ export async function guardedRemove<TResource>(
 ): Promise<void> {
   return verifiedAttempts<TResource, null, void>({
     ...options,
+    requireInitialValidator: true,
     operation: "delete",
     propose: () => null,
     proposedSnapshot: () => options.guard.baseline,
-    write: (_payload, ifMatch) => options.remove(ifMatch),
+    write: (_payload, ifMatch) => {
+      if (ifMatch === null) throw new GuardVerificationError("delete");
+      return options.remove(ifMatch);
+    },
   });
 }
 
@@ -359,6 +407,7 @@ interface VerifiedAttemptOptions<TResource, TPayload, TResult> {
   readonly id: string;
   readonly namespace: string;
   readonly operation: GuardedOperation;
+  readonly requireInitialValidator: boolean;
   readonly guard: WriteGuard<TResource | TPayload> | WriteGuard<TResource>;
   readonly read: () => Promise<TaggedRead<TResource>>;
   readonly propose: (current: TResource) => TPayload;
@@ -374,7 +423,12 @@ async function verifiedAttempts<TResource, TPayload, TResult>(
 
   let preconditionFailed = false;
   for (let attempt = 1; ; attempt += 1) {
-    const { value, etag } = await options.read();
+    const read = await options.read();
+    const { value } = read;
+    const etag = strongEtag(read.etag);
+    if (!preconditionFailed && options.requireInitialValidator && etag === null) {
+      throw new GuardVerificationError(options.operation);
+    }
     const current = guard.select(value);
     const proposed = options.propose(value);
     const refuse = () =>

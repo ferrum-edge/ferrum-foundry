@@ -21,6 +21,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Draft policy proposal (#542; owner decision pending).** Guarded replacement
+  and deletion refuse an initial fresh verification read without one nonempty
+  quoted visible-ASCII strong ETag, before any PUT/DELETE. The fixed capability
+  explanation preserves drafts and does not claim a content conflict. This
+  removes the released initial unconditional fallback for guarded proxy,
+  upstream (including targets), consumer (including ACL), and MCP policy
+  operations on older/database-less gateways and cached reads, even on the
+  paired release. Explicit unguarded calls, low-level helpers, plugin
+  membership plans, and unrelated writes retain their semantics; tagged reads
+  share the stricter validator parser. Valid opaque tokens, stale-content
+  comparisons, namespace/resource/gateway fences, body reconstruction, bounded
+  412 handling and the existing post-412 untagged refusal are preserved.
+  Adoption awaits exact-patch review, fresh independent security/concurrency
+  review, all hosted checks, and the owner's decision. No released version,
+  pins, Node floor, workflow, or pairing evidence changes.
 - The browser-facing proxy refuses `/consumers/{id}/verification` for every
   method, including HEAD, before signing or contacting Ferrum Edge. The denial
   uses the exact canonical pathname forwarded upstream, including encoded

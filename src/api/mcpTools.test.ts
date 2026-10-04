@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { isStaleResourceError } from "./conditionalWrite";
+import { GuardVerificationError, isStaleResourceError } from "./conditionalWrite";
 import { resetGatewayMetadata } from "./gatewayMetadata";
 import { MaskedSecretWriteError } from "./maskedSecrets";
 import {
@@ -103,7 +103,7 @@ function mcpPlugin(overrides: Partial<PluginConfig> = {}): PluginConfig {
 }
 
 /** Edge's conditional-write contract for one plugin configuration. */
-function stubPluginGateway(seed: PluginConfig) {
+function stubPluginGateway(seed: PluginConfig, tagged = true) {
   let stored = seed;
   let revision = 1;
   const wire: { method: string; ifMatch: string | null; namespace: string | null; body?: unknown }[] = [];
@@ -127,7 +127,7 @@ function stubPluginGateway(seed: PluginConfig) {
       revision += 1;
       return Response.json(stored, { headers: { etag: tag() } });
     }
-    return Response.json(stored, { headers: { etag: tag() } });
+    return Response.json(stored, { headers: tagged ? { etag: tag() } : {} });
   });
   vi.stubGlobal("fetch", fetcher);
   return {
@@ -205,6 +205,27 @@ describe("tool catalog read", () => {
 });
 
 describe("per-tool policy write", () => {
+  it("refuses an untagged guarded policy save while preserving explicit unguarded semantics", async () => {
+    const seed = mcpPlugin();
+    const gateway = stubPluginGateway(seed, false);
+    const refusal = await updateToolPolicy(
+      scope, "mcp", "github.create", { action: "allow" },
+      toolPolicyWriteGuard(seed, "github.create"), "admin",
+    ).catch((error: unknown) => error);
+
+    expect(refusal).toBeInstanceOf(GuardVerificationError);
+    expect(gateway.wire.map((call) => call.method)).toEqual(["GET"]);
+    expect(gateway.read()).toEqual(seed);
+
+    await updateToolPolicy(scope, "mcp", "github.create", { action: "allow" }, null, "admin");
+    expect(gateway.wire.map((call) => [call.method, call.ifMatch])).toEqual([
+      ["GET", null], ["GET", null], ["PUT", null],
+    ]);
+    expect(gateway.read().config.policy).toMatchObject({
+      tools: { "github.create": { action: "allow" }, "github.search": { action: "allow" } },
+    });
+  });
+
   it("replaces one entry from a fresh read, conditional on that read, without labels", async () => {
     const gateway = stubPluginGateway(mcpPlugin());
     const guard = toolPolicyWriteGuard(mcpPlugin(), "github.create");

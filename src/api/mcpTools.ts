@@ -27,7 +27,7 @@ import {
 import {
   guardedReplace,
   readTagged,
-  uncomparedGuard,
+  replaceFromRead,
   type WriteGuard,
 } from "./conditionalWrite";
 import { MaskedSecretWriteError } from "./maskedSecrets";
@@ -380,15 +380,16 @@ export async function updateToolPolicy(
     };
   };
 
-  return guardedReplace<PluginConfig, PluginConfigCreate>({
+  const options = {
     resource: "MCP tool policy",
     id: pluginId,
     namespace: scope.namespace,
-    // Unguarded, the save still rebuilds every other field from the read it
-    // is sent against, so it is conditional on that read's tag.
-    guard: guard ?? uncomparedGuard(),
     read: () => readTagged<PluginConfig>(scope, path),
     propose,
-    write: (body, ifMatch) => pluginsApi.updateConfig(scope, pluginId, body, ifMatch),
-  });
+    write: (body: PluginConfigCreate, ifMatch: string | null) =>
+      pluginsApi.updateConfig(scope, pluginId, body, ifMatch),
+  };
+  return guard
+    ? guardedReplace<PluginConfig, PluginConfigCreate>({ ...options, guard })
+    : replaceFromRead<PluginConfig, PluginConfigCreate>(options);
 }

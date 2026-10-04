@@ -31,6 +31,21 @@
 *Release step:* summarize the changes from the `[Unreleased]` section of
 `CHANGELOG.md`.
 
+- **Draft guarded-write policy (#542; owner decision pending).** Guarded proxy,
+  upstream settings/targets, consumer Details/ACL, MCP policy, and guarded
+  detail deletes require a usable strong ETag from the initial fresh read.
+  Without one, no replacement/deletion is sent, the draft survives, and a fixed
+  explanation reports unavailable atomic verification rather than a conflict.
+  This removes the released initial unconditional fallback on older or
+  database-less gateways and cached reads, including the paired release's
+  fallback. Explicit unguarded calls, low-level writes and plugin membership
+  plans keep their semantics; the shared parser rejects empty/malformed tags
+  and preserves valid opaque tokens verbatim. Namespace/resource/gateway
+  fences, stale comparisons, whole-body preservation and bounded 412 handling
+  remain. Exact-patch review, fresh independent security/concurrency review,
+  all hosted checks and the owner's decision are required before adoption.
+  The released pairing, versions, pins, Node floor and workflows do not change.
+
 - **Alloy manifest preview (ferrum-alloy#27).** Settings consumes the shared v1
   JSON data model through an authenticated, namespace-authorized read-only BFF.
   Desired resource fields are bounded and TLS paths redacted; no configuration
