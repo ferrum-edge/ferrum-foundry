@@ -12,7 +12,7 @@ export async function previewServiceManifest(
   if (new TextEncoder().encode(document).byteLength > 32 * 1024) {
     throw new Error('Manifest exceeds the 32 KiB preview budget.');
   }
-  let status = 0;
+  let status: number;
   try {
     return await api.post('service-manifest/preview', scoped(scope, {
       body: document,

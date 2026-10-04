@@ -1,4 +1,9 @@
-import type { FastifyPluginAsync, FastifyServerOptions } from 'fastify';
+import type {
+  FastifyPluginAsync,
+  FastifyReply,
+  FastifyRequest,
+  FastifyServerOptions,
+} from 'fastify';
 import { requireAdminAuth } from '../auth.js';
 import {
   createManifestPreview,
@@ -67,7 +72,7 @@ export const serviceManifestRequestLogging: Pick<
       },
     });
   },
-  frameworkErrors(error, request, reply) {
+  frameworkErrors(error: unknown, request: FastifyRequest, reply: FastifyReply) {
     if (!isManifestRequest(request.raw.url)) return reply.send(error);
     reply.header('cache-control', 'no-store');
     const failure = manifestInputFailure(error);
