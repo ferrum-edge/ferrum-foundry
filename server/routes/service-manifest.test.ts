@@ -18,6 +18,7 @@ const fixtures = (kind: string) => readdirSync(new URL(`${kind}/`, root)).sort()
 const valid = fixtures('valid');
 const invalid = fixtures('invalid');
 const secret = 'preview-credential-canary-123456789';
+const unknownKey = 'unreviewed-secret-field';
 let app: FastifyInstance;
 let logs = '';
 const proof = 'test-trusted-proxy-shared-proof-long-enough';
@@ -31,9 +32,11 @@ function identity(role = 'viewer', grants = 'ferrum,retail') {
   };
 }
 
-async function headers(role = 'viewer', grants = 'ferrum,retail', namespace = 'ferrum') {
+async function headers(
+  role = 'viewer', grants = 'ferrum,retail', namespace = 'ferrum', target = app,
+) {
   const principal = identity(role, grants);
-  const session = await app.inject({ method: 'GET', url: '/api/auth/session', headers: principal });
+  const session = await target.inject({ method: 'GET', url: '/api/auth/session', headers: principal });
   expect(session.statusCode).toBe(200);
   return {
     ...principal,
@@ -50,6 +53,15 @@ async function preview(body: unknown, namespace = 'ferrum', role = 'viewer') {
     headers: await headers(role, 'ferrum,retail', namespace),
     payload: JSON.stringify(body),
   });
+}
+
+function expectSafeLogs(status: number) {
+  // Positive assertions prove the real logger ran before auth/parser rejection.
+  expect(logs).toContain('"req":{"method":"POST","url":"/api/service-manifest/preview"}');
+  expect(logs).toContain(`"statusCode":${status}`);
+  expect(logs).toContain('"msg":"Service manifest request"');
+  expect(logs).not.toContain(secret);
+  expect(logs).not.toContain(unknownKey);
 }
 
 beforeAll(async () => {
@@ -225,6 +237,112 @@ describe('authenticated service manifest preview through the registered BFF rout
       expect(response.statusCode).toBe(status);
       expect(response.body.length).toBeLessThan(256);
       expect(response.body + logs).not.toContain(secret);
+      expectSafeLogs(status);
+      expect(logs).toContain('"level":40');
+    }
+  });
+
+  it.each([false, true])('redacts regular and malformed query input before auth=%s', async (auth) => {
+    const binding = auth ? await headers() : { 'content-type': 'application/json' };
+    for (const url of [
+      `/api/service-manifest/preview?${unknownKey}=https://user:${secret}@example.test`,
+      `/api/service-manifest/preview?${unknownKey}=%E0%A4%A&password=${secret}`,
+      `/%61pi/service-man%69fest/preview?${unknownKey}=${secret}`,
+    ]) {
+      logs = '';
+      const response = await app.inject({
+        method: 'POST', url, headers: binding,
+        payload: `{ "${unknownKey}": "${secret}"`,
+      });
+      const status = auth ? 400 : 401;
+      expect(response.statusCode).toBe(status);
+      expect(response.body).not.toContain(secret);
+      expect(response.body).not.toContain(unknownKey);
+      expectSafeLogs(status);
+      expect(logs).not.toContain('%E0%A4%A');
+      expect(upstreamFetch).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each(['/api/service-manifest/', '/%61pi/service-man%69fest/'])(
+    'redacts malformed URI input below %s before route hooks', async (prefix) => {
+      const response = await app.inject({
+        method: 'POST',
+        url: `${prefix}preview%E0%A4%A${secret}?${unknownKey}=${secret}`,
+        headers: { 'content-type': 'application/json' }, payload: `{${secret}`,
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.headers['cache-control']).toBe('no-store');
+      expect(response.json()).toEqual({
+        error: 'Manifest preview unavailable', code: 'FERRUM_BFF_MANIFEST_INPUT',
+      });
+      expect(response.body).not.toContain(secret);
+      expectSafeLogs(400);
+      expect(logs).not.toContain('%E0%A4%A');
+      expect(upstreamFetch).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [400, 400], [413, 413], ['413', 500], [600, 500], [null, 500],
+  ] as const)('bounds thrown status %s and redacts raw error logs', async (candidate, status) => {
+    const { buildApp } = await import('../app.js');
+    const failureApp = await buildApp({ serveStatic: false, logger: {
+      level: 'debug', stream: { write: (chunk: string) => { logs += chunk; } },
+    } });
+    failureApp.addHook('preHandler', async (request, reply) => {
+      if (request.url !== '/api/service-manifest/preview') return;
+      const error = Object.assign(new Error(secret), {
+        statusCode: candidate, cause: new Error(secret), request,
+        data: { [unknownKey]: secret }, body: request.body,
+      });
+      // Exercise both Pino's error object serializer and its separate msg.
+      request.log.error({ req: request, res: reply, err: error }, error.message);
+      throw error;
+    });
+    try {
+      const binding = await headers('viewer', 'ferrum,retail', 'ferrum', failureApp);
+      logs = '';
+      const response = await failureApp.inject({
+        method: 'POST', url: '/api/service-manifest/preview', headers: binding,
+        payload: JSON.stringify(valid[0].body),
+      });
+      expect(response.statusCode).toBe(status);
+      expect(response.json()).toEqual({
+        error: status === 413 ? 'Manifest exceeds the preview budget' : 'Manifest preview unavailable',
+        code: 'FERRUM_BFF_MANIFEST_INPUT',
+      });
+      expectSafeLogs(status);
+      expect(logs).toContain('"err":{"type":"Error","message":"Manifest preview unavailable"');
+      expect(logs).toContain('"level":50');
+      for (const field of ['cause', 'stack', 'data', 'body', 'headers']) {
+        expect(logs).not.toContain(`"${field}":`);
+      }
+      expect(response.body).not.toContain(secret);
+      expect(response.body).not.toContain(unknownKey);
+      expect(upstreamFetch).not.toHaveBeenCalled();
+    } finally {
+      await failureApp.close();
+    }
+  });
+
+  it('preserves ordinary route logging and framework error classification', async () => {
+    const { buildApp } = await import('../app.js');
+    const ordinaryApp = await buildApp({ serveStatic: false, logger: {
+      level: 'debug', stream: { write: (chunk: string) => { logs += chunk; } },
+    } });
+    ordinaryApp.get('/manifest-logging-probe', async () => ({ ok: true }));
+    try {
+      logs = '';
+      const response = await ordinaryApp.inject('/manifest-logging-probe?ordinary=value');
+      expect(response.statusCode).toBe(200);
+      expect(logs).toContain('/manifest-logging-probe?ordinary=value');
+      expect(logs).toContain('"msg":"incoming request"');
+      const malformed = await ordinaryApp.inject('/manifest-logging-probe/%E0%A4%A');
+      expect(malformed.statusCode).toBe(400);
+      expect(malformed.json()).toMatchObject({ code: 'FST_ERR_BAD_URL', statusCode: 400 });
+    } finally {
+      await ordinaryApp.close();
     }
   });
 
@@ -253,10 +371,12 @@ describe('authenticated service manifest preview through the registered BFF rout
     });
     expect(query.statusCode).toBe(400);
     expect(query.body + logs).not.toContain(secret);
-    const body = { ...valid[0].body, credentials: { password: secret } };
+    const body = { ...valid[0].body, [unknownKey]: { password: secret } };
     const refused = await preview(body);
     expect(refused.statusCode).toBe(400);
     expect(refused.body + logs).not.toContain(secret);
+    expect(refused.body + logs).not.toContain(unknownKey);
+    expectSafeLogs(400);
     expect(upstreamFetch).not.toHaveBeenCalled();
   });
 

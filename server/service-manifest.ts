@@ -81,7 +81,7 @@ export function validatedManifest(body: unknown): Manifest | null {
     gateway: value.gateway ?? {},
     auth: value.auth ?? {},
   }) as Manifest;
-  const { api, gateway, upstream, health, agents } = manifest;
+  const { api, gateway, health, agents } = manifest;
   const id = gateway.proxy_id ?? manifest.service.name;
   const suffixes = [
     ...(health ? ['-upstream'] : []),

@@ -12,6 +12,7 @@ export async function previewServiceManifest(
   if (new TextEncoder().encode(document).byteLength > 32 * 1024) {
     throw new Error('Manifest exceeds the 32 KiB preview budget.');
   }
+  let status = 0;
   try {
     return await api.post('service-manifest/preview', scoped(scope, {
       body: document,
@@ -23,15 +24,17 @@ export async function previewServiceManifest(
   } catch (error) {
     // Never retain a ky request/body/cause or echo submitted credential values
     // (including malformed/unknown fields) in the UI or global error popup.
-    const status = isHTTPError(error) ? error.response.status : 0;
-    if (status === 401) throw new Error('Sign in to preview a service manifest.');
-    if (status === 403) {
-      throw new Error('Preview denied. Check session, CSRF and namespace access.');
-    }
-    if (status === 413) throw new Error('Manifest exceeds the 32 KiB preview budget.');
-    if (status === 400 || status === 415) {
-      throw new Error('Use supported v1 manifest JSON in the active namespace, within preview limits.');
-    }
-    throw new Error('Preview unavailable. No configuration was applied; retry to obtain a preview.');
+    status = isHTTPError(error) ? error.response.status : 0;
   }
+  // Only the numeric status crosses the catch boundary. Deliberately detach
+  // the submitted body, parsed error data and original cause before throwing.
+  if (status === 401) throw new Error('Sign in to preview a service manifest.');
+  if (status === 403) {
+    throw new Error('Preview denied. Check session, CSRF and namespace access.');
+  }
+  if (status === 413) throw new Error('Manifest exceeds the 32 KiB preview budget.');
+  if (status === 400 || status === 415) {
+    throw new Error('Use supported v1 manifest JSON in the active namespace, within preview limits.');
+  }
+  throw new Error('Preview unavailable. No configuration was applied; retry to obtain a preview.');
 }

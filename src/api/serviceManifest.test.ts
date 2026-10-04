@@ -42,15 +42,59 @@ it('uses the authenticated BFF and captured scope without storing the document',
   expect(popup).not.toHaveBeenCalled();
 });
 
-it.each([400, 401, 403, 413, 415, 500])('reports safe %s failure without a popup', async (status) => {
-  const secret = 'preview-secret-canary-123456789';
-  respond.mockReturnValue(Response.json({ error: secret }, { status }));
-  const failure = await previewServiceManifest({ namespace: 'tenant-a' }, secret)
-    .catch((error) => error);
+it.each([
+  [400, 'Use supported v1 manifest JSON in the active namespace, within preview limits.'],
+  [401, 'Sign in to preview a service manifest.'],
+  [403, 'Preview denied. Check session, CSRF and namespace access.'],
+  [413, 'Manifest exceeds the 32 KiB preview budget.'],
+  [415, 'Use supported v1 manifest JSON in the active namespace, within preview limits.'],
+  [500, 'Preview unavailable. No configuration was applied; retry to obtain a preview.'],
+] as const)(
+  'reports safe %s failure without retaining response data or a popup', async (status, message) => {
+    const secret = 'preview-secret-canary-123456789';
+    const unknownKey = 'unreviewed-credential-field';
+    const document = JSON.stringify({ [unknownKey]: { password: secret } });
+    respond.mockReturnValue(Response.json({
+      error: secret, data: { [unknownKey]: secret }, cause: { message: secret },
+    }, { status }));
+    const failure: unknown = await previewServiceManifest({ namespace: 'tenant-a' }, document)
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(Error);
+    if (!(failure instanceof Error)) throw new Error('Expected a detached preview error');
+    expect(failure.message).toBe(message);
+    for (const field of ['request', 'options', 'response', 'data', 'body', 'cause']) {
+      expect(failure).not.toHaveProperty(field);
+    }
+    expect(Object.getOwnPropertyNames(failure).sort()).toEqual(['message', 'stack']);
+    expect(failure.stack).not.toContain(secret);
+    expect(failure.stack).not.toContain(unknownKey);
+    expect(JSON.stringify(failure)).not.toContain(secret);
+    expect(popup).not.toHaveBeenCalled();
+    expect(requests).toHaveLength(1);
+  },
+);
+
+it('detaches a non-HTTP failure containing the document, request and nested raw causes', async () => {
+  const secret = 'preview-transport-secret-123456789';
+  const unknownKey = 'unknown-transport-credential';
+  const document = JSON.stringify({ [unknownKey]: secret });
+  const original = Object.assign(new TypeError(secret), {
+    cause: new Error(document), data: { [unknownKey]: secret }, options: { body: document },
+  });
+  respond.mockImplementation((request) => {
+    throw Object.assign(original, { request });
+  });
+  const failure: unknown = await previewServiceManifest({ namespace: 'tenant-a' }, document)
+    .catch((error: unknown) => error);
   expect(failure).toBeInstanceOf(Error);
-  expect(failure.message).not.toContain(secret);
-  expect(failure).not.toHaveProperty('request');
-  expect(failure).not.toHaveProperty('cause');
+  if (!(failure instanceof Error)) throw new Error('Expected a detached preview error');
+  expect(failure).not.toBe(original);
+  expect(failure.message).toBe(
+    'Preview unavailable. No configuration was applied; retry to obtain a preview.',
+  );
+  expect(Object.getOwnPropertyNames(failure).sort()).toEqual(['message', 'stack']);
+  expect(failure.stack).not.toContain(secret);
+  expect(failure.stack).not.toContain(unknownKey);
   expect(popup).not.toHaveBeenCalled();
   expect(requests).toHaveLength(1);
 });

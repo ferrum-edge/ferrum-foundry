@@ -66,6 +66,16 @@ log bodies or raw preview queries; the browser replaces request-bearing errors
 with safe messages and keeps drafts only in component memory, never storage or
 a mutation cache.
 
+Manifest request loggers are installed through Fastify 5's `childLoggerFactory`
+at app construction, before incoming-request logging and authentication. Their
+request projection names only the preview endpoint; response/error projections
+keep a checked numeric HTTP status, and log messages are fixed. This also covers
+unauthenticated requests, query credentials, percent-encoded prefixes, parser
+and body-limit failures. `frameworkErrors` returns a bounded, non-cacheable
+answer for malformed manifest URLs that bypass route hooks. The browser carries
+only the HTTP status out of its catch block: the replacement error retains no
+request, options, response, parsed data, submitted body or raw cause.
+
 The result is not an import payload: TLS markers must never be applied. Compare
 the desired fields in the current Proxies, Upstreams and Plugins editors and
 review auth/TLS/MCP policy separately. Ordinary explicitly approved saves still
