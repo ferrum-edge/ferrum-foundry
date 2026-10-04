@@ -470,6 +470,32 @@ mutation cache after the form is gone. Consumer metadata saves are not wrapped:
 their body carries no submitted secret, because the credentials in it come from
 a read where they are already `[REDACTED]`.
 
+### Backup export
+
+An archival backup intentionally contains unredacted consumer credentials,
+plugin secrets, and API spec documents. The Settings warning and downloaded
+JSON retain that behavior. `downloadBackup()` (`src/lib/backupDownload.ts`)
+fetches and serializes the archive within one temporary operation, hands it
+to the browser, and returns only nonnegative safe-integer proxy and consumer
+counts. `useBackup()` never receives raw rows as its mutation result or cached
+mutation data, and sets `gcTime: 0`.
+
+The action captures the namespace before the mutation starts. Its request and
+filename use that captured namespace even if the selector changes while the
+read is pending. The request declares the page's gateway target, and the
+operation refuses completion if that target was retired before the download.
+The temporary object URL is revoked in `finally`, including when anchor setup
+or click throws.
+
+A failed export may itself contain backup JSON or a credential excerpt in a
+JSON parse error. Those secret values are unknown, so export discards the
+original message, body, headers, request metadata, and cause rather than
+attempting value-based redaction. The card reports a fixed diagnostic with
+HTTP status or a timeout/target-change reason; `SILENT_ERRORS` prevents the
+shared popup from reporting ky's raw failure first. Only that safe error can
+reach mutation state, toasts, or diagnostics. Hosted regressions exercise the
+real hook and download card in `src/hooks/backupDownload.test.tsx`.
+
 ## What the operator sees
 
 `StaleWriteDialog` opens when a save or delete is refused. For a save:

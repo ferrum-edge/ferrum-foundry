@@ -6,7 +6,12 @@ import { requireAdminAuth } from './auth.js';
 import { loadConfig } from './config.js';
 import { gatewayTargetId, rejectStaleGatewayTarget, stampGatewayTarget } from './gateway-target.js';
 import { generateToken } from './jwt.js';
-import { proxyTargetPath, proxyTargetUrl, UnsafeProxyPathError } from './proxy-path.js';
+import {
+  proxyPathIsConsumerVerification,
+  proxyTargetPath,
+  proxyTargetUrl,
+  UnsafeProxyPathError,
+} from './proxy-path.js';
 import { getDispatcher } from './tls.js';
 import { closeUnreadUpload, setUploadBudget } from './upload-drain.js';
 import { waitingRouteTimeout } from './waitBudget.js';
@@ -326,6 +331,12 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
   ) => {
     try {
       const path = proxyTargetPath(request);
+      if (proxyPathIsConsumerVerification(path)) {
+        return reply.status(403).send({
+          error: 'Consumer credential verification is not available through Foundry',
+          code: 'FERRUM_BFF_CREDENTIAL_READ_DENIED',
+        });
+      }
       if (request.authPrincipal) {
         authorizeRegistryPath(path, request.method, request.authPrincipal);
         const confirmed = authorizeRegistryDeleteConfirmation(

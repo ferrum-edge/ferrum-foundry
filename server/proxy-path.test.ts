@@ -1,6 +1,7 @@
 import type { FastifyRequest } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import {
+  proxyPathIsConsumerVerification,
   proxyPathIsFleetGlobal,
   proxyTargetPath,
   proxyTargetUrl,
@@ -66,6 +67,21 @@ describe('canonical proxy targets', () => {
       expect(proxyTargetPath(req)).toBe(expected);
       expect(proxyTargetUrl(req, 'https://gateway.test/base?old=1#old').href).toBe(`https://gateway.test${expected}`);
     }
+  });
+
+  it.each([
+    ['/api/proxy/consumers/id/verification', true],
+    ['/api/proxy/%63onsumers/a%3Fb%23c/%76erification/?query=1', true],
+    ['/api/proxy/consumers/caf%C3%A9/verification', true],
+    ['/api/proxy/consumers/id', false],
+    ['/api/proxy/consumers/verification', false],
+    ['/api/proxy/consumers/id?path=/verification', false],
+    ['/api/proxy/consumers/id/verification/extra', false],
+  ])('classifies only the exact forwarded canonical pathname of %s', (url, denied) => {
+    const req = request(url, 'router-params-are-not-policy');
+    const target = proxyTargetUrl(req, 'https://gateway.test');
+    expect(proxyPathIsConsumerVerification(proxyTargetPath(req))).toBe(denied);
+    expect(proxyPathIsConsumerVerification(target.pathname)).toBe(denied);
   });
 
   it('keeps query syntax and escapes separate from path validation', () => {

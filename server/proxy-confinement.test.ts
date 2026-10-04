@@ -4,9 +4,24 @@ import { createConnection, type AddressInfo } from 'node:net';
 import type { FastifyInstance } from 'fastify';
 import { decodeJwt } from 'jose';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { fetch as upstreamFetch } from 'undici';
+import { generateToken } from './jwt.js';
+
+vi.mock('undici', async (importOriginal) => {
+  const original = await importOriginal<typeof import('undici')>();
+  return { ...original, fetch: vi.fn(original.fetch) };
+});
+vi.mock('./jwt.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('./jwt.js')>();
+  return { ...original, generateToken: vi.fn(original.generateToken) };
+});
 
 const PROXY_SECRET = 'path-test-trusted-proxy-secret-long-enough';
 const TENANT_DATA = 'tenant-b-private-record';
+const MASKED_CONSUMER = {
+  id: 'consumer-1',
+  credentials: { keyauth: [{ key: '[REDACTED]' }], jwt: [{ secret: '[REDACTED]' }] },
+};
 const arrivals: Array<{ url: string; method: string; namespace: string | undefined; token: string }> = [];
 const publications: Array<{ url: string; body: string }> = [];
 const held: ServerResponse[] = [];
@@ -35,7 +50,14 @@ const gateway = createServer((request, response) => {
       response.once('close', () => clearTimeout(timer));
       return;
     }
-    response.end(JSON.stringify({ data: TENANT_DATA }));
+    const path = new URL(url, 'http://gateway.test').pathname;
+    if (path === '/consumers') {
+      response.end(JSON.stringify({ data: [MASKED_CONSUMER] }));
+    } else if (/^\/consumers\/[^/]+\/?$/.test(path)) {
+      response.end(JSON.stringify(MASKED_CONSUMER));
+    } else {
+      response.end(JSON.stringify({ data: TENANT_DATA }));
+    }
   })().catch(() => response.destroy());
 });
 
@@ -136,6 +158,82 @@ afterAll(async () => {
 });
 
 describe('raw BFF path confinement', () => {
+  it('denies credential verification before signing or fetch for all forwarded methods', async () => {
+    const beforeArrivals = arrivals.length;
+    const beforeTokens = vi.mocked(generateToken).mock.calls.length;
+    const beforeFetches = vi.mocked(upstreamFetch).mock.calls.length;
+    const paths = [
+      '/api/proxy/consumers/consumer-1/verification',
+      '/api/proxy/consumers/consumer-1/verification/',
+      '/api/proxy/consumers/consumer-1/verification?conditional=true',
+      '/api/proxy/%63onsumers/%63onsumer-1/%76erification',
+      '/api/proxy/consumers/a%20b/verification/',
+      '/api/proxy/consumers/caf%C3%A9/verification',
+      '/api/proxy/consumers/a%3Fb%23c/verification/?x=a%2Fb',
+      '/%61pi/pr%6fxy/%63onsumers/a%3Ab%40c/verific%61tion',
+    ];
+    for (const method of app.supportedMethods) {
+      for (const path of paths) {
+        const response = await rawRequest(
+          path, method, identity('admin'), method === 'GET' || method === 'HEAD' ? '' : '{}',
+        );
+        expect(response.status, `${method} ${path}`).toBe(403);
+        if (method !== 'HEAD') expect(response.wire).toContain('FERRUM_BFF_CREDENTIAL_READ_DENIED');
+        expect(arrivals).toHaveLength(beforeArrivals);
+        expect(vi.mocked(generateToken).mock.calls).toHaveLength(beforeTokens);
+        expect(vi.mocked(upstreamFetch).mock.calls).toHaveLength(beforeFetches);
+      }
+    }
+  }, 15_000);
+
+  it('preserves authentication, namespace, CSRF, and unsafe-path checks before denial', async () => {
+    const beforeTokens = vi.mocked(generateToken).mock.calls.length;
+    const beforeFetches = vi.mocked(upstreamFetch).mock.calls.length;
+    const path = '/api/proxy/consumers/consumer-1/verification';
+    const anonymous = await rawRequest(path, 'GET', {});
+    expect(anonymous.status).toBe(401);
+    expect(anonymous.wire).not.toContain('FERRUM_BFF_CREDENTIAL_READ_DENIED');
+    const denied = await rawRequest(path, 'GET', identity('admin', 'tenant-b'));
+    expect(denied.status).toBe(403);
+    expect(denied.wire).toContain('Namespace access denied');
+    const csrf = await rawRequest(path, 'POST', { ...identity('admin'), 'x-csrf-token': '' }, '{}');
+    expect(csrf.status).toBe(403);
+    expect(csrf.wire).toContain('CSRF validation failed');
+    for (const id of ['a%2Fb', 'a%5Cb', '%2520', '..', '%7f']) {
+      const unsafe = await rawRequest(
+        `/api/proxy/consumers/${id}/verification`, 'GET', identity('admin'),
+      );
+      expect(unsafe.status).toBe(400);
+      expect(unsafe.wire).toContain('FERRUM_BFF_UNSAFE_PATH');
+    }
+    const globalAdmin = identity('admin');
+    delete globalAdmin['x-ferrum-namespaces'];
+    const unrestricted = await rawRequest(path, 'GET', globalAdmin);
+    expect(unrestricted.status).toBe(403);
+    expect(unrestricted.wire).toContain('FERRUM_BFF_CREDENTIAL_READ_DENIED');
+    expect(vi.mocked(generateToken).mock.calls).toHaveLength(beforeTokens);
+    expect(vi.mocked(upstreamFetch).mock.calls).toHaveLength(beforeFetches);
+  });
+
+  it('forwards masked consumer reads and ignores verification text in queries', async () => {
+    for (const path of [
+      '/consumers',
+      '/consumers/consumer-1',
+      '/%63onsumers/%63onsumer-1/',
+      '/consumers/a%3Fb%23c?note=/consumers/other/verification',
+    ]) {
+      const beforeTokens = vi.mocked(generateToken).mock.calls.length;
+      const beforeFetches = vi.mocked(upstreamFetch).mock.calls.length;
+      const response = await rawRequest(`/api/proxy${path}`, 'GET', identity('admin'));
+      expect(response.status).toBe(200);
+      expect(response.wire).toContain('[REDACTED]');
+      expect(response.wire).toContain('consumer-1');
+      expect(vi.mocked(generateToken).mock.calls).toHaveLength(beforeTokens + 1);
+      expect(vi.mocked(upstreamFetch).mock.calls).toHaveLength(beforeFetches + 1);
+      expect(decodeJwt(arrivals.at(-1)!.token)).toMatchObject({ role: 'admin', ns: 'tenant-a' });
+    }
+  });
+
   it('refuses ungranted tenant reads and writes without any upstream arrival or publication', async () => {
     const beforeReads = arrivals.length;
     const beforeWrites = publications.length;
