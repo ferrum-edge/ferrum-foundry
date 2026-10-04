@@ -31,6 +31,13 @@
 *Release step:* summarize the changes from the `[Unreleased]` section of
 `CHANGELOG.md`.
 
+- **Alloy manifest preview (ferrum-alloy#27).** Settings consumes the shared v1
+  JSON data model through an authenticated, namespace-authorized read-only BFF.
+  Desired resource fields are bounded and TLS paths redacted; no configuration
+  is applied and no producer or local file is fetched. The canonical contracts
+  pin adopts reviewed r2 schema/fixtures without changing the released pairing.
+  Diagnostic presentation is an ADR decision for future work, not an importer.
+
 - **Distroless runtime again (#504).** The image is back on
   `gcr.io/distroless/nodejs24-debian13:nonroot` (no shell, no package
   manager), running as `65532:65532` with Node as the entrypoint.

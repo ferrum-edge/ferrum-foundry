@@ -14,6 +14,7 @@ COPY public ./public
 COPY src ./src
 COPY server ./server
 COPY shared ./shared
+COPY contracts/ferrum-contracts/schemas/service-manifest/v1.schema.json ./contracts/ferrum-contracts/schemas/service-manifest/v1.schema.json
 
 RUN npm run build \
   && npm prune --omit=dev \
@@ -33,6 +34,7 @@ LABEL org.opencontainers.image.source="https://github.com/ferrum-edge/ferrum-fou
 COPY --from=builder --chown=65532:65532 /app/dist ./dist
 COPY --from=builder --chown=65532:65532 /app/dist-server ./dist-server
 COPY --from=builder --chown=65532:65532 /app/shared ./shared/
+COPY --from=builder --chown=65532:65532 /app/contracts/ferrum-contracts/schemas/service-manifest/v1.schema.json ./contracts/ferrum-contracts/schemas/service-manifest/v1.schema.json
 COPY --from=builder --chown=65532:65532 /app/node_modules ./node_modules
 COPY --from=builder --chown=65532:65532 /app/package.json ./
 

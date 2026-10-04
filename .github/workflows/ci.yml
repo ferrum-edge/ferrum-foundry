@@ -186,6 +186,14 @@ jobs:
             exit 1
           done
 
+      - name: Verify Alloy preview and explicit HTTP resource mapping
+        env:
+          FERRUM_MANIFEST_GATEWAY_CONTRACT: 'true'
+          FERRUM_ADMIN_URL: http://127.0.0.1:9000
+          FERRUM_JWT_SECRET: contract-admin-signing-secret-at-least-32-characters
+          FERRUM_JWT_AUDIENCE: ferrum-admin
+        run: npm exec -- vitest run --project server server/routes/service-manifest.gateway.test.ts
+
       - name: Seed twice and verify canonical backup state
         env:
           FERRUM_ADMIN_URL: http://127.0.0.1:9000

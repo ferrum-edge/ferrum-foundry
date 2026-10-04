@@ -6,6 +6,7 @@ import { useState } from "react";
 import { SettingsForm } from "@/components/forms/SettingsForm";
 import { BackupRestoreCard } from "@/components/forms/BackupRestoreCard";
 import { NamespaceManagerCard } from "@/components/forms/NamespaceManagerCard";
+import { ServiceManifestPreviewCard } from "@/components/forms/ServiceManifestPreviewCard";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Select } from "@/components/ui/Select";
@@ -126,6 +127,13 @@ export default function SettingsPage() {
         <div className="mt-4">
           <NamespaceManagerCard />
         </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-semibold text-text-primary mb-4">
+          Alloy Service Manifest
+        </h2>
+        <ServiceManifestPreviewCard />
       </section>
 
       {/* ── Backup & Restore ──────────────────────────────────────── */}

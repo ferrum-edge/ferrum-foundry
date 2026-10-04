@@ -10,6 +10,7 @@ import proxyPlugin from './proxy.js';
 import { requestIsApiRoute, servesSpaShell } from './proxy-path.js';
 import healthPlugin from './routes/health.js';
 import settingsPlugin from './routes/settings.js';
+import serviceManifestPlugin from './routes/service-manifest.js';
 import { closeDispatchers } from './tls.js';
 import { installUploadDrain } from './upload-drain.js';
 
@@ -90,6 +91,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   await fastify.register(authPlugin);
   await fastify.register(healthPlugin);
   await fastify.register(settingsPlugin);
+  await fastify.register(serviceManifestPlugin);
   await fastify.register(proxyPlugin);
 
   if (serveStatic) {

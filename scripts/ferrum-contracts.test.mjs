@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { test } from "node:test";
 import {
   DEFAULT_PLUGIN_CONFIGS,
@@ -33,6 +33,9 @@ function pinnedFiles() {
 const CONTRACTS_TAG_EDGE_VERSIONS = {
   "contracts-edge-0.9.8": ["v0.9.8"],
   "contracts-edge-0.9.9": ["v0.9.9", "v0.9.10"],
+  // r2 adds the proposed Alloy manifest and agents fields. Existing plugin
+  // and provisioning vocabulary bytes/provenance are unchanged.
+  "contracts-edge-0.9.9-r2": ["v0.9.9", "v0.9.10"],
 };
 
 function describeSetDrift(actual, expected, label) {
@@ -48,10 +51,17 @@ function describeSetDrift(actual, expected, label) {
 }
 
 test("vendored Ferrum Contracts files match their PIN digests", () => {
-  assert.match(pinText, /^tag=contracts-edge-[0-9.]+$/m);
+  assert.match(pinText, /^tag=contracts-edge-[0-9.]+(?:-r[1-9][0-9]*)?$/m);
   assert.match(pinText, /^commit=[a-f0-9]{40}$/m);
   const files = pinnedFiles();
-  assert.equal(files.size, 4, "PIN must list every vendored contract file exactly once");
+  const actualFiles = readdirSync(contractRoot, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name !== "PIN")
+    .map((entry) => `${entry.parentPath}/${entry.name}`.slice(contractRoot.pathname.length))
+    .sort();
+  assert.equal(files.size, 17, "PIN must include the reviewed vocabularies, schema and all fixtures");
+  assert.deepEqual([...files.keys()].sort(), actualFiles, "PIN must cover every vendored file");
+  assert.equal(pinText.split(/\r?\n/).filter((line) => line.startsWith("sha256")).length,
+    files.size, "PIN must not contain duplicate entries");
   for (const [path, expected] of files) {
     const contents = readFileSync(new URL(path, contractRoot));
     const actual = createHash("sha256").update(contents).digest("hex");
@@ -60,7 +70,7 @@ test("vendored Ferrum Contracts files match their PIN digests", () => {
 });
 
 test("the contracts pin tracks the qualified Ferrum Edge release", () => {
-  const tag = /^tag=(contracts-edge-[0-9.]+)$/m.exec(pinText)?.[1];
+  const tag = /^tag=(contracts-edge-[0-9.]+(?:-r[1-9][0-9]*)?)$/m.exec(pinText)?.[1];
   assert.ok(tag, "PIN must name a contracts-edge tag");
   const compatibility = JSON.parse(
     readFileSync(new URL("../docs/compatibility.json", import.meta.url), "utf8"),
@@ -78,6 +88,21 @@ test("the contracts pin tracks the qualified Ferrum Edge release", () => {
     `PIN tag ${tag} maps to ${allowed.join(", ")}, but docs/compatibility.json ` +
       `qualifies ${edgeVersion}`,
   );
+});
+
+test("the manifest pin retains proposed status and existing vocabulary integrity", () => {
+  assert.match(pinText, /^tag=contracts-edge-0\.9\.9-r2$/m);
+  assert.match(pinText, /^commit=591c73a3f965fdab440c3a76b2707accdf491ba5$/m);
+  const schema = JSON.parse(readFileSync(
+    new URL("schemas/service-manifest/v1.schema.json", contractRoot), "utf8",
+  ));
+  assert.equal(schema["x-contract"].status, "proposed");
+  assert.equal(schema["x-contract"].provenance[0].commit,
+    "4cba0f4a66f85bcee3140e3b92e299275a2507fb");
+  assert.equal(pinnedFiles().get("vocabularies/plugin-catalog.json"),
+    "bba27e2beb6c0a4b48875b499e49f9f70a5debe53793f26cdc124c4251025494");
+  assert.equal(pinnedFiles().get("vocabularies/provisioned-by.json"),
+    "60f6df5cabead31dc456c3fefb01f4191f0a48ad6f8406a58481e033aa1ac061");
 });
 
 test("Foundry plugin metadata and defaults use the pinned plugin catalog", () => {
