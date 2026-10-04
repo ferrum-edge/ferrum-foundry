@@ -129,8 +129,8 @@ function paginatedCount(response: unknown): number | null {
 
 /**
  * Resource kinds that keep a namespace "non-empty" for the purposes of
- * `DELETE /namespaces/{name}` — i.e. the rows a `?confirm=true` cascade
- * deletes. Ordered for display.
+ * `DELETE /namespaces/{name}` — i.e. the rows Edge's cascade deletes. Ordered
+ * for display.
  */
 const OCCUPANCY_ENDPOINTS = [
   { label: "proxies", path: "proxies", count: paginatedCount },
@@ -193,7 +193,7 @@ export async function getOccupancy(name: string): Promise<NamespaceOccupancy> {
 
 
 /**
- * Whether a failed delete is one a `?confirm=true` cascade could resolve.
+ * Whether a failed delete is one Edge's cascade could resolve.
  *
  * The gateway refuses a delete for two unrelated reasons: the namespace is
  * non-empty (cascade fixes it), or the namespace is protected — one this
@@ -273,17 +273,18 @@ export async function update(
 
 /**
  * Delete a namespace registry row. A non-empty namespace returns 409 unless
- * `confirm` is set, which cascade-deletes every resource in the namespace.
+ * `confirm` echoes the exact namespace name to the BFF, which validates it and
+ * forwards Edge's existing boolean confirmation for the cascade.
  */
 export async function remove(
   scope: NamespaceScope,
   name: string,
-  options: { confirm?: boolean } = {},
+  options: { confirm?: string } = {},
 ): Promise<void> {
   await proxyApi.delete(
     `namespaces/${pathSegment(name)}`,
     scoped(scope, {
-      searchParams: options.confirm ? { confirm: "true" } : {},
+      searchParams: options.confirm ? { confirm: options.confirm } : {},
       // The unconfirmed call is a deliberate probe — a 409 is the gateway
       // telling us the namespace is non-empty, which the caller turns into a
       // cascade confirmation. Terminal failures are reported as a toast by

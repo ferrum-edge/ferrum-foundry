@@ -322,11 +322,11 @@ describe("namespace API requests", () => {
     expect(captured[0].url).not.toContain("confirm");
   });
 
-  it("remove() with confirm sends ?confirm=true for the cascade", async () => {
+  it("remove() with confirm sends the exact namespace name for the cascade", async () => {
     nextResponse = () => new Response(null, { status: 204 });
 
-    await remove(scope, "qa", { confirm: true });
-    expect(captured[0].url).toMatch(/\/api\/proxy\/namespaces\/qa\?confirm=true$/);
+    await remove(scope, "qa", { confirm: "qa" });
+    expect(captured[0].url).toMatch(/\/api\/proxy\/namespaces\/qa\?confirm=qa$/);
   });
 
   it("URL-encodes namespace names in paths", async () => {

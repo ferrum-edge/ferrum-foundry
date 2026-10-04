@@ -212,6 +212,19 @@ async function closeDialog() {
 const conflict = () => Response.json({ message: "Namespace is not empty" }, { status: 409 });
 const fields = () => [...document.querySelectorAll<HTMLInputElement>('[role="dialog"] input')].map((field) => field.value);
 
+it("sends the typed namespace name as the cascade confirmation", async () => {
+  await render();
+  await click("Delete", row());
+  nextMutationResponse = conflict();
+  await click("Delete Namespace");
+  await settle(() => expect(document.body.textContent).toContain("Namespace is not empty"));
+  await input(0, "tenant-a");
+  await click("Permanently Delete Everything");
+  await settle(() => expect(writes).toHaveLength(2));
+  expect(writes[0].url.search).toBe("");
+  expect(writes[1].url.search).toBe("?confirm=tenant-a");
+});
+
 describe("namespace dialog opening identity", () => {
   for (const target of ["tenant-a", "tenant-c"]) {
     it.each(["success", "error"] as const)(`old edit %s preserves a reopened ${target} draft`, async (outcome) => {

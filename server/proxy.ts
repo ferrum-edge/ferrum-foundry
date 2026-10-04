@@ -13,6 +13,7 @@ import { waitingRouteTimeout } from './waitBudget.js';
 import {
   authorizeRegistryBody,
   authorizeRegistryPath,
+  authorizeRegistryDeleteConfirmation,
   isRegistryPath,
   NamespaceScanTimeoutError,
   RegistryRequestError,
@@ -317,13 +318,23 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
   fastify.addHook('onResponse', async (request) => releaseCapacity(request));
   fastify.addHook('onRequestAbort', async (request) => releaseCapacity(request));
 
+  const confirmedRegistryDeletes = new WeakSet<FastifyRequest>();
+
   const requireSafeProxyPath = async (
     request: FastifyRequest,
     reply: Parameters<typeof requireAdminAuth>[1],
   ) => {
     try {
       const path = proxyTargetPath(request);
-      if (request.authPrincipal) authorizeRegistryPath(path, request.method, request.authPrincipal);
+      if (request.authPrincipal) {
+        authorizeRegistryPath(path, request.method, request.authPrincipal);
+        const confirmed = authorizeRegistryDeleteConfirmation(
+          path,
+          request.method,
+          request.raw.url ?? request.url,
+        );
+        if (confirmed) confirmedRegistryDeletes.add(request);
+      }
     } catch (error) {
       if (error instanceof RegistryRequestError) {
         return reply.status(error.status).send({ error: error.message });
@@ -360,6 +371,12 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
     if (!stampGatewayTarget(request, reply, config)) return rejectStaleGatewayTarget(reply);
 
     const target = proxyTargetUrl(request, config.adminUrl);
+    // Only the authorization decision may enable Edge's boolean cascade flag.
+    // Remove any reparsed confirmation before constructing the upstream value.
+    if (request.method === 'DELETE' && target.pathname.startsWith('/namespaces/')) {
+      target.searchParams.delete('confirm');
+      if (confirmedRegistryDeletes.has(request)) target.searchParams.set('confirm', 'true');
+    }
     const targetPath = target.pathname;
 
     const declaredLength = Number(request.headers['content-length']);

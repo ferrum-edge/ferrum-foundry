@@ -38,6 +38,49 @@ export function authorizeRegistryPath(path: string, method: string, principal: A
   }
 }
 
+/** Return whether a literal namespace echo authorizes forwarding a cascade. */
+export function authorizeRegistryDeleteConfirmation(
+  path: string,
+  method: string,
+  rawUrl: string,
+): boolean {
+  if (method !== 'DELETE' || !path.startsWith('/namespaces/')) return false;
+  const targetName = path.slice('/namespaces/'.length);
+  const queryIndex = rawUrl.indexOf('?');
+  const query = queryIndex >= 0 ? rawUrl.slice(queryIndex + 1) : '';
+  const confirmations: string[] = [];
+  for (const parameter of query.split('&')) {
+    const separator = parameter.indexOf('=');
+    const rawKey = separator < 0 ? parameter : parameter.slice(0, separator);
+    let key: string;
+    try {
+      key = decodeURIComponent(rawKey.replaceAll('+', ' '));
+    } catch {
+      continue;
+    }
+    if (key === 'confirm') confirmations.push(separator < 0 ? '' : parameter.slice(separator + 1));
+  }
+  // Match proxyTargetUrl's URL serialization as well as the raw spelling.
+  // In particular, assigning a query beginning with '?' removes that prefix,
+  // so a raw '??confirm=...' must not become an unseen confirmation upstream.
+  const forwarded = new URL('http://registry.invalid');
+  forwarded.search = query;
+  const forwardedConfirmations = forwarded.searchParams.getAll('confirm');
+  if (confirmations.length === 0 && forwardedConfirmations.length === 0) return false;
+  if (
+    confirmations.length !== 1 ||
+    confirmations[0] !== targetName ||
+    forwardedConfirmations.length !== 1 ||
+    forwardedConfirmations[0] !== targetName
+  ) {
+    throw new RegistryRequestError(
+      400,
+      `Cascade deletion requires exactly one literal confirm=${targetName}`,
+    );
+  }
+  return true;
+}
+
 export function authorizeRegistryBody(bytes: Buffer, method: string, principal: AuthPrincipal): string {
   let value: unknown;
   try {

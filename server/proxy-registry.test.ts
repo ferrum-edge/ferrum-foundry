@@ -196,7 +196,7 @@ describe('registry authorization at the forwarding boundary', () => {
       ['/namespaces/tenant-a', 'PUT', {}, 200],
       ['/namespaces/tenant-a', 'PUT', { name: 'tenant-c', description: '😀'.repeat(1024) }, 200],
       ['/namespaces/z-derived', 'DELETE', undefined, 204],
-      ['/namespaces/z-derived?confirm=true', 'DELETE', undefined, 204],
+      ['/namespaces/z-derived?confirm=z-derived', 'DELETE', undefined, 204],
     ] as const;
     for (const [path, method, body, status] of cases) {
       expect((await call(`/api/proxy${path}`, method, body ? JSON.stringify(body) : '')).status).toBe(status);
@@ -208,9 +208,146 @@ describe('registry authorization at the forwarding boundary', () => {
     expect((await call('/api/proxy/namespaces/tenant-b', 'GET', '', unrestricted)).status).toBe(200);
     expect((await call('/api/proxy/namespaces/tenant-b', 'PUT', '{"name":"new-name"}', unrestricted)).status).toBe(200);
     expect((await call('/api/proxy/namespaces', 'POST', '{"name":"new-name"}', unrestricted)).status).toBe(201);
-    expect((await call('/api/proxy/namespaces/tenant-b?confirm=true', 'DELETE', '', unrestricted)).status).toBe(204);
+    expect((await call(
+      '/api/proxy/namespaces/tenant-b?confirm=tenant-b',
+      'DELETE',
+      '',
+      unrestricted,
+    )).status).toBe(204);
     expect((await call('/api/proxy/namespaces/tenant-a', 'GET', '', identity({ 'x-registry-role': 'viewer' }))).status).toBe(200);
   });
+
+  it.each([
+    'confirm',
+    'confirm=',
+    'confirm=true',
+    'confirm=false',
+    'confirm=tenant-b',
+    'confirm=%74enant-a',
+    'confirm=%2574enant-a',
+    'confirm=tenant-a+',
+    'confirm=tenant-a%20',
+    'confirm=tenant-a%00',
+    'confirm=tenant-a%ZZ',
+    'confirm=tenant-a=extra',
+    'confirm=tenant-a&confirm=tenant-a',
+    'confirm=tenant-a&confirm=tenant-b',
+    'confirm=true&confirm=tenant-a',
+    '%63onfirm=tenant-b',
+    'con%66irm=true',
+    'confirm=tenant-a&%63onfirm=tenant-a',
+    'ignored=?&confirm=tenant-b',
+    'ignored=?&confirm=true',
+    'ignored=?&confirm',
+    'ignored=?&confirm=%74enant-a',
+    'ignored=?&confirm=tenant-a&confirm=tenant-b',
+    'ignored=?&confirm=tenant-a&confirm=tenant-a',
+    'ignored=?&confirm=true&confirm=tenant-a',
+    'ignored=?&confirm=tenant-a&%63onfirm=tenant-a',
+    'ignored=?&%63onfirm=tenant-b',
+    'confirm=tenant-a&ignored=?&confirm=tenant-b',
+    'confirm=tenant-a?&confirm=tenant-a',
+    '?confirm=tenant-b',
+    '?confirm=true',
+    '?confirm=tenant-a',
+    '?confirm=tenant-a&confirm=tenant-a',
+  ])(
+    'refuses ambiguous or mismatched cascade query %s without contacting the gateway',
+    async (query) => {
+      const before = arrivals.length;
+      const beforeWrites = writes.length;
+      const response = await call(`/api/proxy/namespaces/tenant-a?${query}`, 'DELETE');
+      expect(response.status).toBe(400);
+      expect(response.body).toContain('exactly one literal confirm=tenant-a');
+      expect(arrivals).toHaveLength(before);
+      expect(writes).toHaveLength(beforeWrites);
+    },
+  );
+
+  it.each([
+    '',
+    '?ignored=?',
+    '?ignored=%26confirm%3Dtrue',
+    '?ignored=1;confirm=true',
+    '?confirm%ZZ=true',
+    '?%2563onfirm=true',
+    '?con%FFfirm=true',
+    '?confirm%0A=true',
+    '?confirm+=true',
+  ])('keeps a delete without a confirmation unconfirmed for query %s', async (query) => {
+    const before = arrivals.length;
+    const beforeWrites = writes.length;
+    expect((await call(`/api/proxy/namespaces/tenant-a${query}`, 'DELETE')).status).toBe(204);
+    expect(arrivals).toHaveLength(before + 1);
+    expect(writes).toHaveLength(beforeWrites + 1);
+    const target = new URL(arrivals.at(-1)!.path, 'http://fixture');
+    expect(target.pathname).toBe('/namespaces/tenant-a');
+    expect(target.searchParams.has('confirm')).toBe(false);
+  });
+
+  it.each([
+    '/namespaces/tenant-a?confirm=tenant-a',
+    '/namespaces/tenant-a?ignored=?&confirm=tenant-a',
+    '/namespaces/tenant-a?confirm=tenant-a&ignored=?',
+    '/namespaces/tenant-a?ignored=?more?&confirm=tenant-a',
+    '/namespaces/tenant-a?%63onfirm=tenant-a',
+    '/namespaces/%74enant-a?confirm=tenant-a',
+  ])('forwards a validated exact namespace echo from %s as one boolean flag', async (path) => {
+    const before = arrivals.length;
+    const beforeWrites = writes.length;
+    // Exact acknowledgments are stateless: no prior occupancy 409 is required.
+    expect((await call(`/api/proxy${path}`, 'DELETE')).status).toBe(204);
+    expect(arrivals).toHaveLength(before + 1);
+    expect(writes).toHaveLength(beforeWrites + 1);
+    const target = new URL(arrivals.at(-1)!.path, 'http://fixture');
+    expect(target.pathname).toBe('/namespaces/tenant-a');
+    expect(target.searchParams.getAll('confirm')).toEqual(['true']);
+    expect(decodeJwt(arrivals.at(-1)!.token)).toMatchObject({
+      sub: 'registry-user',
+      role: 'admin',
+      ns: ['tenant-a', 'tenant-c', 'z-derived'],
+    });
+  });
+
+  it('accepts confirm=true only as the exact echo of the namespace named true', async () => {
+    const before = arrivals.length;
+    const beforeWrites = writes.length;
+    const response = await call(
+      '/api/proxy/namespaces/true?confirm=true',
+      'DELETE',
+      '',
+      identity({ 'x-registry-grants': 'true', 'x-ferrum-namespace': 'true' }),
+    );
+    expect(response.status).toBe(204);
+    expect(arrivals).toHaveLength(before + 1);
+    expect(writes).toHaveLength(beforeWrites + 1);
+    expect(arrivals.at(-1)?.path).toBe('/namespaces/true?confirm=true');
+    expect(decodeJwt(arrivals.at(-1)!.token).ns).toBe('true');
+  });
+
+  it.each([
+    [{ 'x-ferrum-auth-secret': 'invalid' }, 401],
+    [{ 'x-registry-role': 'viewer' }, 403],
+    [{ 'x-registry-role': 'operator' }, 403],
+    [{ 'x-registry-grants': 'tenant-c', 'x-ferrum-namespace': 'tenant-c' }, 403],
+    [{ 'x-csrf-token': 'invalid' }, 403],
+    [{ cookie: '' }, 403],
+  ] as const)(
+    'preserves authentication, role, grant and CSRF checks for exact acknowledgments: %j',
+    async (headers, status) => {
+      const before = arrivals.length;
+      const beforeWrites = writes.length;
+      const response = await call(
+        '/api/proxy/namespaces/tenant-a?confirm=tenant-a',
+        'DELETE',
+        '',
+        identity(headers),
+      );
+      expect(response.status).toBe(status);
+      expect(arrivals).toHaveLength(before);
+      expect(writes).toHaveLength(beforeWrites);
+    },
+  );
 
   it('validates bounded JSON before publication and preserves authentication and roles', async () => {
     const before = arrivals.length;
