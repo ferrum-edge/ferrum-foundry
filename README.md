@@ -49,20 +49,19 @@ works the same way against a live Ferrum Edge gateway.
 
 ## Supported Ferrum Edge version
 
-Foundry is qualified against one Ferrum Edge image at a time. This branch
-prepares **Foundry v0.5.0** with the published **Ferrum Edge v0.9.11** distribution,
-pinned by digest in `docs/compatibility.json`. Hosted Foundry qualification is
-pending. The published canonical contracts and actual hosted schema producer
-export have been reviewed and adopted; hosted live acceptance remains required.
-The latest published pairing remains Foundry v0.4.0 / Edge v0.9.10 in
-[history](docs/compatibility.md#history).
+Foundry is qualified against one Ferrum Edge image at a time. **Foundry v0.5.0**
+pairs with the published **Ferrum Edge v0.9.11** distribution, pinned by digest
+in `docs/compatibility.json`. Hosted qualification and publication evidence,
+including the Foundry image index and platform manifests, are recorded in the
+[supported pairing record](docs/compatibility.md). The preceding v0.4.0 / Edge
+v0.9.10 pairing remains in [history](docs/compatibility.md#history).
 
 The qualification envelope stays `database` mode on SQLite (writable and
 `FERRUM_ADMIN_READ_ONLY`), the trusted-proxy starter, Chromium, and
 `linux/amd64` and `linux/arm64`. Other Ferrum Edge releases, gateway modes, and
 browsers remain best-effort or not qualified.
-[Supported pairing](docs/compatibility.md) records the remaining acceptance
-steps, requirements, Node floors, and tested scale.
+[Supported pairing](docs/compatibility.md) records the requirements, Node
+floors, and tested scale.
 
 ## Contracts
 

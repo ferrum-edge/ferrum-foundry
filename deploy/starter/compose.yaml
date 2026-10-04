@@ -126,8 +126,8 @@ services:
       - ./nginx/identity:/etc/nginx/identity:ro
       - ./secrets:/etc/nginx/secrets:ro
 
-  # Published v0.9.11 image for candidate qualification (docs/compatibility.md).
-  # Qualification is pending. Must equal `edge.image` in docs/compatibility.json;
+  # Published v0.9.11 image qualified for Foundry v0.5.0 (docs/compatibility.md).
+  # Must equal `edge.image` in docs/compatibility.json;
   # a test fails if it drifts.
   demo-gateway:
     image: ferrumedge/ferrum-edge@sha256:2476b502855940e28157858fc24008545cb3baeb3084c9610e1d4505cbe0d36e
