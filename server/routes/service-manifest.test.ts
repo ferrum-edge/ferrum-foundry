@@ -23,6 +23,22 @@ let app: FastifyInstance;
 let logs = '';
 const proof = 'test-trusted-proxy-shared-proof-long-enough';
 
+async function buildTrustedProxyApp() {
+  vi.stubEnv('NODE_ENV', 'test');
+  vi.stubEnv('FERRUM_ADMIN_URL', 'http://127.0.0.1:9999');
+  vi.stubEnv('FERRUM_JWT_SECRET', 'test-signing-secret-long-enough-123456789');
+  vi.stubEnv('FERRUM_AUTH_MODE', 'trusted-proxy');
+  vi.stubEnv('FERRUM_TRUSTED_PROXY_SECRET', proof);
+  vi.stubEnv('FERRUM_SECURE_COOKIES', 'false');
+  // loadConfig caches its base configuration. Each app needs a fresh module
+  // graph after the static-login test, even when the environment is restored.
+  vi.resetModules();
+  const { buildApp } = await import('../app.js');
+  return buildApp({ serveStatic: false, logger: {
+    level: 'debug', stream: { write: (chunk: string) => { logs += chunk; } },
+  } });
+}
+
 function identity(role = 'viewer', grants = 'ferrum,retail') {
   return {
     'x-ferrum-auth-secret': proof,
@@ -38,6 +54,9 @@ async function headers(
   const principal = identity(role, grants);
   const session = await target.inject({ method: 'GET', url: '/api/auth/session', headers: principal });
   expect(session.statusCode).toBe(200);
+  expect(session.json().principal).toMatchObject({
+    subject: 'manifest-reviewer', role, namespaces: grants.split(','), authMode: 'trusted-proxy',
+  });
   return {
     ...principal,
     cookie: session.cookies.map((entry) => `${entry.name}=${entry.value}`).join('; '),
@@ -65,17 +84,7 @@ function expectSafeLogs(status: number) {
 }
 
 beforeAll(async () => {
-  vi.stubEnv('NODE_ENV', 'test');
-  vi.stubEnv('FERRUM_ADMIN_URL', 'http://127.0.0.1:9999');
-  vi.stubEnv('FERRUM_JWT_SECRET', 'test-signing-secret-long-enough-123456789');
-  vi.stubEnv('FERRUM_AUTH_MODE', 'trusted-proxy');
-  vi.stubEnv('FERRUM_TRUSTED_PROXY_SECRET', proof);
-  vi.stubEnv('FERRUM_SECURE_COOKIES', 'false');
-  vi.resetModules();
-  const { buildApp } = await import('../app.js');
-  app = await buildApp({ serveStatic: false, logger: {
-    level: 'debug', stream: { write: (chunk: string) => { logs += chunk; } },
-  } });
+  app = await buildTrustedProxyApp();
 });
 
 beforeEach(() => {
@@ -286,12 +295,13 @@ describe('authenticated service manifest preview through the registered BFF rout
   it.each([
     [400, 400], [413, 413], ['413', 500], [600, 500], [null, 500],
   ] as const)('bounds thrown status %s and redacts raw error logs', async (candidate, status) => {
-    const { buildApp } = await import('../app.js');
-    const failureApp = await buildApp({ serveStatic: false, logger: {
-      level: 'debug', stream: { write: (chunk: string) => { logs += chunk; } },
-    } });
+    const failureApp = await buildTrustedProxyApp();
     failureApp.addHook('preHandler', async (request, reply) => {
       if (request.url !== '/api/service-manifest/preview') return;
+      expect(request.authPrincipal).toMatchObject({
+        subject: 'manifest-reviewer', role: 'viewer', namespaces: ['ferrum', 'retail'],
+        authMode: 'trusted-proxy',
+      });
       const error = Object.assign(new Error(secret), {
         statusCode: candidate, cause: new Error(secret), request,
         data: { [unknownKey]: secret }, body: request.body,
@@ -327,10 +337,7 @@ describe('authenticated service manifest preview through the registered BFF rout
   });
 
   it('preserves ordinary route logging and framework error classification', async () => {
-    const { buildApp } = await import('../app.js');
-    const ordinaryApp = await buildApp({ serveStatic: false, logger: {
-      level: 'debug', stream: { write: (chunk: string) => { logs += chunk; } },
-    } });
+    const ordinaryApp = await buildTrustedProxyApp();
     ordinaryApp.get('/manifest-logging-probe', async () => ({ ok: true }));
     try {
       logs = '';

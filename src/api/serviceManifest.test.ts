@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { stubFetch } from '@/test/__tests__/harness';
-import { setApiErrorHandler, setCsrfToken } from './client';
+import { api, setApiErrorHandler, setCsrfToken } from './client';
 import { previewServiceManifest } from './serviceManifest';
 
 let requests: Request[];
@@ -22,23 +22,36 @@ beforeEach(() => {
 afterEach(() => {
   setCsrfToken(null);
   setApiErrorHandler(undefined);
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   localStorage.clear();
+});
+
+it('resolves explicit BFF paths from the real client root prefix', async () => {
+  respond.mockReturnValue(Response.json({ mode: 'trusted-proxy' }));
+  await api.get('api/auth/config').json();
+  expect(requests).toHaveLength(1);
+  expect(new URL(requests[0].url).pathname).toBe('/api/auth/config');
+  expect(requests[0].credentials).toBe('same-origin');
 });
 
 it('uses the authenticated BFF and captured scope without storing the document', async () => {
   const raw = '{"schema":"ferrum.service_manifest"}';
   respond.mockReturnValue(Response.json({ readOnly: true }));
   localStorage.setItem('ferrum:namespace', 'different-tenant');
+  const readStorage = vi.spyOn(Storage.prototype, 'getItem');
   await previewServiceManifest({ namespace: 'tenant-a' }, raw);
   expect(requests).toHaveLength(1);
   expect(new URL(requests[0].url).pathname).toBe('/api/service-manifest/preview');
   expect(requests[0].method).toBe('POST');
+  expect(requests[0].credentials).toBe('same-origin');
+  expect(requests[0].headers.has('authorization')).toBe(false);
   expect(requests[0].headers.get('X-Ferrum-Namespace')).toBe('tenant-a');
   expect(requests[0].headers.get('X-CSRF-Token')).toBe('csrf-for-preview');
   expect(requests[0].headers.get('content-type')).toBe('application/json');
   expect(await requests[0].text()).toBe(raw);
   expect(localStorage.length).toBe(1);
+  expect(readStorage).not.toHaveBeenCalled();
   expect(popup).not.toHaveBeenCalled();
 });
 
