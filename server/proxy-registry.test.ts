@@ -241,7 +241,7 @@ describe('registry authorization at the forwarding boundary', () => {
       expect((await call('/api/proxy/namespaces/%74enant-a?confirm=tenant-a', 'DELETE')).status)
         .toBe(204);
       expect(arrivals).toHaveLength(before + 2);
-      expect(writes).toHaveLength(before + 2);
+      expect(writes).toHaveLength(beforeWrites + 2);
       expect(arrivals.at(-1)?.path).toBe('/namespaces/tenant-a?confirm=true');
     },
   );
