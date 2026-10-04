@@ -322,7 +322,7 @@ describe('registry authorization at the forwarding boundary', () => {
     expect(arrivals).toHaveLength(before + 1);
     expect(writes).toHaveLength(beforeWrites + 1);
     expect(arrivals.at(-1)?.path).toBe('/namespaces/true?confirm=true');
-    expect(decodeJwt(arrivals.at(-1)!.token)).toMatchObject({ ns: ['true'] });
+    expect(decodeJwt(arrivals.at(-1)!.token).ns).toBe('true');
   });
 
   it.each([
