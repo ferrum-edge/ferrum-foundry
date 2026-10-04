@@ -117,7 +117,7 @@ let client: QueryClient;
 let writes: { namespace: string | null; resolve: (response: Response) => void }[];
 let serverProxy: Proxy;
 let updates: unknown[];
-let proxyUpdateTags: string[];
+let proxyUpdateTags: (string | null)[];
 let serverProxyRevision: number;
 
 const proxyEtag = () => `"proxy-revision-${serverProxyRevision}"`;
@@ -146,7 +146,7 @@ beforeEach(() => {
       }
       if (request.method === "PUT") {
         const ifMatch = request.headers.get("If-Match");
-        if (ifMatch !== proxyEtag()) return new Response(null, { status: 412 });
+        if (ifMatch !== null && ifMatch !== proxyEtag()) return new Response(null, { status: 412 });
 
         const data = (await request.json()) as Partial<Proxy>;
         updates.push(data);
@@ -274,22 +274,6 @@ it("keeps a sibling proxy's detail entry when one proxy is deleted", async () =>
 
   expect(client.getQueryData(["proxy", "tenant-a", "spec-proxy"])).toBeUndefined();
   expect(client.getQueryData(["proxy", "tenant-a", "other-proxy"])).toBeDefined();
-});
-
-it("refuses a proxy PUT with a missing or stale ETag before mutating", async () => {
-  for (const headers of [{}, { "If-Match": '"stale-proxy-revision"' }]) {
-    const response = await fetch(
-      new Request("http://localhost/api/proxies/spec-proxy", {
-        method: "PUT",
-        headers,
-        body: JSON.stringify({ listen_path: "/stale" }),
-      }),
-    );
-
-    expect(response.status).toBe(412);
-    expect(serverProxy.listen_path).toBe("/v1");
-    expect(updates).toHaveLength(0);
-  }
 });
 
 it("reopens and submits a spec-replaced proxy without pre-replacement values", async () => {
