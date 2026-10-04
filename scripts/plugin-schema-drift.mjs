@@ -9,16 +9,18 @@
  * spec (CLAUDE.md), so the digest is what pins the provenance: it is the proof
  * of what the descriptors were reviewed against.
  *
- * This re-fetches the spec and compares. A changed block fails the check —
+ * This re-fetches the spec at the pinned Edge source and compares. A changed
+ * block fails the check —
  * loudly, naming the component — because a guided field set derived from an
  * older schema is exactly how a structured editor starts stripping fields a
  * newer gateway understands.
  *
- *   node scripts/plugin-schema-drift.mjs              # pinned revision
+ *   node scripts/plugin-schema-drift.mjs              # pinned Edge source
  *   FERRUM_SPEC_REF=main node scripts/plugin-schema-drift.mjs
  */
 
 import { createHash } from "node:crypto";
+import { readFileSync, writeFileSync } from "node:fs";
 import {
   PLUGIN_SCHEMA_PROVENANCE,
   PLUGIN_SCHEMA_SPEC,
@@ -93,12 +95,39 @@ export function compareProvenance(spec, provenance = PLUGIN_SCHEMA_PROVENANCE) {
   });
 }
 
+/** Exact fetched source blocks and hashes for a hosted, serial pin review. */
+export function schemaProducerExport(spec, ref) {
+  return {
+    record_version: 1,
+    source: {
+      repository: PLUGIN_SCHEMA_SPEC.repository,
+      path: PLUGIN_SCHEMA_SPEC.path,
+      ref,
+      sha256: digestOf(spec),
+    },
+    reviewed_ref: PLUGIN_SCHEMA_SPEC.ref,
+    components: compareProvenance(spec).map((finding) => ({
+      ...finding,
+      yaml: extractSchemaBlock(spec, finding.component),
+    })),
+  };
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const ref = process.env.FERRUM_SPEC_REF?.trim() || PLUGIN_SCHEMA_SPEC.ref;
+  const pairing = JSON.parse(
+    readFileSync(new URL("../docs/compatibility.json", import.meta.url), "utf8"),
+  );
+  const ref = process.env.FERRUM_SPEC_REF?.trim() || pairing.edge.source_commit;
   const spec = await fetchSpec(ref);
   const findings = compareProvenance(spec);
   const drifted = findings.filter((finding) => finding.status !== "unchanged");
 
+  const exportPath = process.env.FERRUM_SCHEMA_EXPORT_PATH;
+  if (exportPath) {
+    writeFileSync(exportPath, `${JSON.stringify(schemaProducerExport(spec, ref), null, 2)}\n`, {
+      flag: "wx",
+    });
+  }
   console.log(JSON.stringify({ ref, findings }, null, 2));
 
   if (drifted.length > 0) {

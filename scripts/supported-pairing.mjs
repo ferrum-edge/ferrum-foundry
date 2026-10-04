@@ -17,10 +17,11 @@
  *
  * `release-ready` also binds the tag to an unreleased record
  * (GHSA-rw8r-hrr2-vpc2): the tagged commit must still be the `candidate`
- * prepared for release, with the Foundry artifacts unrecorded. The release
+ * prepared for release, with the Foundry artifacts null. The release
  * step fills them and marks the record `released` on main afterwards (a commit
  * cannot name its own hash), so a tag moved or re-created onto any later commit
- * cannot publish the same version again.
+ * cannot publish the same version again. Qualification must be recorded before
+ * tagging; a draft pin is not evidence that the pairing passed hosted CI.
  *
  * Changing `edge.image` is a re-qualification, not a tag edit: the pull request
  * that changes it runs every gateway-backed gate against the new image.
@@ -33,11 +34,16 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  qualificationErrors,
+  readHostedQualification,
+  requireHostedQualification,
+} from "./hosted-qualification.mjs";
 
 export const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 export const RECORD_PATH = "docs/compatibility.json";
 
-/** Values the release step fills in. They are never guessed ahead of it. */
+/** Unresolved Edge pairing fields; Foundry candidate artifacts use null. */
 export const PLACEHOLDER_PREFIX = "RELEASE-STEP";
 
 const EDGE_IMAGE = /^ferrumedge\/ferrum-edge@sha256:[0-9a-f]{64}$/;
@@ -136,9 +142,8 @@ export const FOUNDRY_RELEASE_STEP_FIELDS = ["source_commit", "image", "ci_eviden
 /**
  * Why a tagged commit's record cannot be released. Empty only for the
  * `candidate` record prepared for this release, whose Foundry artifacts are
- * still release-step placeholders. A `released` record (every commit after a
- * release step) or a recorded artifact means this version was already
- * published.
+ * still null. A `released` record (every commit after a release step) or a
+ * recorded artifact means this version was already published.
  */
 export function foundryReleaseErrors(record) {
   const errors = [];
@@ -149,7 +154,7 @@ export function foundryReleaseErrors(record) {
     );
   }
   for (const field of FOUNDRY_RELEASE_STEP_FIELDS) {
-    if (!isPlaceholder(record?.foundry?.[field])) {
+    if (record?.foundry?.[field] !== null) {
       errors.push(`foundry.${field} is already recorded; this version was already released`);
     }
   }
@@ -163,6 +168,9 @@ export function validatePairing(record) {
   const release = edge.release ?? {};
   const foundry = record?.foundry ?? {};
 
+  if (record?.record_version !== 2) {
+    errors.push("record_version must be 2");
+  }
   if (!["candidate", "released"].includes(record?.status)) {
     errors.push('status must be "candidate" or "released"');
   }
@@ -211,6 +219,10 @@ export function validatePairing(record) {
 
   const released = record?.status === "released";
   if (released) errors.push(...edgeReleaseErrors(record));
+  errors.push(...qualificationErrors(record?.qualification));
+  if (released && record?.qualification?.status !== "qualified") {
+    errors.push("a released record must have qualified CI evidence");
+  }
 
   const fields = [
     ["version", FOUNDRY_VERSION],
@@ -220,10 +232,10 @@ export function validatePairing(record) {
   ];
   for (const [field, pattern] of fields) {
     const value = foundry[field];
-    if (isPlaceholder(value)) {
-      if (released) errors.push(`foundry.${field} is still a release-step placeholder`);
+    if (value === null && FOUNDRY_RELEASE_STEP_FIELDS.includes(field)) {
+      if (released) errors.push(`foundry.${field} is still null`);
     } else if (typeof value !== "string" || !pattern.test(value)) {
-      errors.push(`foundry.${field} is neither a valid value nor a ${PLACEHOLDER_PREFIX} placeholder`);
+      errors.push(`foundry.${field} must be a valid value${field === "version" ? "" : " or null"}`);
     }
   }
   return errors;
@@ -293,7 +305,7 @@ export function missingRequiredReferences(record, root = REPO_ROOT) {
  * is `foundryReleaseErrors`, so this is the test seam proving the command calls
  * it rather than trusting it separately.
  */
-export function requireReleaseReady(record) {
+export function requireReleaseReady(record, hostedEvidence) {
   const unready = edgeReleaseErrors(record);
   if (unready.length > 0) {
     throw new Error([
@@ -310,10 +322,11 @@ export function requireReleaseReady(record) {
       "Tag the commit that prepared this version. A published version is never re-released.",
     ].join("\n"));
   }
+  requireHostedQualification(record, hostedEvidence);
   return { ready: true, edge: record.edge.release.version, image: record.edge.image };
 }
 
-function main(command) {
+async function main(command) {
   const record = readSupportedPairing();
   const errors = validatePairing(record);
   if (errors.length > 0) {
@@ -324,7 +337,8 @@ function main(command) {
     return;
   }
   if (command === "release-ready") {
-    console.log(JSON.stringify(requireReleaseReady(record)));
+    const evidence = await readHostedQualification(record);
+    console.log(JSON.stringify(requireReleaseReady(record, evidence)));
     return;
   }
   if (command !== "check") {
@@ -343,10 +357,8 @@ function main(command) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  try {
-    main(process.argv[2]);
-  } catch (error) {
+  main(process.argv[2]).catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
-  }
+  });
 }

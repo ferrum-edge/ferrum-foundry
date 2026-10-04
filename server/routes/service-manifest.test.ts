@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fetch as upstreamFetch } from 'undici';
 import { MANIFEST_BODY_LIMIT, TLS_PATH_REDACTION } from '../service-manifest.js';
+import { manifestValidator } from '../service-manifest-schema.js';
 
 vi.mock('undici', async (importOriginal) => ({
   ...await importOriginal<typeof import('undici')>(),
@@ -17,6 +18,23 @@ const fixtures = (kind: string) => readdirSync(new URL(`${kind}/`, root)).sort()
 }));
 const valid = fixtures('valid');
 const invalid = fixtures('invalid');
+const invalidExpectations: Record<string, { instance_path: string; keyword: string }> = JSON.parse(
+  readFileSync(new URL('../invalid-expectations.json', root), 'utf8'),
+);
+// One repair per canonical negative; the rest of each fixture stays unchanged.
+const repairs: Record<string, { path: string[]; keyword: string; value?: unknown }> = {
+  'agents-bad-namespace.json': { path: ['agents', 'namespace'], keyword: 'pattern', value: 'orders' },
+  'agents-enabled-not-boolean.json': { path: ['agents', 'enabled'], keyword: 'type', value: true },
+  'agents-unknown-key.json': { path: ['agents'], keyword: 'additionalProperties' },
+  'base-path-without-trailing-slash.json': {
+    path: ['api', 'service_base_path'], keyword: 'pattern', value: '/v1/',
+  },
+  'client-cert-without-key.json': { path: ['upstream'], keyword: 'dependentRequired' },
+  'http3-protocol.json': { path: ['upstream', 'protocols', '1'], keyword: 'enum', value: 'http2' },
+  'tls-path-with-http-scheme.json': { path: ['upstream', 'scheme'], keyword: 'const', value: 'https' },
+  'unknown-field.json': { path: ['upstream'], keyword: 'additionalProperties' },
+  'unsupported-major.json': { path: ['schema_version'], keyword: 'pattern', value: '1.0' },
+};
 const secret = 'preview-credential-canary-123456789';
 const unknownKey = 'unreviewed-secret-field';
 let app: FastifyInstance;
@@ -98,6 +116,46 @@ afterAll(async () => {
 });
 
 describe('authenticated service manifest preview through the registered BFF route', () => {
+  it('covers every canonical manifest negative and its precise invalid expectation', () => {
+    const paths = invalid.map(({ name }) => `service-manifest/invalid/${name}`).sort();
+    expect(Object.keys(invalidExpectations).filter((path) =>
+      path.startsWith('service-manifest/invalid/')).sort()).toEqual(paths);
+    expect(Object.keys(repairs).sort()).toEqual(invalid.map(({ name }) => name).sort());
+    for (const { name } of invalid) {
+      expect(invalidExpectations[`service-manifest/invalid/${name}`]).toEqual({
+        instance_path: `/${repairs[name].path.join('/')}`, keyword: repairs[name].keyword,
+      });
+    }
+  });
+
+  it.each(invalid)('rejects $name at its declared defect and accepts only its repair', async ({
+    name, body,
+  }) => {
+    const result = manifestValidator.safeParse(body);
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error('Invalid canonical fixture was accepted');
+    const repair = repairs[name];
+    const expectedPath = repair.path.join('/');
+    // Conditional/refinement failures can name the containing object; require
+    // that location to contain the canonical field, never an unrelated failure.
+    expect(result.error.issues.some((issue) => {
+      const path = issue.path.map(String).join('/');
+      return path === expectedPath || expectedPath.startsWith(`${path}/`);
+    })).toBe(true);
+    const fixed = structuredClone(body);
+    let parent = fixed;
+    for (const key of repair.path.slice(0, -1)) parent = parent[key];
+    const field = repair.path[repair.path.length - 1];
+    if (Object.hasOwn(repair, 'value')) parent[field] = repair.value;
+    else if (name === 'agents-unknown-key.json') delete fixed.agents.read_only;
+    else if (name === 'unknown-field.json') delete fixed.upstream.backend_scheme;
+    else fixed.upstream.gateway_client_key_path = '/etc/ferrum/edge-client.key';
+    expect(manifestValidator.safeParse(fixed).success).toBe(true);
+    const response = await preview(fixed, fixed.gateway?.namespace ?? 'ferrum');
+    expect(response.statusCode).toBe(200);
+    expect(upstreamFetch).not.toHaveBeenCalled();
+  });
+
   it.each(valid)('consumes shared valid fixture $name without side effects', async ({ body }) => {
     const response = await preview(body, body.gateway?.namespace ?? 'ferrum');
     expect(response.statusCode).toBe(200);
