@@ -102,9 +102,13 @@ Its `info.version: 0.2.0` is schema metadata, not either product's version.
    image index, platform manifests and registry revision labels.
 
 The qualified source is the earlier tree that passed, not a claim that an
-evidence commit qualified itself. The immutable release tag points to the main
-commit containing that reviewed source as its second merge parent. The release
-workflow re-ran its pre-publication gates and retains its immutable-tag safeguards.
+evidence commit qualified itself. The immutable release tag points to
+`7ab9ddb732ebd890fb02928d6e4b22470ceab3f7`; its literal second parent is the
+reviewed release PR head `feca49466e6276a3095b913af9982e3e70407743`. The
+qualified source `4ee6dcafe1af603a6808c7fd6899eca0cbfc1d28` is an ancestor
+contained in that reviewed release head, not the literal second parent. The
+release workflow re-ran its pre-publication gates and retains its immutable-tag
+safeguards.
 
 The buildout database profiles, Node floors and `viewer` / `operator` / `admin`
 authority tiers are unchanged. This release does not include the proposed
