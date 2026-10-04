@@ -14,7 +14,8 @@ what is still open.
 `scripts/concurrent-edit-contract.mjs` runs a two-administrator sequence
 against the pinned Ferrum Edge image. `scripts/gateway-contract-smoke.mjs`
 runs it in the `Pinned Gateway Contract` CI job on every pull request. It
-records:
+records the baseline below. Its prior accepted pairing was Edge v0.9.10; live
+acceptance against the v0.9.11 candidate pin is pending:
 
 | Observation | Result |
 | --- | --- |
@@ -25,7 +26,7 @@ records:
 | `PUT` with a malformed `If-Match`, or `POST /proxies` with any `If-Match` | **`400`, nothing written** (`malformedIfMatchStatus: 400`, `createIfMatchStatus: 400`) |
 
 Conditional writes come from ferrum-edge#5661, first released in Ferrum Edge
-v0.9.7; v0.9.8, v0.9.9, and v0.9.10 retain it
+v0.9.7; v0.9.8 through v0.9.11 retain it
 ([compatibility.md](compatibility.md)).
 `gateway-contract-smoke.mjs` fails if the pinned gateway issues no tag. The
 contract itself also checks that the two halves agree on any gateway: one that

@@ -14,12 +14,14 @@ request.
 For a walkthrough that ends in an authenticated request through the data
 plane, see [`docs/getting-started.md`](../../docs/getting-started.md).
 
-**Supported pairing.** The stack is qualified with one Ferrum Edge image: the
-published v0.9.10 release that Foundry v0.4.0 pairs with, recorded by digest in
-[`docs/compatibility.md`](../../docs/compatibility.md). The `demo` profile runs
-that image. The default Foundry image, `ferrumedge/ferrum-foundry:main`, is the
-development channel; for production, pin the released Foundry image named in
-the same record.
+**Candidate pairing.** The demo profile pins the verified published Edge
+v0.9.11 distribution proposed for Foundry v0.5.0. Hosted Foundry qualification
+is pending; the latest published pairing remains v0.4.0 / Edge v0.9.10 in
+[`docs/compatibility.md`](../../docs/compatibility.md). The default Foundry
+image, `ferrumedge/ferrum-foundry:main`, is the development channel. Production
+must use an actual released Foundry digest from that record; the candidate has
+no published Foundry image yet. Both existing profiles and authority tiers are
+unchanged.
 
 ## Two profiles
 

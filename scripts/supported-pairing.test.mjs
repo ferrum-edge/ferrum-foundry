@@ -65,21 +65,21 @@ describe("the supported pairing record", () => {
     }
   });
 
-  it("qualifies the published v0.9.10 release by its recorded image and manifests", () => {
+  it("pins the verified v0.9.11 distribution for pending hosted qualification", () => {
     const image =
-      "ferrumedge/ferrum-edge@sha256:430d6a7d41361de5ad12562786481f97f1e97fef72a0b5f1a0699eced7cdd4cc";
-    const sourceCommit = "ee040d5e3281fde424aa65f5b18004852c5b53b0";
+      "ferrumedge/ferrum-edge@sha256:2476b502855940e28157858fc24008545cb3baeb3084c9610e1d4505cbe0d36e";
+    const sourceCommit = "c764084b3b51c3f7ffde268c039688d35e49c553";
     const manifests = {
-      "linux/amd64": "sha256:18a8a962ad13bacb2505a122330bb25ce921b21a2f3cb5362a6ea93f11fe44d5",
-      "linux/arm64": "sha256:c35253bed87153afa6e193074f9b644eb3feeedb35459d1c15de5a23a78e4891",
+      "linux/amd64": "sha256:7287d297e8f305c99143e148f910024e50fac0341e7fd89236325331fe405b22",
+      "linux/arm64": "sha256:738a68e81da5cc9c0dde8e8ed5ba9e9c6957fcbdd930070d60d8782c303bb9eb",
     };
     assert.equal(record.edge.image, image);
     assert.equal(record.edge.source_commit, sourceCommit);
     assert.deepEqual(record.edge.platform_manifests, manifests);
-    assert.match(record.edge.build, /v0\.9\.10/);
+    assert.match(record.edge.build, /v0\.9\.11/);
 
     const release = record.edge.release;
-    assert.equal(release.version, "v0.9.10");
+    assert.equal(release.version, "v0.9.11");
     assert.equal(release.image, image);
     assert.equal(release.source_commit, sourceCommit);
     assert.deepEqual(release.platform_manifests, manifests);
@@ -108,9 +108,9 @@ describe("the supported pairing record", () => {
     assert.match(semantics, /#409/);
   });
 
-  it("records the Foundry release preparation against the qualified Edge pairing", () => {
-    assert.equal(record.foundry.version, "0.4.0");
-    assert.equal(record.foundry.previous_release, "v0.3.0");
+  it("records the Foundry candidate preparation against the verified Edge distribution", () => {
+    assert.equal(record.foundry.version, "0.5.0");
+    assert.equal(record.foundry.previous_release, "v0.4.0");
     const pkg = JSON.parse(repoFile("package.json"));
     const lock = JSON.parse(repoFile("package-lock.json"));
     // The release workflow requires the tag, package.json, and the record to agree.
@@ -119,7 +119,7 @@ describe("the supported pairing record", () => {
     assert.equal(lock.packages[""].version, record.foundry.version);
     for (const field of ["source_commit", "image", "ci_evidence"]) {
       assert.equal(
-        isPlaceholder(record.foundry[field]),
+        record.foundry[field] === null,
         record.status !== "released",
         `foundry.${field} reflects whether this release has been published`,
       );
@@ -127,7 +127,7 @@ describe("the supported pairing record", () => {
     if (record.status === "released") {
       // A released record also mirrors the recorded Foundry artifacts in docs.
       for (const field of ["source_commit", "image", "ci_evidence"]) {
-        assert.ok(!isPlaceholder(record.foundry[field]), `foundry.${field} after release`);
+        assert.notEqual(record.foundry[field], null, `foundry.${field} after release`);
       }
       // docs/compatibility.md mirrors them, with no release-step marker left.
       const doc = repoFile("docs/compatibility.md");
@@ -142,6 +142,26 @@ describe("the supported pairing record", () => {
       );
     }
     assert.deepEqual(record.foundry.platforms, ["linux/amd64", "linux/arm64"]);
+  });
+
+  it("preserves the published v0.4.0 facts separately from the candidate", () => {
+    const previous = JSON.parse(repoFile("docs/release-notes/v0.4.0.compatibility.json"));
+    assert.equal(previous.status, "released");
+    assert.equal(previous.record_version, 1);
+    assert.equal(previous.foundry.version, "0.4.0");
+    assert.equal(previous.foundry.source_commit, "cb6dbe5b2b2e3f3ed211d5e829322d867ecb7a36");
+    assert.equal(
+      previous.foundry.image,
+      "ferrumedge/ferrum-foundry@sha256:03d4baa0e424c4438abb65da4ee3a4441f50cde9f2eb4e28664e5cf0698c0241",
+    );
+    assert.equal(
+      previous.foundry.ci_evidence,
+      "https://github.com/ferrum-edge/ferrum-foundry/actions/runs/36874319153",
+    );
+    assert.equal(previous.edge.release.version, "v0.9.10");
+    assert.notEqual(previous.edge.image, record.edge.image);
+    assert.deepEqual(record.tested, previous.tested);
+    assert.deepEqual(record.best_effort, previous.best_effort);
   });
 
   it("records the Edge changes the pairing depends on as released in it", () => {
@@ -228,11 +248,11 @@ describe("validatePairing", () => {
       }
     }
 
-    // The commit that prepares a release: candidate, artifacts unrecorded.
+    // The commit that prepares a release: candidate, artifacts null.
     const candidate = structuredClone(valid);
     candidate.status = "candidate";
     for (const field of FOUNDRY_RELEASE_STEP_FIELDS) {
-      candidate.foundry[field] = `${PLACEHOLDER_PREFIX}: ${field}`;
+      candidate.foundry[field] = null;
     }
     assert.deepEqual(validatePairing(candidate), []);
     assert.deepEqual(foundryReleaseErrors(candidate), []);
@@ -257,11 +277,17 @@ describe("validatePairing", () => {
     assert.equal(foundryReleaseErrors(undefined).length, 1 + FOUNDRY_RELEASE_STEP_FIELDS.length);
   });
 
-  it("allows placeholders only until the record is marked released", () => {
+  it("allows null artifact fields only until the record is marked released", () => {
     const released = structuredClone(valid);
     released.status = "released";
-    released.foundry.version = `${PLACEHOLDER_PREFIX}: version`;
-    assert.ok(validatePairing(released).some((error) => error.includes("foundry.version is still")));
+    released.qualification = {
+      status: "qualified",
+      ci_evidence: "https://github.com/ferrum-edge/ferrum-foundry/actions/runs/123",
+    };
+    for (const field of FOUNDRY_RELEASE_STEP_FIELDS) {
+      released.foundry[field] = null;
+      assert.ok(validatePairing(released).includes(`foundry.${field} is still null`));
+    }
 
     const filled = structuredClone(released);
     Object.assign(filled.foundry, {
@@ -299,16 +325,54 @@ describe("validatePairing", () => {
     guessed.foundry.image = "ferrumedge/ferrum-foundry:latest";
     assert.ok(validatePairing(guessed).some((error) => error.includes("foundry.image")));
   });
+
+  it("requires metadata version 2 and refuses missing or string candidate placeholders", () => {
+    const oldVersion = structuredClone(valid);
+    oldVersion.record_version = 1;
+    assert.ok(validatePairing(oldVersion).includes("record_version must be 2"));
+    for (const field of FOUNDRY_RELEASE_STEP_FIELDS) {
+      for (const value of [undefined, "", `${PLACEHOLDER_PREFIX}: ${field}`]) {
+        const malformed = structuredClone(valid);
+        malformed.foundry[field] = value;
+        assert.ok(validatePairing(malformed).some((error) => error.startsWith(`foundry.${field}`)));
+        assert.ok(
+          foundryReleaseErrors(malformed).some((error) => error.startsWith(`foundry.${field}`)),
+        );
+      }
+    }
+    const noVersion = structuredClone(valid);
+    noVersion.foundry.version = null;
+    assert.ok(validatePairing(noVersion).some((error) => error.startsWith("foundry.version")));
+  });
+
+  it("does not present missing hosted evidence or a draft as qualified", () => {
+    for (const qualification of [
+      {},
+      {
+        status: "pending",
+        ci_evidence: "https://github.com/ferrum-edge/ferrum-foundry/actions/runs/123",
+      },
+      { status: "qualified", ci_evidence: null },
+    ]) {
+      const malformed = structuredClone(valid);
+      malformed.qualification = qualification;
+      assert.ok(validatePairing(malformed).some((error) => error.includes("qualification.")));
+    }
+  });
 });
 
 describe("requireReleaseReady", () => {
   // The candidate commit that prepares a release: status candidate, Foundry
-  // artifacts still placeholders. Its Edge release is already qualified.
+  // artifacts still null. Its Edge release has hosted qualification evidence.
   const candidate = structuredClone(record);
   candidate.status = "candidate";
   for (const field of FOUNDRY_RELEASE_STEP_FIELDS) {
-    candidate.foundry[field] = `${PLACEHOLDER_PREFIX}: ${field}`;
+    candidate.foundry[field] = null;
   }
+  candidate.qualification = {
+    status: "qualified",
+    ci_evidence: "https://github.com/ferrum-edge/ferrum-foundry/actions/runs/123",
+  };
 
   it("passes the unreleased candidate the release workflow tags", () => {
     assert.deepEqual(requireReleaseReady(candidate), {
@@ -351,6 +415,18 @@ describe("requireReleaseReady", () => {
       () => requireReleaseReady(unqualified),
       /does not name a qualified Ferrum Edge release/,
     );
+  });
+
+  it("refuses a draft pairing even when the verified Edge distribution is pinned", () => {
+    for (const qualification of [
+      { status: "pending", ci_evidence: null },
+      { status: "qualified", ci_evidence: null },
+    ]) {
+      assert.throws(
+        () => requireReleaseReady({ ...candidate, qualification }),
+        /hosted qualification is still pending/,
+      );
+    }
   });
 
   it("wires the release-ready command to requireReleaseReady, not an inline check", () => {

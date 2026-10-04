@@ -28,9 +28,9 @@ the SHA-256 of each source component block instead:
 
 `scripts/plugin-schema-drift.mjs` (`npm run check:plugin-schemas`) fetches
 `openapi.yaml`, extracts each block, and compares digests. A changed or missing
-block fails, naming the component. By default it fetches the pinned commit, and
-that is what the **Pinned Gateway Contract** CI job runs. To check against a
-newer spec, set the ref:
+block fails, naming the component. By default the **Pinned Gateway Contract**
+CI job checks the current `edge.source_commit` from `docs/compatibility.json`.
+To check against a newer spec, set the ref:
 
 ```bash
 FERRUM_SPEC_REF=main npm run check:plugin-schemas
@@ -44,6 +44,30 @@ together.
 A block runs from its four-space key line to the next key at that indentation,
 with trailing blank lines dropped. `scripts/plugin-schema-drift.test.mjs` fixes
 that rule and checks that every guided plugin's components are pinned.
+
+### v0.5.0 draft qualification
+
+The reviewed ref and digests above are retained while the Edge v0.9.11 pin is
+prepared. At released Edge commit `c764084b3b51c3f7ffde268c039688d35e49c553`,
+`RateLimitingConfig` includes `mcp_tool_calls`; these older pins do not establish
+qualification against that source. `info.version: 0.2.0` is OpenAPI schema
+metadata, not the Edge or Foundry product version.
+
+The existing drift checker now exports the exact fetched component YAML blocks,
+actual hashes, comparison findings, raw source hash, source ref and reviewed ref
+as JSON when `FERRUM_SCHEMA_EXPORT_PATH` is set. The Pinned Gateway Contract job
+writes `plugin-schema-producer.json`, hashes that exact file, and uploads both
+files as `plugin-schema-producer-<Foundry head SHA>`, even when drift fails.
+This is the checker's hosted producer output; no local generated schema or
+source-derived guess substitutes for it. The complete OpenAPI document is not
+vendored.
+
+Root must retrieve the artifact from the actual hosted run for this branch,
+verify its checksum and c764 source identity, review the affected descriptors
+and omission/null semantics, then update `PLUGIN_SCHEMA_SPEC.ref` and the
+component hashes in one serial finisher. Re-run all hosted qualification gates
+at the resulting head. Drift continues to fail until that review and update;
+no producer artifact hash or new component digest is invented in this draft.
 
 Transport failures are retried; any other fetch error, including an HTTP error,
 fails the check. An outage is never reported as drift, and never passes.

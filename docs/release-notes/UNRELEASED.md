@@ -1,8 +1,9 @@
 # Ferrum Foundry — next release (draft)
 
-> **Draft.** At release preparation, move this file to
-> `docs/release-notes/vX.Y.Z.md`, fill the release-step markers, and leave a
-> fresh copy of this template here. The release workflow publishes the
+> **Draft.** v0.5.0 preparation also has draft versioned notes. Root must
+> reconcile later main merges, finalize `docs/release-notes/v0.5.0.md`, move
+> the intended changelog entries into `[0.5.0]`, and leave a fresh template here
+> before tagging. The release workflow publishes the
 > versioned file and refuses a tag without it. It also requires `package.json`
 > and `foundry.version` in `docs/compatibility.json` to match the tag, and
 > `node scripts/supported-pairing.mjs release-ready` to pass.
@@ -34,11 +35,12 @@
 - **Alloy manifest preview (ferrum-alloy#27).** Settings consumes the shared v1
   JSON data model through an authenticated, namespace-authorized read-only BFF.
   Desired resource fields are bounded and TLS paths redacted; no configuration
-  is applied and no producer or local file is fetched. The canonical contracts
-  pin adopts reviewed r2 schema/fixtures without changing the released pairing.
+  is applied and no producer or local file is fetched. The existing immutable
+  r2 schema/fixtures remain pinned pending canonical PR #13 owner qualification
+  and publication.
   Diagnostic presentation is an ADR decision for future work, not an importer.
 
-- **Distroless runtime again (#504).** The image is back on
+- **Distroless runtime again (#533).** The image is back on
   `gcr.io/distroless/nodejs24-debian13:nonroot` (no shell, no package
   manager), running as `65532:65532` with Node as the entrypoint.
 - **Release tags are never reassigned (GHSA-rw8r-hrr2-vpc2).** A release must
@@ -63,9 +65,27 @@
   `code: FERRUM_BFF_NAMESPACE_SCAN_BUDGET` rather than a partial list, and
   identical concurrent lists share one gateway read.
 
+- **Sensitive browser reads and backup export (#543).** The browser proxy
+  refuses consumer verification before signing or fetching. Intentional
+  unredacted backup downloads return only safe counts to mutation state, keep
+  namespace/gateway bindings, revoke URLs and sanitize failures.
+- **Deployment and identity (#527, #529, #536).** Production remote admin
+  connections require HTTPS and verified TLS unless the disposable-stack
+  exception is set. Identity headers cannot collide; OIDC templates require an
+  operator-owned session encryption secret and rotation of the old public key.
+- **Namespace confirmation (#538).** A cascade must echo exactly one literal
+  target namespace; malformed or ambiguous queries never reach Edge.
+- **Release preparation.** v0.5.0 proposes verified Edge v0.9.11 distribution
+  while preserving actual v0.4.0 facts. Metadata v2 keeps Foundry publication
+  fields null and qualification pending. Exact hosted schema producer JSON/hash
+  retrieval and canonical PR #13 publication precede serial pin updates.
+
 ### Known limitations
 
-*Release step.*
+Hosted pairing acceptance remains pending. Edge #6008 (SOAP body deadlines)
+and #6009 (native HTTP/3 early-body admission) are not fixed by v0.9.11.
+The existing database profiles, Node floors, role tiers and scale limitations
+remain unchanged; see `docs/compatibility.md`.
 
 ### Install
 

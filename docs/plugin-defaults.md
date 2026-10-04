@@ -85,7 +85,11 @@ The canonical pin is now `contracts-edge-0.9.9-r2`; its plugin catalog and
 provisioning vocabulary/schema bytes and provenance are unchanged from the
 previous pin. It also includes the proposed service-manifest schema and all
 shared fixtures for the [Alloy preview consumer](alloy-manifest-preview.md).
-The revision continues to map to qualified Edge v0.9.10 without changing that pin.
+The revision maps to the previously qualified Edge v0.9.10. The v0.5.0 /
+Edge v0.9.11 draft preserves this immutable pin; canonical
+[PR #13](https://github.com/ferrum-edge/ferrum-contracts/pull/13) remains a
+qualification dependency. Root will assign adoption only after actual owner
+main qualification and canonical merge/tag. No draft head is a released pin.
 
 To bump the pin, choose a `contracts-edge-*` release, download the adopted
 vocabulary and schema files from that tag into the same paths, resolve the tag

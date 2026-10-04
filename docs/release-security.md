@@ -31,12 +31,12 @@ workflow (`.github/workflows/ci.yml`) has passed:
 ## Supported Edge image
 
 Passing these gates qualifies Foundry with that one Ferrum Edge image and no
-other build. Every gateway-backed gate runs against the published Ferrum Edge
-v0.9.10 release in `edge.image`, including the MCP security fixes in
-ferrum-edge#5954. Foundry v0.4.0 pairs with v0.9.10; the previous Foundry
-v0.3.0 release paired with v0.9.8.
-Requirements, best-effort and unqualified setups, and rejected images are in
-[the compatibility record](compatibility.md).
+other build. This candidate moves `edge.image` to the verified published Edge
+v0.9.11 distribution; it is not yet a qualified Foundry v0.5.0 pairing.
+The latest published pairing, Foundry v0.4.0 / Edge v0.9.10, remains immutable
+in [history](compatibility.md#history). The hosted schema producer artifact,
+canonical contract promotion, and live acceptance remain outstanding in
+[the draft qualification record](compatibility.md#draft-qualification-dependencies).
 
 Moving the pin is a re-qualification: change `edge.image` in
 `docs/compatibility.json`, and the pull request re-runs every gate above against
@@ -68,6 +68,19 @@ Every third-party GitHub Action is pinned to a full commit SHA.
 
 ## Publishing
 
+For v0.5.0, root must land the reviewed release preparation with a **merge
+commit**, whose second parent is the reviewed release branch head. After all
+actual main-push workflows pass, freeze that main commit and create the
+immutable version tag on it. A squash loses the reviewed release-head ancestry.
+Before tagging, move the final intended entries out of `[Unreleased]` into
+`[0.5.0]` with the actual release date and reconcile any later main merges.
+This draft does not perform publication.
+
+After publication, record the actual Foundry tag source commit, image index,
+platform manifests and successful CI run, set the record to `released`, and
+verify each registry platform config's `org.opencontainers.image.revision`
+against the immutable tag. Candidate nulls cannot be filled from v0.4.0 facts.
+
 Pushes to `main` and release tags publish multi-architecture images with
 BuildKit provenance (`mode=max`) and SBOM attestations. Each manifest job
 requires exactly two per-platform digests, checks that they are `linux/amd64`
@@ -95,7 +108,7 @@ Before any registry login or build, the release workflow requires that:
 - `node scripts/supported-pairing.mjs release-ready` passes: `edge.release` names
   a published Edge release and `edge.image` is that release, and the record is
   still the unreleased `candidate`, with `foundry.source_commit`, `image`, and
-  `ci_evidence` unrecorded;
+  `ci_evidence` null, and `qualification` names its successful hosted run;
 - the version has no GitHub release yet;
 - neither `vX.Y.Z` nor `X.Y.Z` exists on Docker Hub or GHCR with an image whose
   `org.opencontainers.image.revision` is another commit

@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { compareProvenance, digestOf, extractSchemaBlock } from "./plugin-schema-drift.mjs";
+import {
+  compareProvenance,
+  digestOf,
+  extractSchemaBlock,
+  schemaProducerExport,
+} from "./plugin-schema-drift.mjs";
 import {
   GUIDED_PLUGINS,
   PLUGIN_SCHEMA_PROVENANCE,
+  PLUGIN_SCHEMA_SPEC,
   getGuidedSchema,
 } from "../src/lib/pluginSchemas.ts";
 
@@ -81,4 +87,20 @@ test("every pinned digest is a full SHA-256", () => {
   for (const entry of PLUGIN_SCHEMA_PROVENANCE) {
     assert.match(entry.sha256, /^[0-9a-f]{64}$/, entry.component);
   }
+});
+
+test("the hosted export retains exact blocks and reports drift without inventing pins", () => {
+  const ref = "a".repeat(40);
+  const exported = schemaProducerExport(SPEC, ref);
+  assert.equal(exported.source.ref, ref);
+  assert.equal(exported.source.sha256, digestOf(SPEC));
+  assert.equal(exported.reviewed_ref, PLUGIN_SCHEMA_SPEC.ref);
+  const keyAuth = exported.components.find((entry) => entry.component === "KeyAuthConfig");
+  assert.equal(keyAuth.yaml, extractSchemaBlock(SPEC, "KeyAuthConfig"));
+  assert.equal(keyAuth.actual, digestOf(keyAuth.yaml));
+  assert.equal(keyAuth.status, "changed");
+  const missing = exported.components.find((entry) => entry.component === "RateLimitingConfig");
+  assert.equal(missing.yaml, null);
+  assert.equal(missing.actual, null);
+  assert.equal(missing.status, "missing");
 });

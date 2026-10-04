@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Foundry v0.5.0 release preparation is a draft. Entries stay here until root
+reconciles later main merges and establishes `[0.5.0]` with the actual release
+date before the immutable tag target. See `docs/release-notes/v0.5.0.md` and
+the pending qualification dependencies in `docs/compatibility.md`.
+
 ### Added
 
 - Authenticated, namespace-authorized Alloy service-manifest v1 JSON preview in
@@ -120,7 +125,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- The runtime image is distroless again (#504):
+- Prepare the Foundry v0.5.0 pairing with the verified published Edge v0.9.11
+  source, binaries and default multi-architecture image. Foundry hosted live
+  acceptance remains pending; SQLite profiles, Node floors and authority tiers
+  are unchanged. Preserve the exact v0.4.0 compatibility record and history.
+- Compatibility metadata version 2 uses null candidate source, image and release
+  CI fields, with pending hosted qualification recorded separately. Release
+  readiness refuses pending qualification and still refuses recorded artifacts.
+- The existing plugin-schema drift checker exports exact fetched component
+  blocks and hashes to a hosted JSON artifact with a checksum, even on drift.
+  The reviewed schema pin remains unchanged pending actual artifact retrieval
+  and serial review of `RateLimitingConfig.mcp_tool_calls`. The canonical
+  `contracts-edge-0.9.9-r2` pin remains immutable while contracts PR #13 awaits
+  owner qualification and publication.
+
+- The runtime image is distroless again (#533):
   `gcr.io/distroless/nodejs24-debian13:nonroot`, pinned by index digest, now
   that upstream ships the fixed `libssl3t64` 3.5.7-1~deb13u3. The temporary
   `node:24-trixie-slim` runtime, its build-time OpenSSL and `libpcre2-8-0`

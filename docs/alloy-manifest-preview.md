@@ -23,8 +23,13 @@ plugin/provisioning vocabularies and schemas, plus the service-manifest schema
 and every shared valid/invalid manifest fixture, including agents. Each exact
 published file has a SHA-256 in the same pin. The four older files are byte
 identical; their original provenance and plugin invariants remain intact. The
-contracts revision still maps to the qualified Edge v0.9.10 release; it changes
-neither Foundry/Edge release versions nor the gateway image pin.
+contracts revision maps to the previously qualified Edge v0.9.10 release.
+The v0.5.0 / Edge v0.9.11 draft keeps these exact immutable bytes while
+[canonical PR #13](https://github.com/ferrum-edge/ferrum-contracts/pull/13)
+awaits Alloy replacement main CI and root's qualified merge/tag. Its final
+published service-manifest wire schema will be unchanged and retain full
+descriptions; this draft claims no future tag, bytes, provenance or status.
+Canonical pin adoption is a later serial qualification step.
 
 The independently reviewed producer is Alloy commit
 [`690aed7a9fa8458aeea4ac8416170c8daeb0470b`](https://github.com/ferrum-edge/ferrum-alloy/tree/690aed7a9fa8458aeea4ac8416170c8daeb0470b).

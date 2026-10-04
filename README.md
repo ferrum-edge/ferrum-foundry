@@ -49,15 +49,19 @@ works the same way against a live Ferrum Edge gateway.
 
 ## Supported Ferrum Edge version
 
-Foundry is qualified against one Ferrum Edge image at a time. Foundry v0.4.0
-pairs with the published **Ferrum Edge v0.9.10** release using the image digest
-recorded in `docs/compatibility.json`. The qualification covers `database` mode
-(writable and `FERRUM_ADMIN_READ_ONLY`), the trusted-proxy starter, Chromium,
-and `linux/amd64` and `linux/arm64`.
-Other Ferrum Edge releases, other gateway modes, and other browsers are
-best-effort or not qualified.
-[Supported pairing](docs/compatibility.md) has the requirements, the full
-envelope, and the tested scale.
+Foundry is qualified against one Ferrum Edge image at a time. This branch
+prepares **Foundry v0.5.0** with the published **Ferrum Edge v0.9.11** distribution,
+pinned by digest in `docs/compatibility.json`. Hosted Foundry qualification is
+pending, including the schema producer export and canonical contract promotion.
+The latest published pairing remains Foundry v0.4.0 / Edge v0.9.10 in
+[history](docs/compatibility.md#history).
+
+The qualification envelope stays `database` mode on SQLite (writable and
+`FERRUM_ADMIN_READ_ONLY`), the trusted-proxy starter, Chromium, and
+`linux/amd64` and `linux/arm64`. Other Ferrum Edge releases, gateway modes, and
+browsers remain best-effort or not qualified.
+[Supported pairing](docs/compatibility.md) records the remaining acceptance
+steps, requirements, Node floors, and tested scale.
 
 ## Contracts
 
@@ -72,6 +76,9 @@ its valid/invalid fixtures, under
 files, Foundry's local plugin names and provisioning markers, and the pin's tie
 to the qualified Edge release are checked by
 [Plugin configuration templates](docs/plugin-defaults.md#shared-plugin-catalog-contract).
+Canonical [PR #13](https://github.com/ferrum-edge/ferrum-contracts/pull/13) is
+a draft qualification dependency; this branch keeps the existing immutable pin
+until its actual owner qualification, merge and tag.
 The unreleased [Alloy manifest preview](docs/alloy-manifest-preview.md) consumes
 the existing fields through an authenticated, read-only BFF route.
 

@@ -1,40 +1,66 @@
 {
-  "$comment": "Supported Foundry-Edge pairing. docs/compatibility.md is the human-readable record; scripts/supported-pairing.mjs reads and validates this file, CI starts the gateway edge.image names, and scripts/supported-pairing.test.mjs fails if another file pins a different Ferrum Edge image. edge.release is the published Edge release the Foundry release pairs with, and edge.image names that same release. Foundry artifact fields are filled by the release step, never guessed.",
-  "record_version": 1,
-  "status": "released",
+  "$comment": "Supported Foundry-Edge pairing, metadata version 2. Null Foundry artifact fields are unrecorded until publication. qualification records hosted pairing acceptance separately from verified Edge distribution. The immutable v0.4.0 record is docs/release-notes/v0.4.0.compatibility.json. CI reads edge.image; docs/compatibility.md explains draft dependencies and the unchanged support envelope.",
+  "record_version": 2,
+  "status": "candidate",
   "foundry": {
-    "version": "0.4.0",
-    "previous_release": "v0.3.0",
-    "source_commit": "cb6dbe5b2b2e3f3ed211d5e829322d867ecb7a36",
-    "image": "ferrumedge/ferrum-foundry@sha256:03d4baa0e424c4438abb65da4ee3a4441f50cde9f2eb4e28664e5cf0698c0241",
-    "ci_evidence": "https://github.com/ferrum-edge/ferrum-foundry/actions/runs/36874319153",
+    "version": "0.5.0",
+    "previous_release": "v0.4.0",
+    "source_commit": null,
+    "image": null,
+    "ci_evidence": null,
     "platforms": ["linux/amd64", "linux/arm64"]
   },
+  "qualification": {
+    "status": "pending",
+    "ci_evidence": null
+  },
   "edge": {
-    "image": "ferrumedge/ferrum-edge@sha256:430d6a7d41361de5ad12562786481f97f1e97fef72a0b5f1a0699eced7cdd4cc",
-    "build": "published release v0.9.10 (https://github.com/ferrum-edge/ferrum-edge/releases/tag/v0.9.10), the Edge release Foundry v0.4.0 pairs with (edge.release). It follows v0.9.9, which was qualified (#512) but never paired with a Foundry release; Foundry v0.3.0 pairs with v0.9.8",
-    "source_commit": "ee040d5e3281fde424aa65f5b18004852c5b53b0",
-    "source_evidence": "https://github.com/ferrum-edge/ferrum-edge/actions/runs/36852417185",
+    "image": "ferrumedge/ferrum-edge@sha256:2476b502855940e28157858fc24008545cb3baeb3084c9610e1d4505cbe0d36e",
+    "build": "published release v0.9.11; verified distribution at c764084b3b51c3f7ffde268c039688d35e49c553. Proposed Foundry v0.5.0 pairing; hosted Foundry qualification and canonical contract promotion remain pending",
+    "source_commit": "c764084b3b51c3f7ffde268c039688d35e49c553",
+    "source_evidence": "https://github.com/ferrum-edge/ferrum-edge/actions/runs/37229572280",
     "platform_manifests": {
-      "linux/amd64": "sha256:18a8a962ad13bacb2505a122330bb25ce921b21a2f3cb5362a6ea93f11fe44d5",
-      "linux/arm64": "sha256:c35253bed87153afa6e193074f9b644eb3feeedb35459d1c15de5a23a78e4891"
+      "linux/amd64": "sha256:7287d297e8f305c99143e148f910024e50fac0341e7fd89236325331fe405b22",
+      "linux/arm64": "sha256:738a68e81da5cc9c0dde8e8ed5ba9e9c6957fcbdd930070d60d8782c303bb9eb"
     },
     "release": {
-      "version": "v0.9.10",
-      "github_release": "https://github.com/ferrum-edge/ferrum-edge/releases/tag/v0.9.10",
-      "source_commit": "ee040d5e3281fde424aa65f5b18004852c5b53b0",
-      "image": "ferrumedge/ferrum-edge@sha256:430d6a7d41361de5ad12562786481f97f1e97fef72a0b5f1a0699eced7cdd4cc",
+      "version": "v0.9.11",
+      "github_release": "https://github.com/ferrum-edge/ferrum-edge/releases/tag/v0.9.11",
+      "source_commit": "c764084b3b51c3f7ffde268c039688d35e49c553",
+      "image": "ferrumedge/ferrum-edge@sha256:2476b502855940e28157858fc24008545cb3baeb3084c9610e1d4505cbe0d36e",
       "platform_manifests": {
-        "linux/amd64": "sha256:18a8a962ad13bacb2505a122330bb25ce921b21a2f3cb5362a6ea93f11fe44d5",
-        "linux/arm64": "sha256:c35253bed87153afa6e193074f9b644eb3feeedb35459d1c15de5a23a78e4891"
+        "linux/amd64": "sha256:7287d297e8f305c99143e148f910024e50fac0341e7fd89236325331fe405b22",
+        "linux/arm64": "sha256:738a68e81da5cc9c0dde8e8ed5ba9e9c6957fcbdd930070d60d8782c303bb9eb"
       },
       "requirements": [
         "It retains ferrum-edge#5661 conditional writes, ferrum-edge#4611 proxy association, and namespace-qualified resource identity (ferrum-edge 5db1d77a8, aligned in #409). The qualification checks these contracts against the published release.",
         "GET /proxies/{id}/mcp/tools remains a viewer-readable, namespace-scoped MCP catalog read; viewer-key namespace ceilings apply to every namespace route and deny global routes outside the documented allowlist. Capability parity includes the new read route.",
         "Operator reads of upstreams mask the Consul ACL token, and operator reads of plugin configs mask secrets and credential-bearing endpoint URL components, with redaction placeholders. A POST or PUT of an upstream or plugin config that echoes a placeholder at a masked field is refused with 400 before update merging (ferrum-edge#5925), so for upstreams and plugin configs a placeholder is not a round-trip marker; admin-only consumer credential entries still round-trip [REDACTED]. Admin reads are raw and never refused. Foundry's editors block such a save, for a non-admin role and only at the sites Edge masks, until each field is re-entered or cleared.",
-        "Ferrum Edge v0.9.10 includes ferrum-edge#5954: mcp_gateway and ai_prompt_shield refuse non-UTF-8 charset inputs and fail closed on uninspectable or over-nested JSON-RPC batches (GHSA-4f9m-cfqg-fhx9, GHSA-f2jp-59r9-fp64).",
+        "Ferrum Edge v0.9.11 retains v0.9.10's fixes and includes ferrum-edge#5954: mcp_gateway and ai_prompt_shield refuse non-UTF-8 charset inputs and fail closed on uninspectable or over-nested JSON-RPC batches (GHSA-4f9m-cfqg-fhx9, GHSA-f2jp-59r9-fp64).",
+        "v0.9.11 adds credential-complete consumer verification, conditional namespace backup/restore, and process-scoped backend-egress metadata. Foundry blocks the sensitive verification route and confines ordinary backup exports to a temporary download. No conditional restore or egress-policy adoption is claimed by this release preparation.",
+        "The RateLimitingConfig mcp_tool_calls addition requires the exact hosted schema producer JSON export and checksum, descriptor review, and a serial schema provenance update. The existing canonical contracts pin remains contracts-edge-0.9.9-r2 until PR #13 is qualified, merged and immutably tagged; no draft canonical revision is a released contract.",
         "The full qualification is re-run with edge.image moved to that release, and every job is green on the pull request that moves it, before any Foundry release is published: Quality Gate, Pinned Gateway Contract (including capability parity, writable and read-only), Deployment Starter, Critical Journeys, and Container Gate."
-      ]
+      ],
+      "binary_sha256": {
+        "ferrum-cni-linux-aarch64": "sha256:c54b68605132a42eab941ce43d595cca878f3be79e8ae1ecda5cf05dd6450b8a",
+        "ferrum-cni-linux-x86_64": "sha256:d70b1a273eaf4d5e30d07ef41a07764f13cd9fe4274d9348b4b710172fc1a7ef",
+        "ferrum-edge-linux-aarch64": "sha256:3f0c4a7334878963792c8c277f49f8b91af24bf2db59996e41ec3f7e41c7fbac",
+        "ferrum-edge-linux-x86_64": "sha256:97cbd7cd277feee8f661e9d2cd97a6383be969fd2fc2b61143601614922f988f",
+        "ferrum-edge-macos-aarch64": "sha256:d9a535fda68f17c67e7a44de4c6c0d037145d8772067c7051fa9bd47a30e12ea",
+        "ferrum-edge-macos-x86_64": "sha256:83a59079dd5661af431c8dcacbc1139c6e3963f9a755e6f13b8e93b1570f59c8",
+        "ferrum-edge-windows-x86_64.exe": "sha256:9bc7c9240fa0898a9efeb6e2dabb74c696772af0bb0ba2f7e57ab70c3d0a86e9"
+      },
+      "openapi": {
+        "info_version": "0.2.0",
+        "sha256": "687db80271512a367814ded6002ecce546eb190a347a57e32eca36af7d665020"
+      },
+      "distribution": {
+        "status": "VERIFIED_DISTRIBUTION",
+        "ci_evidence": "https://github.com/ferrum-edge/ferrum-edge/actions/runs/37229572280",
+        "default_image_binaries_match_release_assets": true,
+        "revision_label": null,
+        "ghcr_anonymous_access": false
+      }
     },
     "rejected_images": []
   },
@@ -74,21 +100,21 @@
   ],
   "not_qualified": [
     "file, dp, mesh, and node_agent gateway modes (modelled read-only in the UI, not run in CI)",
-    "any Ferrum Edge release other than v0.9.10 (edge.release)",
-    "any Ferrum Edge image other than edge.image for this qualification, including the 0.9.10-ebpf and 0.9.10-ebpf-tools variants",
+    "any Ferrum Edge release other than v0.9.11 (edge.release)",
+    "any Ferrum Edge image other than edge.image for this qualification, including the 0.9.11-ebpf and 0.9.11-ebpf-tools variants",
     "browser latency and more than one concurrent operator at scale"
   ],
   "edge_dependencies": [
     {
       "change": "ferrum-edge#5661",
       "what": "strong ETag on resource reads and If-Match on PUT/DELETE of proxies, upstreams, consumers, and plugin configs; a malformed If-Match, or one on a route that does not evaluate it, is 400",
-      "status": "first released in Ferrum Edge v0.9.7; retained in Ferrum Edge v0.9.8, v0.9.9, and v0.9.10",
+      "status": "first released in Ferrum Edge v0.9.7; retained in Ferrum Edge v0.9.8, v0.9.9, v0.9.10, and v0.9.11",
       "effect_on_pinned_edge": "Foundry's write guard sends If-Match with the ETag of its verification read, so a writer that commits between that read and the write is refused with 412; the gateway contract asserts the 412s and the 400s"
     },
     {
       "change": "ferrum-edge#5726",
       "what": "optional proxy_id filter on GET /plugins/config (exact match, paginated over the filtered set, invalid value is 400)",
-      "status": "first released in Ferrum Edge v0.9.7; retained in Ferrum Edge v0.9.8, v0.9.9, and v0.9.10",
+      "status": "first released in Ferrum Edge v0.9.7; retained in Ferrum Edge v0.9.8, v0.9.9, v0.9.10, and v0.9.11",
       "effect_on_pinned_edge": "a proxy's Plugins tab lists the proxy-scoped configurations targeting it from the filtered collection instead of the whole namespace; a response the filter did not narrow is refused rather than shown"
     }
   ]
