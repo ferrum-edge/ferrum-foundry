@@ -1,5 +1,5 @@
 import { isHTTPError } from 'ky';
-import type { ServiceManifestPreview } from '../../server/service-manifest';
+import type { ServiceManifestPreview } from '../../shared/service-manifest.js';
 import { api, scoped, SILENT_ERRORS, type NamespaceScope } from './client';
 
 export type { ServiceManifestPreview };

@@ -1,4 +1,12 @@
 import { manifestDefaults, manifestSchema, manifestValidator } from './service-manifest-schema.js';
+import type {
+  ServiceManifestPluginPreview,
+  ServiceManifestPreview,
+  ServiceManifestProxyPreview,
+  ServiceManifestTlsPreview,
+  ServiceManifestUpstreamPreview,
+} from '../shared/service-manifest.js';
+export type { ServiceManifestPreview } from '../shared/service-manifest.js';
 
 export const MANIFEST_BODY_LIMIT = 32 * 1024;
 export const MANIFEST_RESPONSE_LIMIT = 16 * 1024;
@@ -30,7 +38,7 @@ interface Manifest {
     otel_endpoint?: string;
     otel_root_sampling_ratio?: number;
   };
-  auth: { mode?: string };
+  auth: { mode?: 'none' | 'gateway' | 'service' };
   agents?: { enabled: boolean; endpoint_path?: string; namespace?: string };
 }
 
@@ -110,11 +118,11 @@ export function validatedManifest(body: unknown): Manifest | null {
   return manifest;
 }
 
-export function createManifestPreview(manifest: Manifest) {
+export function createManifestPreview(manifest: Manifest): ServiceManifestPreview {
   const { service, api, upstream, gateway, timeouts, health, agents } = manifest;
   const id = gateway.proxy_id ?? service.name;
   const namespace = gateway.namespace;
-  const tls: Record<string, unknown> = upstream.scheme === 'https'
+  const tls: ServiceManifestTlsPreview = upstream.scheme === 'https'
     ? { backend_tls_verify_server_cert: true }
     : {};
   const tlsPathFields: string[] = [];
@@ -128,7 +136,7 @@ export function createManifestPreview(manifest: Manifest) {
       tlsPathFields.push(target);
     }
   }
-  const plugins: Record<string, unknown>[] = [];
+  const plugins: ServiceManifestPluginPreview[] = [];
   if (gateway.correlation_id) {
     plugins.push({
       id: `${id}-correlation-id`, plugin_name: 'correlation_id', namespace,
@@ -151,7 +159,7 @@ export function createManifestPreview(manifest: Manifest) {
       },
     });
   }
-  const proxy: Record<string, unknown> = {
+  const proxy: ServiceManifestProxyPreview = {
     id, name: service.name, namespace, listen_path: api.public_path,
     backend_scheme: upstream.scheme, strip_listen_path: api.strip_public_path,
     ...(api.service_base_path !== '/' ? {
@@ -165,7 +173,7 @@ export function createManifestPreview(manifest: Manifest) {
       plugins: plugins.map((plugin) => ({ plugin_config_id: plugin.id })),
     } : {}),
   };
-  let desiredUpstream: Record<string, unknown> | null = null;
+  let desiredUpstream: ServiceManifestUpstreamPreview | null = null;
   if (health) {
     proxy.upstream_id = `${id}-upstream`;
     desiredUpstream = {
@@ -206,5 +214,3 @@ export function createManifestPreview(manifest: Manifest) {
     ],
   };
 }
-
-export type ServiceManifestPreview = ReturnType<typeof createManifestPreview>;
