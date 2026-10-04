@@ -40,9 +40,26 @@ function apiFixture({ evidence }) {
 }
 
 describe("hosted qualification binding", () => {
-  it("accepts a successful PR tree followed only by its evidence record and a merge", () => {
+  it("accepts an evidence commit after the PR and main advance beyond the tested merge", () => {
     const { record, evidence } = fixture();
+    assert.equal(evidence.run.pull_requests[0].head.sha, evidence.target.commit.sha);
+    assert.notEqual(evidence.run.pull_requests[0].head.sha, evidence.run.head_sha);
+    assert.notEqual(evidence.run.pull_requests[0].base.sha, evidence.tested.commit.parents[0].sha);
     assert.deepEqual(qualificationErrors(record.qualification), []);
+    assert.doesNotThrow(() => requireHostedQualification(record, evidence));
+  });
+
+  it("uses the original producer binding throughout the evidence-recording lifecycle", () => {
+    const { record, evidence } = fixture();
+    const pr = evidence.run.pull_requests[0];
+    pr.head.sha = evidence.source.commit.sha;
+    pr.base.sha = evidence.tested.commit.parents[0].sha;
+    const originalJob = structuredClone(evidence.jobs.jobs.at(-1));
+    assert.doesNotThrow(() => requireHostedQualification(record, evidence));
+
+    pr.head.sha = evidence.target.commit.sha;
+    pr.base.sha = "8".repeat(40);
+    assert.deepEqual(evidence.jobs.jobs.at(-1), originalJob);
     assert.doesNotThrow(() => requireHostedQualification(record, evidence));
   });
 
@@ -64,7 +81,9 @@ describe("hosted qualification binding", () => {
     evidence.run.event = "push";
     evidence.run.head_branch = "main";
     evidence.tested = structuredClone(evidence.source);
-    evidence.jobs.jobs.at(-1).name = `Qualification Source (${record.qualification.tested_commit})`;
+    const sha = record.qualification.source_commit;
+    evidence.jobs.jobs.at(-1).name =
+      `Qualification Source (${sha}; source ${sha}; base ${sha}; ref main)`;
     evidence.target.record = structuredClone(record);
     assert.doesNotThrow(() => requireHostedQualification(record, evidence));
   });
@@ -157,6 +176,34 @@ describe("hosted qualification binding", () => {
     assert.throws(() => requireHostedQualification(record, partial), /incomplete/);
   });
 
+  it("rejects wrong producer source, base, tested commit, target ref and legacy bindings", () => {
+    for (const change of [
+      (name) => name.replace(/source [0-9a-f]{40}/, `source ${"9".repeat(40)}`),
+      (name) => name.replace(/base [0-9a-f]{40}/, `base ${"9".repeat(40)}`),
+      (name) => name.replace(/\([0-9a-f]{40};/, `(${"9".repeat(40)};`),
+      (name) => name.replace("ref main", "ref other"),
+      () => `Qualification Source (${"b".repeat(40)})`,
+    ]) {
+      const { record, evidence } = fixture();
+      evidence.jobs.jobs.at(-1).name = change(evidence.jobs.jobs.at(-1).name);
+      assert.throws(
+        () => requireHostedQualification(record, evidence),
+        /immutable source binding|tested PR merge/,
+      );
+    }
+  });
+
+  it("rejects an intervening source edit even when the live PR head names the evidence commit", () => {
+    const { record, evidence } = fixture();
+    evidence.target.commit.parents = [{ sha: "7".repeat(40) }];
+    evidence.target.tree.tree.find((entry) => entry.path === "package.json").sha = "9".repeat(40);
+    assert.equal(evidence.run.pull_requests[0].head.sha, evidence.target.commit.sha);
+    assert.throws(
+      () => requireHostedQualification(record, evidence),
+      /changed after hosted qualification/,
+    );
+  });
+
   it("rejects code, canonical pin, workflow and pairing changes after qualification", () => {
     const paths = ["package.json", "contracts/ferrum-contracts/PIN", ".github/workflows/ci.yml"];
     for (const path of paths) {
@@ -200,7 +247,7 @@ describe("hosted qualification binding", () => {
         e.tested.commit.parents.reverse();
       },
       (e) => {
-        e.run.pull_requests[0].base.sha = "9".repeat(40);
+        e.tested.commit.parents[0].sha = "9".repeat(40);
       },
     ]) {
       const { record, evidence } = fixture();
@@ -251,7 +298,8 @@ describe("hosted qualification binding", () => {
     evidence.source = structuredClone(evidence.target);
     evidence.tested = structuredClone(evidence.target);
     for (const job of evidence.jobs.jobs) job.head_sha = selfSha;
-    evidence.jobs.jobs.at(-1).name = `Qualification Source (${selfSha})`;
+    evidence.jobs.jobs.at(-1).name =
+      `Qualification Source (${selfSha}; source ${selfSha}; base ${selfSha}; ref main)`;
     assert.throws(() => requireHostedQualification(record, evidence), /Only qualification evidence/);
   });
 });
@@ -260,6 +308,38 @@ describe("hosted qualification API reader", () => {
   it("loads the exact run, attempt, trees and records through read-only API routes", async () => {
     const f = fixture();
     const evidence = await readHostedQualification(f.record, f.env, apiFixture(f));
+    assert.deepEqual(evidence, f.evidence);
+  });
+
+  it("retains original checkout evidence on later job pages after the PR advances", async () => {
+    const f = fixture();
+    const required = structuredClone(f.evidence.jobs.jobs);
+    const extra = Array.from({ length: 100 }, (_, index) => ({
+      id: 100 + index,
+      name: `Optional job ${index}`,
+      run_id: 123,
+      run_attempt: 1,
+      head_sha: f.evidence.run.head_sha,
+      status: "completed",
+      conclusion: "skipped",
+    }));
+    f.evidence.jobs.jobs = [...extra, ...required];
+    f.evidence.jobs.total_count = f.evidence.jobs.jobs.length;
+    const read = apiFixture(f);
+    const pages = [];
+    const evidence = await readHostedQualification(f.record, f.env, async (path) => {
+      if (!path.includes("/jobs?")) return read(path);
+      pages.push(path);
+      const page = Number(new URLSearchParams(path.split("?")[1]).get("page"));
+      return {
+        total_count: f.evidence.jobs.total_count,
+        jobs: structuredClone(f.evidence.jobs.jobs.slice((page - 1) * 100, page * 100)),
+      };
+    });
+    assert.deepEqual(pages, [
+      "actions/runs/123/attempts/1/jobs?per_page=100&page=1",
+      "actions/runs/123/attempts/1/jobs?per_page=100&page=2",
+    ]);
     assert.deepEqual(evidence, f.evidence);
   });
 

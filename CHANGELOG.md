@@ -7,10 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Foundry v0.5.0 release preparation is a draft. Entries stay here until root
-reconciles later main merges and establishes `[0.5.0]` with the actual release
-date before the immutable tag target. See `docs/release-notes/v0.5.0.md` and
-the pending qualification dependencies in `docs/compatibility.md`.
+No changes beyond the prepared v0.5.0 source below.
+
+## [0.5.0] - Pending publication
+
+This release source is prepared; hosted qualification and publication remain
+pending. The actual publication date will be recorded with the published
+Foundry artifacts, after release. See `docs/release-notes/v0.5.0.md` and the
+pending qualification dependencies in `docs/compatibility.md`.
 
 ### Added
 
@@ -18,11 +22,14 @@ the pending qualification dependencies in `docs/compatibility.md`.
   Settings. Viewers and editors can review bounded desired proxy, upstream and
   plugin fields without applying configuration, contacting a producer, or
   reading TLS paths. The shared schema and all fixtures are vendored at
-  `contracts-edge-0.9.9-r2` in the canonical integrity pin, preserving existing
-  vocabulary bytes and the qualified Edge pairing. The contract remains
-  PROPOSED; remaining consumers stay tracked by ferrum-alloy#27. An ADR defines
-  the authenticated presentation boundary for future diagnostics; no telemetry
-  or report import is implemented.
+  published `contracts-edge-0.9.11` at `390edbd5b2485af0988e02f7827fde778d76ae0a`
+  in the canonical integrity pin, with canonical invalid expectations.
+  Validation fields and fixtures are unchanged; vocabulary provenance now names
+  released Edge v0.9.11 with unchanged plugin/provisioning semantics. The shared
+  manifest/report status is EXISTING/implemented, with Alloy still unpublished;
+  remaining coordinated adoption stays tracked by ferrum-alloy#27/#28. An ADR
+  defines the authenticated presentation boundary for future diagnostics; no
+  telemetry or report import is implemented.
 
 ### Security
 
@@ -136,6 +143,9 @@ the pending qualification dependencies in `docs/compatibility.md`.
   qualification evidence may change after the earlier pending tree passes;
   changed code, pins, workflows or documentation require qualification again.
   Pending qualification and already-recorded Foundry artifacts remain refused.
+  Original tested/source/base identities and main ref are captured in the
+  immutable checkout job; advancing live PR metadata to record evidence no
+  longer invalidates an otherwise unchanged qualified tree.
 - The existing plugin-schema drift checker exports exact fetched component
   blocks and hashes to a hosted JSON artifact with a checksum, even on drift.
   Uploads require both nonempty files and successful hashing, and include the
@@ -143,8 +153,9 @@ the pending qualification dependencies in `docs/compatibility.md`.
   actual c764 export from hosted run 37239682559 / artifact 11316747307; only
   `RateLimitingConfig` changed. Guided edits preserve its unmodelled MCP object,
   null and omitted states without inferring controls or defaults. The canonical
-  `contracts-edge-0.9.9-r2` pin remains immutable while contracts PR #13 awaits
-  owner qualification and publication.
+  pin adopts the actual published v0.9.11 tag byte-exact, preserving full
+  descriptions and their historical preparation wording. The prior r2 tag and
+  released v0.4.0 pairing remain immutable.
 
 - The runtime image is distroless again (#533):
   `gcr.io/distroless/nodejs24-debian13:nonroot`, pinned by index digest, now
@@ -454,7 +465,8 @@ First public release of Ferrum Foundry.
 - Release channels are monotonic: tags are validated and ancestry-checked before registry access, prereleases never advance stable tags, and promotion runs through a fail-closed FIFO queue (#155).
 - Scheduled live branch deletion replaced with dry-run planning plus a separately approved, exact-SHA-revalidated deletion path (#155).
 
-[Unreleased]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/ferrum-edge/ferrum-foundry/compare/release/foundry-0.5.0...HEAD
+[0.5.0]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.4.0...release/foundry-0.5.0
 [0.4.0]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.1.0...v0.2.0

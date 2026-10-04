@@ -65,12 +65,16 @@ export function hostedQualificationFixture(base) {
     conclusion: "success",
     pull_requests: [
       {
-        head: { sha: sourceSha, repo: { id: 42 } },
-        base: { sha: baseSha, ref: "main", repo: { id: 42 } },
+        // The PR has advanced to its evidence commit and main has advanced too.
+        // These mutable fields deliberately differ from the historical checkout.
+        head: { sha: targetSha, repo: { id: 42 } },
+        base: { sha: "8".repeat(40), ref: "main", repo: { id: 42 } },
       },
     ],
   };
-  const jobs = [...QUALIFICATION_JOBS, `Qualification Source (${testedSha})`].map(
+  const sourceJob =
+    `Qualification Source (${testedSha}; source ${sourceSha}; base ${baseSha}; ref main)`;
+  const jobs = [...QUALIFICATION_JOBS, sourceJob].map(
     (name, index) => ({
       id: index + 1,
       name,

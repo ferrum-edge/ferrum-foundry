@@ -17,28 +17,34 @@ switches clear the draft and result and abort an outstanding preview.
 ## Contract and provenance
 
 The canonical pin is `contracts/ferrum-contracts/PIN`: immutable tag
-[`contracts-edge-0.9.9-r2`](https://github.com/ferrum-edge/ferrum-contracts/tree/591c73a3f965fdab440c3a76b2707accdf491ba5)
-at `591c73a3f965fdab440c3a76b2707accdf491ba5`. The adopted files are the existing
+[`contracts-edge-0.9.11`](https://github.com/ferrum-edge/ferrum-contracts/tree/390edbd5b2485af0988e02f7827fde778d76ae0a)
+at `390edbd5b2485af0988e02f7827fde778d76ae0a`, published as
+[release 403239814](https://github.com/ferrum-edge/ferrum-contracts/releases/tag/contracts-edge-0.9.11)
+on 2026-10-04 at 22:41:21 UTC. The adopted files are the existing
 plugin/provisioning vocabularies and schemas, plus the service-manifest schema
-and every shared valid/invalid manifest fixture, including agents. Each exact
-published file has a SHA-256 in the same pin. The four older files are byte
-identical; their original provenance and plugin invariants remain intact. The
-contracts revision maps to the previously qualified Edge v0.9.10 release.
-The v0.5.0 / Edge v0.9.11 draft keeps these exact immutable bytes while
-[canonical PR #13](https://github.com/ferrum-edge/ferrum-contracts/pull/13)
-awaits Alloy replacement main CI and root's qualified merge/tag. Its final
-published service-manifest wire schema will be unchanged and retain full
-descriptions; this draft claims no future tag, bytes, provenance or status.
-Canonical pin adoption is a later serial qualification step.
+and every shared valid/invalid manifest fixture, including agents, plus the
+canonical invalid-expectations file. Each exact published file has a SHA-256 in
+the same pin. Vocabulary provenance now binds released Edge v0.9.11 at c764;
+plugin entries, lifecycle metadata, provisioning values and first availability
+are unchanged. Both vocabulary schemas and all 12 manifest fixtures retain
+their earlier bytes. The manifest validation fields are unchanged, with current
+owner/status metadata and full published descriptions retained verbatim.
+Historical preparation/pending wording inside immutable canonical files records
+their source state before publication; the tag and release above establish the
+actual publication. Foundry hosted v0.5.0 qualification remains pending.
 
 The independently reviewed producer is Alloy commit
 [`690aed7a9fa8458aeea4ac8416170c8daeb0470b`](https://github.com/ferrum-edge/ferrum-alloy/tree/690aed7a9fa8458aeea4ac8416170c8daeb0470b).
 Foundry reads its `manifest.rs` normalization rules and `export.rs` field mapping.
-The shared schema records its earlier transcription source
-`4cba0f4a66f85bcee3140e3b92e299275a2507fb`; that published provenance is preserved,
-not replaced with the newer producer SHA. The schema's status remains
-**PROPOSED**. Foundry's fixture consumption is evidence for one consumer, not a
-freeze of v1 or evidence that every Ferrum consumer works.
+That original Foundry mapping review remains producer evidence. The newly
+published schema separately records qualified Alloy owner
+`81cbb410d34ff5fba1f3d54cfd2e7ebccaed397e`, its successful main PUSH run
+`37238543236`, and root's accepted unchanged shared v1 freeze. Its shared status
+is **EXISTING**, with `x-contract.status: implemented` and owner availability
+`unreleased`. The schema remains a transcription of owner code, with
+post-default and cross-field limitations stated in its provenance. It does not
+publish Alloy crates or establish a Foundry diagnostic importer. The earlier
+r2 tag and its original transcription provenance remain immutable upstream.
 
 ## What the result means
 
@@ -96,8 +102,11 @@ Quality Gate (including Node 24) runs all 12 shared fixtures through the actual
 registered BFF route, plus authentication, CSRF, namespace/agents denial,
 unknown-key/major, normalization, redaction, bounded input, literal mapping and
 accessible UI/cancellation tests. No upstream request is allowed in those
-route tests. PIN tests check integrity, complete file coverage, original
-vocabulary bytes and the Edge release mapping.
+route tests. Canonical invalid expectations cover every negative fixture;
+single-defect repair controls verify its declared schema location and keyword
+and require the repaired input to pass the registered route. PIN tests check
+complete byte integrity (including descriptions), complete file coverage,
+vocabulary semantics, owner status and the Edge release mapping.
 
 Pinned Gateway Contract separately calls preview as a viewer, compares gateway
 collections before and after, then explicitly submits two returned **HTTP**
@@ -108,8 +117,10 @@ apply path. Deployment Starter and Container Gate include the fixed vendored
 schema in the production image.
 
 [Alloy issue 27](https://github.com/ferrum-edge/ferrum-alloy/issues/27) continues to
-track Nexus manifest consumption, Anvil diagnostic import and cross-repo checks,
-and GitForgeOps validation. This Foundry portion must not close that issue or
-mark the shared contract EXISTING without the other consumers' evidence.
+track coordinated adoption across Nexus, Anvil, Alloy and GitForgeOps. The
+canonical publication records their earlier qualified slices and the accepted
+shared status; this Foundry pin update does not qualify arbitrary newer consumer
+sources, close issues 27/28, or authorize Alloy crate publication. Root owns
+those decisions after the remaining adoption gates.
 The [presentation-boundary ADR](adr/0001-alloy-authenticated-presentation.md)
 separates this implemented preview from future diagnostic presentation.

@@ -6,7 +6,7 @@ work tracked by [Alloy issue 27](https://github.com/ferrum-edge/ferrum-alloy/iss
 
 ## Context
 
-Alloy is a local service/CLI producer of a proposed service manifest and
+Alloy is a local service/CLI producer of a shared service manifest and
 diagnostic evidence. It is not a trace store or an authenticated Foundry data
 plane. Foundry already authenticates sessions behind its BFF, authorizes exact
 namespace grants and signs gateway calls as the principal. Browser-direct
@@ -61,10 +61,14 @@ redacted metadata and are never read. No manifest URL or OpenAPI file is loaded.
 There is no telemetry ingestion, report importer, diagnostic lookup, trace
 query, persistent plan or automatic gateway application in this implementation.
 
-The shared manifest remains PROPOSED. Foundry records producer and schema
-provenance and consumer-side fixture evidence; Nexus/Anvil and the remaining
-cross-repo work remain tracked by issue 27. Normal resource editor saves are
-separately approved operations with the existing gateway-qualified behavior.
+The published `contracts-edge-0.9.11` metadata marks the shared manifest and
+diagnostic report EXISTING/implemented after root's accepted owner/consumer
+qualification. Foundry adopts the exact manifest schema and fixtures, with
+owner-unreleased availability and historical descriptions retained. Alloy crate
+publication and remaining coordinated adoption are separate decisions tracked
+by issue 27; diagnostic presentation stays future work here. Normal resource
+editor saves are separately approved operations with the existing
+gateway-qualified behavior.
 
 ## Consequences
 

@@ -134,13 +134,19 @@ test("hosted producer uploads require both nonempty files and successful hashing
   assert.doesNotMatch(upload, /overwrite:|continue-on-error:/);
 });
 
-test("hosted qualification exposes the tested checkout SHA independently of the PR head", () => {
+test("hosted qualification captures original tested, source and base identities", () => {
   const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
   const source = workflow.slice(
     workflow.indexOf("  qualification-source:"),
     workflow.indexOf("  quality:"),
   );
-  assert.match(source, /name: Qualification Source \(\$\{\{ github\.sha \}\}\)/);
-  assert.match(source, /run: test "\$\(git rev-parse HEAD\)" = "\$GITHUB_SHA"/);
+  assert.match(source, /name: Qualification Source \(\$\{\{ github\.sha \}\}; source /);
+  assert.match(source, /source \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/);
+  assert.match(source, /base \$\{\{ github\.event\.pull_request\.base\.sha \|\| github\.sha \}\}/);
+  assert.match(source, /ref \$\{\{ github\.event\.pull_request\.base\.ref \|\| github\.ref_name \}\}\)/);
+  assert.match(source, /fetch-depth: 2/);
+  assert.match(source, /test "\$\(git rev-parse HEAD\)" = "\$GITHUB_SHA"/);
+  assert.match(source, /test "\$\(git rev-parse HEAD\^1\)" = "\$QUALIFICATION_BASE"/);
+  assert.match(source, /test "\$\(git rev-parse HEAD\^2\)" = "\$QUALIFICATION_SOURCE"/);
   assert.doesNotMatch(source, /continue-on-error:|\n\s+if:/);
 });

@@ -52,8 +52,8 @@ works the same way against a live Ferrum Edge gateway.
 Foundry is qualified against one Ferrum Edge image at a time. This branch
 prepares **Foundry v0.5.0** with the published **Ferrum Edge v0.9.11** distribution,
 pinned by digest in `docs/compatibility.json`. Hosted Foundry qualification is
-pending, including canonical contract promotion. The actual hosted schema
-producer export has been reviewed and adopted; it is not live acceptance.
+pending. The published canonical contracts and actual hosted schema producer
+export have been reviewed and adopted; hosted live acceptance remains required.
 The latest published pairing remains Foundry v0.4.0 / Edge v0.9.10 in
 [history](docs/compatibility.md#history).
 
@@ -69,17 +69,19 @@ steps, requirements, Node floors, and tested scale.
 The org's shared vocabularies, JSON schemas, and fixtures live in
 [ferrum-edge/ferrum-contracts](https://github.com/ferrum-edge/ferrum-contracts).
 Foundry vendors the `plugin-catalog` and `provisioned-by` vocabularies with
-their vocabulary schemas, plus the proposed service-manifest schema and all
-its valid/invalid fixtures, under
+their vocabulary schemas, plus the implemented service-manifest schema, all
+its valid/invalid fixtures and the canonical invalid-expectations file, under
 [`contracts/ferrum-contracts/`](contracts/ferrum-contracts/), pinned to
-`contracts-edge-0.9.9-r2` in
+`contracts-edge-0.9.11` at `390edbd5b2485af0988e02f7827fde778d76ae0a` in
 [`contracts/ferrum-contracts/PIN`](contracts/ferrum-contracts/PIN). The vendored
 files, Foundry's local plugin names and provisioning markers, and the pin's tie
 to the qualified Edge release are checked by
 [Plugin configuration templates](docs/plugin-defaults.md#shared-plugin-catalog-contract).
-Canonical [PR #13](https://github.com/ferrum-edge/ferrum-contracts/pull/13) is
-a draft qualification dependency; this branch keeps the existing immutable pin
-until its actual owner qualification, merge and tag.
+Canonical [release 403239814](https://github.com/ferrum-edge/ferrum-contracts/releases/tag/contracts-edge-0.9.11)
+was published on 2026-10-04. Its owner qualification marks the shared manifest
+and diagnostic report EXISTING/implemented; Alloy remains unpublished. Exact
+vendored descriptions retain their historical preparation wording. Foundry
+adopts only the files listed in its pin; diagnostic import remains future work.
 The unreleased [Alloy manifest preview](docs/alloy-manifest-preview.md) consumes
 the existing fields through an authenticated, read-only BFF route.
 

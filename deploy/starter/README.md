@@ -21,7 +21,10 @@ is pending; the latest published pairing remains v0.4.0 / Edge v0.9.10 in
 image, `ferrumedge/ferrum-foundry:main`, is the development channel. Production
 must use an actual released Foundry digest from that record; the candidate has
 no published Foundry image yet. Both existing profiles and authority tiers are
-unchanged.
+unchanged. The candidate adopts published `contracts-edge-0.9.11` at
+`390edbd5b2485af0988e02f7827fde778d76ae0a`; its service-manifest schema is
+packaged unchanged from that tag. Canonical publication does not qualify this
+starter or publish a Foundry image.
 
 ## Two profiles
 

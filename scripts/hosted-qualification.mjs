@@ -15,6 +15,10 @@ export const QUALIFICATION_JOBS = [
 
 const COMMIT = /^[0-9a-f]{40}$/;
 const RUN_URL = /^https:\/\/github\.com\/ferrum-edge\/ferrum-foundry\/actions\/runs\/([1-9]\d*)$/;
+const SOURCE_JOB = new RegExp(
+  "^Qualification Source \\(([0-9a-f]{40}); source ([0-9a-f]{40}); " +
+  "base ([0-9a-f]{40}); ref main\\)$",
+);
 const IDENTITY_FIELDS = ["ci_evidence", "source_commit", "tested_commit", "run_attempt"];
 
 function positiveInteger(value) {
@@ -126,10 +130,21 @@ export function requireHostedQualification(record, evidence) {
   ) {
     throw new Error("Hosted qualification jobs are missing or incomplete");
   }
-  const required = [
-    ...QUALIFICATION_JOBS,
-    `Qualification Source (${qualification.tested_commit})`,
-  ];
+  // Job names are immutable for an attempt. Embedded run.pull_requests head
+  // and base SHAs are live PR metadata and cannot bind a historical checkout.
+  const sourceJobs = jobs.jobs.filter((job) => job.name?.startsWith("Qualification Source ("));
+  const binding = SOURCE_JOB.exec(sourceJobs[0]?.name ?? "");
+  if (
+    sourceJobs.length !== 1 || !binding || binding[1] !== qualification.tested_commit ||
+    binding[2] !== qualification.source_commit
+  ) {
+    throw new Error(
+      "Hosted qualification requires one successful current-attempt job " +
+      "with matching immutable source binding",
+    );
+  }
+  const originalBase = binding[3];
+  const required = [...QUALIFICATION_JOBS, sourceJobs[0].name];
   const jobIds = new Set();
   for (const name of required) {
     const matches = jobs.jobs.filter((job) => job.name === name);
@@ -155,22 +170,19 @@ export function requireHostedQualification(record, evidence) {
     throw new Error("Hosted qualification commit identities do not match the record");
   }
   if (run.event === "pull_request") {
-    const pullRequests = Array.isArray(run.pull_requests)
-      ? run.pull_requests.filter((pr) => pr.head?.sha === qualification.source_commit)
-      : [];
-    const pr = pullRequests?.[0];
     if (
-      pullRequests?.length !== 1 || pr.head.repo?.id !== run.repository.id ||
-      pr.base?.repo?.id !== run.repository.id || pr.base.ref !== "main" ||
-      !COMMIT.test(pr.base.sha ?? "") || tested.commit.parents?.length !== 2 ||
-      tested.commit.parents[0].sha !== pr.base.sha ||
+      tested.commit.parents?.length !== 2 ||
+      tested.commit.parents[0].sha !== originalBase ||
       tested.commit.parents[1].sha !== qualification.source_commit
     ) {
       throw new Error(
         "Hosted qualification does not bind the tested PR merge to its actual head and base",
       );
     }
-  } else if (run.head_branch !== "main" || tested.commit.sha !== source.commit.sha) {
+  } else if (
+    run.head_branch !== "main" || tested.commit.sha !== source.commit.sha ||
+    originalBase !== source.commit.sha
+  ) {
     throw new Error("Hosted push qualification must test the main source commit");
   }
   if (

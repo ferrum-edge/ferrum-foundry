@@ -86,7 +86,9 @@ Regression tests cover that preservation, not runtime MCP admission.
 The original run failed on this drift before starting the contract gateway;
 its producer artifact is schema evidence, not successful live qualification.
 The Node gates also failed the unchanged canonical r2 mapping for v0.9.11.
-Canonical publication/adoption and full hosted acceptance remain pending.
+Published `contracts-edge-0.9.11` was subsequently adopted in the pending release
+source; full Foundry hosted acceptance remains pending. The earlier failed run
+and original artifact identities above remain schema evidence only.
 
 The checker exports exact fetched component YAML blocks, actual hashes,
 comparison findings, raw source hash, source ref and reviewed ref as JSON when

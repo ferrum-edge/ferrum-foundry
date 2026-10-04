@@ -37,6 +37,9 @@ a local copy would go stale.
 
 Shared org contracts are vendored under `contracts/ferrum-contracts/`; see
 [Contracts](README.md#contracts).
+The v0.5.0 preparation pins published `contracts-edge-0.9.11` at
+`390edbd5b2485af0988e02f7827fde778d76ae0a`. The shared manifest is implemented;
+Foundry hosted pairing qualification and publication evidence remain pending.
 
 ## Development
 

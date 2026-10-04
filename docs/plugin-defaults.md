@@ -81,15 +81,18 @@ the org's central contract store, in
 [`contracts/ferrum-contracts/PIN`](../contracts/ferrum-contracts/PIN).
 The pinned files and the local plugin names and provisioning markers are checked
 by `scripts/ferrum-contracts.test.mjs` in the normal contract test suite.
-The canonical pin is now `contracts-edge-0.9.9-r2`; its plugin catalog and
-provisioning vocabulary/schema bytes and provenance are unchanged from the
-previous pin. It also includes the proposed service-manifest schema and all
-shared fixtures for the [Alloy preview consumer](alloy-manifest-preview.md).
-The revision maps to the previously qualified Edge v0.9.10. The v0.5.0 /
-Edge v0.9.11 draft preserves this immutable pin; canonical
-[PR #13](https://github.com/ferrum-edge/ferrum-contracts/pull/13) remains a
-qualification dependency. Root will assign adoption only after actual owner
-main qualification and canonical merge/tag. No draft head is a released pin.
+The canonical pin is now published `contracts-edge-0.9.11` at
+`390edbd5b2485af0988e02f7827fde778d76ae0a`, mapped to Edge v0.9.11. The plugin
+catalog and provisioning vocabulary refresh provenance to released Edge source
+`c764084b3b51c3f7ffde268c039688d35e49c553`; plugin entries, lifecycle metadata,
+provisioning values and historical first availability are unchanged. The
+vocabulary schemas retain their exact earlier bytes. The pin also includes the
+implemented service-manifest schema, every shared manifest fixture and the
+canonical invalid-expectations file for the
+[Alloy preview consumer](alloy-manifest-preview.md). Every adopted file is
+byte-identical to the immutable canonical commit, including descriptions with
+historical preparation wording. Foundry's hosted v0.5.0 pairing qualification
+remains pending.
 
 To bump the pin, choose a `contracts-edge-*` release, download the adopted
 vocabulary and schema files from that tag into the same paths, resolve the tag
