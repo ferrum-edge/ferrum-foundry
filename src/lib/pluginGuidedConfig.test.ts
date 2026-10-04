@@ -93,6 +93,47 @@ describe("losslessness", () => {
       },
     ]);
   });
+
+  it.each<{ state: string; raw: JsonObject }>([
+    {
+      state: "object",
+      raw: {
+        mcp_tool_calls: {
+          tools: ["search", "lookup"],
+          per_tool: true,
+          endpoint_path: "/mcp",
+        },
+      },
+    },
+    { state: "explicit null", raw: { mcp_tool_calls: null } },
+    { state: "omitted", raw: {} },
+  ])("preserves $state MCP tool counting policy during a guided rate edit", ({ raw }) => {
+    const config: JsonObject = {
+      ...raw,
+      limits: [{ scope: "default", requests_per_second: 100, raw_rule_field: null }],
+      raw_policy: { enabled: false, nested: [null, { value: "untouched" }] },
+    };
+    const original = JSON.stringify(config);
+    expect(rateLimiting.unsupported(config)).toBeNull();
+    const values = readGuidedConfig(rateLimiting, config);
+    expect(Object.keys(values).some((path) => path.startsWith("mcp_tool_calls"))).toBe(false);
+    const draft = { ...values, "limits.0.requests_per_second": { present: true, text: "200" } };
+    const edited = writeGuidedConfig(rateLimiting, config, draft, values);
+
+    expect(edited).toEqual({
+      ...config,
+      limits: [{ scope: "default", requests_per_second: 200, raw_rule_field: null }],
+    });
+    expect(Object.hasOwn(edited, "mcp_tool_calls")).toBe(Object.hasOwn(raw, "mcp_tool_calls"));
+    expect(edited.mcp_tool_calls).toEqual(config.mcp_tool_calls);
+    expect(Object.keys(edited)).toEqual(Object.keys(config));
+    expect(JSON.stringify(config)).toBe(original);
+    if (edited.mcp_tool_calls !== null && typeof edited.mcp_tool_calls === "object") {
+      expect(edited.mcp_tool_calls).not.toBe(config.mcp_tool_calls);
+      expect(Object.keys(edited.mcp_tool_calls)).toEqual(["tools", "per_tool", "endpoint_path"]);
+    }
+    expect(validateGuidedConfig(rateLimiting, draft, edited, values)).toEqual([]);
+  });
 });
 
 describe("omission and clear semantics", () => {

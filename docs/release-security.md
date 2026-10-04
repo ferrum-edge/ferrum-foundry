@@ -31,12 +31,13 @@ workflow (`.github/workflows/ci.yml`) has passed:
 ## Supported Edge image
 
 Passing these gates qualifies Foundry with that one Ferrum Edge image and no
-other build. Every gateway-backed gate runs against the published Ferrum Edge
-v0.9.10 release in `edge.image`, including the MCP security fixes in
-ferrum-edge#5954. Foundry v0.4.0 pairs with v0.9.10; the previous Foundry
-v0.3.0 release paired with v0.9.8.
-Requirements, best-effort and unqualified setups, and rejected images are in
-[the compatibility record](compatibility.md).
+other build. This candidate moves `edge.image` to the verified published Edge
+v0.9.11 distribution; it is not yet a qualified Foundry v0.5.0 pairing.
+The latest published pairing, Foundry v0.4.0 / Edge v0.9.10, remains immutable
+in [history](compatibility.md#history). The actual hosted schema producer export
+and published contracts-edge-0.9.11 have been adopted in the pending source;
+live acceptance remains outstanding in
+[the draft qualification record](compatibility.md#draft-qualification-dependencies).
 
 Moving the pin is a re-qualification: change `edge.image` in
 `docs/compatibility.json`, and the pull request re-runs every gate above against
@@ -68,6 +69,20 @@ Every third-party GitHub Action is pinned to a full commit SHA.
 
 ## Publishing
 
+For v0.5.0, root must land the reviewed release preparation with a **merge
+commit**, whose second parent is the reviewed release branch head. After all
+actual main-push workflows pass, freeze that main commit and create the
+immutable version tag on it. A squash loses the reviewed release-head ancestry.
+The intended entries are prepared in `[0.5.0]` with publication explicitly
+pending; `[Unreleased]` is reserved for subsequent work. Reconcile any later
+main merges before final qualification. This source preparation does not
+perform publication or invent its date.
+
+After publication, record its actual date, Foundry tag source commit, image
+index, platform manifests and successful CI run, set the record to `released`, and
+verify each registry platform config's `org.opencontainers.image.revision`
+against the immutable tag. Candidate nulls cannot be filled from v0.4.0 facts.
+
 Pushes to `main` and release tags publish multi-architecture images with
 BuildKit provenance (`mode=max`) and SBOM attestations. Each manifest job
 requires exactly two per-platform digests, checks that they are `linux/amd64`
@@ -92,10 +107,22 @@ Before any registry login or build, the release workflow requires that:
   `/api/health/ready`;
 - `foundry.version` in `docs/compatibility.json` equals that version;
 - `docs/release-notes/vX.Y.Z.md` exists and is not empty;
-- `node scripts/supported-pairing.mjs release-ready` passes: `edge.release` names
+- `node scripts/supported-pairing.mjs release-ready` passes in hosted Actions:
+  `edge.release` names
   a published Edge release and `edge.image` is that release, and the record is
   still the unreleased `candidate`, with `foundry.source_commit`, `image`, and
-  `ci_evidence` unrecorded;
+  `ci_evidence` null, and `qualification` names its verified successful hosted
+  CI run, attempt, actual head and tested checkout SHA. The metadata job uses
+  only `actions: read` and `contents: read` for those GitHub API reads. It
+  requires every pairing job and checkout-identity job to pass in that attempt,
+  complete source trees, matching pairing records, PR merge-parent binding and
+  release ancestry. The immutable checkout job captures the original source,
+  base and main ref; live embedded PR metadata cannot invalidate historical
+  evidence after its evidence-only commit. API failure is a fixed, redacted
+  refusal. After the earlier pending source passes, only its `qualification`
+  object may change: other code, pin, workflow, record or documentation changes
+  require qualification again. See
+  [qualification recording](compatibility.md#draft-qualification-dependencies);
 - the version has no GitHub release yet;
 - neither `vX.Y.Z` nor `X.Y.Z` exists on Docker Hub or GHCR with an image whose
   `org.opencontainers.image.revision` is another commit

@@ -14,6 +14,7 @@ jobs:
     name: Validate Release Tag
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: read
     outputs:
       tag: ${{ steps.version.outputs.tag }}
@@ -64,6 +65,7 @@ jobs:
         # publish the version again. The record and the notes are prepared on
         # main before tagging; nothing here edits them.
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |

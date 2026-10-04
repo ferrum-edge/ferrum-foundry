@@ -7,18 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- Authenticated, namespace-authorized Alloy service-manifest v1 JSON preview in
-  Settings. Viewers and editors can review bounded desired proxy, upstream and
-  plugin fields without applying configuration, contacting a producer, or
-  reading TLS paths. The shared schema and all fixtures are vendored at
-  `contracts-edge-0.9.9-r2` in the canonical integrity pin, preserving existing
-  vocabulary bytes and the qualified Edge pairing. The contract remains
-  PROPOSED; remaining consumers stay tracked by ferrum-alloy#27. An ADR defines
-  the authenticated presentation boundary for future diagnostics; no telemetry
-  or report import is implemented.
-
 ### Security
 
 - **Draft policy proposal (#542; owner decision pending).** Guarded replacement
@@ -36,6 +24,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Adoption awaits exact-patch review, fresh independent security/concurrency
   review, all hosted checks, and the owner's decision. No released version,
   pins, Node floor, workflow, or pairing evidence changes.
+
+## [0.5.0] - Pending publication
+
+This release source is prepared; hosted qualification and publication remain
+pending. The actual publication date will be recorded with the published
+Foundry artifacts, after release. See `docs/release-notes/v0.5.0.md` and the
+pending qualification dependencies in `docs/compatibility.md`.
+
+### Added
+
+- Authenticated, namespace-authorized Alloy service-manifest v1 JSON preview in
+  Settings. Viewers and editors can review bounded desired proxy, upstream and
+  plugin fields without applying configuration, contacting a producer, or
+  reading TLS paths. The shared schema and all fixtures are vendored at
+  published `contracts-edge-0.9.11` at `390edbd5b2485af0988e02f7827fde778d76ae0a`
+  in the canonical integrity pin, with canonical invalid expectations.
+  Validation fields and fixtures are unchanged; vocabulary provenance now names
+  released Edge v0.9.11 with unchanged plugin/provisioning semantics. The shared
+  manifest/report status is EXISTING/implemented, with Alloy still unpublished;
+  remaining coordinated adoption stays tracked by ferrum-alloy#27/#28. An ADR
+  defines the authenticated presentation boundary for future diagnostics; no
+  telemetry or report import is implemented.
+
+### Security
+
 - The browser-facing proxy refuses `/consumers/{id}/verification` for every
   method, including HEAD, before signing or contacting Ferrum Edge. The denial
   uses the exact canonical pathname forwarded upstream, including encoded
@@ -135,7 +148,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- The runtime image is distroless again (#504):
+- Prepare the Foundry v0.5.0 pairing with the verified published Edge v0.9.11
+  source, binaries and default multi-architecture image. Foundry hosted live
+  acceptance remains pending; SQLite profiles, Node floors and authority tiers
+  are unchanged. Preserve the exact v0.4.0 compatibility record and history.
+- Compatibility metadata version 2 uses null candidate source, image and release
+  CI fields, with pending hosted qualification recorded separately. Release
+  readiness verifies the completed successful hosted CI run, all pairing jobs,
+  attempt, actual head, tested merge, ancestry and source/pairing trees. Only
+  qualification evidence may change after the earlier pending tree passes;
+  changed code, pins, workflows or documentation require qualification again.
+  Pending qualification and already-recorded Foundry artifacts remain refused.
+  Original tested/source/base identities and main ref are captured in the
+  immutable checkout job; advancing live PR metadata to record evidence no
+  longer invalidates an otherwise unchanged qualified tree.
+- The existing plugin-schema drift checker exports exact fetched component
+  blocks and hashes to a hosted JSON artifact with a checksum, even on drift.
+  Uploads require both nonempty files and successful hashing, and include the
+  attempt to preserve prior evidence. The reviewed schema ref now adopts the
+  actual c764 export from hosted run 37239682559 / artifact 11316747307; only
+  `RateLimitingConfig` changed. Guided edits preserve its unmodelled MCP object,
+  null and omitted states without inferring controls or defaults. The canonical
+  pin adopts the actual published v0.9.11 tag byte-exact, preserving full
+  descriptions and their historical preparation wording. The prior r2 tag and
+  released v0.4.0 pairing remain immutable.
+
+- The runtime image is distroless again (#533):
   `gcr.io/distroless/nodejs24-debian13:nonroot`, pinned by index digest, now
   that upstream ships the fixed `libssl3t64` 3.5.7-1~deb13u3. The temporary
   `node:24-trixie-slim` runtime, its build-time OpenSSL and `libpcre2-8-0`
@@ -443,7 +481,8 @@ First public release of Ferrum Foundry.
 - Release channels are monotonic: tags are validated and ancestry-checked before registry access, prereleases never advance stable tags, and promotion runs through a fail-closed FIFO queue (#155).
 - Scheduled live branch deletion replaced with dry-run planning plus a separately approved, exact-SHA-revalidated deletion path (#155).
 
-[Unreleased]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/ferrum-edge/ferrum-foundry/compare/release/foundry-0.5.0...HEAD
+[0.5.0]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.4.0...release/foundry-0.5.0
 [0.4.0]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.1.0...v0.2.0

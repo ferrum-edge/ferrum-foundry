@@ -36,6 +36,7 @@ const CONTRACTS_TAG_EDGE_VERSIONS = {
   // r2 adds the proposed Alloy manifest and agents fields. Existing plugin
   // and provisioning vocabulary bytes/provenance are unchanged.
   "contracts-edge-0.9.9-r2": ["v0.9.9", "v0.9.10"],
+  "contracts-edge-0.9.11": ["v0.9.11"],
 };
 
 function describeSetDrift(actual, expected, label) {
@@ -58,7 +59,8 @@ test("vendored Ferrum Contracts files match their PIN digests", () => {
     .filter((entry) => entry.isFile() && entry.name !== "PIN")
     .map((entry) => `${entry.parentPath}/${entry.name}`.slice(contractRoot.pathname.length))
     .sort();
-  assert.equal(files.size, 17, "PIN must include the reviewed vocabularies, schema and all fixtures");
+  assert.equal(files.size, 18,
+    "PIN must include the reviewed vocabularies, schema, fixtures and invalid expectations");
   assert.deepEqual([...files.keys()].sort(), actualFiles, "PIN must cover every vendored file");
   assert.equal(pinText.split(/\r?\n/).filter((line) => line.startsWith("sha256")).length,
     files.size, "PIN must not contain duplicate entries");
@@ -90,19 +92,56 @@ test("the contracts pin tracks the qualified Ferrum Edge release", () => {
   );
 });
 
-test("the manifest pin retains proposed status and existing vocabulary integrity", () => {
-  assert.match(pinText, /^tag=contracts-edge-0\.9\.9-r2$/m);
-  assert.match(pinText, /^commit=591c73a3f965fdab440c3a76b2707accdf491ba5$/m);
+test("the published manifest pin retains owner status and complete canonical integrity", () => {
+  assert.match(pinText, /^tag=contracts-edge-0\.9\.11$/m);
+  assert.match(pinText, /^commit=390edbd5b2485af0988e02f7827fde778d76ae0a$/m);
   const schema = JSON.parse(readFileSync(
     new URL("schemas/service-manifest/v1.schema.json", contractRoot), "utf8",
   ));
-  assert.equal(schema["x-contract"].status, "proposed");
+  assert.equal(schema["x-contract"].status, "implemented");
+  assert.match(schema["x-contract"].shared_status, /^EXISTING shared v1/);
+  assert.equal(schema["x-contract"].owner, "ferrum-edge/ferrum-alloy");
   assert.equal(schema["x-contract"].provenance[0].commit,
-    "4cba0f4a66f85bcee3140e3b92e299275a2507fb");
+    "81cbb410d34ff5fba1f3d54cfd2e7ebccaed397e");
+  assert.equal(schema["x-contract"].provenance[0].availability, "unreleased");
+  assert.equal(schema["x-contract"].coordinated_release.qualified_owner_commit,
+    "81cbb410d34ff5fba1f3d54cfd2e7ebccaed397e");
+  assert.equal(pinnedFiles().get("schemas/service-manifest/v1.schema.json"),
+    "3d086aec773345df3547adf6e026ad466168b27bf98163614d44171b7862b5dc");
   assert.equal(pinnedFiles().get("vocabularies/plugin-catalog.json"),
-    "bba27e2beb6c0a4b48875b499e49f9f70a5debe53793f26cdc124c4251025494");
+    "3c9060b0152d65cc5b0fa8ef68038b8194d36eed7dbf1e09fe11954e46964807");
   assert.equal(pinnedFiles().get("vocabularies/provisioned-by.json"),
-    "60f6df5cabead31dc456c3fefb01f4191f0a48ad6f8406a58481e033aa1ac061");
+    "672be61219e507b7611a888634126f25dd7e054312d980e5956737318039dd6c");
+  assert.equal(pinnedFiles().get("fixtures/invalid-expectations.json"),
+    "ad48468935b59437a45953a5ac1112912384c48e14dfd6cbe3a9450a4431c679");
+});
+
+test("the vocabularies bind the published Edge source without changing attribution semantics", () => {
+  const compatibility = JSON.parse(
+    readFileSync(new URL("../docs/compatibility.json", import.meta.url), "utf8"),
+  );
+  for (const vocabulary of [pluginCatalog, provisionedBy]) {
+    assert.equal(vocabulary.edge_release, compatibility.edge.release.version);
+    for (const source of vocabulary.provenance) {
+      assert.equal(source.repo, "ferrum-edge/ferrum-edge");
+      assert.equal(source.ref, compatibility.edge.release.version);
+      assert.equal(source.commit, compatibility.edge.source_commit);
+    }
+    assert.equal(Object.hasOwn(vocabulary, "main_branch_delta"), false);
+  }
+  assert.equal(pluginCatalog.config_schema_document.commit, compatibility.edge.source_commit);
+  assert.equal(pluginCatalog.config_schema_document.sha256, compatibility.edge.release.openapi.sha256);
+  assert.equal(provisionedBy.label.key, "provisioned-by");
+  assert.equal(provisionedBy.label.available_since, "v0.9.5");
+  assert.equal(provisionedBy.header.name, "X-Ferrum-Provisioned-By");
+  assert.equal(provisionedBy.header.occurrences, 1);
+  assert.equal(provisionedBy.header.max_length_bytes, 512);
+  assert.equal(provisionedBy.header.control_characters, false);
+  assert.equal(provisionedBy.header.trimmed, true);
+  assert.equal(provisionedBy.open_set, true);
+  assert.deepEqual(provisionedBy.values.map((entry) => entry.value), [
+    "ferrum-edge-git-forge-ops", "ferrum-nexus", "ferrum-foundry",
+  ]);
 });
 
 test("Foundry plugin metadata and defaults use the pinned plugin catalog", () => {

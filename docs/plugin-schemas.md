@@ -23,14 +23,15 @@ Foundry keeps no copy of `openapi.yaml`. It stores the reviewed descriptors and
 the SHA-256 of each source component block instead:
 
 - `PLUGIN_SCHEMA_SPEC` pins the upstream commit
-  (`ferrum-edge/ferrum-edge@65a2341`, `info.version: 0.2.0`).
+  (`ferrum-edge/ferrum-edge@c764084b3b51c3f7ffde268c039688d35e49c553`,
+  `info.version: 0.2.0`).
 - `PLUGIN_SCHEMA_PROVENANCE` pins one digest per component.
 
 `scripts/plugin-schema-drift.mjs` (`npm run check:plugin-schemas`) fetches
 `openapi.yaml`, extracts each block, and compares digests. A changed or missing
-block fails, naming the component. By default it fetches the pinned commit, and
-that is what the **Pinned Gateway Contract** CI job runs. To check against a
-newer spec, set the ref:
+block fails, naming the component. By default the **Pinned Gateway Contract**
+CI job checks the current `edge.source_commit` from `docs/compatibility.json`.
+To check against a newer spec, set the ref:
 
 ```bash
 FERRUM_SPEC_REF=main npm run check:plugin-schemas
@@ -44,6 +45,61 @@ together.
 A block runs from its four-space key line to the next key at that indentation,
 with trailing blank lines dropped. `scripts/plugin-schema-drift.test.mjs` fixes
 that rule and checks that every guided plugin's components are pinned.
+
+### v0.5.0 hosted schema adoption
+
+The serial schema update adopts the actual Pinned Gateway Contract producer
+from [run 37239682559](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37239682559),
+attempt 1. Its API head is `4f729320986aa564158fc2834dfebcbb4fb7a1b3` on
+`release/foundry-0.5.0`. The producer artifact name contains the tested synthetic
+PR merge SHA, `74eef28b70c27251b7ebdcce5033470ee174a3a1`, rather than that API
+head. Retrieval binds to the run and artifact metadata, not a guessed name.
+
+| Actual hosted evidence | Value |
+| --- | --- |
+| Artifact ID | `11316747307` |
+| Original artifact name | `plugin-schema-producer-74eef28b70c27251b7ebdcce5033470ee174a3a1` |
+| Archive SHA-256, matching the GitHub API digest | `a626f1e24c9831c38e0a4fff4393908aab3da8ca3bc7e1c7109b4897e65985fe` |
+| Exported JSON SHA-256, matching its checksum file | `c45683796aef1dbbb9dee9286f48e3b8a37a65b300c3ed3fb0edd9d41fbcd940` |
+| Source repository and path | `ferrum-edge/ferrum-edge`, `openapi.yaml` |
+| Source ref | `c764084b3b51c3f7ffde268c039688d35e49c553` |
+| Raw source SHA-256 | `687db80271512a367814ded6002ecce546eb190a347a57e32eca36af7d665020` |
+| Previous reviewed ref | `65a23411841dd363497f98c7d40f5a66ed7d1942` |
+
+Only `RateLimitingConfig` changed: its actual exported digest is
+`f6f4c095e2c9f326ba62d87094fb9e8ac3833bba9503476cf01daca1ebc6e4a1`, replacing
+`3ba160df5e20745939284d67655d5dcc5cee4766e424a0a31846c0740980ed5d`.
+The exported digests for `KeyAuthConfig`, `RateLimitingRuleConfig`, `CorsConfig`
+and `PrometheusMetricsConfig` are unchanged. The actual component blocks were
+read against the descriptors and `writeGuidedConfig`'s structural-copy behavior
+before updating the ref and this one digest together.
+
+`mcp_tool_calls` deliberately remains unmodelled in guided editing. Its object,
+explicit `null` and omitted states survive a rate edit unchanged, including
+nested `tools`, `per_tool`, `endpoint_path`, and unrelated raw fields. No guided
+control infers this mode or inserts defaults. The raw JSON editor is the full
+surface; the gateway constructor remains admission authority, including UTF-8
+byte bounds, HTTP-only operation and the `per_tool`/`tools` requirement.
+Regression tests cover that preservation, not runtime MCP admission.
+`info.version: 0.2.0` is OpenAPI metadata, not a product version.
+
+The original run failed on this drift before starting the contract gateway;
+its producer artifact is schema evidence, not successful live qualification.
+The Node gates also failed the unchanged canonical r2 mapping for v0.9.11.
+Published `contracts-edge-0.9.11` was subsequently adopted in the pending release
+source; full Foundry hosted acceptance remains pending. The earlier failed run
+and original artifact identities above remain schema evidence only.
+
+The checker exports exact fetched component YAML blocks, actual hashes,
+comparison findings, raw source hash, source ref and reviewed ref as JSON when
+`FERRUM_SCHEMA_EXPORT_PATH` is set. The workflow now uploads both nonempty files
+only after successful hashing, including when the checker reports drift. Names
+are `plugin-schema-producer-<github.sha>-attempt-<github.run_attempt>`: on PRs
+`github.sha` is the synthetic merge, while the API run/artifact head is the
+branch head. Each attempt preserves its prior evidence; uploads never overwrite
+an older attempt. Verify the API run ID, attempt, head, source identity, archive
+digest and exported checksum when retrieving future evidence. The complete
+OpenAPI document is never vendored, and no producer was executed locally.
 
 Transport failures are retried; any other fetch error, including an HTTP error,
 fails the check. An outage is never reported as drift, and never passes.

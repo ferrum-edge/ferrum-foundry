@@ -1,9 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { compareProvenance, digestOf, extractSchemaBlock } from "./plugin-schema-drift.mjs";
+import { readFileSync } from "node:fs";
+import {
+  compareProvenance,
+  digestOf,
+  extractSchemaBlock,
+  schemaProducerExport,
+} from "./plugin-schema-drift.mjs";
 import {
   GUIDED_PLUGINS,
   PLUGIN_SCHEMA_PROVENANCE,
+  PLUGIN_SCHEMA_SPEC,
   getGuidedSchema,
 } from "../src/lib/pluginSchemas.ts";
 
@@ -81,4 +88,65 @@ test("every pinned digest is a full SHA-256", () => {
   for (const entry of PLUGIN_SCHEMA_PROVENANCE) {
     assert.match(entry.sha256, /^[0-9a-f]{64}$/, entry.component);
   }
+});
+
+test("the hosted export retains exact blocks and reports drift without inventing pins", () => {
+  const ref = "a".repeat(40);
+  const exported = schemaProducerExport(SPEC, ref);
+  assert.equal(exported.source.ref, ref);
+  assert.equal(exported.source.sha256, digestOf(SPEC));
+  assert.equal(exported.reviewed_ref, PLUGIN_SCHEMA_SPEC.ref);
+  const keyAuth = exported.components.find((entry) => entry.component === "KeyAuthConfig");
+  assert.equal(keyAuth.yaml, extractSchemaBlock(SPEC, "KeyAuthConfig"));
+  assert.equal(keyAuth.actual, digestOf(keyAuth.yaml));
+  assert.equal(keyAuth.status, "changed");
+  const missing = exported.components.find((entry) => entry.component === "RateLimitingConfig");
+  assert.equal(missing.yaml, null);
+  assert.equal(missing.actual, null);
+  assert.equal(missing.status, "missing");
+});
+
+test("hosted producer uploads require both nonempty files and successful hashing", () => {
+  const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+  const hashStart = workflow.indexOf("      - name: Hash the hosted schema producer export\n");
+  const uploadStart = workflow.indexOf("      - name: Upload the hosted schema producer export\n");
+  const end = workflow.indexOf("      - name: Verify the plugin sensitivity table", uploadStart);
+  assert.ok(hashStart > 0 && uploadStart > hashStart && end > uploadStart);
+  const hash = workflow.slice(hashStart, uploadStart);
+  assert.match(hash, /id: schema-hash\n/);
+  // Drift remains a failing job, but its valid exporter output can be hashed.
+  assert.match(hash, /always\(\) && steps\.guided-schemas\.outcome != 'skipped'/);
+  assert.match(
+    hash,
+    /test -s plugin-schema-producer\.json\n\s+sha256sum plugin-schema-producer\.json > plugin-schema-producer\.json\.sha256\n\s+test -s plugin-schema-producer\.json\.sha256/,
+  );
+  const upload = workflow.slice(uploadStart, end);
+  assert.match(upload, /if: \$\{\{ always\(\) && steps\.schema-hash\.outcome == 'success' \}\}/);
+  assert.match(
+    upload,
+    /name: plugin-schema-producer-\$\{\{ github\.sha \}\}-attempt-\$\{\{ github\.run_attempt \}\}/,
+  );
+  assert.match(
+    upload,
+    /path: \|\n\s+\$\{\{ runner\.temp \}\}\/plugin-schema-producer\.json\n\s+\$\{\{ runner\.temp \}\}\/plugin-schema-producer\.json\.sha256/,
+  );
+  assert.match(upload, /if-no-files-found: error/);
+  assert.doesNotMatch(upload, /overwrite:|continue-on-error:/);
+});
+
+test("hosted qualification captures original tested, source and base identities", () => {
+  const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+  const source = workflow.slice(
+    workflow.indexOf("  qualification-source:"),
+    workflow.indexOf("  quality:"),
+  );
+  assert.match(source, /name: Qualification Source \(\$\{\{ github\.sha \}\}; source /);
+  assert.match(source, /source \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/);
+  assert.match(source, /base \$\{\{ github\.event\.pull_request\.base\.sha \|\| github\.sha \}\}/);
+  assert.match(source, /ref \$\{\{ github\.event\.pull_request\.base\.ref \|\| github\.ref_name \}\}\)/);
+  assert.match(source, /fetch-depth: 2/);
+  assert.match(source, /test "\$\(git rev-parse HEAD\)" = "\$GITHUB_SHA"/);
+  assert.match(source, /test "\$\(git rev-parse HEAD\^1\)" = "\$QUALIFICATION_BASE"/);
+  assert.match(source, /test "\$\(git rev-parse HEAD\^2\)" = "\$QUALIFICATION_SOURCE"/);
+  assert.doesNotMatch(source, /continue-on-error:|\n\s+if:/);
 });
