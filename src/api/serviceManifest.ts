@@ -14,7 +14,7 @@ export async function previewServiceManifest(
   }
   let status: number;
   try {
-    return await api.post('service-manifest/preview', scoped(scope, {
+    return await api.post('api/service-manifest/preview', scoped(scope, {
       body: document,
       headers: { 'content-type': 'application/json' },
       signal,
