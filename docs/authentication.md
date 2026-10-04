@@ -140,6 +140,22 @@ repeated separators, malformed escapes, and nested escapes are refused with
 authorization, body limits, upload admission, and deadlines all use the same
 normalized path that is sent upstream.
 
+### Consumer credential verification
+
+Edge's `/consumers/{id}/verification` is a credential-complete reconciliation
+read. Foundry refuses it through `/api/proxy/*` with
+`403 FERRUM_BFF_CREDENTIAL_READ_DENIED` for every forwarded method, including
+HEAD. The decision uses the same canonical pathname sent upstream: encoded
+route components and identifiers, an optional trailing slash, and queries
+cannot bypass it. Unsafe paths still receive `400 FERRUM_BFF_UNSAFE_PATH`.
+
+Principal authentication, CSRF, and namespace authorization run first. The
+credential-read denial runs before JWT signing or upstream fetch, even for an
+authorized administrator. Foundry has no credential-complete consumer reader;
+ordinary masked consumer reads and the existing masked metadata write workflow
+remain supported. Intentional archival backup downloads are described in
+[Backup export](concurrent-edits.md#backup-export).
+
 ### Runtime identity defaults
 
 `GET /api/settings` includes the active `authMode`. In `trusted-proxy` mode:

@@ -77,20 +77,13 @@ export function BackupRestoreCard() {
 
   const handleDownload = async () => {
     if (!canExport.allowed) return;
+    const namespace = selectedNamespace;
     try {
-      const data = await backup.mutateAsync(undefined);
-      const blob = new Blob([JSON.stringify(data, null, 2)], {
-        type: "application/json",
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `ferrum-backup-${selectedNamespace}-${new Date().toISOString().slice(0, 10)}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
+      const counts = await backup.mutateAsync({ namespace });
       toast(
         "success",
-        `Backup exported (${data.counts.proxies} proxies, ${data.counts.consumers} consumers). Credentials are UNREDACTED — store securely.`,
+        `Backup exported for namespace "${namespace}" (${counts.proxies} proxies, ` +
+          `${counts.consumers} consumers). Credentials are UNREDACTED — store securely.`,
       );
     } catch (err) {
       toast("error", await getApiErrorMessage(err, "Backup failed"));

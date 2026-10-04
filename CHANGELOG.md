@@ -21,6 +21,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- The browser-facing proxy refuses `/consumers/{id}/verification` for every
+  method, including HEAD, before signing or contacting Ferrum Edge. The denial
+  uses the exact canonical pathname forwarded upstream, including encoded
+  components and IDs, a trailing slash, and queries. Ordinary masked consumer
+  reads and metadata writes remain supported (#541).
+- Backup export downloads the intentional unredacted archive within a temporary
+  operation and returns only validated completion counts to TanStack Query.
+  Mutation state never receives backup rows, and export uses `gcTime: 0`.
+  Object URLs are revoked on success and download setup failure; the request,
+  filename, and completion stay bound to the captured namespace and gateway
+  target. Export errors retain fixed diagnostics and HTTP status without raw
+  response bodies, credential excerpts, or request metadata (#541).
 - Namespace cascade deletes now require the BFF request to echo the exact
   target namespace as exactly one literal `confirm=<namespace-name>`. The BFF
   validates the complete query, including text after a second `?`, and forwards

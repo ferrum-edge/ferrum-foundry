@@ -84,6 +84,13 @@ export function proxyTargetUrl(request: FastifyRequest, adminUrl: string): URL {
   return target;
 }
 
+/** Credential-complete reconciliation reads must never reach a browser. */
+export function proxyPathIsConsumerVerification(path: string): boolean {
+  // Consume proxyTargetPath's serialized pathname, exactly as proxyTargetUrl
+  // forwards it. IDs may still contain URL escapes; never decode it again.
+  return /^\/consumers\/[^/]+\/verification\/?$/.test(path);
+}
+
 export function requestIsProxyRoute(request: FastifyRequest): boolean {
   const routePath = request.routeOptions.url ?? '';
   return routePath === '/api/proxy/*' || routePath.startsWith(PROXY_PREFIX);

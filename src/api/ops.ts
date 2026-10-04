@@ -480,6 +480,7 @@ export interface BackupResponse {
   api_specs?: unknown;
 }
 
+/** Raw archival rows for the temporary download operation; never cache this result. */
 export async function getBackup(
   scope: NamespaceScope,
   resources?: string[],
@@ -489,7 +490,17 @@ export async function getBackup(
     searchParams.resources = resources.join(",");
   }
   return proxyApi
-    .get("backup", scoped(scope, { searchParams, timeout: 120_000, retry: 0 }))
+    // Export reports only safe failures from the download operation. A failed
+    // read may itself carry backup JSON, so never report ky's raw error body.
+    .get(
+      "backup",
+      scoped(scope, {
+        searchParams,
+        timeout: 120_000,
+        retry: 0,
+        context: { [SILENT_ERRORS]: true },
+      }),
+    )
     .json<BackupResponse>();
 }
 

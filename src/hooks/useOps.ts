@@ -13,6 +13,7 @@ import { classifyUnobservedOutcome } from "@/api/mutationOutcome";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as ops from "@/api/ops";
 import { useNamespace } from "@/stores/namespace";
+import { downloadBackup } from "@/lib/backupDownload";
 import { retireCascade, type CascadeKind } from "./retireCascade";
 
 export function useOverload(refetchInterval?: number | false) {
@@ -97,9 +98,12 @@ export function useAuditEvents(params: ops.AuditListParams = {}) {
 }
 
 export function useBackup() {
-  const { scope } = useNamespace();
   return useMutation({
-    mutationFn: (resources?: string[]) => ops.getBackup(scope, resources),
+    gcTime: 0,
+    // Capture the namespace at the action, before Query starts the mutation.
+    // Only counts return from the operation; raw rows never enter its state.
+    mutationFn: ({ namespace, resources }: { namespace: string; resources?: string[] }) =>
+      downloadBackup({ namespace }, resources),
   });
 }
 
