@@ -15,6 +15,17 @@ permissions:
   contents: read
 
 jobs:
+  qualification-source:
+    # The run API's head_sha is the PR head, while checkout tests github.sha
+    # (the synthetic merge). Expose that immutable identity in the jobs API.
+    name: Qualification Source (${{ github.sha }})
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Bind the checkout to the hosted workflow source
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
   quality:
     name: Quality Gate (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
@@ -110,15 +121,20 @@ jobs:
         run: npm run check:plugin-schemas
 
       - name: Hash the hosted schema producer export
+        id: schema-hash
         if: ${{ always() && steps.guided-schemas.outcome != 'skipped' }}
         working-directory: ${{ runner.temp }}
-        run: sha256sum plugin-schema-producer.json > plugin-schema-producer.json.sha256
+        run: |
+          set -euo pipefail
+          test -s plugin-schema-producer.json
+          sha256sum plugin-schema-producer.json > plugin-schema-producer.json.sha256
+          test -s plugin-schema-producer.json.sha256
 
       - name: Upload the hosted schema producer export
-        if: ${{ always() && steps.guided-schemas.outcome != 'skipped' }}
+        if: ${{ always() && steps.schema-hash.outcome == 'success' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: plugin-schema-producer-${{ github.sha }}
+          name: plugin-schema-producer-${{ github.sha }}-attempt-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/plugin-schema-producer.json
             ${{ runner.temp }}/plugin-schema-producer.json.sha256

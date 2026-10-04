@@ -42,8 +42,8 @@ export interface SchemaProvenance {
 export const PLUGIN_SCHEMA_SPEC = {
   repository: "ferrum-edge/ferrum-edge",
   path: "openapi.yaml",
-  /** Commit that last touched `openapi.yaml` when these were transcribed. */
-  ref: "65a23411841dd363497f98c7d40f5a66ed7d1942",
+  /** Released source reviewed from the hosted schema producer export. */
+  ref: "c764084b3b51c3f7ffde268c039688d35e49c553",
   /** `info.version` at that revision. */
   version: "0.2.0",
 } as const;
@@ -55,7 +55,7 @@ export const PLUGIN_SCHEMA_PROVENANCE: readonly SchemaProvenance[] = [
   },
   {
     component: "RateLimitingConfig",
-    sha256: "3ba160df5e20745939284d67655d5dcc5cee4766e424a0a31846c0740980ed5d",
+    sha256: "f6f4c095e2c9f326ba62d87094fb9e8ac3833bba9503476cf01daca1ebc6e4a1",
   },
   {
     component: "RateLimitingRuleConfig",
@@ -189,6 +189,9 @@ function isPlainObject(value: JsonValue | undefined): value is Record<string, Js
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// `mcp_tool_calls` deliberately remains unmodelled. Guided writes clone the
+// original object, preserving its nested policy and object/null/omitted state;
+// the raw JSON editor and gateway constructor remain the complete authority.
 const RATE_LIMITING: PluginGuidedSchema = {
   plugin: "rate_limiting",
   summary: "Per-IP, per-consumer, or per-SPIFFE-identity request rate limiting.",

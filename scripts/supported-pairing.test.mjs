@@ -18,8 +18,10 @@ import {
   requireReleaseReady,
   validatePairing,
 } from "./supported-pairing.mjs";
+import { hostedQualificationFixture } from "./fixtures/hosted-qualification.mjs";
 
 const record = readSupportedPairing();
+const qualifiedFixture = hostedQualificationFixture(record);
 
 /** A rejected entry for fixtures; the live record currently rejects nothing. */
 const REJECTED_FIXTURE = {
@@ -280,10 +282,7 @@ describe("validatePairing", () => {
   it("allows null artifact fields only until the record is marked released", () => {
     const released = structuredClone(valid);
     released.status = "released";
-    released.qualification = {
-      status: "qualified",
-      ci_evidence: "https://github.com/ferrum-edge/ferrum-foundry/actions/runs/123",
-    };
+    released.qualification = structuredClone(qualifiedFixture.record.qualification);
     for (const field of FOUNDRY_RELEASE_STEP_FIELDS) {
       released.foundry[field] = null;
       assert.ok(validatePairing(released).includes(`foundry.${field} is still null`));
@@ -362,24 +361,23 @@ describe("validatePairing", () => {
 });
 
 describe("requireReleaseReady", () => {
-  // The candidate commit that prepares a release: status candidate, Foundry
-  // artifacts still null. Its Edge release has hosted qualification evidence.
-  const candidate = structuredClone(record);
-  candidate.status = "candidate";
-  for (const field of FOUNDRY_RELEASE_STEP_FIELDS) {
-    candidate.foundry[field] = null;
-  }
-  candidate.qualification = {
-    status: "qualified",
-    ci_evidence: "https://github.com/ferrum-edge/ferrum-foundry/actions/runs/123",
-  };
+  // Fictitious successful hosted evidence for the pending tree, followed only
+  // by an evidence record. The live record remains pending and cannot release.
+  const { record: candidate, evidence } = qualifiedFixture;
 
   it("passes the unreleased candidate the release workflow tags", () => {
-    assert.deepEqual(requireReleaseReady(candidate), {
+    assert.deepEqual(requireReleaseReady(candidate, evidence), {
       ready: true,
       edge: candidate.edge.release.version,
       image: candidate.edge.image,
     });
+  });
+
+  it("refuses a URL without verified hosted evidence", () => {
+    assert.throws(() => requireReleaseReady(candidate), /run does not match/);
+    const failed = structuredClone(evidence);
+    failed.run.conclusion = "failure";
+    assert.throws(() => requireReleaseReady(candidate, failed), /completed and successful/);
   });
 
   it("refuses a published version through foundryReleaseErrors", () => {
@@ -398,7 +396,7 @@ describe("requireReleaseReady", () => {
     for (const published of [publishedStatus, publishedArtifact]) {
       assert.deepEqual(validatePairing(published), []);
       assert.throws(
-        () => requireReleaseReady(published),
+        () => requireReleaseReady(published, evidence),
         (error) => {
           assert.match(error.message, /is not an unreleased candidate/);
           assert.match(error.message, /Tag the commit that prepared this version/);
@@ -412,7 +410,7 @@ describe("requireReleaseReady", () => {
     const unqualified = structuredClone(candidate);
     unqualified.edge.release.image = `${PLACEHOLDER_PREFIX}: edge release image`;
     assert.throws(
-      () => requireReleaseReady(unqualified),
+      () => requireReleaseReady(unqualified, evidence),
       /does not name a qualified Ferrum Edge release/,
     );
   });
@@ -423,7 +421,7 @@ describe("requireReleaseReady", () => {
       { status: "qualified", ci_evidence: null },
     ]) {
       assert.throws(
-        () => requireReleaseReady({ ...candidate, qualification }),
+        () => requireReleaseReady({ ...candidate, qualification }, evidence),
         /hosted qualification is still pending/,
       );
     }
@@ -434,7 +432,7 @@ describe("requireReleaseReady", () => {
     // main() actually calls it rather than reverting to an inline edge check.
     assert.match(
       repoFile("scripts/supported-pairing.mjs"),
-      /command === "release-ready"\) \{\n\s+console\.log\(JSON\.stringify\(requireReleaseReady\(record\)\)\)/,
+      /command === "release-ready"\) \{\n\s+const evidence = await readHostedQualification\(record\);\n\s+console\.log\(JSON\.stringify\(requireReleaseReady\(record, evidence\)\)\)/,
     );
   });
 });
@@ -466,6 +464,14 @@ describe("repository alignment", () => {
   it("has the release workflow refuse a tag until the Edge release is qualified", () => {
     const workflow = repoFile(".github/workflows/release.yml");
     assert.match(workflow, /node scripts\/supported-pairing\.mjs release-ready\n/);
+    const metadata = workflow.slice(
+      workflow.indexOf("  release-metadata:"),
+      workflow.indexOf("  quality-gates:"),
+    );
+    assert.match(metadata, /permissions:\n\s+actions: read\n\s+contents: read\n/);
+    const pairingStep = metadata.slice(metadata.indexOf("Require the supported pairing"));
+    assert.match(pairingStep, /GH_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}/);
+    assert.doesNotMatch(metadata, /actions: write|contents: write/);
   });
 
   describe("the release workflow never reassigns a release (GHSA-rw8r-hrr2-vpc2)", () => {

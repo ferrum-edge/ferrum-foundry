@@ -51,13 +51,17 @@ Its `info.version: 0.2.0` is schema metadata, not either product's version.
 
 ## Draft qualification dependencies
 
-1. **Hosted schema producer artifact.** The existing Pinned Gateway Contract
-   checker exports exact source blocks and hashes as
-   `plugin-schema-producer-<Foundry head SHA>`, with the JSON file's checksum.
-   Root must retrieve the actual hosted output, verify its c764 source identity
-   and checksum, review `RateLimitingConfig.mcp_tool_calls`, and serially update
-   the reviewed schema ref/digests. Existing reviewed pins remain unchanged;
-   schema drift still fails. See [plugin schemas](plugin-schemas.md).
+1. **Hosted schema producer adoption completed.** The actual export from run
+   `37239682559`, artifact `11316747307`, attempt 1 was read against the guided
+   descriptors and preservation behavior. Its API head is `4f729320986aa564158fc2834dfebcbb4fb7a1b3`;
+   the original artifact name uses synthetic merge `74eef28b70c27251b7ebdcce5033470ee174a3a1`.
+   The reviewed ref is now c764 and only the `RateLimitingConfig` digest changed.
+   MCP tool counting stays unmodelled and round-trips as object/null/omitted.
+   Archive/source/component hashes, checksum and review limits are recorded in
+   [plugin schemas](plugin-schemas.md#v050-hosted-schema-adoption). That failed
+   producer run does not qualify the pairing. New exports require both nonempty
+   files and successful hashing; names include the synthetic `github.sha` and
+   `github.run_attempt`, preserving earlier attempts.
 2. **Canonical contracts.** [PR #13](https://github.com/ferrum-edge/ferrum-contracts/pull/13)
    is not tagged. Final owner promotion awaits Alloy replacement main CI and
    root's qualified canonical merge/tag. `contracts/ferrum-contracts/PIN`
@@ -68,8 +72,14 @@ Its `info.version: 0.2.0` is schema metadata, not either product's version.
 3. **Hosted live acceptance.** Every existing Foundry job must pass at the final
    reviewed release head with this image: both Node Quality Gates, Pinned
    Gateway Contract, Deployment Starter, Critical Journeys and both Container
-   Gates. Record that successful run in `qualification.ci_evidence` and set
-   `qualification.status` to `qualified`; `release-ready` refuses this draft.
+   Gates, plus the checkout identity job. Record that successful run and attempt
+   in `qualification.ci_evidence` / `run_attempt`, its actual API head in
+   `source_commit`, and the SHA in `Qualification Source (<SHA>)` in
+   `tested_commit`, then set `status` to `qualified`. All four evidence fields
+   remain null now. `release-ready` verifies the completed successful CI run,
+   repository, workflow and every required job through the hosted GitHub API.
+   Every required job must pass in that same attempt; a partial rerun cannot
+   borrow older successful jobs. API failures refuse release with fixed errors.
 4. **Release ancestry and recording.** Root must reconcile later main merges,
    establish `[0.5.0]` in the changelog with the actual release date, finalize
    notes, and land with a merge commit whose second parent is the reviewed
@@ -78,6 +88,18 @@ Its `info.version: 0.2.0` is schema metadata, not either product's version.
    actual Foundry source/image/CI facts, preserve platform manifests and verify
    registry revision labels before setting `status: released`. See
    [release security](release-security.md#publishing).
+
+The qualified source is the earlier pending tree that actually passed, never a
+claim that an evidence commit qualified itself. Finalize all code, pins,
+workflows, notes and changelog before that run. Afterwards only the
+`qualification` object in `docs/compatibility.json` may change; every other
+record field and tracked path/mode/blob must match the qualified source and
+tested merge tree. The gate reads complete GitHub source trees and records,
+checks PR merge parents (or the exact main-push SHA), and requires the qualified
+source to be an ancestor of the tag target. A merge onto different code or any
+later documentation change invalidates the evidence too: restore pending
+qualification and qualify the resulting tree again. The release workflow still
+re-runs all pre-publication gates and retains its immutable-tag safeguards.
 
 The buildout database profiles, Node floors and `viewer` / `operator` / `admin`
 authority tiers are unchanged. This preparation contains no proposed initial
@@ -113,9 +135,10 @@ qualifies only if:
    Contract (including capability parity, writable and read-only), Deployment
    Starter, Critical Journeys, and Container Gate.
 
-`node scripts/supported-pairing.mjs release-ready` enforces the recorded part
-of this. The release workflow runs it and refuses a tag while `edge.release`
-still holds `RELEASE-STEP` placeholders or `edge.image` is not that release.
+`node scripts/supported-pairing.mjs release-ready` verifies this through hosted
+GitHub Actions with `actions: read` and `contents: read`. The release workflow
+refuses a tag while `edge.release` still holds `RELEASE-STEP` placeholders or
+`edge.image` is not that release.
 It also refuses a record that is no longer the unreleased `candidate`: tag the
 commit that prepares the release, whose `foundry.source_commit`, `image`, and
 `ci_evidence` are still null and `qualification` names the successful hosted
@@ -287,9 +310,10 @@ see the draft dependencies above.
 Relative to Foundry's older reviewed schema ref, `RateLimitingConfig` has gained
 the optional `mcp_tool_calls` object for counting MCP `tools/call` members.
 That object was already present in Edge v0.9.10; it is not a new v0.9.11 UI
-feature. Guided edits already preserve unmodelled fields; new reviewed schema
-hashes must come from the hosted producer export. The plugin sensitivity source
-is byte-identical to v0.9.10 and its provenance is now
+feature. The reviewed schema ref and changed digest now come from the actual
+hosted producer export described above, with explicit preservation regressions.
+This schema adoption does not establish gateway admission or live acceptance.
+The plugin sensitivity source is byte-identical to v0.9.10 and its provenance is now
 `c764084b3b51c3f7ffde268c039688d35e49c553`.
 
 Edge v0.9.11 retains the v0.9.10 MCP charset and batch fixes above. It does not
@@ -317,7 +341,7 @@ rejected digest may appear only in history files (`CHANGELOG.md`, this page,
 | [#498](https://github.com/ferrum-edge/ferrum-foundry/pull/498) until #512 | v0.9.8, `ferrumedge/ferrum-edge@sha256:e5b204f9448d4ec210a57dbd2badece5f4359d5d544522fa48dcdfeef033b385` | The next published Edge release. Its admin API source, plugin configuration projection, and plugin scope merge are unchanged from v0.9.7 ([Admin API changes in v0.9.8](#admin-api-changes-in-v098)). Recorded as `edge.release` and moved to `edge.image` together with the Foundry v0.3.0 release preparation in [#498](https://github.com/ferrum-edge/ferrum-foundry/pull/498), whose gates are the qualification. `PLUGIN_SENSITIVITY_SOURCE` was re-read at `e27f2109216352c3fe9e67a7014611f3f66daa91`. Foundry [v0.3.0](https://github.com/ferrum-edge/ferrum-foundry/releases/tag/v0.3.0) paired with it: source commit `b0762e61f7138de0fcabc6173308f2c6c78076e1`, image `ferrumedge/ferrum-foundry@sha256:0f8064151f264d8afafef3f581bb44c56af3c88398db21df3b65457e195ab7d6` (`linux/amd64` `sha256:322b8ffc024d964b56b5172683b08c5f8f9abd3a61ef8718e07fbdf99099a5f3`, `linux/arm64` `sha256:7f77563d8121afa84c1f379b69ccd0d25f294dbaaa18051651ae6a9988c5dc09`), [release run](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/36325287150) |
 | [#512](https://github.com/ferrum-edge/ferrum-foundry/pull/512) until #524 | v0.9.9, `ferrumedge/ferrum-edge@sha256:83bb4de2ea264d5bed18d8f01f94e0e17a29b43aa1458b8984a0e9e1e784ede6` (source commit `234717ce41965cd1e2b5c6c761a25475c5d7628c`, Edge's [Release run](https://github.com/ferrum-edge/ferrum-edge/actions/runs/36806975161); `linux/amd64` `sha256:558fba9a1a9d7826e5ff9d84a1c80f24903c202a3a755072f45af0372ce1b477`, `linux/arm64` `sha256:33a8acceab1bee27e999b235cb24311619e44209b865cd68971cd9f3928a8379`) | The v0.9.9 qualification was the most recently supported release before #524. It added the viewer-readable MCP tool catalog read, `allow_path_parameters` on proxies, and the masked-placeholder write refusal (ferrum-edge#5925), which Foundry handles ([Admin API changes in v0.9.9](#admin-api-changes-in-v099)). `PLUGIN_SENSITIVITY_SOURCE` was read at `234717ce41965cd1e2b5c6c761a25475c5d7628c`. Foundry v0.3.0 remains paired with v0.9.8 |
 | [#524](https://github.com/ferrum-edge/ferrum-foundry/pull/524) through the v0.4.0 release | v0.9.10, `ferrumedge/ferrum-edge@sha256:430d6a7d41361de5ad12562786481f97f1e97fef72a0b5f1a0699eced7cdd4cc` (source commit `ee040d5e3281fde424aa65f5b18004852c5b53b0`, Edge's [Release run](https://github.com/ferrum-edge/ferrum-edge/actions/runs/36852417185); `linux/amd64` `sha256:18a8a962ad13bacb2505a122330bb25ce921b21a2f3cb5362a6ea93f11fe44d5`, `linux/arm64` `sha256:c35253bed87153afa6e193074f9b644eb3feeedb35459d1c15de5a23a78e4891`) | Qualified in [#524](https://github.com/ferrum-edge/ferrum-foundry/pull/524) and recorded as `edge.release` and `edge.image`. It includes ferrum-edge#5954, the fail-closed MCP charset and JSON-RPC batch handling security fixes described above. `PLUGIN_SENSITIVITY_SOURCE` was re-read at `ee040d5e3281fde424aa65f5b18004852c5b53b0`; its source file is unchanged from v0.9.9. Foundry [v0.4.0](https://github.com/ferrum-edge/ferrum-foundry/releases/tag/v0.4.0) paired with it: source commit `cb6dbe5b2b2e3f3ed211d5e829322d867ecb7a36`, image `ferrumedge/ferrum-foundry@sha256:03d4baa0e424c4438abb65da4ee3a4441f50cde9f2eb4e28664e5cf0698c0241` (`linux/amd64` `sha256:e72ca1c95809b9b06b143c9c6c16b48763c6fc70a39aeb52ecb4b598228e00be`, `linux/arm64` `sha256:f8d5a740906c6c7b40311b0f48f371ab90498c8974ae8ca1e4e333ab61409b14`), [release run](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/36874319153) |
-| v0.5.0 draft | v0.9.11, the c764 distribution and digests recorded above | Verified distribution only; Foundry hosted qualification, schema producer pin review and canonical adoption pending. No Foundry tag, image or release CI is recorded |
+| v0.5.0 draft | v0.9.11, the c764 distribution and digests recorded above | Actual hosted schema export adopted; Foundry hosted qualification and canonical adoption pending. No Foundry tag, image or release CI is recorded |
 
 ## Tested support
 

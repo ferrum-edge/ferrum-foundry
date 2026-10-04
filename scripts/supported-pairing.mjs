@@ -34,6 +34,11 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  qualificationErrors,
+  readHostedQualification,
+  requireHostedQualification,
+} from "./hosted-qualification.mjs";
 
 export const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 export const RECORD_PATH = "docs/compatibility.json";
@@ -214,21 +219,9 @@ export function validatePairing(record) {
 
   const released = record?.status === "released";
   if (released) errors.push(...edgeReleaseErrors(record));
-  const qualification = record?.qualification ?? {};
-  if (!["pending", "qualified"].includes(qualification.status)) {
-    errors.push('qualification.status must be "pending" or "qualified"');
-  }
-  if (qualification.status === "pending") {
-    if (qualification.ci_evidence !== null) {
-      errors.push("pending qualification.ci_evidence must be null");
-    }
-    if (released) errors.push("a released record must have qualified CI evidence");
-  } else if (
-    !/^https:\/\/github\.com\/ferrum-edge\/ferrum-foundry\/actions\/runs\/\d+$/.test(
-      qualification.ci_evidence ?? "",
-    )
-  ) {
-    errors.push("qualification.ci_evidence must name the hosted qualification run");
+  errors.push(...qualificationErrors(record?.qualification));
+  if (released && record?.qualification?.status !== "qualified") {
+    errors.push("a released record must have qualified CI evidence");
   }
 
   const fields = [
@@ -312,7 +305,7 @@ export function missingRequiredReferences(record, root = REPO_ROOT) {
  * is `foundryReleaseErrors`, so this is the test seam proving the command calls
  * it rather than trusting it separately.
  */
-export function requireReleaseReady(record) {
+export function requireReleaseReady(record, hostedEvidence) {
   const unready = edgeReleaseErrors(record);
   if (unready.length > 0) {
     throw new Error([
@@ -329,20 +322,11 @@ export function requireReleaseReady(record) {
       "Tag the commit that prepared this version. A published version is never re-released.",
     ].join("\n"));
   }
-  if (
-    record.qualification?.status !== "qualified" ||
-    !/^https:\/\/github\.com\/ferrum-edge\/ferrum-foundry\/actions\/runs\/\d+$/.test(
-      record.qualification?.ci_evidence ?? "",
-    )
-  ) {
-    throw new Error(
-      "The pairing's hosted qualification is still pending; record its successful run before tagging.",
-    );
-  }
+  requireHostedQualification(record, hostedEvidence);
   return { ready: true, edge: record.edge.release.version, image: record.edge.image };
 }
 
-function main(command) {
+async function main(command) {
   const record = readSupportedPairing();
   const errors = validatePairing(record);
   if (errors.length > 0) {
@@ -353,7 +337,8 @@ function main(command) {
     return;
   }
   if (command === "release-ready") {
-    console.log(JSON.stringify(requireReleaseReady(record)));
+    const evidence = await readHostedQualification(record);
+    console.log(JSON.stringify(requireReleaseReady(record, evidence)));
     return;
   }
   if (command !== "check") {
@@ -372,10 +357,8 @@ function main(command) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  try {
-    main(process.argv[2]);
-  } catch (error) {
+  main(process.argv[2]).catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
-  }
+  });
 }

@@ -52,7 +52,8 @@ works the same way against a live Ferrum Edge gateway.
 Foundry is qualified against one Ferrum Edge image at a time. This branch
 prepares **Foundry v0.5.0** with the published **Ferrum Edge v0.9.11** distribution,
 pinned by digest in `docs/compatibility.json`. Hosted Foundry qualification is
-pending, including the schema producer export and canonical contract promotion.
+pending, including canonical contract promotion. The actual hosted schema
+producer export has been reviewed and adopted; it is not live acceptance.
 The latest published pairing remains Foundry v0.4.0 / Edge v0.9.10 in
 [history](docs/compatibility.md#history).
 

@@ -34,8 +34,9 @@ Passing these gates qualifies Foundry with that one Ferrum Edge image and no
 other build. This candidate moves `edge.image` to the verified published Edge
 v0.9.11 distribution; it is not yet a qualified Foundry v0.5.0 pairing.
 The latest published pairing, Foundry v0.4.0 / Edge v0.9.10, remains immutable
-in [history](compatibility.md#history). The hosted schema producer artifact,
-canonical contract promotion, and live acceptance remain outstanding in
+in [history](compatibility.md#history). The actual hosted schema producer export
+has been adopted; canonical contract promotion and live acceptance remain
+outstanding in
 [the draft qualification record](compatibility.md#draft-qualification-dependencies).
 
 Moving the pin is a re-qualification: change `edge.image` in
@@ -105,10 +106,19 @@ Before any registry login or build, the release workflow requires that:
   `/api/health/ready`;
 - `foundry.version` in `docs/compatibility.json` equals that version;
 - `docs/release-notes/vX.Y.Z.md` exists and is not empty;
-- `node scripts/supported-pairing.mjs release-ready` passes: `edge.release` names
+- `node scripts/supported-pairing.mjs release-ready` passes in hosted Actions:
+  `edge.release` names
   a published Edge release and `edge.image` is that release, and the record is
   still the unreleased `candidate`, with `foundry.source_commit`, `image`, and
-  `ci_evidence` null, and `qualification` names its successful hosted run;
+  `ci_evidence` null, and `qualification` names its verified successful hosted
+  CI run, attempt, actual head and tested checkout SHA. The metadata job uses
+  only `actions: read` and `contents: read` for those GitHub API reads. It
+  requires every pairing job and checkout-identity job to pass in that attempt,
+  complete source trees, matching pairing records, PR merge-parent binding and
+  release ancestry. API failure is a fixed, redacted refusal. After the earlier
+  pending source passes, only its `qualification` object may change: other
+  code, pin, workflow, record or documentation changes require qualification
+  again. See [qualification recording](compatibility.md#draft-qualification-dependencies);
 - the version has no GitHub release yet;
 - neither `vX.Y.Z` nor `X.Y.Z` exists on Docker Hub or GHCR with an image whose
   `org.opencontainers.image.revision` is another commit

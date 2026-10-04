@@ -131,11 +131,18 @@ the pending qualification dependencies in `docs/compatibility.md`.
   are unchanged. Preserve the exact v0.4.0 compatibility record and history.
 - Compatibility metadata version 2 uses null candidate source, image and release
   CI fields, with pending hosted qualification recorded separately. Release
-  readiness refuses pending qualification and still refuses recorded artifacts.
+  readiness verifies the completed successful hosted CI run, all pairing jobs,
+  attempt, actual head, tested merge, ancestry and source/pairing trees. Only
+  qualification evidence may change after the earlier pending tree passes;
+  changed code, pins, workflows or documentation require qualification again.
+  Pending qualification and already-recorded Foundry artifacts remain refused.
 - The existing plugin-schema drift checker exports exact fetched component
   blocks and hashes to a hosted JSON artifact with a checksum, even on drift.
-  The reviewed schema pin remains unchanged pending actual artifact retrieval
-  and serial review of `RateLimitingConfig.mcp_tool_calls`. The canonical
+  Uploads require both nonempty files and successful hashing, and include the
+  attempt to preserve prior evidence. The reviewed schema ref now adopts the
+  actual c764 export from hosted run 37239682559 / artifact 11316747307; only
+  `RateLimitingConfig` changed. Guided edits preserve its unmodelled MCP object,
+  null and omitted states without inferring controls or defaults. The canonical
   `contracts-edge-0.9.9-r2` pin remains immutable while contracts PR #13 awaits
   owner qualification and publication.
 

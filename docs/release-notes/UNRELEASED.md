@@ -77,8 +77,10 @@
   target namespace; malformed or ambiguous queries never reach Edge.
 - **Release preparation.** v0.5.0 proposes verified Edge v0.9.11 distribution
   while preserving actual v0.4.0 facts. Metadata v2 keeps Foundry publication
-  fields null and qualification pending. Exact hosted schema producer JSON/hash
-  retrieval and canonical PR #13 publication precede serial pin updates.
+  fields null and qualification pending. The actual hosted c764 schema export
+  is adopted with preservation regressions; canonical PR #13 publication and
+  adoption remain pending. Release readiness verifies hosted run/job/source
+  evidence; producer uploads require both nonempty files and preserve attempts.
 
 ### Known limitations
 
