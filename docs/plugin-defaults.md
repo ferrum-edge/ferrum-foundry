@@ -81,6 +81,11 @@ the org's central contract store, in
 [`contracts/ferrum-contracts/PIN`](../contracts/ferrum-contracts/PIN).
 The pinned files and the local plugin names and provisioning markers are checked
 by `scripts/ferrum-contracts.test.mjs` in the normal contract test suite.
+The canonical pin is now `contracts-edge-0.9.9-r2`; its plugin catalog and
+provisioning vocabulary/schema bytes and provenance are unchanged from the
+previous pin. It also includes the proposed service-manifest schema and all
+shared fixtures for the [Alloy preview consumer](alloy-manifest-preview.md).
+The revision continues to map to qualified Edge v0.9.10 without changing that pin.
 
 To bump the pin, choose a `contracts-edge-*` release, download the adopted
 vocabulary and schema files from that tag into the same paths, resolve the tag

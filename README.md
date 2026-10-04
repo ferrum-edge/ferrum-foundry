@@ -64,13 +64,16 @@ envelope, and the tested scale.
 The org's shared vocabularies, JSON schemas, and fixtures live in
 [ferrum-edge/ferrum-contracts](https://github.com/ferrum-edge/ferrum-contracts).
 Foundry vendors the `plugin-catalog` and `provisioned-by` vocabularies with
-their vocabulary schemas under
+their vocabulary schemas, plus the proposed service-manifest schema and all
+its valid/invalid fixtures, under
 [`contracts/ferrum-contracts/`](contracts/ferrum-contracts/), pinned to
-`contracts-edge-0.9.9` in
+`contracts-edge-0.9.9-r2` in
 [`contracts/ferrum-contracts/PIN`](contracts/ferrum-contracts/PIN). The vendored
 files, Foundry's local plugin names and provisioning markers, and the pin's tie
 to the qualified Edge release are checked by
 [Plugin configuration templates](docs/plugin-defaults.md#shared-plugin-catalog-contract).
+The unreleased [Alloy manifest preview](docs/alloy-manifest-preview.md) consumes
+the existing fields through an authenticated, read-only BFF route.
 
 A shared contract changes in `ferrum-contracts` first, then is re-vendored here;
 never edit a vendored file locally.

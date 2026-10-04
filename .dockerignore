@@ -19,3 +19,9 @@
 !server/**
 !shared/
 !shared/**
+
+!contracts/
+!contracts/ferrum-contracts/
+!contracts/ferrum-contracts/schemas/
+!contracts/ferrum-contracts/schemas/service-manifest/
+!contracts/ferrum-contracts/schemas/service-manifest/v1.schema.json

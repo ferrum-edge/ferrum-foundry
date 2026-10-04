@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Authenticated, namespace-authorized Alloy service-manifest v1 JSON preview in
+  Settings. Viewers and editors can review bounded desired proxy, upstream and
+  plugin fields without applying configuration, contacting a producer, or
+  reading TLS paths. The shared schema and all fixtures are vendored at
+  `contracts-edge-0.9.9-r2` in the canonical integrity pin, preserving existing
+  vocabulary bytes and the qualified Edge pairing. The contract remains
+  PROPOSED; remaining consumers stay tracked by ferrum-alloy#27. An ADR defines
+  the authenticated presentation boundary for future diagnostics; no telemetry
+  or report import is implemented.
+
 ### Security
 
 - Namespace cascade deletes now require the BFF request to echo the exact

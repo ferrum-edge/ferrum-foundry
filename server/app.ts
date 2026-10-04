@@ -10,6 +10,7 @@ import proxyPlugin from './proxy.js';
 import { requestIsApiRoute, servesSpaShell } from './proxy-path.js';
 import healthPlugin from './routes/health.js';
 import settingsPlugin from './routes/settings.js';
+import serviceManifestPlugin, { serviceManifestRequestLogging } from './routes/service-manifest.js';
 import { closeDispatchers } from './tls.js';
 import { installUploadDrain } from './upload-drain.js';
 
@@ -29,6 +30,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   const isProduction = process.env.NODE_ENV === 'production';
   const serveStatic = options.serveStatic ?? isProduction;
   const fastify = Fastify({
+    ...serviceManifestRequestLogging,
     logger: options.logger ?? {
       level: isProduction ? 'info' : 'debug',
     },
@@ -90,6 +92,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   await fastify.register(authPlugin);
   await fastify.register(healthPlugin);
   await fastify.register(settingsPlugin);
+  await fastify.register(serviceManifestPlugin);
   await fastify.register(proxyPlugin);
 
   if (serveStatic) {
