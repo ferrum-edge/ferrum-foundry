@@ -81,18 +81,22 @@ the org's central contract store, in
 [`contracts/ferrum-contracts/PIN`](../contracts/ferrum-contracts/PIN).
 The pinned files and the local plugin names and provisioning markers are checked
 by `scripts/ferrum-contracts.test.mjs` in the normal contract test suite.
-The canonical pin is now published `contracts-edge-0.9.11` at
-`390edbd5b2485af0988e02f7827fde778d76ae0a`, mapped to Edge v0.9.11. The plugin
+The canonical pin is now published `contracts-edge-0.9.12` at
+`31f0a21d707795be293d15837c2f77c3d84219d8`, mapped to Edge v0.9.12. The plugin
 catalog and provisioning vocabulary refresh provenance to released Edge source
-`c764084b3b51c3f7ffde268c039688d35e49c553`; plugin entries, lifecycle metadata,
+`0d917701b63ef38210c49df830f48cf0457cbc7d`; plugin entries, lifecycle metadata,
 provisioning values and historical first availability are unchanged. The
 vocabulary schemas retain their exact earlier bytes. The pin also includes the
 implemented service-manifest schema, every shared manifest fixture and the
 canonical invalid-expectations file for the
 [Alloy preview consumer](alloy-manifest-preview.md). Every adopted file is
 byte-identical to the immutable canonical commit, including descriptions with
-historical preparation wording. Foundry's hosted v0.5.0 pairing qualification
-is recorded in [the compatibility record](compatibility.md).
+historical preparation wording. The complete canonical invalid-expectations
+file adds deployment-profile negatives; Foundry's same 18-file scope includes
+no deployment schemas or profile implementation. Manifest schema, fixtures and
+owner-unreleased status remain unchanged. Foundry v0.5.1 hosted pairing
+qualification is pending in [the compatibility record](compatibility.md);
+v0.5.0 evidence belongs to its immutable release record.
 
 To bump the pin, choose a `contracts-edge-*` release, download the adopted
 vocabulary and schema files from that tag into the same paths, resolve the tag

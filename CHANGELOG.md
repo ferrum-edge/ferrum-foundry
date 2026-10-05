@@ -7,7 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Future changes will be recorded here.
+### Changed
+
+- Prepare the unreleased Foundry v0.5.1 candidate with published Ferrum Edge
+  v0.9.12 source, image, platform manifests, binary hashes and raw OpenAPI
+  identity. Starter and development commands use the same digest. Hosted
+  qualification and Foundry publication remain pending; v0.5.0 and v0.4.0
+  release records are immutable.
+- Re-vendor the same 18 scoped files from published `contracts-edge-0.9.12` at
+  `31f0a21d707795be293d15837c2f77c3d84219d8`, including complete canonical
+  invalid expectations. Manifest schema, fixtures, owner status and
+  plugin/provisioning semantics are unchanged. Refresh sensitivity provenance
+  after source equality review; keep guided-schema provenance at its reviewed
+  hosted export until the fresh producer is reviewed.
+
+No native deployment profile, conditional restore, capability, Node-floor or
+initial untagged-write policy change is included. Existing owner decisions
+remain pending.
 
 ## [0.5.0] - 2026-10-04
 

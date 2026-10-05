@@ -104,6 +104,25 @@ OpenAPI document is never vendored, and no producer was executed locally.
 Transport failures are retried; any other fetch error, including an HTTP error,
 fails the check. An outage is never reported as drift, and never passes.
 
+### v0.5.1 candidate review pending
+
+The candidate pins published Edge v0.9.12 at
+`0d917701b63ef38210c49df830f48cf0457cbc7d`. Its raw OpenAPI SHA-256 is
+`f7242228d73d34ad2d7da3c989ec6ba15bb6ae1f2f4c94a8e0a181b000caae77`.
+The five components listed above were read directly at that immutable source;
+the release adds deployment components outside guided editing. No new schema
+ref or component digest is adopted here. `PLUGIN_SCHEMA_SPEC.ref` and all five
+hashes retain the earlier reviewed c764 hosted export, including the failed
+producer's original identities and limits above.
+
+The controller must retrieve the new Pinned Gateway Contract producer artifact
+for this candidate, verify its actual run/attempt/head, archive and export
+checksums and source identity, and review every component against the
+descriptors and preservation behavior before refreshing the schema provenance.
+The existing gate fetches `edge.source_commit` even while the reviewed ref is
+older; drift still fails. No local producer, extractor or digest algorithm ran,
+and no OpenAPI copy is stored. Qualification remains pending.
+
 ## What guided editing does to a configuration
 
 ### It is lossless
