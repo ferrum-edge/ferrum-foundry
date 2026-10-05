@@ -15,7 +15,12 @@
 Published Edge v0.9.12 and contracts-edge-0.9.12 are selected for v0.5.1.
 The same contract scope, manifest fields/fixtures, profiles, Node floors,
 capabilities and ordinary mutation semantics remain unchanged. Guided-schema
-provenance stays at its reviewed hosted export until fresh producer review.
+static review is complete from hosted run `37336969590`, attempt 1, artifact
+`11356821423`; the reviewed ref adopts the published Edge source with every
+component hash and guided behavior unchanged. Exact producer source, tested
+merge, verified archive/export hashes and limits are recorded in
+[schema provenance](../plugin-schemas.md#v051-hosted-schema-adoption).
+Fresh independent read-only review and all final-head hosted gates remain pending.
 
 ### Known limitations
 
@@ -26,5 +31,5 @@ and Foundry publication are separate evidence.
 ### Publication
 
 No new Foundry tag, source commit, image digest, publication date or successful
-qualification is claimed. Root owns draft creation, hosted qualification and
+qualification is claimed. Root owns final-source review, hosted qualification and
 any subsequent release. See [compatibility](../compatibility.md).

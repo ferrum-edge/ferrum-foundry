@@ -61,17 +61,26 @@ Its `info.version: 0.2.0` is schema metadata, not either product's version.
    manifest/report status remains EXISTING/implemented at Alloy owner
    `81cbb410d34ff5fba1f3d54cfd2e7ebccaed397e`, whose availability stays
    unreleased. Alloy publication and other consumer qualification are separate.
-2. **Guided schema review pending.** The five source components were read at
-   0d917701; refs and hashes retain the actual reviewed c764 export from run
-   `37239682559`, attempt 1, artifact `11316747307`. That failed producer is
-   historical schema evidence, never pairing acceptance. The controller must
-   retrieve and review the new hosted producer's exact blocks, source identity,
-   archive digest and exported checksum before changing schema provenance.
-   [Plugin schemas](plugin-schemas.md#v051-candidate-review-pending) records
-   the pending work and existing preservation behavior.
-3. **Hosted pairing acceptance pending.** After the controller creates the
-   candidate draft PR, Qualification Source, Quality Gate on Node 22 and 24,
-   Pinned Gateway Contract (including writable/read-only capability parity),
+2. **Guided schema static review complete.** The actual hosted producer from
+   [run 37336969590](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37336969590),
+   attempt 1, artifact `11356821423`, binds PR source
+   `0dc21a387367059785c6fbea8c7ced5a55e2af70` to tested merge
+   `632a24eb7c5220fd06a6e9fd85d5b5b11308b898` over base
+   `fa57904868affd1e2f94add5bc8daa1fdd0905f1`. Actual archive/export byte
+   hashes match the API digest and producer checksum. All five exported blocks
+   were read against the descriptors, lossless writes and preservation tests;
+   every component is unchanged. `PLUGIN_SCHEMA_SPEC.ref` now names 0d917701,
+   retaining all five hashes and guided behavior.
+   [Plugin schemas](plugin-schemas.md#v051-hosted-schema-adoption) records the
+   complete evidence. The Gateway Contract job succeeded at that earlier
+   source, but both Node Quality Gates failed the old readiness fixture. Its
+   repair and this update still require fresh qualification. The failed c764
+   producer remains historical schema evidence only.
+3. **Hosted pairing acceptance pending.** For the final source of
+   [PR #548](https://github.com/ferrum-edge/ferrum-foundry/pull/548), Root must
+   obtain a fresh independent read-only review. Qualification Source, Quality
+   Gate on Node 22 and 24, Pinned Gateway Contract (including writable/read-only
+   capability parity),
    Deployment Starter, Critical Journeys and both Container Gates must pass
    for the exact candidate head and its tested merge. No prior run qualifies
    this tree. Every later source or documentation edit requires fresh gates;
@@ -365,9 +374,10 @@ The sensitivity source file is byte-identical to c764 (Git blob
 `47136b600b12ab4c11db7d366e2c70e82a5079dbc61f2a625d071171a74c64e5`).
 Every table rule and Kafka safe property was read against Foundry's copy before
 refreshing `PLUGIN_SENSITIVITY_SOURCE` to the published 0d917701 source.
-The five guided schemas were read there too; their refs/hashes stay at the
-reviewed c764 hosted export until fresh hosted producer review. No guided
-field, template, catalog or unmodelled-value behavior changes.
+The five guided schemas were reviewed from the verified v0.9.12 hosted producer
+export recorded above. Their reviewed ref now names 0d917701; all five component
+hashes are unchanged. No guided field, template, catalog or unmodelled-value
+behavior changes. This static review does not qualify the final candidate head.
 
 Edge #6011 is not in the published source. No advisory closure or approval of
 unmerged Edge #6002/#6003/#5989, unresolved-route behavior or physical Node
