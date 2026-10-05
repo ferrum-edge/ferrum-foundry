@@ -116,8 +116,9 @@ Its `info.version: 0.2.0` is schema metadata, not either product's version.
    [Actual release run 37351255936](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37351255936),
    attempt 1, repeated all eight pairing gates at the tag source `1dc43bd` and
    completed successfully: **13 successful jobs and two expected skips**.
-   The skipped reusable Docker and Docker Manifest jobs were disabled by
-   `publish=false`; separate actual amd64, arm64, manifest and GitHub release
+   The skipped reusable Docker and Docker Manifest jobs require a push to
+   `refs/heads/main`; the release ref `refs/tags/v0.5.1` made that condition
+   false. Separate actual amd64, arm64, manifest and GitHub release
    publishers all succeeded. Release `403984368` was published at the time
    recorded above. This post-publication update changes documentation and
    release metadata only; it adds no qualification claim for changed runtime code.

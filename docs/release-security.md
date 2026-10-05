@@ -74,8 +74,10 @@ reviewed head `0e47b6b307bca8aa25fe37f54a2224f87d6e1118` and whose tree
 matches that head. Main push run `37349447989` passed all 11 jobs before the
 immutable version tag was created. Actual release run `37351255936`, attempt 1,
 passed all eight pairing gates and completed with 13 successful jobs and two
-expected reusable publication skips (`publish=false`). Separate actual amd64,
-arm64, manifest and GitHub release publishers succeeded. The release record
+expected reusable publication skips. The reusable Docker and Docker Manifest
+jobs require a push to `refs/heads/main`; the release ref `refs/tags/v0.5.1`
+made that condition false. Separate actual amd64, arm64, manifest and GitHub
+release publishers succeeded. The release record
 contains the publication date, tag source commit, final image index,
 per-architecture build indexes and successful release CI run. Native build and
 manifest logs bind source and digest identity in both registries; anonymous
