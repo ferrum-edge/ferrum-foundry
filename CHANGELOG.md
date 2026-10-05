@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Future changes will be recorded here.
+
 ### Security
 
 - **Draft policy proposal (#542; owner decision pending).** Guarded replacement
@@ -25,12 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   review, all hosted checks, and the owner's decision. No released version,
   pins, Node floor, workflow, or pairing evidence changes.
 
-## [0.5.0] - Pending publication
+## [0.5.0] - 2026-10-04
 
-This release source is prepared; hosted qualification and publication remain
-pending. The actual publication date will be recorded with the published
-Foundry artifacts, after release. See `docs/release-notes/v0.5.0.md` and the
-pending qualification dependencies in `docs/compatibility.md`.
+Foundry v0.5.0 was published after hosted qualification against Ferrum Edge
+v0.9.11. See `docs/release-notes/v0.5.0.md` and the evidence in
+`docs/compatibility.md`.
 
 ### Added
 
@@ -148,20 +149,20 @@ pending qualification dependencies in `docs/compatibility.md`.
 
 ### Changed
 
-- Prepare the Foundry v0.5.0 pairing with the verified published Edge v0.9.11
-  source, binaries and default multi-architecture image. Foundry hosted live
-  acceptance remains pending; SQLite profiles, Node floors and authority tiers
-  are unchanged. Preserve the exact v0.4.0 compatibility record and history.
-- Compatibility metadata version 2 uses null candidate source, image and release
-  CI fields, with pending hosted qualification recorded separately. Release
-  readiness verifies the completed successful hosted CI run, all pairing jobs,
-  attempt, actual head, tested merge, ancestry and source/pairing trees. Only
-  qualification evidence may change after the earlier pending tree passes;
-  changed code, pins, workflows or documentation require qualification again.
-  Pending qualification and already-recorded Foundry artifacts remain refused.
-  Original tested/source/base identities and main ref are captured in the
-  immutable checkout job; advancing live PR metadata to record evidence no
-  longer invalidates an otherwise unchanged qualified tree.
+- Pair Foundry v0.5.0 with the published Ferrum Edge v0.9.11 source, binaries
+  and default multi-architecture image. Hosted qualification passed; SQLite
+  profiles, Node floors and authority tiers are unchanged. Preserve the exact
+  v0.4.0 compatibility record and history. The v0.5.0 source, image index,
+  release run, platform manifests and independently verified Docker Hub
+  platform configs are recorded in the compatibility record. GHCR hosted
+  publication passed, but anonymous registry reads returned 401 and are not
+  claimed as independently verified.
+- Compatibility metadata version 2 records the published source, image and
+  release CI evidence alongside the separate hosted qualification source and
+  tested merge. Release readiness verifies hosted CI jobs, attempts, ancestry
+  and source/pairing trees. Original tested/source/base identities and main ref
+  are captured in the immutable checkout job; advancing live PR metadata to
+  record evidence does not invalidate an otherwise unchanged qualified tree.
 - The existing plugin-schema drift checker exports exact fetched component
   blocks and hashes to a hosted JSON artifact with a checksum, even on drift.
   Uploads require both nonempty files and successful hashing, and include the

@@ -31,7 +31,8 @@ their earlier bytes. The manifest validation fields are unchanged, with current
 owner/status metadata and full published descriptions retained verbatim.
 Historical preparation/pending wording inside immutable canonical files records
 their source state before publication; the tag and release above establish the
-actual publication. Foundry hosted v0.5.0 qualification remains pending.
+actual publication. Foundry v0.5.0 hosted qualification is recorded in the
+[compatibility record](compatibility.md).
 
 The independently reviewed producer is Alloy commit
 [`690aed7a9fa8458aeea4ac8416170c8daeb0470b`](https://github.com/ferrum-edge/ferrum-alloy/tree/690aed7a9fa8458aeea4ac8416170c8daeb0470b).

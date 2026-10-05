@@ -92,7 +92,7 @@ canonical invalid-expectations file for the
 [Alloy preview consumer](alloy-manifest-preview.md). Every adopted file is
 byte-identical to the immutable canonical commit, including descriptions with
 historical preparation wording. Foundry's hosted v0.5.0 pairing qualification
-remains pending.
+is recorded in [the compatibility record](compatibility.md).
 
 To bump the pin, choose a `contracts-edge-*` release, download the adopted
 vocabulary and schema files from that tag into the same paths, resolve the tag

@@ -14,17 +14,16 @@ request.
 For a walkthrough that ends in an authenticated request through the data
 plane, see [`docs/getting-started.md`](../../docs/getting-started.md).
 
-**Candidate pairing.** The demo profile pins the verified published Edge
-v0.9.11 distribution proposed for Foundry v0.5.0. Hosted Foundry qualification
-is pending; the latest published pairing remains v0.4.0 / Edge v0.9.10 in
+**Supported pairing.** The demo profile pins the published Edge
+v0.9.11 distribution qualified for Foundry v0.5.0. The release and qualification
+evidence are recorded in
 [`docs/compatibility.md`](../../docs/compatibility.md). The default Foundry
 image, `ferrumedge/ferrum-foundry:main`, is the development channel. Production
-must use an actual released Foundry digest from that record; the candidate has
-no published Foundry image yet. Both existing profiles and authority tiers are
-unchanged. The candidate adopts published `contracts-edge-0.9.11` at
+must use the released Foundry digest from that record. Both existing profiles
+and authority tiers are unchanged. The release adopts published
+`contracts-edge-0.9.11` at
 `390edbd5b2485af0988e02f7827fde778d76ae0a`; its service-manifest schema is
-packaged unchanged from that tag. Canonical publication does not qualify this
-starter or publish a Foundry image.
+packaged unchanged from that tag.
 
 ## Two profiles
 
