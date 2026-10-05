@@ -31,9 +31,9 @@ workflow (`.github/workflows/ci.yml`) has passed:
 ## Supported Edge image
 
 Passing these gates qualifies Foundry with that one Ferrum Edge image and no
-other build. The Foundry v0.5.1 candidate selects published Edge v0.9.12 and
-published contracts-edge-0.9.12; its hosted schema producer review, full pairing
-qualification and publication are pending in
+other build. Published Foundry v0.5.1 pairs with published Edge v0.9.12 and
+contracts-edge-0.9.12; its hosted schema producer review, full pairing
+qualification and actual publication are recorded in
 [the compatibility record](compatibility.md#qualification-evidence).
 Published v0.5.0 / Edge v0.9.11 and v0.4.0 / Edge v0.9.10 pairings remain
 immutable in [history](compatibility.md#history).
@@ -68,13 +68,23 @@ Every third-party GitHub Action is pinned to a full commit SHA.
 
 ## Publishing
 
-For v0.5.0, the reviewed release preparation landed in a **merge commit** whose
-second parent was the reviewed release branch head. All 11 main-push jobs
-passed before the immutable version tag was created. The release record now
-contains the publication date, tag source commit, image index, platform
-manifests and successful CI run; Docker Hub platform config revision labels
-were verified against the immutable tag. See the versioned notes and
-[compatibility record](compatibility.md).
+For v0.5.1, the reviewed release preparation landed in protected **merge commit**
+`1dc43bd1bbd4c2c89ca14e2a603aa478ab1a0d18`, whose second parent was exact
+reviewed head `0e47b6b307bca8aa25fe37f54a2224f87d6e1118` and whose tree
+matches that head. Main push run `37349447989` passed all 11 jobs before the
+immutable version tag was created. Actual release run `37351255936`, attempt 1,
+passed all eight pairing gates and completed with 13 successful jobs and two
+expected reusable publication skips. The reusable Docker and Docker Manifest
+jobs require a push to `refs/heads/main`; the release ref `refs/tags/v0.5.1`
+made that condition false. Separate actual amd64, arm64, manifest and GitHub
+release publishers succeeded. The release record
+contains the publication date, tag source commit, final image index,
+per-architecture build indexes and successful release CI run. Native build and
+manifest logs bind source and digest identity in both registries; anonymous
+GHCR access, independent cryptographic attestation verification and account-level
+registry immutability are not proved. See the [v0.5.1 notes](release-notes/v0.5.1.md)
+and [compatibility record](compatibility.md). The v0.5.0 and v0.4.0 notes and
+records remain unchanged.
 
 Pushes to `main` and release tags publish multi-architecture images with
 BuildKit provenance (`mode=max`) and SBOM attestations. Each manifest job

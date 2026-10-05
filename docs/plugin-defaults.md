@@ -95,8 +95,8 @@ historical preparation wording. The complete canonical invalid-expectations
 file adds deployment-profile negatives; Foundry's same 18-file scope includes
 no deployment schemas or profile implementation. Manifest schema, fixtures and
 owner-unreleased status remain unchanged. Foundry v0.5.1 hosted pairing
-qualification is pending in [the compatibility record](compatibility.md);
-v0.5.0 evidence belongs to its immutable release record.
+qualification and publication are recorded in [the compatibility record](compatibility.md);
+v0.5.0 evidence belongs to its unchanged immutable release record.
 
 To bump the pin, choose a `contracts-edge-*` release, download the adopted
 vocabulary and schema files from that tag into the same paths, resolve the tag
