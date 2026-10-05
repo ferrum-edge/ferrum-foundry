@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Future changes will be recorded here.
+### Changed
+
+- Record the actual v0.5.1 publication and preserve its immutable compatibility
+  snapshot. Update current release and provenance documentation; runtime code,
+  dependencies, contracts and qualification semantics are unchanged.
 
 ### Security
 
@@ -26,6 +30,51 @@ Future changes will be recorded here.
   Adoption awaits exact-patch review, fresh independent security/concurrency
   review, all hosted checks, and the owner's decision. No released version,
   pins, Node floor, workflow, or pairing evidence changes.
+
+## [0.5.1] - 2026-10-05
+
+Foundry v0.5.1 was published at 17:57:15 UTC after hosted qualification against
+Ferrum Edge v0.9.12. Original qualification run `37341678624`, attempt 1,
+binds source `157fa7f478ea8e987104f6adb3cc41baf1efb2e0` to tested merge
+`b01dd9137635739cd453d1e3b507c24ec1aca3e3`. The protected merge preserved
+reviewed head `0e47b6b307bca8aa25fe37f54a2224f87d6e1118` as its second
+parent. Main push run `37349447989` passed all 11 jobs before tagging. Actual
+release run `37351255936`, attempt 1, completed with 13 successful jobs and two
+expected reusable publication skips; separate actual architecture, manifest
+and GitHub release publishers succeeded. See
+[v0.5.1 notes](docs/release-notes/v0.5.1.md) and its
+[immutable record](docs/release-notes/v0.5.1.compatibility.json).
+
+### Changed
+
+- Pair published Foundry v0.5.1 with published Ferrum Edge
+  v0.9.12 source, image, platform manifests, binary hashes and raw OpenAPI
+  identity. Starter and development commands use the same digest. Hosted
+  qualification and actual publication passed; v0.5.0 and v0.4.0 notes and
+  release records remain unchanged.
+- Re-vendor the same 18 scoped files from published `contracts-edge-0.9.12` at
+  `31f0a21d707795be293d15837c2f77c3d84219d8`, including complete canonical
+  invalid expectations. Manifest schema, fixtures, owner status and
+  plugin/provisioning semantics are unchanged. Refresh sensitivity provenance
+  after source equality review. Adopt the reviewed v0.9.12 schema ref with all
+  five component hashes and guided behavior unchanged. Original adoption run
+  `37336969590` / artifact `11356821423` and qualified run `37341678624` /
+  artifact `11358382729` retain their separate identities; the failed c764
+  producer remains historical schema evidence only.
+
+No native deployment profile, conditional restore, capability, Node-floor or
+initial untagged-write policy change is included. Existing owner decisions
+remain pending.
+
+### Security
+
+- Explicitly refuse the secret-complete `/deployment-snapshot` route through
+  the browser-facing BFF for every method and role, including HEAD, after
+  authentication and before capacity admission, JWT signing or upstream fetch.
+  The denial reuses `FERRUM_BFF_CREDENTIAL_READ_DENIED` and checks the exact
+  normalized root pathname, including encoded components, a trailing slash and
+  queries. Ordinary masked reads and ephemeral backup downloads retain their
+  existing behavior. No native deployment workflow or recovery journal is added.
 
 ## [0.5.0] - 2026-10-04
 
@@ -482,7 +531,8 @@ First public release of Ferrum Foundry.
 - Release channels are monotonic: tags are validated and ancestry-checked before registry access, prereleases never advance stable tags, and promotion runs through a fail-closed FIFO queue (#155).
 - Scheduled live branch deletion replaced with dry-run planning plus a separately approved, exact-SHA-revalidated deletion path (#155).
 
-[Unreleased]: https://github.com/ferrum-edge/ferrum-foundry/compare/release/foundry-0.5.0...HEAD
+[Unreleased]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.4.0...release/foundry-0.5.0
 [0.4.0]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.2.0...v0.3.0

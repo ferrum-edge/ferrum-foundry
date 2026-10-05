@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -67,26 +68,59 @@ describe("the supported pairing record", () => {
     }
   });
 
-  it("pins the verified v0.9.11 distribution for pending hosted qualification", () => {
+  it("pins the verified v0.9.12 distribution for hosted qualification", () => {
     const image =
-      "ferrumedge/ferrum-edge@sha256:2476b502855940e28157858fc24008545cb3baeb3084c9610e1d4505cbe0d36e";
-    const sourceCommit = "c764084b3b51c3f7ffde268c039688d35e49c553";
+      "ferrumedge/ferrum-edge@sha256:80526b59cbbdc2bfcc8bae9241da4e5395414cf07bf0be4effd4c73c51684ee4";
+    const sourceCommit = "0d917701b63ef38210c49df830f48cf0457cbc7d";
     const manifests = {
-      "linux/amd64": "sha256:7287d297e8f305c99143e148f910024e50fac0341e7fd89236325331fe405b22",
-      "linux/arm64": "sha256:738a68e81da5cc9c0dde8e8ed5ba9e9c6957fcbdd930070d60d8782c303bb9eb",
+      "linux/amd64": "sha256:96fda718b2d078090b16ebe06d02bec0b942ca5b8632bb78f5076221db3b6cb6",
+      "linux/arm64": "sha256:0d3bbf1fb471347711a188b50fdcfe0df444fc7be32256cb9ec6807f338742af",
     };
     assert.equal(record.edge.image, image);
     assert.equal(record.edge.source_commit, sourceCommit);
     assert.deepEqual(record.edge.platform_manifests, manifests);
-    assert.match(record.edge.build, /v0\.9\.11/);
+    assert.match(record.edge.build, /v0\.9\.12/);
 
     const release = record.edge.release;
-    assert.equal(release.version, "v0.9.11");
+    assert.equal(release.version, "v0.9.12");
     assert.equal(release.image, image);
     assert.equal(release.source_commit, sourceCommit);
     assert.deepEqual(release.platform_manifests, manifests);
     assert.deepEqual(edgeReleaseErrors(record), []);
     assert.ok(!record.edge.rejected_images.some((entry) => entry.image === record.edge.image));
+  });
+
+  it("records exact published assets without inventing registry identity evidence", () => {
+    const release = record.edge.release;
+    assert.deepEqual(release.binary_sha256, {
+      "ferrum-cni-linux-aarch64":
+        "sha256:04e7dba5fdccb11d903002419be93324f81bf4c09ab6a5482741a613604923bb",
+      "ferrum-cni-linux-x86_64":
+        "sha256:1233690f92cac8ccb39d0978e971fcd70a770090a0ecd0fc698cde00e5bb90d2",
+      "ferrum-edge-linux-aarch64":
+        "sha256:a4a1192d68f5ef1e8c699fa36ce93fd912110a248ab349dc301d0d66eadb1588",
+      "ferrum-edge-linux-x86_64":
+        "sha256:1453b6ff9ae8bcea983adb7cc120ef2b78c3b292e0adb8e81233222ae4d46ce8",
+      "ferrum-edge-macos-aarch64":
+        "sha256:8ca3e4ed5e28507c5440cd52cae4c29a7fe339104f9f3024b400b3ff58ddaba8",
+      "ferrum-edge-macos-x86_64":
+        "sha256:61770188a10457225482b3df162528d45a646f88e45b468451a9e59d183edd27",
+      "ferrum-edge-windows-x86_64.exe":
+        "sha256:c92d5f4dbf8cc014b062c1420cf3deda4e75874b3649262464228086f790e660",
+    });
+    assert.deepEqual(release.openapi, {
+      info_version: "0.2.0",
+      sha256: "f7242228d73d34ad2d7da3c989ec6ba15bb6ae1f2f4c94a8e0a181b000caae77",
+    });
+    assert.equal(
+      release.github_release,
+      "https://github.com/ferrum-edge/ferrum-edge/releases/tag/v0.9.12",
+    );
+    assert.equal(release.distribution.ci_evidence, record.edge.source_evidence);
+    assert.equal(release.distribution.status, "VERIFIED_DISTRIBUTION");
+    assert.equal(release.distribution.default_image_binaries_match_release_assets, true);
+    assert.equal(release.distribution.revision_label, null);
+    assert.equal(release.distribution.ghcr_anonymous_access, false);
   });
 
   it("never pairs with v0.9.5, which lacks ferrum-edge#5661, or the unpublished v0.9.6", () => {
@@ -111,8 +145,8 @@ describe("the supported pairing record", () => {
   });
 
   it("records the Foundry candidate preparation against the verified Edge distribution", () => {
-    assert.equal(record.foundry.version, "0.5.0");
-    assert.equal(record.foundry.previous_release, "v0.4.0");
+    assert.equal(record.foundry.version, "0.5.1");
+    assert.equal(record.foundry.previous_release, "v0.5.0");
     const pkg = JSON.parse(repoFile("package.json"));
     const lock = JSON.parse(repoFile("package-lock.json"));
     // The release workflow requires the tag, package.json, and the record to agree.
@@ -144,6 +178,41 @@ describe("the supported pairing record", () => {
       );
     }
     assert.deepEqual(record.foundry.platforms, ["linux/amd64", "linux/arm64"]);
+  });
+
+  it("preserves immutable release bytes and never reuses prior qualification for a moved pin", () => {
+    for (const [version, digest] of [
+      ["0.4.0", "937d06bd98cb3338358f3afa8697eafb17154b423d65da5a8335ee26e70ff9a6"],
+      ["0.5.0", "78ca12374fccd5e77d5353916550b5199b508dac718f25d06be570d5e92a39f5"],
+    ]) {
+      const bytes = repoFile(`docs/release-notes/v${version}.compatibility.json`);
+      assert.equal(createHash("sha256").update(bytes).digest("hex"), digest);
+    }
+    const previous = JSON.parse(repoFile("docs/release-notes/v0.5.0.compatibility.json"));
+    assert.equal(previous.status, "released");
+    assert.equal(previous.foundry.source_commit, "7ab9ddb732ebd890fb02928d6e4b22470ceab3f7");
+    assert.equal(
+      previous.foundry.image,
+      "ferrumedge/ferrum-foundry@sha256:079db008f6e45e721c2b6636be94980c67b69faff963eace2de7be2232a7eb9b",
+    );
+    assert.equal(previous.edge.release.version, "v0.9.11");
+    assert.notDeepEqual(record.qualification, previous.qualification);
+    assert.deepEqual(record.tested, previous.tested);
+    assert.deepEqual(record.best_effort, previous.best_effort);
+
+    // Published upstream distribution cannot make a pending Foundry source releasable.
+    const pending = structuredClone(qualifiedFixture.record);
+    pending.qualification = {
+      status: "pending",
+      ci_evidence: null,
+      source_commit: null,
+      tested_commit: null,
+      run_attempt: null,
+    };
+    assert.throws(() => requireReleaseReady(pending), /hosted qualification is still pending/);
+    const reused = structuredClone(qualifiedFixture.record);
+    reused.qualification = structuredClone(previous.qualification);
+    assert.throws(() => requireReleaseReady(reused, qualifiedFixture.evidence), /run does not match/);
   });
 
   it("preserves the published v0.4.0 facts separately from the candidate", () => {

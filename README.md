@@ -49,12 +49,14 @@ works the same way against a live Ferrum Edge gateway.
 
 ## Supported Ferrum Edge version
 
-Foundry is qualified against one Ferrum Edge image at a time. **Foundry v0.5.0**
-pairs with the published **Ferrum Edge v0.9.11** distribution, pinned by digest
-in `docs/compatibility.json`. Hosted qualification and publication evidence,
-including the Foundry image index and platform manifests, are recorded in the
-[supported pairing record](docs/compatibility.md). The preceding v0.4.0 / Edge
-v0.9.10 pairing remains in [history](docs/compatibility.md#history).
+The latest published pairing is **Foundry v0.5.1 / Ferrum Edge v0.9.12**,
+qualified against the digest in `docs/compatibility.json` and published on
+2026-10-05. Its [immutable record](docs/release-notes/v0.5.1.compatibility.json)
+preserves actual source, image and release CI identities separately from the
+original hosted qualification. Published v0.5.0 / Edge v0.9.11 and v0.4.0 /
+Edge v0.9.10 records remain unchanged in [history](docs/compatibility.md#history).
+The [pairing record](docs/compatibility.md) records the publication evidence
+and verification limits.
 
 The qualification envelope stays `database` mode on SQLite (writable and
 `FERRUM_ADMIN_READ_ONLY`), the trusted-proxy starter, Chromium, and
@@ -71,17 +73,21 @@ Foundry vendors the `plugin-catalog` and `provisioned-by` vocabularies with
 their vocabulary schemas, plus the implemented service-manifest schema, all
 its valid/invalid fixtures and the canonical invalid-expectations file, under
 [`contracts/ferrum-contracts/`](contracts/ferrum-contracts/), pinned to
-`contracts-edge-0.9.11` at `390edbd5b2485af0988e02f7827fde778d76ae0a` in
+`contracts-edge-0.9.12` at `31f0a21d707795be293d15837c2f77c3d84219d8` in
 [`contracts/ferrum-contracts/PIN`](contracts/ferrum-contracts/PIN). The vendored
 files, Foundry's local plugin names and provisioning markers, and the pin's tie
-to the qualified Edge release are checked by
+to the paired Edge release are checked by
 [Plugin configuration templates](docs/plugin-defaults.md#shared-plugin-catalog-contract).
-Canonical [release 403239814](https://github.com/ferrum-edge/ferrum-contracts/releases/tag/contracts-edge-0.9.11)
-was published on 2026-10-04. Its owner qualification marks the shared manifest
+Canonical [release 403772929](https://github.com/ferrum-edge/ferrum-contracts/releases/tag/contracts-edge-0.9.12)
+was published on 2026-10-05 after successful main Validate contracts run
+37320780987. Its owner qualification marks the shared manifest
 and diagnostic report EXISTING/implemented; Alloy remains unpublished. Exact
 vendored descriptions retain their historical preparation wording. Foundry
-adopts only the files listed in its pin; diagnostic import remains future work.
-The unreleased [Alloy manifest preview](docs/alloy-manifest-preview.md) consumes
+adopts only the same 18 files listed in its pin. The complete canonical invalid
+expectations include deployment-profile additions, but Foundry does not vendor
+those schemas or adopt the native deployment profile. Diagnostic import remains
+future work. Foundry v0.5.1 passed hosted qualification with this contract scope.
+The [Alloy manifest preview](docs/alloy-manifest-preview.md) consumes
 the existing fields through an authenticated, read-only BFF route.
 
 A shared contract changes in `ferrum-contracts` first, then is re-vendored here;

@@ -37,10 +37,11 @@ a local copy would go stale.
 
 Shared org contracts are vendored under `contracts/ferrum-contracts/`; see
 [Contracts](README.md#contracts).
-Foundry v0.5.0 adopts published `contracts-edge-0.9.11` at
-`390edbd5b2485af0988e02f7827fde778d76ae0a`. The shared manifest is implemented;
-Foundry v0.5.0 qualification and publication are recorded in
-`docs/compatibility.json` and its immutable release record.
+Published Foundry v0.5.1 adopts `contracts-edge-0.9.12` at
+`31f0a21d707795be293d15837c2f77c3d84219d8`. The shared manifest is implemented;
+hosted qualification and actual publication are recorded in
+`docs/compatibility.json` and its immutable v0.5.1 snapshot. Released v0.5.0
+and v0.4.0 notes and records remain unchanged.
 
 ## Development
 
@@ -79,8 +80,8 @@ node scripts/demo-traffic-client.mjs mixed
 ### Running the gateway locally
 
 Run the Ferrum Edge image CI pins, by digest, so local results match CI. It is
-the published Ferrum Edge v0.9.11 release qualified for Foundry v0.5.0. The
-published v0.4.0 pairing remains in history.
+the published Ferrum Edge v0.9.12 release qualified with published Foundry
+v0.5.1. Published v0.5.0 and v0.4.0 pairings remain in history.
 `edge.image` in `docs/compatibility.json` is the single source: CI reads it
 (`node scripts/supported-pairing.mjs edge-image`), and
 `scripts/supported-pairing.test.mjs` fails if the starter, this command, or any
@@ -99,7 +100,7 @@ docker run --rm -d --name ferrum-edge \
   -e FERRUM_ADMIN_BIND_ADDRESS=0.0.0.0 \
   -e FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true \
   -p 127.0.0.1:9000:9000 -p 127.0.0.1:8000:8000 \
-  ferrumedge/ferrum-edge@sha256:2476b502855940e28157858fc24008545cb3baeb3084c9610e1d4505cbe0d36e run -m database -v
+  ferrumedge/ferrum-edge@sha256:80526b59cbbdc2bfcc8bae9241da4e5395414cf07bf0be4effd4c73c51684ee4 run -m database -v
 ```
 
 The plaintext admin bind above is a local-development exception; Docker's port

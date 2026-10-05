@@ -1,33 +1,28 @@
 # Ferrum Foundry — next release (draft)
 
-> **Draft template.** The prepared v0.5.0 source is documented in
-> [v0.5.0.md](v0.5.0.md) and the pending `[0.5.0]` changelog bucket. Its hosted
-> qualification and publication remain pending; no Foundry release artifact or
-> publication date is claimed. This file is reserved for subsequent work.
-> The release workflow publishes the versioned notes, requires matching package
-> and compatibility versions, and requires hosted `release-ready` verification.
+> **Draft notes.** No next release is prepared. The latest published pairing
+> is v0.5.1 / Edge v0.9.12, documented in [v0.5.1.md](v0.5.1.md) and its
+> [immutable release record](v0.5.1.compatibility.json).
+> The release workflow requires matching package/compatibility versions,
+> versioned notes and hosted `release-ready` verification.
 >
-> Name an Edge image only in the versioned release notes, using `edge.release`
-> from `docs/compatibility.json`. Moving that pin requires full qualification.
+> Name an Edge image only in versioned notes using `edge.release` from the
+> current record; moving the pin requires full qualification.
 
-### Supported pairing
+### Changes since v0.5.1
 
-*Release step:* name the actual Foundry and published Edge versions, image
-identities, tested gateway/access/browser envelope and hosted evidence. Keep
-unverified publication facts pending. See [compatibility](../compatibility.md).
-
-### Highlights
-
-No changes beyond the prepared v0.5.0 source are recorded yet. Summarize future
-changes from `[Unreleased]` here when preparing the next versioned notes.
+Record the verified v0.5.1 publication in current documentation and preserve its
+immutable compatibility snapshot. No runtime, contract scope, dependency,
+profile, capability or mutation-policy changes are included.
 
 ### Known limitations
 
-*Release step:* retain the documented support and security limits; distinguish
-published upstream facts, consumer adoption and actual hosted qualification.
+Retain the documented support/security limits and pending owner decisions.
+Published upstream facts, canonical consumption, hosted Foundry qualification
+and Foundry publication are separate evidence.
 
-### Install, upgrade and rollback
+### Publication
 
-*Release step:* reference actual immutable artifacts and the matching deployment
-starter. Record the actual publication date and distribution facts only after
-publication. Never reuse a previous release's source, digest or CI evidence.
+No subsequent Foundry version or qualification is claimed. Root owns review
+and hosted CI for this documentation update and any future release. See
+[compatibility](../compatibility.md).

@@ -14,16 +14,17 @@ request.
 For a walkthrough that ends in an authenticated request through the data
 plane, see [`docs/getting-started.md`](../../docs/getting-started.md).
 
-**Supported pairing.** The demo profile pins the published Edge
-v0.9.11 distribution qualified for Foundry v0.5.0. The release and qualification
-evidence are recorded in
-[`docs/compatibility.md`](../../docs/compatibility.md). The default Foundry
-image, `ferrumedge/ferrum-foundry:main`, is the development channel. Production
-must use the released Foundry digest from that record. Both existing profiles
-and authority tiers are unchanged. The release adopts published
-`contracts-edge-0.9.11` at
-`390edbd5b2485af0988e02f7827fde778d76ae0a`; its service-manifest schema is
-packaged unchanged from that tag.
+**Candidate pairing.** The demo profile pins published Edge v0.9.12 for the
+Foundry v0.5.1 candidate. Hosted qualification and Foundry publication are
+pending in [`docs/compatibility.md`](../../docs/compatibility.md). The default
+Foundry image, `ferrumedge/ferrum-foundry:main`, is the development channel.
+Production must use a published pairing and its released Foundry digest; the
+latest is preserved in the
+[v0.5.0 record](../../docs/release-notes/v0.5.0.compatibility.json). Both profiles
+and authority tiers are unchanged. The candidate adopts published
+`contracts-edge-0.9.12` at `31f0a21d707795be293d15837c2f77c3d84219d8`; its
+service-manifest schema and all manifest fixtures are unchanged from the prior
+pin. The native deployment profile is not adopted.
 
 ## Two profiles
 
@@ -31,7 +32,7 @@ packaged unchanged from that tag.
 | --- | --- | --- |
 | Reverse proxy | nginx, TLS on :443 | nginx, plain HTTP on loopback |
 | Identity | oauth2-proxy against your OIDC provider | a local stub keyed by a request header |
-| Gateway | yours — run the Ferrum Edge release named in the compatibility record | a disposable SQLite Ferrum Edge, the image CI qualifies, pinned by digest |
+| Gateway | yours — run the Ferrum Edge release in the published pairing you deploy | a disposable SQLite Ferrum Edge, the image CI qualifies, pinned by digest |
 | Backend | yours | a disposable echo origin |
 | Data | yours | throwaway; `down -v` removes it |
 
@@ -108,7 +109,8 @@ or `unmapped`). It is for a first run and for CI. Do not expose it.
 4. Edit `nginx/foundry.conf` for your `server_name` and certificate paths, and
    `nginx/identity/policy.conf` for your IdP's group names and your namespaces.
 5. Pin `FOUNDRY_IMAGE` to a released digest, and run the Ferrum Edge release
-   named in [`docs/compatibility.md`](../../docs/compatibility.md).
+   named in that published pairing's immutable record linked from
+   [`docs/compatibility.md`](../../docs/compatibility.md).
 6. `docker compose --profile production up -d`, then run the preflight.
 
 ### What the stack gets right

@@ -1,6 +1,6 @@
 # Alloy service manifest preview
 
-The unreleased Settings → Alloy Service Manifest card consumes the JSON data
+The Settings → Alloy Service Manifest card consumes the JSON data
 model of `ferrum.service_manifest` v1. It calls the authenticated BFF endpoint
 `POST /api/service-manifest/preview`; it never calls the gateway from the browser.
 Paste JSON matching the shared fixtures. This version does not parse the
@@ -17,22 +17,26 @@ switches clear the draft and result and abort an outstanding preview.
 ## Contract and provenance
 
 The canonical pin is `contracts/ferrum-contracts/PIN`: immutable tag
-[`contracts-edge-0.9.11`](https://github.com/ferrum-edge/ferrum-contracts/tree/390edbd5b2485af0988e02f7827fde778d76ae0a)
-at `390edbd5b2485af0988e02f7827fde778d76ae0a`, published as
-[release 403239814](https://github.com/ferrum-edge/ferrum-contracts/releases/tag/contracts-edge-0.9.11)
-on 2026-10-04 at 22:41:21 UTC. The adopted files are the existing
+[`contracts-edge-0.9.12`](https://github.com/ferrum-edge/ferrum-contracts/tree/31f0a21d707795be293d15837c2f77c3d84219d8)
+at `31f0a21d707795be293d15837c2f77c3d84219d8`, published as
+[release 403772929](https://github.com/ferrum-edge/ferrum-contracts/releases/tag/contracts-edge-0.9.12)
+on 2026-10-05 at 13:58:38 UTC. The adopted files are the existing
 plugin/provisioning vocabularies and schemas, plus the service-manifest schema
 and every shared valid/invalid manifest fixture, including agents, plus the
 canonical invalid-expectations file. Each exact published file has a SHA-256 in
-the same pin. Vocabulary provenance now binds released Edge v0.9.11 at c764;
+the same pin. Vocabulary provenance now binds released Edge v0.9.12 at 0d917701;
 plugin entries, lifecycle metadata, provisioning values and first availability
 are unchanged. Both vocabulary schemas and all 12 manifest fixtures retain
 their earlier bytes. The manifest validation fields are unchanged, with current
 owner/status metadata and full published descriptions retained verbatim.
 Historical preparation/pending wording inside immutable canonical files records
 their source state before publication; the tag and release above establish the
-actual publication. Foundry v0.5.0 hosted qualification is recorded in the
-[compatibility record](compatibility.md).
+actual publication after successful main Validate contracts run 37320780987.
+The same 18-file scope retains complete canonical invalid expectations,
+including new deployment-profile entries; it does not vendor those schemas or
+adopt that runtime profile. Foundry v0.5.1 hosted qualification and publication
+are recorded in the [compatibility record](compatibility.md); v0.5.0 evidence
+is historical.
 
 The independently reviewed producer is Alloy commit
 [`690aed7a9fa8458aeea4ac8416170c8daeb0470b`](https://github.com/ferrum-edge/ferrum-alloy/tree/690aed7a9fa8458aeea4ac8416170c8daeb0470b).
