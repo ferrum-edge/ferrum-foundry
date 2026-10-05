@@ -106,7 +106,7 @@ fails the check. An outage is never reported as drift, and never passes.
 
 ### v0.5.1 hosted schema adoption
 
-The candidate adopts the actual Pinned Gateway Contract producer from
+The v0.5.1 schema adoption used the actual Pinned Gateway Contract producer from
 [run 37336969590](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37336969590),
 attempt 1, for [PR #548](https://github.com/ferrum-edge/ferrum-foundry/pull/548).
 The API run and artifact head identify the PR source; the artifact name and
@@ -145,7 +145,7 @@ pin:
 | `CorsConfig` | `96fcc1b45b3c20b27713b0bc0c7eef23bd92810587b21115a233081da7932bf3` |
 | `PrometheusMetricsConfig` | `ee96fad934766a3195cd0aa2231c55287732973f246bf4a830e4ae890b980623` |
 
-Only `PLUGIN_SCHEMA_SPEC.ref` changes. Descriptors, catalog and templates stay
+That adoption changed only `PLUGIN_SCHEMA_SPEC.ref`. Descriptors, catalog and templates stay
 unchanged. `mcp_tool_calls` remains unmodelled: its object, explicit `null` and
 omitted states, nested policy, unrelated raw keys and key order survive guided
 rate edits. Stored `redis_password` stays present-but-blank in guided state,
@@ -153,16 +153,48 @@ with the existing keep/replace/omit behavior. No defaults are inferred and the
 gateway remains admission authority. `info.version: 0.2.0` remains schema
 metadata. New deployment components are outside this guided surface.
 
-This completes static schema review, not final-head pairing qualification. The
+This producer completed static schema review, not final-head pairing qualification. The
 producer's Pinned Gateway Contract job succeeded, but both Node Quality Gates
 failed the old readiness fixture's v0.5.0 expectation. That fixture was repaired
 in `c96d342149ca3b71f6c3e96dd5bb3143b9caa464`; neither that repair nor this
-provenance update is qualified by the producer run. Root must obtain a fresh
-independent read-only review and all eight applicable hosted gates for the final
-source and tested merge. Qualification and publication fields remain null.
-The failed v0.5.0 producer above remains historical schema evidence only.
+provenance update is qualified by that producer run. Subsequent fresh independent
+read-only review and hosted qualification passed as recorded below. The failed
+v0.5.0 producer above remains historical schema evidence only.
 No project tooling, producer or component extractor executed locally, and no
 OpenAPI document or export is stored in the repository.
+
+#### Qualified v0.5.1 schema evidence
+
+The original pairing qualification
+[run 37341678624](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37341678624),
+attempt 1, passed all eight applicable gates and produced the following actual
+schema artifact. Its metadata binds the same repository to source `157fa7f`
+and tested merge `b01dd913`; it does not restamp either earlier producer.
+
+| Actual qualified hosted evidence | Value |
+| --- | --- |
+| Foundry repository ID | `1206833208` |
+| Run / attempt | `37341678624` / `1` |
+| PR source / API head | `157fa7f478ea8e987104f6adb3cc41baf1efb2e0` |
+| Tested synthetic merge | `b01dd9137635739cd453d1e3b507c24ec1aca3e3` |
+| Merge base | `fa57904868affd1e2f94add5bc8daa1fdd0905f1` |
+| Artifact ID | `11358382729` |
+| Original artifact name | `plugin-schema-producer-b01dd9137635739cd453d1e3b507c24ec1aca3e3-attempt-1` |
+| Archive bytes / SHA-256, matching the GitHub API digest | `9395` / `fbde655c7122acb4412d63cd4c79fecc977121511bd703f091330616d4e258f8` |
+| Exported JSON bytes / SHA-256, matching its checksum file | `30061` / `6d8eb6f1f34ebff466e4a1c318b9b6be259ee25960f7da0ea70ae426af72d48c` |
+| Source repository and path | `ferrum-edge/ferrum-edge`, `openapi.yaml` |
+| Source ref and reviewed ref | `0d917701b63ef38210c49df830f48cf0457cbc7d` |
+| Raw source SHA-256 | `f7242228d73d34ad2d7da3c989ec6ba15bb6ae1f2f4c94a8e0a181b000caae77` |
+
+All five complete exported components are `unchanged`, with `actual` and
+`sha256` equal to the retained hashes above. The schema ref, component hashes,
+descriptors, catalog, templates and preservation behavior are unchanged in this
+post-publication record. Actual v0.5.1 release run `37351255936`, attempt 1,
+repeated all eight pairing gates at published source
+`1dc43bd1bbd4c2c89ca14e2a603aa478ab1a0d18`. Its Pinned Gateway Contract
+schema check passed. Publication and repeated tag-run evidence are separate
+from the original qualification object in
+[compatibility](compatibility.md#qualification-evidence).
 
 ## What guided editing does to a configuration
 

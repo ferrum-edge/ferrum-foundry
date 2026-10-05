@@ -1,26 +1,19 @@
 # Ferrum Foundry — next release (draft)
 
-> **Draft notes.** The unreleased v0.5.1 candidate is documented in
-> [v0.5.1.md](v0.5.1.md) and the `[Unreleased]` changelog bucket. Hosted
-> qualification and Foundry publication are pending. The latest published
-> pairing remains v0.5.0 / Edge v0.9.11 in its immutable release record.
+> **Draft notes.** No next release is prepared. The latest published pairing
+> is v0.5.1 / Edge v0.9.12, documented in [v0.5.1.md](v0.5.1.md) and its
+> [immutable release record](v0.5.1.compatibility.json).
 > The release workflow requires matching package/compatibility versions,
 > versioned notes and hosted `release-ready` verification.
 >
 > Name an Edge image only in versioned notes using `edge.release` from the
 > current record; moving the pin requires full qualification.
 
-### Candidate changes
+### Changes since v0.5.1
 
-Published Edge v0.9.12 and contracts-edge-0.9.12 are selected for v0.5.1.
-The same contract scope, manifest fields/fixtures, profiles, Node floors,
-capabilities and ordinary mutation semantics remain unchanged. Guided-schema
-static review is complete from hosted run `37336969590`, attempt 1, artifact
-`11356821423`; the reviewed ref adopts the published Edge source with every
-component hash and guided behavior unchanged. Exact producer source, tested
-merge, verified archive/export hashes and limits are recorded in
-[schema provenance](../plugin-schemas.md#v051-hosted-schema-adoption).
-Fresh independent read-only review and all final-head hosted gates remain pending.
+Record the verified v0.5.1 publication in current documentation and preserve its
+immutable compatibility snapshot. No runtime, contract scope, dependency,
+profile, capability or mutation-policy changes are included.
 
 ### Known limitations
 
@@ -30,6 +23,6 @@ and Foundry publication are separate evidence.
 
 ### Publication
 
-No new Foundry tag, source commit, image digest, publication date or successful
-qualification is claimed. Root owns final-source review, hosted qualification and
-any subsequent release. See [compatibility](../compatibility.md).
+No subsequent Foundry version or qualification is claimed. Root owns review
+and hosted CI for this documentation update and any future release. See
+[compatibility](../compatibility.md).

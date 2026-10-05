@@ -1,6 +1,6 @@
 # Alloy service manifest preview
 
-The unreleased Settings → Alloy Service Manifest card consumes the JSON data
+The Settings → Alloy Service Manifest card consumes the JSON data
 model of `ferrum.service_manifest` v1. It calls the authenticated BFF endpoint
 `POST /api/service-manifest/preview`; it never calls the gateway from the browser.
 Paste JSON matching the shared fixtures. This version does not parse the
@@ -34,8 +34,9 @@ their source state before publication; the tag and release above establish the
 actual publication after successful main Validate contracts run 37320780987.
 The same 18-file scope retains complete canonical invalid expectations,
 including new deployment-profile entries; it does not vendor those schemas or
-adopt that runtime profile. Foundry v0.5.1 hosted qualification is pending in
-the [compatibility record](compatibility.md); v0.5.0 evidence is historical.
+adopt that runtime profile. Foundry v0.5.1 hosted qualification and publication
+are recorded in the [compatibility record](compatibility.md); v0.5.0 evidence
+is historical.
 
 The independently reviewed producer is Alloy commit
 [`690aed7a9fa8458aeea4ac8416170c8daeb0470b`](https://github.com/ferrum-edge/ferrum-alloy/tree/690aed7a9fa8458aeea4ac8416170c8daeb0470b).
