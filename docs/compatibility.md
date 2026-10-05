@@ -345,15 +345,20 @@ compare that original authority inside transaction fences and return explicit
 requires retaining original encrypted evidence on refusal or uncertainty;
 publication of that contract does not authorize consumer adoption.
 
-This candidate updates source and distribution pins only. Foundry adds no
-native deployment workflow, recovery journal, conditional restore or capability
-and changes no ordinary mutation semantics. Consumer verification remains
-blocked, ordinary backup exports remain ephemeral downloads, and the initial
+This candidate updates source and distribution pins and explicitly refuses the
+new secret-complete deployment snapshot at the browser-facing BFF boundary.
+Every method and role receives `403 FERRUM_BFF_CREDENTIAL_READ_DENIED` after
+authentication and before capacity admission, JWT signing or upstream fetch.
+The denial uses the normalized root pathname, including encoded components,
+an optional trailing slash and queries; ambiguous paths retain the existing
+`400` refusal. Consumer verification remains blocked, while ordinary masked
+reads and ephemeral backup downloads retain their existing behavior.
+
+Foundry adds no native deployment workflow, recovery journal, conditional
+restore or capability and changes no ordinary mutation semantics. The initial
 untagged-write fallback and post-412 refusal remain unchanged. Foundry #542/#544
-and #547 owner decisions are still pending. The generic authenticated BFF
-forwarder has no deployment-snapshot-specific denial; deciding whether to block
-that new secret-complete read before any UI adoption is separate root work.
-No deployment-profile browser retention or cleanup guarantee is claimed here.
+and #547 owner decisions are still pending. No deployment-profile browser
+retention or cleanup guarantee is claimed here.
 
 The sensitivity source file is byte-identical to c764 (Git blob
 `827bf3a7c998c7ea9c995093ab38320facbd072a`, raw SHA-256

@@ -8,6 +8,7 @@ import { gatewayTargetId, rejectStaleGatewayTarget, stampGatewayTarget } from '.
 import { generateToken } from './jwt.js';
 import {
   proxyPathIsConsumerVerification,
+  proxyPathIsDeploymentSnapshot,
   proxyTargetPath,
   proxyTargetUrl,
   UnsafeProxyPathError,
@@ -334,6 +335,12 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
       if (proxyPathIsConsumerVerification(path)) {
         return reply.status(403).send({
           error: 'Consumer credential verification is not available through Foundry',
+          code: 'FERRUM_BFF_CREDENTIAL_READ_DENIED',
+        });
+      }
+      if (proxyPathIsDeploymentSnapshot(path)) {
+        return reply.status(403).send({
+          error: 'Deployment snapshot is not available through Foundry',
           code: 'FERRUM_BFF_CREDENTIAL_READ_DENIED',
         });
       }

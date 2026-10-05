@@ -2,6 +2,7 @@ import type { FastifyRequest } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import {
   proxyPathIsConsumerVerification,
+  proxyPathIsDeploymentSnapshot,
   proxyPathIsFleetGlobal,
   proxyTargetPath,
   proxyTargetUrl,
@@ -82,6 +83,28 @@ describe('canonical proxy targets', () => {
     const target = proxyTargetUrl(req, 'https://gateway.test');
     expect(proxyPathIsConsumerVerification(proxyTargetPath(req))).toBe(denied);
     expect(proxyPathIsConsumerVerification(target.pathname)).toBe(denied);
+  });
+
+  it.each([
+    ['/api/proxy/deployment-snapshot', true],
+    ['/api/proxy/deployment-snapshot/', true],
+    ['/api/proxy/deployment-snapshot?resources=consumers', true],
+    ['/api/proxy/%64eployment-%73napshot/?query=%zz', true],
+    ['/%61pi/pr%6fxy/deploym%65nt-snapshot', true],
+    ['/api/proxy/deployment-snapshot/extra', false],
+    ['/api/proxy/deployment-snapshots', false],
+    ['/api/proxy/admin/deployment-snapshot', false],
+    ['/api/proxy/proxies/deployment-snapshot', false],
+    ['/api/proxy/consumers/deployment-snapshot', false],
+    ['/api/proxy/backup?path=/deployment-snapshot', false],
+    ['/api/proxy/config/export?path=%2Fdeployment-snapshot', false],
+  ])('classifies only the exact deployment snapshot pathname of %s', (url, denied) => {
+    for (const wildcard of [undefined, 'router-params-are-not-policy']) {
+      const req = request(url, wildcard);
+      const target = proxyTargetUrl(req, 'https://gateway.test');
+      expect(proxyPathIsDeploymentSnapshot(proxyTargetPath(req))).toBe(denied);
+      expect(proxyPathIsDeploymentSnapshot(target.pathname)).toBe(denied);
+    }
   });
 
   it('keeps query syntax and escapes separate from path validation', () => {

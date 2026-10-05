@@ -91,6 +91,12 @@ export function proxyPathIsConsumerVerification(path: string): boolean {
   return /^\/consumers\/[^/]+\/verification\/?$/.test(path);
 }
 
+/** Deployment evidence includes original credentials and is not a browser read. */
+export function proxyPathIsDeploymentSnapshot(path: string): boolean {
+  // Classify only the normalized pathname serialized for upstream fetch.
+  return path === '/deployment-snapshot' || path === '/deployment-snapshot/';
+}
+
 export function requestIsProxyRoute(request: FastifyRequest): boolean {
   const routePath = request.routeOptions.url ?? '';
   return routePath === '/api/proxy/*' || routePath.startsWith(PROXY_PREFIX);

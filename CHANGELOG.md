@@ -25,6 +25,16 @@ No native deployment profile, conditional restore, capability, Node-floor or
 initial untagged-write policy change is included. Existing owner decisions
 remain pending.
 
+### Security
+
+- Explicitly refuse the secret-complete `/deployment-snapshot` route through
+  the browser-facing BFF for every method and role, including HEAD, after
+  authentication and before capacity admission, JWT signing or upstream fetch.
+  The denial reuses `FERRUM_BFF_CREDENTIAL_READ_DENIED` and checks the exact
+  normalized root pathname, including encoded components, a trailing slash and
+  queries. Ordinary masked reads and ephemeral backup downloads retain their
+  existing behavior. No native deployment workflow or recovery journal is added.
+
 ## [0.5.0] - 2026-10-04
 
 Foundry v0.5.0 was published after hosted qualification against Ferrum Edge
