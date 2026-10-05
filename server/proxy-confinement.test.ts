@@ -186,19 +186,75 @@ describe('raw BFF path confinement', () => {
     }
   }, 15_000);
 
+  it.each(['viewer', 'operator', 'admin'])(
+    'denies deployment snapshots for %s before signing or fetch for all forwarded methods',
+    async (role) => {
+      const beforeArrivals = arrivals.length;
+      const beforeWrites = publications.length;
+      const beforeTokens = vi.mocked(generateToken).mock.calls.length;
+      const beforeFetches = vi.mocked(upstreamFetch).mock.calls.length;
+      const paths = [
+        '/api/proxy/deployment-snapshot',
+        '/api/proxy/deployment-snapshot/',
+        '/api/proxy/deployment-snapshot?resources=consumers',
+        '/api/proxy/deployment-snapshot/?note=a%2Fb&query=%zz?extra=1',
+        '/api/proxy/%64eployment-%73napshot',
+        '/api/proxy/deploym%65nt-snapshot/',
+        '/%61pi/pr%6fxy/%64eployment-%73napshot/?conditional=true',
+      ];
+      for (const method of app.supportedMethods) {
+        for (const path of paths) {
+          const response = await rawRequest(
+            path,
+            method,
+            identity(role),
+            method === 'GET' || method === 'HEAD' ? '' : '{}',
+          );
+          expect(response.status, `${role} ${method} ${path}`).toBe(403);
+          if (method !== 'HEAD') {
+            expect(response.wire).toContain('FERRUM_BFF_CREDENTIAL_READ_DENIED');
+            expect(response.wire).toContain('Deployment snapshot is not available through Foundry');
+          }
+          expect(arrivals).toHaveLength(beforeArrivals);
+          expect(publications).toHaveLength(beforeWrites);
+          expect(vi.mocked(generateToken).mock.calls).toHaveLength(beforeTokens);
+          expect(vi.mocked(upstreamFetch).mock.calls).toHaveLength(beforeFetches);
+        }
+      }
+    },
+    15_000,
+  );
+
   it('preserves authentication, namespace, CSRF, and unsafe-path checks before denial', async () => {
+    const beforeArrivals = arrivals.length;
     const beforeTokens = vi.mocked(generateToken).mock.calls.length;
     const beforeFetches = vi.mocked(upstreamFetch).mock.calls.length;
-    const path = '/api/proxy/consumers/consumer-1/verification';
-    const anonymous = await rawRequest(path, 'GET', {});
-    expect(anonymous.status).toBe(401);
-    expect(anonymous.wire).not.toContain('FERRUM_BFF_CREDENTIAL_READ_DENIED');
-    const denied = await rawRequest(path, 'GET', identity('admin', 'tenant-b'));
-    expect(denied.status).toBe(403);
-    expect(denied.wire).toContain('Namespace access denied');
-    const csrf = await rawRequest(path, 'POST', { ...identity('admin'), 'x-csrf-token': '' }, '{}');
-    expect(csrf.status).toBe(403);
-    expect(csrf.wire).toContain('CSRF validation failed');
+    for (const path of [
+      '/api/proxy/consumers/consumer-1/verification',
+      '/api/proxy/deployment-snapshot',
+    ]) {
+      for (const method of ['GET', 'HEAD', 'POST']) {
+        const anonymous = await rawRequest(path, method, {}, method === 'POST' ? '{}' : '');
+        expect(anonymous.status).toBe(401);
+        expect(anonymous.wire).not.toContain('FERRUM_BFF_CREDENTIAL_READ_DENIED');
+      }
+      const denied = await rawRequest(path, 'GET', identity('admin', 'tenant-b'));
+      expect(denied.status).toBe(403);
+      expect(denied.wire).toContain('Namespace access denied');
+      const csrf = await rawRequest(
+        path,
+        'POST',
+        { ...identity('admin'), 'x-csrf-token': '' },
+        '{}',
+      );
+      expect(csrf.status).toBe(403);
+      expect(csrf.wire).toContain('CSRF validation failed');
+      const globalAdmin = identity('admin');
+      delete globalAdmin['x-ferrum-namespaces'];
+      const unrestricted = await rawRequest(path, 'GET', globalAdmin);
+      expect(unrestricted.status).toBe(403);
+      expect(unrestricted.wire).toContain('FERRUM_BFF_CREDENTIAL_READ_DENIED');
+    }
     for (const id of ['a%2Fb', 'a%5Cb', '%2520', '..', '%7f']) {
       const unsafe = await rawRequest(
         `/api/proxy/consumers/${id}/verification`, 'GET', identity('admin'),
@@ -206,13 +262,51 @@ describe('raw BFF path confinement', () => {
       expect(unsafe.status).toBe(400);
       expect(unsafe.wire).toContain('FERRUM_BFF_UNSAFE_PATH');
     }
-    const globalAdmin = identity('admin');
-    delete globalAdmin['x-ferrum-namespaces'];
-    const unrestricted = await rawRequest(path, 'GET', globalAdmin);
-    expect(unrestricted.status).toBe(403);
-    expect(unrestricted.wire).toContain('FERRUM_BFF_CREDENTIAL_READ_DENIED');
+    expect(arrivals).toHaveLength(beforeArrivals);
     expect(vi.mocked(generateToken).mock.calls).toHaveLength(beforeTokens);
     expect(vi.mocked(upstreamFetch).mock.calls).toHaveLength(beforeFetches);
+  });
+
+  it('refuses ambiguous snapshot paths before signing or contacting upstream', async () => {
+    const beforeArrivals = arrivals.length;
+    const beforeTokens = vi.mocked(generateToken).mock.calls.length;
+    const beforeFetches = vi.mocked(upstreamFetch).mock.calls.length;
+    for (const path of [
+      '//deployment-snapshot',
+      '/deployment-snapshot//',
+      '/./deployment-snapshot',
+      '/other/../deployment-snapshot',
+      '/%2564eployment-snapshot',
+      '/deployment-snapshot%2f',
+      '/deployment-snapshot%5c',
+      '/deployment-snapshot%00',
+      '/deployment-snapshot%7f',
+    ]) {
+      const response = await rawRequest(`/api/proxy${path}`, 'GET', identity('admin'));
+      expect(response.status, path).toBe(400);
+      expect(response.wire).toContain('FERRUM_BFF_UNSAFE_PATH');
+      expect(arrivals).toHaveLength(beforeArrivals);
+      expect(vi.mocked(generateToken).mock.calls).toHaveLength(beforeTokens);
+      expect(vi.mocked(upstreamFetch).mock.calls).toHaveLength(beforeFetches);
+    }
+  });
+
+  it('rejects malformed snapshot escapes without signing or contacting upstream', async () => {
+    const beforeArrivals = arrivals.length;
+    const beforeTokens = vi.mocked(generateToken).mock.calls.length;
+    const beforeFetches = vi.mocked(upstreamFetch).mock.calls.length;
+    for (const path of [
+      '/%zzdeployment-snapshot',
+      '/deployment-snapshot%',
+      '/%c0%afdeployment-snapshot',
+    ]) {
+      const response = await rawRequest(`/api/proxy${path}`, 'GET', identity('admin'));
+      // The router may reject malformed wire escapes before onRequest runs.
+      expect(response.status, path).toBe(400);
+      expect(arrivals).toHaveLength(beforeArrivals);
+      expect(vi.mocked(generateToken).mock.calls).toHaveLength(beforeTokens);
+      expect(vi.mocked(upstreamFetch).mock.calls).toHaveLength(beforeFetches);
+    }
   });
 
   it('forwards masked consumer reads and ignores verification text in queries', async () => {
@@ -221,6 +315,7 @@ describe('raw BFF path confinement', () => {
       '/consumers/consumer-1',
       '/%63onsumers/%63onsumer-1/',
       '/consumers/a%3Fb%23c?note=/consumers/other/verification',
+      '/consumers/deployment-snapshot?note=/deployment-snapshot',
     ]) {
       const beforeTokens = vi.mocked(generateToken).mock.calls.length;
       const beforeFetches = vi.mocked(upstreamFetch).mock.calls.length;
@@ -232,6 +327,69 @@ describe('raw BFF path confinement', () => {
       expect(vi.mocked(upstreamFetch).mock.calls).toHaveLength(beforeFetches + 1);
       expect(decodeJwt(arrivals.at(-1)!.token)).toMatchObject({ role: 'admin', ns: 'tenant-a' });
     }
+  });
+
+  it('forwards backups, masked exports, and unrelated snapshot text unchanged', async () => {
+    for (const path of [
+      '/backup?note=/deployment-snapshot',
+      '/config/export?note=%2Fdeployment-snapshot',
+      '/proxies/deployment-snapshot',
+      '/deployment-snapshot/extra',
+      '/deployment-snapshots',
+      '/admin/deployment-snapshot',
+    ]) {
+      const beforeArrivals = arrivals.length;
+      const beforeTokens = vi.mocked(generateToken).mock.calls.length;
+      const beforeFetches = vi.mocked(upstreamFetch).mock.calls.length;
+      const response = await rawRequest(`/api/proxy${path}`, 'GET', identity('admin'));
+      expect(response.status, path).toBe(200);
+      expect(arrivals).toHaveLength(beforeArrivals + 1);
+      expect(arrivals.at(-1)).toMatchObject({ url: path, method: 'GET', namespace: 'tenant-a' });
+      expect(vi.mocked(generateToken).mock.calls).toHaveLength(beforeTokens + 1);
+      expect(vi.mocked(upstreamFetch).mock.calls).toHaveLength(beforeFetches + 1);
+    }
+  });
+
+  it('denies snapshot writes before admission even when the upload pool is full', async () => {
+    const pending: Array<ReturnType<typeof rawRequest>> = [];
+    try {
+      // These ordinary-body routes wait for their response, keeping all eight
+      // configured upload permits held without changing any pool or deadline.
+      for (let index = 0; index < 8; index += 1) {
+        const ready = once(signals, 'held', { signal: AbortSignal.timeout(2500) });
+        pending.push(
+          rawRequest(
+            `/api/proxy/admin/tls/acme/orders/order-${index}/finalize?hold=1`,
+            'POST',
+            identity('admin'),
+            '{}',
+          ),
+        );
+        await ready;
+      }
+      const beforeArrivals = arrivals.length;
+      const beforeTokens = vi.mocked(generateToken).mock.calls.length;
+      const beforeFetches = vi.mocked(upstreamFetch).mock.calls.length;
+      const full = await rawRequest('/api/proxy/proxies', 'POST', identity('admin'), '{}');
+      expect(full.status).toBe(429);
+      expect(full.wire).toContain('FERRUM_BFF_UPLOAD_CAPACITY');
+      const denied = await rawRequest(
+        '/api/proxy/%64eployment-snapshot/?conditional=true',
+        'PUT',
+        identity('admin'),
+        '{}',
+      );
+      expect(denied.status).toBe(403);
+      expect(denied.wire).toContain('FERRUM_BFF_CREDENTIAL_READ_DENIED');
+      expect(arrivals).toHaveLength(beforeArrivals);
+      expect(vi.mocked(generateToken).mock.calls).toHaveLength(beforeTokens);
+      expect(vi.mocked(upstreamFetch).mock.calls).toHaveLength(beforeFetches);
+    } finally {
+      for (const response of held.splice(0)) response.end('{}');
+      await Promise.all(pending);
+    }
+    const released = await rawRequest('/api/proxy/proxies', 'POST', identity('admin'), '{}');
+    expect(released.status).toBe(200);
   });
 
   it('refuses ungranted tenant reads and writes without any upstream arrival or publication', async () => {
