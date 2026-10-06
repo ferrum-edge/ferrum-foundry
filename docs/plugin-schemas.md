@@ -193,8 +193,36 @@ post-publication record. Actual v0.5.1 release run `37351255936`, attempt 1,
 repeated all eight pairing gates at published source
 `1dc43bd1bbd4c2c89ca14e2a603aa478ab1a0d18`. Its Pinned Gateway Contract
 schema check passed. Publication and repeated tag-run evidence are separate
-from the original qualification object in
-[compatibility](compatibility.md#qualification-evidence).
+from the original qualification object in the
+[immutable v0.5.1 record](release-notes/v0.5.1.compatibility.json).
+
+### v0.5.2 schema review
+
+The v0.5.2 candidate moves `edge.source_commit` to published Edge v0.9.13,
+`9b83115de7ec23ab51ec4feae6bed65e596db425`. Its raw `openapi.yaml` (SHA-256
+`5f3e50e217b22b97d068490bdad9563ea450097a2daf7df4f80ff61f98559a81`) was
+downloaded from the immutable source alongside the reviewed 0d917701 document.
+Each of the five components was extracted with the block rule above and
+compared byte for byte:
+
+| Component | Result at 9b83115d | SHA-256 |
+| --- | --- | --- |
+| `KeyAuthConfig` | byte-identical to 0d917701 | `2489182cc16c230dd69d984441a2efcee271df44a934a8ca6d5d868f77da4deb` |
+| `RateLimitingConfig` | byte-identical to 0d917701 | `f6f4c095e2c9f326ba62d87094fb9e8ac3833bba9503476cf01daca1ebc6e4a1` |
+| `RateLimitingRuleConfig` | byte-identical to 0d917701 | `baeb7755166ff2af60d33fdc8eff36e94fb04e5b15ef099c69792a064eb2489d` |
+| `CorsConfig` | byte-identical to 0d917701 | `96fcc1b45b3c20b27713b0bc0c7eef23bd92810587b21115a233081da7932bf3` |
+| `PrometheusMetricsConfig` | byte-identical to 0d917701 | `ee96fad934766a3195cd0aa2231c55287732973f246bf4a830e4ae890b980623` |
+
+The v0.9.13 OpenAPI changes are confined to backend egress policy
+`schema_version: 2`, the deployment snapshot's `StoredContentDigest` and
+`api_spec_contents`, and the `NamespaceSnapshotTooLarge` `507` responses;
+none touches a guided plugin. Descriptors, catalog, templates, secret handling
+and `mcp_tool_calls` preservation are unchanged. `PLUGIN_SCHEMA_SPEC.ref` keeps
+naming 0d917701, the last ref adopted from a reviewed hosted producer export;
+the Pinned Gateway Contract drift check still compares every pinned hash at the
+new `edge.source_commit`. Moving the ref to 9b83115d waits for review of this
+candidate's own producer artifact. No project tooling or producer ran locally,
+and no OpenAPI document or export is stored in the repository.
 
 ## What guided editing does to a configuration
 

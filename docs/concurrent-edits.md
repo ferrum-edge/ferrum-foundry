@@ -23,8 +23,9 @@ runs it in the `Pinned Gateway Contract` CI job on every pull request. It
 records the baseline below. Foundry v0.5.1 passed hosted qualification against
 published Edge v0.9.12, including its released concurrent-edit contract; see
 the original qualification and repeated tag-run evidence in
-[compatibility.md](compatibility.md). This proposal head requires fresh hosted
-qualification.
+[compatibility.md](compatibility.md). The Foundry v0.5.2 candidate, which
+includes this proposal, moves the pin to published Edge v0.9.13 and requires
+fresh hosted qualification.
 
 | Observation | Result |
 | --- | --- |
@@ -35,7 +36,7 @@ qualification.
 | `PUT` with a malformed `If-Match`, or `POST /proxies` with any `If-Match` | **`400`, nothing written** (`malformedIfMatchStatus: 400`, `createIfMatchStatus: 400`) |
 
 Conditional writes come from ferrum-edge#5661, first released in Ferrum Edge
-v0.9.7; v0.9.8 through v0.9.12 retain it
+v0.9.7; v0.9.8 through v0.9.13 retain it
 ([compatibility.md](compatibility.md)).
 `gateway-contract-smoke.mjs` fails if the pinned gateway issues no tag. The
 contract itself requires a usable strong tag for a guarded write and checks

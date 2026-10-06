@@ -157,6 +157,15 @@ consumer reader; ordinary masked consumer reads and the existing masked metadata
 write workflow remain supported. Intentional archival backup downloads are described in
 [Backup export](concurrent-edits.md#backup-export).
 
+Edge v0.9.13 keeps the snapshot secret-complete: its evidence carries stored
+spec documents only as SHA-256 and length, but the new `api_spec_contents`
+array returns one base64 copy of every stored spec document. The path-based
+refusal is unchanged. Conditional snapshot paths that Foundry itself never
+issues (`GET /backup?conditional=true`, a tagged `POST /restore` and the two
+deployment mutations) can answer a deterministic
+`507 Insufficient Storage`; the BFF relays that status and body unchanged and
+releases the request's capacity permit like any other answer.
+
 ### Runtime identity defaults
 
 `GET /api/settings` includes the active `authMode`. In `trusted-proxy` mode:

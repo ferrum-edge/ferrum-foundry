@@ -31,12 +31,12 @@ workflow (`.github/workflows/ci.yml`) has passed:
 ## Supported Edge image
 
 Passing these gates qualifies Foundry with that one Ferrum Edge image and no
-other build. Published Foundry v0.5.1 pairs with published Edge v0.9.12 and
-contracts-edge-0.9.12; its hosted schema producer review, full pairing
-qualification and actual publication are recorded in
+other build. The Foundry v0.5.2 candidate selects published Edge v0.9.13 and
+published contracts-edge-0.9.13; its hosted schema producer review, full pairing
+qualification and publication are pending in
 [the compatibility record](compatibility.md#qualification-evidence).
-Published v0.5.0 / Edge v0.9.11 and v0.4.0 / Edge v0.9.10 pairings remain
-immutable in [history](compatibility.md#history).
+Published v0.5.1 / Edge v0.9.12, v0.5.0 / Edge v0.9.11 and v0.4.0 / Edge
+v0.9.10 pairings remain immutable in [history](compatibility.md#history).
 
 Moving the pin is a re-qualification: change `edge.image` in
 `docs/compatibility.json`, and the pull request re-runs every gate above against

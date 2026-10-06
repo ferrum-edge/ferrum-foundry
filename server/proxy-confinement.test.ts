@@ -18,6 +18,7 @@ vi.mock('./jwt.js', async (importOriginal) => {
 
 const PROXY_SECRET = 'path-test-trusted-proxy-secret-long-enough';
 const TENANT_DATA = 'tenant-b-private-record';
+const SNAPSHOT_TOO_LARGE = 'Namespace snapshot exceeds the 64 MiB conditional-authority bound';
 const MASKED_CONSUMER = {
   id: 'consumer-1',
   credentials: { keyauth: [{ key: '[REDACTED]' }], jwt: [{ secret: '[REDACTED]' }] },
@@ -26,6 +27,15 @@ const arrivals: Array<{ url: string; method: string; namespace: string | undefin
 const publications: Array<{ url: string; body: string }> = [];
 const held: ServerResponse[] = [];
 const signals = new EventEmitter();
+
+// Edge v0.9.13 conditional snapshot paths: a conditional backup read, a
+// tagged restore, and the two deployment mutations.
+function conditionalSnapshot(method: string, url: string, ifMatch: string | undefined): boolean {
+  const target = new URL(url, 'http://gateway.test');
+  if (method === 'POST' && target.pathname === '/restore') return ifMatch !== undefined;
+  return target.searchParams.get('conditional') === 'true';
+}
+
 const gateway = createServer((request, response) => {
   const url = request.url ?? '';
   arrivals.push({
@@ -48,6 +58,12 @@ const gateway = createServer((request, response) => {
     if (url.includes('delay=1')) {
       const timer = setTimeout(() => response.end('{"ok":true}'), 700);
       response.once('close', () => clearTimeout(timer));
+      return;
+    }
+    if (conditionalSnapshot(request.method ?? '', url, request.headers['if-match'])) {
+      // Deterministic NamespaceSnapshotTooLarge: nothing was issued or applied.
+      response.statusCode = 507;
+      response.end(JSON.stringify({ error: SNAPSHOT_TOO_LARGE }));
       return;
     }
     const path = new URL(url, 'http://gateway.test').pathname;
@@ -349,6 +365,44 @@ describe('raw BFF path confinement', () => {
       expect(vi.mocked(upstreamFetch).mock.calls).toHaveLength(beforeFetches + 1);
     }
   });
+
+  it('relays conditional snapshot 507s unchanged and releases every capacity permit', async () => {
+    const tag = '"0123456789abcdef0123456789abcdef"';
+    const routes: Array<[string, string, Record<string, string>, string]> = [
+      ['GET', '/backup?conditional=true', {}, ''],
+      ['POST', '/restore?confirm=true', { 'if-match': tag }, '{}'],
+      [
+        'DELETE',
+        '/proxies/proxy-1?conditional=true&cleanup_orphaned_upstream=false',
+        { 'if-match': tag },
+        '',
+      ],
+      ['PUT', '/api-specs/spec-1?conditional=true', { 'if-match': tag }, '{}'],
+    ];
+    // More attempts than the per-principal long-read (8) and large-upload (2)
+    // pools hold, so a leaked permit would surface as a 429.
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      for (const [method, path, headers, body] of routes) {
+        const beforeArrivals = arrivals.length;
+        const beforeTokens = vi.mocked(generateToken).mock.calls.length;
+        const response = await rawRequest(
+          `/api/proxy${path}`, method, { ...identity('admin'), ...headers }, body,
+        );
+        expect(response.status, `${method} ${path}`).toBe(507);
+        expect(response.wire).toContain(SNAPSHOT_TOO_LARGE);
+        expect(response.wire).not.toContain('FERRUM_BFF_');
+        expect(arrivals).toHaveLength(beforeArrivals + 1);
+        expect(arrivals.at(-1)).toMatchObject({ url: path, method, namespace: 'tenant-a' });
+        expect(vi.mocked(generateToken).mock.calls).toHaveLength(beforeTokens + 1);
+      }
+    }
+    const backup = await rawRequest('/api/proxy/backup', 'GET', identity('admin'));
+    expect(backup.status).toBe(200);
+    const restore = await rawRequest(
+      '/api/proxy/restore?confirm=true', 'POST', identity('admin'), '{}',
+    );
+    expect(restore.status).toBe(200);
+  }, 15_000);
 
   it('denies snapshot writes before admission even when the upload pool is full', async () => {
     const pending: Array<ReturnType<typeof rawRequest>> = [];
