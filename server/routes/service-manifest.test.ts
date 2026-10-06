@@ -3,7 +3,9 @@ import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fetch as upstreamFetch } from 'undici';
 import { MANIFEST_BODY_LIMIT, TLS_PATH_REDACTION } from '../service-manifest.js';
-import { manifestValidator } from '../service-manifest-schema.js';
+import { serviceManifestSchema } from '../service-manifest-schema.js';
+
+const manifestValidator = serviceManifestSchema().validator;
 
 vi.mock('undici', async (importOriginal) => ({
   ...await importOriginal<typeof import('undici')>(),

@@ -5,6 +5,7 @@ import type {
   FastifyServerOptions,
 } from 'fastify';
 import { requireAdminAuth } from '../auth.js';
+import { serviceManifestSchema } from '../service-manifest-schema.js';
 import {
   createManifestPreview,
   MANIFEST_BODY_LIMIT,
@@ -82,6 +83,20 @@ export const serviceManifestRequestLogging: Pick<
 };
 
 const serviceManifestPlugin: FastifyPluginAsync = async (fastify) => {
+  // Compile the vendored schema once, at preview-route registration. A broken
+  // contract (a missing schema file or a new, unrecognized keyword) must disable
+  // only this preview route: the failure is logged exactly once here and every
+  // other BFF surface still starts.
+  let previewUnavailable = false;
+  try {
+    serviceManifestSchema();
+  } catch {
+    previewUnavailable = true;
+    fastify.log.error(
+      'Service manifest preview is disabled: the vendored schema is unavailable',
+    );
+  }
+
   // Encapsulated parser/error handler: malformed or oversized input never
   // returns parser excerpts, validator keys/values, or logs submitted data.
   fastify.removeContentTypeParser('application/json');
@@ -108,6 +123,14 @@ const serviceManifestPlugin: FastifyPluginAsync = async (fastify) => {
   fastify.post(PREVIEW_PATH, {
     bodyLimit: MANIFEST_BODY_LIMIT,
     onRequest: async (request, reply) => {
+      // A disabled route reports unavailability uniformly, before auth.
+      if (previewUnavailable) {
+        reply.header('cache-control', 'no-store');
+        return reply.status(503).send({
+          error: 'Service manifest preview is unavailable',
+          code: 'FERRUM_BFF_MANIFEST_SCHEMA_UNAVAILABLE',
+        });
+      }
       await requireAdminAuth(request, reply);
       if (reply.sent) return;
       const namespace = request.headers['x-ferrum-namespace'];

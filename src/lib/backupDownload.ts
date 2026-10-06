@@ -78,8 +78,12 @@ export async function downloadBackup(
       anchor.href = url;
       anchor.download = `ferrum-backup-${namespace}-${new Date().toISOString().slice(0, 10)}.json`;
       anchor.click();
-    } finally {
+      // Let the browser begin the download from the blob URL before releasing
+      // it: revoking synchronously after click can cancel a large export.
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch (error) {
       URL.revokeObjectURL(url);
+      throw error;
     }
     return counts;
   } catch (error) {

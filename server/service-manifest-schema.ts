@@ -23,9 +23,9 @@ interface SchemaNode {
 }
 
 // Fixed, vendored input only. The same relative path works from dist-server.
-export const manifestSchema: SchemaNode = JSON.parse(readFileSync(new URL(
+const SCHEMA_URL = new URL(
   '../contracts/ferrum-contracts/schemas/service-manifest/v1.schema.json', import.meta.url,
-), 'utf8'));
+);
 
 const KEYWORDS = new Set([
   '$schema', '$id', 'title', 'description', 'x-contract', 'type', 'const', 'enum',
@@ -34,8 +34,8 @@ const KEYWORDS = new Set([
 ]);
 
 // Compile only the subset used by this closed contract with our existing Zod
-// dependency. Fail startup on new keywords rather than silently ignoring drift.
-// No coercion, key removal, or implicit default insertion during validation.
+// dependency. Refuse new keywords rather than silently ignoring drift. No
+// coercion, key removal, or implicit default insertion during validation.
 function compile(node: SchemaNode): z.ZodType {
   if (Object.keys(node).some((key) => !KEYWORDS.has(key))) {
     throw new Error('Unsupported service manifest schema keyword');
@@ -101,7 +101,44 @@ function compile(node: SchemaNode): z.ZodType {
   return validator;
 }
 
-export const manifestValidator = compile(manifestSchema);
+export class ServiceManifestSchemaError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ServiceManifestSchemaError';
+  }
+}
+
+export interface ServiceManifestSchema {
+  schema: SchemaNode;
+  validator: z.ZodType;
+}
+
+let loaded: ServiceManifestSchema | undefined;
+let loadFailure: ServiceManifestSchemaError | undefined;
+
+function readAndCompile(): ServiceManifestSchema {
+  const schema = JSON.parse(readFileSync(SCHEMA_URL, 'utf8')) as SchemaNode;
+  return { schema, validator: compile(schema) };
+}
+
+// Compile the vendored schema on first use and memoize the outcome, including
+// failure. A future contracts re-vendor that adds a keyword, or a missing
+// schema file in the deployed image, disables only the preview route rather
+// than stopping the whole BFF from starting. Callers treat a thrown
+// ServiceManifestSchemaError as the preview being unavailable.
+export function serviceManifestSchema(): ServiceManifestSchema {
+  if (loaded) return loaded;
+  if (loadFailure) throw loadFailure;
+  try {
+    loaded = readAndCompile();
+    return loaded;
+  } catch {
+    loadFailure = new ServiceManifestSchemaError(
+      'The vendored service manifest schema could not be loaded or compiled',
+    );
+    throw loadFailure;
+  }
+}
 
 export function manifestDefaults(node: SchemaNode, value: unknown): unknown {
   if (!node.properties || !value || typeof value !== 'object' || Array.isArray(value)) return value;
