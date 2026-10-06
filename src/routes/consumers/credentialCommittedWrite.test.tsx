@@ -322,7 +322,10 @@ describe("credential append outcomes (#451)", () => {
     await click("Add");
     await enterSecret();
     await submit();
-    await waitFor(() => expect(notice()).toContain("Outcome unknown"));
+    await waitFor(() => {
+      expect(notice()).toContain("Outcome unknown");
+      expect(notice()).toContain("The consumer has been re-read");
+    });
     expect(host.querySelectorAll('[aria-label^="Delete JWT credential"]')).toHaveLength(2);
     expect(notice()).toContain("now lists more jwt credentials than before this write");
     expect(notice()).toContain("likely stored");
@@ -459,7 +462,10 @@ describe("basic credential and delete outcomes (#451)", () => {
     await click("Add");
     await enterSecret();
     await submit();
-    await waitFor(() => expect(notice()).toContain("Outcome unknown"));
+    await waitFor(() => {
+      expect(notice()).toContain("Outcome unknown");
+      expect(notice()).toContain("The consumer has been re-read");
+    });
     expect(notice()).toContain("does not list basic credentials");
     expect(notice()).toContain("cannot be observed");
     expect(notice()).toContain(
@@ -488,7 +494,10 @@ describe("basic credential and delete outcomes (#451)", () => {
     await click("Replace basic credentials");
     await enterSecret();
     await submit();
-    await waitFor(() => expect(notice()).toContain("Outcome unknown"));
+    await waitFor(() => {
+      expect(notice()).toContain("Outcome unknown");
+      expect(notice()).toContain("The consumer has been re-read");
+    });
     expect(notice()).toContain("cannot be observed");
     expect(notice()).toContain("Replacing basic credentials again is safe to repeat");
   });

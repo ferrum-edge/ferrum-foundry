@@ -126,7 +126,8 @@ services:
       - ./nginx/identity:/etc/nginx/identity:ro
       - ./secrets:/etc/nginx/secrets:ro
 
-  # Published v0.9.12 image; Foundry v0.5.1 qualification is pending (docs/compatibility.md).
+  # Published Edge v0.9.12, qualified with published Foundry v0.5.1.
+  # Publication and original qualification: docs/release-notes/v0.5.1.compatibility.json.
   # Must equal `edge.image` in docs/compatibility.json;
   # a test fails if it drifts.
   demo-gateway:
