@@ -13,6 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   snapshot. Update current release and provenance documentation; runtime code,
   dependencies, contracts and qualification semantics are unchanged.
 
+### Fixed
+
+- Load and compile the vendored service-manifest schema lazily at preview-route
+  registration. A missing schema file or a new, unrecognized keyword now
+  disables only `/api/service-manifest/preview` with a controlled `503`, logged
+  once, while the rest of the BFF starts normally.
+- Revoke a backup download's object URL on the next tick instead of
+  synchronously after `anchor.click()`, so the browser can begin a large export
+  before the blob URL is released.
+
 ### Security
 
 - **Draft policy proposal (#542; owner decision pending).** Guarded replacement

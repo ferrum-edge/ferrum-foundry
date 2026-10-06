@@ -1,4 +1,4 @@
-import { manifestDefaults, manifestSchema, manifestValidator } from './service-manifest-schema.js';
+import { manifestDefaults, serviceManifestSchema } from './service-manifest-schema.js';
 import type {
   ServiceManifestPluginPreview,
   ServiceManifestPreview,
@@ -80,10 +80,11 @@ function safeStrings(value: unknown): boolean {
 
 export function validatedManifest(body: unknown): Manifest | null {
   if (!safeStrings(body)) return null;
-  const result = manifestValidator.safeParse(body);
+  const { schema, validator } = serviceManifestSchema();
+  const result = validator.safeParse(body);
   if (!result.success) return null;
   const value = result.data as Record<string, unknown>;
-  const manifest = manifestDefaults(manifestSchema, {
+  const manifest = manifestDefaults(schema, {
     ...value,
     timeouts: value.timeouts ?? {},
     gateway: value.gateway ?? {},
