@@ -14,19 +14,21 @@ request.
 For a walkthrough that ends in an authenticated request through the data
 plane, see [`docs/getting-started.md`](../../docs/getting-started.md).
 
-**Candidate pairing.** The demo profile pins published Edge v0.9.13 for the
-Foundry v0.5.2 candidate. Hosted qualification and Foundry publication are
-pending in [`docs/compatibility.md`](../../docs/compatibility.md). The default
-Foundry image, `ferrumedge/ferrum-foundry:main`, is the development channel.
-Production must use a published pairing and its released Foundry digest; the
-latest is published Foundry v0.5.1 with Edge v0.9.12, preserved in the
-[v0.5.1 record](../../docs/release-notes/v0.5.1.compatibility.json) with its
-published source `1dc43bd1bbd4c2c89ca14e2a603aa478ab1a0d18` and
-[publication run 37351255936](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37351255936).
-Both profiles and authority tiers are unchanged. The candidate adopts published
-`contracts-edge-0.9.13` at `9626821eb089c71f5d4d71268c7b8276a8a5ab50`; its
-service-manifest schema and all manifest fixtures are unchanged from the prior
-pin. The native deployment profile is not adopted.
+**Published pairing.** The demo profile pins published Edge v0.9.13, qualified
+with published Foundry v0.5.2. The
+[v0.5.2 record](../../docs/release-notes/v0.5.2.compatibility.json) preserves
+the published source `ebd09e8d82f773b6840b1edda67fbac287c3f7a0`, original hosted
+[qualification run 37511649961](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37511649961)
+(source `bc7ca925`, tested merge `f9703947`), and actual
+[publication run 37514033958](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37514033958)
+(published 2026-10-06 at 18:55:40 UTC). The default Foundry image is pinned to
+`ferrumedge/ferrum-foundry@sha256:b1728fdc0694a195e2a21e7666ca09dd0cf9205c81041cc963b0e104750ce79a`;
+set `FOUNDRY_IMAGE` to another released digest when selecting a different
+pairing. Both profiles and authority tiers are unchanged. This release adopts
+published `contracts-edge-0.9.13` at
+`9626821eb089c71f5d4d71268c7b8276a8a5ab50`; its service-manifest schema and all
+manifest fixtures are unchanged from the prior pin. The native deployment
+profile is not adopted.
 
 ## Two profiles
 
