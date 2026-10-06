@@ -37,11 +37,11 @@ a local copy would go stale.
 
 Shared org contracts are vendored under `contracts/ferrum-contracts/`; see
 [Contracts](README.md#contracts).
-Published Foundry v0.5.1 adopts `contracts-edge-0.9.12` at
-`31f0a21d707795be293d15837c2f77c3d84219d8`. The shared manifest is implemented;
-hosted qualification and actual publication are recorded in
-`docs/compatibility.json` and its immutable v0.5.1 snapshot. Released v0.5.0
-and v0.4.0 notes and records remain unchanged.
+The Foundry v0.5.2 candidate adopts published `contracts-edge-0.9.13` at
+`9626821eb089c71f5d4d71268c7b8276a8a5ab50`. The shared manifest is implemented;
+candidate qualification and publication remain pending in
+`docs/compatibility.json`. Released v0.5.1, v0.5.0 and v0.4.0 notes and
+records remain unchanged.
 
 ## Development
 
@@ -80,8 +80,9 @@ node scripts/demo-traffic-client.mjs mixed
 ### Running the gateway locally
 
 Run the Ferrum Edge image CI pins, by digest, so local results match CI. It is
-the published Ferrum Edge v0.9.12 release qualified with published Foundry
-v0.5.1. Published v0.5.0 and v0.4.0 pairings remain in history.
+the published Ferrum Edge v0.9.13 release selected for the Foundry v0.5.2
+candidate; hosted pairing qualification is pending. Published v0.5.1, v0.5.0
+and v0.4.0 pairings remain in history.
 `edge.image` in `docs/compatibility.json` is the single source: CI reads it
 (`node scripts/supported-pairing.mjs edge-image`), and
 `scripts/supported-pairing.test.mjs` fails if the starter, this command, or any
@@ -100,7 +101,7 @@ docker run --rm -d --name ferrum-edge \
   -e FERRUM_ADMIN_BIND_ADDRESS=0.0.0.0 \
   -e FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true \
   -p 127.0.0.1:9000:9000 -p 127.0.0.1:8000:8000 \
-  ferrumedge/ferrum-edge@sha256:80526b59cbbdc2bfcc8bae9241da4e5395414cf07bf0be4effd4c73c51684ee4 run -m database -v
+  ferrumedge/ferrum-edge@sha256:6caa0987adb4c0a3a368fcd800bb0459cff3d3e219522e2e9c56280205862e50 run -m database -v
 ```
 
 The plaintext admin bind above is a local-development exception; Docker's port
@@ -240,15 +241,14 @@ See `docs/concurrent-edits.md`.
   Edge refuses it with `412` if anything commits in between. The guard then
   re-verifies, and re-sends only if the fields this write replaces are still
   unchanged.
-- Draft policy proposal #542: `guardedReplace`/`guardedRemove` refuse an initial
-  fresh read without one nonempty quoted visible-ASCII strong `ETag`, before
-  writing, with a fixed `GuardVerificationError`. Older/database-less gateways
-  and cached reads cannot establish an atomic guard. Released v0.4.0 permits
-  that initial unconditional fallback; owner adoption of this narrowing is
-  pending review and hosted qualification. Explicit `null`-guard read-derived
-  calls use `replaceFromRead` and retain their fallback; low-level helpers and
-  plugin membership plans keep their semantics. Never use them to bypass a
-  refused editor write. An untagged re-read after a `412` was already refused.
+- Adopted policy #542 (v0.5.2, #544): `guardedReplace`/`guardedRemove` refuse an
+  initial fresh read without one nonempty quoted visible-ASCII strong `ETag`,
+  before writing, with a fixed `GuardVerificationError`. Older/database-less
+  gateways and cached reads cannot establish an atomic guard. Released v0.5.1
+  and earlier permit that initial unconditional fallback; v0.5.2 removes it.
+  Explicit `null`-guard read-derived calls use `replaceFromRead` and retain
+  their fallback; low-level helpers and plugin membership plans keep their
+  semantics. Never use them to bypass a refused editor write. An untagged re-read after a `412` was already refused.
 - Send `If-Match` only on `PUT`/`DELETE` of the four resource item paths
   (proxies, upstreams, consumers, plugin configs), and only a strong tag from a
   read. Anywhere else, or a malformed or empty value, is a `400`.

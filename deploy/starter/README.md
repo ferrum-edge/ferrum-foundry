@@ -14,18 +14,17 @@ request.
 For a walkthrough that ends in an authenticated request through the data
 plane, see [`docs/getting-started.md`](../../docs/getting-started.md).
 
-**Published pairing.** The demo profile pins published Edge v0.9.12,
-qualified with published Foundry v0.5.1. The
-[v0.5.1 record](../../docs/release-notes/v0.5.1.compatibility.json) preserves the
-published source `1dc43bd1bbd4c2c89ca14e2a603aa478ab1a0d18`, the original hosted
-[qualification run 37341678624](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37341678624)
-(source `157fa7f`, tested merge `b01dd913`), and the actual
-[publication run 37351255936](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37351255936)
-(published 2026-10-05 at 17:57:15 UTC). The default Foundry image,
-`ferrumedge/ferrum-foundry:main`, is the development channel. Production must
-use a published pairing and its released Foundry digest from that record.
-Both profiles and authority tiers are unchanged. This release adopts published
-`contracts-edge-0.9.12` at `31f0a21d707795be293d15837c2f77c3d84219d8`; its
+**Candidate pairing.** The demo profile pins published Edge v0.9.13 for the
+Foundry v0.5.2 candidate. Hosted qualification and Foundry publication are
+pending in [`docs/compatibility.md`](../../docs/compatibility.md). The default
+Foundry image, `ferrumedge/ferrum-foundry:main`, is the development channel.
+Production must use a published pairing and its released Foundry digest; the
+latest is published Foundry v0.5.1 with Edge v0.9.12, preserved in the
+[v0.5.1 record](../../docs/release-notes/v0.5.1.compatibility.json) with its
+published source `1dc43bd1bbd4c2c89ca14e2a603aa478ab1a0d18` and
+[publication run 37351255936](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37351255936).
+Both profiles and authority tiers are unchanged. The candidate adopts published
+`contracts-edge-0.9.13` at `9626821eb089c71f5d4d71268c7b8276a8a5ab50`; its
 service-manifest schema and all manifest fixtures are unchanged from the prior
 pin. The native deployment profile is not adopted.
 

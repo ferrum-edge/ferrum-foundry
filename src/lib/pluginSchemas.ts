@@ -43,7 +43,7 @@ export const PLUGIN_SCHEMA_SPEC = {
   repository: "ferrum-edge/ferrum-edge",
   path: "openapi.yaml",
   /** Released source reviewed from the hosted schema producer export. */
-  ref: "0d917701b63ef38210c49df830f48cf0457cbc7d",
+  ref: "9b83115de7ec23ab51ec4feae6bed65e596db425",
   /** `info.version` at that revision. */
   version: "0.2.0",
 } as const;

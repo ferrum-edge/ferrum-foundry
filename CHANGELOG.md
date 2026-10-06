@@ -9,9 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Prepare the unreleased Foundry v0.5.2 candidate with published Ferrum Edge
+  v0.9.13 source, image, platform manifests, binary hashes and raw OpenAPI
+  identity. Starter and development commands use the same digest, whose
+  gateway and CNI binaries match the release assets on both architectures.
+  Hosted qualification and Foundry publication remain pending; v0.5.1, v0.5.0
+  and v0.4.0 release records are immutable.
+- Re-vendor the same 18 scoped files from published `contracts-edge-0.9.13` at
+  `9626821eb089c71f5d4d71268c7b8276a8a5ab50`. Only the two vocabularies'
+  Edge provenance and the complete canonical invalid expectations change; the
+  latter versions deployment-snapshot and backend-egress-policy negatives
+  without Foundry adopting those schemas. Plugin entries, provisioning values,
+  manifest schema and fixtures are unchanged. Refresh sensitivity provenance
+  after source equality review. All five guided schema blocks are byte-identical
+  at the new source; the reviewed schema ref moves to it from the reviewed
+  hosted producer export (run 37509542502, artifact 11434665326).
 - Record the actual v0.5.1 publication and preserve its immutable compatibility
   snapshot. Update current release and provenance documentation; runtime code,
   dependencies, contracts and qualification semantics are unchanged.
+- Bump dependency patch and minor versions (#551, #553); Node floors are
+  unchanged.
 
 ### Fixed
 
@@ -25,21 +42,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- **Draft policy proposal (#542; owner decision pending).** Guarded replacement
-  and deletion refuse an initial fresh verification read without one nonempty
-  quoted visible-ASCII strong ETag, before any PUT/DELETE. The fixed capability
-  explanation preserves drafts and does not claim a content conflict. This
-  removes the released initial unconditional fallback for guarded proxy,
-  upstream (including targets), consumer (including ACL), and MCP policy
-  operations on older/database-less gateways and cached reads, even on the
-  paired release. Explicit unguarded calls, low-level helpers, plugin
-  membership plans, and unrelated writes retain their semantics; tagged reads
-  share the stricter validator parser. Valid opaque tokens, stale-content
-  comparisons, namespace/resource/gateway fences, body reconstruction, bounded
-  412 handling and the existing post-412 untagged refusal are preserved.
-  Adoption awaits exact-patch review, fresh independent security/concurrency
-  review, all hosted checks, and the owner's decision. No released version,
-  pins, Node floor, workflow, or pairing evidence changes.
+- Keep the browser-facing BFF refusal of Edge's `/deployment-snapshot` for the
+  v0.9.13 shape, whose new `api_spec_contents` array still returns every stored
+  spec document. Edge v0.9.13 conditional snapshot paths can answer a
+  deterministic `507`; the BFF relays it unchanged and releases the request's
+  long-read or upload permit. Foundry issues no conditional backup, conditional
+  restore or deployment mutation, and does not read the backend egress policy,
+  whose `schema_version` moves to 2.
+- **Guarded-write initial-validator policy (#542, adopted 2026-10-06;
+  implemented by #544).** Guarded replacement and deletion refuse an initial
+  fresh verification read without one nonempty quoted visible-ASCII strong
+  ETag, before any PUT/DELETE. The fixed capability explanation preserves
+  drafts and does not claim a content conflict. This removes v0.5.1's initial
+  unconditional fallback for guarded proxy, upstream (including targets),
+  consumer (including ACL), and MCP policy operations on older/database-less
+  gateways and cached reads, even on the paired release. Explicit unguarded
+  calls, low-level helpers, plugin membership plans, and unrelated writes
+  retain their semantics; tagged reads share the stricter validator parser.
+  Valid opaque tokens, stale-content comparisons, namespace/resource/gateway
+  fences, body reconstruction, bounded 412 handling and the existing post-412
+  untagged refusal are preserved.
 
 ## [0.5.1] - 2026-10-05
 

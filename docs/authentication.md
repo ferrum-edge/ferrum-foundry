@@ -157,6 +157,15 @@ consumer reader; ordinary masked consumer reads and the existing masked metadata
 write workflow remain supported. Intentional archival backup downloads are described in
 [Backup export](concurrent-edits.md#backup-export).
 
+Edge v0.9.13 keeps the snapshot secret-complete: its evidence carries stored
+spec documents only as SHA-256 and length, but the new `api_spec_contents`
+array returns one base64 copy of every stored spec document. The path-based
+refusal is unchanged. Conditional snapshot paths that Foundry itself never
+issues (`GET /backup?conditional=true`, a tagged `POST /restore` and the two
+deployment mutations) can answer a deterministic
+`507 Insufficient Storage`; the BFF relays that status and body unchanged and
+releases the request's capacity permit like any other answer.
+
 ### Runtime identity defaults
 
 `GET /api/settings` includes the active `authMode`. In `trusted-proxy` mode:
@@ -422,9 +431,9 @@ anything changes. A request that declares no target (for example a script
 calling the BFF directly) is not bound and goes to the current target. The
 target header is never forwarded to the gateway.
 
-### Draft guarded-write verification policy (#542)
+### Guarded-write verification policy (#542)
 
-The proposed initial strong-ETag requirement is an additional verification
+The initial strong-ETag requirement is an additional verification
 condition within the same captured namespace, resource, and gateway target;
 it changes none of the identity or authorization fences above. A guarded
 replacement or deletion whose initial fresh read has no usable validator is
@@ -432,7 +441,8 @@ refused before writing. Its fixed capability explanation retains no resource
 or credential data, and leaves the mounted draft and baseline intact. It does
 not claim that another writer changed content and never falls back to the
 seed's tag or an explicitly unguarded path. Older, database-less, or cached
-reads consequently lose the released guarded-write fallback; explicit
-unguarded calls and unrelated writes keep their supported semantics. This is
-a draft awaiting root review, independent review, hosted qualification, and
-the owner's decision; see [concurrent-edits.md](concurrent-edits.md#without-a-tag).
+reads consequently lose the guarded-write fallback that v0.5.1 and earlier
+releases shipped; explicit unguarded calls and unrelated writes keep their
+supported semantics. The owner's delegate adopted this policy on 2026-10-06,
+#544 implements it, and v0.5.2 is the first release that ships it; see
+[concurrent-edits.md](concurrent-edits.md#without-a-tag).
