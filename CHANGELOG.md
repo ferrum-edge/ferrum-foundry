@@ -7,14 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-10-06
+
+Foundry v0.5.2 was published at 18:55:40 UTC after hosted qualification against
+Ferrum Edge v0.9.13 and `contracts-edge-0.9.13`. Qualification run
+`37511649961`, attempt 1, binds source `bc7ca925b68eac86a42bc394bbf9f25e47efffc0`
+to tested merge `f9703947f384a642b9f7144e6be87e8e68b7a8e5`. Release PR #556
+merged as `ebd09e8d82f773b6840b1edda67fbac287c3f7a0`, preserving reviewed head
+`8f324c52bcf2a48e9532d0fabb46ee2036f3075b` as its second parent. Release run
+`37514033958` succeeded and GitHub release `405045848` was published.
+The release image index and platform digests are in the
+[immutable record](docs/release-notes/v0.5.2.compatibility.json).
+
 ### Changed
 
-- Prepare the unreleased Foundry v0.5.2 candidate with published Ferrum Edge
-  v0.9.13 source, image, platform manifests, binary hashes and raw OpenAPI
-  identity. Starter and development commands use the same digest, whose
-  gateway and CNI binaries match the release assets on both architectures.
-  Hosted qualification and Foundry publication remain pending; v0.5.1, v0.5.0
-  and v0.4.0 release records are immutable.
+- Pair published Foundry v0.5.2 with published Ferrum Edge v0.9.13 and
+  `contracts-edge-0.9.13`. The starter defaults to the released Foundry image
+  digest; qualification and publication evidence is recorded in the immutable
+  compatibility snapshot.
 - Re-vendor the same 18 scoped files from published `contracts-edge-0.9.13` at
   `9626821eb089c71f5d4d71268c7b8276a8a5ab50`. Only the two vocabularies'
   Edge provenance and the complete canonical invalid expectations change; the
@@ -24,9 +34,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   after source equality review. All five guided schema blocks are byte-identical
   at the new source; the reviewed schema ref moves to it from the reviewed
   hosted producer export (run 37509542502, artifact 11434665326).
-- Record the actual v0.5.1 publication and preserve its immutable compatibility
-  snapshot. Update current release and provenance documentation; runtime code,
-  dependencies, contracts and qualification semantics are unchanged.
 - Bump dependency patch and minor versions (#551, #553); Node floors are
   unchanged.
 
@@ -563,7 +570,8 @@ First public release of Ferrum Foundry.
 - Release channels are monotonic: tags are validated and ancestry-checked before registry access, prereleases never advance stable tags, and promotion runs through a fail-closed FIFO queue (#155).
 - Scheduled live branch deletion replaced with dry-run planning plus a separately approved, exact-SHA-revalidated deletion path (#155).
 
-[Unreleased]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.4.0...release/foundry-0.5.0
 [0.4.0]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.3.0...v0.4.0
