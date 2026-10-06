@@ -241,15 +241,14 @@ See `docs/concurrent-edits.md`.
   Edge refuses it with `412` if anything commits in between. The guard then
   re-verifies, and re-sends only if the fields this write replaces are still
   unchanged.
-- Draft policy proposal #542: `guardedReplace`/`guardedRemove` refuse an initial
-  fresh read without one nonempty quoted visible-ASCII strong `ETag`, before
-  writing, with a fixed `GuardVerificationError`. Older/database-less gateways
-  and cached reads cannot establish an atomic guard. Released v0.4.0 permits
-  that initial unconditional fallback; owner adoption of this narrowing is
-  pending review and hosted qualification. Explicit `null`-guard read-derived
-  calls use `replaceFromRead` and retain their fallback; low-level helpers and
-  plugin membership plans keep their semantics. Never use them to bypass a
-  refused editor write. An untagged re-read after a `412` was already refused.
+- Adopted policy #542 (v0.5.2, #544): `guardedReplace`/`guardedRemove` refuse an
+  initial fresh read without one nonempty quoted visible-ASCII strong `ETag`,
+  before writing, with a fixed `GuardVerificationError`. Older/database-less
+  gateways and cached reads cannot establish an atomic guard. Released v0.5.1
+  and earlier permit that initial unconditional fallback; v0.5.2 removes it.
+  Explicit `null`-guard read-derived calls use `replaceFromRead` and retain
+  their fallback; low-level helpers and plugin membership plans keep their
+  semantics. Never use them to bypass a refused editor write. An untagged re-read after a `412` was already refused.
 - Send `If-Match` only on `PUT`/`DELETE` of the four resource item paths
   (proxies, upstreams, consumers, plugin configs), and only a strong tag from a
   read. Anywhere else, or a malformed or empty value, is a `400`.

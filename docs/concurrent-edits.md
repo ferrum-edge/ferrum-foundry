@@ -9,11 +9,10 @@ it.
 This page covers what the gateway does, how Foundry guards these writes, and
 what is still open.
 
-> **Draft policy proposal (#542), not a released or approved policy.** The
-> proposed initial-validator requirement below changes the released untagged
-> fallback. Adoption requires root's exact-patch review, a fresh independent
-> security/concurrency review, all hosted checks, and the owner's decision.
-> The published release's pairing and evidence remain unchanged.
+> **Guarded-write initial-validator policy (#542), adopted for v0.5.2.** The
+> owner's delegate approved it on 2026-10-06, and #544 implements it. The
+> initial-validator requirement below removes the untagged fallback that
+> v0.5.1 and earlier releases shipped for guarded editor writes.
 
 ## Measured baseline
 
@@ -23,9 +22,9 @@ runs it in the `Pinned Gateway Contract` CI job on every pull request. It
 records the baseline below. Foundry v0.5.1 passed hosted qualification against
 published Edge v0.9.12, including its released concurrent-edit contract; see
 the original qualification and repeated tag-run evidence in
-[compatibility.md](compatibility.md). The Foundry v0.5.2 candidate, which
-includes this proposal, moves the pin to published Edge v0.9.13 and requires
-fresh hosted qualification.
+[compatibility.md](compatibility.md). Foundry v0.5.2, which adopts this policy,
+moves the pin to published Edge v0.9.13 and requires fresh hosted
+qualification.
 
 | Observation | Result |
 | --- | --- |
@@ -40,7 +39,7 @@ v0.9.7; v0.9.8 through v0.9.13 retain it
 ([compatibility.md](compatibility.md)).
 `gateway-contract-smoke.mjs` fails if the pinned gateway issues no tag. The
 contract itself requires a usable strong tag for a guarded write and checks
-that a stale tag is refused. An untagged gateway cannot satisfy this proposal's
+that a stale tag is refused. An untagged gateway cannot satisfy this policy's
 guarded-write profile and fails the contract gate.
 
 ## The Edge contract
@@ -135,11 +134,11 @@ other failure is still reported.
 
 ### Without a tag
 
-**Proposed supported-profile narrowing (#542):** `guardedReplace` and
-`guardedRemove` require the **initial fresh verification read** to provide one
-nonempty quoted visible-ASCII strong `ETag`. Missing, weak, empty, malformed,
-wildcard, list, non-ASCII, and control/line-end-bearing values are unusable.
-Valid opaque tokens are preserved verbatim; Foundry makes no assumption about
+**Supported-profile narrowing (#542, adopted in v0.5.2):** `guardedReplace`
+and `guardedRemove` require the **initial fresh verification read** to provide
+one nonempty quoted visible-ASCII strong `ETag`. Missing, weak, empty,
+malformed, wildcard, list, non-ASCII, and control/line-end-bearing values are
+unusable. Valid opaque tokens are preserved verbatim; Foundry makes no assumption about
 a MAC format and performs no cryptographic validation.
 
 Without that validator, no replacement or deletion is attempted. The mounted
@@ -154,7 +153,7 @@ storage. A tagged content mismatch still produces `StaleResourceError` and the
 redacted comparison. The existing refusal of an untagged re-read **after a
 `412`** remains: that was already refused in the released behavior.
 
-This proposal affects guarded proxy settings and detail deletes, upstream
+This policy affects guarded proxy settings and detail deletes, upstream
 settings/targets and detail deletes, consumer Details/ACL and detail deletes,
 and MCP tool policy edits. It removes their released initial unconditional
 fallback, including cached reads even on the paired Edge release. An older or
@@ -174,10 +173,11 @@ stricter parser is shared by tagged reads and `validatorOf`; an unusable value
 is no longer retained as a validator. None of these paths is a recovery option
 for a refused guarded save or delete.
 
-**Released behavior:** Foundry v0.4.0 deliberately sends an initial untagged
-guarded write unconditionally after comparing the content. That narrows the
-race to one gateway round trip; a writer in the gap can still be overwritten.
-The proposal removes that fallback only from the guarded operations above.
+**Earlier releases:** Foundry v0.4.0 through v0.5.1 deliberately send an
+initial untagged guarded write unconditionally after comparing the content.
+That narrows the race to one gateway round trip; a writer in the gap can still
+be overwritten. Policy #542 removes that fallback only from the guarded
+operations above.
 
 A lock inside the BFF is not an alternative. It cannot see another BFF replica
 or a direct admin API client, which are exactly the writers the guard is for.
@@ -363,7 +363,7 @@ keeps its old basis and its save is refused.
 A cached-config read (`X-Data-Source: cached`) can lag the commit, and the form
 would then show older content. That is the same exposure as seeding an editor
 from such a read: the next Save is refused if its verification read comes from
-the database and has changed, and under this proposal is refused with the
+the database and has changed, and under policy #542 is refused with the
 [verification explanation](#without-a-tag) if that read is cached too. The
 cached-data banner is shown either way.
 
@@ -622,10 +622,9 @@ be used to test guesses of a redacted value.
 
 ## Still open
 
-- **Adoption of the initial-validator proposal (#542).** A cached read cannot
-  establish an atomic guard: Edge cannot tag a cache that may lag the database.
-  This draft refuses guarded writes from it. Owner approval and hosted
-  qualification are pending; explicitly unguarded operations and membership
-  plans retain their existing untagged behavior.
+- **Untagged writes outside the guard.** A cached read cannot establish an
+  atomic guard: Edge cannot tag a cache that may lag the database. Adopted
+  policy #542 refuses guarded writes from it; explicitly unguarded operations
+  and membership plans retain their existing untagged behavior.
 - **A browser-level two-session journey.** Not yet in the critical-journey
   suite (`e2e/journeys`).

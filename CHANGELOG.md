@@ -22,8 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without Foundry adopting those schemas. Plugin entries, provisioning values,
   manifest schema and fixtures are unchanged. Refresh sensitivity provenance
   after source equality review. All five guided schema blocks are byte-identical
-  at the new source; the reviewed schema ref stays at its hosted export until
-  this candidate's producer is reviewed.
+  at the new source; the reviewed schema ref moves to it from the reviewed
+  hosted producer export (run 37509542502, artifact 11434665326).
 - Record the actual v0.5.1 publication and preserve its immutable compatibility
   snapshot. Update current release and provenance documentation; runtime code,
   dependencies, contracts and qualification semantics are unchanged.
@@ -49,21 +49,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   long-read or upload permit. Foundry issues no conditional backup, conditional
   restore or deployment mutation, and does not read the backend egress policy,
   whose `schema_version` moves to 2.
-- **Draft policy proposal (#542; owner decision pending).** Guarded replacement
-  and deletion refuse an initial fresh verification read without one nonempty
-  quoted visible-ASCII strong ETag, before any PUT/DELETE. The fixed capability
-  explanation preserves drafts and does not claim a content conflict. This
-  removes the released initial unconditional fallback for guarded proxy,
-  upstream (including targets), consumer (including ACL), and MCP policy
-  operations on older/database-less gateways and cached reads, even on the
-  paired release. Explicit unguarded calls, low-level helpers, plugin
-  membership plans, and unrelated writes retain their semantics; tagged reads
-  share the stricter validator parser. Valid opaque tokens, stale-content
-  comparisons, namespace/resource/gateway fences, body reconstruction, bounded
-  412 handling and the existing post-412 untagged refusal are preserved.
-  Adoption awaits exact-patch review, fresh independent security/concurrency
-  review, all hosted checks, and the owner's decision. No released version,
-  pins, Node floor, workflow, or pairing evidence changes.
+- **Guarded-write initial-validator policy (#542, adopted 2026-10-06;
+  implemented by #544).** Guarded replacement and deletion refuse an initial
+  fresh verification read without one nonempty quoted visible-ASCII strong
+  ETag, before any PUT/DELETE. The fixed capability explanation preserves
+  drafts and does not claim a content conflict. This removes v0.5.1's initial
+  unconditional fallback for guarded proxy, upstream (including targets),
+  consumer (including ACL), and MCP policy operations on older/database-less
+  gateways and cached reads, even on the paired release. Explicit unguarded
+  calls, low-level helpers, plugin membership plans, and unrelated writes
+  retain their semantics; tagged reads share the stricter validator parser.
+  Valid opaque tokens, stale-content comparisons, namespace/resource/gateway
+  fences, body reconstruction, bounded 412 handling and the existing post-412
+  untagged refusal are preserved.
 
 ## [0.5.1] - 2026-10-05
 

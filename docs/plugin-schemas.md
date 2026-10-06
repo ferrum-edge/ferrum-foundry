@@ -23,7 +23,7 @@ Foundry keeps no copy of `openapi.yaml`. It stores the reviewed descriptors and
 the SHA-256 of each source component block instead:
 
 - `PLUGIN_SCHEMA_SPEC` pins the upstream commit
-  (`ferrum-edge/ferrum-edge@0d917701b63ef38210c49df830f48cf0457cbc7d`,
+  (`ferrum-edge/ferrum-edge@9b83115de7ec23ab51ec4feae6bed65e596db425`,
   `info.version: 0.2.0`).
 - `PLUGIN_SCHEMA_PROVENANCE` pins one digest per component.
 
@@ -198,7 +198,7 @@ from the original qualification object in the
 
 ### v0.5.2 schema review
 
-The v0.5.2 candidate moves `edge.source_commit` to published Edge v0.9.13,
+Foundry v0.5.2 moves `edge.source_commit` to published Edge v0.9.13,
 `9b83115de7ec23ab51ec4feae6bed65e596db425`. Its raw `openapi.yaml` (SHA-256
 `5f3e50e217b22b97d068490bdad9563ea450097a2daf7df4f80ff61f98559a81`) was
 downloaded from the immutable source alongside the reviewed 0d917701 document.
@@ -217,12 +217,34 @@ The v0.9.13 OpenAPI changes are confined to backend egress policy
 `schema_version: 2`, the deployment snapshot's `StoredContentDigest` and
 `api_spec_contents`, and the `NamespaceSnapshotTooLarge` `507` responses;
 none touches a guided plugin. Descriptors, catalog, templates, secret handling
-and `mcp_tool_calls` preservation are unchanged. `PLUGIN_SCHEMA_SPEC.ref` keeps
-naming 0d917701, the last ref adopted from a reviewed hosted producer export;
-the Pinned Gateway Contract drift check still compares every pinned hash at the
-new `edge.source_commit`. Moving the ref to 9b83115d waits for review of this
-candidate's own producer artifact. No project tooling or producer ran locally,
-and no OpenAPI document or export is stored in the repository.
+and `mcp_tool_calls` preservation are unchanged.
+
+The hosted producer from the Pinned Gateway Contract job of
+[run 37509542502](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37509542502)
+was then downloaded and reviewed:
+
+| Hosted evidence | Value |
+| --- | --- |
+| Foundry repository ID | `1206833208` |
+| Run / attempt | `37509542502` / `1` |
+| PR source / API head | `0d6d3c4715edf1bca4ae86ed44f873626cd75ece` |
+| Tested synthetic merge | `648d7feadd2d4477229c61016f3a60491281c100` |
+| Merge base | `f6c08ecdf1e28928b9a373f957604a63d0edf79f` |
+| Artifact ID | `11434665326` |
+| Original artifact name | `plugin-schema-producer-648d7feadd2d4477229c61016f3a60491281c100-attempt-1` |
+| Archive bytes / SHA-256, matching the GitHub API digest | `9429` / `19293cf7bb18d8be70b0e1618be1462fff87e2fcdefc8a77735fb5aebf6e672d` |
+| Exported JSON bytes / SHA-256, matching its checksum file | `30061` / `db6cdc1ae8bae2aff6517f33efaef12bcb21f80291bf8107aa56bdca138ddaa0` |
+| Source repository and path | `ferrum-edge/ferrum-edge`, `openapi.yaml` |
+| Source ref | `9b83115de7ec23ab51ec4feae6bed65e596db425` |
+| Raw source SHA-256 | `5f3e50e217b22b97d068490bdad9563ea450097a2daf7df4f80ff61f98559a81` |
+| Previous reviewed ref, recorded by the producer | `0d917701b63ef38210c49df830f48cf0457cbc7d` |
+
+All five exported components are `unchanged`, with `actual` and `sha256` equal
+to the pinned hashes above. `PLUGIN_SCHEMA_SPEC.ref` therefore adopts
+9b83115d; every component hash, descriptor, template and preservation behavior
+is retained. This review is schema evidence, not pairing qualification. No
+project tooling or producer ran locally, and no OpenAPI document or export is
+stored in the repository.
 
 ## What guided editing does to a configuration
 

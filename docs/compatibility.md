@@ -73,15 +73,20 @@ Its `info.version: 0.2.0` is schema metadata, not either product's version.
    EXISTING/implemented at Alloy owner
    `81cbb410d34ff5fba1f3d54cfd2e7ebccaed397e`, whose availability stays
    unreleased. Alloy publication and other consumer qualification are separate.
-2. **Guided schema static review complete; hosted export pending.** All five
-   complete component blocks at `9b83115de7ec23ab51ec4feae6bed65e596db425` are
-   byte-identical to the reviewed `0d917701b63ef38210c49df830f48cf0457cbc7d`
-   blocks, so every pinned component hash is unchanged.
-   `PLUGIN_SCHEMA_SPEC.ref` keeps naming the reviewed 0d917701 hosted export
-   until this candidate's own Pinned Gateway Contract producer export is
-   reviewed; the drift check already compares the hashes at
-   `edge.source_commit`. [Plugin schemas](plugin-schemas.md#v052-schema-review)
-   records the review and its limits.
+2. **Guided schema review complete.** The hosted producer from
+   [run 37509542502](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37509542502),
+   attempt 1, artifact `11434665326`, binds PR source
+   `0d6d3c4715edf1bca4ae86ed44f873626cd75ece` to tested merge
+   `648d7feadd2d4477229c61016f3a60491281c100` over base
+   `f6c08ecdf1e28928b9a373f957604a63d0edf79f`. Its archive SHA-256
+   `19293cf7bb18d8be70b0e1618be1462fff87e2fcdefc8a77735fb5aebf6e672d` matches
+   the API digest, and the export SHA-256
+   `db6cdc1ae8bae2aff6517f33efaef12bcb21f80291bf8107aa56bdca138ddaa0` matches
+   the producer checksum. All five complete component blocks at
+   `9b83115de7ec23ab51ec4feae6bed65e596db425` are unchanged.
+   `PLUGIN_SCHEMA_SPEC.ref` now names 9b83115d, retaining every component hash
+   and guided behavior. [Plugin schemas](plugin-schemas.md#v052-schema-review)
+   records the review.
 3. **Hosted pairing acceptance pending.** For the final source of this
    candidate's pull request, Root must obtain a fresh independent read-only
    review. Qualification Source, Quality Gate on Node 22 and 24, Pinned Gateway
@@ -96,9 +101,9 @@ Its `info.version: 0.2.0` is schema metadata, not either product's version.
 
 The database profiles, Node floors and `viewer` / `operator` / `admin` tiers
 are unchanged. Unlike v0.5.1, this candidate includes the initial
-untagged-write refusal from Foundry PR #544 (draft policy #542; see
-[below](#draft-initial-validator-proposal-542)). It changes no account-level
-registry settings under #547.
+untagged-write refusal from Foundry PR #544, the adopted guarded-write policy
+#542 (see [below](#guarded-write-initial-validator-policy-542)). It changes no
+account-level registry settings under #547.
 
 ## Previous published pairing: v0.5.1 / Edge v0.9.12
 
@@ -369,9 +374,9 @@ reads and ephemeral backup downloads retain their existing behavior.
 
 Foundry adds no native deployment workflow, recovery journal, conditional
 restore or capability and changes no ordinary mutation semantics. The initial
-untagged-write fallback and post-412 refusal remain unchanged. Foundry #542/#544
-and #547 owner decisions are still pending. No deployment-profile browser
-retention or cleanup guarantee is claimed here.
+untagged-write fallback and post-412 refusal remained unchanged. At v0.5.1
+publication, the Foundry #542/#544 and #547 owner decisions were pending. No
+deployment-profile browser retention or cleanup guarantee was claimed.
 
 The sensitivity source file is byte-identical to c764 (Git blob
 `827bf3a7c998c7ea9c995093ab38320facbd072a`, raw SHA-256
@@ -380,8 +385,8 @@ Every table rule and Kafka safe property was read against Foundry's copy before
 refreshing `PLUGIN_SENSITIVITY_SOURCE` to the published 0d917701 source.
 The five guided schemas were reviewed from the verified v0.9.12 hosted producer
 export recorded in [plugin schemas](plugin-schemas.md#v051-hosted-schema-adoption).
-Their reviewed ref now names 0d917701; all five component hashes are unchanged.
-No guided field, template, catalog or unmodelled-value behavior changes. Static
+Their reviewed ref moved to 0d917701; all five component hashes were unchanged.
+No guided field, template, catalog or unmodelled-value behavior changed. Static
 review and hosted pairing acceptance are separate; the successful v0.5.1
 qualification is preserved in its immutable record.
 
@@ -432,7 +437,8 @@ source file is byte-identical to 0d917701 (Git blob
 `827bf3a7c998c7ea9c995093ab38320facbd072a`, raw SHA-256
 `47136b600b12ab4c11db7d366e2c70e82a5079dbc61f2a625d071171a74c64e5`), so the
 table is unchanged and `PLUGIN_SENSITIVITY_SOURCE` now names 9b83115d. All five
-guided schema blocks are byte-identical to 0d917701 (see
+guided schema blocks are byte-identical to 0d917701, and `PLUGIN_SCHEMA_SPEC.ref`
+now names 9b83115d from the reviewed hosted export (see
 [Qualification evidence](#qualification-evidence)). No guided field, template,
 catalog or unmodelled-value behavior changes, and no advisory closure follows
 from this pin move.
@@ -545,17 +551,16 @@ with `412` and nothing is written.
 
 In v0.5.1, a read with no strong tag (the cached-config fallback,
 `X-Data-Source: cached`) still gets an unconditional write, which narrows the
-race to one round trip rather than closing it. The v0.5.2 candidate includes
-draft proposal #542 below, which refuses that initial untagged read for guarded
-writes. The contract
+race to one round trip rather than closing it. v0.5.2 adopts policy #542
+below, which refuses that initial untagged read for guarded writes. The contract
 `scripts/concurrent-edit-contract.mjs` requires the pinned gateway to issue the
 tags, refuse a stale and an invented tag with `412`, and refuse a malformed
 `If-Match` and one on a create with `400`. See
 [concurrent-edits.md](concurrent-edits.md).
 
-### Draft initial-validator proposal (#542)
+### Guarded-write initial-validator policy (#542)
 
-This proposal narrows the supported profile for `guardedReplace` and
+This policy narrows the supported profile for `guardedReplace` and
 `guardedRemove`: the initial fresh verification read must return one nonempty
 quoted visible-ASCII strong validator. Without one, guarded proxy settings and
 detail deletes, upstream settings/targets and detail deletes, consumer
@@ -574,13 +579,9 @@ and gateway-target fences, whole-body preservation, tagged stale-content
 comparisons, and bounded `412` re-verification remain in place; the existing
 post-412 untagged refusal is unchanged.
 
-**Draft, not approved or released.** Root must review the exact patch, obtain
-a fresh independent security/concurrency review and every hosted gate, then
-ask the owner to decide on this behavior change. The proposal itself moved no
-version, dependency or Node floor, gateway image/source pin, workflow binding,
-or published pairing evidence. It is merged on `main`, so the v0.5.2 candidate
-source includes it; publishing v0.5.2 ships it. See
-[the precise scope](concurrent-edits.md#without-a-tag).
+**Adopted for v0.5.2.** The owner's delegate approved this behavior change on
+2026-10-06, closing #542; #544 implements it. v0.5.2 is the first release that
+ships it. See [the precise scope](concurrent-edits.md#without-a-tag).
 
 ## Changing the pairing
 
