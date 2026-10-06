@@ -117,12 +117,18 @@ let client: QueryClient;
 let writes: { namespace: string | null; resolve: (response: Response) => void }[];
 let serverProxy: Proxy;
 let updates: unknown[];
+let proxyUpdateTags: (string | null)[];
+let serverProxyRevision: number;
+
+const proxyEtag = () => `"proxy-revision-${serverProxyRevision}"`;
 
 beforeEach(() => {
   namespace = "tenant-a";
   writes = [];
   updates = [];
+  proxyUpdateTags = [];
   serverProxy = specProxy("/v1");
+  serverProxyRevision = 1;
   vi.stubGlobal("Request", BasedRequest);
   vi.stubGlobal(
     "fetch",
@@ -139,12 +145,19 @@ beforeEach(() => {
         );
       }
       if (request.method === "PUT") {
+        const ifMatch = request.headers.get("If-Match");
+        if (ifMatch !== null && ifMatch !== proxyEtag()) return new Response(null, { status: 412 });
+
         const data = (await request.json()) as Partial<Proxy>;
         updates.push(data);
+        proxyUpdateTags.push(ifMatch);
         serverProxy = { ...serverProxy, ...data };
+        serverProxyRevision += 1;
         return Response.json(serverProxy);
       }
-      if (path.endsWith("/proxies/spec-proxy")) return Response.json(serverProxy);
+      if (path.endsWith("/proxies/spec-proxy")) {
+        return Response.json(serverProxy, { headers: { ETag: proxyEtag() } });
+      }
       if (path.endsWith("/api-specs")) return Response.json({ items: [], total: 0, limit: 2, offset: 0, next_offset: null });
       return Response.json({ data: [], pagination: { offset: 0, limit: 250, total: 0 } });
     }),
@@ -275,6 +288,8 @@ it("reopens and submits a spec-replaced proxy without pre-replacement values", a
   const pending = run("spec-1");
   await settle(() => expect(writes).toHaveLength(1));
   serverProxy = specProxy("/v2");
+  serverProxyRevision += 1;
+  const replacementEtag = proxyEtag();
   await act(async () => {
     writes[0]!.resolve(specResponse());
     await pending;
@@ -290,6 +305,7 @@ it("reopens and submits a spec-replaced proxy without pre-replacement values", a
       .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
   });
   await settle(() => expect(updates).toHaveLength(1));
+  expect(proxyUpdateTags).toEqual([replacementEtag]);
   expect(updates[0]).toMatchObject({ listen_path: "/v2" });
   expect(serverProxy.listen_path).toBe("/v2");
 });

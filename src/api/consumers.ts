@@ -20,7 +20,7 @@ import {
   guardedRemove,
   guardedReplace,
   readTagged,
-  uncomparedGuard,
+  replaceFromRead,
   type WriteGuard,
 } from "./conditionalWrite";
 import {
@@ -146,18 +146,21 @@ export async function update(
 ): Promise<Consumer> {
   const path = `consumers/${pathSegment(id)}`;
   const metadata = toUpdatePayload(data);
-  return serializeWrite(scope, id, () =>
-    guardedReplace<Consumer, ConsumerCreate>({
+  return serializeWrite(scope, id, () => {
+    const options = {
       resource: "consumer",
       id,
       namespace: scope.namespace,
-      guard: guard ?? uncomparedGuard(),
       read: () => readTagged<Consumer>(scope, path),
-      propose: (current) =>
+      propose: (current: Consumer) =>
         withConsumerId({ ...metadata, credentials: current.credentials }, id),
-      write: (body, ifMatch) => conditionalPut<Consumer>(scope, path, body, ifMatch),
-    }),
-  );
+      write: (body: ConsumerCreate, ifMatch: string | null) =>
+        conditionalPut<Consumer>(scope, path, body, ifMatch),
+    };
+    return guard
+      ? guardedReplace<Consumer, ConsumerCreate>({ ...options, guard })
+      : replaceFromRead<Consumer, ConsumerCreate>(options);
+  });
 }
 
 /**

@@ -21,7 +21,7 @@ import {
   guardedRemove,
   guardedReplace,
   readTagged,
-  uncomparedGuard,
+  replaceFromRead,
   type WriteGuard,
 } from "./conditionalWrite";
 import {
@@ -300,18 +300,18 @@ export async function updateTargets(
   };
 
   return serializeWrite(scope, id, async () => {
-    return guardedReplace<Upstream, UpstreamCreate>({
+    const options = {
       resource: "upstream targets",
       id,
       namespace: scope.namespace,
-      // Unguarded, the targets write still rebuilds every setting from the
-      // read it is sent against, so it is conditional on that read's tag.
-      // `targets` itself is simply replaced: nothing is compared.
-      guard: guard ?? uncomparedGuard(),
       read: () => readTagged<Upstream>(scope, path),
       propose,
-      write: (body, ifMatch) => putUpstream(scope, path, body, ifMatch),
-    });
+      write: (body: UpstreamCreate, ifMatch: string | null) =>
+        putUpstream(scope, path, body, ifMatch),
+    };
+    return guard
+      ? guardedReplace<Upstream, UpstreamCreate>({ ...options, guard })
+      : replaceFromRead<Upstream, UpstreamCreate>(options);
   });
 }
 

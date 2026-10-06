@@ -69,6 +69,12 @@ function consumerFixture(namespace: string): Consumer {
   };
 }
 
+function etagOf(consumer: Consumer): string {
+  let hash = 0;
+  for (const char of JSON.stringify(consumer)) hash = (hash * 31 + char.charCodeAt(0)) | 0;
+  return `"${(hash >>> 0).toString(16)}"`;
+}
+
 type NamespaceHandle = ReturnType<typeof useNamespace>;
 
 function NamespaceProbe({ onValue }: { onValue: (value: NamespaceHandle) => void }) {
@@ -103,6 +109,7 @@ describe("consumer editor identity across a namespace switch", () => {
   let root: Root | null = null;
   let handle: NamespaceHandle | undefined;
   let basicPolicy = false;
+  let tagReads = true;
 
   /** Hold every `<METHOD> <namespace>` detail request until released. */
   function hold(key: string): () => void {
@@ -217,6 +224,7 @@ describe("consumer editor identity across a namespace switch", () => {
     holds.clear();
     handle = undefined;
     basicPolicy = false;
+    tagReads = true;
     records.clear();
     records.set("tenant-a", consumerFixture("tenant-a"));
     records.set("tenant-b", consumerFixture("tenant-b"));
@@ -248,7 +256,13 @@ describe("consumer editor identity across a namespace switch", () => {
         if (url.pathname === DETAIL_PATH) {
           const record = records.get(tenant);
           if (method === "GET") {
-            return record ? json(record) : json({ error: "not found" }, 404);
+            return record
+              ? Response.json(record, { headers: tagReads ? { ETag: etagOf(record) } : {} })
+              : json({ error: "not found" }, 404);
+          }
+          const ifMatch = request.headers.get("If-Match");
+          if (ifMatch !== null && (!record || ifMatch !== etagOf(record))) {
+            return json({ error: "Precondition Failed" }, 412);
           }
           if (method === "PUT" && record) {
             const next = { ...record, ...(body as Partial<Consumer>), updated_at: "v1" };
@@ -295,6 +309,26 @@ describe("consumer editor identity across a namespace switch", () => {
     queryClient.clear();
     vi.unstubAllGlobals();
     localStorage.removeItem(NAMESPACE_STORAGE_KEY);
+  });
+
+  it("preserves a metadata draft and cached resource when verification is untagged", async () => {
+    await mount();
+    await waitFor(() => heading() === "tenant-a-user");
+    const original = queryClient.getQueryData(["consumer", "tenant-a", "shared"]);
+    tagReads = false;
+    await act(async () => { typeInto(field("Username")!, "unsaved-user"); });
+    await submitForm();
+    await waitFor(() => document.body.textContent?.includes("Your draft was not saved") ?? false);
+
+    expect(field("Username")?.value).toBe("unsaved-user");
+    expect(document.body.textContent).toContain("cannot establish an atomic write guard");
+    expect(document.body.textContent).not.toContain("changed after you opened");
+    expect(dialog()).toBeNull();
+    expect(puts()).toHaveLength(0);
+    expect(records.get("tenant-a")).toEqual(consumerFixture("tenant-a"));
+    expect(queryClient.getQueryData(["consumer", "tenant-a", "shared"])).toBe(original);
+    expect(localStorage.getItem(NAMESPACE_STORAGE_KEY)).toBe("tenant-a");
+    expect(Object.values(localStorage).join(" ")).not.toContain("unsaved-user");
   });
 
   it("re-seeds the editor from the newly selected tenant on a cached switch and submits only that tenant's fields", async () => {

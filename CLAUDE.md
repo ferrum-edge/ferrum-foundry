@@ -240,9 +240,15 @@ See `docs/concurrent-edits.md`.
   Edge refuses it with `412` if anything commits in between. The guard then
   re-verifies, and re-sends only if the fields this write replaces are still
   unchanged.
-- A read with no strong `ETag` (the cached-config fallback; every item read from
-  the paired Edge release carries one) gets an unconditional PUT. That narrows
-  the race to one round trip; it does not close it.
+- Draft policy proposal #542: `guardedReplace`/`guardedRemove` refuse an initial
+  fresh read without one nonempty quoted visible-ASCII strong `ETag`, before
+  writing, with a fixed `GuardVerificationError`. Older/database-less gateways
+  and cached reads cannot establish an atomic guard. Released v0.4.0 permits
+  that initial unconditional fallback; owner adoption of this narrowing is
+  pending review and hosted qualification. Explicit `null`-guard read-derived
+  calls use `replaceFromRead` and retain their fallback; low-level helpers and
+  plugin membership plans keep their semantics. Never use them to bypass a
+  refused editor write. An untagged re-read after a `412` was already refused.
 - Send `If-Match` only on `PUT`/`DELETE` of the four resource item paths
   (proxies, upstreams, consumers, plugin configs), and only a strong tag from a
   read. Anywhere else, or a malformed or empty value, is a `400`.
@@ -254,10 +260,12 @@ See `docs/concurrent-edits.md`.
   by passing the read it compared as `basis` (`validatorOf`). Never pass an
   editor seed or Query-cache value there.
 - Detail-page deletes are guarded against the resource the page is displaying.
-- A refused save keeps the draft; a refused delete deletes nothing. Both show a
-  redacted original/current(/proposed) comparison (redaction applies at every
-  depth of structured values such as plugin `config`). Nothing is resent
-  automatically with the same body.
+- A refused save keeps the draft; a refused delete deletes nothing. Content
+  conflicts show a redacted original/current(/proposed) comparison (redaction
+  applies at every depth, such as plugin `config`). Initial unusable-validator
+  refusals report unavailable atomic verification without claiming a conflict
+  or retaining resource/credential data in diagnostics or browser storage.
+  Nothing is resent automatically with the same body.
 - A field a save omits and Edge preserves (`plugins` on a proxy, `labels` on a
   consumer or plugin configuration) is left out of the comparison, since the
   save cannot revert it.

@@ -9,14 +9,22 @@ it.
 This page covers what the gateway does, how Foundry guards these writes, and
 what is still open.
 
+> **Draft policy proposal (#542), not a released or approved policy.** The
+> proposed initial-validator requirement below changes the released untagged
+> fallback. Adoption requires root's exact-patch review, a fresh independent
+> security/concurrency review, all hosted checks, and the owner's decision.
+> The published release's pairing and evidence remain unchanged.
+
 ## Measured baseline
 
 `scripts/concurrent-edit-contract.mjs` runs a two-administrator sequence
 against the pinned Ferrum Edge image. `scripts/gateway-contract-smoke.mjs`
 runs it in the `Pinned Gateway Contract` CI job on every pull request. It
 records the baseline below. Foundry v0.5.1 passed hosted qualification against
-published Edge v0.9.12, including this contract; see the original qualification
-and repeated tag-run evidence in [compatibility.md](compatibility.md).
+published Edge v0.9.12, including its released concurrent-edit contract; see
+the original qualification and repeated tag-run evidence in
+[compatibility.md](compatibility.md). This proposal head requires fresh hosted
+qualification.
 
 | Observation | Result |
 | --- | --- |
@@ -30,9 +38,9 @@ Conditional writes come from ferrum-edge#5661, first released in Ferrum Edge
 v0.9.7; v0.9.8 through v0.9.12 retain it
 ([compatibility.md](compatibility.md)).
 `gateway-contract-smoke.mjs` fails if the pinned gateway issues no tag. The
-contract itself also checks that the two halves agree on any gateway: one that
-tags reads must refuse a stale tag, and one that issues no tag must not enforce
-a precondition Foundry cannot satisfy.
+contract itself requires a usable strong tag for a guarded write and checks
+that a stale tag is refused. An untagged gateway cannot satisfy this proposal's
+guarded-write profile and fails the contract gate.
 
 ## The Edge contract
 
@@ -65,7 +73,10 @@ What Foundry relies on:
 1. When the editor is seeded it captures a **baseline**: the resource reduced
    to the fields this write overwrites (`src/lib/resourceBaseline.ts`).
 2. On submit the guard re-reads the resource, keeps that read's `ETag`, and
-   compares the reduced fields against the baseline.
+   requires a usable strong validator before constructing a replacement body.
+   If the initial read has none, it throws `GuardVerificationError` and sends
+   no `PUT` or `DELETE`. With a validator, it compares the reduced fields
+   against the baseline.
 3. If they differ, it throws `StaleResourceError`. **Nothing is sent.**
 4. If they match, it sends the `PUT` with `If-Match` set to the tag of **that
    same read**. If anything was written since, Edge answers `412` and the guard
@@ -123,16 +134,49 @@ other failure is still reported.
 
 ### Without a tag
 
-If the verification read has no usable `ETag` (a cached-config read, a gateway
-older than ferrum-edge#5661, or a weak tag added by an intermediary), Foundry
-sends the `PUT` without `If-Match`. The guard then narrows the race instead of
-closing it: a writer that commits between the verification read and the write
-is not detected. The guard still:
+**Proposed supported-profile narrowing (#542):** `guardedReplace` and
+`guardedRemove` require the **initial fresh verification read** to provide one
+nonempty quoted visible-ASCII strong `ETag`. Missing, weak, empty, malformed,
+wildcard, list, non-ASCII, and control/line-end-bearing values are unusable.
+Valid opaque tokens are preserved verbatim; Foundry makes no assumption about
+a MAC format and performs no cryptographic validation.
 
-- shrinks the exposure from "as long as the editor was open" to one round trip;
-- detects **any** writer, not just another Foundry tab: another Foundry
-  deployment, the seed scripts, Terraform, or a direct admin API client;
-- stops the stale body from ever being sent when a change is detected.
+Without that validator, no replacement or deletion is attempted. The mounted
+form and its baseline stay intact, the resource stays in place, and the caller
+reports a fixed, bounded `GuardVerificationError`: older gateways, modes
+without a database, and cached reads cannot establish an atomic write guard.
+This is **unsupported or unverified capability**, not evidence that another
+writer changed content. The error carries no resource, namespace, id, tag,
+payload, response, request, or cause. There is no raw API popup or comparison
+dialog for this refusal, no automatic retry, and nothing is stored in browser
+storage. A tagged content mismatch still produces `StaleResourceError` and the
+redacted comparison. The existing refusal of an untagged re-read **after a
+`412`** remains: that was already refused in the released behavior.
+
+This proposal affects guarded proxy settings and detail deletes, upstream
+settings/targets and detail deletes, consumer Details/ACL and detail deletes,
+and MCP tool policy edits. It removes their released initial unconditional
+fallback, including cached reads even on the paired Edge release. An older or
+database-less gateway that cannot issue these validators cannot support these
+guarded operations; reads and unrelated writes remain available according to
+their existing authorization and mode gates.
+
+**Scope stays explicit.** Calls with an explicit `null` editor guard keep their
+supported semantics. Consumer metadata, upstream targets, and MCP tool policy
+calls with `null` use `replaceFromRead`: they still rebuild unowned fields from
+each fresh read, write conditionally when it has a usable tag, retain the
+initial untagged fallback, and refuse an untagged read after a `412`. Direct
+`conditionalPut`/`conditionalDelete`, `proxies.replace`, plugin membership
+plans (including plugin configuration saves/deletes), creates, credential
+routes, batch, restore, and TLS writes keep their existing semantics. The
+stricter parser is shared by tagged reads and `validatorOf`; an unusable value
+is no longer retained as a validator. None of these paths is a recovery option
+for a refused guarded save or delete.
+
+**Released behavior:** Foundry v0.4.0 deliberately sends an initial untagged
+guarded write unconditionally after comparing the content. That narrows the
+race to one gateway round trip; a writer in the gap can still be overwritten.
+The proposal removes that fallback only from the guarded operations above.
 
 A lock inside the BFF is not an alternative. It cannot see another BFF replica
 or a direct admin API client, which are exactly the writers the guard is for.
@@ -318,8 +362,9 @@ keeps its old basis and its save is refused.
 A cached-config read (`X-Data-Source: cached`) can lag the commit, and the form
 would then show older content. That is the same exposure as seeding an editor
 from such a read: the next Save is refused if its verification read comes from
-the database, and falls back to [Without a tag](#without-a-tag) if that read is
-cached too. The cached-data banner is shown either way.
+the database and has changed, and under this proposal is refused with the
+[verification explanation](#without-a-tag) if that read is cached too. The
+cached-data banner is shown either way.
 
 ### Committed deletes
 
@@ -500,7 +545,9 @@ real hook and download card in `src/hooks/backupDownload.test.tsx`.
 
 ## What the operator sees
 
-`StaleWriteDialog` opens when a save or delete is refused. For a save:
+`StaleWriteDialog` opens when a save or delete is refused for a content
+conflict. An initial unusable validator instead uses the fixed verification
+explanation [above](#without-a-tag), leaving the form mounted. For a conflict:
 
 1. **The draft survives.** Nothing from it was written. "Keep my draft" closes
    the dialog and returns to the unsaved changes.
@@ -546,7 +593,8 @@ so the next successful read seeds a fresh baseline.
 | --- | --- |
 | Reduction, fingerprint, three-way comparison, redaction | `src/lib/resourceBaseline.test.ts` |
 | Two-session regression, unguarded baseline, re-seeded save, plugin-association non-conflict, targets scope | `src/api/writeGuard.test.ts` |
-| `If-Match` from the verified read, a writer in the gap refused, re-send after a `412` on unowned fields, bounded retries, untagged and weak-tag fallback, popup opt-out | `src/api/conditionalWrite.test.ts` |
+| `If-Match` from the verified read, a writer in the gap refused, re-send after a `412` on unowned fields, bounded retries, initial unusable-validator refusal, post-412 untagged refusal, explicit unguarded fallback, popup opt-out | `src/api/conditionalWrite.test.ts` |
+| Initial untagged refusal preserves mounted settings/targets/consumer drafts and detail caches through real hooks; MCP policy refuses before PUT | `src/routes/upstreams/TargetEditor.test.tsx`, `src/routes/consumers/consumerEditorIdentity.test.tsx`, `src/api/mcpTools.test.ts` |
 | Draft preserved, no reapply control, keep/discard behavior | `src/routes/proxies/concurrentEdit.test.tsx` |
 | Same-client write ordering still composes | `src/api/upstreams.targetWrites.test.ts` |
 | Target form basis survives a background refetch; unrelated settings still compose; the form follows its target identity when rows shift, including a renumbered duplicate `host:port`; a committed-but-not-live removal is adopted only when the read holds exactly its result, up to omitted empty optional members | `src/routes/upstreams/TargetEditor.test.tsx`, `src/lib/upstreamTargets.test.ts`, `scripts/gateway-contract-smoke.mjs` |
@@ -573,10 +621,10 @@ be used to test guesses of a redacted value.
 
 ## Still open
 
-- **The cached-config fallback.** A read served from Edge's cached
-  configuration (`X-Data-Source: cached`) has no tag, so a write verified
-  against it is sent unconditionally and the race is narrowed to one round
-  trip rather than closed. This is Edge's contract: a tag cannot be issued from
-  a cache that may lag the database.
+- **Adoption of the initial-validator proposal (#542).** A cached read cannot
+  establish an atomic guard: Edge cannot tag a cache that may lag the database.
+  This draft refuses guarded writes from it. Owner approval and hosted
+  qualification are pending; explicitly unguarded operations and membership
+  plans retain their existing untagged behavior.
 - **A browser-level two-session journey.** Not yet in the critical-journey
   suite (`e2e/journeys`).
