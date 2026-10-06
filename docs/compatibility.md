@@ -513,17 +513,47 @@ was merged to Ferrum Edge `main` as `e55ce01893c25bd802cb4f10831c07ca32b3deda`
 on 2026-09-23 and released in v0.9.7. v0.9.8 through v0.9.12 retain it. It is
 not in v0.9.5.
 
-Foundry sends `If-Match` whenever its verification read carries a strong tag.
-The v0.9.12 contract gate confirmed the strong item tags. With a strong
-tag, a full-replacement save or a detail-page delete is atomic: a writer that
-commits between the guard's verification read and the write is refused with
-`412` and nothing is written.
-A read with no strong tag (the cached-config fallback, `X-Data-Source: cached`)
-still gets an unconditional write, which narrows the race to one round trip
-rather than closing it. `scripts/concurrent-edit-contract.mjs` requires the
-pinned gateway to issue the tags, refuse a stale and an invented tag with
-`412`, and refuse a malformed `If-Match` and one on a create with `400`. See
+Released Foundry v0.5.1 sends `If-Match` whenever its verification read carries
+a strong tag. The v0.9.12 contract gate confirmed the strong item tags. With a
+strong tag, a full-replacement save or a detail-page delete is atomic: a writer
+that commits between the guard's verification read and the write is refused
+with `412` and nothing is written.
+
+In that release, a read with no strong tag (the cached-config fallback,
+`X-Data-Source: cached`) still gets an unconditional write, which narrows the
+race to one round trip rather than closing it. Draft proposal #542 below would
+refuse that initial untagged read for guarded writes. The contract
+`scripts/concurrent-edit-contract.mjs` requires the pinned gateway to issue the
+tags, refuse a stale and an invented tag with `412`, and refuse a malformed
+`If-Match` and one on a create with `400`. See
 [concurrent-edits.md](concurrent-edits.md).
+
+### Draft initial-validator proposal (#542)
+
+This proposal narrows the supported profile for `guardedReplace` and
+`guardedRemove`: the initial fresh verification read must return one nonempty
+quoted visible-ASCII strong validator. Without one, guarded proxy settings and
+detail deletes, upstream settings/targets and detail deletes, consumer
+Details/ACL and detail deletes, and MCP tool policy edits send no `PUT` or
+`DELETE`. Drafts and baselines stay mounted; the refusal reports that atomic
+verification is unavailable, not that content changed.
+
+The compatibility consequence is deliberate: these guarded operations lose
+the released initial unconditional fallback on older gateways, modes without
+a database, and cached reads (`X-Data-Source: cached`), including cached reads
+from the paired release. Explicit `null`-guard calls, low-level writes, plugin
+membership plans, and unrelated operations retain their supported semantics;
+the shared validator parser stops accepting empty or malformed tags. Valid
+opaque strong tokens require no MAC-format assumption. Namespace, resource,
+and gateway-target fences, whole-body preservation, tagged stale-content
+comparisons, and bounded `412` re-verification remain in place; the existing
+post-412 untagged refusal is unchanged.
+
+**Draft, not approved or released.** Root must review the exact patch, obtain
+a fresh independent security/concurrency review and every hosted gate, then
+ask the owner to decide on this behavior change. This does not move a version,
+dependency or Node floor, gateway image/source pin, workflow binding, or any
+published pairing evidence. See [the precise scope](concurrent-edits.md#without-a-tag).
 
 ## Changing the pairing
 

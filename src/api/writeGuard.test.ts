@@ -60,7 +60,7 @@ function proxyFixture(): Proxy {
   };
 }
 
-/** A gateway that accepts every full-replacement PUT, exactly as Edge does. */
+/** A gateway with tagged reads and Edge's conditional replacement contract. */
 function stubGateway(seed: Proxy) {
   let stored = seed;
   let revision = 0;
@@ -69,11 +69,17 @@ function stubGateway(seed: Proxy) {
   const fetcher = vi.fn(async (request: Request) => {
     wire.push(`${request.method} ${new URL(request.url).pathname}`);
     if (request.method === "PUT") {
+      const ifMatch = request.headers.get("If-Match");
+      if (ifMatch !== null && ifMatch !== `"r${revision}"`) {
+        return Response.json({ error: "Precondition Failed" }, { status: 412 });
+      }
       const body = (await request.json()) as Partial<Proxy>;
       revision += 1;
       stored = { ...stored, ...body, updated_at: `rev-${revision}` };
     }
-    return Response.json(stored);
+    return Response.json(stored, {
+      headers: request.method === "GET" ? { ETag: `"r${revision}"` } : {},
+    });
   });
   vi.stubGlobal("fetch", fetcher);
   return { wire, read: () => stored };
@@ -254,11 +260,17 @@ describe("cross-session upstream target edits", () => {
       vi.fn(async (request: Request) => {
         wire.push(request.method);
         if (request.method === "PUT") {
+          const ifMatch = request.headers.get("If-Match");
+          if (ifMatch !== null && ifMatch !== `"r${revision}"`) {
+            return Response.json({ error: "Precondition Failed" }, { status: 412 });
+          }
           const body = (await request.json()) as Partial<Upstream>;
           revision += 1;
           stored = { ...stored, ...body, updated_at: `rev-${revision}` };
         }
-        return Response.json(stored);
+        return Response.json(stored, {
+          headers: request.method === "GET" ? { ETag: `"r${revision}"` } : {},
+        });
       }),
     );
     return { wire, read: () => stored };
