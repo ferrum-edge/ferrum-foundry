@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pin the development-only transitive `shell-quote` dependency (pulled in by
   `concurrently`, which requires exactly 1.9.0) to 1.12.0 with an npm
   `overrides` entry, fixing GHSA-pqg4-j6r4-53mv (critical). No runtime
-  runtime dependency changes.
+  dependency changes.
 
 ## [0.5.2] - 2026-10-06
 
