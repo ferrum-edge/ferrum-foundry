@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Name Ferrum Edge LLC as the copyright holder and commercial licensor in `LICENSE` (Required Notice, previously "Ferrum Foundry") and `LICENSE-COMMERCIAL.md`.
+
 ### Security
 
 - Pin the development-only transitive `shell-quote` dependency (pulled in by
