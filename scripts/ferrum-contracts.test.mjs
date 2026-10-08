@@ -39,6 +39,7 @@ const CONTRACTS_TAG_EDGE_VERSIONS = {
   "contracts-edge-0.9.11": ["v0.9.11"],
   "contracts-edge-0.9.12": ["v0.9.12"],
   "contracts-edge-0.9.13": ["v0.9.13"],
+  "contracts-edge-0.9.14": ["v0.9.14"],
 };
 
 function describeSetDrift(actual, expected, label) {
@@ -95,8 +96,8 @@ test("the contracts pin tracks the qualified Ferrum Edge release", () => {
 });
 
 test("the published manifest pin retains owner status and complete canonical integrity", () => {
-  assert.match(pinText, /^tag=contracts-edge-0\.9\.13$/m);
-  assert.match(pinText, /^commit=9626821eb089c71f5d4d71268c7b8276a8a5ab50$/m);
+  assert.match(pinText, /^tag=contracts-edge-0\.9\.14$/m);
+  assert.match(pinText, /^commit=ddbdd845733b7046c4393ac951011dafb774db33$/m);
   const schema = JSON.parse(readFileSync(
     new URL("schemas/service-manifest/v1.schema.json", contractRoot), "utf8",
   ));
@@ -111,11 +112,11 @@ test("the published manifest pin retains owner status and complete canonical int
   assert.equal(pinnedFiles().get("schemas/service-manifest/v1.schema.json"),
     "3d086aec773345df3547adf6e026ad466168b27bf98163614d44171b7862b5dc");
   assert.equal(pinnedFiles().get("vocabularies/plugin-catalog.json"),
-    "be31cc53508042c6efd0e745e8c673fb66bbbdb1d2dd1a2eaa1a813f09ae80c3");
+    "a21a3de12f02dd7e9440110582049672cc56ac5357efa13dc2194ad3a985b408");
   assert.equal(pinnedFiles().get("vocabularies/provisioned-by.json"),
-    "514913de70c0caf3b5092363fb34d11c46da3f9ff9d0c98b0a83bfe2e04c76c9");
+    "620e2a9eaf4a1f116124d5b057aa0cd7a0e34b3b36a0b4175c8546b954a07227");
   assert.equal(pinnedFiles().get("fixtures/invalid-expectations.json"),
-    "048ded8e16600e116bcfb3cf6eaae4c00aca49a9061395c8cc647e1f66191699");
+    "6ada3d48b250fc100a83067d8ee0441d3cd07de632f958ce87ce31111d8b1c7e");
 });
 
 test("the vocabularies bind the published Edge source without changing attribution semantics", () => {

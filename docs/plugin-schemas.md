@@ -246,6 +246,38 @@ is retained. This review is schema evidence, not pairing qualification. No
 project tooling or producer ran locally, and no OpenAPI document or export is
 stored in the repository.
 
+### v0.5.3 schema review
+
+The Foundry v0.5.3 candidate moves `edge.source_commit` to published Edge
+v0.9.14, `9bd4d5f9caa4ebe8f0ea13e76d8a6e2172eaca7d`. Its raw `openapi.yaml`
+(SHA-256 `6d286649ae744691e2eeb7d16607c538ca02e31bdeaafe98ab07fc861e7b9da4`)
+was read from the immutable tag alongside the reviewed 9b83115d document. Each
+of the five components was extracted with the block rule above, as a text
+operation, and compared byte for byte:
+
+| Component | Result at 9bd4d5f9 | SHA-256 |
+| --- | --- | --- |
+| `KeyAuthConfig` | byte-identical to 9b83115d | `2489182cc16c230dd69d984441a2efcee271df44a934a8ca6d5d868f77da4deb` |
+| `RateLimitingConfig` | byte-identical to 9b83115d | `f6f4c095e2c9f326ba62d87094fb9e8ac3833bba9503476cf01daca1ebc6e4a1` |
+| `RateLimitingRuleConfig` | byte-identical to 9b83115d | `baeb7755166ff2af60d33fdc8eff36e94fb04e5b15ef099c69792a064eb2489d` |
+| `CorsConfig` | byte-identical to 9b83115d | `96fcc1b45b3c20b27713b0bc0c7eef23bd92810587b21115a233081da7932bf3` |
+| `PrometheusMetricsConfig` | byte-identical to 9b83115d | `ee96fad934766a3195cd0aa2231c55287732973f246bf4a830e4ae890b980623` |
+
+The v0.9.14 OpenAPI changes are confined to the `GET /cluster` and
+`GET /backend-egress-policy` data-plane attestation shapes
+(`ClusterStatusCp`, `ConnectedDpNode`, `DataPlaneEgress*`), the deployment
+mutation `durable` descriptions, and deployment snapshot and conditional backup
+`ETag` descriptions; none touches a plugin component or `PluginConfigBase`.
+Every pinned hash, descriptor, template and preservation behavior is retained,
+and the drift check compares the pinned hashes at the new `edge.source_commit`.
+
+`PLUGIN_SCHEMA_SPEC.ref` remains 9b83115d, the source of the last reviewed
+hosted producer export ([v0.5.2 schema review](#v052-schema-review)). Moving
+it to 9bd4d5f9 requires reviewing this candidate's hosted producer export
+first; it would change no hash. This review is schema evidence, not pairing
+qualification. No project tooling or producer ran locally, and no OpenAPI
+document is stored in the repository.
+
 ## What guided editing does to a configuration
 
 ### It is lossless

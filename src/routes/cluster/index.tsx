@@ -24,6 +24,8 @@ import {
   isCpStatus,
   isDpStatus,
   type BackendCapabilitiesResponse,
+  type ConnectedDpNode,
+  type DataPlaneEgressSummary,
   type ProtocolSupport,
 } from "@/api/ops";
 import { formatDateTime, formatTime } from "@/lib/format";
@@ -33,6 +35,41 @@ function supportBadge(support: ProtocolSupport, stale = false) {
   if (support === "supported") return <Badge variant="green">yes</Badge>;
   if (support === "unsupported") return <Badge variant="red">no</Badge>;
   return <Badge variant="default">?</Badge>;
+}
+
+/** A data plane's self-reported egress policy; `null` where none is carried. */
+function egressPolicyLabel(node: ConnectedDpNode): string | null {
+  const attestation = node.backend_egress_policy_attestation;
+  if (attestation === undefined) return null;
+  const policy = node.backend_egress_policy;
+  if (attestation !== "reported" || !policy) return "egress policy unknown";
+  return `egress ${policy.mode}${policy.public_only_guaranteed ? " · public-only" : ""}`;
+}
+
+function EgressAttestationSummary({
+  summary,
+  stale,
+}: {
+  summary: DataPlaneEgressSummary;
+  stale: boolean;
+}) {
+  const weakest = summary.weakest_policy;
+  return (
+    <div className="mt-3 space-y-1 text-sm text-text-secondary">
+      <p>
+        Backend egress{stale ? " in last known snapshot" : ""}:{" "}
+        {summary.reporting_data_planes} of {summary.connected_data_planes} data plane(s) reported ·{" "}
+        {summary.unknown_data_planes} unknown · weakest reported mode{" "}
+        {weakest ? weakest.mode : "none"}
+        {summary.weakest_policy_complete ? "" : " (incomplete)"} · public-only for every
+        connected data plane: {summary.all_connected_public_only_guaranteed ? "yes" : "no"}
+      </p>
+      <p className="text-xs text-text-muted">
+        Self-reported by connected data planes over ConfigSync, not host attestation. A
+        disconnected data plane still serving cached configuration is not listed.
+      </p>
+    </div>
+  );
 }
 
 function unsupportedProbeMessage(connectedDataPlanes: number): string {
@@ -230,6 +267,12 @@ export default function ClusterPage() {
                 {cluster.connected_mesh_nodes} mesh node(s) connected{clusterError ? " in last known snapshot" : ""}
               </span>
             </div>
+            {cluster.data_plane_backend_egress_policy ? (
+              <EgressAttestationSummary
+                summary={cluster.data_plane_backend_egress_policy}
+                stale={clusterError}
+              />
+            ) : null}
           </Card>
           {[
             { title: "Data Planes", nodes: cluster.data_planes },
@@ -242,21 +285,29 @@ export default function ClusterPage() {
               {nodes.length === 0 && (
                 <EmptyState title={`No ${title.toLowerCase()} connected${clusterError ? " in last known snapshot" : ""}`} description="" />
               )}
-              {nodes.map((node) => (
-                <div
-                  key={node.node_id}
-                  className="px-4 py-3 border-b border-border/50 last:border-b-0 flex items-center justify-between gap-4"
-                >
-                  <div className="min-w-0">
-                    <p className="text-sm text-text-primary font-medium">{node.node_id}</p>
-                    <p className="text-xs text-text-muted">
-                      v{node.version} · ns {node.namespace} · connected{" "}
-                      {formatDateTime(node.connected_at)} · last sync {formatDateTime(node.last_sync_at)}
-                    </p>
+              {nodes.map((node, index) => {
+                const egress = egressPolicyLabel(node);
+                return (
+                  // Edge v0.9.14 lists one entry per Subscribe stream, so
+                  // several can share a node_id.
+                  <div
+                    key={`${node.node_id}:${node.connected_at}:${index}`}
+                    className="px-4 py-3 border-b border-border/50 last:border-b-0 flex items-center justify-between gap-4"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm text-text-primary font-medium">{node.node_id}</p>
+                      <p className="text-xs text-text-muted">
+                        v{node.version} · ns {node.namespace} · connected{" "}
+                        {formatDateTime(node.connected_at)} · last sync {formatDateTime(node.last_sync_at)}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      {egress ? <Badge variant="default">{egress}</Badge> : null}
+                      <Badge variant={clusterError ? "default" : "green"}>{clusterError ? "last known online" : "online"}</Badge>
+                    </div>
                   </div>
-                  <Badge variant={clusterError ? "default" : "green"}>{clusterError ? "last known online" : "online"}</Badge>
-                </div>
-              ))}
+                );
+              })}
             </Card>
           ))}
         </div>

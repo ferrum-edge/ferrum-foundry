@@ -28,7 +28,7 @@ const publications: Array<{ url: string; body: string }> = [];
 const held: ServerResponse[] = [];
 const signals = new EventEmitter();
 
-// Edge v0.9.13 conditional snapshot paths: a conditional backup read, a
+// Edge v0.9.13+ conditional snapshot paths: a conditional backup read, a
 // tagged restore, and the two deployment mutations.
 function conditionalSnapshot(method: string, url: string, ifMatch: string | undefined): boolean {
   const target = new URL(url, 'http://gateway.test');

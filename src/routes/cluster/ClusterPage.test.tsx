@@ -3,7 +3,12 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "@/components/ui/Toast";
-import type { ClusterStatus, BackendCapabilitiesResponse } from "@/api/ops";
+import type {
+  ClusterStatus,
+  BackendCapabilitiesResponse,
+  ConnectedDpNode,
+  DataPlaneEgressPolicy,
+} from "@/api/ops";
 import ClusterPage from "./index";
 
 vi.mock("@/stores/namespace", () => ({
@@ -228,5 +233,100 @@ describe("Backend probe surface by gateway mode", () => {
     expect(host.textContent).toContain("gRPC H2/TLS");
     expect(host.textContent).not.toContain("belong to a data plane");
     expect(capabilityRequestCount()).toBeGreaterThan(0);
+  });
+});
+
+describe("Data-plane backend egress attestation (Edge v0.9.14)", () => {
+  const publicOnly: DataPlaneEgressPolicy = {
+    mode: "public",
+    mode_allowed_ip_classes: ["public"],
+    mode_blocked_ip_classes: ["private-reserved"],
+    dangerous_ranges_blocked: true,
+    allow_cidr_overrides_present: false,
+    deny_cidr_overrides_present: false,
+    public_only_guaranteed: true,
+  };
+
+  function stream(
+    connectedAt: string,
+    extra: Pick<ConnectedDpNode, "backend_egress_policy_attestation" | "backend_egress_policy">,
+  ): ConnectedDpNode {
+    return {
+      node_id: "dp-shared",
+      namespace: "default",
+      version: "0.9.14",
+      status: "online",
+      connected_at: connectedAt,
+      last_sync_at: connectedAt,
+      ...extra,
+    };
+  }
+
+  it("lists streams sharing a node_id and summarizes their self-reported policy", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    topology = {
+      mode: "cp",
+      connected_data_planes: 2,
+      data_planes: [
+        stream("2026-10-07T00:00:00Z", {
+          backend_egress_policy_attestation: "reported",
+          backend_egress_policy: publicOnly,
+        }),
+        stream("2026-10-07T00:00:05Z", {
+          backend_egress_policy_attestation: "unknown",
+          backend_egress_policy: null,
+        }),
+      ],
+      data_plane_backend_egress_policy: {
+        connected_data_planes: 2,
+        reporting_data_planes: 1,
+        unknown_data_planes: 1,
+        weakest_policy: publicOnly,
+        weakest_policy_complete: false,
+        all_connected_public_only_guaranteed: false,
+      },
+      connected_mesh_nodes: 0,
+      mesh_nodes: [],
+    };
+    try {
+      await mount();
+      await expectText("egress public · public-only");
+      expect(host.textContent).toContain("egress policy unknown");
+      expect(host.textContent!.split("dp-shared")).toHaveLength(3);
+      expect(host.textContent).toContain("1 of 2 data plane(s) reported · 1 unknown");
+      expect(host.textContent).toContain("weakest reported mode public (incomplete)");
+      expect(host.textContent).toContain("public-only for every connected data plane: no");
+      expect(host.textContent).toContain("not host attestation");
+      expect(consoleError.mock.calls.flat().map(String).join(" ")).not.toContain("same key");
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it("qualifies the aggregate as last known after a failed refresh", async () => {
+    topology = {
+      ...(cpTopology() as Extract<ClusterStatus, { mode: "cp" }>),
+      data_plane_backend_egress_policy: {
+        connected_data_planes: 1,
+        reporting_data_planes: 1,
+        unknown_data_planes: 0,
+        weakest_policy: publicOnly,
+        weakest_policy_complete: true,
+        all_connected_public_only_guaranteed: true,
+      },
+    };
+    await mount();
+    await expectText("public-only for every connected data plane: yes");
+    failTopology = true;
+    await refetch("cluster");
+    await expectText("Backend egress in last known snapshot");
+  });
+
+  it("makes no egress claim when the response carries no attestation", async () => {
+    await mount();
+    await expectText("historical-node");
+    expect(host.textContent).not.toContain("Backend egress");
+    expect(host.textContent).not.toContain("egress policy unknown");
+    expect(host.textContent).not.toContain("egress public");
   });
 });

@@ -81,10 +81,10 @@ the org's central contract store, in
 [`contracts/ferrum-contracts/PIN`](../contracts/ferrum-contracts/PIN).
 The pinned files and the local plugin names and provisioning markers are checked
 by `scripts/ferrum-contracts.test.mjs` in the normal contract test suite.
-The canonical pin is now published `contracts-edge-0.9.13` at
-`9626821eb089c71f5d4d71268c7b8276a8a5ab50`, mapped to Edge v0.9.13. The plugin
+The canonical pin is now published `contracts-edge-0.9.14` at
+`ddbdd845733b7046c4393ac951011dafb774db33`, mapped to Edge v0.9.14. The plugin
 catalog and provisioning vocabulary refresh provenance to released Edge source
-`9b83115de7ec23ab51ec4feae6bed65e596db425`; plugin entries, lifecycle metadata,
+`9bd4d5f9caa4ebe8f0ea13e76d8a6e2172eaca7d`; plugin entries, lifecycle metadata,
 provisioning values and historical first availability are unchanged. The
 vocabulary schemas retain their exact earlier bytes. The pin also includes the
 implemented service-manifest schema, every shared manifest fixture and the
@@ -93,11 +93,12 @@ canonical invalid-expectations file for the
 byte-identical to the immutable canonical commit, including descriptions with
 historical preparation wording. The complete canonical invalid-expectations
 file versions its deployment-snapshot and backend-egress-policy negatives and
-adds their v2 entries; Foundry's same 18-file scope includes no deployment or
-egress-policy schemas or profile implementation. Manifest schema, fixtures and
-owner-unreleased status remain unchanged. Foundry v0.5.2 hosted pairing
+adds their v2 entries, now including the v0.9.14 data-plane attestation
+negatives; Foundry's same 18-file scope includes no deployment or egress-policy
+schemas or profile implementation. Manifest schema, fixtures and
+owner-unreleased status remain unchanged. Foundry v0.5.3 hosted pairing
 qualification is pending in [the compatibility record](compatibility.md);
-v0.5.1 and earlier evidence belongs to their unchanged immutable release records.
+v0.5.2 and earlier evidence belongs to their unchanged immutable release records.
 
 To bump the pin, choose a `contracts-edge-*` release, download the adopted
 vocabulary and schema files from that tag into the same paths, resolve the tag

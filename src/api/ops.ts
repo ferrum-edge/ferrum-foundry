@@ -276,6 +276,31 @@ export async function getChargesSinkStatus(
 
 /* ---------- Cluster ---------- */
 
+/**
+ * Backend egress policy metadata a data plane self-reported on ConfigSync
+ * Subscribe (Edge v0.9.14+): presence flags only, never CIDRs or addresses.
+ * It is not cryptographic host attestation.
+ */
+export interface DataPlaneEgressPolicy {
+  mode: "both" | "public" | "private";
+  mode_allowed_ip_classes: string[];
+  mode_blocked_ip_classes: string[];
+  dangerous_ranges_blocked: boolean;
+  allow_cidr_overrides_present: boolean;
+  deny_cidr_overrides_present: boolean;
+  public_only_guaranteed: boolean;
+}
+
+/** Aggregate over the live data-plane Subscribe streams a CP reports. */
+export interface DataPlaneEgressSummary {
+  connected_data_planes: number;
+  reporting_data_planes: number;
+  unknown_data_planes: number;
+  weakest_policy: DataPlaneEgressPolicy | null;
+  weakest_policy_complete: boolean;
+  all_connected_public_only_guaranteed: boolean;
+}
+
 export interface ConnectedDpNode {
   node_id: string;
   version: string;
@@ -283,12 +308,18 @@ export interface ConnectedDpNode {
   status: "online";
   connected_at: string;
   last_sync_at: string;
+  /** Data planes only, Edge v0.9.14+; mesh nodes carry neither field. */
+  backend_egress_policy_attestation?: "reported" | "unknown";
+  backend_egress_policy?: DataPlaneEgressPolicy | null;
 }
 
 export interface ClusterStatusCp {
   mode: "cp";
+  /** Live Subscribe streams: several may share one `node_id`. */
   connected_data_planes: number;
   data_planes: ConnectedDpNode[];
+  /** Edge v0.9.14+: aggregate over every connected data plane, all namespaces. */
+  data_plane_backend_egress_policy?: DataPlaneEgressSummary;
   connected_mesh_nodes: number;
   mesh_nodes: ConnectedDpNode[];
 }
