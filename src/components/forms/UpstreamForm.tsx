@@ -13,6 +13,7 @@ import { CollapsibleSection } from "./CollapsibleSection";
 import { FormValidationSummary } from "./FormValidationSummary";
 import { TargetForm } from "./TargetForm";
 import { useCollapsibleFormValidation } from "@/lib/collapsedFormValidation";
+import { BACKEND_TLS_OPERATOR_SCOPE_NOTE } from "@/lib/backendTlsReferences";
 import { targetActionLabels } from "@/lib/upstreamTargets";
 import {
   subsetLabelsDraft,
@@ -1462,6 +1463,7 @@ export function UpstreamForm({
             TLS settings for backend connections. When this upstream is linked to
             a proxy, these take precedence over the proxy's backend TLS fields.
           </p>
+          <p className="text-text-muted text-xs">{BACKEND_TLS_OPERATOR_SCOPE_NOTE}</p>
           <Input
             label="Client Cert Path (mTLS)"
             value={tlsCertPath}

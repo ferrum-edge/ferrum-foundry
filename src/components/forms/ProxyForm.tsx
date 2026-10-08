@@ -11,6 +11,7 @@ import { CollapsibleSection } from "./CollapsibleSection";
 import { TagInput } from "./TagInput";
 import { FormValidationSummary } from "./FormValidationSummary";
 import { useCollapsibleFormValidation } from "@/lib/collapsedFormValidation";
+import { BACKEND_TLS_OPERATOR_SCOPE_NOTE } from "@/lib/backendTlsReferences";
 import {
   missingNumberError,
   numberDraftFromInput,
@@ -776,6 +777,7 @@ export function ProxyForm({
             checked={backendTlsVerify}
             onChange={setBackendTlsVerify}
           />
+          <p className="text-text-muted text-xs">{BACKEND_TLS_OPERATOR_SCOPE_NOTE}</p>
           <Input
             label="Backend TLS Client Cert Path"
             value={backendTlsCertPath}

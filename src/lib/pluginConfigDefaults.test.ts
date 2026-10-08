@@ -79,6 +79,30 @@ describe("canonical plugin defaults", () => {
     }
   });
 
+  it("omits the removed LDAP consumer_mapping option", () => {
+    // Edge v0.9.15 (ferrum-edge#6088) refuses a config that still sets it.
+    expect(getPluginConfigDefault("ldap_auth")).not.toHaveProperty("consumer_mapping");
+  });
+
+  it("references only FERRUM_PLUGIN_SECRET_<NAME> environment variables", () => {
+    // Edge v0.9.15 (ferrum-edge#6089) refuses any other plugin-config env reference with 400.
+    const name = /^FERRUM_PLUGIN_SECRET_[A-Z_][A-Z0-9_]*$/;
+    const at = (plugin: string, path: string): unknown =>
+      path.split(".").reduce<unknown>(
+        (value, key) => (value as Record<string, unknown> | undefined)?.[key],
+        getPluginConfigDefault(plugin),
+      );
+    const providers = at("ai_stream_router", "providers") as { api_key: string }[];
+    const references = [
+      at("ai_semantic_firewall", "provider.api_key_env"),
+      at("api_chargeback_sink", "clickhouse.password_ref"),
+      at("proxy_alerts", "channels.ops_slack.webhook_url_env"),
+      ...providers.map((provider) => /^\$\{(.*)\}$/.exec(provider.api_key)?.[1]),
+    ];
+    expect(references).toHaveLength(5);
+    for (const reference of references) expect(reference).toMatch(name);
+  });
+
   it("omits A2A-only discovery.public_base_url from the mcp_gateway template", () => {
     expect(getPluginConfigDefault("mcp_gateway")).not.toHaveProperty("discovery");
   });

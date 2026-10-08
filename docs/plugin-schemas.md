@@ -23,7 +23,7 @@ Foundry keeps no copy of `openapi.yaml`. It stores the reviewed descriptors and
 the SHA-256 of each source component block instead:
 
 - `PLUGIN_SCHEMA_SPEC` pins the upstream commit
-  (`ferrum-edge/ferrum-edge@9b83115de7ec23ab51ec4feae6bed65e596db425`,
+  (`ferrum-edge/ferrum-edge@25b37395ff61bfea0f3ffd189d9011c4984fa755`,
   `info.version: 0.2.0`).
 - `PLUGIN_SCHEMA_PROVENANCE` pins one digest per component.
 
@@ -277,6 +277,60 @@ it to 9bd4d5f9 requires reviewing this candidate's hosted producer export
 first; it would change no hash. This review is schema evidence, not pairing
 qualification. No project tooling or producer ran locally, and no OpenAPI
 document is stored in the repository.
+
+### v0.5.5 schema review
+
+The Foundry v0.5.5 candidate moves `edge.source_commit` to published Edge
+v0.9.15, `25b37395ff61bfea0f3ffd189d9011c4984fa755`. Its raw `openapi.yaml`
+(SHA-256 `f6c7d8b1d247060c4d0ae66e5c149ad3d76721addb8176eff45b6fc3d1b4d6b2`)
+was read from the immutable tag alongside the v0.9.14 document. Each of the
+five components was extracted with the block rule above, as a text operation,
+and compared byte for byte:
+
+| Component | Result at 25b37395 | SHA-256 |
+| --- | --- | --- |
+| `KeyAuthConfig` | byte-identical to 9bd4d5f9 | `2489182cc16c230dd69d984441a2efcee271df44a934a8ca6d5d868f77da4deb` |
+| `RateLimitingConfig` | **changed**: adds `ipv6_prefix` | `fc6778eda49ab4999909b430a6c90a8abf38b43f8ddf0bfa1e894c5208033037` (was `f6f4c095e2c9f326ba62d87094fb9e8ac3833bba9503476cf01daca1ebc6e4a1`) |
+| `RateLimitingRuleConfig` | byte-identical to 9bd4d5f9 | `baeb7755166ff2af60d33fdc8eff36e94fb04e5b15ef099c69792a064eb2489d` |
+| `CorsConfig` | byte-identical to 9bd4d5f9 | `96fcc1b45b3c20b27713b0bc0c7eef23bd92810587b21115a233081da7932bf3` |
+| `PrometheusMetricsConfig` | byte-identical to 9bd4d5f9 | `ee96fad934766a3195cd0aa2231c55287732973f246bf4a830e4ae890b980623` |
+
+The only `RateLimitingConfig` change is one new property (ferrum-edge#6079):
+
+```yaml
+        ipv6_prefix:
+          type: integer
+          minimum: 1
+          maximum: 128
+          default: 64
+          description: IPv6 prefix length used to group source addresses for IP rate-limit keys. IPv4 addresses remain host-specific.
+```
+
+The guided rate-limiting editor now models it in the Policy section as an
+integer from 1 to 128 whose omission means `64`, with the schema's description.
+Like every guided field it is written only when the operator sets it, so an
+untouched configuration keeps the key absent and Edge applies its default;
+`128` restores per-address keys. Every other descriptor, template and
+preservation behavior is unchanged, and the `limits` rule component is
+untouched.
+
+The other v0.9.15 plugin-schema changes touch components Foundry does not
+guide: `LdapAuthConfig` drops `consumer_mapping`; the environment-reference
+fields of `ApiChargebackSinkConfig`, `AiSemanticFirewallConfig`,
+`WorkloadMetricsConfig` and `ProxyAlertsEnvName` take a
+`FERRUM_PLUGIN_SECRET_<NAME>` pattern; `McpGatewayConfig` adds
+`sessions.max_sessions_per_principal`; `BodyValidatorConfig` raises
+`grpc_max_decompressed_size_bytes` to minimum 1; and the `JwksAuthConfig`,
+`Oauth2IntrospectionConfig`, `OidcRelyingPartyConfig`, `AiStreamRouterConfig`,
+`ServerlessFunctionConfig` and `SoapWsSecurityConfig` changes are descriptions.
+`PluginConfigBase` is unchanged.
+
+`PLUGIN_SCHEMA_SPEC.ref` moves to 25b37395 together with the one changed digest,
+as the drift check requires. This review read the blocks directly from the
+immutable tag; the candidate's hosted producer export, from the Pinned Gateway
+Contract job, is the independent check of the same digests. This review is
+schema evidence, not pairing qualification. No project tooling or producer ran
+locally, and no OpenAPI document is stored in the repository.
 
 ## What guided editing does to a configuration
 

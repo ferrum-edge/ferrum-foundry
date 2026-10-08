@@ -345,6 +345,22 @@ describe("validation", () => {
     expect(issues.map((issue) => issue.message).join(" ")).toContain("at most 1000000");
   });
 
+  it("bounds the Edge v0.9.15 IPv6 prefix and leaves it omitted by default", () => {
+    const config: JsonObject = { limits: [{ scope: "default", requests_per_second: 10 }] };
+    expect("ipv6_prefix" in roundTrip(rateLimiting, config)).toBe(false);
+    for (const [text, message] of [
+      ["0", "IPv6 prefix length must be at least 1."],
+      ["129", "IPv6 prefix length must be at most 128."],
+    ]) {
+      const issues = issuesFor(rateLimiting, config, { ipv6_prefix: { present: true, text } });
+      expect(issues.map((issue) => issue.message)).toEqual([message]);
+    }
+    const perAddress = { ipv6_prefix: { present: true, text: "128" } };
+    expect(issuesFor(rateLimiting, config, perAddress)).toEqual([]);
+    const values = { ...readGuidedConfig(rateLimiting, config), ...perAddress };
+    expect(writeGuidedConfig(rateLimiting, config, values, values).ipv6_prefix).toBe(128);
+  });
+
   it("reports a non-integer where the schema requires one", () => {
     const issues = issuesFor(
       rateLimiting,

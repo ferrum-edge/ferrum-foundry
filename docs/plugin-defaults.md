@@ -37,9 +37,9 @@ error body and its `400` status.
 | --- | --- |
 | `hmac_auth` | A `replay_scope` for `ferrum-hmac-v2` that matches your replica topology. |
 | `mtls_auth` | `allowed_issuers[0].ca_certificate_pem`; an issuer name alone cannot pin trust. |
-| `ai_stream_router` | Provider API keys in the gateway environment (the template references `${OPENAI_API_KEY}` first). |
+| `ai_stream_router` | Provider API keys in the gateway environment (the template references `${FERRUM_PLUGIN_SECRET_OPENAI_API_KEY}` first). |
 | `load_testing` | A trigger `key` of at least 32 characters. |
-| `proxy_alerts` | `FERRUM_ALERTS_SLACK_WEBHOOK` in the gateway environment. |
+| `proxy_alerts` | `FERRUM_PLUGIN_SECRET_ALERTS_SLACK_WEBHOOK` in the gateway environment. |
 | `kafka_logging` | An unrestricted backend egress policy. Under the default restrictive policy the gateway refuses librdkafka during field validation (the error starts with `Invalid plugin config fields: kafka_logging:`), before contacting a broker. Use another log sink if egress must stay restricted. |
 | `openapi_validator` | Proxy scope, on a proxy with an attached API spec. |
 
@@ -81,11 +81,12 @@ the org's central contract store, in
 [`contracts/ferrum-contracts/PIN`](../contracts/ferrum-contracts/PIN).
 The pinned files and the local plugin names and provisioning markers are checked
 by `scripts/ferrum-contracts.test.mjs` in the normal contract test suite.
-The canonical pin is now published `contracts-edge-0.9.14` at
-`ddbdd845733b7046c4393ac951011dafb774db33`, mapped to Edge v0.9.14. The plugin
+The canonical pin is now published `contracts-edge-0.9.15` at
+`6fb64c5dc2e014204c17609fc717d976f3b4589e`, mapped to Edge v0.9.15. The plugin
 catalog and provisioning vocabulary refresh provenance to released Edge source
-`9bd4d5f9caa4ebe8f0ea13e76d8a6e2172eaca7d`; plugin entries, lifecycle metadata,
-provisioning values and historical first availability are unchanged. The
+`25b37395ff61bfea0f3ffd189d9011c4984fa755`, and the catalog notes the v0.9.15
+config-schema changes; plugin entries, lifecycle metadata, provisioning values
+and historical first availability are unchanged. The
 vocabulary schemas retain their exact earlier bytes. The pin also includes the
 implemented service-manifest schema, every shared manifest fixture and the
 canonical invalid-expectations file for the
@@ -93,13 +94,24 @@ canonical invalid-expectations file for the
 byte-identical to the immutable canonical commit, including descriptions with
 historical preparation wording. The complete canonical invalid-expectations
 file versions its deployment-snapshot and backend-egress-policy negatives and
-adds their v2 entries, now including the v0.9.14 data-plane attestation
-negatives; Foundry's same 18-file scope includes no deployment or egress-policy
+adds their v2 entries, including the v0.9.14 data-plane attestation negatives;
+v0.9.15 adds diagnostic-ref and gateway-headers negatives. Foundry's same
+18-file scope includes no deployment, egress-policy, diagnostic or header
 schemas or profile implementation. Manifest schema, fixtures and
-owner-unreleased status remain unchanged. Foundry v0.5.3 passed hosted pairing
-qualification with this pin. The v0.5.4 candidate keeps it, and its own
+owner-unreleased status remain unchanged. Foundry v0.5.5 hosted pairing
 qualification is pending in [the compatibility record](compatibility.md);
-v0.5.3 and earlier evidence belongs to their unchanged immutable release records.
+v0.5.4 and earlier evidence belongs to their unchanged immutable release records.
+
+Edge v0.9.15 confines every plugin-config environment reference to
+`FERRUM_PLUGIN_SECRET_<NAME>` (`<NAME>` uppercase `[A-Z_][A-Z0-9_]*`) and
+refuses any other name with `400` (ferrum-edge#6089). The `ai_semantic_firewall`,
+`ai_stream_router`, `api_chargeback_sink` and `proxy_alerts` templates name
+variables in that namespace; set them in the gateway environment, directly or
+through a `_FILE` / `_VAULT` / `_AWS` / `_AZURE` / `_GCP` source. The
+`serverless_function` Azure and GCP credential fallbacks now read
+`FERRUM_PLUGIN_SECRET_AZURE_FUNCTIONS_KEY` and
+`FERRUM_PLUGIN_SECRET_GCP_CLOUD_FUNCTIONS_BEARER_TOKEN`. The `ldap_auth`
+template never set `consumer_mapping`, which v0.9.15 removes and refuses.
 
 To bump the pin, choose a `contracts-edge-*` release, download the adopted
 vocabulary and schema files from that tag into the same paths, resolve the tag

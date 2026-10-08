@@ -216,7 +216,7 @@ existing masked metadata write workflow remain supported. Intentional archival
 backup downloads are described in
 [Backup export](concurrent-edits.md#backup-export).
 
-Edge v0.9.13 and v0.9.14 keep the snapshot secret-complete: its evidence
+Edge v0.9.13 through v0.9.15 keep the snapshot secret-complete: its evidence
 carries stored spec documents only as SHA-256 and length, but the
 `api_spec_contents` array returns one base64 copy of every stored spec
 document. The path-based

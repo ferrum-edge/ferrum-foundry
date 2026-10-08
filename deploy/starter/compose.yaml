@@ -125,11 +125,11 @@ services:
       - ./nginx/identity:/etc/nginx/identity:ro
       - ./secrets:/etc/nginx/secrets:ro
 
-  # Published Edge v0.9.14, qualified with published Foundry v0.5.4.
+  # Published Edge v0.9.15; Foundry v0.5.5 qualification is pending (docs/compatibility.md).
   # Must equal `edge.image` in docs/compatibility.json;
   # a test fails if it drifts.
   demo-gateway:
-    image: ferrumedge/ferrum-edge@sha256:15442f1b1d1758023fe871fe57be50f19caf34bbe6c499a6812f4ffd0da5e3f8
+    image: ferrumedge/ferrum-edge@sha256:29b468dfeea13b1ecaac8dfbc7e019f310e71e647611d43800a1dc64436eaca3
     restart: unless-stopped
     profiles: [demo]
     environment:
