@@ -15,20 +15,18 @@ For a walkthrough that ends in an authenticated request through the data
 plane, see [`docs/getting-started.md`](../../docs/getting-started.md).
 
 **Published pairing.** The demo profile pins published Edge v0.9.14, qualified
-with published Foundry v0.5.3. The Foundry v0.5.4 candidate keeps that Edge
-pin; its qualification and publication are pending in
-[`docs/compatibility.md`](../../docs/compatibility.md), so the default Foundry
-image below stays the published v0.5.3 digest. v0.5.4 changes what a
-namespace-scoped identity may reach; see
+with published Foundry v0.5.4. The default Foundry image is pinned to its
+published digest below. v0.5.4 changes what a namespace-scoped identity may
+reach; see
 [Namespace route ceiling](../../docs/authentication.md#namespace-route-ceiling).
 The
-[v0.5.3 record](../../docs/release-notes/v0.5.3.compatibility.json) preserves
-the published source `74a7be374f5c6fcf1284737907e43d8808bb95c6`, hosted
-[qualification run 37758405759](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37758405759)
-(source `e88b8341`, tested merge `885934d6`), and actual
-[publication run 37760444063](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37760444063)
-(published 2026-10-08 at 10:07:37 UTC). The default Foundry image is pinned to
-`ferrumedge/ferrum-foundry@sha256:1edef8251f7786f10ebb67dd333cf9e75f7bf54f7af17ad4452227df3ac9a742`;
+[v0.5.4 record](../../docs/release-notes/v0.5.4.compatibility.json) preserves
+the published source `0a855ddeef1e4a998a60a2e0c61e71510365b70e`, hosted
+[qualification run 37775840732](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37775840732)
+(source `9407c05d`, tested merge `c2e2aa64`), and actual
+[publication run 37781284653](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37781284653)
+(published 2026-10-08 at 13:19:12 UTC). The default Foundry image is pinned to
+`ferrumedge/ferrum-foundry@sha256:645061444dc4d824aa256796e3891618e9f8446e7b3eb95c184a3147209975e1`;
 set `FOUNDRY_IMAGE` to another released digest when selecting a different
 pairing. Both profiles and authority tiers are unchanged. This release adopts
 published `contracts-edge-0.9.14` at
