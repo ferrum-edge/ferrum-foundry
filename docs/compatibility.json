@@ -14,11 +14,11 @@
     ]
   },
   "qualification": {
-    "status": "pending",
-    "ci_evidence": null,
-    "source_commit": null,
-    "tested_commit": null,
-    "run_attempt": null
+    "status": "qualified",
+    "ci_evidence": "https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37775840732",
+    "source_commit": "9407c05dce79c9752d9ae3621c1f2f3caf467a35",
+    "tested_commit": "c2e2aa642c961fd6bff184f0fb8a90214c746c17",
+    "run_attempt": 1
   },
   "edge": {
     "image": "ferrumedge/ferrum-edge@sha256:15442f1b1d1758023fe871fe57be50f19caf34bbe6c499a6812f4ffd0da5e3f8",
