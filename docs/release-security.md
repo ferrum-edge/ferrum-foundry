@@ -31,14 +31,14 @@ workflow (`.github/workflows/ci.yml`) has passed:
 ## Supported Edge image
 
 Passing these gates qualifies Foundry with that one Ferrum Edge image and no
-other build. The Foundry v0.5.5 candidate selects published Edge v0.9.15, a
-security release that fixes 26 published Ferrum Edge advisories, and published
+other build. Published Foundry v0.5.5 pairs with Edge v0.9.15, a security
+release that fixes 26 published Ferrum Edge advisories, and published
 `contracts-edge-0.9.15`; its full pairing qualification and publication are
-pending in
+recorded in
 [the compatibility record](compatibility.md#qualification-evidence).
-Published v0.5.4 and v0.5.3 / Edge v0.9.14, v0.5.2 / Edge v0.9.13, v0.5.1 /
-Edge v0.9.12, v0.5.0 / Edge v0.9.11 and v0.4.0 / Edge v0.9.10 pairings remain
-immutable in their [release records](compatibility.md#history).
+Published v0.5.4 / Edge v0.9.14, v0.5.3 / Edge v0.9.14, v0.5.2 / Edge v0.9.13,
+v0.5.1 / Edge v0.9.12, v0.5.0 / Edge v0.9.11 and v0.4.0 / Edge v0.9.10
+pairings remain immutable in their [release records](compatibility.md#history).
 
 Moving the pin is a re-qualification: change `edge.image` in
 `docs/compatibility.json`, and the pull request re-runs every gate above against
@@ -70,17 +70,17 @@ Every third-party GitHub Action is pinned to a full commit SHA.
 
 ## Publishing
 
-For v0.5.4, release PR #563 merged as protected commit
-`0a855ddeef1e4a998a60a2e0c61e71510365b70e`, whose second parent was
-`08562007f526828a5c12c14ae6ee5858703ded1c`. Qualification run `37775840732`,
-attempt 1, binds source `9407c05dce79c9752d9ae3621c1f2f3caf467a35` to tested
-merge `c2e2aa642c961fd6bff184f0fb8a90214c746c17`. Release run `37781284653`
-succeeded; GitHub release `406851205` was published at 2026-10-08 13:19:12 UTC.
+For v0.5.5, release PR #567 merged as protected commit
+`359e1cd4efab110475b294452dfeeaefc7a4d5e6`, whose second parent was
+`d1e46e227d2d868ec51a1ca6bd6bfa04b51de8a5`. Qualification run `37846502086`,
+attempt 1, binds source `f947a607f0bbb920d508e88568969bbe69e5ed58` to tested
+merge `8126d6b771f90bd76e8a54b48ddfa26441175c27`. Release run `37848400800`
+succeeded; GitHub release `407290286` was published at 2026-10-08 21:48:04 UTC.
 The immutable release record contains the tag source, final multi-architecture
 image index, platform digests and CI evidence. The supplied publication evidence
 does not establish anonymous GHCR access, independent cryptographic attestation
 verification or account-level registry immutability. See the
-[v0.5.4 record](release-notes/v0.5.4.compatibility.json) and
+[v0.5.5 record](release-notes/v0.5.5.compatibility.json) and
 [compatibility record](compatibility.md). Earlier release notes and records
 remain unchanged.
 
