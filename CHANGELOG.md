@@ -37,7 +37,7 @@ change for namespace-scoped sessions is breaking; see Upgrading in the
   credential-read denials and unsafe-path `400`s keep their documented codes and
   run first. This is breaking for namespace-scoped sessions; see
   [Namespace route ceiling](docs/authentication.md#namespace-route-ceiling)
-  (#562).
+  (#562) ([GHSA-xj6f-9qj5-q2j3](https://github.com/ferrum-edge/ferrum-foundry/security/advisories/GHSA-xj6f-9qj5-q2j3)).
 
 ## [0.5.3] - 2026-10-08
 
