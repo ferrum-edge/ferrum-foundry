@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Bound a namespace-scoped session to the gateway routes its namespace grant
+  actually scopes. A session with namespace grants may now reach only known
+  namespace-scoped resource routes and an explicit fleet-wide ceiling;
+  fleet-wide observability, cluster, mesh, and unknown routes are refused with
+  `403 Namespace access denied` before a JWT is signed or the gateway is
+  contacted. HEAD is classified like GET. Scoped principals may read and
+  validate fleet TLS material but may no longer create, replace, rotate, renew,
+  finalize, or delete it. `/health` and `/status` answer a scoped principal with
+  only `status`, `timestamp`, `mode`, `admin_writes_enabled`, and `ready`, and
+  without the upstream length or validator headers; `/overload` is withheld. The
+  credential-read denials and unsafe-path `400`s keep their documented codes and
+  run first.
+
 ## [0.5.3] - 2026-10-08
 
 Foundry v0.5.3 was published at 10:07:37 UTC after hosted qualification against

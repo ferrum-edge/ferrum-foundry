@@ -242,7 +242,9 @@ describe('scoped static principal', () => {
     const app = Fastify();
     await app.register(cookie);
     await app.register(scopedAuth.authPlugin);
-    app.get('/api/proxy/*', { onRequest: scopedAuth.requireAdminAuth }, async () => ({ ok: true }));
+    app.get('/api/proxy/*', {
+      onRequest: [scopedAuth.requireAdminAuth, scopedAuth.requireNamespaceCeiling],
+    }, async () => ({ ok: true }));
     return app;
   }
 

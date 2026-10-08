@@ -94,6 +94,18 @@ export class FaultControl {
     });
   }
 
+  /** Wait until every armed fault has been taken by a matching request, so a
+   *  journey asserts that the request it arranged is in flight instead of
+   *  racing it. A delayed fault is taken when its request arrives. */
+  async waitUntilTaken(timeout = 15_000): Promise<void> {
+    await expect
+      .poll(async () => (await this.state()).armed.length, {
+        message: "an armed fault was never taken",
+        timeout,
+      })
+      .toBe(0);
+  }
+
   /** Assert every armed fault was actually consumed, so a journey cannot
    *  pass because the failure it arranged never happened. */
   async expectAllConsumed(): Promise<void> {

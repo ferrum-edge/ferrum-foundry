@@ -135,11 +135,25 @@ or `unmapped`). It is for a first run and for CI. Do not expose it.
 
 - **Secrets.** Plain files are the simplest thing that works; a secret manager
   that renders the same files is better.
-- **Namespace grants.** `nginx/identity/policy.conf` ships one namespace. Use
-  exact names; Foundry expands no wildcards or prefixes.
+- **Namespace grants.** `nginx/identity/policy.conf` ships one namespace and
+  maps every group, including `ferrum-admins`, to it. Use exact names; Foundry
+  expands no wildcards or prefixes.
+- **Every starter identity is scoped.** Because each group is mapped to a
+  namespace, no starter user is an unrestricted admin. A scoped session may
+  reach only namespace-scoped routes plus a small fleet-wide ceiling, so it
+  loses the Dashboard, Metrics, Cluster, and Mesh surfaces, and Health shows
+  only the summary. The Audit Log stays, for the session's own namespaces. To
+  give one operator the fleet-wide surfaces, map that identity to a role but
+  omit its namespaces header; only an `admin` may be global. See
+  [`docs/authentication.md`](../../docs/authentication.md#namespace-route-ceiling).
 - **Fleet-global surfaces.** Namespace grants do not scope TLS inventory,
-  managed TLS material, ACME, rotation, or validation. Restrict those routes at
-  the proxy if a scoped identity must not reach them.
+  managed TLS material, ACME, rotation, or validation. A scoped identity may
+  read and validate fleet TLS material but may not create, replace, rotate,
+  renew, finalize, or delete it; restrict the reads at the proxy as well if a
+  scoped identity must not see them.
+- **Fleet-wide audit rows.** Edge records fleet-wide actions (TLS, the
+  namespace registry, mesh) under its default `ferrum` namespace. Grant
+  `ferrum` only to identities that may read them.
 - **Gateway TLS.** The production profile assumes an `https://` admin API.
   Never set `FERRUM_TLS_VERIFY=false`.
 

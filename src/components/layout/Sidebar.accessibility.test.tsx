@@ -5,9 +5,14 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { button, createHarness } from "@/test/__tests__/harness";
 import { Sidebar } from "./Sidebar";
+
+const { auth } = vi.hoisted(() => ({
+  auth: { principal: null as { namespaces?: string[] } | null },
+}));
+vi.mock("@/stores/auth", () => ({ useAuth: () => ({ principal: auth.principal }) }));
 
 let ui: ReturnType<typeof createHarness>;
 
@@ -29,7 +34,7 @@ function SidebarHarness() {
   );
 }
 
-beforeEach(() => { ui = createHarness(); });
+beforeEach(() => { auth.principal = null; ui = createHarness(); });
 afterEach(async () => ui.dispose());
 
 async function mount() {
@@ -70,5 +75,20 @@ describe("mobile sidebar keyboard behavior", () => {
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(document.activeElement).toBe(toggle);
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("hides fleet-wide navigation from namespace-scoped principals", async () => {
+    auth.principal = { namespaces: ["tenant-a"] };
+    await mount();
+
+    const links = [...document.querySelectorAll("#desktop-sidebar a")]
+      .map((link) => link.textContent?.trim());
+    expect(links).not.toContain("Dashboard");
+    expect(links).not.toContain("Metrics");
+    expect(links).not.toContain("Cluster");
+    expect(links).not.toContain("Mesh");
+    expect(links).toContain("Health");
+    expect(links).toContain("Audit Log");
+    expect(links).toContain("TLS");
   });
 });

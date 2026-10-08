@@ -2,7 +2,7 @@ import { Readable, Transform, type TransformCallback } from 'node:stream';
 import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { fetch, type RequestInit, type Response } from 'undici';
-import { requireAdminAuth } from './auth.js';
+import { requireAdminAuth, requireNamespaceCeiling } from './auth.js';
 import { loadConfig } from './config.js';
 import { gatewayTargetId, rejectStaleGatewayTarget, stampGatewayTarget } from './gateway-target.js';
 import { generateToken } from './jwt.js';
@@ -57,6 +57,22 @@ const RESPONSE_HEADER_ALLOWLIST = [
   'x-data-source',
   'x-ferrum-config-cursor',
 ] as const;
+
+// Edge answers the primary-key JWT Foundry signs with its detailed health
+// view: listeners, data-plane and trust diagnostics, database, and cached
+// configuration. A namespace-scoped principal receives only the summary fields
+// below, which the capability model reads, and only the headers that do not
+// describe the upstream representation.
+const SCOPED_HEALTH_FIELDS = ['status', 'timestamp', 'mode', 'admin_writes_enabled', 'ready'] as const;
+const SCOPED_HEALTH_RESPONSE_HEADERS = ['cache-control', 'expires', 'retry-after'] as const;
+const SCOPED_HEALTH_BODY_LIMIT = 1024 * 1024;
+
+class UnreadableHealthError extends Error {
+  constructor() {
+    super('Gateway health response could not be summarized');
+    this.name = 'UnreadableHealthError';
+  }
+}
 
 class PayloadTooLargeError extends Error {
   constructor() {
@@ -162,6 +178,41 @@ function isLongRead(request: FastifyRequest): boolean {
   if (request.method !== 'GET' && request.method !== 'HEAD') return false;
   const path = proxyTargetPath(request);
   return waitingRouteTimeout('GET', path) > 0 || path === '/backup' || isScopedNamespaceList(request, path);
+}
+
+function isScopedHealthRead(request: FastifyRequest, path: string): boolean {
+  return (request.method === 'GET' || request.method === 'HEAD')
+    && (path === '/health' || path === '/status')
+    && request.authPrincipal?.namespaces !== undefined;
+}
+
+/** Buffer a bounded upstream health body and keep only its summary fields. */
+async function scopedHealthSummary(body: Readable): Promise<Record<string, unknown>> {
+  const chunks: Buffer[] = [];
+  let received = 0;
+  for await (const chunk of body) {
+    const bytes = Buffer.from(chunk as Uint8Array);
+    received += bytes.length;
+    if (received > SCOPED_HEALTH_BODY_LIMIT) throw new UnreadableHealthError();
+    chunks.push(bytes);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  } catch {
+    throw new UnreadableHealthError();
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new UnreadableHealthError();
+  }
+  const summary: Record<string, unknown> = {};
+  for (const field of SCOPED_HEALTH_FIELDS) {
+    const value = (parsed as Record<string, unknown>)[field];
+    if (Object.hasOwn(parsed, field) && (value === null || typeof value !== 'object')) {
+      summary[field] = value;
+    }
+  }
+  return summary;
 }
 
 // A stable number per dispatcher instance, so a namespace scan running on a
@@ -368,7 +419,16 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
   };
 
   fastify.all('/api/proxy/*', {
-    onRequest: [requireAdminAuth, requireSafeProxyPath, reserveUpload, reserveLongRead],
+    onRequest: [
+      requireAdminAuth,
+      // Unsafe paths and the credential-read denials must answer with their
+      // documented 400 / 403 codes before the namespace ceiling can refuse a
+      // scoped principal for a route it does not know.
+      requireSafeProxyPath,
+      requireNamespaceCeiling,
+      reserveUpload,
+      reserveLongRead,
+    ],
     bodyLimit: RESTORE_BODY_LIMIT,
   }, async (request, reply) => {
     const config = loadConfig();
@@ -481,7 +541,8 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
         ...(body && { duplex: 'half' }),
       };
       const scopedList = isScopedNamespaceList(request, targetPath);
-      if (scopedList) {
+      const scopedHealth = isScopedHealthRead(request, targetPath);
+      if (scopedList || scopedHealth) {
         // Conditional/range headers address the original fleet representation.
         for (const name of ['if-match', 'if-none-match', 'range']) delete headers[name];
       }
@@ -520,6 +581,25 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
       // response headers exist, bound the downstream phase immediately.
       startResponseDeadline();
 
+      if (scopedHealth) {
+        let summary: Record<string, unknown> | undefined;
+        if (response.body && request.method !== 'HEAD') {
+          const body = Readable.fromWeb(response.body as unknown as NodeReadableStream<Uint8Array>);
+          summary = await scopedHealthSummary(body);
+        }
+        clearResponseDeadline();
+        reply.raw.off('close', abortOnDisconnect);
+        reply.status(response.status);
+        // The summary is a new representation: no upstream length, validator,
+        // range, or encoding header describes it.
+        for (const name of SCOPED_HEALTH_RESPONSE_HEADERS) {
+          const value = response.headers.get(name);
+          if (value !== null) reply.header(name, value);
+        }
+        if (response.status === 401) reply.header('x-ferrum-auth-layer', 'gateway');
+        return summary === undefined ? reply.send() : reply.send(summary);
+      }
+
       reply.status(response.status);
       const upstreamEncoding = response.headers.get('content-encoding')?.trim().toLowerCase();
       const responseWasDecoded = Boolean(upstreamEncoding && upstreamEncoding !== 'identity');
@@ -555,6 +635,12 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
       reply.raw.off('close', abortOnDisconnect);
       if (error instanceof RegistryRequestError) {
         return reply.status(error.status).send({ error: error.message });
+      }
+      if (error instanceof UnreadableHealthError) {
+        return reply.status(502).send({
+          error: 'Bad Gateway',
+          code: 'FERRUM_BFF_UPSTREAM_FAILURE',
+        });
       }
       if (error instanceof NamespaceScanTimeoutError) {
         return reply.status(504).send(timeoutResponse('response'));

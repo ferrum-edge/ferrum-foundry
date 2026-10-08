@@ -299,9 +299,24 @@ Things that are easy to get wrong:
   `proxy_request_buffering off`, keep `client_body_timeout` and
   `proxy_read_timeout` at or below Foundry's own budgets
   (`FERRUM_UPLOAD_TIMEOUT`, and `FERRUM_WRITE_TIMEOUT` for ordinary routes).
-- **Fleet-global surfaces are not namespace-scoped.** TLS inventory, managed
-  TLS material, ACME, rotation, and validation ignore namespace grants.
-  Restrict those routes at the proxy if a scoped identity must not reach them.
+- **Fleet-global surfaces are not namespace-scoped, and a scoped identity is
+  bounded to namespace-scoped routes.** TLS inventory, managed TLS material,
+  ACME, rotation, and validation ignore namespace grants. A scoped identity may
+  read and validate fleet TLS material but may not create, replace, rotate,
+  renew, finalize, or delete it; block the reads at the proxy too if it must not
+  see them. More broadly, a session with namespace grants may reach only the
+  gateway routes its namespace scopes, plus a small fleet-wide ceiling.
+  `/health` and `/status` answer it with a summary (`status`, `timestamp`,
+  `mode`, `admin_writes_enabled`, `ready`) rather than the detailed view.
+  `/overload`, `/cluster`, `/mesh/*`, `/charges`, `/metrics`,
+  `/backend-capabilities`, and unknown routes are refused with `403`, so such a
+  session loses the Dashboard, Metrics, Cluster, and Mesh surfaces in the UI.
+  The audit log stays available for the session's own namespaces. Edge records
+  fleet-wide actions under its default `ferrum` namespace, so an identity
+  granted `ferrum` reads those rows. Only an identity that omits the namespaces
+  header (an unrestricted admin) sees the fleet-wide surfaces. The starter maps
+  every group, `ferrum-admins` included, to a namespace, so every starter user
+  is scoped; see [Authentication](authentication.md#namespace-route-ceiling).
 - **Cap in-flight API requests per client.** The starter allows 64 `/api/`
   requests in flight per client address (`limit_conn foundry_api 64`, answered
   with `429`). nginx applies it before `auth_request`, so it is keyed on the

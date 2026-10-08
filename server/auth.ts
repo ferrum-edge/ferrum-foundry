@@ -8,7 +8,12 @@ import {
   type GatewayRole,
 } from './config.js';
 import { GATEWAY_TARGET_HEADER, gatewayTargetId } from './gateway-target.js';
-import { proxyPathIsFleetGlobal, requestIsProxyRoute } from './proxy-path.js';
+import {
+  proxyPathIsAllowedForNamespace,
+  proxyPathIsEdgeNamespaceSafeGlobal,
+  proxyPathIsFleetGlobal,
+  requestIsProxyRoute,
+} from './proxy-path.js';
 
 interface StaticSession {
   principal: AuthPrincipal;
@@ -214,16 +219,6 @@ function csrfIsValid(
   return readTrustedCsrfExpiry(config, principal.subject, headerToken) !== undefined;
 }
 
-function namespaceIsAllowed(request: FastifyRequest, principal: AuthPrincipal): boolean {
-  if (!principal.namespaces) return true;
-  if (!requestIsProxyRoute(request)) return true;
-  // Ferrum documents TLS management as a fleet-global surface. The namespace
-  // header is inert there, so Foundry must not pretend that it scopes access.
-  if (proxyPathIsFleetGlobal(request)) return true;
-  const namespace = singleHeader(request, 'x-ferrum-namespace');
-  return Boolean(namespace && principal.namespaces.includes(namespace));
-}
-
 function rejectAuth(reply: FastifyReply, status = 401, error = 'Unauthorized'): FastifyReply {
   reply.header('x-ferrum-auth-layer', 'bff');
   return reply.status(status).send({ error });
@@ -244,8 +239,33 @@ export async function requireAdminAuth(
   const principal = session?.principal ?? trustedProxyPrincipal(request, config);
   if (!principal) return rejectAuth(reply);
   if (!csrfIsValid(request, config, principal, session)) return rejectAuth(reply, 403, 'CSRF validation failed');
-  if (!namespaceIsAllowed(request, principal)) return rejectAuth(reply, 403, 'Namespace access denied');
   request.authPrincipal = principal;
+}
+
+/**
+ * Namespace authorization for a proxied request, run by the proxy route after
+ * authentication, CSRF, path safety, and the credential-read denials, so those
+ * keep their documented status codes and bodies.
+ *
+ * Edge does not apply namespace claims to fleet-global admin handlers, so a
+ * scoped principal passes only known namespace-scoped route classes and the
+ * explicit global ceiling; a namespace-scoped call must name one of the
+ * principal's grants.
+ */
+export async function requireNamespaceCeiling(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<FastifyReply | void> {
+  const principal = request.authPrincipal;
+  if (!principal?.namespaces || !requestIsProxyRoute(request)) return;
+  if (!proxyPathIsAllowedForNamespace(request)) {
+    return rejectAuth(reply, 403, 'Namespace access denied');
+  }
+  if (proxyPathIsFleetGlobal(request) || proxyPathIsEdgeNamespaceSafeGlobal(request)) return;
+  const namespace = singleHeader(request, 'x-ferrum-namespace');
+  if (!namespace || !principal.namespaces.includes(namespace)) {
+    return rejectAuth(reply, 403, 'Namespace access denied');
+  }
 }
 
 export function requireRole(required: GatewayRole) {

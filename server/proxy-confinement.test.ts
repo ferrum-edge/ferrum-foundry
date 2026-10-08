@@ -23,6 +23,24 @@ const MASKED_CONSUMER = {
   id: 'consumer-1',
   credentials: { keyauth: [{ key: '[REDACTED]' }], jwt: [{ secret: '[REDACTED]' }] },
 };
+// The health fields a scoped principal receives, and the detailed view Edge
+// returns to the primary-key JWT the BFF signs.
+const HEALTH_SUMMARY = {
+  status: 'ok',
+  timestamp: '2026-10-08T00:00:00Z',
+  mode: 'database',
+  admin_writes_enabled: true,
+  ready: true,
+};
+const HEALTH_DETAIL = {
+  ...HEALTH_SUMMARY,
+  namespace: { serving: 'tenant-b', serving_scope: 'single' },
+  database: { connected: true, pool: { size: 8 } },
+  cached_config: { proxies: 42, consumers: 7 },
+  gateway_listeners: { failures: [{ port: 8443 }] },
+  dp_config: { stale: false },
+  cp_dp_trust: { degraded: false },
+};
 const arrivals: Array<{ url: string; method: string; namespace: string | undefined; token: string }> = [];
 const publications: Array<{ url: string; body: string }> = [];
 const held: ServerResponse[] = [];
@@ -67,7 +85,12 @@ const gateway = createServer((request, response) => {
       return;
     }
     const path = new URL(url, 'http://gateway.test').pathname;
-    if (path === '/consumers') {
+    if (path === '/health' || path === '/status') {
+      response.setHeader('etag', '"health-detail"');
+      response.setHeader('last-modified', 'Thu, 08 Oct 2026 00:00:00 GMT');
+      response.setHeader('cache-control', 'no-store');
+      response.end(JSON.stringify(HEALTH_DETAIL));
+    } else if (path === '/consumers') {
       response.end(JSON.stringify({ data: [MASKED_CONSUMER] }));
     } else if (/^\/consumers\/[^/]+\/?$/.test(path)) {
       response.end(JSON.stringify(MASKED_CONSUMER));
@@ -89,6 +112,22 @@ function identity(role = 'operator', namespace: string | undefined = 'tenant-a')
     ...(namespace === undefined ? {} : { 'x-ferrum-namespace': namespace }),
     ...csrfHeaders,
   };
+}
+
+function withoutNamespace(headers: Record<string, string>): Record<string, string> {
+  const { 'x-ferrum-namespace': _namespace, ...rest } = headers;
+  return rest;
+}
+
+// An unrestricted admin: the identity proxy omits the namespaces header.
+function globalAdmin(): Record<string, string> {
+  const { 'x-ferrum-namespaces': _namespaces, ...rest } = withoutNamespace(identity('admin'));
+  return rest;
+}
+
+function splitWire(wire: string): { head: string; body: string } {
+  const index = wire.indexOf('\r\n\r\n');
+  return { head: wire.slice(0, index), body: wire.slice(index + 4) };
 }
 
 // Deliberately bypass URL/HTTP client normalization. The exact supplied target
@@ -241,7 +280,7 @@ describe('raw BFF path confinement', () => {
     15_000,
   );
 
-  it('preserves authentication, namespace, CSRF, and unsafe-path checks before denial', async () => {
+  it('preserves authentication, CSRF, credential-read, and unsafe-path checks before denial', async () => {
     const beforeArrivals = arrivals.length;
     const beforeTokens = vi.mocked(generateToken).mock.calls.length;
     const beforeFetches = vi.mocked(upstreamFetch).mock.calls.length;
@@ -254,9 +293,11 @@ describe('raw BFF path confinement', () => {
         expect(anonymous.status).toBe(401);
         expect(anonymous.wire).not.toContain('FERRUM_BFF_CREDENTIAL_READ_DENIED');
       }
+      // The credential-read denial runs before the namespace ceiling, so an
+      // ungranted namespace gets the same body a granted one would.
       const denied = await rawRequest(path, 'GET', identity('admin', 'tenant-b'));
       expect(denied.status).toBe(403);
-      expect(denied.wire).toContain('Namespace access denied');
+      expect(denied.wire).toContain('FERRUM_BFF_CREDENTIAL_READ_DENIED');
       const csrf = await rawRequest(
         path,
         'POST',
@@ -345,14 +386,11 @@ describe('raw BFF path confinement', () => {
     }
   });
 
-  it('forwards backups, masked exports, and unrelated snapshot text unchanged', async () => {
+  it('forwards backups and masked exports, and refuses unrelated routes at the namespace ceiling', async () => {
     for (const path of [
       '/backup?note=/deployment-snapshot',
       '/config/export?note=%2Fdeployment-snapshot',
       '/proxies/deployment-snapshot',
-      '/deployment-snapshot/extra',
-      '/deployment-snapshots',
-      '/admin/deployment-snapshot',
     ]) {
       const beforeArrivals = arrivals.length;
       const beforeTokens = vi.mocked(generateToken).mock.calls.length;
@@ -363,6 +401,19 @@ describe('raw BFF path confinement', () => {
       expect(arrivals.at(-1)).toMatchObject({ url: path, method: 'GET', namespace: 'tenant-a' });
       expect(vi.mocked(generateToken).mock.calls).toHaveLength(beforeTokens + 1);
       expect(vi.mocked(upstreamFetch).mock.calls).toHaveLength(beforeFetches + 1);
+    }
+    // Snapshot text in an unrelated path is not the credential-complete
+    // snapshot: it is refused only because the namespace ceiling does not know
+    // the route class, never with the credential-read denial.
+    for (const path of [
+      '/deployment-snapshot/extra',
+      '/deployment-snapshots',
+      '/admin/deployment-snapshot',
+    ]) {
+      const response = await rawRequest(`/api/proxy${path}`, 'GET', identity('admin'));
+      expect(response.status, path).toBe(403);
+      expect(response.wire).not.toContain('FERRUM_BFF_CREDENTIAL_READ_DENIED');
+      expect(response.wire).toContain('Namespace access denied');
     }
   });
 
@@ -415,7 +466,8 @@ describe('raw BFF path confinement', () => {
           rawRequest(
             `/api/proxy/admin/tls/acme/orders/order-${index}/finalize?hold=1`,
             'POST',
-            identity('admin'),
+            // Fleet TLS mutations are refused to scoped principals.
+            globalAdmin(),
             '{}',
           ),
         );
@@ -523,25 +575,110 @@ describe('raw BFF path confinement', () => {
     expect(decodeJwt(arrivals.at(-1)!.token)).toMatchObject({ role: 'operator', ns: 'tenant-a' });
   });
 
-  it('exempts real fleet operations and refuses unsupported method/path combinations', async () => {
+  it('allows fleet TLS reads and validation, and refuses every fleet TLS mutation to scoped principals', async () => {
     for (const [method, path] of [
       ['GET', '/admin/tls/inventory'], ['GET', '/admin/tls/certificates/cert-1'],
+      ['HEAD', '/admin/tls/certificates/cert-1'],
       ['GET', '/admin/tls/acme/orders/order-1'], ['POST', '/admin/tls/validate'],
-      ['POST', '/admin/tls/rotate/all'], ['POST', '/admin/tls/acme/orders/order-1/finalize'],
     ]) {
-      const headers = identity(method === 'GET' ? 'operator' : 'admin');
+      const headers = identity(method === 'POST' ? 'admin' : 'operator');
       delete headers['x-ferrum-namespace'];
       expect((await rawRequest(`/api/proxy${path}`, method, headers, method === 'POST' ? '{}' : '')).status).toBe(200);
       expect(arrivals.at(-1)).toMatchObject({ url: path, method, namespace: undefined });
     }
     const before = arrivals.length;
     for (const [method, path] of [
-      ['POST', '/admin/tls/inventory'], ['PUT', '/admin/tls/acme/orders/id'],
-      ['GET', '/admin/tls/acme/orders/id/finalize'], ['GET', '/admin/tls/unknown'],
+      ['POST', '/admin/tls/rotate/all'], ['DELETE', '/admin/tls/certificates/cert-1'],
+      ['POST', '/admin/tls/certificates'], ['PUT', '/admin/tls/certificates/cert-1'],
+      ['PUT', '/admin/tls/ca-bundles/bundle-1'], ['POST', '/admin/tls/jwks'],
+      ['PUT', '/admin/tls/crls/crl-1'], ['POST', '/admin/tls/acme/orders'],
+      ['POST', '/admin/tls/acme/orders/order-1/finalize'], ['POST', '/admin/tls/acme/renew/cert-1'],
+      ['POST', '/admin/tls/validate/'], ['POST', '/admin/tls/inventory'],
+      ['PUT', '/admin/tls/acme/orders/id'], ['GET', '/admin/tls/acme/orders/id/finalize'],
+      ['GET', '/admin/tls/unknown'],
     ]) {
-      expect((await rawRequest(`/api/proxy${path}`, method, identity('operator', 'tenant-b'), method === 'GET' ? '' : '{}')).status).toBe(403);
+      for (const role of ['operator', 'admin']) {
+        for (const headers of [identity(role), identity(role, 'tenant-b'), withoutNamespace(identity(role))]) {
+          const response = await rawRequest(
+            `/api/proxy${path}`,
+            method,
+            headers,
+            method === 'GET' ? '' : '{}',
+          );
+          expect(response.status, `${role} ${method} ${path}`).toBe(403);
+          expect(response.wire).toContain('Namespace access denied');
+        }
+      }
     }
     expect(arrivals).toHaveLength(before);
+  });
+
+  it('forwards fleet-wide routes and TLS mutations for an unrestricted admin', async () => {
+    for (const [method, path] of [
+      ['GET', '/cluster'], ['GET', '/overload'], ['POST', '/admin/tls/rotate/all'],
+      ['PUT', '/admin/tls/certificates/cert-1'], ['POST', '/admin/tls/acme/orders/order-1/finalize'],
+    ]) {
+      const beforeTokens = vi.mocked(generateToken).mock.calls.length;
+      const response = await rawRequest(`/api/proxy${path}`, method, globalAdmin(), method === 'GET' ? '' : '{}');
+      expect(response.status, `${method} ${path}`).toBe(200);
+      expect(arrivals.at(-1)).toMatchObject({ url: path, method, namespace: undefined });
+      expect(vi.mocked(generateToken).mock.calls).toHaveLength(beforeTokens + 1);
+      const claims = decodeJwt(arrivals.at(-1)!.token);
+      expect(claims).toMatchObject({ sub: 'path-test-user', role: 'admin' });
+      expect(claims).not.toHaveProperty('ns');
+    }
+  });
+
+  it('projects gateway health to its summary fields for scoped principals', async () => {
+    const detailKeys = Object.keys(HEALTH_DETAIL).filter((key) => !(key in HEALTH_SUMMARY));
+    for (const path of ['/health', '/status']) {
+      for (const headers of [identity('viewer'), withoutNamespace(identity('viewer')), identity('admin')]) {
+        const response = await rawRequest(`/api/proxy${path}`, 'GET', headers);
+        expect(response.status, path).toBe(200);
+        expect(arrivals.at(-1)).toMatchObject({ url: path, method: 'GET' });
+        const { head, body } = splitWire(response.wire);
+        const parsed = JSON.parse(body) as Record<string, unknown>;
+        expect(parsed).toEqual(HEALTH_SUMMARY);
+        for (const key of detailKeys) expect(parsed, key).not.toHaveProperty(key);
+        // No header describing the upstream representation survives.
+        expect(head).not.toMatch(/^etag:/im);
+        expect(head).not.toMatch(/^last-modified:/im);
+        expect(head).toMatch(new RegExp(`^content-length: ${Buffer.byteLength(body)}$`, 'im'));
+        expect(head).toMatch(/^cache-control: no-store$/im);
+      }
+    }
+    const headRead = await rawRequest('/api/proxy/health', 'HEAD', identity('viewer'));
+    expect(headRead.status).toBe(200);
+    expect(headRead.wire).not.toMatch(/^etag:/im);
+    expect(arrivals.at(-1)).toMatchObject({ url: '/health', method: 'HEAD' });
+
+    // The overload snapshot has no summary projection and stays withheld.
+    const before = arrivals.length;
+    const overload = await rawRequest('/api/proxy/overload', 'GET', identity('admin'));
+    expect(overload.status).toBe(403);
+    expect(overload.wire).toContain('Namespace access denied');
+    expect(arrivals).toHaveLength(before);
+  });
+
+  it('forwards the full health view to an unrestricted admin', async () => {
+    for (const path of ['/health', '/status']) {
+      const response = await rawRequest(`/api/proxy${path}`, 'GET', globalAdmin());
+      expect(response.status).toBe(200);
+      const { head, body } = splitWire(response.wire);
+      expect(JSON.parse(body)).toEqual(HEALTH_DETAIL);
+      expect(head).toMatch(/^etag: "health-detail"$/im);
+    }
+  });
+
+  it('lets a scoped principal poll apply status without a namespace header', async () => {
+    const headers = withoutNamespace(identity('operator'));
+    const response = await rawRequest('/api/proxy/config/apply-status?epoch=1&sequence=1', 'GET', headers);
+    expect(response.status).toBe(200);
+    expect(arrivals.at(-1)).toMatchObject({
+      url: '/config/apply-status?epoch=1&sequence=1',
+      method: 'GET',
+      namespace: undefined,
+    });
   });
 
   it('uses canonical paths for body limits and refuses oversize ordinary bodies before publication', async () => {
@@ -591,7 +728,9 @@ describe('raw BFF path confinement', () => {
       ['GET', '/config/%61pply-status'], ['GET', '/%62ackup'],
       ['POST', '/admin/tls/acme/orders/order-1/%66inalize'], ['POST', '/%72estore'],
     ]) {
-      expect((await rawRequest(`/api/proxy${path}?delay=1`, method, identity('admin'), method === 'POST' ? '{}' : '')).status).toBe(200);
+      // ACME finalize is a fleet TLS mutation, refused to a scoped principal.
+      const headers = decodeURIComponent(path).includes('finalize') ? globalAdmin() : identity('admin');
+      expect((await rawRequest(`/api/proxy${path}?delay=1`, method, headers, method === 'POST' ? '{}' : '')).status).toBe(200);
       expect(arrivals.at(-1)?.url).toBe(`${decodeURIComponent(path)}?delay=1`);
     }
   });
