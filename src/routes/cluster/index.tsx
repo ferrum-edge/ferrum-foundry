@@ -65,8 +65,9 @@ function EgressAttestationSummary({
         connected data plane: {summary.all_connected_public_only_guaranteed ? "yes" : "no"}
       </p>
       <p className="text-xs text-text-muted">
-        Self-reported by connected data planes over ConfigSync, not host attestation. A
-        disconnected data plane still serving cached configuration is not listed.
+        Covers connected data planes in every namespace. Self-reported over ConfigSync,
+        not host attestation. A disconnected data plane still serving cached configuration
+        is not listed.
       </p>
     </div>
   );
