@@ -15,7 +15,13 @@ For a walkthrough that ends in an authenticated request through the data
 plane, see [`docs/getting-started.md`](../../docs/getting-started.md).
 
 **Published pairing.** The demo profile pins published Edge v0.9.14, qualified
-with published Foundry v0.5.3. The
+with published Foundry v0.5.3. The Foundry v0.5.4 candidate keeps that Edge
+pin; its qualification and publication are pending in
+[`docs/compatibility.md`](../../docs/compatibility.md), so the default Foundry
+image below stays the published v0.5.3 digest. v0.5.4 changes what a
+namespace-scoped identity may reach; see
+[Namespace route ceiling](../../docs/authentication.md#namespace-route-ceiling).
+The
 [v0.5.3 record](../../docs/release-notes/v0.5.3.compatibility.json) preserves
 the published source `74a7be374f5c6fcf1284737907e43d8808bb95c6`, hosted
 [qualification run 37758405759](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37758405759)

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-10-08
+
+Security and fix patch release against the same published Ferrum Edge v0.9.14
+and `contracts-edge-0.9.14` as v0.5.3. The Edge pin, platform digests, contract
+pin, plugin sensitivity table and guided schema hashes are unchanged. The
+change for namespace-scoped sessions is breaking; see Upgrading in the
+[v0.5.4 notes](docs/release-notes/v0.5.4.md).
+
+### Changed
+
+- Prepare the Foundry v0.5.4 candidate on the unchanged Edge v0.9.14 pairing.
+  Package and lockfile root versions are 0.5.4, and the compatibility record is
+  a candidate whose hosted qualification and publication are pending. The
+  starter keeps the published v0.5.3 image digest until v0.5.4 is published;
+  v0.5.3 and earlier release records are immutable.
+
 ### Security
 
 - Bound a namespace-scoped session to the gateway routes its namespace grant
@@ -20,7 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only `status`, `timestamp`, `mode`, `admin_writes_enabled`, and `ready`, and
   without the upstream length or validator headers; `/overload` is withheld. The
   credential-read denials and unsafe-path `400`s keep their documented codes and
-  run first.
+  run first. This is breaking for namespace-scoped sessions; see
+  [Namespace route ceiling](docs/authentication.md#namespace-route-ceiling)
+  (#562).
 
 ## [0.5.3] - 2026-10-08
 
@@ -643,7 +661,8 @@ First public release of Ferrum Foundry.
 - Release channels are monotonic: tags are validated and ancestry-checked before registry access, prereleases never advance stable tags, and promotion runs through a fail-closed FIFO queue (#155).
 - Scheduled live branch deletion replaced with dry-run planning plus a separately approved, exact-SHA-revalidated deletion path (#155).
 
-[Unreleased]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.5.3...HEAD
+[Unreleased]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.5.4...HEAD
+[0.5.4]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.5.0...v0.5.1

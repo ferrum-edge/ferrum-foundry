@@ -40,8 +40,9 @@ Shared org contracts are vendored under `contracts/ferrum-contracts/`; see
 Published Foundry v0.5.3 adopts `contracts-edge-0.9.14` at
 `ddbdd845733b7046c4393ac951011dafb774db33`. The shared manifest is implemented;
 qualification and publication evidence are recorded in
-`docs/compatibility.json` and its immutable v0.5.3 snapshot. Earlier release
-notes and records remain unchanged.
+`docs/compatibility.json` and its immutable v0.5.3 snapshot. The Foundry v0.5.4
+candidate keeps the same contract and Edge pins; its qualification and
+publication are pending. Earlier release notes and records remain unchanged.
 
 ## Development
 
@@ -81,8 +82,9 @@ node scripts/demo-traffic-client.mjs mixed
 
 Run the Ferrum Edge image CI pins, by digest, so local results match CI. It is
 the published Ferrum Edge v0.9.14 release qualified with published Foundry
-v0.5.3. Published v0.5.2, v0.5.1, v0.5.0 and v0.4.0 pairings remain in
-history.
+v0.5.3 and kept unchanged for the Foundry v0.5.4 candidate, whose hosted
+qualification is pending. Published v0.5.2, v0.5.1, v0.5.0 and v0.4.0 pairings
+remain in history.
 `edge.image` in `docs/compatibility.json` is the single source: CI reads it
 (`node scripts/supported-pairing.mjs edge-image`), and
 `scripts/supported-pairing.test.mjs` fails if the starter, this command, or any

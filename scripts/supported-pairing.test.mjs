@@ -144,19 +144,9 @@ describe("the supported pairing record", () => {
     assert.match(semantics, /#409/);
   });
 
-  it("records the Foundry release against the verified Edge distribution", () => {
-    assert.equal(record.foundry.version, "0.5.3");
-    assert.equal(record.foundry.previous_release, "v0.5.2");
-    assert.equal(record.status, "released");
-    assert.equal(record.foundry.source_commit, "74a7be374f5c6fcf1284737907e43d8808bb95c6");
-    assert.equal(
-      record.foundry.image,
-      "ferrumedge/ferrum-foundry@sha256:1edef8251f7786f10ebb67dd333cf9e75f7bf54f7af17ad4452227df3ac9a742",
-    );
-    assert.equal(
-      record.foundry.ci_evidence,
-      "https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37760444063",
-    );
+  it("records the Foundry candidate preparation against the verified Edge distribution", () => {
+    assert.equal(record.foundry.version, "0.5.4");
+    assert.equal(record.foundry.previous_release, "v0.5.3");
     const pkg = JSON.parse(repoFile("package.json"));
     const lock = JSON.parse(repoFile("package-lock.json"));
     // The release workflow requires the tag, package.json, and the record to agree.
@@ -210,9 +200,24 @@ describe("the supported pairing record", () => {
       "ferrumedge/ferrum-foundry@sha256:b1728fdc0694a195e2a21e7666ca09dd0cf9205c81041cc963b0e104750ce79a",
     );
     assert.equal(previous.edge.release.version, "v0.9.13");
+    // v0.5.3 was published against the same Edge pin. Its qualification
+    // tested other source, so it cannot qualify this version.
     const published = JSON.parse(repoFile("docs/release-notes/v0.5.3.compatibility.json"));
-    assert.equal(published.foundry.source_commit, record.foundry.source_commit);
-    assert.equal(published.foundry.image, record.foundry.image);
+    assert.equal(published.status, "released");
+    assert.equal(published.foundry.version, "0.5.3");
+    assert.equal(published.foundry.source_commit, "74a7be374f5c6fcf1284737907e43d8808bb95c6");
+    assert.equal(
+      published.foundry.image,
+      "ferrumedge/ferrum-foundry@sha256:1edef8251f7786f10ebb67dd333cf9e75f7bf54f7af17ad4452227df3ac9a742",
+    );
+    assert.equal(published.edge.release.version, record.edge.release.version);
+    assert.equal(published.edge.image, record.edge.image);
+    assert.notDeepEqual(record.qualification, published.qualification);
+    if (record.qualification.status === "qualified") {
+      for (const field of ["ci_evidence", "source_commit", "tested_commit"]) {
+        assert.notEqual(record.qualification[field], published.qualification[field]);
+      }
+    }
     assert.notEqual(previous.edge.image, record.edge.image);
     assert.notDeepEqual(record.qualification, previous.qualification);
     if (record.qualification.status === "qualified") {

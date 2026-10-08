@@ -53,7 +53,9 @@ The latest published pairing is **Foundry v0.5.3 / Ferrum Edge v0.9.14**,
 qualified and published on 2026-10-08. Its source, image, platform digests,
 qualification and publication evidence are preserved in the
 [immutable v0.5.3 record](docs/release-notes/v0.5.3.compatibility.json).
-Published v0.5.2 / Edge v0.9.13, v0.5.1 / Edge v0.9.12, v0.5.0 / Edge v0.9.11
+The **Foundry v0.5.4 candidate** is a security and fix patch on the same Edge
+v0.9.14 pin; its hosted qualification and publication are pending in
+`docs/compatibility.json`. Published v0.5.2 / Edge v0.9.13, v0.5.1 / Edge v0.9.12, v0.5.0 / Edge v0.9.11
 and v0.4.0 / Edge v0.9.10 remain unchanged in
 [history](docs/compatibility.md#history). The
 [pairing record](docs/compatibility.md) records publication evidence and its
@@ -89,7 +91,7 @@ expectations include versioned deployment-snapshot and backend-egress-policy
 entries, including the v0.9.14 data-plane attestation negatives, but Foundry
 does not vendor those schemas or adopt the native deployment profile.
 Diagnostic import remains future work. Foundry v0.5.3 passed hosted
-qualification with this contract scope.
+qualification with this contract scope; the v0.5.4 candidate keeps it.
 The [Alloy manifest preview](docs/alloy-manifest-preview.md) consumes
 the existing fields through an authenticated, read-only BFF route.
 
