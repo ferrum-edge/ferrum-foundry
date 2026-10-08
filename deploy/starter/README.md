@@ -14,18 +14,17 @@ request.
 For a walkthrough that ends in an authenticated request through the data
 plane, see [`docs/getting-started.md`](../../docs/getting-started.md).
 
-**Candidate pairing.** The demo profile pins published Edge v0.9.14 for the
-Foundry v0.5.3 candidate. Hosted qualification and Foundry publication are
-pending in [`docs/compatibility.md`](../../docs/compatibility.md). Production
-must use a published pairing and its released Foundry digest. The latest is
-published Foundry v0.5.2 with Edge v0.9.13, preserved in the
-[v0.5.2 record](../../docs/release-notes/v0.5.2.compatibility.json) with its
-published source `ebd09e8d82f773b6840b1edda67fbac287c3f7a0` and
-[publication run 37514033958](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37514033958).
-The default Foundry image stays pinned to that release,
-`ferrumedge/ferrum-foundry@sha256:b1728fdc0694a195e2a21e7666ca09dd0cf9205c81041cc963b0e104750ce79a`;
+**Published pairing.** The demo profile pins published Edge v0.9.14, qualified
+with published Foundry v0.5.3. The
+[v0.5.3 record](../../docs/release-notes/v0.5.3.compatibility.json) preserves
+the published source `74a7be374f5c6fcf1284737907e43d8808bb95c6`, hosted
+[qualification run 37758405759](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37758405759)
+(source `e88b8341`, tested merge `885934d6`), and actual
+[publication run 37760444063](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37760444063)
+(published 2026-10-08 at 10:07:37 UTC). The default Foundry image is pinned to
+`ferrumedge/ferrum-foundry@sha256:1edef8251f7786f10ebb67dd333cf9e75f7bf54f7af17ad4452227df3ac9a742`;
 set `FOUNDRY_IMAGE` to another released digest when selecting a different
-pairing. Both profiles and authority tiers are unchanged. The candidate adopts
+pairing. Both profiles and authority tiers are unchanged. This release adopts
 published `contracts-edge-0.9.14` at
 `ddbdd845733b7046c4393ac951011dafb774db33`; its service-manifest schema and all
 manifest fixtures are unchanged from the prior pin. The native deployment

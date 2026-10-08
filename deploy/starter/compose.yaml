@@ -30,9 +30,9 @@
 
 services:
   foundry:
-    # Published v0.5.2 digest. Set FOUNDRY_IMAGE to another released pairing
+    # Published v0.5.3 digest. Set FOUNDRY_IMAGE to another released pairing
     # for production; CI overrides this with the image under test.
-    image: ${FOUNDRY_IMAGE:-ferrumedge/ferrum-foundry@sha256:b1728fdc0694a195e2a21e7666ca09dd0cf9205c81041cc963b0e104750ce79a}
+    image: ${FOUNDRY_IMAGE:-ferrumedge/ferrum-foundry@sha256:1edef8251f7786f10ebb67dd333cf9e75f7bf54f7af17ad4452227df3ac9a742}
     restart: unless-stopped
     profiles: [production, demo]
     # Deliberately no host port: the BFF is reachable only through the proxy.
@@ -125,7 +125,7 @@ services:
       - ./nginx/identity:/etc/nginx/identity:ro
       - ./secrets:/etc/nginx/secrets:ro
 
-  # Published Edge v0.9.14; Foundry v0.5.3 qualification is pending (docs/compatibility.md).
+  # Published Edge v0.9.14, qualified with published Foundry v0.5.3.
   # Must equal `edge.image` in docs/compatibility.json;
   # a test fails if it drifts.
   demo-gateway:
@@ -154,7 +154,7 @@ services:
       - "127.0.0.1:${FERRUM_DEMO_ADMIN_PORT:-9000}:9000"
 
   demo-backend:
-    image: ${FOUNDRY_IMAGE:-ferrumedge/ferrum-foundry@sha256:b1728fdc0694a195e2a21e7666ca09dd0cf9205c81041cc963b0e104750ce79a}
+    image: ${FOUNDRY_IMAGE:-ferrumedge/ferrum-foundry@sha256:1edef8251f7786f10ebb67dd333cf9e75f7bf54f7af17ad4452227df3ac9a742}
     restart: unless-stopped
     profiles: [demo]
     # A disposable origin for the proxy created in the walkthrough. The

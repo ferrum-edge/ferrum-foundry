@@ -144,9 +144,19 @@ describe("the supported pairing record", () => {
     assert.match(semantics, /#409/);
   });
 
-  it("records the Foundry candidate preparation against the verified Edge distribution", () => {
+  it("records the Foundry release against the verified Edge distribution", () => {
     assert.equal(record.foundry.version, "0.5.3");
     assert.equal(record.foundry.previous_release, "v0.5.2");
+    assert.equal(record.status, "released");
+    assert.equal(record.foundry.source_commit, "74a7be374f5c6fcf1284737907e43d8808bb95c6");
+    assert.equal(
+      record.foundry.image,
+      "ferrumedge/ferrum-foundry@sha256:1edef8251f7786f10ebb67dd333cf9e75f7bf54f7af17ad4452227df3ac9a742",
+    );
+    assert.equal(
+      record.foundry.ci_evidence,
+      "https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37760444063",
+    );
     const pkg = JSON.parse(repoFile("package.json"));
     const lock = JSON.parse(repoFile("package-lock.json"));
     // The release workflow requires the tag, package.json, and the record to agree.
@@ -186,6 +196,7 @@ describe("the supported pairing record", () => {
       ["0.5.0", "78ca12374fccd5e77d5353916550b5199b508dac718f25d06be570d5e92a39f5"],
       ["0.5.1", "ec09719c04ec65c39279674a85abbfa24b3788544e61a1c51f0a5ecf7ea8a70f"],
       ["0.5.2", "dae44af942b989245ae642c86a9044fdb5b263317c30b283b1a50988d90c5cbf"],
+      ["0.5.3", "3461e01b588e4b61f341e405e0d7e8029f00bf45b3038884aef52ce56adf7f80"],
     ]) {
       const bytes = repoFile(`docs/release-notes/v${version}.compatibility.json`);
       assert.equal(createHash("sha256").update(bytes).digest("hex"), digest);
@@ -199,6 +210,9 @@ describe("the supported pairing record", () => {
       "ferrumedge/ferrum-foundry@sha256:b1728fdc0694a195e2a21e7666ca09dd0cf9205c81041cc963b0e104750ce79a",
     );
     assert.equal(previous.edge.release.version, "v0.9.13");
+    const published = JSON.parse(repoFile("docs/release-notes/v0.5.3.compatibility.json"));
+    assert.equal(published.foundry.source_commit, record.foundry.source_commit);
+    assert.equal(published.foundry.image, record.foundry.image);
     assert.notEqual(previous.edge.image, record.edge.image);
     assert.notDeepEqual(record.qualification, previous.qualification);
     if (record.qualification.status === "qualified") {
