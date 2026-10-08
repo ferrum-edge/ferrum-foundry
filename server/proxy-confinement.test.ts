@@ -466,7 +466,8 @@ describe('raw BFF path confinement', () => {
           rawRequest(
             `/api/proxy/admin/tls/acme/orders/order-${index}/finalize?hold=1`,
             'POST',
-            identity('admin'),
+            // Fleet TLS mutations are refused to scoped principals.
+            globalAdmin(),
             '{}',
           ),
         );
@@ -728,7 +729,7 @@ describe('raw BFF path confinement', () => {
       ['POST', '/admin/tls/acme/orders/order-1/%66inalize'], ['POST', '/%72estore'],
     ]) {
       // ACME finalize is a fleet TLS mutation, refused to a scoped principal.
-      const headers = path.includes('finalize') ? globalAdmin() : identity('admin');
+      const headers = decodeURIComponent(path).includes('finalize') ? globalAdmin() : identity('admin');
       expect((await rawRequest(`/api/proxy${path}?delay=1`, method, headers, method === 'POST' ? '{}' : '')).status).toBe(200);
       expect(arrivals.at(-1)?.url).toBe(`${decodeURIComponent(path)}?delay=1`);
     }
