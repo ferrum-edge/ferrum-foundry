@@ -8,7 +8,12 @@ import {
   type GatewayRole,
 } from './config.js';
 import { GATEWAY_TARGET_HEADER, gatewayTargetId } from './gateway-target.js';
-import { proxyPathIsFleetGlobal, requestIsProxyRoute } from './proxy-path.js';
+import {
+  proxyPathIsAllowedForNamespace,
+  proxyPathIsEdgeNamespaceSafeGlobal,
+  proxyPathIsFleetGlobal,
+  requestIsProxyRoute,
+} from './proxy-path.js';
 
 interface StaticSession {
   principal: AuthPrincipal;
@@ -217,9 +222,10 @@ function csrfIsValid(
 function namespaceIsAllowed(request: FastifyRequest, principal: AuthPrincipal): boolean {
   if (!principal.namespaces) return true;
   if (!requestIsProxyRoute(request)) return true;
-  // Ferrum documents TLS management as a fleet-global surface. The namespace
-  // header is inert there, so Foundry must not pretend that it scopes access.
-  if (proxyPathIsFleetGlobal(request)) return true;
+  // Edge does not apply namespace claims to fleet-global admin handlers. Allow
+  // only known route classes, then require a grant for namespace-scoped APIs.
+  if (!proxyPathIsAllowedForNamespace(request)) return false;
+  if (proxyPathIsFleetGlobal(request) || proxyPathIsEdgeNamespaceSafeGlobal(request)) return true;
   const namespace = singleHeader(request, 'x-ferrum-namespace');
   return Boolean(namespace && principal.namespaces.includes(namespace));
 }

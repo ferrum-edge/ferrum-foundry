@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   proxyPathIsConsumerVerification,
   proxyPathIsDeploymentSnapshot,
+  proxyPathIsAllowedForNamespace,
+  proxyPathIsEdgeNamespaceSafeGlobal,
   proxyPathIsFleetGlobal,
   proxyTargetPath,
   proxyTargetUrl,
@@ -19,6 +21,52 @@ function request(url: string, wildcard?: string, method = 'GET'): FastifyRequest
 }
 
 describe('canonical proxy targets', () => {
+  it.each([
+    ['GET', '/api/proxy/proxies'],
+    ['POST', '/api/proxy/upstreams'],
+    ['GET', '/api/proxy/consumers/alice'],
+    ['POST', '/api/proxy/consumers/alice/credentials/keyauth'],
+    ['PUT', '/api/proxy/plugins/config/config-1'],
+    ['GET', '/api/proxy/api-specs/by-proxy/orders'],
+    ['GET', '/api/proxy/gateway-trust-bundles'],
+    ['GET', '/api/proxy/mesh/egress-scope'],
+    ['POST', '/api/proxy/mesh/egress-scope/test'],
+    ['POST', '/api/proxy/batch'],
+    ['GET', '/api/proxy/backup'],
+  ])('allows known namespace-scoped route class %s %s', (method, url) => {
+    expect(proxyPathIsAllowedForNamespace(request(url, undefined, method))).toBe(true);
+  });
+
+  it.each([
+    ['GET', '/api/proxy/plugins'],
+    ['GET', '/api/proxy/namespaces'],
+    ['GET', '/api/proxy/namespaces/tenant-a'],
+    ['GET', '/api/proxy/health'],
+    ['GET', '/api/proxy/live'],
+    ['GET', '/api/proxy/status'],
+    ['GET', '/api/proxy/overload'],
+  ])('allows Edge namespace-safe global route class %s %s', (method, url) => {
+    const req = request(url, undefined, method);
+    expect(proxyPathIsEdgeNamespaceSafeGlobal(req)).toBe(true);
+    expect(proxyPathIsAllowedForNamespace(req)).toBe(true);
+  });
+
+  it.each([
+    ['GET', '/api/proxy/charges'],
+    ['GET', '/api/proxy/admin/metrics'],
+    ['GET', '/api/proxy/metrics/runtime'],
+    ['GET', '/api/proxy/cluster'],
+    ['GET', '/api/proxy/mesh/service-graph'],
+    ['GET', '/api/proxy/mesh/federation'],
+    ['GET', '/api/proxy/node-waypoint/identities'],
+    ['GET', '/api/proxy/mesh/runtime-overlay'],
+    ['POST', '/api/proxy/mesh/config-revision/reset'],
+    ['POST', '/api/proxy/backend-capabilities/refresh'],
+    ['GET', '/api/proxy/a-new-admin-route'],
+  ])('denies fleet-wide and unclassified route classes %s %s', (method, url) => {
+    expect(proxyPathIsAllowedForNamespace(request(url, undefined, method))).toBe(false);
+  });
+
   const unsafe = [
     '.', '..', '%2e', '.%2e', '%2e.', '%2E%2e',
     '..%09', '..%0a', '..%0d', '.%09.', '%00', '%1f', '%7f',

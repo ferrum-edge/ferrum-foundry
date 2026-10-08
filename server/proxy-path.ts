@@ -20,6 +20,36 @@ const FLEET_GLOBAL_ROUTES: ReadonlyArray<readonly [string, RegExp]> = [
   ['POST', /^\/admin\/tls\/validate$/],
 ];
 
+// Namespace-scoped principals may use the explicitly known resource route
+// classes below. Edge's namespace claim does not scope its other admin routes,
+// so anything not classified here or in the global ceiling is denied.
+const NAMESPACE_SCOPED_ROUTES: ReadonlyArray<readonly [string, RegExp]> = [
+  [
+    'GET|POST',
+    /^\/(proxies|upstreams|consumers|plugins\/config|api-specs|gateway-trust-bundles)$/,
+  ],
+  [
+    'GET|PUT|DELETE',
+    /^\/(proxies|upstreams|consumers|plugins\/config|api-specs|gateway-trust-bundles)\/[^/]+$/,
+  ],
+  ['POST|PUT|DELETE', /^\/consumers\/[^/]+\/credentials\/[^/]+(?:\/[^/]+)?$/],
+  ['GET', /^\/api-specs\/by-proxy\/[^/]+$/],
+  ['GET', /^\/gateway-trust\/status$/],
+  ['GET', /^\/mesh\/egress-scope$/],
+  ['POST', /^\/mesh\/egress-scope\/test$/],
+  ['POST', /^\/(batch|restore)$/],
+  ['GET', /^\/backup$/],
+];
+
+// Edge's own namespace ceiling permits only these fleet-wide route classes.
+// Keep methods and paths explicit so newly added admin routes default-deny.
+const NAMESPACE_SAFE_GLOBAL_ROUTES: ReadonlyArray<readonly [string, RegExp]> = [
+  ['GET', /^\/plugins$/],
+  ['GET|POST', /^\/namespaces$/],
+  ['GET|PUT|DELETE', /^\/namespaces\/[^/]+$/],
+  ['GET', /^\/(health|live|status|overload)$/],
+];
+
 export class UnsafeProxyPathError extends Error {
   constructor() {
     super('Proxy path is unsafe');
@@ -137,6 +167,30 @@ export function proxyPathIsFleetGlobal(request: FastifyRequest): boolean {
   try {
     const path = proxyTargetPath(request);
     return FLEET_GLOBAL_ROUTES.some(([methods, pattern]) => methods.split('|').includes(request.method) && pattern.test(path));
+  } catch {
+    return false;
+  }
+}
+
+/** Whether a namespace-scoped principal may reach this known Edge route class. */
+export function proxyPathIsAllowedForNamespace(request: FastifyRequest): boolean {
+  try {
+    const path = proxyTargetPath(request);
+    const routeAllowed = ([methods, pattern]: readonly [string, RegExp]) =>
+      methods.split('|').includes(request.method) && pattern.test(path);
+    return FLEET_GLOBAL_ROUTES.some(routeAllowed)
+      || NAMESPACE_SAFE_GLOBAL_ROUTES.some(routeAllowed)
+      || NAMESPACE_SCOPED_ROUTES.some(routeAllowed);
+  } catch {
+    return false;
+  }
+}
+
+export function proxyPathIsEdgeNamespaceSafeGlobal(request: FastifyRequest): boolean {
+  try {
+    const path = proxyTargetPath(request);
+    return NAMESPACE_SAFE_GLOBAL_ROUTES.some(([methods, pattern]) =>
+      methods.split('|').includes(request.method) && pattern.test(path));
   } catch {
     return false;
   }

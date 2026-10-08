@@ -2,6 +2,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { type RefObject, useEffect, useRef, useState } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { NavIcon, type NavIconName } from "@/components/ui/icons";
+import { useAuth } from "@/stores/auth";
 import { BrandMark } from "./BrandMark";
 
 interface SidebarProps {
@@ -59,6 +60,17 @@ export function Sidebar({ open, onClose, triggerRef }: SidebarProps) {
   const closingForDesktop = useRef(false);
   const routerState = useRouterState();
   const currentPath = routerState.location.pathname;
+  const { principal } = useAuth();
+  const namespaceScoped = principal?.namespaces !== undefined;
+  const visibleSections = namespaceScoped
+    ? navSections
+        .map((section) => ({
+          ...section,
+          items: section.items.filter((item) =>
+            !["/", "/audit", "/metrics", "/cluster", "/mesh"].includes(item.to)),
+        }))
+        .filter((section) => section.items.length > 0)
+    : navSections;
 
   useEffect(() => {
     if (typeof window.matchMedia !== "function") return;
@@ -90,7 +102,7 @@ export function Sidebar({ open, onClose, triggerRef }: SidebarProps) {
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto py-3 px-3">
-        {navSections.map((section, sectionIndex) => (
+        {visibleSections.map((section, sectionIndex) => (
           <div key={section.title ?? sectionIndex} className={sectionIndex > 0 ? "mt-4" : ""}>
             {section.title && (
               <p className="px-3 mb-1 text-[10px] font-semibold uppercase tracking-widest text-text-muted">

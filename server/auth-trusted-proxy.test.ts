@@ -205,14 +205,14 @@ describe('trusted OIDC proxy authentication', () => {
     try {
       const missing = await app.inject({
         method: 'GET',
-        url: '/api/proxy/test',
+        url: '/api/proxy/proxies',
         headers: identityHeaders(),
       });
       expect(missing.statusCode).toBe(403);
 
       const denied = await app.inject({
         method: 'GET',
-        url: '/api/proxy/test',
+        url: '/api/proxy/proxies',
         headers: identityHeaders({ 'x-ferrum-namespace': 'tenant-c' }),
       });
       expect(denied.statusCode).toBe(403);
@@ -220,7 +220,7 @@ describe('trusted OIDC proxy authentication', () => {
 
       const allowed = await app.inject({
         method: 'GET',
-        url: '/api/proxy/test',
+        url: '/api/proxy/proxies',
         headers: identityHeaders({ 'x-ferrum-namespace': 'tenant-a' }),
       });
       expect(allowed.statusCode).toBe(200);
@@ -229,7 +229,7 @@ describe('trusted OIDC proxy authentication', () => {
     }
   });
 
-  it('does not apply tenant headers to BFF-local or documented fleet-global routes', async () => {
+  it('allows the explicit Edge global ceiling and the documented TLS route class', async () => {
     const app = await buildApp();
     try {
       const local = await app.inject({ method: 'GET', url: '/protected', headers: identityHeaders() });
@@ -238,8 +238,35 @@ describe('trusted OIDC proxy authentication', () => {
         url: '/api/proxy/admin/tls/inventory',
         headers: identityHeaders(),
       });
+      const edgeGlobal = await app.inject({
+        method: 'GET',
+        url: '/api/proxy/health',
+        headers: identityHeaders(),
+      });
       expect(local.statusCode).toBe(200);
       expect(fleetGlobal.statusCode).toBe(200);
+      expect(edgeGlobal.statusCode).toBe(200);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('refuses fleet-wide admin route classes and unknown routes before proxying', async () => {
+    const app = await buildApp();
+    try {
+      for (const [method, path] of [
+        ['GET', '/api/proxy/charges'],
+        ['GET', '/api/proxy/admin/metrics'],
+        ['GET', '/api/proxy/cluster'],
+        ['GET', '/api/proxy/mesh/service-graph'],
+        ['POST', '/api/proxy/mesh/config-revision/reset'],
+        ['POST', '/api/proxy/backend-capabilities/refresh'],
+        ['GET', '/api/proxy/new-admin-route'],
+      ] as const) {
+        const response = await app.inject({ method, url: path, headers: identityHeaders() });
+        expect(response.statusCode, `${method} ${path}`).toBe(403);
+        expect(response.json()).toEqual({ error: 'Namespace access denied' });
+      }
     } finally {
       await app.close();
     }
@@ -249,9 +276,9 @@ describe('trusted OIDC proxy authentication', () => {
     const app = await buildApp();
     try {
       for (const path of [
-        '/api/proxy/admin/tls/../../test',
-        '/api/proxy/admin/tls/%2e%2e/%2e%2e/test',
-        '/api/proxy/admin/tls/%252e%252e/%252e%252e/test',
+        '/api/proxy/admin/tls/../../proxies',
+        '/api/proxy/admin/tls/%2e%2e/%2e%2e/proxies',
+        '/api/proxy/admin/tls/%252e%252e/%252e%252e/proxies',
       ]) {
         const response = await rawGet(app, path, identityHeaders());
         expect(response.statusCode).toBe(403);
@@ -265,7 +292,7 @@ describe('trusted OIDC proxy authentication', () => {
   it('uses the matched proxy route when the raw prefix is percent-encoded', async () => {
     const app = await buildApp();
     try {
-      for (const path of ['/%61pi/proxy/test', '/api/pro%78y/test']) {
+      for (const path of ['/%61pi/proxy/proxies', '/api/pro%78y/proxies']) {
         const response = await rawGet(app, path, identityHeaders());
         expect(response.statusCode).toBe(403);
         expect(JSON.parse(response.body)).toEqual({ error: 'Namespace access denied' });
