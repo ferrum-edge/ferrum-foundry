@@ -3,28 +3,36 @@
 Foundry is qualified against **one** Ferrum Edge image at a time. Passing CI
 with that image says nothing about any other Edge build, older or newer.
 [`compatibility.json`](compatibility.json) is the machine-readable current
-record, and CI reads the gateway image from it.
+candidate record, and CI reads the gateway image from it.
 
-**Record version 2, status: released; qualification: qualified.** Foundry
-v0.5.3 is published with Ferrum Edge v0.9.14 and canonical
-`contracts-edge-0.9.14`. The qualification and publication evidence are
-preserved in the [immutable v0.5.3 record](release-notes/v0.5.3.compatibility.json).
-Earlier releases remain byte-for-byte in their
+**Record version 2, status: candidate; qualification: pending.** Foundry
+v0.5.4 is a patch candidate against the same published Edge v0.9.14 and
+canonical `contracts-edge-0.9.14` as v0.5.3: the Edge pin, platform digests,
+contract pin, plugin sensitivity provenance and guided schema hashes are
+unchanged. Foundry source, image and publication CI fields are null; all four
+qualification identity fields are null. This source preparation is not a
+release or successful qualification. The latest published pairing remains
+Foundry v0.5.3 / Edge v0.9.14, preserved byte-for-byte in
+[its immutable record](release-notes/v0.5.3.compatibility.json), alongside the
 [v0.5.2](release-notes/v0.5.2.compatibility.json),
 [v0.5.1](release-notes/v0.5.1.compatibility.json),
 [v0.5.0](release-notes/v0.5.0.compatibility.json) and
 [v0.4.0](release-notes/v0.4.0.compatibility.json) records.
 
-## Published pairing
+## The candidate pairing
 
 | | Foundry | Ferrum Edge |
 | --- | --- | --- |
-| Version | [Foundry v0.5.3](https://github.com/ferrum-edge/ferrum-foundry/releases/tag/v0.5.3); previous release v0.5.2 | [Ferrum Edge v0.9.14](https://github.com/ferrum-edge/ferrum-edge/releases/tag/v0.9.14) |
-| Source commit | `74a7be374f5c6fcf1284737907e43d8808bb95c6`, tag target; release PR #560 merge, second parent `0430caaa8a97f729cffa065d63c5fcaf54c7ff4d` | `9bd4d5f9caa4ebe8f0ea13e76d8a6e2172eaca7d`, immutable `v0.9.14` tag target |
-| Image | `ferrumedge/ferrum-foundry@sha256:1edef8251f7786f10ebb67dd333cf9e75f7bf54f7af17ad4452227df3ac9a742` | `ferrumedge/ferrum-edge@sha256:15442f1b1d1758023fe871fe57be50f19caf34bbe6c499a6812f4ffd0da5e3f8` |
-| Platforms | `linux/amd64` `sha256:784c34fb6bc9f945a4fbb0d648e9ea3113cf71396dd14eadba913586dd9f2dd4`; `linux/arm64` `sha256:cfd8e4063fa371395eb577cadbcab75e9c52ab00765cc3d0a739e736908e39dc` | `linux/amd64` `sha256:12a8cd56090c0d4511bb3015b240e606b1b87989c644157566b8f6b6f635b3c2`; `linux/arm64` `sha256:19d2886ed8c192cb0daba48ef0a27a0cd0526449dac74bf9438502322aabd9f2` |
-| Qualification | [Run 37758405759](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37758405759), attempt 1; source `e88b83416e7ca6f60bdaa79ccd028c29b1cf99ec`, tested merge `885934d6bdb01f89d380d4d1010cc4e7627d20d0` | Edge release run 37585311307; distribution evidence only |
-| Publication | [Release run 37760444063](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37760444063), success; GitHub release 406687099, published 2026-10-08 10:07:37 UTC | GitHub release 405571232, published 2026-10-07 08:59:56 UTC |
+| Version | v0.5.4 candidate; previous release v0.5.3 | [Ferrum Edge v0.9.14](https://github.com/ferrum-edge/ferrum-edge/releases/tag/v0.9.14), unchanged from v0.5.3 |
+| Source commit | *release step*: null until publication | `9bd4d5f9caa4ebe8f0ea13e76d8a6e2172eaca7d`, immutable `v0.9.14` tag target |
+| Image | *release step*: null until publication | `ferrumedge/ferrum-edge@sha256:15442f1b1d1758023fe871fe57be50f19caf34bbe6c499a6812f4ffd0da5e3f8` |
+| Platforms | `linux/amd64`, `linux/arm64` qualification pending | `linux/amd64` `sha256:12a8cd56090c0d4511bb3015b240e606b1b87989c644157566b8f6b6f635b3c2`; `linux/arm64` `sha256:19d2886ed8c192cb0daba48ef0a27a0cd0526449dac74bf9438502322aabd9f2` |
+| CI evidence | Qualification pending; publication *release step* | [Edge release run 37585311307](https://github.com/ferrum-edge/ferrum-edge/actions/runs/37585311307), all 20 jobs successful; distribution evidence only |
+| Published | *release step* | GitHub release 405571232, 2026-10-07 08:59:56 UTC |
+
+The candidate's source changes since v0.5.3 are in the
+[v0.5.4 notes](release-notes/v0.5.4.md). They bound what a namespace-scoped
+session may reach through the BFF; no Edge admin API contract changes.
 
 ## The CI pin
 
@@ -35,9 +43,11 @@ multi-architecture index above. Edge release `405571232` was published at
 after all 14 main-push workflows succeeded on that commit. Edge release run
 `37585311307` completed all 20 jobs successfully, including signing,
 attestation and both release gates. The hosted Foundry qualification run
-37758405759, attempt 1, passed against this pairing. The publication run
-37760444063 succeeded and published the v0.5.3 tag. The immutable record carries
-the Foundry tag source, image index, platform digests and CI evidence.
+37758405759, attempt 1, passed against this pairing for the v0.5.3 source. The
+publication run 37760444063 succeeded and published the v0.5.3 tag. The
+immutable record carries the Foundry tag source, image index, platform digests
+and CI evidence. The v0.5.4 candidate keeps this pin unchanged; it needs its
+own hosted qualification run against it.
 
 The raw Docker Hub index bytes for both the `0.9.14` and `v0.9.14` tags hash to
 the recorded index digest, and the two platform manifests and their configs
@@ -52,7 +62,8 @@ Anonymous GHCR token requests return 401; anonymous GHCR contents are not
 claimed. Published Edge configs have no revision label. Source identity rests on
 the immutable release and exact binary pairing, with hosted attestation
 evidence; no local cryptographic verification is claimed. The `0.9.14-ebpf`
-and `0.9.14-ebpf-tools` variants are outside the v0.5.3 qualification.
+and `0.9.14-ebpf-tools` variants are outside the v0.5.3 qualification and the
+v0.5.4 candidate.
 
 The raw canonical OpenAPI at the immutable Edge source has SHA-256
 `6d286649ae744691e2eeb7d16607c538ca02e31bdeaafe98ab07fc861e7b9da4`.
@@ -60,7 +71,7 @@ Its `info.version: 0.2.0` is schema metadata, not either product's version.
 
 ## Qualification evidence
 
-1. **Canonical adoption complete.** Published
+1. **Canonical adoption unchanged.** Published
    [contracts-edge-0.9.14](https://github.com/ferrum-edge/ferrum-contracts/releases/tag/contracts-edge-0.9.14)
    names `ddbdd845733b7046c4393ac951011dafb774db33`; release `406650065` was
    published after the main Validate contracts run `37755967635` succeeded.
@@ -70,55 +81,50 @@ Its `info.version: 0.2.0` is schema metadata, not either product's version.
    provisioning values, manifest schema and 12 fixtures are unchanged. The
    shared manifest/report status remains EXISTING/implemented at the Alloy
    owner, whose availability remains unpublished.
-2. **Guided schema static review complete.** All five complete component
+2. **Guided schema static review unchanged.** All five complete component
    blocks at `9bd4d5f9caa4ebe8f0ea13e76d8a6e2172eaca7d` are byte-identical to
    9b83115d, so every pinned hash is unchanged and the drift check compares
    them at `edge.source_commit`. `PLUGIN_SCHEMA_SPEC.ref` remains 9b83115d,
    the source of the last reviewed hosted producer export. The plugin
    sensitivity source is byte-identical to its prior version and its
    provenance is recorded at the v0.9.14 source.
-3. **Hosted pairing qualification complete.** Run `37758405759`, attempt 1,
-   binds source `e88b83416e7ca6f60bdaa79ccd028c29b1cf99ec` to tested merge
-   `885934d6bdb01f89d380d4d1010cc4e7627d20d0` against Edge v0.9.14 and
-   `contracts-edge-0.9.14`.
-4. **Foundry publication complete.** Tag `v0.5.3` points to
-   `74a7be374f5c6fcf1284737907e43d8808bb95c6`, the merge of #560 with second
-   parent `0430caaa8a97f729cffa065d63c5fcaf54c7ff4d`. Release run `37760444063`
-   succeeded; GitHub release `406687099` was published on 2026-10-08 at
-   10:07:37 UTC. The immutable record preserves the image index and platform
-   digests. The supplied publication evidence does not establish anonymous
-   GHCR access, independent cryptographic attestation verification or
-   account-level registry immutability.
+3. **Hosted pairing acceptance pending.** The v0.5.3 run `37758405759`
+   tested other source and does not qualify this candidate. For the final
+   source of the v0.5.4 release pull request, Qualification Source, Quality
+   Gate on Node 22 and 24, Pinned Gateway Contract (including writable and
+   read-only capability parity), Deployment Starter, Critical Journeys and
+   both Container Gates must pass for the exact candidate head and its tested
+   merge against the unchanged `edge.image`. Only an evidence-only
+   qualification record may follow the qualified tree.
+4. **Foundry publication pending.** No v0.5.4 tag, published source commit,
+   image, platform digest or release CI evidence is asserted. Root owns the
+   protected merge and release sequence after full qualification.
 
 The database profiles, Node floors and `viewer` / `operator` / `admin` tiers are
-unchanged. Like v0.5.2, v0.5.3 includes the initial untagged-write refusal of
-the adopted guarded-write policy #542 (see
+unchanged. Like v0.5.2 and v0.5.3, this candidate includes the initial
+untagged-write refusal of the adopted guarded-write policy #542 (see
 [below](#guarded-write-initial-validator-policy-542)). It changes no
 account-level registry settings under #547.
 
-## Previous published pairing: v0.5.2 / Edge v0.9.13
+## Previous published pairing: v0.5.3 / Edge v0.9.14
 
 The following evidence qualifies the previous immutable release only. It does
-not replace the v0.5.3 qualification or publication record. Its qualification
-run, release ancestry and full publication facts remain in the
-[v0.5.2 notes](release-notes/v0.5.2.md) and
-[immutable record](release-notes/v0.5.2.compatibility.json). The v0.5.1 and
+not qualify the v0.5.4 candidate, although both use the same Edge pin. Its
+qualification run, release ancestry and full publication facts remain in the
+[v0.5.3 notes](release-notes/v0.5.3.md) and
+[immutable record](release-notes/v0.5.3.compatibility.json). The v0.5.2 and
 earlier pairings and their publication facts remain in [history](#history) and
 their immutable records.
 
 | | Foundry | Ferrum Edge |
 | --- | --- | --- |
-| Version | [Foundry v0.5.2](https://github.com/ferrum-edge/ferrum-foundry/releases/tag/v0.5.2); previous release v0.5.1 | [Ferrum Edge v0.9.13](https://github.com/ferrum-edge/ferrum-edge/releases/tag/v0.9.13) |
-| Source commit | `ebd09e8d82f773b6840b1edda67fbac287c3f7a0`, immutable `v0.5.2` tag target; release PR #556 merge, second parent `8f324c52bcf2a48e9532d0fabb46ee2036f3075b` | `9b83115de7ec23ab51ec4feae6bed65e596db425`, immutable `v0.9.13` tag target |
-| Image | `ferrumedge/ferrum-foundry@sha256:b1728fdc0694a195e2a21e7666ca09dd0cf9205c81041cc963b0e104750ce79a`; published as `v0.5.2` in Docker Hub and GHCR | `ferrumedge/ferrum-edge@sha256:6caa0987adb4c0a3a368fcd800bb0459cff3d3e219522e2e9c56280205862e50` |
-| Platforms | `linux/amd64` `sha256:c92e235abe064e24be66289a9ce9d34500fca661446392a06f378b517f91c0a4`; `linux/arm64` `sha256:a765ce8e6c3817f45607ea6c6562de964b55d64a9903200006d36df9637bc141` | `linux/amd64` `sha256:03822d924b7919d07a840baf757d016f2f05c8df8a8d0455a2eebae917aae2cc`; `linux/arm64` `sha256:a628f8fc12c916793b96ba111c2bf4360ea84981b8bf766254b47c6140c02a80` |
-| CI evidence | [Qualification run 37511649961](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37511649961), attempt 1; source `bc7ca925b68eac86a42bc394bbf9f25e47efffc0`, tested merge `f9703947f384a642b9f7144e6be87e8e68b7a8e5`; [release run 37514033958](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37514033958), success | [Edge release run 37483752754](https://github.com/ferrum-edge/ferrum-edge/actions/runs/37483752754), all 20 jobs successful; distribution evidence only |
-| Published | GitHub release 405045848, 2026-10-06 18:55:40 UTC | GitHub release 404961860, 2026-10-06 17:04:49 UTC |
+| Version | [Foundry v0.5.3](https://github.com/ferrum-edge/ferrum-foundry/releases/tag/v0.5.3); previous release v0.5.2 | [Ferrum Edge v0.9.14](https://github.com/ferrum-edge/ferrum-edge/releases/tag/v0.9.14) |
+| Source commit | `74a7be374f5c6fcf1284737907e43d8808bb95c6`, tag target; release PR #560 merge, second parent `0430caaa8a97f729cffa065d63c5fcaf54c7ff4d` | `9bd4d5f9caa4ebe8f0ea13e76d8a6e2172eaca7d`, immutable `v0.9.14` tag target |
+| Image | `ferrumedge/ferrum-foundry@sha256:1edef8251f7786f10ebb67dd333cf9e75f7bf54f7af17ad4452227df3ac9a742` | `ferrumedge/ferrum-edge@sha256:15442f1b1d1758023fe871fe57be50f19caf34bbe6c499a6812f4ffd0da5e3f8` |
+| Platforms | `linux/amd64` `sha256:784c34fb6bc9f945a4fbb0d648e9ea3113cf71396dd14eadba913586dd9f2dd4`; `linux/arm64` `sha256:cfd8e4063fa371395eb577cadbcab75e9c52ab00765cc3d0a739e736908e39dc` | `linux/amd64` `sha256:12a8cd56090c0d4511bb3015b240e606b1b87989c644157566b8f6b6f635b3c2`; `linux/arm64` `sha256:19d2886ed8c192cb0daba48ef0a27a0cd0526449dac74bf9438502322aabd9f2` |
+| Qualification | [Run 37758405759](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37758405759), attempt 1; source `e88b83416e7ca6f60bdaa79ccd028c29b1cf99ec`, tested merge `885934d6bdb01f89d380d4d1010cc4e7627d20d0` | Edge release run 37585311307; distribution evidence only |
+| Publication | [Release run 37760444063](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37760444063), success; GitHub release 406687099, published 2026-10-08 10:07:37 UTC | GitHub release 405571232, published 2026-10-07 08:59:56 UTC |
 
-The v0.5.2 guided schema review adopted `PLUGIN_SCHEMA_SPEC.ref` 9b83115d from
-the hosted producer export of
-[run 37509542502](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37509542502),
-artifact `11434665326` ([plugin schemas](plugin-schemas.md#v052-schema-review)).
 Anonymous GHCR access, independent cryptographic attestation verification and
 account-level registry immutability are not proved. Foundry #547 remains pending.
 
@@ -512,13 +518,16 @@ rejected digest may appear only in history files (`CHANGELOG.md`, this page,
 | [Foundry v0.5.1](https://github.com/ferrum-edge/ferrum-foundry/releases/tag/v0.5.1) | Published v0.9.12, `ferrumedge/ferrum-edge@sha256:80526b59cbbdc2bfcc8bae9241da4e5395414cf07bf0be4effd4c73c51684ee4` | Qualified and released from `1dc43bd1bbd4c2c89ca14e2a603aa478ab1a0d18`; original qualification and actual image/publication evidence are preserved in [the immutable record](release-notes/v0.5.1.compatibility.json) |
 | [Foundry v0.5.2](https://github.com/ferrum-edge/ferrum-foundry/releases/tag/v0.5.2) | Published v0.9.13, `ferrumedge/ferrum-edge@sha256:6caa0987adb4c0a3a368fcd800bb0459cff3d3e219522e2e9c56280205862e50` | Qualified and published; full evidence in the [immutable v0.5.2 record](release-notes/v0.5.2.compatibility.json) |
 | [Foundry v0.5.3](https://github.com/ferrum-edge/ferrum-foundry/releases/tag/v0.5.3) | Published v0.9.14, `ferrumedge/ferrum-edge@sha256:15442f1b1d1758023fe871fe57be50f19caf34bbe6c499a6812f4ffd0da5e3f8` | Qualified and published; full evidence in the [immutable v0.5.3 record](release-notes/v0.5.3.compatibility.json) |
+| Foundry v0.5.4 candidate | Published v0.9.14, the same `ferrumedge/ferrum-edge@sha256:15442f1b1d1758023fe871fe57be50f19caf34bbe6c499a6812f4ffd0da5e3f8` | Patch candidate on the unchanged pin; Foundry qualification and publication pending |
 
 ## Tested support
 
-This is the qualification envelope passed by v0.5.3 against Edge v0.9.14. The
-gates run on every pull request and again before publication against
-`edge.image`. The machine-readable `tested` dimensions describe the qualified
-envelope; they do not qualify other Edge images or gateway modes.
+This is the qualification envelope passed by v0.5.3 against Edge v0.9.14 and
+the unchanged target for the v0.5.4 candidate, whose acceptance is pending.
+The gates run on every pull request and again before publication against
+`edge.image`. The machine-readable `tested` dimensions describe the envelope
+required for qualification; they do not assert that this candidate has passed
+or qualify other Edge images or gateway modes.
 
 | Dimension | Qualification target | Evidence gate |
 | --- | --- | --- |
@@ -572,9 +581,11 @@ CI. Report problems; they do not block releases.
   read-only ([capabilities.md](capabilities.md)) and the mock admin gateway
   reproduces that, but no real gateway in those modes runs in CI. The mesh,
   waypoint, trust, and chargeback pages are therefore unqualified.
+- The v0.5.4 candidate itself, until all hosted gates pass. v0.5.3's
+  qualification of the same pin tested other source and cannot qualify it.
 - Any Ferrum Edge release other than v0.9.14 (`edge.release`) for the v0.5.3
-  pairing. Published v0.5.2 / v0.9.13, v0.5.1 / v0.9.12, v0.5.0 / v0.9.11
-  and v0.4.0 / v0.9.10 remain in history.
+  pairing or the v0.5.4 candidate. Published v0.5.2 / v0.9.13, v0.5.1 /
+  v0.9.12, v0.5.0 / v0.9.11 and v0.4.0 / v0.9.10 remain in history.
 - Any Ferrum Edge image other than `edge.image`, including the `0.9.14-ebpf`
   and `0.9.14-ebpf-tools` variants of the same release.
 - Browser latency, and more than one operator editing at scale.
@@ -589,8 +600,9 @@ not in v0.9.5.
 
 Released Foundry v0.5.3 sends `If-Match` whenever its verification read carries
 a strong tag. The v0.9.14 contract gate confirmed the strong item tags for
-v0.5.3. With a strong tag, a full-replacement save or a detail-page delete is atomic: a writer
-that commits between the guard's verification read and the write is refused
+v0.5.3; the v0.5.4 candidate's gates must confirm them again. With a strong
+tag, a full-replacement save or a detail-page delete is atomic: a writer that
+commits between the guard's verification read and the write is refused
 with `412` and nothing is written.
 
 In v0.5.1, a read with no strong tag (the cached-config fallback,
@@ -625,7 +637,7 @@ post-412 untagged refusal is unchanged.
 
 **Adopted for v0.5.2.** The owner's delegate approved this behavior change on
 2026-10-06, closing #542; #544 implements it. v0.5.2 is the first release that
-ships it, and v0.5.3 retains it unchanged. See
+ships it, and v0.5.3 and the v0.5.4 candidate retain it unchanged. See
 [the precise scope](concurrent-edits.md#without-a-tag).
 
 ## Changing the pairing

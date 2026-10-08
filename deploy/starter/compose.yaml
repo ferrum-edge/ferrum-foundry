@@ -125,7 +125,8 @@ services:
       - ./nginx/identity:/etc/nginx/identity:ro
       - ./secrets:/etc/nginx/secrets:ro
 
-  # Published Edge v0.9.14, qualified with published Foundry v0.5.3.
+  # Published Edge v0.9.14, qualified with published Foundry v0.5.3 and kept
+  # for the v0.5.4 candidate (qualification pending, docs/compatibility.md).
   # Must equal `edge.image` in docs/compatibility.json;
   # a test fails if it drifts.
   demo-gateway:

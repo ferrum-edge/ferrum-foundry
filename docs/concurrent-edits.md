@@ -22,8 +22,9 @@ runs it in the `Pinned Gateway Contract` CI job on every pull request. It
 records the baseline below. Foundry v0.5.2, which adopted this policy, passed
 hosted qualification against published Edge v0.9.13, including its
 concurrent-edit contract; see the qualification evidence in
-[compatibility.md](compatibility.md). The Foundry v0.5.3 candidate moves the pin
-to published Edge v0.9.14 and requires fresh hosted qualification.
+[compatibility.md](compatibility.md). Foundry v0.5.3 moved the pin to published
+Edge v0.9.14 and passed hosted qualification against it. The v0.5.4 candidate
+keeps that pin and requires fresh hosted qualification.
 
 | Observation | Result |
 | --- | --- |

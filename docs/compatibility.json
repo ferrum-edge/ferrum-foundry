@@ -1,40 +1,28 @@
 {
   "$comment": "Supported Foundry-Edge pairing, metadata version 2. qualification records hosted pairing acceptance separately from actual Foundry publication and verified Edge distribution. Immutable v0.4.0, v0.5.0, v0.5.1, v0.5.2 and v0.5.3 release records are under docs/release-notes/. CI reads edge.image; docs/compatibility.md records the unchanged support envelope.",
   "record_version": 2,
-  "status": "released",
+  "status": "candidate",
   "foundry": {
-    "version": "0.5.3",
-    "previous_release": "v0.5.2",
-    "source_commit": "74a7be374f5c6fcf1284737907e43d8808bb95c6",
-    "image": "ferrumedge/ferrum-foundry@sha256:1edef8251f7786f10ebb67dd333cf9e75f7bf54f7af17ad4452227df3ac9a742",
-    "ci_evidence": "https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37760444063",
+    "version": "0.5.4",
+    "previous_release": "v0.5.3",
+    "source_commit": null,
+    "image": null,
+    "ci_evidence": null,
     "platforms": [
       "linux/amd64",
       "linux/arm64"
-    ],
-    "registries": [
-      "ferrumedge/ferrum-foundry:v0.5.3",
-      "ghcr.io/ferrum-edge/ferrum-foundry:v0.5.3"
-    ],
-    "release_id": 406687099,
-    "merge_second_parent": "0430caaa8a97f729cffa065d63c5fcaf54c7ff4d",
-    "platform_manifests": {
-      "linux/amd64": "sha256:784c34fb6bc9f945a4fbb0d648e9ea3113cf71396dd14eadba913586dd9f2dd4",
-      "linux/arm64": "sha256:cfd8e4063fa371395eb577cadbcab75e9c52ab00765cc3d0a739e736908e39dc"
-    },
-    "github_release": "https://github.com/ferrum-edge/ferrum-foundry/releases/tag/v0.5.3",
-    "published_at": "2026-10-08T10:07:37Z"
+    ]
   },
   "qualification": {
     "status": "qualified",
-    "ci_evidence": "https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37758405759",
-    "source_commit": "e88b83416e7ca6f60bdaa79ccd028c29b1cf99ec",
-    "tested_commit": "885934d6bdb01f89d380d4d1010cc4e7627d20d0",
+    "ci_evidence": "https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37775840732",
+    "source_commit": "9407c05dce79c9752d9ae3621c1f2f3caf467a35",
+    "tested_commit": "c2e2aa642c961fd6bff184f0fb8a90214c746c17",
     "run_attempt": 1
   },
   "edge": {
     "image": "ferrumedge/ferrum-edge@sha256:15442f1b1d1758023fe871fe57be50f19caf34bbe6c499a6812f4ffd0da5e3f8",
-    "build": "published release v0.9.14; verified distribution at 9bd4d5f9caa4ebe8f0ea13e76d8a6e2172eaca7d. Foundry v0.5.3 was qualified and published with this pairing",
+    "build": "published release v0.9.14; verified distribution at 9bd4d5f9caa4ebe8f0ea13e76d8a6e2172eaca7d. Foundry v0.5.3 was qualified and published with this pairing; the Foundry v0.5.4 patch candidate keeps it unchanged and its own qualification and publication are pending",
     "source_commit": "9bd4d5f9caa4ebe8f0ea13e76d8a6e2172eaca7d",
     "source_evidence": "https://github.com/ferrum-edge/ferrum-edge/actions/runs/37585311307",
     "platform_manifests": {
@@ -56,10 +44,10 @@
         "Operator reads of upstreams mask the Consul ACL token, and operator reads of plugin configs mask secrets and credential-bearing endpoint URL components, with redaction placeholders. A POST or PUT of an upstream or plugin config that echoes a placeholder at a masked field is refused with 400 before update merging (ferrum-edge#5925), so for upstreams and plugin configs a placeholder is not a round-trip marker; admin-only consumer credential entries still round-trip [REDACTED]. Admin reads are raw and never refused. Foundry's editors block such a save, for a non-admin role and only at the sites Edge masks, until each field is re-entered or cleared.",
         "Ferrum Edge v0.9.14 retains v0.9.11's MCP charset and JSON-RPC batch inspection fixes (ferrum-edge#5954, GHSA-4f9m-cfqg-fhx9, GHSA-f2jp-59r9-fp64) and v0.9.13's HTTP/3 retained-request admission (ferrum-edge#6009). It keys built-in plugin trust and security-composition ordering on the registered concrete type rather than the reported name, runs the reject hooks and transaction log for HTTP/3 dispatch-stage and bridge drain refusals (ferrum-edge#6022), and refuses two more published OIDC session-secret fixture keys (ferrum-edge#6037). Its publication is not a claim that all upstream security issues are fixed.",
         "v0.9.14 adds control-plane attestation of data-plane backend egress policy (ferrum-edge#6020): on a CP, GET /backend-egress-policy gains an optional data_plane_attestation object, additive within schema_version 2, and GET /cluster adds each data plane's backend_egress_policy_attestation and backend_egress_policy plus a cluster-wide data_plane_backend_egress_policy aggregate. Data planes are listed per live Subscribe stream, so several may share a node_id; ConfigSync protocol revision 3 requires CP and DP to run the same build. Foundry does not read GET /backend-egress-policy. Its Cluster page shows the reported per-data-plane policy and the aggregate as self-reported presence metadata, keys each stream separately, and treats the fields as absent when a response omits them. Conditional deployment mutations now separate durable not_started from not_committed (ferrum-edge#6021); Foundry issues no deployment mutation, adds no native deployment profile, recovery journal or capability, and the BFF keeps refusing GET /deployment-snapshot for every method and role with 403 FERRUM_BFF_CREDENTIAL_READ_DENIED before capacity admission, JWT signing or upstream fetch. Backend HTTP/2 resets that now count as backend failures are data-plane behavior with no admin contract change for Foundry.",
-        "Foundry v0.5.3 retains guarded-write policy #542, first shipped in v0.5.2 (#544): guarded replacement and deletion refuse an initial fresh verification read without one nonempty quoted visible-ASCII strong ETag, before any PUT/DELETE. Explicit unguarded calls, low-level helpers and plugin membership plans keep their semantics, and the post-412 untagged refusal is unchanged. The paired release issues strong item ETags, confirmed by the hosted qualification.",
+        "Foundry v0.5.3 and the v0.5.4 candidate retain guarded-write policy #542, first shipped in v0.5.2 (#544): guarded replacement and deletion refuse an initial fresh verification read without one nonempty quoted visible-ASCII strong ETag, before any PUT/DELETE. Explicit unguarded calls, low-level helpers and plugin membership plans keep their semantics, and the post-412 untagged refusal is unchanged. The paired release issues strong item ETags, confirmed by the hosted qualification.",
         "Static guided-schema review at 9bd4d5f9caa4ebe8f0ea13e76d8a6e2172eaca7d: all five complete component blocks (KeyAuthConfig, RateLimitingConfig, RateLimitingRuleConfig, CorsConfig, PrometheusMetricsConfig) are byte-identical to 9b83115de7ec23ab51ec4feae6bed65e596db425, so every pinned component hash is unchanged and the drift check compares them at edge.source_commit. PLUGIN_SCHEMA_SPEC.ref remains 9b83115de7ec23ab51ec4feae6bed65e596db425, the source of the last reviewed hosted producer export. The sensitivity source is byte-identical to 9b83115d (Git blob 827bf3a7c998c7ea9c995093ab38320facbd072a) and its provenance is now 9bd4d5f9caa4ebe8f0ea13e76d8a6e2172eaca7d.",
         "The canonical pin adopts published contracts-edge-0.9.14 at ddbdd845733b7046c4393ac951011dafb774db33, release 406650065, after successful main Validate contracts run 37755967635. The same 18 scoped files and descriptions are byte-exact. All 82 plugin entries, provisioning values, manifest schema and all 12 fixtures are unchanged; the complete invalid-expectations file adds the backend-egress-policy v2 data_plane_attestation and vocabulary attestation negatives without Foundry adopting those schemas or runtime profiles. Shared manifest/report status remains EXISTING/implemented at Alloy owner 81cbb, with Alloy unpublished.",
-        "Foundry v0.5.3 qualified against this published Edge release in hosted run 37758405759, attempt 1; source e88b83416e7ca6f60bdaa79ccd028c29b1cf99ec was tested at merge 885934d6bdb01f89d380d4d1010cc4e7627d20d0, with every job green: Quality Gate, Pinned Gateway Contract (including capability parity, writable and read-only), Deployment Starter, Critical Journeys, and Container Gate. The release and tag evidence is preserved in docs/release-notes/v0.5.3.compatibility.json."
+        "Foundry v0.5.3 qualified against this published Edge release in hosted run 37758405759, attempt 1; source e88b83416e7ca6f60bdaa79ccd028c29b1cf99ec was tested at merge 885934d6bdb01f89d380d4d1010cc4e7627d20d0, with every job green: Quality Gate, Pinned Gateway Contract (including capability parity, writable and read-only), Deployment Starter, Critical Journeys, and Container Gate. The release and tag evidence is preserved in docs/release-notes/v0.5.3.compatibility.json. That run does not qualify the v0.5.4 candidate: its qualification is pending, and the full qualification must pass against this unchanged edge.image for the v0.5.4 source before it is published."
       ],
       "binary_sha256": {
         "ferrum-cni-linux-aarch64": "sha256:29f156bb0d77933ba6820d39350ddfaea907eb117ee007a44b1a49c2fd8c4d70",
@@ -139,7 +127,7 @@
   ],
   "not_qualified": [
     "file, dp, mesh, and node_agent gateway modes (modelled read-only in the UI, not run in CI)",
-    "any Ferrum Edge release other than v0.9.14 (edge.release) for this release",
+    "any Ferrum Edge release other than v0.9.14 (edge.release) for this candidate; v0.5.4 qualification against v0.9.14 is pending",
     "any Ferrum Edge image other than edge.image for this qualification, including the 0.9.14-ebpf and 0.9.14-ebpf-tools variants",
     "browser latency and more than one concurrent operator at scale"
   ],

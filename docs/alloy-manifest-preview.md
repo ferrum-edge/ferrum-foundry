@@ -35,9 +35,10 @@ actual publication after successful main Validate contracts run 37755967635.
 The same 18-file scope retains complete canonical invalid expectations,
 including the versioned deployment-snapshot and backend-egress-policy entries
 and the v0.9.14 data-plane attestation negatives; it does not vendor those
-schemas or adopt that runtime profile. Foundry v0.5.3 hosted qualification is
-pending in the [compatibility record](compatibility.md); v0.5.2 and earlier
-evidence is historical.
+schemas or adopt that runtime profile. Foundry v0.5.3 passed hosted
+qualification with this scope. The v0.5.4 candidate keeps it, and its own
+qualification is pending in the [compatibility record](compatibility.md);
+v0.5.3 and earlier evidence is historical.
 
 The independently reviewed producer is Alloy commit
 [`690aed7a9fa8458aeea4ac8416170c8daeb0470b`](https://github.com/ferrum-edge/ferrum-alloy/tree/690aed7a9fa8458aeea4ac8416170c8daeb0470b).

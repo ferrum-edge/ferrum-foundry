@@ -33,7 +33,10 @@ workflow (`.github/workflows/ci.yml`) has passed:
 Passing these gates qualifies Foundry with that one Ferrum Edge image and no
 other build. Published Foundry v0.5.3 pairs with Edge v0.9.14 and
 `contracts-edge-0.9.14`; its hosted pairing qualification and publication are
-recorded in [the compatibility record](compatibility.md#qualification-evidence).
+preserved in [its immutable record](release-notes/v0.5.3.compatibility.json).
+The Foundry v0.5.4 candidate keeps the same Edge and contract pins; its own
+qualification and publication are pending in
+[the compatibility record](compatibility.md#qualification-evidence).
 Published v0.5.2 / Edge v0.9.13, v0.5.1 / Edge v0.9.12, v0.5.0 / Edge v0.9.11
 and v0.4.0 / Edge v0.9.10 pairings remain immutable in
 [history](compatibility.md#history).

@@ -96,9 +96,10 @@ file versions its deployment-snapshot and backend-egress-policy negatives and
 adds their v2 entries, now including the v0.9.14 data-plane attestation
 negatives; Foundry's same 18-file scope includes no deployment or egress-policy
 schemas or profile implementation. Manifest schema, fixtures and
-owner-unreleased status remain unchanged. Foundry v0.5.3 hosted pairing
+owner-unreleased status remain unchanged. Foundry v0.5.3 passed hosted pairing
+qualification with this pin. The v0.5.4 candidate keeps it, and its own
 qualification is pending in [the compatibility record](compatibility.md);
-v0.5.2 and earlier evidence belongs to their unchanged immutable release records.
+v0.5.3 and earlier evidence belongs to their unchanged immutable release records.
 
 To bump the pin, choose a `contracts-edge-*` release, download the adopted
 vocabulary and schema files from that tag into the same paths, resolve the tag
