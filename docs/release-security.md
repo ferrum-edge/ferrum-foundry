@@ -31,10 +31,9 @@ workflow (`.github/workflows/ci.yml`) has passed:
 ## Supported Edge image
 
 Passing these gates qualifies Foundry with that one Ferrum Edge image and no
-other build. The Foundry v0.5.3 candidate selects published Edge v0.9.14 and
-published `contracts-edge-0.9.14`; its full pairing qualification and
-publication are pending in
-[the compatibility record](compatibility.md#qualification-evidence).
+other build. Published Foundry v0.5.3 pairs with Edge v0.9.14 and
+`contracts-edge-0.9.14`; its hosted pairing qualification and publication are
+recorded in [the compatibility record](compatibility.md#qualification-evidence).
 Published v0.5.2 / Edge v0.9.13, v0.5.1 / Edge v0.9.12, v0.5.0 / Edge v0.9.11
 and v0.4.0 / Edge v0.9.10 pairings remain immutable in
 [history](compatibility.md#history).
@@ -69,17 +68,17 @@ Every third-party GitHub Action is pinned to a full commit SHA.
 
 ## Publishing
 
-For v0.5.2, the reviewed release preparation landed in protected **merge
-commit** `ebd09e8d82f773b6840b1edda67fbac287c3f7a0`, whose second parent was
-`8f324c52bcf2a48e9532d0fabb46ee2036f3075b`. Qualification run `37511649961`,
-attempt 1, binds source `bc7ca925b68eac86a42bc394bbf9f25e47efffc0` to tested
-merge `f9703947f384a642b9f7144e6be87e8e68b7a8e5`. Release run `37514033958`
-succeeded; GitHub release `405045848` was published at 2026-10-06 18:55:40 UTC.
+For v0.5.3, release PR #560 merged as protected commit
+`74a7be374f5c6fcf1284737907e43d8808bb95c6`, whose second parent was
+`0430caaa8a97f729cffa065d63c5fcaf54c7ff4d`. Qualification run `37758405759`,
+attempt 1, binds source `e88b83416e7ca6f60bdaa79ccd028c29b1cf99ec` to tested
+merge `885934d6bdb01f89d380d4d1010cc4e7627d20d0`. Release run `37760444063`
+succeeded; GitHub release `406687099` was published at 2026-10-08 10:07:37 UTC.
 The immutable release record contains the tag source, final multi-architecture
 image index, platform digests and CI evidence. The supplied publication evidence
 does not establish anonymous GHCR access, independent cryptographic attestation
 verification or account-level registry immutability. See the
-[v0.5.2 record](release-notes/v0.5.2.compatibility.json) and
+[v0.5.3 record](release-notes/v0.5.3.compatibility.json) and
 [compatibility record](compatibility.md). Earlier release notes and records
 remain unchanged.
 

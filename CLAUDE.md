@@ -37,11 +37,11 @@ a local copy would go stale.
 
 Shared org contracts are vendored under `contracts/ferrum-contracts/`; see
 [Contracts](README.md#contracts).
-The Foundry v0.5.3 candidate adopts published `contracts-edge-0.9.14` at
+Published Foundry v0.5.3 adopts `contracts-edge-0.9.14` at
 `ddbdd845733b7046c4393ac951011dafb774db33`. The shared manifest is implemented;
-candidate qualification and publication remain pending in
-`docs/compatibility.json`. Released v0.5.2, v0.5.1, v0.5.0 and v0.4.0 notes and
-records remain unchanged.
+qualification and publication evidence are recorded in
+`docs/compatibility.json` and its immutable v0.5.3 snapshot. Earlier release
+notes and records remain unchanged.
 
 ## Development
 
@@ -80,9 +80,9 @@ node scripts/demo-traffic-client.mjs mixed
 ### Running the gateway locally
 
 Run the Ferrum Edge image CI pins, by digest, so local results match CI. It is
-the published Ferrum Edge v0.9.14 release selected for the Foundry v0.5.3
-candidate; hosted pairing qualification is pending. Published v0.5.2, v0.5.1,
-v0.5.0 and v0.4.0 pairings remain in history.
+the published Ferrum Edge v0.9.14 release qualified with published Foundry
+v0.5.3. Published v0.5.2, v0.5.1, v0.5.0 and v0.4.0 pairings remain in
+history.
 `edge.image` in `docs/compatibility.json` is the single source: CI reads it
 (`node scripts/supported-pairing.mjs edge-image`), and
 `scripts/supported-pairing.test.mjs` fails if the starter, this command, or any

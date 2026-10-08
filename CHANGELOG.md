@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-10-08
+
+Foundry v0.5.3 was published at 10:07:37 UTC after hosted qualification against
+Ferrum Edge v0.9.14 and `contracts-edge-0.9.14`. Qualification run
+`37758405759`, attempt 1, binds source `e88b83416e7ca6f60bdaa79ccd028c29b1cf99ec`
+to tested merge `885934d6bdb01f89d380d4d1010cc4e7627d20d0`. Release PR #560
+merged as `74a7be374f5c6fcf1284737907e43d8808bb95c6`, preserving reviewed head
+`0430caaa8a97f729cffa065d63c5fcaf54c7ff4d` as its second parent. Release run
+`37760444063` succeeded and GitHub release `406687099` was published. The
+release image index and platform digests are in the
+[immutable record](docs/release-notes/v0.5.3.compatibility.json).
+
 ### Added
 
 - Show the data-plane backend egress attestation that Edge v0.9.14 adds to a
@@ -21,12 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Prepare the unreleased Foundry v0.5.3 candidate with published Ferrum Edge
-  v0.9.14 source, image, platform manifests, binary hashes and raw OpenAPI
-  identity. Starter and development commands use the same digest, whose
-  gateway and CNI binaries match the release assets on both architectures.
-  Hosted qualification and Foundry publication remain pending; v0.5.2, v0.5.1,
-  v0.5.0 and v0.4.0 release records are immutable.
+- Pair published Foundry v0.5.3 with published Ferrum Edge v0.9.14 and
+  `contracts-edge-0.9.14`. The starter defaults to the released Foundry image
+  digest; qualification and publication evidence is recorded in the immutable
+  compatibility snapshot. Earlier release records remain immutable.
 - Re-vendor the same 18 scoped files from published `contracts-edge-0.9.14` at
   `ddbdd845733b7046c4393ac951011dafb774db33`. Only the two vocabularies'
   Edge provenance and OpenAPI digest and the complete canonical invalid
@@ -618,7 +628,8 @@ First public release of Ferrum Foundry.
 - Release channels are monotonic: tags are validated and ancestry-checked before registry access, prereleases never advance stable tags, and promotion runs through a fail-closed FIFO queue (#155).
 - Scheduled live branch deletion replaced with dry-run planning plus a separately approved, exact-SHA-revalidated deletion path (#155).
 
-[Unreleased]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.5.3...HEAD
+[0.5.3]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.4.0...release/foundry-0.5.0
