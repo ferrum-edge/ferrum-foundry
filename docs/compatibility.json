@@ -11,11 +11,11 @@
     "platforms": ["linux/amd64", "linux/arm64"]
   },
   "qualification": {
-    "status": "pending",
-    "ci_evidence": null,
-    "source_commit": null,
-    "tested_commit": null,
-    "run_attempt": null
+    "status": "qualified",
+    "ci_evidence": "https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37758405759",
+    "source_commit": "e88b83416e7ca6f60bdaa79ccd028c29b1cf99ec",
+    "tested_commit": "885934d6bdb01f89d380d4d1010cc4e7627d20d0",
+    "run_attempt": 1
   },
   "edge": {
     "image": "ferrumedge/ferrum-edge@sha256:15442f1b1d1758023fe871fe57be50f19caf34bbe6c499a6812f4ffd0da5e3f8",
