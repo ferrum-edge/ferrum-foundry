@@ -144,9 +144,19 @@ describe("the supported pairing record", () => {
     assert.match(semantics, /#409/);
   });
 
-  it("records the Foundry candidate preparation against the verified Edge distribution", () => {
+  it("records the Foundry release against the verified Edge distribution", () => {
     assert.equal(record.foundry.version, "0.5.4");
     assert.equal(record.foundry.previous_release, "v0.5.3");
+    assert.equal(record.status, "released");
+    assert.equal(record.foundry.source_commit, "0a855ddeef1e4a998a60a2e0c61e71510365b70e");
+    assert.equal(
+      record.foundry.image,
+      "ferrumedge/ferrum-foundry@sha256:645061444dc4d824aa256796e3891618e9f8446e7b3eb95c184a3147209975e1",
+    );
+    assert.equal(
+      record.foundry.ci_evidence,
+      "https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37781284653",
+    );
     const pkg = JSON.parse(repoFile("package.json"));
     const lock = JSON.parse(repoFile("package-lock.json"));
     // The release workflow requires the tag, package.json, and the record to agree.
@@ -187,6 +197,7 @@ describe("the supported pairing record", () => {
       ["0.5.1", "ec09719c04ec65c39279674a85abbfa24b3788544e61a1c51f0a5ecf7ea8a70f"],
       ["0.5.2", "dae44af942b989245ae642c86a9044fdb5b263317c30b283b1a50988d90c5cbf"],
       ["0.5.3", "8e57ea00308afa3aedd04aafcf6e63e7601c7cb1837b7b5787c65cb4a7fd15d4"],
+      ["0.5.4", "f69fa7e84ad1f2e89f3a73d64629e87e4bab64de9f7c8f1758941ef461c16647"],
     ]) {
       const bytes = repoFile(`docs/release-notes/v${version}.compatibility.json`);
       assert.equal(createHash("sha256").update(bytes).digest("hex"), digest);
@@ -212,6 +223,18 @@ describe("the supported pairing record", () => {
     );
     assert.equal(published.edge.release.version, record.edge.release.version);
     assert.equal(published.edge.image, record.edge.image);
+    const currentRelease = JSON.parse(repoFile("docs/release-notes/v0.5.4.compatibility.json"));
+    assert.equal(currentRelease.status, "released");
+    assert.equal(currentRelease.foundry.source_commit, record.foundry.source_commit);
+    assert.equal(currentRelease.foundry.image, record.foundry.image);
+    assert.equal(currentRelease.qualification.ci_evidence, record.qualification.ci_evidence);
+    assert.ok(
+      currentRelease.edge.release.requirements.some(
+        (requirement) =>
+          requirement.includes("with every job green:") && requirement.includes("Deployment Starter"),
+      ),
+      "the immutable qualification evidence names the green Deployment Starter job",
+    );
     assert.notDeepEqual(record.qualification, published.qualification);
     if (record.qualification.status === "qualified") {
       for (const field of ["ci_evidence", "source_commit", "tested_commit"]) {

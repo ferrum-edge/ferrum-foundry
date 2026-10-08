@@ -17,11 +17,10 @@ change for namespace-scoped sessions is breaking; see Upgrading in the
 
 ### Changed
 
-- Prepare the Foundry v0.5.4 candidate on the unchanged Edge v0.9.14 pairing.
-  Package and lockfile root versions are 0.5.4, and the compatibility record is
-  a candidate whose hosted qualification and publication are pending. The
-  starter keeps the published v0.5.3 image digest until v0.5.4 is published;
-  v0.5.3 and earlier release records are immutable.
+- Pair published Foundry v0.5.4 with published Ferrum Edge v0.9.14 and
+  `contracts-edge-0.9.14`. The starter defaults to the released Foundry image
+  digest; qualification and publication evidence is recorded in the immutable
+  compatibility snapshot. Earlier release records remain immutable.
 
 ### Security
 

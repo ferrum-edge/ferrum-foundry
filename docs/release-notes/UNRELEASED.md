@@ -1,10 +1,9 @@
 # Ferrum Foundry — next release (draft)
 
-> **Draft notes.** The unreleased v0.5.4 candidate is documented in
-> [v0.5.4.md](v0.5.4.md) and the `[0.5.4]` changelog section. Hosted
-> qualification and Foundry publication are pending. The latest published
-> pairing remains v0.5.3 / Edge v0.9.14 in its
-> [immutable release record](v0.5.3.compatibility.json).
+> **Draft notes.** Foundry v0.5.4 was published; its versioned notes are
+> [v0.5.4.md](v0.5.4.md), and its qualification and publication evidence are
+> in [the immutable release record](v0.5.4.compatibility.json). The latest
+> published pairing is v0.5.4 / Edge v0.9.14.
 > The release workflow requires matching package/compatibility versions,
 > versioned notes and hosted `release-ready` verification.
 >
@@ -13,17 +12,16 @@
 
 ### Changes since v0.5.4
 
-No changes beyond the prepared v0.5.4 candidate are recorded yet. Summarize
+No changes since the published v0.5.4 release are recorded yet. Summarize
 future work from `[Unreleased]` here when preparing the next versioned notes.
 
 ### Known limitations
 
 Retain the documented support/security limits and pending owner decisions.
 Published upstream facts, canonical consumption, hosted Foundry qualification
-and Foundry publication are separate evidence.
+and Foundry publication remain separate evidence.
 
 ### Publication
 
-No subsequent Foundry version or qualification is claimed. Root owns review
-and hosted CI for the v0.5.4 candidate and any future release. See
+No subsequent Foundry version or qualification is claimed. See
 [compatibility](../compatibility.md).

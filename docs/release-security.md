@@ -34,8 +34,8 @@ Passing these gates qualifies Foundry with that one Ferrum Edge image and no
 other build. Published Foundry v0.5.3 pairs with Edge v0.9.14 and
 `contracts-edge-0.9.14`; its hosted pairing qualification and publication are
 preserved in [its immutable record](release-notes/v0.5.3.compatibility.json).
-The Foundry v0.5.4 candidate keeps the same Edge and contract pins; its own
-qualification and publication are pending in
+Published Foundry v0.5.4 keeps the same Edge and contract pins; its hosted
+qualification and publication are recorded in
 [the compatibility record](compatibility.md#qualification-evidence).
 Published v0.5.2 / Edge v0.9.13, v0.5.1 / Edge v0.9.12, v0.5.0 / Edge v0.9.11
 and v0.4.0 / Edge v0.9.10 pairings remain immutable in
@@ -71,17 +71,17 @@ Every third-party GitHub Action is pinned to a full commit SHA.
 
 ## Publishing
 
-For v0.5.3, release PR #560 merged as protected commit
-`74a7be374f5c6fcf1284737907e43d8808bb95c6`, whose second parent was
-`0430caaa8a97f729cffa065d63c5fcaf54c7ff4d`. Qualification run `37758405759`,
-attempt 1, binds source `e88b83416e7ca6f60bdaa79ccd028c29b1cf99ec` to tested
-merge `885934d6bdb01f89d380d4d1010cc4e7627d20d0`. Release run `37760444063`
-succeeded; GitHub release `406687099` was published at 2026-10-08 10:07:37 UTC.
+For v0.5.4, release PR #563 merged as protected commit
+`0a855ddeef1e4a998a60a2e0c61e71510365b70e`, whose second parent was
+`08562007f526828a5c12c14ae6ee5858703ded1c`. Qualification run `37775840732`,
+attempt 1, binds source `9407c05dce79c9752d9ae3621c1f2f3caf467a35` to tested
+merge `c2e2aa642c961fd6bff184f0fb8a90214c746c17`. Release run `37781284653`
+succeeded; GitHub release `406851205` was published at 2026-10-08 13:19:12 UTC.
 The immutable release record contains the tag source, final multi-architecture
 image index, platform digests and CI evidence. The supplied publication evidence
 does not establish anonymous GHCR access, independent cryptographic attestation
 verification or account-level registry immutability. See the
-[v0.5.3 record](release-notes/v0.5.3.compatibility.json) and
+[v0.5.4 record](release-notes/v0.5.4.compatibility.json) and
 [compatibility record](compatibility.md). Earlier release notes and records
 remain unchanged.
 
