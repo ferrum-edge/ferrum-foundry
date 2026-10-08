@@ -42,8 +42,8 @@ export interface SchemaProvenance {
 export const PLUGIN_SCHEMA_SPEC = {
   repository: "ferrum-edge/ferrum-edge",
   path: "openapi.yaml",
-  /** Released source reviewed from the hosted schema producer export. */
-  ref: "9b83115de7ec23ab51ec4feae6bed65e596db425",
+  /** Released source the descriptors were last re-read against (Edge v0.9.15). */
+  ref: "25b37395ff61bfea0f3ffd189d9011c4984fa755",
   /** `info.version` at that revision. */
   version: "0.2.0",
 } as const;
@@ -55,7 +55,7 @@ export const PLUGIN_SCHEMA_PROVENANCE: readonly SchemaProvenance[] = [
   },
   {
     component: "RateLimitingConfig",
-    sha256: "f6f4c095e2c9f326ba62d87094fb9e8ac3833bba9503476cf01daca1ebc6e4a1",
+    sha256: "fc6778eda49ab4999909b430a6c90a8abf38b43f8ddf0bfa1e894c5208033037",
   },
   {
     component: "RateLimitingRuleConfig",
@@ -327,6 +327,16 @@ const RATE_LIMITING: PluginGuidedSchema = {
             { value: "consumer", label: "Identified consumer" },
             { value: "spiffe_identity", label: "SPIFFE identity" },
           ],
+        },
+        {
+          key: "ipv6_prefix",
+          label: "IPv6 prefix length",
+          kind: "integer",
+          description:
+            "IPv6 prefix length used to group source addresses for IP rate-limit keys. IPv4 addresses remain host-specific.",
+          minimum: 1,
+          maximum: 128,
+          omissionMeans: "64",
         },
         {
           key: "expose_headers",

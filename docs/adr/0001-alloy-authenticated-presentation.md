@@ -61,7 +61,7 @@ redacted metadata and are never read. No manifest URL or OpenAPI file is loaded.
 There is no telemetry ingestion, report importer, diagnostic lookup, trace
 query, persistent plan or automatic gateway application in this implementation.
 
-The published `contracts-edge-0.9.14` metadata marks the shared manifest and
+The published `contracts-edge-0.9.15` metadata marks the shared manifest and
 diagnostic report EXISTING/implemented after root's accepted owner/consumer
 qualification. Foundry adopts the exact manifest schema and fixtures, with
 owner-unreleased availability and historical descriptions retained. Alloy crate

@@ -51,7 +51,7 @@ export const OPERATOR_INPUT_REJECTIONS = {
   },
   ai_stream_router: {
     status: 400,
-    error: 'Invalid plugin config: ai_stream_router: provider "openai-streaming" missing `api_key`',
+    error: 'Invalid plugin config: ai_stream_router: provider "openai-streaming" `api_key` references a `FERRUM_PLUGIN_SECRET_<NAME>` env variable that is not set',
   },
   load_testing: {
     status: 400,
@@ -59,7 +59,7 @@ export const OPERATOR_INPUT_REJECTIONS = {
   },
   proxy_alerts: {
     status: 400,
-    error: 'Invalid plugin config: proxy_alerts: channel "ops_slack": env var "FERRUM_ALERTS_SLACK_WEBHOOK" (referenced by `webhook_url_env`) is not set',
+    error: 'Invalid plugin config: proxy_alerts: channel "ops_slack": env var "FERRUM_PLUGIN_SECRET_ALERTS_SLACK_WEBHOOK" (referenced by `webhook_url_env`) is not set',
   },
   kafka_logging: {
     status: 400,

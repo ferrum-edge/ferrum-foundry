@@ -1,11 +1,11 @@
-tag=contracts-edge-0.9.14
-commit=ddbdd845733b7046c4393ac951011dafb774db33
-sha256  a21a3de12f02dd7e9440110582049672cc56ac5357efa13dc2194ad3a985b408  vocabularies/plugin-catalog.json
-sha256  620e2a9eaf4a1f116124d5b057aa0cd7a0e34b3b36a0b4175c8546b954a07227  vocabularies/provisioned-by.json
+tag=contracts-edge-0.9.15
+commit=6fb64c5dc2e014204c17609fc717d976f3b4589e
+sha256  1f8cd895b17fcba5a29ad3de15746d508a36feef25b90f6004cb732cf570e110  vocabularies/plugin-catalog.json
+sha256  213e8ae60ba1a97dbdb34ef859af01082459ce1300cd7ccc62861760647b45ba  vocabularies/provisioned-by.json
 sha256  3d086aec773345df3547adf6e026ad466168b27bf98163614d44171b7862b5dc  schemas/service-manifest/v1.schema.json
 sha256  d1d59bc2b70121e665eaef2997812aff772c20b8f3efa01de09481dde41c8a3a  schemas/vocabulary-plugin-catalog/v1.schema.json
 sha256  c5d08f3d52acda8223dee5f054ac5da4978bdda98ddada30a892da30b53f6aef  schemas/vocabulary-provisioned-by/v1.schema.json
-sha256  6ada3d48b250fc100a83067d8ee0441d3cd07de632f958ce87ce31111d8b1c7e  fixtures/invalid-expectations.json
+sha256  841c930817a77d017ebef11633a77fe7d961b6ab057a53ef95d41aed1f127b69  fixtures/invalid-expectations.json
 sha256  db87d1f238f6f81e258dfcc2c7ff400f34c807866fd4cd354258386622130316  fixtures/service-manifest/invalid/agents-bad-namespace.json
 sha256  112341075e1e64ad0e1c4e652ec78de2eebae3c50303f7d81a1a931309c668c5  fixtures/service-manifest/invalid/agents-enabled-not-boolean.json
 sha256  07ce370e9fbc5a4f8f704773bda051843704d7be1c8f3a0f92413b9cf2154068  fixtures/service-manifest/invalid/agents-unknown-key.json

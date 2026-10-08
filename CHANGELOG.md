@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Model `rate_limiting`'s `ipv6_prefix` (1–128, default 64), new in Edge
+  v0.9.15 (ferrum-edge#6079), in the guided rate-limiting editor. It is written
+  only when set. The `RateLimitingConfig` schema digest and
+  `PLUGIN_SCHEMA_SPEC.ref` move to the reviewed v0.9.15 source; the other four
+  guided components are byte-identical.
+- State Edge v0.9.15's namespace-scoped operator rule for backend TLS
+  references in the proxy and upstream Backend TLS sections: where namespace
+  claims are enforced, an operator may set only inline PEM, `system://` or a
+  `k8s://` Secret in the namespace (ferrum-edge#6094). Edge's `400` is shown as
+  returned.
+
+### Changed
+
+- Prepare the unreleased Foundry v0.5.5 candidate with published Ferrum Edge
+  v0.9.15 source, image, platform manifests, binary hashes and raw OpenAPI
+  identity. Starter and development commands use the same digest, whose
+  gateway and CNI binaries match the release assets on both architectures.
+  Hosted qualification and Foundry publication remain pending; v0.5.4 and
+  earlier release records are immutable.
+- Re-vendor the same 18 scoped files from published `contracts-edge-0.9.15` at
+  `6fb64c5dc2e014204c17609fc717d976f3b4589e`. Only the two vocabularies' Edge
+  provenance, OpenAPI digest and a catalog note on the v0.9.15 config-schema
+  changes, and the complete canonical invalid expectations, change; the latter
+  adds a diagnostic-ref and a gateway-headers negative without Foundry adopting
+  those schemas. All 82 plugin entries, provisioning values, manifest schema
+  and fixtures are unchanged. Sensitivity provenance moves to the v0.9.15
+  source after source equality review.
+- Point the `ai_semantic_firewall`, `ai_stream_router`, `api_chargeback_sink`
+  and `proxy_alerts` templates at `FERRUM_PLUGIN_SECRET_<NAME>` variables, the
+  only plugin-config environment references Edge v0.9.15 admits
+  (ferrum-edge#6089), and expect Edge's new unset-variable refusals in the
+  plugin-defaults contract.
+
+### Security
+
+- Pair with Ferrum Edge v0.9.15, which fixes 26 published Ferrum Edge security
+  advisories. Operators should upgrade Edge; see Upgrading in the
+  [v0.5.5 notes](docs/release-notes/v0.5.5.md).
+
 ## [0.5.4] - 2026-10-08
 
 Security and fix patch release against the same published Ferrum Edge v0.9.14

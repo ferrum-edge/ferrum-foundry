@@ -17,28 +17,30 @@ switches clear the draft and result and abort an outstanding preview.
 ## Contract and provenance
 
 The canonical pin is `contracts/ferrum-contracts/PIN`: immutable tag
-[`contracts-edge-0.9.14`](https://github.com/ferrum-edge/ferrum-contracts/tree/ddbdd845733b7046c4393ac951011dafb774db33)
-at `ddbdd845733b7046c4393ac951011dafb774db33`, published as
-[release 406650065](https://github.com/ferrum-edge/ferrum-contracts/releases/tag/contracts-edge-0.9.14)
-on 2026-10-08 at 09:22:24 UTC. The adopted files are the existing
+[`contracts-edge-0.9.15`](https://github.com/ferrum-edge/ferrum-contracts/tree/6fb64c5dc2e014204c17609fc717d976f3b4589e)
+at `6fb64c5dc2e014204c17609fc717d976f3b4589e`, published as
+[release 407246047](https://github.com/ferrum-edge/ferrum-contracts/releases/tag/contracts-edge-0.9.15)
+on 2026-10-08 at 20:42:07 UTC. The adopted files are the existing
 plugin/provisioning vocabularies and schemas, plus the service-manifest schema
 and every shared valid/invalid manifest fixture, including agents, plus the
 canonical invalid-expectations file. Each exact published file has a SHA-256 in
-the same pin. Vocabulary provenance now binds released Edge v0.9.14 at 9bd4d5f9;
+the same pin. Vocabulary provenance now binds released Edge v0.9.15 at 25b37395,
+and the plugin catalog adds a note on the v0.9.15 config-schema changes;
 plugin entries, lifecycle metadata, provisioning values and first availability
 are unchanged. Both vocabulary schemas and all 12 manifest fixtures retain
 their earlier bytes. The manifest validation fields are unchanged, with current
 owner/status metadata and full published descriptions retained verbatim.
 Historical preparation/pending wording inside immutable canonical files records
 their source state before publication; the tag and release above establish the
-actual publication after successful main Validate contracts run 37755967635.
+actual publication after successful main Validate contracts run 37841329610.
 The same 18-file scope retains complete canonical invalid expectations,
 including the versioned deployment-snapshot and backend-egress-policy entries
-and the v0.9.14 data-plane attestation negatives; it does not vendor those
-schemas or adopt that runtime profile. Foundry v0.5.3 passed hosted
-qualification with this scope. The v0.5.4 candidate keeps it, and its own
-qualification is pending in the [compatibility record](compatibility.md);
-v0.5.3 and earlier evidence is historical.
+and the v0.9.14 data-plane attestation negatives, plus the v0.9.15
+diagnostic-ref route-protocol-admission and gateway-headers availability
+negatives; it does not vendor those schemas or adopt that runtime profile.
+Foundry v0.5.5 hosted qualification is pending in the
+[compatibility record](compatibility.md); v0.5.4 and earlier evidence is
+historical.
 
 The independently reviewed producer is Alloy commit
 [`690aed7a9fa8458aeea4ac8416170c8daeb0470b`](https://github.com/ferrum-edge/ferrum-alloy/tree/690aed7a9fa8458aeea4ac8416170c8daeb0470b).

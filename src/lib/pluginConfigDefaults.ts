@@ -386,7 +386,7 @@ export const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
       type: "openai_compatible_embeddings",
       endpoint: "https://api.openai.com/v1/embeddings",
       model: "text-embedding-3-small",
-      api_key_env: "OPENAI_API_KEY",
+      api_key_env: "FERRUM_PLUGIN_SECRET_OPENAI_API_KEY",
       request_timeout_ms: 5000,
     },
     builtins: {
@@ -413,14 +413,14 @@ export const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
         name: "openai-streaming",
         provider_type: "openai",
         endpoint: "https://api.openai.com/v1/chat/completions",
-        api_key: "${OPENAI_API_KEY}",
+        api_key: "${FERRUM_PLUGIN_SECRET_OPENAI_API_KEY}",
         model_patterns: ["gpt-*", "o*"],
       },
       {
         name: "anthropic-streaming",
         provider_type: "anthropic",
         endpoint: "https://api.anthropic.com/v1/messages",
-        api_key: "${ANTHROPIC_API_KEY}",
+        api_key: "${FERRUM_PLUGIN_SECRET_ANTHROPIC_API_KEY}",
         model_patterns: ["claude-*"],
         anthropic_version: "2023-06-01",
       },
@@ -509,7 +509,7 @@ export const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
       database: "ferrum",
       table: "charges_raw",
       username: "ferrum",
-      password_ref: "FERRUM_CLICKHOUSE_PASSWORD",
+      password_ref: "FERRUM_PLUGIN_SECRET_CLICKHOUSE_PASSWORD",
     },
     batch: { size: 500, flush_interval_ms: 2000 },
     spool: { enabled: true, dir: "/var/lib/ferrum/chargeback-spool" },
@@ -884,7 +884,7 @@ export const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
     channels: {
       ops_slack: {
         type: "slack",
-        webhook_url_env: "FERRUM_ALERTS_SLACK_WEBHOOK",
+        webhook_url_env: "FERRUM_PLUGIN_SECRET_ALERTS_SLACK_WEBHOOK",
         channel_override: "#alerts-prod",
       },
     },
