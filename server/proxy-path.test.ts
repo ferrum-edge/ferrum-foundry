@@ -46,6 +46,11 @@ describe('canonical proxy targets', () => {
     ['GET', '/api/proxy/namespaces'],
     ['GET', '/api/proxy/namespaces/tenant-a'],
     ['GET', '/api/proxy/live'],
+    ['GET', '/api/proxy/health'],
+    ['GET', '/api/proxy/status'],
+    ['HEAD', '/api/proxy/health'],
+    ['GET', '/api/proxy/config/apply-status'],
+    ['HEAD', '/api/proxy/config/apply-status'],
   ])('allows Edge namespace-safe global route class %s %s', (method, url) => {
     const req = request(url, undefined, method);
     expect(proxyPathIsEdgeNamespaceSafeGlobal(req)).toBe(true);
@@ -63,9 +68,10 @@ describe('canonical proxy targets', () => {
     ['POST', '/api/proxy/mesh/egress-scope/test'],
     ['GET', '/api/proxy/node-waypoint/identities'],
     ['GET', '/api/proxy/mesh/runtime-overlay'],
-    ['GET', '/api/proxy/health'],
-    ['GET', '/api/proxy/status'],
     ['GET', '/api/proxy/overload'],
+    ['HEAD', '/api/proxy/overload'],
+    ['GET', '/api/proxy/health/'],
+    ['OPTIONS', '/api/proxy/proxies'],
     ['POST', '/api/proxy/mesh/config-revision/reset'],
     ['POST', '/api/proxy/backend-capabilities/refresh'],
     ['GET', '/api/proxy/a-new-admin-route'],
@@ -77,10 +83,36 @@ describe('canonical proxy targets', () => {
     ['POST', '/api/proxy/admin/tls/rotate/all'],
     ['DELETE', '/api/proxy/admin/tls/certificates/cert-1'],
     ['DELETE', '/api/proxy/admin/tls/acme/orders/order-1'],
+    ['POST', '/api/proxy/admin/tls/certificates'],
+    ['PUT', '/api/proxy/admin/tls/certificates/cert-1'],
+    ['PUT', '/api/proxy/admin/tls/ca-bundles/bundle-1'],
+    ['POST', '/api/proxy/admin/tls/jwks'],
+    ['PUT', '/api/proxy/admin/tls/ocsp-responses/ocsp-1'],
+    ['POST', '/api/proxy/admin/tls/acme/orders'],
+    ['POST', '/api/proxy/admin/tls/acme/orders/order-1/finalize'],
+    ['POST', '/api/proxy/admin/tls/acme/renew/cert-1'],
+    ['PUT', '/api/proxy/admin/tls/acme/certificates/cert-1'],
   ])('denies fleet TLS mutation %s %s to scoped principals while it stays fleet-global', (method, url) => {
     const req = request(url, undefined, method);
     expect(proxyPathIsFleetGlobal(req)).toBe(true);
     expect(proxyPathIsAllowedForNamespace(req)).toBe(false);
+  });
+
+  it.each([
+    ['GET', '/api/proxy/admin/tls/inventory'],
+    ['HEAD', '/api/proxy/admin/tls/certificates/cert-1'],
+    ['GET', '/api/proxy/admin/tls/acme/accounts'],
+    ['POST', '/api/proxy/admin/tls/validate'],
+  ])('allows fleet TLS read or validation %s %s to scoped principals', (method, url) => {
+    const req = request(url, undefined, method);
+    expect(proxyPathIsFleetGlobal(req)).toBe(true);
+    expect(proxyPathIsAllowedForNamespace(req)).toBe(true);
+  });
+
+  it('classifies HEAD like GET on namespace-scoped routes', () => {
+    expect(proxyPathIsAllowedForNamespace(request('/api/proxy/proxies/p1', undefined, 'HEAD'))).toBe(true);
+    expect(proxyPathIsAllowedForNamespace(request('/api/proxy/backup', undefined, 'HEAD'))).toBe(true);
+    expect(proxyPathIsEdgeNamespaceSafeGlobal(request('/api/proxy/proxies', undefined, 'HEAD'))).toBe(false);
   });
 
   const unsafe = [

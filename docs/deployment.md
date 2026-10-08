@@ -301,15 +301,20 @@ Things that are easy to get wrong:
   (`FERRUM_UPLOAD_TIMEOUT`, and `FERRUM_WRITE_TIMEOUT` for ordinary routes).
 - **Fleet-global surfaces are not namespace-scoped, and a scoped identity is
   bounded to namespace-scoped routes.** TLS inventory, managed TLS material,
-  ACME, validation, and the create/replace operations ignore namespace grants;
-  rotation and deletion are refused for a scoped identity, and the rest can be
-  blocked at the proxy. More broadly, a session with namespace grants may reach
-  only the gateway routes its namespace scopes. Fleet-wide observability
-  (`/health`, `/status`, `/overload`, `/cluster`, `/mesh/*`, `/charges`,
-  `/metrics`, `/backend-capabilities`), the audit log, and unknown routes are
-  refused with `403`, so such a session loses the Dashboard, Metrics, Health
-  detail, Cluster, Mesh, and Audit surfaces in the UI. Only an identity that
-  omits the namespace header (an unrestricted admin) sees them. The starter maps
+  ACME, rotation, and validation ignore namespace grants. A scoped identity may
+  read and validate fleet TLS material but may not create, replace, rotate,
+  renew, finalize, or delete it; block the reads at the proxy too if it must not
+  see them. More broadly, a session with namespace grants may reach only the
+  gateway routes its namespace scopes, plus a small fleet-wide ceiling.
+  `/health` and `/status` answer it with a summary (`status`, `timestamp`,
+  `mode`, `admin_writes_enabled`, `ready`) rather than the detailed view.
+  `/overload`, `/cluster`, `/mesh/*`, `/charges`, `/metrics`,
+  `/backend-capabilities`, and unknown routes are refused with `403`, so such a
+  session loses the Dashboard, Metrics, Cluster, and Mesh surfaces in the UI.
+  The audit log stays available for the session's own namespaces. Edge records
+  fleet-wide actions under its default `ferrum` namespace, so an identity
+  granted `ferrum` reads those rows. Only an identity that omits the namespaces
+  header (an unrestricted admin) sees the fleet-wide surfaces. The starter maps
   every group, `ferrum-admins` included, to a namespace, so every starter user
   is scoped; see [Authentication](authentication.md#namespace-route-ceiling).
 - **Cap in-flight API requests per client.** The starter allows 64 `/api/`

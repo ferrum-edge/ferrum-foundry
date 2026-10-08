@@ -84,11 +84,11 @@ describe("mobile sidebar keyboard behavior", () => {
     const links = [...document.querySelectorAll("#desktop-sidebar a")]
       .map((link) => link.textContent?.trim());
     expect(links).not.toContain("Dashboard");
-    expect(links).not.toContain("Audit Log");
     expect(links).not.toContain("Metrics");
     expect(links).not.toContain("Cluster");
     expect(links).not.toContain("Mesh");
     expect(links).toContain("Health");
+    expect(links).toContain("Audit Log");
     expect(links).toContain("TLS");
   });
 });

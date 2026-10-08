@@ -186,6 +186,9 @@ test.describe("namespace isolation", () => {
       times: 1,
     });
     await page.reload();
+    // The premise is that tenant A's read is in flight when the switch
+    // happens: wait until the proxy has taken it rather than racing it.
+    await faults.waitUntilTaken();
     await selectNamespace(page, NAMESPACE_B);
 
     // Tenant B does not hold this id. The page reaches that conclusion only
@@ -237,6 +240,9 @@ test.describe("namespace isolation", () => {
       times: 1,
     });
     await page.reload();
+    // The premise is that tenant A's read is in flight when the switch
+    // happens: wait until the proxy has taken it rather than racing it.
+    await faults.waitUntilTaken();
     await selectNamespace(page, NAMESPACE_B);
     await expect(page.getByLabel("Name", { exact: true })).toHaveValue(sharedName(NAMESPACE_B));
 

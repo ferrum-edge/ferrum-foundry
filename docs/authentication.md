@@ -121,49 +121,72 @@ See [Capabilities](capabilities.md) for the role and mode matrix.
 ### Namespace route ceiling
 
 A namespace grant scopes only the Ferrum routes that take
-`X-Ferrum-Namespace`. For a session with grants, Foundry refuses every other
-gateway route with `403 Namespace access denied`, before signing a JWT or
-contacting the gateway. Anything not explicitly allowed is denied, so a new
-Edge admin route is refused until Foundry classifies it. The classification is
-in `server/proxy-path.ts`.
+`X-Ferrum-Namespace`. For a session with grants, Foundry refuses every gateway
+route outside the classes below with `403 Namespace access denied`, before
+signing a JWT or contacting the gateway. Anything not explicitly allowed is
+denied, so a new Edge admin route is refused until Foundry classifies it. The
+classification is in `server/proxy-path.ts`.
 
 - **Allowed namespace-scoped routes** mirror Edge's
   `namespace_scoped_resource_kind`: the `proxies`, `upstreams`, `consumers`,
   `plugins/config`, `api-specs`, and `gateway-trust-bundles` resources; the
   `gateway-trust` status; `POST /batch`, `GET /backup`, and `POST /restore`;
   `GET /proxies/{id}/mcp/tools`; `GET /config/export`; `GET /audit`; and
-  `GET /backend-egress-policy`.
-- **Allowed fleet-wide routes** are Edge's viewer-key ceiling minus its
-  detailed observability views: `GET /plugins`, the `/namespaces` registry,
-  and `GET /live`.
-- **Refused fleet-wide routes** include `/health`, `/status`, and `/overload`.
-  Foundry signs with the primary key, which Edge treats as detail-authorized,
-  so a scoped principal would otherwise receive the full listeners, `dp_config`,
-  `cp_dp_trust`, and database-failover projection. `/cluster`, `/mesh/*`
+  `GET /backend-egress-policy`. Each must name one of the session's grants in
+  `X-Ferrum-Namespace`.
+- **Allowed fleet-wide routes** need no namespace header: `GET /plugins`, the
+  `/namespaces` registry (writes are confined to the session's grants by the
+  BFF), `GET /live`, `GET /health`, `GET /status`, and
+  `GET /config/apply-status`. Apply status is process-topology in Edge and
+  reveals only the apply cursor; the UI polls it without a header after a
+  fleet-wide write.
+- **Health summary.** Foundry signs with the primary key, which Edge treats as
+  detail-authorized, so `/health` and `/status` would otherwise carry the
+  listeners, `dp_config`, `cp_dp_trust`, database, and cached-config detail. For
+  a scoped session the BFF re-serializes the answer with only `status`,
+  `timestamp`, `mode`, `admin_writes_enabled`, and `ready`, which is what the
+  capability model reads. The upstream `Content-Length`, `ETag`,
+  `Last-Modified`, and range headers are dropped, and conditional and range
+  request headers are not forwarded. An unrestricted admin receives the full
+  view.
+- **Refused fleet-wide routes** include `/overload`, `/cluster`, `/mesh/*`
   (including `/mesh/egress-scope`), `/charges`, `/metrics`,
-  `/backend-capabilities`, the waypoint routes, and every unknown path are also
-  refused. `GET /config/apply-status` is deliberately permitted for a scoped
-  principal because the UI's post-mutation apply confirmation depends on it; it
-  is process-topology in Edge and reveals only a monotone apply cursor.
+  `/backend-capabilities`, the waypoint routes, every fleet TLS mutation (see
+  below), and every unknown path.
+- **HEAD** is classified like GET, because the BFF and Edge answer it the same
+  way. Every other method must be named by the route class.
 
 The credential-read denial and unsafe-path checks run before the ceiling, so
 `/consumers/{id}/verification` and `/deployment-snapshot` keep
 `403 FERRUM_BFF_CREDENTIAL_READ_DENIED` and an unsafe path keeps
 `400 FERRUM_BFF_UNSAFE_PATH`, whatever the namespace grants.
 
+#### Fleet-wide audit rows
+
+Edge records fleet-wide actions (TLS, the namespace registry, mesh) under its
+default `ferrum` namespace. `GET /audit` lists the rows of the namespace in
+`X-Ferrum-Namespace`, so a session granted `ferrum` reads those fleet-wide rows,
+including the actor subjects. Grant `ferrum` only to identities that may see
+fleet-wide audit.
+
 ### Fleet-global TLS routes
 
 Namespace grants apply to Ferrum operations that take `X-Ferrum-Namespace`.
 They do not make fleet-global APIs tenant-scoped. TLS inventory, managed TLS
-material, ACME, validation, and the create/replace operations are fleet-global,
-so Foundry sends no namespace header for them and labels the surface as
-fleet-global. A scoped principal may read fleet TLS material, but rotation and
-deletion are refused by the namespace route ceiling above; block the remaining
-routes at the identity proxy if a scoped identity must not reach them at all.
+material, ACME, rotation, and validation are fleet-global, so Foundry sends no
+namespace header for them and labels the surface as fleet-global.
+
+A scoped principal may read and validate fleet TLS material, but may not
+create, replace, rotate, renew, finalize, or delete it: every `POST`, `PUT`, or
+`DELETE` under `/admin/tls/` except the stateless `POST /admin/tls/validate` is
+refused by the namespace route ceiling. Those operations change material that
+every tenant's routes and plugins may reference. Only an unrestricted admin, an
+identity with no namespace grants, can perform them. Block the TLS reads at the
+identity proxy too if a scoped identity must not see fleet TLS metadata.
 
 Only the TLS paths and methods listed in `server/proxy-path.ts`
 (`FLEET_GLOBAL_ROUTES`) are fleet-global. A new Edge TLS operation must be added
-to that list; `FLEET_GLOBAL_SCOPED_DENIED_ROUTES` names the methods withheld
+to that list; `FLEET_GLOBAL_SCOPED_DENIED_ROUTES` withholds every TLS mutation
 from scoped principals.
 
 ### Proxy path validation

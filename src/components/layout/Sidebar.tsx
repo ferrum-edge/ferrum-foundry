@@ -62,12 +62,14 @@ export function Sidebar({ open, onClose, triggerRef }: SidebarProps) {
   const currentPath = routerState.location.pathname;
   const { principal } = useAuth();
   const namespaceScoped = principal?.namespaces !== undefined;
+  // The BFF refuses these fleet-wide surfaces to a namespace-scoped session.
+  // The audit log and health summary stay: both answer for a scoped session.
   const visibleSections = namespaceScoped
     ? navSections
         .map((section) => ({
           ...section,
           items: section.items.filter((item) =>
-            !["/", "/audit", "/metrics", "/cluster", "/mesh"].includes(item.to)),
+            !["/", "/metrics", "/cluster", "/mesh"].includes(item.to)),
         }))
         .filter((section) => section.items.length > 0)
     : navSections;
