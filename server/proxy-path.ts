@@ -21,33 +21,48 @@ const FLEET_GLOBAL_ROUTES: ReadonlyArray<readonly [string, RegExp]> = [
 ];
 
 // Namespace-scoped principals may use the explicitly known resource route
-// classes below. Edge's namespace claim does not scope its other admin routes,
-// so anything not classified here or in the global ceiling is denied.
+// classes below, mirroring Edge's `namespace_scoped_resource_kind`. Edge does
+// not apply the namespace claim to its other admin routes, so anything not
+// classified here or in the global ceiling is denied by default. `POST /batch`,
+// `GET /backup`, and `POST /restore` take their namespace from the header.
 const NAMESPACE_SCOPED_ROUTES: ReadonlyArray<readonly [string, RegExp]> = [
   [
     'GET|POST',
-    /^\/(proxies|upstreams|consumers|plugins\/config|api-specs|gateway-trust-bundles)$/,
+    /^\/(proxies|upstreams|consumers|plugins\/config|api-specs|gateway-trust-bundles)\/?$/,
   ],
   [
     'GET|PUT|DELETE',
-    /^\/(proxies|upstreams|consumers|plugins\/config|api-specs|gateway-trust-bundles)\/[^/]+$/,
+    /^\/(proxies|upstreams|consumers|plugins\/config|api-specs|gateway-trust-bundles)\/[^/]+\/?$/,
   ],
-  ['POST|PUT|DELETE', /^\/consumers\/[^/]+\/credentials\/[^/]+(?:\/[^/]+)?$/],
-  ['GET', /^\/api-specs\/by-proxy\/[^/]+$/],
-  ['GET', /^\/gateway-trust\/status$/],
-  ['GET', /^\/mesh\/egress-scope$/],
-  ['POST', /^\/mesh\/egress-scope\/test$/],
-  ['POST', /^\/(batch|restore)$/],
-  ['GET', /^\/backup$/],
+  ['POST|PUT|DELETE', /^\/consumers\/[^/]+\/credentials\/[^/]+(?:\/[^/]+)?\/?$/],
+  ['GET', /^\/api-specs\/by-proxy\/[^/]+\/?$/],
+  ['GET', /^\/proxies\/[^/]+\/mcp\/tools\/?$/],
+  ['GET', /^\/gateway-trust\/status\/?$/],
+  ['GET', /^\/config\/(export|apply-status)\/?$/],
+  ['GET', /^\/audit\/?$/],
+  ['GET', /^\/backend-egress-policy\/?$/],
+  ['POST', /^\/(batch|restore)\/?$/],
+  ['GET', /^\/backup\/?$/],
 ];
 
 // Edge's own namespace ceiling permits only these fleet-wide route classes.
 // Keep methods and paths explicit so newly added admin routes default-deny.
+// Foundry is deliberately stricter than Edge here: the detailed `/health`,
+// `/status`, and `/overload` views are withheld from scoped principals because
+// Foundry signs with the primary key, which Edge treats as detail-authorized.
 const NAMESPACE_SAFE_GLOBAL_ROUTES: ReadonlyArray<readonly [string, RegExp]> = [
   ['GET', /^\/plugins$/],
   ['GET|POST', /^\/namespaces$/],
   ['GET|PUT|DELETE', /^\/namespaces\/[^/]+$/],
-  ['GET', /^\/(health|live|status|overload)$/],
+  ['GET', /^\/live$/],
+];
+
+// A namespace-scoped principal may read fleet TLS material but may not rotate
+// or delete it: those mutate fleet-wide state the namespace claim does not
+// scope. Edge's own ceiling denies `/admin/tls/*` to tenant-bounded callers.
+const FLEET_GLOBAL_SCOPED_DENIED_ROUTES: ReadonlyArray<readonly [string, RegExp]> = [
+  ['DELETE', /^\/admin\/tls\//],
+  ['POST', /^\/admin\/tls\/rotate\/[^/]+$/],
 ];
 
 export class UnsafeProxyPathError extends Error {
@@ -178,6 +193,7 @@ export function proxyPathIsAllowedForNamespace(request: FastifyRequest): boolean
     const path = proxyTargetPath(request);
     const routeAllowed = ([methods, pattern]: readonly [string, RegExp]) =>
       methods.split('|').includes(request.method) && pattern.test(path);
+    if (FLEET_GLOBAL_SCOPED_DENIED_ROUTES.some(routeAllowed)) return false;
     return FLEET_GLOBAL_ROUTES.some(routeAllowed)
       || NAMESPACE_SAFE_GLOBAL_ROUTES.some(routeAllowed)
       || NAMESPACE_SCOPED_ROUTES.some(routeAllowed);

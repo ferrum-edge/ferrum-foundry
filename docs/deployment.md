@@ -299,9 +299,19 @@ Things that are easy to get wrong:
   `proxy_request_buffering off`, keep `client_body_timeout` and
   `proxy_read_timeout` at or below Foundry's own budgets
   (`FERRUM_UPLOAD_TIMEOUT`, and `FERRUM_WRITE_TIMEOUT` for ordinary routes).
-- **Fleet-global surfaces are not namespace-scoped.** TLS inventory, managed
-  TLS material, ACME, rotation, and validation ignore namespace grants.
-  Restrict those routes at the proxy if a scoped identity must not reach them.
+- **Fleet-global surfaces are not namespace-scoped, and a scoped identity is
+  bounded to namespace-scoped routes.** TLS inventory, managed TLS material,
+  ACME, validation, and the create/replace operations ignore namespace grants;
+  rotation and deletion are refused for a scoped identity, and the rest can be
+  blocked at the proxy. More broadly, a session with namespace grants may reach
+  only the gateway routes its namespace scopes. Fleet-wide observability
+  (`/health`, `/status`, `/overload`, `/cluster`, `/mesh/*`, `/charges`,
+  `/metrics`, `/backend-capabilities`), the audit log, and unknown routes are
+  refused with `403`, so such a session loses the Dashboard, Metrics, Health
+  detail, Cluster, Mesh, and Audit surfaces in the UI. Only an identity that
+  omits the namespace header (an unrestricted admin) sees them. The starter maps
+  every group, `ferrum-admins` included, to a namespace, so every starter user
+  is scoped; see [Authentication](authentication.md#namespace-route-ceiling).
 - **Cap in-flight API requests per client.** The starter allows 64 `/api/`
   requests in flight per client address (`limit_conn foundry_api 64`, answered
   with `429`). nginx applies it before `auth_request`, so it is keyed on the

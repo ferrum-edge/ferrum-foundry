@@ -118,18 +118,53 @@ read-only, with the reason visible before anything is edited. This is a
 usability layer only; the BFF and Ferrum Edge remain the enforcement points.
 See [Capabilities](capabilities.md) for the role and mode matrix.
 
+### Namespace route ceiling
+
+A namespace grant scopes only the Ferrum routes that take
+`X-Ferrum-Namespace`. For a session with grants, Foundry refuses every other
+gateway route with `403 Namespace access denied`, before signing a JWT or
+contacting the gateway. Anything not explicitly allowed is denied, so a new
+Edge admin route is refused until Foundry classifies it. The classification is
+in `server/proxy-path.ts`.
+
+- **Allowed namespace-scoped routes** mirror Edge's
+  `namespace_scoped_resource_kind`: the `proxies`, `upstreams`, `consumers`,
+  `plugins/config`, `api-specs`, and `gateway-trust-bundles` resources; the
+  `gateway-trust` status; `POST /batch`, `GET /backup`, and `POST /restore`;
+  `GET /proxies/{id}/mcp/tools`; `GET /config/export`; `GET /audit`; and
+  `GET /backend-egress-policy`.
+- **Allowed fleet-wide routes** are Edge's viewer-key ceiling minus its
+  detailed observability views: `GET /plugins`, the `/namespaces` registry,
+  and `GET /live`.
+- **Refused fleet-wide routes** include `/health`, `/status`, and `/overload`.
+  Foundry signs with the primary key, which Edge treats as detail-authorized,
+  so a scoped principal would otherwise receive the full listeners, `dp_config`,
+  `cp_dp_trust`, and database-failover projection. `/cluster`, `/mesh/*`
+  (including `/mesh/egress-scope`), `/charges`, `/metrics`,
+  `/backend-capabilities`, the waypoint routes, and every unknown path are also
+  refused. `GET /config/apply-status` is deliberately permitted for a scoped
+  principal because the UI's post-mutation apply confirmation depends on it; it
+  is process-topology in Edge and reveals only a monotone apply cursor.
+
+The credential-read denial and unsafe-path checks run before the ceiling, so
+`/consumers/{id}/verification` and `/deployment-snapshot` keep
+`403 FERRUM_BFF_CREDENTIAL_READ_DENIED` and an unsafe path keeps
+`400 FERRUM_BFF_UNSAFE_PATH`, whatever the namespace grants.
+
 ### Fleet-global TLS routes
 
 Namespace grants apply to Ferrum operations that take `X-Ferrum-Namespace`.
 They do not make fleet-global APIs tenant-scoped. TLS inventory, managed TLS
-material, ACME, rotation, and validation are fleet-global, so Foundry sends no
-namespace header for them and labels the surface as fleet-global. Map roles
-with that blast radius in mind, and block these routes at the identity proxy
-if scoped identities must not use them.
+material, ACME, validation, and the create/replace operations are fleet-global,
+so Foundry sends no namespace header for them and labels the surface as
+fleet-global. A scoped principal may read fleet TLS material, but rotation and
+deletion are refused by the namespace route ceiling above; block the remaining
+routes at the identity proxy if a scoped identity must not reach them at all.
 
 Only the TLS paths and methods listed in `server/proxy-path.ts`
-(`FLEET_GLOBAL_ROUTES`) are exempt from the namespace check. A new Edge TLS
-operation must be added to that list.
+(`FLEET_GLOBAL_ROUTES`) are fleet-global. A new Edge TLS operation must be added
+to that list; `FLEET_GLOBAL_SCOPED_DENIED_ROUTES` names the methods withheld
+from scoped principals.
 
 ### Proxy path validation
 
@@ -150,11 +185,12 @@ upstream: encoded route components and identifiers, an optional trailing slash,
 and queries cannot bypass it. Unsafe paths still receive
 `400 FERRUM_BFF_UNSAFE_PATH`.
 
-Principal authentication, CSRF, and namespace authorization run first. The
-credential-read denial runs before capacity admission, JWT signing or upstream
-fetch, even for an authorized administrator. Foundry has no credential-complete
-consumer reader; ordinary masked consumer reads and the existing masked metadata
-write workflow remain supported. Intentional archival backup downloads are described in
+Principal authentication and CSRF run first, then the credential-read denial.
+The namespace route ceiling runs after it and before capacity admission, JWT
+signing or upstream fetch, even for an authorized administrator. Foundry has no
+credential-complete consumer reader; ordinary masked consumer reads and the
+existing masked metadata write workflow remain supported. Intentional archival
+backup downloads are described in
 [Backup export](concurrent-edits.md#backup-export).
 
 Edge v0.9.13 and v0.9.14 keep the snapshot secret-complete: its evidence

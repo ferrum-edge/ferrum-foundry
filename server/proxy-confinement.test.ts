@@ -241,7 +241,7 @@ describe('raw BFF path confinement', () => {
     15_000,
   );
 
-  it('preserves authentication, namespace, CSRF, and unsafe-path checks before denial', async () => {
+  it('preserves authentication, CSRF, credential-read, and unsafe-path checks before denial', async () => {
     const beforeArrivals = arrivals.length;
     const beforeTokens = vi.mocked(generateToken).mock.calls.length;
     const beforeFetches = vi.mocked(upstreamFetch).mock.calls.length;
@@ -254,9 +254,11 @@ describe('raw BFF path confinement', () => {
         expect(anonymous.status).toBe(401);
         expect(anonymous.wire).not.toContain('FERRUM_BFF_CREDENTIAL_READ_DENIED');
       }
+      // The credential-read denial runs before the namespace ceiling, so an
+      // ungranted namespace gets the same body a granted one would.
       const denied = await rawRequest(path, 'GET', identity('admin', 'tenant-b'));
       expect(denied.status).toBe(403);
-      expect(denied.wire).toContain('Namespace access denied');
+      expect(denied.wire).toContain('FERRUM_BFF_CREDENTIAL_READ_DENIED');
       const csrf = await rawRequest(
         path,
         'POST',
@@ -345,14 +347,11 @@ describe('raw BFF path confinement', () => {
     }
   });
 
-  it('forwards backups, masked exports, and unrelated snapshot text unchanged', async () => {
+  it('forwards backups and masked exports, and refuses unrelated routes at the namespace ceiling', async () => {
     for (const path of [
       '/backup?note=/deployment-snapshot',
       '/config/export?note=%2Fdeployment-snapshot',
       '/proxies/deployment-snapshot',
-      '/deployment-snapshot/extra',
-      '/deployment-snapshots',
-      '/admin/deployment-snapshot',
     ]) {
       const beforeArrivals = arrivals.length;
       const beforeTokens = vi.mocked(generateToken).mock.calls.length;
@@ -363,6 +362,19 @@ describe('raw BFF path confinement', () => {
       expect(arrivals.at(-1)).toMatchObject({ url: path, method: 'GET', namespace: 'tenant-a' });
       expect(vi.mocked(generateToken).mock.calls).toHaveLength(beforeTokens + 1);
       expect(vi.mocked(upstreamFetch).mock.calls).toHaveLength(beforeFetches + 1);
+    }
+    // Snapshot text in an unrelated path is not the credential-complete
+    // snapshot: it is refused only because the namespace ceiling does not know
+    // the route class, never with the credential-read denial.
+    for (const path of [
+      '/deployment-snapshot/extra',
+      '/deployment-snapshots',
+      '/admin/deployment-snapshot',
+    ]) {
+      const response = await rawRequest(`/api/proxy${path}`, 'GET', identity('admin'));
+      expect(response.status, path).toBe(403);
+      expect(response.wire).not.toContain('FERRUM_BFF_CREDENTIAL_READ_DENIED');
+      expect(response.wire).toContain('Namespace access denied');
     }
   });
 
@@ -523,11 +535,11 @@ describe('raw BFF path confinement', () => {
     expect(decodeJwt(arrivals.at(-1)!.token)).toMatchObject({ role: 'operator', ns: 'tenant-a' });
   });
 
-  it('exempts real fleet operations and refuses unsupported method/path combinations', async () => {
+  it('allows fleet TLS reads and non-destructive operations, and refuses fleet TLS rotate/delete to scoped principals', async () => {
     for (const [method, path] of [
       ['GET', '/admin/tls/inventory'], ['GET', '/admin/tls/certificates/cert-1'],
       ['GET', '/admin/tls/acme/orders/order-1'], ['POST', '/admin/tls/validate'],
-      ['POST', '/admin/tls/rotate/all'], ['POST', '/admin/tls/acme/orders/order-1/finalize'],
+      ['POST', '/admin/tls/acme/orders/order-1/finalize'],
     ]) {
       const headers = identity(method === 'GET' ? 'operator' : 'admin');
       delete headers['x-ferrum-namespace'];
@@ -536,6 +548,7 @@ describe('raw BFF path confinement', () => {
     }
     const before = arrivals.length;
     for (const [method, path] of [
+      ['POST', '/admin/tls/rotate/all'], ['DELETE', '/admin/tls/certificates/cert-1'],
       ['POST', '/admin/tls/inventory'], ['PUT', '/admin/tls/acme/orders/id'],
       ['GET', '/admin/tls/acme/orders/id/finalize'], ['GET', '/admin/tls/unknown'],
     ]) {

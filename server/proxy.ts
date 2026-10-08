@@ -2,7 +2,7 @@ import { Readable, Transform, type TransformCallback } from 'node:stream';
 import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { fetch, type RequestInit, type Response } from 'undici';
-import { requireAdminAuth } from './auth.js';
+import { requireAdminAuth, requireNamespaceCeiling } from './auth.js';
 import { loadConfig } from './config.js';
 import { gatewayTargetId, rejectStaleGatewayTarget, stampGatewayTarget } from './gateway-target.js';
 import { generateToken } from './jwt.js';
@@ -368,7 +368,16 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
   };
 
   fastify.all('/api/proxy/*', {
-    onRequest: [requireAdminAuth, requireSafeProxyPath, reserveUpload, reserveLongRead],
+    onRequest: [
+      requireAdminAuth,
+      // Unsafe paths and the credential-read denials must answer with their
+      // documented 400 / 403 codes before the namespace ceiling can refuse a
+      // scoped principal for a route it does not know.
+      requireSafeProxyPath,
+      requireNamespaceCeiling,
+      reserveUpload,
+      reserveLongRead,
+    ],
     bodyLimit: RESTORE_BODY_LIMIT,
   }, async (request, reply) => {
     const config = loadConfig();

@@ -17,6 +17,7 @@ const snapshot: Record<string, string | undefined> = {};
 
 let authPlugin: typeof import('./auth.js').authPlugin;
 let requireAdminAuth: typeof import('./auth.js').requireAdminAuth;
+let requireNamespaceCeiling: typeof import('./auth.js').requireNamespaceCeiling;
 let requireRole: typeof import('./auth.js').requireRole;
 
 beforeAll(async () => {
@@ -29,6 +30,7 @@ beforeAll(async () => {
   const auth = await import('./auth.js');
   authPlugin = auth.authPlugin;
   requireAdminAuth = auth.requireAdminAuth;
+  requireNamespaceCeiling = auth.requireNamespaceCeiling;
   requireRole = auth.requireRole;
 });
 
@@ -46,9 +48,11 @@ async function buildApp(): Promise<FastifyInstance> {
   await app.register(authPlugin);
   app.get('/protected', { onRequest: requireAdminAuth }, async (request) => request.authPrincipal);
   app.post('/protected', { onRequest: requireAdminAuth }, async () => ({ ok: true }));
-  app.get('/api/proxy/test', { onRequest: requireAdminAuth }, async () => ({ ok: true }));
-  app.get('/api/proxy/admin/tls/inventory', { onRequest: requireAdminAuth }, async () => ({ ok: true }));
-  app.get('/api/proxy/*', { onRequest: requireAdminAuth }, async () => ({ ok: true }));
+  const proxyAuth = [requireAdminAuth, requireNamespaceCeiling];
+  app.get('/api/proxy/test', { onRequest: proxyAuth }, async () => ({ ok: true }));
+  app.get('/api/proxy/admin/tls/inventory', { onRequest: proxyAuth }, async () => ({ ok: true }));
+  app.get('/api/proxy/*', { onRequest: proxyAuth }, async () => ({ ok: true }));
+  app.post('/api/proxy/*', { onRequest: proxyAuth }, async () => ({ ok: true }));
   app.get('/admin-only', { onRequest: requireRole('admin') }, async () => ({ ok: true }));
   return app;
 }
@@ -240,7 +244,7 @@ describe('trusted OIDC proxy authentication', () => {
       });
       const edgeGlobal = await app.inject({
         method: 'GET',
-        url: '/api/proxy/health',
+        url: '/api/proxy/live',
         headers: identityHeaders(),
       });
       expect(local.statusCode).toBe(200);
@@ -254,16 +258,25 @@ describe('trusted OIDC proxy authentication', () => {
   it('refuses fleet-wide admin route classes and unknown routes before proxying', async () => {
     const app = await buildApp();
     try {
+      // A trusted-proxy POST must present a valid double-submit CSRF token to
+      // reach the namespace ceiling rather than failing CSRF validation first.
+      const { csrfToken, cookieHeader } = await issueCsrf(app);
       for (const [method, path] of [
         ['GET', '/api/proxy/charges'],
         ['GET', '/api/proxy/admin/metrics'],
         ['GET', '/api/proxy/cluster'],
         ['GET', '/api/proxy/mesh/service-graph'],
+        ['GET', '/api/proxy/mesh/egress-scope'],
+        ['GET', '/api/proxy/health'],
         ['POST', '/api/proxy/mesh/config-revision/reset'],
         ['POST', '/api/proxy/backend-capabilities/refresh'],
         ['GET', '/api/proxy/new-admin-route'],
       ] as const) {
-        const response = await app.inject({ method, url: path, headers: identityHeaders() });
+        const response = await app.inject({
+          method,
+          url: path,
+          headers: identityHeaders({ cookie: cookieHeader, 'x-csrf-token': csrfToken }),
+        });
         expect(response.statusCode, `${method} ${path}`).toBe(403);
         expect(response.json()).toEqual({ error: 'Namespace access denied' });
       }

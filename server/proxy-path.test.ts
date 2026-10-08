@@ -26,11 +26,15 @@ describe('canonical proxy targets', () => {
     ['POST', '/api/proxy/upstreams'],
     ['GET', '/api/proxy/consumers/alice'],
     ['POST', '/api/proxy/consumers/alice/credentials/keyauth'],
+    ['DELETE', '/api/proxy/consumers/alice/credentials/keyauth/0'],
     ['PUT', '/api/proxy/plugins/config/config-1'],
     ['GET', '/api/proxy/api-specs/by-proxy/orders'],
+    ['GET', '/api/proxy/proxies/agents/mcp/tools'],
     ['GET', '/api/proxy/gateway-trust-bundles'],
-    ['GET', '/api/proxy/mesh/egress-scope'],
-    ['POST', '/api/proxy/mesh/egress-scope/test'],
+    ['GET', '/api/proxy/config/export'],
+    ['GET', '/api/proxy/config/apply-status'],
+    ['GET', '/api/proxy/audit'],
+    ['GET', '/api/proxy/backend-egress-policy'],
     ['POST', '/api/proxy/batch'],
     ['GET', '/api/proxy/backup'],
   ])('allows known namespace-scoped route class %s %s', (method, url) => {
@@ -41,10 +45,7 @@ describe('canonical proxy targets', () => {
     ['GET', '/api/proxy/plugins'],
     ['GET', '/api/proxy/namespaces'],
     ['GET', '/api/proxy/namespaces/tenant-a'],
-    ['GET', '/api/proxy/health'],
     ['GET', '/api/proxy/live'],
-    ['GET', '/api/proxy/status'],
-    ['GET', '/api/proxy/overload'],
   ])('allows Edge namespace-safe global route class %s %s', (method, url) => {
     const req = request(url, undefined, method);
     expect(proxyPathIsEdgeNamespaceSafeGlobal(req)).toBe(true);
@@ -58,13 +59,28 @@ describe('canonical proxy targets', () => {
     ['GET', '/api/proxy/cluster'],
     ['GET', '/api/proxy/mesh/service-graph'],
     ['GET', '/api/proxy/mesh/federation'],
+    ['GET', '/api/proxy/mesh/egress-scope'],
+    ['POST', '/api/proxy/mesh/egress-scope/test'],
     ['GET', '/api/proxy/node-waypoint/identities'],
     ['GET', '/api/proxy/mesh/runtime-overlay'],
+    ['GET', '/api/proxy/health'],
+    ['GET', '/api/proxy/status'],
+    ['GET', '/api/proxy/overload'],
     ['POST', '/api/proxy/mesh/config-revision/reset'],
     ['POST', '/api/proxy/backend-capabilities/refresh'],
     ['GET', '/api/proxy/a-new-admin-route'],
   ])('denies fleet-wide and unclassified route classes %s %s', (method, url) => {
     expect(proxyPathIsAllowedForNamespace(request(url, undefined, method))).toBe(false);
+  });
+
+  it.each([
+    ['POST', '/api/proxy/admin/tls/rotate/all'],
+    ['DELETE', '/api/proxy/admin/tls/certificates/cert-1'],
+    ['DELETE', '/api/proxy/admin/tls/acme/orders/order-1'],
+  ])('denies fleet TLS mutation %s %s to scoped principals while it stays fleet-global', (method, url) => {
+    const req = request(url, undefined, method);
+    expect(proxyPathIsFleetGlobal(req)).toBe(true);
+    expect(proxyPathIsAllowedForNamespace(req)).toBe(false);
   });
 
   const unsafe = [

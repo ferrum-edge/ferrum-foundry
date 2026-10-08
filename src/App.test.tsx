@@ -86,9 +86,9 @@ it("loads an authenticated deep link, navigates the shell, saves settings, and s
   await click("Toggle sidebar");
   const mobileSidebar = document.querySelector<HTMLElement>('[role="dialog"]');
   expect(mobileSidebar?.querySelectorAll("aside")).toHaveLength(1);
-  const meshLink = mobileSidebar!.querySelector<HTMLAnchorElement>('a[href="/mesh"]')!;
-  await act(async () => meshLink.click());
-  await settle(() => expect(ui.host.querySelector("h1")?.textContent).toBe("Mesh"));
+  const proxyLink = mobileSidebar!.querySelector<HTMLAnchorElement>('a[href="/proxies"]')!;
+  await act(async () => proxyLink.click());
+  await settle(() => expect(ui.host.querySelector("h1")?.textContent).toBe("Proxies"));
   expect(document.querySelector('[role="dialog"]')).toBeNull();
   await click("Switch to light theme");
   expect(document.documentElement.dataset.theme).toBe("light");

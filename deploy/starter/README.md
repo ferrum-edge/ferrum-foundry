@@ -135,10 +135,20 @@ or `unmapped`). It is for a first run and for CI. Do not expose it.
 
 - **Secrets.** Plain files are the simplest thing that works; a secret manager
   that renders the same files is better.
-- **Namespace grants.** `nginx/identity/policy.conf` ships one namespace. Use
-  exact names; Foundry expands no wildcards or prefixes.
+- **Namespace grants.** `nginx/identity/policy.conf` ships one namespace and
+  maps every group, including `ferrum-admins`, to it. Use exact names; Foundry
+  expands no wildcards or prefixes.
+- **Every starter identity is scoped.** Because each group is mapped to a
+  namespace, no starter user is an unrestricted admin. A scoped session may
+  reach only namespace-scoped routes, so it loses the Dashboard, Metrics,
+  Health detail, Cluster, Mesh, and Audit surfaces and cannot rotate or delete
+  fleet TLS material. To give one operator the fleet-wide surfaces, map that
+  identity to a role but omit its namespaces header; only an `admin` may be
+  global. See
+  [`docs/authentication.md`](../../docs/authentication.md#namespace-route-ceiling).
 - **Fleet-global surfaces.** Namespace grants do not scope TLS inventory,
-  managed TLS material, ACME, rotation, or validation. Restrict those routes at
+  managed TLS material, ACME, validation, or the create/replace operations.
+  Rotation and deletion are refused for a scoped identity; restrict the rest at
   the proxy if a scoped identity must not reach them.
 - **Gateway TLS.** The production profile assumes an `https://` admin API.
   Never set `FERRUM_TLS_VERIFY=false`.
