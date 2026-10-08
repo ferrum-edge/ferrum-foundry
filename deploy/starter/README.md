@@ -14,19 +14,20 @@ request.
 For a walkthrough that ends in an authenticated request through the data
 plane, see [`docs/getting-started.md`](../../docs/getting-started.md).
 
-**Published pairing.** The demo profile pins published Edge v0.9.13, qualified
-with published Foundry v0.5.2. The
-[v0.5.2 record](../../docs/release-notes/v0.5.2.compatibility.json) preserves
-the published source `ebd09e8d82f773b6840b1edda67fbac287c3f7a0`, original hosted
-[qualification run 37511649961](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37511649961)
-(source `bc7ca925`, tested merge `f9703947`), and actual
-[publication run 37514033958](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37514033958)
-(published 2026-10-06 at 18:55:40 UTC). The default Foundry image is pinned to
+**Candidate pairing.** The demo profile pins published Edge v0.9.14 for the
+Foundry v0.5.3 candidate. Hosted qualification and Foundry publication are
+pending in [`docs/compatibility.md`](../../docs/compatibility.md). Production
+must use a published pairing and its released Foundry digest. The latest is
+published Foundry v0.5.2 with Edge v0.9.13, preserved in the
+[v0.5.2 record](../../docs/release-notes/v0.5.2.compatibility.json) with its
+published source `ebd09e8d82f773b6840b1edda67fbac287c3f7a0` and
+[publication run 37514033958](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37514033958).
+The default Foundry image stays pinned to that release,
 `ferrumedge/ferrum-foundry@sha256:b1728fdc0694a195e2a21e7666ca09dd0cf9205c81041cc963b0e104750ce79a`;
 set `FOUNDRY_IMAGE` to another released digest when selecting a different
-pairing. Both profiles and authority tiers are unchanged. This release adopts
-published `contracts-edge-0.9.13` at
-`9626821eb089c71f5d4d71268c7b8276a8a5ab50`; its service-manifest schema and all
+pairing. Both profiles and authority tiers are unchanged. The candidate adopts
+published `contracts-edge-0.9.14` at
+`ddbdd845733b7046c4393ac951011dafb774db33`; its service-manifest schema and all
 manifest fixtures are unchanged from the prior pin. The native deployment
 profile is not adopted.
 

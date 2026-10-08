@@ -21,9 +21,9 @@ export const PLUGIN_SENSITIVITY_SOURCE = {
   repository: "ferrum-edge/ferrum-edge",
   path: "src/admin/plugin_config_projection.rs",
   /** The Edge source the table was last checked against. */
-  commit: "9b83115de7ec23ab51ec4feae6bed65e596db425",
+  commit: "9bd4d5f9caa4ebe8f0ea13e76d8a6e2172eaca7d",
   /** The Edge release at that commit. */
-  release: "v0.9.13",
+  release: "v0.9.14",
 } as const;
 
 /**

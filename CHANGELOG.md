@@ -7,16 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Show the data-plane backend egress attestation that Edge v0.9.14 adds to a
+  control plane's `GET /cluster` (ferrum-edge#6020). Each data plane row shows
+  its self-reported mode and public-only status, or that its policy is
+  unknown, and the control-plane card summarizes the reporting and unknown
+  counts, the weakest reported mode and whether every connected data plane is
+  public-only. The page says these are self-reports, not host attestation, and
+  that disconnected data planes serving cached configuration are not listed. A
+  response without the fields renders as before; Foundry still does not read
+  `GET /backend-egress-policy`.
+
 ### Changed
 
-- Name Ferrum Edge LLC as the copyright holder and commercial licensor in `LICENSE` (Required Notice, previously "Ferrum Foundry") and `LICENSE-COMMERCIAL.md`.
+- Prepare the unreleased Foundry v0.5.3 candidate with published Ferrum Edge
+  v0.9.14 source, image, platform manifests, binary hashes and raw OpenAPI
+  identity. Starter and development commands use the same digest, whose
+  gateway and CNI binaries match the release assets on both architectures.
+  Hosted qualification and Foundry publication remain pending; v0.5.2, v0.5.1,
+  v0.5.0 and v0.4.0 release records are immutable.
+- Re-vendor the same 18 scoped files from published `contracts-edge-0.9.14` at
+  `ddbdd845733b7046c4393ac951011dafb774db33`. Only the two vocabularies'
+  Edge provenance and OpenAPI digest and the complete canonical invalid
+  expectations change; the latter adds the backend-egress-policy data-plane
+  attestation negatives without Foundry adopting those schemas. All 82 plugin
+  entries, provisioning values, manifest schema and fixtures are unchanged.
+  Refresh sensitivity provenance after source equality review. All five guided
+  schema blocks are byte-identical at the new source, so every pinned hash is
+  unchanged; the reviewed schema ref stays at the v0.9.13 source.
+- Name Ferrum Edge LLC as the copyright holder and commercial licensor in `LICENSE` (Required Notice, previously "Ferrum Foundry") and `LICENSE-COMMERCIAL.md` (#559).
+
+### Fixed
+
+- Key the Cluster page's data-plane rows per Subscribe stream. Edge v0.9.14
+  lists one entry per live stream, so several can share a `node_id`; keying
+  rows by `node_id` alone could collapse them.
 
 ### Security
 
 - Pin the development-only transitive `shell-quote` dependency (pulled in by
   `concurrently`, which requires exactly 1.9.0) to 1.12.0 with an npm
   `overrides` entry, fixing GHSA-pqg4-j6r4-53mv (critical). No runtime
-  dependency changes.
+  dependency changes (#558).
+- Keep the browser-facing BFF refusal of Edge's `/deployment-snapshot` with
+  Edge v0.9.14, whose deployment mutations now separate
+  `durable: "not_started"` and `"not_committed"` from `"unknown"`
+  (ferrum-edge#6021). Foundry issues no deployment mutation.
 
 ## [0.5.2] - 2026-10-06
 

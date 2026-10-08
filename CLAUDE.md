@@ -37,11 +37,11 @@ a local copy would go stale.
 
 Shared org contracts are vendored under `contracts/ferrum-contracts/`; see
 [Contracts](README.md#contracts).
-Published Foundry v0.5.2 adopts `contracts-edge-0.9.13` at
-`9626821eb089c71f5d4d71268c7b8276a8a5ab50`. The shared manifest is implemented;
-hosted qualification and actual publication are recorded in
-`docs/compatibility.json` and its immutable v0.5.2 snapshot. Released v0.5.1,
-v0.5.0 and v0.4.0 notes and records remain unchanged.
+The Foundry v0.5.3 candidate adopts published `contracts-edge-0.9.14` at
+`ddbdd845733b7046c4393ac951011dafb774db33`. The shared manifest is implemented;
+candidate qualification and publication remain pending in
+`docs/compatibility.json`. Released v0.5.2, v0.5.1, v0.5.0 and v0.4.0 notes and
+records remain unchanged.
 
 ## Development
 
@@ -80,8 +80,9 @@ node scripts/demo-traffic-client.mjs mixed
 ### Running the gateway locally
 
 Run the Ferrum Edge image CI pins, by digest, so local results match CI. It is
-the published Ferrum Edge v0.9.13 release qualified with published Foundry
-v0.5.2. Published v0.5.1, v0.5.0 and v0.4.0 pairings remain in history.
+the published Ferrum Edge v0.9.14 release selected for the Foundry v0.5.3
+candidate; hosted pairing qualification is pending. Published v0.5.2, v0.5.1,
+v0.5.0 and v0.4.0 pairings remain in history.
 `edge.image` in `docs/compatibility.json` is the single source: CI reads it
 (`node scripts/supported-pairing.mjs edge-image`), and
 `scripts/supported-pairing.test.mjs` fails if the starter, this command, or any
@@ -100,7 +101,7 @@ docker run --rm -d --name ferrum-edge \
   -e FERRUM_ADMIN_BIND_ADDRESS=0.0.0.0 \
   -e FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true \
   -p 127.0.0.1:9000:9000 -p 127.0.0.1:8000:8000 \
-  ferrumedge/ferrum-edge@sha256:6caa0987adb4c0a3a368fcd800bb0459cff3d3e219522e2e9c56280205862e50 run -m database -v
+  ferrumedge/ferrum-edge@sha256:15442f1b1d1758023fe871fe57be50f19caf34bbe6c499a6812f4ffd0da5e3f8 run -m database -v
 ```
 
 The plaintext admin bind above is a local-development exception; Docker's port

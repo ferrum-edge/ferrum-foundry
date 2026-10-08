@@ -68,21 +68,21 @@ describe("the supported pairing record", () => {
     }
   });
 
-  it("pins the verified v0.9.13 distribution for hosted qualification", () => {
+  it("pins the verified v0.9.14 distribution for hosted qualification", () => {
     const image =
-      "ferrumedge/ferrum-edge@sha256:6caa0987adb4c0a3a368fcd800bb0459cff3d3e219522e2e9c56280205862e50";
-    const sourceCommit = "9b83115de7ec23ab51ec4feae6bed65e596db425";
+      "ferrumedge/ferrum-edge@sha256:15442f1b1d1758023fe871fe57be50f19caf34bbe6c499a6812f4ffd0da5e3f8";
+    const sourceCommit = "9bd4d5f9caa4ebe8f0ea13e76d8a6e2172eaca7d";
     const manifests = {
-      "linux/amd64": "sha256:03822d924b7919d07a840baf757d016f2f05c8df8a8d0455a2eebae917aae2cc",
-      "linux/arm64": "sha256:a628f8fc12c916793b96ba111c2bf4360ea84981b8bf766254b47c6140c02a80",
+      "linux/amd64": "sha256:12a8cd56090c0d4511bb3015b240e606b1b87989c644157566b8f6b6f635b3c2",
+      "linux/arm64": "sha256:19d2886ed8c192cb0daba48ef0a27a0cd0526449dac74bf9438502322aabd9f2",
     };
     assert.equal(record.edge.image, image);
     assert.equal(record.edge.source_commit, sourceCommit);
     assert.deepEqual(record.edge.platform_manifests, manifests);
-    assert.match(record.edge.build, /v0\.9\.13/);
+    assert.match(record.edge.build, /v0\.9\.14/);
 
     const release = record.edge.release;
-    assert.equal(release.version, "v0.9.13");
+    assert.equal(release.version, "v0.9.14");
     assert.equal(release.image, image);
     assert.equal(release.source_commit, sourceCommit);
     assert.deepEqual(release.platform_manifests, manifests);
@@ -94,27 +94,27 @@ describe("the supported pairing record", () => {
     const release = record.edge.release;
     assert.deepEqual(release.binary_sha256, {
       "ferrum-cni-linux-aarch64":
-        "sha256:e752158d58314afda2464c26a3361c7b188a6ecf580da5112012a09ed0a591e4",
+        "sha256:29f156bb0d77933ba6820d39350ddfaea907eb117ee007a44b1a49c2fd8c4d70",
       "ferrum-cni-linux-x86_64":
-        "sha256:782ec54062cc89d571c8a57c635a1dbfc40380e2ad7edf55cb1b39be6aa307b9",
+        "sha256:d8270da265779da67083b289e0ef7f1287f7f8ee2d4d58654dcc234e142d54a2",
       "ferrum-edge-linux-aarch64":
-        "sha256:13cabd8d5d6fe120702977de4490edee44218402f2121986c5dbdcc3c0e8d17e",
+        "sha256:f23ba7c9fff1d1d924f3047f48e4669d080e1b6acc8214361185af661901c3e9",
       "ferrum-edge-linux-x86_64":
-        "sha256:bdb8756c30bd2c04c3483ebff26bf0163ebeb0d5dfdc887897a7eb473305ed6c",
+        "sha256:d0e89b11dbc29f29e6ea8cab4355b7c551638d370fb4c6a52a0ba7444fc6c020",
       "ferrum-edge-macos-aarch64":
-        "sha256:1c2f299bb9d7cbb167241d367e5025cb9e702f82b2f49bdd6bded23296f64a59",
+        "sha256:e195aa0b74fba6b2f9b9c8e2bf92c0b351c874617499c5b638305c61ea624411",
       "ferrum-edge-macos-x86_64":
-        "sha256:3802213c3f00eece900be6fef3da913a069c69c18f883330590ee9f93662f400",
+        "sha256:e0db84859e9ec6d294ba21ded9cb767ac1994c8a42d35e636c1d90c3c160adcc",
       "ferrum-edge-windows-x86_64.exe":
-        "sha256:8a9f5c7876343afd171fa7a9e7d3349fb2f88fb5897493a65a57552957f83dc8",
+        "sha256:b22e5cc4b18973aa834166acdfb825690cc829260753db6867449c420d942e6b",
     });
     assert.deepEqual(release.openapi, {
       info_version: "0.2.0",
-      sha256: "5f3e50e217b22b97d068490bdad9563ea450097a2daf7df4f80ff61f98559a81",
+      sha256: "6d286649ae744691e2eeb7d16607c538ca02e31bdeaafe98ab07fc861e7b9da4",
     });
     assert.equal(
       release.github_release,
-      "https://github.com/ferrum-edge/ferrum-edge/releases/tag/v0.9.13",
+      "https://github.com/ferrum-edge/ferrum-edge/releases/tag/v0.9.14",
     );
     assert.equal(release.distribution.ci_evidence, record.edge.source_evidence);
     assert.equal(release.distribution.status, "VERIFIED_DISTRIBUTION");
@@ -145,8 +145,8 @@ describe("the supported pairing record", () => {
   });
 
   it("records the Foundry candidate preparation against the verified Edge distribution", () => {
-    assert.equal(record.foundry.version, "0.5.2");
-    assert.equal(record.foundry.previous_release, "v0.5.1");
+    assert.equal(record.foundry.version, "0.5.3");
+    assert.equal(record.foundry.previous_release, "v0.5.2");
     const pkg = JSON.parse(repoFile("package.json"));
     const lock = JSON.parse(repoFile("package-lock.json"));
     // The release workflow requires the tag, package.json, and the record to agree.
@@ -185,19 +185,20 @@ describe("the supported pairing record", () => {
       ["0.4.0", "937d06bd98cb3338358f3afa8697eafb17154b423d65da5a8335ee26e70ff9a6"],
       ["0.5.0", "78ca12374fccd5e77d5353916550b5199b508dac718f25d06be570d5e92a39f5"],
       ["0.5.1", "ec09719c04ec65c39279674a85abbfa24b3788544e61a1c51f0a5ecf7ea8a70f"],
+      ["0.5.2", "dae44af942b989245ae642c86a9044fdb5b263317c30b283b1a50988d90c5cbf"],
     ]) {
       const bytes = repoFile(`docs/release-notes/v${version}.compatibility.json`);
       assert.equal(createHash("sha256").update(bytes).digest("hex"), digest);
     }
-    const previous = JSON.parse(repoFile("docs/release-notes/v0.5.1.compatibility.json"));
+    const previous = JSON.parse(repoFile("docs/release-notes/v0.5.2.compatibility.json"));
     assert.equal(previous.status, "released");
-    assert.equal(previous.foundry.version, "0.5.1");
-    assert.equal(previous.foundry.source_commit, "1dc43bd1bbd4c2c89ca14e2a603aa478ab1a0d18");
+    assert.equal(previous.foundry.version, "0.5.2");
+    assert.equal(previous.foundry.source_commit, "ebd09e8d82f773b6840b1edda67fbac287c3f7a0");
     assert.equal(
       previous.foundry.image,
-      "ferrumedge/ferrum-foundry@sha256:52c76c58958ed20df96c35bd943a500eb00f5a5eb540263dd7dd4e40717f30df",
+      "ferrumedge/ferrum-foundry@sha256:b1728fdc0694a195e2a21e7666ca09dd0cf9205c81041cc963b0e104750ce79a",
     );
-    assert.equal(previous.edge.release.version, "v0.9.12");
+    assert.equal(previous.edge.release.version, "v0.9.13");
     assert.notEqual(previous.edge.image, record.edge.image);
     assert.notDeepEqual(record.qualification, previous.qualification);
     if (record.qualification.status === "qualified") {
@@ -205,6 +206,9 @@ describe("the supported pairing record", () => {
         assert.notEqual(record.qualification[field], previous.qualification[field]);
       }
     }
+    const v051 = JSON.parse(repoFile("docs/release-notes/v0.5.1.compatibility.json"));
+    assert.equal(v051.foundry.source_commit, "1dc43bd1bbd4c2c89ca14e2a603aa478ab1a0d18");
+    assert.equal(v051.edge.release.version, "v0.9.12");
     const v050 = JSON.parse(repoFile("docs/release-notes/v0.5.0.compatibility.json"));
     assert.equal(v050.foundry.source_commit, "7ab9ddb732ebd890fb02928d6e4b22470ceab3f7");
     assert.equal(v050.edge.release.version, "v0.9.11");
