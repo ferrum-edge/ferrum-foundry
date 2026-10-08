@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-10-08
+
 ### Added
 
 - Model `rate_limiting`'s `ipv6_prefix` (1–128, default 64), new in Edge
@@ -22,12 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Prepare the unreleased Foundry v0.5.5 candidate with published Ferrum Edge
-  v0.9.15 source, image, platform manifests, binary hashes and raw OpenAPI
-  identity. Starter and development commands use the same digest, whose
-  gateway and CNI binaries match the release assets on both architectures.
-  Hosted qualification and Foundry publication remain pending; v0.5.4 and
-  earlier release records are immutable.
+- Pair published Foundry v0.5.5 with published Ferrum Edge v0.9.15 and
+  `contracts-edge-0.9.15`. The starter defaults to the released Foundry image
+  digest; qualification and publication evidence is recorded in the immutable
+  compatibility snapshot. Earlier release records remain immutable.
 - Re-vendor the same 18 scoped files from published `contracts-edge-0.9.15` at
   `6fb64c5dc2e014204c17609fc717d976f3b4589e`. Only the two vocabularies' Edge
   provenance, OpenAPI digest and a catalog note on the v0.9.15 config-schema
@@ -701,7 +701,8 @@ First public release of Ferrum Foundry.
 - Release channels are monotonic: tags are validated and ancestry-checked before registry access, prereleases never advance stable tags, and promotion runs through a fail-closed FIFO queue (#155).
 - Scheduled live branch deletion replaced with dry-run planning plus a separately approved, exact-SHA-revalidated deletion path (#155).
 
-[Unreleased]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.5.4...HEAD
+[Unreleased]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.5.5...HEAD
+[0.5.5]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.5.4...v0.5.5
 [0.5.4]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.5.1...v0.5.2

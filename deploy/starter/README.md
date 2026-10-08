@@ -14,21 +14,17 @@ request.
 For a walkthrough that ends in an authenticated request through the data
 plane, see [`docs/getting-started.md`](../../docs/getting-started.md).
 
-**Candidate pairing.** The demo profile pins published Edge v0.9.15, a
-security release that fixes 26 published Ferrum Edge advisories, for the
-Foundry v0.5.5 candidate. Hosted qualification and Foundry publication are
-pending in [`docs/compatibility.md`](../../docs/compatibility.md). Production
-must use a published pairing and its released Foundry digest. The latest is
-published Foundry v0.5.4 with Edge v0.9.14, preserved in the
-[v0.5.4 record](../../docs/release-notes/v0.5.4.compatibility.json) with its
-published source `0a855ddeef1e4a998a60a2e0c61e71510365b70e` and
-[publication run 37781284653](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37781284653).
-v0.5.4 changes what a namespace-scoped identity may reach; see
-[Namespace route ceiling](../../docs/authentication.md#namespace-route-ceiling).
-The default Foundry image stays pinned to that release,
-`ferrumedge/ferrum-foundry@sha256:645061444dc4d824aa256796e3891618e9f8446e7b3eb95c184a3147209975e1`;
+**Published pairing.** The demo profile pins published Edge v0.9.15 with
+published Foundry v0.5.5. The default Foundry image is pinned to its released
+digest below. The [v0.5.5 record](../../docs/release-notes/v0.5.5.compatibility.json)
+preserves source `359e1cd4efab110475b294452dfeeaefc7a4d5e6`, hosted
+[qualification run 37846502086](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37846502086)
+(source `f947a607`, tested merge `8126d6b7`), and actual
+[publication run 37848400800](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37848400800)
+(published 2026-10-08 at 21:48:04 UTC). The default Foundry image is pinned to
+`ferrumedge/ferrum-foundry@sha256:5bdfa947adead6895e9dbdc4b4db5ed7e960bd7fc5ebb9872ac722ced86a8b0f`;
 set `FOUNDRY_IMAGE` to another released digest when selecting a different
-pairing. Both profiles and authority tiers are unchanged. The candidate adopts
+pairing. Both profiles and authority tiers are unchanged. This release adopts
 published `contracts-edge-0.9.15` at
 `6fb64c5dc2e014204c17609fc717d976f3b4589e`; its service-manifest schema and all
 manifest fixtures are unchanged from the prior pin. The native deployment

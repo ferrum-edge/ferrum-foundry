@@ -144,9 +144,19 @@ describe("the supported pairing record", () => {
     assert.match(semantics, /#409/);
   });
 
-  it("records the Foundry candidate preparation against the verified Edge distribution", () => {
+  it("records the Foundry release against the verified Edge distribution", () => {
     assert.equal(record.foundry.version, "0.5.5");
     assert.equal(record.foundry.previous_release, "v0.5.4");
+    assert.equal(record.status, "released");
+    assert.equal(record.foundry.source_commit, "359e1cd4efab110475b294452dfeeaefc7a4d5e6");
+    assert.equal(
+      record.foundry.image,
+      "ferrumedge/ferrum-foundry@sha256:5bdfa947adead6895e9dbdc4b4db5ed7e960bd7fc5ebb9872ac722ced86a8b0f",
+    );
+    assert.equal(
+      record.foundry.ci_evidence,
+      "https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37848400800",
+    );
     const pkg = JSON.parse(repoFile("package.json"));
     const lock = JSON.parse(repoFile("package-lock.json"));
     // The release workflow requires the tag, package.json, and the record to agree.
@@ -188,13 +198,24 @@ describe("the supported pairing record", () => {
       ["0.5.2", "dae44af942b989245ae642c86a9044fdb5b263317c30b283b1a50988d90c5cbf"],
       ["0.5.3", "8e57ea00308afa3aedd04aafcf6e63e7601c7cb1837b7b5787c65cb4a7fd15d4"],
       ["0.5.4", "f69fa7e84ad1f2e89f3a73d64629e87e4bab64de9f7c8f1758941ef461c16647"],
+      ["0.5.5", "58fb1d567eddf0a0dc10088164cf8602080a6fb4f47c746c5024da4a8f75313f"],
     ]) {
       const bytes = repoFile(`docs/release-notes/v${version}.compatibility.json`);
       assert.equal(createHash("sha256").update(bytes).digest("hex"), digest);
     }
-    // The latest published release qualified the previous Edge pin. Its
-    // qualification tested other source and another Edge image, so it cannot
-    // qualify this candidate.
+    const currentRelease = JSON.parse(repoFile("docs/release-notes/v0.5.5.compatibility.json"));
+    assert.equal(currentRelease.status, "released");
+    assert.equal(currentRelease.foundry.source_commit, record.foundry.source_commit);
+    assert.equal(currentRelease.foundry.image, record.foundry.image);
+    assert.equal(currentRelease.qualification.ci_evidence, record.qualification.ci_evidence);
+    assert.ok(
+      currentRelease.edge.release.requirements.some(
+        (requirement) =>
+          requirement.includes("with every job green:") && requirement.includes("Deployment Starter"),
+      ),
+      "the immutable qualification evidence names the green Deployment Starter job",
+    );
+    // The prior qualification tested a different source and Edge image.
     const previous = JSON.parse(repoFile("docs/release-notes/v0.5.4.compatibility.json"));
     assert.equal(previous.status, "released");
     assert.equal(previous.foundry.version, "0.5.4");
