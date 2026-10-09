@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – fleet-wide views for namespace-scoped sessions   */
 /*                                                                    */
 /*  A page that only reads fleet-global routes (TLS, metrics,         */
-/*  cluster, mesh) is refused route by route to a session holding     */
+/*  cluster) is refused route by route to a session holding           */
 /*  namespace grants: by the BFF's namespace route ceiling, and by    */
 /*  Ferrum Edge v0.9.16+ for an `ns`-claim JWT. Such a session gets   */
 /*  the page title and the reason instead, and none of the page's     */

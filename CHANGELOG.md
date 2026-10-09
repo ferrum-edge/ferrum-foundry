@@ -19,11 +19,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   serves to such a JWT. Edge v0.9.15 and earlier admit an `ns`-claim JWT on
   fleet-global routes, so the BFF is the ceiling there and behaves the same.
   Unrestricted sessions are unchanged.
+- **Upgrade note:** namespace-scoped operators lose TLS inventory, material,
+  ACME, and event reads and TLS validation in Foundry even against Ferrum Edge
+  v0.9.15, which would still serve them. Give such an operator a second
+  identity without namespace grants for TLS. Where Edge runs with
+  `FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM=true` (the starter does), that
+  unrestricted identity is refused every namespace-scoped route, so an operator
+  who needs both keeps two identities (`docs/authentication.md` → "One
+  identity cannot do both").
 - Reduce scoped `/health`, `/status`, and `GET /api/settings/status` answers
   from any Edge health tier: the v0.9.15 detailed view, or v0.9.16's tenant
   tier (`status`, `ready`, `mode`, `admin_writes_enabled`, `namespace`) and
   minimal probe body. The summary now keeps the `namespace` serving block when
-  its `active` namespace is one of the session's grants, and only then.
+  its `active` namespace is one of the session's grants, and only then; an
+  omitted block, or one whose `active` is absent or `null`, is "not served for
+  this session" and never names another namespace.
 
 - Refuse every `PUT /api/settings` from a session that holds namespace grants
   with `403 FERRUM_BFF_SETTINGS_NAMESPACE_SCOPED`, whatever its role and body,
@@ -63,14 +73,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   contract probes the new surface with a mesh egress dry-run (#565).
 - A session holding namespace grants lands on Proxies instead of the
   fleet-wide Dashboard (#565).
-- Withhold the fleet-wide Metrics, TLS, Cluster, and Mesh views from a session
+- Withhold the fleet-wide Metrics, TLS, and Cluster views from a session
   holding namespace grants. The navigation hides them, and opening one by URL
   shows the page title and the `namespace-scope` reason without sending any of
-  its reads (`FleetViewGate`). TLS validation (`operationalActions`) is now a
-  fleet-wide surface too (ferrum-edge#6095).
-- The live-apply monitor stops polling `/config/apply-status` at the first
-  `403` and reports the committed write as unverifiable, naming that apply
-  status is fleet-global, instead of retrying a refusal.
+  its reads (`FleetViewGate`). Mesh stays in the navigation for its
+  namespace-scoped Trust tab (gateway trust bundles) and shows the reason in
+  place of its fleet tabs, whose reads are not sent. TLS validation
+  (`operationalActions`) is now a fleet-wide surface too (ferrum-edge#6095).
+- The live-apply monitor no longer polls `/config/apply-status` for a session
+  holding namespace grants, because the route is fleet-global. Its committed
+  writes show a neutral notice that live-apply verification is a fleet-level
+  view not available to a namespace-scoped session, or a warning when the
+  gateway answered that the write is committed but not yet live. A poll
+  refused with `403` ends the same way instead of being retried.
 - The capability parity contract now runs every check as an unrestricted and
   as a namespace-scoped principal. Unrestricted fleet-global probes and
   `/health` are signed without an `ns` claim, as the BFF signs them; scoped

@@ -60,6 +60,23 @@ describe('scoped health summary', () => {
     expect(projectHealthSummary({ status: 'ok', namespace: SERVING_TENANT_A }, [])).toEqual({ status: 'ok' });
   });
 
+  it('treats an omitted or withheld tenant-tier namespace block as not served for the session', () => {
+    // Edge's tenant tier either omits the block or withholds `active` (absent
+    // or null) when the claim does not cover the served namespace. Both mean
+    // "not served for this session", and no other namespace's name survives.
+    const tenant = { status: 'ok', ready: true, mode: 'database', admin_writes_enabled: true };
+    for (const body of [
+      tenant,
+      { ...tenant, namespace: { active: null, serving_scope: 'single-namespace-data-plane' } },
+      { ...tenant, namespace: { serving_scope: 'single-namespace-data-plane', served: 'tenant-b' } },
+      { ...tenant, namespace: { active: null, configured: 'tenant-b' } },
+    ]) {
+      const summary = projectHealthSummary(body, GRANTS);
+      expect(summary).toEqual(tenant);
+      expect(JSON.stringify(summary)).not.toContain('tenant-b');
+    }
+  });
+
   it('keeps only the scalar fields of a granted namespace block', () => {
     expect(projectHealthSummary({
       namespace: { ...SERVING_TENANT_A, routes: { count: 3 }, listeners: [8443] },

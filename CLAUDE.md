@@ -141,9 +141,11 @@ The BFF and Ferrum Edge remain the only enforcement points. See
 - A `fleetWide` surface (fleet TLS material, TLS rotation and validation, the
   backend-capability refresh and mesh egress dry-run, BFF settings) is denied
   to a session holding namespace grants, because the BFF refuses it. A page
-  that only reads fleet-global routes (Metrics, TLS, Cluster, Mesh) is a
+  that only reads fleet-global routes (Metrics, TLS, Cluster) is a
   `FleetView`: `FleetViewGate` shows such a session the reason and sends none
-  of its reads.
+  of its reads. Mesh gates only its fleet tabs; its Trust tab is
+  namespace-scoped and stays. Such a session's writes do not poll
+  `/config/apply-status` either (`setNamespaceScopedSession`).
 - The BFF's namespace route ceiling (`server/proxy-path.ts`) matches Ferrum
   Edge v0.9.16+'s for an `ns`-claim JWT (`ns_claim_global_route_is_allowed`,
   ferrum-edge#6093): namespace-scoped routes plus `GET /plugins`, the

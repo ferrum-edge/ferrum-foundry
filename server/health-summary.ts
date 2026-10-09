@@ -3,8 +3,9 @@
 // - Edge v0.9.15 and earlier return the detailed view (listeners, data-plane
 //   and trust diagnostics, database, cached configuration);
 // - Edge v0.9.16+ return the tenant tier (`status`, `ready`, `mode`,
-//   `admin_writes_enabled`, and the `namespace` block when the claim covers the
-//   active namespace) or the minimal `status` and `ready` probe body.
+//   `admin_writes_enabled`, and the `namespace` block, which is omitted or has
+//   `active` withheld unless the claim covers the active namespace) or the
+//   minimal `status` and `ready` probe body.
 // Each tier reduces to the same summary, which the capability model reads; a
 // field the gateway did not send is simply absent.
 const SCOPED_HEALTH_FIELDS = ['status', 'timestamp', 'mode', 'admin_writes_enabled', 'ready'] as const;
@@ -29,8 +30,11 @@ function copyScalars(
 
 /**
  * The `namespace` serving block, kept only when its `active` namespace is one
- * of the principal's grants, as Edge's tenant tier does. The active namespace
- * name is deployment topology, so a principal not granted it never learns it.
+ * of the principal's grants, as Edge's tenant tier does. When the claim does
+ * not cover the served namespace, the tenant tier either omits the block or
+ * withholds `active` (absent or `null`); both mean "not served for this
+ * session" and drop the whole block. The active namespace name is deployment
+ * topology, so a principal not granted it never learns it.
  */
 function projectNamespaceBlock(
   value: unknown,

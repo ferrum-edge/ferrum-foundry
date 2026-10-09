@@ -5,13 +5,6 @@ import {
 } from "@/api/gatewayMetadata";
 import { UNOBSERVED_OUTCOME_CAUSE, type UnobservedOutcomeReason } from "@/api/mutationOutcome";
 
-// The apply-status poll is fleet-global, so a session holding namespace grants
-// is refused it (`isApplyStatusDenied` in `src/api/gatewayMetadata.ts`).
-const UNVERIFIABLE_REASON: Record<string, string> = {
-  apply_status_denied:
-    "apply status is fleet-global and is not available to a session holding namespace grants",
-};
-
 function pathFromUrl(url: string | null): string {
   if (!url) return "configuration request";
   try {
@@ -44,9 +37,11 @@ export function GatewayMetadataBanner() {
           className={`rounded-lg border px-4 py-3 text-sm text-text-secondary ${
             apply.state === "applied" || apply.state === "succeeded"
               ? "border-success/40 bg-success/10"
-              : apply.state === "nothing_applied" || apply.state === "outcome_unknown"
+              : apply.state === "nothing_applied" ||
+                  apply.state === "outcome_unknown" ||
+                  (apply.state === "unmonitored" && apply.reason)
                 ? "border-warning/40 bg-warning/10"
-                : apply.state === "pending"
+                : apply.state === "pending" || apply.state === "unmonitored"
                   ? "border-blue/40 bg-blue/10"
                   : "border-danger/40 bg-danger/10"
           }`}
@@ -99,8 +94,19 @@ export function GatewayMetadataBanner() {
           {apply.state === "unverifiable" && (
             <>
               <strong className="text-danger">Committed state cannot be verified as live.</strong>{" "}
-              Reason: {(apply.reason && UNVERIFIABLE_REASON[apply.reason]) ?? apply.reason ?? "no apply cursor was available"}.
-              {" "}Inspect the live gateway configuration.
+              Reason: {apply.reason ?? "no apply cursor was available"}. Inspect the live gateway configuration.
+            </>
+          )}
+          {/* Live-apply status is fleet-global, refused to a session holding
+              namespace grants (`setNamespaceScopedSession`), so it is not polled. */}
+          {apply.state === "unmonitored" && (
+            <>
+              <strong className={apply.reason ? "text-warning" : "text-blue"}>
+                Committed. Live-apply status is not monitored.
+              </strong>{" "}
+              {apply.reason && `The gateway answered that the change is not yet live (reason: ${apply.reason}). `}
+              Live-apply verification is a fleet-level view, which is not available to a
+              namespace-scoped session.
             </>
           )}
         </div>

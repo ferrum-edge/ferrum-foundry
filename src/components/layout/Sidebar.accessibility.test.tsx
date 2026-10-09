@@ -87,8 +87,9 @@ describe("mobile sidebar keyboard behavior", () => {
     expect(links).not.toContain("Metrics");
     expect(links).not.toContain("TLS");
     expect(links).not.toContain("Cluster");
-    expect(links).not.toContain("Mesh");
     expect(links).toContain("Health");
     expect(links).toContain("Audit Log");
+    // Mesh keeps its namespace-scoped Trust tab.
+    expect(links).toContain("Mesh");
   });
 });

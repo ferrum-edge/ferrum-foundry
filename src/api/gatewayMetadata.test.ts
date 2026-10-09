@@ -5,6 +5,7 @@ import {
   parseConfigCursor,
   resetGatewayMetadata,
   setApplyStatusFetcher,
+  setNamespaceScopedSession,
   type ApplyStatusResponse,
 } from "./gatewayMetadata";
 
@@ -326,9 +327,10 @@ describe("observeGatewayResponse", () => {
     expect(getGatewayMetadataSnapshot().apply.state).toBe("succeeded");
   });
 
-  it("stops at once, as denied, when a namespace-scoped session is refused the poll", async () => {
+  it("stops at once, unmonitored, when the poll is refused after grants changed", async () => {
     // The BFF's namespace route ceiling, and Edge v0.9.16+ for an `ns`-claim
     // JWT, refuse fleet-global apply status with 403; retrying cannot help.
+    // The session was read as unscoped, so the poll was sent.
     const fetchStatus = vi.fn().mockRejectedValue(
       Object.assign(new Error("Forbidden"), { response: new Response(null, { status: 403 }) }),
     );
@@ -344,10 +346,91 @@ describe("observeGatewayResponse", () => {
     await vi.waitFor(() => expect(getGatewayMetadataSnapshot().apply.polling).toBe(false));
     expect(fetchStatus).toHaveBeenCalledOnce();
     expect(getGatewayMetadataSnapshot().apply).toMatchObject({
-      state: "unverifiable",
+      state: "unmonitored",
       namespace: "tenant-a",
       cursor: "6:3",
-      reason: "apply_status_denied",
+      reason: null,
+    });
+  });
+
+  describe("a namespace-scoped session", () => {
+    // Live-apply status is fleet-global, so a session holding namespace grants
+    // never sends the poll the BFF and Edge v0.9.16+ would refuse.
+    it("publishes an accepted write as unmonitored without polling", async () => {
+      const fetchStatus = vi.fn();
+      setApplyStatusFetcher(fetchStatus);
+      setNamespaceScopedSession(true);
+      await observeGatewayResponse(
+        mutationRequest("tenant-a"),
+        new Response("{}", { status: 202, headers: { "x-ferrum-config-cursor": "6:3" } }),
+      );
+
+      expect(getGatewayMetadataSnapshot().apply).toMatchObject({
+        state: "unmonitored",
+        namespace: "tenant-a",
+        cursor: "6:3",
+        reason: null,
+        polling: false,
+      });
+      await Promise.resolve();
+      expect(fetchStatus).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      [{ applied: false, reason: "reload_timeout" }, "reload_timeout"],
+      [{ applied: false }, "committed_not_live"],
+    ])("keeps a committed-not-live answer's reason without polling (%j)", async (body, reason) => {
+      const fetchStatus = vi.fn();
+      setApplyStatusFetcher(fetchStatus);
+      setNamespaceScopedSession(true);
+      await observeGatewayResponse(
+        mutationRequest("tenant-a"),
+        new Response(JSON.stringify(body), {
+          status: 503,
+          headers: { "x-ferrum-config-cursor": "6:3" },
+        }),
+      );
+
+      expect(getGatewayMetadataSnapshot().apply).toMatchObject({
+        state: "unmonitored",
+        cursor: "6:3",
+        reason,
+        polling: false,
+      });
+      expect(fetchStatus).not.toHaveBeenCalled();
+    });
+
+    it("still reports a write the gateway applied synchronously as live", async () => {
+      const fetchStatus = vi.fn();
+      setApplyStatusFetcher(fetchStatus);
+      setNamespaceScopedSession(true);
+      await observeGatewayResponse(
+        mutationRequest("tenant-a"),
+        new Response("{}", { status: 200, headers: { "x-ferrum-config-cursor": "6:3" } }),
+      );
+
+      expect(getGatewayMetadataSnapshot().apply).toMatchObject({ state: "applied", cursor: "6:3" });
+      expect(fetchStatus).not.toHaveBeenCalled();
+    });
+
+    it("polls again once the session no longer holds namespace grants", async () => {
+      const fetchStatus = vi.fn().mockResolvedValue({
+        topology_epoch: "6",
+        sequence: "3",
+        state: "applied",
+        accepted_topology_epoch: "6",
+        accepted_sequence: "3",
+      });
+      setApplyStatusFetcher(fetchStatus);
+      setNamespaceScopedSession(true);
+      setNamespaceScopedSession(false);
+      await observeGatewayResponse(
+        mutationRequest("tenant-a"),
+        new Response("{}", { status: 202, headers: { "x-ferrum-config-cursor": "6:3" } }),
+      );
+
+      await vi.waitFor(() => expect(getGatewayMetadataSnapshot().apply.state).toBe("applied"));
+      expect(fetchStatus).toHaveBeenCalledOnce();
     });
   });
 

@@ -914,8 +914,9 @@ describe('raw BFF path confinement', () => {
       ['GET', '/config/%61pply-status'], ['GET', '/%62ackup'],
       ['POST', '/admin/tls/acme/orders/order-1/%66inalize'], ['POST', '/%72estore'],
     ]) {
-      // ACME finalize is a fleet TLS mutation, refused to a scoped principal.
-      const headers = decodeURIComponent(path).includes('finalize') ? globalAdmin() : identity('admin');
+      // ACME finalize and apply status are fleet-global, refused to a scoped principal.
+      const fleetGlobal = /finalize|apply-status/.test(decodeURIComponent(path));
+      const headers = fleetGlobal ? globalAdmin() : identity('admin');
       expect((await rawRequest(`/api/proxy${path}?delay=1`, method, headers, method === 'POST' ? '{}' : '')).status).toBe(200);
       expect(arrivals.at(-1)?.url).toBe(`${decodeURIComponent(path)}?delay=1`);
     }

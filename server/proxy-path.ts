@@ -174,8 +174,11 @@ export function requestIsApiRoute(request: FastifyRequest): boolean {
   return true;
 }
 
-// The BFF and Edge answer HEAD exactly like GET, so a route class that allows
-// GET also allows HEAD.
+// A route class that allows GET also allows HEAD. Edge has no HEAD routes of
+// its own: only its early `/live`, `/health`, and `/status` branches ignore the
+// method, it answers HEAD elsewhere with 404 or 405, and v0.9.16 refuses a
+// scoped `HEAD /plugins` (its `ns`-claim allowlist is GET-exact). Edge is
+// therefore never less strict than this ceiling.
 function classifiedMethod(request: FastifyRequest): string {
   return request.method === 'HEAD' ? 'GET' : request.method;
 }

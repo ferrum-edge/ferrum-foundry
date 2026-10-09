@@ -109,7 +109,9 @@ manager and the header selector use the same grants.
 
 These BFF checks apply even when the gateway does not enforce namespace
 claims. For a second enforcement layer on multi-tenant deployments, also set
-`FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM=true` on Ferrum Edge.
+`FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM=true` on Ferrum Edge. With it, operators
+who need both namespace and fleet-wide surfaces need two identities; see
+[One identity cannot do both](#one-identity-cannot-do-both).
 
 ### Roles in the UI
 
@@ -155,13 +157,16 @@ routes; there the BFF is the only ceiling, and it refuses the same routes.
   the detailed `/health` and `/status` view: listeners, `dp_config`,
   `cp_dp_trust`, database, and cached-config detail. Edge v0.9.16+ answer it
   with a bounded tenant tier (`status`, `ready`, `mode`,
-  `admin_writes_enabled`, and the `namespace` block when the claim covers the
-  active namespace) or the minimal `status` and `ready` probe body. Whichever
+  `admin_writes_enabled`, and the `namespace` block, which Edge omits or sends
+  with `active` withheld unless the claim covers the active namespace) or the
+  minimal `status` and `ready` probe body. Whichever
   tier arrives, the BFF re-serializes it for a scoped session with only
   `status`, `timestamp`, `mode`, `admin_writes_enabled`, `ready`, and the
   `namespace` serving block (`active`, `serving_scope`,
   `data_plane_single_namespace`) when its `active` namespace is one of the
-  session's grants (`server/health-summary.ts`). A field the gateway did not
+  session's grants (`server/health-summary.ts`). An omitted block, or one whose
+  `active` is absent or `null`, means the namespace is not served for this
+  session, and the whole block is dropped. A field the gateway did not
   send stays absent, and the capability model concludes nothing from it. The
   upstream `Content-Length`, `ETag`, `Last-Modified`, and range headers are
   dropped, and conditional and range request headers are not forwarded. A
@@ -176,8 +181,14 @@ routes; there the BFF is the only ceiling, and it refuses the same routes.
   `/charges*`, `/backend-capabilities*`, `/mesh/*` (including
   `/mesh/egress-scope`), the waypoint routes, `/overload`, and every unknown
   path.
-- **HEAD** is classified like GET, because the BFF and Edge answer it the same
-  way. Every other method must be named by the route class.
+- **HEAD** is classified like GET by the BFF: a route class that allows GET
+  also allows HEAD. Edge has no HEAD routes of its own. Only its early
+  `/live`, `/health`, and `/status` branches ignore the method; elsewhere it
+  answers HEAD with `404` or `405`, and v0.9.16 refuses a scoped
+  `HEAD /plugins` with `403`, because its `ns`-claim allowlist matches `GET`
+  exactly. Edge is therefore at least as strict as the BFF. A scoped
+  `HEAD /namespaces` is refused with `400` by the registry check before it is
+  forwarded. Every other method must be named by the route class.
 
 The credential-read denial and unsafe-path checks run before the ceiling, so
 `/consumers/{id}/verification` and `/deployment-snapshot` keep
@@ -186,12 +197,32 @@ The credential-read denial and unsafe-path checks run before the ceiling, so
 
 The UI mirrors the ceiling, as a convenience only. A scoped session lands on
 Proxies instead of the Dashboard and does not see the Dashboard, Metrics, TLS,
-Cluster, or Mesh navigation. Opening Metrics, TLS, Cluster, or Mesh by URL
-shows the page title and the reason, and sends none of the page's reads. The
-BFF settings are read-only, with the reason (see
-[Capabilities](capabilities.md#surface-matrix)). The live-apply monitor does
-not poll `/config/apply-status` for such a session past the first refusal: a
-committed write it cannot confirm is reported as unverifiable, with the reason.
+or Cluster navigation. Opening Metrics, TLS, or Cluster by URL shows the page
+title and the reason, and sends none of the page's reads. Mesh keeps its Trust
+tab, because gateway trust bundles are namespace-scoped, and shows the reason
+in place of its fleet tabs, whose reads are not sent. The BFF settings are
+read-only, with the reason (see [Capabilities](capabilities.md#surface-matrix)).
+The live-apply monitor does not poll `/config/apply-status` for such a session.
+A committed write is reported with a neutral notice that live-apply
+verification is a fleet-level view, not available to a namespace-scoped
+session, or with a warning when the gateway answered that the write is
+committed but not yet live. A poll refused with `403`, because the grants
+changed after the session was read, ends the same way.
+
+#### One identity cannot do both
+
+With `FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM=true` on Ferrum Edge (the starter
+sets it, and Edge forces it on a multi-namespace control plane), Edge refuses a
+JWT without an `ns` claim on every namespace-scoped route. An unrestricted
+Foundry session sends no claim (see [Downstream claims](#downstream-claims)), so
+it is fleet-only: TLS, Cluster, Metrics, Mesh, and BFF settings work, but
+Proxies, Consumers, Upstreams, Plugins, API Specs, gateway trust, backup and
+restore, and the other namespace pages are refused with `403`. A scoped session
+is namespace-only, as above. No single Foundry session can do both, so an
+operator who needs both uses two identities: one with namespace grants for
+tenant configuration, and one admin without grants for the fleet-wide
+surfaces. Without the flag, an unrestricted session also reaches every
+namespace.
 
 #### Fleet-wide audit rows
 
@@ -472,7 +503,11 @@ Foundry JWTs contain `iss`, `sub`, `exp`, `iat`, `nbf`, `jti`, and `role`.
 audience. `ns` is one exact namespace string or an array of them. An
 unrestricted principal (a trusted-proxy admin with no namespace header, or a
 static principal configured with `*`) gets no `ns` claim. `*` is only a Foundry
-configuration value and is never sent as a claim.
+configuration value and is never sent as a claim. A gateway running with
+`FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM=true` therefore refuses an unrestricted
+session every namespace-scoped route, while Foundry and Edge v0.9.16+ refuse a
+scoped session every fleet-wide one; see
+[One identity cannot do both](#one-identity-cannot-do-both).
 
 Tokens are cached per signing input and principal, so a configuration or
 identity change never reuses an earlier token.

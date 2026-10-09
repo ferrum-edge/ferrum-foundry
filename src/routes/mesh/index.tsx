@@ -35,7 +35,7 @@ import { GatewayTrustManager } from "@/components/forms/GatewayTrustManager";
 import { useCapabilities } from "@/stores/capabilities";
 import { CapabilityNotice } from "@/components/shared/CapabilityGate";
 import { formatDateTime, formatTime } from "@/lib/format";
-import { FleetViewGate } from "@/components/shared/FleetViewGate";
+import { resolveFleetView } from "@/lib/capabilities";
 
 function NotMeshEmpty({ what }: { what: string }) {
   return (
@@ -579,17 +579,14 @@ function TrustTab() {
 /*  MeshPage                                                           */
 /* ================================================================== */
 
-// The fleet-wide routes this page reads are refused to a session holding
-// namespace grants, so such a session gets the reason instead of the page.
+// Every tab but Trust reads fleet-wide routes, which the BFF and Ferrum Edge
+// v0.9.16+ refuse to a session holding namespace grants. Gateway trust bundles
+// are namespace-scoped, so such a session keeps the Trust tab and gets the
+// reason for the rest; none of the fleet tabs is mounted, so none of their
+// reads is sent.
 export default function MeshPage() {
-  return (
-    <FleetViewGate view="mesh" title="Mesh">
-      <MeshWorkspace />
-    </FleetViewGate>
-  );
-}
-
-function MeshWorkspace() {
+  const { facts } = useCapabilities();
+  const fleetView = resolveFleetView("mesh", facts);
   return (
     <div className="space-y-6">
       <PageHeader
@@ -597,27 +594,45 @@ function MeshWorkspace() {
         description="Service graph, config convergence, multicluster trust, egress scope, and waypoint topology for mesh-mode gateways."
       />
 
-      <Tabs defaultValue="overview">
-        <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="runtime">Runtime</TabsTrigger>
-          <TabsTrigger value="graph">Service Graph</TabsTrigger>
-          <TabsTrigger value="denies">Policy Denies</TabsTrigger>
-          <TabsTrigger value="clusters">Clusters</TabsTrigger>
-          <TabsTrigger value="egress">Egress</TabsTrigger>
-          <TabsTrigger value="waypoints">Waypoints</TabsTrigger>
-          <TabsTrigger value="trust">Trust</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="overview"><OverviewTab /></TabsContent>
-        <TabsContent value="runtime"><RuntimeTab /></TabsContent>
-        <TabsContent value="graph"><ServiceGraphTab /></TabsContent>
-        <TabsContent value="denies"><PolicyDeniesTab /></TabsContent>
-        <TabsContent value="clusters"><ClustersTab /></TabsContent>
-        <TabsContent value="egress"><EgressTab /></TabsContent>
-        <TabsContent value="waypoints"><WaypointsTab /></TabsContent>
-        <TabsContent value="trust"><TrustTab /></TabsContent>
-      </Tabs>
+      {fleetView.allowed ? (
+        <MeshTabs />
+      ) : (
+        <>
+          <CapabilityNotice verdict={fleetView} />
+          <Tabs defaultValue="trust">
+            <TabsList>
+              <TabsTrigger value="trust">Trust</TabsTrigger>
+            </TabsList>
+            <TabsContent value="trust"><TrustTab /></TabsContent>
+          </Tabs>
+        </>
+      )}
     </div>
+  );
+}
+
+function MeshTabs() {
+  return (
+    <Tabs defaultValue="overview">
+      <TabsList>
+        <TabsTrigger value="overview">Overview</TabsTrigger>
+        <TabsTrigger value="runtime">Runtime</TabsTrigger>
+        <TabsTrigger value="graph">Service Graph</TabsTrigger>
+        <TabsTrigger value="denies">Policy Denies</TabsTrigger>
+        <TabsTrigger value="clusters">Clusters</TabsTrigger>
+        <TabsTrigger value="egress">Egress</TabsTrigger>
+        <TabsTrigger value="waypoints">Waypoints</TabsTrigger>
+        <TabsTrigger value="trust">Trust</TabsTrigger>
+      </TabsList>
+
+      <TabsContent value="overview"><OverviewTab /></TabsContent>
+      <TabsContent value="runtime"><RuntimeTab /></TabsContent>
+      <TabsContent value="graph"><ServiceGraphTab /></TabsContent>
+      <TabsContent value="denies"><PolicyDeniesTab /></TabsContent>
+      <TabsContent value="clusters"><ClustersTab /></TabsContent>
+      <TabsContent value="egress"><EgressTab /></TabsContent>
+      <TabsContent value="waypoints"><WaypointsTab /></TabsContent>
+      <TabsContent value="trust"><TrustTab /></TabsContent>
+    </Tabs>
   );
 }

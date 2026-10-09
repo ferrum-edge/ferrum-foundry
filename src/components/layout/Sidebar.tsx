@@ -64,13 +64,14 @@ export function Sidebar({ open, onClose, triggerRef }: SidebarProps) {
   const namespaceScoped = principal?.namespaces !== undefined;
   // The BFF, and Ferrum Edge v0.9.16+, refuse these fleet-wide surfaces to a
   // namespace-scoped session; TLS reads and validation included. The audit
-  // log and health summary stay: both answer for a scoped session.
+  // log and health summary stay: both answer for a scoped session. Mesh stays
+  // for its namespace-scoped Trust tab; the page withholds the fleet tabs.
   const visibleSections = namespaceScoped
     ? navSections
         .map((section) => ({
           ...section,
           items: section.items.filter((item) =>
-            !["/", "/metrics", "/tls", "/cluster", "/mesh"].includes(item.to)),
+            !["/", "/metrics", "/tls", "/cluster"].includes(item.to)),
         }))
         .filter((section) => section.items.length > 0)
     : navSections;

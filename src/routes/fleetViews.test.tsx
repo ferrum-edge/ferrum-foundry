@@ -1,8 +1,9 @@
 /* ------------------------------------------------------------------ */
-/*  Metrics, Cluster, and Mesh read only fleet-global routes, which    */
-/*  the BFF and Ferrum Edge v0.9.16+ refuse to a namespace-scoped      */
-/*  session. Such a session reaching one by URL gets the reason and    */
-/*  the page sends nothing; any other session gets the page.           */
+/*  Metrics and Cluster read only fleet-global routes, which the BFF   */
+/*  and Ferrum Edge v0.9.16+ refuse to a namespace-scoped session.     */
+/*  Such a session reaching one by URL gets the reason and the page    */
+/*  sends nothing; any other session gets the page. Mesh keeps its     */
+/*  namespace-scoped Trust tab and withholds only the fleet tabs.      */
 /* ------------------------------------------------------------------ */
 
 import type { ComponentType } from "react";
@@ -10,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HealthResponse } from "@/api/types";
 import { FleetViewGate } from "@/components/shared/FleetViewGate";
 import { CapabilityProvider } from "@/stores/capabilities";
-import { createHarness, settle, stubFetch } from "@/test/__tests__/harness";
+import { createHarness, page, settle, stubFetch } from "@/test/__tests__/harness";
 import ClusterPage from "./cluster/index";
 import MeshPage from "./mesh/index";
 import MetricsPage from "./metrics/index";
@@ -47,7 +48,6 @@ vi.mock("@/hooks/useMetrics", async (importOriginal) => ({
 const PAGES: Array<[string, ComponentType, string, string]> = [
   ["Metrics", MetricsPage, "Metrics", "Gateway metrics are unavailable"],
   ["Cluster", ClusterPage, "Cluster", "Cluster status is unavailable"],
-  ["Mesh", MeshPage, "Mesh", "Mesh status is unavailable"],
 ];
 
 let ui: ReturnType<typeof createHarness>;
@@ -59,6 +59,9 @@ beforeEach(() => {
   session.principal = null;
   stubFetch(async (request) => {
     requests.push(request);
+    const path = new URL(request.url).pathname;
+    if (path === "/api/proxy/gateway-trust-bundles") return Response.json(page([]));
+    if (path === "/api/proxy/gateway-trust/status") return Response.json({ configured: false });
     return Response.json({}, { status: 404 });
   });
 });
@@ -87,6 +90,41 @@ describe("fleet-wide views for a namespace-scoped session", () => {
     expect(notices()[0].querySelector("p")?.textContent).toBe(headline);
     expect(notices()[0].textContent).toContain("namespace grants do not scope");
     expect(requests).toEqual([]);
+  });
+
+  it("keeps Mesh's namespace-scoped Trust tab and sends none of the fleet tabs' reads", async () => {
+    session.principal = { role: "admin", namespaces: ["tenant-a"] };
+    await ui.render(
+      <CapabilityProvider>
+        <MeshPage />
+      </CapabilityProvider>,
+    );
+    await settle(() => expect(document.body.textContent).toContain("Mesh trust is not active in database mode"));
+
+    expect(document.querySelector("h1")?.textContent).toBe("Mesh");
+    expect(notices()).toHaveLength(1);
+    expect(notices()[0].querySelector("p")?.textContent).toBe("Mesh status is unavailable");
+    const tabs = [...document.querySelectorAll('[role="tab"]')].map((tab) => tab.textContent);
+    expect(tabs).toEqual(["Trust"]);
+    // Only the namespace-scoped gateway trust reads, bound to the namespace.
+    const paths = requests.map((request) => new URL(request.url).pathname);
+    expect(new Set(paths)).toEqual(
+      new Set(["/api/proxy/gateway-trust-bundles", "/api/proxy/gateway-trust/status"]),
+    );
+    expect(requests.every((request) => request.headers.get("X-Ferrum-Namespace") === "tenant-a")).toBe(true);
+  });
+
+  it("renders every Mesh tab for a session without namespace grants", async () => {
+    session.principal = { role: "admin" };
+    await ui.render(
+      <CapabilityProvider>
+        <MeshPage />
+      </CapabilityProvider>,
+    );
+    await settle(() => expect(document.querySelectorAll('[role="tab"]')).toHaveLength(8));
+
+    expect(notices()).toEqual([]);
+    expect(document.querySelector('[role="tab"][data-state="active"]')?.textContent).toBe("Overview");
   });
 
   it.each<[string, Principal | null]>([

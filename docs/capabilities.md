@@ -166,13 +166,21 @@ Only an observed grant denies: `namespaceScoped` that is `false` or `null`
 concludes nothing.
 
 **Fleet-wide views are withheld from a namespace-scoped session.** Metrics,
-TLS, Cluster, and Mesh read only fleet-global routes, so the ceiling would
-refuse every read they make. `resolveFleetView()` denies each of them to a
-session that holds namespace grants, with `blockedBy: "namespace-scope"`, and
+TLS, and Cluster read only fleet-global routes, so the ceiling would refuse
+every read they make. `resolveFleetView()` denies each of them to a session
+that holds namespace grants, with `blockedBy: "namespace-scope"`, and
 `FleetViewGate` (`src/components/shared/FleetViewGate.tsx`) renders the page
 title and that reason instead of the page, so none of its reads is sent. The
-navigation hides them too. Role and mode never decide a view: a read the
-gateway withholds from a role stays a `ReadDeniedNotice` on the page.
+navigation hides them too. Mesh applies the same verdict to its fleet tabs
+only: its Trust tab reads and writes the namespace-scoped gateway trust bundle
+routes, so a scoped session keeps that tab, sees the reason in place of the
+others, and sends none of their reads. Role and mode never decide a view: a
+read the gateway withholds from a role stays a `ReadDeniedNotice` on the page.
+
+The live-apply monitor follows the same rule. `/config/apply-status` is
+fleet-global, so a scoped session's committed write is not polled; the banner
+says live-apply verification is a fleet-level view instead
+(`setNamespaceScopedSession` in `src/api/gatewayMetadata.ts`).
 
 A role denial is reported first, then a namespace-scope denial, then a
 gateway-mode denial: each is more fundamental and more stable than the next.
@@ -235,7 +243,8 @@ The `disabled` fieldset covers editing controls. Anything the role may still
    "unavailable". Set `fleetWide: true` when the BFF refuses the write to a
    session holding namespace grants (`server/proxy-path.ts`). A page that
    only reads fleet-global routes is a `FleetView` instead, wrapped in
-   `FleetViewGate`.
+   `FleetViewGate`; a page that mixes them gates only its fleet-global tabs
+   with `resolveFleetView()`, as Mesh does.
 2. Read it with `useCapabilities()` and render `CapabilityNotice`,
    `ReadOnlySurface`, or `WriteAction`.
 3. Guard the mutation handler with `if (!capability.allowed) return;`. Guard the
