@@ -312,6 +312,14 @@ export function SettingsForm() {
   // A session the capability model denies (a namespace-scoped admin) sees the
   // same values read-only; the notice above them says why.
   const locked = immutable || !canWrite.allowed;
+  // Static grants are captured at login and overrides last until restart, so
+  // saving exact grants leaves every later login unable to change settings.
+  const scopesLaterLogins =
+    !locked &&
+    settings.authMode === "static" &&
+    namespaceGrantsTouched() &&
+    namespaceGrantsError(namespaceText) === undefined &&
+    !parseCommaList(namespaceText).includes(NAMESPACE_WILDCARD);
 
   return (
     <div className="space-y-6">
@@ -421,6 +429,14 @@ export function SettingsForm() {
             disabled={locked || settings.authMode !== "static"}
             readOnly={locked}
           />
+          {scopesLaterLogins && (
+            <p role="note" data-testid="scoped-login-warning" className="text-warning text-xs">
+              Saving exact grants scopes every new static login to these namespaces, and a
+              namespace-scoped session cannot change BFF settings, including restoring{" "}
+              <code className="font-mono">{NAMESPACE_WILDCARD}</code>. Only this session, other
+              sessions created before the save, or a BFF restart can change them again.
+            </p>
+          )}
         </div>
       </Card>
 

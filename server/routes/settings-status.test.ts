@@ -101,6 +101,52 @@ describe("settings status publication", () => {
     expect(upstream).toHaveBeenCalledOnce();
   });
 
+  it("relays the detailed health body to an unrestricted admin", async () => {
+    const server = await setup();
+    const detailed = {
+      status: "ok", mode: "database", ready: true, admin_writes_enabled: true,
+      listeners: [{ port: 8443 }], database: { connected: true }, namespace: "ferrum",
+    };
+    upstream.mockResolvedValue(Response.json(detailed));
+    const response = await server.inject({ method: "GET", url: "/api/settings/status", headers });
+    expect(response.json()).toEqual({ reachable: true, status: 200, body: detailed });
+  });
+
+  it("reduces the health body to its summary fields for a namespace-scoped admin", async () => {
+    vi.stubEnv("FERRUM_JWT_NAMESPACES", "tenant-a");
+    const server = await setup();
+    upstream.mockResolvedValue(Response.json({
+      status: "ok", timestamp: "2026-10-09T00:00:00Z", mode: "database", ready: true,
+      admin_writes_enabled: true, listeners: [{ port: 8443 }], database: { connected: true },
+      namespace: "ferrum", cached_config: { proxies: 12 },
+    }));
+    const response = await server.inject({ method: "GET", url: "/api/settings/status", headers });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      reachable: true, status: 200,
+      body: {
+        status: "ok", timestamp: "2026-10-09T00:00:00Z", mode: "database", ready: true,
+        admin_writes_enabled: true,
+      },
+    });
+    expect(response.body).not.toContain("listeners");
+    expect(response.body).not.toContain("cached_config");
+  });
+
+  it.each([
+    [503, "gateway unavailable: listener 10.0.0.7:9000"],
+    [200, "[{\"listener\":\"10.0.0.7:9000\"}]"],
+  ] as const)("omits a %s non-object health body for a namespace-scoped admin", async (status, body) => {
+    vi.stubEnv("FERRUM_JWT_NAMESPACES", "tenant-a");
+    const server = await setup();
+    upstream.mockResolvedValue(new Response(body, { status }));
+    const response = await server.inject({ method: "GET", url: "/api/settings/status", headers });
+    expect(response.statusCode).toBe(status);
+    expect(response.json()).toEqual({ reachable: status === 200, status });
+    expect(response.json()).not.toHaveProperty("body");
+    expect(response.body).not.toContain("10.0.0.7");
+  });
+
   it("decodes UTF-8 characters split across chunks", async () => {
     const server = await setup();
     const bytes = new TextEncoder().encode('{"message":"é"}');

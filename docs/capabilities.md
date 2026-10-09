@@ -100,7 +100,8 @@ namespace registry, and audit.
 | `proxies` | `operator` | `config-store` | `admit_write` on `POST/PUT/DELETE /proxies` |
 | `upstreams` | `operator` | `config-store` | `admit_write` on `POST/PUT/DELETE /upstreams` |
 | `pluginConfigs` | `operator` | `config-store` | `admit_write` on `POST/PUT/DELETE /plugins/config` |
-| `operationalActions` (TLS validate, backend-capability refresh, egress dry-run) | `operator` | `none` | `admit_audited_operation`, or no gate |
+| `operationalActions` (`POST /admin/tls/validate`) | `operator` | `none` | no gate |
+| `fleetOperations` (backend-capability refresh, mesh egress dry-run) | `operator` | `none`, fleet-wide | role check only in `POST /backend-capabilities/refresh` and `POST /mesh/egress-scope/test` |
 | `tlsRotation` (`POST /admin/tls/rotate/{surface}`) | `operator` | `none`, fleet-wide | `admit_audited_operation` in `handle_rotate` |
 | `consumers` | `admin` | `config-store` | `admit_write` on `POST/PUT/DELETE /consumers` |
 | `consumerCredentials` | `admin` | `config-store` | `admit_write` on `/consumers/{id}/credentials/{type}` |
@@ -151,6 +152,10 @@ It refuses every fleet TLS mutation except the stateless validate, so
 whatever the role and mode. `bffSettings` is denied the same way, because
 `PUT /api/settings` refuses a scoped session
 (see [Runtime identity defaults](authentication.md#runtime-identity-defaults)).
+It also refuses `/backend-capabilities/*` and `/mesh/*`, so `fleetOperations`
+(the Cluster page's backend-capability refresh and the Mesh page's egress
+dry-run) is denied the same way. The parity contract probes it with a mesh
+egress dry-run, which a gateway without a mesh egress scope answers `404`.
 TLS validation stays in `operationalActions` and stays available. Only an
 observed grant denies: `namespaceScoped` that is `false` or `null` concludes
 nothing, and the parity contract, which supplies no namespace fact, sees the

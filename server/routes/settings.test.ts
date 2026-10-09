@@ -124,28 +124,43 @@ describe('settings routes', () => {
     const app = await buildApp();
     try {
       const headers = await authenticatedHeaders(app);
-      const response = await app.inject({
-        method: 'PUT',
-        url: '/api/settings',
-        headers,
-        payload: {
+      try {
+        const response = await app.inject({
+          method: 'PUT',
+          url: '/api/settings',
+          headers,
+          payload: {
+            adminUrl: 'https://gateway.example',
+            jwtIssuer: 'updated-issuer',
+            jwtTtl: 600,
+            jwtRole: 'admin',
+            jwtAudience: 'edge-admin',
+            jwtNamespaces: ['tenant-a'],
+          },
+        });
+        expect(response.statusCode).toBe(200);
+        expect(response.json()).toMatchObject({
           adminUrl: 'https://gateway.example',
           jwtIssuer: 'updated-issuer',
           jwtTtl: 600,
           jwtRole: 'admin',
           jwtAudience: 'edge-admin',
           jwtNamespaces: ['tenant-a'],
-        },
-      });
-      expect(response.statusCode).toBe(200);
-      expect(response.json()).toMatchObject({
-        adminUrl: 'https://gateway.example',
-        jwtIssuer: 'updated-issuer',
-        jwtTtl: 600,
-        jwtRole: 'admin',
-        jwtAudience: 'edge-admin',
-        jwtNamespaces: ['tenant-a'],
-      });
+        });
+      } finally {
+        // Runtime overrides outlive this app, and a login after exact grants
+        // were saved is namespace-scoped and may not change settings. Restore
+        // the wildcard from this still-unrestricted session so later tests
+        // reach the validation they target.
+        const restore = await app.inject({
+          method: 'PUT',
+          url: '/api/settings',
+          headers,
+          payload: { jwtNamespaces: ['*'] },
+        });
+        expect(restore.statusCode).toBe(200);
+        expect(restore.json().jwtNamespaces).toEqual(['*']);
+      }
     } finally {
       await app.close();
     }

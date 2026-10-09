@@ -118,7 +118,8 @@ describe("TLS page for a namespace-scoped session", () => {
     await mount();
 
     const headlines = notices().map((notice) => notice.querySelector("p")?.textContent);
-    expect(headlines).toEqual(["Managed TLS material is read-only", "TLS rotation is unavailable"]);
+    // One notice for both: the reason is the same.
+    expect(headlines).toEqual(["Managed TLS material and rotation are read-only"]);
     for (const notice of notices()) {
       expect(notice.textContent).toContain("namespace grants do not scope");
     }

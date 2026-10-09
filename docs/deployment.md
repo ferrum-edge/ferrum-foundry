@@ -128,7 +128,7 @@ Durations are integers.
 | `FERRUM_JWT_MAX_TTL` | No | `3600` | 0-86400 seconds; `0` disables the ceiling | Gateway maximum TTL that `FERRUM_JWT_TTL` is checked against |
 | `FERRUM_JWT_ROLE` | No | `admin` | `viewer`, `operator`, or `admin` | Role of the static development principal. Trusted-proxy requests take the role from the header |
 | `FERRUM_JWT_AUDIENCE` | No | - | comma-separated exact values | `aud` claim, sent only when set. Must match the gateway's `FERRUM_ADMIN_JWT_AUDIENCE` |
-| `FERRUM_JWT_NAMESPACES` | In `static` | - | comma-separated names matching `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$`, or `*` alone | `ns` grants for the static principal and the readiness probe. `*` grants every namespace and omits `ns` |
+| `FERRUM_JWT_NAMESPACES` | In `static` | - | comma-separated names matching `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$`, or `*` alone | `ns` grants for the static principal and the readiness probe. `*` grants every namespace and omits `ns`. Exact names make every static session namespace-scoped, so no session can change BFF settings at runtime; change them here and restart |
 
 `FERRUM_JWT_NAMESPACES` rules:
 

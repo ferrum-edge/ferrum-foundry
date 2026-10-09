@@ -138,8 +138,9 @@ The BFF and Ferrum Edge remain the only enforcement points. See
   (`src/stores/capabilities.tsx`) derive them from the session role and
   namespace grants plus one `/health` snapshot, and
   `src/components/shared/CapabilityGate.tsx` renders them.
-- A `fleetWide` surface (fleet TLS material, TLS rotation, BFF settings) is
-  denied to a session holding namespace grants, because the BFF refuses it.
+- A `fleetWide` surface (fleet TLS material, TLS rotation, the backend-capability
+  refresh and mesh egress dry-run, BFF settings) is denied to a session holding
+  namespace grants, because the BFF refuses it.
 - A fact that was never read is `null` and concludes nothing, so a failed health
   read never downgrades a surface. The last snapshot that *did* load is kept for
   the provider's lifetime, because a gateway's mode and write policy only change

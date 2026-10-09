@@ -253,7 +253,13 @@ the refusal is logged as a warning naming the actor. The runtime-settings gate
 and body validation run after it. The Settings page
 shows such a session the values read-only, with the reason, and disables Save.
 `GET /api/settings` and `GET /api/settings/status` keep their `admin` role
-requirement.
+requirement. Edge answers the primary-key JWT the status probe signs with its
+detailed `/health` view whatever the `ns` claim, so for a session holding
+namespace grants `GET /api/settings/status` reduces the gateway's body to the
+same summary fields as `/api/proxy/health` (`status`, `timestamp`, `mode`,
+`admin_writes_enabled`, `ready`). It omits a body that is not a JSON object,
+including raw text, and keeps `reachable` and `status`. An unrestricted admin
+still receives the full body.
 
 `GET /api/settings` includes the active `authMode`. In `trusted-proxy` mode:
 
@@ -264,9 +270,23 @@ requirement.
   identity proxy's policy to change user access.
 - The reported `jwtNamespaces` describes only the readiness probe's scope.
 
-In static development mode the defaults are editable and apply to the static
-principal on its next login. Existing sessions keep their original grants.
-Issuer, audience, and token lifetime are signing settings in both modes.
+In static development mode the defaults are editable from an unrestricted
+session and apply to the static principal on its next login. Existing sessions
+keep their original grants. Issuer, audience, and token lifetime are signing
+settings in both modes.
+
+Because the static principal's grants are captured at login and runtime
+overrides live only in BFF memory:
+
+- With exact names in `FERRUM_JWT_NAMESPACES`, every static session is
+  namespace-scoped, so no session can change BFF settings at runtime and
+  `FERRUM_ALLOW_RUNTIME_SETTINGS=true` has no effect. Change settings through
+  the environment and restart the BFF.
+- When an unrestricted session saves exact `jwtNamespaces`, every later login
+  is namespace-scoped and cannot change settings, including restoring `["*"]`.
+  Only a session created before the save, until it expires, or a BFF restart
+  (which drops runtime overrides) can recover. The Settings form warns before
+  such a save.
 
 `jwtNamespaces` follows the `FERRUM_JWT_NAMESPACES` rules:
 

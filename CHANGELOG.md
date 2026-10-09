@@ -16,6 +16,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unrestricted admin may change them. This replaces the narrow-but-not-widen
   grant rule and its `403 FERRUM_BFF_NAMESPACE_GRANT_EXCEEDED`. The Settings
   page shows such a session the values read-only, with the reason (#565).
+  Static grants are captured at login and runtime overrides live only in
+  memory: with exact names in `FERRUM_JWT_NAMESPACES` no session can change
+  settings at runtime, and once an unrestricted session saves exact
+  `jwtNamespaces`, every later login is scoped and cannot restore `["*"]` until
+  the BFF restarts. The Settings form warns before such a save.
+- Reduce `GET /api/settings/status` for a session holding namespace grants to
+  the same `/health` summary fields as `/api/proxy/health`, and omit a body
+  that is not a JSON object. Edge returns its detailed health view (listeners,
+  data-plane and trust diagnostics, database, cached configuration) to the
+  primary-key JWT whatever the `ns` claim (#565).
 - Narrow the namespace route ceiling's consumer credential routes to the
   methods Edge serves: `PUT`, `POST`, and `DELETE` on
   `/consumers/{id}/credentials/{type}`, and only `DELETE` on
@@ -30,7 +40,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   controls read-only, with a `namespace-scope` reason, instead of controls the
   BFF refuses with `403`; TLS reads and validation stay available. TLS rotation
   is its own `tlsRotation` surface, probed by the capability parity contract
-  with an unsupported surface name (#565).
+  with an unsupported surface name. A scoped admin sees one notice naming
+  both material and rotation (#565).
+- Split the Cluster page's backend-capability refresh and the Mesh page's
+  egress dry-run into a fleet-wide `fleetOperations` surface. A session
+  holding namespace grants sees them disabled with the `namespace-scope`
+  reason instead of controls the BFF refuses with `403`; TLS validation stays
+  in `operationalActions`. The capability parity contract probes the new
+  surface with a mesh egress dry-run (#565).
 - A session holding namespace grants lands on Proxies instead of the
   fleet-wide Dashboard (#565).
 

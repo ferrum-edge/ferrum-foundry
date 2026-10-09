@@ -92,6 +92,7 @@ export type CapabilitySurface =
   | "tlsMaterial"
   | "tlsRotation"
   | "operationalActions"
+  | "fleetOperations"
   | "bffSettings";
 
 export type CapabilityBlocker = "role" | "namespace-scope" | "gateway-read-only";
@@ -278,6 +279,17 @@ const SURFACES: Record<CapabilitySurface, SurfaceDescriptor> = {
     action: "run operational gateway actions",
     minimumRole: "operator",
     gate: "none",
+  },
+  fleetOperations: {
+    label: "Fleet operational actions",
+    headline: "Fleet operational actions are unavailable",
+    action: "refresh backend capabilities or test mesh egress",
+    minimumRole: "operator",
+    // Role-checked only, with no write gate: the backend-capability refresh
+    // and the mesh egress dry-run. The BFF's namespace route ceiling refuses
+    // `/backend-capabilities/*` and `/mesh/*` to a scoped session.
+    gate: "none",
+    fleetWide: true,
   },
   bffSettings: {
     label: "BFF connection settings",

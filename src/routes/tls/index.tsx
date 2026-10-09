@@ -1665,6 +1665,11 @@ const TLS_TABS: readonly string[] = [
 
 export default function TlsPage() {
   const { capabilities } = useCapabilities();
+  // A scoped admin is denied material and rotation for the same reason, so one
+  // notice names both.
+  const scopedMaterialAndRotation =
+    capabilities.tlsMaterial.blockedBy === "namespace-scope" &&
+    capabilities.tlsRotation.blockedBy === "namespace-scope";
   // Inventory and Events each page through the route's one `offset` and
   // `limit`. The active tab lives in the URL beside them so a switch drops
   // both in the same navigation: the newly opened list starts at its first
@@ -1702,11 +1707,20 @@ export default function TlsPage() {
         </p>
       </div>
 
-      <CapabilityNotice verdict={capabilities.tlsMaterial} />
+      <CapabilityNotice
+        verdict={
+          scopedMaterialAndRotation
+            ? {
+                ...capabilities.tlsMaterial,
+                headline: "Managed TLS material and rotation are read-only",
+              }
+            : capabilities.tlsMaterial
+        }
+      />
       <CapabilityNotice verdict={capabilities.operationalActions} />
       {/* A role denial of rotation is the operational-actions notice above;
           only a namespace scope sets rotation apart from validation. */}
-      {capabilities.tlsRotation.blockedBy === "namespace-scope" && (
+      {capabilities.tlsRotation.blockedBy === "namespace-scope" && !scopedMaterialAndRotation && (
         <CapabilityNotice verdict={capabilities.tlsRotation} />
       )}
 

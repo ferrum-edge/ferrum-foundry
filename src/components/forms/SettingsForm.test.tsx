@@ -256,6 +256,21 @@ describe("SettingsForm editing drafts", () => {
     expect(submitted.jwtNamespaces).toEqual(["tenant-a", "tenant-b"]);
   });
 
+  it("warns before a save that would scope every later static login", async () => {
+    currentSettings.jwtNamespaces = ["*"];
+    await renderForm();
+    const warning = () => host.querySelector('[data-testid="scoped-login-warning"]');
+    expect(warning()).toBeNull();
+
+    await change("Namespace grants", "tenant-a");
+    expect(warning()?.textContent).toContain("cannot change BFF settings");
+
+    await change("Namespace grants", "*");
+    expect(warning()).toBeNull();
+    await change("Namespace grants", "tenant-a, bad grant");
+    expect(warning()).toBeNull();
+  });
+
   it("keeps an invalid grant visible with an inline error and does not save", async () => {
     await renderForm();
     const grants = inputByLabel("Namespace grants");

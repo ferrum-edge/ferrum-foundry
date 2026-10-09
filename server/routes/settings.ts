@@ -13,6 +13,7 @@ import {
   rejectStaleGatewayTarget,
   stampGatewayTarget,
 } from '../gateway-target.js';
+import { projectHealthSummary } from '../health-summary.js';
 import { generateToken } from '../jwt.js';
 import { getDispatcher } from '../tls.js';
 
@@ -162,6 +163,12 @@ const settingsPlugin: FastifyPluginAsync = async (fastify) => {
         body = JSON.parse(rawBody);
       } catch {
         // The gateway may return text for a proxy/intermediary failure.
+      }
+      // Edge returns its detailed health view to the primary-key JWT whatever
+      // the `ns` claim, so a namespace-scoped session receives only the
+      // summary fields `/api/proxy/health` gives it, and never raw text.
+      if (principal.namespaces !== undefined) {
+        body = typeof body === 'string' ? undefined : projectHealthSummary(body);
       }
       return reply.status(response.status).send({
         reachable: response.ok,

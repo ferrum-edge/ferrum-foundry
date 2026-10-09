@@ -39,18 +39,21 @@ const READ_ONLY_MODE_SURFACES: readonly CapabilitySurface[] = ["tlsMaterial"];
 const UNGATED_SURFACES: readonly CapabilitySurface[] = [
   "tlsRotation",
   "operationalActions",
+  "fleetOperations",
   "configExport",
   "bffSettings",
 ];
 
 /**
  * Fleet-wide writes the BFF refuses to a session holding namespace grants:
- * every TLS mutation except validate (`server/proxy-path.ts`) and
- * `PUT /api/settings` (`server/routes/settings.ts`).
+ * every TLS mutation except validate, the backend-capability refresh, and the
+ * mesh egress dry-run (`server/proxy-path.ts`), and `PUT /api/settings`
+ * (`server/routes/settings.ts`).
  */
 const FLEET_WIDE_SURFACES: readonly CapabilitySurface[] = [
   "tlsMaterial",
   "tlsRotation",
+  "fleetOperations",
   "bffSettings",
 ];
 
@@ -116,6 +119,7 @@ describe("role x mode capability matrix", () => {
     expect(capabilities.pluginConfigs.allowed).toBe(true);
     expect(capabilities.tlsRotation.allowed).toBe(true);
     expect(capabilities.operationalActions.allowed).toBe(true);
+    expect(capabilities.fleetOperations.allowed).toBe(true);
 
     for (const surface of [
       "consumers",
@@ -158,6 +162,7 @@ describe("role x mode capability matrix", () => {
       }
       expect(capabilities.tlsRotation.allowed).toBe(true);
       expect(capabilities.operationalActions.allowed).toBe(true);
+      expect(capabilities.fleetOperations.allowed).toBe(true);
       expect(capabilities.bffSettings.allowed).toBe(true);
       if (mode === "node_agent") {
         expect(capabilities.configExport.allowed).toBe(false);
@@ -255,6 +260,21 @@ describe("namespace-scoped sessions", () => {
     expect(scoped.headline).toBe("TLS rotation is unavailable");
     expect(resolveCapability("tlsRotation", facts("operator", "file", null, null, false)).allowed)
       .toBe(true);
+  });
+
+  it("names the backend-capability refresh and egress dry-run as fleet-wide", () => {
+    const scoped = resolveCapability(
+      "fleetOperations",
+      facts("operator", "database", true, "ok", true),
+    );
+    expect(scoped.allowed).toBe(false);
+    expect(scoped.blockedBy).toBe("namespace-scope");
+    expect(scoped.headline).toBe("Fleet operational actions are unavailable");
+    const unscoped = resolveCapability(
+      "fleetOperations",
+      facts("operator", "database", true, "ok", false),
+    );
+    expect(unscoped.allowed).toBe(true);
   });
 
   it("reports the role denial ahead of the namespace-scope denial", () => {

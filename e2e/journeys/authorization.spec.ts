@@ -191,8 +191,7 @@ test.describe("authorization through the identity proxy", () => {
     // The BFF refuses fleet TLS mutations to a scoped session; the page says
     // so before anything is edited and keeps the reads.
     await page.goto("/tls");
-    await expect(page.getByText("Managed TLS material is read-only")).toBeVisible();
-    await expect(page.getByText("TLS rotation is unavailable")).toBeVisible();
+    await expect(page.getByText("Managed TLS material and rotation are read-only")).toBeVisible();
     await expect(page.getByRole("button", { name: "Rotate Now" })).toBeDisabled();
   });
 

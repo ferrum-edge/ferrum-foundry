@@ -5,6 +5,7 @@ import { fetch, type RequestInit, type Response } from 'undici';
 import { requireAdminAuth, requireNamespaceCeiling } from './auth.js';
 import { loadConfig } from './config.js';
 import { gatewayTargetId, rejectStaleGatewayTarget, stampGatewayTarget } from './gateway-target.js';
+import { projectHealthSummary } from './health-summary.js';
 import { generateToken } from './jwt.js';
 import {
   proxyPathIsConsumerVerification,
@@ -58,12 +59,9 @@ const RESPONSE_HEADER_ALLOWLIST = [
   'x-ferrum-config-cursor',
 ] as const;
 
-// Edge answers the primary-key JWT Foundry signs with its detailed health
-// view: listeners, data-plane and trust diagnostics, database, and cached
-// configuration. A namespace-scoped principal receives only the summary fields
-// below, which the capability model reads, and only the headers that do not
-// describe the upstream representation.
-const SCOPED_HEALTH_FIELDS = ['status', 'timestamp', 'mode', 'admin_writes_enabled', 'ready'] as const;
+// A namespace-scoped principal receives only the health summary fields
+// (`projectHealthSummary`) and only the headers that do not describe the
+// upstream representation.
 const SCOPED_HEALTH_RESPONSE_HEADERS = ['cache-control', 'expires', 'retry-after'] as const;
 const SCOPED_HEALTH_BODY_LIMIT = 1024 * 1024;
 
@@ -202,16 +200,8 @@ async function scopedHealthSummary(body: Readable): Promise<Record<string, unkno
   } catch {
     throw new UnreadableHealthError();
   }
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new UnreadableHealthError();
-  }
-  const summary: Record<string, unknown> = {};
-  for (const field of SCOPED_HEALTH_FIELDS) {
-    const value = (parsed as Record<string, unknown>)[field];
-    if (Object.hasOwn(parsed, field) && (value === null || typeof value !== 'object')) {
-      summary[field] = value;
-    }
-  }
+  const summary = projectHealthSummary(parsed);
+  if (!summary) throw new UnreadableHealthError();
   return summary;
 }
 
