@@ -133,10 +133,13 @@ cannot write is shown read-only, with the reason, before anything is edited.
 The BFF and Ferrum Edge remain the only enforcement points. See
 `docs/capabilities.md`.
 
-- `src/lib/capabilities.ts` maps role x gateway mode to per-surface verdicts.
-  `CapabilityProvider` / `useCapabilities()` (`src/stores/capabilities.tsx`)
-  derive them from the session role plus one `/health` snapshot, and
+- `src/lib/capabilities.ts` maps role x namespace scope x gateway mode to
+  per-surface verdicts. `CapabilityProvider` / `useCapabilities()`
+  (`src/stores/capabilities.tsx`) derive them from the session role and
+  namespace grants plus one `/health` snapshot, and
   `src/components/shared/CapabilityGate.tsx` renders them.
+- A `fleetWide` surface (fleet TLS material, TLS rotation, BFF settings) is
+  denied to a session holding namespace grants, because the BFF refuses it.
 - A fact that was never read is `null` and concludes nothing, so a failed health
   read never downgrades a surface. The last snapshot that *did* load is kept for
   the provider's lifetime, because a gateway's mode and write policy only change

@@ -34,6 +34,7 @@ const EDGE_ROUTES = [
   { method: "GET", prefix: "/backup", role: "admin", gate: "none", ok: 200 },
   { method: "DELETE", prefix: "/admin/tls/certificates/", role: "admin", gate: "read-only-mode", ok: 404 },
   { method: "POST", prefix: "/admin/tls/validate", role: "operator", gate: "none", ok: 400 },
+  { method: "POST", prefix: "/admin/tls/rotate/", role: "operator", gate: "none", ok: 400 },
   { method: "GET", prefix: "/admin/tls/inventory", role: "operator", gate: "none", ok: 200 },
   { method: "GET", prefix: "/gateway-trust-bundles", role: "operator", gate: "none", ok: 200, collection: true },
   { method: "GET", prefix: "/audit", role: "admin", gate: "none", ok: 200 },
@@ -109,6 +110,7 @@ describe("capability parity contract", () => {
     assert.equal(result.writes.admin.tlsMaterial, 403);
     // Rotate/validate and export are not behind the read-only gate.
     assert.equal(result.writes.operator.operationalActions, 400);
+    assert.equal(result.writes.operator.tlsRotation, 400);
     assert.equal(result.writes.admin.configExport, 200);
   });
 
@@ -293,7 +295,10 @@ describe("capability parity contract", () => {
         assert.ok(probe.path.includes(PROBE_ID), `${surface} must delete only the probe id`);
         assert.equal(probe.admittedStatus, 404, `${surface} must require a missing probe id`);
       } else if (probe.method === "POST") {
-        assert.ok(["/restore", "/admin/tls/validate"].includes(probe.path), `${surface} POST`);
+        assert.ok(
+          ["/restore", "/admin/tls/validate", `/admin/tls/rotate/${PROBE_ID}`].includes(probe.path),
+          `${surface} POST`,
+        );
       } else {
         assert.equal(probe.method, "GET", surface);
       }

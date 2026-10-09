@@ -11,11 +11,12 @@ The model lives in `src/lib/capabilities.ts`, is published by
 
 ## Inputs
 
-Every verdict comes from four facts, from two reads the UI already makes:
+Every verdict comes from five facts, from two reads the UI already makes:
 
 | Fact | Source |
 | --- | --- |
 | `role` | `principal.role` from the Foundry session (`GET /api/auth/session`): `viewer`, `operator`, or `admin`. Checked with `isGatewayRole()`, so an unexpected value becomes `null` |
+| `namespaceScoped` | whether the same principal carries `namespaces`: `true` for an array of grants, `false` when the BFF omits it (an unrestricted admin), `null` while the session is unknown or the value has another shape |
 | `mode` | `mode` from the authenticated gateway health snapshot (`GET /health`) |
 | `adminWritesEnabled` | `admin_writes_enabled` from the same snapshot |
 | `status` | `status` from the same snapshot (`ok` / `degraded` / `starting` / `unavailable` / `draining`) |
@@ -99,7 +100,8 @@ namespace registry, and audit.
 | `proxies` | `operator` | `config-store` | `admit_write` on `POST/PUT/DELETE /proxies` |
 | `upstreams` | `operator` | `config-store` | `admit_write` on `POST/PUT/DELETE /upstreams` |
 | `pluginConfigs` | `operator` | `config-store` | `admit_write` on `POST/PUT/DELETE /plugins/config` |
-| `operationalActions` (TLS rotate/validate, backend-capability refresh, egress dry-run) | `operator` | `none` | `admit_audited_operation`, or no gate |
+| `operationalActions` (TLS validate, backend-capability refresh, egress dry-run) | `operator` | `none` | `admit_audited_operation`, or no gate |
+| `tlsRotation` (`POST /admin/tls/rotate/{surface}`) | `operator` | `none`, fleet-wide | `admit_audited_operation` in `handle_rotate` |
 | `consumers` | `admin` | `config-store` | `admit_write` on `POST/PUT/DELETE /consumers` |
 | `consumerCredentials` | `admin` | `config-store` | `admit_write` on `/consumers/{id}/credentials/{type}` |
 | `apiSpecs` | `admin` | `config-store` | `admit_write` on `/api-specs` |
@@ -107,8 +109,8 @@ namespace registry, and audit.
 | `configBackup` (`POST /restore`) | `admin` | `config-store` | `admit_write` on `/restore`, after `require_db` in file/DP mode |
 | `gatewayTrust` | `admin` | `config-store` | `admit_write` on `/gateway-trust-bundles` |
 | `configExport` (`GET /backup`) | `admin` | `none` (denied on `node_agent`) | `handle_backup`: a read with no write gate; `node_agent` has no cached config |
-| `tlsMaterial` (certificates, CA bundles, CRLs, OCSP, JWKS, ACME) | `admin` | `read-only-mode` | `admit_non_config_db_write`, called by all 18 mutation handlers in `src/admin/tls_management.rs` |
-| `bffSettings` (`PUT /api/settings`, BFF-local) | `admin` | `none` | `requireRole('admin')` in `server/routes/settings.ts`; never reaches the gateway |
+| `tlsMaterial` (certificates, CA bundles, CRLs, OCSP, JWKS, ACME) | `admin` | `read-only-mode`, fleet-wide | `admit_non_config_db_write`, called by all 18 mutation handlers in `src/admin/tls_management.rs` |
+| `bffSettings` (`PUT /api/settings`, BFF-local) | `admin` | `none`, fleet-wide | `requireRole('admin')` and the namespace-scope refusal in `server/routes/settings.ts`; never reaches the gateway |
 
 A few rows need explaining.
 
@@ -141,15 +143,29 @@ and `handle_backup` applies no write gate. `file`, `dp`, and `mesh` keep a
 config"}`. The model denies export on that mode only. On every other read-only
 mode, export stays available to an admin.
 
-A role denial is reported before a gateway-mode denial, because it is the more
-fundamental and more stable of the two.
+**Fleet-wide surfaces are refused to a namespace-scoped session.** The BFF
+bounds a session that holds namespace grants to the routes its namespaces
+scope (see [Namespace route ceiling](authentication.md#namespace-route-ceiling)).
+It refuses every fleet TLS mutation except the stateless validate, so
+`tlsMaterial` and `tlsRotation` are denied with `blockedBy: "namespace-scope"`
+whatever the role and mode. `bffSettings` is denied the same way, because
+`PUT /api/settings` refuses a scoped session
+(see [Runtime identity defaults](authentication.md#runtime-identity-defaults)).
+TLS validation stays in `operationalActions` and stays available. Only an
+observed grant denies: `namespaceScoped` that is `false` or `null` concludes
+nothing, and the parity contract, which supplies no namespace fact, sees the
+role and mode verdicts alone.
+
+A role denial is reported first, then a namespace-scope denial, then a
+gateway-mode denial: each is more fundamental and more stable than the next.
 
 ## Presentation
 
 `src/components/shared/CapabilityGate.tsx` renders the verdict:
 
 - `CapabilityNotice`: the visible reason, the surface's `headline` plus the
-  `explanation`. It carries `data-capability-blocked="role" | "gateway-read-only"`.
+  `explanation`. It carries
+  `data-capability-blocked="role" | "namespace-scope" | "gateway-read-only"`.
 - `ReadOnlySurface`: the notice plus a `disabled` fieldset around a whole
   editing surface, linked to the notice with `aria-describedby`. It uses
   `display: contents` by default so layout is unchanged. Passing
@@ -198,7 +214,8 @@ The `disabled` fieldset covers editing controls. Anything the role may still
    `config-store`, `admit_non_config_db_write` → `read-only-mode`,
    `admit_audited_operation` or none → `none`. Write the `headline` as a full
    sentence: an editing surface is "read-only", a one-off action is
-   "unavailable".
+   "unavailable". Set `fleetWide: true` when the BFF refuses the write to a
+   session holding namespace grants (`server/proxy-path.ts`).
 2. Read it with `useCapabilities()` and render `CapabilityNotice`,
    `ReadOnlySurface`, or `WriteAction`.
 3. Guard the mutation handler with `if (!capability.allowed) return;`. Guard the

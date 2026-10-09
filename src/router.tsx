@@ -30,7 +30,7 @@ const UpstreamDetailPage = lazy(() => import("@/routes/upstreams/$upstreamId"));
 const MetricsPage = lazy(() => import("@/routes/metrics/index"));
 const StatusPage = lazy(() => import("@/routes/status/index"));
 
-const DashboardPage = lazy(() => import("@/routes/dashboard/index"));
+const LandingPage = lazy(() => import("@/routes/landing"));
 const SettingsPage = lazy(() => import("@/routes/settings/index"));
 
 const TlsPage = lazy(() => import("@/routes/tls/index"));
@@ -45,12 +45,12 @@ const rootRoute = createRootRoute({
   component: AppShell,
 });
 
-/* ---------- Dashboard ---------- */
+/* ---------- Landing: the Dashboard, or proxies for a scoped session ---------- */
 
 const dashboardRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
-  component: DashboardPage,
+  component: LandingPage,
 });
 
 /* ---------- Proxies ---------- */

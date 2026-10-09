@@ -310,7 +310,9 @@ Things that are easy to get wrong:
   `mode`, `admin_writes_enabled`, `ready`) rather than the detailed view.
   `/overload`, `/cluster`, `/mesh/*`, `/charges`, `/metrics`,
   `/backend-capabilities`, and unknown routes are refused with `403`, so such a
-  session loses the Dashboard, Metrics, Cluster, and Mesh surfaces in the UI.
+  session loses the Dashboard, Metrics, Cluster, and Mesh surfaces in the UI
+  and lands on Proxies. It may not change BFF settings either:
+  `PUT /api/settings` answers it `403 FERRUM_BFF_SETTINGS_NAMESPACE_SCOPED`.
   The audit log stays available for the session's own namespaces. Edge records
   fleet-wide actions under its default `ferrum` namespace, so an identity
   granted `ferrum` reads those rows. Only an identity that omits the namespaces

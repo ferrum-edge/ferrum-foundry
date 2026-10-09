@@ -133,7 +133,9 @@ classification is in `server/proxy-path.ts`.
   `gateway-trust` status; `POST /batch`, `GET /backup`, and `POST /restore`;
   `GET /proxies/{id}/mcp/tools`; `GET /config/export`; `GET /audit`; and
   `GET /backend-egress-policy`. Each must name one of the session's grants in
-  `X-Ferrum-Namespace`.
+  `X-Ferrum-Namespace`. Consumer credentials take only the methods Edge
+  serves: `PUT`, `POST`, and `DELETE` on `/consumers/{id}/credentials/{type}`,
+  and `DELETE` on `/consumers/{id}/credentials/{type}/{index}`.
 - **Allowed fleet-wide routes** need no namespace header: `GET /plugins`, the
   `/namespaces` registry (writes are confined to the session's grants by the
   BFF), `GET /live`, `GET /health`, `GET /status`, and
@@ -147,8 +149,11 @@ classification is in `server/proxy-path.ts`.
   `timestamp`, `mode`, `admin_writes_enabled`, and `ready`, which is what the
   capability model reads. The upstream `Content-Length`, `ETag`,
   `Last-Modified`, and range headers are dropped, and conditional and range
-  request headers are not forwarded. An unrestricted admin receives the full
-  view.
+  request headers are not forwarded. A non-`200` answer, such as `503` while
+  the gateway is not ready, is reduced the same way and keeps its status and
+  `Retry-After`. A body that is not a JSON object, or exceeds 1 MiB, is
+  answered with `502 FERRUM_BFF_UPSTREAM_FAILURE` rather than relayed. An
+  unrestricted admin receives the full view.
 - **Refused fleet-wide routes** include `/overload`, `/cluster`, `/mesh/*`
   (including `/mesh/egress-scope`), `/charges`, `/metrics`,
   `/backend-capabilities`, the waypoint routes, every fleet TLS mutation (see
@@ -160,6 +165,13 @@ The credential-read denial and unsafe-path checks run before the ceiling, so
 `/consumers/{id}/verification` and `/deployment-snapshot` keep
 `403 FERRUM_BFF_CREDENTIAL_READ_DENIED` and an unsafe path keeps
 `400 FERRUM_BFF_UNSAFE_PATH`, whatever the namespace grants.
+
+The UI mirrors the ceiling, as a convenience only. A scoped session lands on
+Proxies instead of the Dashboard, does not see the Dashboard, Metrics,
+Cluster, or Mesh navigation, and sees fleet TLS create, replace, delete, ACME,
+and rotation controls and the BFF settings read-only, with the reason (see
+[Capabilities](capabilities.md#surface-matrix)). TLS reads and validation stay
+available.
 
 #### Fleet-wide audit rows
 
@@ -232,6 +244,17 @@ answer unchanged.
 
 ### Runtime identity defaults
 
+BFF settings are fleet-wide: the gateway target, TLS trust, JWT signing, and
+the static login defaults apply to every session and every namespace. Only an
+unrestricted admin, a session with no namespace grants, may change them. A
+session that holds namespace grants is refused every `PUT /api/settings`,
+whatever its role or body, with `403 FERRUM_BFF_SETTINGS_NAMESPACE_SCOPED`, and
+the refusal is logged as a warning naming the actor. The runtime-settings gate
+and body validation run after it. The Settings page
+shows such a session the values read-only, with the reason, and disables Save.
+`GET /api/settings` and `GET /api/settings/status` keep their `admin` role
+requirement.
+
 `GET /api/settings` includes the active `authMode`. In `trusted-proxy` mode:
 
 - The Settings page disables the role and namespace defaults and leaves them
@@ -252,19 +275,13 @@ Issuer, audience, and token lifetime are signing settings in both modes.
   `["*"]` for every namespace. Empty entries are dropped.
 - An array with no name left, an invalid name, `*` mixed with names, or a value
   that is not an array of strings is refused with
-  `400 FERRUM_BFF_INVALID_SETTINGS`, and nothing is applied. The shape check
-  runs first, so a malformed body is never reported as a widening.
+  `400 FERRUM_BFF_INVALID_SETTINGS`, and nothing is applied.
 - `GET /api/settings` always includes it, reporting an unrestricted static
   principal as `["*"]`.
 
-A session that holds namespace grants may only choose grants it holds.
-Anything wider, including `["*"]`, is refused with
-`403 FERRUM_BFF_NAMESPACE_GRANT_EXCEEDED` and logged as a warning naming the
-actor and the requested grants. The Settings form leaves the field out of a
-save when it is untouched (the same grants in another order or spacing count
-as untouched), so a narrower session can still save other settings. A refused
-widening is shown on the field; any other `403` is shown once as a toast with
-the BFF's reason.
+The Settings form leaves the field out of a save when it is untouched (the same
+grants in another order or spacing count as untouched). A refused save is shown
+once as a toast with the BFF's reason.
 
 ### Namespace binding
 

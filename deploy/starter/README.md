@@ -141,8 +141,9 @@ or `unmapped`). It is for a first run and for CI. Do not expose it.
 - **Every starter identity is scoped.** Because each group is mapped to a
   namespace, no starter user is an unrestricted admin. A scoped session may
   reach only namespace-scoped routes plus a small fleet-wide ceiling, so it
-  loses the Dashboard, Metrics, Cluster, and Mesh surfaces, and Health shows
-  only the summary. The Audit Log stays, for the session's own namespaces. To
+  loses the Dashboard, Metrics, Cluster, and Mesh surfaces (it lands on
+  Proxies), Health shows only the summary, and BFF settings are read-only. The
+  Audit Log stays, for the session's own namespaces. To
   give one operator the fleet-wide surfaces, map that identity to a role but
   omit its namespaces header; only an `admin` may be global. See
   [`docs/authentication.md`](../../docs/authentication.md#namespace-route-ceiling).

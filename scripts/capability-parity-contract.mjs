@@ -27,7 +27,9 @@
  * because the `DELETE` probes are safe only when their reserved id does not
  * exist. The contract also requires those admitted deletes to return `404`,
  * rather than treating a successful deletion as parity. The remaining probes
- * are `POST /admin/tls/validate` (non-persistent), `GET /backup`,
+ * are `POST /admin/tls/validate` (non-persistent), a `POST /admin/tls/rotate`
+ * for a surface Edge does not support (refused with `400` after the role check
+ * and audit admission, so nothing is reloaded), `GET /backup`,
  * or a `POST /restore` without `?confirm=true` and with a body that is not
  * JSON. Each still passes through exactly the role check and the admission
  * gate the surface mirrors, because Edge applies both before it looks the
@@ -98,6 +100,9 @@ export const WRITE_PROBES = {
   },
   configExport: { method: "GET", path: "/backup" },
   tlsMaterial: { method: "DELETE", path: `/admin/tls/certificates/${PROBE_ID}`, admittedStatus: 404 },
+  // `handle_rotate` checks the role and audit admission, then refuses a
+  // surface it does not know with `400` before requesting any reload.
+  tlsRotation: { method: "POST", path: `/admin/tls/rotate/${PROBE_ID}`, admittedStatus: 400 },
   operationalActions: { method: "POST", path: "/admin/tls/validate", body: {} },
 };
 

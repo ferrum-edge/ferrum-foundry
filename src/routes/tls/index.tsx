@@ -483,7 +483,7 @@ function InventoryTab() {
   const { data, isLoading } = page;
   const rotate = useRotateTlsSurface();
   const { capabilities } = useCapabilities();
-  const canRotate = capabilities.operationalActions;
+  const canRotate = capabilities.tlsRotation;
   const [surface, setSurface] = useState<TlsRotateSurface>("proxy_https");
 
   const entries = data?.data ?? [];
@@ -1704,6 +1704,11 @@ export default function TlsPage() {
 
       <CapabilityNotice verdict={capabilities.tlsMaterial} />
       <CapabilityNotice verdict={capabilities.operationalActions} />
+      {/* A role denial of rotation is the operational-actions notice above;
+          only a namespace scope sets rotation apart from validation. */}
+      {capabilities.tlsRotation.blockedBy === "namespace-scope" && (
+        <CapabilityNotice verdict={capabilities.tlsRotation} />
+      )}
 
       <Tabs value={activeTab} onValueChange={selectTab}>
         <TabsList>

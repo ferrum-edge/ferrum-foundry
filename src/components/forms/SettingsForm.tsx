@@ -80,16 +80,6 @@ function namespaceGrantsError(text: string): string | undefined {
   return undefined;
 }
 
-/** The BFF refused grants wider than the ones this session holds. */
-const NAMESPACE_GRANT_EXCEEDED_CODE = "FERRUM_BFF_NAMESPACE_GRANT_EXCEEDED";
-
-function isNamespaceGrantExceeded(error: unknown): boolean {
-  // ky has already parsed the error body into `data`; the response is spent.
-  const data = error instanceof Error ? (error as { data?: unknown }).data : undefined;
-  return typeof data === "object" && data !== null &&
-    (data as { code?: unknown }).code === NAMESPACE_GRANT_EXCEEDED_CODE;
-}
-
 function errorStatus(error: unknown): number | undefined {
   if (!(error instanceof Error)) return undefined;
   const status = (error as { response?: { status?: unknown } }).response?.status;
@@ -245,16 +235,14 @@ export function SettingsForm() {
         runtimeSettingsEnabled: _runtimeSettingsEnabled,
         ...updates
       } = resolveNumberDrafts(settings, SETTINGS_NUMBER_KEYS);
-      // Omitted grants stay unchanged on the server, so a session holding
-      // narrower grants than the defaults can still save unrelated settings.
+      // Omitted grants stay unchanged on the server.
       const identity = namespaceGrantsTouched()
         ? { jwtRole, jwtNamespaces: parseCommaList(namespaceText) }
         : { jwtRole };
       const data = await api
         .put("api/settings", {
           json: authMode === "static" ? { ...updates, ...identity } : updates,
-          // A refused widening becomes the field error below, and any other
-          // 403 this toast; neither is reported a second time by the popup.
+          // A 403 becomes this form's toast; the popup does not report it again.
           context: { [HANDLED_STATUSES]: [403] },
         })
         .json<Settings>();
@@ -267,13 +255,6 @@ export function SettingsForm() {
       // A save refused because this tab's target was replaced is not a
       // failure of the save; the gateway target gate explains it.
       if (isGatewayTargetRetired()) return;
-      if (isNamespaceGrantExceeded(error)) {
-        setErrors((prev) => ({
-          ...prev,
-          jwtNamespaces: "Grants cannot include namespaces this session does not hold, or *",
-        }));
-        return;
-      }
       if (errorStatus(error) === 403) {
         toast("error", await getApiErrorMessage(error, "Failed to save settings"));
         return;
@@ -328,6 +309,9 @@ export function SettingsForm() {
   // Environment/secret-mounted configuration: shown as values, not as
   // greyed-out controls, and explained once above the fields it covers.
   const immutable = !settings.runtimeSettingsEnabled;
+  // A session the capability model denies (a namespace-scoped admin) sees the
+  // same values read-only; the notice above them says why.
+  const locked = immutable || !canWrite.allowed;
 
   return (
     <div className="space-y-6">
@@ -357,8 +341,8 @@ export function SettingsForm() {
             onChange={(e) => update("adminUrl", e.target.value)}
             placeholder="http://localhost:9876"
             helpText="The Ferrum Admin API URL that this BFF server connects to"
-            disabled={immutable}
-            readOnly={immutable}
+            disabled={locked}
+            readOnly={locked}
           />
 
           <div className="flex min-w-0 flex-col gap-1.5">
@@ -381,8 +365,8 @@ export function SettingsForm() {
               onChange={(e) => update("jwtIssuer", e.target.value)}
               placeholder="ferrum-edge"
               helpText="JWT 'iss' claim. Must match gateway's FERRUM_ADMIN_JWT_ISSUER."
-              disabled={immutable}
-              readOnly={immutable}
+              disabled={locked}
+              readOnly={locked}
             />
             <Input
               label="JWT TTL (seconds)"
@@ -392,8 +376,8 @@ export function SettingsForm() {
               onChange={(e) => update("jwtTtl", numberDraftFromInput(e.target.value))}
               error={errors.jwtTtl}
               helpText="Token lifetime in seconds. Maps to FERRUM_JWT_TTL."
-              disabled={immutable}
-              readOnly={immutable}
+              disabled={locked}
+              readOnly={locked}
             />
           </div>
           {settings.authMode === "trusted-proxy" && (
@@ -414,17 +398,17 @@ export function SettingsForm() {
                 { value: "operator", label: "Operator" },
                 { value: "admin", label: "Admin" },
               ]}
-              disabled={immutable || settings.authMode !== "static"}
-              readOnly={immutable}
+              disabled={locked || settings.authMode !== "static"}
+              readOnly={locked}
             />
             <Input
               label="JWT Audience"
               value={Array.isArray(settings.jwtAudience) ? settings.jwtAudience.join(", ") : settings.jwtAudience ?? ""}
               onChange={(event) => update("jwtAudience", event.target.value)}
               helpText="Optional comma-separated aud claim; leave empty unless the gateway requires it."
-              placeholder={immutable ? "Not set" : undefined}
-              disabled={immutable}
-              readOnly={immutable}
+              placeholder={locked ? "Not set" : undefined}
+              disabled={locked}
+              readOnly={locked}
             />
           </div>
           <Input
@@ -434,8 +418,8 @@ export function SettingsForm() {
             onBlur={checkNamespaceGrants}
             helpText="Applies to new static logins: exact comma-separated namespace grants, or * for every namespace."
             error={errors.jwtNamespaces}
-            disabled={immutable || settings.authMode !== "static"}
-            readOnly={immutable}
+            disabled={locked || settings.authMode !== "static"}
+            readOnly={locked}
           />
         </div>
       </Card>
@@ -456,7 +440,7 @@ export function SettingsForm() {
                 checked={settings.tlsVerify}
                 onChange={(e) => update("tlsVerify", e.target.checked)}
                 className="h-4 w-4 rounded border-border bg-bg-input accent-orange"
-                disabled={immutable}
+                disabled={locked}
               />
               <div>
                 <span className="text-sm font-medium text-text-secondary">
@@ -484,8 +468,8 @@ export function SettingsForm() {
             value={numberDraftText(settings.connectTimeout)}
             onChange={(e) => update("connectTimeout", numberDraftFromInput(e.target.value))}
             error={errors.connectTimeout}
-            disabled={immutable}
-            readOnly={immutable}
+            disabled={locked}
+            readOnly={locked}
           />
           <Input
             label="Read Timeout (ms)"
@@ -494,8 +478,8 @@ export function SettingsForm() {
             value={numberDraftText(settings.readTimeout)}
             onChange={(e) => update("readTimeout", numberDraftFromInput(e.target.value))}
             error={errors.readTimeout}
-            disabled={immutable}
-            readOnly={immutable}
+            disabled={locked}
+            readOnly={locked}
           />
           <Input
             label="Write Timeout (ms)"
@@ -504,8 +488,8 @@ export function SettingsForm() {
             value={numberDraftText(settings.writeTimeout)}
             onChange={(e) => update("writeTimeout", numberDraftFromInput(e.target.value))}
             error={errors.writeTimeout}
-            disabled={immutable}
-            readOnly={immutable}
+            disabled={locked}
+            readOnly={locked}
           />
         </div>
       </Card>

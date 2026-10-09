@@ -37,8 +37,20 @@ const READ_ONLY_MODE_SURFACES: readonly CapabilitySurface[] = ["tlsMaterial"];
 
 /** Surfaces the gateway applies no write gate to at all. */
 const UNGATED_SURFACES: readonly CapabilitySurface[] = [
+  "tlsRotation",
   "operationalActions",
   "configExport",
+  "bffSettings",
+];
+
+/**
+ * Fleet-wide writes the BFF refuses to a session holding namespace grants:
+ * every TLS mutation except validate (`server/proxy-path.ts`) and
+ * `PUT /api/settings` (`server/routes/settings.ts`).
+ */
+const FLEET_WIDE_SURFACES: readonly CapabilitySurface[] = [
+  "tlsMaterial",
+  "tlsRotation",
   "bffSettings",
 ];
 
@@ -57,8 +69,9 @@ function facts(
   mode: string | null,
   adminWritesEnabled: boolean | null = mode === null ? null : true,
   status: string | null = null,
+  namespaceScoped: boolean | null = null,
 ): CapabilityFacts {
-  return { role, mode, adminWritesEnabled, status };
+  return { role, namespaceScoped, mode, adminWritesEnabled, status };
 }
 
 describe("gateway write state", () => {
@@ -101,6 +114,7 @@ describe("role x mode capability matrix", () => {
     expect(capabilities.proxies.allowed).toBe(true);
     expect(capabilities.upstreams.allowed).toBe(true);
     expect(capabilities.pluginConfigs.allowed).toBe(true);
+    expect(capabilities.tlsRotation.allowed).toBe(true);
     expect(capabilities.operationalActions.allowed).toBe(true);
 
     for (const surface of [
@@ -142,6 +156,7 @@ describe("role x mode capability matrix", () => {
         expect(capabilities[surface].blockedBy).toBe("gateway-read-only");
         expect(capabilities[surface].explanation).toContain(MODE_PHRASE[mode]);
       }
+      expect(capabilities.tlsRotation.allowed).toBe(true);
       expect(capabilities.operationalActions.allowed).toBe(true);
       expect(capabilities.bffSettings.allowed).toBe(true);
       if (mode === "node_agent") {
@@ -212,6 +227,59 @@ describe("role x mode capability matrix", () => {
     const capabilities = resolveCapabilities(facts("viewer", null));
     expect(capabilities.proxies.allowed).toBe(false);
     expect(capabilities.proxies.blockedBy).toBe("role");
+  });
+});
+
+describe("namespace-scoped sessions", () => {
+  it("withholds every fleet-wide write from a scoped admin and keeps the rest", () => {
+    const capabilities = resolveCapabilities(facts("admin", "database", true, "ok", true));
+    for (const surface of CAPABILITY_SURFACES) {
+      const verdict = capabilities[surface];
+      if (FLEET_WIDE_SURFACES.includes(surface)) {
+        expect(verdict.allowed, surface).toBe(false);
+        expect(verdict.blockedBy, surface).toBe("namespace-scope");
+        expect(verdict.summary).toBe("Requires an administrator without namespace grants");
+        expect(verdict.explanation).toContain("namespace grants do not scope");
+      } else {
+        expect(verdict.allowed, surface).toBe(true);
+      }
+    }
+    // Validation is stateless and stays available to a scoped session.
+    expect(capabilities.operationalActions.allowed).toBe(true);
+  });
+
+  it("names TLS rotation as a fleet-wide action an operator otherwise holds", () => {
+    const scoped = resolveCapability("tlsRotation", facts("operator", "file", null, null, true));
+    expect(scoped.allowed).toBe(false);
+    expect(scoped.blockedBy).toBe("namespace-scope");
+    expect(scoped.headline).toBe("TLS rotation is unavailable");
+    expect(resolveCapability("tlsRotation", facts("operator", "file", null, null, false)).allowed)
+      .toBe(true);
+  });
+
+  it("reports the role denial ahead of the namespace-scope denial", () => {
+    const verdict = resolveCapability("tlsMaterial", facts("operator", "database", true, "ok", true));
+    expect(verdict.blockedBy).toBe("role");
+    expect(verdict.summary).toBe("Requires the admin role");
+  });
+
+  it("reports the namespace-scope denial ahead of the gateway-mode denial", () => {
+    const verdict = resolveCapability("tlsMaterial", facts("admin", "file", null, null, true));
+    expect(verdict.blockedBy).toBe("namespace-scope");
+  });
+
+  it.each([false, null])("concludes nothing from namespace grants that are %s", (namespaceScoped) => {
+    const capabilities = resolveCapabilities(facts("admin", "database", true, "ok", namespaceScoped));
+    for (const surface of FLEET_WIDE_SURFACES) {
+      expect(capabilities[surface].allowed, surface).toBe(true);
+    }
+  });
+
+  it("concludes nothing when a caller supplies no namespace fact", () => {
+    // The parity contract passes role and health facts only.
+    const unscopedFacts = { role: "admin", mode: "database", adminWritesEnabled: true, status: "ok" };
+    const verdict = resolveCapability("tlsMaterial", unscopedFacts as unknown as CapabilityFacts);
+    expect(verdict.allowed).toBe(true);
   });
 });
 

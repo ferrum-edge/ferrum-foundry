@@ -30,6 +30,8 @@ async function setup(
   // Static mode requires an explicit scope; `*` is its every-namespace grant.
   staticGrants: string | undefined = mode === 'static' ? '*' : undefined,
   logLines?: string[],
+  // The trusted admin is unrestricted unless the identity proxy sends grants.
+  trustedGrants?: string,
 ) {
   vi.stubEnv('FERRUM_AUTH_MODE', mode);
   // Always set, so a setup never inherits a scope from the shell.
@@ -48,7 +50,7 @@ async function setup(
     'x-ferrum-auth-secret': PROXY_SECRET,
     'x-forwarded-user': 'settings-admin@example.test',
     'x-ferrum-role': 'admin',
-    'x-ferrum-namespaces': 'tenant-a',
+    ...(trustedGrants === undefined ? {} : { 'x-ferrum-namespaces': trustedGrants }),
   } : {};
   const session = mode === 'trusted-proxy'
     ? await app.inject({ method: 'GET', url: '/api/auth/session', headers: identityHeaders })
@@ -123,22 +125,6 @@ describe('settings identity authority', () => {
     expect(login.json().principal).toMatchObject({ role: 'viewer', namespaces: ['tenant-b'] });
   });
 
-  it('refuses an empty static grant list from a scoped session without applying other fields', async () => {
-    const { app, headers } = await setup('static', 'tenant-a,tenant-b');
-    const before = await app.inject({ method: 'GET', url: '/api/settings', headers });
-    expect(before.json().jwtNamespaces).toEqual(['tenant-a', 'tenant-b']);
-    const response = await app.inject({
-      method: 'PUT', url: '/api/settings', headers,
-      payload: { jwtIssuer: 'must-not-apply', jwtNamespaces: [] },
-    });
-    expect(response.statusCode).toBe(400);
-    expect(response.json().code).toBe('FERRUM_BFF_INVALID_SETTINGS');
-    const after = await app.inject({ method: 'GET', url: '/api/settings', headers });
-    expect(after.json()).toEqual(before.json());
-    const login = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { token: BFF_TOKEN } });
-    expect(login.json().principal.namespaces).toEqual(['tenant-a', 'tenant-b']);
-  });
-
   it.each([
     { jwtNamespaces: [] },
     { jwtNamespaces: [''] },
@@ -167,66 +153,91 @@ describe('settings identity authority', () => {
     expect(login.json().principal.namespaces).toEqual(['tenant-a']);
   });
 
+  it('ignores empty entries in a grant list', async () => {
+    const { app, headers } = await setup('static');
+    const response = await app.inject({
+      method: 'PUT', url: '/api/settings', headers,
+      payload: { jwtNamespaces: ['tenant-b', '', ' '] },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().jwtNamespaces).toEqual(['tenant-b']);
+  });
+
   it.each([
+    { jwtIssuer: 'must-not-apply' },
+    { jwtNamespaces: ['tenant-a'] },
+    { jwtNamespaces: ['tenant-b'] },
     { jwtNamespaces: ['*'] },
-    { jwtNamespaces: ['tenant-c'] },
     { jwtNamespaces: ['tenant-a', 'tenant-c'] },
-  ])('refuses a scoped session widening static grants: %j', async (update) => {
+    { jwtNamespaces: [] },
+    { jwtNamespaces: 'tenant-a' },
+    { adminUrl: 'http://127.0.0.1:9000' },
+    { unsupported: true },
+  ])('refuses every change from a static session holding namespace grants: %j', async (update) => {
     const { app, headers } = await setup('static', 'tenant-a,tenant-b');
+    const before = await app.inject({ method: 'GET', url: '/api/settings', headers });
+    expect(before.json().jwtNamespaces).toEqual(['tenant-a', 'tenant-b']);
     const response = await app.inject({
       method: 'PUT', url: '/api/settings', headers,
       payload: { jwtIssuer: 'must-not-apply', ...update },
     });
     expect(response.statusCode).toBe(403);
-    expect(response.json().code).toBe('FERRUM_BFF_NAMESPACE_GRANT_EXCEEDED');
-    const settings = await app.inject({ method: 'GET', url: '/api/settings', headers });
-    expect(settings.json()).toMatchObject({ jwtIssuer: 'ferrum-edge', jwtNamespaces: ['tenant-a', 'tenant-b'] });
+    expect(response.json()).toEqual({
+      error: 'Namespace-scoped sessions cannot change BFF settings',
+      code: 'FERRUM_BFF_SETTINGS_NAMESPACE_SCOPED',
+    });
+    const after = await app.inject({ method: 'GET', url: '/api/settings', headers });
+    expect(after.json()).toEqual(before.json());
     const login = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { token: BFF_TOKEN } });
     expect(login.json().principal.namespaces).toEqual(['tenant-a', 'tenant-b']);
   });
 
   it.each([
-    { jwtNamespaces: 'tenant-a' },
-    { jwtNamespaces: null },
-    { jwtNamespaces: { tenant: 'tenant-a' } },
-    { jwtNamespaces: ['tenant-a', 7] },
-  ])('refuses a malformed grant list as a bad request, not a widening: %j', async (update) => {
-    const logLines: string[] = [];
-    const { app, headers } = await setup('static', 'tenant-a,tenant-b', logLines);
-    const response = await app.inject({
-      method: 'PUT', url: '/api/settings', headers,
-      payload: { jwtIssuer: 'must-not-apply', ...update },
-    });
-    expect(response.statusCode).toBe(400);
-    expect(response.json().code).toBe('FERRUM_BFF_INVALID_SETTINGS');
-    expect(logLines.join('\n')).not.toContain('Namespace grant widening refused');
-    const settings = await app.inject({ method: 'GET', url: '/api/settings', headers });
-    expect(settings.json()).toMatchObject({ jwtIssuer: 'ferrum-edge', jwtNamespaces: ['tenant-a', 'tenant-b'] });
+    { jwtAudience: 'edge-admin' },
+    { jwtIssuer: 'must-not-apply' },
+    { jwtNamespaces: ['tenant-a'] },
+  ])('refuses every change from a trusted admin holding namespace grants: %j', async (update) => {
+    const { app, headers } = await setup('trusted-proxy', undefined, undefined, 'tenant-a');
+    const before = await app.inject({ method: 'GET', url: '/api/settings', headers });
+    expect(before.statusCode).toBe(200);
+    const response = await app.inject({ method: 'PUT', url: '/api/settings', headers, payload: update });
+    expect(response.statusCode).toBe(403);
+    expect(response.json().code).toBe('FERRUM_BFF_SETTINGS_NAMESPACE_SCOPED');
+    const after = await app.inject({ method: 'GET', url: '/api/settings', headers });
+    expect(after.json()).toEqual(before.json());
   });
 
-  it('logs a refused widening with the actor and the requested grants', async () => {
+  it('refuses a scoped session before the runtime-settings gate', async () => {
+    vi.stubEnv('FERRUM_ALLOW_RUNTIME_SETTINGS', 'false');
+    const { app, headers } = await setup('static', 'tenant-a');
+    const response = await app.inject({
+      method: 'PUT', url: '/api/settings', headers,
+      payload: { jwtIssuer: 'must-not-apply' },
+    });
+    expect(response.statusCode).toBe(403);
+    expect(response.json().code).toBe('FERRUM_BFF_SETTINGS_NAMESPACE_SCOPED');
+  });
+
+  it('logs a refused scoped change with the actor and nothing from the request', async () => {
     const logLines: string[] = [];
     const { app, headers } = await setup('static', 'tenant-a', logLines);
     const response = await app.inject({
       method: 'PUT', url: '/api/settings', headers,
-      payload: { jwtNamespaces: ['tenant-a', 'tenant-z'] },
+      payload: { jwtNamespaces: ['tenant-a', 'tenant-z'], jwtIssuer: 'issuer-from-body' },
     });
     expect(response.statusCode).toBe(403);
     const entries = logLines.map((line) => JSON.parse(line) as Record<string, unknown>);
-    const refusal = entries.find((entry) => entry.msg === 'Namespace grant widening refused');
-    expect(refusal).toMatchObject({
-      level: 40,
-      actor: 'ferrum-foundry-static',
-      requested: ['tenant-a', 'tenant-z'],
-    });
+    const refusal = entries.find((entry) => entry.msg === 'Namespace-scoped settings change refused');
+    expect(refusal).toMatchObject({ level: 40, actor: 'ferrum-foundry-static' });
+    expect(logLines.join('\n')).not.toContain('issuer-from-body');
     expect(logLines.join('\n')).not.toContain(BFF_TOKEN);
     expect(logLines.join('\n')).not.toContain(headers['x-csrf-token']);
   });
 
-  it('lets a session narrower than the defaults save settings that omit grants', async () => {
-    const { app, headers: wide } = await setup('static', 'tenant-a,tenant-b');
+  it('lets only an unrestricted session change settings once the defaults are scoped', async () => {
+    const { app, headers: unrestricted } = await setup('static');
     const narrow = await app.inject({
-      method: 'PUT', url: '/api/settings', headers: wide,
+      method: 'PUT', url: '/api/settings', headers: unrestricted,
       payload: { jwtNamespaces: ['tenant-a'] },
     });
     expect(narrow.statusCode).toBe(200);
@@ -236,49 +247,20 @@ describe('settings identity authority', () => {
       cookie: login.cookies.map((entry) => `${entry.name}=${entry.value}`).join('; '),
       'x-csrf-token': login.json().csrfToken as string,
     };
+
+    // The scoped login can neither restore the wider defaults nor change an
+    // unrelated setting; the session that set them still can.
+    for (const payload of [{ jwtNamespaces: ['*'] }, { jwtIssuer: 'issuer-2' }]) {
+      const refused = await app.inject({ method: 'PUT', url: '/api/settings', headers: scoped, payload });
+      expect(refused.statusCode).toBe(403);
+      expect(refused.json().code).toBe('FERRUM_BFF_SETTINGS_NAMESPACE_SCOPED');
+    }
     const restore = await app.inject({
-      method: 'PUT', url: '/api/settings', headers: wide,
-      payload: { jwtNamespaces: ['tenant-a', 'tenant-b'] },
+      method: 'PUT', url: '/api/settings', headers: unrestricted,
+      payload: { jwtIssuer: 'issuer-2', jwtNamespaces: ['*'] },
     });
     expect(restore.statusCode).toBe(200);
-
-    // The defaults now grant more than the scoped session holds. Resubmitting
-    // them would be a widening; omitting them leaves them unchanged.
-    const resubmitted = await app.inject({
-      method: 'PUT', url: '/api/settings', headers: scoped,
-      payload: { jwtIssuer: 'issuer-2', jwtNamespaces: ['tenant-a', 'tenant-b'] },
-    });
-    expect(resubmitted.statusCode).toBe(403);
-    const response = await app.inject({
-      method: 'PUT', url: '/api/settings', headers: scoped,
-      payload: { jwtIssuer: 'issuer-2', jwtRole: 'operator' },
-    });
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({
-      jwtIssuer: 'issuer-2', jwtRole: 'operator', jwtNamespaces: ['tenant-a', 'tenant-b'],
-    });
-  });
-
-  it('ignores empty entries when checking a narrowing request', async () => {
-    const { app, headers } = await setup('static', 'tenant-a,tenant-b');
-    const response = await app.inject({
-      method: 'PUT', url: '/api/settings', headers,
-      payload: { jwtNamespaces: ['tenant-b', '', ' '] },
-    });
-    expect(response.statusCode).toBe(200);
-    expect(response.json().jwtNamespaces).toEqual(['tenant-b']);
-  });
-
-  it('lets a scoped session narrow static grants to ones it holds', async () => {
-    const { app, headers } = await setup('static', 'tenant-a,tenant-b');
-    const response = await app.inject({
-      method: 'PUT', url: '/api/settings', headers,
-      payload: { jwtNamespaces: [' tenant-b '] },
-    });
-    expect(response.statusCode).toBe(200);
-    expect(response.json().jwtNamespaces).toEqual(['tenant-b']);
-    const login = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { token: BFF_TOKEN } });
-    expect(login.json().principal.namespaces).toEqual(['tenant-b']);
+    expect(restore.json()).toMatchObject({ jwtIssuer: 'issuer-2', jwtNamespaces: ['*'] });
   });
 
   it('grants every namespace only through the explicit wildcard', async () => {
