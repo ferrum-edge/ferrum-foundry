@@ -13,6 +13,7 @@ import {
   rejectStaleGatewayTarget,
   stampGatewayTarget,
 } from '../gateway-target.js';
+import { projectHealthSummary } from '../health-summary.js';
 import { generateToken } from '../jwt.js';
 import { getDispatcher } from '../tls.js';
 
@@ -32,17 +33,6 @@ const ALLOWED_UPDATE_FIELDS = new Set<keyof RuntimeConfig>([
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
-}
-
-// Empty entries are dropped by the grant parser, so they widen nothing; a list
-// with no entry left is refused there as malformed.
-function grantsAreWithin(requested: readonly string[], held: readonly string[]): boolean {
-  return requested.every((entry) => entry.trim() === '' || held.includes(entry.trim()));
-}
-
-/** Bounded, log-safe summary of a refused grant request (grants are not secrets). */
-function describeRequestedGrants(requested: readonly string[]): string[] {
-  return requested.slice(0, 32).map((entry) => entry.slice(0, 254));
 }
 
 async function readBoundedBody(response: Awaited<ReturnType<typeof fetch>>, maxBytes = 64 * 1024): Promise<string> {
@@ -75,6 +65,20 @@ const settingsPlugin: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.put('/api/settings', { onRequest: requireAdmin, bodyLimit: 32 * 1024 }, async (request, reply) => {
+    // BFF settings are fleet-wide: the gateway target, TLS trust, signing, and
+    // the static login defaults apply to every session and every namespace.
+    // A session holding namespace grants may not change them, whatever its role
+    // and whatever the body names; only an unrestricted admin may.
+    if (request.authPrincipal?.namespaces !== undefined) {
+      request.log.warn({
+        actor: request.authPrincipal.subject,
+      }, 'Namespace-scoped settings change refused');
+      return reply.status(403).send({
+        error: 'Namespace-scoped sessions cannot change BFF settings',
+        code: 'FERRUM_BFF_SETTINGS_NAMESPACE_SCOPED',
+      });
+    }
+
     const config = loadConfig();
     if (!config.allowRuntimeSettings) {
       return reply.status(403).send({
@@ -99,27 +103,10 @@ const settingsPlugin: FastifyPluginAsync = async (fastify) => {
       });
     }
 
-    // A malformed grant list is a bad request for every session, checked before
-    // the widening check so it is never reported (or logged) as a widening.
     if ('jwtNamespaces' in body && !isStringArray(body.jwtNamespaces)) {
       return reply.status(400).send({
         error: 'Settings validation failed',
         code: 'FERRUM_BFF_INVALID_SETTINGS',
-      });
-    }
-
-    // A scoped session may narrow the static grants but never widen them: it
-    // cannot grant a namespace it does not hold, or every namespace.
-    const heldGrants = request.authPrincipal?.namespaces;
-    const requested = body.jwtNamespaces;
-    if (heldGrants && isStringArray(requested) && !grantsAreWithin(requested, heldGrants)) {
-      request.log.warn({
-        actor: request.authPrincipal?.subject,
-        requested: describeRequestedGrants(requested),
-      }, 'Namespace grant widening refused');
-      return reply.status(403).send({
-        error: 'Namespace grants cannot exceed the grants of this session',
-        code: 'FERRUM_BFF_NAMESPACE_GRANT_EXCEEDED',
       });
     }
 
@@ -176,6 +163,12 @@ const settingsPlugin: FastifyPluginAsync = async (fastify) => {
         body = JSON.parse(rawBody);
       } catch {
         // The gateway may return text for a proxy/intermediary failure.
+      }
+      // Edge returns its detailed health view to the primary-key JWT whatever
+      // the `ns` claim, so a namespace-scoped session receives only the
+      // summary fields `/api/proxy/health` gives it, and never raw text.
+      if (principal.namespaces !== undefined) {
+        body = typeof body === 'string' ? undefined : projectHealthSummary(body);
       }
       return reply.status(response.status).send({
         reachable: response.ok,

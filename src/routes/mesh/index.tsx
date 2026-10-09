@@ -422,7 +422,7 @@ function EgressTab() {
   const { data, isLoading } = query;
   const testEgress = useTestEgressScope();
   const { capabilities } = useCapabilities();
-  const canTest = capabilities.operationalActions;
+  const canTest = capabilities.fleetOperations;
   const [testHost, setTestHost] = useState("");
   const [testPort, setTestPort] = useState("");
   const [testResult, setTestResult] = useState<string | null>(null);

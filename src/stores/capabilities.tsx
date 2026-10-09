@@ -1,9 +1,10 @@
 /* ------------------------------------------------------------------ */
 /*  Ferrum Foundry – capability provider                               */
 /*                                                                     */
-/*  Joins the two facts the UI already reads — the session principal's */
-/*  role and the authenticated gateway health snapshot — into the      */
-/*  per-surface capability model in `src/lib/capabilities.ts`.         */
+/*  Joins the two reads the UI already makes — the session principal's */
+/*  role and namespace grants, and the authenticated gateway health    */
+/*  snapshot — into the per-surface capability model in                */
+/*  `src/lib/capabilities.ts`.                                         */
 /*                                                                     */
 /*  One health read serves the whole workspace. A failed or            */
 /*  still-loading read is not evidence of anything: the mode, the      */
@@ -40,6 +41,7 @@ export interface CapabilityContextValue {
 
 const NOTHING_KNOWN: CapabilityFacts = {
   role: null,
+  namespaceScoped: null,
   mode: null,
   adminWritesEnabled: null,
   status: null,
@@ -84,11 +86,21 @@ export function CapabilityProvider({ children }: { children: ReactNode }) {
   // trusted: an off-enum role is `null` and concludes nothing.
   const sessionRole: unknown = principal?.role;
   const role = isGatewayRole(sessionRole) ? sessionRole : null;
+  // The BFF omits `namespaces` for an unrestricted principal. Grants of any
+  // other shape conclude nothing.
+  const sessionNamespaces: unknown = principal?.namespaces;
+  const namespaceScoped = !principal
+    ? null
+    : sessionNamespaces === undefined
+      ? false
+      : Array.isArray(sessionNamespaces)
+        ? true
+        : null;
 
   const value = useMemo<CapabilityContextValue>(() => {
-    const facts: CapabilityFacts = { role, mode, adminWritesEnabled, status };
+    const facts: CapabilityFacts = { role, namespaceScoped, mode, adminWritesEnabled, status };
     return { capabilities: resolveCapabilities(facts), facts };
-  }, [adminWritesEnabled, mode, role, status]);
+  }, [adminWritesEnabled, mode, namespaceScoped, role, status]);
 
   return <CapabilityContext.Provider value={value}>{children}</CapabilityContext.Provider>;
 }

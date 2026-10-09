@@ -178,6 +178,23 @@ test.describe("authorization through the identity proxy", () => {
     expect(operatorSecond.status()).toBe(403);
   });
 
+  test("a namespace-scoped admin lands on Proxies and sees fleet TLS writes read-only", async ({
+    signIn,
+  }) => {
+    // Every starter identity holds namespace grants, the admin included, so
+    // the fleet-wide Dashboard is not its landing page (#565).
+    const { page } = await signIn("admin");
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: "Proxies", exact: true })).toBeVisible();
+    await expect(page).toHaveURL(/\/proxies(\?.*)?$/);
+
+    // The BFF refuses fleet TLS mutations to a scoped session; the page says
+    // so before anything is edited and keeps the reads.
+    await page.goto("/tls");
+    await expect(page.getByText("Managed TLS material and rotation are read-only")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Rotate Now" })).toBeDisabled();
+  });
+
   test("a write without a session and CSRF grant is refused", async ({ request }) => {
     const response = await request.post(`${FOUNDRY_URL}/api/proxy/upstreams`, {
       headers: { [IDENTITY_HEADER]: "admin", "X-Ferrum-Namespace": NAMESPACE },

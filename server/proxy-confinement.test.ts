@@ -41,7 +41,17 @@ const HEALTH_DETAIL = {
   dp_config: { stale: false },
   cp_dp_trust: { degraded: false },
 };
-const arrivals: Array<{ url: string; method: string; namespace: string | undefined; token: string }> = [];
+// What Edge answers while it is not ready: a non-200 that still carries the
+// detailed view.
+const HEALTH_DEGRADED = { ...HEALTH_DETAIL, status: 'degraded', admin_writes_enabled: false, ready: false };
+const arrivals: Array<{
+  url: string;
+  method: string;
+  namespace: string | undefined;
+  token: string;
+  range: string | undefined;
+  ifNoneMatch: string | undefined;
+}> = [];
 const publications: Array<{ url: string; body: string }> = [];
 const held: ServerResponse[] = [];
 const signals = new EventEmitter();
@@ -60,6 +70,8 @@ const gateway = createServer((request, response) => {
     url, method: request.method ?? '',
     namespace: request.headers['x-ferrum-namespace'] as string | undefined,
     token: request.headers.authorization?.replace(/^Bearer /, '') ?? '',
+    range: request.headers.range,
+    ifNoneMatch: request.headers['if-none-match'],
   });
   void (async () => {
     const chunks: Buffer[] = [];
@@ -86,10 +98,26 @@ const gateway = createServer((request, response) => {
     }
     const path = new URL(url, 'http://gateway.test').pathname;
     if (path === '/health' || path === '/status') {
+      const variant = new URL(url, 'http://gateway.test').searchParams.get('health');
       response.setHeader('etag', '"health-detail"');
       response.setHeader('last-modified', 'Thu, 08 Oct 2026 00:00:00 GMT');
       response.setHeader('cache-control', 'no-store');
-      response.end(JSON.stringify(HEALTH_DETAIL));
+      if (variant === 'degraded') {
+        response.statusCode = 503;
+        response.setHeader('retry-after', '5');
+        response.end(JSON.stringify(HEALTH_DEGRADED));
+      } else if (variant === 'oversized') {
+        // Well-formed JSON past the BFF's 1 MiB summary bound.
+        response.end(JSON.stringify({ ...HEALTH_DETAIL, padding: 'x'.repeat(1024 * 1024) }));
+      } else if (variant === 'text') {
+        response.statusCode = 502;
+        response.setHeader('content-type', 'text/plain');
+        response.end('upstream proxy failure');
+      } else if (variant === 'array') {
+        response.end(JSON.stringify([HEALTH_DETAIL]));
+      } else {
+        response.end(JSON.stringify(HEALTH_DETAIL));
+      }
     } else if (path === '/consumers') {
       response.end(JSON.stringify({ data: [MASKED_CONSUMER] }));
     } else if (/^\/consumers\/[^/]+\/?$/.test(path)) {
@@ -629,6 +657,37 @@ describe('raw BFF path confinement', () => {
     }
   });
 
+  it('forwards only the credential methods Edge serves to scoped principals', async () => {
+    for (const [method, path] of [
+      ['PUT', '/consumers/consumer-1/credentials/keyauth'],
+      ['POST', '/consumers/consumer-1/credentials/keyauth'],
+      ['DELETE', '/consumers/consumer-1/credentials/keyauth'],
+      ['DELETE', '/consumers/consumer-1/credentials/keyauth/0'],
+    ]) {
+      const response = await rawRequest(`/api/proxy${path}`, method, identity('admin'), '{}');
+      expect(response.status, `${method} ${path}`).toBe(200);
+      expect(arrivals.at(-1)).toMatchObject({ url: path, method, namespace: 'tenant-a' });
+    }
+    const before = arrivals.length;
+    for (const [method, path] of [
+      ['PUT', '/consumers/consumer-1/credentials/keyauth/0'],
+      ['POST', '/consumers/consumer-1/credentials/keyauth/0'],
+      ['PATCH', '/consumers/consumer-1/credentials/keyauth/0'],
+      ['GET', '/consumers/consumer-1/credentials/keyauth/0'],
+      ['GET', '/consumers/consumer-1/credentials/keyauth'],
+    ]) {
+      const response = await rawRequest(
+        `/api/proxy${path}`,
+        method,
+        identity('admin'),
+        method === 'GET' ? '' : '{}',
+      );
+      expect(response.status, `${method} ${path}`).toBe(403);
+      expect(response.wire).toContain('Namespace access denied');
+    }
+    expect(arrivals).toHaveLength(before);
+  });
+
   it('projects gateway health to its summary fields for scoped principals', async () => {
     const detailKeys = Object.keys(HEALTH_DETAIL).filter((key) => !(key in HEALTH_SUMMARY));
     for (const path of ['/health', '/status']) {
@@ -658,6 +717,83 @@ describe('raw BFF path confinement', () => {
     expect(overload.status).toBe(403);
     expect(overload.wire).toContain('Namespace access denied');
     expect(arrivals).toHaveLength(before);
+  });
+
+  it('reduces a non-200 gateway health answer for scoped principals', async () => {
+    const summary = {
+      status: 'degraded',
+      timestamp: HEALTH_SUMMARY.timestamp,
+      mode: 'database',
+      admin_writes_enabled: false,
+      ready: false,
+    };
+    for (const path of ['/health', '/status']) {
+      for (const headers of [identity('viewer'), identity('admin')]) {
+        const response = await rawRequest(`/api/proxy${path}?health=degraded`, 'GET', headers);
+        expect(response.status, path).toBe(503);
+        expect(arrivals.at(-1)).toMatchObject({ url: `${path}?health=degraded`, method: 'GET' });
+        const { head, body } = splitWire(response.wire);
+        expect(JSON.parse(body)).toEqual(summary);
+        expect(body).not.toContain('gateway_listeners');
+        expect(body).not.toContain('tenant-b');
+        expect(head).not.toMatch(/^etag:/im);
+        expect(head).not.toMatch(/^last-modified:/im);
+        expect(head).toMatch(new RegExp(`^content-length: ${Buffer.byteLength(body)}$`, 'im'));
+        expect(head).toMatch(/^cache-control: no-store$/im);
+        expect(head).toMatch(/^retry-after: 5$/im);
+      }
+    }
+    // An unrestricted admin still receives the detailed non-200 answer.
+    const unrestricted = await rawRequest('/api/proxy/health?health=degraded', 'GET', globalAdmin());
+    expect(unrestricted.status).toBe(503);
+    expect(JSON.parse(splitWire(unrestricted.wire).body)).toEqual(HEALTH_DEGRADED);
+  });
+
+  it('strips range and conditional request headers on the reduced health path only', async () => {
+    const conditional = { range: 'bytes=0-15', 'if-none-match': '"health-detail"' };
+    for (const path of ['/health', '/status']) {
+      for (const method of ['GET', 'HEAD']) {
+        const response = await rawRequest(
+          `/api/proxy${path}`,
+          method,
+          { ...identity('viewer'), ...conditional },
+        );
+        // The summary is a new representation: never a 206 or 304 of the
+        // upstream one.
+        expect(response.status, `${method} ${path}`).toBe(200);
+        expect(arrivals.at(-1)).toMatchObject({
+          url: path,
+          method,
+          range: undefined,
+          ifNoneMatch: undefined,
+        });
+      }
+    }
+    // The unrestricted admin's request is forwarded as sent.
+    await rawRequest('/api/proxy/health', 'GET', { ...globalAdmin(), ...conditional });
+    expect(arrivals.at(-1)).toMatchObject({
+      url: '/health',
+      range: 'bytes=0-15',
+      ifNoneMatch: '"health-detail"',
+    });
+  });
+
+  it.each([
+    ['an oversized', 'oversized'],
+    ['a non-JSON', 'text'],
+    ['a non-object JSON', 'array'],
+  ])('answers %s gateway health body with 502 for scoped principals', async (_label, variant) => {
+    for (const path of ['/health', '/status']) {
+      const beforeArrivals = arrivals.length;
+      const response = await rawRequest(`/api/proxy${path}?health=${variant}`, 'GET', identity('viewer'));
+      expect(response.status, path).toBe(502);
+      expect(arrivals).toHaveLength(beforeArrivals + 1);
+      const { head, body } = splitWire(response.wire);
+      expect(JSON.parse(body)).toEqual({ error: 'Bad Gateway', code: 'FERRUM_BFF_UPSTREAM_FAILURE' });
+      expect(body).not.toContain('upstream proxy failure');
+      expect(body).not.toContain('gateway_listeners');
+      expect(head).not.toMatch(/^etag:/im);
+    }
   });
 
   it('forwards the full health view to an unrestricted admin', async () => {

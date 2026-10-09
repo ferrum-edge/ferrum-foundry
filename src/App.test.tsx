@@ -8,12 +8,16 @@ import { setCsrfToken } from "@/api/client";
 import { resetGatewayMetadata } from "@/api/gatewayMetadata";
 import { GATEWAY_TARGET_HEADER, resetGatewayTarget } from "@/api/gatewayTarget";
 import { inputByLabel } from "@/test/fields";
-import { click, createHarness, fill, page, selectOption, settle, stubFetch } from "@/test/__tests__/harness";
+import {
+  button, click, createHarness, fill, page, selectOption, settle, stubFetch,
+} from "@/test/__tests__/harness";
 import { meshResponses } from "@/test/__tests__/meshFixtures";
 
 let ui: ReturnType<typeof createHarness>;
 let requests: Request[];
 let clients: Set<QueryClient>;
+// The session's namespace grants; `undefined` is an unrestricted admin.
+let sessionNamespaces: string[] | undefined;
 const settings = {
   authMode: "static", adminUrl: "https://gateway.example.test", jwtIssuer: "ferrum-edge",
   jwtTtl: 900, jwtRole: "admin", jwtNamespaces: ["*"], tlsCaConfigured: false, tlsVerify: true,
@@ -29,6 +33,7 @@ beforeEach(() => {
   });
   ui = createHarness();
   requests = [];
+  sessionNamespaces = ["tenant-a"];
   localStorage.clear();
   Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
   stubFetch(async (request) => {
@@ -36,7 +41,10 @@ beforeEach(() => {
     const path = new URL(request.url).pathname;
     if (path === "/api/auth/config") return Response.json({ mode: "static" });
     if (path === "/api/auth/session") return Response.json({
-      principal: { subject: "operator", displayName: "Operator", role: "admin", namespaces: ["tenant-a"], authMode: "static" },
+      principal: {
+        subject: "operator", displayName: "Operator", role: "admin", authMode: "static",
+        ...(sessionNamespaces && { namespaces: sessionNamespaces }),
+      },
       csrfToken: "app-fixture-csrf",
     });
     if (path === "/api/auth/logout") return Response.json({});
@@ -78,7 +86,7 @@ afterEach(async () => {
   Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
 });
 
-it("loads an authenticated deep link, navigates the shell, saves settings, and signs out", async () => {
+it("loads an authenticated deep link, navigates the shell, reads settings, and signs out", async () => {
   await ui.render(<App />);
   await settle(() => expect(ui.host.querySelector("main")?.textContent).toContain("No TLS material found"));
   expect(ui.host.querySelector("h1")?.textContent).toBe("TLS Management");
@@ -99,16 +107,21 @@ it("loads an authenticated deep link, navigates the shell, saves settings, and s
   await act(async () => { await router.navigate({ to: "/settings" }); });
   await settle(() => expect(ui.host.textContent).toContain("Save Settings"));
   expect(ui.host.textContent).toContain("Backup & Restore");
-  await fill(inputByLabel(ui.host, "JWT Issuer"), "updated-from-ui");
-  await click("Save Settings");
-  await settle(() => expect(requests.some((request) => request.method === "PUT")).toBe(true));
-  const save = requests.find((request) => request.method === "PUT")!;
-  expect(save.headers.get("X-CSRF-Token")).toBe("app-fixture-csrf");
-  expect(await save.json()).toMatchObject({ jwtIssuer: "updated-from-ui", adminUrl: settings.adminUrl });
+  // BFF settings are fleet-wide, so a session holding namespace grants reads
+  // them but cannot save them; the BFF refuses the write regardless.
+  expect(ui.host.textContent).toContain("BFF connection settings are read-only");
+  expect(inputByLabel(ui.host, "JWT Issuer").disabled).toBe(true);
+  expect(button("Save Settings").disabled).toBe(true);
   await click("Test Connection");
   await settle(() => expect(ui.host.textContent).toContain("Connected (HTTP 200)"));
   await selectOption("Default Refresh Interval", "Manual");
   expect(localStorage.getItem("ferrum:metricsRefreshInterval")).toBe("0");
+  expect(requests.some((request) => request.method === "PUT")).toBe(false);
+
+  // The scoped session lands on its proxies, not the fleet-wide Dashboard.
+  await act(async () => { await router.navigate({ to: "/" }); });
+  await settle(() => expect(ui.host.querySelector("h1")?.textContent).toBe("Proxies"));
+  expect(router.state.location.pathname).toBe("/proxies");
 
   for (const [to, title, empty] of [
     ["/proxies", "Proxies", "No proxies yet"], ["/consumers", "Consumers", "No consumers yet"],
@@ -204,6 +217,8 @@ function expectWorkspaceRetired() {
 }
 
 it("keeps drafts through same-target refreshes and retires a tab whose target another tab replaced", async () => {
+  // Only an admin without namespace grants may change BFF settings.
+  sessionNamespaces = undefined;
   const bff = retargetableBff();
   await openSettings();
   expect(requests.filter(gatewayFacing).length).toBeGreaterThan(0);
@@ -229,6 +244,7 @@ it("keeps drafts through same-target refreshes and retires a tab whose target an
 }, 15000);
 
 it("retires this tab's workspace once its own settings save re-points the BFF", async () => {
+  sessionNamespaces = undefined;
   const bff = retargetableBff();
   await openSettings();
   await fill(inputByLabel(ui.host, "Admin URL"), "https://gateway-b.example.test");
@@ -236,6 +252,8 @@ it("retires this tab's workspace once its own settings save re-points the BFF", 
   await settle(() => expect(ui.host.textContent).toContain("Gateway target changed"));
 
   const save = requests.find((request) => request.method === "PUT")!;
+  expect(save.headers.get("X-CSRF-Token")).toBe("app-fixture-csrf");
+  expect(await save.clone().json()).toMatchObject({ adminUrl: "https://gateway-b.example.test" });
   expect(save.headers.get(GATEWAY_TARGET_HEADER)).toBe("target-a");
   expect(bff.target).toBe("target-b");
   expectWorkspaceRetired();

@@ -34,7 +34,10 @@ const NAMESPACE_SCOPED_ROUTES: ReadonlyArray<readonly [string, RegExp]> = [
     'GET|PUT|DELETE',
     /^\/(proxies|upstreams|consumers|plugins\/config|api-specs|gateway-trust-bundles)\/[^/]+\/?$/,
   ],
-  ['POST|PUT|DELETE', /^\/consumers\/[^/]+\/credentials\/[^/]+(?:\/[^/]+)?\/?$/],
+  // Edge serves PUT (replace), POST (append), and DELETE (remove all) on a
+  // credential type, and only DELETE on one indexed credential.
+  ['POST|PUT|DELETE', /^\/consumers\/[^/]+\/credentials\/[^/]+\/?$/],
+  ['DELETE', /^\/consumers\/[^/]+\/credentials\/[^/]+\/[^/]+\/?$/],
   ['GET', /^\/api-specs\/by-proxy\/[^/]+\/?$/],
   ['GET', /^\/proxies\/[^/]+\/mcp\/tools\/?$/],
   ['GET', /^\/gateway-trust\/status\/?$/],

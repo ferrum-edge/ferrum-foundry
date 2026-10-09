@@ -6,10 +6,11 @@
 /*  exists so the UI does not present a mutation form whose only       */
 /*  possible outcome is a 403.                                         */
 /*                                                                     */
-/*  Two facts drive it, both of which the UI already reads:            */
+/*  Two reads drive it, both of which the UI already makes:            */
 /*                                                                     */
-/*    * the authenticated role on the Foundry session principal        */
-/*      (`viewer` / `operator` / `admin`), and                         */
+/*    * the Foundry session principal: its role (`viewer` /            */
+/*      `operator` / `admin`) and whether it holds namespace grants,   */
+/*      and                                                            */
 /*    * the gateway's operating mode, `admin_writes_enabled`, and      */
 /*      `status` from the authenticated `/health` snapshot.            */
 /*                                                                     */
@@ -67,6 +68,11 @@ const WRITES_DISABLED_EXPLANATION =
 const ADMIN_READ_ONLY_FLAG_EXPLANATION =
   "The gateway was started with FERRUM_ADMIN_READ_ONLY, so the admin API is read-only.";
 
+const NAMESPACE_SCOPE_EXPLANATION =
+  "Your session holds namespace grants, and this is a fleet-wide surface that " +
+  "namespace grants do not scope. Only an administrator without namespace grants " +
+  "can change it.";
+
 const NODE_AGENT_EXPORT_EXPLANATION =
   "The gateway runs in node-agent mode: it has neither a configuration database " +
   "nor a cached configuration, so configuration export is unavailable.";
@@ -84,10 +90,12 @@ export type CapabilitySurface =
   | "configBackup"
   | "gatewayTrust"
   | "tlsMaterial"
+  | "tlsRotation"
   | "operationalActions"
+  | "fleetOperations"
   | "bffSettings";
 
-export type CapabilityBlocker = "role" | "gateway-read-only";
+export type CapabilityBlocker = "role" | "namespace-scope" | "gateway-read-only";
 
 export interface CapabilityVerdict {
   /** False only when a read fact positively proves the write would be denied. */
@@ -108,6 +116,11 @@ export type CapabilitySet = Record<CapabilitySurface, CapabilityVerdict>;
 export interface CapabilityFacts {
   /** The session principal's role, or `null` while the session is unknown. */
   role: GatewayRole | null;
+  /**
+   * Whether the session principal holds namespace grants, or `null` while the
+   * session is unknown. An unrestricted admin holds none.
+   */
+  namespaceScoped: boolean | null;
   /** `health.mode`, or `null` when the health snapshot has not been read. */
   mode: string | null;
   /** `health.admin_writes_enabled`, or `null` when it was not observed. */
@@ -148,6 +161,11 @@ interface SurfaceDescriptor {
   minimumRole: GatewayRole;
   /** The upstream write-admission gate this surface mirrors. */
   gate: CapabilityGate;
+  /**
+   * The write is fleet-wide, so the BFF's namespace route ceiling (or its
+   * settings route) refuses it to a session that holds namespace grants.
+   */
+  fleetWide?: true;
 }
 
 /**
@@ -241,6 +259,19 @@ const SURFACES: Record<CapabilitySurface, SurfaceDescriptor> = {
     // a read-only mode but are not subject to the config-DB failover gate that
     // `admin_writes_enabled` also folds in.
     gate: "read-only-mode",
+    // Every TLS mutation except the stateless validate is refused to a scoped
+    // session (`FLEET_GLOBAL_SCOPED_DENIED_ROUTES` in `server/proxy-path.ts`).
+    fleetWide: true,
+  },
+  tlsRotation: {
+    label: "TLS rotation",
+    headline: "TLS rotation is unavailable",
+    action: "rotate TLS surfaces",
+    minimumRole: "operator",
+    // `admit_audited_operation`: an operational reload, available in every
+    // mode, but a fleet TLS mutation the BFF refuses to a scoped session.
+    gate: "none",
+    fleetWide: true,
   },
   operationalActions: {
     label: "Operational gateway actions",
@@ -249,12 +280,25 @@ const SURFACES: Record<CapabilitySurface, SurfaceDescriptor> = {
     minimumRole: "operator",
     gate: "none",
   },
+  fleetOperations: {
+    label: "Fleet operational actions",
+    headline: "Fleet operational actions are unavailable",
+    action: "refresh backend capabilities or test mesh egress",
+    minimumRole: "operator",
+    // Role-checked only, with no write gate: the backend-capability refresh
+    // and the mesh egress dry-run. The BFF's namespace route ceiling refuses
+    // `/backend-capabilities/*` and `/mesh/*` to a scoped session.
+    gate: "none",
+    fleetWide: true,
+  },
   bffSettings: {
     label: "BFF connection settings",
     headline: "BFF connection settings are read-only",
     action: "change the Foundry BFF connection settings",
     minimumRole: "admin",
     gate: "none",
+    // `PUT /api/settings` refuses a scoped session (`server/routes/settings.ts`).
+    fleetWide: true,
   },
 };
 
@@ -329,7 +373,10 @@ export function resolveGatewayWriteState(facts: CapabilityFacts): GatewayWriteSt
   return { state: "unknown" };
 }
 
-/** Resolve one surface. Role denials are reported ahead of mode denials. */
+/**
+ * Resolve one surface. Role denials are reported ahead of namespace-scope
+ * denials, and both ahead of mode denials.
+ */
 export function resolveCapability(
   surface: CapabilitySurface,
   facts: CapabilityFacts,
@@ -347,6 +394,19 @@ export function resolveCapability(
       explanation:
         `Your session has the ${facts.role} role, which cannot ${action}. ` +
         `Ferrum Edge requires the ${minimumRole} role for this surface.`,
+    };
+  }
+
+  // Only an observed grant concludes anything: an unknown session, or a fact
+  // a caller did not supply, leaves the surface to the server.
+  if (descriptor.fleetWide && facts.namespaceScoped === true) {
+    return {
+      allowed: false,
+      label,
+      headline,
+      blockedBy: "namespace-scope",
+      summary: "Requires an administrator without namespace grants",
+      explanation: NAMESPACE_SCOPE_EXPLANATION,
     };
   }
 

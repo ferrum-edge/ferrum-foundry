@@ -5,10 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { blurField, clearText, typeText } from "@/test/fields";
 import { SettingsForm } from "./SettingsForm";
 
-const { get, put, toast } = vi.hoisted(() => ({
+const { get, put, toast, session } = vi.hoisted(() => ({
   get: vi.fn(),
   put: vi.fn(),
   toast: vi.fn(),
+  // An admin session; `null` grants conclude nothing, as before a session read.
+  session: { namespaceScoped: null as boolean | null },
 }));
 
 vi.mock("@/api/client", () => ({
@@ -22,6 +24,21 @@ vi.mock("@/api/client", () => ({
 vi.mock("@/components/ui/Toast", () => ({
   useToast: () => ({ toast }),
 }));
+vi.mock("@/stores/capabilities", async () => {
+  const { resolveCapabilities } = await import("@/lib/capabilities");
+  return {
+    useCapabilities: () => {
+      const facts = {
+        role: "admin" as const,
+        namespaceScoped: session.namespaceScoped,
+        mode: null,
+        adminWritesEnabled: null,
+        status: null,
+      };
+      return { capabilities: resolveCapabilities(facts), facts };
+    },
+  };
+});
 
 let host: HTMLDivElement;
 let root: Root;
@@ -90,6 +107,7 @@ async function save() {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  session.namespaceScoped = null;
   submitted = {};
   currentSettings = {
     ...baseSettings,
@@ -184,6 +202,35 @@ describe("SettingsForm runtime saves", () => {
     expect(toast).toHaveBeenCalledWith("success", "Settings saved successfully");
   });
 
+  it("shows a namespace-scoped admin the settings read-only and sends nothing", async () => {
+    session.namespaceScoped = true;
+    await renderForm();
+
+    const notice = host.querySelector<HTMLElement>('[data-capability-blocked="namespace-scope"]');
+    expect(notice?.textContent).toContain("BFF connection settings are read-only");
+    expect(notice?.textContent).toContain("namespace grants do not scope");
+    for (const label of [
+      "Admin URL",
+      "JWT Issuer",
+      "JWT TTL (seconds)",
+      "JWT Audience",
+      "Namespace grants",
+      "Read Timeout (ms)",
+    ]) {
+      expect(inputByLabel(label).disabled, label).toBe(true);
+      expect(inputByLabel(label).readOnly, label).toBe(true);
+    }
+    // The values are the server's, not an environment lock.
+    expect(inputByLabel("Admin URL").value).toBe("http://127.0.0.1:9000");
+    expect(host.textContent).not.toContain("Connection and signing settings are immutable");
+    const buttons = Array.from(host.querySelectorAll("button"));
+    expect(buttons.find((element) => element.textContent === "Save Settings")?.disabled).toBe(true);
+    await save();
+    expect(put).not.toHaveBeenCalled();
+    // Testing the connection is a read and stays available.
+    expect(buttons.find((element) => element.textContent === "Test Connection")?.disabled).toBe(false);
+  });
+
   it("keeps runtime editing unavailable when the server gate is disabled", async () => {
     currentSettings.runtimeSettingsEnabled = false;
     await renderForm();
@@ -207,6 +254,21 @@ describe("SettingsForm editing drafts", () => {
 
     expect(put).toHaveBeenCalledOnce();
     expect(submitted.jwtNamespaces).toEqual(["tenant-a", "tenant-b"]);
+  });
+
+  it("warns before a save that would scope every later static login", async () => {
+    currentSettings.jwtNamespaces = ["*"];
+    await renderForm();
+    const warning = () => host.querySelector('[data-testid="scoped-login-warning"]');
+    expect(warning()).toBeNull();
+
+    await change("Namespace grants", "tenant-a");
+    expect(warning()?.textContent).toContain("cannot change BFF settings");
+
+    await change("Namespace grants", "*");
+    expect(warning()).toBeNull();
+    await change("Namespace grants", "tenant-a, bad grant");
+    expect(warning()).toBeNull();
   });
 
   it("keeps an invalid grant visible with an inline error and does not save", async () => {
@@ -237,9 +299,7 @@ describe("SettingsForm editing drafts", () => {
     expect(submitted).not.toHaveProperty("jwtNamespaces");
   });
 
-  it("lets a session narrower than the defaults save unrelated settings", async () => {
-    // The defaults grant more than a scoped session holds; resubmitting them
-    // would be refused as a widening, so an untouched field is left out.
+  it("leaves untouched multi-namespace grants out of an unrelated save", async () => {
     currentSettings.jwtNamespaces = ["tenant-a", "tenant-b"];
     savedSettings = { ...currentSettings, jwtIssuer: "issuer-2" };
     await renderForm();
@@ -254,40 +314,15 @@ describe("SettingsForm editing drafts", () => {
     expect(toast).toHaveBeenCalledWith("success", "Settings saved successfully");
   });
 
-  it("shows a refused widening as a field error instead of a generic toast", async () => {
+  it.each([
+    ["Runtime settings are disabled", "FERRUM_BFF_SETTINGS_IMMUTABLE"],
+    ["Namespace-scoped sessions cannot change BFF settings", "FERRUM_BFF_SETTINGS_NAMESPACE_SCOPED"],
+  ])("reports a refused save once, with the server's reason: %s (#464)", async (reason, code) => {
     put.mockImplementation(() => ({
       json: async () => {
         throw Object.assign(new Error("Forbidden"), {
           response: { status: 403 },
-          data: {
-            error: "Namespace grants cannot exceed the grants of this session",
-            code: "FERRUM_BFF_NAMESPACE_GRANT_EXCEEDED",
-          },
-        });
-      },
-    }));
-    await renderForm();
-    const grants = inputByLabel("Namespace grants");
-    await change("Namespace grants", "tenant-a, tenant-z");
-    await save();
-
-    expect(put).toHaveBeenCalledOnce();
-    expect(grants.getAttribute("aria-invalid")).toBe("true");
-    const description = document.getElementById(grants.getAttribute("aria-describedby")!);
-    expect(description?.textContent).toContain("namespaces this session does not hold");
-    expect(toast).not.toHaveBeenCalled();
-    expect(grants.value).toBe("tenant-a, tenant-z");
-    // The field error is the only report: the global popup is told the
-    // caller handles a 403 on this request (#464).
-    expect(put.mock.calls[0][1]).toMatchObject({ context: { handledStatuses: [403] } });
-  });
-
-  it("reports any other refused save once, with the server's reason (#464)", async () => {
-    put.mockImplementation(() => ({
-      json: async () => {
-        throw Object.assign(new Error("Forbidden"), {
-          response: { status: 403 },
-          data: { error: "Runtime settings are disabled", code: "FERRUM_BFF_SETTINGS_IMMUTABLE" },
+          data: { error: reason, code },
         });
       },
     }));
@@ -297,8 +332,12 @@ describe("SettingsForm editing drafts", () => {
 
     expect(put).toHaveBeenCalledOnce();
     expect(toast).toHaveBeenCalledOnce();
-    expect(toast).toHaveBeenCalledWith("error", "Forbidden: Runtime settings are disabled");
+    expect(toast).toHaveBeenCalledWith("error", `Forbidden: ${reason}`);
     expect(inputByLabel("Namespace grants").getAttribute("aria-invalid")).toBeNull();
+    expect(inputByLabel("JWT Issuer").value).toBe("issuer-2");
+    // The toast is the only report: the global popup is told the caller
+    // handles a 403 on this request.
+    expect(put.mock.calls[0][1]).toMatchObject({ context: { handledStatuses: [403] } });
   });
 
   it("treats reordered or respaced grants as untouched (#464)", async () => {

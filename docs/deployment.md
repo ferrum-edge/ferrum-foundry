@@ -128,7 +128,7 @@ Durations are integers.
 | `FERRUM_JWT_MAX_TTL` | No | `3600` | 0-86400 seconds; `0` disables the ceiling | Gateway maximum TTL that `FERRUM_JWT_TTL` is checked against |
 | `FERRUM_JWT_ROLE` | No | `admin` | `viewer`, `operator`, or `admin` | Role of the static development principal. Trusted-proxy requests take the role from the header |
 | `FERRUM_JWT_AUDIENCE` | No | - | comma-separated exact values | `aud` claim, sent only when set. Must match the gateway's `FERRUM_ADMIN_JWT_AUDIENCE` |
-| `FERRUM_JWT_NAMESPACES` | In `static` | - | comma-separated names matching `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$`, or `*` alone | `ns` grants for the static principal and the readiness probe. `*` grants every namespace and omits `ns` |
+| `FERRUM_JWT_NAMESPACES` | In `static` | - | comma-separated names matching `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$`, or `*` alone | `ns` grants for the static principal and the readiness probe. `*` grants every namespace and omits `ns`. Exact names make every static session namespace-scoped, so no session can change BFF settings at runtime; change them here and restart |
 
 `FERRUM_JWT_NAMESPACES` rules:
 
@@ -310,7 +310,9 @@ Things that are easy to get wrong:
   `mode`, `admin_writes_enabled`, `ready`) rather than the detailed view.
   `/overload`, `/cluster`, `/mesh/*`, `/charges`, `/metrics`,
   `/backend-capabilities`, and unknown routes are refused with `403`, so such a
-  session loses the Dashboard, Metrics, Cluster, and Mesh surfaces in the UI.
+  session loses the Dashboard, Metrics, Cluster, and Mesh surfaces in the UI
+  and lands on Proxies. It may not change BFF settings either:
+  `PUT /api/settings` answers it `403 FERRUM_BFF_SETTINGS_NAMESPACE_SCOPED`.
   The audit log stays available for the session's own namespaces. Edge records
   fleet-wide actions under its default `ferrum` namespace, so an identity
   granted `ferrum` reads those rows. Only an identity that omits the namespaces

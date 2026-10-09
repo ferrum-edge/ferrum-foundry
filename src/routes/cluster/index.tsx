@@ -234,7 +234,7 @@ export default function ClusterPage() {
   const refresh = useRefreshBackendCapabilities();
   // `capabilities` is already the probe response above, so this one is named
   // for what it gates.
-  const reprobeCapability = useCapabilities().capabilities.operationalActions;
+  const reprobeCapability = useCapabilities().capabilities.fleetOperations;
 
   return (
     <div className="space-y-6">

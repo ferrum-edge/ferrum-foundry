@@ -42,6 +42,38 @@ describe('canonical proxy targets', () => {
   });
 
   it.each([
+    ['PUT', '/api/proxy/consumers/alice/credentials/keyauth'],
+    ['POST', '/api/proxy/consumers/alice/credentials/keyauth'],
+    ['DELETE', '/api/proxy/consumers/alice/credentials/keyauth'],
+    ['DELETE', '/api/proxy/consumers/alice/credentials/keyauth/'],
+    ['DELETE', '/api/proxy/consumers/alice/credentials/keyauth/0'],
+    ['DELETE', '/api/proxy/consumers/alice/credentials/keyauth/0/'],
+  ])('allows the credential method Edge serves %s %s', (method, url) => {
+    expect(proxyPathIsAllowedForNamespace(request(url, undefined, method))).toBe(true);
+  });
+
+  it.each([
+    // An indexed credential is only ever deleted.
+    ['GET', '/api/proxy/consumers/alice/credentials/keyauth/0'],
+    ['HEAD', '/api/proxy/consumers/alice/credentials/keyauth/0'],
+    ['PUT', '/api/proxy/consumers/alice/credentials/keyauth/0'],
+    ['POST', '/api/proxy/consumers/alice/credentials/keyauth/0'],
+    ['PATCH', '/api/proxy/consumers/alice/credentials/keyauth/0'],
+    ['OPTIONS', '/api/proxy/consumers/alice/credentials/keyauth/0'],
+    // A credential type is replaced, appended to, or cleared; never read.
+    ['GET', '/api/proxy/consumers/alice/credentials/keyauth'],
+    ['HEAD', '/api/proxy/consumers/alice/credentials/keyauth'],
+    ['PATCH', '/api/proxy/consumers/alice/credentials/keyauth'],
+    ['OPTIONS', '/api/proxy/consumers/alice/credentials/keyauth'],
+    // Neither the credential collection nor a deeper path is a route.
+    ['GET', '/api/proxy/consumers/alice/credentials'],
+    ['DELETE', '/api/proxy/consumers/alice/credentials'],
+    ['DELETE', '/api/proxy/consumers/alice/credentials/keyauth/0/extra'],
+  ])('denies the credential method Edge does not serve %s %s', (method, url) => {
+    expect(proxyPathIsAllowedForNamespace(request(url, undefined, method))).toBe(false);
+  });
+
+  it.each([
     ['GET', '/api/proxy/plugins'],
     ['GET', '/api/proxy/namespaces'],
     ['GET', '/api/proxy/namespaces/tenant-a'],

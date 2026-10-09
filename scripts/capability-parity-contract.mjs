@@ -27,13 +27,18 @@
  * because the `DELETE` probes are safe only when their reserved id does not
  * exist. The contract also requires those admitted deletes to return `404`,
  * rather than treating a successful deletion as parity. The remaining probes
- * are `POST /admin/tls/validate` (non-persistent), `GET /backup`,
- * or a `POST /restore` without `?confirm=true` and with a body that is not
- * JSON. Each still passes through exactly the role check and the admission
- * gate the surface mirrors, because Edge applies both before it looks the
- * resource up (ferrum-edge v0.9.10, the pinned release, v0.9.9, v0.9.8,
- * v0.9.7, v0.9.5, and the
- * earlier b96cfaa build alike: `crud::handle_delete`, `handle_restore`,
+ * are `POST /admin/tls/validate` (non-persistent), a `POST /admin/tls/rotate`
+ * for a surface Edge does not support (refused with `400` after the role check
+ * and audit admission, so nothing is reloaded; with
+ * `FERRUM_ADMIN_AUDIT_ENABLED=true` that admission records a durable audit
+ * intent finalized as a refused rotate, as the `DELETE` probes do for theirs),
+ * a mesh egress dry-run (`404` on a gateway without a mesh egress scope),
+ * `GET /backup`, or a `POST /restore` without `?confirm=true` and with a body
+ * that is not JSON. Each still passes through exactly the role check and the
+ * admission gate the surface mirrors, because Edge applies both before it
+ * looks the resource up (ferrum-edge v0.9.15, the pinned release, and every
+ * earlier pinned release back to the b96cfaa build alike:
+ * `crud::handle_delete`, `handle_restore`,
  * `tls_management::handle_delete_managed`).
  *
  * `POST /restore` is the one exception to that order. `handle_restore` calls
@@ -98,7 +103,19 @@ export const WRITE_PROBES = {
   },
   configExport: { method: "GET", path: "/backup" },
   tlsMaterial: { method: "DELETE", path: `/admin/tls/certificates/${PROBE_ID}`, admittedStatus: 404 },
+  // `handle_rotate` checks the role and audit admission, then refuses a
+  // surface it does not know with `400` before requesting any reload.
+  tlsRotation: { method: "POST", path: `/admin/tls/rotate/${PROBE_ID}`, admittedStatus: 400 },
   operationalActions: { method: "POST", path: "/admin/tls/validate", body: {} },
+  // `handle_mesh_egress_scope_test` checks the operator role, then answers a
+  // gateway without a mesh egress scope `404 {"error":"No active mesh egress
+  // scope"}` before it reads the body. It is a stateless dry-run either way.
+  fleetOperations: {
+    method: "POST",
+    path: "/mesh/egress-scope/test",
+    body: { host: `${PROBE_ID}.invalid` },
+    admittedStatus: 404,
+  },
 };
 
 /** Surfaces the gateway never sees; the BFF's own tests cover them. */
