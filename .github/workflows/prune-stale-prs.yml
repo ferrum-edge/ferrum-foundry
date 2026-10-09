@@ -31,7 +31,7 @@ permissions:
 jobs:
   plan:
     name: Dry-run branch plan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -51,7 +51,7 @@ jobs:
     name: Approved live branch deletion
     if: github.event_name == 'workflow_dispatch' && inputs.delete_live
     needs: plan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     environment: branch-pruning
     permissions:
       contents: write

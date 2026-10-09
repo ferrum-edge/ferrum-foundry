@@ -12,7 +12,7 @@ concurrency:
 jobs:
   release-metadata:
     name: Validate Release Tag
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       actions: read
       contents: read
@@ -117,7 +117,7 @@ jobs:
   docker:
     name: Docker (${{ matrix.platform }})
     needs: [quality-gates, release-metadata]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       packages: write
@@ -194,7 +194,7 @@ jobs:
   docker-manifest:
     name: Docker Manifest
     needs: [docker, release-metadata]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       actions: read
       contents: read
@@ -492,7 +492,7 @@ jobs:
   create-release:
     name: Create GitHub Release
     needs: [docker-manifest, release-metadata]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: write
     steps:

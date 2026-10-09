@@ -20,7 +20,7 @@ jobs:
     # (the synthetic merge). Capture the original source/base here: the run
     # API's embedded PR references change when the PR or main advances.
     name: Qualification Source (${{ github.sha }}; source ${{ github.event.pull_request.head.sha || github.sha }}; base ${{ github.event.pull_request.base.sha || github.sha }}; ref ${{ github.event.pull_request.base.ref || github.ref_name }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -43,7 +43,7 @@ jobs:
 
   quality:
     name: Quality Gate (Node ${{ matrix.node }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
       matrix:
@@ -109,7 +109,7 @@ jobs:
 
   gateway-contract:
     name: Pinned Gateway Contract
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -278,7 +278,7 @@ jobs:
 
   starter:
     name: Deployment Starter
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -343,7 +343,7 @@ jobs:
 
   critical-journeys:
     name: Critical Journeys
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -452,7 +452,7 @@ jobs:
 
   container:
     name: Container Gate (${{ matrix.platform }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
       matrix:
@@ -610,7 +610,7 @@ jobs:
     name: Docker (${{ matrix.platform }})
     needs: [quality, gateway-contract, starter, critical-journeys, container]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       packages: write
@@ -682,7 +682,7 @@ jobs:
     name: Docker Manifest
     needs: docker
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       packages: write
