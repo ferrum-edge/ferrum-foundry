@@ -301,17 +301,18 @@ Things that are easy to get wrong:
   (`FERRUM_UPLOAD_TIMEOUT`, and `FERRUM_WRITE_TIMEOUT` for ordinary routes).
 - **Fleet-global surfaces are not namespace-scoped, and a scoped identity is
   bounded to namespace-scoped routes.** TLS inventory, managed TLS material,
-  ACME, rotation, and validation ignore namespace grants. A scoped identity may
-  read and validate fleet TLS material but may not create, replace, rotate,
-  renew, finalize, or delete it; block the reads at the proxy too if it must not
-  see them. More broadly, a session with namespace grants may reach only the
-  gateway routes its namespace scopes, plus a small fleet-wide ceiling.
-  `/health` and `/status` answer it with a summary (`status`, `timestamp`,
-  `mode`, `admin_writes_enabled`, `ready`) rather than the detailed view.
-  `/overload`, `/cluster`, `/mesh/*`, `/charges`, `/metrics`,
+  ACME, rotation, and validation ignore namespace grants, so a scoped identity
+  may use none of them, reads included. More broadly, a session with namespace
+  grants may reach only the gateway routes its namespace scopes, plus a small
+  fleet-wide ceiling, the same routes Ferrum Edge v0.9.16+ serves to the
+  `ns`-claim JWT Foundry signs for it. `/health` and `/status` answer it with a
+  summary (`status`, `timestamp`, `mode`, `admin_writes_enabled`, `ready`, and
+  the `namespace` serving block when it names a granted namespace) rather than
+  the detailed view. `/admin/tls/*`, `/overload`, `/cluster`,
+  `/config/apply-status`, `/mesh/*`, `/charges`, `/metrics`,
   `/backend-capabilities`, and unknown routes are refused with `403`, so such a
-  session loses the Dashboard, Metrics, Cluster, and Mesh surfaces in the UI
-  and lands on Proxies. It may not change BFF settings either:
+  session loses the Dashboard, Metrics, TLS, Cluster, and Mesh surfaces in the
+  UI and lands on Proxies. It may not change BFF settings either:
   `PUT /api/settings` answers it `403 FERRUM_BFF_SETTINGS_NAMESPACE_SCOPED`.
   The audit log stays available for the session's own namespaces. Edge records
   fleet-wide actions under its default `ferrum` namespace, so an identity

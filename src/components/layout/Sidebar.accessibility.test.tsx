@@ -85,10 +85,10 @@ describe("mobile sidebar keyboard behavior", () => {
       .map((link) => link.textContent?.trim());
     expect(links).not.toContain("Dashboard");
     expect(links).not.toContain("Metrics");
+    expect(links).not.toContain("TLS");
     expect(links).not.toContain("Cluster");
     expect(links).not.toContain("Mesh");
     expect(links).toContain("Health");
     expect(links).toContain("Audit Log");
-    expect(links).toContain("TLS");
   });
 });

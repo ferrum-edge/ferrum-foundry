@@ -11,7 +11,6 @@ import { GATEWAY_TARGET_HEADER, gatewayTargetId } from './gateway-target.js';
 import {
   proxyPathIsAllowedForNamespace,
   proxyPathIsEdgeNamespaceSafeGlobal,
-  proxyPathIsFleetGlobal,
   requestIsProxyRoute,
 } from './proxy-path.js';
 
@@ -247,10 +246,11 @@ export async function requireAdminAuth(
  * authentication, CSRF, path safety, and the credential-read denials, so those
  * keep their documented status codes and bodies.
  *
- * Edge does not apply namespace claims to fleet-global admin handlers, so a
- * scoped principal passes only known namespace-scoped route classes and the
- * explicit global ceiling; a namespace-scoped call must name one of the
- * principal's grants.
+ * A scoped principal passes only known namespace-scoped route classes and the
+ * explicit global allowlist, the routes Ferrum Edge v0.9.16+ serves to an admin
+ * JWT carrying an `ns` claim. Every fleet-global route, TLS reads and
+ * validation included, is refused here whatever the gateway version. A
+ * namespace-scoped call must name one of the principal's grants.
  */
 export async function requireNamespaceCeiling(
   request: FastifyRequest,
@@ -261,7 +261,7 @@ export async function requireNamespaceCeiling(
   if (!proxyPathIsAllowedForNamespace(request)) {
     return rejectAuth(reply, 403, 'Namespace access denied');
   }
-  if (proxyPathIsFleetGlobal(request) || proxyPathIsEdgeNamespaceSafeGlobal(request)) return;
+  if (proxyPathIsEdgeNamespaceSafeGlobal(request)) return;
   const namespace = singleHeader(request, 'x-ferrum-namespace');
   if (!namespace || !principal.namespaces.includes(namespace)) {
     return rejectAuth(reply, 403, 'Namespace access denied');

@@ -1,8 +1,9 @@
 /* ------------------------------------------------------------------ */
-/*  A session holding namespace grants is refused every fleet TLS      */
-/*  mutation by the BFF, so the TLS page presents create, delete,      */
-/*  ACME, and rotation controls read-only, with the reason, while      */
-/*  reads and stateless validation stay available (issue #565).        */
+/*  A session holding namespace grants is refused every               */
+/*  `/admin/tls/*` route, reads and validation included: by the BFF's */
+/*  namespace route ceiling, and by Ferrum Edge v0.9.16+ for an       */
+/*  `ns`-claim JWT (ferrum-edge#6093). The TLS page names the reason  */
+/*  instead of its tabs and reads nothing.                            */
 /* ------------------------------------------------------------------ */
 
 import {
@@ -22,7 +23,7 @@ import TlsPage from "./index";
 type Principal = {
   subject: string;
   displayName: string;
-  role: "operator" | "admin";
+  role: "viewer" | "operator" | "admin";
   namespaces?: string[];
   authMode: "trusted-proxy";
 };
@@ -105,7 +106,6 @@ async function mount() {
       <RouterProvider router={router} />
     </CapabilityProvider>,
   );
-  await settle(() => expect(panel().textContent).toContain("No TLS material found"));
 }
 
 function notices(): HTMLElement[] {
@@ -113,48 +113,28 @@ function notices(): HTMLElement[] {
 }
 
 describe("TLS page for a namespace-scoped session", () => {
-  it("disables fleet TLS create, delete, ACME, and rotation for a scoped admin", async () => {
-    signIn("admin", ["tenant-a"]);
-    await mount();
+  it.each(["viewer", "operator", "admin"] as const)(
+    "names the reason instead of any TLS read or control for a scoped %s",
+    async (role) => {
+      signIn(role, ["tenant-a"]);
+      await mount();
+      await settle(() => expect(notices()).toHaveLength(1));
 
-    const headlines = notices().map((notice) => notice.querySelector("p")?.textContent);
-    // One notice for both: the reason is the same.
-    expect(headlines).toEqual(["Managed TLS material and rotation are read-only"]);
-    for (const notice of notices()) {
+      const [notice] = notices();
+      expect(notice.querySelector("p")?.textContent).toBe("TLS management is unavailable");
       expect(notice.textContent).toContain("namespace grants do not scope");
-    }
-    expect(button("Rotate Now", panel()).disabled).toBe(true);
+      expect(document.querySelector("h1")?.textContent).toBe("TLS Management");
+      expect(document.querySelector('[role="tablist"]')).toBeNull();
+      expect(document.body.textContent).not.toContain("Rotate Now");
+      expect(document.body.textContent).not.toContain("Validate");
+      expect(requests).toEqual([]);
+    },
+  );
 
-    await selectTab("Certificates");
-    await settle(() => expect(panel().textContent).toContain("Edge Certificate"));
-    expect(button("Add Certificate", panel()).disabled).toBe(true);
-    expect(button("Delete certificate Edge Certificate", panel()).disabled).toBe(true);
-
-    await selectTab("ACME");
-    await settle(() => expect(panel().textContent).toContain("No ACME certificates"));
-    expect(button("Import Certificate", panel()).disabled).toBe(true);
-    expect(button("New ACME Order", panel()).disabled).toBe(true);
-
-    // Validation persists nothing and the BFF allows it to a scoped session.
-    await selectTab("Validate");
-    expect(button("Validate", panel()).disabled).toBe(false);
-    expect(requests.every((request) => request.method === "GET")).toBe(true);
-  });
-
-  it("names rotation separately for a scoped operator, whose role already withholds material", async () => {
-    signIn("operator", ["tenant-a"]);
-    await mount();
-
-    expect(notices().map((notice) => notice.querySelector("p")?.textContent))
-      .toEqual(["TLS rotation is unavailable"]);
-    const material = document.querySelector<HTMLElement>('[data-capability-blocked="role"]');
-    expect(material?.textContent).toContain("Managed TLS material is read-only");
-    expect(button("Rotate Now", panel()).disabled).toBe(true);
-  });
-
-  it("keeps every fleet TLS control for an admin without namespace grants", async () => {
+  it("keeps every fleet TLS read and control for an admin without namespace grants", async () => {
     signIn("admin");
     await mount();
+    await settle(() => expect(panel().textContent).toContain("No TLS material found"));
 
     expect(document.querySelector("[data-capability-blocked]")).toBeNull();
     expect(button("Rotate Now", panel()).disabled).toBe(false);
@@ -162,5 +142,20 @@ describe("TLS page for a namespace-scoped session", () => {
     await settle(() => expect(panel().textContent).toContain("Edge Certificate"));
     expect(button("Add Certificate", panel()).disabled).toBe(false);
     expect(button("Delete certificate Edge Certificate", panel()).disabled).toBe(false);
+    await selectTab("Validate");
+    expect(button("Validate", panel()).disabled).toBe(false);
+    expect(requests.length).toBeGreaterThan(0);
+    expect(requests.every((request) => request.method === "GET")).toBe(true);
+  });
+
+  it("keeps the role notices for an operator without namespace grants", async () => {
+    signIn("operator");
+    await mount();
+    await settle(() => expect(panel().textContent).toContain("No TLS material found"));
+
+    expect(notices()).toEqual([]);
+    const material = document.querySelector<HTMLElement>('[data-capability-blocked="role"]');
+    expect(material?.textContent).toContain("Managed TLS material is read-only");
+    expect(button("Rotate Now", panel()).disabled).toBe(false);
   });
 });

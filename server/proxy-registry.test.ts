@@ -631,7 +631,9 @@ describe('long-running read admission over TCP', () => {
   async function holdRead(user: string) {
     const id = `read-${++serial}`;
     const ready = signal(`held:${id}`);
-    const client = start(`/api/proxy/config/apply-status?hold=1&id=${id}`, 'GET', '', as(user));
+    // Backups are long reads a namespace-scoped principal may make; apply
+    // status is fleet-global and refused to it before admission.
+    const client = start(`/api/proxy/backup?hold=1&id=${id}`, 'GET', '', as(user));
     await ready;
     return { ...client, id };
   }
@@ -649,7 +651,7 @@ describe('long-running read admission over TCP', () => {
   }
   async function assertFull() {
     const before = arrivals.length;
-    const refused = await call('/api/proxy/config/apply-status', 'GET', '', as('reader-c'));
+    const refused = await call('/api/proxy/backup', 'GET', '', as('reader-c'));
     expect(refused.status).toBe(429);
     expect(JSON.parse(refused.body)).toEqual({ error: 'Too Many Requests', code: 'FERRUM_BFF_READ_CAPACITY', scope: 'all' });
     expect(arrivals).toHaveLength(before);
@@ -660,14 +662,12 @@ describe('long-running read admission over TCP', () => {
     const a2 = await holdRead('reader-a');
     try {
       const before = arrivals.length;
-      const refused = await call('/api/proxy/config/apply-status', 'GET', '', as('reader-a'));
+      const refused = await call('/api/proxy/backup', 'GET', '', as('reader-a'));
       expect(refused.status).toBe(429);
       expect(refused.headers['retry-after']).toBe('1');
       expect(JSON.parse(refused.body)).toEqual({ error: 'Too Many Requests', code: 'FERRUM_BFF_READ_CAPACITY', scope: 'principal' });
-      // HEAD waits like GET, and backups and scoped namespace lists draw on
-      // the same share.
-      expect((await call('/api/proxy/config/apply-status', 'HEAD', '', as('reader-a'))).status).toBe(429);
-      expect((await call('/api/proxy/backup', 'GET', '', as('reader-a'))).status).toBe(429);
+      // HEAD waits like GET, and scoped namespace lists draw on the same share.
+      expect((await call('/api/proxy/backup', 'HEAD', '', as('reader-a'))).status).toBe(429);
       expect((await call('/api/proxy/namespaces', 'GET', '', as('reader-a'))).status).toBe(429);
       expect(arrivals).toHaveLength(before);
       // An ordinary read is not a long read.

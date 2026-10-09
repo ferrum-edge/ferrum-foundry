@@ -134,6 +134,37 @@ describe("settings status publication", () => {
   });
 
   it.each([
+    [
+      "the Edge v0.9.16 tenant tier, keeping a granted namespace block",
+      {
+        status: "ok", ready: true, mode: "database", admin_writes_enabled: false,
+        namespace: { active: "tenant-a", serving_scope: "single-namespace-data-plane", data_plane_single_namespace: true },
+      },
+      {
+        status: "ok", ready: true, mode: "database", admin_writes_enabled: false,
+        namespace: { active: "tenant-a", serving_scope: "single-namespace-data-plane", data_plane_single_namespace: true },
+      },
+    ],
+    [
+      "the detailed tier, dropping a namespace block for an ungranted namespace",
+      {
+        status: "ok", ready: true, mode: "database", admin_writes_enabled: true, database: { connected: true },
+        namespace: { active: "tenant-b", serving_scope: "single-namespace-data-plane", data_plane_single_namespace: true },
+      },
+      { status: "ok", ready: true, mode: "database", admin_writes_enabled: true },
+    ],
+    ["the Edge v0.9.16 minimal tier", { status: "ok", ready: true }, { status: "ok", ready: true }],
+  ] as const)("summarizes %s for a namespace-scoped admin", async (_label, upstreamBody, expected) => {
+    vi.stubEnv("FERRUM_JWT_NAMESPACES", "tenant-a");
+    const server = await setup();
+    upstream.mockResolvedValue(Response.json(upstreamBody));
+    const response = await server.inject({ method: "GET", url: "/api/settings/status", headers });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ reachable: true, status: 200, body: expected });
+    expect(response.body).not.toContain("tenant-b");
+  });
+
+  it.each([
     [503, "gateway unavailable: listener 10.0.0.7:9000"],
     [200, "[{\"listener\":\"10.0.0.7:9000\"}]"],
   ] as const)("omits a %s non-object health body for a namespace-scoped admin", async (status, body) => {

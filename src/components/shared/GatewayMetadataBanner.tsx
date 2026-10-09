@@ -5,6 +5,13 @@ import {
 } from "@/api/gatewayMetadata";
 import { UNOBSERVED_OUTCOME_CAUSE, type UnobservedOutcomeReason } from "@/api/mutationOutcome";
 
+// The apply-status poll is fleet-global, so a session holding namespace grants
+// is refused it (`isApplyStatusDenied` in `src/api/gatewayMetadata.ts`).
+const UNVERIFIABLE_REASON: Record<string, string> = {
+  apply_status_denied:
+    "apply status is fleet-global and is not available to a session holding namespace grants",
+};
+
 function pathFromUrl(url: string | null): string {
   if (!url) return "configuration request";
   try {
@@ -92,7 +99,8 @@ export function GatewayMetadataBanner() {
           {apply.state === "unverifiable" && (
             <>
               <strong className="text-danger">Committed state cannot be verified as live.</strong>{" "}
-              Reason: {apply.reason ?? "no apply cursor was available"}. Inspect the live gateway configuration.
+              Reason: {(apply.reason && UNVERIFIABLE_REASON[apply.reason]) ?? apply.reason ?? "no apply cursor was available"}.
+              {" "}Inspect the live gateway configuration.
             </>
           )}
         </div>

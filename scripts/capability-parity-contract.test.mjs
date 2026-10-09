@@ -5,10 +5,13 @@ import {
   PROBE_ID,
   READ_PROBES,
   WRITE_PROBES,
+  addressesNamespace,
+  bffForwardsScoped,
   classifyDenial,
   confirmWritableParityTarget,
   gatewaySender,
   isNoDatabaseRestore,
+  scopedGrants,
   verifyCapabilityParity,
 } from "./capability-parity-contract.mjs";
 
@@ -33,11 +36,11 @@ const EDGE_ROUTES = [
   { method: "DELETE", prefix: "/gateway-trust-bundles/", role: "admin", gate: "config-store", ok: 404 },
   { method: "POST", prefix: "/restore", role: "admin", gate: "config-store", ok: 400 },
   { method: "GET", prefix: "/backup", role: "admin", gate: "none", ok: 200 },
-  { method: "DELETE", prefix: "/admin/tls/certificates/", role: "admin", gate: "read-only-mode", ok: 404 },
-  { method: "POST", prefix: "/admin/tls/validate", role: "operator", gate: "none", ok: 400 },
-  { method: "POST", prefix: "/admin/tls/rotate/", role: "operator", gate: "none", ok: 400 },
-  { method: "POST", prefix: "/mesh/egress-scope/test", role: "operator", gate: "none", ok: 404 },
-  { method: "GET", prefix: "/admin/tls/inventory", role: "operator", gate: "none", ok: 200 },
+  { method: "DELETE", prefix: "/admin/tls/certificates/", role: "admin", gate: "read-only-mode", ok: 404, fleetGlobal: true },
+  { method: "POST", prefix: "/admin/tls/validate", role: "operator", gate: "none", ok: 400, fleetGlobal: true },
+  { method: "POST", prefix: "/admin/tls/rotate/", role: "operator", gate: "none", ok: 400, fleetGlobal: true },
+  { method: "POST", prefix: "/mesh/egress-scope/test", role: "operator", gate: "none", ok: 404, fleetGlobal: true },
+  { method: "GET", prefix: "/admin/tls/inventory", role: "operator", gate: "none", ok: 200, fleetGlobal: true },
   { method: "GET", prefix: "/gateway-trust-bundles", role: "operator", gate: "none", ok: 200, collection: true },
   { method: "GET", prefix: "/audit", role: "admin", gate: "none", ok: 200 },
   { method: "GET", prefix: "/proxies", role: "viewer", gate: "none", ok: 200, collection: true },
@@ -55,22 +58,61 @@ const EDGE_ROUTES = [
   { method: "GET", prefix: "/namespaces", role: "viewer", gate: "none", ok: 200, collection: true },
 ];
 
-function fakeGateway({ readOnly = false, mode = "database", override = () => undefined } = {}) {
+/**
+ * `edge: "0.9.15"` admits an `ns`-claim token everywhere and answers it with
+ * the detailed `/health`; `edge: "0.9.16"` refuses it on fleet-global routes
+ * (ferrum-edge#6093) and answers `/health` with the tenant tier, or with the
+ * minimal probe body when `minimalHealth` is set.
+ */
+function fakeGateway({
+  readOnly = false,
+  mode = "database",
+  edge = "0.9.15",
+  minimalHealth = false,
+  override = () => undefined,
+} = {}) {
   const requests = [];
-  const send = async (role, request) => {
-    requests.push({ role, ...request });
+  const send = async (role, request, { scoped = false } = {}) => {
+    requests.push({ role, scoped, ...request });
     if (request.path === "/health") {
+      if (scoped && edge === "0.9.16") {
+        return {
+          status: 200,
+          body: minimalHealth
+            ? { status: "ok", ready: true }
+            : {
+                status: "ok",
+                ready: true,
+                mode,
+                admin_writes_enabled: !readOnly,
+                namespace: {
+                  active: "tenant-a",
+                  serving_scope: "single-namespace-data-plane",
+                  data_plane_single_namespace: true,
+                },
+              },
+        };
+      }
       return {
         status: 200,
-        body: { status: "ok", mode, admin_writes_enabled: !readOnly },
+        body: { status: "ok", mode, admin_writes_enabled: !readOnly, database: { connected: true } },
       };
     }
     const rule = EDGE_ROUTES
       .filter((entry) => entry.method === request.method && request.path.startsWith(entry.prefix))
       .sort((a, b) => b.prefix.length - a.prefix.length)[0];
     assert.ok(rule, `unmodelled request ${request.method} ${request.path}`);
-    const forced = override(role, request, rule);
+    const forced = override(role, request, rule, scoped);
     if (forced) return forced;
+    if (scoped && edge === "0.9.16" && rule.fleetGlobal) {
+      return {
+        status: 403,
+        body: {
+          error: `global route '${request.path}' is unavailable to admin JWTs with an \`ns\` claim; `
+            + "fleet-global routes require a token without one",
+        },
+      };
+    }
     if (RANK[role] < RANK[rule.role]) {
       return {
         status: 403,
@@ -102,6 +144,66 @@ describe("capability parity contract", () => {
     assert.equal(result.reads.viewer.proxies, 200);
     assert.equal(result.reads.viewer["MCP tool catalog"], 404);
     assert.equal(result.reads.viewer["TLS inventory"], 403);
+    // A scoped session keeps the namespace routes and is never sent the
+    // fleet-global ones: the BFF refuses them and the model withholds them.
+    assert.equal(result.scoped.writes.operator.proxies, 404);
+    assert.equal(result.scoped.writes.admin.namespaceRegistry, 404);
+    for (const surface of ["tlsMaterial", "tlsRotation", "operationalActions", "fleetOperations"]) {
+      assert.equal(result.scoped.writes.admin[surface], "bff-refused", surface);
+    }
+    assert.equal(result.scoped.reads.operator["TLS inventory"], "bff-refused");
+    assert.equal(result.scoped.reads.admin["audit log"], 200);
+  });
+
+  for (const expectation of ["writable", "read-only"]) {
+    it(`agrees with a ${expectation} Edge v0.9.16 gateway that bounds ns-claim tokens`, async () => {
+      const { send, requests } = fakeGateway({ edge: "0.9.16", readOnly: expectation === "read-only" });
+      const result = await verifyCapabilityParity(send, {
+        expectation,
+        grants: scopedGrants("tenant-a"),
+      });
+      assert.deepEqual(result.scoped.observed, result.observed);
+      // No scoped request reached a route Edge refuses to an `ns`-claim token,
+      // and the unrestricted principal's fleet-global probes all answered.
+      const scopedPaths = requests.filter((request) => request.scoped).map((request) => request.path);
+      assert.ok(scopedPaths.every((path) => !path.startsWith("/admin/tls/") && !path.startsWith("/mesh/")));
+      assert.equal(result.writes.operator.tlsRotation, 400);
+      assert.equal(result.reads.operator["TLS inventory"], 200);
+    });
+  }
+
+  it("fails when the BFF forwards a scoped route Edge refuses to an ns-claim token", async () => {
+    const { send } = fakeGateway({
+      edge: "0.9.16",
+      override: (_role, request, _rule, scoped) => scoped && request.path.startsWith("/audit")
+        ? {
+            status: 403,
+            body: { error: "global route '/audit' is unavailable to admin JWTs with an `ns` claim" },
+          }
+        : undefined,
+    });
+    await assert.rejects(
+      verifyCapabilityParity(send, { expectation: "writable" }),
+      /scoped admin read of audit log was refused \(403\)/,
+    );
+  });
+
+  it("fails when the scoped health summary contradicts the unrestricted one", async () => {
+    const { send } = fakeGateway();
+    const contradicting = async (role, request, options) => request.path === "/health" && options?.scoped
+      ? { status: 200, body: { status: "ok", mode: "file", admin_writes_enabled: true } }
+      : send(role, request, options);
+    await assert.rejects(
+      verifyCapabilityParity(contradicting, { expectation: "writable" }),
+      /scoped \/health reports mode "file", unrestricted \/health "database"/,
+    );
+  });
+
+  it("concludes nothing from the minimal scoped health tier on a writable gateway", async () => {
+    const { send } = fakeGateway({ edge: "0.9.16", minimalHealth: true });
+    const result = await verifyCapabilityParity(send, { expectation: "writable" });
+    assert.deepEqual(result.scoped.observed, { mode: null, adminWritesEnabled: null, status: "ok" });
+    assert.equal(result.scoped.writes.admin.proxies, 404);
   });
 
   it("agrees with a gateway started with FERRUM_ADMIN_READ_ONLY", async () => {
@@ -332,6 +434,12 @@ describe("capability parity contract", () => {
       classifyDenial({ status: 403, body: { error: "Namespace access denied" } }),
       { kind: "other", message: "Namespace access denied" },
     );
+    const nsClaim = "global route '/cluster' is unavailable to admin JWTs with an `ns` claim; "
+      + "fleet-global routes require a token without one";
+    assert.deepEqual(
+      classifyDenial({ status: 403, body: { error: nsClaim } }),
+      { kind: "namespace-claim", message: nsClaim },
+    );
     assert.equal(classifyDenial({ status: 404, body: { error: "read-only mode" } }), null);
   });
 
@@ -369,5 +477,54 @@ describe("capability parity contract", () => {
     assert.equal(claims.role, "operator");
     assert.deepEqual(claims.ns, ["tenant-a", PROBE_ID]);
     assert.equal(claims.aud, "ferrum-admin");
+  });
+
+  it("signs fleet-global requests without an ns claim unless the principal is scoped", async () => {
+    const tokens = [];
+    const send = gatewaySender({
+      adminUrl: "http://gateway.test:9000",
+      jwtSecret: "capability-parity-test-secret-at-least-32-characters",
+      jwtIssuer: "ferrum-edge",
+      jwtAudience: "ferrum-admin",
+      namespace: "tenant-a",
+    }, {
+      fetchImpl: async (_url, init) => {
+        tokens.push(JSON.parse(
+          Buffer.from(init.headers.authorization.split(".")[1], "base64url").toString("utf8"),
+        ));
+        return new Response("{}", { status: 200 });
+      },
+    });
+    const health = { method: "GET", path: "/health" };
+    const registry = WRITE_PROBES.namespaceRegistry;
+    for (const request of [WRITE_PROBES.tlsRotation, WRITE_PROBES.fleetOperations, health]) {
+      await send("admin", request);
+      assert.equal(Object.hasOwn(tokens.at(-1), "ns"), false, request.path);
+      await send("admin", request, { scoped: true });
+      assert.deepEqual(tokens.at(-1).ns, ["tenant-a", PROBE_ID], request.path);
+    }
+    // The registry and namespace routes need the claim on a gateway that
+    // requires one, so the unrestricted principal carries it there.
+    await send("admin", registry);
+    assert.deepEqual(tokens.at(-1).ns, ["tenant-a", PROBE_ID]);
+  });
+
+  it("classifies probe routes with the BFF's own namespace route ceiling", () => {
+    for (const surface of ["tlsMaterial", "tlsRotation", "operationalActions", "fleetOperations"]) {
+      const probe = WRITE_PROBES[surface];
+      assert.equal(bffForwardsScoped(probe.method, probe.path), false, surface);
+      assert.equal(addressesNamespace(probe.method, probe.path), false, surface);
+    }
+    for (const surface of ["proxies", "consumerCredentials", "configBackup", "configExport", "namespaceRegistry"]) {
+      const probe = WRITE_PROBES[surface];
+      assert.equal(bffForwardsScoped(probe.method, probe.path), true, surface);
+      assert.equal(addressesNamespace(probe.method, probe.path), true, surface);
+    }
+    assert.equal(bffForwardsScoped("GET", "/health"), true);
+    assert.equal(addressesNamespace("GET", "/health"), false);
+    assert.equal(addressesNamespace("GET", "/plugins/config?offset=0&limit=1"), true);
+    for (const probe of READ_PROBES) {
+      assert.equal(bffForwardsScoped("GET", probe.path), probe.fleetView === undefined, probe.label);
+    }
   });
 });

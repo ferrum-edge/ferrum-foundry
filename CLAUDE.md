@@ -138,9 +138,20 @@ The BFF and Ferrum Edge remain the only enforcement points. See
   (`src/stores/capabilities.tsx`) derive them from the session role and
   namespace grants plus one `/health` snapshot, and
   `src/components/shared/CapabilityGate.tsx` renders them.
-- A `fleetWide` surface (fleet TLS material, TLS rotation, the backend-capability
-  refresh and mesh egress dry-run, BFF settings) is denied to a session holding
-  namespace grants, because the BFF refuses it.
+- A `fleetWide` surface (fleet TLS material, TLS rotation and validation, the
+  backend-capability refresh and mesh egress dry-run, BFF settings) is denied
+  to a session holding namespace grants, because the BFF refuses it. A page
+  that only reads fleet-global routes (Metrics, TLS, Cluster, Mesh) is a
+  `FleetView`: `FleetViewGate` shows such a session the reason and sends none
+  of its reads.
+- The BFF's namespace route ceiling (`server/proxy-path.ts`) matches Ferrum
+  Edge v0.9.16+'s for an `ns`-claim JWT (`ns_claim_global_route_is_allowed`,
+  ferrum-edge#6093): namespace-scoped routes plus `GET /plugins`, the
+  `/namespaces` registry, `/live`, `/health`, and `/status`. Every
+  `/admin/tls/*` route, `/config/apply-status`, and every other fleet-global
+  route is refused. Scoped `/health` and `/status` reduce, whichever tier Edge
+  answers (detailed before v0.9.16, tenant or minimal after), through
+  `projectHealthSummary` (`server/health-summary.ts`).
 - A fact that was never read is `null` and concludes nothing, so a failed health
   read never downgrades a surface. The last snapshot that *did* load is kept for
   the provider's lifetime, because a gateway's mode and write policy only change
@@ -152,8 +163,9 @@ The BFF and Ferrum Edge remain the only enforcement points. See
 - A read-only surface never shows less than the editable one: collapsible
   sections are forced open and Cancel stays outside the disabled fieldset.
 - `scripts/capability-parity-contract.mjs` checks the model against the pinned
-  gateway as each role, both writable and with `FERRUM_ADMIN_READ_ONLY`. Extend
-  its probe table when you add a surface.
+  gateway as each role, both writable and with `FERRUM_ADMIN_READ_ONLY`, as an
+  unrestricted and as a namespace-scoped principal. Extend its probe table
+  when you add a surface.
 - A read the gateway refuses with `403` is a denial, rendered by
   `ReadDeniedNotice` (`src/components/shared/ReadState.tsx`), never an empty
   collection or a missing feature.
@@ -373,8 +385,9 @@ Namespaces are a full CRUD registry on the gateway, not just a header value.
   `docs/authentication.md` → "Namespace binding".
 - TLS inventory, managed TLS material, ACME, rotation, and validation are
   fleet-global upstream surfaces. They use the `FLEET_GLOBAL` client context so
-  Foundry does not imply that `X-Ferrum-Namespace` scopes them. Keep the UI
-  warning and destructive confirmation wording explicit.
+  Foundry does not imply that `X-Ferrum-Namespace` scopes them, and only a
+  session without namespace grants may use them. Keep the UI warning and
+  destructive confirmation wording explicit.
 
 ### Registry API
 

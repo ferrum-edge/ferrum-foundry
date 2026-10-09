@@ -5,7 +5,6 @@ import {
   proxyPathIsDeploymentSnapshot,
   proxyPathIsAllowedForNamespace,
   proxyPathIsEdgeNamespaceSafeGlobal,
-  proxyPathIsFleetGlobal,
   proxyTargetPath,
   proxyTargetUrl,
   servesSpaShell,
@@ -32,7 +31,6 @@ describe('canonical proxy targets', () => {
     ['GET', '/api/proxy/proxies/agents/mcp/tools'],
     ['GET', '/api/proxy/gateway-trust-bundles'],
     ['GET', '/api/proxy/config/export'],
-    ['GET', '/api/proxy/config/apply-status'],
     ['GET', '/api/proxy/audit'],
     ['GET', '/api/proxy/backend-egress-policy'],
     ['POST', '/api/proxy/batch'],
@@ -81,37 +79,60 @@ describe('canonical proxy targets', () => {
     ['GET', '/api/proxy/health'],
     ['GET', '/api/proxy/status'],
     ['HEAD', '/api/proxy/health'],
-    ['GET', '/api/proxy/config/apply-status'],
-    ['HEAD', '/api/proxy/config/apply-status'],
+    ['POST', '/api/proxy/namespaces'],
+    ['PUT', '/api/proxy/namespaces/tenant-a'],
+    ['DELETE', '/api/proxy/namespaces/tenant-a'],
   ])('allows Edge namespace-safe global route class %s %s', (method, url) => {
     const req = request(url, undefined, method);
     expect(proxyPathIsEdgeNamespaceSafeGlobal(req)).toBe(true);
     expect(proxyPathIsAllowedForNamespace(req)).toBe(true);
   });
 
+  // Ferrum Edge v0.9.16+ refuses every one of these to an admin JWT carrying
+  // an `ns` claim (`ns_claim_global_route_is_allowed`, ferrum-edge#6093), so
+  // the BFF refuses them to a scoped principal whatever the gateway version.
   it.each([
     ['GET', '/api/proxy/charges'],
+    ['GET', '/api/proxy/charges/sink/status'],
+    ['GET', '/api/proxy/metrics'],
     ['GET', '/api/proxy/admin/metrics'],
     ['GET', '/api/proxy/metrics/runtime'],
     ['GET', '/api/proxy/cluster'],
+    ['GET', '/api/proxy/config/apply-status'],
+    ['HEAD', '/api/proxy/config/apply-status'],
+    ['GET', '/api/proxy/backend-capabilities'],
+    ['POST', '/api/proxy/backend-capabilities/refresh'],
     ['GET', '/api/proxy/mesh/service-graph'],
     ['GET', '/api/proxy/mesh/federation'],
     ['GET', '/api/proxy/mesh/egress-scope'],
     ['POST', '/api/proxy/mesh/egress-scope/test'],
     ['GET', '/api/proxy/node-waypoint/identities'],
+    ['GET', '/api/proxy/service-waypoint/services'],
     ['GET', '/api/proxy/mesh/runtime-overlay'],
+    ['POST', '/api/proxy/mesh/config-revision/reset'],
     ['GET', '/api/proxy/overload'],
     ['HEAD', '/api/proxy/overload'],
     ['GET', '/api/proxy/health/'],
+    ['GET', '/api/proxy/backend-egress-policy/'],
+    ['GET', '/api/proxy/diagnostics/v1/refs/fd1_00'],
+    ['POST', '/api/proxy/plugins'],
     ['OPTIONS', '/api/proxy/proxies'],
-    ['POST', '/api/proxy/mesh/config-revision/reset'],
-    ['POST', '/api/proxy/backend-capabilities/refresh'],
     ['GET', '/api/proxy/a-new-admin-route'],
   ])('denies fleet-wide and unclassified route classes %s %s', (method, url) => {
-    expect(proxyPathIsAllowedForNamespace(request(url, undefined, method))).toBe(false);
+    const req = request(url, undefined, method);
+    expect(proxyPathIsAllowedForNamespace(req)).toBe(false);
+    expect(proxyPathIsEdgeNamespaceSafeGlobal(req)).toBe(false);
   });
 
   it.each([
+    ['GET', '/api/proxy/admin/tls/inventory'],
+    ['GET', '/api/proxy/admin/tls/events'],
+    ['GET', '/api/proxy/admin/tls/certificates'],
+    ['GET', '/api/proxy/admin/tls/certificates/cert-1'],
+    ['HEAD', '/api/proxy/admin/tls/certificates/cert-1'],
+    ['GET', '/api/proxy/admin/tls/acme/accounts'],
+    ['GET', '/api/proxy/admin/tls/acme/orders/order-1'],
+    ['POST', '/api/proxy/admin/tls/validate'],
     ['POST', '/api/proxy/admin/tls/rotate/all'],
     ['DELETE', '/api/proxy/admin/tls/certificates/cert-1'],
     ['DELETE', '/api/proxy/admin/tls/acme/orders/order-1'],
@@ -124,21 +145,10 @@ describe('canonical proxy targets', () => {
     ['POST', '/api/proxy/admin/tls/acme/orders/order-1/finalize'],
     ['POST', '/api/proxy/admin/tls/acme/renew/cert-1'],
     ['PUT', '/api/proxy/admin/tls/acme/certificates/cert-1'],
-  ])('denies fleet TLS mutation %s %s to scoped principals while it stays fleet-global', (method, url) => {
+  ])('denies every fleet TLS route %s %s to scoped principals, reads and validation included', (method, url) => {
     const req = request(url, undefined, method);
-    expect(proxyPathIsFleetGlobal(req)).toBe(true);
     expect(proxyPathIsAllowedForNamespace(req)).toBe(false);
-  });
-
-  it.each([
-    ['GET', '/api/proxy/admin/tls/inventory'],
-    ['HEAD', '/api/proxy/admin/tls/certificates/cert-1'],
-    ['GET', '/api/proxy/admin/tls/acme/accounts'],
-    ['POST', '/api/proxy/admin/tls/validate'],
-  ])('allows fleet TLS read or validation %s %s to scoped principals', (method, url) => {
-    const req = request(url, undefined, method);
-    expect(proxyPathIsFleetGlobal(req)).toBe(true);
-    expect(proxyPathIsAllowedForNamespace(req)).toBe(true);
+    expect(proxyPathIsEdgeNamespaceSafeGlobal(req)).toBe(false);
   });
 
   it('classifies HEAD like GET on namespace-scoped routes', () => {
@@ -164,7 +174,7 @@ describe('canonical proxy targets', () => {
     for (const params of [undefined, `admin/tls/${wildcard}/proxies`]) {
       const req = request(url, params);
       expect(() => proxyTargetPath(req)).toThrow(UnsafeProxyPathError);
-      expect(proxyPathIsFleetGlobal(req)).toBe(false);
+      expect(proxyPathIsAllowedForNamespace(req)).toBe(false);
     }
   });
 
@@ -260,28 +270,6 @@ describe('canonical proxy targets', () => {
       }
     }
     expect(accepted).toBeGreaterThan(50);
-  });
-
-  it('limits namespace-free access to known TLS operations', () => {
-    for (const collection of ['certificates', 'ca-bundles', 'crls', 'ocsp-responses', 'jwks', 'acme/certificates']) {
-      for (const method of ['GET', 'POST']) {
-        expect(proxyPathIsFleetGlobal(request(`/api/proxy/admin/tls/${collection}`, undefined, method))).toBe(true);
-      }
-      for (const method of ['GET', 'PUT', 'DELETE']) {
-        expect(proxyPathIsFleetGlobal(request(`/api/proxy/admin/tls/${collection}/id`, undefined, method))).toBe(true);
-      }
-    }
-    for (const [method, path] of [
-      ['GET', 'inventory'], ['GET', 'events'], ['GET', 'acme/accounts'],
-      ['GET', 'acme/orders'], ['POST', 'acme/orders'], ['GET', 'acme/orders/id'],
-      ['DELETE', 'acme/orders/id'], ['POST', 'acme/orders/id/finalize'],
-      ['POST', 'acme/renew/id'], ['POST', 'rotate/all'], ['POST', 'validate'],
-    ]) expect(proxyPathIsFleetGlobal(request(`/api/proxy/admin/tls/${path}`, undefined, method))).toBe(true);
-    for (const [method, path] of [
-      ['GET', 'unknown'], ['POST', 'inventory'], ['GET', 'inventory/extra'],
-      ['PUT', 'acme/orders/id'], ['GET', 'acme/orders/id/finalize'],
-      ['POST', 'certificates/id/extra'], ['GET', '../proxies'],
-    ]) expect(proxyPathIsFleetGlobal(request(`/api/proxy/admin/tls/${path}`, undefined, method))).toBe(false);
   });
 });
 

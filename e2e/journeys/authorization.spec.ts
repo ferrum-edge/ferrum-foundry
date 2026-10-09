@@ -131,16 +131,15 @@ test.describe("authorization through the identity proxy", () => {
   test("a read the gateway withholds from a viewer is a denial, not an empty store", async ({
     signIn,
   }) => {
-    // Ferrum Edge requires operator for every TLS read. The pinned gateway
+    // Ferrum Edge requires admin for the audit log. The pinned gateway
     // answers the viewer 403; the page must say so rather than claim that no
-    // TLS material exists (#385).
+    // audit events exist (#385).
     const { page } = await signIn("viewer");
-    await page.goto("/tls");
+    await page.goto("/audit");
     // Reads retry with backoff before settling as an error, so allow for it.
-    await expect(page.getByText("TLS inventory: read not permitted for this session")).toBeVisible({
+    await expect(page.getByText("Audit log: read not permitted for this session")).toBeVisible({
       timeout: 30_000,
     });
-    await expect(page.getByText("No TLS material found")).toHaveCount(0);
   });
 
   test("an operator may write, and the gateway agrees", async ({ signIn, request }) => {
@@ -178,8 +177,9 @@ test.describe("authorization through the identity proxy", () => {
     expect(operatorSecond.status()).toBe(403);
   });
 
-  test("a namespace-scoped admin lands on Proxies and sees fleet TLS writes read-only", async ({
+  test("a namespace-scoped admin lands on Proxies and is not offered fleet TLS", async ({
     signIn,
+    request,
   }) => {
     // Every starter identity holds namespace grants, the admin included, so
     // the fleet-wide Dashboard is not its landing page (#565).
@@ -187,12 +187,20 @@ test.describe("authorization through the identity proxy", () => {
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Proxies", exact: true })).toBeVisible();
     await expect(page).toHaveURL(/\/proxies(\?.*)?$/);
+    await expect(page.getByRole("link", { name: "TLS", exact: true })).toHaveCount(0);
 
-    // The BFF refuses fleet TLS mutations to a scoped session; the page says
-    // so before anything is edited and keeps the reads.
+    // Every TLS route, reads and validation included, is refused to a scoped
+    // session by the BFF and by Ferrum Edge v0.9.16+ (ferrum-edge#6093). The
+    // page says so instead of offering any TLS read or control.
     await page.goto("/tls");
-    await expect(page.getByText("Managed TLS material and rotation are read-only")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Rotate Now" })).toBeDisabled();
+    await expect(page.getByText("TLS management is unavailable")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Rotate Now" })).toHaveCount(0);
+
+    const read = await request.get(`${FOUNDRY_URL}/api/proxy/admin/tls/inventory`, {
+      headers: { [IDENTITY_HEADER]: "admin" },
+    });
+    expect(read.status()).toBe(403);
+    expect(await read.json()).toEqual({ error: "Namespace access denied" });
   });
 
   test("a write without a session and CSRF grant is refused", async ({ request }) => {

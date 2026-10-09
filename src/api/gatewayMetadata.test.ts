@@ -326,6 +326,31 @@ describe("observeGatewayResponse", () => {
     expect(getGatewayMetadataSnapshot().apply.state).toBe("succeeded");
   });
 
+  it("stops at once, as denied, when a namespace-scoped session is refused the poll", async () => {
+    // The BFF's namespace route ceiling, and Edge v0.9.16+ for an `ns`-claim
+    // JWT, refuse fleet-global apply status with 403; retrying cannot help.
+    const fetchStatus = vi.fn().mockRejectedValue(
+      Object.assign(new Error("Forbidden"), { response: new Response(null, { status: 403 }) }),
+    );
+    setApplyStatusFetcher(fetchStatus);
+    await observeGatewayResponse(
+      mutationRequest("tenant-a"),
+      new Response("{}", {
+        status: 202,
+        headers: { "x-ferrum-config-cursor": "6:3" },
+      }),
+    );
+
+    await vi.waitFor(() => expect(getGatewayMetadataSnapshot().apply.polling).toBe(false));
+    expect(fetchStatus).toHaveBeenCalledOnce();
+    expect(getGatewayMetadataSnapshot().apply).toMatchObject({
+      state: "unverifiable",
+      namespace: "tenant-a",
+      cursor: "6:3",
+      reason: "apply_status_denied",
+    });
+  });
+
   describe("BFF capacity refusals", () => {
     const capacityRefusal = (retryAfter = "1") =>
       Object.assign(new Error("Too Many Requests"), {

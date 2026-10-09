@@ -63,6 +63,7 @@ import type { PaginatedResponse } from "@/api/types";
 import { usePaginationParams } from "@/hooks/usePagination";
 import { useCapabilities } from "@/stores/capabilities";
 import { CapabilityNotice } from "@/components/shared/CapabilityGate";
+import { FleetViewGate } from "@/components/shared/FleetViewGate";
 import {
   acmeCertificateToForm,
   buildAcmeCertificateRequest,
@@ -1664,12 +1665,17 @@ const TLS_TABS: readonly string[] = [
 ];
 
 export default function TlsPage() {
+  // Every `/admin/tls/*` route, reads and validation included, is refused to a
+  // session holding namespace grants, so such a session never gets the tabs.
+  return (
+    <FleetViewGate view="tls" title="TLS Management">
+      <TlsWorkspace />
+    </FleetViewGate>
+  );
+}
+
+function TlsWorkspace() {
   const { capabilities } = useCapabilities();
-  // A scoped admin is denied material and rotation for the same reason, so one
-  // notice names both.
-  const scopedMaterialAndRotation =
-    capabilities.tlsMaterial.blockedBy === "namespace-scope" &&
-    capabilities.tlsRotation.blockedBy === "namespace-scope";
   // Inventory and Events each page through the route's one `offset` and
   // `limit`. The active tab lives in the URL beside them so a switch drops
   // both in the same navigation: the newly opened list starts at its first
@@ -1707,22 +1713,9 @@ export default function TlsPage() {
         </p>
       </div>
 
-      <CapabilityNotice
-        verdict={
-          scopedMaterialAndRotation
-            ? {
-                ...capabilities.tlsMaterial,
-                headline: "Managed TLS material and rotation are read-only",
-              }
-            : capabilities.tlsMaterial
-        }
-      />
+      <CapabilityNotice verdict={capabilities.tlsMaterial} />
+      {/* A role denial of rotation is the operational-actions notice below. */}
       <CapabilityNotice verdict={capabilities.operationalActions} />
-      {/* A role denial of rotation is the operational-actions notice above;
-          only a namespace scope sets rotation apart from validation. */}
-      {capabilities.tlsRotation.blockedBy === "namespace-scope" && !scopedMaterialAndRotation && (
-        <CapabilityNotice verdict={capabilities.tlsRotation} />
-      )}
 
       <Tabs value={activeTab} onValueChange={selectTab}>
         <TabsList>

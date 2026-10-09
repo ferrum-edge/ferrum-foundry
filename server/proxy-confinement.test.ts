@@ -24,7 +24,8 @@ const MASKED_CONSUMER = {
   credentials: { keyauth: [{ key: '[REDACTED]' }], jwt: [{ secret: '[REDACTED]' }] },
 };
 // The health fields a scoped principal receives, and the detailed view Edge
-// returns to the primary-key JWT the BFF signs.
+// v0.9.15 returns to the primary-key JWT the BFF signs, here for a gateway
+// serving a namespace the principal is not granted.
 const HEALTH_SUMMARY = {
   status: 'ok',
   timestamp: '2026-10-08T00:00:00Z',
@@ -32,9 +33,24 @@ const HEALTH_SUMMARY = {
   admin_writes_enabled: true,
   ready: true,
 };
+const SERVING_TENANT_A = {
+  active: 'tenant-a',
+  serving_scope: 'single-namespace-data-plane',
+  data_plane_single_namespace: true,
+};
+// Edge v0.9.16's tenant tier for an `ns`-claim JWT covering the active
+// namespace, and its minimal probe body.
+const HEALTH_TENANT = {
+  status: 'ok',
+  ready: true,
+  mode: 'database',
+  admin_writes_enabled: true,
+  namespace: SERVING_TENANT_A,
+};
+const HEALTH_MINIMAL = { status: 'ok', ready: true };
 const HEALTH_DETAIL = {
   ...HEALTH_SUMMARY,
-  namespace: { serving: 'tenant-b', serving_scope: 'single' },
+  namespace: { ...SERVING_TENANT_A, active: 'tenant-b' },
   database: { connected: true, pool: { size: 8 } },
   cached_config: { proxies: 42, consumers: 7 },
   gateway_listeners: { failures: [{ port: 8443 }] },
@@ -115,6 +131,12 @@ const gateway = createServer((request, response) => {
         response.end('upstream proxy failure');
       } else if (variant === 'array') {
         response.end(JSON.stringify([HEALTH_DETAIL]));
+      } else if (variant === 'granted') {
+        response.end(JSON.stringify({ ...HEALTH_DETAIL, namespace: SERVING_TENANT_A }));
+      } else if (variant === 'tenant') {
+        response.end(JSON.stringify(HEALTH_TENANT));
+      } else if (variant === 'minimal') {
+        response.end(JSON.stringify(HEALTH_MINIMAL));
       } else {
         response.end(JSON.stringify(HEALTH_DETAIL));
       }
@@ -603,19 +625,14 @@ describe('raw BFF path confinement', () => {
     expect(decodeJwt(arrivals.at(-1)!.token)).toMatchObject({ role: 'operator', ns: 'tenant-a' });
   });
 
-  it('allows fleet TLS reads and validation, and refuses every fleet TLS mutation to scoped principals', async () => {
-    for (const [method, path] of [
-      ['GET', '/admin/tls/inventory'], ['GET', '/admin/tls/certificates/cert-1'],
-      ['HEAD', '/admin/tls/certificates/cert-1'],
-      ['GET', '/admin/tls/acme/orders/order-1'], ['POST', '/admin/tls/validate'],
-    ]) {
-      const headers = identity(method === 'POST' ? 'admin' : 'operator');
-      delete headers['x-ferrum-namespace'];
-      expect((await rawRequest(`/api/proxy${path}`, method, headers, method === 'POST' ? '{}' : '')).status).toBe(200);
-      expect(arrivals.at(-1)).toMatchObject({ url: path, method, namespace: undefined });
-    }
+  it('refuses every fleet TLS route to scoped principals, reads and validation included', async () => {
     const before = arrivals.length;
+    const beforeTokens = vi.mocked(generateToken).mock.calls.length;
     for (const [method, path] of [
+      ['GET', '/admin/tls/inventory'], ['GET', '/admin/tls/events'],
+      ['GET', '/admin/tls/certificates'], ['GET', '/admin/tls/certificates/cert-1'],
+      ['HEAD', '/admin/tls/certificates/cert-1'], ['GET', '/admin/tls/acme/accounts'],
+      ['GET', '/admin/tls/acme/orders/order-1'], ['POST', '/admin/tls/validate'],
       ['POST', '/admin/tls/rotate/all'], ['DELETE', '/admin/tls/certificates/cert-1'],
       ['POST', '/admin/tls/certificates'], ['PUT', '/admin/tls/certificates/cert-1'],
       ['PUT', '/admin/tls/ca-bundles/bundle-1'], ['POST', '/admin/tls/jwks'],
@@ -625,17 +642,40 @@ describe('raw BFF path confinement', () => {
       ['PUT', '/admin/tls/acme/orders/id'], ['GET', '/admin/tls/acme/orders/id/finalize'],
       ['GET', '/admin/tls/unknown'],
     ]) {
-      for (const role of ['operator', 'admin']) {
+      for (const role of ['viewer', 'operator', 'admin']) {
         for (const headers of [identity(role), identity(role, 'tenant-b'), withoutNamespace(identity(role))]) {
           const response = await rawRequest(
             `/api/proxy${path}`,
             method,
             headers,
-            method === 'GET' ? '' : '{}',
+            method === 'GET' || method === 'HEAD' ? '' : '{}',
           );
           expect(response.status, `${role} ${method} ${path}`).toBe(403);
-          expect(response.wire).toContain('Namespace access denied');
+          if (method !== 'HEAD') expect(response.wire).toContain('Namespace access denied');
         }
+      }
+    }
+    // Refused before a JWT is signed or the gateway is contacted.
+    expect(arrivals).toHaveLength(before);
+    expect(vi.mocked(generateToken).mock.calls).toHaveLength(beforeTokens);
+  }, 15_000);
+
+  it('refuses every fleet-global observability and operations route to scoped principals', async () => {
+    const before = arrivals.length;
+    for (const [method, path] of [
+      ['GET', '/cluster'], ['GET', '/config/apply-status?epoch=1&sequence=1'],
+      ['GET', '/metrics'], ['GET', '/metrics/runtime'], ['GET', '/admin/metrics'],
+      ['GET', '/charges?format=json'], ['GET', '/charges/sink/status'],
+      ['GET', '/backend-capabilities'], ['POST', '/backend-capabilities/refresh'],
+      ['GET', '/mesh/service-graph'], ['POST', '/mesh/egress-scope/test'],
+      ['POST', '/mesh/config-revision/reset'], ['GET', '/node-waypoint/identities'],
+      ['GET', '/service-waypoint/services'], ['GET', '/overload'],
+      ['GET', '/diagnostics/v1/refs/fd1_00'],
+    ]) {
+      for (const headers of [identity('admin'), withoutNamespace(identity('admin'))]) {
+        const response = await rawRequest(`/api/proxy${path}`, method, headers, method === 'GET' ? '' : '{}');
+        expect(response.status, `${method} ${path}`).toBe(403);
+        expect(response.wire).toContain('Namespace access denied');
       }
     }
     expect(arrivals).toHaveLength(before);
@@ -706,6 +746,14 @@ describe('raw BFF path confinement', () => {
         expect(head).toMatch(/^cache-control: no-store$/im);
       }
     }
+    // A granted active namespace keeps its serving block, as Edge's tenant
+    // tier does; the detailed fields are still dropped.
+    for (const headers of [identity('viewer'), withoutNamespace(identity('admin'))]) {
+      const granted = await rawRequest('/api/proxy/health?health=granted', 'GET', headers);
+      expect(granted.status).toBe(200);
+      expect(JSON.parse(splitWire(granted.wire).body)).toEqual({ ...HEALTH_SUMMARY, namespace: SERVING_TENANT_A });
+    }
+
     const headRead = await rawRequest('/api/proxy/health', 'HEAD', identity('viewer'));
     expect(headRead.status).toBe(200);
     expect(headRead.wire).not.toMatch(/^etag:/im);
@@ -806,15 +854,17 @@ describe('raw BFF path confinement', () => {
     }
   });
 
-  it('lets a scoped principal poll apply status without a namespace header', async () => {
-    const headers = withoutNamespace(identity('operator'));
-    const response = await rawRequest('/api/proxy/config/apply-status?epoch=1&sequence=1', 'GET', headers);
-    expect(response.status).toBe(200);
-    expect(arrivals.at(-1)).toMatchObject({
-      url: '/config/apply-status?epoch=1&sequence=1',
-      method: 'GET',
-      namespace: undefined,
-    });
+  it.each([
+    ['the Edge v0.9.16 tenant tier', 'tenant', HEALTH_TENANT],
+    ['the Edge v0.9.16 minimal tier', 'minimal', HEALTH_MINIMAL],
+  ])('relays %s to scoped principals through the same summary', async (_label, variant, expected) => {
+    for (const path of ['/health', '/status']) {
+      const response = await rawRequest(`/api/proxy${path}?health=${variant}`, 'GET', identity('viewer'));
+      expect(response.status, path).toBe(200);
+      const { head, body } = splitWire(response.wire);
+      expect(JSON.parse(body)).toEqual(expected);
+      expect(head).not.toMatch(/^etag:/im);
+    }
   });
 
   it('uses canonical paths for body limits and refuses oversize ordinary bodies before publication', async () => {

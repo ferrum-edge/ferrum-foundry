@@ -35,6 +35,7 @@ import { GatewayTrustManager } from "@/components/forms/GatewayTrustManager";
 import { useCapabilities } from "@/stores/capabilities";
 import { CapabilityNotice } from "@/components/shared/CapabilityGate";
 import { formatDateTime, formatTime } from "@/lib/format";
+import { FleetViewGate } from "@/components/shared/FleetViewGate";
 
 function NotMeshEmpty({ what }: { what: string }) {
   return (
@@ -578,7 +579,17 @@ function TrustTab() {
 /*  MeshPage                                                           */
 /* ================================================================== */
 
+// The fleet-wide routes this page reads are refused to a session holding
+// namespace grants, so such a session gets the reason instead of the page.
 export default function MeshPage() {
+  return (
+    <FleetViewGate view="mesh" title="Mesh">
+      <MeshWorkspace />
+    </FleetViewGate>
+  );
+}
+
+function MeshWorkspace() {
   return (
     <div className="space-y-6">
       <PageHeader

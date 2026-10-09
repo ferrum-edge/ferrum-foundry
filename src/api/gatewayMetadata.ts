@@ -247,6 +247,17 @@ export function capacityRetryDelay(error: unknown): number | null {
   return Math.min(Math.max(seconds, 1) * 1000, MAX_CAPACITY_WAIT_MS);
 }
 
+/**
+ * Whether the poll was refused outright. A session holding namespace grants
+ * may not read `/config/apply-status`: it is fleet-global process topology,
+ * which the BFF's namespace route ceiling and Ferrum Edge v0.9.16+ refuse to a
+ * namespace-bounded caller. Asking again would only be refused again.
+ */
+function isApplyStatusDenied(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  return (error as { response?: { status?: unknown } }).response?.status === 403;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -307,14 +318,15 @@ async function pollApplyStatus(
         await sleep(Math.min(delay * 2 ** (capacityWaits - 1), MAX_CAPACITY_WAIT_MS));
         continue;
       }
-      if (attempt < 2) continue;
+      const denied = isApplyStatusDenied(error);
+      if (!denied && attempt < 2) continue;
       if (generation === pollGeneration) {
         publish({
           ...snapshot,
           apply: {
             ...snapshot.apply,
             state: "unverifiable",
-            reason: "apply_status_unavailable",
+            reason: denied ? "apply_status_denied" : "apply_status_unavailable",
             polling: false,
           },
         });

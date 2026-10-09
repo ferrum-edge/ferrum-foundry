@@ -8,7 +8,11 @@ import {
 import { verifyPluginDefaults } from "./plugin-defaults-contract.mjs";
 import { verifyBasicAuthContract } from "./basic-auth-contract.mjs";
 import { verifyConcurrentEditContract } from "./concurrent-edit-contract.mjs";
-import { gatewaySender, verifyCapabilityParity } from "./capability-parity-contract.mjs";
+import {
+  gatewaySender,
+  scopedGrants,
+  verifyCapabilityParity,
+} from "./capability-parity-contract.mjs";
 import { resourceFingerprint } from "../src/lib/resourceBaseline.ts";
 import { normalizedTargets } from "../src/lib/upstreamTargets.ts";
 import {
@@ -28,10 +32,16 @@ confirmDestructiveTarget(config);
 
 async function exchange(
   path,
-  { method = "GET", body, headers = {}, role } = {},
+  { method = "GET", body, headers = {}, role, fleetGlobal = false } = {},
   requestConfig = config,
 ) {
-  const token = await adminToken(requestConfig, role ? { role } : {});
+  // A fleet-global route is signed without an `ns` claim, as Foundry signs it
+  // for an unrestricted principal: Ferrum Edge v0.9.16+ refuses it to a token
+  // carrying one (ferrum-edge#6093).
+  const token = await adminToken(requestConfig, {
+    ...(role && { role }),
+    ...(fleetGlobal && { namespaces: undefined }),
+  });
   const response = await fetch(`${config.adminUrl}${path}`, {
     method,
     signal: AbortSignal.timeout(30_000),
@@ -344,6 +354,7 @@ assert.equal(concurrentEdits.gatewayHonoursIfMatch, true);
 // container started with FERRUM_ADMIN_READ_ONLY (see the CI workflow).
 const capabilityParity = await verifyCapabilityParity(gatewaySender(config), {
   expectation: "writable",
+  grants: scopedGrants(config.namespace),
 });
 
 // Validation is non-persistent. Empty PEM values are present-but-invalid, so
@@ -358,7 +369,12 @@ for (const [body, error] of [
   [{ crl_pem: "", cert_expiry_warning_days: 0 }, /^crl_pem:/],
   [{ crl_pem: "", cert_expiry_warning_days: -1 }, /Invalid JSON body/],
 ]) {
-  const response = await request("/admin/tls/validate", { method: "POST", body, expected: [400] });
+  const response = await request("/admin/tls/validate", {
+    method: "POST",
+    body,
+    expected: [400],
+    fleetGlobal: true,
+  });
   assert.equal(response.valid, false);
   assert.match(response.error, error);
 }

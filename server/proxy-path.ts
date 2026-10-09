@@ -4,27 +4,14 @@ const MAX_DECODE_PASSES = 8;
 const PROXY_PREFIX = '/api/proxy/';
 const targetPaths = new WeakMap<FastifyRequest, string>();
 
-// Keep in sync with upstream src/admin/mod.rs and openapi.yaml. New TLS
-// operations require an explicit exemption, never a namespace-free prefix.
-const FLEET_GLOBAL_ROUTES: ReadonlyArray<readonly [string, RegExp]> = [
-  ['GET', /^\/admin\/tls\/(inventory|events)$/],
-  ['GET|POST', /^\/admin\/tls\/(certificates|ca-bundles|crls|ocsp-responses|jwks)$/],
-  ['GET|PUT|DELETE', /^\/admin\/tls\/(certificates|ca-bundles|crls|ocsp-responses|jwks)\/[^/]+$/],
-  ['GET|POST', /^\/admin\/tls\/acme\/(certificates|orders)$/],
-  ['GET|PUT|DELETE', /^\/admin\/tls\/acme\/certificates\/[^/]+$/],
-  ['GET|DELETE', /^\/admin\/tls\/acme\/orders\/[^/]+$/],
-  ['GET', /^\/admin\/tls\/acme\/accounts$/],
-  ['POST', /^\/admin\/tls\/acme\/orders\/[^/]+\/finalize$/],
-  ['POST', /^\/admin\/tls\/acme\/renew\/[^/]+$/],
-  ['POST', /^\/admin\/tls\/rotate\/[^/]+$/],
-  ['POST', /^\/admin\/tls\/validate$/],
-];
-
 // Namespace-scoped principals may use the explicitly known resource route
-// classes below, mirroring Edge's `namespace_scoped_resource_kind`. Edge does
-// not apply the namespace claim to its other admin routes, so anything not
-// classified here or in the global ceiling is denied by default. `POST /batch`,
-// `GET /backup`, and `POST /restore` take their namespace from the header.
+// classes below, mirroring Edge's `namespace_scoped_resource_kind`, and the
+// global allowlist after them. Anything else is denied by default, matching
+// Edge v0.9.16+ (`ns_claim_global_route_is_allowed`, ferrum-edge#6093), which
+// refuses every other route to an admin JWT carrying an `ns` claim. Earlier
+// Edge releases admit such a JWT on fleet-global routes, so the BFF is the only
+// ceiling there. `POST /batch`, `GET /backup`, and `POST /restore` take their
+// namespace from the header.
 const NAMESPACE_SCOPED_ROUTES: ReadonlyArray<readonly [string, RegExp]> = [
   [
     'GET|POST',
@@ -43,38 +30,35 @@ const NAMESPACE_SCOPED_ROUTES: ReadonlyArray<readonly [string, RegExp]> = [
   ['GET', /^\/gateway-trust\/status\/?$/],
   ['GET', /^\/config\/export\/?$/],
   ['GET', /^\/audit\/?$/],
-  ['GET', /^\/backend-egress-policy\/?$/],
+  // Edge classifies only the one-segment path, so no trailing slash.
+  ['GET', /^\/backend-egress-policy$/],
   ['POST', /^\/(batch|restore)\/?$/],
   ['GET', /^\/backup\/?$/],
 ];
 
 // Fleet-wide route classes a namespace-scoped principal may reach without a
-// granted namespace header. Keep methods and paths explicit so newly added
-// admin routes default-deny.
+// granted namespace header: Edge's `ns`-claim allowlist, less the routes the
+// BFF withholds. Keep methods and paths explicit so newly added admin routes
+// default-deny.
 // - `GET /plugins`, `GET /namespaces*`, `/live`, `/health`, and `/status` are
-//   Edge's own ceiling. Foundry signs with the primary key, which Edge treats as
-//   detail-authorized, so the proxy projects `/health` and `/status` down to
-//   their summary fields for a scoped principal; `/overload` stays withheld.
-// - Edge allows only GET on `/namespaces*`. The registry writes here are safe
-//   only because `namespace-registry.ts` confines both the path and the body
-//   names to the principal's grants.
-// - `GET /config/apply-status` is process-topology in Edge: it ignores the
-//   namespace header and reveals only the apply cursor. The UI polls it
-//   without a header after a fleet-wide write.
+//   Edge's own ceiling. The proxy projects `/health` and `/status` down to the
+//   summary fields of `projectHealthSummary` for a scoped principal, whichever
+//   tier Edge answers. `/overload` stays withheld.
+// - `POST /namespaces` and `PUT`/`DELETE /namespaces/{name}` are allowed by
+//   Edge because its registry handlers authorize the claim themselves; the BFF
+//   also confines the path and body names to the principal's grants
+//   (`namespace-registry.ts`).
+// - Edge's `GET /diagnostics/v1/refs/{ref}` is not used by Foundry and stays
+//   denied.
+// - Everything else is fleet-global and refused: TLS inventory, material, ACME,
+//   rotation and validation; `/cluster`; `/config/apply-status`; `/metrics*`
+//   and `/admin/metrics`; `/charges*`; `/backend-capabilities*`; `/mesh/*`; and
+//   the waypoint routes.
 const NAMESPACE_SAFE_GLOBAL_ROUTES: ReadonlyArray<readonly [string, RegExp]> = [
   ['GET', /^\/plugins$/],
   ['GET|POST', /^\/namespaces$/],
   ['GET|PUT|DELETE', /^\/namespaces\/[^/]+$/],
   ['GET', /^\/(live|health|status)$/],
-  ['GET', /^\/config\/apply-status\/?$/],
-];
-
-// A namespace-scoped principal may read and validate fleet TLS material but may
-// not create, replace, rotate, renew, finalize, or delete it: each of those
-// changes fleet-wide state that the namespace claim does not scope. Edge's own
-// ceiling denies `/admin/tls/*` to tenant-bounded callers.
-const FLEET_GLOBAL_SCOPED_DENIED_ROUTES: ReadonlyArray<readonly [string, RegExp]> = [
-  ['POST|PUT|DELETE', /^\/admin\/tls\/(?!validate$)/],
 ];
 
 export class UnsafeProxyPathError extends Error {
@@ -196,16 +180,6 @@ function classifiedMethod(request: FastifyRequest): string {
   return request.method === 'HEAD' ? 'GET' : request.method;
 }
 
-export function proxyPathIsFleetGlobal(request: FastifyRequest): boolean {
-  try {
-    const path = proxyTargetPath(request);
-    const method = classifiedMethod(request);
-    return FLEET_GLOBAL_ROUTES.some(([methods, pattern]) => methods.split('|').includes(method) && pattern.test(path));
-  } catch {
-    return false;
-  }
-}
-
 /** Whether a namespace-scoped principal may reach this known Edge route class. */
 export function proxyPathIsAllowedForNamespace(request: FastifyRequest): boolean {
   try {
@@ -213,10 +187,7 @@ export function proxyPathIsAllowedForNamespace(request: FastifyRequest): boolean
     const method = classifiedMethod(request);
     const routeAllowed = ([methods, pattern]: readonly [string, RegExp]) =>
       methods.split('|').includes(method) && pattern.test(path);
-    if (FLEET_GLOBAL_SCOPED_DENIED_ROUTES.some(routeAllowed)) return false;
-    return FLEET_GLOBAL_ROUTES.some(routeAllowed)
-      || NAMESPACE_SAFE_GLOBAL_ROUTES.some(routeAllowed)
-      || NAMESPACE_SCOPED_ROUTES.some(routeAllowed);
+    return NAMESPACE_SAFE_GLOBAL_ROUTES.some(routeAllowed) || NAMESPACE_SCOPED_ROUTES.some(routeAllowed);
   } catch {
     return false;
   }
