@@ -30,12 +30,23 @@ import {
   getStoredMetricsRefreshInterval,
   setStoredMetricsRefreshInterval,
 } from "@/utils/metricsRefresh";
+import { FleetViewGate } from "@/components/shared/FleetViewGate";
 
 /* ================================================================== */
 /*  MetricsPage                                                        */
 /* ================================================================== */
 
+// The fleet-wide routes this page reads are refused to a session holding
+// namespace grants, so such a session gets the reason instead of the page.
 export default function MetricsPage() {
+  return (
+    <FleetViewGate view="metrics" title="Metrics">
+      <MetricsWorkspace />
+    </FleetViewGate>
+  );
+}
+
+function MetricsWorkspace() {
   const [refreshInterval, setRefreshInterval] = useState(
     getStoredMetricsRefreshInterval,
   );

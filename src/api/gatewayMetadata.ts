@@ -9,7 +9,8 @@ export type ApplyState =
   | "succeeded"
   | "applied"
   | "rejected"
-  | "unverifiable";
+  | "unverifiable"
+  | "unmonitored";
 
 export interface ConfigCursor {
   raw: string;
@@ -77,6 +78,7 @@ let statusFetcher: ApplyStatusFetcher | undefined;
 let pollGeneration = 0;
 let latestMutationOrder = 0;
 let sessionGeneration = 0;
+let namespaceScopedSession = false;
 
 export interface GatewayRequestIdentity {
   session: number;
@@ -111,6 +113,16 @@ export function setApplyStatusFetcher(fetcher?: ApplyStatusFetcher): void {
   statusFetcher = fetcher;
 }
 
+/**
+ * Whether the signed-in session holds namespace grants. `/config/apply-status`
+ * is fleet-global process topology, which the BFF's namespace route ceiling and
+ * Ferrum Edge v0.9.16+ refuse to a namespace-bounded caller, so a committed
+ * write from such a session is published as `unmonitored` and no poll is sent.
+ */
+export function setNamespaceScopedSession(scoped: boolean): void {
+  namespaceScopedSession = scoped;
+}
+
 // Non-persisting operations documented in upstream docs/admin_api.md and openapi.yaml.
 // Keep this method/path allowlist narrow: managed TLS writes and unknown mutations
 // must retain the ordinary apply-cursor checks, regardless of their response status.
@@ -132,7 +144,7 @@ export function beginGatewayRequest(request: Request): GatewayRequestIdentity {
   const identity: GatewayRequestIdentity = { session: sessionGeneration };
   if (!request.url.includes("/api/proxy/") || !isConfigurationMutation(request)) return identity;
   latestMutationOrder += 1;
-  if (["applied", "succeeded", "nothing_applied", "outcome_unknown"].includes(snapshot.apply.state)) {
+  if (["applied", "succeeded", "nothing_applied", "outcome_unknown", "unmonitored"].includes(snapshot.apply.state)) {
     publish({ ...snapshot, apply: IDLE_APPLY });
   }
   return { ...identity, mutationOrder: latestMutationOrder };
@@ -247,6 +259,17 @@ export function capacityRetryDelay(error: unknown): number | null {
   return Math.min(Math.max(seconds, 1) * 1000, MAX_CAPACITY_WAIT_MS);
 }
 
+/**
+ * Whether the poll was refused outright. A session holding namespace grants
+ * may not read `/config/apply-status` (see `setNamespaceScopedSession`), so a
+ * poll is only refused if the grants changed after the session was read.
+ * Asking again would only be refused again.
+ */
+function isApplyStatusDenied(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  return (error as { response?: { status?: unknown } }).response?.status === 403;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -307,16 +330,19 @@ async function pollApplyStatus(
         await sleep(Math.min(delay * 2 ** (capacityWaits - 1), MAX_CAPACITY_WAIT_MS));
         continue;
       }
-      if (attempt < 2) continue;
+      const denied = isApplyStatusDenied(error);
+      if (!denied && attempt < 2) continue;
       if (generation === pollGeneration) {
         publish({
           ...snapshot,
-          apply: {
-            ...snapshot.apply,
-            state: "unverifiable",
-            reason: "apply_status_unavailable",
-            polling: false,
-          },
+          apply: denied
+            ? { ...snapshot.apply, state: "unmonitored", polling: false }
+            : {
+                ...snapshot.apply,
+                state: "unverifiable",
+                reason: "apply_status_unavailable",
+                polling: false,
+              },
         });
       }
       return;
@@ -462,6 +488,20 @@ export async function observeGatewayResponse(
     next = { ...next, apply: IDLE_APPLY };
   }
 
+  if (next.apply.polling && namespaceScopedSession) {
+    // Live-apply status is fleet-global, so the poll would only be refused. A
+    // committed-not-live answer keeps the gateway's reason, or a fixed one.
+    next = {
+      ...next,
+      apply: {
+        ...next.apply,
+        state: "unmonitored",
+        reason: notLive ? (next.apply.reason ?? "committed_not_live") : null,
+        polling: false,
+      },
+    };
+  }
+
   publish(next);
   if (cursor && next.apply.polling) {
     void pollApplyStatus(
@@ -531,8 +571,9 @@ export function clearGatewayMetadata(): void {
   });
 }
 
-/** Test-only reset, including the configured status transport. */
+/** Test-only reset, including the configured status transport and session scope. */
 export function resetGatewayMetadata(): void {
   clearGatewayMetadata();
   statusFetcher = undefined;
+  namespaceScopedSession = false;
 }

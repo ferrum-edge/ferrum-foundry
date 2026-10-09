@@ -51,6 +51,25 @@
  * `503` is never described as admitted, and a `2xx` from a surface the model
  * treats as read-only still fails.
  *
+ * Every check runs twice, once per kind of Foundry principal:
+ *
+ * - **Unrestricted** (no namespace grants): the BFF signs it without an `ns`
+ *   claim, so fleet-global probes and `/health` go out claim-less, as Foundry
+ *   sends them. Routes that address a namespace (the namespace-scoped
+ *   resources and the registry) carry the claim, because the gateways the
+ *   contract runs against set `FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM`; the role
+ *   and admission answer is the same either way.
+ * - **Namespace-scoped**: every request carries the claim, and the facts come
+ *   from the scoped `/health` reduced by the BFF's own `projectHealthSummary`.
+ *   Ferrum Edge v0.9.15 and earlier answer that token with the detailed tier;
+ *   v0.9.16+ (ferrum-edge#6093) with the tenant tier, which carries the same
+ *   `mode`, `admin_writes_enabled`, and `status`. A probe the BFF's namespace
+ *   route ceiling refuses (`proxyPathIsAllowedForNamespace`) is never sent:
+ *   the model must withhold it instead (a namespace-scope or role verdict for
+ *   a write, a denied fleet view for a read). A probe the ceiling forwards is
+ *   compared with the gateway exactly as above, so a route Edge v0.9.16+
+ *   refuses to an `ns`-claim JWT, but the BFF forwards, fails the contract.
+ *
  * Run directly against a gateway whose mode is fixed by
  * `FERRUM_CAPABILITY_EXPECT` (`writable` or `read-only`); the contract first
  * proves the gateway really is in that mode, so it cannot pass vacuously.
@@ -62,9 +81,12 @@ import {
   CAPABILITY_SURFACES,
   capabilityRequirement,
   resolveCapability,
+  resolveFleetView,
   resolveGatewayWriteState,
   resolveReadOnlyModeState,
 } from "../src/lib/capabilities.ts";
+import { projectHealthSummary } from "../server/health-summary.ts";
+import { proxyPathIsAllowedForNamespace } from "../server/proxy-path.ts";
 import {
   adminToken,
   confirmDestructiveTarget,
@@ -76,6 +98,30 @@ const ROLE_RANK = { viewer: 0, operator: 1, admin: 2 };
 
 /** An id and namespace name that no probe expects to exist. */
 export const PROBE_ID = "capability-parity-probe";
+
+/**
+ * Whether the BFF's namespace route ceiling forwards this request for a
+ * principal holding namespace grants, judged by the BFF's own classifier on
+ * the path it would proxy.
+ */
+export function bffForwardsScoped(method, path) {
+  const url = `/api/proxy${path}`;
+  return proxyPathIsAllowedForNamespace({
+    method,
+    url,
+    raw: { url },
+    routeOptions: { url: "/api/proxy/*" },
+  });
+}
+
+/**
+ * Whether a request addresses a namespace: a namespace-scoped route or the
+ * namespace registry. Everything else the ceiling forwards (`/plugins`,
+ * `/live`, `/health`, `/status`) and every fleet-global route does not.
+ */
+export function addressesNamespace(method, path) {
+  return bffForwardsScoped(method, path) && !/^\/(plugins|live|health|status)(\?|$)/.test(path);
+}
 
 /**
  * One request per gateway-backed surface, each reaching the same role check
@@ -142,7 +188,13 @@ export const READ_PROBES = [
   { label: "consumers", path: "/consumers?offset=0&limit=1", minimumRole: "viewer", collection: true },
   { label: "plugin configs", path: "/plugins/config?offset=0&limit=1", minimumRole: "viewer", collection: true },
   { label: "namespaces", path: "/namespaces?offset=0&limit=1", minimumRole: "viewer", collection: true },
-  { label: "TLS inventory", path: "/admin/tls/inventory?offset=0&limit=1", minimumRole: "operator" },
+  {
+    label: "TLS inventory",
+    path: "/admin/tls/inventory?offset=0&limit=1",
+    minimumRole: "operator",
+    // Fleet-global: a namespace-scoped session gets the TLS view's reason.
+    fleetView: "tls",
+  },
   { label: "gateway trust bundles", path: "/gateway-trust-bundles?offset=0&limit=1", minimumRole: "operator" },
   { label: "audit log", path: "/audit?offset=0&limit=1", minimumRole: "admin" },
 ];
@@ -168,12 +220,19 @@ export function classifyDenial(response) {
   const role = ROLE_DENIAL.exec(message)?.[1];
   if (role) return { kind: "role", requiredRole: role };
   if (READ_ONLY_DENIAL.test(message)) return { kind: "gateway-read-only" };
+  if (NS_CLAIM_DENIAL.test(message)) return { kind: "namespace-claim", message };
   return { kind: "other", message };
 }
 
 function isCollection(body) {
   return Array.isArray(body) || Array.isArray(body?.data);
 }
+
+/**
+ * Edge v0.9.16+'s refusal of a fleet-global route to an admin JWT carrying an
+ * `ns` claim (`authorize_namespace_bounded_global_route`, ferrum-edge#6093).
+ */
+const NS_CLAIM_DENIAL = /unavailable to admin JWTs with an `ns` claim/;
 
 /** The capability facts the UI derives from an authenticated `/health`. */
 export function observedFacts(health) {
@@ -203,22 +262,167 @@ function describeActual(response, denial) {
   if (!denial) return `admitted (${response.status})`;
   if (denial.kind === "role") return `role denial requiring ${denial.requiredRole}`;
   if (denial.kind === "gateway-read-only") return "read-only denial";
+  if (denial.kind === "namespace-claim") return `ns-claim denial ${JSON.stringify(denial.message)}`;
   return `403 ${JSON.stringify(denial.message)}`;
 }
 
+/** The scoped principal's grants, as `gatewaySender` signs them. */
+export function scopedGrants(namespace) {
+  return [namespace, PROBE_ID];
+}
+
 /**
- * @param send `(role, { method, path, body?, rawBody? }) => Promise<{ status, body }>`,
- *   signing as the given role for the namespace under test.
+ * Compare every write and read probe with the model for one principal. A
+ * scoped principal's probe that the BFF's ceiling refuses is not sent; the
+ * model must withhold it instead.
+ */
+async function comparePrincipal(send, { expectation, observed, scoped, mismatches }) {
+  const who = (role) => (scoped ? `scoped ${role}` : role);
+  const surfaces = CAPABILITY_SURFACES.filter((surface) => !BFF_ONLY_SURFACES.has(surface));
+  const writes = {};
+  for (const role of ROLES) {
+    writes[role] = {};
+    for (const surface of surfaces) {
+      const probe = WRITE_PROBES[surface];
+      const facts = { role, namespaceScoped: scoped, ...observed };
+      const verdict = resolveCapability(surface, facts);
+      const label = `${who(role)} ${surface} (${probe.method} ${probe.path})`;
+
+      if (scoped && !bffForwardsScoped(probe.method, probe.path)) {
+        // The BFF refuses it before signing; the UI must not offer it either.
+        writes[role][surface] = "bff-refused";
+        if (verdict.allowed) {
+          mismatches.push(`${label}: model offers it, but the BFF namespace route ceiling refuses it`);
+        }
+        continue;
+      }
+      if (scoped && verdict.blockedBy === "namespace-scope") {
+        mismatches.push(`${label}: model withholds it as fleet-wide, but the BFF forwards it`);
+        continue;
+      }
+
+      const response = await send(role, probe, { scoped });
+      const denial = classifyDenial(response);
+      writes[role][surface] = response.status;
+
+      let agrees;
+      if (response.status === 401) {
+        agrees = false; // authentication failed: the probe tested nothing
+      } else if (verdict.allowed) {
+        const admittedStatus = probe.admittedStatus;
+        // A 503 is a failed or unavailable write, never an admission.
+        agrees = denial === null
+          && response.status !== 503
+          && (admittedStatus === undefined || response.status === admittedStatus);
+      } else if (verdict.blockedBy === "role") {
+        agrees = denial?.kind === "role"
+          && denial.requiredRole === capabilityRequirement(surface).minimumRole;
+      } else {
+        // File/DP restore answers the documented `503 {"error":"No database"}`
+        // before the read-only gate; under a read-only expectation that is an
+        // expected no-writable-store outcome, not an admission.
+        const readOnlyDenial = denial?.kind === "gateway-read-only";
+        const noDatabaseRestore = expectation === "read-only"
+          && probe.acceptsNoDatabaseRestore === true
+          && isNoDatabaseRestore(response);
+        agrees = readOnlyDenial || noDatabaseRestore;
+      }
+      if (!agrees) {
+        mismatches.push(
+          `${label}: model expects ${describeExpected(verdict, surface)}, `
+          + `gateway answered ${describeActual(response, denial)}`,
+        );
+      }
+    }
+  }
+
+  const reads = {};
+  for (const role of ROLES) {
+    reads[role] = {};
+    for (const probe of READ_PROBES) {
+      if (scoped && !bffForwardsScoped("GET", probe.path)) {
+        reads[role][probe.label] = "bff-refused";
+        const facts = { role, namespaceScoped: true, ...observed };
+        if (!probe.fleetView || resolveFleetView(probe.fleetView, facts).allowed) {
+          mismatches.push(
+            `${who(role)} read of ${probe.label}: the BFF namespace route ceiling refuses it, `
+            + "but no fleet view withholds it",
+          );
+        }
+        continue;
+      }
+      const response = await send(role, { method: "GET", path: probe.path }, { scoped });
+      const denial = classifyDenial(response);
+      reads[role][probe.label] = response.status;
+      if (ROLE_RANK[role] >= ROLE_RANK[probe.minimumRole]) {
+        if (response.status === 401 || denial) {
+          mismatches.push(`${who(role)} read of ${probe.label} was refused (${response.status})`);
+        } else if (probe.expectedStatus !== undefined && response.status !== probe.expectedStatus) {
+          mismatches.push(
+            `${who(role)} read of ${probe.label} returned ${response.status}, expected ${probe.expectedStatus}`,
+          );
+        } else if (
+          probe.expectedError !== undefined && response.body?.error !== probe.expectedError
+        ) {
+          mismatches.push(
+            `${who(role)} read of ${probe.label} answered ${JSON.stringify(response.body?.error)}, `
+            + `expected the handler's ${JSON.stringify(probe.expectedError)}`,
+          );
+        } else if (probe.collection && !(response.status === 200 && isCollection(response.body))) {
+          mismatches.push(
+            `${who(role)} read of ${probe.label} returned ${response.status} without a collection`,
+          );
+        }
+      } else if (denial?.kind !== "role" || denial.requiredRole !== probe.minimumRole) {
+        // A 404/501/503 here would be rendered as "not enabled on this gateway".
+        mismatches.push(
+          `${who(role)} read of ${probe.label}: expected an explicit 403 requiring ${probe.minimumRole}, `
+          + `gateway answered ${describeActual(response, denial)}`,
+        );
+      }
+    }
+  }
+  return { writes, reads };
+}
+
+/**
+ * The facts a namespace-scoped session's UI reads: the scoped `/health`,
+ * reduced by the BFF's `projectHealthSummary` for the scoped grants. Every
+ * fact it carries must match the unrestricted reading of the same gateway.
+ */
+async function scopedFacts(send, observed, grants, mismatches) {
+  const health = await send("admin", { method: "GET", path: "/health" }, { scoped: true });
+  assert.equal(health.status, 200, `scoped GET /health returned ${health.status}`);
+  const summary = projectHealthSummary(health.body, grants);
+  assert.ok(summary, "scoped GET /health has no summary");
+  const facts = observedFacts(summary);
+  for (const [fact, value] of Object.entries(facts)) {
+    if (value !== null && value !== observed[fact]) {
+      mismatches.push(
+        `scoped /health reports ${fact} ${JSON.stringify(value)}, `
+        + `unrestricted /health ${JSON.stringify(observed[fact])}`,
+      );
+    }
+  }
+  return facts;
+}
+
+/**
+ * @param send `(role, { method, path, body?, rawBody? }, { scoped }) =>
+ *   Promise<{ status, body }>`, signing as the given role for the namespace
+ *   under test, as an unrestricted or a namespace-scoped principal.
  * @param options.expectation `"writable"` or `"read-only"`: the mode the
  *   gateway was started in, proved before anything else is compared.
+ * @param options.grants the scoped principal's grants, as `gatewaySender`
+ *   signs them, for the BFF's health summary.
  */
-export async function verifyCapabilityParity(send, { expectation } = {}) {
+export async function verifyCapabilityParity(send, { expectation, grants = [] } = {}) {
   assert.ok(
     expectation === "writable" || expectation === "read-only",
     'expectation must be "writable" or "read-only"',
   );
 
-  const health = await send("admin", { method: "GET", path: "/health" });
+  const health = await send("admin", { method: "GET", path: "/health" }, { scoped: false });
   assert.equal(health.status, 200, `GET /health returned ${health.status}`);
   const observed = observedFacts(health.body);
   const unknownRole = { role: null, ...observed };
@@ -244,97 +448,40 @@ export async function verifyCapabilityParity(send, { expectation } = {}) {
   );
 
   const mismatches = [];
-  const writes = {};
-  for (const role of ROLES) {
-    writes[role] = {};
-    for (const surface of surfaces) {
-      const verdict = resolveCapability(surface, { role, ...observed });
-      const response = await send(role, WRITE_PROBES[surface]);
-      const denial = classifyDenial(response);
-      writes[role][surface] = response.status;
-
-      let agrees;
-      if (response.status === 401) {
-        agrees = false; // authentication failed: the probe tested nothing
-      } else if (verdict.allowed) {
-        const admittedStatus = WRITE_PROBES[surface].admittedStatus;
-        // A 503 is a failed or unavailable write, never an admission.
-        agrees = denial === null
-          && response.status !== 503
-          && (admittedStatus === undefined || response.status === admittedStatus);
-      } else if (verdict.blockedBy === "role") {
-        agrees = denial?.kind === "role"
-          && denial.requiredRole === capabilityRequirement(surface).minimumRole;
-      } else {
-        // File/DP restore answers the documented `503 {"error":"No database"}`
-        // before the read-only gate; under a read-only expectation that is an
-        // expected no-writable-store outcome, not an admission.
-        const probe = WRITE_PROBES[surface];
-        const readOnlyDenial = denial?.kind === "gateway-read-only";
-        const noDatabaseRestore = expectation === "read-only"
-          && probe.acceptsNoDatabaseRestore === true
-          && isNoDatabaseRestore(response);
-        agrees = readOnlyDenial || noDatabaseRestore;
-      }
-      if (!agrees) {
-        mismatches.push(
-          `${role} ${surface} (${WRITE_PROBES[surface].method} ${WRITE_PROBES[surface].path}): `
-          + `model expects ${describeExpected(verdict, surface)}, `
-          + `gateway answered ${describeActual(response, denial)}`,
-        );
-      }
-    }
-  }
-
-  const reads = {};
-  for (const role of ROLES) {
-    reads[role] = {};
-    for (const probe of READ_PROBES) {
-      const response = await send(role, { method: "GET", path: probe.path });
-      const denial = classifyDenial(response);
-      reads[role][probe.label] = response.status;
-      if (ROLE_RANK[role] >= ROLE_RANK[probe.minimumRole]) {
-        if (response.status === 401 || denial) {
-          mismatches.push(`${role} read of ${probe.label} was refused (${response.status})`);
-        } else if (probe.expectedStatus !== undefined && response.status !== probe.expectedStatus) {
-          mismatches.push(
-            `${role} read of ${probe.label} returned ${response.status}, expected ${probe.expectedStatus}`,
-          );
-        } else if (
-          probe.expectedError !== undefined && response.body?.error !== probe.expectedError
-        ) {
-          mismatches.push(
-            `${role} read of ${probe.label} answered ${JSON.stringify(response.body?.error)}, `
-            + `expected the handler's ${JSON.stringify(probe.expectedError)}`,
-          );
-        } else if (probe.collection && !(response.status === 200 && isCollection(response.body))) {
-          mismatches.push(
-            `${role} read of ${probe.label} returned ${response.status} without a collection`,
-          );
-        }
-      } else if (denial?.kind !== "role" || denial.requiredRole !== probe.minimumRole) {
-        // A 404/501/503 here would be rendered as "not enabled on this gateway".
-        mismatches.push(
-          `${role} read of ${probe.label}: expected an explicit 403 requiring ${probe.minimumRole}, `
-          + `gateway answered ${describeActual(response, denial)}`,
-        );
-      }
-    }
-  }
+  const { writes, reads } = await comparePrincipal(send, {
+    expectation, observed, scoped: false, mismatches,
+  });
+  const scopedObserved = await scopedFacts(send, observed, grants, mismatches);
+  const scoped = await comparePrincipal(send, {
+    expectation, observed: scopedObserved, scoped: true, mismatches,
+  });
 
   assert.deepEqual(mismatches, [], `capability model and gateway disagree:\n${mismatches.join("\n")}`);
-  return { expectation, observed, writes, reads };
+  return {
+    expectation,
+    observed,
+    writes,
+    reads,
+    scoped: { observed: scopedObserved, ...scoped },
+  };
 }
 
-/** Sign each request as `role` for `config.namespace`, as the BFF would. */
+/**
+ * Sign each request as `role` for `config.namespace`, as the BFF would. A
+ * namespace-scoped principal's token always carries the `ns` claim. An
+ * unrestricted principal's carries none, except on a route that addresses a
+ * namespace, where `FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM` would refuse it.
+ */
 export function gatewaySender(config, { fetchImpl = fetch } = {}) {
-  return async (role, { method, path, body, rawBody }) => {
+  return async (role, { method, path, body, rawBody }, { scoped = false } = {}) => {
     const token = await adminToken(config, {
       role,
       subject: `ferrum-foundry-capability-parity-${role}`,
       // The registry probe names PROBE_ID; with FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM
       // an ungranted name would be a namespace denial, not the gate under test.
-      namespaces: [config.namespace, PROBE_ID],
+      namespaces: scoped || addressesNamespace(method, path)
+        ? scopedGrants(config.namespace)
+        : undefined,
     });
     const payload = rawBody ?? (body === undefined ? undefined : JSON.stringify(body));
     const response = await fetchImpl(`${config.adminUrl}${path}`, {
@@ -369,6 +516,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   confirmWritableParityTarget(config, expectation);
   verifyCapabilityParity(gatewaySender(config), {
     expectation,
+    grants: scopedGrants(config.namespace),
   })
     .then((result) => console.log(JSON.stringify({ verified: true, capabilityParity: result })))
     .catch((error) => {

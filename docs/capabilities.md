@@ -100,7 +100,7 @@ namespace registry, and audit.
 | `proxies` | `operator` | `config-store` | `admit_write` on `POST/PUT/DELETE /proxies` |
 | `upstreams` | `operator` | `config-store` | `admit_write` on `POST/PUT/DELETE /upstreams` |
 | `pluginConfigs` | `operator` | `config-store` | `admit_write` on `POST/PUT/DELETE /plugins/config` |
-| `operationalActions` (`POST /admin/tls/validate`) | `operator` | `none` | no gate |
+| `operationalActions` (`POST /admin/tls/validate`) | `operator` | `none`, fleet-wide | no gate |
 | `fleetOperations` (backend-capability refresh, mesh egress dry-run) | `operator` | `none`, fleet-wide | role check only in `POST /backend-capabilities/refresh` and `POST /mesh/egress-scope/test` |
 | `tlsRotation` (`POST /admin/tls/rotate/{surface}`) | `operator` | `none`, fleet-wide | `admit_audited_operation` in `handle_rotate` |
 | `consumers` | `admin` | `config-store` | `admit_write` on `POST/PUT/DELETE /consumers` |
@@ -146,10 +146,12 @@ mode, export stays available to an admin.
 
 **Fleet-wide surfaces are refused to a namespace-scoped session.** The BFF
 bounds a session that holds namespace grants to the routes its namespaces
-scope (see [Namespace route ceiling](authentication.md#namespace-route-ceiling)).
-It refuses every fleet TLS mutation except the stateless validate, so
-`tlsMaterial` and `tlsRotation` are denied with `blockedBy: "namespace-scope"`
-whatever the role and mode. `bffSettings` is denied the same way, because
+scope, as Ferrum Edge v0.9.16+ bounds the `ns`-claim JWT it signs for one (see
+[Namespace route ceiling](authentication.md#namespace-route-ceiling)).
+Both refuse every `/admin/tls/*` route, so `tlsMaterial`, `tlsRotation`, and
+`operationalActions` (the stateless TLS validation) are denied with
+`blockedBy: "namespace-scope"` whatever the role and mode. `bffSettings` is
+denied the same way, because
 `PUT /api/settings` refuses a scoped session
 (see [Runtime identity defaults](authentication.md#runtime-identity-defaults)).
 It also refuses `/backend-capabilities/*` and `/mesh/*`, so `fleetOperations`
@@ -160,10 +162,25 @@ That holds on database, file and data-plane gateways (the modes the contract
 runs against); a control-plane or node-agent gateway answers `503`, and a mesh
 gateway with an active egress scope answers `200`, so the probe is not valid
 against those modes.
-TLS validation stays in `operationalActions` and stays available. Only an
-observed grant denies: `namespaceScoped` that is `false` or `null` concludes
-nothing, and the parity contract, which supplies no namespace fact, sees the
-role and mode verdicts alone.
+Only an observed grant denies: `namespaceScoped` that is `false` or `null`
+concludes nothing.
+
+**Fleet-wide views are withheld from a namespace-scoped session.** Metrics,
+TLS, and Cluster read only fleet-global routes, so the ceiling would refuse
+every read they make. `resolveFleetView()` denies each of them to a session
+that holds namespace grants, with `blockedBy: "namespace-scope"`, and
+`FleetViewGate` (`src/components/shared/FleetViewGate.tsx`) renders the page
+title and that reason instead of the page, so none of its reads is sent. The
+navigation hides them too. Mesh applies the same verdict to its fleet tabs
+only: its Trust tab reads and writes the namespace-scoped gateway trust bundle
+routes, so a scoped session keeps that tab, sees the reason in place of the
+others, and sends none of their reads. Role and mode never decide a view: a
+read the gateway withholds from a role stays a `ReadDeniedNotice` on the page.
+
+The live-apply monitor follows the same rule. `/config/apply-status` is
+fleet-global, so a scoped session's committed write is not polled; the banner
+says live-apply verification is a fleet-level view instead
+(`setNamespaceScopedSession` in `src/api/gatewayMetadata.ts`).
 
 A role denial is reported first, then a namespace-scope denial, then a
 gateway-mode denial: each is more fundamental and more stable than the next.
@@ -224,7 +241,10 @@ The `disabled` fieldset covers editing controls. Anything the role may still
    `admit_audited_operation` or none → `none`. Write the `headline` as a full
    sentence: an editing surface is "read-only", a one-off action is
    "unavailable". Set `fleetWide: true` when the BFF refuses the write to a
-   session holding namespace grants (`server/proxy-path.ts`).
+   session holding namespace grants (`server/proxy-path.ts`). A page that
+   only reads fleet-global routes is a `FleetView` instead, wrapped in
+   `FleetViewGate`; a page that mixes them gates only its fleet-global tabs
+   with `resolveFleetView()`, as Mesh does.
 2. Read it with `useCapabilities()` and render `CapabilityNotice`,
    `ReadOnlySurface`, or `WriteAction`.
 3. Guard the mutation handler with `if (!capability.allowed) return;`. Guard the
@@ -266,6 +286,21 @@ compares against this model rather than a second copy.
   `npm run test:gateway-contract`) and against a second container started with
   `FERRUM_ADMIN_READ_ONLY=true`. It first proves the gateway is in the expected
   mode, so it cannot pass vacuously.
+- Every check runs twice. As an **unrestricted** principal, fleet-global probes
+  and `/health` are signed without an `ns` claim, as the BFF signs them; routes
+  that address a namespace carry one, because both gateways set
+  `FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM`. As a **namespace-scoped** principal,
+  every request carries the claim, and the facts come from the scoped `/health`
+  reduced by the BFF's `projectHealthSummary`; any fact it carries must equal
+  the unrestricted reading. A probe the BFF's ceiling refuses
+  (`proxyPathIsAllowedForNamespace`) is not sent, and the model must withhold
+  it: a write by a role or namespace-scope verdict, a read by a denied
+  `FleetView`. Every probe the ceiling forwards is compared with the gateway as
+  above, so on Edge v0.9.16+ a route the BFF forwards but Edge refuses to an
+  `ns`-claim JWT fails the contract. The same contract passes against Edge
+  v0.9.15, which admits such a JWT everywhere and answers its `/health` with
+  the detailed tier, and against v0.9.16+, which answers with the tenant
+  tier.
 
 The MCP tool catalog read (`GET /proxies/{id}/mcp/tools`) is also probed as a
 viewer-readable, namespace-scoped endpoint. Its disposable missing-proxy probe
@@ -281,7 +316,8 @@ data. Every role must get real collections for the launch surfaces, and a read
 the gateway withholds from a role (TLS inventory and trust bundles below
 `operator`, the audit log below `admin`) must be an explicit `403` naming the
 role. `ReadStateNotice` and the TLS page show such a `403` as a denial
-(`ReadDeniedNotice`), never as an empty list or a missing feature.
+(`ReadDeniedNotice`), never as an empty list or a missing feature. The TLS
+inventory read is a fleet view, so a namespace-scoped principal never sends it.
 
 Not checked: `file`, `dp`, `mesh`, and `node_agent` modes (no such gateway
 runs in CI), the failover-topology gate, and any Edge release other than the

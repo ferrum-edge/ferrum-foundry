@@ -233,10 +233,11 @@ describe('trusted OIDC proxy authentication', () => {
     }
   });
 
-  it('allows the explicit Edge global ceiling and the documented TLS route class', async () => {
+  it('allows the explicit Edge global ceiling and refuses fleet TLS reads', async () => {
     const app = await buildApp();
     try {
       const local = await app.inject({ method: 'GET', url: '/protected', headers: identityHeaders() });
+      // Edge v0.9.16+ refuses every `/admin/tls/*` route to an `ns`-claim JWT.
       const fleetGlobal = await app.inject({
         method: 'GET',
         url: '/api/proxy/admin/tls/inventory',
@@ -248,7 +249,8 @@ describe('trusted OIDC proxy authentication', () => {
         headers: identityHeaders(),
       });
       expect(local.statusCode).toBe(200);
-      expect(fleetGlobal.statusCode).toBe(200);
+      expect(fleetGlobal.statusCode).toBe(403);
+      expect(fleetGlobal.json()).toEqual({ error: 'Namespace access denied' });
       expect(edgeGlobal.statusCode).toBe(200);
     } finally {
       await app.close();
@@ -268,6 +270,10 @@ describe('trusted OIDC proxy authentication', () => {
         ['GET', '/api/proxy/mesh/service-graph'],
         ['GET', '/api/proxy/mesh/egress-scope'],
         ['GET', '/api/proxy/overload'],
+        ['GET', '/api/proxy/metrics'],
+        ['GET', '/api/proxy/config/apply-status'],
+        ['GET', '/api/proxy/admin/tls/certificates'],
+        ['POST', '/api/proxy/admin/tls/validate'],
         ['POST', '/api/proxy/admin/tls/rotate/all'],
         ['POST', '/api/proxy/admin/tls/certificates'],
         ['POST', '/api/proxy/mesh/config-revision/reset'],
@@ -313,8 +319,10 @@ describe('trusted OIDC proxy authentication', () => {
         expect(JSON.parse(response.body)).toEqual({ error: 'Namespace access denied' });
       }
 
+      const edgeGlobal = await rawGet(app, '/%61pi/proxy/live', identityHeaders());
+      expect(edgeGlobal.statusCode).toBe(200);
       const fleetGlobal = await rawGet(app, '/%61pi/proxy/admin/tls/inventory', identityHeaders());
-      expect(fleetGlobal.statusCode).toBe(200);
+      expect(fleetGlobal.statusCode).toBe(403);
     } finally {
       await app.close();
     }

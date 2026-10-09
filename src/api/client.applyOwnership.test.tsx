@@ -7,6 +7,7 @@ import {
   getGatewayMetadataSnapshot,
   resetGatewayMetadata,
   setApplyStatusFetcher,
+  setNamespaceScopedSession,
   type ApplyStatusResponse,
 } from "./gatewayMetadata";
 import { GatewayMetadataBanner } from "@/components/shared/GatewayMetadataBanner";
@@ -250,6 +251,32 @@ describe("configured client apply ownership", () => {
     expect(host!.textContent).toContain("Monitoring ended for");
     expect(fetchStatus).toHaveBeenCalledTimes(8);
     expect(getGatewayMetadataSnapshot().apply).toMatchObject({ state: "pending", polling: false, namespace });
+  });
+
+  it.each([
+    [committed(), "border-blue/40", false],
+    [Response.json({ applied: false, reason: "reload_timeout" }, {
+      status: 503, headers: { "x-ferrum-config-cursor": "1:2" },
+    }), "border-warning/40", true],
+  ])("tells a namespace-scoped session live-apply status is fleet-level, without polling (%#)", async (answer, border, notLive) => {
+    const fetchStatus = vi.fn();
+    setApplyStatusFetcher(fetchStatus);
+    setNamespaceScopedSession(true);
+    const fetcher = vi.fn(async () => answer);
+    vi.stubGlobal("fetch", fetcher);
+    await renderBanner();
+    await act(async () => { await api.put(path, scoped(scope)).catch(() => undefined); });
+
+    const banner = host!.querySelector('[role="status"] > div')!;
+    expect(banner.className).toContain(border);
+    expect(banner.className).not.toContain("border-danger");
+    expect(host!.textContent).toContain("Committed. Live-apply status is not monitored.");
+    expect(host!.textContent).toContain("not available to a namespace-scoped session");
+    expect(host!.textContent).not.toContain("cannot be verified");
+    expect(host!.textContent?.includes("not yet live (reason: reload_timeout)")).toBe(notLive);
+    expect(host!.textContent).toContain("Namespace: tenant-a");
+    expect(fetchStatus).not.toHaveBeenCalled();
+    expect(fetcher).toHaveBeenCalledOnce();
   });
 
   it("accepts full uint64 cursor strings without rounding", async () => {

@@ -88,8 +88,11 @@ afterEach(async () => {
 
 it("loads an authenticated deep link, navigates the shell, reads settings, and signs out", async () => {
   await ui.render(<App />);
-  await settle(() => expect(ui.host.querySelector("main")?.textContent).toContain("No TLS material found"));
+  // TLS is fleet-global, so the scoped session's deep link names the reason
+  // and reads nothing from `/admin/tls/*`.
+  await settle(() => expect(ui.host.querySelector("main")?.textContent).toContain("TLS management is unavailable"));
   expect(ui.host.querySelector("h1")?.textContent).toBe("TLS Management");
+  expect(ui.host.querySelector('[data-capability-blocked="namespace-scope"]')).not.toBeNull();
   expect(ui.host.querySelectorAll("aside")).toHaveLength(1);
   await click("Toggle sidebar");
   const mobileSidebar = document.querySelector<HTMLElement>('[role="dialog"]');
@@ -140,7 +143,8 @@ it("loads an authenticated deep link, navigates the shell, reads settings, and s
   await click("Sign out");
   await settle(() => expect(ui.host.textContent).toContain("Local development sign in"));
   expect(ui.host.querySelector("main")).toBeNull();
-  expect(requests.filter((request) => request.url.includes("/api/proxy/") && !request.url.includes("/admin/tls/"))
+  expect(requests.some((request) => request.url.includes("/admin/tls/"))).toBe(false);
+  expect(requests.filter((request) => request.url.includes("/api/proxy/"))
     .every((request) => request.headers.get("X-Ferrum-Namespace") === "tenant-a")).toBe(true);
 }, 15000);
 
@@ -273,8 +277,8 @@ it.each([
   const bff = retargetableBff();
   bff.stripRefusalTarget = stripped;
   await openShell();
-  await act(async () => { await router.navigate({ to: "/tls" }); });
-  await settle(() => expect(ui.host.querySelector("main")?.textContent).toContain("No TLS material found"));
+  await act(async () => { await router.navigate({ to: "/proxies" }); });
+  await settle(() => expect(ui.host.querySelector("main")?.textContent).toContain("No proxies yet"));
 
   // Another tab re-points the BFF as this tab opens Settings: the read was
   // declared against A, so no answer from B can seed the form, and a retry

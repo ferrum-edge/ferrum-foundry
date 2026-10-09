@@ -29,6 +29,7 @@ import {
   type ProtocolSupport,
 } from "@/api/ops";
 import { formatDateTime, formatTime } from "@/lib/format";
+import { FleetViewGate } from "@/components/shared/FleetViewGate";
 
 function supportBadge(support: ProtocolSupport, stale = false) {
   if (stale) return <Badge variant="default">{support === "supported" ? "yes" : support === "unsupported" ? "no" : "?"}</Badge>;
@@ -224,7 +225,17 @@ function ProbeResults({
   );
 }
 
+// The fleet-wide routes this page reads are refused to a session holding
+// namespace grants, so such a session gets the reason instead of the page.
 export default function ClusterPage() {
+  return (
+    <FleetViewGate view="cluster" title="Cluster">
+      <ClusterWorkspace />
+    </FleetViewGate>
+  );
+}
+
+function ClusterWorkspace() {
   const { toast } = useToast();
   const clusterQuery = useClusterStatus();
   const { data: cluster, isLoading: clusterLoading, isError: clusterError } = clusterQuery;

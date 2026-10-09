@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Align the namespace route ceiling with Ferrum Edge v0.9.16's limit on admin
+  JWTs that carry an `ns` claim (ferrum-edge#6093, ferrum-edge#6095). A session
+  holding namespace grants is now refused every `/admin/tls/*` route, TLS
+  inventory, material, ACME and event reads and `POST /admin/tls/validate`
+  included, and `GET /config/apply-status`, with `403 Namespace access denied`
+  before signing. It keeps the namespace-scoped routes plus `GET /plugins`, the
+  `/namespaces` registry, `/live`, `/health`, and `/status`, which Edge v0.9.16
+  serves to such a JWT. Edge v0.9.15 and earlier admit an `ns`-claim JWT on
+  fleet-global routes, so the BFF is the ceiling there and behaves the same.
+  Unrestricted sessions are unchanged.
+- **Upgrade note:** namespace-scoped operators lose TLS inventory, material,
+  ACME, and event reads and TLS validation in Foundry even against Ferrum Edge
+  v0.9.15, which would still serve them. Give such an operator a second
+  identity without namespace grants for TLS. Where Edge runs with
+  `FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM=true` (the starter does), that
+  unrestricted identity is refused every namespace-scoped route, so an operator
+  who needs both keeps two identities (`docs/authentication.md` → "One
+  identity cannot do both").
+- Reduce scoped `/health`, `/status`, and `GET /api/settings/status` answers
+  from any Edge health tier: the v0.9.15 detailed view, or v0.9.16's tenant
+  tier (`status`, `ready`, `mode`, `admin_writes_enabled`, `namespace`) and
+  minimal probe body. The summary now keeps the `namespace` serving block when
+  its `active` namespace is one of the session's grants, and only then; an
+  omitted block, or one whose `active` is absent or `null`, is "not served for
+  this session" and never names another namespace.
+
 - Refuse every `PUT /api/settings` from a session that holds namespace grants
   with `403 FERRUM_BFF_SETTINGS_NAMESPACE_SCOPED`, whatever its role and body,
   and log the refusal with the actor. BFF settings (the gateway target, TLS
@@ -36,20 +62,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Add the session's namespace grants to the client capability model. A session
-  holding grants sees fleet TLS create, replace, delete, ACME, and rotation
-  controls read-only, with a `namespace-scope` reason, instead of controls the
-  BFF refuses with `403`; TLS reads and validation stay available. TLS rotation
-  is its own `tlsRotation` surface, probed by the capability parity contract
-  with an unsupported surface name. A scoped admin sees one notice naming
-  both material and rotation (#565).
+  holding grants is denied fleet TLS material, rotation, and validation with a
+  `namespace-scope` reason instead of controls the BFF refuses with `403`. TLS
+  rotation is its own `tlsRotation` surface, probed by the capability parity
+  contract with an unsupported surface name (#565).
 - Split the Cluster page's backend-capability refresh and the Mesh page's
   egress dry-run into a fleet-wide `fleetOperations` surface. A session
   holding namespace grants sees them disabled with the `namespace-scope`
-  reason instead of controls the BFF refuses with `403`; TLS validation stays
-  in `operationalActions`. The capability parity contract probes the new
-  surface with a mesh egress dry-run (#565).
+  reason instead of controls the BFF refuses with `403`. The capability parity
+  contract probes the new surface with a mesh egress dry-run (#565).
 - A session holding namespace grants lands on Proxies instead of the
   fleet-wide Dashboard (#565).
+- Withhold the fleet-wide Metrics, TLS, and Cluster views from a session
+  holding namespace grants. The navigation hides them, and opening one by URL
+  shows the page title and the `namespace-scope` reason without sending any of
+  its reads (`FleetViewGate`). Mesh stays in the navigation for its
+  namespace-scoped Trust tab (gateway trust bundles) and shows the reason in
+  place of its fleet tabs, whose reads are not sent. TLS validation
+  (`operationalActions`) is now a fleet-wide surface too (ferrum-edge#6095).
+- The live-apply monitor no longer polls `/config/apply-status` for a session
+  holding namespace grants, because the route is fleet-global. Its committed
+  writes show a neutral notice that live-apply verification is a fleet-level
+  view not available to a namespace-scoped session, or a warning when the
+  gateway answered that the write is committed but not yet live. A poll
+  refused with `403` ends the same way instead of being retried.
+- The capability parity contract now runs every check as an unrestricted and
+  as a namespace-scoped principal. Unrestricted fleet-global probes and
+  `/health` are signed without an `ns` claim, as the BFF signs them; scoped
+  probes the BFF ceiling refuses are not sent and must be withheld by the
+  model, and every probe it forwards must be admitted by the gateway as the
+  model predicts, so the contract holds on Edge v0.9.15 and v0.9.16. The
+  gateway contract smoke signs its TLS validation probes without a claim.
 
 ## [0.5.5] - 2026-10-08
 

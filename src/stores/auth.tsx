@@ -19,7 +19,7 @@ import {
   setOnUnauthorized,
   SILENT_ERRORS,
 } from "@/api/client";
-import { clearGatewayMetadata } from "@/api/gatewayMetadata";
+import { clearGatewayMetadata, setNamespaceScopedSession } from "@/api/gatewayMetadata";
 
 export type AuthMode = "static" | "trusted-proxy";
 export type AuthStatus = "loading" | "authenticated" | "unauthenticated";
@@ -128,6 +128,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setStatus("unauthenticated");
     queryClient.clear();
     clearGatewayMetadata();
+    setNamespaceScopedSession(false);
   }, [queryClient]);
 
   const acceptSession = useCallback((session: SessionResponse) => {
@@ -139,6 +140,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!previous || authorizationKey(previous) !== authorizationKey(session.principal)) {
       clearGatewayMetadata();
     }
+    setNamespaceScopedSession(session.principal.namespaces !== undefined);
     principalRef.current = session.principal;
     setPrincipal(session.principal);
     setCsrfToken(session.csrfToken, session.csrfCookie);

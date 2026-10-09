@@ -259,8 +259,9 @@ const SURFACES: Record<CapabilitySurface, SurfaceDescriptor> = {
     // a read-only mode but are not subject to the config-DB failover gate that
     // `admin_writes_enabled` also folds in.
     gate: "read-only-mode",
-    // Every TLS mutation except the stateless validate is refused to a scoped
-    // session (`FLEET_GLOBAL_SCOPED_DENIED_ROUTES` in `server/proxy-path.ts`).
+    // Every `/admin/tls/*` route is refused to a scoped session by the BFF's
+    // namespace route ceiling (`server/proxy-path.ts`) and by Ferrum Edge
+    // v0.9.16+ for an `ns`-claim JWT.
     fleetWide: true,
   },
   tlsRotation: {
@@ -278,7 +279,10 @@ const SURFACES: Record<CapabilitySurface, SurfaceDescriptor> = {
     headline: "Operational gateway actions are unavailable",
     action: "run operational gateway actions",
     minimumRole: "operator",
+    // TLS validation: stateless, but a fleet-global `/admin/tls/*` route, so
+    // refused to a scoped session like the rest of TLS.
     gate: "none",
+    fleetWide: true,
   },
   fleetOperations: {
     label: "Fleet operational actions",
@@ -371,6 +375,43 @@ export function resolveGatewayWriteState(facts: CapabilityFacts): GatewayWriteSt
   }
   if (facts.adminWritesEnabled === true) return { state: "enabled" };
   return { state: "unknown" };
+}
+
+/**
+ * Fleet-wide *views*: pages that only read fleet-global routes. The BFF's
+ * namespace route ceiling refuses those routes to a session holding namespace
+ * grants, and so does Ferrum Edge v0.9.16+ for an `ns`-claim JWT
+ * (ferrum-edge#6093), so such a session is never offered them. Unlike a write
+ * surface there is no role or mode verdict here: each page keeps reporting a
+ * role-withheld read as a denial (`ReadDeniedNotice`).
+ */
+export type FleetView = "metrics" | "tls" | "cluster" | "mesh";
+
+const FLEET_VIEWS: Record<FleetView, { label: string; headline: string }> = {
+  metrics: { label: "Gateway metrics", headline: "Gateway metrics are unavailable" },
+  tls: { label: "TLS management", headline: "TLS management is unavailable" },
+  cluster: { label: "Cluster status", headline: "Cluster status is unavailable" },
+  mesh: { label: "Mesh status", headline: "Mesh status is unavailable" },
+};
+
+const FLEET_VIEW_EXPLANATION =
+  "Your session holds namespace grants, and this view reports on the whole " +
+  "gateway, which namespace grants do not scope. Foundry and Ferrum Edge " +
+  "refuse its fleet-wide routes to a namespace-scoped session; only a session " +
+  "without namespace grants can open it.";
+
+/** Resolve a fleet-wide view. Only an observed grant denies it. */
+export function resolveFleetView(view: FleetView, facts: CapabilityFacts): CapabilityVerdict {
+  const { label, headline } = FLEET_VIEWS[view];
+  if (facts.namespaceScoped !== true) return { allowed: true, label, headline };
+  return {
+    allowed: false,
+    label,
+    headline,
+    blockedBy: "namespace-scope",
+    summary: "Requires a session without namespace grants",
+    explanation: FLEET_VIEW_EXPLANATION,
+  };
 }
 
 /**

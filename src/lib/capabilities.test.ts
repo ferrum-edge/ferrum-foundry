@@ -5,10 +5,12 @@ import {
   isGatewayRole,
   resolveCapabilities,
   resolveCapability,
+  resolveFleetView,
   resolveGatewayWriteState,
   resolveReadOnlyModeState,
   type CapabilityFacts,
   type CapabilitySurface,
+  type FleetView,
   type GatewayRole,
 } from "./capabilities";
 
@@ -46,16 +48,20 @@ const UNGATED_SURFACES: readonly CapabilitySurface[] = [
 
 /**
  * Fleet-wide writes the BFF refuses to a session holding namespace grants:
- * every TLS mutation except validate, the backend-capability refresh, and the
- * mesh egress dry-run (`server/proxy-path.ts`), and `PUT /api/settings`
+ * every TLS route, validation included, the backend-capability refresh, and
+ * the mesh egress dry-run (`server/proxy-path.ts`, matching Ferrum Edge
+ * v0.9.16+ for an `ns`-claim JWT), and `PUT /api/settings`
  * (`server/routes/settings.ts`).
  */
 const FLEET_WIDE_SURFACES: readonly CapabilitySurface[] = [
   "tlsMaterial",
   "tlsRotation",
+  "operationalActions",
   "fleetOperations",
   "bffSettings",
 ];
+
+const FLEET_VIEWS: readonly FleetView[] = ["metrics", "tls", "cluster", "mesh"];
 
 /** Modes that report `read_only: true` unconditionally. */
 const READ_ONLY_MODES: readonly string[] = ["file", "dp", "mesh", "node_agent"];
@@ -249,8 +255,34 @@ describe("namespace-scoped sessions", () => {
         expect(verdict.allowed, surface).toBe(true);
       }
     }
-    // Validation is stateless and stays available to a scoped session.
-    expect(capabilities.operationalActions.allowed).toBe(true);
+    // Validation is stateless, but a fleet-global TLS route all the same.
+    expect(capabilities.operationalActions.blockedBy).toBe("namespace-scope");
+  });
+
+  it("names TLS validation as a fleet-wide action an operator otherwise holds", () => {
+    const scoped = resolveCapability("operationalActions", facts("operator", "file", null, null, true));
+    expect(scoped.allowed).toBe(false);
+    expect(scoped.blockedBy).toBe("namespace-scope");
+    expect(resolveCapability("operationalActions", facts("operator", "file", null, null, false)).allowed)
+      .toBe(true);
+  });
+
+  it.each(FLEET_VIEWS)("withholds the fleet-wide %s view from a scoped session of any role", (view) => {
+    for (const role of ["viewer", "operator", "admin"] as const) {
+      const verdict = resolveFleetView(view, facts(role, "database", true, "ok", true));
+      expect(verdict.allowed).toBe(false);
+      expect(verdict.blockedBy).toBe("namespace-scope");
+      expect(verdict.headline).toMatch(/ (is|are) unavailable$/);
+      expect(verdict.summary).toBe("Requires a session without namespace grants");
+      expect(verdict.explanation).toContain("namespace grants do not scope");
+    }
+  });
+
+  it.each([false, null])("offers every fleet-wide view when namespace grants are %s", (namespaceScoped) => {
+    for (const view of FLEET_VIEWS) {
+      // Role and mode never decide a view: each page reports a withheld read.
+      expect(resolveFleetView(view, facts("viewer", "file", false, "ok", namespaceScoped)).allowed).toBe(true);
+    }
   });
 
   it("names TLS rotation as a fleet-wide action an operator otherwise holds", () => {

@@ -109,7 +109,9 @@ manager and the header selector use the same grants.
 
 These BFF checks apply even when the gateway does not enforce namespace
 claims. For a second enforcement layer on multi-tenant deployments, also set
-`FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM=true` on Ferrum Edge.
+`FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM=true` on Ferrum Edge. With it, operators
+who need both namespace and fleet-wide surfaces need two identities; see
+[One identity cannot do both](#one-identity-cannot-do-both).
 
 ### Roles in the UI
 
@@ -127,6 +129,14 @@ signing a JWT or contacting the gateway. Anything not explicitly allowed is
 denied, so a new Edge admin route is refused until Foundry classifies it. The
 classification is in `server/proxy-path.ts`.
 
+The ceiling matches Ferrum Edge's own. From v0.9.16 (ferrum-edge#6093), Edge
+treats an admin JWT carrying an `ns` claim as a tenant credential and refuses
+it every fleet-global route outside `ns_claim_global_route_is_allowed`, whatever
+`FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM` says. Foundry signs a scoped session's
+grants into exactly that claim, so it offers such a session nothing Edge would
+refuse. Edge v0.9.15 and earlier admit an `ns`-claim JWT on fleet-global
+routes; there the BFF is the only ceiling, and it refuses the same routes.
+
 - **Allowed namespace-scoped routes** mirror Edge's
   `namespace_scoped_resource_kind`: the `proxies`, `upstreams`, `consumers`,
   `plugins/config`, `api-specs`, and `gateway-trust-bundles` resources; the
@@ -136,30 +146,49 @@ classification is in `server/proxy-path.ts`.
   `X-Ferrum-Namespace`. Consumer credentials take only the methods Edge
   serves: `PUT`, `POST`, and `DELETE` on `/consumers/{id}/credentials/{type}`,
   and `DELETE` on `/consumers/{id}/credentials/{type}/{index}`.
-- **Allowed fleet-wide routes** need no namespace header: `GET /plugins`, the
-  `/namespaces` registry (writes are confined to the session's grants by the
-  BFF), `GET /live`, `GET /health`, `GET /status`, and
-  `GET /config/apply-status`. Apply status is process-topology in Edge and
-  reveals only the apply cursor; the UI polls it without a header after a
-  fleet-wide write.
-- **Health summary.** Foundry signs with the primary key, which Edge treats as
-  detail-authorized, so `/health` and `/status` would otherwise carry the
-  listeners, `dp_config`, `cp_dp_trust`, database, and cached-config detail. For
-  a scoped session the BFF re-serializes the answer with only `status`,
-  `timestamp`, `mode`, `admin_writes_enabled`, and `ready`, which is what the
-  capability model reads. The upstream `Content-Length`, `ETag`,
-  `Last-Modified`, and range headers are dropped, and conditional and range
-  request headers are not forwarded. A non-`200` answer, such as `503` while
-  the gateway is not ready, is reduced the same way and keeps its status and
-  `Retry-After`. A body that is not a JSON object, or exceeds 1 MiB, is
-  answered with `502 FERRUM_BFF_UPSTREAM_FAILURE` rather than relayed. An
-  unrestricted admin receives the full view.
-- **Refused fleet-wide routes** include `/overload`, `/cluster`, `/mesh/*`
-  (including `/mesh/egress-scope`), `/charges`, `/metrics`,
-  `/backend-capabilities`, the waypoint routes, every fleet TLS mutation (see
-  below), and every unknown path.
-- **HEAD** is classified like GET, because the BFF and Edge answer it the same
-  way. Every other method must be named by the route class.
+- **Allowed fleet-wide routes** need no namespace header. They are Edge's
+  `ns`-claim allowlist less what Foundry withholds: `GET /plugins`, the
+  `/namespaces` registry (`GET`, `POST`, and `PUT`/`DELETE` on one name; the
+  BFF confines writes to the session's grants, and Edge authorizes the claim in
+  its registry handlers), `GET /live`, `GET /health`, and `GET /status`.
+  Foundry does not forward `GET /overload` or Edge's
+  `GET /diagnostics/v1/refs/{ref}` for a scoped session.
+- **Health summary.** Edge v0.9.15 and earlier answer an `ns`-claim JWT with
+  the detailed `/health` and `/status` view: listeners, `dp_config`,
+  `cp_dp_trust`, database, and cached-config detail. Edge v0.9.16+ answer it
+  with a bounded tenant tier (`status`, `ready`, `mode`,
+  `admin_writes_enabled`, and the `namespace` block, which Edge omits or sends
+  with `active` withheld unless the claim covers the active namespace) or the
+  minimal `status` and `ready` probe body. Whichever
+  tier arrives, the BFF re-serializes it for a scoped session with only
+  `status`, `timestamp`, `mode`, `admin_writes_enabled`, `ready`, and the
+  `namespace` serving block (`active`, `serving_scope`,
+  `data_plane_single_namespace`) when its `active` namespace is one of the
+  session's grants (`server/health-summary.ts`). An omitted block, or one whose
+  `active` is absent or `null`, means the namespace is not served for this
+  session, and the whole block is dropped. A field the gateway did not
+  send stays absent, and the capability model concludes nothing from it. The
+  upstream `Content-Length`, `ETag`, `Last-Modified`, and range headers are
+  dropped, and conditional and range request headers are not forwarded. A
+  non-`200` answer, such as `503` while the gateway is not ready, is reduced
+  the same way and keeps its status and `Retry-After`. A body that is not a
+  JSON object, or exceeds 1 MiB, is answered with
+  `502 FERRUM_BFF_UPSTREAM_FAILURE` rather than relayed. An unrestricted admin
+  receives the full view.
+- **Refused fleet-wide routes** are everything else, including every
+  `/admin/tls/*` route (TLS reads and validation too; see below), `/cluster`,
+  `/config/apply-status`, `/metrics`, `/metrics/runtime`, `/admin/metrics`,
+  `/charges*`, `/backend-capabilities*`, `/mesh/*` (including
+  `/mesh/egress-scope`), the waypoint routes, `/overload`, and every unknown
+  path.
+- **HEAD** is classified like GET by the BFF: a route class that allows GET
+  also allows HEAD. Edge has no HEAD routes of its own. Only its early
+  `/live`, `/health`, and `/status` branches ignore the method; elsewhere it
+  answers HEAD with `404` or `405`, and v0.9.16 refuses a scoped
+  `HEAD /plugins` with `403`, because its `ns`-claim allowlist matches `GET`
+  exactly. Edge is therefore at least as strict as the BFF. A scoped
+  `HEAD /namespaces` is refused with `400` by the registry check before it is
+  forwarded. Every other method must be named by the route class.
 
 The credential-read denial and unsafe-path checks run before the ceiling, so
 `/consumers/{id}/verification` and `/deployment-snapshot` keep
@@ -167,11 +196,33 @@ The credential-read denial and unsafe-path checks run before the ceiling, so
 `400 FERRUM_BFF_UNSAFE_PATH`, whatever the namespace grants.
 
 The UI mirrors the ceiling, as a convenience only. A scoped session lands on
-Proxies instead of the Dashboard, does not see the Dashboard, Metrics,
-Cluster, or Mesh navigation, and sees fleet TLS create, replace, delete, ACME,
-and rotation controls and the BFF settings read-only, with the reason (see
-[Capabilities](capabilities.md#surface-matrix)). TLS reads and validation stay
-available.
+Proxies instead of the Dashboard and does not see the Dashboard, Metrics, TLS,
+or Cluster navigation. Opening Metrics, TLS, or Cluster by URL shows the page
+title and the reason, and sends none of the page's reads. Mesh keeps its Trust
+tab, because gateway trust bundles are namespace-scoped, and shows the reason
+in place of its fleet tabs, whose reads are not sent. The BFF settings are
+read-only, with the reason (see [Capabilities](capabilities.md#surface-matrix)).
+The live-apply monitor does not poll `/config/apply-status` for such a session.
+A committed write is reported with a neutral notice that live-apply
+verification is a fleet-level view, not available to a namespace-scoped
+session, or with a warning when the gateway answered that the write is
+committed but not yet live. A poll refused with `403`, because the grants
+changed after the session was read, ends the same way.
+
+#### One identity cannot do both
+
+With `FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM=true` on Ferrum Edge (the starter
+sets it, and Edge forces it on a multi-namespace control plane), Edge refuses a
+JWT without an `ns` claim on every namespace-scoped route. An unrestricted
+Foundry session sends no claim (see [Downstream claims](#downstream-claims)), so
+it is fleet-only: TLS, Cluster, Metrics, Mesh, and BFF settings work, but
+Proxies, Consumers, Upstreams, Plugins, API Specs, gateway trust, backup and
+restore, and the other namespace pages are refused with `403`. A scoped session
+is namespace-only, as above. No single Foundry session can do both, so an
+operator who needs both uses two identities: one with namespace grants for
+tenant configuration, and one admin without grants for the fleet-wide
+surfaces. Without the flag, an unrestricted session also reaches every
+namespace.
 
 #### Fleet-wide audit rows
 
@@ -188,18 +239,12 @@ They do not make fleet-global APIs tenant-scoped. TLS inventory, managed TLS
 material, ACME, rotation, and validation are fleet-global, so Foundry sends no
 namespace header for them and labels the surface as fleet-global.
 
-A scoped principal may read and validate fleet TLS material, but may not
-create, replace, rotate, renew, finalize, or delete it: every `POST`, `PUT`, or
-`DELETE` under `/admin/tls/` except the stateless `POST /admin/tls/validate` is
-refused by the namespace route ceiling. Those operations change material that
-every tenant's routes and plugins may reference. Only an unrestricted admin, an
-identity with no namespace grants, can perform them. Block the TLS reads at the
-identity proxy too if a scoped identity must not see fleet TLS metadata.
-
-Only the TLS paths and methods listed in `server/proxy-path.ts`
-(`FLEET_GLOBAL_ROUTES`) are fleet-global. A new Edge TLS operation must be added
-to that list; `FLEET_GLOBAL_SCOPED_DENIED_ROUTES` withholds every TLS mutation
-from scoped principals.
+Only an unrestricted admin, an identity with no namespace grants, may use
+them. A scoped principal is refused every `/admin/tls/*` route, reads and the
+stateless `POST /admin/tls/validate` included, by the namespace route ceiling,
+and Ferrum Edge v0.9.16+ refuses the same routes to its `ns`-claim JWT. TLS
+material is referenced by every tenant's routes and plugins, and its inventory
+describes the whole fleet.
 
 ### Proxy path validation
 
@@ -253,13 +298,14 @@ the refusal is logged as a warning naming the actor. The runtime-settings gate
 and body validation run after it. The Settings page
 shows such a session the values read-only, with the reason, and disables Save.
 `GET /api/settings` and `GET /api/settings/status` keep their `admin` role
-requirement. Edge answers the primary-key JWT the status probe signs with its
-detailed `/health` view whatever the `ns` claim, so for a session holding
-namespace grants `GET /api/settings/status` reduces the gateway's body to the
-same summary fields as `/api/proxy/health` (`status`, `timestamp`, `mode`,
-`admin_writes_enabled`, `ready`). It omits a body that is not a JSON object,
-including raw text, and keeps `reachable` and `status`. An unrestricted admin
-still receives the full body.
+requirement. For a session holding namespace grants,
+`GET /api/settings/status` reduces the gateway's `/health` body, whichever tier
+Edge answers the status probe's `ns`-claim JWT with, to the same summary as
+`/api/proxy/health` (`status`, `timestamp`, `mode`, `admin_writes_enabled`,
+`ready`, and a granted `namespace` block; see
+[Namespace route ceiling](#namespace-route-ceiling)). It omits a body that is
+not a JSON object, including raw text, and keeps `reachable` and `status`. An
+unrestricted admin still receives the full body.
 
 `GET /api/settings` includes the active `authMode`. In `trusted-proxy` mode:
 
@@ -457,7 +503,11 @@ Foundry JWTs contain `iss`, `sub`, `exp`, `iat`, `nbf`, `jti`, and `role`.
 audience. `ns` is one exact namespace string or an array of them. An
 unrestricted principal (a trusted-proxy admin with no namespace header, or a
 static principal configured with `*`) gets no `ns` claim. `*` is only a Foundry
-configuration value and is never sent as a claim.
+configuration value and is never sent as a claim. A gateway running with
+`FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM=true` therefore refuses an unrestricted
+session every namespace-scoped route, while Foundry and Edge v0.9.16+ refuse a
+scoped session every fleet-wide one; see
+[One identity cannot do both](#one-identity-cannot-do-both).
 
 Tokens are cached per signing input and principal, so a configuration or
 identity change never reuses an earlier token.

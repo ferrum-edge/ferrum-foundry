@@ -141,17 +141,24 @@ or `unmapped`). It is for a first run and for CI. Do not expose it.
 - **Every starter identity is scoped.** Because each group is mapped to a
   namespace, no starter user is an unrestricted admin. A scoped session may
   reach only namespace-scoped routes plus a small fleet-wide ceiling, so it
-  loses the Dashboard, Metrics, Cluster, and Mesh surfaces (it lands on
-  Proxies), Health shows only the summary, and BFF settings are read-only. The
-  Audit Log stays, for the session's own namespaces. To
-  give one operator the fleet-wide surfaces, map that identity to a role but
-  omit its namespaces header; only an `admin` may be global. See
+  loses the Dashboard, Metrics, TLS, and Cluster surfaces and Mesh's fleet
+  tabs (it lands on Proxies, and Mesh keeps its Trust tab), Health shows only
+  the summary, and BFF settings are read-only. The Audit Log stays, for the
+  session's own namespaces. See
   [`docs/authentication.md`](../../docs/authentication.md#namespace-route-ceiling).
+- **Fleet-wide surfaces need a second identity.** An identity mapped to `admin`
+  without a namespaces header is unrestricted and reaches TLS, Cluster,
+  Metrics, Mesh, and BFF settings; only an `admin` may be global. Its JWT
+  carries no `ns` claim, and the starter's gateway sets
+  `FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM=true`, so Ferrum Edge refuses it every
+  namespace-scoped route: Proxies, Consumers, and the other namespace pages
+  answer `403`. Give an operator who needs both a second identity rather than
+  dropping the namespaces header from their only one. See
+  [`docs/authentication.md`](../../docs/authentication.md#one-identity-cannot-do-both).
 - **Fleet-global surfaces.** Namespace grants do not scope TLS inventory,
-  managed TLS material, ACME, rotation, or validation. A scoped identity may
-  read and validate fleet TLS material but may not create, replace, rotate,
-  renew, finalize, or delete it; restrict the reads at the proxy as well if a
-  scoped identity must not see them.
+  managed TLS material, ACME, rotation, or validation, so a scoped identity may
+  use none of them, reads included. Foundry refuses them to it, and so does
+  Ferrum Edge v0.9.16+ for the `ns`-claim JWT Foundry signs.
 - **Fleet-wide audit rows.** Edge records fleet-wide actions (TLS, the
   namespace registry, mesh) under its default `ferrum` namespace. Grant
   `ferrum` only to identities that may read them.

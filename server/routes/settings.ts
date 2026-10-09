@@ -164,11 +164,12 @@ const settingsPlugin: FastifyPluginAsync = async (fastify) => {
       } catch {
         // The gateway may return text for a proxy/intermediary failure.
       }
-      // Edge returns its detailed health view to the primary-key JWT whatever
-      // the `ns` claim, so a namespace-scoped session receives only the
-      // summary fields `/api/proxy/health` gives it, and never raw text.
+      // Edge v0.9.15 and earlier return the detailed health view to an
+      // `ns`-claim JWT; v0.9.16+ return the tenant or minimal tier. Either way
+      // a namespace-scoped session receives only the summary fields
+      // `/api/proxy/health` gives it, and never raw text.
       if (principal.namespaces !== undefined) {
-        body = typeof body === 'string' ? undefined : projectHealthSummary(body);
+        body = typeof body === 'string' ? undefined : projectHealthSummary(body, principal.namespaces);
       }
       return reply.status(response.status).send({
         reachable: response.ok,

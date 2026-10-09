@@ -60,8 +60,8 @@ const RESPONSE_HEADER_ALLOWLIST = [
 ] as const;
 
 // A namespace-scoped principal receives only the health summary fields
-// (`projectHealthSummary`) and only the headers that do not describe the
-// upstream representation.
+// (`projectHealthSummary`), whichever tier the gateway answers, and only the
+// headers that do not describe the upstream representation.
 const SCOPED_HEALTH_RESPONSE_HEADERS = ['cache-control', 'expires', 'retry-after'] as const;
 const SCOPED_HEALTH_BODY_LIMIT = 1024 * 1024;
 
@@ -185,7 +185,10 @@ function isScopedHealthRead(request: FastifyRequest, path: string): boolean {
 }
 
 /** Buffer a bounded upstream health body and keep only its summary fields. */
-async function scopedHealthSummary(body: Readable): Promise<Record<string, unknown>> {
+async function scopedHealthSummary(
+  body: Readable,
+  grants: readonly string[],
+): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   let received = 0;
   for await (const chunk of body) {
@@ -200,7 +203,7 @@ async function scopedHealthSummary(body: Readable): Promise<Record<string, unkno
   } catch {
     throw new UnreadableHealthError();
   }
-  const summary = projectHealthSummary(parsed);
+  const summary = projectHealthSummary(parsed, grants);
   if (!summary) throw new UnreadableHealthError();
   return summary;
 }
@@ -575,7 +578,7 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
         let summary: Record<string, unknown> | undefined;
         if (response.body && request.method !== 'HEAD') {
           const body = Readable.fromWeb(response.body as unknown as NodeReadableStream<Uint8Array>);
-          summary = await scopedHealthSummary(body);
+          summary = await scopedHealthSummary(body, principal.namespaces ?? []);
         }
         clearResponseDeadline();
         reply.raw.off('close', abortOnDisconnect);
