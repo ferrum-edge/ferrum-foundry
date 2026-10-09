@@ -156,6 +156,10 @@ It also refuses `/backend-capabilities/*` and `/mesh/*`, so `fleetOperations`
 (the Cluster page's backend-capability refresh and the Mesh page's egress
 dry-run) is denied the same way. The parity contract probes it with a mesh
 egress dry-run, which a gateway without a mesh egress scope answers `404`.
+That holds on database, file and data-plane gateways (the modes the contract
+runs against); a control-plane or node-agent gateway answers `503`, and a mesh
+gateway with an active egress scope answers `200`, so the probe is not valid
+against those modes.
 TLS validation stays in `operationalActions` and stays available. Only an
 observed grant denies: `namespaceScoped` that is `false` or `null` concludes
 nothing, and the parity contract, which supplies no namespace fact, sees the
