@@ -732,19 +732,20 @@ describe('long-running read admission over TCP', () => {
 
 describe('per-subject upload admission over TCP', () => {
   let serial = 0;
-  // An upload whose declared body is never completed holds its permit (and
-  // its upstream connection) until the client goes away.
+  // A completed upload whose upstream response is held open keeps its
+  // permit (and its upstream connection) until the client goes away.
   async function holdUpload(user: string) {
     const id = `upload-${++serial}`;
-    const arrived = signal(`arrived:${id}`);
-    const client = start(`/api/proxy/proxies?id=${id}`, 'PUT', '{"description":"held"}', await sessionIdentity(user), undefined, false);
-    await arrived;
+    const ready = signal(`held:${id}`);
+    const client = start(`/api/proxy/proxies?hold=1&id=${id}`, 'POST', '{"description":"held"}', await sessionIdentity(user), undefined, true);
+    await ready;
     return { ...client, id };
   }
   async function drop(client: Awaited<ReturnType<typeof holdUpload>>) {
     const closed = signal(`closed:${client.id}`);
     client.request.destroy();
     await closed;
+    held.delete(client.id);
   }
 
   it('admits one subject only its upload share while another subject still uploads', async () => {
