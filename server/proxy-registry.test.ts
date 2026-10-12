@@ -567,7 +567,10 @@ describe('upload reservation lifetime over TCP', () => {
   async function hold(path: string, complete = true) {
     const id = String(++serial);
     const ready = signal(`${complete ? 'held' : 'arrived'}:${id}`);
-    const client = start(`/api/proxy${path}?hold=1&id=${id}`, 'POST', '{}', identity(), undefined, complete);
+    // A distinct subject per hold: these tests exercise the global pools'
+    // permit lifetime, and the per-subject shares would otherwise refuse
+    // holds long before the global pool fills.
+    const client = start(`/api/proxy${path}?hold=1&id=${id}`, 'POST', '{}', identity({ 'x-registry-user': `holder-${id}` }), undefined, complete);
     await ready;
     return { ...client, id };
   }

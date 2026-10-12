@@ -16,6 +16,7 @@ import {
   type CommittedWrite,
   type GatewayRequestIdentity,
 } from "./gatewayMetadata";
+import { setCommittedWriteProbe } from "./mutationOutcome";
 import {
   boundGatewayTarget,
   GATEWAY_TARGET_CHANGED_CODE,
@@ -707,6 +708,7 @@ export const proxyApi = api.extend({ prefix: "/api/proxy" });
 // cursor, so it inherits that mutation's binding: the same namespace header,
 // or fleet-global when the mutation itself was fleet-global. Its client
 // timeout is sized to the server-side wait it requests (#204).
+setCommittedWriteProbe((error) => getCommittedWrite(error) !== null);
 setApplyStatusFetcher((epoch, sequence, waitMs, namespace) => {
   const options = {
     searchParams: { epoch, sequence, wait_ms: String(waitMs) },

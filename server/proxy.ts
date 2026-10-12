@@ -298,16 +298,18 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
       scope,
     });
     // Every check runs before any counter moves, so a refusal at any layer
-    // reserves nothing.
+    // reserves nothing. The global pools are reported first: when the whole
+    // pool is exhausted the refusal is `all`/`large` even for a subject that
+    // is also at its own share.
+    if (activeUploads >= config.maxActiveUploads) return refuse('all');
     if (subject !== undefined && (uploadsBySubject.get(subject) ?? 0) >= config.maxUploadsPerPrincipal) {
       return refuse('principal');
     }
-    if (activeUploads >= config.maxActiveUploads) return refuse('all');
     if (large) {
+      if (activeLargeUploads >= config.maxLargeUploads) return refuse('large');
       if (subject !== undefined && (largeUploadsBySubject.get(subject) ?? 0) >= config.maxLargeUploadsPerPrincipal) {
         return refuse('principal_large');
       }
-      if (activeLargeUploads >= config.maxLargeUploads) return refuse('large');
       activeLargeUploads += 1;
       if (subject !== undefined) {
         largeUploadsBySubject.set(subject, (largeUploadsBySubject.get(subject) ?? 0) + 1);

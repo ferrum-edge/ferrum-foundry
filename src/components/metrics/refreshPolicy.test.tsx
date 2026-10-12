@@ -158,12 +158,12 @@ describe("Metrics page refresh policy", () => {
     failAdmin = true;
     localStorage.setItem(METRICS_REFRESH_INTERVAL_KEY, "10000");
     await act(async () => root.render(<QueryClientProvider client={client}><MetricsPage /></QueryClientProvider>));
-    await advance(100);
-    await advance(100);
+    // The client retries a 503 GET twice before the query settles as an error.
+    await advance(2000);
     expect(host.textContent).toContain("Failed to load metrics");
     expect(host.textContent).toContain("Overload Protection");
     expect(host.textContent).toContain("Requests by Route");
-    for (const path of paths) expect(counts[path], path).toBe(1);
+    for (const path of paths) expect(counts[path], path).toBe(path === "/admin/metrics" ? 3 : 1);
     // The independent panels keep polling on the page interval.
     await advance(10000);
     expect(counts["/overload"]).toBe(2);
