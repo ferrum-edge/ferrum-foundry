@@ -18,7 +18,7 @@ export const ALL_PAGE_SIZE = 250;
  */
 export const SUMMARY_SCAN_BUDGET = 2_000;
 
-export interface CollectOptions {
+export interface CollectOptions<T> {
   pageSize?: number;
   /**
    * Stop after this many records. The result is then reported as incomplete
@@ -69,7 +69,7 @@ type PageFetcher<T> = (
  */
 export async function collectBoundedPages<T>(
   fetchPage: PageFetcher<T>,
-  options: CollectOptions = {},
+  options: CollectOptions<T> = {},
 ): Promise<BoundedCollection<T>> {
   const pageSize = options.pageSize ?? ALL_PAGE_SIZE;
   const budget = options.budget ?? Number.POSITIVE_INFINITY;
