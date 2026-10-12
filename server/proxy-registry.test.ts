@@ -737,7 +737,7 @@ describe('per-subject upload admission over TCP', () => {
   async function holdUpload(user: string) {
     const id = `upload-${++serial}`;
     const arrived = signal(`arrived:${id}`);
-    const client = start(`/api/proxy/namespaces/tenant-a?id=${id}`, 'PUT', '{"description":"held"}', await sessionIdentity(user), undefined, false);
+    const client = start(`/api/proxy/proxies?id=${id}`, 'PUT', '{"description":"held"}', await sessionIdentity(user), undefined, false);
     await arrived;
     return { ...client, id };
   }
@@ -752,7 +752,7 @@ describe('per-subject upload admission over TCP', () => {
     const a2 = await holdUpload('writer-a');
     try {
       const before = arrivals.length;
-      const refused = await call('/api/proxy/namespaces/tenant-a', 'PUT', '{"description":"third"}', await sessionIdentity('writer-a'));
+      const refused = await call('/api/proxy/proxies', 'POST', '{"description":"third"}', await sessionIdentity('writer-a'));
       expect(refused.status).toBe(429);
       expect(refused.headers['retry-after']).toBe('1');
       expect(JSON.parse(refused.body)).toEqual({ error: 'Too Many Requests', code: 'FERRUM_BFF_UPLOAD_CAPACITY', scope: 'principal' });
@@ -760,13 +760,13 @@ describe('per-subject upload admission over TCP', () => {
 
       // The global pool (4) is not full: another subject is admitted, and a
       // body-less read never touches the upload pools at all.
-      expect((await call('/api/proxy/namespaces/tenant-a', 'PUT', '{"description":"other"}', await sessionIdentity('writer-b'))).status).toBe(200);
-      expect((await call('/api/proxy/namespaces/tenant-a', 'GET', '', await sessionIdentity('writer-a'))).status).toBe(200);
+      expect((await call('/api/proxy/proxies', 'POST', '{"description":"other"}', await sessionIdentity('writer-b'))).status).toBe(200);
+      expect((await call('/api/proxy/proxies', 'GET', '', await sessionIdentity('writer-a'))).status).toBe(200);
     } finally {
       await drop(a1);
       await drop(a2);
     }
     // Released permits are returned exactly once: the same subject uploads again.
-    expect((await call('/api/proxy/namespaces/tenant-a', 'PUT', '{"description":"again"}', await sessionIdentity('writer-a'))).status).toBe(200);
+    expect((await call('/api/proxy/proxies', 'POST', '{"description":"again"}', await sessionIdentity('writer-a'))).status).toBe(200);
   }, 10_000);
 });

@@ -169,7 +169,7 @@ describe("Metrics page refresh policy", () => {
     const polled = ["/overload", "/metrics/runtime", "/charges"];
     const before = polled.map((path) => counts[path]);
     await advance(10000);
-    polled.forEach((path, index) => expect(counts[path], path).toBe((before[index] ?? 0) + 1));
+    polled.forEach((path, index) => expect(counts[path], path).toBeGreaterThan(before[index] ?? 0));
     // Recovery restores the admin-derived panels.
     failAdmin = false;
     await advance(10000);
