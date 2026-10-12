@@ -34,6 +34,13 @@ export interface EditorSession {
   bind<Args extends unknown[]>(
     handler: (...args: Args) => Promise<void>,
   ): (...args: Args) => Promise<void>;
+  /**
+   * Whether this session's identity is still the one on screen. Check it
+   * after an awaited mutation and before any completion-time navigation: a
+   * write that started under this editor may finish (and reconcile) after
+   * the operator moved to a newer editor, and must not redirect it away.
+   */
+  isCurrent(): boolean;
 }
 
 export interface EditorSessionOptions {
@@ -93,8 +100,13 @@ export function useEditorIdentity(
     [identity],
   );
 
+  const isCurrent = useCallback(
+    () => sameEditorIdentity(identity, live.current),
+    [identity],
+  );
+
   return useMemo(
-    () => ({ identity, key: editorIdentityKey(identity), bind }),
-    [identity, bind],
+    () => ({ identity, key: editorIdentityKey(identity), bind, isCurrent }),
+    [identity, bind, isCurrent],
   );
 }

@@ -478,7 +478,7 @@ function DeleteNamespaceDialog({
 
 export function NamespaceManagerCard() {
   const { selectedNamespace } = useNamespace();
-  const { data: namespaces, isLoading } = useNamespaces();
+  const { data: namespaces, isLoading, isError, refetch } = useNamespaces();
   const { principal } = useAuth();
   const visibleNamespaces = principal
     ? namespaces?.filter((name) => namespaceGranted(principal.namespaces, name))
@@ -511,6 +511,15 @@ export function NamespaceManagerCard() {
 
       {isLoading ? (
         <div className="h-24 bg-bg-card-hover rounded animate-pulse" />
+      ) : isError && !namespaces ? (
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm text-danger">
+            Namespaces are unavailable — the registry could not be read.
+          </p>
+          <Button variant="ghost" size="sm" onClick={() => void refetch()}>
+            Retry
+          </Button>
+        </div>
       ) : !visibleNamespaces || visibleNamespaces.length === 0 ? (
         <p className="text-sm text-text-muted">
           No namespaces returned from the gateway.
@@ -529,6 +538,7 @@ export function NamespaceManagerCard() {
                 <Button
                   variant="ghost"
                   size="sm"
+                  disabled={isError}
                   onClick={() => setEditSession({ id: ++generation.current, target: ns })}
                 >
                   Edit
@@ -536,6 +546,7 @@ export function NamespaceManagerCard() {
                 <Button
                   variant="ghost"
                   size="sm"
+                  disabled={isError}
                   className="text-danger hover:text-danger"
                   onClick={() => setDeleteSession({ id: ++generation.current, target: ns })}
                 >
@@ -545,6 +556,18 @@ export function NamespaceManagerCard() {
             </li>
           ))}
         </ul>
+      )}
+
+      {isError && namespaces && (
+        <div className="flex items-center justify-between gap-3 mt-3">
+          <p className="text-sm text-danger">
+            The registry could not be refreshed; these rows may be stale, so
+            Edit and Delete are unavailable until it reads again.
+          </p>
+          <Button variant="ghost" size="sm" onClick={() => void refetch()}>
+            Retry
+          </Button>
+        </div>
       )}
 
       <p className="text-text-muted text-xs mt-3">

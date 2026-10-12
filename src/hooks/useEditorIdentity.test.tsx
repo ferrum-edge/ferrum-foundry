@@ -154,6 +154,25 @@ describe("useEditorIdentity", () => {
     expect(freshHandler).toHaveBeenCalledTimes(1);
   });
 
+  it("reports currency so a completion cannot navigate a newer editor away", async () => {
+    await render(probe("shared"));
+    const retired = handle!.session;
+    expect(retired.isCurrent()).toBe(true);
+
+    // Identity moves (namespace switch, then a different resource): the
+    // retired session's completion-time navigation must be suppressed.
+    await act(async () => {
+      handle!.setNamespace("tenant-b");
+    });
+    expect(retired.isCurrent()).toBe(false);
+    expect(handle!.session.isCurrent()).toBe(true);
+
+    const beforeRoute = handle!.session;
+    await render(probe("other"));
+    expect(beforeRoute.isCurrent()).toBe(false);
+    expect(handle!.session.isCurrent()).toBe(true);
+  });
+
   it("hands a stale call to onStale instead of throwing when one is configured", async () => {
     const onStale = vi.fn((_captured: EditorIdentity, _current: EditorIdentity) => {});
     await render(probe("shared", { onStale }));

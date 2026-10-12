@@ -29,9 +29,12 @@ and [plugin documentation](https://github.com/ferrum-edge/ferrum-edge/blob/main/
 
 ## Templates that need operator input
 
-Seven templates are rejected as shipped, because they need something only the
-operator or the gateway environment can supply. The contract records each exact
-error body and its `400` status.
+Eight templates need something only the operator or the gateway environment
+can supply. Seven are rejected as shipped, and the contract records each exact
+error body and its `400` status. The eighth, `oidc_relying_party`, ships with
+an empty `session.encryption_secret` that the form requires the operator to
+fill before it can be enabled; the contract injects a fresh secret and then
+expects admission, so it is never counted as an unmodified-template admission.
 
 | Template | What to supply |
 | --- | --- |
@@ -42,6 +45,7 @@ error body and its `400` status.
 | `proxy_alerts` | `FERRUM_PLUGIN_SECRET_ALERTS_SLACK_WEBHOOK` in the gateway environment. |
 | `kafka_logging` | An unrestricted backend egress policy. Under the default restrictive policy the gateway refuses librdkafka during field validation (the error starts with `Invalid plugin config fields: kafka_logging:`), before contacting a broker. Use another log sink if egress must stay restricted. |
 | `openapi_validator` | Proxy scope, on a proxy with an attached API spec. |
+| `oidc_relying_party` | A valid `session.encryption_secret`; the shipped template deliberately leaves it empty. |
 
 ## Contract gate
 
@@ -53,12 +57,15 @@ templates and:
 
 1. checks that Foundry's 81 non-internal templates match the gateway's
    `GET /plugins` catalog;
-2. in a separate disposable namespace, submits each unmodified template with
-   `enabled: true`, one at a time, and deletes it before the next. TCP
-   throttling gets a TCP proxy fixture and OpenAPI validation an HTTP proxy
-   fixture; every other template is global;
-3. expects 74 `201` admissions (each read back as enabled) and the seven exact
-   rejections above.
+2. in a separate disposable namespace, submits each template with
+   `enabled: true`, one at a time, and deletes it before the next — unmodified,
+   except `oidc_relying_party`, whose empty `session.encryption_secret` is
+   first filled with a fresh operator value (the raw template is asserted
+   empty). TCP throttling gets a TCP proxy fixture and OpenAPI validation an
+   HTTP proxy fixture; every other template is global;
+3. expects 74 `201` admissions (each read back as enabled) — 73 unmodified
+   templates plus `oidc_relying_party` with its supplied secret — and the
+   seven exact rejections above.
 
 It runs before the demo seeds, because the seeded `prometheus_metrics` plugin
 owns a process-wide registry that a separate namespace cannot isolate.
@@ -98,8 +105,8 @@ adds their v2 entries, including the v0.9.14 data-plane attestation negatives;
 v0.9.15 adds diagnostic-ref and gateway-headers negatives. Foundry's same
 18-file scope includes no deployment, egress-policy, diagnostic or header
 schemas or profile implementation. Manifest schema, fixtures and
-owner-unreleased status remain unchanged. Foundry v0.5.5 hosted pairing
-qualification is pending in [the compatibility record](compatibility.md);
+owner-unreleased status remain unchanged. Foundry v0.5.5 passed hosted pairing
+qualification and was published; see [the compatibility record](compatibility.md).
 v0.5.4 and earlier evidence belongs to their unchanged immutable release records.
 
 Edge v0.9.15 confines every plugin-config environment reference to

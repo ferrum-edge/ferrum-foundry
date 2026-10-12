@@ -34,6 +34,10 @@ services:
     # for production; CI overrides this with the image under test.
     image: ${FOUNDRY_IMAGE:-ferrumedge/ferrum-foundry@sha256:5bdfa947adead6895e9dbdc4b4db5ed7e960bd7fc5ebb9872ac722ced86a8b0f}
     restart: unless-stopped
+    # The BFF drains for up to FERRUM_SHUTDOWN_TIMEOUT (10s below) and then
+    # logs and exits nonzero; orchestration grace must exceed that deadline
+    # (Compose otherwise defaults to 10s and can force-kill first).
+    stop_grace_period: 20s
     profiles: [production, demo]
     # Deliberately no host port: the BFF is reachable only through the proxy.
     expose:

@@ -1,3 +1,5 @@
+import { getCommittedWrite } from './client';
+
 /** A lost response cannot establish whether a remote mutation committed. */
 export class MutationOutcomeUnknownError extends Error {
   constructor(operation: string, cause: unknown) {
@@ -30,7 +32,13 @@ export async function observeMutation<T>(operation: string, request: Promise<T>)
       'phase' in data &&
       data.phase === 'upload';
     const localPathRefusal = error instanceof Error && error.name === 'PathSegmentError';
+    // A recognized committed-but-not-live answer is a known commit, not an
+    // unknown outcome: the write is durable and the caller recovers by
+    // re-reading, never by treating the workspace as locked (see
+    // docs/client-recovery.md). The marker survives secret redaction.
+    const committed = getCommittedWrite(error) !== null;
     if (
+      !committed &&
       !localPathRefusal &&
       !uploadRejected &&
       (status === undefined || status === 408 || status >= 500)

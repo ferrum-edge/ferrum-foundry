@@ -157,6 +157,8 @@ Durations are integers.
 | `FERRUM_UPLOAD_TIMEOUT` | No | `300000` | 1000-3600000 ms | Whole-body deadline for restore and API-spec uploads. Progress never extends it |
 | `FERRUM_MAX_LARGE_UPLOADS` | No | `2` | 1-32, at most `FERRUM_MAX_ACTIVE_UPLOADS` | Concurrent restore and API-spec uploads before `429` |
 | `FERRUM_MAX_ACTIVE_UPLOADS` | No | `32` | 1-1024 | Concurrent proxied requests with a body, of any size, before `429` |
+| `FERRUM_MAX_UPLOADS_PER_PRINCIPAL` | No | `8` (or `FERRUM_MAX_ACTIVE_UPLOADS` if lower) | 1-1024, at most `FERRUM_MAX_ACTIVE_UPLOADS` | Body-bearing proxied requests one authenticated subject may hold at once before `429` |
+| `FERRUM_MAX_LARGE_UPLOADS_PER_PRINCIPAL` | No | `1` | 1-32, at most `FERRUM_MAX_LARGE_UPLOADS` and `FERRUM_MAX_UPLOADS_PER_PRINCIPAL` | Restore/API-spec uploads one authenticated subject may hold at once before `429` |
 | `FERRUM_MAX_ACTIVE_LONG_READS` | No | `32` | 1-1024 | Concurrent [long-running reads](#long-running-reads) (apply-status long polls, backup downloads, namespace-scoped namespace lists) before `429` |
 | `FERRUM_MAX_LONG_READS_PER_PRINCIPAL` | No | `8` | 1-1024, at most `FERRUM_MAX_ACTIVE_LONG_READS` | Long-running reads one authenticated subject may hold at once before `429` |
 | `FERRUM_NAMESPACE_SCAN_MAX_PAGES` | No | `50` | 1-1000 | Upstream pages of 1000 names a namespace-scoped `GET /namespaces` may read before it answers `503` |
@@ -568,10 +570,14 @@ Time limits:
 
 Concurrency limits: `FERRUM_MAX_ACTIVE_UPLOADS` covers every proxied request
 with a body, and `FERRUM_MAX_LARGE_UPLOADS` is a tighter limit on restore and
-API-spec uploads. Both answer `429` with `code: FERRUM_BFF_UPLOAD_CAPACITY`,
-`retry-after: 1`, and `scope` `all` or `large`. Steady `429`s with
-`scope: "all"` mean the instance is at its ceiling; raise it only with matching
-socket and memory headroom.
+API-spec uploads. Each pool also has a per-subject share
+(`FERRUM_MAX_UPLOADS_PER_PRINCIPAL`, `FERRUM_MAX_LARGE_UPLOADS_PER_PRINCIPAL`)
+so one authenticated principal cannot hold every permit while other tenants
+are refused. All answer `429` with `code: FERRUM_BFF_UPLOAD_CAPACITY`,
+`retry-after: 1`, and `scope` `all`, `large`, `principal`, or
+`principal_large`, reserved before a token is signed or the gateway is
+contacted. Steady `429`s with `scope: "all"` mean the instance is at its
+ceiling; raise it only with matching socket and memory headroom.
 
 When the BFF answers before a body has fully arrived (for example a `401`,
 `403`, `413`, or capacity `429`, or a gateway that refused the upload unread),

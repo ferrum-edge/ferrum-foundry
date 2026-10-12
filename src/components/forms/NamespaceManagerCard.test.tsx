@@ -4,10 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NamespaceManagerCard } from './NamespaceManagerCard';
 import { Header } from '@/components/layout/Header';
 
-const { state, create, update, remove } = vi.hoisted(() => ({
+const { state, create, update, remove, refetch } = vi.hoisted(() => ({
   state: { principal: { role: 'admin', namespaces: ['tenant-a', 'tenant-c'] as string[] | undefined },
-    names: ['tenant-a', 'tenant-b', 'tenant-c'] },
-  create: vi.fn(), update: vi.fn(), remove: vi.fn(),
+    names: ['tenant-a', 'tenant-b', 'tenant-c'] as string[] | undefined, isError: false },
+  create: vi.fn(), update: vi.fn(), remove: vi.fn(), refetch: vi.fn(),
 }));
 vi.mock('@/stores/auth', () => ({ useAuth: () => ({ principal: state.principal, logout: vi.fn() }) }));
 vi.mock('@/stores/namespace', () => ({ useNamespace: () => ({ selectedNamespace: 'tenant-a', setNamespace: vi.fn(), replaceNamespaceIfCurrent: vi.fn() }) }));
@@ -17,7 +17,7 @@ vi.mock('@/components/ui/Toast', () => ({ useToast: () => ({ toast: vi.fn() }) }
 vi.mock('@/components/ui/Select', () => ({ Select: ({ options }: { options: { value: string }[] }) =>
   <div data-testid="header-names">{options.map((option) => <span key={option.value}>{option.value}</span>)}</div> }));
 vi.mock('@/hooks/useNamespaces', () => ({
-  useNamespaces: () => ({ data: state.names, isLoading: false, isSuccess: true, isFetching: false }),
+  useNamespaces: () => ({ data: state.names, isLoading: false, isSuccess: !state.isError, isError: state.isError, isFetching: false, refetch }),
   useNamespaceDetail: (name: string) => ({ data: { name, description: '' }, isSuccess: true }),
   useCreateNamespace: () => ({ mutateAsync: create, isPending: false }),
   useUpdateNamespace: () => ({ mutateAsync: update, isPending: false }),
@@ -48,6 +48,9 @@ async function name(value: string) {
 }
 
 beforeEach(() => {
+  state.names = ['tenant-a', 'tenant-b', 'tenant-c'];
+  state.isError = false;
+  refetch.mockReset();
   state.principal = { role: 'admin', namespaces: ['tenant-a', 'tenant-c'] };
   create.mockReset().mockResolvedValue({ name: 'tenant-c' });
   update.mockReset().mockResolvedValue({ name: 'tenant-c' });
@@ -109,6 +112,31 @@ describe('namespace manager grants', () => {
     await name('tenant-c');
     await click('Save');
     expect(update).toHaveBeenCalledWith({ name: 'tenant-a', data: { name: 'tenant-c' } });
+  });
+
+  it('reports an initial registry failure as unavailable, not empty, and retries', async () => {
+    state.names = undefined;
+    state.isError = true;
+    await render();
+    expect(host.querySelectorAll('li')).toHaveLength(0);
+    expect(host.textContent).toContain('Namespaces are unavailable');
+    expect(host.textContent).not.toContain('No namespaces returned');
+    await click('Retry');
+    expect(refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('withdraws row actions when a refresh fails over stale rows', async () => {
+    await render();
+    expect(button('Edit', host.querySelector('li')!).disabled).toBe(false);
+    state.isError = true;
+    await render();
+    const rows = [...host.querySelectorAll('li')];
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(button('Edit', row).disabled).toBe(true);
+      expect(button('Delete', row).disabled).toBe(true);
+    }
+    expect(host.textContent).toContain('could not be refreshed');
   });
 
   it('unmounts an open destructive dialog when its target grant disappears', async () => {

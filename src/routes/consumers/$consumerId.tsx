@@ -192,7 +192,9 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
       } else {
         toast("success", "Consumer deleted successfully");
       }
-      navigate({ to: "/consumers" });
+      // The delete reconciled its own resource either way; only the
+      // editor still on screen may leave for the collection.
+      if (session.isCurrent()) navigate({ to: "/consumers" });
     } catch (err: unknown) {
       if (isStaleResourceError(err)) {
         setDeleteOpen(false);

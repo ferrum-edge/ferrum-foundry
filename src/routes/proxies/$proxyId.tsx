@@ -256,7 +256,9 @@ function ProxyEditor({ session }: { session: EditorSession }) {
       } else {
         toast("success", "Proxy deleted successfully");
       }
-      navigate({ to: "/proxies" });
+      // The delete reconciled its own resource either way; only the
+      // editor still on screen may leave for the collection.
+      if (session.isCurrent()) navigate({ to: "/proxies" });
     } catch (err: unknown) {
       if (isStaleResourceError(err)) {
         setDeleteOpen(false);

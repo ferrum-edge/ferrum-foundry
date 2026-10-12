@@ -143,7 +143,9 @@ function PluginEditor({ session }: { session: EditorSession }) {
         guard: pluginsApi.pluginWriteGuard(plugin),
       });
       toast("success", "Plugin configuration deleted successfully");
-      navigate({ to: "/plugins" });
+      // The delete reconciled its own resource either way; only the
+      // editor still on screen may leave for the collection.
+      if (session.isCurrent()) navigate({ to: "/plugins" });
     } catch (err: unknown) {
       if (isStaleResourceError(err)) {
         setDeleteOpen(false);

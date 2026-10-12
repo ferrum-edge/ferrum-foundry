@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { markCommittedWrite } from './client';
 import {
   classifyUnobservedOutcome,
   MutationOutcomeUnknownError,
@@ -15,6 +16,14 @@ describe('mutation outcome classification', () => {
     const error = Object.assign(new Error('interrupted'), { response: new Response(null, { status }) });
     await expect(observeMutation('Import', Promise.reject(error)))
       .rejects.toBeInstanceOf(MutationOutcomeUnknownError);
+  });
+
+  it('keeps a recognized committed-but-not-live 503 a known commit', async () => {
+    const error = Object.assign(new Error('committed, not live'), {
+      response: new Response(null, { status: 503 }),
+    });
+    markCommittedWrite(error, { cursor: null, reason: 'committed_not_live' });
+    await expect(observeMutation('Import', Promise.reject(error))).rejects.toBe(error);
   });
 
   it('treats a lost connection as unknown', async () => {

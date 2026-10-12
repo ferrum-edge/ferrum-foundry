@@ -134,24 +134,21 @@ function MetricsWorkspace() {
   }
 
   /* ---------------------------------------------------------------- */
-  /*  Error state                                                      */
+  /*  Admin-metrics error state                                        */
   /* ---------------------------------------------------------------- */
 
-  if (isError) {
-    return (
-      <div className="space-y-6">
-        {header}
-        <Card>
-          <p className="text-danger font-medium">Failed to load metrics</p>
-          <p className="text-text-muted text-sm mt-1">
-            {error instanceof Error ? error.message : "Unknown error"}
-          </p>
-        </Card>
-      </div>
-    );
-  }
-
-  if (!metrics) return null;
+  // Admin metrics failing must not unmount the independently readable
+  // overload/runtime/chargeback panels (and stop their polling) or hide the
+  // Prometheus sample: each endpoint keeps its own unavailable state, and
+  // the admin-derived panels render only when a sample exists.
+  const adminError = isError ? (
+    <Card>
+      <p className="text-danger font-medium">Failed to load metrics</p>
+      <p className="text-text-muted text-sm mt-1">
+        {error instanceof Error ? error.message : "Unknown error"}
+      </p>
+    </Card>
+  ) : null;
 
   /* ---------------------------------------------------------------- */
   /*  Render                                                           */
@@ -160,14 +157,17 @@ function MetricsWorkspace() {
   return (
     <div className="space-y-6">
       {header}
+      {adminError}
 
       {/* Gateway Stats */}
-      <section>
-        <h2 className="text-lg font-semibold text-text-primary mb-3">
-          Gateway
-        </h2>
-        <GatewayStats metrics={metrics.gateway} requestStats={requestStats} />
-      </section>
+      {metrics && (
+        <section>
+          <h2 className="text-lg font-semibold text-text-primary mb-3">
+            Gateway
+          </h2>
+          <GatewayStats metrics={metrics.gateway} requestStats={requestStats} />
+        </section>
+      )}
 
       {/* Panels grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -185,61 +185,75 @@ function MetricsWorkspace() {
           <RuntimePanel refetchInterval={opsInterval} />
         </Card>
 
-        <Card>
-          <h3 className="text-sm font-semibold text-text-primary mb-3">
-            Circuit Breakers
-          </h3>
-          <CircuitBreakerPanel breakers={metrics.circuit_breakers} />
-        </Card>
+        {metrics && (
+          <Card>
+            <h3 className="text-sm font-semibold text-text-primary mb-3">
+              Circuit Breakers
+            </h3>
+            <CircuitBreakerPanel breakers={metrics.circuit_breakers} />
+          </Card>
+        )}
 
-        <Card>
-          <h3 className="text-sm font-semibold text-text-primary mb-3">
-            Connection Pools
-          </h3>
-          <ConnectionPoolPanel pools={metrics.connection_pools} />
-        </Card>
+        {metrics && (
+          <Card>
+            <h3 className="text-sm font-semibold text-text-primary mb-3">
+              Connection Pools
+            </h3>
+            <ConnectionPoolPanel pools={metrics.connection_pools} />
+          </Card>
+        )}
 
-        <Card>
-          <h3 className="text-sm font-semibold text-text-primary mb-3">
-            Health Checks
-          </h3>
-          <HealthCheckPanel healthCheck={metrics.health_check} />
-        </Card>
+        {metrics && (
+          <Card>
+            <h3 className="text-sm font-semibold text-text-primary mb-3">
+              Health Checks
+            </h3>
+            <HealthCheckPanel healthCheck={metrics.health_check} />
+          </Card>
+        )}
 
-        <Card>
-          <h3 className="text-sm font-semibold text-text-primary mb-3">
-            Load Balancers
-          </h3>
-          <LoadBalancerPanel loadBalancers={metrics.load_balancers} />
-        </Card>
+        {metrics && (
+          <Card>
+            <h3 className="text-sm font-semibold text-text-primary mb-3">
+              Load Balancers
+            </h3>
+            <LoadBalancerPanel loadBalancers={metrics.load_balancers} />
+          </Card>
+        )}
 
-        <Card>
-          <h3 className="text-sm font-semibold text-text-primary mb-3">
-            Caches
-          </h3>
-          <CachePanel caches={metrics.caches} />
-        </Card>
+        {metrics && (
+          <Card>
+            <h3 className="text-sm font-semibold text-text-primary mb-3">
+              Caches
+            </h3>
+            <CachePanel caches={metrics.caches} />
+          </Card>
+        )}
 
-        <Card>
-          <h3 className="text-sm font-semibold text-text-primary mb-3">
-            Rate Limiting
-          </h3>
-          <RateLimitPanel rateLimiting={metrics.rate_limiting} />
-        </Card>
+        {metrics && (
+          <Card>
+            <h3 className="text-sm font-semibold text-text-primary mb-3">
+              Rate Limiting
+            </h3>
+            <RateLimitPanel rateLimiting={metrics.rate_limiting} />
+          </Card>
+        )}
 
-        <Card>
-          <h3 className="text-sm font-semibold text-text-primary mb-3">
-            Consumer Index
-          </h3>
-          <div className="grid grid-cols-2 gap-3">
-            <StatCard label="Total consumers" value={metrics.consumer_index.total_consumers} />
-            {(Object.entries(metrics.consumer_index) as [string, number][])
-              .filter(([key, val]) => key !== "total_consumers" && val > 0)
-              .map(([key, val]) => (
-                <StatCard key={key} label={humanizeKey(key)} value={val} />
-              ))}
-          </div>
-        </Card>
+        {metrics && (
+          <Card>
+            <h3 className="text-sm font-semibold text-text-primary mb-3">
+              Consumer Index
+            </h3>
+            <div className="grid grid-cols-2 gap-3">
+              <StatCard label="Total consumers" value={metrics.consumer_index.total_consumers} />
+              {(Object.entries(metrics.consumer_index) as [string, number][])
+                .filter(([key, val]) => key !== "total_consumers" && val > 0)
+                .map(([key, val]) => (
+                  <StatCard key={key} label={humanizeKey(key)} value={val} />
+                ))}
+            </div>
+          </Card>
+        )}
         <Card>
           <h3 className="text-sm font-semibold text-text-primary mb-3">
             API Chargeback

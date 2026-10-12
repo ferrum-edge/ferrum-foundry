@@ -84,6 +84,7 @@ export async function listAllConfigs(
     (offset, limit, pageSignal) => listConfigs(scope, { offset, limit }, pageSignal),
     undefined,
     signal,
+    (config) => config.id,
   );
 }
 
@@ -141,6 +142,7 @@ export async function listConfigsForProxy(
     },
     undefined,
     signal,
+    (config) => config.id,
   );
 }
 

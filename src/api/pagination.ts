@@ -27,6 +27,15 @@ export interface CollectOptions {
   budget?: number;
   /** Abort in-flight and pending pages; the returned promise rejects. */
   signal?: AbortSignal;
+  /**
+   * Stable identity of a record. When given, a traversal that observes the
+   * same identity twice is rejected: offset pages over a collection that
+   * changed under the traversal (a delete plus an earlier-sorting insert
+   * keeps the total equal) can repeat a boundary row and omit another while
+   * still returning exactly `total` rows, so counts alone cannot establish
+   * completeness. Correctness-critical callers must supply this.
+   */
+  identity?: (item: T) => string;
 }
 
 export interface BoundedCollection<T> {
@@ -73,6 +82,7 @@ export async function collectBoundedPages<T>(
   }
 
   const items: T[] = [];
+  const seenIdentities = options.identity ? new Set<string>() : undefined;
   let offset = 0;
   let expectedTotal: number | undefined;
 
@@ -94,6 +104,17 @@ export async function collectBoundedPages<T>(
       expectedTotal = pagination.total;
     } else if (pagination.total !== expectedTotal) {
       throw new Error("Gateway changed pagination total while collecting pages");
+    }
+    if (seenIdentities && options.identity) {
+      for (const item of page.data) {
+        const id = options.identity(item);
+        if (seenIdentities.has(id)) {
+          throw new Error(
+            'Gateway returned a repeated resource while collecting pages; the collection changed during traversal',
+          );
+        }
+        seenIdentities.add(id);
+      }
     }
     items.push(...page.data);
 
@@ -128,7 +149,8 @@ export async function collectAllPages<T>(
   fetchPage: PageFetcher<T>,
   pageSize = ALL_PAGE_SIZE,
   signal?: AbortSignal,
+  identity?: (item: T) => string,
 ): Promise<T[]> {
-  const collected = await collectBoundedPages(fetchPage, { pageSize, signal });
+  const collected = await collectBoundedPages(fetchPage, { pageSize, signal, identity });
   return collected.items;
 }

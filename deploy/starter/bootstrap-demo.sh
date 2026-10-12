@@ -43,7 +43,9 @@ FERRUM_ENABLE_HSTS=false
 FOUNDRY_DEMO_PORT=${FOUNDRY_DEMO_PORT:-8088}
 FERRUM_DEMO_PROXY_PORT=${FERRUM_DEMO_PROXY_PORT:-8000}
 FERRUM_DEMO_ADMIN_PORT=${FERRUM_DEMO_ADMIN_PORT:-9000}
-FOUNDRY_IMAGE=${FOUNDRY_IMAGE:-ferrumedge/ferrum-foundry:main}
+# Empty unless the invoking shell overrides it, so Compose falls back to
+# the published release digest instead of the moving main tag.
+FOUNDRY_IMAGE=${FOUNDRY_IMAGE:-}
 ENV
 
 printf 'set $ferrum_proxy_secret "%s";\n' "$proxy_secret" > secrets/ferrum-proxy-secret.conf

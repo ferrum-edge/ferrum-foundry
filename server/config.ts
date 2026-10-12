@@ -43,6 +43,10 @@ export interface Config {
   shutdownTimeout: number;
   maxLargeUploads: number;
   maxActiveUploads: number;
+  /** The share of `maxActiveUploads` one authenticated subject may hold. */
+  maxUploadsPerPrincipal: number;
+  /** The share of `maxLargeUploads` one authenticated subject may hold. */
+  maxLargeUploadsPerPrincipal: number;
   /** Concurrent long-running reads (apply-status waits, backups, scoped namespace lists). */
   maxActiveLongReads: number;
   /** The share of `maxActiveLongReads` one authenticated subject may hold. */
@@ -452,6 +456,20 @@ function parseBaseConfig(): Config {
   if (maxLargeUploads > maxActiveUploads) {
     throw new Error('FERRUM_MAX_LARGE_UPLOADS must not exceed FERRUM_MAX_ACTIVE_UPLOADS');
   }
+  // Each pool also has a per-subject share, like the long-read pool below,
+  // so one authenticated principal cannot hold every upload permit while
+  // other tenants are refused. The same subset contradictions are rejected.
+  const maxUploadsPerPrincipal = parseInteger('FERRUM_MAX_UPLOADS_PER_PRINCIPAL', Math.min(8, maxActiveUploads), 1, 1024);
+  if (maxUploadsPerPrincipal > maxActiveUploads) {
+    throw new Error('FERRUM_MAX_UPLOADS_PER_PRINCIPAL must not exceed FERRUM_MAX_ACTIVE_UPLOADS');
+  }
+  const maxLargeUploadsPerPrincipal = parseInteger('FERRUM_MAX_LARGE_UPLOADS_PER_PRINCIPAL', 1, 1, 32);
+  if (maxLargeUploadsPerPrincipal > maxLargeUploads) {
+    throw new Error('FERRUM_MAX_LARGE_UPLOADS_PER_PRINCIPAL must not exceed FERRUM_MAX_LARGE_UPLOADS');
+  }
+  if (maxLargeUploadsPerPrincipal > maxUploadsPerPrincipal) {
+    throw new Error('FERRUM_MAX_LARGE_UPLOADS_PER_PRINCIPAL must not exceed FERRUM_MAX_UPLOADS_PER_PRINCIPAL');
+  }
   // Reads that hold a request and an upstream connection for longer than an
   // ordinary read get their own pool, with a per-subject share of it so one
   // identity cannot take the whole allowance. The same contradiction rule as
@@ -512,6 +530,8 @@ function parseBaseConfig(): Config {
     shutdownTimeout: parseInteger('FERRUM_SHUTDOWN_TIMEOUT', 10_000, 1000, 300_000),
     maxLargeUploads,
     maxActiveUploads,
+    maxUploadsPerPrincipal,
+    maxLargeUploadsPerPrincipal,
     maxActiveLongReads,
     maxLongReadsPerPrincipal,
     namespaceScanMaxPages: parseInteger('FERRUM_NAMESPACE_SCAN_MAX_PAGES', 50, 1, 1000),

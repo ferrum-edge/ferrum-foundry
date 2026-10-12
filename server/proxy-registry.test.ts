@@ -143,6 +143,7 @@ beforeAll(async () => {
     FERRUM_TRUSTED_PROXY_NAMESPACES_HEADER: 'x-registry-grants',
     FERRUM_READ_TIMEOUT: '4000', FERRUM_WRITE_TIMEOUT: '2000', FERRUM_UPLOAD_TIMEOUT: '4000',
     FERRUM_MAX_ACTIVE_UPLOADS: '4', FERRUM_MAX_LARGE_UPLOADS: '2',
+    FERRUM_MAX_UPLOADS_PER_PRINCIPAL: '2', FERRUM_MAX_LARGE_UPLOADS_PER_PRINCIPAL: '1',
     FERRUM_MAX_ACTIVE_LONG_READS: '3', FERRUM_MAX_LONG_READS_PER_PRINCIPAL: '2',
     FERRUM_NAMESPACE_SCAN_MAX_PAGES: '3',
   })) vi.stubEnv(key, value);
@@ -699,4 +700,46 @@ describe('long-running read admission over TCP', () => {
       for (const client of clients) await release(client);
     }
   }, 20_000);
+});
+
+describe('per-subject upload admission over TCP', () => {
+  let serial = 0;
+  const as = (user: string) => identity({ 'x-registry-user': user });
+  // An upload whose declared body is never completed holds its permit (and
+  // its upstream connection) until the client goes away.
+  async function holdUpload(user: string) {
+    const id = `upload-${++serial}`;
+    const arrived = signal(`arrived:${id}`);
+    const client = start(`/api/proxy/namespaces/tenant-a?id=${id}`, 'PUT', '{"description":"held"}', as(user), undefined, false);
+    await arrived;
+    return { ...client, id };
+  }
+  async function drop(client: Awaited<ReturnType<typeof holdUpload>>) {
+    const closed = signal(`closed:${client.id}`);
+    client.request.destroy();
+    await closed;
+  }
+
+  it('admits one subject only its upload share while another subject still uploads', async () => {
+    const a1 = await holdUpload('writer-a');
+    const a2 = await holdUpload('writer-a');
+    try {
+      const before = arrivals.length;
+      const refused = await call('/api/proxy/namespaces/tenant-a', 'PUT', '{"description":"third"}', as('writer-a'));
+      expect(refused.status).toBe(429);
+      expect(refused.headers['retry-after']).toBe('1');
+      expect(JSON.parse(refused.body)).toEqual({ error: 'Too Many Requests', code: 'FERRUM_BFF_UPLOAD_CAPACITY', scope: 'principal' });
+      expect(arrivals).toHaveLength(before);
+
+      // The global pool (4) is not full: another subject is admitted, and a
+      // body-less read never touches the upload pools at all.
+      expect((await call('/api/proxy/namespaces/tenant-a', 'PUT', '{"description":"other"}', as('writer-b'))).status).toBe(200);
+      expect((await call('/api/proxy/namespaces/tenant-a', 'GET', '', as('writer-a'))).status).toBe(200);
+    } finally {
+      await drop(a1);
+      await drop(a2);
+    }
+    // Released permits are returned exactly once: the same subject uploads again.
+    expect((await call('/api/proxy/namespaces/tenant-a', 'PUT', '{"description":"again"}', as('writer-a'))).status).toBe(200);
+  }, 10_000);
 });

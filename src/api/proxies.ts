@@ -63,6 +63,7 @@ export async function listAll(
     (offset, limit, pageSignal) => list(scope, { offset, limit }, pageSignal),
     undefined,
     signal,
+    (proxy) => proxy.id,
   );
 }
 
