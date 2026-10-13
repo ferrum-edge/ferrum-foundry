@@ -400,8 +400,12 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
         onConfirm={async () => {
           if (!deleteTarget || !collectionAvailable || !canWrite.allowed) return;
           try {
-            await deleteSpec.mutateAsync(deleteTarget.id);
-            toast("success", "Spec and owned resources deleted");
+            const deleted = await deleteSpec.mutateAsync(deleteTarget.id);
+            if (deleted.committed) {
+              toast("warning", committedWriteMessage("Spec and owned resources deleted", deleted.committed));
+            } else {
+              toast("success", "Spec and owned resources deleted");
+            }
           } catch (err) {
             toast("error", await getApiErrorMessage(err, "Delete failed"));
           } finally {

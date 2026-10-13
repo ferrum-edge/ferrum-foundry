@@ -241,15 +241,22 @@ for (const [kind, retired] of cases) {
       expect(writes[0]!.namespace).toBe("tenant-a");
       expect(client.getQueryData(['apiSpecDocument', 'tenant-a', 'byProxy', 'shared'])).toBeUndefined();
       expect(client.getQueryData(['apiSpecDocument', 'tenant-b', 'byProxy', 'shared'])).toBe('old document');
-      expect(client.getQueryState(['apiSpecs', 'tenant-a', 'byProxy', 'shared'])?.isInvalidated).toBe(true);
+      // Spec writes also retire the issuing namespace's inactive lists, which
+      // editors seed from; a proxy delete only invalidates them.
+      const specList = client.getQueryState(['apiSpecs', 'tenant-a', 'byProxy', 'shared']);
+      if (kind === "deleteProxy") expect(specList?.isInvalidated).toBe(true);
+      else expect(specList).toBeUndefined();
       for (const detail of retired) {
         expect(client.getQueryData([detail, "tenant-a", "cascaded-id"])).toBeUndefined();
         expect(client.getQueryData([detail, "tenant-b", "cascaded-id"])).toBeDefined();
       }
     });
 
-    if (kind === "import" || kind === "replace") {
-      it("retires the issuing namespace's details when the gateway answers committed-but-not-live", async () => {
+    if (kind !== "deleteProxy") {
+      it.each([
+        ["committed-but-not-live", committedNotLive],
+        ["lost (unobserved)", () => Response.json({ error: "upstream connection failed" }, { status: 502 })],
+      ])("retires the issuing namespace's details when the answer is %s", async (_label, answer) => {
         const Probe = probes[kind];
         seedDetails();
         await render(<Probe />);
@@ -259,7 +266,7 @@ for (const [kind, retired] of cases) {
         namespace = "tenant-b";
         await render(<Probe />);
         await act(async () => {
-          writes[0]!.resolve(committedNotLive());
+          writes[0]!.resolve(answer());
           await pending;
         });
 

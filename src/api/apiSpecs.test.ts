@@ -106,6 +106,16 @@ describe("API spec request contracts", () => {
     expect(requests).toHaveLength(2);
   });
 
+  it("rejects a spec repeated across pages under an unchanged total (#577)", async () => {
+    // Page 1 is [orders-spec, stock]; a delete plus an earlier-sorting insert
+    // shifts page 2 back one row, repeating stock and skipping another spec.
+    const stock = { ...summary, id: "stock" };
+    respond.mockImplementationOnce(() => Response.json(listPage([summary, stock], 4, 0, 2)))
+      .mockImplementationOnce(() => Response.json(listPage([stock, { ...summary, id: "zeta" }], 4, 2)));
+    await expect(specs.listAll(scope)).rejects.toThrow("repeated API spec");
+    expect(requests).toHaveLength(2);
+  });
+
   it("requests YAML document text without converting it to a JSON envelope", async () => {
     const document = "openapi: 3.1.0\ninfo:\n  title: Orders\n";
     respond.mockReturnValue(new Response(document, { headers: { "content-type": "application/yaml" } }));

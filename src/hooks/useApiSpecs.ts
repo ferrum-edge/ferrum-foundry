@@ -13,7 +13,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as apiSpecs from "@/api/apiSpecs";
 import { useNamespace } from "@/stores/namespace";
 import { retireCascade, type CascadeKind } from "./retireCascade";
-import { retireDeletedDetail } from "./retireDeletedDetail";
+import { removeCommitted, retireDeletedDetail, type DeleteOutcome } from "./retireDeletedDetail";
 
 /**
  * `POST /api-specs` creates, `PUT /api-specs/{id}` deletes and re-creates
@@ -29,7 +29,15 @@ const SPEC_CASCADE: readonly CascadeKind[] = [
 ];
 
 /**
- * Whether a rejected import/replacement may still have changed the gateway:
+ * A spec write can drop or add a proxy's declared plugin associations, and
+ * the plugin editor seeds proxy-group membership once from the whole proxy
+ * list, so inactive list entries are retired too (as `useRestore` does);
+ * otherwise saving a reopened group could reattach a removed association.
+ */
+const SPEC_RETIREMENT = { retireLists: true } as const;
+
+/**
+ * Whether a rejected spec write may still have changed the gateway:
  * a recognized committed-but-not-live `503` did, and a lost or unknown
  * outcome might have. Either way the cascade is retired as on success, so a
  * reopened editor cannot seed from the superseded resource; a definite
@@ -111,11 +119,11 @@ export function useImportApiSpec() {
     // The issuing namespace, captured at mutate() time for the error path.
     onMutate: () => ({ namespace: scope.namespace }),
     onSuccess: (created) => {
-      retireCascade(qc, created.namespace, SPEC_CASCADE);
+      retireCascade(qc, created.namespace, SPEC_CASCADE, SPEC_RETIREMENT);
     },
     onError: (error, _variables, context) => {
       if (context && mayHaveCommitted(error)) {
-        retireCascade(qc, context.namespace, SPEC_CASCADE);
+        retireCascade(qc, context.namespace, SPEC_CASCADE, SPEC_RETIREMENT);
       }
     },
   });
@@ -135,11 +143,11 @@ export function useUpdateApiSpec() {
     // The issuing namespace, captured at mutate() time for the error path.
     onMutate: () => ({ namespace: scope.namespace }),
     onSuccess: (replaced) => {
-      retireCascade(qc, replaced.namespace, SPEC_CASCADE);
+      retireCascade(qc, replaced.namespace, SPEC_CASCADE, SPEC_RETIREMENT);
     },
     onError: (error, _variables, context) => {
       if (context && mayHaveCommitted(error)) {
-        retireCascade(qc, context.namespace, SPEC_CASCADE);
+        retireCascade(qc, context.namespace, SPEC_CASCADE, SPEC_RETIREMENT);
       }
     },
   });
@@ -149,17 +157,27 @@ export function useDeleteApiSpec() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
   return useMutation({
-    mutationFn: async (id: string) => {
-      await apiSpecs.remove(scope, id);
-      return { namespace: scope.namespace, id };
+    mutationFn: async (id: string): Promise<DeleteOutcome> => {
+      // A committed-but-not-live answer is a completed delete: its caches are
+      // retired below exactly as for a 204.
+      const committed = await removeCommitted(() => apiSpecs.remove(scope, id));
+      return { namespace: scope.namespace, id, committed };
     },
+    onMutate: (id) => ({ namespace: scope.namespace, id }),
     onSuccess: async (retired) => {
       await retireDeletedDetail(qc, [
         "apiSpecDocument",
         retired.namespace,
         retired.id,
       ]);
-      retireCascade(qc, retired.namespace, SPEC_CASCADE);
+      retireCascade(qc, retired.namespace, SPEC_CASCADE, SPEC_RETIREMENT);
+    },
+    // A lost answer may have deleted the spec and its cascade: retire as for
+    // a delete. A definite refusal leaves the cache alone.
+    onError: async (error, _id, context) => {
+      if (!context || !mayHaveCommitted(error)) return;
+      await retireDeletedDetail(qc, ["apiSpecDocument", context.namespace, context.id]);
+      retireCascade(qc, context.namespace, SPEC_CASCADE, SPEC_RETIREMENT);
     },
   });
 }
