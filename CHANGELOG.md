@@ -14,10 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`FERRUM_AUTH_MAX_FAILURES`) within 15 minutes lock the address out for 60
   seconds (`FERRUM_AUTH_LOCKOUT_SECONDS`), doubling on each repeat up to one
   hour. A locked-out address gets `429` with `Retry-After`, and its secret is
-  not compared. Failures and lockouts are logged at `warn`. The table of
-  addresses is bounded at 10,000. Once it is full of locked-out addresses, the
-  rest share one overflow lockout, from which recently authenticated addresses
-  are exempt.
+  not compared. Failures and lockouts are logged at `warn`. Tracking is
+  bounded (10,000 addresses, plus 1,024 recently authenticated ones) without
+  ever dropping live state; once the table is full, further addresses share one
+  overflow lockout, from which recently authenticated addresses are exempt.
   `FERRUM_AUTH_MAX_FAILURES=0` disables the throttle.
 - **Upgrade note:** behind the identity proxy, a proxy that sends a wrong
   secret now locks itself out. Fix the secret and restart the BFF to clear it.

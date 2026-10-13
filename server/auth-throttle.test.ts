@@ -82,34 +82,57 @@ describe('AuthFailureThrottle', () => {
     expect(instance.size).toBe(0);
   });
 
-  it('bounds the keys it tracks, keeping locked keys longest', () => {
+  it('never drops a live key to make room; newcomers count against the overflow', () => {
     const { instance } = throttle({ maxKeys: 5 });
     for (let i = 0; i < 3; i += 1) instance.recordFailure('locked');
     for (let i = 0; i < 50; i += 1) instance.recordFailure(`key-${i}`);
     expect(instance.size).toBe(5);
     expect(instance.lockedFor('locked')).toBe(1_000);
+    // key-0..key-3 hold the remaining slots with one live failure each.
+    expect(instance.recordFailure('key-0')).toEqual({ failures: 2 });
+    // The other 46 shared the overflow, which locked on its third.
+    expect(instance.lockedFor('key-49')).toBeGreaterThan(0);
+  });
+
+  it('makes room by dropping only stale keys', () => {
+    const { instance, advance } = throttle({ maxKeys: 1 });
+    instance.recordFailure('old');
+    advance(10_000 + 4_000);
+    expect(instance.recordFailure('new')).toEqual({ failures: 1 });
+    expect(instance.size).toBe(1);
   });
 });
 
 describe('AuthFailureThrottle overflow', () => {
+  it('refuses an attacker who cycles through more addresses than the table holds', () => {
+    const { instance } = throttle({ maxKeys: 1, maxFailures: 3 });
+    let refused = false;
+    for (let i = 0; i < 20 && !refused; i += 1) {
+      const key = i % 2 === 0 ? 'A' : 'B';
+      if (instance.lockedFor(key) > 0) refused = true;
+      else instance.recordFailure(key);
+    }
+    expect(refused).toBe(true);
+    expect(instance.lockedFor('A')).toBeGreaterThan(0);
+    expect(instance.lockedFor('B')).toBeGreaterThan(0);
+  });
+
   it('keeps throttling new keys once the table is full of locked keys', () => {
     const { instance } = throttle({ maxKeys: 1 });
     for (let i = 0; i < 3; i += 1) instance.recordFailure('A');
     expect(instance.lockedFor('A')).toBe(1_000);
 
-    // B cannot be retained without dropping A's lockout, so the shared
-    // overflow entry counts it instead.
     expect(instance.recordFailure('B')).toEqual({ failures: 1, overflow: true });
     expect(instance.recordFailure('B')).toEqual({ failures: 2, overflow: true });
     expect(instance.recordFailure('B')).toEqual({ failures: 3, lockedForMs: 1_000, overflow: true });
     expect(instance.lockedFor('B')).toBe(1_000);
     expect(instance.lockedFor('A')).toBe(1_000);
-    // Every other untracked key shares the overflow lockout...
+    // Every other untracked key shares the overflow lockout.
     expect(instance.lockedFor('C')).toBe(1_000);
     expect(instance.size).toBe(1);
   });
 
-  it('exempts recently authenticated keys from the overflow lockout, never from their own', () => {
+  it('exempts authenticated keys from the overflow lockout, never from their own', () => {
     const { instance } = throttle({ maxKeys: 1 });
     instance.noteAuthenticated('proxy');
     for (let i = 0; i < 3; i += 1) instance.recordFailure('A');
@@ -117,11 +140,19 @@ describe('AuthFailureThrottle overflow', () => {
     expect(instance.lockedFor('C')).toBe(1_000);
     expect(instance.lockedFor('proxy')).toBe(0);
 
-    // An authenticated key that then fails is tracked and locked on its own.
-    const fresh = throttle({ maxKeys: 5 }).instance;
-    fresh.noteAuthenticated('proxy');
-    for (let i = 0; i < 3; i += 1) fresh.recordFailure('proxy');
-    expect(fresh.lockedFor('proxy')).toBe(1_000);
+    // Saturated as it is, the table still counts and locks the proxy itself.
+    expect(instance.recordFailure('proxy')).toEqual({ failures: 1 });
+    instance.recordFailure('proxy');
+    expect(instance.recordFailure('proxy')).toEqual({ failures: 3, lockedForMs: 1_000 });
+    expect(instance.lockedFor('proxy')).toBe(1_000);
+  });
+
+  it('keeps failures an address had before it authenticated', () => {
+    const { instance } = throttle();
+    instance.recordFailure('proxy');
+    instance.recordFailure('proxy');
+    instance.noteAuthenticated('proxy');
+    expect(instance.recordFailure('proxy')).toEqual({ failures: 3, lockedForMs: 1_000 });
   });
 
   it('bounds the authenticated keys it remembers', () => {

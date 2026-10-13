@@ -91,11 +91,14 @@ lockout, so a lockout cannot be used to test guesses. Every failure and every
 lockout is logged at `warn` (`event` `bff_auth_failure` or
 `bff_auth_lockout`) with the address.
 
-The BFF tracks up to 10,000 addresses. If every tracked address is locked out,
-failures from any further address share one overflow lockout, so an attack
-spread across more addresses than that is still throttled. An address that
-recently authenticated, such as the identity proxy or a signed-in
-administrator, is exempt from the overflow lockout, but never from its own.
+The BFF tracks up to 10,000 addresses that have not authenticated, and never
+forgets one that still has a failure inside the window, a lockout, or an
+escalation that has not decayed. Once that table is full, failures from any
+further address share one overflow lockout, so an attack spread across more
+addresses than that is still throttled. Up to 1,024 addresses that recently
+authenticated, such as the identity proxy or a signed-in administrator, keep
+their own failure state in a separate table. They are exempt from the overflow
+lockout but never from their own.
 
 The address is the socket peer, never `X-Forwarded-For`, so a client that
 reaches the BFF directly cannot rotate a header to escape its own lockout.
