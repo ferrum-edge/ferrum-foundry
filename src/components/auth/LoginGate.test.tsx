@@ -14,6 +14,7 @@ let configStatus: number;
 let requests: Request[];
 let completeLogin: (response: Response) => void;
 let deferSession: boolean;
+let lockoutMarked: boolean;
 let completeSession: ((response: Response) => void) | undefined;
 let completeProbe: ((response: Response) => void) | undefined;
 
@@ -33,6 +34,7 @@ beforeEach(() => {
   sessionStatus = 401;
   configStatus = 200;
   deferSession = false;
+  lockoutMarked = true;
   completeSession = undefined;
   completeProbe = undefined;
   requests = [];
@@ -56,7 +58,9 @@ beforeEach(() => {
       if (sessionStatus === 429) {
         return Response.json(
           { error: "Too many failed authentication attempts" },
-          { status: 429, headers: { "retry-after": "30", "x-ferrum-auth-layer": "bff" } },
+          lockoutMarked
+            ? { status: 429, headers: { "retry-after": "30", "x-ferrum-auth-layer": "bff" } }
+            : { status: 429, headers: { "retry-after": "0" } },
         );
       }
       return sessionStatus === 200 ? session() : Response.json({}, { status: sessionStatus });
@@ -203,6 +207,23 @@ describe("LoginGate session exchange", () => {
     sessionStatus = 200;
     await click("Recheck");
     await settle(() => expect(ui.host.querySelector('[role="alert"]')).toBeNull());
+  });
+
+  it("does not call a 429 from in front of the BFF a sign-in lockout", async () => {
+    mode = "trusted-proxy";
+    sessionStatus = 200;
+    await ui.render(
+      <AuthProvider><LoginGate><AuthLockoutBanner /><h2>Protected workspace</h2><Recheck /></LoginGate></AuthProvider>,
+    );
+    await settle(() => expect(ui.host.textContent).toContain("Protected workspace"));
+    sessionStatus = 429;
+    lockoutMarked = false;
+    const before = requests.length;
+    await click("Recheck");
+    // An unmarked 429 is retried like any read, then fails as transient.
+    await settle(() => expect(requests.length - before).toBe(3), { timeout: 3_000 });
+    await settle(() => expect(ui.host.querySelector('[role="alert"]')).toBeNull());
+    expect(ui.host.textContent).toContain("Protected workspace");
   });
 
   it("lets no older 401 or session read undo a newer lockout", async () => {

@@ -310,7 +310,7 @@ function noteAuthFailure(request: FastifyRequest, config: Config, kind: string):
         ...(outcome.overflow ? { overflow: true } : {}),
       },
       outcome.overflow
-        ? 'Locking out every untracked, unauthenticated address: the failure table is full of locked-out addresses'
+        ? 'Locking out every untracked, unauthenticated address: the failure table is full of addresses with live authentication-failure state'
         : 'Locking out an address after repeated failed BFF authentication',
     );
   }

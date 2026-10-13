@@ -90,6 +90,10 @@ function responseStatus(error: unknown): number | undefined {
 export function lockoutMessage(error: unknown): string | undefined {
   if (responseStatus(error) !== 429) return undefined;
   const response = (error as { response?: Response }).response;
+  // Only the BFF's own refusal is a lockout. A 429 from anything in front of
+  // it (the starter's proxy caps concurrent API requests) is a transient
+  // verification failure, not a sign-in problem.
+  if (response?.headers.get("x-ferrum-auth-layer") !== "bff") return undefined;
   const seconds = Number(response?.headers.get("retry-after"));
   const wait = !Number.isFinite(seconds) || seconds <= 0
     ? "later"
