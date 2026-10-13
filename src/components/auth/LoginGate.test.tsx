@@ -1,6 +1,6 @@
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AuthProvider } from "@/stores/auth";
+import { AuthProvider, useAuth } from "@/stores/auth";
 import { setCsrfToken } from "@/api/client";
 import { BasedRequest, button, click, createHarness, fill, settle } from "@/test/__tests__/harness";
 import { LoginGate } from "./LoginGate";
@@ -62,6 +62,11 @@ afterEach(async () => {
   sessionStorage.clear();
   vi.unstubAllGlobals();
 });
+
+function Recheck() {
+  const { refreshSession } = useAuth();
+  return <button type="button" onClick={() => void refreshSession()}>Recheck</button>;
+}
 
 async function mount() {
   await ui.render(<AuthProvider><LoginGate><h2>Protected workspace</h2></LoginGate></AuthProvider>);
@@ -155,6 +160,24 @@ describe("LoginGate session exchange", () => {
     const sessionReads = requests.filter((request) => new URL(request.url).pathname === "/api/auth/session");
     expect(sessionReads).toHaveLength(1);
     expect(ui.host.textContent).not.toContain("Protected workspace");
+  });
+
+  it("shows a lockout over a signed-in workspace without unmounting it", async () => {
+    mode = "trusted-proxy";
+    sessionStatus = 200;
+    await ui.render(
+      <AuthProvider><LoginGate><h2>Protected workspace</h2><Recheck /></LoginGate></AuthProvider>,
+    );
+    await settle(() => expect(ui.host.textContent).toContain("Protected workspace"));
+    expect(ui.host.querySelector('[role="alert"]')).toBeNull();
+    sessionStatus = 429;
+    await click("Recheck");
+    await settle(() => expect(ui.host.querySelector('[role="alert"]')?.textContent)
+      .toBe("Too many failed sign-in attempts from this address. Try again in 30 seconds."));
+    expect(ui.host.textContent).toContain("Protected workspace");
+    sessionStatus = 200;
+    await click("Recheck");
+    await settle(() => expect(ui.host.querySelector('[role="alert"]')).toBeNull());
   });
 
   it("accepts an existing trusted-proxy session without a token form", async () => {

@@ -5,12 +5,24 @@ import { Card } from "@/components/ui/Card";
 import { BrandMark } from "@/components/layout/BrandMark";
 
 export function LoginGate({ children }: { children: ReactNode }) {
-  const { status, mode, loginUrl, error, login, refreshSession } = useAuth();
+  const { status, mode, loginUrl, error, lockout, login, refreshSession } = useAuth();
   const [input, setInput] = useState("");
   const [showSecret, setShowSecret] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  if (status === "authenticated") return <>{children}</>;
+  if (status === "authenticated") {
+    // The workspace stays mounted, drafts included, while the lockout runs.
+    return (
+      <>
+        {lockout && (
+          <p className="px-4 py-2 text-sm text-danger bg-bg-primary border-b border-border" role="alert">
+            {lockout}
+          </p>
+        )}
+        {children}
+      </>
+    );
+  }
 
   if (status === "loading") {
     return (

@@ -123,7 +123,9 @@ export class AuthFailureThrottle {
     }
     if (this.entries.size >= this.options.maxKeys) this.dropStale(now);
     if (this.entries.size < this.options.maxKeys) {
-      const entry = newEntry();
+      // Until now this address was counted by the overflow entry (if anything
+      // counted it), so it starts from a copy of that live state.
+      const entry = this.copyOfOverflow(now);
       this.entries.set(key, entry);
       return this.count(entry, now);
     }

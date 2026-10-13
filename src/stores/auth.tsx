@@ -53,6 +53,13 @@ interface AuthContextValue {
   principal: AuthPrincipal | null;
   loginUrl?: string;
   error: string | null;
+  /**
+   * Set while this address is locked out after repeated failed
+   * authentication (a BFF `429`). Unlike `error` it is shown over the
+   * workspace too, because a signed-in tab polling its session is refused as
+   * well until the lockout ends.
+   */
+  lockout: string | null;
   login: (token: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshSession: () => Promise<void>;
@@ -108,6 +115,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [config, setConfig] = useState<AuthConfig | null>(null);
   const [principal, setPrincipal] = useState<AuthPrincipal | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [lockout, setLockout] = useState<string | null>(null);
   const principalRef = useRef<AuthPrincipal | null>(null);
   // Request ticket of the newest evidence this provider has published. A
   // session read, or another request's BFF 401, may change the session only if
@@ -164,6 +172,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setCsrfToken(session.csrfToken, session.csrfCookie);
     setStatus("authenticated");
     setError(null);
+    setLockout(null);
   }, [queryClient]);
 
   const refreshSession = useCallback(async () => {
@@ -180,12 +189,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       acceptSession(session);
     } catch (sessionError) {
       if (controller.signal.aborted || !isCurrent(ticket)) return;
-      const lockout = lockoutMessage(sessionError);
+      const lockedOut = lockoutMessage(sessionError);
       if (responseStatus(sessionError) === 401) {
         appliedTicketRef.current = ticket;
         clearLocalSession();
-      } else if (lockout) {
-        setError(lockout);
+      } else if (lockedOut) {
+        setError(lockedOut);
+        setLockout(lockedOut);
         if (!principalRef.current) setStatus("unauthenticated");
       } else if (principalRef.current) {
         setError("Session verification is temporarily unavailable.");
@@ -276,10 +286,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     principal,
     loginUrl: config?.loginUrl,
     error,
+    lockout,
     login,
     logout,
     refreshSession,
-  }), [config, error, login, logout, principal, refreshSession, status]);
+  }), [config, error, lockout, login, logout, principal, refreshSession, status]);
 
   return (
     <AuthContext.Provider value={value}>

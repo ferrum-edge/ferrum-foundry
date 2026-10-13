@@ -100,7 +100,13 @@ authenticated, such as the identity proxy or a signed-in administrator, keep
 their own failure state in a separate table. They are exempt from the overflow
 lockout but never from their own. Live state is never discarded to make room:
 when both tables are full of it, a newly authenticated address goes without
-the exemption until a slot frees up.
+the exemption until a slot frees up. An address that gets a slot after the
+overflow counted it, in either table, starts from a copy of the overflow's
+failures and escalation, not from a clean record. A successful static login
+does start clean.
+
+A signed-in tab whose session check is locked out keeps its workspace open and
+shows the lockout and its remaining time above it.
 
 The address is the socket peer, never `X-Forwarded-For`, so a client that
 reaches the BFF directly cannot rotate a header to escape its own lockout.
