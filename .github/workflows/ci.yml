@@ -83,13 +83,16 @@ jobs:
 
       - name: Audit production dependencies
         # The audit is a blocking gate, so it must fail closed on findings.
+        # Production dependencies gate at `moderate` (issue #593): a moderate
+        # advisory in code the BFF or the shipped bundle runs must not merge
+        # silently. Dev dependencies are reported by the next step instead.
         # It must not fail on a registry outage: a 503 from npm's advisory
         # endpoint once held this step for five minutes and blocked the main
         # image publish. Only a transport or endpoint error is retried; any
         # other non-zero exit (vulnerabilities found) fails immediately.
         run: |
           for attempt in 1 2 3 4; do
-            if output="$(npm audit --omit=dev --audit-level=high 2>&1)"; then
+            if output="$(npm audit --omit=dev --audit-level=moderate 2>&1)"; then
               printf '%s\n' "$output"
               exit 0
             fi
@@ -103,6 +106,12 @@ jobs:
           done
           echo 'npm advisory endpoint unavailable after 4 attempts; refusing to pass an unaudited build' >&2
           exit 1
+
+      - name: Report dev-dependency advisories
+        # Non-blocking: build and test tooling never ships in the image, and a
+        # dev-only advisory must not hold up an unrelated change. The full-tree
+        # report keeps it visible in every run so it is fixed deliberately.
+        run: npm audit --audit-level=low || echo "::warning::npm audit reports advisories in the full dependency tree (dev dependencies included); see the log above"
 
       - name: Build production artifacts
         run: npm run build
