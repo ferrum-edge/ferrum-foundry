@@ -44,6 +44,8 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     authMode: 'static',
     bffAuthToken: 'test-bff-token-is-long-enough-123456',
     sessionTtl: 3600,
+    authMaxFailures: 10,
+    authLockoutSeconds: 60,
     trustedProxySecret: undefined,
     trustedProxyUserHeader: 'x-forwarded-user',
     trustedProxyRoleHeader: 'x-ferrum-role',

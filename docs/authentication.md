@@ -75,6 +75,31 @@ proxy can connect. When the proxy runs on the same host, set
 as `127.0.0.1` or `::1`. Configure the proxy to revoke a user's session as soon
 as the identity provider disables the user.
 
+### Failed-authentication lockout
+
+The trusted-proxy proof and the static login token are each one static
+secret, so the BFF counts failed comparisons per socket peer address. It counts
+a wrong `X-Ferrum-Auth-Secret` and a wrong token at `POST /api/auth/login`. It
+does not count a request with no proof header or a login with no token.
+
+`FERRUM_AUTH_MAX_FAILURES` failures (default 10) within 15 minutes lock the
+address out for `FERRUM_AUTH_LOCKOUT_SECONDS` (default 60). Each further
+lockout of the same address doubles, up to one hour. While an address is
+locked out, every authentication attempt from it gets `429` with
+`Retry-After`, the right secret included. The secret is not compared during a
+lockout, so a lockout cannot be used to test guesses. Every failure and every
+lockout is logged at `warn` (`event` `bff_auth_failure` or
+`bff_auth_lockout`) with the address.
+
+The address is the socket peer, never `X-Forwarded-For`, so a client that
+reaches the BFF directly cannot rotate a header to escape its own lockout.
+Behind the identity proxy every user shares the proxy's address. A proxy that
+sends a wrong secret, for example during a secret rotation, therefore locks
+itself out. Fix the secret and restart the BFF to clear the lockout: the state
+is per process and in memory, and a secret change needs a restart anyway. Set
+`FERRUM_AUTH_MAX_FAILURES=0` to turn the throttle off where the network already
+guarantees that only the proxy can connect.
+
 ### Namespace registry
 
 Registry requests are authorized against the namespace they actually target:

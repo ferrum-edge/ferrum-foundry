@@ -113,6 +113,43 @@ function identityHeaders(overrides: Record<string, string> = {}) {
   };
 }
 
+describe('trusted proxy proof throttle (#588)', () => {
+  it('locks out an address that keeps presenting a wrong proof', async () => {
+    const app = await buildApp();
+    const remoteAddress = '198.51.100.7';
+    const get = (headers: Record<string, string>) => app.inject({
+      method: 'GET', url: '/protected', headers, remoteAddress,
+    });
+    try {
+      // No proof at all is anonymous, not a guess.
+      for (let i = 0; i < 20; i += 1) {
+        expect((await get({ 'x-forwarded-user': 'alice@example.test' })).statusCode).toBe(401);
+      }
+      for (let i = 0; i < 10; i += 1) {
+        const wrong = await get(identityHeaders({ 'x-ferrum-auth-secret': `wrong-proof-${i}-is-long-enough-too` }));
+        expect(wrong.statusCode).toBe(401);
+      }
+      // Refused before the comparison, so the right proof cannot be confirmed.
+      const locked = await get(identityHeaders());
+      expect(locked.statusCode).toBe(429);
+      expect(locked.json()).toEqual({ error: 'Too many failed authentication attempts' });
+      expect(locked.headers['x-ferrum-auth-layer']).toBe('bff');
+      expect(Number(locked.headers['retry-after'])).toBeGreaterThan(0);
+
+      const session = await app.inject({
+        method: 'GET', url: '/api/auth/session', headers: identityHeaders(), remoteAddress,
+      });
+      expect(session.statusCode).toBe(429);
+
+      // The proxy's own address is unaffected.
+      expect((await app.inject({ method: 'GET', url: '/protected', headers: identityHeaders() })).statusCode)
+        .toBe(200);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
 describe('trusted OIDC proxy authentication', () => {
   it('requires a trusted proxy proof and validated identity headers', async () => {
     const app = await buildApp();

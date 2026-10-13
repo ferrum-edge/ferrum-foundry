@@ -7,6 +7,7 @@ import {
   type Config,
   type GatewayRole,
 } from './config.js';
+import { AuthFailureThrottle } from './auth-throttle.js';
 import { GATEWAY_TARGET_HEADER, gatewayTargetId } from './gateway-target.js';
 import {
   proxyPathIsAllowedForNamespace,
@@ -153,7 +154,10 @@ function containsControlCharacter(value: string): boolean {
   });
 }
 
-function trustedProxyPrincipal(request: FastifyRequest, config: Config): AuthPrincipal | undefined {
+function trustedProxyPrincipal(
+  request: FastifyRequest,
+  config: Config,
+): AuthPrincipal | undefined | LockedOut {
   const identityHeaders = new Set([
     TRUSTED_PROXY_SECRET_HEADER, config.trustedProxyUserHeader,
     config.trustedProxyRoleHeader, config.trustedProxyNamespacesHeader,
@@ -166,9 +170,18 @@ function trustedProxyPrincipal(request: FastifyRequest, config: Config): AuthPri
     seen.add(name);
   }
   const suppliedSecret = singleHeader(request, TRUSTED_PROXY_SECRET_HEADER);
-  if (!suppliedSecret || !config.trustedProxySecret || !safeEqual(suppliedSecret, config.trustedProxySecret)) {
+  if (!suppliedSecret || !config.trustedProxySecret) return undefined;
+  // A locked-out address is refused before the comparison, so a lockout
+  // cannot be used to test guesses. A request without the proof header is
+  // simply anonymous and is neither counted nor refused here.
+  if (authThrottle(config).lockedFor(throttleKey(request)) > 0) return LOCKED_OUT;
+  if (!safeEqual(suppliedSecret, config.trustedProxySecret)) {
+    noteAuthFailure(request, config, 'trusted-proxy proof');
     return undefined;
   }
+  // No reset on success: the identity proxy shares one address with every
+  // user, so a correct proof must not wipe failures an attacker on the same
+  // address has accumulated. They expire with the window instead.
 
   const subject = singleHeader(request, config.trustedProxyUserHeader);
   const role = parseRole(singleHeader(request, config.trustedProxyRoleHeader));
@@ -223,9 +236,79 @@ function rejectAuth(reply: FastifyReply, status = 401, error = 'Unauthorized'): 
   return reply.status(status).send({ error });
 }
 
+// ── Failed-authentication throttle (issue #588) ─────────────────────────────
+// The static login token and the trusted-proxy proof are each one static
+// secret, so every failed comparison is counted against the caller's socket
+// address and repeated failures lock that address out. See auth-throttle.ts.
+
+const AUTH_FAILURE_WINDOW_MS = 15 * 60_000;
+const AUTH_MAX_LOCKOUT_MS = 60 * 60_000;
+const AUTH_THROTTLE_MAX_KEYS = 10_000;
+
+/** Returned in place of a principal while the caller's address is locked out. */
+const LOCKED_OUT = Symbol('locked-out');
+type LockedOut = typeof LOCKED_OUT;
+
+let throttleState: { throttle: AuthFailureThrottle; maxFailures: number; lockoutSeconds: number } | undefined;
+
+function authThrottle(config: Config): AuthFailureThrottle {
+  if (
+    !throttleState
+    || throttleState.maxFailures !== config.authMaxFailures
+    || throttleState.lockoutSeconds !== config.authLockoutSeconds
+  ) {
+    throttleState = {
+      throttle: new AuthFailureThrottle({
+        maxFailures: config.authMaxFailures,
+        windowMs: AUTH_FAILURE_WINDOW_MS,
+        lockoutMs: config.authLockoutSeconds * 1000,
+        maxLockoutMs: Math.max(AUTH_MAX_LOCKOUT_MS, config.authLockoutSeconds * 1000),
+        maxKeys: AUTH_THROTTLE_MAX_KEYS,
+      }),
+      maxFailures: config.authMaxFailures,
+      lockoutSeconds: config.authLockoutSeconds,
+    };
+  }
+  return throttleState.throttle;
+}
+
+/**
+ * The address failures are counted against: the socket peer, never a
+ * forwarded header. The BFF trusts X-Forwarded-For from its directly connected
+ * hop, so a caller that reaches the BFF directly could otherwise rotate that
+ * header to dodge its own lockout.
+ */
+function throttleKey(request: FastifyRequest): string {
+  return request.socket?.remoteAddress ?? 'unknown';
+}
+
+function noteAuthFailure(request: FastifyRequest, config: Config, kind: string): void {
+  const key = throttleKey(request);
+  const outcome = authThrottle(config).recordFailure(key);
+  request.log.warn(
+    { event: 'bff_auth_failure', kind, remoteAddress: key, failures: outcome.failures },
+    'Failed BFF authentication attempt',
+  );
+  if (outcome.lockedForMs !== undefined) {
+    request.log.warn(
+      { event: 'bff_auth_lockout', kind, remoteAddress: key, lockoutSeconds: Math.ceil(outcome.lockedForMs / 1000) },
+      'Locking out an address after repeated failed BFF authentication',
+    );
+  }
+}
+
+function rejectLockedOut(request: FastifyRequest, reply: FastifyReply, config: Config): FastifyReply {
+  const lockedForMs = authThrottle(config).lockedFor(throttleKey(request));
+  reply.header('retry-after', String(Math.max(1, Math.ceil(lockedForMs / 1000))));
+  return rejectAuth(reply, 429, 'Too many failed authentication attempts');
+}
+
 export async function resolvePrincipal(request: FastifyRequest): Promise<AuthPrincipal | undefined> {
   const config = loadConfig();
-  if (config.authMode === 'trusted-proxy') return trustedProxyPrincipal(request, config);
+  if (config.authMode === 'trusted-proxy') {
+    const principal = trustedProxyPrincipal(request, config);
+    return principal === LOCKED_OUT ? undefined : principal;
+  }
   return readStaticSession(request, config)?.principal;
 }
 
@@ -235,7 +318,9 @@ export async function requireAdminAuth(
 ): Promise<FastifyReply | void> {
   const config = loadConfig();
   const session = config.authMode === 'static' ? readStaticSession(request, config) : undefined;
-  const principal = session?.principal ?? trustedProxyPrincipal(request, config);
+  const proxied = session ? undefined : trustedProxyPrincipal(request, config);
+  if (proxied === LOCKED_OUT) return rejectLockedOut(request, reply, config);
+  const principal = session?.principal ?? proxied;
   if (!principal) return rejectAuth(reply);
   if (!csrfIsValid(request, config, principal, session)) return rejectAuth(reply, 403, 'CSRF validation failed');
   request.authPrincipal = principal;
@@ -296,10 +381,18 @@ export const authPlugin: FastifyPluginAsync = async (fastify) => {
   fastify.post('/api/auth/login', { bodyLimit: 4096 }, async (request, reply) => {
     const config = loadConfig();
     if (config.authMode !== 'static') return reply.status(404).send({ error: 'Not Found' });
+    // Refused before the comparison while locked out, so a lockout cannot be
+    // used to test guesses (issue #588).
+    if (authThrottle(config).lockedFor(throttleKey(request)) > 0) {
+      return rejectLockedOut(request, reply, config);
+    }
     const body = request.body as { token?: unknown } | undefined;
     if (typeof body?.token !== 'string' || !config.bffAuthToken || !safeEqual(body.token, config.bffAuthToken)) {
+      // A malformed body is not a guess; only a presented token counts.
+      if (typeof body?.token === 'string') noteAuthFailure(request, config, 'static login');
       return rejectAuth(reply);
     }
+    authThrottle(config).recordSuccess(throttleKey(request));
 
     pruneSessions();
     const sessionId = randomBytes(32).toString('base64url');
@@ -324,7 +417,9 @@ export const authPlugin: FastifyPluginAsync = async (fastify) => {
   fastify.get('/api/auth/session', async (request, reply) => {
     const config = loadConfig();
     const session = config.authMode === 'static' ? readStaticSession(request, config) : undefined;
-    const principal = session?.principal ?? trustedProxyPrincipal(request, config);
+    const proxied = session ? undefined : trustedProxyPrincipal(request, config);
+    if (proxied === LOCKED_OUT) return rejectLockedOut(request, reply, config);
+    const principal = session?.principal ?? proxied;
     if (!principal) return rejectAuth(reply);
 
     let csrfToken = session?.csrfToken;

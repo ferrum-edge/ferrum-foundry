@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Throttle failed authentication (#588). A wrong trusted-proxy proof or static
+  login token counts against the caller's socket address. 10 failures
+  (`FERRUM_AUTH_MAX_FAILURES`) within 15 minutes lock the address out for 60
+  seconds (`FERRUM_AUTH_LOCKOUT_SECONDS`), doubling on each repeat up to one
+  hour. A locked-out address gets `429` with `Retry-After`, and its secret is
+  not compared. Failures and lockouts are logged at `warn`.
+  `FERRUM_AUTH_MAX_FAILURES=0` disables the throttle.
+- **Upgrade note:** behind the identity proxy, a proxy that sends a wrong
+  secret now locks itself out. Fix the secret and restart the BFF to clear it.
+
 - Give upload admission a per-authenticated-subject share
   (GHSA-733w-pmhj-7r6j). `FERRUM_MAX_UPLOADS_PER_PRINCIPAL` (default 8, or
   `FERRUM_MAX_ACTIVE_UPLOADS` if lower) and

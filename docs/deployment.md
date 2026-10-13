@@ -115,6 +115,8 @@ Durations are integers.
 | `FERRUM_AUTH_LOGIN_URL` | No | - | root-relative path (not `//`, no backslash) or an `https://` URL | Where the SPA sends a signed-out user |
 | `FERRUM_AUTH_LOGOUT_URL` | No | - | root-relative path or an `https://` URL | Where the SPA sends a user to sign out of the proxy |
 | `FERRUM_SESSION_TTL` | No | `3600` | 60-86400 seconds | Lifetime of the BFF session cookie and of a trusted-proxy CSRF token |
+| `FERRUM_AUTH_MAX_FAILURES` | No | `10` | 0-1000 | Failed proxy proofs or static logins from one address, within 15 minutes, that lock it out. `0` disables the lockout. See [Failed-authentication lockout](authentication.md#failed-authentication-lockout) |
+| `FERRUM_AUTH_LOCKOUT_SECONDS` | No | `60` | 1-3600 seconds | First lockout; each further one doubles, up to one hour |
 | `FERRUM_SECURE_COOKIES` | No | `true` when `NODE_ENV=production`, else `false` | `true`/`false` | Sets `Secure` and the `__Host-` cookie name prefix |
 | `FERRUM_BFF_AUTH_TOKEN` | In `static` | - | 32 characters or more | Development-only token exchanged once at `POST /api/auth/login` |
 | `FERRUM_ALLOW_INSECURE_STATIC_AUTH` | No | `false` | `true`/`false` | Allows static auth under `NODE_ENV=production`. Do not use it |
