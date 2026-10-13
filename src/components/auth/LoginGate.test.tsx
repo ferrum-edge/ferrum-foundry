@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthProvider, useAuth } from "@/stores/auth";
 import { api, setCsrfToken, SILENT_ERRORS } from "@/api/client";
 import { BasedRequest, button, click, createHarness, fill, settle } from "@/test/__tests__/harness";
+import { AuthLockoutBanner } from "./AuthLockoutBanner";
 import { LoginGate } from "./LoginGate";
 
 let ui: ReturnType<typeof createHarness>;
@@ -190,14 +191,14 @@ describe("LoginGate session exchange", () => {
     mode = "trusted-proxy";
     sessionStatus = 200;
     await ui.render(
-      <AuthProvider><LoginGate><h2>Protected workspace</h2><Recheck /></LoginGate></AuthProvider>,
+      <AuthProvider><LoginGate><AuthLockoutBanner /><h2>Protected workspace</h2><Recheck /></LoginGate></AuthProvider>,
     );
     await settle(() => expect(ui.host.textContent).toContain("Protected workspace"));
     expect(ui.host.querySelector('[role="alert"]')).toBeNull();
     sessionStatus = 429;
     await click("Recheck");
     await settle(() => expect(ui.host.querySelector('[role="alert"]')?.textContent)
-      .toBe("Too many failed sign-in attempts from this address. Try again in 30 seconds."));
+      .toContain("Too many failed sign-in attempts from this address. Try again in 30 seconds."));
     expect(ui.host.textContent).toContain("Protected workspace");
     sessionStatus = 200;
     await click("Recheck");
@@ -208,7 +209,9 @@ describe("LoginGate session exchange", () => {
     mode = "trusted-proxy";
     sessionStatus = 200;
     await ui.render(
-      <AuthProvider><LoginGate><h2>Protected workspace</h2><Recheck /><Probe /></LoginGate></AuthProvider>,
+      <AuthProvider>
+        <LoginGate><AuthLockoutBanner /><h2>Protected workspace</h2><Recheck /><Probe /></LoginGate>
+      </AuthProvider>,
     );
     await settle(() => expect(ui.host.textContent).toContain("Protected workspace"));
     const draft = () => ui.host.querySelector<HTMLInputElement>('input[aria-label="Draft"]');
@@ -226,7 +229,7 @@ describe("LoginGate session exchange", () => {
     sessionStatus = 429;
     await click("Recheck");
     const lockedOut = "Too many failed sign-in attempts from this address. Try again in 30 seconds.";
-    await settle(() => expect(ui.host.querySelector('[role="alert"]')?.textContent).toBe(lockedOut));
+    await settle(() => expect(ui.host.querySelector('[role="alert"]')?.textContent).toContain(lockedOut));
 
     // The older answers land afterwards and change nothing.
     await act(async () => completeProbe!(Response.json(
@@ -234,7 +237,7 @@ describe("LoginGate session exchange", () => {
       { status: 401, headers: { "x-ferrum-auth-layer": "bff" } },
     )));
     await act(async () => completeSession!(session()));
-    await settle(() => expect(ui.host.querySelector('[role="alert"]')?.textContent).toBe(lockedOut));
+    await settle(() => expect(ui.host.querySelector('[role="alert"]')?.textContent).toContain(lockedOut));
     expect(ui.host.textContent).toContain("Protected workspace");
     expect(draft()?.value).toBe("unsaved edit");
   });

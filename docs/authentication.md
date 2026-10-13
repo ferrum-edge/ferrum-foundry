@@ -103,10 +103,11 @@ when both tables are full of it, a newly authenticated address goes without
 the exemption until a slot frees up. An address that gets a slot after the
 overflow counted it, in either table, starts from a copy of the overflow's
 failures and escalation, not from a clean record. A successful static login
-does start clean.
+clears the record the BFF holds for its address; an address that neither table
+can admit keeps sharing the overflow's history and lockout.
 
 A signed-in tab whose session check is locked out keeps its workspace open and
-shows the lockout and its remaining time above it.
+shows the lockout and its remaining time at the top of the page content.
 
 The address is the socket peer, never `X-Forwarded-For`, so a client that
 reaches the BFF directly cannot rotate a header to escape its own lockout.
