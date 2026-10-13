@@ -86,6 +86,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   workspace as outcome-unknown (#575).
 - Complete collection traversals reject a repeated record `id` (an
   equal-total concurrent change) instead of reporting complete data (#577).
+- A create that completes after the operator switched namespace or left the
+  page no longer navigates the newer draft away (proxy, upstream, and plugin
+  create; follow-up to #573).
+- A committed-but-not-live or outcome-unknown API-spec import or replacement
+  now retires the spec's cascaded detail caches in the issuing namespace, so a
+  reopened proxy is not seeded from the replaced resource (follow-up to #575).
+- The Proxies page's budgeted plugin-configuration summary and the namespace
+  registry traversal also reject a repeated record (follow-up to #577).
+- The Metrics page keeps its independent panels mounted while an admin-metrics
+  retry is pending after a failure (follow-up to #574).
 - Starter: the demo bootstrap and `.env.example` no longer override the
   published Foundry digest with `:main` (#578); preflight gateway probes trust
   `FERRUM_TLS_CA_PATH` when it is readable on the host (#579); the production

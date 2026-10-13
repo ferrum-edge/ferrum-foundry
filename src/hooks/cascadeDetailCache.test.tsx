@@ -192,6 +192,13 @@ async function settle(check: () => void) {
   });
 }
 
+// The gateway committed the write but could not prove it live (#575).
+const committedNotLive = () =>
+  Response.json(
+    { error: "reload timed out", applied: false, reason: "reload_timeout" },
+    { status: 503 },
+  );
+
 const specResponse = () =>
   Response.json({
     id: "spec-1",
@@ -240,6 +247,29 @@ for (const [kind, retired] of cases) {
         expect(client.getQueryData([detail, "tenant-b", "cascaded-id"])).toBeDefined();
       }
     });
+
+    if (kind === "import" || kind === "replace") {
+      it("retires the issuing namespace's details when the gateway answers committed-but-not-live", async () => {
+        const Probe = probes[kind];
+        seedDetails();
+        await render(<Probe />);
+        const pending = run("spec-1").catch((error: unknown) => error);
+        await settle(() => expect(writes).toHaveLength(1));
+
+        namespace = "tenant-b";
+        await render(<Probe />);
+        await act(async () => {
+          writes[0]!.resolve(committedNotLive());
+          await pending;
+        });
+
+        expect(writes[0]!.namespace).toBe("tenant-a");
+        for (const detail of retired) {
+          expect(client.getQueryData([detail, "tenant-a", "cascaded-id"])).toBeUndefined();
+          expect(client.getQueryData([detail, "tenant-b", "cascaded-id"])).toBeDefined();
+        }
+      });
+    }
 
     it("retains the cascaded details when the mutation fails", async () => {
       const Probe = probes[kind];
@@ -308,4 +338,35 @@ it("reopens and submits a spec-replaced proxy without pre-replacement values", a
   expect(proxyUpdateTags).toEqual([replacementEtag]);
   expect(updates[0]).toMatchObject({ listen_path: "/v2" });
   expect(serverProxy.listen_path).toBe("/v2");
+});
+
+it("reopens a proxy replaced by a committed-but-not-live spec write without pre-replacement values", async () => {
+  const listenPath = () =>
+    (host.querySelector('input[placeholder="/api/v1"]') as HTMLInputElement | null)?.value;
+
+  await render(<ProxyDetailPage />);
+  await settle(() => expect(listenPath()).toBe("/v1"));
+
+  await render(<ReplaceProbe />);
+  const pending = run("spec-1").catch((error: unknown) => error);
+  await settle(() => expect(writes).toHaveLength(1));
+  serverProxy = specProxy("/v2");
+  serverProxyRevision += 1;
+  const replacementEtag = proxyEtag();
+  await act(async () => {
+    writes[0]!.resolve(committedNotLive());
+    await pending;
+  });
+
+  await render(<ProxyDetailPage />);
+  await settle(() => expect(listenPath()).toBe("/v2"));
+
+  await act(async () => {
+    host
+      .querySelector("form")!
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  });
+  await settle(() => expect(updates).toHaveLength(1));
+  expect(proxyUpdateTags).toEqual([replacementEtag]);
+  expect(updates[0]).toMatchObject({ listen_path: "/v2" });
 });

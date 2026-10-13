@@ -125,3 +125,36 @@ describe("listConfigsForProxy", () => {
     expect(requests[0]!.searchParams.has("proxy_id")).toBe(false);
   });
 });
+
+describe("listBoundedConfigs", () => {
+  beforeEach(() => {
+    resetGatewayMetadata();
+  });
+  afterEach(() => {
+    resetGatewayMetadata();
+    vi.unstubAllGlobals();
+  });
+
+  it("rejects a repeated boundary configuration under an unchanged total (#577)", async () => {
+    // 500 configurations; after page one, a delete plus an earlier-sorting
+    // insert shifts page two back one row: it repeats plugin-249 and the total
+    // stays 500, so counts alone would call the summary complete.
+    const TOTAL = 2 * ALL_PAGE_SIZE;
+    vi.stubGlobal("Request", BasedRequest);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request) => {
+        const url = new URL(input.url);
+        const offset = Number(url.searchParams.get("offset") ?? "0");
+        const limit = Number(url.searchParams.get("limit") ?? "20");
+        const start = offset === 0 ? 0 : offset - 1;
+        return Response.json({
+          data: Array.from({ length: limit }, (_, index) => pluginAt(start + index)),
+          pagination: { offset, limit, total: TOTAL },
+        });
+      }),
+    );
+
+    await expect(plugins.listBoundedConfigs(scope)).rejects.toThrow("repeated resource");
+  });
+});

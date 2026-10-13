@@ -15,6 +15,10 @@ interface DraftProps {
 let latestSubmit: DraftProps["onSubmit"];
 const writes: { namespace: string; data: unknown }[] = [];
 const toast = vi.fn();
+// When set, each create stays pending until its resolver in `held` is called,
+// standing in for a POST whose answer arrives after the operator moved on.
+let holdWrites = false;
+const held: (() => void)[] = [];
 const navigate = vi.fn();
 
 // Keep real route/session behavior; a small stateful form exposes remounting
@@ -42,6 +46,9 @@ function useScopedMutation() {
     error: null,
     mutateAsync: async (data: unknown) => {
       writes.push({ namespace: scope.namespace, data });
+      if (holdWrites) {
+        await new Promise<void>((resolve) => held.push(resolve));
+      }
       return { id: "created" };
     },
   };
@@ -106,6 +113,8 @@ describe.each(cases)("%s create editor namespace identity", (_kind, Page) => {
 
   beforeEach(async () => {
     writes.length = 0;
+    holdWrites = false;
+    held.length = 0;
     toast.mockClear();
     navigate.mockClear();
     localStorage.setItem(NAMESPACE_STORAGE_KEY, "tenant-a");
@@ -153,5 +162,41 @@ describe.each(cases)("%s create editor namespace identity", (_kind, Page) => {
     expect(writes).toEqual([]);
     expect(navigate).not.toHaveBeenCalled();
     expect(toast).toHaveBeenCalledWith("warning", expect.stringContaining("Discarded"));
+  });
+
+  it("opens the created resource when the draft is still on screen", async () => {
+    holdWrites = true;
+    await type("Draft name", "tenant-a-draft");
+    await act(async () => { host.querySelector("form")!.requestSubmit(); });
+    expect(writes).toHaveLength(1);
+    await act(async () => { held.shift()!(); });
+    expect(navigate).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not navigate a newer draft away when a held create completes after a namespace switch", async () => {
+    holdWrites = true;
+    await type("Draft name", "tenant-a-draft");
+    await act(async () => { host.querySelector("form")!.requestSubmit(); });
+    expect(writes).toHaveLength(1);
+
+    await act(async () => { namespace.setNamespace("tenant-b"); });
+    await type("Draft name", "tenant-b-draft");
+    await act(async () => { held.shift()!(); });
+
+    expect(navigate).not.toHaveBeenCalled();
+    expect(input("Draft name").value).toBe("tenant-b-draft");
+  });
+
+  it("does not navigate when a held create completes after the page unmounted", async () => {
+    holdWrites = true;
+    await type("Draft name", "tenant-a-draft");
+    await act(async () => { host.querySelector("form")!.requestSubmit(); });
+    expect(writes).toHaveLength(1);
+
+    await act(async () => {
+      root.render(<NamespaceProvider><NamespaceProbe /></NamespaceProvider>);
+    });
+    await act(async () => { held.shift()!(); });
+    expect(navigate).not.toHaveBeenCalled();
   });
 });

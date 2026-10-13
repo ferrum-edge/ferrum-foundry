@@ -101,7 +101,9 @@ export async function listBoundedConfigs(
 ): Promise<BoundedCollection<PluginConfig>> {
   return collectBoundedPages(
     (offset, limit, pageSignal) => listConfigs(scope, { offset, limit }, pageSignal),
-    { budget, signal },
+    // A complete summary is only as good as the traversal: reject a repeated
+    // boundary row instead of counting it (#577).
+    { budget, signal, identity: (config) => config.id },
   );
 }
 

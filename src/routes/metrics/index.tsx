@@ -116,22 +116,21 @@ function MetricsWorkspace() {
   );
 
   /* ---------------------------------------------------------------- */
-  /*  Loading state                                                    */
+  /*  Admin-metrics loading state                                      */
   /* ---------------------------------------------------------------- */
 
-  if (isLoading) {
-    return (
-      <div className="space-y-6">
-        {header}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <SkeletonCard />
-          <SkeletonCard />
-          <SkeletonCard />
-          <SkeletonCard />
-        </div>
-      </div>
-    );
-  }
+  // Placeholders stand in for admin-derived content only. A retry after an
+  // initial admin failure puts that query back to pending (no sample yet), and
+  // an early return here would unmount the independent panels and stop their
+  // polling until the admin read settles.
+  const adminLoading = isLoading ? (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4" aria-busy="true">
+      <SkeletonCard />
+      <SkeletonCard />
+      <SkeletonCard />
+      <SkeletonCard />
+    </div>
+  ) : null;
 
   /* ---------------------------------------------------------------- */
   /*  Admin-metrics error state                                        */
@@ -157,6 +156,7 @@ function MetricsWorkspace() {
   return (
     <div className="space-y-6">
       {header}
+      {adminLoading}
       {adminError}
 
       {/* Gateway Stats */}
