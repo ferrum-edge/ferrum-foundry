@@ -324,6 +324,9 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
     // either Fastify terminal hook. Install this at reservation lifetime, not
     // inside forwarding, and retain it through every handler cleanup path.
     reply.raw.once('close', () => releaseUpload(request));
+    // A socket that closed before the listener existed never emits again, and
+    // a leaked permit would now shrink that subject's share until restart.
+    if (reply.raw.destroyed) releaseUpload(request);
   };
 
   // The release is keyed off WeakMap membership, so a request that holds one

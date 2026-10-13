@@ -311,8 +311,13 @@ test("a 404 forged-identity answer is unknown, not a stripping pass", async () =
 });
 
 test("gateway probes use the configured CA bundle when it is readable here", async () => {
-  const dispatcher = { fake: true };
+  let agentOptions;
   let seenInit;
+  class FakeAgent {
+    constructor(options) {
+      agentOptions = options;
+    }
+  }
   const gatewayFetch = await createGatewayFetch(
     { ...workingEnv, FERRUM_TLS_CA_PATH: "/host/ca.pem" },
     {
@@ -320,25 +325,30 @@ test("gateway probes use the configured CA bundle when it is readable here", asy
         assert.equal(path, "/host/ca.pem");
         return "PEM";
       },
-      makeDispatcher: async (ca) => {
-        assert.equal(ca, "PEM");
-        return dispatcher;
+      undici: {
+        Agent: FakeAgent,
+        fetch: async (_url, init) => {
+          seenInit = init;
+          return new Response("ok");
+        },
       },
     },
   );
-  // Invoke through a stubbed global fetch? The returned fetcher wraps the
-  // global one with the dispatcher; assert the dispatcher reached it.
-  const original = globalThis.fetch;
-  globalThis.fetch = async (_url, init) => {
-    seenInit = init;
-    return new Response("ok");
-  };
-  try {
-    await gatewayFetch("https://ferrum-admin.internal:9000/health", {});
-  } finally {
-    globalThis.fetch = original;
-  }
-  assert.equal(seenInit.dispatcher, dispatcher);
+  await gatewayFetch("https://ferrum-admin.internal:9000/health", {});
+  assert.deepEqual(agentOptions, { connect: { ca: "PEM" } });
+  assert.ok(seenInit.dispatcher instanceof FakeAgent);
+});
+
+test("gateway probes fall back to ambient trust when the CA path is not on this host", async () => {
+  const gatewayFetch = await createGatewayFetch(
+    { ...workingEnv, FERRUM_TLS_CA_PATH: "/container/ca.pem" },
+    {
+      readFile: async () => {
+        throw Object.assign(new Error("missing"), { code: "ENOENT" });
+      },
+    },
+  );
+  assert.equal(gatewayFetch, fetch);
 });
 
 test("a served anonymous request fails", async () => {

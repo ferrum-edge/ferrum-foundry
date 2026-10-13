@@ -573,7 +573,10 @@ with a body, and `FERRUM_MAX_LARGE_UPLOADS` is a tighter limit on restore and
 API-spec uploads. Each pool also has a per-subject share
 (`FERRUM_MAX_UPLOADS_PER_PRINCIPAL`, `FERRUM_MAX_LARGE_UPLOADS_PER_PRINCIPAL`)
 so one authenticated principal cannot hold every permit while other tenants
-are refused. All answer `429` with `code: FERRUM_BFF_UPLOAD_CAPACITY`,
+are refused. The share is keyed by subject (the trusted-proxy user header), not
+by session, so extra sessions do not widen it; under static authentication
+every session is the same subject, so the shares bound the whole instance.
+All answer `429` with `code: FERRUM_BFF_UPLOAD_CAPACITY`,
 `retry-after: 1`, and `scope` `all`, `large`, `principal`, or
 `principal_large`, reserved before a token is signed or the gateway is
 contacted. Steady `429`s with `scope: "all"` mean the instance is at its

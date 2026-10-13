@@ -247,7 +247,7 @@ export async function checkGatewayReachable(env, fetchImpl = fetch) {
       FAIL,
       `GET ${origin}/health failed (${cause})`,
       tls
-        ? "The gateway's certificate did not verify. Point FERRUM_TLS_CA_PATH at the issuing CA; do not disable FERRUM_TLS_VERIFY."
+        ? "The gateway's certificate did not verify. Point FERRUM_TLS_CA_PATH at the issuing CA; do not disable FERRUM_TLS_VERIFY. If it is already set, this probe used it only if that path is readable on this host (see gateway TLS trust); otherwise run preflight where it resolves, or trust the CA on this host with NODE_EXTRA_CA_CERTS."
         : "Check the admin URL, network reachability, and that the gateway is running.",
     );
   }
@@ -523,12 +523,12 @@ export async function createGatewayFetch(env, deps = {}) {
   if (!path || !(env.FERRUM_ADMIN_URL ?? "").startsWith("https://")) return fetch;
   try {
     const ca = await (deps.readFile ?? readFile)(path);
-    const makeDispatcher = deps.makeDispatcher ?? (async (bundle) => {
-      const { Agent } = await import("undici");
-      return new Agent({ connect: { ca: bundle } });
-    });
-    const dispatcher = await makeDispatcher(ca);
-    return (url, init = {}) => fetch(url, { ...init, dispatcher });
+    // undici's own fetch with its own Agent, as the BFF sends (server/proxy.ts):
+    // the runtime's global fetch bundles its own undici, possibly another
+    // major, which need not accept this package's dispatcher.
+    const { Agent, fetch: undiciFetch } = deps.undici ?? (await import("undici"));
+    const dispatcher = new Agent({ connect: { ca } });
+    return (url, init = {}) => undiciFetch(url, { ...init, dispatcher });
   } catch {
     // The bundle is not readable from this host (the configured path is the
     // container's mount path). Fall back to ambient trust; checkTlsTrust
