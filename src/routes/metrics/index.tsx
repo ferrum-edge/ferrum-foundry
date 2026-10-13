@@ -70,6 +70,7 @@ function MetricsWorkspace() {
     data: prometheusText,
     dataUpdatedAt: prometheusUpdatedAt,
     isError: isPrometheusError,
+    isPending: isPrometheusPending,
     isFetching: isPrometheusFetching,
     refetch: refetchPrometheusMetrics,
   } = usePrometheusMetrics(refreshInterval);
@@ -269,7 +270,12 @@ function MetricsWorkspace() {
         </h2>
         <MetricsSampleTime timestamp={prometheusUpdatedAt} />
         {isPrometheusError && <p className="text-danger text-sm mb-3">Per-route metrics unavailable. Any values below are from the last successful sample.</p>}
-        {(!isPrometheusError || prometheusText) && <PrometheusStatsPanel text={prometheusText ?? ""} />}
+        {/* No sample yet: an empty panel would claim the plugin is off. */}
+        {isPrometheusPending && !prometheusText ? (
+          <p className="text-text-muted text-sm" role="status">Loading per-route metrics…</p>
+        ) : (
+          (!isPrometheusError || prometheusText) && <PrometheusStatsPanel text={prometheusText ?? ""} />
+        )}
       </section>
     </div>
   );

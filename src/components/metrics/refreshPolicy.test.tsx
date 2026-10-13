@@ -223,6 +223,24 @@ describe("Metrics page refresh policy", () => {
     expect(overload.isConnected).toBe(true);
   });
 
+  it("does not advise enabling Prometheus before the first sample arrives", async () => {
+    holdAdmin = true;
+    holdPrometheus = true;
+    localStorage.setItem(METRICS_REFRESH_INTERVAL_KEY, "0");
+    await act(async () => root.render(<QueryClientProvider client={client}><MetricsPage /></QueryClientProvider>));
+    await advance(100);
+    expect(host.textContent).toContain("Loading per-route metrics");
+    expect(host.textContent).not.toContain("No Prometheus metrics available");
+
+    holdPrometheus = false;
+    releasePrometheus!();
+    for (const release of releaseAdmin.splice(0)) release();
+    await advance(100);
+    await advance(100);
+    expect(host.textContent).not.toContain("Loading per-route metrics");
+    expect(host.textContent).toContain("Requests by Route");
+  });
+
   it("keeps manual recovery available after the admin metrics request fails", async () => {
     failAdmin = true;
     localStorage.setItem(METRICS_REFRESH_INTERVAL_KEY, "0");
