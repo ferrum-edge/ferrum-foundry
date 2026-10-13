@@ -41,6 +41,8 @@ const ENV_KEYS = [
   'FERRUM_MAX_GATEWAY_CONNECTIONS',
   'FERRUM_BIND_ADDRESS',
   'FERRUM_SHUTDOWN_TIMEOUT',
+  'FERRUM_SECURE_COOKIES',
+  'FERRUM_ENABLE_HSTS',
   'PORT',
 ] as const;
 
@@ -523,6 +525,33 @@ describe('config', () => {
     });
     const { loadConfig } = await loadModule();
     expect(loadConfig()).toMatchObject({ authMode: 'trusted-proxy', bffAuthToken: undefined });
+  });
+
+  it('defaults HSTS to on wherever Secure cookies are on (#589)', async () => {
+    setProductionEnv();
+    let { loadConfig } = await loadModule();
+    expect(loadConfig()).toMatchObject({ secureCookies: true, enableHsts: true });
+
+    clearTestEnv();
+    setProductionEnv({ FERRUM_ENABLE_HSTS: 'false' });
+    ({ loadConfig } = await loadModule());
+    expect(loadConfig()).toMatchObject({ secureCookies: true, enableHsts: false });
+
+    // A plain-HTTP production deployment turns Secure cookies off, and HSTS with them.
+    clearTestEnv();
+    setProductionEnv({ FERRUM_SECURE_COOKIES: 'false' });
+    ({ loadConfig } = await loadModule());
+    expect(loadConfig()).toMatchObject({ secureCookies: false, enableHsts: false });
+
+    clearTestEnv();
+    setValidEnv();
+    ({ loadConfig } = await loadModule());
+    expect(loadConfig()).toMatchObject({ secureCookies: false, enableHsts: false });
+
+    clearTestEnv();
+    setValidEnv({ FERRUM_ENABLE_HSTS: 'true' });
+    ({ loadConfig } = await loadModule());
+    expect(loadConfig()).toMatchObject({ secureCookies: false, enableHsts: true });
   });
 
   it('classifies only https and literal loopback plaintext as secure admin origins', async () => {

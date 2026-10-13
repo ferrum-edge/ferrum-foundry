@@ -509,6 +509,12 @@ function parseBaseConfig(): Config {
   const tlsVerify = parseBoolean('FERRUM_TLS_VERIFY', true);
   assertTlsVerification(adminUrl, tlsVerify, requireSecure);
 
+  // HSTS follows Secure cookies by default (issue #589): both mean "this BFF is
+  // reached over HTTPS", which is the production default. A plain-HTTP
+  // deployment turns both off; FERRUM_ENABLE_HSTS=false opts out on its own.
+  const secureCookies = parseBoolean('FERRUM_SECURE_COOKIES', isProduction);
+  const enableHsts = parseBoolean('FERRUM_ENABLE_HSTS', secureCookies);
+
   return {
     adminUrl,
     initialAdminOrigin: adminUrl,
@@ -550,8 +556,8 @@ function parseBaseConfig(): Config {
     ...parseTrustedProxyHeaders(),
     authLoginUrl: parseAuthRedirect(optionalEnv('FERRUM_AUTH_LOGIN_URL'), 'FERRUM_AUTH_LOGIN_URL'),
     authLogoutUrl: parseAuthRedirect(optionalEnv('FERRUM_AUTH_LOGOUT_URL'), 'FERRUM_AUTH_LOGOUT_URL'),
-    secureCookies: parseBoolean('FERRUM_SECURE_COOKIES', isProduction),
-    enableHsts: parseBoolean('FERRUM_ENABLE_HSTS', false),
+    secureCookies,
+    enableHsts,
   };
 }
 

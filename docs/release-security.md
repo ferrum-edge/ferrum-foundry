@@ -5,8 +5,9 @@ workflow (`.github/workflows/ci.yml`) has passed:
 
 1. **Quality Gate** (Node 22 and 24): zero-warning lint, frontend, server, and
    E2E type checks, the full test suite with coverage floors, a
-   production-dependency audit (`npm audit --omit=dev --audit-level=high`), and
-   a production build.
+   production-dependency audit that fails on any moderate or worse advisory
+   (`npm audit --omit=dev --audit-level=moderate`), a non-blocking full-tree
+   audit report that includes dev dependencies, and a production build.
 2. **Pinned Gateway Contract**: runs against the Ferrum Edge image pinned as
    `edge.image` in `docs/compatibility.json`, with admin JWT audience and
    namespace-claim enforcement on. It checks the guided plugin schemas and the
@@ -104,8 +105,8 @@ Before any registry login or build, the release workflow requires that:
 - the tag is a safe semantic version, names the commit the run builds
   (`GITHUB_SHA`), and that commit is reachable from `main`;
 - `package.json` `version` equals the tag without its `v` (`v1.2.3` needs
-  `1.2.3`), because the BFF reports it from `/api/health/live` and
-  `/api/health/ready`;
+  `1.2.3`), because the BFF reports it to an authenticated session from
+  `/api/health/live` and `/api/health/ready`;
 - `foundry.version` in `docs/compatibility.json` equals that version;
 - `docs/release-notes/vX.Y.Z.md` exists and is not empty;
 - `node scripts/supported-pairing.mjs release-ready` passes in hosted Actions:

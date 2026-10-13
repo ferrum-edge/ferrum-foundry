@@ -3,8 +3,8 @@
 Foundry's security boundaries and supported deployment assumptions are
 described in [SECURITY.md](../SECURITY.md),
 [authentication.md](authentication.md), and [deployment.md](deployment.md).
-This document records the threats relevant to admin API transport and
-operator helper scripts.
+This document records the threats relevant to admin API transport, operator
+helper scripts, and the browser-facing surface of the BFF.
 
 ## Admin API token transport
 
@@ -45,3 +45,26 @@ acknowledgement before its first network request. The preflight can perform
 its anonymous, proof-free diagnostic request first, but it does not send the
 proof header when the configured HTTP target is not an allowed loopback
 literal. Operators should use HTTPS for remote targets.
+
+## Browser-facing headers and public endpoints
+
+- **Content-Security-Policy.** `script-src 'self'` with `script-src-attr 'none'`,
+  `object-src 'none'` and `frame-ancestors 'none'`. `style-src` still allows
+  `'unsafe-inline'` because of a framework constraint: Radix's scroll lock
+  (Dialog, Select, DropdownMenu) injects a `<style>` element with computed
+  widths at runtime, and Select's viewport renders another. No hash can cover
+  them. Removing it needs per-response nonces in the SPA shell and in those
+  libraries. That work is tracked in
+  [#594](https://github.com/ferrum-edge/ferrum-foundry/issues/594). The Foundry
+  maintainers own it, and it is due before Foundry leaves buildout and onboards
+  users. Until then, an HTML-injection sink could use
+  inline styles for UI redress or CSS-based exfiltration, but not to run script.
+- **HSTS** is on by default wherever Secure cookies are (both default to
+  `NODE_ENV=production`). `FERRUM_ENABLE_HSTS=false` opts out.
+- **CORS** is disabled in every environment. The development UI reaches the
+  BFF through Vite's same-origin `/api/` proxy, so no other site a developer
+  visits can read a locally running BFF.
+- **Health endpoints** are unauthenticated so probes work. An anonymous caller
+  gets only the verdict (`status`, `ready`) and the status code. The Foundry
+  version, the gateway's `degraded` verdict and the Admin API status code need
+  an authenticated session.

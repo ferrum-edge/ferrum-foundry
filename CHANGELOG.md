@@ -21,6 +21,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `FERRUM_AUTH_MAX_FAILURES=0` disables the throttle.
 - **Upgrade note:** behind the identity proxy, a proxy that sends a wrong
   secret now locks itself out. Fix the secret and restart the BFF to clear it.
+- Send `Strict-Transport-Security` by default wherever Secure cookies are on,
+  which is `NODE_ENV=production` unless `FERRUM_SECURE_COOKIES=false` (#589).
+  `FERRUM_ENABLE_HSTS=false` still opts out.
+- **Upgrade note:** a production deployment that serves Foundry, or a
+  subdomain of its host, over plain HTTP with Secure cookies left on must now
+  set `FERRUM_ENABLE_HSTS=false`.
+- Stop reflecting any `Origin` in CORS outside production (#590). The BFF now
+  emits no CORS allow headers in any environment, so no other site's scripts
+  can read its responses; the development UI already reaches it through
+  Vite's same-origin `/api/` proxy.
+- Tell unauthenticated health callers only the verdict (#592).
+  `/api/health` and `/api/health/live` answer `{"status":"ok"}`, and
+  `/api/health/ready` answers `{"status":"ready"|"unavailable","ready":...}`
+  with an unchanged status code. The Foundry `version`, `checkedAt`, the
+  gateway's `degraded` verdict and its Admin API status code need an
+  authenticated session.
+- **Upgrade note:** a monitor that read `version` or `components` from a health
+  endpoint without a session gets only the verdict now.
+- Gate CI on moderate production-dependency advisories instead of high only,
+  and report the full dependency tree, dev dependencies included, on every run
+  without blocking (#593).
+- Document why `style-src` still allows `'unsafe-inline'` (#591): Radix's
+  runtime `<style>` injection cannot be hashed. Nonce-based removal is tracked
+  in #594.
 
 - Give upload admission a per-authenticated-subject share
   (GHSA-733w-pmhj-7r6j). `FERRUM_MAX_UPLOADS_PER_PRINCIPAL` (default 8, or
