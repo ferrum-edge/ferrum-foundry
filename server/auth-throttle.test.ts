@@ -242,11 +242,15 @@ describe('AuthFailureThrottle overflow', () => {
   it('carries overflow escalation into an address the table later admits', () => {
     const { instance, advance } = throttle({ maxKeys: 1, maxFailures: 3, windowMs: 2_000 });
     instance.recordFailure('A'); // t = 0
-    advance(3_000);
-    for (let i = 0; i < 3; i += 1) instance.recordFailure('B'); // overflow locks to t = 4 s
     advance(1_500);
-    // t = 4.5 s: A is stale, the overflow lockout has ended but not decayed.
-    instance.recordFailure('B');
+    instance.recordFailure('A'); // t = 1.5 s: A stays live and holds the only slot
+    expect(instance.recordFailure('B')).toEqual({ failures: 1, overflow: true });
+    expect(instance.recordFailure('B')).toEqual({ failures: 2, overflow: true });
+    expect(instance.recordFailure('B')).toEqual({ failures: 3, lockedForMs: 1_000, overflow: true });
+    advance(2_000);
+    // t = 3.5 s: A is stale; the overflow lockout ended at 2.5 s but has not decayed.
+    expect(instance.lockedFor('B')).toBe(0);
+    expect(instance.recordFailure('B')).toEqual({ failures: 1 });
     instance.recordFailure('B');
     expect(instance.recordFailure('B')).toEqual({ failures: 3, lockedForMs: 2_000 });
   });

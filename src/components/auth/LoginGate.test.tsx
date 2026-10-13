@@ -1,7 +1,7 @@
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthProvider, useAuth } from "@/stores/auth";
-import { setCsrfToken } from "@/api/client";
+import { api, setCsrfToken, SILENT_ERRORS } from "@/api/client";
 import { BasedRequest, button, click, createHarness, fill, settle } from "@/test/__tests__/harness";
 import { LoginGate } from "./LoginGate";
 
@@ -12,6 +12,9 @@ let sessionStatus: number;
 let configStatus: number;
 let requests: Request[];
 let completeLogin: (response: Response) => void;
+let deferSession: boolean;
+let completeSession: ((response: Response) => void) | undefined;
+let completeProbe: ((response: Response) => void) | undefined;
 
 function session() {
   return Response.json({
@@ -28,6 +31,9 @@ beforeEach(() => {
   loginUrl = undefined;
   sessionStatus = 401;
   configStatus = 200;
+  deferSession = false;
+  completeSession = undefined;
+  completeProbe = undefined;
   requests = [];
   ui = createHarness();
   localStorage.clear();
@@ -39,7 +45,13 @@ beforeEach(() => {
     if (path === "/api/auth/config") {
       return Response.json({ mode, loginUrl }, { status: configStatus });
     }
+    if (path === "/api/probe") {
+      return new Promise<Response>((resolve) => { completeProbe = resolve; });
+    }
     if (path === "/api/auth/session") {
+      if (deferSession) {
+        return new Promise<Response>((resolve) => { completeSession = resolve; });
+      }
       if (sessionStatus === 429) {
         return Response.json(
           { error: "Too many failed authentication attempts" },
@@ -66,6 +78,18 @@ afterEach(async () => {
 function Recheck() {
   const { refreshSession } = useAuth();
   return <button type="button" onClick={() => void refreshSession()}>Recheck</button>;
+}
+
+function Probe() {
+  const probe = () => {
+    void api.get("api/probe", { context: { [SILENT_ERRORS]: true } }).catch(() => undefined);
+  };
+  return (
+    <>
+      <input aria-label="Draft" defaultValue="" />
+      <button type="button" onClick={probe}>Probe</button>
+    </>
+  );
 }
 
 async function mount() {
@@ -178,6 +202,41 @@ describe("LoginGate session exchange", () => {
     sessionStatus = 200;
     await click("Recheck");
     await settle(() => expect(ui.host.querySelector('[role="alert"]')).toBeNull());
+  });
+
+  it("lets no older 401 or session read undo a newer lockout", async () => {
+    mode = "trusted-proxy";
+    sessionStatus = 200;
+    await ui.render(
+      <AuthProvider><LoginGate><h2>Protected workspace</h2><Recheck /><Probe /></LoginGate></AuthProvider>,
+    );
+    await settle(() => expect(ui.host.textContent).toContain("Protected workspace"));
+    const draft = () => ui.host.querySelector<HTMLInputElement>('input[aria-label="Draft"]');
+    await fill(draft()!, "unsaved edit");
+
+    // Two answers sent before the lockout: a protected read and a session read.
+    await click("Probe");
+    await settle(() => expect(completeProbe).toBeDefined());
+    deferSession = true;
+    await click("Recheck");
+    await settle(() => expect(completeSession).toBeDefined());
+
+    // The newer session read reports the lockout.
+    deferSession = false;
+    sessionStatus = 429;
+    await click("Recheck");
+    const lockedOut = "Too many failed sign-in attempts from this address. Try again in 30 seconds.";
+    await settle(() => expect(ui.host.querySelector('[role="alert"]')?.textContent).toBe(lockedOut));
+
+    // The older answers land afterwards and change nothing.
+    await act(async () => completeProbe!(Response.json(
+      { error: "Unauthorized" },
+      { status: 401, headers: { "x-ferrum-auth-layer": "bff" } },
+    )));
+    await act(async () => completeSession!(session()));
+    await settle(() => expect(ui.host.querySelector('[role="alert"]')?.textContent).toBe(lockedOut));
+    expect(ui.host.textContent).toContain("Protected workspace");
+    expect(draft()?.value).toBe("unsaved edit");
   });
 
   it("accepts an existing trusted-proxy session without a token form", async () => {

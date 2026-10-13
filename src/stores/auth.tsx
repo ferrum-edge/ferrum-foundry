@@ -194,6 +194,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         appliedTicketRef.current = ticket;
         clearLocalSession();
       } else if (lockedOut) {
+        // Newer evidence than any answer still in flight: an older 401 or
+        // session read must not clear the workspace or the notice after it.
+        appliedTicketRef.current = ticket;
         setError(lockedOut);
         setLockout(lockedOut);
         if (!principalRef.current) setStatus("unauthenticated");
