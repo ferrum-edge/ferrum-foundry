@@ -75,6 +75,50 @@ proxy can connect. When the proxy runs on the same host, set
 as `127.0.0.1` or `::1`. Configure the proxy to revoke a user's session as soon
 as the identity provider disables the user.
 
+### Failed-authentication lockout
+
+The trusted-proxy proof and the static login token are each one static
+secret, so the BFF counts failed comparisons per socket peer address. It counts
+a wrong `X-Ferrum-Auth-Secret` and a wrong token at `POST /api/auth/login`. It
+does not count a request with no proof header or a login with no token.
+
+`FERRUM_AUTH_MAX_FAILURES` failures (default 10) within any 15 minutes (a
+rolling window) lock the address out for `FERRUM_AUTH_LOCKOUT_SECONDS` (default 60). Each further
+lockout of the same address doubles, up to one hour. While an address is
+locked out, every authentication attempt from it gets `429` with
+`Retry-After`, the right secret included. The secret is not compared during a
+lockout, so a lockout cannot be used to test guesses. Every failure and every
+lockout is logged at `warn` (`event` `bff_auth_failure` or
+`bff_auth_lockout`) with the address.
+
+The BFF tracks up to 10,000 addresses that have not authenticated, and never
+forgets one that still has a failure inside the window, a lockout, or an
+escalation that has not decayed. Once that table is full, failures from any
+further address share one overflow lockout, so an attack spread across more
+addresses than that is still throttled. Up to 1,024 addresses that recently
+authenticated, such as the identity proxy or a signed-in administrator, keep
+their own failure state in a separate table. They are exempt from the overflow
+lockout but never from their own. Live state is never discarded to make room:
+when both tables are full of it, a newly authenticated address goes without
+the exemption until a slot frees up. An address that gets a slot after the
+overflow counted it, in either table, starts from a copy of the overflow's
+failures and escalation, not from a clean record. A successful static login
+clears the record the BFF holds for its address; an address that neither table
+can admit keeps sharing the overflow's history and lockout.
+
+A signed-in tab whose session check is locked out keeps its workspace open and
+shows the lockout and its remaining time at the top of the page content.
+
+The address is the socket peer, never `X-Forwarded-For`, so a client that
+reaches the BFF directly cannot rotate a header to escape its own lockout.
+Behind the identity proxy every user shares the proxy's address. A proxy that
+sends a wrong secret, for example during a secret rotation, therefore locks
+itself out. Fix the secret and restart the BFF to clear the lockout: the state
+is per process and in memory, and a secret change needs a restart anyway. Set
+`FERRUM_AUTH_MAX_FAILURES=0` to turn the throttle off where the network already
+guarantees that only the proxy can connect. The starter forwards both settings
+from its `.env`.
+
 ### Namespace registry
 
 Registry requests are authorized against the namespace they actually target:

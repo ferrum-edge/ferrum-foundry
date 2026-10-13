@@ -219,6 +219,104 @@ describe('static development sessions', () => {
       await app.close();
     }
   });
+
+  it('locks an address out after repeated failed logins, even for the right token (#588)', async () => {
+    const app = await buildApp();
+    const attacker = '192.0.2.10';
+    const attempt = (token: unknown, remoteAddress = attacker) => app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { token },
+      remoteAddress,
+    });
+    try {
+      // A malformed body is not a guess and is not counted.
+      for (let i = 0; i < 20; i += 1) expect((await attempt(42)).statusCode).toBe(401);
+      // The default limit is 10 failures.
+      for (let i = 0; i < 10; i += 1) {
+        expect((await attempt('wrong-token-that-is-also-long-enough')).statusCode).toBe(401);
+      }
+      const locked = await attempt(BFF_TOKEN);
+      expect(locked.statusCode).toBe(429);
+      expect(locked.json()).toEqual({ error: 'Too many failed authentication attempts' });
+      expect(Number(locked.headers['retry-after'])).toBeGreaterThan(0);
+      expect(Number(locked.headers['retry-after'])).toBeLessThanOrEqual(60);
+      expect(locked.cookies).toHaveLength(0);
+
+      // Another address is unaffected.
+      expect((await attempt(BFF_TOKEN, '192.0.2.11')).statusCode).toBe(200);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('lifts the lockout when it expires and doubles the next one', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const app = await buildApp();
+    const attempt = (token: string) => app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { token },
+      remoteAddress: '192.0.2.20',
+    });
+    try {
+      for (let i = 0; i < 10; i += 1) await attempt('wrong-token-that-is-also-long-enough');
+      expect((await attempt(BFF_TOKEN)).statusCode).toBe(429);
+      vi.advanceTimersByTime(60_001);
+      for (let i = 0; i < 10; i += 1) await attempt('wrong-token-that-is-also-long-enough');
+      const again = await attempt(BFF_TOKEN);
+      expect(again.statusCode).toBe(429);
+      expect(Number(again.headers['retry-after'])).toBe(120);
+      vi.advanceTimersByTime(120_001);
+      // A successful login clears the address's record.
+      expect((await attempt(BFF_TOKEN)).statusCode).toBe(200);
+      for (let i = 0; i < 9; i += 1) await attempt('wrong-token-that-is-also-long-enough');
+      expect((await attempt(BFF_TOKEN)).statusCode).toBe(200);
+    } finally {
+      await app.close();
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('failed-login throttle disabled', () => {
+  let disabledAuth: typeof import('./auth.js');
+
+  beforeAll(async () => {
+    process.env.FERRUM_AUTH_MAX_FAILURES = '0';
+    vi.resetModules();
+    disabledAuth = await import('./auth.js');
+  });
+
+  afterAll(() => {
+    delete process.env.FERRUM_AUTH_MAX_FAILURES;
+  });
+
+  it('never locks out when FERRUM_AUTH_MAX_FAILURES=0', async () => {
+    const app = Fastify();
+    await app.register(cookie);
+    await app.register(disabledAuth.authPlugin);
+    try {
+      for (let i = 0; i < 30; i += 1) {
+        const failed = await app.inject({
+          method: 'POST',
+          url: '/api/auth/login',
+          payload: { token: 'wrong-token-that-is-also-long-enough' },
+          remoteAddress: '192.0.2.30',
+        });
+        expect(failed.statusCode).toBe(401);
+      }
+      const ok = await app.inject({
+        method: 'POST',
+        url: '/api/auth/login',
+        payload: { token: BFF_TOKEN },
+        remoteAddress: '192.0.2.30',
+      });
+      expect(ok.statusCode).toBe(200);
+    } finally {
+      await app.close();
+    }
+  });
 });
 
 describe('scoped static principal', () => {

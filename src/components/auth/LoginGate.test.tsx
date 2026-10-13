@@ -1,8 +1,9 @@
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AuthProvider } from "@/stores/auth";
-import { setCsrfToken } from "@/api/client";
+import { AuthProvider, useAuth } from "@/stores/auth";
+import { api, setCsrfToken, SILENT_ERRORS } from "@/api/client";
 import { BasedRequest, button, click, createHarness, fill, settle } from "@/test/__tests__/harness";
+import { AuthLockoutBanner } from "./AuthLockoutBanner";
 import { LoginGate } from "./LoginGate";
 
 let ui: ReturnType<typeof createHarness>;
@@ -12,6 +13,10 @@ let sessionStatus: number;
 let configStatus: number;
 let requests: Request[];
 let completeLogin: (response: Response) => void;
+let deferSession: boolean;
+let lockoutMarked: boolean;
+let completeSession: ((response: Response) => void) | undefined;
+let completeProbe: ((response: Response) => void) | undefined;
 
 function session() {
   return Response.json({
@@ -28,6 +33,10 @@ beforeEach(() => {
   loginUrl = undefined;
   sessionStatus = 401;
   configStatus = 200;
+  deferSession = false;
+  lockoutMarked = true;
+  completeSession = undefined;
+  completeProbe = undefined;
   requests = [];
   ui = createHarness();
   localStorage.clear();
@@ -39,7 +48,21 @@ beforeEach(() => {
     if (path === "/api/auth/config") {
       return Response.json({ mode, loginUrl }, { status: configStatus });
     }
+    if (path === "/api/probe") {
+      return new Promise<Response>((resolve) => { completeProbe = resolve; });
+    }
     if (path === "/api/auth/session") {
+      if (deferSession) {
+        return new Promise<Response>((resolve) => { completeSession = resolve; });
+      }
+      if (sessionStatus === 429) {
+        return Response.json(
+          { error: "Too many failed authentication attempts" },
+          lockoutMarked
+            ? { status: 429, headers: { "retry-after": "30", "x-ferrum-auth-layer": "bff" } }
+            : { status: 429, headers: { "retry-after": "0" } },
+        );
+      }
       return sessionStatus === 200 ? session() : Response.json({}, { status: sessionStatus });
     }
     if (path === "/api/auth/login") {
@@ -56,6 +79,23 @@ afterEach(async () => {
   sessionStorage.clear();
   vi.unstubAllGlobals();
 });
+
+function Recheck() {
+  const { refreshSession } = useAuth();
+  return <button type="button" onClick={() => void refreshSession()}>Recheck</button>;
+}
+
+function Probe() {
+  const probe = () => {
+    void api.get("api/probe", { context: { [SILENT_ERRORS]: true } }).catch(() => undefined);
+  };
+  return (
+    <>
+      <input aria-label="Draft" defaultValue="" />
+      <button type="button" onClick={probe}>Probe</button>
+    </>
+  );
+}
 
 async function mount() {
   await ui.render(<AuthProvider><LoginGate><h2>Protected workspace</h2></LoginGate></AuthProvider>);
@@ -122,6 +162,105 @@ describe("LoginGate session exchange", () => {
     await settle(() => expect(requests.filter((request) => request.method === "POST")).toHaveLength(2));
     await act(async () => completeLogin(session()));
     await settle(() => expect(ui.host.textContent).toBe("Protected workspace"));
+  });
+
+  it("tells a locked-out operator to wait instead of calling the token wrong (#588)", async () => {
+    await mount();
+    await settle(() => expect(ui.host.querySelector("input")).not.toBeNull());
+    await fill(ui.host.querySelector("input")!, "correct-but-locked-out");
+    await submit();
+    await settle(() => expect(requests.some((request) => request.method === "POST")).toBe(true));
+    await act(async () => completeLogin(Response.json(
+      { error: "Too many failed authentication attempts" },
+      { status: 429, headers: { "retry-after": "120", "x-ferrum-auth-layer": "bff" } },
+    )));
+    await settle(() => expect(ui.host.querySelector('[role="alert"]')?.textContent)
+      .toBe("Too many failed sign-in attempts from this address. Try again in 2 minutes."));
+    expect(ui.host.textContent).not.toContain("The token was rejected");
+    expect(button("Sign in").disabled).toBe(false);
+  });
+
+  it("reports a locked-out trusted-proxy session as a lockout, without retrying it", async () => {
+    mode = "trusted-proxy";
+    sessionStatus = 429;
+    await mount();
+    await settle(() => expect(ui.host.querySelector('[role="alert"]')?.textContent)
+      .toBe("Too many failed sign-in attempts from this address. Try again in 30 seconds."));
+    const sessionReads = requests.filter((request) => new URL(request.url).pathname === "/api/auth/session");
+    expect(sessionReads).toHaveLength(1);
+    expect(ui.host.textContent).not.toContain("Protected workspace");
+  });
+
+  it("shows a lockout over a signed-in workspace without unmounting it", async () => {
+    mode = "trusted-proxy";
+    sessionStatus = 200;
+    await ui.render(
+      <AuthProvider><LoginGate><AuthLockoutBanner /><h2>Protected workspace</h2><Recheck /></LoginGate></AuthProvider>,
+    );
+    await settle(() => expect(ui.host.textContent).toContain("Protected workspace"));
+    expect(ui.host.querySelector('[role="alert"]')).toBeNull();
+    sessionStatus = 429;
+    await click("Recheck");
+    await settle(() => expect(ui.host.querySelector('[role="alert"]')?.textContent)
+      .toContain("Too many failed sign-in attempts from this address. Try again in 30 seconds."));
+    expect(ui.host.textContent).toContain("Protected workspace");
+    sessionStatus = 200;
+    await click("Recheck");
+    await settle(() => expect(ui.host.querySelector('[role="alert"]')).toBeNull());
+  });
+
+  it("does not call a 429 from in front of the BFF a sign-in lockout", async () => {
+    mode = "trusted-proxy";
+    sessionStatus = 200;
+    await ui.render(
+      <AuthProvider><LoginGate><AuthLockoutBanner /><h2>Protected workspace</h2><Recheck /></LoginGate></AuthProvider>,
+    );
+    await settle(() => expect(ui.host.textContent).toContain("Protected workspace"));
+    sessionStatus = 429;
+    lockoutMarked = false;
+    const before = requests.length;
+    await click("Recheck");
+    // An unmarked 429 is retried like any read, then fails as transient.
+    await settle(() => expect(requests.length - before).toBe(3), { timeout: 3_000 });
+    await settle(() => expect(ui.host.querySelector('[role="alert"]')).toBeNull());
+    expect(ui.host.textContent).toContain("Protected workspace");
+  });
+
+  it("lets no older 401 or session read undo a newer lockout", async () => {
+    mode = "trusted-proxy";
+    sessionStatus = 200;
+    await ui.render(
+      <AuthProvider>
+        <LoginGate><AuthLockoutBanner /><h2>Protected workspace</h2><Recheck /><Probe /></LoginGate>
+      </AuthProvider>,
+    );
+    await settle(() => expect(ui.host.textContent).toContain("Protected workspace"));
+    const draft = () => ui.host.querySelector<HTMLInputElement>('input[aria-label="Draft"]');
+    await fill(draft()!, "unsaved edit");
+
+    // Two answers sent before the lockout: a protected read and a session read.
+    await click("Probe");
+    await settle(() => expect(completeProbe).toBeDefined());
+    deferSession = true;
+    await click("Recheck");
+    await settle(() => expect(completeSession).toBeDefined());
+
+    // The newer session read reports the lockout.
+    deferSession = false;
+    sessionStatus = 429;
+    await click("Recheck");
+    const lockedOut = "Too many failed sign-in attempts from this address. Try again in 30 seconds.";
+    await settle(() => expect(ui.host.querySelector('[role="alert"]')?.textContent).toContain(lockedOut));
+
+    // The older answers land afterwards and change nothing.
+    await act(async () => completeProbe!(Response.json(
+      { error: "Unauthorized" },
+      { status: 401, headers: { "x-ferrum-auth-layer": "bff" } },
+    )));
+    await act(async () => completeSession!(session()));
+    await settle(() => expect(ui.host.querySelector('[role="alert"]')?.textContent).toContain(lockedOut));
+    expect(ui.host.textContent).toContain("Protected workspace");
+    expect(draft()?.value).toBe("unsaved edit");
   });
 
   it("accepts an existing trusted-proxy session without a token form", async () => {

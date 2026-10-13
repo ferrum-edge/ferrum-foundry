@@ -53,6 +53,13 @@ interface AuthContextValue {
   principal: AuthPrincipal | null;
   loginUrl?: string;
   error: string | null;
+  /**
+   * Set while this address is locked out after repeated failed
+   * authentication (a BFF `429`). Unlike `error` it is shown over the
+   * workspace too, because a signed-in tab polling its session is refused as
+   * well until the lockout ends.
+   */
+  lockout: string | null;
   login: (token: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshSession: () => Promise<void>;
@@ -74,6 +81,28 @@ function responseStatus(error: unknown): number | undefined {
   return response?.status;
 }
 
+/**
+ * The operator-facing message for a BFF authentication lockout (`429` after
+ * repeated failed sign-ins from this address), or `undefined` for any other
+ * error. A lockout is not a wrong token: the right one is refused too until
+ * the Retry-After delay passes.
+ */
+export function lockoutMessage(error: unknown): string | undefined {
+  if (responseStatus(error) !== 429) return undefined;
+  const response = (error as { response?: Response }).response;
+  // Only the BFF's own refusal is a lockout. A 429 from anything in front of
+  // it (the starter's proxy caps concurrent API requests) is a transient
+  // verification failure, not a sign-in problem.
+  if (response?.headers.get("x-ferrum-auth-layer") !== "bff") return undefined;
+  const seconds = Number(response?.headers.get("retry-after"));
+  const wait = !Number.isFinite(seconds) || seconds <= 0
+    ? "later"
+    : seconds < 60
+      ? `in ${Math.ceil(seconds)} seconds`
+      : `in ${Math.ceil(seconds / 60)} minutes`;
+  return `Too many failed sign-in attempts from this address. Try again ${wait}.`;
+}
+
 function authorizationKey(principal: AuthPrincipal | null): string {
   if (!principal) return "anonymous";
   return JSON.stringify([
@@ -90,6 +119,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [config, setConfig] = useState<AuthConfig | null>(null);
   const [principal, setPrincipal] = useState<AuthPrincipal | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [lockout, setLockout] = useState<string | null>(null);
   const principalRef = useRef<AuthPrincipal | null>(null);
   // Request ticket of the newest evidence this provider has published. A
   // session read, or another request's BFF 401, may change the session only if
@@ -146,6 +176,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setCsrfToken(session.csrfToken, session.csrfCookie);
     setStatus("authenticated");
     setError(null);
+    setLockout(null);
   }, [queryClient]);
 
   const refreshSession = useCallback(async () => {
@@ -162,9 +193,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       acceptSession(session);
     } catch (sessionError) {
       if (controller.signal.aborted || !isCurrent(ticket)) return;
+      const lockedOut = lockoutMessage(sessionError);
       if (responseStatus(sessionError) === 401) {
         appliedTicketRef.current = ticket;
         clearLocalSession();
+      } else if (lockedOut) {
+        // Newer evidence than any answer still in flight: an older 401 or
+        // session read must not clear the workspace or the notice after it.
+        appliedTicketRef.current = ticket;
+        setError(lockedOut);
+        setLockout(lockedOut);
+        if (!principalRef.current) setStatus("unauthenticated");
       } else if (principalRef.current) {
         setError("Session verification is temporarily unavailable.");
       } else {
@@ -221,9 +260,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         json: { token },
         context: { [SILENT_ERRORS]: true },
       }).json<SessionResponse>();
-    } catch {
-      setError("The token was rejected.");
-      throw new Error("Authentication failed");
+    } catch (loginError) {
+      setError(lockoutMessage(loginError) ?? "The token was rejected.");
+      throw new Error("Authentication failed", { cause: loginError });
     }
     if (disposedRef.current) return;
     retireInFlight();
@@ -254,10 +293,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     principal,
     loginUrl: config?.loginUrl,
     error,
+    lockout,
     login,
     logout,
     refreshSession,
-  }), [config, error, login, logout, principal, refreshSession, status]);
+  }), [config, error, lockout, login, logout, principal, refreshSession, status]);
 
   return (
     <AuthContext.Provider value={value}>

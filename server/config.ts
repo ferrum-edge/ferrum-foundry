@@ -62,6 +62,10 @@ export interface Config {
   authMode: AuthMode;
   bffAuthToken: string | undefined;
   sessionTtl: number;
+  /** Failed static logins or proxy proofs from one address that lock it out; 0 disables. */
+  authMaxFailures: number;
+  /** First lockout in seconds; each further one doubles, up to an hour. */
+  authLockoutSeconds: number;
   trustedProxySecret: string | undefined;
   trustedProxyUserHeader: string;
   trustedProxyRoleHeader: string;
@@ -546,6 +550,8 @@ function parseBaseConfig(): Config {
     authMode,
     bffAuthToken,
     sessionTtl: parseInteger('FERRUM_SESSION_TTL', 3600, 60, 86_400),
+    authMaxFailures: parseInteger('FERRUM_AUTH_MAX_FAILURES', 10, 0, 1000),
+    authLockoutSeconds: parseInteger('FERRUM_AUTH_LOCKOUT_SECONDS', 60, 1, 3600),
     trustedProxySecret,
     ...parseTrustedProxyHeaders(),
     authLoginUrl: parseAuthRedirect(optionalEnv('FERRUM_AUTH_LOGIN_URL'), 'FERRUM_AUTH_LOGIN_URL'),

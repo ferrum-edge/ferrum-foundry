@@ -709,3 +709,13 @@ test("a 127-prefixed DNS name never receives the proof after other checks fail",
     "the proof header must be absent for a non-loopback HTTP hostname",
   );
 });
+
+test("the starter forwards the failed-authentication throttle settings to Foundry", async () => {
+  const compose = await readFile(new URL("compose.yaml", STARTER), "utf8");
+  const foundry = compose.slice(compose.indexOf("  foundry:"), compose.indexOf("  oauth2-proxy:"));
+  assert.match(foundry, /FERRUM_AUTH_MAX_FAILURES: \$\{FERRUM_AUTH_MAX_FAILURES:-10\}/);
+  assert.match(foundry, /FERRUM_AUTH_LOCKOUT_SECONDS: \$\{FERRUM_AUTH_LOCKOUT_SECONDS:-60\}/);
+  const example = parseEnvFile(await readFile(new URL(".env.example", STARTER), "utf8"));
+  assert.equal(example.FERRUM_AUTH_MAX_FAILURES, "10");
+  assert.equal(example.FERRUM_AUTH_LOCKOUT_SECONDS, "60");
+});

@@ -569,6 +569,15 @@ export const api = ky.create({
     methods: ["get", "head", "options"],
     statusCodes: [408, 413, 429, 500, 502, 503, 504],
     shouldRetry: ({ error }) => {
+      // A BFF authentication lockout lasts until its Retry-After; replaying
+      // the read only delays telling the operator to wait.
+      if (
+        isHTTPError(error) &&
+        error.response.status === 429 &&
+        error.response.headers.get("x-ferrum-auth-layer") === "bff"
+      ) {
+        return false;
+      }
       // A committed-but-not-live response is never permission to retry,
       // even if its body is missing or it unexpectedly arrives on a read.
       if (

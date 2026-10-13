@@ -10,6 +10,8 @@ export function LoginGate({ children }: { children: ReactNode }) {
   const [showSecret, setShowSecret] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  // A lockout while signed in is shown by `AuthLockoutBanner` inside the
+  // workspace, which stays mounted.
   if (status === "authenticated") return <>{children}</>;
 
   if (status === "loading") {

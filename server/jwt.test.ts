@@ -28,6 +28,8 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     authMode: 'trusted-proxy',
     bffAuthToken: undefined,
     sessionTtl: 3600,
+    authMaxFailures: 10,
+    authLockoutSeconds: 60,
     trustedProxySecret: 'trusted-proxy-secret-is-long-enough',
     trustedProxyUserHeader: 'x-forwarded-user',
     trustedProxyRoleHeader: 'x-ferrum-role',
