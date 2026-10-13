@@ -245,7 +245,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }).json<SessionResponse>();
     } catch (loginError) {
       setError(lockoutMessage(loginError) ?? "The token was rejected.");
-      throw new Error("Authentication failed");
+      throw new Error("Authentication failed", { cause: loginError });
     }
     if (disposedRef.current) return;
     retireInFlight();
