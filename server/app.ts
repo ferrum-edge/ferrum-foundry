@@ -53,7 +53,11 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   installUploadDrain(fastify);
 
   await fastify.register(cookie);
-  await fastify.register(cors, { origin: isProduction ? false : true });
+  // No CORS grant in any environment (issue #590). The SPA is served
+  // same-origin in production, and in development Vite proxies `/api/` to the
+  // BFF, so the browser never makes a cross-origin call. Reflecting any Origin
+  // outside production let every site a developer visited read a running BFF.
+  await fastify.register(cors, { origin: false });
   await fastify.register(helmet, {
     contentSecurityPolicy: {
       directives: {
@@ -66,6 +70,12 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
         imgSrc: ["'self'", 'data:'],
         objectSrc: ["'none'"],
         scriptSrc: ["'self'"],
+        // 'unsafe-inline' is a framework constraint, not a choice (issue #591):
+        // Radix's scroll lock (Dialog, Select, DropdownMenu) injects a <style>
+        // element with computed widths at runtime, and Select's viewport renders
+        // another, so no hash can cover them. Removal needs per-response nonces;
+        // tracked in issue #594. React style props use the CSSOM, which CSP does
+        // not govern.
         styleSrc: ["'self'", "'unsafe-inline'"],
         upgradeInsecureRequests: null,
       },

@@ -200,7 +200,7 @@ checks are not applied.
 
 | Variable | Required | Default | Range or format | Meaning |
 |---|---|---|---|---|
-| `FERRUM_ENABLE_HSTS` | No | `false` | `true`/`false` | Sends `Strict-Transport-Security` with a one-year max-age and `includeSubDomains` |
+| `FERRUM_ENABLE_HSTS` | No | Same as `FERRUM_SECURE_COOKIES` (`true` when `NODE_ENV=production`) | `true`/`false` | Sends `Strict-Transport-Security` with a one-year max-age and `includeSubDomains`. Set `false` for a plain-HTTP deployment that keeps Secure cookies on, or when a subdomain of this host is not served over HTTPS |
 
 ### Runtime settings
 
@@ -515,7 +515,7 @@ Notes:
 
 | Path | Meaning |
 |---|---|
-| `GET /api/health/live` | Liveness. `200` with `{"status":"ok","version":"..."}` while the process serves requests. Never calls the gateway |
+| `GET /api/health/live` | Liveness. `200` with `{"status":"ok"}` while the process serves requests (an authenticated session also gets `version`). Never calls the gateway |
 | `GET /api/health/ready` | Readiness. Probes the gateway and reports the result |
 | `GET /api/health` | Same as `/api/health/live` |
 
@@ -526,8 +526,7 @@ fleet-global, so the probe needs no tenant. Results are cached for 5 seconds
 and concurrent probes share one check, so a short probe interval does not
 multiply gateway load.
 
-It returns `200` with `status` `ready` or `degraded` when both calls succeed,
-and `503` with `status: "unavailable"` when the gateway is unreachable,
+It returns `200` when both calls succeed, and `503` when the gateway is unreachable,
 unhealthy, or rejects the JWT. Wire it as the readiness probe so a gateway
 outage or signing-key mismatch takes Foundry out of rotation.
 
@@ -536,9 +535,14 @@ The UI header polls readiness every 15 seconds. It shows **Connected** for
 **Unreachable** when the readiness request itself fails, even if an earlier
 check succeeded.
 
-All three endpoints are unauthenticated. Liveness carries no gateway detail;
-readiness reports only component status, the gateway HTTP status, and the
-Foundry version.
+All three endpoints are unauthenticated, so they tell an anonymous caller only
+the verdict: liveness answers `{"status":"ok"}`, and readiness
+`{"status":"ready","ready":true}` or `{"status":"unavailable","ready":false}`.
+A `degraded` gateway reads `ready` there. A request carrying an authenticated
+session (the UI, or a request through the identity proxy) also gets the Foundry
+`version`, `checkedAt`, the `degraded` verdict and the per-component status
+with the gateway HTTP status: `status` is `ready`, `degraded` or
+`unavailable`. Probes key on the status code, which is the same for both.
 
 ### Logging
 
@@ -741,8 +745,8 @@ SBOM attestations. See [Release and supply-chain gates](release-security.md).
 - [ ] `FERRUM_ALLOW_INSECURE_ADMIN_HTTP` is unset or `false`.
 - [ ] `FERRUM_TLS_VERIFY` is left at `true`.
 - [ ] `FERRUM_ALLOW_RUNTIME_SETTINGS` is left at `false`.
-- [ ] `FERRUM_ENABLE_HSTS=true` only when this host and all its subdomains are
-      served over HTTPS only.
+- [ ] HSTS is on by default in production. Set `FERRUM_ENABLE_HSTS=false`
+      unless this host and all its subdomains are served over HTTPS only.
 - [ ] `FERRUM_JWT_AUDIENCE` matches the gateway's `FERRUM_ADMIN_JWT_AUDIENCE`,
       or both are unset.
 - [ ] `FERRUM_AUTH_LOGIN_URL` and `FERRUM_AUTH_LOGOUT_URL` point at the proxy's

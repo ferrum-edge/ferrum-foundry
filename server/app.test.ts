@@ -8,6 +8,8 @@ const ENV = {
   FERRUM_AUTH_MODE: 'trusted-proxy',
   FERRUM_TRUSTED_PROXY_SECRET: 'trusted-proxy-shared-secret-is-long-enough',
   FERRUM_JWT_NAMESPACES: undefined,
+  FERRUM_SECURE_COOKIES: undefined,
+  FERRUM_ENABLE_HSTS: undefined,
 };
 const snapshot: Record<string, string | undefined> = {};
 
@@ -134,5 +136,33 @@ describe('static namespace scope at startup', () => {
       FERRUM_JWT_NAMESPACES: undefined,
     });
     await app.close();
+  });
+});
+
+describe('Strict-Transport-Security (#589)', () => {
+  it('is sent by default in production and suppressed by an explicit opt-out', async () => {
+    const defaults = await loadApp();
+    try {
+      const response = await defaults.inject({ method: 'GET', url: '/api/health/live' });
+      expect(response.headers['strict-transport-security']).toBe('max-age=31536000; includeSubDomains');
+    } finally {
+      await defaults.close();
+    }
+
+    const optedOut = await loadApp({ FERRUM_ENABLE_HSTS: 'false' });
+    try {
+      const response = await optedOut.inject({ method: 'GET', url: '/api/health/live' });
+      expect(response.headers['strict-transport-security']).toBeUndefined();
+    } finally {
+      await optedOut.close();
+    }
+
+    const plainHttp = await loadApp({ FERRUM_SECURE_COOKIES: 'false' });
+    try {
+      const response = await plainHttp.inject({ method: 'GET', url: '/api/health/live' });
+      expect(response.headers['strict-transport-security']).toBeUndefined();
+    } finally {
+      await plainHttp.close();
+    }
   });
 });

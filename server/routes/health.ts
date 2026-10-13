@@ -1,5 +1,6 @@
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { fetch } from 'undici';
+import { resolvePrincipal } from '../auth.js';
 import type { AuthPrincipal } from '../auth-types.js';
 import { loadConfig, registerRuntimeConfigListener } from '../config.js';
 import { generateToken } from '../jwt.js';
@@ -153,13 +154,33 @@ async function readiness(): Promise<ReadinessResult> {
   return inFlight;
 }
 
+/**
+ * What an unauthenticated caller is told (issue #592).
+ *
+ * Liveness and readiness probes key on the status code, and a monitor needs
+ * the verdict, so both stay public. The Foundry version and the gateway's own
+ * state (its `degraded` verdict and the Admin API status code) fingerprint the
+ * deployment and describe a system the caller could not otherwise see, so only
+ * an authenticated session reads them. A `degraded` gateway is still ready.
+ */
+function publicReadiness(
+  body: ReadinessResult['body'],
+): { status: 'ready' | 'unavailable'; ready: boolean } {
+  return { status: body.ready ? 'ready' : 'unavailable', ready: body.ready };
+}
+
 const healthPlugin: FastifyPluginAsync = async (fastify) => {
-  const live = async () => ({ status: 'ok' as const, version: APP_VERSION });
+  const live = async (request: FastifyRequest) => (
+    await resolvePrincipal(request)
+      ? { status: 'ok' as const, version: APP_VERSION }
+      : { status: 'ok' as const }
+  );
   fastify.get('/api/health', live);
   fastify.get('/api/health/live', live);
-  fastify.get('/api/health/ready', async (_request, reply) => {
+  fastify.get('/api/health/ready', async (request, reply) => {
     const result = await readiness();
-    return reply.status(result.httpStatus).send(result.body);
+    const body = await resolvePrincipal(request) ? result.body : publicReadiness(result.body);
+    return reply.status(result.httpStatus).send(body);
   });
 };
 

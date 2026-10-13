@@ -337,17 +337,51 @@ describe('streaming gateway proxy', () => {
   );
 
   it('separates liveness from authenticated downstream readiness', async () => {
-    const live = await app.inject({ method: 'GET', url: '/api/health/live' });
+    const live = await app.inject({ method: 'GET', url: '/api/health/live', headers: sessionHeaders });
     expect(live.statusCode).toBe(200);
     expect(live.json()).toMatchObject({ status: 'ok', version: '0.5.5' });
 
-    const ready = await app.inject({ method: 'GET', url: '/api/health/ready' });
+    const ready = await app.inject({ method: 'GET', url: '/api/health/ready', headers: sessionHeaders });
     expect(ready.statusCode).toBe(200);
     expect(ready.json()).toMatchObject({
       ready: true,
-      components: { bff: { status: 'ok' }, gateway: { status: 'ok' } },
+      version: '0.5.5',
+      components: { bff: { status: 'ok' }, gateway: { status: 'ok', httpStatus: 200 } },
     });
     expect(observed.some(({ url }) => url === '/namespaces?offset=0&limit=1')).toBe(true);
+  });
+
+  it('tells an unauthenticated probe only the verdict (#592)', async () => {
+    for (const url of ['/api/health', '/api/health/live']) {
+      const live = await app.inject({ method: 'GET', url });
+      expect(live.statusCode).toBe(200);
+      expect(live.json()).toEqual({ status: 'ok' });
+    }
+
+    const ready = await app.inject({ method: 'GET', url: '/api/health/ready' });
+    expect(ready.statusCode).toBe(200);
+    expect(ready.json()).toEqual({ status: 'ready', ready: true });
+  });
+
+  it('answers no cross-origin request outside production (#590)', async () => {
+    const simple = await app.inject({
+      method: 'GET',
+      url: '/api/health/live',
+      headers: { origin: 'https://attacker.example' },
+    });
+    expect(simple.statusCode).toBe(200);
+    expect(simple.headers['access-control-allow-origin']).toBeUndefined();
+
+    const preflight = await app.inject({
+      method: 'OPTIONS',
+      url: '/api/auth/session',
+      headers: {
+        origin: 'https://attacker.example',
+        'access-control-request-method': 'GET',
+      },
+    });
+    expect(preflight.headers['access-control-allow-origin']).toBeUndefined();
+    expect(preflight.headers['access-control-allow-credentials']).toBeUndefined();
   });
 
   it('applies baseline browser hardening headers to API responses', async () => {
