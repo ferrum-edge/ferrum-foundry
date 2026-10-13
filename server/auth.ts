@@ -181,7 +181,10 @@ function trustedProxyPrincipal(
   }
   // No reset on success: the identity proxy shares one address with every
   // user, so a correct proof must not wipe failures an attacker on the same
-  // address has accumulated. They expire with the window instead.
+  // address has accumulated. They expire with the window instead. The address
+  // is remembered as authenticated, which exempts it from the shared overflow
+  // lockout a flood of fresh addresses can trigger.
+  authThrottle(config).noteAuthenticated(throttleKey(request));
 
   const subject = singleHeader(request, config.trustedProxyUserHeader);
   const role = parseRole(singleHeader(request, config.trustedProxyRoleHeader));
@@ -244,6 +247,7 @@ function rejectAuth(reply: FastifyReply, status = 401, error = 'Unauthorized'): 
 const AUTH_FAILURE_WINDOW_MS = 15 * 60_000;
 const AUTH_MAX_LOCKOUT_MS = 60 * 60_000;
 const AUTH_THROTTLE_MAX_KEYS = 10_000;
+const AUTH_THROTTLE_MAX_TRUSTED_KEYS = 1_024;
 
 /** Returned in place of a principal while the caller's address is locked out. */
 const LOCKED_OUT = Symbol('locked-out');
@@ -264,6 +268,7 @@ function authThrottle(config: Config): AuthFailureThrottle {
         lockoutMs: config.authLockoutSeconds * 1000,
         maxLockoutMs: Math.max(AUTH_MAX_LOCKOUT_MS, config.authLockoutSeconds * 1000),
         maxKeys: AUTH_THROTTLE_MAX_KEYS,
+        maxTrustedKeys: AUTH_THROTTLE_MAX_TRUSTED_KEYS,
       }),
       maxFailures: config.authMaxFailures,
       lockoutSeconds: config.authLockoutSeconds,
@@ -286,13 +291,27 @@ function noteAuthFailure(request: FastifyRequest, config: Config, kind: string):
   const key = throttleKey(request);
   const outcome = authThrottle(config).recordFailure(key);
   request.log.warn(
-    { event: 'bff_auth_failure', kind, remoteAddress: key, failures: outcome.failures },
+    {
+      event: 'bff_auth_failure',
+      kind,
+      remoteAddress: key,
+      failures: outcome.failures,
+      ...(outcome.overflow ? { overflow: true } : {}),
+    },
     'Failed BFF authentication attempt',
   );
   if (outcome.lockedForMs !== undefined) {
     request.log.warn(
-      { event: 'bff_auth_lockout', kind, remoteAddress: key, lockoutSeconds: Math.ceil(outcome.lockedForMs / 1000) },
-      'Locking out an address after repeated failed BFF authentication',
+      {
+        event: 'bff_auth_lockout',
+        kind,
+        remoteAddress: key,
+        lockoutSeconds: Math.ceil(outcome.lockedForMs / 1000),
+        ...(outcome.overflow ? { overflow: true } : {}),
+      },
+      outcome.overflow
+        ? 'Locking out every untracked, unauthenticated address: the failure table is full of locked-out addresses'
+        : 'Locking out an address after repeated failed BFF authentication',
     );
   }
 }

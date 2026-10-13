@@ -82,14 +82,20 @@ secret, so the BFF counts failed comparisons per socket peer address. It counts
 a wrong `X-Ferrum-Auth-Secret` and a wrong token at `POST /api/auth/login`. It
 does not count a request with no proof header or a login with no token.
 
-`FERRUM_AUTH_MAX_FAILURES` failures (default 10) within 15 minutes lock the
-address out for `FERRUM_AUTH_LOCKOUT_SECONDS` (default 60). Each further
+`FERRUM_AUTH_MAX_FAILURES` failures (default 10) within any 15 minutes (a
+rolling window) lock the address out for `FERRUM_AUTH_LOCKOUT_SECONDS` (default 60). Each further
 lockout of the same address doubles, up to one hour. While an address is
 locked out, every authentication attempt from it gets `429` with
 `Retry-After`, the right secret included. The secret is not compared during a
 lockout, so a lockout cannot be used to test guesses. Every failure and every
 lockout is logged at `warn` (`event` `bff_auth_failure` or
 `bff_auth_lockout`) with the address.
+
+The BFF tracks up to 10,000 addresses. If every tracked address is locked out,
+failures from any further address share one overflow lockout, so an attack
+spread across more addresses than that is still throttled. An address that
+recently authenticated, such as the identity proxy or a signed-in
+administrator, is exempt from the overflow lockout, but never from its own.
 
 The address is the socket peer, never `X-Forwarded-For`, so a client that
 reaches the BFF directly cannot rotate a header to escape its own lockout.

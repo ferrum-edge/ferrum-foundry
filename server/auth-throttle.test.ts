@@ -9,6 +9,7 @@ function throttle(overrides: Partial<AuthThrottleOptions> = {}) {
     lockoutMs: 1_000,
     maxLockoutMs: 4_000,
     maxKeys: 100,
+    maxTrustedKeys: 10,
     now: () => now,
     ...overrides,
   });
@@ -24,6 +25,18 @@ describe('AuthFailureThrottle', () => {
     expect(instance.recordFailure('a')).toEqual({ failures: 3, lockedForMs: 1_000 });
     expect(instance.lockedFor('a')).toBe(1_000);
     expect(instance.lockedFor('b')).toBe(0);
+  });
+
+  it('counts a rolling window, not a fixed one', () => {
+    const { instance, advance } = throttle({ windowMs: 10_000, maxFailures: 3 });
+    instance.recordFailure('a'); // t = 0
+    advance(9_000);
+    instance.recordFailure('a'); // t = 9 s
+    advance(1_000);
+    // t = 10 s: the first failure has left the window, the second has not.
+    expect(instance.recordFailure('a')).toEqual({ failures: 2 });
+    advance(100);
+    expect(instance.recordFailure('a')).toEqual({ failures: 3, lockedForMs: 1_000 });
   });
 
   it('forgets failures older than the window', () => {
@@ -75,5 +88,51 @@ describe('AuthFailureThrottle', () => {
     for (let i = 0; i < 50; i += 1) instance.recordFailure(`key-${i}`);
     expect(instance.size).toBe(5);
     expect(instance.lockedFor('locked')).toBe(1_000);
+  });
+});
+
+describe('AuthFailureThrottle overflow', () => {
+  it('keeps throttling new keys once the table is full of locked keys', () => {
+    const { instance } = throttle({ maxKeys: 1 });
+    for (let i = 0; i < 3; i += 1) instance.recordFailure('A');
+    expect(instance.lockedFor('A')).toBe(1_000);
+
+    // B cannot be retained without dropping A's lockout, so the shared
+    // overflow entry counts it instead.
+    expect(instance.recordFailure('B')).toEqual({ failures: 1, overflow: true });
+    expect(instance.recordFailure('B')).toEqual({ failures: 2, overflow: true });
+    expect(instance.recordFailure('B')).toEqual({ failures: 3, lockedForMs: 1_000, overflow: true });
+    expect(instance.lockedFor('B')).toBe(1_000);
+    expect(instance.lockedFor('A')).toBe(1_000);
+    // Every other untracked key shares the overflow lockout...
+    expect(instance.lockedFor('C')).toBe(1_000);
+    expect(instance.size).toBe(1);
+  });
+
+  it('exempts recently authenticated keys from the overflow lockout, never from their own', () => {
+    const { instance } = throttle({ maxKeys: 1 });
+    instance.noteAuthenticated('proxy');
+    for (let i = 0; i < 3; i += 1) instance.recordFailure('A');
+    for (let i = 0; i < 3; i += 1) instance.recordFailure('B');
+    expect(instance.lockedFor('C')).toBe(1_000);
+    expect(instance.lockedFor('proxy')).toBe(0);
+
+    // An authenticated key that then fails is tracked and locked on its own.
+    const fresh = throttle({ maxKeys: 5 }).instance;
+    fresh.noteAuthenticated('proxy');
+    for (let i = 0; i < 3; i += 1) fresh.recordFailure('proxy');
+    expect(fresh.lockedFor('proxy')).toBe(1_000);
+  });
+
+  it('bounds the authenticated keys it remembers', () => {
+    const { instance } = throttle({ maxKeys: 1, maxTrustedKeys: 2 });
+    instance.noteAuthenticated('one');
+    instance.noteAuthenticated('two');
+    instance.noteAuthenticated('three');
+    for (let i = 0; i < 3; i += 1) instance.recordFailure('A');
+    for (let i = 0; i < 3; i += 1) instance.recordFailure('B');
+    expect(instance.lockedFor('one')).toBe(1_000);
+    expect(instance.lockedFor('two')).toBe(0);
+    expect(instance.lockedFor('three')).toBe(0);
   });
 });

@@ -4,11 +4,24 @@
  *
  * Both compare a caller-supplied value with one static secret, so without a
  * limit anyone who can reach the BFF may guess at full speed. Failures are
- * counted per key (the socket peer address) inside a rolling window. When a
- * key reaches the limit it is locked out: every authentication attempt from
- * it is refused **without comparing the secret** until the lockout ends, so a
- * lockout cannot be used to test guesses either. Each further lockout of the
- * same key within its decay period doubles, up to a ceiling.
+ * counted per key (the socket peer address) inside a rolling window: a key is
+ * locked out once `maxFailures` of its failures fall within the last
+ * `windowMs`, however those failures line up with any earlier ones. While a key
+ * is locked out every authentication attempt from it is refused **without
+ * comparing the secret**, so a lockout cannot be used to test guesses either.
+ * Each further lockout of the same key within its decay period doubles, up to
+ * a ceiling.
+ *
+ * The table of keys is bounded. When it is full of keys that are all locked
+ * out, a new key cannot be retained, and dropping it would let every fresh
+ * address guess at full speed. Such keys share one overflow entry instead:
+ * it counts and locks exactly like a key, and while it is locked every key the
+ * table does not hold is refused. That fails closed under an attack spread
+ * across more addresses than the table holds, rather than failing open.
+ * Addresses that recently proved they hold the secret (the identity proxy, an
+ * administrator who signed in) are exempt from the overflow lockout, though
+ * never from their own: a flood of fresh addresses cannot lock out the
+ * deployment's real users, and only the secret earns the exemption.
  *
  * State is per process and in memory. Restarting the BFF clears it, which is
  * also how an operator recovers a proxy locked out by a misconfigured secret.
@@ -24,15 +37,17 @@ export interface AuthThrottleOptions {
   lockoutMs: number;
   /** The longest lockout, and how long a key stays escalated after its last one. */
   maxLockoutMs: number;
-  /** Keys tracked at once; the oldest is dropped beyond this. */
+  /** Keys tracked at once, beyond the shared overflow entry. */
   maxKeys: number;
+  /** Recently authenticated keys remembered for the overflow exemption. */
+  maxTrustedKeys: number;
   /** Clock, for tests. */
   now?: () => number;
 }
 
 interface Entry {
-  failures: number;
-  windowStart: number;
+  /** Times of the failures still inside the window, oldest first. */
+  failures: number[];
   lockedUntil: number;
   /** Lockouts so far; drives the doubling. */
   lockouts: number;
@@ -44,10 +59,19 @@ export interface FailureOutcome {
   failures: number;
   /** Set when this failure started a lockout: how long it lasts. */
   lockedForMs?: number;
+  /** Set when the key could not be retained and the overflow entry counted it. */
+  overflow?: true;
+}
+
+function newEntry(): Entry {
+  return { failures: [], lockedUntil: 0, lockouts: 0 };
 }
 
 export class AuthFailureThrottle {
   private readonly entries = new Map<string, Entry>();
+  private overflow: Entry = newEntry();
+  /** Keys that recently proved they hold the secret, least recent first. */
+  private readonly trusted = new Set<string>();
   private readonly options: AuthThrottleOptions;
   private readonly now: () => number;
 
@@ -61,12 +85,15 @@ export class AuthFailureThrottle {
     return this.options.maxFailures > 0;
   }
 
-  /** Milliseconds `key` stays locked out, or `0` when it may try. */
+  /**
+   * Milliseconds `key` stays locked out, or `0` when it may try. A key the
+   * table does not hold answers for the shared overflow entry, unless it
+   * recently authenticated.
+   */
   lockedFor(key: string): number {
     if (!this.enabled) return 0;
-    const entry = this.entries.get(key);
-    if (!entry) return 0;
-    return Math.max(0, entry.lockedUntil - this.now());
+    const entry = this.entries.get(key) ?? (this.trusted.has(key) ? undefined : this.overflow);
+    return entry ? Math.max(0, entry.lockedUntil - this.now()) : 0;
   }
 
   /** Count one failed attempt from `key`. */
@@ -74,74 +101,97 @@ export class AuthFailureThrottle {
     if (!this.enabled) return { failures: 0 };
     const now = this.now();
     let entry = this.entries.get(key);
-    if (entry && this.isStale(entry, now)) {
-      this.entries.delete(key);
-      entry = undefined;
-    }
-    if (!entry) {
-      entry = { failures: 0, windowStart: now, lockedUntil: 0, lockouts: 0 };
-    } else {
+    if (entry) {
       // Re-insert so the map stays ordered by last activity for eviction.
       this.entries.delete(key);
-      if (now - entry.windowStart >= this.options.windowMs) {
-        entry.failures = 0;
-        entry.windowStart = now;
-      }
+    } else {
+      entry = newEntry();
     }
-    entry.failures += 1;
-    const outcome: FailureOutcome = { failures: entry.failures };
-    if (entry.failures >= this.options.maxFailures) {
-      const lockout = Math.min(
-        this.options.lockoutMs * 2 ** Math.min(entry.lockouts, 30),
-        this.options.maxLockoutMs,
-      );
-      entry.lockouts += 1;
-      entry.lockedUntil = now + lockout;
-      entry.failures = 0;
-      entry.windowStart = now;
-      outcome.lockedForMs = lockout;
-    }
+    if (this.isStale(entry, now)) entry = newEntry();
     this.entries.set(key, entry);
-    this.evict(now);
-    return outcome;
+    this.evict(now, key);
+    if (!this.entries.has(key)) {
+      // Every retained key is locked out: count it against the overflow entry.
+      if (this.isStale(this.overflow, now)) this.overflow = newEntry();
+      return { ...this.count(this.overflow, now), overflow: true };
+    }
+    return this.count(entry, now);
   }
 
-  /** Forget `key` after it proved it holds the secret. */
+  /**
+   * Remember that `key` proved it holds the secret, exempting it from the
+   * overflow lockout. Its own failures are kept: see {@link recordSuccess}.
+   */
+  noteAuthenticated(key: string): void {
+    if (!this.enabled) return;
+    this.trusted.delete(key);
+    this.trusted.add(key);
+    for (const oldest of this.trusted) {
+      if (this.trusted.size <= this.options.maxTrustedKeys) break;
+      this.trusted.delete(oldest);
+    }
+  }
+
+  /** Forget `key`'s failures after it proved it holds the secret. */
   recordSuccess(key: string): void {
     this.entries.delete(key);
+    this.noteAuthenticated(key);
   }
 
-  /** Keys currently tracked (for tests and diagnostics). */
+  /** Keys currently tracked, not counting the overflow entry. */
   get size(): number {
     return this.entries.size;
   }
 
+  private count(entry: Entry, now: number): FailureOutcome {
+    const { windowMs, maxFailures, lockoutMs, maxLockoutMs } = this.options;
+    entry.failures = entry.failures.filter((at) => now - at < windowMs);
+    entry.failures.push(now);
+    const outcome: FailureOutcome = { failures: entry.failures.length };
+    if (entry.failures.length >= maxFailures) {
+      const lockout = Math.min(lockoutMs * 2 ** Math.min(entry.lockouts, 30), maxLockoutMs);
+      entry.lockouts += 1;
+      entry.lockedUntil = now + lockout;
+      entry.failures = [];
+      outcome.lockedForMs = lockout;
+    }
+    return outcome;
+  }
+
   /**
-   * An entry that is no longer locked, whose window has passed, and whose last
-   * lockout has decayed carries no information worth keeping.
+   * An entry that is no longer locked, has no failure left in the window, and
+   * whose last lockout has decayed carries no information worth keeping.
    */
   private isStale(entry: Entry, now: number): boolean {
+    const last = entry.failures.at(-1);
     return (
       entry.lockedUntil <= now &&
-      now - entry.windowStart >= this.options.windowMs &&
+      (last === undefined || now - last >= this.options.windowMs) &&
       now - entry.lockedUntil >= this.options.maxLockoutMs
     );
   }
 
-  private evict(now: number): void {
+  /**
+   * Bring the table back to `maxKeys`: stale keys first, then unlocked ones in
+   * least-recently-failed order, `current` (the key being counted) last. A
+   * locked key is never dropped, since that would end its lockout early; if
+   * only locked keys remain, `current` itself is dropped and the caller counts
+   * it against the overflow entry.
+   */
+  private evict(now: number, current: string): void {
     if (this.entries.size <= this.options.maxKeys) return;
     for (const [key, entry] of this.entries) {
-      if (this.isStale(entry, now)) this.entries.delete(key);
+      if (key !== current && this.isStale(entry, now)) this.entries.delete(key);
     }
-    // Still over: drop the least recently failed keys. A locked key is the
-    // last thing worth dropping, so unlocked ones go first.
     for (const [key, entry] of this.entries) {
       if (this.entries.size <= this.options.maxKeys) return;
-      if (entry.lockedUntil <= now) this.entries.delete(key);
+      if (key !== current && entry.lockedUntil <= now) this.entries.delete(key);
     }
-    for (const key of this.entries.keys()) {
-      if (this.entries.size <= this.options.maxKeys) return;
-      this.entries.delete(key);
+    if (this.entries.size > this.options.maxKeys) {
+      const entry = this.entries.get(current);
+      // Callers never count a failure for a locked key, but if one did, its
+      // lockout must not end early: the table runs one over instead.
+      if (entry && entry.lockedUntil <= now) this.entries.delete(current);
     }
   }
 }
