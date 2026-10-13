@@ -41,6 +41,27 @@ describe("collectAllPages", () => {
     ).rejects.toThrow("changed pagination total");
   });
 
+  it("rejects a repeated identity from an equal-total concurrent change", async () => {
+    // Page 1 is [a, b]; a delete plus an earlier-sorting insert then keeps
+    // the total at 4 while page 2 repeats b and omits the new row. Counts
+    // alone would call this complete.
+    const pages = new Map([
+      [0, [{ id: "a" }, { id: "b" }]],
+      [2, [{ id: "b" }, { id: "d" }]],
+    ]);
+    await expect(
+      collectAllPages(
+        async (offset, limit) => ({
+          data: pages.get(offset) ?? [],
+          pagination: { offset, limit, total: 4 },
+        }),
+        2,
+        undefined,
+        (item) => item.id,
+      ),
+    ).rejects.toThrow("repeated resource");
+  });
+
   it("rejects an invalid caller page size", async () => {
     await expect(collectAllPages(async () => ({
       data: [],

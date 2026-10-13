@@ -38,8 +38,8 @@ including the versioned deployment-snapshot and backend-egress-policy entries
 and the v0.9.14 data-plane attestation negatives, plus the v0.9.15
 diagnostic-ref route-protocol-admission and gateway-headers availability
 negatives; it does not vendor those schemas or adopt that runtime profile.
-Foundry v0.5.5 hosted qualification is pending in the
-[compatibility record](compatibility.md); v0.5.4 and earlier evidence is
+Foundry v0.5.5 passed hosted qualification and was published; see the
+[compatibility record](compatibility.md). v0.5.4 and earlier evidence is
 historical.
 
 The independently reviewed producer is Alloy commit
@@ -69,7 +69,9 @@ r2 tag and its original transcription provenance remain immutable upstream.
 
 The BFF validates the closed shared schema using the existing Zod dependency,
 without coercion or silently dropping unknown keys. Defaults come from the
-vendored schema. It fails startup if the schema adds an unsupported keyword.
+vendored schema. If the schema cannot be compiled (for example it adds an
+unsupported keyword), only this preview route is disabled: the BFF still
+starts, logs the failure once, and the preview route answers `503`.
 The reviewed producer adds stricter literal path rules (no dot segments,
 percent escapes, semicolons or backslashes), derived resource IDs at most 254
 characters, and an agents endpoint below the public prefix. These are checked

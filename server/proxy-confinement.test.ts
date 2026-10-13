@@ -240,6 +240,9 @@ beforeAll(async () => {
     FERRUM_UPLOAD_TIMEOUT: '4000',
     FERRUM_MAX_ACTIVE_UPLOADS: '8',
     FERRUM_MAX_LARGE_UPLOADS: '2',
+    // The single test identity holds both large permits: these tests are
+    // about path classification, not the per-subject share.
+    FERRUM_MAX_LARGE_UPLOADS_PER_PRINCIPAL: '2',
   };
   for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
   vi.resetModules();

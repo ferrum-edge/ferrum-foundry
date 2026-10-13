@@ -239,3 +239,34 @@ it.each(['import', 'replace'])('blocks repeating an uncertain spec %s across dia
   expect(document.querySelector('[role="dialog"]')!.textContent).toContain('outcome unknown');
   expect(editor().disabled).toBe(true);
 });
+
+it.each(['import', 'replace'])('reports a committed-but-not-live spec %s as saved, not locked', async (mode) => {
+  await mount();
+  if (mode === 'replace') {
+    await openReplace(0, 1);
+    await resolveRead(0, 'document A');
+    await settle(() => expect(editor().disabled).toBe(false));
+  } else {
+    await click('Import Spec');
+    await edit('document A');
+  }
+  const label = mode === 'replace' ? 'Replace Spec' : 'Import Spec';
+  const submit = () => [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
+    .find((button) => button.textContent?.trim() === label)!;
+  await act(async () => submit().click());
+  await settle(() => expect(writes).toHaveLength(1));
+  await act(async () => writes[0]!.resolve(Response.json(
+    { error: 'reload timed out', applied: false, reason: 'reload_timeout' },
+    { status: 503, headers: { 'x-ferrum-config-cursor': '1:2' } },
+  )));
+  // The write is durable: the dialog closes so it is not submitted twice, and
+  // the workspace is not locked as if the outcome were unknown.
+  await settle(() => {
+    expect(document.querySelector('textarea[aria-label="OpenAPI document"]')).toBeNull();
+    expect(document.body.textContent).toContain('committed, not yet proven live');
+    expect(document.body.textContent).not.toContain('outcome unknown');
+  });
+  await click('Import Spec');
+  expect(document.querySelector('[role="dialog"]')!.textContent).not.toContain('outcome unknown');
+  expect(editor().disabled).toBe(false);
+});

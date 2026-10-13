@@ -93,6 +93,30 @@ function identity(extra: Record<string, string> = {}): Record<string, string> {
     'x-ferrum-namespace': 'tenant-a', ...csrf, ...extra };
 }
 
+// CSRF tokens are bound to the trusted-proxy subject, so a write under a
+// different `x-registry-user` needs that subject's own session cookie/token
+// (reads are exempt, which is why header-only identity works for them).
+const subjectSessions = new Map<string, Promise<Record<string, string>>>();
+function sessionIdentity(user: string): Promise<Record<string, string>> {
+  let session = subjectSessions.get(user);
+  if (!session) {
+    session = (async () => {
+      const response = await app.inject({
+        url: '/api/auth/session',
+        headers: identity({ 'x-registry-user': user, cookie: '', 'x-csrf-token': '' }),
+      });
+      expect(response.statusCode).toBe(200);
+      return identity({
+        'x-registry-user': user,
+        cookie: response.cookies.map((entry) => `${entry.name}=${entry.value}`).join('; '),
+        'x-csrf-token': response.json().csrfToken,
+      });
+    })();
+    subjectSessions.set(user, session);
+  }
+  return session;
+}
+
 // Node's raw header array writes separate wire occurrences without folding
 // them. All assertions exercise a listening buildApp() over real TCP.
 function start(path: string, method = 'GET', body = '', headers = identity(), duplicate?: [string, string], complete = true) {
@@ -143,6 +167,7 @@ beforeAll(async () => {
     FERRUM_TRUSTED_PROXY_NAMESPACES_HEADER: 'x-registry-grants',
     FERRUM_READ_TIMEOUT: '4000', FERRUM_WRITE_TIMEOUT: '2000', FERRUM_UPLOAD_TIMEOUT: '4000',
     FERRUM_MAX_ACTIVE_UPLOADS: '4', FERRUM_MAX_LARGE_UPLOADS: '2',
+    FERRUM_MAX_UPLOADS_PER_PRINCIPAL: '2', FERRUM_MAX_LARGE_UPLOADS_PER_PRINCIPAL: '1',
     FERRUM_MAX_ACTIVE_LONG_READS: '3', FERRUM_MAX_LONG_READS_PER_PRINCIPAL: '2',
     FERRUM_NAMESPACE_SCAN_MAX_PAGES: '3',
   })) vi.stubEnv(key, value);
@@ -566,7 +591,11 @@ describe('upload reservation lifetime over TCP', () => {
   async function hold(path: string, complete = true) {
     const id = String(++serial);
     const ready = signal(`${complete ? 'held' : 'arrived'}:${id}`);
-    const client = start(`/api/proxy${path}?hold=1&id=${id}`, 'POST', '{}', identity(), undefined, complete);
+    // A distinct subject per hold: these tests exercise the global pools'
+    // permit lifetime, and the per-subject shares would otherwise refuse
+    // holds long before the global pool fills.
+    const headers = await sessionIdentity(`holder-${id}`);
+    const client = start(`/api/proxy${path}?hold=1&id=${id}`, 'POST', '{}', headers, undefined, complete);
     await ready;
     return { ...client, id };
   }
@@ -699,4 +728,46 @@ describe('long-running read admission over TCP', () => {
       for (const client of clients) await release(client);
     }
   }, 20_000);
+});
+
+describe('per-subject upload admission over TCP', () => {
+  let serial = 0;
+  // A completed upload whose upstream response is held open keeps its
+  // permit (and its upstream connection) until the client goes away.
+  async function holdUpload(user: string) {
+    const id = `upload-${++serial}`;
+    const ready = signal(`held:${id}`);
+    const client = start(`/api/proxy/proxies?hold=1&id=${id}`, 'POST', '{"description":"held"}', await sessionIdentity(user), undefined, true);
+    await ready;
+    return { ...client, id };
+  }
+  async function drop(client: Awaited<ReturnType<typeof holdUpload>>) {
+    const closed = signal(`closed:${client.id}`);
+    client.request.destroy();
+    await closed;
+    held.delete(client.id);
+  }
+
+  it('admits one subject only its upload share while another subject still uploads', async () => {
+    const a1 = await holdUpload('writer-a');
+    const a2 = await holdUpload('writer-a');
+    try {
+      const before = arrivals.length;
+      const refused = await call('/api/proxy/proxies', 'POST', '{"description":"third"}', await sessionIdentity('writer-a'));
+      expect(refused.status).toBe(429);
+      expect(refused.headers['retry-after']).toBe('1');
+      expect(JSON.parse(refused.body)).toEqual({ error: 'Too Many Requests', code: 'FERRUM_BFF_UPLOAD_CAPACITY', scope: 'principal' });
+      expect(arrivals).toHaveLength(before);
+
+      // The global pool (4) is not full: another subject is admitted, and a
+      // body-less read never touches the upload pools at all.
+      expect((await call('/api/proxy/proxies', 'POST', '{"description":"other"}', await sessionIdentity('writer-b'))).status).toBe(200);
+      expect((await call('/api/proxy/proxies', 'GET', '', await sessionIdentity('writer-a'))).status).toBe(200);
+    } finally {
+      await drop(a1);
+      await drop(a2);
+    }
+    // Released permits are returned exactly once: the same subject uploads again.
+    expect((await call('/api/proxy/proxies', 'POST', '{"description":"again"}', await sessionIdentity('writer-a'))).status).toBe(200);
+  }, 10_000);
 });

@@ -23,9 +23,10 @@ records the baseline below. Foundry v0.5.2, which adopted this policy, passed
 hosted qualification against published Edge v0.9.13, including its
 concurrent-edit contract; see the qualification evidence in
 [compatibility.md](compatibility.md). Foundry v0.5.3 moved the pin to published
-Edge v0.9.14 and passed hosted qualification against it, as did v0.5.4. The
-Foundry v0.5.5 candidate moves the pin to published Edge v0.9.15 and requires
-fresh hosted qualification.
+Edge v0.9.14 and passed hosted qualification against it, as did v0.5.4.
+Foundry v0.5.5 moved the pin to published Edge v0.9.15, passed hosted
+qualification against it, and was published; see
+[compatibility.md](compatibility.md).
 
 | Observation | Result |
 | --- | --- |

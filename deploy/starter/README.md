@@ -98,10 +98,14 @@ or `unmapped`). It is for a first run and for CI. Do not expose it.
    whole file for every profile, and a production-only requirement would stop
    the demo from starting.)
 2. Write `secrets/ferrum-proxy-secret.conf` with the **same** value as
-   `FERRUM_TRUSTED_PROXY_SECRET`:
+   `FERRUM_TRUSTED_PROXY_SECRET`. Editing `.env` does not put that value in
+   your shell, so read it back from the file you just filled in (this also
+   fails loudly instead of writing an empty proof value):
 
    ```bash
-   printf 'set $ferrum_proxy_secret "%s";\n' "$FERRUM_TRUSTED_PROXY_SECRET" \
+   proxy_secret=$(grep '^FERRUM_TRUSTED_PROXY_SECRET=' .env | cut -d= -f2-)
+   test -n "$proxy_secret" || { echo "FERRUM_TRUSTED_PROXY_SECRET is empty in .env"; exit 1; }
+   printf 'set $ferrum_proxy_secret "%s";\n' "$proxy_secret" \
      > secrets/ferrum-proxy-secret.conf
    chmod 600 secrets/ferrum-proxy-secret.conf
    ```

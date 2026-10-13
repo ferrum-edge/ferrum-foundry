@@ -39,6 +39,17 @@ answer.
    long; a short page would then silently drop or duplicate records. The
    fail-closed checks (a page that does not advance, a total that shifts, an
    over-long response) stay for the same reason.
+7. **Complete means consistent, not snapshotted.** A complete traversal is
+   one whose pages chained from offset 0, kept the first page's total,
+   returned exactly that many records, and, for the proxy, upstream,
+   consumer, and plugin-configuration traversals, never repeated a record
+   `id`. A repeated `id` is the visible trace of a delete plus an
+   earlier-sorting insert that kept the total equal (the later page shifts
+   back one row and repeats the boundary record while another is skipped), so
+   it fails the read instead of being deduplicated. Offset reads cannot prove
+   more than that: the mirror interleaving (a delete before the cursor plus a
+   later-sorting insert) skips a record without repeating one, and is not
+   detectable until the gateway exposes a collection revision (see below).
 
 ## Budgets
 
@@ -189,6 +200,10 @@ namespace they started in, so a switch cannot abandon a rollback halfway.
   to it". Global and proxy-group configurations would need a scope filter the
   admin API does not have. Until then, the complete traversal keeps the
   authorization answer truthful.
+- **Snapshot-consistent traversal.** Offset pages carry no collection
+  revision, so an equal-cardinality change during a traversal can only be
+  detected when it repeats a record. A revision or snapshot cursor on the list
+  routes would let a complete traversal prove it saw one coherent collection.
 - **Bulk reference resolution.** An `ids=` filter on `GET /upstreams` would
   replace up to twenty per-row reads with one request.
 

@@ -13,8 +13,10 @@ import {
   checkSecrets,
   checkTlsTrust,
   checkTrustBoundary,
+  createGatewayFetch,
   parseEnvFile,
   runPreflight,
+  verdictForForgedProbe,
 } from "./starter-preflight.mjs";
 
 const STARTER = new URL("../deploy/starter/", import.meta.url);
@@ -284,6 +286,71 @@ test("a served forged-identity request fails", async () => {
   assert.match(results[1].remedy, /proxy_set_header/);
 });
 
+test("only a recognized denial against a healthy control proves stripping", () => {
+  for (const status of [200, 204]) assert.equal(verdictForForgedProbe(status, true), FAIL);
+  for (const status of [401, 403]) assert.equal(verdictForForgedProbe(status, true), PASS);
+  // Redirects, missing routes, overload and server failures are inconclusive,
+  // as is a denial with no healthy anonymous control.
+  for (const status of [301, 302, 404, 429, 500, 503]) {
+    assert.equal(verdictForForgedProbe(status, true), UNKNOWN, String(status));
+  }
+  assert.equal(verdictForForgedProbe(401, false), UNKNOWN);
+  assert.equal(verdictForForgedProbe(403, false), UNKNOWN);
+});
+
+test("a 404 forged-identity answer is unknown, not a stripping pass", async () => {
+  const results = await checkTrustBoundary(
+    { ...workingEnv, FOUNDRY_PREFLIGHT_URL: "https://foundry.example.com" },
+    async (_url, init) =>
+      init.headers?.["X-Ferrum-Role"] === "admin"
+        ? new Response("", { status: 404 })
+        : new Response("", { status: 401 }),
+  );
+  assert.equal(results[0].status, PASS);
+  assert.equal(results[1].status, UNKNOWN);
+});
+
+test("gateway probes use the configured CA bundle when it is readable here", async () => {
+  let agentOptions;
+  let seenInit;
+  class FakeAgent {
+    constructor(options) {
+      agentOptions = options;
+    }
+  }
+  const gatewayFetch = await createGatewayFetch(
+    { ...workingEnv, FERRUM_TLS_CA_PATH: "/host/ca.pem" },
+    {
+      readFile: async (path) => {
+        assert.equal(path, "/host/ca.pem");
+        return "PEM";
+      },
+      undici: {
+        Agent: FakeAgent,
+        fetch: async (_url, init) => {
+          seenInit = init;
+          return new Response("ok");
+        },
+      },
+    },
+  );
+  await gatewayFetch("https://ferrum-admin.internal:9000/health", {});
+  assert.deepEqual(agentOptions, { connect: { ca: "PEM" } });
+  assert.ok(seenInit.dispatcher instanceof FakeAgent);
+});
+
+test("gateway probes fall back to ambient trust when the CA path is not on this host", async () => {
+  const gatewayFetch = await createGatewayFetch(
+    { ...workingEnv, FERRUM_TLS_CA_PATH: "/container/ca.pem" },
+    {
+      readFile: async () => {
+        throw Object.assign(new Error("missing"), { code: "ENOENT" });
+      },
+    },
+  );
+  assert.equal(gatewayFetch, fetch);
+});
+
 test("a served anonymous request fails", async () => {
   const [anonymous] = await checkTrustBoundary(
     { ...workingEnv, FOUNDRY_PREFLIGHT_URL: "https://foundry.example.com" },
@@ -412,6 +479,19 @@ test("the BFF publishes no host port in either profile", async () => {
     !/^\s{4}ports:/m.test(foundryService),
     "anyone who can reach the BFF port and knows the proof secret is an administrator",
   );
+});
+
+test("starter defaults select the published Foundry digest and stop grace exceeds the BFF deadline", async () => {
+  const example = await readFile(new URL(".env.example", STARTER), "utf8");
+  assert.ok(!/^FOUNDRY_IMAGE=/m.test(example), "a copied .env must not override the compose digest fallback");
+  const bootstrap = await readFile(new URL("bootstrap-demo.sh", STARTER), "utf8");
+  assert.ok(!bootstrap.includes("ferrum-foundry:main"), "the demo bootstrap must not default to the moving main tag");
+  assert.match(bootstrap, /FOUNDRY_IMAGE=\$\{FOUNDRY_IMAGE:-\}/);
+  const compose = await readFile(new URL("compose.yaml", STARTER), "utf8");
+  const foundry = compose.slice(compose.indexOf("  foundry:"), compose.indexOf("  oauth2-proxy:"));
+  const grace = Number(foundry.match(/stop_grace_period:\s*(\d+)s/)?.[1] ?? 0);
+  const deadline = Number(foundry.match(/FERRUM_SHUTDOWN_TIMEOUT:\s*"?(\d+)"?/)?.[1] ?? 0) / 1000;
+  assert.ok(grace > deadline, `stop grace ${grace}s must exceed the BFF shutdown deadline ${deadline}s`);
 });
 
 test("every third-party image in the starter is pinned by digest", async () => {

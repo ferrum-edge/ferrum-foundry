@@ -17,7 +17,7 @@ import { PlusIcon } from "@/components/ui/icons";
 import { SearchBar } from "@/components/shared/SearchBar";
 import { PaginationControls } from "@/components/shared/PaginationControls";
 import { useToast } from "@/components/ui/Toast";
-import { getApiErrorMessage } from "@/api/client";
+import { committedWriteMessage, getApiErrorMessage, getCommittedWrite } from "@/api/client";
 import {
   useApiSpecs,
   useAllApiSpecs,
@@ -177,6 +177,26 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
       setImportDoc("");
       setReplaceTarget(null);
     } catch (err) {
+      // A recognized committed-but-not-live answer saved the document: report
+      // it as saved and close the dialog, so the same import is not submitted
+      // a second time. Cached reads are refreshed by the mutation cache.
+      const committed = getCommittedWrite(err);
+      if (committed) {
+        if (generation !== importGeneration.current) return;
+        toast(
+          "warning",
+          committedWriteMessage(
+            replaceTarget
+              ? `Spec ${replaceTarget.title ?? replaceTarget.id} replaced`
+              : "Spec imported",
+            committed,
+          ),
+        );
+        closeImport();
+        setImportDoc("");
+        setReplaceTarget(null);
+        return;
+      }
       // Retain the warning even if the operator closed/reopened the dialog.
       if (err instanceof MutationOutcomeUnknownError) setUnknownWrite(err.message);
       const message = await getApiErrorMessage(err, "Spec import failed");

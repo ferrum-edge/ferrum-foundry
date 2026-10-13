@@ -270,51 +270,78 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
   // Every proxied request that carries a body occupies a socket and an upstream
   // connection for as long as the body takes to arrive, so the global pool
   // bounds all of them. The large-upload pool is a stricter inner bound on the
-  // routes whose bodies may be tens of megabytes.
+  // routes whose bodies may be tens of megabytes. Each pool also has a
+  // per-subject share, reserved atomically with the global permits before a
+  // token is signed or the gateway is contacted, so one authenticated
+  // principal cannot hold every permit while other tenants are refused.
   let activeUploads = 0;
   let activeLargeUploads = 0;
-  const reservedUploads = new WeakSet<FastifyRequest>();
-  const reservedLargeUploads = new WeakSet<FastifyRequest>();
+  const uploadsBySubject = new Map<string, number>();
+  const largeUploadsBySubject = new Map<string, number>();
+  const reservedUploads = new WeakMap<FastifyRequest, { subject?: string; large: boolean }>();
+
+  const decrementSubject = (counts: Map<string, number>, subject: string | undefined) => {
+    if (subject === undefined) return;
+    const remaining = (counts.get(subject) ?? 1) - 1;
+    if (remaining > 0) counts.set(subject, remaining);
+    else counts.delete(subject);
+  };
 
   const reserveUpload = async (request: FastifyRequest, reply: Parameters<typeof requireAdminAuth>[1]) => {
     if (!carriesRequestBody(request)) return;
     const config = loadConfig();
-    if (activeUploads >= config.maxActiveUploads) {
-      return reply.status(429).header('retry-after', '1').send({
-        error: 'Too Many Requests',
-        code: 'FERRUM_BFF_UPLOAD_CAPACITY',
-        scope: 'all',
-      });
+    const subject = request.authPrincipal?.subject;
+    const large = isLargeUpload(request);
+    const refuse = (scope: string) => reply.status(429).header('retry-after', '1').send({
+      error: 'Too Many Requests',
+      code: 'FERRUM_BFF_UPLOAD_CAPACITY',
+      scope,
+    });
+    // Every check runs before any counter moves, so a refusal at any layer
+    // reserves nothing. The global pools are reported first: when the whole
+    // pool is exhausted the refusal is `all`/`large` even for a subject that
+    // is also at its own share.
+    if (activeUploads >= config.maxActiveUploads) return refuse('all');
+    if (subject !== undefined && (uploadsBySubject.get(subject) ?? 0) >= config.maxUploadsPerPrincipal) {
+      return refuse('principal');
     }
-    if (isLargeUpload(request)) {
-      if (activeLargeUploads >= config.maxLargeUploads) {
-        return reply.status(429).header('retry-after', '1').send({
-          error: 'Too Many Requests',
-          code: 'FERRUM_BFF_UPLOAD_CAPACITY',
-          scope: 'large',
-        });
+    if (large) {
+      if (activeLargeUploads >= config.maxLargeUploads) return refuse('large');
+      if (subject !== undefined && (largeUploadsBySubject.get(subject) ?? 0) >= config.maxLargeUploadsPerPrincipal) {
+        return refuse('principal_large');
       }
       activeLargeUploads += 1;
-      reservedLargeUploads.add(request);
+      if (subject !== undefined) {
+        largeUploadsBySubject.set(subject, (largeUploadsBySubject.get(subject) ?? 0) + 1);
+      }
     }
     activeUploads += 1;
-    reservedUploads.add(request);
+    if (subject !== undefined) {
+      uploadsBySubject.set(subject, (uploadsBySubject.get(subject) ?? 0) + 1);
+    }
+    reservedUploads.set(request, { subject, large });
     // A completed request body can lose its response socket without triggering
     // either Fastify terminal hook. Install this at reservation lifetime, not
     // inside forwarding, and retain it through every handler cleanup path.
     reply.raw.once('close', () => releaseUpload(request));
+    // A socket that closed before the listener existed never emits again, and
+    // a leaked permit would now shrink that subject's share until restart.
+    if (reply.raw.destroyed) releaseUpload(request);
   };
 
-  // Both releases are keyed off a WeakSet membership test, so a request that
-  // holds one or both permits gives back exactly what it took, exactly once,
-  // whichever terminal hook or raw response close fires first.
+  // The release is keyed off WeakMap membership, so a request that holds one
+  // or both permits gives back exactly what it took, exactly once, whichever
+  // terminal hook or raw response close fires first.
   const releaseUpload = (request: FastifyRequest) => {
-    if (reservedLargeUploads.delete(request)) {
+    const held = reservedUploads.get(request);
+    if (held === undefined) return;
+    reservedUploads.delete(request);
+    if (held.large) {
       activeLargeUploads = Math.max(0, activeLargeUploads - 1);
+      decrementSubject(largeUploadsBySubject, held.subject);
     }
-    if (reservedUploads.delete(request)) {
-      activeUploads = Math.max(0, activeUploads - 1);
-    }
+    activeUploads = Math.max(0, activeUploads - 1);
+    decrementSubject(uploadsBySubject, held.subject);
   };
 
   // Reads never enter the upload pools, so long-running ones get their own:

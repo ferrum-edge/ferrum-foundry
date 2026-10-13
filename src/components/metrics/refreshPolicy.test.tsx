@@ -154,6 +154,29 @@ describe("Metrics page refresh policy", () => {
     expect(refreshButton().disabled).toBe(false);
   });
 
+  it("keeps independent panels mounted and polling when admin metrics fail", async () => {
+    failAdmin = true;
+    localStorage.setItem(METRICS_REFRESH_INTERVAL_KEY, "10000");
+    await act(async () => root.render(<QueryClientProvider client={client}><MetricsPage /></QueryClientProvider>));
+    // The client retries a 503 GET twice before the query settles as an error.
+    await advance(2000);
+    expect(host.textContent).toContain("Failed to load metrics");
+    expect(host.textContent).toContain("Overload Protection");
+    expect(host.textContent).toContain("Requests by Route");
+    for (const path of paths) expect(counts[path], path).toBeGreaterThanOrEqual(1);
+    expect(counts["/admin/metrics"]).toBe(3);
+    // The independent panels keep polling on the page interval.
+    const polled = ["/overload", "/metrics/runtime", "/charges"];
+    const before = polled.map((path) => counts[path]);
+    await advance(10000);
+    polled.forEach((path, index) => expect(counts[path], path).toBeGreaterThan(before[index] ?? 0));
+    // Recovery restores the admin-derived panels.
+    failAdmin = false;
+    await advance(10000);
+    expect(host.textContent).not.toContain("Failed to load metrics");
+    expect(host.textContent).toContain("Gateway");
+  });
+
   it("keeps manual recovery available after the admin metrics request fails", async () => {
     failAdmin = true;
     localStorage.setItem(METRICS_REFRESH_INTERVAL_KEY, "0");

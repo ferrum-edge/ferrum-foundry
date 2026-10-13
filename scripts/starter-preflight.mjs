@@ -210,7 +210,7 @@ export async function checkTlsTrust(env, fs = { stat }) {
       "gateway TLS trust",
       UNKNOWN,
       `${path} is readable (${info.size} bytes)`,
-      "Foundry has not verified that this bundle actually anchors the gateway's certificate; the connection check below is what proves it.",
+      "Foundry has not verified that this bundle actually anchors the gateway's certificate; the connection check below is what proves it. Preflight probes trust this bundle when the path resolves on this host; in Compose the same file is mounted at this path inside the container, so run preflight where the path resolves (or expect ambient host trust instead).",
     );
   } catch (error) {
     return check(
@@ -247,7 +247,7 @@ export async function checkGatewayReachable(env, fetchImpl = fetch) {
       FAIL,
       `GET ${origin}/health failed (${cause})`,
       tls
-        ? "The gateway's certificate did not verify. Point FERRUM_TLS_CA_PATH at the issuing CA; do not disable FERRUM_TLS_VERIFY."
+        ? "The gateway's certificate did not verify. Point FERRUM_TLS_CA_PATH at the issuing CA; do not disable FERRUM_TLS_VERIFY. If it is already set, this probe used it only if that path is readable on this host (see gateway TLS trust); otherwise run preflight where it resolves, or trust the CA on this host with NODE_EXTRA_CA_CERTS."
         : "Check the admin URL, network reachability, and that the gateway is running.",
     );
   }
@@ -390,14 +390,16 @@ export async function checkTrustBoundary(env, fetchImpl = fetch) {
 
   const results = [];
   let probeUrl;
+  let controlPassed = false;
   try {
     probeUrl = new URL("/api/proxy/proxies?offset=0&limit=1", front);
     const response = await fetchImpl(probeUrl, {
       signal: AbortSignal.timeout(10_000),
       redirect: "manual",
     });
+    controlPassed = response.status === 401 || response.status === 302 || response.status === 403;
     results.push(
-      response.status === 401 || response.status === 302 || response.status === 403
+      controlPassed
         ? check(
             "identity proxy refuses an anonymous request",
             PASS,
@@ -460,15 +462,23 @@ export async function checkTrustBoundary(env, fetchImpl = fetch) {
         "X-Ferrum-Namespaces": env.FERRUM_NAMESPACE ?? "",
       },
     });
+    const verdict = verdictForForgedProbe(response.status, controlPassed);
     results.push(
-      response.ok
+      verdict === FAIL
         ? check(
             "client identity headers are stripped",
             FAIL,
             "a forged X-Ferrum-Role: admin request was served",
             "The proxy must set all four identity headers with proxy_set_header so a client copy is replaced.",
           )
-        : check("client identity headers are stripped", PASS, `answered ${response.status}`),
+        : verdict === PASS
+          ? check("client identity headers are stripped", PASS, `answered ${response.status}`)
+          : check(
+              "client identity headers are stripped",
+              UNKNOWN,
+              `answered ${response.status}, which does not prove the headers were stripped`,
+              "Only a 401/403 authorization denial against a healthy front door proves stripping; a redirect, 404, 429 or 5xx is inconclusive. Fix the front door first, then re-run.",
+            ),
     );
   } catch (error) {
     results.push(
@@ -483,18 +493,59 @@ export async function checkTrustBoundary(env, fetchImpl = fetch) {
   return results;
 }
 
+/**
+ * Verdict for the forged-identity probe. Only a recognized authorization
+ * denial (401/403) observed against a healthy control (the anonymous probe
+ * was also refused) proves the boundary stripped the headers. Any other
+ * non-success — a login redirect, a missing route, overload, a server
+ * failure — says nothing about stripping and stays unknown.
+ */
+export function verdictForForgedProbe(status, controlPassed) {
+  if (status >= 200 && status < 300) return FAIL;
+  if ((status === 401 || status === 403) && controlPassed) return PASS;
+  return UNKNOWN;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Runner                                                             */
 /* ------------------------------------------------------------------ */
 
+/**
+ * The fetch used for gateway-origin probes. When a CA bundle is configured
+ * and readable on this host, probes trust it exactly as the BFF will —
+ * checking the file exists while probing without it proves nothing about a
+ * private-CA gateway. Front-door probes keep the default fetch: the gateway
+ * CA must not replace the public roots there. `deps.fetch` (tests) wins.
+ */
+export async function createGatewayFetch(env, deps = {}) {
+  if (deps.fetch) return deps.fetch;
+  const path = env.FERRUM_TLS_CA_PATH;
+  if (!path || !(env.FERRUM_ADMIN_URL ?? "").startsWith("https://")) return fetch;
+  try {
+    const ca = await (deps.readFile ?? readFile)(path);
+    // undici's own fetch with its own Agent, as the BFF sends (server/proxy.ts):
+    // the runtime's global fetch bundles its own undici, possibly another
+    // major, which need not accept this package's dispatcher.
+    const { Agent, fetch: undiciFetch } = deps.undici ?? (await import("undici"));
+    const dispatcher = new Agent({ connect: { ca } });
+    return (url, init = {}) => undiciFetch(url, { ...init, dispatcher });
+  } catch {
+    // The bundle is not readable from this host (the configured path is the
+    // container's mount path). Fall back to ambient trust; checkTlsTrust
+    // explains the mapping and the connection check reports what happened.
+    return fetch;
+  }
+}
+
 export async function runPreflight(env, deps = {}) {
   const fetchImpl = deps.fetch ?? fetch;
+  const gatewayFetch = await createGatewayFetch(env, deps);
   const results = [
     ...checkSecrets(env),
     checkAdminUrl(env),
     await checkTlsTrust(env, deps.fs),
-    await checkGatewayReachable(env, fetchImpl),
-    ...(await checkAdminCredentials(env, fetchImpl)),
+    await checkGatewayReachable(env, gatewayFetch),
+    ...(await checkAdminCredentials(env, gatewayFetch)),
     ...(await checkTrustBoundary(env, fetchImpl)),
   ];
   return {

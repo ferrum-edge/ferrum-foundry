@@ -280,7 +280,7 @@ document is stored in the repository.
 
 ### v0.5.5 schema review
 
-The Foundry v0.5.5 candidate moves `edge.source_commit` to published Edge
+Foundry v0.5.5 (published; see [compatibility.md](compatibility.md)) moves `edge.source_commit` to published Edge
 v0.9.15, `25b37395ff61bfea0f3ffd189d9011c4984fa755`. Its raw `openapi.yaml`
 (SHA-256 `f6c7d8b1d247060c4d0ae66e5c149ad3d76721addb8176eff45b6fc3d1b4d6b2`)
 was read from the immutable tag alongside the v0.9.14 document. Each of the
@@ -327,7 +327,7 @@ fields of `ApiChargebackSinkConfig`, `AiSemanticFirewallConfig`,
 
 `PLUGIN_SCHEMA_SPEC.ref` moves to 25b37395 together with the one changed digest,
 as the drift check requires. This review read the blocks directly from the
-immutable tag; the candidate's hosted producer export, from the Pinned Gateway
+immutable tag; the release's hosted producer export, from the Pinned Gateway
 Contract job, is the independent check of the same digests. This review is
 schema evidence, not pairing qualification. No project tooling or producer ran
 locally, and no OpenAPI document is stored in the repository.

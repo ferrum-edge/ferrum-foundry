@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Give upload admission a per-authenticated-subject share
+  (GHSA-733w-pmhj-7r6j). `FERRUM_MAX_UPLOADS_PER_PRINCIPAL` (default 8, or
+  `FERRUM_MAX_ACTIVE_UPLOADS` if lower) and
+  `FERRUM_MAX_LARGE_UPLOADS_PER_PRINCIPAL` (default 1) are reserved with the
+  global permits before a token is signed, so one principal, across any number
+  of sessions, can no longer hold every upload permit while other tenants get
+  `429`. Refusals keep `FERRUM_BFF_UPLOAD_CAPACITY` with `scope` `principal` or
+  `principal_large`. A permit reserved after the client's socket already
+  closed is returned at once instead of leaking from the subject's share.
+- **Upgrade note:** one subject now holds at most one of the two default
+  restore/API-spec upload permits; static-auth deployments share a single
+  subject, so the whole instance gets the per-principal shares.
+
 - Align the namespace route ceiling with Ferrum Edge v0.9.16's limit on admin
   JWTs that carry an `ns` claim (ferrum-edge#6093, ferrum-edge#6095). A session
   holding namespace grants is now refused every `/admin/tls/*` route, TLS
@@ -58,6 +71,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `/consumers/{id}/credentials/{type}/{index}`. Any other method from a scoped
   session is refused with `403 Namespace access denied` before signing, as on
   every other route class (#565).
+
+### Fixed
+
+- Namespace Manager tells an unreadable registry from an empty one, offers
+  Retry, and disables Edit/Delete over stale rows after a failed refresh (#572).
+- A delete that completes after its detail editor was replaced, by an
+  identity change or by leaving the page, no longer navigates the newer editor
+  away (#573).
+- An `/admin/metrics` failure no longer unmounts the overload, runtime,
+  chargeback, and Prometheus panels or stops their polling (#574).
+- An API-spec import or replacement answered with the committed-but-not-live
+  `503` is reported as saved and closes its dialog instead of locking the
+  workspace as outcome-unknown (#575).
+- Complete collection traversals reject a repeated record `id` (an
+  equal-total concurrent change) instead of reporting complete data (#577).
+- Starter: the demo bootstrap and `.env.example` no longer override the
+  published Foundry digest with `:main` (#578); preflight gateway probes trust
+  `FERRUM_TLS_CA_PATH` when it is readable on the host (#579); the production
+  proof-file step reads the secret from `.env` (#580); Compose stop grace
+  exceeds the BFF shutdown deadline (#581); the forged-identity probe passes
+  only on a `401`/`403` against a healthy control (#582).
+- Guides: OIDC operator input in plugin defaults (#576), preview-only `503`
+  for an uncompilable manifest schema (#583), and v0.5.5 recorded as
+  qualified and published (#584).
 
 ### Changed
 

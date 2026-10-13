@@ -1,3 +1,15 @@
+/**
+ * Whether an error carries the client's committed-but-not-live marker.
+ * Registered by `client.ts` at load (the same pattern as
+ * `setApplyStatusFetcher`): this module sits below `gatewayMetadata` in the
+ * import graph and must not import the client back.
+ */
+let committedWriteProbe: ((error: unknown) => boolean) | undefined;
+
+export function setCommittedWriteProbe(probe?: (error: unknown) => boolean): void {
+  committedWriteProbe = probe;
+}
+
 /** A lost response cannot establish whether a remote mutation committed. */
 export class MutationOutcomeUnknownError extends Error {
   constructor(operation: string, cause: unknown) {
@@ -30,7 +42,13 @@ export async function observeMutation<T>(operation: string, request: Promise<T>)
       'phase' in data &&
       data.phase === 'upload';
     const localPathRefusal = error instanceof Error && error.name === 'PathSegmentError';
+    // A recognized committed-but-not-live answer is a known commit, not an
+    // unknown outcome: the write is durable and the caller recovers by
+    // re-reading, never by treating the workspace as locked (see
+    // docs/client-recovery.md). The marker survives secret redaction.
+    const committed = committedWriteProbe?.(error) ?? false;
     if (
+      !committed &&
       !localPathRefusal &&
       !uploadRejected &&
       (status === undefined || status === 408 || status >= 500)

@@ -34,6 +34,15 @@ export interface EditorSession {
   bind<Args extends unknown[]>(
     handler: (...args: Args) => Promise<void>,
   ): (...args: Args) => Promise<void>;
+  /**
+   * Whether this session is still the editor on screen: its page is mounted
+   * and has not moved to another identity since (returning to the same
+   * identity later starts a new session). Check it after an awaited mutation
+   * and before any completion-time navigation: a write that started under
+   * this editor may finish (and reconcile) after the operator moved to a
+   * newer editor, and must not redirect it away.
+   */
+  isCurrent(): boolean;
 }
 
 export interface EditorSessionOptions {
@@ -93,8 +102,26 @@ export function useEditorIdentity(
     [identity],
   );
 
+  // A session is current only while the hook that issued it is mounted and
+  // still holds the very identity it was issued for. Unmounting (the operator
+  // opened another family's editor) retires it for good, and so does any
+  // identity change: `identity` is a fresh object per change, so leaving and
+  // returning to the same namespace/resource does not revive an old session.
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  const isCurrent = useCallback(
+    () => mounted.current && live.current === identity,
+    [identity],
+  );
+
   return useMemo(
-    () => ({ identity, key: editorIdentityKey(identity), bind }),
-    [identity, bind],
+    () => ({ identity, key: editorIdentityKey(identity), bind, isCurrent }),
+    [identity, bind, isCurrent],
   );
 }

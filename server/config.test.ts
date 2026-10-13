@@ -33,6 +33,8 @@ const ENV_KEYS = [
   'FERRUM_UPLOAD_TIMEOUT',
   'FERRUM_MAX_LARGE_UPLOADS',
   'FERRUM_MAX_ACTIVE_UPLOADS',
+  'FERRUM_MAX_UPLOADS_PER_PRINCIPAL',
+  'FERRUM_MAX_LARGE_UPLOADS_PER_PRINCIPAL',
   'FERRUM_MAX_ACTIVE_LONG_READS',
   'FERRUM_MAX_LONG_READS_PER_PRINCIPAL',
   'FERRUM_NAMESPACE_SCAN_MAX_PAGES',
@@ -277,6 +279,32 @@ describe('config', () => {
       setValidEnv({ FERRUM_MAX_LARGE_UPLOADS: value });
       const invalid = await loadModule();
       expect(() => invalid.loadConfig()).toThrow(/FERRUM_MAX_LARGE_UPLOADS/);
+    }
+  });
+
+  it('bounds the per-subject shares of both upload pools', async () => {
+    setValidEnv({
+      FERRUM_MAX_UPLOADS_PER_PRINCIPAL: '4',
+      FERRUM_MAX_LARGE_UPLOADS_PER_PRINCIPAL: '2',
+      FERRUM_MAX_ACTIVE_UPLOADS: '16',
+      FERRUM_MAX_LARGE_UPLOADS: '4',
+    });
+    const { loadConfig } = await loadModule();
+    expect(loadConfig()).toMatchObject({
+      maxUploadsPerPrincipal: 4,
+      maxLargeUploadsPerPrincipal: 2,
+    });
+
+    for (const [env, pattern] of [
+      [{ FERRUM_MAX_UPLOADS_PER_PRINCIPAL: '64', FERRUM_MAX_ACTIVE_UPLOADS: '32' }, /FERRUM_MAX_UPLOADS_PER_PRINCIPAL must not exceed FERRUM_MAX_ACTIVE_UPLOADS/],
+      [{ FERRUM_MAX_LARGE_UPLOADS_PER_PRINCIPAL: '4', FERRUM_MAX_LARGE_UPLOADS: '2' }, /FERRUM_MAX_LARGE_UPLOADS_PER_PRINCIPAL must not exceed FERRUM_MAX_LARGE_UPLOADS/],
+      [{ FERRUM_MAX_LARGE_UPLOADS_PER_PRINCIPAL: '2', FERRUM_MAX_LARGE_UPLOADS: '4', FERRUM_MAX_UPLOADS_PER_PRINCIPAL: '1' }, /FERRUM_MAX_LARGE_UPLOADS_PER_PRINCIPAL must not exceed FERRUM_MAX_UPLOADS_PER_PRINCIPAL/],
+      [{ FERRUM_MAX_UPLOADS_PER_PRINCIPAL: '0' }, /FERRUM_MAX_UPLOADS_PER_PRINCIPAL/],
+    ] as const) {
+      clearTestEnv();
+      setValidEnv(env);
+      const invalid = await loadModule();
+      expect(() => invalid.loadConfig()).toThrow(pattern);
     }
   });
 

@@ -154,6 +154,54 @@ describe("useEditorIdentity", () => {
     expect(freshHandler).toHaveBeenCalledTimes(1);
   });
 
+  it("reports currency so a completion cannot navigate a newer editor away", async () => {
+    await render(probe("shared"));
+    const retired = handle!.session;
+    expect(retired.isCurrent()).toBe(true);
+
+    // Identity moves (namespace switch, then a different resource): the
+    // retired session's completion-time navigation must be suppressed.
+    await act(async () => {
+      handle!.setNamespace("tenant-b");
+    });
+    expect(retired.isCurrent()).toBe(false);
+    expect(handle!.session.isCurrent()).toBe(true);
+
+    const beforeRoute = handle!.session;
+    await render(probe("other"));
+    expect(beforeRoute.isCurrent()).toBe(false);
+    expect(handle!.session.isCurrent()).toBe(true);
+  });
+
+  it("retires a session when its page unmounts", async () => {
+    await render(probe("shared"));
+    const retired = handle!.session;
+    expect(retired.isCurrent()).toBe(true);
+
+    // The operator opens another family's editor: this route unmounts while
+    // its delete is still awaiting the gateway, and nothing updates the ref.
+    await render(<span />);
+    expect(retired.isCurrent()).toBe(false);
+
+    // Coming back to the same identity mounts a new session; the old one
+    // stays retired so its completion cannot navigate the new editor away.
+    await render(probe("shared"));
+    expect(handle!.session.isCurrent()).toBe(true);
+    expect(retired.isCurrent()).toBe(false);
+  });
+
+  it("does not revive a session when the page returns to the same identity", async () => {
+    await render(probe("shared"));
+    const retired = handle!.session;
+
+    await render(probe("other"));
+    expect(retired.isCurrent()).toBe(false);
+
+    await render(probe("shared"));
+    expect(handle!.session.isCurrent()).toBe(true);
+    expect(retired.isCurrent()).toBe(false);
+  });
+
   it("hands a stale call to onStale instead of throwing when one is configured", async () => {
     const onStale = vi.fn((_captured: EditorIdentity, _current: EditorIdentity) => {});
     await render(probe("shared", { onStale }));

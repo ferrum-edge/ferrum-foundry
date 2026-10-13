@@ -772,13 +772,15 @@ describe('streaming gateway proxy', () => {
       payload: '{"version":1}',
     });
     const responses = await Promise.all([request(), request(), request()]);
-    expect(responses.map((response) => response.statusCode).sort()).toEqual([200, 200, 429]);
+    // One subject may hold only its per-principal large share (default 1 of
+    // the global 2), so the second large permit stays available to others.
+    expect(responses.map((response) => response.statusCode).sort()).toEqual([200, 429, 429]);
     const rejected = responses.find((response) => response.statusCode === 429);
     expect(rejected?.headers['retry-after']).toBe('1');
     expect(rejected?.json()).toEqual({
       error: 'Too Many Requests',
       code: 'FERRUM_BFF_UPLOAD_CAPACITY',
-      scope: 'large',
+      scope: 'principal_large',
     });
   });
 });
