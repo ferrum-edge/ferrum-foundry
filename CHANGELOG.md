@@ -16,8 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   subdomain of its host, over plain HTTP with Secure cookies left on must now
   set `FERRUM_ENABLE_HSTS=false`.
 - Stop reflecting any `Origin` in CORS outside production (#590). The BFF now
-  answers no cross-origin request in any environment; the development UI
-  already reaches it through Vite's same-origin `/api/` proxy.
+  emits no CORS allow headers in any environment, so no other site's scripts
+  can read its responses; the development UI already reaches it through
+  Vite's same-origin `/api/` proxy.
 - Tell unauthenticated health callers only the verdict (#592).
   `/api/health` and `/api/health/live` answer `{"status":"ok"}`, and
   `/api/health/ready` answers `{"status":"ready"|"unavailable","ready":...}`

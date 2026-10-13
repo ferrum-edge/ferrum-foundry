@@ -53,7 +53,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   installUploadDrain(fastify);
 
   await fastify.register(cookie);
-  // No cross-origin access in any environment (issue #590). The SPA is served
+  // No CORS grant in any environment (issue #590). The SPA is served
   // same-origin in production, and in development Vite proxies `/api/` to the
   // BFF, so the browser never makes a cross-origin call. Reflecting any Origin
   // outside production let every site a developer visited read a running BFF.

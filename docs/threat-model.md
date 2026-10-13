@@ -55,8 +55,9 @@ literal. Operators should use HTTPS for remote targets.
   widths at runtime, and Select's viewport renders another. No hash can cover
   them. Removing it needs per-response nonces in the SPA shell and in those
   libraries. That work is tracked in
-  [#594](https://github.com/ferrum-edge/ferrum-foundry/issues/594) and is due
-  before Foundry leaves buildout. Until then, an HTML-injection sink could use
+  [#594](https://github.com/ferrum-edge/ferrum-foundry/issues/594). The Foundry
+  maintainers own it, and it is due before Foundry leaves buildout and onboards
+  users. Until then, an HTML-injection sink could use
   inline styles for UI redress or CSS-based exfiltration, but not to run script.
 - **HSTS** is on by default wherever Secure cookies are (both default to
   `NODE_ENV=production`). `FERRUM_ENABLE_HSTS=false` opts out.
