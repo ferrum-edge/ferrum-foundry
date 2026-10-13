@@ -141,6 +141,10 @@ export async function listAll(
   let offset = 0;
   const limit = 250;
   let expectedTotal: number | undefined;
+  // Counts alone cannot prove completeness: an equal-total delete plus an
+  // earlier-sorting insert between pages repeats a boundary spec and skips
+  // another (#577, `collectBoundedPages`).
+  const seen = new Set<string>();
 
   for (;;) {
     signal?.throwIfAborted();
@@ -157,6 +161,14 @@ export async function listAll(
       expectedTotal = page.total;
     } else if (page.total !== expectedTotal) {
       throw new Error("Gateway changed API spec pagination total while collecting pages");
+    }
+    for (const spec of page.items) {
+      if (seen.has(spec.id)) {
+        throw new Error(
+          "Gateway returned a repeated API spec while collecting pages; the collection changed during traversal",
+        );
+      }
+      seen.add(spec.id);
     }
     items.push(...page.items);
     if (items.length >= expectedTotal) {

@@ -251,6 +251,23 @@ describe("namespace API requests", () => {
     expect(captured[1].url).toContain("offset=2&limit=250");
   });
 
+  it("list() rejects a namespace repeated across pages under an unchanged total", async () => {
+    let call = 0;
+    nextResponse = () => {
+      call += 1;
+      return new Response(
+        JSON.stringify(
+          call === 1
+            ? { data: ["ferrum", "production"], pagination: { offset: 0, limit: 250, total: 3 } }
+            : { data: ["production"], pagination: { offset: 2, limit: 250, total: 3 } },
+        ),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    };
+
+    await expect(list(scope)).rejects.toThrow("repeated resource");
+  });
+
   it("list() passes through a bare array response", async () => {
     nextResponse = () =>
       new Response(JSON.stringify(["ferrum"]), {

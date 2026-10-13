@@ -39,6 +39,8 @@ let counts: Record<string, number>;
 let failPrometheus: boolean;
 let failAdmin: boolean;
 let holdPrometheus: boolean;
+let holdAdmin: boolean;
+const releaseAdmin: (() => void)[] = [];
 let releasePrometheus: (() => void) | undefined;
 
 beforeEach(() => {
@@ -49,11 +51,16 @@ beforeEach(() => {
   failPrometheus = false;
   failAdmin = false;
   holdPrometheus = false;
+  holdAdmin = false;
+  releaseAdmin.length = 0;
   releasePrometheus = undefined;
   vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
     const path = new URL(request.url).pathname.replace("/api/proxy", "");
     expect(request.headers.get("X-Ferrum-Namespace")).toBe("ferrum");
     counts[path] = (counts[path] ?? 0) + 1;
+    if (path === "/admin/metrics" && holdAdmin) {
+      await new Promise<void>((resolve) => { releaseAdmin.push(resolve); });
+    }
     if (path === "/admin/metrics") return Response.json(failAdmin ? { error: "Unavailable" } : metrics, { status: failAdmin ? 503 : 200 });
     if (path === "/metrics/runtime") return Response.json({});
     if (path === "/overload") return Response.json({ level: "normal" });
@@ -71,6 +78,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   releasePrometheus?.();
+  for (const release of releaseAdmin.splice(0)) release();
   await act(async () => root.unmount());
   client.clear();
   host.remove();
@@ -175,6 +183,62 @@ describe("Metrics page refresh policy", () => {
     await advance(10000);
     expect(host.textContent).not.toContain("Failed to load metrics");
     expect(host.textContent).toContain("Gateway");
+  });
+
+  it("keeps independent panels mounted while an admin retry after a failure is pending", async () => {
+    failAdmin = true;
+    localStorage.setItem(METRICS_REFRESH_INTERVAL_KEY, "10000");
+    await act(async () => root.render(<QueryClientProvider client={client}><MetricsPage /></QueryClientProvider>));
+    await advance(2000);
+    expect(host.textContent).toContain("Failed to load metrics");
+    const heading = (text: string) =>
+      [...host.querySelectorAll("h3")].find((node) => node.textContent?.trim() === text);
+    const overload = heading("Overload Protection")!;
+    const chargeback = heading("API Chargeback")!;
+    expect(overload).toBeTruthy();
+    expect(chargeback).toBeTruthy();
+
+    // The next interval retries admin metrics with no sample yet, which puts
+    // that query back to pending. Hold it there.
+    holdAdmin = true;
+    const polled = ["/overload", "/metrics/runtime", "/charges"];
+    const before = polled.map((path) => counts[path]);
+    await advance(10000);
+    expect(releaseAdmin.length).toBeGreaterThanOrEqual(1);
+    expect(host.querySelector('[aria-busy="true"]')).not.toBeNull();
+    // Same elements: the panels were not unmounted, and they kept polling.
+    expect(overload.isConnected).toBe(true);
+    expect(chargeback.isConnected).toBe(true);
+    expect(host.textContent).toContain("Per-Route Metrics");
+    polled.forEach((path, index) => expect(counts[path], path).toBeGreaterThan(before[index] ?? 0));
+
+    // The held retry succeeds and the admin-derived panels appear beside them.
+    failAdmin = false;
+    holdAdmin = false;
+    for (const release of releaseAdmin.splice(0)) release();
+    await advance(100);
+    await advance(100);
+    expect(host.querySelector('[aria-busy="true"]')).toBeNull();
+    expect(heading("Circuit Breakers")).toBeTruthy();
+    expect(overload.isConnected).toBe(true);
+  });
+
+  it("does not advise enabling Prometheus before the first sample arrives", async () => {
+    holdAdmin = true;
+    holdPrometheus = true;
+    localStorage.setItem(METRICS_REFRESH_INTERVAL_KEY, "0");
+    await act(async () => root.render(<QueryClientProvider client={client}><MetricsPage /></QueryClientProvider>));
+    await advance(100);
+    expect(host.textContent).toContain("Loading per-route metrics");
+    expect(host.textContent).not.toContain("No Prometheus metrics available");
+
+    holdPrometheus = false;
+    releasePrometheus!();
+    for (const release of releaseAdmin.splice(0)) release();
+    await advance(100);
+    await advance(100);
+    expect(host.textContent).not.toContain("Loading per-route metrics");
+    expect(host.textContent).toContain("Requests by Route");
   });
 
   it("keeps manual recovery available after the admin metrics request fails", async () => {

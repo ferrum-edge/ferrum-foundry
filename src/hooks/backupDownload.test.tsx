@@ -102,6 +102,10 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  // A successful download revokes its object URL on a 0 ms timer. Let any
+  // still-pending revoke run now, while this test's URL stub is installed;
+  // otherwise it can land in the next test after the mocks were cleared.
+  await new Promise((resolve) => setTimeout(resolve, 0));
   await ui.dispose();
   setApiErrorHandler(undefined);
   resetGatewayTarget();

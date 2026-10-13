@@ -35,6 +35,11 @@ function ProxyCreateEditor({ session }: { session: EditorSession }) {
     try {
       const created = await createProxy.mutateAsync(data);
       toast("success", "Proxy created successfully");
+      // The create is durable either way; only the draft still on screen may
+      // open it. A completion under a namespace the operator has since left
+      // (or after leaving the page) must not replace a newer draft, nor open
+      // the new id under another namespace.
+      if (!session.isCurrent()) return;
       navigate({
         to: "/proxies/$proxyId",
         params: { proxyId: created.id },

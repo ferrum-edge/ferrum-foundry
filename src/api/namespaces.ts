@@ -240,7 +240,7 @@ export async function list(scope: NamespaceScope): Promise<string[]> {
       throw new Error("Gateway changed namespace pagination format mid-request");
     }
     return page;
-  });
+  }, ALL_PAGE_SIZE, undefined, (name) => name);
 }
 
 export async function get(
