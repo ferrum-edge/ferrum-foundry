@@ -74,6 +74,24 @@ function responseStatus(error: unknown): number | undefined {
   return response?.status;
 }
 
+/**
+ * The operator-facing message for a BFF authentication lockout (`429` after
+ * repeated failed sign-ins from this address), or `undefined` for any other
+ * error. A lockout is not a wrong token: the right one is refused too until
+ * the Retry-After delay passes.
+ */
+export function lockoutMessage(error: unknown): string | undefined {
+  if (responseStatus(error) !== 429) return undefined;
+  const response = (error as { response?: Response }).response;
+  const seconds = Number(response?.headers.get("retry-after"));
+  const wait = !Number.isFinite(seconds) || seconds <= 0
+    ? "later"
+    : seconds < 60
+      ? `in ${Math.ceil(seconds)} seconds`
+      : `in ${Math.ceil(seconds / 60)} minutes`;
+  return `Too many failed sign-in attempts from this address. Try again ${wait}.`;
+}
+
 function authorizationKey(principal: AuthPrincipal | null): string {
   if (!principal) return "anonymous";
   return JSON.stringify([
@@ -162,9 +180,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       acceptSession(session);
     } catch (sessionError) {
       if (controller.signal.aborted || !isCurrent(ticket)) return;
+      const lockout = lockoutMessage(sessionError);
       if (responseStatus(sessionError) === 401) {
         appliedTicketRef.current = ticket;
         clearLocalSession();
+      } else if (lockout) {
+        setError(lockout);
+        if (!principalRef.current) setStatus("unauthenticated");
       } else if (principalRef.current) {
         setError("Session verification is temporarily unavailable.");
       } else {
@@ -221,8 +243,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         json: { token },
         context: { [SILENT_ERRORS]: true },
       }).json<SessionResponse>();
-    } catch {
-      setError("The token was rejected.");
+    } catch (loginError) {
+      setError(lockoutMessage(loginError) ?? "The token was rejected.");
       throw new Error("Authentication failed");
     }
     if (disposedRef.current) return;

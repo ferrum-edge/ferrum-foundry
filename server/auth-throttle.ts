@@ -135,9 +135,15 @@ export class AuthFailureThrottle {
   /**
    * Remember that `key` proved it holds the secret. It moves to the
    * authenticated table, keeping whatever failure state it had, and is exempt
-   * from the overflow lockout from then on, never from its own.
+   * from the overflow lockout from then on, never from its own. An address the
+   * shared table did not hold had its failures counted by the overflow entry,
+   * so it starts from a copy of that state rather than from nothing.
    */
   noteAuthenticated(key: string): void {
+    this.promote(key, false);
+  }
+
+  private promote(key: string, clearFailures: boolean): void {
     if (!this.enabled) return;
     const current = this.trusted.get(key);
     if (current) {
@@ -150,9 +156,21 @@ export class AuthFailureThrottle {
     // keeps whatever it has in the shared table and goes without the
     // exemption until there is.
     if (this.trusted.size >= this.options.maxTrustedKeys && !this.makeTrustedRoom(key)) return;
-    const entry = this.entries.get(key) ?? newEntry();
+    const entry = clearFailures
+      ? newEntry()
+      : (this.entries.get(key) ?? this.copyOfOverflow(this.now()));
     this.entries.delete(key);
     this.trusted.set(key, entry);
+  }
+
+  /** An independent copy of the overflow entry's live state, or a fresh entry. */
+  private copyOfOverflow(now: number): Entry {
+    const overflow = this.refresh(this.overflow, now);
+    return {
+      failures: [...overflow.failures],
+      lockedUntil: overflow.lockedUntil,
+      lockouts: overflow.lockouts,
+    };
   }
 
   /**
@@ -186,7 +204,7 @@ export class AuthFailureThrottle {
     if (!this.enabled) return;
     this.entries.delete(key);
     this.trusted.delete(key);
-    this.noteAuthenticated(key);
+    this.promote(key, true);
   }
 
   /** Addresses tracked in the shared table (not counting authenticated ones). */

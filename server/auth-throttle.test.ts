@@ -196,4 +196,34 @@ describe('AuthFailureThrottle overflow', () => {
     expect(instance.recordFailure('A')).toEqual({ failures: 3, lockedForMs: 1_000 });
     expect(instance.lockedFor('A')).toBe(1_000);
   });
+
+  it('carries overflow-counted failures into an address that then authenticates', () => {
+    const { instance } = throttle({ maxKeys: 1, maxFailures: 3 });
+    instance.recordFailure('A'); // fills the shared table
+    expect(instance.recordFailure('B')).toEqual({ failures: 1, overflow: true });
+    expect(instance.recordFailure('B')).toEqual({ failures: 2, overflow: true });
+    instance.noteAuthenticated('B');
+    expect(instance.recordFailure('B')).toEqual({ failures: 3, lockedForMs: 1_000 });
+  });
+
+  it('carries overflow escalation into an address that then authenticates', () => {
+    const { instance, advance } = throttle({ maxKeys: 1, maxFailures: 3 });
+    instance.recordFailure('A');
+    for (let i = 0; i < 3; i += 1) instance.recordFailure('B');
+    expect(instance.lockedFor('B')).toBe(1_000);
+    advance(1_000);
+    instance.noteAuthenticated('B');
+    instance.recordFailure('B');
+    instance.recordFailure('B');
+    expect(instance.recordFailure('B')).toEqual({ failures: 3, lockedForMs: 2_000 });
+  });
+
+  it('starts a successful static login from a clean record', () => {
+    const { instance } = throttle({ maxKeys: 1, maxFailures: 3 });
+    instance.recordFailure('A');
+    instance.recordFailure('B');
+    instance.recordFailure('B');
+    instance.recordSuccess('B');
+    expect(instance.recordFailure('B')).toEqual({ failures: 1 });
+  });
 });

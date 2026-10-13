@@ -40,6 +40,12 @@ beforeEach(() => {
       return Response.json({ mode, loginUrl }, { status: configStatus });
     }
     if (path === "/api/auth/session") {
+      if (sessionStatus === 429) {
+        return Response.json(
+          { error: "Too many failed authentication attempts" },
+          { status: 429, headers: { "retry-after": "30", "x-ferrum-auth-layer": "bff" } },
+        );
+      }
       return sessionStatus === 200 ? session() : Response.json({}, { status: sessionStatus });
     }
     if (path === "/api/auth/login") {
@@ -122,6 +128,33 @@ describe("LoginGate session exchange", () => {
     await settle(() => expect(requests.filter((request) => request.method === "POST")).toHaveLength(2));
     await act(async () => completeLogin(session()));
     await settle(() => expect(ui.host.textContent).toBe("Protected workspace"));
+  });
+
+  it("tells a locked-out operator to wait instead of calling the token wrong (#588)", async () => {
+    await mount();
+    await settle(() => expect(ui.host.querySelector("input")).not.toBeNull());
+    await fill(ui.host.querySelector("input")!, "correct-but-locked-out");
+    await submit();
+    await settle(() => expect(requests.some((request) => request.method === "POST")).toBe(true));
+    await act(async () => completeLogin(Response.json(
+      { error: "Too many failed authentication attempts" },
+      { status: 429, headers: { "retry-after": "120", "x-ferrum-auth-layer": "bff" } },
+    )));
+    await settle(() => expect(ui.host.querySelector('[role="alert"]')?.textContent)
+      .toBe("Too many failed sign-in attempts from this address. Try again in 2 minutes."));
+    expect(ui.host.textContent).not.toContain("The token was rejected");
+    expect(button("Sign in").disabled).toBe(false);
+  });
+
+  it("reports a locked-out trusted-proxy session as a lockout, without retrying it", async () => {
+    mode = "trusted-proxy";
+    sessionStatus = 429;
+    await mount();
+    await settle(() => expect(ui.host.querySelector('[role="alert"]')?.textContent)
+      .toBe("Too many failed sign-in attempts from this address. Try again in 30 seconds."));
+    const sessionReads = requests.filter((request) => new URL(request.url).pathname === "/api/auth/session");
+    expect(sessionReads).toHaveLength(1);
+    expect(ui.host.textContent).not.toContain("Protected workspace");
   });
 
   it("accepts an existing trusted-proxy session without a token form", async () => {
