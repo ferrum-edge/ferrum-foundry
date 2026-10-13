@@ -166,4 +166,34 @@ describe('AuthFailureThrottle overflow', () => {
     expect(instance.lockedFor('two')).toBe(0);
     expect(instance.lockedFor('three')).toBe(0);
   });
+
+  it('never discards a locked authenticated address to admit another', () => {
+    const { instance } = throttle({ maxKeys: 1, maxTrustedKeys: 1 });
+    instance.noteAuthenticated('A');
+    for (let i = 0; i < 3; i += 1) instance.recordFailure('A');
+    instance.recordFailure('B'); // fills the shared table with live state
+    instance.noteAuthenticated('C');
+    expect(instance.lockedFor('A')).toBe(1_000);
+  });
+
+  it('keeps failures below the threshold when both tables are full', () => {
+    const { instance } = throttle({ maxKeys: 1, maxTrustedKeys: 1 });
+    instance.noteAuthenticated('A');
+    instance.recordFailure('A');
+    instance.recordFailure('A');
+    instance.recordFailure('B');
+    instance.noteAuthenticated('C');
+    expect(instance.recordFailure('A')).toEqual({ failures: 3, lockedForMs: 1_000 });
+  });
+
+  it('demotes a live authenticated address into the shared table when it fits', () => {
+    const { instance } = throttle({ maxKeys: 2, maxTrustedKeys: 1 });
+    instance.noteAuthenticated('A');
+    instance.recordFailure('A');
+    instance.recordFailure('A');
+    instance.noteAuthenticated('C');
+    expect(instance.size).toBe(1);
+    expect(instance.recordFailure('A')).toEqual({ failures: 3, lockedForMs: 1_000 });
+    expect(instance.lockedFor('A')).toBe(1_000);
+  });
 });

@@ -139,20 +139,46 @@ export class AuthFailureThrottle {
    */
   noteAuthenticated(key: string): void {
     if (!this.enabled) return;
-    const entry = this.trusted.get(key) ?? this.entries.get(key) ?? newEntry();
+    const current = this.trusted.get(key);
+    if (current) {
+      // Re-insert so the map stays ordered by last authentication.
+      this.trusted.delete(key);
+      this.trusted.set(key, current);
+      return;
+    }
+    // No room without losing another address's live state: the newcomer
+    // keeps whatever it has in the shared table and goes without the
+    // exemption until there is.
+    if (this.trusted.size >= this.options.maxTrustedKeys && !this.makeTrustedRoom(key)) return;
+    const entry = this.entries.get(key) ?? newEntry();
     this.entries.delete(key);
-    this.trusted.delete(key);
     this.trusted.set(key, entry);
+  }
+
+  /**
+   * Free one slot in the authenticated table without losing live state: drop
+   * the least recently authenticated stale entry, or else demote the least
+   * recently authenticated live one into the shared table if it fits there.
+   * `newcomer`'s own shared entry is about to move out, so its slot counts as
+   * free. Returns whether a slot was freed.
+   */
+  private makeTrustedRoom(newcomer: string): boolean {
     const now = this.now();
-    for (const [oldest, state] of this.trusted) {
-      if (this.trusted.size <= this.options.maxTrustedKeys) break;
-      this.trusted.delete(oldest);
-      // Displacing it takes as many other addresses proving the secret; keep
-      // any live state it had where there is room for it.
-      if (!this.isStale(state, now) && this.entries.size < this.options.maxKeys) {
-        this.entries.set(oldest, state);
+    for (const [key, state] of this.trusted) {
+      if (this.isStale(state, now)) {
+        this.trusted.delete(key);
+        return true;
       }
     }
+    const freed = this.entries.has(newcomer) ? 1 : 0;
+    if (this.entries.size - freed >= this.options.maxKeys) this.dropStale(now);
+    if (this.entries.size - freed >= this.options.maxKeys) return false;
+    const oldest = this.trusted.entries().next();
+    if (oldest.done) return false;
+    const [key, state] = oldest.value;
+    this.trusted.delete(key);
+    this.entries.set(key, state);
+    return true;
   }
 
   /** Forget `key`'s failures after it proved it holds the secret. */

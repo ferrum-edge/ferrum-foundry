@@ -98,7 +98,9 @@ further address share one overflow lockout, so an attack spread across more
 addresses than that is still throttled. Up to 1,024 addresses that recently
 authenticated, such as the identity proxy or a signed-in administrator, keep
 their own failure state in a separate table. They are exempt from the overflow
-lockout but never from their own.
+lockout but never from their own. Live state is never discarded to make room:
+when both tables are full of it, a newly authenticated address goes without
+the exemption until a slot frees up.
 
 The address is the socket peer, never `X-Forwarded-For`, so a client that
 reaches the BFF directly cannot rotate a header to escape its own lockout.
@@ -107,7 +109,8 @@ sends a wrong secret, for example during a secret rotation, therefore locks
 itself out. Fix the secret and restart the BFF to clear the lockout: the state
 is per process and in memory, and a secret change needs a restart anyway. Set
 `FERRUM_AUTH_MAX_FAILURES=0` to turn the throttle off where the network already
-guarantees that only the proxy can connect.
+guarantees that only the proxy can connect. The starter forwards both settings
+from its `.env`.
 
 ### Namespace registry
 

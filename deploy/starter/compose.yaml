@@ -56,6 +56,10 @@ services:
       FERRUM_AUTH_LOGIN_URL: ${FERRUM_AUTH_LOGIN_URL:-/oauth2/start}
       FERRUM_AUTH_LOGOUT_URL: ${FERRUM_AUTH_LOGOUT_URL:-/oauth2/sign_out}
       FERRUM_ENABLE_HSTS: ${FERRUM_ENABLE_HSTS:-true}
+      # Failed proxy-proof throttle (docs/authentication.md, "Failed-authentication
+      # lockout"). 0 failures disables it.
+      FERRUM_AUTH_MAX_FAILURES: ${FERRUM_AUTH_MAX_FAILURES:-10}
+      FERRUM_AUTH_LOCKOUT_SECONDS: ${FERRUM_AUTH_LOCKOUT_SECONDS:-60}
       FERRUM_SHUTDOWN_TIMEOUT: "10000"
       # Extra trust anchors for the admin API connection, when the gateway
       # presents a private certificate. Leave unset for a public chain.
