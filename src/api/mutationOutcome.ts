@@ -31,7 +31,8 @@ export async function observeMutation<T>(operation: string, request: Promise<T>)
         ? (error as { response: Response }).response.status
         : undefined;
     const data = error instanceof Error && 'data' in error ? error.data : undefined;
-    // A BFF upload timeout proves the complete document never reached admission.
+    // A BFF upload timeout proves the complete document never reached admission;
+    // headers and part of the body may have arrived.
     // Bare 504s and response-phase timeouts do not provide that guarantee.
     const uploadRejected =
       status === 504 &&

@@ -127,8 +127,8 @@ const SETTLED_ROLLBACK = new Set<ops.RestoreRollbackOutcome>(["completed", "not_
 /**
  * True only when a failed restore's answer proves the namespace is unchanged:
  * a rollback that completed or was not needed, a pre-commit connectivity
- * failure, or the BFF's upload-phase timeout (the body never reached the
- * gateway). Every other server failure may have left restored content behind.
+ * failure, or the BFF's upload-phase timeout (the complete body never
+ * reached the gateway). Every other server failure may have left restored content behind.
  */
 function restoreProvablyUnchanged(error: unknown): boolean {
   const failure = ops.getRestoreFailure(error);

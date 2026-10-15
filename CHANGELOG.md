@@ -126,6 +126,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   membership plan's proxy replace now apply the same failure redaction as
   upstream writes, and the proxy create and update mutations no longer keep
   their submitted body in the mutation cache once the form is gone.
+- API responses always carry `cache-control: no-store`: the BFF replaces a
+  gateway's own `cache-control` and drops its `expires` instead of forwarding
+  them (#607).
+- Docs: the deployment guide no longer says an upload-phase timeout proves the
+  request never reached the gateway (headers and part of the body may have),
+  and no longer calls `main-<commit>` image tags immutable, since rerunning a
+  `main` publication re-points them (#607). The `deepseek-pro-agents` skill now
+  says it dispatches `deepseek-v4.1-flash`, not V4 Pro (#605), and the Grok
+  wrapper states the launcher's `max`-to-`xhigh` mapping instead of forbidding
+  clamping (#606).
 - Namespace Manager tells an unreadable registry from an empty one, offers
   Retry, and disables Edit/Delete over stale rows after a failed refresh (#572).
 - A delete that completes after its detail editor was replaced, by an
