@@ -27,7 +27,10 @@ Delete Plugin to remove a group.
 Group membership is written through `PUT /proxies/{id}`. Foundry attaches every
 new member before detaching any old one, so during a move both source and
 destination can briefly run the plugin. A membership change spans several
-requests and is not atomic.
+requests and is not atomic. Its last detach can still make Edge delete the configuration if
+another operator removes the members it just attached and edits the plugin in
+between: each proxy write is conditional on that proxy only, and Edge offers no
+way to condition the cascade on the plugin's revision.
 
 ## Scope changes and proxy-scoped plugins
 
