@@ -1,9 +1,9 @@
 ---
 name: deepseek-pro-agents
-description: Dispatch and orchestrate local opencode DeepSeek V4 Pro agents via the opencode CLI harness for Ferrum Foundry issue, PR, review-feedback, CI-repair, and shepherding work. DeepSeek V4 Pro is the deep-reasoning tier, suited to invariant-heavy, security, protocol, and concurrency work. Use when the user asks GPT, Codex, or Claude to delegate to DeepSeek Pro or deepseek-v4-pro workers, run multiple DeepSeek Pro agents, resume interrupted runs, or drive agent-owned branches and PRs. Do not use for Codex-native subagents, Claude Code workers, or ordinary single-agent edits.
+description: Dispatch and orchestrate local opencode DeepSeek agents, pinned to alibaba-token-plan/deepseek-v4.1-flash, via the opencode CLI harness for Ferrum Foundry issue, PR, review-feedback, CI-repair, and shepherding work. The skill keeps its deepseek-pro-agents name but does not dispatch DeepSeek V4 Pro. Use when the user asks GPT, Codex, or Claude to delegate to deepseek-pro-agents workers, run multiple such agents, resume interrupted runs, or drive agent-owned branches and PRs. Do not use for Codex-native subagents, Claude Code workers, or ordinary single-agent edits.
 ---
 
-# DeepSeek V4 Pro agents
+# DeepSeek agents (`deepseek-pro-agents`, pinned to V4.1 Flash)
 
 Act as the orchestrator. Treat local opencode processes running
 `alibaba-token-plan/deepseek-v4.1-flash` as implementation workers. Own task decomposition,
@@ -11,15 +11,16 @@ worktree isolation, liveness, independent diff review, and the final merge recom
 each worker to carry its assigned scope through the stopping point in the prompt. Never accept a
 worker's report without checking the repository and GitHub state yourself.
 
-DeepSeek V4 Pro is the deep-reasoning tier of this fleet. Prefer it for tasks that need careful
-invariant reasoning — fail-closed security paths, protocol correctness, concurrency and ordering
-fences, and review rounds where a finding has to be either fixed properly or rebutted with
-file-and-line evidence.
+The skill keeps the `deepseek-pro-agents` name it was created with, but since #456 it dispatches
+`alibaba-token-plan/deepseek-v4.1-flash`, not DeepSeek V4 Pro. Do not select it as a V4 Pro or
+deep-reasoning tier, and do not describe its workers as V4 Pro. A user who asks for V4 Pro needs
+the pin changed (step 6 of the preflight) or another skill; say so instead of dispatching Flash
+under the Pro name.
 
 **Guard: do not use this skill when you are yourself a dispatched worker.** If the session prompt
 references this skill's `agent-brief.md` or `continuation-brief.md`, says "YOU are the implementer,"
 or assigns an existing worktree and findings to fix, implement directly in the current session.
-Do not recursively dispatch another DeepSeek V4 Pro, opencode, Grok, Sol, Opus, Fable, or Composer
+Do not recursively dispatch another DeepSeek, opencode, Grok, Sol, Opus, Fable, or Composer
 worker. The orchestrator selected this session's model deliberately.
 
 ## Remote CI validation

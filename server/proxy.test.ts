@@ -68,6 +68,13 @@ function gatewayHandler(request: IncomingMessage, response: ServerResponse): voi
       response.end('{"error":"bad gateway jwt"}');
       return;
     }
+    if (request.url?.startsWith('/cacheable')) {
+      response.setHeader('content-type', 'application/json');
+      response.setHeader('cache-control', 'public, max-age=600');
+      response.setHeader('expires', 'Thu, 01 Jan 2099 00:00:00 GMT');
+      response.end('{"ok":true}');
+      return;
+    }
     if (request.url?.startsWith('/gzip')) {
       const compressed = gzipSync(GZIP_RESPONSE);
       response.setHeader('content-type', 'application/json');
@@ -423,6 +430,17 @@ describe('streaming gateway proxy', () => {
       });
     }
     expect(observed).toHaveLength(before);
+  });
+
+  it('replaces a gateway caching header with no-store on proxied reads', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/proxy/cacheable',
+      headers: sessionHeaders,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.headers.expires).toBeUndefined();
   });
 
   it('classifies an encoded API prefix from the matched route', async () => {

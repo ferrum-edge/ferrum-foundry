@@ -88,12 +88,12 @@ remain unchanged.
 Pushes to `main` and release tags publish multi-architecture images with
 BuildKit provenance (`mode=max`) and SBOM attestations. Each manifest job
 requires exactly two per-platform digests, checks that they are `linux/amd64`
-and `linux/arm64`, publishes and re-checks the immutable tag, and only then
+and `linux/arm64`, publishes and re-checks the per-build tag, and only then
 moves channel tags.
 
-| Trigger | Immutable tag | Channel tags |
+| Trigger | Per-build tag | Channel tags |
 | --- | --- | --- |
-| Push to `main` | `main-<commit>` | `main` |
+| Push to `main` | `main-<commit>`: no later commit reuses it, but a rerun of that commit's publication rebuilds and re-points it, without the compare-before-set check release tags get; pin its digest | `main` |
 | Release tag `vX.Y.Z` | `vX.Y.Z` and `X.Y.Z`, never reassigned | `X.Y` if it is the newest patch in that line; `latest` if it is the newest stable version |
 
 A prerelease tag (`vX.Y.Z-suffix`) is marked as a prerelease on GitHub and never
