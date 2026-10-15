@@ -169,8 +169,9 @@ complete after one request, which is the common case. If not, it says so
 ("Searching the first 250 of N proxies") and offers "Search all N proxies",
 which starts a full, cancellable traversal. A full list cached by an earlier
 search answers only while it is not invalidated by a proxy write, is at least
-as recent as the first page, and agrees with it (its length is the page's
-total and every row on the page is in it under the same name). Otherwise the
+as recent as the first page (or is kept current by an open view that reads
+it), and agrees with that page once loaded (its length is the page's total and
+every row on the page is in it under the same name). Otherwise the
 page answers, with its own total and errors, so a stale list cannot hide a new
 proxy or "Search all". An expanded picker refetches a list that fails these
 checks even inside its stale time.

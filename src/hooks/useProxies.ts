@@ -118,13 +118,17 @@ export function useProxyCatalog(expanded: boolean): ProxyCatalog {
 
   // The full list stays cached after a search, and a write invalidates it
   // without refetching while it is disabled (#611). Such an entry may not be
-  // the collection any more, so it answers only while it is valid: not
-  // invalidated, at least as recent as the first page, and in agreement with
-  // that page (its length is the page's total, and every row on the page is in
-  // it under the same name). Otherwise the first page answers, with its own
-  // total, completeness and errors, so "Search all" is offered again.
-  // Invalidating a disabled query notifies no observer, so the flag is read
-  // through a cache subscription that re-renders the picker when it changes.
+  // the collection any more, so it answers only while it is valid:
+  //   - not invalidated;
+  //   - at least as recent as the first page, or kept current by an enabled
+  //     observer (a membership editor, or this picker expanded), which
+  //     TanStack refetches on invalidation and refocus;
+  //   - in agreement with the first page, once there is one: its length is
+  //     the page's total, and every row on the page is in it by the same name.
+  // Otherwise the first page answers, with its own total, completeness and
+  // errors, so "Search all" is offered again. Invalidating a disabled query
+  // notifies no observer, so its state is read through a cache subscription
+  // that re-renders the picker when it changes.
   const subscribe = useCallback(
     (onChange: () => void) => qc.getQueryCache().subscribe(onChange),
     [qc],
@@ -133,21 +137,26 @@ export function useProxyCatalog(expanded: boolean): ProxyCatalog {
     subscribe,
     () => qc.getQueryState(["proxies", scope.namespace, "all"])?.isInvalidated === true,
   );
+  const fullListObserved = useSyncExternalStore(
+    subscribe,
+    () => qc.getQueryCache()
+      .find({ queryKey: ["proxies", scope.namespace, "all"], exact: true })
+      ?.isActive() === true,
+  );
   const fullListAgrees = useMemo(() => {
     const all = everything.data;
-    if (all === undefined || page === undefined) return false;
+    if (all === undefined) return false;
+    if (page === undefined) return true;
     if (all.length !== page.pagination.total) return false;
     const names = new Map(all.map((entry) => [entry.id, entry.name]));
     return page.data.every((entry) => names.has(entry.id) && names.get(entry.id) === entry.name);
   }, [everything.data, page]);
   const fullListNewer = everything.dataUpdatedAt >= firstPage.dataUpdatedAt;
-  // An expanded picker keeps a valid list answering while it refreshes in the
-  // background, as long as it still agrees with the first page.
   const fullListValid =
     everything.data !== undefined &&
     !fullListInvalidated &&
     fullListAgrees &&
-    (fullListNewer || (traversing && everything.isFetching));
+    (fullListNewer || fullListObserved);
 
   // Expanded, the operator asked for the whole collection, so a list that is
   // not valid is fetched again whatever the stale timer says. When the list is

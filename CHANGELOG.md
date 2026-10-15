@@ -177,7 +177,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its freshly fetched first page. That stale list could omit a new proxy, show
   an old name or a deleted proxy, and claim to be complete, hiding "Search
   all". The cached list answers only while it is not invalidated, is at least
-  as recent as the first page, and agrees with it; an expanded picker
+  as recent as the first page or kept current by an open view, and agrees with
+  that page; an expanded picker
   refetches it otherwise, even inside its stale time (#611).
 - Starter preflight: the forged-identity probe now also selects the namespace
   it grants (`X-Ferrum-Namespace`), so the BFF's namespace ceiling can no longer
