@@ -118,6 +118,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Inline backend TLS material is redacted like other secrets (#612). A
+  `backend_tls_*_path` field whose value is inline PEM, such as a client
+  private key, is now secret in a refused write's error and popup and shows as
+  `[redacted]` in the stale-write dialog; file paths and `system://` or
+  `k8s://` references stay readable. Proxy create, update, and a plugin
+  membership plan's proxy replace now apply the same failure redaction as
+  upstream writes. The proxy create and update mutations, and the proxy,
+  upstream, and plugin delete mutations (whose guards carry the editor's
+  baseline), no longer keep their variables in the mutation cache once the
+  page is gone.
 - API responses always carry `cache-control: no-store`: the BFF replaces a
   gateway's own `cache-control` and drops its `expires` instead of forwarding
   them (#607).

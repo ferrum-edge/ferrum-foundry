@@ -10,7 +10,7 @@
 /*  submitted secret removed, and nothing else from the request.      */
 /* ------------------------------------------------------------------ */
 
-import { isRedactedField } from "@/lib/resourceBaseline";
+import { isInlineMaterial, isRedactedField } from "@/lib/resourceBaseline";
 import type { ApiError } from "./types";
 import {
   extractApiErrorData,
@@ -168,14 +168,18 @@ function ruleSecrets(value: unknown, path: readonly string[], sensitivity: Sensi
 
 /**
  * Edge's floor beneath the schema (`redact_sensitive_plugin_config_fields`
- * and the URL sweep), widened by Foundry's own field-name heuristic.
+ * and the URL sweep), widened by Foundry's own field-name heuristic and by
+ * inline PEM in a `*_path` field (`isInlineMaterial`), which a known plugin's
+ * rules may not name: `mesh_route_dispatch`'s `backend_tls.client_key_path`.
  */
 function configFloorSecrets(data: unknown): string[] {
   if (typeof data === "string") return urlSecrets(data);
   if (Array.isArray(data)) return data.flatMap(configFloorSecrets);
   if (data && typeof data === "object") {
     return Object.entries(data).flatMap(([field, value]) => {
-      if (isSecretField(field) || isEdgeSensitiveConfigKey(field)) return submittedValues(value);
+      if (isSecretField(field) || isEdgeSensitiveConfigKey(field) || isInlineMaterial(field, value)) {
+        return submittedValues(value);
+      }
       if (normalizeConfigKey(field) === "redisurl") return projectedSecrets(value, "redis");
       return configFloorSecrets(value);
     });
@@ -212,7 +216,9 @@ export function pluginConfigSecrets(pluginName: string, config: unknown): Secret
 /**
  * The secrets a structured write payload carries, found by position rather
  * than by type of write: every string under a credential-shaped field name,
- * at any depth, and the credential-bearing parts of any URL elsewhere. Fails
+ * at any depth, inline PEM in a material-location field (`*_path`, which
+ * otherwise names a file or reference: `isInlineMaterial`), and the
+ * credential-bearing parts of any URL elsewhere. Fails
  * closed on a whole subtree — `credentials`, `headers`, a `*_secret` object —
  * rather than trying to recognise which of its leaves is sensitive. A plugin
  * configuration (`plugin_name` beside `config`) at any depth — a plugin write,
@@ -230,7 +236,9 @@ export function secretValues(data: unknown): Secrets {
       return mergeSecrets([pluginConfigSecrets(pluginName, config), secretValues(rest)]);
     }
     return mergeSecrets(Object.entries(record).map(([field, value]) =>
-      isSecretField(field) ? classified(submittedValues(value)) : secretValues(value)));
+      isSecretField(field) || isInlineMaterial(field, value)
+        ? classified(submittedValues(value))
+        : secretValues(value)));
   }
   return NO_SECRETS;
 }

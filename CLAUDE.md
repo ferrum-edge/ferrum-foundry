@@ -306,7 +306,8 @@ See `docs/concurrent-edits.md`.
 - A write whose body carries a secret runs inside
   `withRedactedFailure(secretValues(body), …)` (`src/api/secretRedaction.ts`).
   That covers consumer create and credential writes, plugin configurations,
-  upstreams, TLS key material and ACME account credentials, batch create,
+  proxy writes (membership `replace` included) and upstreams (inline backend
+  TLS keys), TLS key material and ACME account credentials, batch create,
   backup restore (`restoreSecrets`), and API spec import/replace
   (`specDocumentSecrets`). **Add any new secret-bearing write to it.**
 - Its failure becomes a `RedactedWriteError`: every submitted secret is replaced
@@ -320,6 +321,10 @@ See `docs/concurrent-edits.md`.
   URL, and outcome, so a lost answer still opens "Outcome unknown". Use
   `SILENT_ERRORS` instead when the form reports every failure itself. Never
   neither: the popup would show the raw body.
+- A `*_path` field is a location (file path, `system://`, `k8s://`) and stays
+  readable, unless its value is inline PEM (`isInlineMaterial` in
+  `src/lib/resourceBaseline.ts`): then both `secretValues` and the conflict
+  dialog treat it as secret.
 - A plugin `config` is classified by Ferrum Edge's own projection table:
   `PLUGIN_SENSITIVITY` in `src/api/pluginSensitivity.ts`, transcribed from
   `plugin_config_projection.rs` at `edge.source_commit`.

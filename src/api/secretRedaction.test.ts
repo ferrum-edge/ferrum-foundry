@@ -13,7 +13,13 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ApiError, ConsumerCreate, PluginConfigCreate, UpstreamCreate } from "./types";
+import type {
+  ApiError,
+  ConsumerCreate,
+  PluginConfigCreate,
+  ProxyCreate,
+  UpstreamCreate,
+} from "./types";
 import {
   getApiErrorDetail,
   getApiErrorMessage,
@@ -29,6 +35,7 @@ import * as apiSpecs from "./apiSpecs";
 import * as consumers from "./consumers";
 import * as ops from "./ops";
 import * as plugins from "./plugins";
+import * as proxies from "./proxies";
 import * as tls from "./tls";
 import * as upstreams from "./upstreams";
 import {
@@ -66,6 +73,16 @@ const PEM = [
   "",
 ].join("\n");
 const CERT = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n";
+// A draft whose opening armor is one dash short still carries the key bytes.
+const DAMAGED_PEM = PEM.replace("-----BEGIN PRIVATE KEY-----", "-----BEGIN PRIVATE KEY----");
+/** A known plugin whose sensitivity table names no rules, carrying `key` nested. */
+const meshDispatch = (key: string): PluginConfigCreate => ({
+  plugin_name: "mesh_route_dispatch",
+  scope: "global",
+  config: {
+    rules: [{ destination: { host: "orders.mesh", backend_tls: { client_key_path: key } } }],
+  },
+} as PluginConfigCreate);
 
 /** Every form and every 32-character window of `value` that must not survive. */
 function fragments(value: string): string[] {
@@ -199,6 +216,18 @@ describe("secretValues", () => {
   it("does not treat a path to key material as the material", () => {
     expect(classifiedValues(secretValues({ backend_tls_client_key_path: "/etc/ferrum/client.key" })))
       .toEqual([]);
+    expect(classifiedValues(secretValues({ backend_tls_server_ca_cert_path: "system://" })))
+      .toEqual([]);
+  });
+
+  it("takes inline PEM in a material-location field as the material (#612)", () => {
+    expect(classifiedValues(secretValues({ backend_tls_client_key_path: PEM }))).toEqual([PEM]);
+    expect(classifiedValues(secretValues({ backend_tls_client_key_path: DAMAGED_PEM })))
+      .toEqual([DAMAGED_PEM]);
+    expect(classifiedValues(secretValues({
+      backend_tls_client_cert_path: CERT,
+      backend_tls_server_ca_cert_path: "/etc/ferrum/ca.pem",
+    }))).toEqual([CERT]);
   });
 
   it("redacts each substantial line of a multi-line value, but not the PEM armor", () => {
@@ -261,6 +290,11 @@ describe("plugin configurations follow Ferrum Edge's projection", () => {
       .toEqual(["collector.internal/t0ken"]);
     expect(classifiedValues(pluginConfigSecrets("http_logging", { endpoint_url: "https://collector.internal" })))
       .toEqual([]);
+  });
+
+  it("takes inline PEM in a nested path field of a known plugin (#612)", () => {
+    expect(classifiedValues(secretValues(meshDispatch(PEM)))).toEqual([PEM]);
+    expect(classifiedValues(secretValues(meshDispatch("/etc/ferrum/client.key")))).toEqual([]);
   });
 
   it("matches Edge's normalized key spellings and its name floor", () => {
@@ -475,6 +509,71 @@ describe("upstream writes (#478)", () => {
     expectDetached(updated);
     expectRedacted(await exposure(updated), LONG);
     expectRedactedReport(LONG, 400, "/api/proxy/upstreams/orders");
+  });
+});
+
+describe("inline backend TLS keys (#612)", () => {
+  const proxy: ProxyCreate = {
+    name: "checkout",
+    backend_host: "backend.internal",
+    backend_port: 443,
+    backend_scheme: "https",
+    listen_path: "/checkout",
+    backend_tls_client_key_path: PEM,
+  } as ProxyCreate;
+
+  it("upstream create keeps no fragment of the key", async () => {
+    echo(PEM);
+    const failure = await upstreams.create(scope, {
+      name: "audit",
+      algorithm: "round_robin",
+      targets: [],
+      backend_tls_client_key_path: PEM,
+    } as UpstreamCreate).catch((e: unknown) => e);
+
+    expectDetached(failure);
+    expectRedacted(await exposure(failure), PEM);
+    expectRedactedReport(PEM, 400, "/api/proxy/upstreams");
+  });
+
+  it("proxy create, update, and replace keep no fragment of the key", async () => {
+    echo(PEM);
+    const created = await proxies.create(scope, proxy).catch((e: unknown) => e);
+    expectDetached(created);
+    expectRedacted(await exposure(created), PEM);
+    expectRedactedReport(PEM, 400, "/api/proxy/proxies");
+
+    reported.length = 0;
+    const updated = await proxies.update(scope, "checkout", proxy, null).catch((e: unknown) => e);
+    expectDetached(updated);
+    expectRedacted(await exposure(updated), PEM);
+    expectRedactedReport(PEM, 400, "/api/proxy/proxies/checkout");
+
+    reported.length = 0;
+    const replaced = await proxies.replace(scope, "checkout", proxy, '"r1"')
+      .catch((e: unknown) => e);
+    expectDetached(replaced);
+    expectRedacted(await exposure(replaced), PEM);
+    expect(isPreconditionFailed(replaced)).toBe(false);
+    expectRedactedReport(PEM, 400, "/api/proxy/proxies/checkout");
+    expect(sent.map((request) => request.method)).toEqual(["POST", "PUT", "PUT"]);
+  });
+
+  it("proxy create keeps no fragment of a key whose opening armor is damaged", async () => {
+    echo(DAMAGED_PEM);
+    const failure = await proxies.create(scope, { ...proxy, backend_tls_client_key_path: DAMAGED_PEM })
+      .catch((e: unknown) => e);
+    expectDetached(failure);
+    expectRedacted(await exposure(failure), DAMAGED_PEM);
+    expectRedactedReport(DAMAGED_PEM, 400, "/api/proxy/proxies");
+  });
+
+  it("plugin create keeps no fragment of a key nested in a known plugin's config", async () => {
+    echo(PEM);
+    const failure = await plugins.createConfig(scope, meshDispatch(PEM)).catch((e: unknown) => e);
+    expectDetached(failure);
+    expectRedacted(await exposure(failure), PEM);
+    expectRedactedReport(PEM, 400, "/api/proxy/plugins/config");
   });
 });
 
