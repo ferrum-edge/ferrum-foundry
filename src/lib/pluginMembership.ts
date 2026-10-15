@@ -368,12 +368,13 @@ async function rollbackAssociations(
         );
         continue;
       }
-      // Never remove a group reference this plan added (#618). If it is the
-      // last one, Edge deletes the configuration; a scan for other references
-      // cannot make that safe, because another operator can detach them and
-      // edit the plugin before this write, and nothing conditions the cascade
-      // on the plugin's revision. Keep it and report it instead.
-      if (plugin?.scope === "proxy_group" && !referencesPlugin(change.before, pluginId)) {
+      // Never remove a reference this plan added (#618). If it is the last one
+      // of a group, Edge deletes the configuration, and nothing read here can
+      // rule that out: another operator can detach the other members, or move
+      // the plugin out of group scope and back, and edit it before this write,
+      // and nothing conditions the cascade on the plugin's revision. Keep it
+      // and report it instead, whatever scope the plugin was read with.
+      if (plugin && !referencesPlugin(change.before, pluginId)) {
         failures.push(
           `proxy ${current.id} still lists plugin ${pluginId} from the failed save; it was kept, ` +
             "because detaching it could delete the plugin. Detach it once the group's members are confirmed",

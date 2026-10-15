@@ -345,6 +345,34 @@ describe("proxy-group membership reconciliation", () => {
     expect(state.operations).not.toContain("cascade:plugin-1");
   });
 
+  it("keeps an added reference even when a concurrent edit makes the plugin non-group", async () => {
+    // p2 is added, p1's detach fails; before rollback reads the plugin another
+    // operator moves it to proxy scope on p2. Rollback must still not detach
+    // p2: the operator can move it back to a group and edit it before the
+    // write, and that detach would then cascade-delete the edit (#618).
+    const state = harness(
+      [makeProxy("p1", ["plugin-1"]), makeProxy("p2")],
+      [makePlugin("plugin-1")],
+      { failProxyOnce: "p1" },
+    );
+    const getPlugin = state.deps.getPlugin;
+    let reads = 0;
+    state.deps.getPlugin = async (id) => {
+      reads += 1;
+      if (reads === 3) {
+        const current = state.plugins.get(id)!;
+        state.plugins.set(id, { ...current, scope: "proxy", proxy_id: "p2", updated_at: "v-other" });
+      }
+      return getPlugin(id);
+    };
+
+    await expect(
+      updatePluginWithMembership("plugin-1", groupInput(), ["p2"], state.deps, null),
+    ).rejects.toThrow("proxy p2 still lists plugin plugin-1 from the failed save; it was kept");
+    expect(memberships(state.proxies, "plugin-1")).toEqual(["p1", "p2"]);
+    expect(state.plugins.has("plugin-1")).toBe(true);
+  });
+
   it("retains the last destination if an originally orphaned group cannot converge", async () => {
     const state = harness(
       [makeProxy("p1"), makeProxy("p2")],
