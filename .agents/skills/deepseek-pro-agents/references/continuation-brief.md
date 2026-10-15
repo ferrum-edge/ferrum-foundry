@@ -1,4 +1,4 @@
-# Ferrum Foundry DeepSeek V4 Pro continuation brief
+# Ferrum Foundry DeepSeek (`deepseek-pro-agents`) continuation brief
 
 Resume the existing worktree and branch named in the dispatch prompt. Follow every rule in
 `agent-brief.md`, especially isolation, direct implementation, the

@@ -129,6 +129,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in one `DELETE` that also removes its associations; otherwise it is kept and
   reported with the proxies that reference it (#608). A failed group create no
   longer detaches members first, which could cascade-delete a concurrent edit.
+- API responses always carry `cache-control: no-store`: the BFF replaces a
+  gateway's own `cache-control` and drops its `expires` instead of forwarding
+  them (#607).
+- Docs: the deployment guide no longer says an upload-phase timeout proves the
+  request never reached the gateway (headers and part of the body may have),
+  and no longer calls `main-<commit>` image tags immutable, since rerunning a
+  `main` publication re-points them (#607). The `deepseek-pro-agents` skill now
+  says it dispatches `deepseek-v4.1-flash`, not V4 Pro (#605), and the Grok
+  wrapper states the launcher's `max`-to-`xhigh` mapping instead of forbidding
+  clamping (#606).
 - Namespace Manager tells an unreadable registry from an empty one, offers
   Retry, and disables Edit/Delete over stale rows after a failed refresh (#572).
 - A delete that completes after its detail editor was replaced, by an
@@ -163,6 +173,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Guides: OIDC operator input in plugin defaults (#576), preview-only `503`
   for an uncompilable manifest schema (#583), and v0.5.5 recorded as
   qualified and published (#584).
+- Starter preflight: the forged-identity probe now also selects the namespace
+  it grants (`X-Ferrum-Namespace`), so the BFF's namespace ceiling can no longer
+  refuse it with a `403` that reads as header stripping. Without
+  `FERRUM_NAMESPACE` or `FERRUM_TRUSTED_PROXY_SECRET` the check is unknown
+  rather than sent as a request the BFF would refuse on its own (#603).
 
 ### Changed
 
