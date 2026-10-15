@@ -49,7 +49,10 @@ The preflight checks:
 - gateway reachability and TLS trust;
 - that the gateway accepts the BFF's signing key and audience;
 - that your namespace is served;
-- that the front door refuses an anonymous request and a forged identity header.
+- that the front door refuses an anonymous request and a forged identity
+  header. The forged request is one the BFF would serve if it arrived intact:
+  the real proof secret, an admin role, and `FERRUM_NAMESPACE` both granted and
+  selected.
 
 It writes nothing and prints no secret.
 
