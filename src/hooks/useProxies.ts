@@ -102,6 +102,7 @@ export interface ProxyCatalog {
  * which stays cancellable.
  */
 export function useProxyCatalog(expanded: boolean): ProxyCatalog {
+  const qc = useQueryClient();
   const { scope } = useNamespace();
   const firstPage = useQuery({
     queryKey: ["proxies", scope.namespace, "firstPage", ALL_PAGE_SIZE],
@@ -112,11 +113,24 @@ export function useProxyCatalog(expanded: boolean): ProxyCatalog {
   const firstPageIsWholeCollection =
     page !== undefined && page.pagination.total <= page.data.length;
 
-  const everything = useAllProxies(expanded && page !== undefined && !firstPageIsWholeCollection);
+  const traversing = expanded && page !== undefined && !firstPageIsWholeCollection;
+  const everything = useAllProxies(traversing);
+
+  // The full list stays cached after a search, and a write invalidates it
+  // without refetching while it is disabled (#611). Such an entry is not the
+  // collection any more, so it must not replace a newer first page, claim to
+  // be complete, or hide "Search all". It is used only while it is valid and
+  // at least as recent as the first page, or while an expanded picker's
+  // background refetch of a valid list (on focus, say) has not finished yet.
+  const fullListValid =
+    everything.data !== undefined &&
+    !qc.getQueryState(["proxies", scope.namespace, "all"])?.isInvalidated &&
+    (everything.dataUpdatedAt >= firstPage.dataUpdatedAt ||
+      (traversing && everything.isFetching));
 
   // Whichever read actually supplied the rows is the one the picker's state
   // must reflect, so a failure of *that* read is what disables it.
-  if (everything.data) {
+  if (everything.data && fullListValid) {
     return {
       proxies: everything.data,
       total: everything.data.length,

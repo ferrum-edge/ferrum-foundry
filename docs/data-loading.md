@@ -167,7 +167,11 @@ whose membership needs it.
 `useProxyCatalog` loads one catalog page. If the namespace fits, the picker is
 complete after one request, which is the common case. If not, it says so
 ("Searching the first 250 of N proxies") and offers "Search all N proxies",
-which starts a full, cancellable traversal. Selected proxies outside the loaded
+which starts a full, cancellable traversal. A full list cached by an earlier
+search answers only while it is valid and at least as recent as the first page:
+one invalidated by a proxy write, or older than the page, gives way to the page,
+so it cannot hide a new proxy or "Search all", and searching all refetches it.
+Selected proxies outside the loaded
 page are resolved one id at a time, so they are labelled correctly, and a
 selection whose proxy no longer exists is labelled as such and can still be
 removed.

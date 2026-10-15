@@ -152,6 +152,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Guides: OIDC operator input in plugin defaults (#576), preview-only `503`
   for an uncompilable manifest schema (#583), and v0.5.5 recorded as
   qualified and published (#584).
+- The proxy picker no longer lets a full proxy list cached by an earlier
+  search, and invalidated by a later proxy create, rename, or delete, override
+  its freshly fetched first page. That stale list could omit a new proxy, show
+  an old name or a deleted proxy, and claim to be complete, hiding "Search
+  all". The cached list is used only while valid and at least as recent as the
+  first page; "Search all" refetches it (#611).
 
 ### Changed
 
