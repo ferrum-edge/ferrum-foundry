@@ -124,14 +124,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   page's baseline was compared with; Edge detaches its proxies in the same
   transaction. Detaching a group's members first could let the last detach
   delete a concurrently edited configuration before it was checked (#609).
-- A proxy-scoped plugin create that cannot verify its attachment deletes the
-  new configuration only while a fresh read still holds what it created, and
-  conditionally on that read; otherwise it is kept and reported with the
-  proxies that reference it (#608).
-- A failed move of a group plugin to proxy or global scope reattaches the
-  group's original members after restoring its configuration, instead of
-  leaving them without the policy. The proxy-scope target the move attached is
-  kept and reported, since detaching it could cascade-delete the plugin (#610).
+- A plugin create that does not converge deletes the new configuration only
+  while a fresh read still holds what it created, conditionally on that read,
+  in one `DELETE` that also removes its associations; otherwise it is kept and
+  reported with the proxies that reference it (#608). A failed group create no
+  longer detaches members first, which could cascade-delete a concurrent edit.
 - Namespace Manager tells an unreadable registry from an empty one, offers
   Retry, and disables Edit/Delete over stale rows after a failed refresh (#572).
 - A delete that completes after its detail editor was replaced, by an

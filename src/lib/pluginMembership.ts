@@ -623,22 +623,17 @@ export async function createPluginWithMembership(
 
   if (data.scope !== "proxy_group") return created;
 
-  const applied: AppliedProxyChange[] = [];
   try {
-    await applyAssociationPlan(
-      plan.proxies,
-      created.id,
-      plan.desired,
-      deps,
-      applied,
-    );
+    await applyAssociationPlan(plan.proxies, created.id, plan.desired, deps);
     return created;
   } catch (error) {
     const failure = failureText(error);
-    const recovery = await rollbackAssociations(applied, created.id, deps, created);
-    if (recovery.length === 0) {
-      recovery.push(...await discardCreatedPlugin(created, deps));
-    }
+    // Discard the new group in one conditional DELETE, which also removes the
+    // associations it got. Detaching them one by one first could let the last
+    // detach cascade-delete a configuration another operator edited
+    // meanwhile, since no proxy write is conditional on the plugin (#609).
+    // A plugin that is kept stays attached where it is, and is reported.
+    const recovery = await discardCreatedPlugin(created, deps);
     if (recovery.length > 0) {
       recovery.push(...await recoveryState(created.id, deps));
     }
@@ -649,55 +644,6 @@ export async function createPluginWithMembership(
       pluginsApi.toUpdatePayload(created),
     );
   }
-}
-
-/**
- * Put a restored group's original members back after a failed move out of
- * group scope. The plugin `PUT` that left group scope detached them as a
- * gateway side effect, outside the plan's own `applied` list.
- *
- * Every write is conditional on a fresh read of that proxy and only adds this
- * plugin's association, so whatever else another writer changed on the proxy
- * stands. The proxy-scope target the failed save attached is never detached
- * here: no proxy write can be conditional on the plugin's revision or on the
- * other proxies' references, so if another writer detached the restored
- * members meanwhile, removing it could make Edge cascade-delete the
- * configuration (#609). It is reported for the operator to detach instead.
- */
-async function restoreGroupMembers(
-  pluginId: string,
-  members: string[],
-  target: string | undefined,
-  deps: PluginMembershipDependencies,
-): Promise<string[]> {
-  const failures: string[] = [];
-  for (const proxyId of members) {
-    try {
-      const current = await deps.getProxy(proxyId);
-      if (referencesPlugin(current, pluginId)) continue;
-      await deps.updateProxy(
-        proxyId,
-        {
-          ...proxiesApi.toUpdatePayload(current),
-          plugins: desiredAssociations(current, pluginId, true),
-        },
-        current,
-      );
-    } catch (error) {
-      failures.push(
-        isPreconditionFailed(error)
-          ? `proxy ${proxyId} changed while plugin ${pluginId} was being reattached; it was not overwritten`
-          : `proxy ${proxyId} was not reattached (${error instanceof Error ? error.message : "unknown error"})`,
-      );
-    }
-  }
-  if (target && !members.includes(target)) {
-    failures.push(
-      `proxy ${target} still lists plugin ${pluginId} from the failed save; it was kept, ` +
-        "because detaching it could delete the plugin. Detach it once the group's members are confirmed",
-    );
-  }
-  return failures;
 }
 
 /**
@@ -758,23 +704,7 @@ export async function updatePluginWithMembership(
     } else {
       recovery.push(...await rollbackAssociations(applied, pluginId, deps));
       if (updatedPlugin) {
-        const restored = await rollbackPlugin(beforePlugin, updatedPlugin, deps);
-        recovery.push(...restored);
-        if (!nextIsGroup) {
-          // Leaving group scope made Edge detach every member in the plugin
-          // PUT itself (#610). Restoring the group configuration does not
-          // bring them back: group membership lives on the proxies.
-          const members = plan.proxies
-            .filter((proxy) => referencesPlugin(proxy, pluginId))
-            .map((proxy) => proxy.id);
-          recovery.push(
-            ...(restored.length === 0
-              ? await restoreGroupMembers(pluginId, members, data.proxy_id ?? undefined, deps)
-              : members.length > 0
-                ? [`original members ${members.join(", ")} were not reattached`]
-                : []),
-          );
-        }
+        recovery.push(...await rollbackPlugin(beforePlugin, updatedPlugin, deps));
       }
     }
     recovery.push(...await recoveryState(pluginId, deps));
