@@ -144,11 +144,14 @@ If a change fails, Foundry attempts a compensating rollback:
   committed (#610). That `PUT` detached the group's members in the same
   transaction; restoring them, or removing the new proxy-scope target, could
   undo or cascade-delete another operator's concurrent change. If a later step
-  fails (such as the read that verifies the new attachment), the editor adopts
-  the saved configuration and reports "saved, but its attachment could not be
-  verified": the members before the save, the proxy to check, and what the
-  gateway holds now. The editor keeps your form as it is; use **Reload saved
-  configuration** before editing further. The saved proxy- or global-scoped
+  fails (such as the read that verifies the new attachment), the editor
+  reports "saved, but its attachment could not be verified": the members
+  before the save, those the scope change detached, the proxy to check, and
+  what the gateway holds now, with a recovery snapshot of the configuration.
+  The form and its baseline are left as they are, so saving again would meet
+  your own committed change as a conflict; **Reload saved configuration**
+  reseeds both from fresh reads (the plugin and, for a group, its membership)
+  and changes nothing if a read fails. The saved proxy- or global-scoped
   configuration cannot simply be reattached to the old members: to give them
   the policy again, change the plugin back to `proxy_group` and select the
   members you want, or create a separate group configuration for them.

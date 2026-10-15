@@ -869,6 +869,7 @@ describe("leaving group scope (#610)", () => {
     expect(failure).toBeInstanceOf(PluginSavedUnverifiedError);
     const saved = failure as PluginSavedUnverifiedError;
     expect(saved.message).toContain("committed, not yet proven live");
+    expect(saved.savedFromLaterRead).toBe(true);
     expect(saved.saved).toMatchObject({ scope: "proxy", proxy_id: "p3" });
     // The saved configuration is the recovery snapshot too.
     expect(saved.lastKnownConfig).toMatchObject({ scope: "proxy", proxy_id: "p3" });

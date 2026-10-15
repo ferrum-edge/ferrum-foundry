@@ -53,6 +53,23 @@ describe("PluginMembershipRecovery", () => {
     expect(html).not.toContain("updated_at");
   });
 
+  it("labels a snapshot from a later read as observed, not as the committed save", () => {
+    const error = new PluginSavedUnverifiedError(
+      "Plugin group-1 was saved with scope proxy (committed, not yet proven live)",
+      [],
+      {},
+      {
+        id: "group-1", plugin_name: "rate_limiting", scope: "proxy", proxy_id: "p3",
+        config: { requests: 10 }, enabled: true, created_at: "v0", updated_at: "v1",
+      },
+      true,
+    );
+    const html = renderToStaticMarkup(<PluginMembershipRecovery error={error} />);
+    expect(html).toContain("Configuration read after this save");
+    expect(html).toContain("another operator");
+    expect(html).not.toContain("Committed configuration");
+  });
+
   it("does not render for an unrelated error", () => {
     expect(
       renderToStaticMarkup(

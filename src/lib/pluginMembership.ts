@@ -138,6 +138,12 @@ export class PluginSavedUnverifiedError extends PluginMembershipError {
     recovery: string[],
     options: ErrorOptions,
     readonly saved: PluginConfig | undefined,
+    /**
+     * `true` when `saved` is a later read rather than the `PUT` response (a
+     * committed-but-not-live answer carries no body). Such a read may already
+     * hold another operator's edit, or lag behind on Edge's cached fallback.
+     */
+    readonly savedFromLaterRead = false,
   ) {
     // The committed configuration doubles as the recovery snapshot.
     super(message, recovery, options, saved ? pluginsApi.toUpdatePayload(saved) : undefined);
@@ -731,6 +737,7 @@ export async function updatePluginWithMembership(
         ],
         { cause: error },
         saved,
+        !updatedPlugin,
       );
     }
     const recovery: string[] = [];
