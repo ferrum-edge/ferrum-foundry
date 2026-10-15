@@ -326,7 +326,7 @@ describe("proxy-group membership reconciliation", () => {
     );
     await expect(
       updatePluginWithMembership("plugin-1", groupInput(), ["p4"], state.deps, null),
-    ).rejects.toThrow("proxy p4 still lists plugin plugin-1 from the failed save; it was kept");
+    ).rejects.toThrow("proxy p4 was attached by the failed save and left attached");
     // p4 is never detached by the rollback: if another operator detached the
     // other members and edited the plugin meanwhile, that write would make
     // Edge cascade-delete the edited configuration.
@@ -368,7 +368,33 @@ describe("proxy-group membership reconciliation", () => {
 
     await expect(
       updatePluginWithMembership("plugin-1", groupInput(), ["p2"], state.deps, null),
-    ).rejects.toThrow("proxy p2 still lists plugin plugin-1 from the failed save; it was kept");
+    ).rejects.toThrow("proxy p2 was attached by the failed save and left attached");
+    expect(memberships(state.proxies, "plugin-1")).toEqual(["p1", "p2"]);
+    expect(state.plugins.has("plugin-1")).toBe(true);
+  });
+
+  it("keeps an added reference when rollback's plugin read is a stale 404", async () => {
+    // Edge's cached fallback can answer 404 for a plugin the database still
+    // holds; detaching the added p2 then could cascade-delete it (#618).
+    const state = harness(
+      [makeProxy("p1", ["plugin-1"]), makeProxy("p2")],
+      [makePlugin("plugin-1")],
+      { failProxyOnce: "p1" },
+    );
+    const getPlugin = state.deps.getPlugin;
+    let reads = 0;
+    state.deps.getPlugin = async (id) => {
+      reads += 1;
+      if (reads >= 3) throw notFound(id);
+      return getPlugin(id);
+    };
+
+    await expect(
+      updatePluginWithMembership("plugin-1", groupInput(), ["p2"], state.deps, null),
+    ).rejects.toThrow("proxy p2 was attached by the failed save and left attached");
+    expect(
+      state.operations.filter((operation) => operation.startsWith("proxy:")),
+    ).toEqual(["proxy:p2", "proxy:p1"]);
     expect(memberships(state.proxies, "plugin-1")).toEqual(["p1", "p2"]);
     expect(state.plugins.has("plugin-1")).toBe(true);
   });
@@ -381,7 +407,7 @@ describe("proxy-group membership reconciliation", () => {
     );
     await expect(
       updatePluginWithMembership("plugin-1", groupInput(), ["p1", "p2"], state.deps, null),
-    ).rejects.toThrow("proxy p1 still lists plugin plugin-1 from the failed save; it was kept");
+    ).rejects.toThrow("proxy p1 was attached by the failed save and left attached");
     expect(memberships(state.proxies, "plugin-1")).toEqual(["p1"]);
     expect(state.plugins.has("plugin-1")).toBe(true);
   });
