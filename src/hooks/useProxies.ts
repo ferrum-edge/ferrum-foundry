@@ -191,8 +191,10 @@ export function useProxyCatalog(expanded: boolean): ProxyCatalog {
     proxies: page?.data ?? [],
     total: page?.pagination.total ?? 0,
     complete: firstPageIsWholeCollection,
-    // The first page answers here, so its own failure is reported first.
-    query: !firstPage.isError && everything.isError ? everything : firstPage,
+    // The first page answers here, so its own failure is reported first. A
+    // full-list failure is this picker's only while it is traversing; one
+    // from another view's read must not gate it.
+    query: traversing && !firstPage.isError && everything.isError ? everything : firstPage,
     expanding: everything.isFetching,
   };
 }
