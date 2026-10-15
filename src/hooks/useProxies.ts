@@ -8,7 +8,7 @@
 /* ------------------------------------------------------------------ */
 
 import { isCommittedWrite, queryScope } from "@/api/client";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import {
   useMutation,
   useQueries,
@@ -117,45 +117,55 @@ export function useProxyCatalog(expanded: boolean): ProxyCatalog {
   const everything = useAllProxies(traversing);
 
   // The full list stays cached after a search, and a write invalidates it
-  // without refetching while it is disabled (#611). Such an entry is not the
-  // collection any more, so it must not replace a newer first page, claim to
-  // be complete, or hide "Search all". Collapsed, it is used only while it is
-  // valid and at least as recent as the first page.
-  const allState = qc.getQueryState(["proxies", scope.namespace, "all"]);
-  const invalidated = allState?.isInvalidated === true;
-  const fetchCount = allState?.dataUpdateCount ?? 0;
-  const currentForPage =
+  // without refetching while it is disabled (#611). Such an entry may not be
+  // the collection any more, so it answers only while it is valid: not
+  // invalidated, at least as recent as the first page, and in agreement with
+  // that page (its length is the page's total, and every row on the page is in
+  // it under the same name). Otherwise the first page answers, with its own
+  // total, completeness and errors, so "Search all" is offered again.
+  // Invalidating a disabled query notifies no observer, so the flag is read
+  // through a cache subscription that re-renders the picker when it changes.
+  const subscribe = useCallback(
+    (onChange: () => void) => qc.getQueryCache().subscribe(onChange),
+    [qc],
+  );
+  const fullListInvalidated = useSyncExternalStore(
+    subscribe,
+    () => qc.getQueryState(["proxies", scope.namespace, "all"])?.isInvalidated === true,
+  );
+  const fullListAgrees = useMemo(() => {
+    const all = everything.data;
+    if (all === undefined || page === undefined) return false;
+    if (all.length !== page.pagination.total) return false;
+    const names = new Map(all.map((entry) => [entry.id, entry.name]));
+    return page.data.every((entry) => names.has(entry.id) && names.get(entry.id) === entry.name);
+  }, [everything.data, page]);
+  const fullListNewer = everything.dataUpdatedAt >= firstPage.dataUpdatedAt;
+  // An expanded picker keeps a valid list answering while it refreshes in the
+  // background, as long as it still agrees with the first page.
+  const fullListValid =
     everything.data !== undefined &&
-    !invalidated &&
-    everything.dataUpdatedAt >= firstPage.dataUpdatedAt;
+    !fullListInvalidated &&
+    fullListAgrees &&
+    (fullListNewer || (traversing && everything.isFetching));
 
-  // Expanded, the operator asked for the whole collection: a list this check
-  // rejected is fetched again whatever the stale timer says, and from then on
-  // any list fetched since the expansion began answers, however a later
-  // first-page refresh is ordered against it. `fetchCount` (the query's
-  // `dataUpdateCount`) counts those fetches without comparing clocks.
-  const [expansion, setExpansion] = useState<{ namespace: string; acceptFrom: number } | null>(null);
-  if (traversing && expansion?.namespace !== scope.namespace) {
-    setExpansion({
-      namespace: scope.namespace,
-      acceptFrom: currentForPage ? fetchCount : fetchCount + 1,
-    });
-  } else if (!traversing && expansion !== null) {
-    setExpansion(null);
-  }
-  const acceptFrom = traversing && expansion !== null && expansion.namespace === scope.namespace
-    ? expansion.acceptFrom
-    : null;
-  const needsFetch = acceptFrom !== null && fetchCount < acceptFrom;
-  const { refetch } = everything;
+  // Expanded, the operator asked for the whole collection, so a list that is
+  // not valid is fetched again whatever the stale timer says. When the list is
+  // the newer read and the first page disagrees with it, the page is the stale
+  // one and is read again instead. Each read triggers at most one follow-up,
+  // and a failed one stops here and surfaces as the answering query's error.
+  const repair: "all" | "page" | null = !traversing || fullListValid
+    ? null
+    : everything.data !== undefined && !fullListInvalidated && fullListNewer
+      ? "page"
+      : "all";
+  const { refetch: refetchAll } = everything;
+  const { refetch: refetchPage } = firstPage;
   useEffect(() => {
-    // `cancelRefetch: false` joins a fetch the query already started.
-    if (needsFetch) void refetch({ cancelRefetch: false });
-  }, [needsFetch, refetch]);
-
-  const fullListValid = acceptFrom !== null
-    ? everything.data !== undefined && !invalidated && fetchCount >= acceptFrom
-    : currentForPage;
+    // `cancelRefetch: false` joins a read the query already started.
+    if (repair === "all") void refetchAll({ cancelRefetch: false });
+    else if (repair === "page") void refetchPage({ cancelRefetch: false });
+  }, [repair, everything.dataUpdatedAt, firstPage.dataUpdatedAt, refetchAll, refetchPage]);
 
   // Whichever read actually supplied the rows is the one the picker's state
   // must reflect, so a failure of *that* read is what disables it.
@@ -172,7 +182,8 @@ export function useProxyCatalog(expanded: boolean): ProxyCatalog {
     proxies: page?.data ?? [],
     total: page?.pagination.total ?? 0,
     complete: firstPageIsWholeCollection,
-    query: everything.isError ? everything : firstPage,
+    // The first page answers here, so its own failure is reported first.
+    query: !firstPage.isError && everything.isError ? everything : firstPage,
     expanding: everything.isFetching,
   };
 }

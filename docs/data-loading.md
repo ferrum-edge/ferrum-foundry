@@ -168,11 +168,12 @@ whose membership needs it.
 complete after one request, which is the common case. If not, it says so
 ("Searching the first 250 of N proxies") and offers "Search all N proxies",
 which starts a full, cancellable traversal. A full list cached by an earlier
-search answers only while it is valid and at least as recent as the first page:
-one invalidated by a proxy write, or older than the page, gives way to the page,
-so it cannot hide a new proxy or "Search all". Searching all refetches such a
-list even inside its stale time, and while expanded any list fetched since the
-search began answers, whatever order a later first-page refresh lands in.
+search answers only while it is not invalidated by a proxy write, is at least
+as recent as the first page, and agrees with it (its length is the page's
+total and every row on the page is in it under the same name). Otherwise the
+page answers, with its own total and errors, so a stale list cannot hide a new
+proxy or "Search all". An expanded picker refetches a list that fails these
+checks even inside its stale time.
 Selected proxies outside the loaded
 page are resolved one id at a time, so they are labelled correctly, and a
 selection whose proxy no longer exists is labelled as such and can still be

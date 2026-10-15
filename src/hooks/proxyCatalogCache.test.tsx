@@ -9,6 +9,7 @@ import { act, useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearGatewayMetadata } from "@/api/gatewayMetadata";
 import type { Proxy, ProxyCreate } from "@/api/types";
+import { resolveReadState } from "@/lib/readState";
 import { createHarness, settle, stubFetch } from "@/test/__tests__/harness";
 import {
   useCreateProxy,
@@ -38,8 +39,10 @@ let ui: ReturnType<typeof createHarness>;
 let rows: Proxy[];
 /** The most rows the gateway returns per page, so a test can make the first page partial. */
 let pageCap: number;
-/** Hold the next proxy-list read until `release` is called. */
-let holdNext: boolean;
+/** Let this many proxy-list reads through, then hold the next until `release`. */
+let holdAfter: number | null;
+/** Fail every proxy-list read with a `400` (not retried). */
+let failReads: boolean;
 let release: (() => void) | undefined;
 let fetchMock: ReturnType<typeof stubFetch>;
 let create: (data: ProxyCreate) => Promise<unknown>;
@@ -68,6 +71,7 @@ function Catalog({ expanded }: { expanded: boolean }) {
       data-total={catalog.total}
       data-complete={String(catalog.complete)}
       data-expanding={String(catalog.expanding)}
+      data-read={resolveReadState(catalog.query)}
     />
   );
 }
@@ -83,6 +87,8 @@ function catalog() {
   };
 }
 
+const readState = () => ui.host.querySelector("output")?.dataset.read;
+
 const proxyListReads = () => fetchMock.mock.calls.filter(([request]) =>
   request.method === "GET" && new URL(request.url).pathname === "/api/proxy/proxies").length;
 
@@ -96,17 +102,19 @@ beforeEach(() => {
   });
   rows = [];
   pageCap = Number.POSITIVE_INFINITY;
-  holdNext = false;
+  holdAfter = null;
+  failReads = false;
   release = undefined;
   clearGatewayMetadata();
   fetchMock = stubFetch(async (request) => {
     const url = new URL(request.url);
     const path = url.pathname;
     if (path === "/api/proxy/proxies" && request.method === "GET") {
-      if (holdNext) {
-        holdNext = false;
+      if (holdAfter !== null && holdAfter-- === 0) {
+        holdAfter = null;
         await new Promise<void>((resolve) => { release = resolve; });
       }
+      if (failReads) return Response.json({ error: "read failed" }, { status: 400 });
       const offset = Number(url.searchParams.get("offset") ?? 0);
       const limit = Math.min(Number(url.searchParams.get("limit") ?? 250), pageCap);
       return Response.json({
@@ -267,7 +275,7 @@ describe("useProxyCatalog full list", () => {
     rows = [...rows, proxy("d")];
     // Hold the read of the query that must finish last, and let the other
     // complete before releasing it.
-    holdNext = true;
+    holdAfter = 0;
     await act(async () => { void ui.client.refetchQueries({ queryKey: last }); });
     await settle(() => expect(release).toBeDefined());
     await act(async () => { await ui.client.refetchQueries({ queryKey: first }); });
@@ -278,6 +286,54 @@ describe("useProxyCatalog full list", () => {
       expect(catalog()).toEqual({
         names: "a,b,c,d", total: 4, complete: true, expanding: false,
       });
+    });
+  });
+
+  it("stops claiming complete when a first-page refresh outgrows an expanded full list", async () => {
+    rows = [proxy("a"), proxy("b"), proxy("c")];
+    pageCap = 1;
+    await ui.render(<Catalog expanded />);
+    await settle(() => expect(catalog()).toEqual({
+      names: "a,b,c", total: 3, complete: true, expanding: false,
+    }));
+
+    // Another session adds a proxy, and only the first page is refreshed (a
+    // refocus after its stale time). Hold the full-list read that follows.
+    rows = [...rows, proxy("d")];
+    holdAfter = 1;
+    await act(async () => { await ui.client.refetchQueries({ queryKey: FIRST_PAGE_KEY }); });
+    await settle(() => {
+      expect(release).toBeDefined();
+      expect(catalog()).toEqual({ names: "a", total: 4, complete: false, expanding: true });
+    });
+
+    await act(async () => { release!(); });
+    await settle(() => expect(catalog()).toEqual({
+      names: "a,b,c,d", total: 4, complete: true, expanding: false,
+    }));
+  });
+
+  it("drops an invalidated full list from a mounted picker when the first-page refresh fails", async () => {
+    rows = [proxy("a"), proxy("b"), proxy("c")];
+    pageCap = 1;
+    await ui.render(<Catalog expanded />);
+    await settle(() => expect(catalog().complete).toBe(true));
+    // Collapsed, the cached list is valid and still answers.
+    await ui.render(<Catalog expanded={false} />);
+    await settle(() => {
+      expect(catalog()).toEqual({ names: "a,b,c", total: 3, complete: true, expanding: false });
+      expect(readState()).toBe("loaded");
+    });
+
+    failReads = true;
+    await act(async () => { await ui.client.invalidateQueries({ queryKey: ["proxies"] }); });
+
+    // The disabled full list was invalidated, not refetched: it must stop
+    // answering, and the failed first page is what the picker reports.
+    await settle(() => {
+      expect(ui.client.getQueryState(ALL_KEY)?.isInvalidated).toBe(true);
+      expect(catalog()).toEqual({ names: "a", total: 3, complete: false, expanding: false });
+      expect(readState()).toBe("stale");
     });
   });
 });
