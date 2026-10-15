@@ -17,8 +17,9 @@ do not duplicate them in this directory.
   --effort <low|medium|high|xhigh|max>
 ```
 
-`--effort` is accepted for parity with the sibling skills; the shared launcher pins the Cursor
-Composer 2.5 model. Append `--fast` only when the user explicitly requests fast mode for that
+`--effort` is accepted for parity with the sibling skills and ignored; the shared launcher pins
+the Cursor Composer 2.5 model, which has no effort tiers.
+Append `--fast` only when the user explicitly requests fast mode for that
 dispatch or fleet, and `--name NAME` only to label a worker.
 
 Read the canonical skill before dispatch for effort selection, preflight, isolation, failure
@@ -27,8 +28,9 @@ handling, and verification. For implementer mode, read
 For fix-round or shepherd mode, also read
 [continuation-brief.md](../../../.agents/skills/composer-agents/references/continuation-brief.md).
 Resolve all worker paths to absolute paths. Run each worker in its own background or long-lived
-execution session and retain that session's identity. Honor the user's selected effort without
-clamping or substituting. Never recursively invoke this skill from a dispatched worker. Assign
+execution session and retain that session's identity. Pass the user's selected effort through, but
+never report it as applied: the launcher ignores it.
+Never recursively invoke this skill from a dispatched worker. Assign
 commit, push, review-trigger, and CI actions only when the user's request includes them; the
 canonical skill's stopping-point rules apply to every prompt you construct.
 

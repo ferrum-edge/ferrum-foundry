@@ -19,7 +19,7 @@ do not duplicate them in this directory.
 
 The shared launcher defaults to `opencode/laguna-s-2.1-free`; pass `--model opencode/<model>`
 only for an explicit alternative opencode model. `--effort` is accepted for parity with the
-sibling skills.
+sibling skills and ignored, because opencode zen models expose no effort tiers.
 
 Read the canonical skill before dispatch for effort selection, preflight, isolation, failure
 handling, and verification. For implementer mode, read
@@ -27,8 +27,9 @@ handling, and verification. For implementer mode, read
 For fix-round or shepherd mode, also read
 [continuation-brief.md](../../../.agents/skills/opencode-laguna-agents/references/continuation-brief.md).
 Resolve all worker paths to absolute paths. Run each worker in its own background or long-lived
-execution session and retain that session's identity. Honor the user's selected effort without
-clamping or substituting. Never recursively invoke this skill from a dispatched worker. Assign
+execution session and retain that session's identity. Pass the user's selected effort through, but
+never report it as applied: the launcher ignores it.
+Never recursively invoke this skill from a dispatched worker. Assign
 commit, push, review-trigger, and CI actions only when the user's request includes them; the
 canonical skill's stopping-point rules apply to every prompt you construct.
 
