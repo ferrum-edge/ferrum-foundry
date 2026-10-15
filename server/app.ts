@@ -100,8 +100,12 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       'permissions-policy',
       'camera=(), geolocation=(), microphone=(), payment=(), usb=()',
     );
-    if (requestIsApiRoute(request) && !reply.hasHeader('cache-control')) {
+    // Every API answer is per-session admin data. A gateway's own caching
+    // headers do not apply once the BFF has signed the read for one principal,
+    // so they are replaced rather than forwarded (#607).
+    if (requestIsApiRoute(request)) {
       reply.header('cache-control', 'no-store');
+      reply.removeHeader('expires');
     }
     return payload;
   });

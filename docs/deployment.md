@@ -364,9 +364,12 @@ gateway reports a terminal state.
 An interrupted spec import or replacement, or an ACME create or renew, shows
 **outcome unknown** and blocks resubmission in that view. Inspect the spec
 resources or ACME orders before you reload or retry; the warning does not
-survive a page load. Only a BFF timeout with `phase: "upload"` proves the
-request never reached the gateway. A response-phase timeout, bare `504`,
-network error, or upstream `5xx` does not prove nothing was created.
+survive a page load. Only a BFF timeout with `phase: "upload"` is treated as
+a definite failure: the BFF streams the body, so the gateway may already have
+the request headers and part of the body, but the complete body never reached
+it, and the gateway acts on a write only once it has the whole body. A
+response-phase timeout, bare `504`, network error, or upstream `5xx` does not
+prove nothing was created.
 
 ## 4. Docker Compose example
 
@@ -556,7 +559,8 @@ The BFF never logs the CA bundle, `FERRUM_JWT_SECRET`,
 Runtime settings changes are logged with the actor and each changed field;
 `adminUrl` and `tlsCaPath` values are redacted.
 
-API responses carry `cache-control: no-store`. Hashed static assets are cached
+API responses carry `cache-control: no-store`, replacing any `cache-control`
+the gateway sends, and no `expires`. Hashed static assets are cached
 for a year; `index.html` and `theme-bootstrap.js` are never cached.
 
 ### Upload bounds
@@ -706,10 +710,10 @@ Published image tags:
 | `X.Y.Z` | Never | Same release, without the `v` |
 | `X.Y` | Yes, to the newest patch | Tracking a minor line |
 | `latest` | Yes, to the newest stable release | Convenience only |
-| `main-<commit>` | Never | Staging a specific `main` build |
+| `main-<commit>` | Not by later commits; a rerun of that commit's publication rebuilds and re-points it | Staging a specific `main` build; pin its digest for byte identity |
 | `main` | Yes | Tracking `main`, non-production only |
 
-Deploy an immutable tag. Pin by digest when you need byte-identical rollouts:
+Deploy a release tag. Pin by digest when you need byte-identical rollouts:
 
 ```bash
 docker pull ferrumedge/ferrum-foundry:vX.Y.Z

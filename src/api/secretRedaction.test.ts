@@ -727,7 +727,7 @@ describe("backup restore (#485)", () => {
       code: "FERRUM_BFF_TIMEOUT",
       phase: "upload",
     });
-    // The upload phase still proves the body never reached the gateway.
+    // The upload phase still proves the complete body never reached the gateway.
     expect(classifyUnobservedOutcome(timedOut)).toBeNull();
     expect(reported).toEqual([]);
   });

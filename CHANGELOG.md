@@ -118,6 +118,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- API responses always carry `cache-control: no-store`: the BFF replaces a
+  gateway's own `cache-control` and drops its `expires` instead of forwarding
+  them (#607).
+- Docs: the deployment guide no longer says an upload-phase timeout proves the
+  request never reached the gateway (headers and part of the body may have),
+  and no longer calls `main-<commit>` image tags immutable, since rerunning a
+  `main` publication re-points them (#607). The `deepseek-pro-agents` skill now
+  says it dispatches `deepseek-v4.1-flash`, not V4 Pro (#605), and the Grok
+  wrapper states the launcher's `max`-to-`xhigh` mapping instead of forbidding
+  clamping (#606).
 - Namespace Manager tells an unreadable registry from an empty one, offers
   Retry, and disables Edit/Delete over stale rows after a failed refresh (#572).
 - A delete that completes after its detail editor was replaced, by an
@@ -158,6 +168,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an old name or a deleted proxy, and claim to be complete, hiding "Search
   all". The cached list is used only while valid and at least as recent as the
   first page; "Search all" refetches it even inside its stale time (#611).
+- Starter preflight: the forged-identity probe now also selects the namespace
+  it grants (`X-Ferrum-Namespace`), so the BFF's namespace ceiling can no longer
+  refuse it with a `403` that reads as header stripping. Without
+  `FERRUM_NAMESPACE` or `FERRUM_TRUSTED_PROXY_SECRET` the check is unknown
+  rather than sent as a request the BFF would refuse on its own (#603).
 
 ### Changed
 
