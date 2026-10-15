@@ -27,7 +27,11 @@ import {
   deletePluginWithMembership,
   updatePluginWithMembership,
 } from "@/lib/pluginMembership";
-import { retireDeletedDetail } from "./retireDeletedDetail";
+import {
+  removeCommitted,
+  retireDeletedDetail,
+  type DeleteOutcome,
+} from "./retireDeletedDetail";
 
 export function useAvailablePlugins() {
   const { scope } = useNamespace();
@@ -200,10 +204,14 @@ export function useDeletePluginWithMembership() {
     }: {
       id: string;
       guard: WriteGuard<PluginConfig | PluginConfigCreate> | null;
-    }) => {
-      await deletePluginWithMembership(id, bindPluginMembership(scope), guard);
+    }): Promise<DeleteOutcome> => {
+      // A committed-but-not-live answer is a completed delete: its detail
+      // cache is retired below exactly as for a 204.
+      const committed = await removeCommitted(() =>
+        deletePluginWithMembership(id, bindPluginMembership(scope), guard),
+      );
       // Carry the mutation's namespace through completion, even after a switch.
-      return { namespace: scope.namespace, id };
+      return { namespace: scope.namespace, id, committed };
     },
     onSuccess: async (retired) => {
       await retireDeletedDetail(qc, [

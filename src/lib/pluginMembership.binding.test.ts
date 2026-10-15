@@ -186,6 +186,7 @@ describe("plugin membership plans on a gateway that honours If-Match", () => {
   const store = new Map<string, Stored>();
   const wire: string[] = [];
   let interleaveOnPut: string | null = null;
+  let untaggedPluginReads = false;
 
   const tag = (path: string) => `"${path}@${store.get(path)!.revision}"`;
 
@@ -214,6 +215,7 @@ describe("plugin membership plans on a gateway that honours If-Match", () => {
     store.clear();
     wire.length = 0;
     interleaveOnPut = null;
+    untaggedPluginReads = false;
     store.set("plugins/config/plugin-1", { value: plugin, revision: 0 });
     store.set("proxies/p1", { value: makeProxy("p1", "v1"), revision: 0 });
     store.set("proxies/p2", { value: makeProxy("p2", "v1"), revision: 0 });
@@ -241,8 +243,13 @@ describe("plugin membership plans on a gateway that honours If-Match", () => {
         const entry = store.get(path);
         if (!entry) return json({ error: "Not Found" }, 404);
         if (input.method === "GET") {
+          // Edge's cached fallback answers without a tag.
+          const untagged = untaggedPluginReads && path.startsWith("plugins/");
           return new Response(JSON.stringify(entry.value), {
-            headers: { "content-type": "application/json", etag: tag(path) },
+            headers: {
+              "content-type": "application/json",
+              ...(!untagged && { etag: tag(path) }),
+            },
           });
         }
         // Another administrator edits this proxy after the plan's preflight
@@ -306,6 +313,17 @@ describe("plugin membership plans on a gateway that honours If-Match", () => {
     expect(store.has("plugins/config/plugin-1")).toBe(false);
     expect((store.get("proxies/p1")!.value as Proxy).plugins).toEqual([]);
     expect((store.get("proxies/p2")!.value as Proxy).plugins).toEqual([]);
+  });
+
+  it("sends no DELETE when the plugin read is untagged", async () => {
+    untaggedPluginReads = true;
+
+    await expect(
+      deletePluginWithMembership("plugin-1", bindPluginMembership({ namespace: "tenant-a" }), null),
+    ).rejects.toThrow("did not provide a usable strong ETag");
+
+    expect(wire).toEqual(["GET plugins/config/plugin-1"]);
+    expect(store.has("plugins/config/plugin-1")).toBe(true);
   });
 
   it("keeps a group whose configuration changed after the editor's check (#609)", async () => {

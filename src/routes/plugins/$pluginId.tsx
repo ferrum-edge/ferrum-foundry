@@ -24,7 +24,7 @@ import { PluginConfigForm } from "@/components/forms/PluginConfigForm";
 import { PluginMembershipRecovery } from "@/components/forms/PluginMembershipRecovery";
 import { MaskedSecretRefusal } from "@/components/shared/MaskedSecretRefusal";
 import { maskedPlaceholderRefusal } from "@/api/maskedSecrets";
-import { getApiErrorMessage } from "@/api/client";
+import { committedWriteMessage, getApiErrorMessage } from "@/api/client";
 import { formatPluginName } from "@/lib/pluginConfigDefaults";
 import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
 import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
@@ -138,11 +138,18 @@ function PluginEditor({ session }: { session: EditorSession }) {
     try {
       // Judged against the configuration this page is displaying — see the
       // proxy detail page.
-      await deletePlugin.mutateAsync({
+      const deleted = await deletePlugin.mutateAsync({
         id: pluginId,
         guard: pluginsApi.pluginDeleteGuard(plugin),
       });
-      toast("success", "Plugin configuration deleted successfully");
+      if (deleted.committed) {
+        toast(
+          "warning",
+          committedWriteMessage("Plugin configuration deleted", deleted.committed),
+        );
+      } else {
+        toast("success", "Plugin configuration deleted successfully");
+      }
       // The delete reconciled its own resource either way; only the
       // editor still on screen may leave for the collection.
       if (session.isCurrent()) navigate({ to: "/plugins" });

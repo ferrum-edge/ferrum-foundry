@@ -124,7 +124,11 @@ the last detach would make Edge delete the configuration before Foundry could
 check it again, so a concurrent configuration change could be deleted unseen
 (#609). A `412` re-reads the configuration: if it no longer matches what the
 page showed, the comparison is shown; otherwise the delete is refused as
-changed during deletion. A `404` means it is already gone.
+changed during deletion. A `404` means it is already gone, and a
+committed-but-not-live `503` is reported as a completed delete that is not yet
+proven live. A read without a usable strong `ETag` (an older gateway, or Edge's
+cached fallback) refuses the delete before anything is sent, since the
+`DELETE` could not be conditional.
 
 ## Failures and recovery
 
@@ -140,7 +144,8 @@ If a change fails, Foundry attempts a compensating rollback:
   than by detaching proxies first. It is deleted only while it is still the
   configuration Foundry created: a fresh read must hold the create response's
   `updated_at`, and the `DELETE` is conditional on that read. A plugin another
-  operator changed meanwhile, or one whose read fails, is kept, and the
+  operator changed meanwhile, one whose read fails, or one whose read carries no
+  `ETag` is kept, and the
   recovery details report its existence and the proxies that reference it
   (#608).
 - It does not reattach a plugin that no longer exists.

@@ -123,7 +123,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deleting a plugin configuration is one `DELETE` conditional on the read the
   page's baseline was compared with; Edge detaches its proxies in the same
   transaction. Detaching a group's members first could let the last detach
-  delete a concurrently edited configuration before it was checked (#609).
+  delete a concurrently edited configuration before it was checked (#609). An
+  untagged read refuses it rather than sending an unconditional `DELETE`, and a
+  committed-but-not-live answer is reported as a completed delete.
 - A plugin create that does not converge deletes the new configuration only
   while a fresh read still holds what it created, conditionally on that read,
   in one `DELETE` that also removes its associations; otherwise it is kept and

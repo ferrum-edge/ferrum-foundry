@@ -1,5 +1,6 @@
-import { extractApiErrorData, type NamespaceScope } from "@/api/client";
+import { extractApiErrorData, getCommittedWrite, type NamespaceScope } from "@/api/client";
 import {
+  GuardVerificationError,
   isPreconditionFailed,
   StaleResourceError,
   validatorOf,
@@ -49,6 +50,12 @@ export interface PluginMembershipDependencies {
     basis: PluginConfig | null,
   ) => Promise<PluginConfig>;
   deletePlugin: (id: string, basis: PluginConfig | null) => Promise<void>;
+  /**
+   * Whether a write based on this read would be conditional: the gateway
+   * issued a usable strong `ETag` with it. A destructive step the plan cannot
+   * make conditional (an untagged or cached read) is not sent.
+   */
+  canCondition: (read: PluginConfig) => boolean;
 }
 
 /**
@@ -84,6 +91,7 @@ export function bindPluginMembership(
       pluginsApi.updateConfig(scope, id, data, validatorOf(basis)),
     deletePlugin: (id, basis) =>
       pluginsApi.removeConfig(scope, id, validatorOf(basis)),
+    canCondition: (read) => validatorOf(read) !== null,
   };
 }
 
@@ -576,6 +584,15 @@ async function discardCreatedPlugin(
     const current = await getPluginIfPresent(created.id, deps);
     if (!current) return [];
     if (current.updated_at !== created.updated_at) return kept;
+    // An untagged read (an older gateway, or Edge's cached fallback) may lag
+    // the stored configuration, and a DELETE based on it would be
+    // unconditional. Keep the plugin rather than risk deleting a newer edit.
+    if (!deps.canCondition(current)) {
+      return [
+        `orphan plugin ${created.id} was not deleted: its fresh read carried no ETag, ` +
+          "so the deletion could not be made conditional",
+      ];
+    }
     await deps.deletePlugin(created.id, current);
     return [];
   } catch (error) {
@@ -736,11 +753,17 @@ export async function deletePluginWithMembership(
 ): Promise<void> {
   const plugin = await deps.getPlugin(pluginId);
   assertEditorBaseline(plugin, guard, "delete", null, deps.namespace);
+  // Never an unconditional DELETE: without a tag the comparison above could
+  // be against a read that lags the stored configuration (policy #542).
+  if (!deps.canCondition(plugin)) throw new GuardVerificationError("delete");
   try {
     await deps.deletePlugin(pluginId, plugin);
   } catch (error) {
     // Already gone: the outcome the operator asked for.
     if (isNotFound(error)) return;
+    // Committed, not yet proven live: a completed delete. The caller resolves
+    // it as one (`removeCommitted`) instead of reporting a failure.
+    if (getCommittedWrite(error)) throw error;
     if (isPreconditionFailed(error)) {
       // Something was written since the compared read. If it touched what
       // the page showed, the operator needs the comparison.

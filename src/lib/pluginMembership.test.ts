@@ -5,7 +5,7 @@ import type {
   Proxy,
   ProxyCreate,
 } from "@/api/types";
-import { StaleResourceError } from "@/api/conditionalWrite";
+import { GuardVerificationError, StaleResourceError } from "@/api/conditionalWrite";
 import { RedactedWriteError } from "@/api/secretRedaction";
 import { pluginWriteGuard } from "@/api/plugins";
 import {
@@ -71,6 +71,8 @@ interface HarnessOptions {
    * plan must still converge on.
    */
   gatewayAttachesOnCreate?: boolean;
+  /** Model plugin reads that carry no usable ETag (an older gateway or a cached read). */
+  untaggedPluginReads?: boolean;
 }
 
 /** The gateway refusing a write whose `If-Match` no longer matches. */
@@ -236,6 +238,7 @@ function harness(
       }
       return structuredClone(next);
     },
+    canCondition: () => !options.untaggedPluginReads,
     deletePlugin: async (id, basis) => {
       deleteCalls += 1;
       operations.push(`delete:${id}`);
@@ -459,6 +462,18 @@ describe("proxy-group membership reconciliation", () => {
     await expect(deletePluginWithMembership("plugin-1", state.deps, null)).rejects.toThrow(
       "plugin plugin-1 exists with scope proxy_group",
     );
+    expect(state.plugins.has("plugin-1")).toBe(true);
+  });
+
+  it("never sends an unconditional DELETE from an untagged read", async () => {
+    const state = harness([makeProxy("p1", ["plugin-1"])], [makePlugin("plugin-1")], {
+      untaggedPluginReads: true,
+    });
+
+    await expect(deletePluginWithMembership("plugin-1", state.deps, null)).rejects.toBeInstanceOf(
+      GuardVerificationError,
+    );
+    expect(state.counts().deleteCalls).toBe(0);
     expect(state.plugins.has("plugin-1")).toBe(true);
   });
 
@@ -845,6 +860,21 @@ describe("proxy-scoped attachment", () => {
     expect(failure!.recovery.join(" ")).toMatch(/remaining proxy references: checkout/);
     expect(stack.plugins.get("keyauth-1")?.config).toEqual({ key_location: "header:X-Other" });
     expect(stack.counts().deleteCalls).toBe(0);
+  });
+
+  it("keeps a new plugin whose fresh read carries no ETag instead of deleting it unconditionally", async () => {
+    const stack = harness([makeProxy("checkout")], [], {
+      failProxyOnce: "checkout",
+      untaggedPluginReads: true,
+    });
+
+    const failure = await createPluginWithMembership(proxyScoped("checkout"), [], stack.deps)
+      .then(() => null, (error: unknown) => error as PluginMembershipError);
+
+    expect(failure).toBeInstanceOf(PluginMembershipError);
+    expect(failure!.recovery.join(" ")).toMatch(/carried no ETag/);
+    expect(stack.counts().deleteCalls).toBe(0);
+    expect(stack.plugins.has("keyauth-1")).toBe(true);
   });
 
   it("deletes its own unverified plugin, which also removes the association Edge made", async () => {

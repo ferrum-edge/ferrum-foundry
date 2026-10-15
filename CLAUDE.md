@@ -281,7 +281,9 @@ See `docs/concurrent-edits.md`.
   with their own projection (`proxyDeleteGuard`, `consumerDeleteGuard`,
   `pluginDeleteGuard`; `DELETE_BASELINE_OMIT`): a delete destroys the fields a
   save omits, so it compares them too. A plugin delete is one conditional
-  `DELETE`; Edge detaches its proxies in the same transaction.
+  `DELETE`; Edge detaches its proxies in the same transaction. Membership
+  plans never send a destructive plugin `DELETE` without a tag
+  (`canCondition`): an untagged read refuses the delete or keeps the plugin.
 - A refused save keeps the draft; a refused delete deletes nothing. Content
   conflicts show a redacted original/current(/proposed) comparison (redaction
   applies at every depth, such as plugin `config`). Initial unusable-validator
