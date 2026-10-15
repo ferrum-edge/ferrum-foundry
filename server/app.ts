@@ -1,9 +1,11 @@
+import { readFile } from 'node:fs/promises';
 import { dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
+import { CSP_NONCE_PLACEHOLDER } from '../shared/csp-nonce.js';
 import { authPlugin } from './auth.js';
 import { loadConfig } from './config.js';
 import proxyPlugin from './proxy.js';
@@ -16,6 +18,8 @@ import { installUploadDrain } from './upload-drain.js';
 
 export interface BuildAppOptions {
   serveStatic?: boolean;
+  /** The built SPA directory. Defaults to `dist/` beside the server build. */
+  distPath?: string;
   logger?: FastifyServerOptions['logger'];
 }
 
@@ -59,6 +63,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   // outside production let every site a developer visited read a running BFF.
   await fastify.register(cors, { origin: false });
   await fastify.register(helmet, {
+    // A fresh random nonce per response, appended to script-src and
+    // style-src. The SPA shell carries the style nonce (issue #594).
+    enableCSPNonces: true,
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
@@ -70,13 +77,13 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
         imgSrc: ["'self'", 'data:'],
         objectSrc: ["'none'"],
         scriptSrc: ["'self'"],
-        // 'unsafe-inline' is a framework constraint, not a choice (issue #591):
-        // Radix's scroll lock (Dialog, Select, DropdownMenu) injects a <style>
-        // element with computed widths at runtime, and Select's viewport renders
-        // another, so no hash can cover them. Removal needs per-response nonces;
-        // tracked in issue #594. React style props use the CSSOM, which CSP does
-        // not govern.
-        styleSrc: ["'self'", "'unsafe-inline'"],
+        // No 'unsafe-inline' (issue #594). Radix's scroll lock (Dialog, Select,
+        // DropdownMenu) injects a <style> element with computed widths at
+        // runtime and Select's viewport renders another, so no hash can cover
+        // them. Both carry the per-response nonce helmet appends here, which
+        // the shell hands the app through <meta property="csp-nonce">. React
+        // style props use the CSSOM, which CSP does not govern.
+        styleSrc: ["'self'"],
         upgradeInsecureRequests: null,
       },
     },
@@ -107,15 +114,27 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
 
   if (serveStatic) {
     const here = dirname(fileURLToPath(import.meta.url));
-    const distPath = join(here, '..', 'dist');
+    const distPath = options.distPath ?? join(here, '..', 'dist');
+    // The shell is templated per response, so it is read once here and never
+    // served as a file: a static `index.html` would carry the placeholder,
+    // not the nonce the response's policy names.
+    const shell = await readFile(join(distPath, 'index.html'), 'utf8');
+    if (!shell.includes(CSP_NONCE_PLACEHOLDER)) {
+      throw new Error(
+        `${join(distPath, 'index.html')} carries no CSP nonce placeholder; build the SPA with html.cspNonce set`,
+      );
+    }
     const fastifyStatic = (await import('@fastify/static')).default;
     await fastify.register(fastifyStatic, {
       root: distPath,
       prefix: '/',
       wildcard: false,
+      // No route for `/index.html` or its `/` index: both fall through to the
+      // templated shell below.
+      globIgnore: ['index.html'],
       setHeaders(response, pathName) {
         const filename = pathName.slice(distPath.length + 1);
-        if (filename === 'index.html' || filename === 'theme-bootstrap.js') {
+        if (filename === 'theme-bootstrap.js') {
           response.header('cache-control', 'no-cache, no-store, must-revalidate');
         } else if (HASHED_ASSET_PATTERN.test(filename) && extname(filename)) {
           response.header('cache-control', 'public, max-age=31536000, immutable');
@@ -128,7 +147,10 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     fastify.setNotFoundHandler(async (request, reply) => {
       if (!servesSpaShell(request)) return reply.status(404).send({ error: 'Not Found' });
       reply.header('cache-control', 'no-cache, no-store, must-revalidate');
-      return reply.sendFile('index.html');
+      return reply
+        .code(200)
+        .type('text/html; charset=utf-8')
+        .send(shell.replaceAll(CSP_NONCE_PLACEHOLDER, reply.cspNonce.style));
     });
   }
 

@@ -44,6 +44,7 @@
     "@tanstack/react-table": "^8.21.3",
     "@tanstack/react-virtual": "^3.14.14",
     "fastify": "^5.12.5",
+    "get-nonce": "^1.0.1",
     "jose": "^6.2.12",
     "ky": "^2.2.0",
     "react": "^19.3.0",

@@ -1,4 +1,8 @@
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { CSP_NONCE_PLACEHOLDER } from '../shared/csp-nonce.js';
 import type { BuildAppOptions } from './app.js';
 
 const ENV = {
@@ -16,6 +20,7 @@ const snapshot: Record<string, string | undefined> = {};
 async function loadApp(
   overrides: Record<string, string | undefined> = {},
   logger: BuildAppOptions['logger'] = false,
+  appOptions: BuildAppOptions = { serveStatic: false },
 ) {
   for (const [key, value] of Object.entries({ ...ENV, ...overrides })) {
     if (value === undefined) delete process.env[key];
@@ -23,7 +28,7 @@ async function loadApp(
   }
   vi.resetModules();
   const { buildApp } = await import('./app.js');
-  const app = await buildApp({ serveStatic: false, logger });
+  const app = await buildApp({ ...appOptions, logger });
   app.get('/ip', async (request) => ({ ip: request.ip }));
   return app;
 }
@@ -163,6 +168,95 @@ describe('Strict-Transport-Security (#589)', () => {
       expect(response.headers['strict-transport-security']).toBeUndefined();
     } finally {
       await plainHttp.close();
+    }
+  });
+});
+
+describe('SPA shell nonce (#594)', () => {
+  const P = CSP_NONCE_PLACEHOLDER;
+  // The shape Vite's html.cspNonce emits: every tag and a csp-nonce meta.
+  const SHELL = `<!doctype html><html><head><meta property="csp-nonce" nonce="${P}">
+<script nonce="${P}" src="/theme-bootstrap.js"></script>
+<script type="module" crossorigin nonce="${P}" src="/assets/index-AbCdEf12.js"></script>
+<link rel="stylesheet" crossorigin nonce="${P}" href="/assets/index-AbCdEf12.css">
+</head><body><div id="root"></div></body></html>`;
+  let dist: string;
+
+  beforeAll(async () => {
+    dist = await mkdtemp(join(tmpdir(), 'foundry-dist-'));
+    await mkdir(join(dist, 'assets'));
+    await writeFile(join(dist, 'index.html'), SHELL);
+    await writeFile(join(dist, 'theme-bootstrap.js'), '/* theme */');
+    await writeFile(join(dist, 'assets', 'index-AbCdEf12.js'), 'export {};');
+  });
+
+  afterAll(async () => {
+    await rm(dist, { recursive: true, force: true });
+  });
+
+  function styleSrc(header: string | string[] | number | undefined): string {
+    return String(header)
+      .split(';')
+      .map((directive) => directive.trim())
+      .find((directive) => directive.startsWith('style-src '))!;
+  }
+
+  it('templates a fresh nonce into the shell and names it in style-src, without unsafe-inline', async () => {
+    const app = await loadApp({}, false, { serveStatic: true, distPath: dist });
+    try {
+      const nonces = new Set<string>();
+      for (const url of ['/', '/index.html', '/proxies/some-id', '/settings?tab=x']) {
+        const response = await app.inject({ method: 'GET', url });
+        expect(response.statusCode, url).toBe(200);
+        expect(response.headers['content-type']).toContain('text/html');
+        expect(response.headers['cache-control']).toBe('no-cache, no-store, must-revalidate');
+
+        const policy = styleSrc(response.headers['content-security-policy']);
+        expect(policy).not.toContain('unsafe-inline');
+        const nonce = /'nonce-([^']+)'/.exec(policy)?.[1];
+        expect(nonce, url).toMatch(/^[0-9a-f]{32}$/);
+
+        expect(response.body).not.toContain(P);
+        expect(response.body).toContain(`<meta property="csp-nonce" nonce="${nonce}">`);
+        expect(response.body.split(`nonce="${nonce}"`)).toHaveLength(5);
+        nonces.add(nonce!);
+      }
+      expect(nonces.size, 'every response gets its own nonce').toBe(4);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('still serves built files directly and refuses missing chunks and writes', async () => {
+    const app = await loadApp({}, false, { serveStatic: true, distPath: dist });
+    try {
+      const chunk = await app.inject({ method: 'GET', url: '/assets/index-AbCdEf12.js' });
+      expect(chunk.statusCode).toBe(200);
+      expect(chunk.headers['cache-control']).toBe('public, max-age=31536000, immutable');
+
+      const theme = await app.inject({ method: 'GET', url: '/theme-bootstrap.js' });
+      expect(theme.statusCode).toBe(200);
+      expect(theme.headers['cache-control']).toBe('no-cache, no-store, must-revalidate');
+
+      const missing = await app.inject({ method: 'GET', url: '/assets/index-Gone1234.js' });
+      expect(missing.statusCode).toBe(404);
+
+      const write = await app.inject({ method: 'POST', url: '/proxies' });
+      expect(write.statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('refuses to start on a shell built without the nonce placeholder', async () => {
+    const stale = await mkdtemp(join(tmpdir(), 'foundry-dist-stale-'));
+    try {
+      await writeFile(join(stale, 'index.html'), '<!doctype html><html><head></head></html>');
+      await expect(loadApp({}, false, { serveStatic: true, distPath: stale })).rejects.toThrow(
+        /no CSP nonce placeholder/,
+      );
+    } finally {
+      await rm(stale, { recursive: true, force: true });
     }
   });
 });
