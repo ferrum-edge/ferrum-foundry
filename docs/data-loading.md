@@ -170,7 +170,9 @@ complete after one request, which is the common case. If not, it says so
 which starts a full, cancellable traversal. A full list cached by an earlier
 search answers only while it is valid and at least as recent as the first page:
 one invalidated by a proxy write, or older than the page, gives way to the page,
-so it cannot hide a new proxy or "Search all", and searching all refetches it.
+so it cannot hide a new proxy or "Search all". Searching all refetches such a
+list even inside its stale time, and while expanded any list fetched since the
+search began answers, whatever order a later first-page refresh lands in.
 Selected proxies outside the loaded
 page are resolved one id at a time, so they are labelled correctly, and a
 selection whose proxy no longer exists is labelled as such and can still be

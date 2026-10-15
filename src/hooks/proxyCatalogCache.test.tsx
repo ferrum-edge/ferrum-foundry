@@ -20,6 +20,7 @@ import {
 vi.mock("@/stores/namespace", () => ({ useNamespace: () => ({ scope: { namespace: "tenant-a" } }) }));
 
 const ALL_KEY = ["proxies", "tenant-a", "all"];
+const FIRST_PAGE_KEY = ["proxies", "tenant-a", "firstPage"];
 
 function proxy(id: string, name = id): Proxy {
   return {
@@ -37,6 +38,9 @@ let ui: ReturnType<typeof createHarness>;
 let rows: Proxy[];
 /** The most rows the gateway returns per page, so a test can make the first page partial. */
 let pageCap: number;
+/** Hold the next proxy-list read until `release` is called. */
+let holdNext: boolean;
+let release: (() => void) | undefined;
 let fetchMock: ReturnType<typeof stubFetch>;
 let create: (data: ProxyCreate) => Promise<unknown>;
 let rename: (id: string, name: string) => Promise<unknown>;
@@ -84,13 +88,25 @@ const proxyListReads = () => fetchMock.mock.calls.filter(([request]) =>
 
 beforeEach(() => {
   ui = createHarness();
+  // Production's default (`src/lib/queryClient.ts`): a cached list is fresh
+  // for 30 seconds, so enabling its query does not by itself refetch it.
+  ui.client.setDefaultOptions({
+    queries: { retry: false, staleTime: 30_000 },
+    mutations: { retry: false },
+  });
   rows = [];
   pageCap = Number.POSITIVE_INFINITY;
+  holdNext = false;
+  release = undefined;
   clearGatewayMetadata();
   fetchMock = stubFetch(async (request) => {
     const url = new URL(request.url);
     const path = url.pathname;
     if (path === "/api/proxy/proxies" && request.method === "GET") {
+      if (holdNext) {
+        holdNext = false;
+        await new Promise<void>((resolve) => { release = resolve; });
+      }
       const offset = Number(url.searchParams.get("offset") ?? 0);
       const limit = Math.min(Number(url.searchParams.get("limit") ?? 250), pageCap);
       return Response.json({
@@ -217,5 +233,51 @@ describe("useProxyCatalog full list", () => {
     await settle(() => expect(catalog()).toEqual({
       names: "a,b,c", total: 3, complete: true, expanding: false,
     }));
+  });
+
+  it("refetches a full list older than the first page when Search all is pressed", async () => {
+    // A search cached the list moments ago, so it is still fresh to TanStack,
+    // but the picker's first page is newer and reports a proxy it lacks.
+    rows = [proxy("a"), proxy("b"), proxy("c")];
+    pageCap = 1;
+    seedFullList([proxy("a"), proxy("b")]);
+
+    await ui.render(<Catalog expanded={false} />);
+    await settle(() => expect(catalog()).toEqual({
+      names: "a", total: 3, complete: false, expanding: false,
+    }));
+
+    await ui.render(<Catalog expanded />);
+    await settle(() => expect(catalog()).toEqual({
+      names: "a,b,c", total: 3, complete: true, expanding: false,
+    }));
+  });
+
+  it.each([
+    ["the full list first, then the first page", ALL_KEY, FIRST_PAGE_KEY],
+    ["the first page first, then the full list", FIRST_PAGE_KEY, ALL_KEY],
+  ])("stays complete when concurrent refreshes finish with %s", async (_order, first, last) => {
+    rows = [proxy("a"), proxy("b"), proxy("c")];
+    pageCap = 1;
+    await ui.render(<Catalog expanded />);
+    await settle(() => expect(catalog()).toEqual({
+      names: "a,b,c", total: 3, complete: true, expanding: false,
+    }));
+
+    rows = [...rows, proxy("d")];
+    // Hold the read of the query that must finish last, and let the other
+    // complete before releasing it.
+    holdNext = true;
+    await act(async () => { void ui.client.refetchQueries({ queryKey: last }); });
+    await settle(() => expect(release).toBeDefined());
+    await act(async () => { await ui.client.refetchQueries({ queryKey: first }); });
+    await act(async () => { release!(); });
+
+    await settle(() => {
+      expect(ui.client.isFetching({ queryKey: ["proxies"] })).toBe(0);
+      expect(catalog()).toEqual({
+        names: "a,b,c,d", total: 4, complete: true, expanding: false,
+      });
+    });
   });
 });

@@ -8,7 +8,7 @@
 /* ------------------------------------------------------------------ */
 
 import { isCommittedWrite, queryScope } from "@/api/client";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   useMutation,
   useQueries,
@@ -119,14 +119,43 @@ export function useProxyCatalog(expanded: boolean): ProxyCatalog {
   // The full list stays cached after a search, and a write invalidates it
   // without refetching while it is disabled (#611). Such an entry is not the
   // collection any more, so it must not replace a newer first page, claim to
-  // be complete, or hide "Search all". It is used only while it is valid and
-  // at least as recent as the first page, or while an expanded picker's
-  // background refetch of a valid list (on focus, say) has not finished yet.
-  const fullListValid =
+  // be complete, or hide "Search all". Collapsed, it is used only while it is
+  // valid and at least as recent as the first page.
+  const allState = qc.getQueryState(["proxies", scope.namespace, "all"]);
+  const invalidated = allState?.isInvalidated === true;
+  const fetchCount = allState?.dataUpdateCount ?? 0;
+  const currentForPage =
     everything.data !== undefined &&
-    !qc.getQueryState(["proxies", scope.namespace, "all"])?.isInvalidated &&
-    (everything.dataUpdatedAt >= firstPage.dataUpdatedAt ||
-      (traversing && everything.isFetching));
+    !invalidated &&
+    everything.dataUpdatedAt >= firstPage.dataUpdatedAt;
+
+  // Expanded, the operator asked for the whole collection: a list this check
+  // rejected is fetched again whatever the stale timer says, and from then on
+  // any list fetched since the expansion began answers, however a later
+  // first-page refresh is ordered against it. `fetchCount` (the query's
+  // `dataUpdateCount`) counts those fetches without comparing clocks.
+  const [expansion, setExpansion] = useState<{ namespace: string; acceptFrom: number } | null>(null);
+  if (traversing && expansion?.namespace !== scope.namespace) {
+    setExpansion({
+      namespace: scope.namespace,
+      acceptFrom: currentForPage ? fetchCount : fetchCount + 1,
+    });
+  } else if (!traversing && expansion !== null) {
+    setExpansion(null);
+  }
+  const acceptFrom = traversing && expansion !== null && expansion.namespace === scope.namespace
+    ? expansion.acceptFrom
+    : null;
+  const needsFetch = acceptFrom !== null && fetchCount < acceptFrom;
+  const { refetch } = everything;
+  useEffect(() => {
+    // `cancelRefetch: false` joins a fetch the query already started.
+    if (needsFetch) void refetch({ cancelRefetch: false });
+  }, [needsFetch, refetch]);
+
+  const fullListValid = acceptFrom !== null
+    ? everything.data !== undefined && !invalidated && fetchCount >= acceptFrom
+    : currentForPage;
 
   // Whichever read actually supplied the rows is the one the picker's state
   // must reflect, so a failure of *that* read is what disables it.
