@@ -597,7 +597,9 @@ async function discardCreatedPlugin(
     return [];
   } catch (error) {
     if (isPreconditionFailed(error)) return kept;
-    if (isNotFound(error)) return [];
+    // Gone, or deleted and committed but not yet proven live: either way the
+    // configuration no longer exists, so there is nothing left to recover.
+    if (isNotFound(error) || getCommittedWrite(error)) return [];
     return [
       `orphan plugin ${created.id} could not be deleted (${error instanceof Error ? error.message : "unknown error"})`,
     ];
@@ -645,17 +647,18 @@ export async function createPluginWithMembership(
     return created;
   } catch (error) {
     const failure = failureText(error);
-    // Discard the new group in one conditional DELETE, which also removes the
-    // associations it got. Detaching them one by one first could let the last
-    // detach cascade-delete a configuration another operator edited
-    // meanwhile, since no proxy write is conditional on the plugin (#609).
-    // A plugin that is kept stays attached where it is, and is reported.
-    const recovery = await discardCreatedPlugin(created, deps);
-    if (recovery.length > 0) {
-      recovery.push(...await recoveryState(created.id, deps));
-    }
+    // The new group is kept where it got to, and reported. No cleanup can be
+    // made safe here: detaching members one by one can let the last detach
+    // cascade-delete a configuration another operator edited meanwhile (#609),
+    // and a DELETE conditional on the plugin cannot see an association
+    // another operator made or remade on a proxy, which does not change the
+    // plugin's revision.
+    const recovery = [
+      `plugin ${created.id} was created and kept; remove it or finish its membership from the plugin page`,
+      ...await recoveryState(created.id, deps),
+    ];
     throw new PluginMembershipError(
-      `Plugin creation did not converge (${failure}); rollback was attempted`,
+      `Plugin creation did not converge (${failure}); the new plugin was kept`,
       recovery,
       { cause: error },
       pluginsApi.toUpdatePayload(created),

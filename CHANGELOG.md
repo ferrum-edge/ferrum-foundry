@@ -126,11 +126,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   delete a concurrently edited configuration before it was checked (#609). An
   untagged read refuses it rather than sending an unconditional `DELETE`, and a
   committed-but-not-live answer is reported as a completed delete.
-- A plugin create that does not converge deletes the new configuration only
-  while a fresh read still holds what it created, conditionally on that read,
-  in one `DELETE` that also removes its associations; otherwise it is kept and
-  reported with the proxies that reference it (#608). A failed group create no
-  longer detaches members first, which could cascade-delete a concurrent edit.
+- A proxy-scoped plugin create that cannot verify its attachment deletes the
+  new configuration only while a fresh, tagged read still holds what it
+  created, conditionally on that read; otherwise it is kept and reported with
+  the proxies that reference it (#608). A failed group create is kept and
+  reported instead of being detached member by member, which could
+  cascade-delete a concurrent edit.
 - Inline backend TLS material is redacted like other secrets (#612). A
   `backend_tls_*_path` field whose value is inline PEM, such as a client
   private key, is now secret in a refused write's error and popup and shows as
