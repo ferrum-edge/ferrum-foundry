@@ -132,6 +132,26 @@ export const PLUGIN_BASELINE_OMIT: readonly string[] = [
   "labels",
 ];
 
+/**
+ * Fields a detail-page **delete** leaves out of its comparison (#602).
+ *
+ * The omissions above are about saves: a `PUT` that omits `plugins`,
+ * `credentials`, or `labels` leaves them as they are, so a concurrent change
+ * there cannot be lost. A delete destroys the whole resource, those fields
+ * included, so it compares everything except the server-managed fields: a
+ * plugin attached to a proxy, a credential added to or removed from a
+ * consumer, or a label stamped on either since the page loaded refuses the
+ * delete. Consumer reads redact credential values, so the comparison sees only
+ * what the read shows: each returned type's entries and their count. Neither a
+ * same-count rotation nor a change to a type the read omits (`basicauth`,
+ * custom types) is visible.
+ *
+ * Upstreams keep `UPSTREAM_BASELINE_OMIT` for deletes: their omitted fields
+ * are written by the mesh control plane, not by a competing operator, and
+ * change without one.
+ */
+export const DELETE_BASELINE_OMIT: readonly string[] = SERVER_MANAGED_FIELDS;
+
 /** Reduce a fetched resource to the fields a full-replacement write replaces. */
 export function baselineSnapshot(
   resource: object,

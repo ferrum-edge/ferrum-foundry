@@ -72,7 +72,9 @@ beforeEach(() => {
       serverPlugin = { ...serverPlugin, ...data };
       return Response.json(serverPlugin);
     }
-    if (path.endsWith("/plugins/config/same-id")) return Response.json(serverPlugin);
+    if (path.endsWith("/plugins/config/same-id")) {
+      return Response.json(serverPlugin, { headers: { etag: '"plugin-r1"' } });
+    }
     if (path.endsWith("/plugins")) return Response.json(["response_mock"]);
     return Response.json({ data: [], pagination: { offset: 0, limit: 250, total: 0 } });
   }));
@@ -166,6 +168,41 @@ for (const [kind, detail, list] of committedCases) {
     expect(client.getQueryState([list, namespace, "all"])?.isInvalidated).toBe(true);
   });
 }
+
+it("membership: a committed-but-not-live plugin delete completes as a delete", async () => {
+  client.setQueryData(["pluginConfig", namespace, "same-id"], { preserved: true });
+  await render(<Probe kind="membership" />);
+  const pending = remove("same-id");
+  await settle(() => expect(deletion).toHaveLength(1));
+  let outcome: unknown;
+  await act(async () => {
+    deletion[0]!.resolve(Response.json(
+      { error: "reload timed out", applied: false, reason: "reload_timeout" },
+      { status: 503, headers: { "x-ferrum-config-cursor": "1:2" } },
+    ));
+    outcome = await pending;
+  });
+  expect(outcome).toEqual({
+    namespace: "tenant-a",
+    id: "same-id",
+    committed: { cursor: "1:2", reason: "reload_timeout" },
+  });
+  expect(client.getQueryData(["pluginConfig", namespace, "same-id"])).toBeUndefined();
+});
+
+it("membership: an uncommitted 503 on a plugin delete is still a failure", async () => {
+  client.setQueryData(["pluginConfig", namespace, "same-id"], { preserved: true });
+  await render(<Probe kind="membership" />);
+  const pending = remove("same-id").then(() => null, (error: unknown) => error);
+  await settle(() => expect(deletion).toHaveLength(1));
+  let failure: unknown;
+  await act(async () => {
+    deletion[0]!.resolve(Response.json({ error: "unavailable" }, { status: 503 }));
+    failure = await pending;
+  });
+  expect(failure).toBeInstanceOf(Error);
+  expect(client.getQueryData(["pluginConfig", namespace, "same-id"])).toEqual({ preserved: true });
+});
 
 it("reopens and submits a recreated plugin without retired configuration", async () => {
   await render(<PluginDetailPage />);

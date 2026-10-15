@@ -6,6 +6,7 @@ import {
   apiSpecListResponse,
   runtimeOverlayResponse,
   crud,
+  detachDeletedPluginConfig,
   evaluateIfMatch,
   ifMatchRouteRefusal,
   provisionerFromHeaders,
@@ -618,4 +619,40 @@ test("upstream health checks follow the Edge v0.9.7 path and payload rules", () 
   const [status] = crud(list, url, "POST", undefined, upstream({ http_path: "health" }), {}, "ferrum", validateUpstreamWrite);
   assert.equal(status, 400);
   assert.equal(list.length, 0);
+});
+
+test("a plugin DELETE detaches its proxies, and a stale If-Match changes neither collection", () => {
+  const plugin = { id: "group", namespace: "ferrum", plugin_name: "cors", scope: "proxy_group" };
+  const member = (id, namespace = "ferrum") => ({
+    id, namespace, updated_at: "t0",
+    plugins: [{ plugin_config_id: "group" }, { plugin_config_id: "other" }],
+  });
+  const proxies = [member("p1"), member("p2"), member("p3", "elsewhere")];
+  const configs = [plugin];
+  const url = new URL("http://mock/plugins/config/group");
+  const before = structuredClone(proxies);
+
+  const [refused] = crud(configs, url, "DELETE", "group", undefined, {}, "ferrum", undefined, undefined, {
+    kind: "plugins/config",
+    ifMatch: '"stale"',
+  });
+  assert.equal(refused, 412);
+  assert.equal(configs.length, 1);
+  assert.deepEqual(proxies, before);
+
+  const tag = resourceEtag("plugins/config", plugin);
+  const [status] = crud(configs, url, "DELETE", "group", undefined, {}, "ferrum", undefined, undefined, {
+    kind: "plugins/config",
+    ifMatch: tag,
+  });
+  assert.equal(status, 204);
+  detachDeletedPluginConfig(proxies, "ferrum", "group");
+  assert.equal(configs.length, 0);
+  for (const id of ["p1", "p2"]) {
+    const proxy = proxies.find((entry) => entry.id === id);
+    assert.deepEqual(proxy.plugins, [{ plugin_config_id: "other" }]);
+    assert.notEqual(proxy.updated_at, "t0");
+  }
+  // Another namespace's same-id association is untouched.
+  assert.deepEqual(proxies.find((entry) => entry.id === "p3"), before[2]);
 });

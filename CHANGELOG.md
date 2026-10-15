@@ -42,10 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Gate CI on moderate production-dependency advisories instead of high only,
   and report the full dependency tree, dev dependencies included, on every run
   without blocking (#593).
-- Document why `style-src` still allows `'unsafe-inline'` (#591): Radix's
-  runtime `<style>` injection cannot be hashed. Nonce-based removal is tracked
-  in #594.
-- Drop `style-src 'unsafe-inline'` for a per-response nonce (#594). The BFF now
+- Drop `style-src 'unsafe-inline'` for a per-response nonce (#594, superseding
+  the interim #591 note that it remained). The BFF now
   templates `index.html` on each request, instead of serving it through
   `@fastify/static`, and writes the nonce its policy names into the shell and a
   `<meta property="csp-nonce">`. Radix's scroll lock and Select viewport styles
@@ -118,6 +116,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A detail-page delete compares the fields a save leaves out: a plugin
+  attached to the proxy, a consumer credential added or removed (among the
+  types a consumer read shows; `basicauth` and custom types are not), or a label
+  stamped on a consumer or plugin configuration since the page loaded now
+  refuses the delete, before the first `DELETE` and after a `412` (#602).
+- Deleting a plugin configuration is one `DELETE` conditional on the read the
+  page's baseline was compared with; Edge detaches its proxies in the same
+  transaction. Detaching a group's members first could let the last detach
+  delete a concurrently edited configuration before it was checked (#609). An
+  untagged read refuses it rather than sending an unconditional `DELETE`, and a
+  committed-but-not-live answer is reported as a completed delete.
+- A plugin create that does not converge no longer deletes the new
+  configuration, unconditionally or otherwise: it is kept and reported with
+  the proxies that reference it, because no cleanup can be conditional on both
+  the plugin and another operator's proxy associations (#608). A failed group
+  create is no longer detached member by member, which could cascade-delete a
+  concurrent edit.
 - Inline backend TLS material is redacted like other secrets (#612). A
   `backend_tls_*_path` field whose value is inline PEM, such as a client
   private key, is now secret in a refused write's error and popup and shows as

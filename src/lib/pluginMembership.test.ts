@@ -5,7 +5,8 @@ import type {
   Proxy,
   ProxyCreate,
 } from "@/api/types";
-import { StaleResourceError } from "@/api/conditionalWrite";
+import { GuardVerificationError, StaleResourceError } from "@/api/conditionalWrite";
+import { RedactedWriteError } from "@/api/secretRedaction";
 import { pluginWriteGuard } from "@/api/plugins";
 import {
   createPluginWithMembership,
@@ -70,6 +71,18 @@ interface HarnessOptions {
    * plan must still converge on.
    */
   gatewayAttachesOnCreate?: boolean;
+  /** Model plugin reads that carry no usable ETag (an older gateway or a cached read). */
+  untaggedPluginReads?: boolean;
+}
+
+/** The gateway refusing a write whose `If-Match` no longer matches. */
+function preconditionFailed(): Error {
+  return new RedactedWriteError(
+    "Precondition Failed",
+    new Response(null, { status: 412 }),
+    undefined,
+    "HTTPError",
+  );
 }
 
 function notFound(id: string): Error {
@@ -225,12 +238,23 @@ function harness(
       }
       return structuredClone(next);
     },
-    deletePlugin: async (id) => {
+    canCondition: () => !options.untaggedPluginReads,
+    deletePlugin: async (id, basis) => {
       deleteCalls += 1;
       operations.push(`delete:${id}`);
       if (options.failPluginDelete) throw new Error("injected plugin delete failure");
-      if (!plugins.has(id)) throw notFound(id);
+      const current = plugins.get(id);
+      if (!current) throw notFound(id);
+      // `basis` stands for the read whose tag the DELETE carries as If-Match.
+      if (basis && basis.updated_at !== current.updated_at) throw preconditionFailed();
       plugins.delete(id);
+      // Edge removes the configuration from every proxy that lists it in the
+      // same transaction.
+      for (const proxy of proxies.values()) {
+        if (!proxy.plugins.some((entry) => entry.plugin_config_id === id)) continue;
+        proxy.plugins = proxy.plugins.filter((entry) => entry.plugin_config_id !== id);
+        proxy.updated_at = stamp();
+      }
     },
   };
 
@@ -378,17 +402,44 @@ describe("proxy-group membership reconciliation", () => {
     expect(state.counts().updatePluginCalls).toBe(1);
   });
 
-  it("verifies the final detach cascade as successful deletion without DELETE", async () => {
+  it("deletes a group with one DELETE, which detaches every member", async () => {
     const state = harness(
       [makeProxy("p1", ["plugin-1"]), makeProxy("p2", ["plugin-1"])],
       [makePlugin("plugin-1")],
-      { failPluginDelete: true },
     );
     await deletePluginWithMembership("plugin-1", state.deps, null);
-    expect(state.operations.slice(-2)).toEqual(["cascade:plugin-1", "get:plugin-1"]);
-    expect(state.counts().deleteCalls).toBe(0);
+    expect(state.operations).toEqual(["get:plugin-1", "delete:plugin-1"]);
+    expect(state.counts().updateProxyCalls).toBe(0);
     expect(state.plugins.has("plugin-1")).toBe(false);
     expect(memberships(state.proxies, "plugin-1")).toEqual([]);
+  });
+
+  it("keeps a group whose configuration changed after the editor's check (#609)", async () => {
+    const seed = makePlugin("plugin-1");
+    const state = harness([makeProxy("p1", ["plugin-1"])], [seed]);
+    const getPlugin = state.deps.getPlugin;
+    let reads = 0;
+    state.deps.getPlugin = async (id) => {
+      const read = await getPlugin(id);
+      reads += 1;
+      if (reads === 1) {
+        // Another operator saves a config-only change right after this read.
+        state.plugins.set(id, { ...read, config: { requests: 99 }, updated_at: "v-other" });
+      }
+      return read;
+    };
+
+    const refused = await deletePluginWithMembership(
+      "plugin-1",
+      state.deps,
+      pluginWriteGuard(seed),
+    ).then(() => null, (error: unknown) => error);
+
+    if (!(refused instanceof StaleResourceError)) throw new Error("expected a stale delete");
+    expect(refused.detail.current.config).toEqual({ requests: 99 });
+    expect(state.plugins.get("plugin-1")?.config).toEqual({ requests: 99 });
+    expect(memberships(state.proxies, "plugin-1")).toEqual(["p1"]);
+    expect(state.counts().updateProxyCalls).toBe(0);
   });
 
   it("models DELETE of an already cascade-deleted plugin as 404", async () => {
@@ -414,18 +465,46 @@ describe("proxy-group membership reconciliation", () => {
     expect(state.plugins.has("plugin-1")).toBe(true);
   });
 
-  it("does not mistake a failed verification read for cascade confirmation", async () => {
-    const state = harness(
-      [makeProxy("p1", ["plugin-1"])],
-      [makePlugin("plugin-1")],
-      { failPluginGetCall: 2 },
+  it("never sends an unconditional DELETE from an untagged read", async () => {
+    const state = harness([makeProxy("p1", ["plugin-1"])], [makePlugin("plugin-1")], {
+      untaggedPluginReads: true,
+    });
+
+    await expect(deletePluginWithMembership("plugin-1", state.deps, null)).rejects.toBeInstanceOf(
+      GuardVerificationError,
     );
-    await expect(deletePluginWithMembership("plugin-1", state.deps, null)).rejects.toThrow(
-      "injected plugin read failure",
-    );
-    // Recovery probes see the missing config and never PUT a dangling reference.
-    expect(state.counts().updateProxyCalls).toBe(1);
     expect(state.counts().deleteCalls).toBe(0);
+    expect(state.plugins.has("plugin-1")).toBe(true);
+  });
+
+  it("refuses an untagged read with the fixed verification error, not a comparison", async () => {
+    const state = harness([makeProxy("p1", ["plugin-1"])], [makePlugin("plugin-1")], {
+      untaggedPluginReads: true,
+    });
+
+    await expect(
+      deletePluginWithMembership(
+        "plugin-1",
+        state.deps,
+        pluginWriteGuard({ ...makePlugin("plugin-1"), config: { requests: 5 } }),
+      ),
+    ).rejects.toBeInstanceOf(GuardVerificationError);
+    expect(state.counts().deleteCalls).toBe(0);
+  });
+
+  it("treats a plugin another operator already deleted as deleted", async () => {
+    const state = harness([makeProxy("p1", ["plugin-1"])], [makePlugin("plugin-1")]);
+    const getPlugin = state.deps.getPlugin;
+    state.deps.getPlugin = async (id) => {
+      const read = await getPlugin(id);
+      await state.deps.deletePlugin(id, null);
+      return read;
+    };
+
+    await deletePluginWithMembership("plugin-1", state.deps, null);
+
+    expect(state.plugins.has("plugin-1")).toBe(false);
+    expect(state.counts().updateProxyCalls).toBe(0);
   });
 
   it("preflights every desired proxy before creating the plugin", async () => {
@@ -449,7 +528,7 @@ describe("proxy-group membership reconciliation", () => {
   });
 
   it.each(["p1", "p2", "p3"])(
-    "rolls back associations and deletes an orphan when %s fails",
+    "keeps a failed group create where it got to, and reports it, when %s fails",
     async (failureId) => {
       const state = harness(
         [makeProxy("p1"), makeProxy("p2"), makeProxy("p3")],
@@ -462,10 +541,16 @@ describe("proxy-group membership reconciliation", () => {
         state.deps,
       ).catch((failure: unknown) => failure);
       expect(error).toBeInstanceOf(PluginMembershipError);
-      expect((error as PluginMembershipError).recovery).toEqual([]);
-      expect(memberships(state.proxies, "created-plugin")).toEqual([]);
-      expect(state.plugins.has("created-plugin")).toBe(false);
-      expect(state.counts().deleteCalls).toBe(failureId === "p1" ? 1 : 0);
+      // Neither a detach (which can cascade) nor a plugin DELETE (blind to
+      // another operator's proxy associations) can be made safe here.
+      expect((error as PluginMembershipError).recovery.join(" ")).toContain(
+        "plugin created-plugin was created and kept",
+      );
+      expect(memberships(state.proxies, "created-plugin")).toEqual(
+        ({ p1: [], p2: ["p1"], p3: ["p1", "p2"] } as Record<string, string[]>)[failureId],
+      );
+      expect(state.plugins.has("created-plugin")).toBe(true);
+      expect(state.counts().deleteCalls).toBe(0);
     },
   );
 
@@ -484,7 +569,7 @@ describe("proxy-group membership reconciliation", () => {
     };
     await expect(
       createPluginWithMembership(groupInput(), ["p1", "p2"], state.deps),
-    ).rejects.toThrow("proxy p1 was retained as the last reference");
+    ).rejects.toThrow("the new plugin was kept");
     expect(state.plugins.get("created-plugin")?.config).toEqual({ requests: 99 });
     expect(memberships(state.proxies, "created-plugin")).toEqual(["p1"]);
     expect(state.counts().deleteCalls).toBe(0);
@@ -694,20 +779,8 @@ describe("proxy-group membership reconciliation", () => {
       ["p1"],
       state.deps,
     )).rejects.toThrow("did not converge");
-    expect(state.plugins.has("created-plugin")).toBe(false);
-  });
-
-  it("restores membership when a detach fails during deletion", async () => {
-    const state = harness(
-      [makeProxy("p1", ["plugin-1"]), makeProxy("p2", ["plugin-1"])],
-      [makePlugin("plugin-1")],
-      { failProxyOnce: "p2" },
-    );
-    await expect(deletePluginWithMembership("plugin-1", state.deps, null)).rejects.toThrow(
-      "rollback was attempted",
-    );
-    expect(memberships(state.proxies, "plugin-1")).toEqual(["p1", "p2"]);
-    expect(state.plugins.has("plugin-1")).toBe(true);
+    expect(state.plugins.has("created-plugin")).toBe(true);
+    expect(state.counts().deleteCalls).toBe(0);
   });
 });
 
@@ -761,13 +834,17 @@ describe("proxy-scoped attachment", () => {
   it("refuses to report success when the attachment cannot be made", async () => {
     const stack = harness([makeProxy("checkout")], [], { failProxyOnce: "checkout" });
 
-    await expect(
-      createPluginWithMembership(proxyScoped("checkout"), [], stack.deps),
-    ).rejects.toThrow(PluginMembershipError);
+    const failure = await createPluginWithMembership(proxyScoped("checkout"), [], stack.deps)
+      .then(() => null, (error: unknown) => error as PluginMembershipError);
 
-    // The plugin is not left behind looking like a configured policy.
-    expect(stack.plugins.has("keyauth-1")).toBe(false);
+    // Not reported as configured: the failure says the plugin was kept and
+    // that no proxy runs it. Deleting it could not be made safe (#608).
+    expect(failure).toBeInstanceOf(PluginMembershipError);
+    expect(failure!.message).toContain("the new plugin was kept");
+    expect(failure!.recovery.join(" ")).toMatch(/remaining proxy references: none/);
+    expect(stack.plugins.has("keyauth-1")).toBe(true);
     expect(memberships(stack.proxies, "keyauth-1")).toEqual([]);
+    expect(stack.counts().deleteCalls).toBe(0);
   });
 
   it("carries the configuration back when the orphan cannot be deleted", async () => {
@@ -780,8 +857,68 @@ describe("proxy-scoped attachment", () => {
       .then(() => null, (error: unknown) => error as PluginMembershipError);
 
     expect(failure).toBeInstanceOf(PluginMembershipError);
-    expect(failure!.recovery.join(" ")).toMatch(/not attached to any proxy/);
+    expect(failure!.recovery.join(" ")).toMatch(/plugin keyauth-1 was created and kept/);
+    expect(failure!.recovery.join(" ")).toMatch(/remaining proxy references: none/);
     expect(failure!.lastKnownConfig?.plugin_name).toBe("key_auth");
+  });
+
+  it("keeps a new plugin another operator edited before the attachment was verified (#608)", async () => {
+    const stack = harness([makeProxy("checkout")], [], { gatewayAttachesOnCreate: true });
+    const getProxy = stack.deps.getProxy;
+    stack.deps.getProxy = async () => {
+      const created = stack.plugins.get("keyauth-1")!;
+      stack.plugins.set("keyauth-1", {
+        ...created,
+        config: { key_location: "header:X-Other" },
+        updated_at: "v-other",
+      });
+      stack.deps.getProxy = getProxy;
+      throw new Error("injected verification read failure");
+    };
+
+    const failure = await createPluginWithMembership(proxyScoped("checkout"), [], stack.deps)
+      .then(() => null, (error: unknown) => error as PluginMembershipError);
+
+    expect(failure).toBeInstanceOf(PluginMembershipError);
+    expect(failure!.recovery.join(" ")).toMatch(/was created and kept/);
+    // The association Edge made is reported as observed, not assumed absent.
+    expect(failure!.recovery.join(" ")).toMatch(/remaining proxy references: checkout/);
+    expect(stack.plugins.get("keyauth-1")?.config).toEqual({ key_location: "header:X-Other" });
+    expect(stack.counts().deleteCalls).toBe(0);
+  });
+
+  it("keeps a new plugin whose fresh read carries no ETag instead of deleting it unconditionally", async () => {
+    const stack = harness([makeProxy("checkout")], [], {
+      failProxyOnce: "checkout",
+      untaggedPluginReads: true,
+    });
+
+    const failure = await createPluginWithMembership(proxyScoped("checkout"), [], stack.deps)
+      .then(() => null, (error: unknown) => error as PluginMembershipError);
+
+    expect(failure).toBeInstanceOf(PluginMembershipError);
+    expect(failure!.recovery.join(" ")).toMatch(/was created and kept/);
+    expect(stack.counts().deleteCalls).toBe(0);
+    expect(stack.plugins.has("keyauth-1")).toBe(true);
+  });
+
+  it("keeps its unverified plugin and the association Edge made", async () => {
+    // Another operator may have detached and reattached it meanwhile; a
+    // DELETE conditional on the plugin could not tell (#608).
+    const stack = harness([makeProxy("checkout")], [], { gatewayAttachesOnCreate: true });
+    const getProxy = stack.deps.getProxy;
+    stack.deps.getProxy = async () => {
+      stack.deps.getProxy = getProxy;
+      throw new Error("injected verification read failure");
+    };
+
+    await expect(
+      createPluginWithMembership(proxyScoped("checkout"), [], stack.deps),
+    ).rejects.toThrow("the new plugin was kept");
+
+    expect(stack.plugins.has("keyauth-1")).toBe(true);
+    expect(memberships(stack.proxies, "keyauth-1")).toEqual(["checkout"]);
+    expect(stack.counts().deleteCalls).toBe(0);
   });
 
   it("moves the association when the target proxy changes", async () => {

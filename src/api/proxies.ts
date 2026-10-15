@@ -22,6 +22,7 @@ import {
 } from "./conditionalWrite";
 import {
   baselineSnapshot,
+  DELETE_BASELINE_OMIT,
   PROXY_BASELINE_OMIT,
   type BaselineSnapshot,
 } from "@/lib/resourceBaseline";
@@ -211,6 +212,28 @@ export function toBaseline(proxy: Proxy | ProxyCreate): BaselineSnapshot {
 /** The guard shape a proxy editor builds from the resource it was seeded with. */
 export function proxyWriteGuard(seed: Proxy): WriteGuard<Proxy | ProxyCreate> {
   return { baseline: toBaseline(seed), select: toBaseline };
+}
+
+/**
+ * The guard a proxy detail page's delete builds from the proxy it displays.
+ * Unlike a save, it compares `plugins`: deleting the proxy destroys its
+ * associations too (see `DELETE_BASELINE_OMIT`).
+ */
+export function proxyDeleteGuard(seed: Proxy): WriteGuard<Proxy | ProxyCreate> {
+  const select = (value: Proxy | ProxyCreate): BaselineSnapshot => {
+    const snapshot = baselineSnapshot(value, DELETE_BASELINE_OMIT);
+    // Associations are a set: Edge does not order them on read, and sorts
+    // them for its own ETag. Only an added or removed one is a change.
+    return Array.isArray(snapshot.plugins)
+      ? {
+          ...snapshot,
+          plugins: [...snapshot.plugins].sort((a, b) =>
+            String(a?.plugin_config_id).localeCompare(String(b?.plugin_config_id)),
+          ),
+        }
+      : snapshot;
+  };
+  return { baseline: select(seed), select };
 }
 
 /**
