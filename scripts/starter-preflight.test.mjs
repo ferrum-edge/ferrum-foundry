@@ -286,6 +286,40 @@ test("a served forged-identity request fails", async () => {
   assert.match(results[1].remedy, /proxy_set_header/);
 });
 
+test("the forged request selects the namespace it grants", async () => {
+  const sent = [];
+  await checkTrustBoundary(
+    { ...workingEnv, FOUNDRY_PREFLIGHT_URL: "https://foundry.example.com" },
+    async (_url, init) => {
+      sent.push(init.headers ?? {});
+      return new Response("", { status: 401 });
+    },
+  );
+  const forged = sent.find((headers) => headers["X-Ferrum-Role"] === "admin");
+  // Without the selected namespace the BFF's namespace ceiling refuses an
+  // accepted forged identity with 403, which would read as stripping (#603).
+  assert.equal(forged["X-Ferrum-Namespaces"], "production");
+  assert.equal(forged["X-Ferrum-Namespace"], "production");
+  assert.equal(forged["X-Ferrum-Auth-Secret"], workingEnv.FERRUM_TRUSTED_PROXY_SECRET);
+});
+
+test("a forged request the BFF would refuse on its own is not sent", async () => {
+  for (const key of ["FERRUM_NAMESPACE", "FERRUM_TRUSTED_PROXY_SECRET"]) {
+    const sent = [];
+    const results = await checkTrustBoundary(
+      { ...workingEnv, [key]: undefined, FOUNDRY_PREFLIGHT_URL: "https://foundry.example.com" },
+      async (_url, init) => {
+        sent.push(init.headers ?? {});
+        return new Response("", { status: 401 });
+      },
+    );
+    assert.equal(results[0].status, PASS, key);
+    assert.equal(results[1].status, UNKNOWN, key);
+    assert.match(results[1].detail, new RegExp(key), key);
+    assert.equal(sent.length, 1, `${key}: only the anonymous control is sent`);
+  }
+});
+
 test("only a recognized denial against a healthy control proves stripping", () => {
   for (const status of [200, 204]) assert.equal(verdictForForgedProbe(status, true), FAIL);
   for (const status of [401, 403]) assert.equal(verdictForForgedProbe(status, true), PASS);

@@ -451,15 +451,48 @@ export async function checkTrustBoundary(env, fetchImpl = fetch) {
     return results;
   }
 
+  // A denial proves stripping only if the BFF would have served the forged
+  // identity had it arrived intact. The probe's route is namespace-scoped, so
+  // the forged request must also select the namespace it grants: without that,
+  // the BFF's namespace ceiling answers 403 to a forged identity it accepted,
+  // and a proxy that forwards every client header would look like one that
+  // strips them (#603). A missing proof or an empty grant is refused just as
+  // early, so neither is sent as a probe.
+  const secret = env.FERRUM_TRUSTED_PROXY_SECRET;
+  if (!secret) {
+    results.push(
+      check(
+        "client identity headers are stripped",
+        UNKNOWN,
+        "not tested: FERRUM_TRUSTED_PROXY_SECRET is not set",
+        "The probe must send the real proof secret; without it the BFF would refuse the forged identity itself, and that refusal says nothing about the proxy.",
+      ),
+    );
+    return results;
+  }
+  const namespace = env.FERRUM_NAMESPACE;
+  if (!namespace) {
+    results.push(
+      check(
+        "client identity headers are stripped",
+        UNKNOWN,
+        "not tested: FERRUM_NAMESPACE is not set, so the forged request cannot select a namespace",
+        "Set FERRUM_NAMESPACE to the namespace this deployment administers. Without it the BFF would refuse the forged identity itself, and that refusal says nothing about the proxy.",
+      ),
+    );
+    return results;
+  }
+
   try {
     const response = await fetchImpl(probeUrl, {
       signal: AbortSignal.timeout(10_000),
       redirect: "manual",
       headers: {
-        "X-Ferrum-Auth-Secret": env.FERRUM_TRUSTED_PROXY_SECRET ?? "",
+        "X-Ferrum-Auth-Secret": secret,
         "X-Forwarded-User": "preflight-forged",
         "X-Ferrum-Role": "admin",
-        "X-Ferrum-Namespaces": env.FERRUM_NAMESPACE ?? "",
+        "X-Ferrum-Namespaces": namespace,
+        "X-Ferrum-Namespace": namespace,
       },
     });
     const verdict = verdictForForgedProbe(response.status, controlPassed);
@@ -496,7 +529,8 @@ export async function checkTrustBoundary(env, fetchImpl = fetch) {
 /**
  * Verdict for the forged-identity probe. Only a recognized authorization
  * denial (401/403) observed against a healthy control (the anonymous probe
- * was also refused) proves the boundary stripped the headers. Any other
+ * was also refused) proves the boundary stripped the headers, and only
+ * because the probe is otherwise a request the BFF would serve. Any other
  * non-success — a login redirect, a missing route, overload, a server
  * failure — says nothing about stripping and stays unknown.
  */
