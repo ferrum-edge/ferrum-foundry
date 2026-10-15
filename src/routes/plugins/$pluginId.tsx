@@ -141,6 +141,30 @@ function PluginEditor({ session }: { session: EditorSession }) {
     setFormGeneration((generation) => generation + 1);
   };
 
+  /**
+   * Reload after a saved-but-unverified move (#610). Only fresh reads are
+   * adopted: the plugin, and for a group its complete proxy membership, which
+   * the form seeds once. If either read fails, the draft and the recovery
+   * report stay as they are.
+   */
+  const handleReloadSaved = async () => {
+    const refreshed = await resourceQuery.refetch();
+    if (refreshed.isError || refreshed.data === undefined) {
+      toast("error", "Could not re-read the plugin; your form was kept. Try again.");
+      return;
+    }
+    if (refreshed.data.scope === "proxy_group") {
+      const members = await proxiesQuery.refetch();
+      if (members.isError || members.data === undefined) {
+        toast("error", "Could not re-read the plugin's proxies; your form was kept. Try again.");
+        return;
+      }
+    }
+    baseline.adopt(refreshed.data);
+    setFormGeneration((generation) => generation + 1);
+    setMembershipError(null);
+  };
+
   const handleDelete = session.bind(async () => {
     if (!plugin || !capability.allowed) return;
     setMembershipError(null);
@@ -260,10 +284,7 @@ function PluginEditor({ session }: { session: EditorSession }) {
       {membershipError instanceof PluginSavedUnverifiedError && (
         <Button
           variant="secondary"
-          onClick={async () => {
-            await handleDiscardAndReload();
-            setMembershipError(null);
-          }}
+          onClick={() => void handleReloadSaved()}
         >
           Reload saved configuration
         </Button>
