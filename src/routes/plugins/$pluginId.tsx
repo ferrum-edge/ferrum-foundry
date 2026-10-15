@@ -140,7 +140,7 @@ function PluginEditor({ session }: { session: EditorSession }) {
       // proxy detail page.
       await deletePlugin.mutateAsync({
         id: pluginId,
-        guard: pluginsApi.pluginWriteGuard(plugin),
+        guard: pluginsApi.pluginDeleteGuard(plugin),
       });
       toast("success", "Plugin configuration deleted successfully");
       // The delete reconciled its own resource either way; only the

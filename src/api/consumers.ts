@@ -26,6 +26,7 @@ import {
 import {
   baselineSnapshot,
   CONSUMER_BASELINE_OMIT,
+  DELETE_BASELINE_OMIT,
   type BaselineSnapshot,
 } from "@/lib/resourceBaseline";
 
@@ -122,6 +123,19 @@ export function consumerWriteGuard(
   seed: Consumer,
 ): WriteGuard<Consumer | ConsumerCreate> {
   return { baseline: toBaseline(seed), select: toBaseline };
+}
+
+/**
+ * The guard a consumer detail page's delete builds from the consumer it
+ * displays. Unlike a save, it compares `credentials` and `labels`: deleting
+ * the consumer destroys them too (see `DELETE_BASELINE_OMIT`).
+ */
+export function consumerDeleteGuard(
+  seed: Consumer,
+): WriteGuard<Consumer | ConsumerCreate> {
+  const select = (value: Consumer | ConsumerCreate) =>
+    baselineSnapshot(value, DELETE_BASELINE_OMIT);
+  return { baseline: select(seed), select };
 }
 
 /**

@@ -21,6 +21,7 @@ import {
 } from "./conditionalWrite";
 import {
   baselineSnapshot,
+  DELETE_BASELINE_OMIT,
   PROXY_BASELINE_OMIT,
   type BaselineSnapshot,
 } from "@/lib/resourceBaseline";
@@ -190,6 +191,17 @@ export function toBaseline(proxy: Proxy | ProxyCreate): BaselineSnapshot {
 /** The guard shape a proxy editor builds from the resource it was seeded with. */
 export function proxyWriteGuard(seed: Proxy): WriteGuard<Proxy | ProxyCreate> {
   return { baseline: toBaseline(seed), select: toBaseline };
+}
+
+/**
+ * The guard a proxy detail page's delete builds from the proxy it displays.
+ * Unlike a save, it compares `plugins`: deleting the proxy destroys its
+ * associations too (see `DELETE_BASELINE_OMIT`).
+ */
+export function proxyDeleteGuard(seed: Proxy): WriteGuard<Proxy | ProxyCreate> {
+  const select = (value: Proxy | ProxyCreate) =>
+    baselineSnapshot(value, DELETE_BASELINE_OMIT);
+  return { baseline: select(seed), select };
 }
 
 /**

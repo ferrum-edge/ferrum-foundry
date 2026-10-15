@@ -277,7 +277,11 @@ See `docs/concurrent-edits.md`.
   editor's guard and makes each of its own read-compare-write steps conditional
   by passing the read it compared as `basis` (`validatorOf`). Never pass an
   editor seed or Query-cache value there.
-- Detail-page deletes are guarded against the resource the page is displaying.
+- Detail-page deletes are guarded against the resource the page is displaying,
+  with their own projection (`proxyDeleteGuard`, `consumerDeleteGuard`,
+  `pluginDeleteGuard`; `DELETE_BASELINE_OMIT`): a delete destroys the fields a
+  save omits, so it compares them too. A plugin delete is one conditional
+  `DELETE`; Edge detaches its proxies in the same transaction.
 - A refused save keeps the draft; a refused delete deletes nothing. Content
   conflicts show a redacted original/current(/proposed) comparison (redaction
   applies at every depth, such as plugin `config`). Initial unusable-validator
@@ -285,8 +289,8 @@ See `docs/concurrent-edits.md`.
   or retaining resource/credential data in diagnostics or browser storage.
   Nothing is resent automatically with the same body.
 - A field a save omits and Edge preserves (`plugins` on a proxy, `labels` on a
-  consumer or plugin configuration) is left out of the comparison, since the
-  save cannot revert it.
+  consumer or plugin configuration) is left out of the save's comparison, since
+  the save cannot revert it. Deletes compare it.
 - **Committed, not live.** A `503` with `X-Ferrum-Config-Cursor` or
   `applied: false` on a configuration write is a committed write, not a
   failure. `committedNotLiveAnswer()` (`src/api/gatewayMetadata.ts`) is the one

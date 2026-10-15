@@ -249,7 +249,7 @@ function ProxyEditor({ session }: { session: EditorSession }) {
       // unseen. This operator's own saves have already advanced it.
       const deleted = await deleteProxy.mutateAsync({
         id: proxyId,
-        guard: proxiesApi.proxyWriteGuard(proxy),
+        guard: proxiesApi.proxyDeleteGuard(proxy),
       });
       if (deleted.committed) {
         toast("warning", committedWriteMessage("Proxy deleted", deleted.committed));

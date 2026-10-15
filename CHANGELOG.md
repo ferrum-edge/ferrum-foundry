@@ -42,10 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Gate CI on moderate production-dependency advisories instead of high only,
   and report the full dependency tree, dev dependencies included, on every run
   without blocking (#593).
-- Document why `style-src` still allows `'unsafe-inline'` (#591): Radix's
-  runtime `<style>` injection cannot be hashed. Nonce-based removal is tracked
-  in #594.
-- Drop `style-src 'unsafe-inline'` for a per-response nonce (#594). The BFF now
+- Drop `style-src 'unsafe-inline'` for a per-response nonce (#594, superseding
+  the interim #591 note that it remained). The BFF now
   templates `index.html` on each request, instead of serving it through
   `@fastify/static`, and writes the nonce its policy names into the shell and a
   `<meta property="csp-nonce">`. Radix's scroll lock and Select viewport styles
@@ -118,6 +116,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A detail-page delete compares the fields a save leaves out: a plugin
+  attached to the proxy, a consumer credential added or removed, or a label
+  stamped on a consumer or plugin configuration since the page loaded now
+  refuses the delete, before the first `DELETE` and after a `412` (#602).
+- Deleting a plugin configuration is one `DELETE` conditional on the read the
+  page's baseline was compared with; Edge detaches its proxies in the same
+  transaction. Detaching a group's members first could let the last detach
+  delete a concurrently edited configuration before it was checked (#609).
+- A proxy-scoped plugin create that cannot verify its attachment deletes the
+  new configuration only while a fresh read still holds what it created, and
+  conditionally on that read; otherwise it is kept and reported with the
+  proxies that reference it (#608).
+- A failed move of a group plugin to proxy or global scope reattaches the
+  group's original members after restoring its configuration, then detaches
+  the proxy-scope target, instead of leaving them without the policy (#610).
 - Namespace Manager tells an unreadable registry from an empty one, offers
   Retry, and disables Edit/Delete over stale rows after a failed refresh (#572).
 - A delete that completes after its detail editor was replaced, by an

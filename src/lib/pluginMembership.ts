@@ -558,6 +558,35 @@ async function detachFormerProxyScope(
   );
 }
 
+/**
+ * Delete a plugin this plan created and could not converge, unless another
+ * writer has changed it since (#608). A fresh read must still hold the create
+ * response's `updated_at`, and the `DELETE` is conditional on that read, so a
+ * configuration someone edited in the meantime is kept and reported. A read
+ * that fails proves nothing about the plugin or its attachments, so nothing
+ * is deleted then either. Returns the recovery details; empty once the plugin
+ * is gone.
+ */
+async function discardCreatedPlugin(
+  created: PluginConfig,
+  deps: PluginMembershipDependencies,
+): Promise<string[]> {
+  const kept = [`orphan plugin ${created.id} changed concurrently and was not deleted`];
+  try {
+    const current = await getPluginIfPresent(created.id, deps);
+    if (!current) return [];
+    if (current.updated_at !== created.updated_at) return kept;
+    await deps.deletePlugin(created.id, current);
+    return [];
+  } catch (error) {
+    if (isPreconditionFailed(error)) return kept;
+    if (isNotFound(error)) return [];
+    return [
+      `orphan plugin ${created.id} could not be deleted (${error instanceof Error ? error.message : "unknown error"})`,
+    ];
+  }
+}
+
 export async function createPluginWithMembership(
   data: PluginConfigCreate,
   desiredProxyIds: string[],
@@ -575,17 +604,13 @@ export async function createPluginWithMembership(
       await reconcileProxyScopedAssociation(created.id, data.proxy_id, deps);
       return created;
     } catch (error) {
-      // The plugin exists but does not run. Leaving it behind would look like
-      // a configured policy, so remove it and say what happened.
+      // The attachment was not proven. Leaving the plugin behind would look
+      // like a configured policy, so remove it and say what happened — but
+      // only while it still is the configuration this plan created.
       const failure = failureText(error);
-      const recovery: string[] = [];
-      try {
-        // The create response carries no tag, so this delete is unconditional.
-        await deps.deletePlugin(created.id, null);
-      } catch {
-        recovery.push(
-          `orphan plugin ${created.id} could not be deleted; it exists but is not attached to any proxy`,
-        );
+      const recovery = await discardCreatedPlugin(created, deps);
+      if (recovery.length > 0) {
+        recovery.push(...await recoveryState(created.id, deps));
       }
       throw new PluginMembershipError(
         `Plugin creation did not converge (${failure})`,
@@ -612,20 +637,7 @@ export async function createPluginWithMembership(
     const failure = failureText(error);
     const recovery = await rollbackAssociations(applied, created.id, deps, created);
     if (recovery.length === 0) {
-      try {
-        const current = await getPluginIfPresent(created.id, deps);
-        if (current && current.updated_at !== created.updated_at) {
-          recovery.push(
-            `orphan plugin ${created.id} changed concurrently and was not deleted`,
-          );
-        } else if (current) {
-          await deps.deletePlugin(created.id, current);
-        }
-      } catch (deleteError) {
-        recovery.push(
-          `orphan plugin ${created.id} could not be deleted (${deleteError instanceof Error ? deleteError.message : "unknown error"})`,
-        );
-      }
+      recovery.push(...await discardCreatedPlugin(created, deps));
     }
     if (recovery.length > 0) {
       recovery.push(...await recoveryState(created.id, deps));
@@ -637,6 +649,64 @@ export async function createPluginWithMembership(
       pluginsApi.toUpdatePayload(created),
     );
   }
+}
+
+/**
+ * Put a restored group's original members back after a failed move out of
+ * group scope. The plugin `PUT` that left group scope detached them as a
+ * gateway side effect, outside the plan's own `applied` list.
+ *
+ * Every write is conditional on a fresh read of that proxy and only adds or
+ * removes this plugin's association, so whatever else another writer changed
+ * on the proxy stands. Members are reattached before the proxy-scope target
+ * the failed save attached is detached, and that target is kept when no
+ * member could be reattached: removing the last reference would make Edge
+ * delete the restored configuration.
+ */
+async function restoreGroupMembers(
+  pluginId: string,
+  members: string[],
+  target: string | undefined,
+  deps: PluginMembershipDependencies,
+): Promise<string[]> {
+  const failures: string[] = [];
+  const setAssociation = async (proxyId: string, attached: boolean): Promise<boolean> => {
+    try {
+      const current = await deps.getProxy(proxyId);
+      if (referencesPlugin(current, pluginId) === attached) return true;
+      await deps.updateProxy(
+        proxyId,
+        {
+          ...proxiesApi.toUpdatePayload(current),
+          plugins: desiredAssociations(current, pluginId, attached),
+        },
+        current,
+      );
+      return true;
+    } catch (error) {
+      failures.push(
+        isPreconditionFailed(error)
+          ? `proxy ${proxyId} changed while plugin ${pluginId} was being ${attached ? "reattached" : "detached"}; it was not overwritten`
+          : `proxy ${proxyId} was not ${attached ? "reattached" : "detached"} (${error instanceof Error ? error.message : "unknown error"})`,
+      );
+      return false;
+    }
+  };
+
+  let reattached = 0;
+  for (const id of members) {
+    if (await setAssociation(id, true)) reattached += 1;
+  }
+  if (target && !members.includes(target)) {
+    if (reattached > 0) {
+      await setAssociation(target, false);
+    } else {
+      failures.push(
+        `proxy ${target} was retained as the last reference to preserve plugin ${pluginId}`,
+      );
+    }
+  }
+  return failures;
 }
 
 /**
@@ -697,7 +767,23 @@ export async function updatePluginWithMembership(
     } else {
       recovery.push(...await rollbackAssociations(applied, pluginId, deps));
       if (updatedPlugin) {
-        recovery.push(...await rollbackPlugin(beforePlugin, updatedPlugin, deps));
+        const restored = await rollbackPlugin(beforePlugin, updatedPlugin, deps);
+        recovery.push(...restored);
+        if (!nextIsGroup) {
+          // Leaving group scope made Edge detach every member in the plugin
+          // PUT itself (#610). Restoring the group configuration does not
+          // bring them back: group membership lives on the proxies.
+          const members = plan.proxies
+            .filter((proxy) => referencesPlugin(proxy, pluginId))
+            .map((proxy) => proxy.id);
+          recovery.push(
+            ...(restored.length === 0
+              ? await restoreGroupMembers(pluginId, members, data.proxy_id ?? undefined, deps)
+              : members.length > 0
+                ? [`original members ${members.join(", ")} were not reattached`]
+                : []),
+          );
+        }
       }
     }
     recovery.push(...await recoveryState(pluginId, deps));
@@ -713,8 +799,14 @@ export async function updatePluginWithMembership(
 /**
  * `guard` is the plugin editor's baseline: a configuration that changed since
  * the page loaded is not deleted (`StaleResourceError`, operation `delete`).
- * It is checked before any association is detached and again at the read the
- * final `DELETE` is conditional on. `null` only with nothing on screen.
+ * `null` only with nothing on screen.
+ *
+ * The delete is one `DELETE`, conditional on the read the baseline was
+ * compared with. Edge removes the configuration from every proxy that lists
+ * it in the same transaction, so group membership needs no detaching first.
+ * Detaching first would let the last detach cascade-delete the configuration
+ * before the baseline could be checked against it again (#609); here the
+ * gateway refuses the `DELETE` with `412` if anything was written since.
  */
 export async function deletePluginWithMembership(
   pluginId: string,
@@ -723,35 +815,25 @@ export async function deletePluginWithMembership(
 ): Promise<void> {
   const plugin = await deps.getPlugin(pluginId);
   assertEditorBaseline(plugin, guard, "delete", null, deps.namespace);
-  const proxies = await deps.listProxies();
-  const applied: AppliedProxyChange[] = [];
   try {
-    if (plugin.scope === "proxy_group") {
-      await applyAssociationPlan(proxies, pluginId, new Set(), deps, applied);
-    }
-    // The final detach may already have deleted the group. Only an observed
-    // 404 confirms success; authentication/transport errors must still fail.
-    const present = await getPluginIfPresent(pluginId, deps);
-    if (present) {
-      assertEditorBaseline(present, guard, "delete", null, deps.namespace);
-      await unlessChanged(
-        () => deps.deletePlugin(pluginId, present),
-        () =>
-          new PluginMembershipError(
-            `Plugin ${pluginId} changed during deletion; it was not deleted`,
-            [],
-          ),
+    await deps.deletePlugin(pluginId, plugin);
+  } catch (error) {
+    // Already gone: the outcome the operator asked for.
+    if (isNotFound(error)) return;
+    if (isPreconditionFailed(error)) {
+      // Something was written since the compared read. If it touched what
+      // the page showed, the operator needs the comparison.
+      const latest = await getPluginIfPresent(pluginId, deps).catch(() => undefined);
+      if (latest) assertEditorBaseline(latest, guard, "delete", null, deps.namespace);
+      throw new PluginMembershipError(
+        `Plugin ${pluginId} changed during deletion; it was not deleted`,
+        await recoveryState(pluginId, deps),
+        { cause: error },
       );
     }
-  } catch (error) {
-    // Nothing detached yet: the refusal is the whole outcome.
-    if (error instanceof StaleResourceError && applied.length === 0) throw error;
-    const failure = failureText(error);
-    const recovery = await rollbackAssociations(applied, pluginId, deps);
-    recovery.push(...await recoveryState(pluginId, deps));
     throw new PluginMembershipError(
-      `Plugin deletion failed (${failure}); membership rollback was attempted`,
-      recovery,
+      `Plugin deletion failed (${failureText(error)})`,
+      await recoveryState(pluginId, deps),
       { cause: error },
       pluginsApi.toUpdatePayload(plugin),
     );
