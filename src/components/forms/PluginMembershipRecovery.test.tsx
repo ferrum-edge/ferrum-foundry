@@ -45,7 +45,10 @@ describe("PluginMembershipRecovery", () => {
     );
     const html = renderToStaticMarkup(<PluginMembershipRecovery error={error} />);
     expect(html).toContain("members were: p1, p2");
-    expect(html).toContain("Saved configuration for recovery");
+    expect(html).toContain("Committed configuration");
+    expect(html).toContain("Nothing was rolled back");
+    expect(html).toContain("text-warning");
+    expect(html).not.toContain("saved before the operation");
     expect(html).toContain("p3");
     expect(html).not.toContain("updated_at");
   });
