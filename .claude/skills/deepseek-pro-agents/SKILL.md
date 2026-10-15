@@ -1,9 +1,9 @@
 ---
 name: deepseek-pro-agents
-description: Dispatch and orchestrate local opencode DeepSeek V4 Pro subagents via the opencode CLI harness for ferrum-foundry issue/PR work — implementer, fix-round, and shepherd modes, with worktree isolation and the review loop. DeepSeek V4 Pro is the deep-reasoning tier, suited to invariant-heavy security, protocol, and concurrency work. Use when the user asks Claude to spawn DeepSeek Pro/deepseek-v4-pro agents on issues, PRs, review findings, or red CI.
+description: Dispatch and orchestrate local opencode DeepSeek subagents, pinned to alibaba-token-plan/deepseek-v4.1-flash, via the opencode CLI harness for ferrum-foundry issue/PR work — implementer, fix-round, and shepherd modes, with worktree isolation and the review loop. The skill keeps its deepseek-pro-agents name but does not dispatch DeepSeek V4 Pro. Use when the user asks Claude to spawn deepseek-pro-agents workers on issues, PRs, review findings, or red CI.
 ---
 
-# DeepSeek V4 Pro agents
+# DeepSeek agents (`deepseek-pro-agents`, pinned to V4.1 Flash)
 
 Act as the orchestrator. Read and follow the shared workflow in
 [the canonical skill](../../../.agents/skills/deepseek-pro-agents/SKILL.md), interpreting its Codex
@@ -17,8 +17,10 @@ do not duplicate them in this directory.
   --effort <medium|high|xhigh|max>
 ```
 
-The shared launcher pins `alibaba-token-plan/deepseek-v4-pro-0813`; `--effort` is accepted for
-parity with the sibling skills and `--model` only re-states the pinned model.
+The shared launcher pins `alibaba-token-plan/deepseek-v4.1-flash` and refuses any other `--model`;
+`--model` can only restate that pin. Despite the skill's name, it cannot dispatch DeepSeek V4 Pro:
+tell a user who asks for V4 Pro that this skill runs V4.1 Flash. `--effort` is accepted for parity
+with the sibling skills and ignored, because this provider exposes no effort tiers.
 
 Read the canonical skill before dispatch for effort selection, preflight, isolation, failure
 handling, and verification. For implementer mode, read
@@ -26,8 +28,8 @@ handling, and verification. For implementer mode, read
 For fix-round or shepherd mode, also read
 [continuation-brief.md](../../../.agents/skills/deepseek-pro-agents/references/continuation-brief.md).
 Resolve all worker paths to absolute paths. Run each worker in its own background or long-lived
-execution session and retain that session's identity. Honor the user's selected effort without
-clamping or substituting. Never recursively invoke this skill from a dispatched worker. Assign
+execution session and retain that session's identity. Pass the user's selected effort through, but
+never report it as applied: the launcher ignores it. Never recursively invoke this skill from a dispatched worker. Assign
 commit, push, review-trigger, and CI actions only when the user's request includes them; the
 canonical skill's stopping-point rules apply to every prompt you construct.
 
