@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PluginConfig, Proxy } from "@/api/types";
 import { isStaleResourceError } from "@/api/conditionalWrite";
+import { setApiErrorHandler } from "@/api/client";
 import { pluginWriteGuard, toUpdatePayload } from "@/api/plugins";
 import {
   bindPluginMembership,
@@ -187,6 +188,7 @@ describe("plugin membership plans on a gateway that honours If-Match", () => {
   const wire: string[] = [];
   let interleaveOnPut: string | null = null;
   let untaggedPluginReads = false;
+  let vanishBeforeDelete = false;
 
   const tag = (path: string) => `"${path}@${store.get(path)!.revision}"`;
 
@@ -216,6 +218,7 @@ describe("plugin membership plans on a gateway that honours If-Match", () => {
     wire.length = 0;
     interleaveOnPut = null;
     untaggedPluginReads = false;
+    vanishBeforeDelete = false;
     store.set("plugins/config/plugin-1", { value: plugin, revision: 0 });
     store.set("proxies/p1", { value: makeProxy("p1", "v1"), revision: 0 });
     store.set("proxies/p2", { value: makeProxy("p2", "v1"), revision: 0 });
@@ -239,6 +242,11 @@ describe("plugin membership plans on a gateway that honours If-Match", () => {
           store.set(`plugins/config/${created.id}`, { value: created, revision: 0 });
           reconcileProxyScope(created);
           return json(created, 201);
+        }
+        // Another operator deletes it between the plan's read and its DELETE.
+        if (vanishBeforeDelete && input.method === "DELETE") {
+          vanishBeforeDelete = false;
+          store.delete(path);
         }
         const entry = store.get(path);
         if (!entry) return json({ error: "Not Found" }, 404);
@@ -313,6 +321,26 @@ describe("plugin membership plans on a gateway that honours If-Match", () => {
     expect(store.has("plugins/config/plugin-1")).toBe(false);
     expect((store.get("proxies/p1")!.value as Proxy).plugins).toEqual([]);
     expect((store.get("proxies/p2")!.value as Proxy).plugins).toEqual([]);
+  });
+
+  it("resolves a DELETE that finds the plugin already gone, without an error popup", async () => {
+    vanishBeforeDelete = true;
+    const popups = vi.fn();
+    setApiErrorHandler(popups);
+    try {
+      await deletePluginWithMembership(
+        "plugin-1",
+        bindPluginMembership({ namespace: "tenant-a" }),
+        pluginWriteGuard(plugin),
+      );
+    } finally {
+      setApiErrorHandler(undefined);
+    }
+    expect(wire).toEqual([
+      "GET plugins/config/plugin-1",
+      'DELETE plugins/config/plugin-1 if-match "plugins/config/plugin-1@0"',
+    ]);
+    expect(popups).not.toHaveBeenCalled();
   });
 
   it("sends no DELETE when the plugin read is untagged", async () => {

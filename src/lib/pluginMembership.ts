@@ -90,7 +90,8 @@ export function bindPluginMembership(
     updatePlugin: (id, data, basis) =>
       pluginsApi.updateConfig(scope, id, data, validatorOf(basis)),
     deletePlugin: (id, basis) =>
-      pluginsApi.removeConfig(scope, id, validatorOf(basis)),
+      // A 404 is "already deleted", which the plan resolves itself.
+      pluginsApi.removeConfig(scope, id, validatorOf(basis), { handled: [404] }),
     canCondition: (read) => validatorOf(read) !== null,
   };
 }

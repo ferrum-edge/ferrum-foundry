@@ -240,6 +240,7 @@ export async function removeConfig(
   scope: NamespaceScope,
   id: string,
   ifMatch: string | null,
+  options: { readonly handled?: readonly number[] } = {},
 ): Promise<void> {
-  await conditionalDelete(scope, `plugins/config/${pathSegment(id)}`, ifMatch);
+  await conditionalDelete(scope, `plugins/config/${pathSegment(id)}`, ifMatch, options);
 }
