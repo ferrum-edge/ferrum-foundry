@@ -313,7 +313,7 @@ describe("proxy-group membership reconciliation", () => {
     expect(state.operations).not.toContain("cascade:plugin-1");
   });
 
-  it("reattaches original members before removing the destination on rollback", async () => {
+  it("reattaches original members and keeps the added destination on rollback (#618)", async () => {
     const state = harness(
       [
         makeProxy("p1", ["plugin-1"]),
@@ -326,7 +326,10 @@ describe("proxy-group membership reconciliation", () => {
     );
     await expect(
       updatePluginWithMembership("plugin-1", groupInput(), ["p4"], state.deps, null),
-    ).rejects.toThrow("rollback was attempted");
+    ).rejects.toThrow("proxy p4 still lists plugin plugin-1 from the failed save; it was kept");
+    // p4 is never detached by the rollback: if another operator detached the
+    // other members and edited the plugin meanwhile, that write would make
+    // Edge cascade-delete the edited configuration.
     expect(
       state.operations.filter((operation) => operation.startsWith("proxy:")),
     ).toEqual([
@@ -336,9 +339,8 @@ describe("proxy-group membership reconciliation", () => {
       "proxy:p3",
       "proxy:p2",
       "proxy:p1",
-      "proxy:p4",
     ]);
-    expect(memberships(state.proxies, "plugin-1")).toEqual(["p1", "p2", "p3"]);
+    expect(memberships(state.proxies, "plugin-1")).toEqual(["p1", "p2", "p3", "p4"]);
     expect(state.plugins.get("plugin-1")?.config).toEqual({ requests: 10 });
     expect(state.operations).not.toContain("cascade:plugin-1");
   });
@@ -351,7 +353,7 @@ describe("proxy-group membership reconciliation", () => {
     );
     await expect(
       updatePluginWithMembership("plugin-1", groupInput(), ["p1", "p2"], state.deps, null),
-    ).rejects.toThrow("proxy p1 was retained as the last reference");
+    ).rejects.toThrow("proxy p1 still lists plugin plugin-1 from the failed save; it was kept");
     expect(memberships(state.proxies, "plugin-1")).toEqual(["p1"]);
     expect(state.plugins.has("plugin-1")).toBe(true);
   });
@@ -368,8 +370,8 @@ describe("proxy-group membership reconciliation", () => {
     );
     await expect(
       updatePluginWithMembership("plugin-1", groupInput(), ["p3"], state.deps, null),
-    ).rejects.toThrow("remaining proxy references: p2");
-    expect(memberships(state.proxies, "plugin-1")).toEqual(["p2"]);
+    ).rejects.toThrow("remaining proxy references: p2, p3");
+    expect(memberships(state.proxies, "plugin-1")).toEqual(["p2", "p3"]);
     expect(state.plugins.get("plugin-1")?.config).toEqual({ requests: 10 });
     expect(state.operations).not.toContain("cascade:plugin-1");
   });

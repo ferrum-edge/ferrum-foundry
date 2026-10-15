@@ -116,6 +116,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A failed group membership change no longer detaches, on rollback, a proxy
+  it had added. If that was the last reference, Edge deleted the plugin, and
+  another operator's concurrent edit with it; the reference is now kept and
+  reported (#618).
 - A detail-page delete compares the fields a save leaves out: a plugin
   attached to the proxy, a consumer credential added or removed, or a label
   stamped on a consumer or plugin configuration since the page loaded now

@@ -345,7 +345,6 @@ async function rollbackAssociations(
   applied: AppliedProxyChange[],
   pluginId: string,
   deps: PluginMembershipDependencies,
-  disposablePlugin?: PluginConfig,
 ): Promise<string[]> {
   const failures: string[] = [];
   const changes = [...applied].reverse().sort(
@@ -369,20 +368,17 @@ async function rollbackAssociations(
         );
         continue;
       }
-      if (
-        plugin?.scope === "proxy_group" &&
-        plugin.updated_at !== disposablePlugin?.updated_at &&
-        !referencesPlugin(change.before, pluginId)
-      ) {
-        const hasOtherReference = (await deps.listProxies()).some(
-          (proxy) => proxy.id !== current.id && referencesPlugin(proxy, pluginId),
+      // Never remove a group reference this plan added (#618). If it is the
+      // last one, Edge deletes the configuration; a scan for other references
+      // cannot make that safe, because another operator can detach them and
+      // edit the plugin before this write, and nothing conditions the cascade
+      // on the plugin's revision. Keep it and report it instead.
+      if (plugin?.scope === "proxy_group" && !referencesPlugin(change.before, pluginId)) {
+        failures.push(
+          `proxy ${current.id} still lists plugin ${pluginId} from the failed save; it was kept, ` +
+            "because detaching it could delete the plugin. Detach it once the group's members are confirmed",
         );
-        if (!hasOtherReference) {
-          failures.push(
-            `proxy ${current.id} was retained as the last reference to preserve plugin ${pluginId}`,
-          );
-          continue;
-        }
+        continue;
       }
       await deps.updateProxy(current.id, proxiesApi.toUpdatePayload(change.before), current);
     } catch (error) {

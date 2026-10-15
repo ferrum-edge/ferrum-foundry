@@ -135,9 +135,13 @@ cached fallback) refuses the delete before anything is sent, since the
 
 If a change fails, Foundry attempts a compensating rollback:
 
-- It restores original references before removing new ones.
-- It keeps a final reference when removing it would delete a configuration that
-  still needs recovery.
+- It restores original references. A reference the change added is removed
+  only when the plugin is no longer group-scoped, so no cascade is possible.
+- It never removes a group reference the failed change added. If that is the
+  last reference, Edge deletes the configuration, and no check can rule that
+  out: another operator can detach the other members and edit the plugin just
+  before the write (#618). Such a reference is kept and named in the recovery
+  details; detach it once the group's membership is confirmed.
 - A failed move into group scope first restores the original non-group scope,
   relying on Edge's atomic reconciliation.
 - A new plugin whose create did not converge, proxy-scoped or group, is kept
