@@ -162,6 +162,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Guides: OIDC operator input in plugin defaults (#576), preview-only `503`
   for an uncompilable manifest schema (#583), and v0.5.5 recorded as
   qualified and published (#584).
+- Starter preflight: the forged-identity probe now also selects the namespace
+  it grants (`X-Ferrum-Namespace`), so the BFF's namespace ceiling can no longer
+  refuse it with a `403` that reads as header stripping. Without
+  `FERRUM_NAMESPACE` or `FERRUM_TRUSTED_PROXY_SECRET` the check is unknown
+  rather than sent as a request the BFF would refuse on its own (#603).
 
 ### Changed
 

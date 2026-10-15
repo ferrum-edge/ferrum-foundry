@@ -1,6 +1,6 @@
 import { Agent, createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http';
 import { once } from 'node:events';
-import type { AddressInfo } from 'node:net';
+import type { AddressInfo, Socket } from 'node:net';
 import { gzipSync } from 'node:zlib';
 import type { FastifyInstance } from 'fastify';
 import { decodeJwt } from 'jose';
@@ -238,8 +238,12 @@ async function rawGet(path: string): Promise<{ statusCode: number; body: string;
 interface KeepAliveOutcome {
   /** The response status, or 0 if nothing answered in time. */
   status: number;
-  /** Whether the agent sent this request on a socket an earlier request used. */
-  reusedSocket: boolean;
+  /**
+   * The connection the agent assigned to this request. `ClientRequest.reusedSocket`
+   * is not a witness: a request queued behind an upload that is still finishing
+   * is handed the same socket directly and still reports `false` (#604).
+   */
+  socket?: Socket;
   /** The client-side error code, if the exchange failed before a response. */
   error?: string;
 }
@@ -264,6 +268,7 @@ function keepAliveRequest(
   },
 ): Promise<KeepAliveOutcome> {
   return new Promise((resolve) => {
+    let socket: Socket | undefined;
     const request = httpRequest(
       {
         host: '127.0.0.1',
@@ -278,25 +283,35 @@ function keepAliveRequest(
       },
       (incoming) => {
         incoming.resume();
-        incoming.on('end', () => resolve({
-          status: incoming.statusCode ?? 0,
-          reusedSocket: request.reusedSocket,
-        }));
+        incoming.on('end', () => resolve({ status: incoming.statusCode ?? 0, socket }));
       },
     );
     const timer = setTimeout(() => {
       request.destroy();
-      resolve({ status: 0, reusedSocket: request.reusedSocket });
+      resolve({ status: 0, socket });
     }, target.timeoutMs ?? 2_000);
     timer.unref();
     request.on('error', (error: NodeJS.ErrnoException) => resolve({
       status: -1,
-      reusedSocket: request.reusedSocket,
+      socket,
       error: error.code ?? error.message,
     }));
+    request.on('socket', (assigned: Socket) => {
+      socket = assigned;
+    });
     request.on('close', () => clearTimeout(timer));
     request.end(body);
   });
+}
+
+/**
+ * The follow-up was answered on the upload's own connection. The agent never
+ * hands out a socket the server closed, so the same object means the BFF kept
+ * the connection open after discarding the unread remainder.
+ */
+function expectSameConnection(upload: KeepAliveOutcome, followUp: KeepAliveOutcome): void {
+  expect(upload.socket).toBeDefined();
+  expect(followUp.socket).toBe(upload.socket);
 }
 
 afterAll(async () => {
@@ -459,19 +474,19 @@ describe('streaming gateway proxy', () => {
         ...configModule.loadConfig(),
         adminUrl: 'http://127.0.0.1:1',
       });
+      let upload: KeepAliveOutcome;
       try {
-        const upload = await keepAliveRequest(agent, 'PUT', path, Buffer.alloc(1_900_000, 'a'));
-        expect(upload).toEqual({ status: 502, reusedSocket: false });
+        upload = await keepAliveRequest(agent, 'PUT', path, Buffer.alloc(1_900_000, 'a'));
+        expect(upload.status).toBe(502);
       } finally {
         configSpy?.mockRestore();
       }
       // The next request on the same agent must be answered, not queued
       // behind an unread upload until the server's request timeout, and on
       // the same connection, because the BFF discarded the unread remainder.
-      expect(await keepAliveRequest(agent, 'GET', '/api/auth/session')).toEqual({
-        status: 200,
-        reusedSocket: true,
-      });
+      const followUp = await keepAliveRequest(agent, 'GET', '/api/auth/session');
+      expect(followUp.status).toBe(200);
+      expectSameConnection(upload, followUp);
     } finally {
       agent.destroy();
     }
@@ -1032,11 +1047,10 @@ describe('unread upload drains', () => {
         Buffer.alloc(1_900_000, 'a'),
         target,
       );
-      expect(upload).toEqual({ status: 400, reusedSocket: false });
-      expect(await keepAliveRequest(agent, 'GET', '/api/auth/session', undefined, target)).toEqual({
-        status: 200,
-        reusedSocket: true,
-      });
+      expect(upload.status).toBe(400);
+      const followUp = await keepAliveRequest(agent, 'GET', '/api/auth/session', undefined, target);
+      expect(followUp.status).toBe(200);
+      expectSameConnection(upload, followUp);
     } finally {
       agent.destroy();
     }
@@ -1118,11 +1132,10 @@ describe('unread upload drains', () => {
         Buffer.alloc(1_900_000, 'a'),
         target,
       );
-      expect(upload).toEqual({ status: 401, reusedSocket: false });
-      expect(await keepAliveRequest(agent, 'GET', '/api/auth/session', undefined, target)).toEqual({
-        status: 401,
-        reusedSocket: true,
-      });
+      expect(upload.status).toBe(401);
+      const followUp = await keepAliveRequest(agent, 'GET', '/api/auth/session', undefined, target);
+      expect(followUp.status).toBe(401);
+      expectSameConnection(upload, followUp);
     } finally {
       agent.destroy();
     }
@@ -1224,11 +1237,10 @@ describe('signed-out drain pool', () => {
         Buffer.alloc(1_900_000, 'a'),
         target,
       );
-      expect(upload).toEqual({ status: 400, reusedSocket: false });
-      expect(await keepAliveRequest(agent, 'GET', '/api/auth/session', undefined, target)).toEqual({
-        status: 200,
-        reusedSocket: true,
-      });
+      expect(upload.status).toBe(400);
+      const followUp = await keepAliveRequest(agent, 'GET', '/api/auth/session', undefined, target);
+      expect(followUp.status).toBe(200);
+      expectSameConnection(upload, followUp);
     } finally {
       agent.destroy();
       for (const request of stalled) request.destroy();
