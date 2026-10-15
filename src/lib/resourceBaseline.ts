@@ -261,13 +261,19 @@ const REDACTED_FIELD_PATTERN =
  * and that location is what makes a TLS conflict resolvable, so it is shown.
  * The backend TLS fields also accept the material inline as PEM
  * (`backendTlsReferences.ts`), and an inline private key is the secret itself,
- * so such a field is classified by its value: one carrying PEM armor
- * (`isInlineMaterial`) is redacted like a `*_pem` field.
+ * so such a field is classified by its value: one carrying the start of PEM
+ * armor (`isInlineMaterial`) is redacted like a `*_pem` field.
  */
 const MATERIAL_LOCATION_PATTERN = /_paths?$/i;
 
-/** PEM armor opening a block: inline certificate or key material, not a location. */
-const INLINE_PEM_PATTERN = /-----BEGIN [A-Z0-9 ]+-----/;
+/**
+ * The start of PEM armor: inline certificate or key material, not a location.
+ * Deliberately loose. Ferrum Edge reads any value starting `-----BEGIN ` as
+ * inline material, and a draft with damaged armor (`-----BEGIN PRIVATE
+ * KEY----`) still carries the key bytes, so neither the label nor the closing
+ * dashes are required, and a dash or two short still counts.
+ */
+const INLINE_PEM_PATTERN = /-{3,}\s*BEGIN/i;
 
 function carriesInlinePem(value: unknown): boolean {
   if (typeof value === "string") return INLINE_PEM_PATTERN.test(value);

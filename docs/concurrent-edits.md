@@ -435,9 +435,11 @@ validation, batch create, backup restore, and API spec import and replacement.
 - every string under a credential-shaped field name at any depth (the conflict
   dialog's `isRedactedField` list, plus `headers` maps, webhooks,
   service-account documents, and camelCase `*Key` fields);
-- inline PEM in a material-location field (`*_path`, `*_paths`), such as a
-  private key in `backend_tls_client_key_path`. A file path, `system://`, or
-  `k8s://` reference there is not secret (`isInlineMaterial`);
+- inline PEM in a material-location field (`*_path`, `*_paths`) at any depth,
+  a plugin `config` included, such as a private key in
+  `backend_tls_client_key_path`. Any value containing the start of PEM armor
+  counts, even damaged (`-----BEGIN PRIVATE KEY----`). A file path,
+  `system://`, or `k8s://` reference there is not secret (`isInlineMaterial`);
 - the userinfo, path, query, and fragment of any URL (a bare
   `scheme://host[:port]` stays readable);
 - each line of 16 characters or more of a multi-line value such as a PEM key,

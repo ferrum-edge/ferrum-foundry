@@ -168,14 +168,18 @@ function ruleSecrets(value: unknown, path: readonly string[], sensitivity: Sensi
 
 /**
  * Edge's floor beneath the schema (`redact_sensitive_plugin_config_fields`
- * and the URL sweep), widened by Foundry's own field-name heuristic.
+ * and the URL sweep), widened by Foundry's own field-name heuristic and by
+ * inline PEM in a `*_path` field (`isInlineMaterial`), which a known plugin's
+ * rules may not name: `mesh_route_dispatch`'s `backend_tls.client_key_path`.
  */
 function configFloorSecrets(data: unknown): string[] {
   if (typeof data === "string") return urlSecrets(data);
   if (Array.isArray(data)) return data.flatMap(configFloorSecrets);
   if (data && typeof data === "object") {
     return Object.entries(data).flatMap(([field, value]) => {
-      if (isSecretField(field) || isEdgeSensitiveConfigKey(field)) return submittedValues(value);
+      if (isSecretField(field) || isEdgeSensitiveConfigKey(field) || isInlineMaterial(field, value)) {
+        return submittedValues(value);
+      }
       if (normalizeConfigKey(field) === "redisurl") return projectedSecrets(value, "redis");
       return configFloorSecrets(value);
     });

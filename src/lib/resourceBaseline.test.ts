@@ -182,6 +182,9 @@ describe("redaction", () => {
       expect(rendered).not.toContain(pem.split("\n")[1]);
       expect(rendered).not.toContain(pem.split("\n")[2]);
     }
+    const damaged = pem.replace("-----BEGIN PRIVATE KEY-----", "-----BEGIN PRIVATE KEY----");
+    expect(formatBaselineValue("backend_tls_client_key_path", damaged)).toBe("[redacted]");
+    expect(formatBaselineValue("backend_tls_client_key_path", `  ${damaged}`)).toBe("[redacted]");
     expect(formatBaselineValue("backend_tls_client_key_path", null)).toBe("null");
     expect(formatBaselineValue("backend_tls_client_key_path", "")).toBe('""');
 
