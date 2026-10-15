@@ -185,7 +185,7 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
       // detail page.
       const deleted = await deleteConsumer.mutateAsync({
         id: consumerId,
-        guard: consumersApi.consumerWriteGuard(consumer),
+        guard: consumersApi.consumerDeleteGuard(consumer),
       });
       if (deleted.committed) {
         toast("warning", committedWriteMessage("Consumer deleted", deleted.committed));

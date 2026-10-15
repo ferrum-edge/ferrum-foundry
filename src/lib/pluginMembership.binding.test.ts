@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PluginConfig, Proxy } from "@/api/types";
 import { isStaleResourceError } from "@/api/conditionalWrite";
+import { setApiErrorHandler } from "@/api/client";
 import { pluginWriteGuard, toUpdatePayload } from "@/api/plugins";
 import {
   bindPluginMembership,
@@ -80,6 +81,7 @@ describe("plugin membership plans bind every request to the starting namespace",
     proxies.clear();
     proxies.set("p1", makeProxy("p1", "v1"));
     proxies.set("p2", makeProxy("p2", "v1"));
+    proxies.set("p3", { ...makeProxy("p3", "v1"), plugins: [] });
     localStorage.setItem("ferrum:namespace", "tenant-a");
     vi.stubGlobal("Request", BasedRequest);
     vi.stubGlobal(
@@ -99,6 +101,9 @@ describe("plugin membership plans bind every request to the starting namespace",
 
         if (request.method === "GET" && path === "plugins/config/plugin-1") {
           return json(plugin);
+        }
+        if (request.method === "PUT" && path === "plugins/config/plugin-1") {
+          return json({ ...plugin, ...((await request.clone().json()) as object) });
         }
         if (request.method === "GET" && path === "proxies") {
           return json({
@@ -133,15 +138,26 @@ describe("plugin membership plans bind every request to the starting namespace",
   it("keeps listing, preflight, apply, and rollback in the bound namespace", async () => {
     const deps = bindPluginMembership({ namespace: "tenant-a" });
 
-    await expect(deletePluginWithMembership("plugin-1", deps, null)).rejects.toThrow(
-      "membership rollback was attempted",
-    );
+    await expect(
+      updatePluginWithMembership(
+        "plugin-1",
+        toUpdatePayload(plugin),
+        ["p3"],
+        deps,
+        null,
+      ),
+    ).rejects.toThrow("compensating rollback was attempted");
 
-    // p1 was detached, p2 failed, so p1 was restored by the rollback; the
-    // cascade-aware rollback re-checks the plugin and the remaining references.
+    // p3 was attached and p1 detached, p2 failed, so the rollback reattached
+    // p1, detached p3 once other references were confirmed, and restored the
+    // configuration; it then reports the plugin and its remaining references.
     expect(captured.map((r) => `${r.method} ${r.path}`)).toEqual([
       "GET plugins/config/plugin-1",
       "GET proxies",
+      "GET plugins/config/plugin-1",
+      "PUT plugins/config/plugin-1",
+      "GET proxies/p3",
+      "PUT proxies/p3",
       "GET proxies/p1",
       "PUT proxies/p1",
       "GET proxies/p2",
@@ -149,6 +165,12 @@ describe("plugin membership plans bind every request to the starting namespace",
       "GET proxies/p1",
       "GET plugins/config/plugin-1",
       "PUT proxies/p1",
+      "GET proxies/p3",
+      "GET plugins/config/plugin-1",
+      "GET proxies",
+      "PUT proxies/p3",
+      "GET plugins/config/plugin-1",
+      "PUT plugins/config/plugin-1",
       "GET plugins/config/plugin-1",
       "GET proxies",
     ]);
@@ -165,6 +187,8 @@ describe("plugin membership plans on a gateway that honours If-Match", () => {
   const store = new Map<string, Stored>();
   const wire: string[] = [];
   let interleaveOnPut: string | null = null;
+  let untaggedPluginReads = false;
+  let vanishBeforeDelete = false;
 
   const tag = (path: string) => `"${path}@${store.get(path)!.revision}"`;
 
@@ -193,6 +217,8 @@ describe("plugin membership plans on a gateway that honours If-Match", () => {
     store.clear();
     wire.length = 0;
     interleaveOnPut = null;
+    untaggedPluginReads = false;
+    vanishBeforeDelete = false;
     store.set("plugins/config/plugin-1", { value: plugin, revision: 0 });
     store.set("proxies/p1", { value: makeProxy("p1", "v1"), revision: 0 });
     store.set("proxies/p2", { value: makeProxy("p2", "v1"), revision: 0 });
@@ -217,11 +243,21 @@ describe("plugin membership plans on a gateway that honours If-Match", () => {
           reconcileProxyScope(created);
           return json(created, 201);
         }
+        // Another operator deletes it between the plan's read and its DELETE.
+        if (vanishBeforeDelete && input.method === "DELETE") {
+          vanishBeforeDelete = false;
+          store.delete(path);
+        }
         const entry = store.get(path);
         if (!entry) return json({ error: "Not Found" }, 404);
         if (input.method === "GET") {
+          // Edge's cached fallback answers without a tag.
+          const untagged = untaggedPluginReads && path.startsWith("plugins/");
           return new Response(JSON.stringify(entry.value), {
-            headers: { "content-type": "application/json", etag: tag(path) },
+            headers: {
+              "content-type": "application/json",
+              ...(!untagged && { etag: tag(path) }),
+            },
           });
         }
         // Another administrator edits this proxy after the plan's preflight
@@ -239,6 +275,20 @@ describe("plugin membership plans on a gateway that honours If-Match", () => {
         }
         if (input.method === "DELETE") {
           store.delete(path);
+          // Edge removes a deleted configuration from every proxy that lists
+          // it, in the same transaction.
+          for (const [key, other] of store) {
+            if (!key.startsWith("proxies/")) continue;
+            const proxy = other.value as Proxy;
+            const id = path.replace("plugins/config/", "");
+            if (!proxy.plugins.some((a) => a.plugin_config_id === id)) continue;
+            other.revision += 1;
+            other.value = {
+              ...proxy,
+              plugins: proxy.plugins.filter((a) => a.plugin_config_id !== id),
+              updated_at: `touched-${other.revision}`,
+            };
+          }
           return new Response(null, { status: 204 });
         }
         const body = (await input.clone().json()) as object;
@@ -262,29 +312,88 @@ describe("plugin membership plans on a gateway that honours If-Match", () => {
       null,
     );
 
+    // One conditional DELETE; Edge detaches the members in the same
+    // transaction, so no proxy is written first.
     expect(wire).toEqual([
-      "GET plugins/config/plugin-1",
-      "GET proxies",
-      "GET proxies/p1",
-      'PUT proxies/p1 if-match "proxies/p1@0"',
-      "GET proxies/p2",
-      'PUT proxies/p2 if-match "proxies/p2@0"',
       "GET plugins/config/plugin-1",
       'DELETE plugins/config/plugin-1 if-match "plugins/config/plugin-1@0"',
     ]);
     expect(store.has("plugins/config/plugin-1")).toBe(false);
+    expect((store.get("proxies/p1")!.value as Proxy).plugins).toEqual([]);
+    expect((store.get("proxies/p2")!.value as Proxy).plugins).toEqual([]);
   });
 
-  it("aborts on a change its updated_at comparison cannot see, instead of overwriting it", async () => {
-    interleaveOnPut = "proxies/p1";
+  it("resolves a DELETE that finds the plugin already gone, without an error popup", async () => {
+    vanishBeforeDelete = true;
+    const popups = vi.fn();
+    setApiErrorHandler(popups);
+    try {
+      await deletePluginWithMembership(
+        "plugin-1",
+        bindPluginMembership({ namespace: "tenant-a" }),
+        pluginWriteGuard(plugin),
+      );
+    } finally {
+      setApiErrorHandler(undefined);
+    }
+    expect(wire).toEqual([
+      "GET plugins/config/plugin-1",
+      'DELETE plugins/config/plugin-1 if-match "plugins/config/plugin-1@0"',
+    ]);
+    expect(popups).not.toHaveBeenCalled();
+  });
+
+  it("sends no DELETE when the plugin read is untagged", async () => {
+    untaggedPluginReads = true;
 
     await expect(
       deletePluginWithMembership("plugin-1", bindPluginMembership({ namespace: "tenant-a" }), null),
-    ).rejects.toThrow("Proxy p1 changed during membership preflight");
+    ).rejects.toThrow("did not provide a usable strong ETag");
 
-    const p1 = store.get("proxies/p1")!.value as Proxy;
-    expect(p1.backend_host).toBe("moved.internal");
-    expect(p1.plugins).toEqual([{ plugin_config_id: "plugin-1" }]);
+    expect(wire).toEqual(["GET plugins/config/plugin-1"]);
+    expect(store.has("plugins/config/plugin-1")).toBe(true);
+  });
+
+  it("keeps a group whose configuration changed after the editor's check (#609)", async () => {
+    interleaveOnPut = "plugins/config/plugin-1";
+
+    const refused = await deletePluginWithMembership(
+      "plugin-1",
+      bindPluginMembership({ namespace: "tenant-a" }),
+      pluginWriteGuard(plugin),
+    ).then(() => null, (error: unknown) => error);
+
+    if (!isStaleResourceError(refused)) throw new Error("expected a stale delete");
+    expect(refused.detail.current.config).toEqual({ requests: 99 });
+    expect(wire).toEqual([
+      "GET plugins/config/plugin-1",
+      'DELETE plugins/config/plugin-1 if-match "plugins/config/plugin-1@0"',
+      "GET plugins/config/plugin-1",
+    ]);
+    expect((store.get("plugins/config/plugin-1")!.value as PluginConfig).config).toEqual({
+      requests: 99,
+    });
+    expect((store.get("proxies/p1")!.value as Proxy).plugins).toEqual([
+      { plugin_config_id: "plugin-1" },
+    ]);
+  });
+
+  it("aborts on a change its updated_at comparison cannot see, instead of overwriting it", async () => {
+    interleaveOnPut = "proxies/p2";
+
+    await expect(
+      updatePluginWithMembership(
+        "plugin-1",
+        toUpdatePayload(plugin),
+        ["p1"],
+        bindPluginMembership({ namespace: "tenant-a" }),
+        null,
+      ),
+    ).rejects.toThrow("Proxy p2 changed during membership preflight");
+
+    const p2 = store.get("proxies/p2")!.value as Proxy;
+    expect(p2.backend_host).toBe("moved.internal");
+    expect(p2.plugins).toEqual([{ plugin_config_id: "plugin-1" }]);
     expect(store.has("plugins/config/plugin-1")).toBe(true);
   });
 

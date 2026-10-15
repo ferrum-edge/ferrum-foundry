@@ -234,13 +234,23 @@ export function conditionalPut<TResource>(
     .json<TResource>();
 }
 
-/** `DELETE`, conditional on `ifMatch` when there is one; see `conditionalPut`. */
+/**
+ * `DELETE`, conditional on `ifMatch` when there is one; see `conditionalPut`.
+ * `handled` names further statuses the caller resolves itself, kept out of the
+ * global error popup (a membership plan treats `404` as already deleted).
+ */
 export async function conditionalDelete(
   scope: NamespaceScope,
   path: string,
   ifMatch: string | null,
+  options: { readonly handled?: readonly number[] } = {},
 ): Promise<void> {
-  await proxyApi.delete(path, scoped(scope, conditionalOptions(ifMatch)));
+  const conditional = conditionalOptions(ifMatch);
+  const handled = [...(ifMatch === null ? [] : [412]), ...(options.handled ?? [])];
+  await proxyApi.delete(path, scoped(scope, {
+    ...conditional,
+    ...(handled.length > 0 && { context: { [HANDLED_STATUSES]: handled } }),
+  }));
 }
 
 /** Whether `error` is the gateway refusing a conditional write. */

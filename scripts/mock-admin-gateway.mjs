@@ -602,6 +602,21 @@ export function evaluateIfMatch(header, currentTag) {
     : [412, { error: 'Precondition Failed: the resource changed since the supplied ETag was issued' }];
 }
 
+/**
+ * Edge's `DELETE /plugins/config/{id}` removes the configuration from every
+ * proxy in the same namespace that lists it, in the same transaction, and
+ * advances those proxies' `updated_at` (and so their tags). Call it only after
+ * the delete itself succeeded.
+ */
+export function detachDeletedPluginConfig(proxies, ns, id) {
+  for (const proxy of proxies) {
+    if ((proxy.namespace ?? 'ferrum') !== ns || !Array.isArray(proxy.plugins)) continue;
+    if (!proxy.plugins.some((association) => association.plugin_config_id === id)) continue;
+    proxy.plugins = proxy.plugins.filter((association) => association.plugin_config_id !== id);
+    proxy.updated_at = now();
+  }
+}
+
 /** Item paths whose `PUT`/`DELETE` evaluate `If-Match`; everywhere else it is `400`. */
 export const IF_MATCH_ROUTES = [
   /^\/proxies\/[^/]+$/,
@@ -1360,6 +1375,9 @@ export const server = createServer(async (req, res) => {
     const match = path.match(pattern);
     if (match) {
       const [status, payload, headers] = crud(list, url, method, match[1], body, defaults, ns, validate, provisioner, { kind, ifMatch });
+      if (kind === 'plugins/config' && method === 'DELETE' && status === 204) {
+        detachDeletedPluginConfig(proxies, ns, match[1]);
+      }
       return send(status, payload, 'application/json', headers);
     }
   }

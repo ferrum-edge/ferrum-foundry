@@ -311,6 +311,58 @@ await request("/plugins/config?proxy_id=has%20space", { expected: [400] });
   }
 }
 
+// Foundry deletes a plugin configuration, a proxy group included, with one
+// DELETE conditional on the read it compared (#609). That relies on Edge
+// removing the configuration from every proxy that lists it in the same
+// transaction, and on a stale If-Match deleting and detaching nothing.
+{
+  const groupId = "contract-smoke-group";
+  const groupPath = `/plugins/config/${groupId}`;
+  const group = {
+    id: groupId,
+    plugin_name: "correlation_id",
+    scope: "proxy_group",
+    enabled: false,
+    config: { header_name: "X-Contract-Smoke-Group" },
+  };
+  const attached = async () =>
+    (await request(`/proxies/${proxyId}`)).plugins.map((entry) => entry.plugin_config_id);
+  const setAssociations = async (ids) =>
+    request(`/proxies/${proxyId}?apply=sync`, {
+      method: "PUT",
+      body: { ...proxy, plugins: ids.map((plugin_config_id) => ({ plugin_config_id })) },
+    });
+  await request(`${groupPath}?apply=sync`, { method: "DELETE", expected: [200, 204, 404] });
+  await request("/plugins/config?apply=sync", { method: "POST", body: group });
+  const before = await attached();
+  try {
+    await setAssociations([...before, groupId]);
+    const stale = await exchange(groupPath);
+    assert.ok(stale.etag, "plugin config read carried no ETag");
+    await request(`${groupPath}?apply=sync`, {
+      method: "PUT",
+      body: { ...group, config: { header_name: "X-Contract-Smoke-Group-2" } },
+    });
+    const refused = await exchange(`${groupPath}?apply=sync`, {
+      method: "DELETE",
+      headers: { "if-match": stale.etag },
+    });
+    assert.equal(refused.status, 412, JSON.stringify(refused.body));
+    assert.ok((await attached()).includes(groupId), "a refused DELETE detached the group");
+
+    const fresh = await exchange(groupPath);
+    const deleted = await exchange(`${groupPath}?apply=sync`, {
+      method: "DELETE",
+      headers: { "if-match": fresh.etag },
+    });
+    assert.ok([200, 204].includes(deleted.status), JSON.stringify(deleted.body));
+    assert.deepEqual(await attached(), before);
+    await request(groupPath, { expected: [404] });
+  } finally {
+    await request(`${groupPath}?apply=sync`, { method: "DELETE", expected: [200, 204, 404] });
+  }
+}
+
 for (const endpoint of ["upstreams", "consumers", "proxies", "plugins/config"]) {
   const page = await request(`/${endpoint}?offset=0&limit=20`);
   assert.ok(Array.isArray(page.data));
@@ -396,6 +448,7 @@ console.log(JSON.stringify({
     "health-check probe validation",
     "masked placeholder write refusal",
     "masked placeholder sites match Foundry's replay",
+    "conditional plugin DELETE detaches its proxies",
   ],
   resources: ["upstreams", "consumers", "proxies", "plugin configs", "namespaces"],
 }));

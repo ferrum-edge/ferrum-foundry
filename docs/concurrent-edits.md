@@ -215,7 +215,8 @@ which is the only thing that write can lose.
 | Consumer ACL add/remove | the consumer the group list was computed from | the read its credentials are taken from |
 | Plugin configuration save | the editor's seed, minus `labels` (never sent) | the membership plan's fresh read |
 | MCP tool policy save (proxy page, MCP Tools tab) | the one `config.policy.tools` entry the edit was opened against (for a new entry, its absence) | the read every other field is rebuilt from |
-| Proxy, upstream, consumer, or plugin delete from its detail page | the resource the page is displaying | the verification read |
+| Proxy, consumer, or plugin delete from its detail page | the resource the page is displaying, every field except the server-managed ones | the verification read |
+| Upstream delete from its detail page | the resource the page is displaying, minus mesh-projected fields | the verification read |
 | Every write inside a plugin membership plan | the plan's own `updated_at` preflight | the read that preflight compared |
 
 ### Consumers
@@ -277,8 +278,25 @@ showing when the operator confirms, not against the form's seed, so the
 operator's own earlier saves (for example from the Targets tab) never block
 their delete. If another writer changed it, the delete is refused and
 `StaleWriteDialog` shows what moved, with no draft column and no "delete
-anyway". A plugin delete checks before detaching any proxy and again at the
-read its final `DELETE` is conditional on.
+anyway".
+
+A delete destroys the whole resource, so it does not skip the fields a save
+leaves out because Edge preserves them (#602). A plugin attached to a proxy, a
+consumer credential added or removed, or a label stamped on a consumer or
+plugin configuration since the page loaded refuses the delete, before the
+first `DELETE` and again when a `412` makes it re-verify
+(`proxyDeleteGuard`, `consumerDeleteGuard`, `pluginDeleteGuard`; the shared
+rule is `DELETE_BASELINE_OMIT` in `src/lib/resourceBaseline.ts`). Consumer
+reads redact credential values, so the comparison sees only what the read
+shows: each returned credential type's entries and their count. A same-count
+rotation is not visible, and neither is any change to a credential type the
+read omits entirely (Edge's projection leaves out `basicauth` and custom
+types). Upstream deletes still leave out the mesh-projected fields, which the
+control plane rewrites without any competing editor.
+
+A plugin delete is one `DELETE`, conditional on the read the baseline was
+compared with. Edge removes the configuration from every proxy that lists it
+in the same transaction, so no association is detached first (#609).
 
 ## Committed but not yet live
 

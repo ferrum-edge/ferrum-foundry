@@ -46,7 +46,8 @@ write Foundry:
 1. reads the target proxy fresh;
 2. adds the association only if it is missing, conditional on that read; and
 3. if the plugin still is not attached, reports the failure. A new plugin that
-   cannot be attached is deleted rather than left in place unused.
+   cannot be verified as attached is kept and reported, with the proxies that
+   reference it; see below for why it is not deleted.
 
 When a plugin leaves proxy scope, or moves to a different proxy, Foundry also
 detaches it from the proxy it used to target if Edge left it there.
@@ -114,13 +115,21 @@ handles them as follows:
   configuration must be restored manually, with the real values, or by an
   admin.
 
-## Deleting a group
+## Deleting a plugin
 
-Deleting a group detaches every member, then reads the plugin configuration.
-A `404` means the last detach already deleted it, and the delete is shown as
-successful. If the configuration still exists (including a group with no
-members), Foundry sends an explicit `DELETE`. A failed read (for example, a
-`503`) is not treated as confirmation of deletion.
+Deleting a plugin configuration, a group included, is a single
+`DELETE /plugins/config/{id}`, conditional on the read the plugin page's
+baseline was compared with. Edge removes the configuration from every proxy
+that lists it in the same transaction. Foundry does not detach members first:
+the last detach would make Edge delete the configuration before Foundry could
+check it again, so a concurrent configuration change could be deleted unseen
+(#609). A `412` re-reads the configuration: if it no longer matches what the
+page showed, the comparison is shown; otherwise the delete is refused as
+changed during deletion. A `404` means it is already gone, and a
+committed-but-not-live `503` is reported as a completed delete that is not yet
+proven live. A read without a usable strong `ETag` (an older gateway, or Edge's
+cached fallback) refuses the delete before anything is sent, since the
+`DELETE` could not be conditional.
 
 ## Failures and recovery
 
@@ -131,6 +140,13 @@ If a change fails, Foundry attempts a compensating rollback:
   still needs recovery.
 - A failed move into group scope first restores the original non-group scope,
   relying on Edge's atomic reconciliation.
+- A new plugin whose create did not converge, proxy-scoped or group, is kept
+  where it got to and reported with its existence and the proxies that
+  reference it, never cleaned up automatically (#608). Detaching members can
+  cascade-delete a concurrent edit, and a `DELETE` conditional on the plugin
+  cannot see an association another operator made or remade on a proxy, which
+  changes neither the plugin's revision nor its `ETag`. Remove it, or finish
+  attaching it, from the plugin page.
 - It does not reattach a plugin that no longer exists.
 
 Every write is guarded against concurrent changes. Foundry compares

@@ -17,6 +17,7 @@ import {
 } from "./conditionalWrite";
 import {
   baselineSnapshot,
+  DELETE_BASELINE_OMIT,
   PLUGIN_BASELINE_OMIT,
   type BaselineSnapshot,
 } from "@/lib/resourceBaseline";
@@ -170,6 +171,18 @@ export function pluginWriteGuard(
   return { baseline: toBaseline(seed), select: toBaseline };
 }
 
+/**
+ * The guard a plugin detail page's delete builds from the configuration it
+ * displays. Unlike a save, it compares `labels` (see `DELETE_BASELINE_OMIT`).
+ */
+export function pluginDeleteGuard(
+  seed: PluginConfig,
+): WriteGuard<PluginConfig | PluginConfigCreate> {
+  const select = (value: PluginConfig | PluginConfigCreate) =>
+    baselineSnapshot(value, DELETE_BASELINE_OMIT);
+  return { baseline: select(seed), select };
+}
+
 export function toUpdatePayload(plugin: PluginConfig): PluginConfigCreate {
   const { created_at, updated_at, namespace, api_spec_id, ...rest } = plugin;
   void created_at;
@@ -227,6 +240,7 @@ export async function removeConfig(
   scope: NamespaceScope,
   id: string,
   ifMatch: string | null,
+  options: { readonly handled?: readonly number[] } = {},
 ): Promise<void> {
-  await conditionalDelete(scope, `plugins/config/${pathSegment(id)}`, ifMatch);
+  await conditionalDelete(scope, `plugins/config/${pathSegment(id)}`, ifMatch, options);
 }

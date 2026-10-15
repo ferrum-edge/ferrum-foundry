@@ -30,6 +30,7 @@ import {
   type TaggedRead,
 } from "./conditionalWrite";
 import { setApiErrorHandler } from "./client";
+import { formatBaselineValue } from "@/lib/resourceBaseline";
 import { resetGatewayMetadata } from "./gatewayMetadata";
 import * as consumers from "./consumers";
 import * as proxies from "./proxies";
@@ -756,6 +757,77 @@ describe("guarded deletes", () => {
 
     expect(gateway.wire).toEqual(["DELETE"]);
   });
+
+  // A save omits `plugins`, so a membership change is not a conflict for it.
+  // A delete destroys the associations too, so it is (#602).
+  it("refuses to delete a proxy a plugin was attached to since the page loaded", async () => {
+    const seed = proxyFixture();
+    const gateway = stubGateway({
+      ...seed,
+      plugins: [{ plugin_config_id: "new-auth-policy" }],
+    });
+
+    const refused = await settle(
+      proxies.remove(scope, "checkout", proxies.proxyDeleteGuard(seed)),
+    );
+
+    if (!isStaleResourceError(refused)) throw new Error("expected a stale delete");
+    expect(refused.detail.current.plugins).toEqual([{ plugin_config_id: "new-auth-policy" }]);
+    expect(gateway.wire).toEqual(["GET"]);
+    expect(gateway.exists()).toBe(true);
+  });
+
+  it("refuses the re-verified delete after a 412 caused by a plugin attachment", async () => {
+    const seed = proxyFixture();
+    const gateway = stubGateway(seed, {
+      interleave: (stored) => ({ ...stored, plugins: [{ plugin_config_id: "new-auth-policy" }] }),
+    });
+
+    const refused = await settle(
+      proxies.remove(scope, "checkout", proxies.proxyDeleteGuard(seed)),
+    );
+
+    expect(isStaleResourceError(refused)).toBe(true);
+    expect(gateway.wire).toEqual(["GET", 'DELETE if-match "r0"', "GET"]);
+    expect(gateway.exists()).toBe(true);
+    expect(popups).not.toHaveBeenCalled();
+  });
+
+  it("treats reordered associations as unchanged, and an added one as a change", async () => {
+    const seed = {
+      ...proxyFixture(),
+      plugins: [{ plugin_config_id: "a" }, { plugin_config_id: "b" }],
+    };
+    const reordered = stubGateway({
+      ...seed,
+      plugins: [{ plugin_config_id: "b" }, { plugin_config_id: "a" }],
+    });
+
+    await proxies.remove(scope, "checkout", proxies.proxyDeleteGuard(seed));
+
+    expect(reordered.wire).toEqual(["GET", 'DELETE if-match "r0"']);
+    expect(reordered.exists()).toBe(false);
+
+    const added = stubGateway({
+      ...seed,
+      plugins: [{ plugin_config_id: "b" }, { plugin_config_id: "c" }, { plugin_config_id: "a" }],
+    });
+    const refused = await settle(
+      proxies.remove(scope, "checkout", proxies.proxyDeleteGuard(seed)),
+    );
+    expect(isStaleResourceError(refused)).toBe(true);
+    expect(added.exists()).toBe(true);
+  });
+
+  it("deletes a proxy whose associations are unchanged", async () => {
+    const seed = { ...proxyFixture(), plugins: [{ plugin_config_id: "cors" }] };
+    const gateway = stubGateway(seed);
+
+    await proxies.remove(scope, "checkout", proxies.proxyDeleteGuard(seed));
+
+    expect(gateway.wire).toEqual(["GET", 'DELETE if-match "r0"']);
+    expect(gateway.exists()).toBe(false);
+  });
 });
 
 describe("consumer metadata saves", () => {
@@ -870,5 +942,48 @@ describe("consumer metadata saves", () => {
 
     expect(isStaleResourceError(refused)).toBe(true);
     expect(gateway.exists()).toBe(true);
+  });
+
+  it("refuses to delete a consumer whose credentials changed since the page loaded", async () => {
+    // Redacted values cannot reveal a same-count rotation, but an added or
+    // removed credential changes what the read shows (#602).
+    const credentials = { keyauth: [{ key: "[REDACTED]" }, { key: "[REDACTED]" }] };
+    const gateway = stubGateway({ ...consumerSeed, credentials });
+
+    const refused = await settle(
+      consumers.remove(scope, "alice", consumers.consumerDeleteGuard(consumerSeed)),
+    );
+
+    if (!isStaleResourceError(refused)) throw new Error("expected a stale delete");
+    expect(refused.detail.current.credentials).toEqual(credentials);
+    // The comparison still shows only that the field moved.
+    expect(formatBaselineValue("credentials", refused.detail.current.credentials)).toBe(
+      "[redacted]",
+    );
+    expect(gateway.wire).toEqual(["GET"]);
+    expect(gateway.exists()).toBe(true);
+  });
+
+  it("refuses to delete a consumer labelled since the page loaded", async () => {
+    const gateway = stubGateway({
+      ...consumerSeed,
+      labels: { team: "payments", "provisioned-by": "ferrum-nexus" },
+    });
+
+    const refused = await settle(
+      consumers.remove(scope, "alice", consumers.consumerDeleteGuard(consumerSeed)),
+    );
+
+    expect(isStaleResourceError(refused)).toBe(true);
+    expect(gateway.exists()).toBe(true);
+  });
+
+  it("deletes a consumer that still holds what the page shows", async () => {
+    const gateway = stubGateway(consumerSeed);
+
+    await consumers.remove(scope, "alice", consumers.consumerDeleteGuard(consumerSeed));
+
+    expect(gateway.wire).toEqual(["GET", 'DELETE if-match "r0"']);
+    expect(gateway.exists()).toBe(false);
   });
 });
