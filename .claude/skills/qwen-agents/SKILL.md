@@ -18,7 +18,8 @@ do not duplicate them in this directory.
 ```
 
 The shared launcher pins `alibaba-token-plan/qwen3.8-max`; `--effort` is accepted for parity
-with the sibling skills and `--model` only re-states the pinned model.
+with the sibling skills and ignored, because this provider exposes no effort tiers;
+`--model` only re-states the pinned model.
 
 Read the canonical skill before dispatch for effort selection, preflight, isolation, failure
 handling, and verification. For implementer mode, read
@@ -26,8 +27,9 @@ handling, and verification. For implementer mode, read
 For fix-round or shepherd mode, also read
 [continuation-brief.md](../../../.agents/skills/qwen-agents/references/continuation-brief.md).
 Resolve all worker paths to absolute paths. Run each worker in its own background or long-lived
-execution session and retain that session's identity. Honor the user's selected effort without
-clamping or substituting. Never recursively invoke this skill from a dispatched worker. Assign
+execution session and retain that session's identity. Pass the user's selected effort through, but
+never report it as applied: the launcher ignores it.
+Never recursively invoke this skill from a dispatched worker. Assign
 commit, push, review-trigger, and CI actions only when the user's request includes them; the
 canonical skill's stopping-point rules apply to every prompt you construct.
 
