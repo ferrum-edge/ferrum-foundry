@@ -287,9 +287,11 @@ plugin configuration since the page loaded refuses the delete, before the
 first `DELETE` and again when a `412` makes it re-verify
 (`proxyDeleteGuard`, `consumerDeleteGuard`, `pluginDeleteGuard`; the shared
 rule is `DELETE_BASELINE_OMIT` in `src/lib/resourceBaseline.ts`). Consumer
-reads redact credential values, so the comparison sees each credential type's
-entries and their count; a same-count rotation is not visible in a redacted
-read. Upstream deletes still leave out the mesh-projected fields, which the
+reads redact credential values, so the comparison sees only what the read
+shows: each returned credential type's entries and their count. A same-count
+rotation is not visible, and neither is any change to a credential type the
+read omits entirely (Edge's projection leaves out `basicauth` and custom
+types). Upstream deletes still leave out the mesh-projected fields, which the
 control plane rewrites without any competing editor.
 
 A plugin delete is one `DELETE`, conditional on the read the baseline was

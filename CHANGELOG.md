@@ -117,7 +117,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - A detail-page delete compares the fields a save leaves out: a plugin
-  attached to the proxy, a consumer credential added or removed, or a label
+  attached to the proxy, a consumer credential added or removed (among the
+  types a consumer read shows; `basicauth` and custom types are not), or a label
   stamped on a consumer or plugin configuration since the page loaded now
   refuses the delete, before the first `DELETE` and after a `412` (#602).
 - Deleting a plugin configuration is one `DELETE` conditional on the read the
