@@ -149,8 +149,8 @@ describe("plugin membership plans bind every request to the starting namespace",
     ).rejects.toThrow("compensating rollback was attempted");
 
     // p3 was attached and p1 detached, p2 failed, so the rollback reattached
-    // p1, detached p3 once other references were confirmed, and restored the
-    // configuration; it then reports the plugin and its remaining references.
+    // p1, kept the added p3 (detaching it could cascade, #618), and restored
+    // the configuration; it then reports the plugin and its remaining references.
     expect(captured.map((r) => `${r.method} ${r.path}`)).toEqual([
       "GET plugins/config/plugin-1",
       "GET proxies",
@@ -165,10 +165,6 @@ describe("plugin membership plans bind every request to the starting namespace",
       "GET proxies/p1",
       "GET plugins/config/plugin-1",
       "PUT proxies/p1",
-      "GET proxies/p3",
-      "GET plugins/config/plugin-1",
-      "GET proxies",
-      "PUT proxies/p3",
       "GET plugins/config/plugin-1",
       "PUT plugins/config/plugin-1",
       "GET plugins/config/plugin-1",

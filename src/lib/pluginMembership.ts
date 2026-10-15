@@ -374,7 +374,6 @@ async function rollbackAssociations(
   applied: AppliedProxyChange[],
   pluginId: string,
   deps: PluginMembershipDependencies,
-  disposablePlugin?: PluginConfig,
 ): Promise<string[]> {
   const failures: string[] = [];
   const changes = [...applied].reverse().sort(
@@ -383,6 +382,19 @@ async function rollbackAssociations(
       Number(referencesPlugin(a.before, pluginId)),
   );
   for (const change of changes) {
+    // Never remove a reference this plan added (#618). If it is the last one
+    // of a group, Edge deletes the configuration, and nothing read here can
+    // rule that out: another operator can detach the other members, or move
+    // the plugin out of group scope and back, and edit it before the write;
+    // even a 404 can be Edge's stale cached fallback. Nothing conditions the
+    // cascade on the plugin's revision, so the reference is left as it is.
+    if (!referencesPlugin(change.before, pluginId)) {
+      failures.push(
+        `proxy ${change.after.id} was attached by the failed save and left attached; ` +
+          `detaching it could delete plugin ${pluginId}. Detach it once the group's members are confirmed`,
+      );
+      continue;
+    }
     try {
       const current = await deps.getProxy(change.after.id);
       if (current.updated_at !== change.after.updated_at) {
@@ -397,21 +409,6 @@ async function rollbackAssociations(
           `proxy ${current.id} was not reattached because plugin ${pluginId} is missing`,
         );
         continue;
-      }
-      if (
-        plugin?.scope === "proxy_group" &&
-        plugin.updated_at !== disposablePlugin?.updated_at &&
-        !referencesPlugin(change.before, pluginId)
-      ) {
-        const hasOtherReference = (await deps.listProxies()).some(
-          (proxy) => proxy.id !== current.id && referencesPlugin(proxy, pluginId),
-        );
-        if (!hasOtherReference) {
-          failures.push(
-            `proxy ${current.id} was retained as the last reference to preserve plugin ${pluginId}`,
-          );
-          continue;
-        }
       }
       await deps.updateProxy(current.id, proxiesApi.toUpdatePayload(change.before), current);
     } catch (error) {

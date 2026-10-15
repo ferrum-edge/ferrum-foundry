@@ -122,6 +122,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   they silently lost the policy. The save now stands, and the editor reports
   it as saved but unverified, listing the members before the save, the proxy
   to check, and the current references.
+- A failed group membership change no longer detaches, on rollback, a proxy
+  it had added. If that was the last reference, Edge deleted the plugin, and
+  another operator's concurrent edit with it; the reference is now kept and
+  reported (#618).
 - A detail-page delete compares the fields a save leaves out: a plugin
   attached to the proxy, a consumer credential added or removed (among the
   types a consumer read shows; `basicauth` and custom types are not), or a label
