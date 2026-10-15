@@ -718,8 +718,12 @@ export async function updatePluginWithMembership(
           (committedPut ? " (committed, not yet proven live)" : "") +
           `, but its attachment could not be verified (${failure}). Nothing was rolled back.`,
         [
-          `before this save the group's members were: ${members.join(", ") || "none"}; ` +
-            "the scope change detached them",
+          `before this save the group's members were: ${members.join(", ") || "none"}`,
+          ...(() => {
+            // Edge keeps the association on the new proxy-scope target.
+            const detached = members.filter((id) => !(data.scope === "proxy" && id === data.proxy_id));
+            return [`the scope change detached: ${detached.join(", ") || "none"}`];
+          })(),
           ...(data.scope === "proxy" && data.proxy_id
             ? [`check that proxy ${data.proxy_id} lists plugin ${pluginId}`]
             : []),

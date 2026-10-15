@@ -812,6 +812,7 @@ describe("leaving group scope (#610)", () => {
     expect(saved.message).toContain("Nothing was rolled back");
     expect(saved.saved).toMatchObject({ scope: "proxy", proxy_id: "p3" });
     expect(saved.recovery.join(" ")).toContain("members were: p1, p2");
+    expect(saved.recovery.join(" ")).toContain("the scope change detached: p1, p2");
     expect(saved.recovery.join(" ")).toContain("check that proxy p3 lists plugin plugin-1");
     expect(saved.recovery.join(" ")).toContain("remaining proxy references: p3");
     // The committed state stands: no rollback write of any kind.
@@ -819,6 +820,28 @@ describe("leaving group scope (#610)", () => {
     expect(state.counts().updateProxyCalls).toBe(0);
     expect(state.plugins.get("plugin-1")).toMatchObject({ scope: "proxy", proxy_id: "p3" });
     expect(memberships(state.proxies, "plugin-1")).toEqual(["p3"]);
+  });
+
+  it("does not report the proxy-scope target as detached when it was a member", async () => {
+    const state = harness(
+      [makeProxy("p1", ["plugin-1"]), makeProxy("p2", ["plugin-1"])],
+      [makePlugin("plugin-1")],
+    );
+    state.deps.getProxy = async () => {
+      throw new Error("injected verification read failure");
+    };
+
+    const failure = await updatePluginWithMembership(
+      "plugin-1",
+      { ...groupInput("proxy"), proxy_id: "p1" },
+      [],
+      state.deps,
+      null,
+    ).then(() => null, (error: unknown) => error as PluginSavedUnverifiedError);
+
+    expect(failure).toBeInstanceOf(PluginSavedUnverifiedError);
+    expect(failure!.recovery.join(" ")).toContain("the scope change detached: p2");
+    expect(memberships(state.proxies, "plugin-1")).toEqual(["p1"]);
   });
 
   it("treats a committed-but-not-live scope PUT as a committed save", async () => {

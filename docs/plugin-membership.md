@@ -147,7 +147,11 @@ If a change fails, Foundry attempts a compensating rollback:
   fails (such as the read that verifies the new attachment), the editor adopts
   the saved configuration and reports "saved, but its attachment could not be
   verified": the members before the save, the proxy to check, and what the
-  gateway holds now. Reattach members by hand if they should keep the policy.
+  gateway holds now. The editor keeps your form as it is; use **Reload saved
+  configuration** before editing further. The saved proxy- or global-scoped
+  configuration cannot simply be reattached to the old members: to give them
+  the policy again, change the plugin back to `proxy_group` and select the
+  members you want, or create a separate group configuration for them.
 - A new plugin whose create did not converge, proxy-scoped or group, is kept
   where it got to and reported with its existence and the proxies that
   reference it, never cleaned up automatically (#608). Detaching members can

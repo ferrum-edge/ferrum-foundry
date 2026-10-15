@@ -35,7 +35,7 @@ import type { PluginConfigCreate } from "@/api/types";
 import * as pluginsApi from "@/api/plugins";
 import { isStaleResourceError, type StaleResourceDetail } from "@/api/conditionalWrite";
 import { StaleWriteDialog } from "@/components/shared/StaleWriteDialog";
-import { reseedAfterCommit, useEditBaseline } from "@/hooks/useEditBaseline";
+import { useEditBaseline } from "@/hooks/useEditBaseline";
 
 /**
  * The route component survives a namespace switch; `PluginEditor` is keyed on
@@ -116,18 +116,11 @@ function PluginEditor({ session }: { session: EditorSession }) {
           return;
         }
         if (err instanceof PluginSavedUnverifiedError) {
-          // Saved on the gateway (#610). Reseed form and baseline from one
-          // fresh read so Save again is not refused as a conflict with this
-          // very commit, and show what to check.
-          const reseeded = await reseedAfterCommit(resourceQuery.refetch, baseline, () =>
-            setFormGeneration((generation) => generation + 1),
-          );
+          // Saved on the gateway (#610). The form is not replaced
+          // automatically, since the operator may have kept editing; the
+          // recovery panel offers an explicit reload of what was saved.
           setMembershipError(err);
-          toast(
-            "warning",
-            err.message +
-              (reseeded ? "" : " Foundry could not re-read the plugin; reload it before saving again."),
-          );
+          toast("warning", `${err.message} Reload the saved configuration before saving again.`);
           return;
         }
         setMembershipError(err);
@@ -263,6 +256,17 @@ function PluginEditor({ session }: { session: EditorSession }) {
         <MaskedSecretRefusal error={membershipError} />
       ) : (
         <PluginMembershipRecovery error={membershipError} />
+      )}
+      {membershipError instanceof PluginSavedUnverifiedError && (
+        <Button
+          variant="secondary"
+          onClick={async () => {
+            await handleDiscardAndReload();
+            setMembershipError(null);
+          }}
+        >
+          Reload saved configuration
+        </Button>
       )}
       <Card>
         <ResourceLabels labels={plugin.labels} />
