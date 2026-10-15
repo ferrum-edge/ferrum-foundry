@@ -567,43 +567,21 @@ async function detachFormerProxyScope(
 }
 
 /**
- * Delete a plugin this plan created and could not converge, unless another
- * writer has changed it since (#608). A fresh read must still hold the create
- * response's `updated_at`, and the `DELETE` is conditional on that read, so a
- * configuration someone edited in the meantime is kept and reported. A read
- * that fails proves nothing about the plugin or its attachments, so nothing
- * is deleted then either. Returns the recovery details; empty once the plugin
- * is gone.
+ * What a failed create reports: the new plugin is kept where it got to (#608).
+ * No cleanup can be made safe. Detaching group members one by one can let the
+ * last detach cascade-delete a configuration another operator edited
+ * meanwhile (#609), and a `DELETE` conditional on the plugin cannot see an
+ * association another operator made or remade on a proxy, which changes
+ * neither the plugin's revision nor its `ETag`.
  */
-async function discardCreatedPlugin(
+async function keptCreatedPlugin(
   created: PluginConfig,
   deps: PluginMembershipDependencies,
 ): Promise<string[]> {
-  const kept = [`orphan plugin ${created.id} changed concurrently and was not deleted`];
-  try {
-    const current = await getPluginIfPresent(created.id, deps);
-    if (!current) return [];
-    if (current.updated_at !== created.updated_at) return kept;
-    // An untagged read (an older gateway, or Edge's cached fallback) may lag
-    // the stored configuration, and a DELETE based on it would be
-    // unconditional. Keep the plugin rather than risk deleting a newer edit.
-    if (!deps.canCondition(current)) {
-      return [
-        `orphan plugin ${created.id} was not deleted: its fresh read carried no ETag, ` +
-          "so the deletion could not be made conditional",
-      ];
-    }
-    await deps.deletePlugin(created.id, current);
-    return [];
-  } catch (error) {
-    if (isPreconditionFailed(error)) return kept;
-    // Gone, or deleted and committed but not yet proven live: either way the
-    // configuration no longer exists, so there is nothing left to recover.
-    if (isNotFound(error) || getCommittedWrite(error)) return [];
-    return [
-      `orphan plugin ${created.id} could not be deleted (${error instanceof Error ? error.message : "unknown error"})`,
-    ];
-  }
+  return [
+    `plugin ${created.id} was created and kept; remove it, or finish attaching it, from the plugin page`,
+    ...await recoveryState(created.id, deps),
+  ];
 }
 
 export async function createPluginWithMembership(
@@ -623,17 +601,12 @@ export async function createPluginWithMembership(
       await reconcileProxyScopedAssociation(created.id, data.proxy_id, deps);
       return created;
     } catch (error) {
-      // The attachment was not proven. Leaving the plugin behind would look
-      // like a configured policy, so remove it and say what happened — but
-      // only while it still is the configuration this plan created.
+      // The attachment was not proven. Say so, with what the gateway now
+      // holds, rather than report a policy as configured.
       const failure = failureText(error);
-      const recovery = await discardCreatedPlugin(created, deps);
-      if (recovery.length > 0) {
-        recovery.push(...await recoveryState(created.id, deps));
-      }
       throw new PluginMembershipError(
-        `Plugin creation did not converge (${failure})`,
-        recovery,
+        `Plugin creation did not converge (${failure}); the new plugin was kept`,
+        await keptCreatedPlugin(created, deps),
         { cause: error },
         pluginsApi.toUpdatePayload(created),
       );
@@ -647,16 +620,7 @@ export async function createPluginWithMembership(
     return created;
   } catch (error) {
     const failure = failureText(error);
-    // The new group is kept where it got to, and reported. No cleanup can be
-    // made safe here: detaching members one by one can let the last detach
-    // cascade-delete a configuration another operator edited meanwhile (#609),
-    // and a DELETE conditional on the plugin cannot see an association
-    // another operator made or remade on a proxy, which does not change the
-    // plugin's revision.
-    const recovery = [
-      `plugin ${created.id} was created and kept; remove it or finish its membership from the plugin page`,
-      ...await recoveryState(created.id, deps),
-    ];
+    const recovery = await keptCreatedPlugin(created, deps);
     throw new PluginMembershipError(
       `Plugin creation did not converge (${failure}); the new plugin was kept`,
       recovery,
@@ -755,10 +719,11 @@ export async function deletePluginWithMembership(
   guard: WriteGuard<PluginConfig | PluginConfigCreate> | null,
 ): Promise<void> {
   const plugin = await deps.getPlugin(pluginId);
-  assertEditorBaseline(plugin, guard, "delete", null, deps.namespace);
-  // Never an unconditional DELETE: without a tag the comparison above could
-  // be against a read that lags the stored configuration (policy #542).
+  // Never an unconditional DELETE, and never a comparison against a read that
+  // may lag the stored configuration: an untagged read refuses before either
+  // (policy #542).
   if (!deps.canCondition(plugin)) throw new GuardVerificationError("delete");
+  assertEditorBaseline(plugin, guard, "delete", null, deps.namespace);
   try {
     await deps.deletePlugin(pluginId, plugin);
   } catch (error) {

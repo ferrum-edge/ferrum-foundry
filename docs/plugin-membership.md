@@ -46,7 +46,8 @@ write Foundry:
 1. reads the target proxy fresh;
 2. adds the association only if it is missing, conditional on that read; and
 3. if the plugin still is not attached, reports the failure. A new plugin that
-   cannot be attached is deleted rather than left in place unused.
+   cannot be verified as attached is kept and reported, with the proxies that
+   reference it; see below for why it is not deleted.
 
 When a plugin leaves proxy scope, or moves to a different proxy, Foundry also
 detaches it from the proxy it used to target if Edge left it there.
@@ -139,18 +140,13 @@ If a change fails, Foundry attempts a compensating rollback:
   still needs recovery.
 - A failed move into group scope first restores the original non-group scope,
   relying on Edge's atomic reconciliation.
-- A new proxy-scoped plugin whose attachment cannot be verified is deleted
-  with one conditional `DELETE` (which also removes the association Edge made),
-  and only while a fresh read still holds the create response's `updated_at`.
-  A plugin another operator changed meanwhile, one whose read fails, or one
-  whose read carries no `ETag` is kept, and the recovery details report its
-  existence and the proxies that reference it (#608). A committed-but-not-live
-  answer to that `DELETE` counts as deleted.
-- A new group whose membership plan fails is kept where it got to and
-  reported, never cleaned up automatically: detaching members can cascade-delete
-  a concurrent edit, and a `DELETE` conditional on the plugin cannot see an
-  association another operator made on a proxy. Remove it, or finish its
-  membership, from the plugin page.
+- A new plugin whose create did not converge, proxy-scoped or group, is kept
+  where it got to and reported with its existence and the proxies that
+  reference it, never cleaned up automatically (#608). Detaching members can
+  cascade-delete a concurrent edit, and a `DELETE` conditional on the plugin
+  cannot see an association another operator made or remade on a proxy, which
+  changes neither the plugin's revision nor its `ETag`. Remove it, or finish
+  attaching it, from the plugin page.
 - It does not reattach a plugin that no longer exists.
 
 Every write is guarded against concurrent changes. Foundry compares
