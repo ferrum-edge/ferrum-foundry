@@ -124,8 +124,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `[redacted]` in the stale-write dialog; file paths and `system://` or
   `k8s://` references stay readable. Proxy create, update, and a plugin
   membership plan's proxy replace now apply the same failure redaction as
-  upstream writes, and the proxy create and update mutations no longer keep
-  their submitted body in the mutation cache once the form is gone.
+  upstream writes. The proxy create and update mutations, and the proxy,
+  upstream, and plugin delete mutations (whose guards carry the editor's
+  baseline), no longer keep their variables in the mutation cache once the
+  page is gone.
 - API responses always carry `cache-control: no-store`: the BFF replaces a
   gateway's own `cache-control` and drops its `expires` instead of forwarding
   them (#607).

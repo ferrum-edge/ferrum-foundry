@@ -253,6 +253,8 @@ export function useDeleteProxy() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
   return useMutation({
+    // The guard's baseline can carry secrets: discard it once the page is gone.
+    gcTime: 0,
     mutationFn: async ({
       id,
       guard,

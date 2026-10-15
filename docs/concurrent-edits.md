@@ -522,7 +522,9 @@ redacted reason in its own message.
 
 Every secret-bearing mutation hook, including restore and API spec import and
 replacement, sets `gcTime: 0`, so the submitted body does not stay in the
-mutation cache after the form is gone. Consumer metadata saves are not wrapped:
+mutation cache after the form is gone. So do the proxy, upstream, and plugin
+configuration delete hooks, whose guard holds the editor's baseline (an inline
+backend TLS key among it). Consumer metadata saves are not wrapped:
 their body carries no submitted secret, because the credentials in it come from
 a read where they are already `[REDACTED]`.
 
