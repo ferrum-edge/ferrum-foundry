@@ -27,6 +27,7 @@ import { maskedPlaceholderRefusal } from "@/api/maskedSecrets";
 import { committedWriteMessage, getApiErrorMessage } from "@/api/client";
 import { formatPluginName } from "@/lib/pluginConfigDefaults";
 import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
+import { PluginSavedUnverifiedError } from "@/lib/pluginMembership";
 import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
 import { useCapabilities } from "@/stores/capabilities";
 import { WriteAction } from "@/components/shared/CapabilityGate";
@@ -112,6 +113,13 @@ function PluginEditor({ session }: { session: EditorSession }) {
       } catch (err: unknown) {
         if (isStaleResourceError(err)) {
           setConflict(err.detail);
+          return;
+        }
+        if (err instanceof PluginSavedUnverifiedError) {
+          // Saved on the gateway: adopt it, and show what to check (#610).
+          baseline.adopt(err.saved);
+          setMembershipError(err);
+          toast("warning", err.message);
           return;
         }
         setMembershipError(err);

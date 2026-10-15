@@ -12,6 +12,7 @@ import {
   createPluginWithMembership,
   deletePluginWithMembership,
   PluginMembershipError,
+  PluginSavedUnverifiedError,
   type PluginMembershipDependencies,
   updatePluginWithMembership,
 } from "./pluginMembership";
@@ -781,6 +782,60 @@ describe("proxy-group membership reconciliation", () => {
     )).rejects.toThrow("did not converge");
     expect(state.plugins.has("created-plugin")).toBe(true);
     expect(state.counts().deleteCalls).toBe(0);
+  });
+});
+
+describe("leaving group scope (#610)", () => {
+  it("keeps a committed move to proxy scope and reports what to check, without rolling back", async () => {
+    const state = harness(
+      [makeProxy("p1", ["plugin-1"]), makeProxy("p2", ["plugin-1"]), makeProxy("p3")],
+      [makePlugin("plugin-1")],
+    );
+    // The plugin PUT commits (Edge detaches p1 and p2 and attaches p3); the
+    // verification read that follows fails.
+    state.deps.getProxy = async () => {
+      throw new Error("injected verification read failure");
+    };
+
+    const failure = await updatePluginWithMembership(
+      "plugin-1",
+      { ...groupInput("proxy"), proxy_id: "p3" },
+      [],
+      state.deps,
+      null,
+    ).then(() => null, (error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(PluginSavedUnverifiedError);
+    const saved = failure as PluginSavedUnverifiedError;
+    expect(saved.message).toContain("was saved with scope proxy");
+    expect(saved.message).toContain("Nothing was rolled back");
+    expect(saved.saved).toMatchObject({ scope: "proxy", proxy_id: "p3" });
+    expect(saved.recovery.join(" ")).toContain("members were: p1, p2");
+    expect(saved.recovery.join(" ")).toContain("check that proxy p3 lists plugin plugin-1");
+    expect(saved.recovery.join(" ")).toContain("remaining proxy references: p3");
+    // The committed state stands: no rollback write of any kind.
+    expect(state.counts().updatePluginCalls).toBe(1);
+    expect(state.counts().updateProxyCalls).toBe(0);
+    expect(state.plugins.get("plugin-1")).toMatchObject({ scope: "proxy", proxy_id: "p3" });
+    expect(memberships(state.proxies, "plugin-1")).toEqual(["p3"]);
+  });
+
+  it("still rolls back when the plugin PUT itself failed", async () => {
+    const state = harness(
+      [makeProxy("p1", ["plugin-1"]), makeProxy("p2", ["plugin-1"])],
+      [makePlugin("plugin-1")],
+      { failPluginUpdate: true },
+    );
+    const failure = await updatePluginWithMembership(
+      "plugin-1",
+      groupInput("global"),
+      [],
+      state.deps,
+      null,
+    ).then(() => null, (error: unknown) => error);
+    expect(failure).toBeInstanceOf(PluginMembershipError);
+    expect(failure).not.toBeInstanceOf(PluginSavedUnverifiedError);
+    expect(memberships(state.proxies, "plugin-1")).toEqual(["p1", "p2"]);
   });
 });
 
