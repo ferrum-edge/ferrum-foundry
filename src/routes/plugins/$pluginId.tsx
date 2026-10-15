@@ -27,6 +27,7 @@ import { maskedPlaceholderRefusal } from "@/api/maskedSecrets";
 import { committedWriteMessage, getApiErrorMessage } from "@/api/client";
 import { formatPluginName } from "@/lib/pluginConfigDefaults";
 import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
+import { PluginSavedUnverifiedError } from "@/lib/pluginMembership";
 import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
 import { useCapabilities } from "@/stores/capabilities";
 import { WriteAction } from "@/components/shared/CapabilityGate";
@@ -34,7 +35,7 @@ import type { PluginConfigCreate } from "@/api/types";
 import * as pluginsApi from "@/api/plugins";
 import { isStaleResourceError, type StaleResourceDetail } from "@/api/conditionalWrite";
 import { StaleWriteDialog } from "@/components/shared/StaleWriteDialog";
-import { useEditBaseline } from "@/hooks/useEditBaseline";
+import { reseedAfterCommit, useEditBaseline } from "@/hooks/useEditBaseline";
 
 /**
  * The route component survives a namespace switch; `PluginEditor` is keyed on
@@ -112,6 +113,21 @@ function PluginEditor({ session }: { session: EditorSession }) {
       } catch (err: unknown) {
         if (isStaleResourceError(err)) {
           setConflict(err.detail);
+          return;
+        }
+        if (err instanceof PluginSavedUnverifiedError) {
+          // Saved on the gateway (#610). Reseed form and baseline from one
+          // fresh read so Save again is not refused as a conflict with this
+          // very commit, and show what to check.
+          const reseeded = await reseedAfterCommit(resourceQuery.refetch, baseline, () =>
+            setFormGeneration((generation) => generation + 1),
+          );
+          setMembershipError(err);
+          toast(
+            "warning",
+            err.message +
+              (reseeded ? "" : " Foundry could not re-read the plugin; reload it before saving again."),
+          );
           return;
         }
         setMembershipError(err);
