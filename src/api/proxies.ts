@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – Proxy API functions                              */
 /* ------------------------------------------------------------------ */
 
-import { proxyApi, scoped, SILENT_ERRORS, type NamespaceScope } from "./client";
+import { proxyApi, REDACT_ERRORS, scoped, SILENT_ERRORS, type NamespaceScope } from "./client";
 import type {
   PaginatedResponse,
   PaginationParams,
@@ -11,6 +11,7 @@ import type {
 } from "./types";
 import { collectAllPages } from "./pagination";
 import { pathSegment } from "./pathSegment";
+import { secretValues, withRedactedFailure } from "./secretRedaction";
 import {
   conditionalDelete,
   conditionalPut,
@@ -170,13 +171,33 @@ export function mergeFormUpdatePayload(
   return merged;
 }
 
+/**
+ * A proxy body can carry backend TLS key material inline as PEM
+ * (`backend_tls_client_key_path`). A failed write is reported with it removed
+ * and without the request (#612), to the caller and to the global error popup,
+ * which `redactErrors` holds until the body is redacted.
+ */
+function putProxy(
+  scope: NamespaceScope,
+  path: string,
+  body: ProxyCreate,
+  ifMatch: string | null,
+): Promise<Proxy> {
+  return withRedactedFailure(secretValues(body), () =>
+    conditionalPut<Proxy>(scope, path, body, ifMatch, { redactErrors: true }),
+  );
+}
+
 export async function create(
   scope: NamespaceScope,
   data: ProxyCreate,
 ): Promise<Proxy> {
-  return proxyApi
-    .post("proxies", scoped(scope, { json: withProxyId(data) }))
-    .json<Proxy>();
+  const body = withProxyId(data);
+  return withRedactedFailure(secretValues(body), () =>
+    proxyApi
+      .post("proxies", scoped(scope, { json: body, context: { [REDACT_ERRORS]: true } }))
+      .json<Proxy>(),
+  );
 }
 
 /**
@@ -251,7 +272,7 @@ export async function update(
     guard,
     read: () => readTagged<Proxy>(scope, path),
     propose: () => payload,
-    write: (body, ifMatch) => conditionalPut<Proxy>(scope, path, body, ifMatch),
+    write: (body, ifMatch) => putProxy(scope, path, body, ifMatch),
   });
 }
 
@@ -267,12 +288,7 @@ export async function replace(
   data: ProxyCreate,
   ifMatch: string | null,
 ): Promise<Proxy> {
-  return conditionalPut<Proxy>(
-    scope,
-    `proxies/${pathSegment(id)}`,
-    withProxyId(data, id),
-    ifMatch,
-  );
+  return putProxy(scope, `proxies/${pathSegment(id)}`, withProxyId(data, id), ifMatch);
 }
 
 /**

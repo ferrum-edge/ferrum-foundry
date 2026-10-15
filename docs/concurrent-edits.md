@@ -441,7 +441,8 @@ of the global error popup, which would show the raw gateway body.
 
 The same redaction (`src/api/secretRedaction.ts`) covers every write whose body
 carries a secret: consumer create, plugin configuration create and update
-(including a membership plan's rollback), upstream create and update, managed
+(including a membership plan's rollback), proxy create, update, and a
+membership plan's `replace`, upstream create and update, managed
 TLS and ACME certificate writes, ACME order creation and renewal, TLS
 validation, batch create, backup restore, and API spec import and replacement.
 
@@ -450,6 +451,11 @@ validation, batch create, backup restore, and API spec import and replacement.
 - every string under a credential-shaped field name at any depth (the conflict
   dialog's `isRedactedField` list, plus `headers` maps, webhooks,
   service-account documents, and camelCase `*Key` fields);
+- inline PEM in a material-location field (`*_path`, `*_paths`) at any depth,
+  a plugin `config` included, such as a private key in
+  `backend_tls_client_key_path`. Any value containing the start of PEM armor
+  counts, even damaged (`-----BEGIN PRIVATE KEY----`). A file path,
+  `system://`, or `k8s://` reference there is not secret (`isInlineMaterial`);
 - the userinfo, path, query, and fragment of any URL (a bare
   `scheme://host[:port]` stays readable);
 - each line of 16 characters or more of a multi-line value such as a PEM key,
@@ -532,7 +538,9 @@ redacted reason in its own message.
 
 Every secret-bearing mutation hook, including restore and API spec import and
 replacement, sets `gcTime: 0`, so the submitted body does not stay in the
-mutation cache after the form is gone. Consumer metadata saves are not wrapped:
+mutation cache after the form is gone. So do the proxy, upstream, and plugin
+configuration delete hooks, whose guard holds the editor's baseline (an inline
+backend TLS key among it). Consumer metadata saves are not wrapped:
 their body carries no submitted secret, because the credentials in it come from
 a read where they are already `[REDACTED]`.
 
@@ -577,8 +585,9 @@ explanation [above](#without-a-tag), leaving the form mounted. For a conflict:
    fresh read rather than rebasing dirty fields.
 3. **No secrets on screen.** Values are rendered through `formatBaselineValue`,
    which shows credential-shaped values as `[redacted]` while still showing
-   that the field changed. A `*_path` field is shown, since a path to material
-   is not the material. Nothing from the comparison is written to browser
+   that the field changed. A `*_path` field is shown, since a path or
+   `system://`/`k8s://` reference to material is not the material, unless its
+   value is inline PEM, which is redacted. Nothing from the comparison is written to browser
    storage, telemetry, or logs.
 
 ### The writer can be this operator
