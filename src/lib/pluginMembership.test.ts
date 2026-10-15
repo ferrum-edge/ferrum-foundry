@@ -7,6 +7,7 @@ import type {
 } from "@/api/types";
 import { GuardVerificationError, StaleResourceError } from "@/api/conditionalWrite";
 import { RedactedWriteError } from "@/api/secretRedaction";
+import { markCommittedWrite } from "@/api/client";
 import { pluginWriteGuard } from "@/api/plugins";
 import {
   createPluginWithMembership,
@@ -817,6 +818,39 @@ describe("leaving group scope (#610)", () => {
     expect(state.counts().updatePluginCalls).toBe(1);
     expect(state.counts().updateProxyCalls).toBe(0);
     expect(state.plugins.get("plugin-1")).toMatchObject({ scope: "proxy", proxy_id: "p3" });
+    expect(memberships(state.proxies, "plugin-1")).toEqual(["p3"]);
+  });
+
+  it("treats a committed-but-not-live scope PUT as a committed save", async () => {
+    const state = harness(
+      [makeProxy("p1", ["plugin-1"]), makeProxy("p2", ["plugin-1"]), makeProxy("p3")],
+      [makePlugin("plugin-1")],
+    );
+    const updatePlugin = state.deps.updatePlugin;
+    state.deps.updatePlugin = async (id, data, basis) => {
+      await updatePlugin(id, data, basis);
+      throw markCommittedWrite(new Error("reload timed out"), {
+        cursor: "1:2",
+        reason: "reload_timeout",
+      });
+    };
+
+    const failure = await updatePluginWithMembership(
+      "plugin-1",
+      { ...groupInput("proxy"), proxy_id: "p3" },
+      [],
+      state.deps,
+      null,
+    ).then(() => null, (error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(PluginSavedUnverifiedError);
+    const saved = failure as PluginSavedUnverifiedError;
+    expect(saved.message).toContain("committed, not yet proven live");
+    expect(saved.saved).toMatchObject({ scope: "proxy", proxy_id: "p3" });
+    // The saved configuration is the recovery snapshot too.
+    expect(saved.lastKnownConfig).toMatchObject({ scope: "proxy", proxy_id: "p3" });
+    expect(state.counts().updatePluginCalls).toBe(1);
+    expect(state.counts().updateProxyCalls).toBe(0);
     expect(memberships(state.proxies, "plugin-1")).toEqual(["p3"]);
   });
 

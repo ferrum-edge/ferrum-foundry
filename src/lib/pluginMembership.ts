@@ -128,16 +128,18 @@ export class PluginMembershipError extends Error {
  * in the same transaction; Foundry does not roll that back, because restoring
  * members or removing the new target could undo or cascade-delete another
  * operator's concurrent change. `saved` is the configuration the gateway
- * accepted, so the editor can adopt it as its new baseline.
+ * accepted (or a fresh read of it, after a committed-but-not-live answer), or
+ * `undefined` when it could not be read.
  */
 export class PluginSavedUnverifiedError extends PluginMembershipError {
   constructor(
     message: string,
     recovery: string[],
     options: ErrorOptions,
-    readonly saved: PluginConfig,
+    readonly saved: PluginConfig | undefined,
   ) {
-    super(message, recovery, options);
+    // The committed configuration doubles as the recovery snapshot.
+    super(message, recovery, options, saved ? pluginsApi.toUpdatePayload(saved) : undefined);
     this.name = "PluginSavedUnverifiedError";
   }
 }
@@ -700,15 +702,20 @@ export async function updatePluginWithMembership(
     // recovery report.
     if (error instanceof StaleResourceError && !updatedPlugin) throw error;
     const failure = failureText(error);
-    if (updatedPlugin && beforePlugin.scope === "proxy_group" && !nextIsGroup) {
+    // A committed-but-not-live answer to the plugin PUT is a committed save.
+    const committedPut = !updatedPlugin && getCommittedWrite(error) !== null;
+    if ((updatedPlugin || committedPut) && beforePlugin.scope === "proxy_group" && !nextIsGroup) {
       // The scope change committed, and with it Edge detached every member.
       // Leave the gateway's committed state alone and say what to check.
       const members = plan.proxies
         .filter((proxy) => referencesPlugin(proxy, pluginId))
         .map((proxy) => proxy.id);
+      const saved = updatedPlugin ??
+        await getPluginIfPresent(pluginId, deps).catch(() => undefined);
       throw new PluginSavedUnverifiedError(
-        `Plugin ${pluginId} was saved with scope ${data.scope}, but its attachment ` +
-          `could not be verified (${failure}). Nothing was rolled back.`,
+        `Plugin ${pluginId} was saved with scope ${data.scope}` +
+          (committedPut ? " (committed, not yet proven live)" : "") +
+          `, but its attachment could not be verified (${failure}). Nothing was rolled back.`,
         [
           `before this save the group's members were: ${members.join(", ") || "none"}; ` +
             "the scope change detached them",
@@ -718,7 +725,7 @@ export async function updatePluginWithMembership(
           ...await recoveryState(pluginId, deps),
         ],
         { cause: error },
-        updatedPlugin,
+        saved,
       );
     }
     const recovery: string[] = [];
