@@ -49,16 +49,17 @@ literal. Operators should use HTTPS for remote targets.
 ## Browser-facing headers and public endpoints
 
 - **Content-Security-Policy.** `script-src 'self'` with `script-src-attr 'none'`,
-  `object-src 'none'` and `frame-ancestors 'none'`. `style-src` still allows
-  `'unsafe-inline'` because of a framework constraint: Radix's scroll lock
+  `object-src 'none'` and `frame-ancestors 'none'`. `style-src` is `'self'` plus
+  a per-response nonce, with no `'unsafe-inline'` (#594). Radix's scroll lock
   (Dialog, Select, DropdownMenu) injects a `<style>` element with computed
-  widths at runtime, and Select's viewport renders another. No hash can cover
-  them. Removing it needs per-response nonces in the SPA shell and in those
-  libraries. That work is tracked in
-  [#594](https://github.com/ferrum-edge/ferrum-foundry/issues/594). The Foundry
-  maintainers own it, and it is due before Foundry leaves buildout and onboards
-  users. Until then, an HTML-injection sink could use
-  inline styles for UI redress or CSS-based exfiltration, but not to run script.
+  widths at runtime, and Select's viewport renders another, so no hash could
+  cover them. The BFF templates the SPA shell per request instead of serving it
+  as a static file: it writes the nonce into every tag and into
+  `<meta property="csp-nonce">`, and the app hands that nonce to
+  `react-style-singleton` (through `get-nonce`) and to the Select viewport. The
+  `content-security-policy` critical journey opens a Select and a Dialog and
+  fails on any `securitypolicyviolation`. Inline `style` attributes in markup
+  are blocked; React `style` props use the CSSOM, which CSP does not govern.
 - **HSTS** is on by default wherever Secure cookies are (both default to
   `NODE_ENV=production`). `FERRUM_ENABLE_HSTS=false` opts out.
 - **CORS** is disabled in every environment. The development UI reaches the

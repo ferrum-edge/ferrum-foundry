@@ -1,5 +1,6 @@
 import { useId } from "react";
 import * as SelectPrimitive from "@radix-ui/react-select";
+import { cspNonce } from "@/lib/cspNonce";
 import { READ_ONLY_CLASSES } from "./Input";
 
 export interface SelectOption {
@@ -114,7 +115,10 @@ export function Select({
             position="popper"
             sideOffset={4}
           >
-            <SelectPrimitive.Viewport className="p-1 max-h-[min(var(--radix-select-content-available-height),20rem)]">
+            <SelectPrimitive.Viewport
+              nonce={cspNonce()}
+              className="p-1 max-h-[min(var(--radix-select-content-available-height),20rem)]"
+            >
               {groups
                 ? groups.map((group) => (
                     <SelectPrimitive.Group key={group.label}>

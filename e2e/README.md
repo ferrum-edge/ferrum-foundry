@@ -50,6 +50,7 @@ npm run e2e:report   # HTML report from the last run
 | `lifecycle.spec.ts` | Does an edit or a delete leave the gateway in the state the UI claimed? |
 | `read-failures.spec.ts` | Does a transient failure recover quietly, and does an unavailable read stay distinguishable from an empty one? |
 | `interrupted-write.spec.ts` | When the outcome of a write is genuinely unknown, is it reported rather than replayed? |
+| `content-security-policy.spec.ts` | Do the styles Radix injects at runtime (scroll lock, Select viewport) apply under a `style-src` with no `'unsafe-inline'`, with no CSP violation? |
 
 ## Rules the suite holds itself to
 

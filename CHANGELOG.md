@@ -45,6 +45,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Document why `style-src` still allows `'unsafe-inline'` (#591): Radix's
   runtime `<style>` injection cannot be hashed. Nonce-based removal is tracked
   in #594.
+- Drop `style-src 'unsafe-inline'` for a per-response nonce (#594). The BFF now
+  templates `index.html` on each request, instead of serving it through
+  `@fastify/static`, and writes the nonce its policy names into the shell and a
+  `<meta property="csp-nonce">`. Radix's scroll lock and Select viewport styles
+  carry it. The BFF refuses to start on a shell built without the nonce
+  placeholder. A new critical journey opens a Select and a Dialog and fails on
+  any CSP violation.
 
 - Give upload admission a per-authenticated-subject share
   (GHSA-733w-pmhj-7r6j). `FERRUM_MAX_UPLOADS_PER_PRINCIPAL` (default 8, or
