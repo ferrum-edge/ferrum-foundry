@@ -793,6 +793,32 @@ describe("guarded deletes", () => {
     expect(popups).not.toHaveBeenCalled();
   });
 
+  it("treats reordered associations as unchanged, and an added one as a change", async () => {
+    const seed = {
+      ...proxyFixture(),
+      plugins: [{ plugin_config_id: "a" }, { plugin_config_id: "b" }],
+    };
+    const reordered = stubGateway({
+      ...seed,
+      plugins: [{ plugin_config_id: "b" }, { plugin_config_id: "a" }],
+    });
+
+    await proxies.remove(scope, "checkout", proxies.proxyDeleteGuard(seed));
+
+    expect(reordered.wire).toEqual(["GET", 'DELETE if-match "r0"']);
+    expect(reordered.exists()).toBe(false);
+
+    const added = stubGateway({
+      ...seed,
+      plugins: [{ plugin_config_id: "b" }, { plugin_config_id: "c" }, { plugin_config_id: "a" }],
+    });
+    const refused = await settle(
+      proxies.remove(scope, "checkout", proxies.proxyDeleteGuard(seed)),
+    );
+    expect(isStaleResourceError(refused)).toBe(true);
+    expect(added.exists()).toBe(true);
+  });
+
   it("deletes a proxy whose associations are unchanged", async () => {
     const seed = { ...proxyFixture(), plugins: [{ plugin_config_id: "cors" }] };
     const gateway = stubGateway(seed);

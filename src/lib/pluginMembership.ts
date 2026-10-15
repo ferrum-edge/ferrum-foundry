@@ -656,12 +656,13 @@ export async function createPluginWithMembership(
  * group scope. The plugin `PUT` that left group scope detached them as a
  * gateway side effect, outside the plan's own `applied` list.
  *
- * Every write is conditional on a fresh read of that proxy and only adds or
- * removes this plugin's association, so whatever else another writer changed
- * on the proxy stands. Members are reattached before the proxy-scope target
- * the failed save attached is detached, and that target is kept when no
- * member could be reattached: removing the last reference would make Edge
- * delete the restored configuration.
+ * Every write is conditional on a fresh read of that proxy and only adds this
+ * plugin's association, so whatever else another writer changed on the proxy
+ * stands. The proxy-scope target the failed save attached is never detached
+ * here: no proxy write can be conditional on the plugin's revision or on the
+ * other proxies' references, so if another writer detached the restored
+ * members meanwhile, removing it could make Edge cascade-delete the
+ * configuration (#609). It is reported for the operator to detach instead.
  */
 async function restoreGroupMembers(
   pluginId: string,
@@ -670,41 +671,31 @@ async function restoreGroupMembers(
   deps: PluginMembershipDependencies,
 ): Promise<string[]> {
   const failures: string[] = [];
-  const setAssociation = async (proxyId: string, attached: boolean): Promise<boolean> => {
+  for (const proxyId of members) {
     try {
       const current = await deps.getProxy(proxyId);
-      if (referencesPlugin(current, pluginId) === attached) return true;
+      if (referencesPlugin(current, pluginId)) continue;
       await deps.updateProxy(
         proxyId,
         {
           ...proxiesApi.toUpdatePayload(current),
-          plugins: desiredAssociations(current, pluginId, attached),
+          plugins: desiredAssociations(current, pluginId, true),
         },
         current,
       );
-      return true;
     } catch (error) {
       failures.push(
         isPreconditionFailed(error)
-          ? `proxy ${proxyId} changed while plugin ${pluginId} was being ${attached ? "reattached" : "detached"}; it was not overwritten`
-          : `proxy ${proxyId} was not ${attached ? "reattached" : "detached"} (${error instanceof Error ? error.message : "unknown error"})`,
+          ? `proxy ${proxyId} changed while plugin ${pluginId} was being reattached; it was not overwritten`
+          : `proxy ${proxyId} was not reattached (${error instanceof Error ? error.message : "unknown error"})`,
       );
-      return false;
     }
-  };
-
-  let reattached = 0;
-  for (const id of members) {
-    if (await setAssociation(id, true)) reattached += 1;
   }
   if (target && !members.includes(target)) {
-    if (reattached > 0) {
-      await setAssociation(target, false);
-    } else {
-      failures.push(
-        `proxy ${target} was retained as the last reference to preserve plugin ${pluginId}`,
-      );
-    }
+    failures.push(
+      `proxy ${target} still lists plugin ${pluginId} from the failed save; it was kept, ` +
+        "because detaching it could delete the plugin. Detach it once the group's members are confirmed",
+    );
   }
   return failures;
 }

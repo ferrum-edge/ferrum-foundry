@@ -778,12 +778,17 @@ describe("proxy-group membership reconciliation", () => {
       scope: "proxy_group",
       config: { requests: 10 },
     });
-    expect(memberships(state.proxies, "plugin-1")).toEqual(["p1", "p2"]);
+    // The members are back. The failed save's target is kept and reported:
+    // no proxy write can be conditional on the plugin or the other members,
+    // so detaching it could cascade-delete a configuration edited meanwhile.
+    expect(memberships(state.proxies, "plugin-1")).toEqual(["p1", "p2", "p3"]);
+    expect((failure as PluginMembershipError).recovery.join(" ")).toContain(
+      "proxy p3 still lists plugin plugin-1 from the failed save; it was kept",
+    );
     expect(state.operations).not.toContain("cascade:plugin-1");
-    // Members are back before the proxy-scope target is detached.
     expect(
       state.operations.filter((operation) => operation.startsWith("proxy:")),
-    ).toEqual(["proxy:p1", "proxy:p2", "proxy:p3"]);
+    ).toEqual(["proxy:p1", "proxy:p2"]);
   });
 
   it("keeps the proxy-scope target when no original member can be reattached", async () => {
@@ -810,7 +815,7 @@ describe("proxy-group membership reconciliation", () => {
         state.deps,
         null,
       ),
-    ).rejects.toThrow("proxy p3 was retained as the last reference");
+    ).rejects.toThrow("proxy p1 was not reattached");
     expect(state.plugins.get("plugin-1")?.scope).toBe("proxy_group");
     expect(memberships(state.proxies, "plugin-1")).toEqual(["p3"]);
     expect(state.operations).not.toContain("cascade:plugin-1");

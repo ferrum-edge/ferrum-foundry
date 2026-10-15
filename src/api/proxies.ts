@@ -199,8 +199,19 @@ export function proxyWriteGuard(seed: Proxy): WriteGuard<Proxy | ProxyCreate> {
  * associations too (see `DELETE_BASELINE_OMIT`).
  */
 export function proxyDeleteGuard(seed: Proxy): WriteGuard<Proxy | ProxyCreate> {
-  const select = (value: Proxy | ProxyCreate) =>
-    baselineSnapshot(value, DELETE_BASELINE_OMIT);
+  const select = (value: Proxy | ProxyCreate): BaselineSnapshot => {
+    const snapshot = baselineSnapshot(value, DELETE_BASELINE_OMIT);
+    // Associations are a set: Edge does not order them on read, and sorts
+    // them for its own ETag. Only an added or removed one is a change.
+    return Array.isArray(snapshot.plugins)
+      ? {
+          ...snapshot,
+          plugins: [...snapshot.plugins].sort((a, b) =>
+            String(a?.plugin_config_id).localeCompare(String(b?.plugin_config_id)),
+          ),
+        }
+      : snapshot;
+  };
   return { baseline: select(seed), select };
 }
 

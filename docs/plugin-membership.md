@@ -137,11 +137,12 @@ If a change fails, Foundry attempts a compensating rollback:
   relying on Edge's atomic reconciliation.
 - A failed move out of group scope restores the group configuration, then
   reattaches its original members, which Edge detached in the plugin `PUT`
-  itself, before detaching the proxy-scope target the move attached (#610).
-  Each of these writes reads the proxy fresh, is conditional on that read, and
-  adds or removes only this plugin's association. The target is kept when no
-  member could be reattached, since removing the last reference would delete
-  the restored configuration.
+  itself (#610). Each of these writes reads the proxy fresh, is conditional on
+  that read, and adds only this plugin's association. The proxy-scope target
+  the move attached keeps the plugin and is named in the recovery details:
+  no proxy write can be conditional on the plugin's revision or on the other
+  members, so detaching it automatically could delete a configuration another
+  operator edited meanwhile. Detach it once the membership is confirmed.
 - A new plugin that did not converge is deleted only while it is still the
   configuration Foundry created: a fresh read must hold the create response's
   `updated_at`, and the `DELETE` is conditional on that read. A plugin another

@@ -129,8 +129,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   conditionally on that read; otherwise it is kept and reported with the
   proxies that reference it (#608).
 - A failed move of a group plugin to proxy or global scope reattaches the
-  group's original members after restoring its configuration, then detaches
-  the proxy-scope target, instead of leaving them without the policy (#610).
+  group's original members after restoring its configuration, instead of
+  leaving them without the policy. The proxy-scope target the move attached is
+  kept and reported, since detaching it could cascade-delete the plugin (#610).
 - Namespace Manager tells an unreadable registry from an empty one, offers
   Retry, and disables Edit/Delete over stale rows after a failed refresh (#572).
 - A delete that completes after its detail editor was replaced, by an
