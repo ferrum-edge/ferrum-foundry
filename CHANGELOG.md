@@ -116,6 +116,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A group plugin moved to proxy or global scope is no longer half rolled back
+  when a step after its committed plugin `PUT` fails (#610). The rollback
+  restored the group configuration but not the members Edge had detached, so
+  they silently lost the policy. The save now stands, and the editor reports
+  it as saved but unverified, listing the members before the save, the proxy
+  to check, and the current references.
 - A failed group membership change no longer detaches, on rollback, a proxy
   it had added. If that was the last reference, Edge deleted the plugin, and
   another operator's concurrent edit with it; the reference is now kept and

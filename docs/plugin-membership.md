@@ -147,6 +147,21 @@ If a change fails, Foundry attempts a compensating rollback:
   details; detach it once the group's membership is confirmed.
 - A failed move into group scope first restores the original non-group scope,
   relying on Edge's atomic reconciliation.
+- A move out of group scope is not rolled back once its plugin `PUT` has
+  committed (#610). That `PUT` detached the group's members in the same
+  transaction; restoring them, or removing the new proxy-scope target, could
+  undo or cascade-delete another operator's concurrent change. If a later step
+  fails (such as the read that verifies the new attachment), the editor
+  reports "saved, but its attachment could not be verified": the members
+  before the save, those the scope change detached, the proxy to check, and
+  what the gateway holds now, with a recovery snapshot of the configuration.
+  The form and its baseline are left as they are, so saving again would meet
+  your own committed change as a conflict; **Reload saved configuration**
+  reseeds both from fresh reads (the plugin and, for a group, its membership)
+  and changes nothing if a read fails. The saved proxy- or global-scoped
+  configuration cannot simply be reattached to the old members: to give them
+  the policy again, change the plugin back to `proxy_group` and select the
+  members you want, or create a separate group configuration for them.
 - A new plugin whose create did not converge, proxy-scoped or group, is kept
   where it got to and reported with its existence and the proxies that
   reference it, never cleaned up automatically (#608). Detaching members can

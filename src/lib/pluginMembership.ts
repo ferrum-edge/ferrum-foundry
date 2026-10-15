@@ -123,6 +123,34 @@ export class PluginMembershipError extends Error {
  * A plugin write's failure is redacted (`plugins.createConfig`), so its detail
  * is safe to carry into the plan's own message, which the editor shows.
  */
+/**
+ * A save that left group scope committed, but its attachment could not be
+ * verified afterwards (#610). Edge's scope `PUT` detached the group's members
+ * in the same transaction; Foundry does not roll that back, because restoring
+ * members or removing the new target could undo or cascade-delete another
+ * operator's concurrent change. `saved` is the configuration the gateway
+ * accepted (or a fresh read of it, after a committed-but-not-live answer), or
+ * `undefined` when it could not be read.
+ */
+export class PluginSavedUnverifiedError extends PluginMembershipError {
+  constructor(
+    message: string,
+    recovery: string[],
+    options: ErrorOptions,
+    readonly saved: PluginConfig | undefined,
+    /**
+     * `true` when `saved` is a later read rather than the `PUT` response (a
+     * committed-but-not-live answer carries no body). Such a read may already
+     * hold another operator's edit, or lag behind on Edge's cached fallback.
+     */
+    readonly savedFromLaterRead = false,
+  ) {
+    // The committed configuration doubles as the recovery snapshot.
+    super(message, recovery, options, saved ? pluginsApi.toUpdatePayload(saved) : undefined);
+    this.name = "PluginSavedUnverifiedError";
+  }
+}
+
 function failureText(error: unknown): string {
   if (!(error instanceof Error)) return "unknown error";
   const detail = "data" in error ? extractApiErrorData((error as { data?: unknown }).data) : "";
@@ -678,6 +706,37 @@ export async function updatePluginWithMembership(
     // recovery report.
     if (error instanceof StaleResourceError && !updatedPlugin) throw error;
     const failure = failureText(error);
+    // A committed-but-not-live answer to the plugin PUT is a committed save.
+    const committedPut = !updatedPlugin && getCommittedWrite(error) !== null;
+    if ((updatedPlugin || committedPut) && beforePlugin.scope === "proxy_group" && !nextIsGroup) {
+      // The scope change committed, and with it Edge detached every member.
+      // Leave the gateway's committed state alone and say what to check.
+      const members = plan.proxies
+        .filter((proxy) => referencesPlugin(proxy, pluginId))
+        .map((proxy) => proxy.id);
+      const saved = updatedPlugin ??
+        await getPluginIfPresent(pluginId, deps).catch(() => undefined);
+      throw new PluginSavedUnverifiedError(
+        `Plugin ${pluginId} was saved with scope ${data.scope}` +
+          (committedPut ? " (committed, not yet proven live)" : "") +
+          `, but its attachment could not be verified (${failure}). Nothing was rolled back.`,
+        [
+          `before this save the group's members were: ${members.join(", ") || "none"}`,
+          ...(() => {
+            // Edge keeps the association on the new proxy-scope target.
+            const detached = members.filter((id) => !(data.scope === "proxy" && id === data.proxy_id));
+            return [`the scope change detached: ${detached.join(", ") || "none"}`];
+          })(),
+          ...(data.scope === "proxy" && data.proxy_id
+            ? [`check that proxy ${data.proxy_id} lists plugin ${pluginId}`]
+            : []),
+          ...await recoveryState(pluginId, deps),
+        ],
+        { cause: error },
+        saved,
+        !updatedPlugin,
+      );
+    }
     const recovery: string[] = [];
     if (updatedPlugin && beforePlugin.scope !== "proxy_group") {
       // Restore non-group scope first: its atomic reconciliation removes group

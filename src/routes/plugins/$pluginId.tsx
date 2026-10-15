@@ -27,6 +27,7 @@ import { maskedPlaceholderRefusal } from "@/api/maskedSecrets";
 import { committedWriteMessage, getApiErrorMessage } from "@/api/client";
 import { formatPluginName } from "@/lib/pluginConfigDefaults";
 import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
+import { PluginSavedUnverifiedError } from "@/lib/pluginMembership";
 import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
 import { useCapabilities } from "@/stores/capabilities";
 import { WriteAction } from "@/components/shared/CapabilityGate";
@@ -114,6 +115,14 @@ function PluginEditor({ session }: { session: EditorSession }) {
           setConflict(err.detail);
           return;
         }
+        if (err instanceof PluginSavedUnverifiedError) {
+          // Saved on the gateway (#610). The form is not replaced
+          // automatically, since the operator may have kept editing; the
+          // recovery panel offers an explicit reload of what was saved.
+          setMembershipError(err);
+          toast("warning", `${err.message} Reload the saved configuration before saving again.`);
+          return;
+        }
         setMembershipError(err);
         const message = await getApiErrorMessage(
           err,
@@ -130,6 +139,30 @@ function PluginEditor({ session }: { session: EditorSession }) {
     const refreshed = await resourceQuery.refetch();
     if (refreshed.data) baseline.adopt(refreshed.data);
     setFormGeneration((generation) => generation + 1);
+  };
+
+  /**
+   * Reload after a saved-but-unverified move (#610). Only fresh reads are
+   * adopted: the plugin, and for a group its complete proxy membership, which
+   * the form seeds once. If either read fails, the draft and the recovery
+   * report stay as they are.
+   */
+  const handleReloadSaved = async () => {
+    const refreshed = await resourceQuery.refetch();
+    if (refreshed.isError || refreshed.data === undefined) {
+      toast("error", "Could not re-read the plugin; your form was kept. Try again.");
+      return;
+    }
+    if (refreshed.data.scope === "proxy_group") {
+      const members = await proxiesQuery.refetch();
+      if (members.isError || members.data === undefined) {
+        toast("error", "Could not re-read the plugin's proxies; your form was kept. Try again.");
+        return;
+      }
+    }
+    baseline.adopt(refreshed.data);
+    setFormGeneration((generation) => generation + 1);
+    setMembershipError(null);
   };
 
   const handleDelete = session.bind(async () => {
@@ -247,6 +280,14 @@ function PluginEditor({ session }: { session: EditorSession }) {
         <MaskedSecretRefusal error={membershipError} />
       ) : (
         <PluginMembershipRecovery error={membershipError} />
+      )}
+      {membershipError instanceof PluginSavedUnverifiedError && (
+        <Button
+          variant="secondary"
+          onClick={() => void handleReloadSaved()}
+        >
+          Reload saved configuration
+        </Button>
       )}
       <Card>
         <ResourceLabels labels={plugin.labels} />
