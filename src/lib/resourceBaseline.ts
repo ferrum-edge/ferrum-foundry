@@ -256,12 +256,24 @@ const REDACTED_FIELD_PATTERN =
   /(secret|password|passphrase|credential|api[_-]?key|client[_-]?key|private[_-]?key|_key$|^key$|token|jwk|hmac|signature|salt|certificate[_-]?pem|_pem$|authorization|cookie|bearer)/i;
 
 /**
- * A `*_path` field names a file on the gateway host, not the material in it.
- * Redacting it would hide the one thing that makes a TLS conflict resolvable
- * while protecting nothing: the gateway never returns key bytes on these
- * resources, only the paths it was told to read.
+ * A `*_path` field usually names where the gateway reads material (a file on
+ * its host, a `system://` store, a `k8s://` Secret), not the material itself,
+ * and that location is what makes a TLS conflict resolvable, so it is shown.
+ * The backend TLS fields also accept the material inline as PEM
+ * (`backendTlsReferences.ts`), and an inline private key is the secret itself,
+ * so such a field is classified by its value: one carrying PEM armor
+ * (`isInlineMaterial`) is redacted like a `*_pem` field.
  */
 const MATERIAL_LOCATION_PATTERN = /_paths?$/i;
+
+/** PEM armor opening a block: inline certificate or key material, not a location. */
+const INLINE_PEM_PATTERN = /-----BEGIN [A-Z0-9 ]+-----/;
+
+function carriesInlinePem(value: unknown): boolean {
+  if (typeof value === "string") return INLINE_PEM_PATTERN.test(value);
+  if (Array.isArray(value)) return value.some(carriesInlinePem);
+  return false;
+}
 
 export const REDACTED_PLACEHOLDER = "[redacted]";
 
@@ -270,8 +282,21 @@ export function isRedactedField(field: string): boolean {
   return REDACTED_FIELD_PATTERN.test(field);
 }
 
+/**
+ * Whether `value` in a material-location field (`*_path`, `*_paths`) is the
+ * material itself, inline PEM, rather than a path or reference to it.
+ */
+export function isInlineMaterial(field: string, value: unknown): boolean {
+  return MATERIAL_LOCATION_PATTERN.test(field) && carriesInlinePem(value);
+}
+
+/** Whether `field`'s `value` is hidden: by the field's name, or as inline material. */
+export function isRedactedValue(field: string, value: unknown): boolean {
+  return isRedactedField(field) || isInlineMaterial(field, value);
+}
+
 function redactFieldValue(field: string, value: unknown): unknown {
-  if (!isRedactedField(field) || value === null || value === "") return value;
+  if (!isRedactedValue(field, value) || value === null || value === "") return value;
   return REDACTED_PLACEHOLDER;
 }
 
@@ -283,7 +308,7 @@ function redactFieldValue(field: string, value: unknown): unknown {
  */
 export function formatBaselineValue(field: string, value: unknown): string {
   if (value === undefined) return "—";
-  if (isRedactedField(field)) {
+  if (isRedactedValue(field, value)) {
     if (value === null) return "null";
     if (typeof value === "string" && value.length === 0) return '""';
     return REDACTED_PLACEHOLDER;

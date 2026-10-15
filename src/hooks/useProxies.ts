@@ -202,6 +202,8 @@ export function useCreateProxy() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
   return useMutation({
+    // Discard submitted inline TLS key material as soon as the form resets/unmounts.
+    gcTime: 0,
     mutationFn: (data: ProxyCreate) => proxies.create(scope, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["proxies"] });
@@ -222,6 +224,8 @@ export function useUpdateProxy() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
   return useMutation({
+    // Discard submitted inline TLS key material as soon as the form resets/unmounts.
+    gcTime: 0,
     mutationFn: ({ id, data, guard }: {
       id: string;
       data: ProxyCreate;

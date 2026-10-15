@@ -158,6 +158,42 @@ describe("redaction", () => {
     expect(isRedactedField("backend_tls_client_key_path")).toBe(false);
     expect(formatBaselineValue("backend_tls_client_key_path", "/etc/ferrum/client.key"))
       .toBe("/etc/ferrum/client.key");
+    expect(formatBaselineValue("backend_tls_client_key_path", "k8s://tenant-a/tls/client"))
+      .toBe("k8s://tenant-a/tls/client");
+    expect(formatBaselineValue("backend_tls_server_ca_cert_path", "system://"))
+      .toBe("system://");
+  });
+
+  it("hides inline PEM material in a path field, but shows that it moved (#612)", () => {
+    const pem = [
+      "-----BEGIN PRIVATE KEY-----",
+      "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7syntheticAAAA",
+      "c3ludGhldGljLXByaXZhdGUta2V5LW1hdGVyaWFsLWZvci10ZXN0cy1vbmx5BBBB",
+      "-----END PRIVATE KEY-----",
+      "",
+    ].join("\n");
+    for (const field of [
+      "backend_tls_client_key_path",
+      "backend_tls_client_cert_path",
+      "backend_tls_server_ca_cert_path",
+    ]) {
+      const rendered = formatBaselineValue(field, pem);
+      expect(rendered, field).toBe("[redacted]");
+      expect(rendered).not.toContain(pem.split("\n")[1]);
+      expect(rendered).not.toContain(pem.split("\n")[2]);
+    }
+    expect(formatBaselineValue("backend_tls_client_key_path", null)).toBe("null");
+    expect(formatBaselineValue("backend_tls_client_key_path", "")).toBe('""');
+
+    const nested = formatBaselineValue("tls", {
+      private_key_path: pem,
+      ca_cert_path: "/etc/ferrum/ca.pem",
+    });
+    expect(nested).not.toContain(pem.split("\n")[1]);
+    expect(JSON.parse(nested)).toEqual({
+      private_key_path: "[redacted]",
+      ca_cert_path: "/etc/ferrum/ca.pem",
+    });
   });
 
   it("hides a redacted value but still shows that it moved", () => {

@@ -118,6 +118,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Inline backend TLS material is redacted like other secrets (#612). A
+  `backend_tls_*_path` field whose value is inline PEM, such as a client
+  private key, is now secret in a refused write's error and popup and shows as
+  `[redacted]` in the stale-write dialog; file paths and `system://` or
+  `k8s://` references stay readable. Proxy create, update, and a plugin
+  membership plan's proxy replace now apply the same failure redaction as
+  upstream writes, and the proxy create and update mutations no longer keep
+  their submitted body in the mutation cache once the form is gone.
 - Namespace Manager tells an unreadable registry from an empty one, offers
   Retry, and disables Edit/Delete over stale rows after a failed refresh (#572).
 - A delete that completes after its detail editor was replaced, by an
