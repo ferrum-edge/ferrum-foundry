@@ -248,16 +248,23 @@ export function ProxySearchPicker(props: ProxySearchPickerProps) {
                   <p>
                     Searching the first {proxies.length} of {catalog.total} proxies
                     in this namespace.
+                    {catalog.inconsistent &&
+                      " The collection changed while it was loading, so the full list could not be confirmed."}
                   </p>
                   <button
                     type="button"
                     disabled={catalog.expanding}
-                    onClick={() => setExpanded(true)}
+                    onClick={() => {
+                      if (catalog.inconsistent) catalog.retry();
+                      else setExpanded(true);
+                    }}
                     className="mt-1 text-orange hover:text-orange-light font-medium transition-colors disabled:opacity-60"
                   >
                     {catalog.expanding
                       ? `Loading all ${catalog.total} proxies…`
-                      : `Search all ${catalog.total} proxies`}
+                      : catalog.inconsistent
+                        ? "Retry loading all proxies"
+                        : `Search all ${catalog.total} proxies`}
                   </button>
                 </div>
               )}

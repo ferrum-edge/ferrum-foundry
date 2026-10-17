@@ -171,10 +171,14 @@ which starts a full, cancellable traversal. A full list cached by an earlier
 search answers only while it is not invalidated by a proxy write, is at least
 as recent as the first page (or is kept current by an open view that reads
 it), and agrees with that page once loaded (its length is the page's total and
-every row on the page is in it under the same name). Otherwise the
-page answers, with its own total and errors, so a stale list cannot hide a new
-proxy or "Search all". An expanded picker refetches a list that fails these
-checks even inside its stale time.
+every row on the page is in it with the same name, listen path/port and
+backend scheme/host/port — the fields the picker searches and shows).
+Otherwise the page answers, with its own total and errors, so a stale list
+cannot hide a new proxy or "Search all". An expanded picker refetches a list
+that fails these checks even inside its stale time, but only once per attempt:
+if the two reads still disagree (the collection kept changing between them),
+automatic fetching stops, the picker stays on the first page and says the full
+list could not be confirmed, and Retry reads both sides again.
 Selected proxies outside the loaded
 page are resolved one id at a time, so they are labelled correctly, and a
 selection whose proxy no longer exists is labelled as such and can still be

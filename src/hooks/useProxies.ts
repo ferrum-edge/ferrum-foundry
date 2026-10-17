@@ -8,7 +8,7 @@
 /* ------------------------------------------------------------------ */
 
 import { isCommittedWrite, queryScope } from "@/api/client";
-import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import {
   useMutation,
   useQueries,
@@ -88,6 +88,15 @@ export interface ProxyCatalog {
   readonly query: UseQueryResult<unknown>;
   /** True while an explicit "search all" traversal is still running. */
   readonly expanding: boolean;
+  /**
+   * True when the first page and the full list still disagree after the one
+   * automatic reconciliation an expanded picker is allowed. Automatic
+   * fetching has stopped; `proxies` is the first page and `complete` is
+   * false until `retry` starts a fresh attempt.
+   */
+  readonly inconsistent: boolean;
+  /** Start a fresh reconciliation attempt after `inconsistent`. */
+  readonly retry: () => void;
 }
 
 /**
@@ -124,7 +133,8 @@ export function useProxyCatalog(expanded: boolean): ProxyCatalog {
   //     observer (a membership editor, or this picker expanded), which
   //     TanStack refetches on invalidation and refocus;
   //   - in agreement with the first page, once there is one: its length is
-  //     the page's total, and every row on the page is in it by the same name.
+  //     the page's total, and every row on the page is in it with the same
+  //     values for every field the picker searches or shows.
   // Otherwise the first page answers, with its own total, completeness and
   // errors, so "Search all" is offered again. Invalidating a disabled query
   // notifies no observer, so its state is read through a cache subscription
@@ -148,8 +158,11 @@ export function useProxyCatalog(expanded: boolean): ProxyCatalog {
     if (all === undefined) return false;
     if (page === undefined) return true;
     if (all.length !== page.pagination.total) return false;
-    const names = new Map(all.map((entry) => [entry.id, entry.name]));
-    return page.data.every((entry) => names.has(entry.id) && names.get(entry.id) === entry.name);
+    const byId = new Map(all.map((entry) => [entry.id, entry]));
+    return page.data.every((entry) => {
+      const listed = byId.get(entry.id);
+      return listed !== undefined && pickerFieldsAgree(listed, entry);
+    });
   }, [everything.data, page]);
   const fullListNewer = everything.dataUpdatedAt >= firstPage.dataUpdatedAt;
   const fullListValid =
@@ -161,20 +174,55 @@ export function useProxyCatalog(expanded: boolean): ProxyCatalog {
   // Expanded, the operator asked for the whole collection, so a list that is
   // not valid is fetched again whatever the stale timer says. When the list is
   // the newer read and the first page disagrees with it, the page is the stale
-  // one and is read again instead. Each read triggers at most one follow-up,
-  // and a failed one stops here and surfaces as the answering query's error.
-  const repair: "all" | "page" | null = !traversing || fullListValid
+  // one and is read again instead. A failed read stops here and surfaces as
+  // the answering query's error.
+  //
+  // Reconciliation is bounded: one automatic repair per attempt. A namespace
+  // that keeps changing between the two reads would otherwise alternate page
+  // reads and full traversals for as long as the picker stays open, because
+  // every successful repair produces a fresh disagreement. When the budget is
+  // spent the catalog stays on the first page as `inconsistent`, and only an
+  // explicit `retry` (or the list becoming valid, or collapsing) starts a new
+  // attempt. Joining the traversal's own first read is not a repair and does
+  // not spend the budget.
+  const [repairSpent, setRepairSpent] = useState(false);
+  const [retryNonce, setRetryNonce] = useState(0);
+  useEffect(() => {
+    if (fullListValid || !traversing) setRepairSpent(false);
+  }, [fullListValid, traversing]);
+  const { refetch: refetchAll } = everything;
+  const { refetch: refetchPage } = firstPage;
+  const retry = useCallback(() => {
+    setRepairSpent(false);
+    setRetryNonce((nonce) => nonce + 1);
+    // A fresh attempt reads both sides again: repairing only the side that
+    // looked stale can strand the pair when the other side was the moving one.
+    void refetchPage({ cancelRefetch: false });
+    void refetchAll({ cancelRefetch: false });
+  }, [refetchAll, refetchPage]);
+  const repair: "all" | "page" | null = !traversing || fullListValid || repairSpent
     ? null
     : everything.data !== undefined && !fullListInvalidated && fullListNewer
       ? "page"
       : "all";
-  const { refetch: refetchAll } = everything;
-  const { refetch: refetchPage } = firstPage;
+  const repairDataPresent = everything.data !== undefined;
   useEffect(() => {
     // `cancelRefetch: false` joins a read the query already started.
-    if (repair === "all") void refetchAll({ cancelRefetch: false });
-    else if (repair === "page") void refetchPage({ cancelRefetch: false });
-  }, [repair, everything.dataUpdatedAt, firstPage.dataUpdatedAt, refetchAll, refetchPage]);
+    if (repair === "all") {
+      if (repairDataPresent) setRepairSpent(true);
+      void refetchAll({ cancelRefetch: false });
+    } else if (repair === "page") {
+      setRepairSpent(true);
+      void refetchPage({ cancelRefetch: false });
+    }
+  }, [repair, repairDataPresent, retryNonce, refetchAll, refetchPage]);
+  const inconsistent =
+    traversing &&
+    !fullListValid &&
+    repairSpent &&
+    repairDataPresent &&
+    !everything.isFetching &&
+    !firstPage.isFetching;
 
   // Whichever read actually supplied the rows is the one the picker's state
   // must reflect, so a failure of *that* read is what disables it.
@@ -185,6 +233,8 @@ export function useProxyCatalog(expanded: boolean): ProxyCatalog {
       complete: true,
       query: everything,
       expanding: false,
+      inconsistent: false,
+      retry,
     };
   }
   return {
@@ -196,7 +246,25 @@ export function useProxyCatalog(expanded: boolean): ProxyCatalog {
     // from another view's read must not gate it.
     query: traversing && !firstPage.isError && everything.isError ? everything : firstPage,
     expanding: everything.isFetching,
+    inconsistent,
+    retry,
   };
+}
+
+/**
+ * Agreement over every field the picker searches or shows. A newer first
+ * page that only moves a proxy's listen path or backend must still displace
+ * an older full list; ids and names alone would call that agreement.
+ */
+function pickerFieldsAgree(listed: Proxy, paged: Proxy): boolean {
+  return (
+    (listed.name ?? null) === (paged.name ?? null) &&
+    (listed.listen_path ?? null) === (paged.listen_path ?? null) &&
+    (listed.listen_port ?? null) === (paged.listen_port ?? null) &&
+    (listed.backend_scheme ?? null) === (paged.backend_scheme ?? null) &&
+    listed.backend_host === paged.backend_host &&
+    listed.backend_port === paged.backend_port
+  );
 }
 
 /**

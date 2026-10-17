@@ -43,6 +43,9 @@ let pageCap: number;
 let holdAfter: number | null;
 /** Fail every proxy-list read with a `400` (not retried). */
 let failReads: boolean;
+/** Give every proxy-list read a fresh backend port, so no two reads agree. */
+let churnReads: boolean;
+let churnTick: number;
 let release: (() => void) | undefined;
 let fetchMock: ReturnType<typeof stubFetch>;
 let create: (data: ProxyCreate) => Promise<unknown>;
@@ -66,13 +69,19 @@ function Mutations() {
 function Catalog({ expanded }: { expanded: boolean }) {
   const catalog = useProxyCatalog(expanded);
   return (
-    <output
-      data-names={catalog.proxies.map((entry) => entry.name).join(",")}
-      data-total={catalog.total}
-      data-complete={String(catalog.complete)}
-      data-expanding={String(catalog.expanding)}
-      data-read={resolveReadState(catalog.query)}
-    />
+    <>
+      <output
+        data-names={catalog.proxies.map((entry) => entry.name).join(",")}
+        data-total={catalog.total}
+        data-complete={String(catalog.complete)}
+        data-expanding={String(catalog.expanding)}
+        data-read={resolveReadState(catalog.query)}
+        data-inconsistent={String(catalog.inconsistent)}
+      />
+      {catalog.inconsistent && (
+        <button type="button" onClick={() => catalog.retry()}>Retry catalog</button>
+      )}
+    </>
   );
 }
 
@@ -104,6 +113,8 @@ beforeEach(() => {
   pageCap = Number.POSITIVE_INFINITY;
   holdAfter = null;
   failReads = false;
+  churnReads = false;
+  churnTick = 0;
   release = undefined;
   clearGatewayMetadata();
   fetchMock = stubFetch(async (request) => {
@@ -117,8 +128,11 @@ beforeEach(() => {
       if (failReads) return Response.json({ error: "read failed" }, { status: 400 });
       const offset = Number(url.searchParams.get("offset") ?? 0);
       const limit = Math.min(Number(url.searchParams.get("limit") ?? 250), pageCap);
+      const slice = rows.slice(offset, offset + limit);
       return Response.json({
-        data: rows.slice(offset, offset + limit),
+        data: churnReads
+          ? slice.map((entry) => ({ ...entry, backend_port: 9000 + (churnTick += 1) }))
+          : slice,
         pagination: { offset, limit, total: rows.length },
       });
     }
@@ -335,5 +349,62 @@ describe("useProxyCatalog full list", () => {
       expect(catalog()).toEqual({ names: "a", total: 3, complete: false, expanding: false });
       expect(readState()).toBe("stale");
     });
+  });
+
+  it("does not let an older full list override a first page that moved a backend", async () => {
+    rows = [proxy("a"), proxy("b"), proxy("c")];
+    pageCap = 1;
+    await ui.render(<Catalog expanded />);
+    await settle(() => expect(catalog()).toEqual({
+      names: "a,b,c", total: 3, complete: true, expanding: false,
+    }));
+
+    // Same ids and names; only the searched/shown backend fields move. The
+    // actively observed full list is now stale in exactly those fields.
+    rows = rows.map((entry) => entry.id === "a"
+      ? { ...entry, listen_path: "/moved", backend_host: "elsewhere" }
+      : entry);
+    // Hold the full-list repair read that the fresher first page triggers.
+    holdAfter = 1;
+    await act(async () => { await ui.client.refetchQueries({ queryKey: FIRST_PAGE_KEY }); });
+    await settle(() => {
+      expect(release).toBeDefined();
+      // Id/name agreement alone would still claim the stale list complete.
+      expect(catalog()).toEqual({ names: "a", total: 3, complete: false, expanding: true });
+    });
+
+    await act(async () => { release!(); });
+    await settle(() => expect(catalog()).toEqual({
+      names: "a,b,c", total: 3, complete: true, expanding: false,
+    }));
+  });
+
+  it("bounds reconciliation when reads never agree, and recovers on retry", async () => {
+    rows = [proxy("a"), proxy("b"), proxy("c")];
+    pageCap = 1;
+    churnReads = true;
+    await ui.render(<Catalog expanded />);
+
+    // Every read reports a different backend port, so the first page and the
+    // full list can never agree. One automatic repair is allowed; then the
+    // catalog stops fetching and reports itself inconsistent.
+    await settle(() => {
+      expect(ui.client.isFetching({ queryKey: ["proxies"] })).toBe(0);
+      expect(catalog().complete).toBe(false);
+      expect(ui.host.querySelector("output")?.dataset.inconsistent).toBe("true");
+    });
+    const readsWhenStopped = proxyListReads();
+    await settle(() => expect(proxyListReads()).toBe(readsWhenStopped));
+
+    // With stable reads again, an explicit retry reconciles and completes.
+    churnReads = false;
+    const retryButton = [...ui.host.querySelectorAll("button")].find(
+      (entry) => entry.textContent === "Retry catalog",
+    );
+    expect(retryButton).toBeDefined();
+    await act(async () => { retryButton!.click(); });
+    await settle(() => expect(catalog()).toEqual({
+      names: "a,b,c", total: 3, complete: true, expanding: false,
+    }));
   });
 });
