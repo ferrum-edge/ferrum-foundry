@@ -27,7 +27,10 @@ Delete Plugin to remove a group.
 Group membership is written through `PUT /proxies/{id}`. Foundry attaches every
 new member before detaching any old one, so during a move both source and
 destination can briefly run the plugin. A membership change spans several
-requests and is not atomic.
+requests and is not atomic. Its last detach can still make Edge delete the configuration if
+another operator removes the members it just attached and edits the plugin in
+between: each proxy write is conditional on that proxy only, and Edge offers no
+way to condition the cascade on the plugin's revision.
 
 ## Scope changes and proxy-scoped plugins
 
@@ -135,11 +138,30 @@ cached fallback) refuses the delete before anything is sent, since the
 
 If a change fails, Foundry attempts a compensating rollback:
 
-- It restores original references before removing new ones.
-- It keeps a final reference when removing it would delete a configuration that
-  still needs recovery.
+- It restores original references.
+- It never removes a reference the failed change added, whatever scope the
+  plugin is read with. If that is the
+  last reference, Edge deletes the configuration, and no check can rule that
+  out: another operator can detach the other members and edit the plugin just
+  before the write (#618). Such a reference is kept and named in the recovery
+  details; detach it once the group's membership is confirmed.
 - A failed move into group scope first restores the original non-group scope,
   relying on Edge's atomic reconciliation.
+- A move out of group scope is not rolled back once its plugin `PUT` has
+  committed (#610). That `PUT` detached the group's members in the same
+  transaction; restoring them, or removing the new proxy-scope target, could
+  undo or cascade-delete another operator's concurrent change. If a later step
+  fails (such as the read that verifies the new attachment), the editor
+  reports "saved, but its attachment could not be verified": the members
+  before the save, those the scope change detached, the proxy to check, and
+  what the gateway holds now, with a recovery snapshot of the configuration.
+  The form and its baseline are left as they are, so saving again would meet
+  your own committed change as a conflict; **Reload saved configuration**
+  reseeds both from fresh reads (the plugin and, for a group, its membership)
+  and changes nothing if a read fails. The saved proxy- or global-scoped
+  configuration cannot simply be reattached to the old members: to give them
+  the policy again, change the plugin back to `proxy_group` and select the
+  members you want, or create a separate group configuration for them.
 - A new plugin whose create did not converge, proxy-scoped or group, is kept
   where it got to and reported with its existence and the proxies that
   reference it, never cleaned up automatically (#608). Detaching members can

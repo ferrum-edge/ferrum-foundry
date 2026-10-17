@@ -7,11 +7,13 @@ import type {
 } from "@/api/types";
 import { GuardVerificationError, StaleResourceError } from "@/api/conditionalWrite";
 import { RedactedWriteError } from "@/api/secretRedaction";
+import { markCommittedWrite } from "@/api/client";
 import { pluginWriteGuard } from "@/api/plugins";
 import {
   createPluginWithMembership,
   deletePluginWithMembership,
   PluginMembershipError,
+  PluginSavedUnverifiedError,
   type PluginMembershipDependencies,
   updatePluginWithMembership,
 } from "./pluginMembership";
@@ -313,7 +315,7 @@ describe("proxy-group membership reconciliation", () => {
     expect(state.operations).not.toContain("cascade:plugin-1");
   });
 
-  it("reattaches original members before removing the destination on rollback", async () => {
+  it("reattaches original members and keeps the added destination on rollback (#618)", async () => {
     const state = harness(
       [
         makeProxy("p1", ["plugin-1"]),
@@ -326,7 +328,10 @@ describe("proxy-group membership reconciliation", () => {
     );
     await expect(
       updatePluginWithMembership("plugin-1", groupInput(), ["p4"], state.deps, null),
-    ).rejects.toThrow("rollback was attempted");
+    ).rejects.toThrow("proxy p4 was attached by the failed save and left attached");
+    // p4 is never detached by the rollback: if another operator detached the
+    // other members and edited the plugin meanwhile, that write would make
+    // Edge cascade-delete the edited configuration.
     expect(
       state.operations.filter((operation) => operation.startsWith("proxy:")),
     ).toEqual([
@@ -336,11 +341,64 @@ describe("proxy-group membership reconciliation", () => {
       "proxy:p3",
       "proxy:p2",
       "proxy:p1",
-      "proxy:p4",
     ]);
-    expect(memberships(state.proxies, "plugin-1")).toEqual(["p1", "p2", "p3"]);
+    expect(memberships(state.proxies, "plugin-1")).toEqual(["p1", "p2", "p3", "p4"]);
     expect(state.plugins.get("plugin-1")?.config).toEqual({ requests: 10 });
     expect(state.operations).not.toContain("cascade:plugin-1");
+  });
+
+  it("keeps an added reference even when a concurrent edit makes the plugin non-group", async () => {
+    // p2 is added, p1's detach fails; before rollback reads the plugin another
+    // operator moves it to proxy scope on p2. Rollback must still not detach
+    // p2: the operator can move it back to a group and edit it before the
+    // write, and that detach would then cascade-delete the edit (#618).
+    const state = harness(
+      [makeProxy("p1", ["plugin-1"]), makeProxy("p2")],
+      [makePlugin("plugin-1")],
+      { failProxyOnce: "p1" },
+    );
+    const getPlugin = state.deps.getPlugin;
+    let reads = 0;
+    state.deps.getPlugin = async (id) => {
+      reads += 1;
+      if (reads === 3) {
+        const current = state.plugins.get(id)!;
+        state.plugins.set(id, { ...current, scope: "proxy", proxy_id: "p2", updated_at: "v-other" });
+      }
+      return getPlugin(id);
+    };
+
+    await expect(
+      updatePluginWithMembership("plugin-1", groupInput(), ["p2"], state.deps, null),
+    ).rejects.toThrow("proxy p2 was attached by the failed save and left attached");
+    expect(memberships(state.proxies, "plugin-1")).toEqual(["p1", "p2"]);
+    expect(state.plugins.has("plugin-1")).toBe(true);
+  });
+
+  it("keeps an added reference when rollback's plugin read is a stale 404", async () => {
+    // Edge's cached fallback can answer 404 for a plugin the database still
+    // holds; detaching the added p2 then could cascade-delete it (#618).
+    const state = harness(
+      [makeProxy("p1", ["plugin-1"]), makeProxy("p2")],
+      [makePlugin("plugin-1")],
+      { failProxyOnce: "p1" },
+    );
+    const getPlugin = state.deps.getPlugin;
+    let reads = 0;
+    state.deps.getPlugin = async (id) => {
+      reads += 1;
+      if (reads >= 3) throw notFound(id);
+      return getPlugin(id);
+    };
+
+    await expect(
+      updatePluginWithMembership("plugin-1", groupInput(), ["p2"], state.deps, null),
+    ).rejects.toThrow("proxy p2 was attached by the failed save and left attached");
+    expect(
+      state.operations.filter((operation) => operation.startsWith("proxy:")),
+    ).toEqual(["proxy:p2", "proxy:p1"]);
+    expect(memberships(state.proxies, "plugin-1")).toEqual(["p1", "p2"]);
+    expect(state.plugins.has("plugin-1")).toBe(true);
   });
 
   it("retains the last destination if an originally orphaned group cannot converge", async () => {
@@ -351,7 +409,7 @@ describe("proxy-group membership reconciliation", () => {
     );
     await expect(
       updatePluginWithMembership("plugin-1", groupInput(), ["p1", "p2"], state.deps, null),
-    ).rejects.toThrow("proxy p1 was retained as the last reference");
+    ).rejects.toThrow("proxy p1 was attached by the failed save and left attached");
     expect(memberships(state.proxies, "plugin-1")).toEqual(["p1"]);
     expect(state.plugins.has("plugin-1")).toBe(true);
   });
@@ -368,8 +426,8 @@ describe("proxy-group membership reconciliation", () => {
     );
     await expect(
       updatePluginWithMembership("plugin-1", groupInput(), ["p3"], state.deps, null),
-    ).rejects.toThrow("remaining proxy references: p2");
-    expect(memberships(state.proxies, "plugin-1")).toEqual(["p2"]);
+    ).rejects.toThrow("remaining proxy references: p2, p3");
+    expect(memberships(state.proxies, "plugin-1")).toEqual(["p2", "p3"]);
     expect(state.plugins.get("plugin-1")?.config).toEqual({ requests: 10 });
     expect(state.operations).not.toContain("cascade:plugin-1");
   });
@@ -781,6 +839,117 @@ describe("proxy-group membership reconciliation", () => {
     )).rejects.toThrow("did not converge");
     expect(state.plugins.has("created-plugin")).toBe(true);
     expect(state.counts().deleteCalls).toBe(0);
+  });
+});
+
+describe("leaving group scope (#610)", () => {
+  it("keeps a committed move to proxy scope and reports what to check, without rolling back", async () => {
+    const state = harness(
+      [makeProxy("p1", ["plugin-1"]), makeProxy("p2", ["plugin-1"]), makeProxy("p3")],
+      [makePlugin("plugin-1")],
+    );
+    // The plugin PUT commits (Edge detaches p1 and p2 and attaches p3); the
+    // verification read that follows fails.
+    state.deps.getProxy = async () => {
+      throw new Error("injected verification read failure");
+    };
+
+    const failure = await updatePluginWithMembership(
+      "plugin-1",
+      { ...groupInput("proxy"), proxy_id: "p3" },
+      [],
+      state.deps,
+      null,
+    ).then(() => null, (error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(PluginSavedUnverifiedError);
+    const saved = failure as PluginSavedUnverifiedError;
+    expect(saved.message).toContain("was saved with scope proxy");
+    expect(saved.message).toContain("Nothing was rolled back");
+    expect(saved.saved).toMatchObject({ scope: "proxy", proxy_id: "p3" });
+    expect(saved.recovery.join(" ")).toContain("members were: p1, p2");
+    expect(saved.recovery.join(" ")).toContain("the scope change detached: p1, p2");
+    expect(saved.recovery.join(" ")).toContain("check that proxy p3 lists plugin plugin-1");
+    expect(saved.recovery.join(" ")).toContain("remaining proxy references: p3");
+    // The committed state stands: no rollback write of any kind.
+    expect(state.counts().updatePluginCalls).toBe(1);
+    expect(state.counts().updateProxyCalls).toBe(0);
+    expect(state.plugins.get("plugin-1")).toMatchObject({ scope: "proxy", proxy_id: "p3" });
+    expect(memberships(state.proxies, "plugin-1")).toEqual(["p3"]);
+  });
+
+  it("does not report the proxy-scope target as detached when it was a member", async () => {
+    const state = harness(
+      [makeProxy("p1", ["plugin-1"]), makeProxy("p2", ["plugin-1"])],
+      [makePlugin("plugin-1")],
+    );
+    state.deps.getProxy = async () => {
+      throw new Error("injected verification read failure");
+    };
+
+    const failure = await updatePluginWithMembership(
+      "plugin-1",
+      { ...groupInput("proxy"), proxy_id: "p1" },
+      [],
+      state.deps,
+      null,
+    ).then(() => null, (error: unknown) => error as PluginSavedUnverifiedError);
+
+    expect(failure).toBeInstanceOf(PluginSavedUnverifiedError);
+    expect(failure!.recovery.join(" ")).toContain("the scope change detached: p2");
+    expect(memberships(state.proxies, "plugin-1")).toEqual(["p1"]);
+  });
+
+  it("treats a committed-but-not-live scope PUT as a committed save", async () => {
+    const state = harness(
+      [makeProxy("p1", ["plugin-1"]), makeProxy("p2", ["plugin-1"]), makeProxy("p3")],
+      [makePlugin("plugin-1")],
+    );
+    const updatePlugin = state.deps.updatePlugin;
+    state.deps.updatePlugin = async (id, data, basis) => {
+      await updatePlugin(id, data, basis);
+      throw markCommittedWrite(new Error("reload timed out"), {
+        cursor: "1:2",
+        reason: "reload_timeout",
+      });
+    };
+
+    const failure = await updatePluginWithMembership(
+      "plugin-1",
+      { ...groupInput("proxy"), proxy_id: "p3" },
+      [],
+      state.deps,
+      null,
+    ).then(() => null, (error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(PluginSavedUnverifiedError);
+    const saved = failure as PluginSavedUnverifiedError;
+    expect(saved.message).toContain("committed, not yet proven live");
+    expect(saved.savedFromLaterRead).toBe(true);
+    expect(saved.saved).toMatchObject({ scope: "proxy", proxy_id: "p3" });
+    // The saved configuration is the recovery snapshot too.
+    expect(saved.lastKnownConfig).toMatchObject({ scope: "proxy", proxy_id: "p3" });
+    expect(state.counts().updatePluginCalls).toBe(1);
+    expect(state.counts().updateProxyCalls).toBe(0);
+    expect(memberships(state.proxies, "plugin-1")).toEqual(["p3"]);
+  });
+
+  it("still rolls back when the plugin PUT itself failed", async () => {
+    const state = harness(
+      [makeProxy("p1", ["plugin-1"]), makeProxy("p2", ["plugin-1"])],
+      [makePlugin("plugin-1")],
+      { failPluginUpdate: true },
+    );
+    const failure = await updatePluginWithMembership(
+      "plugin-1",
+      groupInput("global"),
+      [],
+      state.deps,
+      null,
+    ).then(() => null, (error: unknown) => error);
+    expect(failure).toBeInstanceOf(PluginMembershipError);
+    expect(failure).not.toBeInstanceOf(PluginSavedUnverifiedError);
+    expect(memberships(state.proxies, "plugin-1")).toEqual(["p1", "p2"]);
   });
 });
 
