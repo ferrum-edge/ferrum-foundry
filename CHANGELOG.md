@@ -197,6 +197,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Guides: OIDC operator input in plugin defaults (#576), preview-only `503`
   for an uncompilable manifest schema (#583), and v0.5.5 recorded as
   qualified and published (#584).
+- The proxy picker no longer lets a full proxy list cached by an earlier
+  search, and invalidated by a later proxy create, rename, or delete, override
+  its freshly fetched first page. That stale list could omit a new proxy, show
+  an old name or a deleted proxy, and claim to be complete, hiding "Search
+  all". The cached list answers only while it is not invalidated, is at least
+  as recent as the first page or kept current by an open view, and agrees with
+  that page; an expanded picker
+  refetches it otherwise, even inside its stale time (#611).
 - Starter preflight: the forged-identity probe now also selects the namespace
   it grants (`X-Ferrum-Namespace`), so the BFF's namespace ceiling can no longer
   refuse it with a `403` that reads as header stripping. Without
