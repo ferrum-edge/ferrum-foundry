@@ -68,6 +68,15 @@ function gatewayHandler(request: IncomingMessage, response: ServerResponse): voi
       response.end('{"error":"bad gateway jwt"}');
       return;
     }
+    if (request.url?.startsWith('/active-content')) {
+      response.setHeader('content-type', 'text/html; charset=utf-8');
+      response.end('<script>alert(1)</script>');
+      return;
+    }
+    if (request.url?.startsWith('/untyped')) {
+      response.end('{"ok":true}');
+      return;
+    }
     if (request.url?.startsWith('/cacheable')) {
       response.setHeader('content-type', 'application/json');
       response.setHeader('cache-control', 'public, max-age=600');
@@ -709,6 +718,43 @@ describe('streaming gateway proxy', () => {
     expect(response.headers['x-data-source']).toBe('cached');
     expect(response.headers.location).toBe('/api/proxy/resources/fixture');
     expect(response.headers['set-cookie']).toBeUndefined();
+  });
+
+  it('cannot serve upstream active content in the console origin', async () => {
+    // A document-capable upstream type is relabeled and sandboxed, so a
+    // direct navigation or sniffing can never execute it (#601).
+    const active = await app.inject({
+      method: 'GET',
+      url: '/api/proxy/active-content',
+      headers: sessionHeaders,
+    });
+    expect(active.statusCode).toBe(200);
+    expect(active.headers['content-type']).toBe('application/octet-stream');
+    expect(active.headers['x-content-type-options']).toBe('nosniff');
+    expect(active.headers['content-security-policy']).toBe('sandbox');
+    expect(active.body).toBe('<script>alert(1)</script>');
+
+    // A body with no upstream content type gets an explicit safe type
+    // instead of being left to browser sniffing.
+    const untyped = await app.inject({
+      method: 'GET',
+      url: '/api/proxy/untyped',
+      headers: sessionHeaders,
+    });
+    expect(untyped.statusCode).toBe(200);
+    expect(untyped.headers['content-type']).toBe('application/octet-stream');
+    expect(untyped.headers['x-content-type-options']).toBe('nosniff');
+    expect(untyped.headers['content-security-policy']).toBe('sandbox');
+
+    // Genuine API media types pass through unchanged.
+    const json = await app.inject({
+      method: 'GET',
+      url: '/api/proxy/echo',
+      headers: sessionHeaders,
+    });
+    expect(json.headers['content-type']).toBe('application/json');
+    expect(json.headers['x-content-type-options']).toBe('nosniff');
+    expect(json.headers['content-security-policy']).toBe('sandbox');
   });
 
   it('streams a decoded upstream response without forwarding its compressed length', async () => {
