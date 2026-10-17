@@ -63,9 +63,13 @@ literal. Operators should use HTTPS for remote targets.
 - **Proxied responses are API-only** (#601). Whatever the upstream gateway
   (or an error page in front of it) answers, `/api/proxy/*` responses only
   ever carry an API media type the console consumes (JSON, YAML, plain
-  text, octet-stream); any other or missing content type is relabeled
-  `application/octet-stream`, and every proxied response sets
+  text, octet-stream); any other, missing, or ambiguous (combined)
+  content type is relabeled `application/octet-stream`, an accepted type
+  is re-emitted as one canonical media type rather than forwarded
+  verbatim, and every response streamed through the proxy sets
   `x-content-type-options: nosniff` and `content-security-policy: sandbox`.
+  (The BFF's own scoped health/status projections are authored JSON, not
+  upstream bytes, and do not pass through this boundary.)
   A replaced gateway answering `text/html` therefore cannot render active
   content in the console origin, on a direct navigation or by sniffing.
 - **HSTS** is on by default wherever Secure cookies are (both default to

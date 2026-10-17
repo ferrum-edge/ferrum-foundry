@@ -270,11 +270,28 @@ const API_RESPONSE_MEDIA_TYPES = new Set([
   'text/x-yaml',
 ]);
 
+const MEDIA_TYPE_ESSENCE = /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/;
+const CHARSET_PARAMETER = /^charset=([a-z0-9!#$&^_.+-]+)$/;
+
 function apiContentType(upstream: string | null): string {
-  if (upstream !== null) {
-    const essence = upstream.split(';', 1)[0]?.trim().toLowerCase() ?? '';
-    if (API_RESPONSE_MEDIA_TYPES.has(essence) || essence.endsWith('+json') || essence.endsWith('+yaml')) {
-      return upstream;
+  if (upstream !== null && !upstream.includes(',')) {
+    // Never forward the upstream value verbatim: a combined or trailing
+    // media type (duplicate Content-Type headers, `; charset=utf-8,
+    // text/javascript`) is what browser MIME extraction would honor, not
+    // the prefix validated here. Emit one canonical media type instead,
+    // keeping only a single well-formed charset parameter.
+    const [rawEssence, ...parameters] = upstream.split(';');
+    const essence = rawEssence?.trim().toLowerCase() ?? '';
+    if (
+      MEDIA_TYPE_ESSENCE.test(essence) &&
+      (API_RESPONSE_MEDIA_TYPES.has(essence) || essence.endsWith('+json') || essence.endsWith('+yaml'))
+    ) {
+      const charsets = parameters
+        .map((parameter) => CHARSET_PARAMETER.exec(parameter.trim().toLowerCase())?.[1])
+        .filter((charset) => charset !== undefined);
+      return parameters.length === 1 && charsets.length === 1
+        ? `${essence}; charset=${charsets[0]}`
+        : essence;
     }
   }
   return 'application/octet-stream';
