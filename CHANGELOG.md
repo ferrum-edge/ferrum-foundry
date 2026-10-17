@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Proxied gateway responses are confined to API media types (#601). A
+  response through `/api/proxy/*` only ever carries a JSON/YAML/plain-text/
+  octet-stream content type — any other or missing upstream type is
+  relabeled `application/octet-stream` — plus `x-content-type-options:
+  nosniff` and `content-security-policy: sandbox` on every proxied
+  response, so a gateway answering HTML cannot serve active content in
+  the console origin.
 - Throttle failed authentication (#588). A wrong trusted-proxy proof or static
   login token counts against the caller's socket address. 10 failures
   (`FERRUM_AUTH_MAX_FAILURES`) within 15 minutes lock the address out for 60

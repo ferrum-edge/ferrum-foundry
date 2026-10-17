@@ -68,6 +68,38 @@ function gatewayHandler(request: IncomingMessage, response: ServerResponse): voi
       response.end('{"error":"bad gateway jwt"}');
       return;
     }
+    if (request.url?.startsWith('/active-content')) {
+      response.setHeader('content-type', 'text/html; charset=utf-8');
+      response.end('<script>alert(1)</script>');
+      return;
+    }
+    if (request.url?.startsWith('/ambiguous-content-type')) {
+      // What duplicate upstream Content-Type headers combine into: browser
+      // MIME extraction honors the trailing type, not the JSON prefix.
+      response.setHeader('content-type', 'application/json; charset=utf-8, text/javascript');
+      response.end('alert(1)');
+      return;
+    }
+    if (request.url?.startsWith('/script-content')) {
+      response.setHeader('content-type', 'Text/JavaScript; Charset=UTF-8');
+      response.end('alert(1)');
+      return;
+    }
+    if (request.url?.startsWith('/error-page')) {
+      response.statusCode = 502;
+      response.setHeader('content-type', 'text/html');
+      response.end('<html><body>Bad Gateway</body></html>');
+      return;
+    }
+    if (request.url?.startsWith('/json-charset')) {
+      response.setHeader('content-type', 'Application/JSON; Charset=UTF-8');
+      response.end('{"ok":true}');
+      return;
+    }
+    if (request.url?.startsWith('/untyped')) {
+      response.end('{"ok":true}');
+      return;
+    }
     if (request.url?.startsWith('/cacheable')) {
       response.setHeader('content-type', 'application/json');
       response.setHeader('cache-control', 'public, max-age=600');
@@ -709,6 +741,81 @@ describe('streaming gateway proxy', () => {
     expect(response.headers['x-data-source']).toBe('cached');
     expect(response.headers.location).toBe('/api/proxy/resources/fixture');
     expect(response.headers['set-cookie']).toBeUndefined();
+  });
+
+  it('cannot serve upstream active content in the console origin', async () => {
+    // A document-capable upstream type is relabeled and sandboxed, so a
+    // direct navigation or sniffing can never execute it (#601).
+    const active = await app.inject({
+      method: 'GET',
+      url: '/api/proxy/active-content',
+      headers: sessionHeaders,
+    });
+    expect(active.statusCode).toBe(200);
+    expect(active.headers['content-type']).toBe('application/octet-stream');
+    expect(active.headers['x-content-type-options']).toBe('nosniff');
+    expect(active.headers['content-security-policy']).toBe('sandbox');
+    expect(active.body).toBe('<script>alert(1)</script>');
+
+    // A body with no upstream content type gets an explicit safe type
+    // instead of being left to browser sniffing.
+    const untyped = await app.inject({
+      method: 'GET',
+      url: '/api/proxy/untyped',
+      headers: sessionHeaders,
+    });
+    expect(untyped.statusCode).toBe(200);
+    expect(untyped.headers['content-type']).toBe('application/octet-stream');
+    expect(untyped.headers['x-content-type-options']).toBe('nosniff');
+    expect(untyped.headers['content-security-policy']).toBe('sandbox');
+
+    // Genuine API media types pass through unchanged.
+    const json = await app.inject({
+      method: 'GET',
+      url: '/api/proxy/echo',
+      headers: sessionHeaders,
+    });
+    expect(json.headers['content-type']).toBe('application/json');
+    expect(json.headers['x-content-type-options']).toBe('nosniff');
+    expect(json.headers['content-security-policy']).toBe('sandbox');
+  });
+
+  it('canonicalizes ambiguous upstream content types instead of forwarding them', async () => {
+    // A combined value whose JSON prefix validates but whose trailing type
+    // a browser would extract must not pass through verbatim (#601).
+    const ambiguous = await app.inject({
+      method: 'GET',
+      url: '/api/proxy/ambiguous-content-type',
+      headers: sessionHeaders,
+    });
+    expect(ambiguous.headers['content-type']).toBe('application/octet-stream');
+    expect(ambiguous.headers['x-content-type-options']).toBe('nosniff');
+    expect(ambiguous.headers['content-security-policy']).toBe('sandbox');
+
+    const script = await app.inject({
+      method: 'GET',
+      url: '/api/proxy/script-content',
+      headers: sessionHeaders,
+    });
+    expect(script.headers['content-type']).toBe('application/octet-stream');
+
+    // An upstream error page is relabeled on error statuses too.
+    const errorPage = await app.inject({
+      method: 'GET',
+      url: '/api/proxy/error-page',
+      headers: sessionHeaders,
+    });
+    expect(errorPage.statusCode).toBe(502);
+    expect(errorPage.headers['content-type']).toBe('application/octet-stream');
+    expect(errorPage.headers['content-security-policy']).toBe('sandbox');
+
+    // Case and a well-formed charset canonicalize to a single media type.
+    const charset = await app.inject({
+      method: 'GET',
+      url: '/api/proxy/json-charset',
+      headers: sessionHeaders,
+    });
+    expect(charset.headers['content-type']).toBe('application/json; charset=utf-8');
   });
 
   it('streams a decoded upstream response without forwarding its compressed length', async () => {

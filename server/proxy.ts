@@ -249,6 +249,63 @@ function timeoutResponse(phase: string, reason?: UploadTimeoutReason) {
   };
 }
 
+/**
+ * The API-only response boundary for everything streamed through
+ * `/api/proxy/*` (#601). The BFF shares an origin with the console, so an
+ * upstream (a replaced gateway, an intervening proxy's error page, or a
+ * future endpoint) answering a document-capable type must never render
+ * active content there. API media types the console consumes pass
+ * through; anything else — including a body with no content type —
+ * is relabeled `application/octet-stream`, and every proxied response
+ * carries `nosniff` plus a sandboxing CSP so even a direct navigation
+ * cannot execute it as a document.
+ */
+const API_RESPONSE_MEDIA_TYPES = new Set([
+  'application/json',
+  'application/yaml',
+  'application/x-yaml',
+  'application/octet-stream',
+  'text/plain',
+  'text/yaml',
+  'text/x-yaml',
+]);
+
+const MEDIA_TYPE_ESSENCE = /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/;
+const CHARSET_PARAMETER = /^charset=([a-z0-9!#$&^_.+-]+)$/;
+
+function apiContentType(upstream: string | null): string {
+  if (upstream !== null && !upstream.includes(',')) {
+    // Never forward the upstream value verbatim: a combined or trailing
+    // media type (duplicate Content-Type headers, `; charset=utf-8,
+    // text/javascript`) is what browser MIME extraction would honor, not
+    // the prefix validated here. Emit one canonical media type instead,
+    // keeping only a single well-formed charset parameter.
+    const [rawEssence, ...parameters] = upstream.split(';');
+    const essence = rawEssence?.trim().toLowerCase() ?? '';
+    if (
+      MEDIA_TYPE_ESSENCE.test(essence) &&
+      (API_RESPONSE_MEDIA_TYPES.has(essence) || essence.endsWith('+json') || essence.endsWith('+yaml'))
+    ) {
+      const charsets = parameters
+        .map((parameter) => CHARSET_PARAMETER.exec(parameter.trim().toLowerCase())?.[1])
+        .filter((charset) => charset !== undefined);
+      return parameters.length === 1 && charsets.length === 1
+        ? `${essence}; charset=${charsets[0]}`
+        : essence;
+    }
+  }
+  return 'application/octet-stream';
+}
+
+function applyApiResponseBoundary(
+  reply: Parameters<typeof requireAdminAuth>[1],
+  upstreamContentType: string | null,
+): void {
+  reply.header('content-type', apiContentType(upstreamContentType));
+  reply.header('x-content-type-options', 'nosniff');
+  reply.header('content-security-policy', 'sandbox');
+}
+
 function safeResponseHeader(name: string, value: string, upstream: URL): string | undefined {
   if (name !== 'location') return value;
   try {
@@ -624,6 +681,9 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
       const upstreamEncoding = response.headers.get('content-encoding')?.trim().toLowerCase();
       const responseWasDecoded = Boolean(upstreamEncoding && upstreamEncoding !== 'identity');
       for (const name of RESPONSE_HEADER_ALLOWLIST) {
+        // The boundary below owns the representation type; the upstream
+        // value must not win by being copied here first.
+        if (name === 'content-type') continue;
         if (name === 'content-length' && responseWasDecoded) continue;
         const value = response.headers.get(name);
         if (value !== null) {
@@ -631,6 +691,7 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
           if (safeValue !== undefined) reply.header(name, safeValue);
         }
       }
+      applyApiResponseBoundary(reply, response.headers.get('content-type'));
       if (response.status === 401) reply.header('x-ferrum-auth-layer', 'gateway');
 
       if (!response.body) {
