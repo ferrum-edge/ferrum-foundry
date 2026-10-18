@@ -529,7 +529,7 @@ describe("proxy-group membership reconciliation", () => {
   it("models DELETE of an already cascade-deleted plugin as 404", async () => {
     const state = harness([makeProxy("p1", ["plugin-1"])], [makePlugin("plugin-1")]);
     await state.deps.updateProxy("p1", { ...makeProxy("p1"), plugins: [] }, null);
-    await expect(state.deps.deletePlugin("plugin-1", null)).rejects.toMatchObject({
+    await expect(state.deps.deletePlugin("plugin-1", null, [])).rejects.toMatchObject({
       response: { status: 404 },
     });
   });
@@ -581,7 +581,7 @@ describe("proxy-group membership reconciliation", () => {
     const getPlugin = state.deps.getPlugin;
     state.deps.getPlugin = async (id) => {
       const read = await getPlugin(id);
-      await state.deps.deletePlugin(id, null);
+      await state.deps.deletePlugin(id, null, ["p1"]);
       return read;
     };
 
@@ -646,7 +646,7 @@ describe("proxy-group membership reconciliation", () => {
         await state.deps.updatePlugin("created-plugin", {
           ...groupInput(),
           config: { requests: 99 },
-        }, null);
+        }, null, ["p1"]);
         throw new Error("injected failure after concurrent config edit");
       }
       return updateProxy(id, data, null);
@@ -932,8 +932,8 @@ describe("leaving group scope (#610)", () => {
       [makePlugin("plugin-1")],
     );
     const updatePlugin = state.deps.updatePlugin;
-    state.deps.updatePlugin = async (id, data, basis) => {
-      await updatePlugin(id, data, basis);
+    state.deps.updatePlugin = async (id, data, basis, expectedProxyIds) => {
+      await updatePlugin(id, data, basis, expectedProxyIds);
       throw markCommittedWrite(new Error("reload timed out"), {
         cursor: "1:2",
         reason: "reload_timeout",
