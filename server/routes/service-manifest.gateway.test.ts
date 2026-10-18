@@ -121,7 +121,7 @@ it.runIf(process.env.FERRUM_MANIFEST_GATEWAY_CONTRACT === 'true')(
           await exchange(`/proxies/${desired.proxy.id}?apply=sync&cleanup_orphaned_upstream=false`,
             'DELETE', undefined, [200, 204, 404]);
           for (const plugin of desired.plugin_configs) {
-            await exchange(`/plugins/config/${plugin.id}?apply=sync`,
+            await exchange(`/plugins/config/${plugin.id}?apply=sync&expected_proxy_ids=${desired.proxy.id}`,
               'DELETE', undefined, [200, 204, 404]);
           }
           if (desired.upstream) {

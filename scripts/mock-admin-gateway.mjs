@@ -629,7 +629,7 @@ export function parseExpectedProxyIds(url) {
   const expected = new Set();
   if (values[0] !== '') {
     for (const entry of values[0].split(',')) {
-      if (!MOCK_RESOURCE_ID.test(entry)) {
+      if (entry.length > 254 || !MOCK_RESOURCE_ID.test(entry)) {
         return { refusal: [400, { error: `expected_proxy_ids: invalid resource ID '${entry}'` }] };
       }
       if (expected.has(entry)) {
