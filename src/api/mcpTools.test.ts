@@ -116,6 +116,14 @@ function stubPluginGateway(seed: PluginConfig, tagged = true) {
       namespace: request.headers.get("X-Ferrum-Namespace"),
     } as (typeof wire)[number];
     wire.push(entry);
+    // The policy write lists proxies to name its expected referencing set
+    // (forge-ops #569); answer with the one proxy this gateway models.
+    if (request.method === "GET" && new URL(request.url).pathname.endsWith("/proxies")) {
+      return Response.json({
+        data: [{ id: "agents", namespace: "tenant-a", plugins: [{ plugin_config_id: "mcp" }] }],
+        pagination: { offset: 0, limit: 1000, total: 1 },
+      });
+    }
     if (request.method === "PUT") {
       entry.body = await request.json();
       hooks.beforePut?.();
@@ -219,7 +227,7 @@ describe("per-tool policy write", () => {
 
     await updateToolPolicy(scope, "mcp", "github.create", { action: "allow" }, null, "admin");
     expect(gateway.wire.map((call) => [call.method, call.ifMatch])).toEqual([
-      ["GET", null], ["GET", null], ["PUT", null],
+      ["GET", null], ["GET", null], ["GET", null], ["PUT", null],
     ]);
     expect(gateway.read().config.policy).toMatchObject({
       tools: { "github.create": { action: "allow" }, "github.search": { action: "allow" } },
@@ -238,9 +246,10 @@ describe("per-tool policy write", () => {
 
     expect(gateway.wire.map((call) => [call.method, call.ifMatch, call.namespace])).toEqual([
       ["GET", null, "tenant-a"],
+      ["GET", null, "tenant-a"],
       ["PUT", '"rev-1"', "tenant-a"],
     ]);
-    const body = gateway.wire[1].body as Record<string, unknown>;
+    const body = gateway.wire[2].body as Record<string, unknown>;
     expect(body).not.toHaveProperty("labels");
     expect(body).not.toHaveProperty("created_at");
     expect(body).not.toHaveProperty("namespace");
@@ -290,9 +299,9 @@ describe("per-tool policy write", () => {
     };
 
     await updateToolPolicy(scope, "mcp", "github.create", { action: "allow" }, guard, "admin");
-    expect(gateway.wire.map((call) => call.method)).toEqual(["GET", "PUT", "GET", "PUT"]);
-    expect(gateway.wire[1].ifMatch).toBe('"rev-1"');
-    expect(gateway.wire[3].ifMatch).toBe('"rev-2"');
+    expect(gateway.wire.map((call) => call.method)).toEqual(["GET", "GET", "PUT", "GET", "GET", "PUT"]);
+    expect(gateway.wire[2].ifMatch).toBe('"rev-1"');
+    expect(gateway.wire[5].ifMatch).toBe('"rev-2"');
     expect((gateway.read().config as { policy: unknown }).policy).toEqual({
       default_action: "deny",
       tools: {
@@ -361,7 +370,7 @@ describe("per-tool policy write", () => {
     const gateway = stubPluginGateway(masked);
     await updateToolPolicy(scope, "mcp", "github.create", { action: "allow" },
       toolPolicyWriteGuard(masked, "github.create"), "admin");
-    expect(gateway.wire.map((call) => call.method)).toEqual(["GET", "PUT"]);
+    expect(gateway.wire.map((call) => call.method)).toEqual(["GET", "GET", "PUT"]);
   });
 
   it("refuses what Ferrum Edge would refuse, without sending it", async () => {

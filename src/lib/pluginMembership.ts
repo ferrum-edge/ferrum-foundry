@@ -48,8 +48,20 @@ export interface PluginMembershipDependencies {
     id: string,
     data: PluginConfigCreate,
     basis: PluginConfig | null,
+    /**
+     * The association precondition's expected set (forge-ops #569): every
+     * proxy the plan's own reads showed referencing this configuration.
+     * The gateway refuses the write if another proxy references it by the
+     * time the write lands, so an attachment the plan never saw is never
+     * silently detached.
+     */
+    expectedProxyIds: readonly string[],
   ) => Promise<PluginConfig>;
-  deletePlugin: (id: string, basis: PluginConfig | null) => Promise<void>;
+  deletePlugin: (
+    id: string,
+    basis: PluginConfig | null,
+    expectedProxyIds: readonly string[],
+  ) => Promise<void>;
   /**
    * Whether a write based on this read would be conditional: the gateway
    * issued a usable strong `ETag` with it. A destructive step the plan cannot
@@ -87,11 +99,13 @@ export function bindPluginMembership(
       proxiesApi.replace(scope, id, data, validatorOf(basis)),
     getPlugin: (id) => pluginsApi.getConfig(scope, id, true),
     createPlugin: (data) => pluginsApi.createConfig(scope, data),
-    updatePlugin: (id, data, basis) =>
-      pluginsApi.updateConfig(scope, id, data, validatorOf(basis)),
-    deletePlugin: (id, basis) =>
+    updatePlugin: (id, data, basis, expectedProxyIds) =>
+      pluginsApi.updateConfig(scope, id, data, validatorOf(basis), expectedProxyIds),
+    deletePlugin: (id, basis, expectedProxyIds) =>
       // A 404 is "already deleted", which the plan resolves itself.
-      pluginsApi.removeConfig(scope, id, validatorOf(basis), { handled: [404] }),
+      pluginsApi.removeConfig(scope, id, validatorOf(basis), expectedProxyIds, {
+        handled: [404],
+      }),
     canCondition: (read) => validatorOf(read) !== null,
   };
 }
@@ -222,6 +236,13 @@ function referencesPlugin(proxy: Proxy, pluginId: string): boolean {
   );
 }
 
+/** The expected referencing set a plugin write carries, from one proxy listing. */
+function referencingProxyIds(proxies: readonly Proxy[], pluginId: string): string[] {
+  return proxies
+    .filter((proxy) => referencesPlugin(proxy, pluginId))
+    .map((proxy) => proxy.id);
+}
+
 async function recoveryState(
   pluginId: string,
   deps: PluginMembershipDependencies,
@@ -238,9 +259,7 @@ async function recoveryState(
     details.push(`plugin ${pluginId} existence could not be verified`);
   }
   try {
-    const remaining = (await deps.listProxies())
-      .filter((proxy) => referencesPlugin(proxy, pluginId))
-      .map((proxy) => proxy.id);
+    const remaining = referencingProxyIds(await deps.listProxies(), pluginId);
     details.push(`remaining proxy references: ${remaining.join(", ") || "none"}`);
   } catch {
     details.push("remaining proxy references could not be verified");
@@ -458,7 +477,8 @@ async function rollbackPlugin(
     if (current.updated_at !== after.updated_at) {
       return [`plugin ${after.id} changed after Foundry updated it; config was not overwritten`];
     }
-    await deps.updatePlugin(before.id, pluginsApi.toUpdatePayload(before), current);
+    const expected = referencingProxyIds(await deps.listProxies(), before.id);
+    await deps.updatePlugin(before.id, pluginsApi.toUpdatePayload(before), current, expected);
     return [];
   } catch (error) {
     if (isPreconditionFailed(error)) {
@@ -475,6 +495,7 @@ async function updatePluginIfUnchanged(
   data: PluginConfigCreate,
   deps: PluginMembershipDependencies,
   guard: WriteGuard<PluginConfig | PluginConfigCreate> | null,
+  expectedProxyIds: readonly string[],
 ): Promise<PluginConfig> {
   const changed = () =>
     new PluginMembershipError(
@@ -485,7 +506,7 @@ async function updatePluginIfUnchanged(
   assertEditorBaseline(current, guard, "save", data, deps.namespace);
   if (current.updated_at !== snapshot.updated_at) throw changed();
   try {
-    return await deps.updatePlugin(snapshot.id, data, current);
+    return await deps.updatePlugin(snapshot.id, data, current, expectedProxyIds);
   } catch (error) {
     if (!isPreconditionFailed(error)) throw error;
     // Something was written between that read and the PUT. If it touched what
@@ -687,7 +708,13 @@ export async function updatePluginWithMembership(
     // Edge atomically reconciles associations when PUT changes scope to global
     // or proxy. Do not detach first or remove the proxy-scoped target it adds.
     // Group membership remains operator-managed through proxy PUTs.
-    updatedPlugin = await updatePluginIfUnchanged(beforePlugin, data, deps, guard);
+    updatedPlugin = await updatePluginIfUnchanged(
+      beforePlugin,
+      data,
+      deps,
+      guard,
+      referencingProxyIds(plan.proxies, pluginId),
+    );
     if (nextIsGroup) {
       await applyAssociationPlan(plan.proxies, pluginId, desired, deps, applied);
     } else if (data.scope === "proxy" && data.proxy_id) {
@@ -781,8 +808,12 @@ export async function deletePluginWithMembership(
   // (policy #542).
   if (!deps.canCondition(plugin)) throw new GuardVerificationError("delete");
   assertEditorBaseline(plugin, guard, "delete", null, deps.namespace);
+  // The delete detaches every referencing proxy in Edge's transaction; the
+  // expected set names the ones this listing shows, so a proxy attached
+  // after it refuses the delete instead of being silently detached.
+  const expected = referencingProxyIds(await deps.listProxies(), pluginId);
   try {
-    await deps.deletePlugin(pluginId, plugin);
+    await deps.deletePlugin(pluginId, plugin, expected);
   } catch (error) {
     // Already gone: the outcome the operator asked for.
     if (isNotFound(error)) return;

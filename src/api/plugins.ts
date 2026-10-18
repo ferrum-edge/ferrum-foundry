@@ -226,21 +226,37 @@ export async function updateConfig(
   id: string,
   data: PluginConfigCreate,
   ifMatch: string | null,
+  expectedProxyIds: readonly string[],
 ): Promise<PluginConfig> {
   const body = withPluginConfigId(data, id);
   return withRedactedFailure(secretValues(body), () =>
     conditionalPut<PluginConfig>(scope, `plugins/config/${pathSegment(id)}`, body, ifMatch, {
       redactErrors: true,
+      searchParams: { expected_proxy_ids: expectedProxyIds.join(",") },
+      // The association precondition's 412 is the caller's to resolve,
+      // exactly like an If-Match refusal.
+      handled: [412],
     }),
   );
 }
 
-/** `DELETE`, conditional on `ifMatch` when there is one; see `updateConfig`. */
+/**
+ * `DELETE`, conditional on `ifMatch` when there is one; see `updateConfig`.
+ * `expectedProxyIds` is Edge's association precondition (forge-ops #569):
+ * every proxy the caller expects to reference this configuration and
+ * accepts the delete detaching. A referencing proxy outside the set
+ * refuses the write with `412` instead of being silently detached.
+ */
 export async function removeConfig(
   scope: NamespaceScope,
   id: string,
   ifMatch: string | null,
+  expectedProxyIds: readonly string[],
   options: { readonly handled?: readonly number[] } = {},
 ): Promise<void> {
-  await conditionalDelete(scope, `plugins/config/${pathSegment(id)}`, ifMatch, options);
+  await conditionalDelete(scope, `plugins/config/${pathSegment(id)}`, ifMatch, {
+    ...options,
+    handled: [412, ...(options.handled ?? [])],
+    searchParams: { expected_proxy_ids: expectedProxyIds.join(",") },
+  });
 }

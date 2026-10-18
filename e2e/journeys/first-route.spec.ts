@@ -63,7 +63,11 @@ test.describe("first route, first authenticated request", () => {
       [`/upstreams`, created.upstreamId],
     ] as const) {
       if (!id) continue;
-      const suffix = path === "/proxies" ? "&cleanup_orphaned_upstream=false" : "";
+      const suffix = path === "/proxies"
+        ? "&cleanup_orphaned_upstream=false"
+        : path === "/plugins/config"
+          ? `&expected_proxy_ids=${created.proxyId ?? ""}`
+          : "";
       await gateway.remove(`${path}/${id}?apply=sync${suffix}`);
     }
   });

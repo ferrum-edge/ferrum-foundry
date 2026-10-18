@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Plugin configuration updates and deletes send Ferrum Edge's
+  `expected_proxy_ids` association precondition (forge-ops #569): the
+  proxies the membership plan's own reads showed referencing the
+  configuration. A gateway that enforces it atomically refuses a write
+  that would detach a proxy attached after Foundry read the namespace,
+  surfaced as a concurrent change instead of a silent detach. Older
+  gateways ignore the parameter. The mock admin gateway and the gateway
+  contract scripts model and send it.
+
 ### Security
 
 - Proxied gateway responses are confined to API media types (#601). A

@@ -207,7 +207,12 @@ function harness(
       }
       return structuredClone(plugin);
     },
-    updatePlugin: async (id: string, data: PluginConfigCreate) => {
+    updatePlugin: async (
+      id: string,
+      data: PluginConfigCreate,
+      _basis: PluginConfig | null,
+      expectedProxyIds: readonly string[],
+    ) => {
       updatePluginCalls += 1;
       operations.push(`plugin:${data.scope}`);
       if (options.failPluginUpdate && updatePluginCalls === 1) {
@@ -215,6 +220,19 @@ function harness(
       }
       const current = plugins.get(id);
       if (!current) throw notFound(id);
+      // The gateway's association precondition (forge-ops #569): a
+      // referencing proxy outside the expected set (kept target aside)
+      // refuses the write before anything is detached.
+      const kept = data.scope === "proxy" ? data.proxy_id : undefined;
+      for (const proxy of proxies.values()) {
+        if (
+          proxy.id !== kept &&
+          !expectedProxyIds.includes(proxy.id) &&
+          proxy.plugins.some((entry) => entry.plugin_config_id === id)
+        ) {
+          throw preconditionFailed();
+        }
+      }
       const next = {
         ...current,
         proxy_id: undefined,
@@ -241,7 +259,7 @@ function harness(
       return structuredClone(next);
     },
     canCondition: () => !options.untaggedPluginReads,
-    deletePlugin: async (id, basis) => {
+    deletePlugin: async (id, basis, expectedProxyIds) => {
       deleteCalls += 1;
       operations.push(`delete:${id}`);
       if (options.failPluginDelete) throw new Error("injected plugin delete failure");
@@ -249,6 +267,14 @@ function harness(
       if (!current) throw notFound(id);
       // `basis` stands for the read whose tag the DELETE carries as If-Match.
       if (basis && basis.updated_at !== current.updated_at) throw preconditionFailed();
+      for (const proxy of proxies.values()) {
+        if (
+          !expectedProxyIds.includes(proxy.id) &&
+          proxy.plugins.some((entry) => entry.plugin_config_id === id)
+        ) {
+          throw preconditionFailed();
+        }
+      }
       plugins.delete(id);
       // Edge removes the configuration from every proxy that lists it in the
       // same transaction.
@@ -503,7 +529,7 @@ describe("proxy-group membership reconciliation", () => {
   it("models DELETE of an already cascade-deleted plugin as 404", async () => {
     const state = harness([makeProxy("p1", ["plugin-1"])], [makePlugin("plugin-1")]);
     await state.deps.updateProxy("p1", { ...makeProxy("p1"), plugins: [] }, null);
-    await expect(state.deps.deletePlugin("plugin-1", null)).rejects.toMatchObject({
+    await expect(state.deps.deletePlugin("plugin-1", null, [])).rejects.toMatchObject({
       response: { status: 404 },
     });
   });
@@ -555,7 +581,7 @@ describe("proxy-group membership reconciliation", () => {
     const getPlugin = state.deps.getPlugin;
     state.deps.getPlugin = async (id) => {
       const read = await getPlugin(id);
-      await state.deps.deletePlugin(id, null);
+      await state.deps.deletePlugin(id, null, ["p1"]);
       return read;
     };
 
@@ -620,7 +646,7 @@ describe("proxy-group membership reconciliation", () => {
         await state.deps.updatePlugin("created-plugin", {
           ...groupInput(),
           config: { requests: 99 },
-        }, null);
+        }, null, ["p1"]);
         throw new Error("injected failure after concurrent config edit");
       }
       return updateProxy(id, data, null);
@@ -906,8 +932,8 @@ describe("leaving group scope (#610)", () => {
       [makePlugin("plugin-1")],
     );
     const updatePlugin = state.deps.updatePlugin;
-    state.deps.updatePlugin = async (id, data, basis) => {
-      await updatePlugin(id, data, basis);
+    state.deps.updatePlugin = async (id, data, basis, expectedProxyIds) => {
+      await updatePlugin(id, data, basis, expectedProxyIds);
       throw markCommittedWrite(new Error("reload timed out"), {
         cursor: "1:2",
         reason: "reload_timeout",
