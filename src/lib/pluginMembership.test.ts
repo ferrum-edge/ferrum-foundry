@@ -207,7 +207,12 @@ function harness(
       }
       return structuredClone(plugin);
     },
-    updatePlugin: async (id: string, data: PluginConfigCreate) => {
+    updatePlugin: async (
+      id: string,
+      data: PluginConfigCreate,
+      _basis: PluginConfig | null,
+      expectedProxyIds: readonly string[],
+    ) => {
       updatePluginCalls += 1;
       operations.push(`plugin:${data.scope}`);
       if (options.failPluginUpdate && updatePluginCalls === 1) {
@@ -215,6 +220,19 @@ function harness(
       }
       const current = plugins.get(id);
       if (!current) throw notFound(id);
+      // The gateway's association precondition (forge-ops #569): a
+      // referencing proxy outside the expected set (kept target aside)
+      // refuses the write before anything is detached.
+      const kept = data.scope === "proxy" ? data.proxy_id : undefined;
+      for (const proxy of proxies.values()) {
+        if (
+          proxy.id !== kept &&
+          !expectedProxyIds.includes(proxy.id) &&
+          proxy.plugins.some((entry) => entry.plugin_config_id === id)
+        ) {
+          throw preconditionFailed();
+        }
+      }
       const next = {
         ...current,
         proxy_id: undefined,
@@ -241,7 +259,7 @@ function harness(
       return structuredClone(next);
     },
     canCondition: () => !options.untaggedPluginReads,
-    deletePlugin: async (id, basis) => {
+    deletePlugin: async (id, basis, expectedProxyIds) => {
       deleteCalls += 1;
       operations.push(`delete:${id}`);
       if (options.failPluginDelete) throw new Error("injected plugin delete failure");
@@ -249,6 +267,14 @@ function harness(
       if (!current) throw notFound(id);
       // `basis` stands for the read whose tag the DELETE carries as If-Match.
       if (basis && basis.updated_at !== current.updated_at) throw preconditionFailed();
+      for (const proxy of proxies.values()) {
+        if (
+          !expectedProxyIds.includes(proxy.id) &&
+          proxy.plugins.some((entry) => entry.plugin_config_id === id)
+        ) {
+          throw preconditionFailed();
+        }
+      }
       plugins.delete(id);
       // Edge removes the configuration from every proxy that lists it in the
       // same transaction.

@@ -249,7 +249,7 @@ function associationsTo(proxy, pluginId) {
 
 async function removeResources(session) {
   for (const path of [
-    `/api/proxy/plugins/config/${RESOURCES.plugin}?apply=sync`,
+    `/api/proxy/plugins/config/${RESOURCES.plugin}?apply=sync&expected_proxy_ids=${RESOURCES.proxy}`,
     `/api/proxy/proxies/${RESOURCES.proxy}?apply=sync&cleanup_orphaned_upstream=false`,
     `/api/proxy/consumers/${RESOURCES.consumer}?apply=sync`,
     `/api/proxy/upstreams/${RESOURCES.upstream}?apply=sync`,

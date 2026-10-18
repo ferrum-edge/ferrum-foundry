@@ -210,7 +210,7 @@ export async function verifyPluginDefaults(exchange, { report = console.log } = 
       // response failed after persistence. Never leave a global plugin active
       // for the next template, or unrelated plugin composition can mask drift.
       try {
-        assertStatus(await exchange(`${pluginPath}?apply=sync`, { method: "DELETE" }),
+        assertStatus(await exchange(`${pluginPath}?apply=sync&expected_proxy_ids=${needsProxy ? proxyId : ""}`, { method: "DELETE" }),
           [200, 204, 404], `${name} cleanup`);
         if (needsProxy) {
           assertStatus(await exchange(`/proxies/${proxyId}?apply=sync`, { method: "DELETE" }),

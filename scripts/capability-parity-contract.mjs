@@ -130,7 +130,7 @@ export function addressesNamespace(method, path) {
 export const WRITE_PROBES = {
   proxies: { method: "DELETE", path: `/proxies/${PROBE_ID}`, admittedStatus: 404 },
   upstreams: { method: "DELETE", path: `/upstreams/${PROBE_ID}`, admittedStatus: 404 },
-  pluginConfigs: { method: "DELETE", path: `/plugins/config/${PROBE_ID}`, admittedStatus: 404 },
+  pluginConfigs: { method: "DELETE", path: `/plugins/config/${PROBE_ID}?expected_proxy_ids=`, admittedStatus: 404 },
   consumers: { method: "DELETE", path: `/consumers/${PROBE_ID}`, admittedStatus: 404 },
   consumerCredentials: { method: "DELETE", path: `/consumers/${PROBE_ID}/credentials/keyauth/0`, admittedStatus: 404 },
   apiSpecs: { method: "DELETE", path: `/api-specs/${PROBE_ID}`, admittedStatus: 404 },

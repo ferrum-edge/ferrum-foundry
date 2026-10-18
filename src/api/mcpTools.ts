@@ -33,6 +33,7 @@ import {
 import { MaskedSecretWriteError } from "./maskedSecrets";
 import { pluginConfigPlaceholderSites } from "./maskedSecretSites";
 import * as pluginsApi from "./plugins";
+import * as proxiesApi from "./proxies";
 import { pathSegment } from "./pathSegment";
 import type { PluginConfig, PluginConfigCreate } from "./types";
 import type { GatewayRole } from "@/lib/capabilities";
@@ -386,8 +387,23 @@ export async function updateToolPolicy(
     namespace: scope.namespace,
     read: () => readTagged<PluginConfig>(scope, path),
     propose,
-    write: (body: PluginConfigCreate, ifMatch: string | null) =>
-      pluginsApi.updateConfig(scope, pluginId, body, ifMatch),
+    // A policy save changes neither scope nor target, but the gateway
+    // still requires the expected referencing set (forge-ops #569); list
+    // it at write time so the precondition names the current membership.
+    write: async (body: PluginConfigCreate, ifMatch: string | null) =>
+      pluginsApi.updateConfig(
+        scope,
+        pluginId,
+        body,
+        ifMatch,
+        (await proxiesApi.listAll(scope))
+          .filter((proxy) =>
+            (proxy.plugins ?? []).some(
+              (association) => association.plugin_config_id === pluginId,
+            ),
+          )
+          .map((proxy) => proxy.id),
+      ),
   };
   return guard
     ? guardedReplace<PluginConfig, PluginConfigCreate>({ ...options, guard })

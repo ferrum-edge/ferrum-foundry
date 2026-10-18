@@ -467,7 +467,7 @@ describe("plugin configuration writes (#478)", () => {
     const url = `https://ops:${LONG}@collector.internal/v1/push`;
     const plugin = { ...pluginWith("unused"), config: { endpoint_url: url } };
     echo(url);
-    const failure = await plugins.updateConfig(scope, "log", plugin, '"r1"').catch((e: unknown) => e);
+    const failure = await plugins.updateConfig(scope, "log", plugin, '"r1"', []).catch((e: unknown) => e);
     expectDetached(failure);
     expectRedacted(await exposure(failure), url);
     expect(isPreconditionFailed(failure)).toBe(false);
@@ -476,7 +476,7 @@ describe("plugin configuration writes (#478)", () => {
     // A handled 412 is the guard's to resolve: no popup for it.
     reported.length = 0;
     respond = () => Response.json({ error: `precondition failed for ${url}` }, { status: 412 });
-    const refused = await plugins.updateConfig(scope, "log", plugin, '"r1"').catch((e: unknown) => e);
+    const refused = await plugins.updateConfig(scope, "log", plugin, '"r1"', []).catch((e: unknown) => e);
     expectDetached(refused);
     expect(isPreconditionFailed(refused)).toBe(true);
     expect(sent.at(-1)?.method).toBe("PUT");

@@ -40,6 +40,14 @@ them, and `proxy` keeps only the selected `proxy_id`. Foundry does not detach
 group members first. Entering group scope writes the plugin first, then adds
 members.
 
+Every plugin `PUT` and `DELETE` also carries Edge's association precondition
+(forge-ops #569): `expected_proxy_ids` names every proxy the plan's own
+reads showed referencing the configuration. Edge checks it atomically with
+the write, so a proxy another operator attached after Foundry's read refuses
+the write with `412` — shown as a concurrent change — instead of being
+silently detached by the scope change or delete below. Gateways that predate
+the precondition ignore the parameter.
+
 Creating a proxy-scoped plugin (`POST /plugins/config`) or moving one to proxy
 scope makes Edge attach it to the target proxy in the same transaction
 (ferrum-edge#4611). That transaction also advances the proxy's `updated_at`;
@@ -122,7 +130,8 @@ handles them as follows:
 
 Deleting a plugin configuration, a group included, is a single
 `DELETE /plugins/config/{id}`, conditional on the read the plugin page's
-baseline was compared with. Edge removes the configuration from every proxy
+baseline was compared with and on the referencing proxies a fresh listing
+shows (`expected_proxy_ids`, above). Edge removes the configuration from every proxy
 that lists it in the same transaction. Foundry does not detach members first:
 the last detach would make Edge delete the configuration before Foundry could
 check it again, so a concurrent configuration change could be deleted unseen

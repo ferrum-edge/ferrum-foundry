@@ -608,6 +608,50 @@ export function evaluateIfMatch(header, currentTag) {
  * advances those proxies' `updated_at` (and so their tags). Call it only after
  * the delete itself succeeded.
  */
+const MOCK_RESOURCE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/**
+ * Edge's association precondition on `PUT`/`DELETE /plugins/config/{id}`
+ * (forge-ops #569): the required `expected_proxy_ids` query parameter names
+ * every proxy the caller expects to reference the configuration. Parsing
+ * (absent/repeated/malformed → `400`) happens before the `404`, like Edge's
+ * query parse; the set comparison runs after `If-Match`. Returns
+ * `{ expected }`, `{ refusal: [status, body] }`, from the two stages.
+ */
+export function parseExpectedProxyIds(url) {
+  const values = url.searchParams.getAll('expected_proxy_ids');
+  if (values.length === 0) {
+    return { refusal: [400, { error: 'expected_proxy_ids query parameter is required: list every proxy that may reference this plugin config (empty value expects none)' }] };
+  }
+  if (values.length > 1) {
+    return { refusal: [400, { error: 'expected_proxy_ids must not be supplied more than once' }] };
+  }
+  const expected = new Set();
+  if (values[0] !== '') {
+    for (const entry of values[0].split(',')) {
+      if (!MOCK_RESOURCE_ID.test(entry)) {
+        return { refusal: [400, { error: `expected_proxy_ids: invalid resource ID '${entry}'` }] };
+      }
+      if (expected.has(entry)) {
+        return { refusal: [400, { error: `expected_proxy_ids lists proxy '${entry}' more than once` }] };
+      }
+      expected.add(entry);
+    }
+  }
+  return { expected };
+}
+
+export function associationPreconditionRefusal(proxies, ns, id, expected, kept) {
+  const unexpected = proxies
+    .filter((proxy) => (proxy.namespace ?? 'ferrum') === ns && Array.isArray(proxy.plugins)
+      && proxy.plugins.some((association) => association.plugin_config_id === id))
+    .map((proxy) => proxy.id)
+    .filter((proxyId) => proxyId !== kept && !expected.has(proxyId))
+    .sort();
+  if (unexpected.length === 0) return null;
+  return [412, { error: `plugin config '${id}' is referenced by proxies outside expected_proxy_ids: ${unexpected.join(', ')}; re-read the namespace and retry with the current referencing set` }];
+}
+
 export function detachDeletedPluginConfig(proxies, ns, id) {
   for (const proxy of proxies) {
     if ((proxy.namespace ?? 'ferrum') !== ns || !Array.isArray(proxy.plugins)) continue;
@@ -637,7 +681,7 @@ export function ifMatchRouteRefusal(method, path, header) {
  * tuple member carries response headers (the `ETag` on an item `GET`).
  */
 export function crud(list, url, method, id, body, defaults = {}, ns = 'ferrum', validate, provisioner, precondition = {}) {
-  const { kind, ifMatch } = precondition;
+  const { kind, ifMatch, proxies } = precondition;
   // The real gateway isolates resources per namespace; list responses must
   // reflect that or namespace occupancy counts are meaningless.
   if (method === 'GET' && !id) {
@@ -654,10 +698,25 @@ export function crud(list, url, method, id, body, defaults = {}, ns = 'ferrum', 
   // RFC 9110 §13.2.1: a request that would be 404 without the precondition is
   // still 404; otherwise the precondition is evaluated before anything else.
   if (id && (method === 'PUT' || method === 'DELETE')) {
+    // The association precondition's query parse precedes the 404, as on
+    // Edge; its set comparison follows If-Match.
+    let expectedProxyIds;
+    if (kind === 'plugins/config') {
+      const parsed = parseExpectedProxyIds(url);
+      if (parsed.refusal) return parsed.refusal;
+      expectedProxyIds = parsed.expected;
+    }
     const existing = list.find((x) => x.id === id);
     if (!existing) return [404, { error: 'not found' }];
     const refusal = kind ? evaluateIfMatch(ifMatch, resourceEtag(kind, existing)) : null;
     if (refusal) return refusal;
+    if (kind === 'plugins/config' && proxies) {
+      const kept = method === 'PUT' && (body?.scope ?? existing.scope) === 'proxy'
+        ? (body?.proxy_id ?? existing.proxy_id)
+        : undefined;
+      const associationRefusal = associationPreconditionRefusal(proxies, ns, id, expectedProxyIds, kept);
+      if (associationRefusal) return associationRefusal;
+    }
   }
   if (method === 'POST' || method === 'PUT') {
     const rejection = validate?.(body, method);
@@ -1374,7 +1433,7 @@ export const server = createServer(async (req, res) => {
   for (const [pattern, list, defaults, validate, kind] of routes) {
     const match = path.match(pattern);
     if (match) {
-      const [status, payload, headers] = crud(list, url, method, match[1], body, defaults, ns, validate, provisioner, { kind, ifMatch });
+      const [status, payload, headers] = crud(list, url, method, match[1], body, defaults, ns, validate, provisioner, { kind, ifMatch, proxies });
       if (kind === 'plugins/config' && method === 'DELETE' && status === 204) {
         detachDeletedPluginConfig(proxies, ns, match[1]);
       }

@@ -220,15 +220,25 @@ export function conditionalPut<TResource>(
   path: string,
   body: unknown,
   ifMatch: string | null,
-  options: { readonly redactErrors?: boolean } = {},
+  options: {
+    readonly redactErrors?: boolean;
+    readonly searchParams?: Record<string, string>;
+    /** Further statuses the caller resolves itself, as in `conditionalDelete`. */
+    readonly handled?: readonly number[];
+  } = {},
 ): Promise<TResource> {
   const conditional = conditionalOptions(ifMatch);
+  const handled = [...(ifMatch === null ? [] : [412]), ...(options.handled ?? [])];
   return proxyApi
     .put(path, scoped(scope, {
       json: body,
+      ...(options.searchParams && { searchParams: options.searchParams }),
       ...conditional,
-      ...(options.redactErrors && {
-        context: { ...conditional.context, [REDACT_ERRORS]: true },
+      ...((options.redactErrors || handled.length > 0) && {
+        context: {
+          ...(handled.length > 0 && { [HANDLED_STATUSES]: handled }),
+          ...(options.redactErrors && { [REDACT_ERRORS]: true }),
+        },
       }),
     }))
     .json<TResource>();
@@ -243,11 +253,15 @@ export async function conditionalDelete(
   scope: NamespaceScope,
   path: string,
   ifMatch: string | null,
-  options: { readonly handled?: readonly number[] } = {},
+  options: {
+    readonly handled?: readonly number[];
+    readonly searchParams?: Record<string, string>;
+  } = {},
 ): Promise<void> {
   const conditional = conditionalOptions(ifMatch);
   const handled = [...(ifMatch === null ? [] : [412]), ...(options.handled ?? [])];
   await proxyApi.delete(path, scoped(scope, {
+    ...(options.searchParams && { searchParams: options.searchParams }),
     ...conditional,
     ...(handled.length > 0 && { context: { [HANDLED_STATUSES]: handled } }),
   }));

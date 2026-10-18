@@ -629,21 +629,40 @@ test("a plugin DELETE detaches its proxies, and a stale If-Match changes neither
   });
   const proxies = [member("p1"), member("p2"), member("p3", "elsewhere")];
   const configs = [plugin];
-  const url = new URL("http://mock/plugins/config/group");
+  const url = new URL("http://mock/plugins/config/group?expected_proxy_ids=p1,p2");
   const before = structuredClone(proxies);
+
+  // The association precondition is required and parsed first (forge-ops #569).
+  const [missing] = crud(configs, new URL("http://mock/plugins/config/group"), "DELETE", "group", undefined, {}, "ferrum", undefined, undefined, {
+    kind: "plugins/config",
+    proxies,
+  });
+  assert.equal(missing, 400);
 
   const [refused] = crud(configs, url, "DELETE", "group", undefined, {}, "ferrum", undefined, undefined, {
     kind: "plugins/config",
     ifMatch: '"stale"',
+    proxies,
   });
   assert.equal(refused, 412);
   assert.equal(configs.length, 1);
   assert.deepEqual(proxies, before);
 
+  // An expected set missing a referencing proxy refuses the same way.
   const tag = resourceEtag("plugins/config", plugin);
+  const [unexpected] = crud(configs, new URL("http://mock/plugins/config/group?expected_proxy_ids=p1"), "DELETE", "group", undefined, {}, "ferrum", undefined, undefined, {
+    kind: "plugins/config",
+    ifMatch: tag,
+    proxies,
+  });
+  assert.equal(unexpected, 412);
+  assert.equal(configs.length, 1);
+  assert.deepEqual(proxies, before);
+
   const [status] = crud(configs, url, "DELETE", "group", undefined, {}, "ferrum", undefined, undefined, {
     kind: "plugins/config",
     ifMatch: tag,
+    proxies,
   });
   assert.equal(status, 204);
   detachDeletedPluginConfig(proxies, "ferrum", "group");

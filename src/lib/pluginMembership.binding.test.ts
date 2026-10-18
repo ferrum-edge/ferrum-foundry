@@ -166,6 +166,7 @@ describe("plugin membership plans bind every request to the starting namespace",
       "GET plugins/config/plugin-1",
       "PUT proxies/p1",
       "GET plugins/config/plugin-1",
+      "GET proxies",
       "PUT plugins/config/plugin-1",
       "GET plugins/config/plugin-1",
       "GET proxies",
@@ -312,6 +313,7 @@ describe("plugin membership plans on a gateway that honours If-Match", () => {
     // transaction, so no proxy is written first.
     expect(wire).toEqual([
       "GET plugins/config/plugin-1",
+      "GET proxies",
       'DELETE plugins/config/plugin-1 if-match "plugins/config/plugin-1@0"',
     ]);
     expect(store.has("plugins/config/plugin-1")).toBe(false);
@@ -334,6 +336,7 @@ describe("plugin membership plans on a gateway that honours If-Match", () => {
     }
     expect(wire).toEqual([
       "GET plugins/config/plugin-1",
+      "GET proxies",
       'DELETE plugins/config/plugin-1 if-match "plugins/config/plugin-1@0"',
     ]);
     expect(popups).not.toHaveBeenCalled();
@@ -363,6 +366,7 @@ describe("plugin membership plans on a gateway that honours If-Match", () => {
     expect(refused.detail.current.config).toEqual({ requests: 99 });
     expect(wire).toEqual([
       "GET plugins/config/plugin-1",
+      "GET proxies",
       'DELETE plugins/config/plugin-1 if-match "plugins/config/plugin-1@0"',
       "GET plugins/config/plugin-1",
     ]);

@@ -183,7 +183,7 @@ await request(`/proxies/${proxyId}?apply=sync`, {
 });
 
 await request("/plugins/config?apply=sync", { method: "POST", body: plugin });
-await request(`/plugins/config/${pluginId}?apply=sync`, {
+await request(`/plugins/config/${pluginId}?apply=sync&expected_proxy_ids=${proxyId}`, {
   method: "PUT",
   body: { ...plugin, config: { max_bytes: 8192 } },
 });
@@ -207,7 +207,7 @@ await request("/plugins/config?proxy_id=has%20space", { expected: [400] });
   const maskedPath = `/plugins/config/${maskedId}`;
   const endpointUrl = "https://collector.example.com/contract-smoke/ingest";
   // A run that died against a persistent gateway may have left it behind.
-  await request(`${maskedPath}?apply=sync`, { method: "DELETE", expected: [200, 204, 404] });
+  await request(`${maskedPath}?apply=sync&expected_proxy_ids=`, { method: "DELETE", expected: [200, 204, 404] });
   await request("/plugins/config?apply=sync", {
     method: "POST",
     body: {
@@ -228,7 +228,7 @@ await request("/plugins/config?proxy_id=has%20space", { expected: [400] });
       ...operatorRead.body,
       config: { ...operatorRead.body.config, batch_size: 75 },
     };
-    const refused = await exchange(`${maskedPath}?apply=sync`, {
+    const refused = await exchange(`${maskedPath}?apply=sync&expected_proxy_ids=`, {
       method: "PUT",
       body: echoed,
       role: "operator",
@@ -241,7 +241,7 @@ await request("/plugins/config?proxy_id=has%20space", { expected: [400] });
     assert.equal(stored.config.endpoint_url, endpointUrl);
     assert.equal(stored.config.batch_size, 50);
   } finally {
-    await request(`${maskedPath}?apply=sync`, { method: "DELETE", expected: [200, 204, 404] });
+    await request(`${maskedPath}?apply=sync&expected_proxy_ids=`, { method: "DELETE", expected: [200, 204, 404] });
   }
 }
 
@@ -279,10 +279,10 @@ await request("/plugins/config?proxy_id=has%20space", { expected: [400] });
   );
   assert.deepEqual(predicted, ["/config/authorization"]);
 
-  await request(`${replayPath}?apply=sync`, { method: "DELETE", expected: [200, 204, 404] });
+  await request(`${replayPath}?apply=sync&expected_proxy_ids=`, { method: "DELETE", expected: [200, 204, 404] });
   await request("/plugins/config?apply=sync", { method: "POST", body: created });
   try {
-    const refused = await exchange(`${replayPath}?apply=sync`, {
+    const refused = await exchange(`${replayPath}?apply=sync&expected_proxy_ids=`, {
       method: "PUT",
       body: echoed,
       role: "operator",
@@ -294,7 +294,7 @@ await request("/plugins/config?proxy_id=has%20space", { expected: [400] });
     );
 
     // The ordinary string alone is not a masked site, so an operator may send it.
-    const unmasked = await exchange(`${replayPath}?apply=sync`, {
+    const unmasked = await exchange(`${replayPath}?apply=sync&expected_proxy_ids=`, {
       method: "PUT",
       body: { ...echoed, config: { ...echoed.config, authorization: "Bearer rotated" } },
       role: "operator",
@@ -302,12 +302,12 @@ await request("/plugins/config?proxy_id=has%20space", { expected: [400] });
     assert.equal(unmasked.status, 200, JSON.stringify(unmasked.body));
 
     // An admin's reads are raw, so an admin's write is never checked.
-    await request(`${replayPath}?apply=sync`, { method: "PUT", body: echoed });
+    await request(`${replayPath}?apply=sync&expected_proxy_ids=`, { method: "PUT", body: echoed });
     const stored = await request(replayPath);
     assert.equal(stored.config.authorization, REDACTED_PLACEHOLDER);
     assert.equal(stored.config.service_name, REDACTED_PLACEHOLDER);
   } finally {
-    await request(`${replayPath}?apply=sync`, { method: "DELETE", expected: [200, 204, 404] });
+    await request(`${replayPath}?apply=sync&expected_proxy_ids=`, { method: "DELETE", expected: [200, 204, 404] });
   }
 }
 
@@ -332,18 +332,18 @@ await request("/plugins/config?proxy_id=has%20space", { expected: [400] });
       method: "PUT",
       body: { ...proxy, plugins: ids.map((plugin_config_id) => ({ plugin_config_id })) },
     });
-  await request(`${groupPath}?apply=sync`, { method: "DELETE", expected: [200, 204, 404] });
+  await request(`${groupPath}?apply=sync&expected_proxy_ids=${proxyId}`, { method: "DELETE", expected: [200, 204, 404] });
   await request("/plugins/config?apply=sync", { method: "POST", body: group });
   const before = await attached();
   try {
     await setAssociations([...before, groupId]);
     const stale = await exchange(groupPath);
     assert.ok(stale.etag, "plugin config read carried no ETag");
-    await request(`${groupPath}?apply=sync`, {
+    await request(`${groupPath}?apply=sync&expected_proxy_ids=${proxyId}`, {
       method: "PUT",
       body: { ...group, config: { header_name: "X-Contract-Smoke-Group-2" } },
     });
-    const refused = await exchange(`${groupPath}?apply=sync`, {
+    const refused = await exchange(`${groupPath}?apply=sync&expected_proxy_ids=${proxyId}`, {
       method: "DELETE",
       headers: { "if-match": stale.etag },
     });
@@ -351,7 +351,7 @@ await request("/plugins/config?proxy_id=has%20space", { expected: [400] });
     assert.ok((await attached()).includes(groupId), "a refused DELETE detached the group");
 
     const fresh = await exchange(groupPath);
-    const deleted = await exchange(`${groupPath}?apply=sync`, {
+    const deleted = await exchange(`${groupPath}?apply=sync&expected_proxy_ids=${proxyId}`, {
       method: "DELETE",
       headers: { "if-match": fresh.etag },
     });
@@ -359,7 +359,7 @@ await request("/plugins/config?proxy_id=has%20space", { expected: [400] });
     assert.deepEqual(await attached(), before);
     await request(groupPath, { expected: [404] });
   } finally {
-    await request(`${groupPath}?apply=sync`, { method: "DELETE", expected: [200, 204, 404] });
+    await request(`${groupPath}?apply=sync&expected_proxy_ids=${proxyId}`, { method: "DELETE", expected: [200, 204, 404] });
   }
 }
 
@@ -372,7 +372,7 @@ const namespaces = await request("/namespaces?offset=0&limit=100");
 const namespaceNames = Array.isArray(namespaces) ? namespaces : namespaces.data;
 assert.ok(namespaceNames.includes(config.namespace));
 
-await request(`/plugins/config/${pluginId}?apply=sync`, { method: "DELETE", expected: [200, 204] });
+await request(`/plugins/config/${pluginId}?apply=sync&expected_proxy_ids=${proxyId}`, { method: "DELETE", expected: [200, 204] });
 await request(`/proxies/${proxyId}?apply=sync&cleanup_orphaned_upstream=false`, {
   method: "DELETE",
   expected: [200, 204],

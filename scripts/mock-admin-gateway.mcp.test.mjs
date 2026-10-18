@@ -62,7 +62,7 @@ function replacePayload(stored) {
 }
 
 async function readPlugin() {
-  const response = await request(`/plugins/config/${PLUGIN}`);
+  const response = await request(`/plugins/config/${PLUGIN}?expected_proxy_ids=${PROXY}`);
   assert.equal(response.status, 200);
   const etag = response.headers.get("etag");
   assert.match(etag, /^"[0-9a-f]+"$/);
@@ -135,7 +135,7 @@ test("a per-tool grant round-trips through If-Match and shows in the next catalo
     denied_groups: ["contractors"],
   };
 
-  const write = await request(`/plugins/config/${PLUGIN}`, {
+  const write = await request(`/plugins/config/${PLUGIN}?expected_proxy_ids=${PROXY}`, {
     method: "PUT", body: payload, headers: { "if-match": etag },
   });
   assert.equal(write.status, 200);
@@ -162,7 +162,7 @@ test("a per-tool grant round-trips through If-Match and shows in the next catalo
   // The tag the edit was sent against is spent: replaying it is refused and
   // writes nothing.
   payload.config.policy.tools["github.create_issue"] = { action: "deny" };
-  const stale = await request(`/plugins/config/${PLUGIN}`, {
+  const stale = await request(`/plugins/config/${PLUGIN}?expected_proxy_ids=${PROXY}`, {
     method: "PUT", body: payload, headers: { "if-match": etag },
   });
   assert.equal(stale.status, 412);
@@ -173,7 +173,7 @@ test("removing an entry hands the tool back to the default action", async () => 
   const { plugin, etag } = await readPlugin();
   const payload = replacePayload(plugin);
   delete payload.config.policy.tools["orders.cancel_order"];
-  const write = await request(`/plugins/config/${PLUGIN}`, {
+  const write = await request(`/plugins/config/${PLUGIN}?expected_proxy_ids=${PROXY}`, {
     method: "PUT", body: payload, headers: { "if-match": etag },
   });
   assert.equal(write.status, 200);
@@ -187,7 +187,7 @@ test("a grant on a non-allow entry is refused and nothing is written", async () 
   const { plugin, etag } = await readPlugin();
   const payload = replacePayload(plugin);
   payload.config.policy.tools["github.search_issues"] = { action: "deny", allowed_groups: ["eng"] };
-  const write = await request(`/plugins/config/${PLUGIN}`, {
+  const write = await request(`/plugins/config/${PLUGIN}?expected_proxy_ids=${PROXY}`, {
     method: "PUT", body: payload, headers: { "if-match": etag },
   });
   assert.equal(write.status, 400);
