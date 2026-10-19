@@ -1,9 +1,9 @@
 ---
 name: deepseek-pro-agents
-description: Dispatch and orchestrate local opencode DeepSeek subagents, pinned to alibaba-token-plan/deepseek-v4.1-flash, via the opencode CLI harness for ferrum-foundry issue/PR work — implementer, fix-round, and shepherd modes, with worktree isolation and the review loop. The skill keeps its deepseek-pro-agents name but does not dispatch DeepSeek V4 Pro. Use when the user asks Claude to spawn deepseek-pro-agents workers on issues, PRs, review findings, or red CI.
+description: Dispatch and orchestrate local opencode DeepSeek subagents, pinned to alibaba-token-plan/deepseek-v4.1-flash-1017, via the opencode CLI harness for ferrum-foundry issue/PR work — implementer, fix-round, and shepherd modes, with worktree isolation and the review loop. The skill keeps its deepseek-pro-agents name but does not dispatch DeepSeek V4 Pro. Use when the user asks Claude to spawn deepseek-pro-agents workers on issues, PRs, review findings, or red CI.
 ---
 
-# DeepSeek agents (`deepseek-pro-agents`, pinned to V4.1 Flash)
+# DeepSeek agents (`deepseek-pro-agents`, pinned to V4.1 Flash 1017)
 
 Act as the orchestrator. Read and follow the shared workflow in
 [the canonical skill](../../../.agents/skills/deepseek-pro-agents/SKILL.md), interpreting its Codex
@@ -17,9 +17,9 @@ do not duplicate them in this directory.
   --effort <medium|high|xhigh|max>
 ```
 
-The shared launcher pins `alibaba-token-plan/deepseek-v4.1-flash` and refuses any other `--model`;
+The shared launcher pins `alibaba-token-plan/deepseek-v4.1-flash-1017` and refuses any other `--model`;
 `--model` can only restate that pin. Despite the skill's name, it cannot dispatch DeepSeek V4 Pro:
-tell a user who asks for V4 Pro that this skill runs V4.1 Flash. `--effort` is accepted for parity
+tell a user who asks for V4 Pro that this skill runs V4.1 Flash 1017. `--effort` is accepted for parity
 with the sibling skills and ignored, because this provider exposes no effort tiers.
 
 Read the canonical skill before dispatch for effort selection, preflight, isolation, failure
