@@ -7,6 +7,7 @@ import {
   bindPluginMembership,
   createPluginWithMembership,
   deletePluginWithMembership,
+  PluginMembershipChangedError,
   updatePluginWithMembership,
 } from "./pluginMembership";
 
@@ -145,6 +146,7 @@ describe("plugin membership plans bind every request to the starting namespace",
         ["p3"],
         deps,
         null,
+        ["p1", "p2"],
       ),
     ).rejects.toThrow("compensating rollback was attempted");
 
@@ -186,6 +188,37 @@ describe("plugin membership plans on a gateway that honours If-Match", () => {
   let interleaveOnPut: string | null = null;
   let untaggedPluginReads = false;
   let vanishBeforeDelete = false;
+  /** Another operator attaches this proxy to plugin-1 when the next request of `method` arrives. */
+  let attachOn: { method: string; proxy: string } | null = null;
+  /** The `expected_proxy_ids` each plugin `PUT`/`DELETE` carried. */
+  const expectedSent: (string | null)[] = [];
+
+  function attachPlugin1(proxyPath: string): void {
+    const entry = store.get(proxyPath)!;
+    const proxy = entry.value as Proxy;
+    entry.revision += 1;
+    entry.value = {
+      ...proxy,
+      plugins: [...proxy.plugins, { plugin_config_id: "plugin-1" }],
+      updated_at: `attached-${entry.revision}`,
+    };
+  }
+
+  /**
+   * Edge's association precondition (forge-ops #569), as the mock admin
+   * gateway enforces it: a proxy referencing the configuration outside
+   * `expected_proxy_ids` (a proxy-scoped write's own target aside) is a `412`.
+   */
+  function associationRefusal(path: string, expected: string, kept?: string): boolean {
+    const id = path.replace("plugins/config/", "");
+    const allowed = new Set(expected === "" ? [] : expected.split(","));
+    return [...store.entries()].some(([key, entry]) => {
+      if (!key.startsWith("proxies/")) return false;
+      const proxy = entry.value as Proxy;
+      return proxy.id !== kept && !allowed.has(proxy.id) &&
+        proxy.plugins.some((a) => a.plugin_config_id === id);
+    });
+  }
 
   const tag = (path: string) => `"${path}@${store.get(path)!.revision}"`;
 
@@ -216,6 +249,8 @@ describe("plugin membership plans on a gateway that honours If-Match", () => {
     interleaveOnPut = null;
     untaggedPluginReads = false;
     vanishBeforeDelete = false;
+    attachOn = null;
+    expectedSent.length = 0;
     store.set("plugins/config/plugin-1", { value: plugin, revision: 0 });
     store.set("proxies/p1", { value: makeProxy("p1", "v1"), revision: 0 });
     store.set("proxies/p2", { value: makeProxy("p2", "v1"), revision: 0 });
@@ -223,9 +258,18 @@ describe("plugin membership plans on a gateway that honours If-Match", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: Request) => {
-        const path = new URL(input.url).pathname.replace("/api/proxy/", "");
+        const url = new URL(input.url);
+        const path = url.pathname.replace("/api/proxy/", "");
         const ifMatch = input.headers.get("if-match");
         wire.push(`${input.method} ${path}${ifMatch ? ` if-match ${ifMatch}` : ""}`);
+        if (attachOn && attachOn.method === input.method) {
+          attachPlugin1(`proxies/${attachOn.proxy}`);
+          attachOn = null;
+        }
+        const pluginWrite = path.startsWith("plugins/config/") &&
+          (input.method === "PUT" || input.method === "DELETE");
+        const expected = pluginWrite ? url.searchParams.get("expected_proxy_ids") : null;
+        if (pluginWrite) expectedSent.push(expected);
 
         if (input.method === "GET" && path === "proxies") {
           const data = [...store.entries()]
@@ -270,6 +314,16 @@ describe("plugin membership plans on a gateway that honours If-Match", () => {
         if (ifMatch !== null && ifMatch !== tag(path)) {
           return json({ error: "Precondition Failed" }, 412);
         }
+        if (pluginWrite) {
+          if (expected === null) return json({ error: "expected_proxy_ids is required" }, 400);
+          const body = input.method === "PUT"
+            ? (await input.clone().json()) as PluginConfig
+            : undefined;
+          const kept = body?.scope === "proxy" ? body.proxy_id ?? undefined : undefined;
+          if (associationRefusal(path, expected, kept)) {
+            return json({ error: "referenced by proxies outside expected_proxy_ids" }, 412);
+          }
+        }
         if (input.method === "DELETE") {
           store.delete(path);
           // Edge removes a deleted configuration from every proxy that lists
@@ -307,6 +361,7 @@ describe("plugin membership plans on a gateway that honours If-Match", () => {
       "plugin-1",
       bindPluginMembership({ namespace: "tenant-a" }),
       null,
+      ["p1", "p2"],
     );
 
     // One conditional DELETE; Edge detaches the members in the same
@@ -319,6 +374,92 @@ describe("plugin membership plans on a gateway that honours If-Match", () => {
     expect(store.has("plugins/config/plugin-1")).toBe(false);
     expect((store.get("proxies/p1")!.value as Proxy).plugins).toEqual([]);
     expect((store.get("proxies/p2")!.value as Proxy).plugins).toEqual([]);
+    // The precondition names the members the page showed.
+    expect(expectedSent).toEqual(["p1,p2"]);
+  });
+
+  it("sends the membership the page showed, so Edge refuses a delete after a concurrent attach (#630)", async () => {
+    store.set("proxies/p3", { value: { ...makeProxy("p3", "v1"), plugins: [] }, revision: 0 });
+    // Another operator attaches p3 after the plan's listing, just before the DELETE.
+    attachOn = { method: "DELETE", proxy: "p3" };
+
+    const refused = await deletePluginWithMembership(
+      "plugin-1",
+      bindPluginMembership({ namespace: "tenant-a" }),
+      pluginWriteGuard(plugin),
+      ["p1", "p2"],
+    ).then(() => null, (error: unknown) => error);
+
+    expect(refused).toBeInstanceOf(PluginMembershipChangedError);
+    expect((refused as PluginMembershipChangedError).unexpectedProxyIds).toEqual(["p3"]);
+    expect((refused as Error).message).toContain("Nothing was deleted");
+    expect((refused as Error).message).toContain("Reload");
+    // Not a fresh listing's {p1, p2, p3}: the set the page rendered.
+    expect(expectedSent).toEqual(["p1,p2"]);
+    expect(wire).toEqual([
+      "GET plugins/config/plugin-1",
+      "GET proxies",
+      'DELETE plugins/config/plugin-1 if-match "plugins/config/plugin-1@0"',
+      "GET plugins/config/plugin-1",
+      "GET proxies",
+    ]);
+    expect(store.has("plugins/config/plugin-1")).toBe(true);
+    expect((store.get("proxies/p3")!.value as Proxy).plugins).toEqual([
+      { plugin_config_id: "plugin-1" },
+    ]);
+  });
+
+  it("sends no DELETE when its own listing shows a proxy attached since the page loaded (#630)", async () => {
+    store.set("proxies/p3", { value: { ...makeProxy("p3", "v1"), plugins: [] }, revision: 0 });
+    // Attached between the page's render and the delete: a fresh listing
+    // would now name p3 and Edge would accept a DELETE that detaches it.
+    attachOn = { method: "GET", proxy: "p3" };
+
+    const refused = await deletePluginWithMembership(
+      "plugin-1",
+      bindPluginMembership({ namespace: "tenant-a" }),
+      pluginWriteGuard(plugin),
+      ["p1", "p2"],
+    ).then(() => null, (error: unknown) => error);
+
+    expect(refused).toBeInstanceOf(PluginMembershipChangedError);
+    expect((refused as PluginMembershipChangedError).unexpectedProxyIds).toEqual(["p3"]);
+    expect(wire).toEqual(["GET plugins/config/plugin-1", "GET proxies"]);
+    expect(expectedSent).toEqual([]);
+    expect(store.has("plugins/config/plugin-1")).toBe(true);
+  });
+
+  it("sends the membership the editor showed on a scope change, so Edge refuses it after a concurrent attach (#630)", async () => {
+    store.set("proxies/p3", { value: { ...makeProxy("p3", "v1"), plugins: [] }, revision: 0 });
+    attachOn = { method: "PUT", proxy: "p3" };
+
+    const refused = await updatePluginWithMembership(
+      "plugin-1",
+      { ...toUpdatePayload(plugin), scope: "global" },
+      [],
+      bindPluginMembership({ namespace: "tenant-a" }),
+      pluginWriteGuard(plugin),
+      ["p1", "p2"],
+    ).then(() => null, (error: unknown) => error);
+
+    expect(refused).toBeInstanceOf(PluginMembershipChangedError);
+    expect((refused as Error).message).toContain("Nothing was saved");
+    expect(expectedSent).toEqual(["p1,p2"]);
+    expect(wire).toEqual([
+      "GET plugins/config/plugin-1",
+      "GET proxies",
+      "GET plugins/config/plugin-1",
+      'PUT plugins/config/plugin-1 if-match "plugins/config/plugin-1@0"',
+      "GET plugins/config/plugin-1",
+      "GET proxies",
+    ]);
+    // Nothing was rolled back, because nothing was written.
+    expect((store.get("plugins/config/plugin-1")!.value as PluginConfig).scope).toBe("proxy_group");
+    for (const id of ["p1", "p2", "p3"]) {
+      expect((store.get(`proxies/${id}`)!.value as Proxy).plugins).toEqual([
+        { plugin_config_id: "plugin-1" },
+      ]);
+    }
   });
 
   it("resolves a DELETE that finds the plugin already gone, without an error popup", async () => {
@@ -330,6 +471,7 @@ describe("plugin membership plans on a gateway that honours If-Match", () => {
         "plugin-1",
         bindPluginMembership({ namespace: "tenant-a" }),
         pluginWriteGuard(plugin),
+        ["p1", "p2"],
       );
     } finally {
       setApiErrorHandler(undefined);
@@ -346,7 +488,12 @@ describe("plugin membership plans on a gateway that honours If-Match", () => {
     untaggedPluginReads = true;
 
     await expect(
-      deletePluginWithMembership("plugin-1", bindPluginMembership({ namespace: "tenant-a" }), null),
+      deletePluginWithMembership(
+        "plugin-1",
+        bindPluginMembership({ namespace: "tenant-a" }),
+        null,
+        ["p1", "p2"],
+      ),
     ).rejects.toThrow("did not provide a usable strong ETag");
 
     expect(wire).toEqual(["GET plugins/config/plugin-1"]);
@@ -360,6 +507,7 @@ describe("plugin membership plans on a gateway that honours If-Match", () => {
       "plugin-1",
       bindPluginMembership({ namespace: "tenant-a" }),
       pluginWriteGuard(plugin),
+      ["p1", "p2"],
     ).then(() => null, (error: unknown) => error);
 
     if (!isStaleResourceError(refused)) throw new Error("expected a stale delete");
@@ -388,6 +536,7 @@ describe("plugin membership plans on a gateway that honours If-Match", () => {
         ["p1"],
         bindPluginMembership({ namespace: "tenant-a" }),
         null,
+        ["p1", "p2"],
       ),
     ).rejects.toThrow("Proxy p2 changed during membership preflight");
 
@@ -406,6 +555,7 @@ describe("plugin membership plans on a gateway that honours If-Match", () => {
       ["p1", "p2"],
       bindPluginMembership({ namespace: "tenant-a" }),
       pluginWriteGuard(plugin),
+      ["p1", "p2"],
     ).then(() => null, (error: unknown) => error);
 
     if (!isStaleResourceError(refused)) throw new Error("expected a stale write");
@@ -466,6 +616,7 @@ describe("plugin membership plans on a gateway that honours If-Match", () => {
       [],
       bindPluginMembership({ namespace: "tenant-a" }),
       pluginWriteGuard(keyauth),
+      ["p1"],
     );
 
     // The plugin PUT re-homes the association and bumps both proxies; the plan

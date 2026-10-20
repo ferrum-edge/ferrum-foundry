@@ -40,7 +40,7 @@ let remove: (id: string) => Promise<unknown>;
 function Probe({ kind }: { kind: keyof typeof hooks }) {
   const useDelete = hooks[kind];
   const mutation = useDelete();
-  useEffect(() => { remove = (id) => mutation.mutateAsync({ id, guard: null }); });
+  useEffect(() => { remove = (id) => mutation.mutateAsync({ id, guard: null, observedProxyIds: [] }); });
   return null;
 }
 

@@ -49,10 +49,11 @@ export interface PluginMembershipDependencies {
     data: PluginConfigCreate,
     basis: PluginConfig | null,
     /**
-     * The association precondition's expected set (forge-ops #569): every
-     * proxy the plan's own reads showed referencing this configuration.
-     * The gateway refuses the write if another proxy references it by the
-     * time the write lands, so an attachment the plan never saw is never
+     * The association precondition's expected set (forge-ops #569): the
+     * proxies the editor showed referencing this configuration (#630), and
+     * for a rollback those plus the ones the failed save attached. The gateway
+     * refuses the write if another proxy references it by the time the
+     * write lands, so an attachment the operator never saw is never
      * silently detached.
      */
     expectedProxyIds: readonly string[],
@@ -163,6 +164,72 @@ export class PluginSavedUnverifiedError extends PluginMembershipError {
     super(message, recovery, options, saved ? pluginsApi.toUpdatePayload(saved) : undefined);
     this.name = "PluginSavedUnverifiedError";
   }
+}
+
+/**
+ * A save or delete refused because the plugin's proxy membership is no longer
+ * what the editor showed (#630): a proxy the page never displayed now
+ * references it. Nothing was written. Edge's association precondition
+ * (`expected_proxy_ids`, forge-ops #569) refuses such a write with `412`; the
+ * plan also checks its own listing first, so a gateway that predates the
+ * precondition still never detaches a proxy the operator did not see.
+ */
+export class PluginMembershipChangedError extends PluginMembershipError {
+  constructor(
+    readonly pluginId: string,
+    readonly operation: "save" | "delete",
+    /** Proxies referencing the plugin that the editor did not show. */
+    readonly unexpectedProxyIds: readonly string[],
+    options?: ErrorOptions,
+  ) {
+    super(
+      `Plugin ${pluginId}'s proxy membership changed since this page loaded: ` +
+        `${unexpectedProxyIds.join(", ")} now ${unexpectedProxyIds.length === 1 ? "references" : "reference"} it. ` +
+        `Nothing was ${operation === "delete" ? "deleted" : "saved"}. ` +
+        "Reload to review the current membership before trying again.",
+      [],
+      options,
+    );
+    this.name = "PluginMembershipChangedError";
+  }
+}
+
+/**
+ * The proxies an editor shows referencing a plugin, which a save or delete
+ * from that editor sends as `expected_proxy_ids` (#630): the group's members
+ * for `proxy_group` (`groupMemberIds`, as the editor was seeded with them),
+ * the target for `proxy`, none for `global`.
+ */
+export function observedMembership(
+  plugin: Pick<PluginConfig | PluginConfigCreate, "scope" | "proxy_id">,
+  groupMemberIds: readonly string[],
+): string[] {
+  if (plugin.scope === "proxy_group") return [...new Set(groupMemberIds)];
+  if (plugin.scope === "proxy" && plugin.proxy_id) return [plugin.proxy_id];
+  return [];
+}
+
+/**
+ * Refuse when `proxies` shows a reference the editor never displayed. A
+ * proxy the editor showed that no longer references the plugin is fine: the
+ * write cannot detach it.
+ */
+function assertMembershipUnchanged(
+  proxies: readonly Proxy[],
+  pluginId: string,
+  observed: readonly string[],
+  operation: "save" | "delete",
+  cause?: unknown,
+): void {
+  const seen = new Set(observed);
+  const unexpected = referencingProxyIds(proxies, pluginId).filter((id) => !seen.has(id));
+  if (unexpected.length === 0) return;
+  throw new PluginMembershipChangedError(
+    pluginId,
+    operation,
+    unexpected,
+    cause === undefined ? undefined : { cause },
+  );
 }
 
 function failureText(error: unknown): string {
@@ -446,6 +513,52 @@ async function rollbackAssociations(
 }
 
 /**
+ * The references a failed save's rollback may write over (#630): the
+ * membership the editor showed, plus the ones this plan established — the
+ * proxies its association writes attached and, for a move to proxy scope,
+ * the target Edge attached in the plugin `PUT`'s transaction. Restoring a
+ * global or proxy scope detaches every other reference, so the rollback's
+ * `expected_proxy_ids` is this set, never a listing taken at restore time,
+ * which would name (and so detach) a proxy another operator attached after
+ * the plugin `PUT`.
+ */
+function rollbackFence(
+  observed: readonly string[],
+  applied: readonly AppliedProxyChange[],
+  pluginId: string,
+  data: PluginConfigCreate,
+): string[] {
+  const ids = new Set(observed);
+  for (const change of applied) {
+    if (referencesPlugin(change.after, pluginId)) ids.add(change.after.id);
+  }
+  if (data.scope === "proxy" && data.proxy_id) ids.add(data.proxy_id);
+  return [...ids];
+}
+
+function unaccountedReferences(
+  proxies: readonly Proxy[],
+  pluginId: string,
+  fence: readonly string[],
+): string[] {
+  const accounted = new Set(fence);
+  return referencingProxyIds(proxies, pluginId).filter((id) => !accounted.has(id));
+}
+
+function notRestoredOver(before: PluginConfig, unaccounted: readonly string[]): string {
+  const one = unaccounted.length === 1;
+  const why = before.scope === "proxy_group"
+    ? "and Foundry does not restore over a reference it did not account for"
+    : `and restoring scope ${before.scope} would detach ${one ? "it" : "them"}`;
+  return (
+    `plugin ${before.id} was not restored: ${unaccounted.join(", ")} ` +
+    `${one ? "references" : "reference"} it without having been part of this save, ${why}, ` +
+    `so ${unaccounted.join(", ")} ${one ? "was" : "were"} left attached. Review the ` +
+    "membership, then restore the previous configuration manually if it is still wanted"
+  );
+}
+
+/**
  * Put `before` back. A `before` read through a masked projection carries a
  * placeholder for each withheld secret; writing it would be refused
  * (ferrum-edge#5925), or on an older gateway store the placeholder as the
@@ -458,6 +571,7 @@ async function rollbackPlugin(
   before: PluginConfig,
   after: PluginConfig,
   deps: PluginMembershipDependencies,
+  fence: readonly string[],
 ): Promise<string[]> {
   const masked = pluginConfigPlaceholderSites(before.plugin_name, before.config, deps.role)
     .blocking;
@@ -477,11 +591,16 @@ async function rollbackPlugin(
     if (current.updated_at !== after.updated_at) {
       return [`plugin ${after.id} changed after Foundry updated it; config was not overwritten`];
     }
-    const expected = referencingProxyIds(await deps.listProxies(), before.id);
-    await deps.updatePlugin(before.id, pluginsApi.toUpdatePayload(before), current, expected);
+    const unaccounted = unaccountedReferences(await deps.listProxies(), before.id, fence);
+    if (unaccounted.length > 0) return [notRestoredOver(before, unaccounted)];
+    await deps.updatePlugin(before.id, pluginsApi.toUpdatePayload(before), current, fence);
     return [];
   } catch (error) {
     if (isPreconditionFailed(error)) {
+      // Edge's association precondition: a proxy attached after that listing.
+      const proxies = await deps.listProxies().catch(() => undefined);
+      const unaccounted = proxies ? unaccountedReferences(proxies, before.id, fence) : [];
+      if (unaccounted.length > 0) return [notRestoredOver(before, unaccounted)];
       return [`plugin ${after.id} changed after Foundry updated it; config was not overwritten`];
     }
     return [
@@ -511,9 +630,12 @@ async function updatePluginIfUnchanged(
     if (!isPreconditionFailed(error)) throw error;
     // Something was written between that read and the PUT. If it touched what
     // the editor opened against, the operator needs the comparison, not a
-    // generic plan failure.
+    // generic plan failure; if a proxy the editor never showed now references
+    // the plugin (the association precondition), they need to reload.
     const latest = await getPluginIfPresent(snapshot.id, deps);
     if (latest) assertEditorBaseline(latest, guard, "save", data, deps.namespace);
+    const proxies = await deps.listProxies().catch(() => undefined);
+    if (proxies) assertMembershipUnchanged(proxies, snapshot.id, expectedProxyIds, "save", error);
     throw changed();
   }
 }
@@ -683,6 +805,12 @@ export async function createPluginWithMembership(
  * longer holds what the editor opened — checked at the preflight read and
  * again at the read the plugin `PUT` is conditional on. `null` only for a
  * caller with no editor to compare.
+ *
+ * `observedProxyIds` is the membership the editor showed
+ * (`observedMembership`), not a fresh listing (#630). It is the plugin
+ * `PUT`'s `expected_proxy_ids`, and the plan refuses with
+ * `PluginMembershipChangedError`, before anything is written, when its own
+ * listing already shows a proxy outside it.
  */
 export async function updatePluginWithMembership(
   pluginId: string,
@@ -690,14 +818,17 @@ export async function updatePluginWithMembership(
   desiredProxyIds: string[],
   deps: PluginMembershipDependencies,
   guard: WriteGuard<PluginConfig | PluginConfigCreate> | null,
+  observedProxyIds: readonly string[],
 ): Promise<PluginConfig> {
   validateScope(data, desiredProxyIds);
+  const observed = [...new Set(observedProxyIds)];
   const beforePlugin = await deps.getPlugin(pluginId);
   assertEditorBaseline(beforePlugin, guard, "save", data, deps.namespace);
   const plan = await loadPlan(
     data.scope === "proxy_group" ? desiredProxyIds : [],
     deps,
   );
+  assertMembershipUnchanged(plan.proxies, pluginId, observed, "save");
   const nextIsGroup = data.scope === "proxy_group";
   const desired = nextIsGroup ? plan.desired : new Set<string>();
 
@@ -713,7 +844,7 @@ export async function updatePluginWithMembership(
       data,
       deps,
       guard,
-      referencingProxyIds(plan.proxies, pluginId),
+      observed,
     );
     if (nextIsGroup) {
       await applyAssociationPlan(plan.proxies, pluginId, desired, deps, applied);
@@ -731,7 +862,12 @@ export async function updatePluginWithMembership(
     // Refused before the plugin write: nothing was changed, so there is
     // nothing to roll back, and the editor needs the comparison, not a
     // recovery report.
-    if (error instanceof StaleResourceError && !updatedPlugin) throw error;
+    if (
+      (error instanceof StaleResourceError || error instanceof PluginMembershipChangedError) &&
+      !updatedPlugin
+    ) {
+      throw error;
+    }
     const failure = failureText(error);
     // A committed-but-not-live answer to the plugin PUT is a committed save.
     const committedPut = !updatedPlugin && getCommittedWrite(error) !== null;
@@ -765,14 +901,15 @@ export async function updatePluginWithMembership(
       );
     }
     const recovery: string[] = [];
+    const fence = rollbackFence(observed, applied, pluginId, data);
     if (updatedPlugin && beforePlugin.scope !== "proxy_group") {
       // Restore non-group scope first: its atomic reconciliation removes group
       // attachments without ever orphaning a group config.
-      recovery.push(...await rollbackPlugin(beforePlugin, updatedPlugin, deps));
+      recovery.push(...await rollbackPlugin(beforePlugin, updatedPlugin, deps, fence));
     } else {
       recovery.push(...await rollbackAssociations(applied, pluginId, deps));
       if (updatedPlugin) {
-        recovery.push(...await rollbackPlugin(beforePlugin, updatedPlugin, deps));
+        recovery.push(...await rollbackPlugin(beforePlugin, updatedPlugin, deps, fence));
       }
     }
     recovery.push(...await recoveryState(pluginId, deps));
@@ -796,12 +933,22 @@ export async function updatePluginWithMembership(
  * Detaching first would let the last detach cascade-delete the configuration
  * before the baseline could be checked against it again (#609); here the
  * gateway refuses the `DELETE` with `412` if anything was written since.
+ *
+ * `observedProxyIds` is the membership the page showed
+ * (`observedMembership`), sent as `expected_proxy_ids` (#630). A fresh
+ * listing would only cover the moments between it and the `DELETE`: a proxy
+ * attached after the page loaded would be listed, expected, and silently
+ * detached. A proxy outside it refuses the delete
+ * (`PluginMembershipChangedError`), whether the plan's own listing shows it
+ * or Edge's precondition answers `412`.
  */
 export async function deletePluginWithMembership(
   pluginId: string,
   deps: PluginMembershipDependencies,
   guard: WriteGuard<PluginConfig | PluginConfigCreate> | null,
+  observedProxyIds: readonly string[],
 ): Promise<void> {
+  const observed = [...new Set(observedProxyIds)];
   const plugin = await deps.getPlugin(pluginId);
   // Never an unconditional DELETE, and never a comparison against a read that
   // may lag the stored configuration: an untagged read refuses before either
@@ -809,11 +956,12 @@ export async function deletePluginWithMembership(
   if (!deps.canCondition(plugin)) throw new GuardVerificationError("delete");
   assertEditorBaseline(plugin, guard, "delete", null, deps.namespace);
   // The delete detaches every referencing proxy in Edge's transaction; the
-  // expected set names the ones this listing shows, so a proxy attached
-  // after it refuses the delete instead of being silently detached.
-  const expected = referencingProxyIds(await deps.listProxies(), pluginId);
+  // expected set names only the ones the page showed, so a proxy attached
+  // since refuses the delete instead of being silently detached. This
+  // listing refuses it early, and on a gateway without the precondition.
+  assertMembershipUnchanged(await deps.listProxies(), pluginId, observed, "delete");
   try {
-    await deps.deletePlugin(pluginId, plugin, expected);
+    await deps.deletePlugin(pluginId, plugin, observed);
   } catch (error) {
     // Already gone: the outcome the operator asked for.
     if (isNotFound(error)) return;
@@ -825,6 +973,10 @@ export async function deletePluginWithMembership(
       // the page showed, the operator needs the comparison.
       const latest = await getPluginIfPresent(pluginId, deps).catch(() => undefined);
       if (latest) assertEditorBaseline(latest, guard, "delete", null, deps.namespace);
+      // Edge's association precondition: a proxy the page never showed now
+      // references the plugin.
+      const proxies = await deps.listProxies().catch(() => undefined);
+      if (proxies) assertMembershipUnchanged(proxies, pluginId, observed, "delete", error);
       throw new PluginMembershipError(
         `Plugin ${pluginId} changed during deletion; it was not deleted`,
         await recoveryState(pluginId, deps),
