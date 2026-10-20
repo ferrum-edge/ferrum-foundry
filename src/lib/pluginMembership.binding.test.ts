@@ -319,7 +319,7 @@ describe("plugin membership plans on a gateway that honours If-Match", () => {
           const body = input.method === "PUT"
             ? (await input.clone().json()) as PluginConfig
             : undefined;
-          const kept = body?.scope === "proxy" ? body.proxy_id : undefined;
+          const kept = body?.scope === "proxy" ? body.proxy_id ?? undefined : undefined;
           if (associationRefusal(path, expected, kept)) {
             return json({ error: "referenced by proxies outside expected_proxy_ids" }, 412);
           }

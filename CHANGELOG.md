@@ -22,7 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before the write, which named and so silently detached a proxy attached
   after the page loaded. A proxy outside that set — in the plan's own listing
   or in Edge's `412` — refuses the write with a "membership changed" error
-  naming it, and the page offers a reload; nothing is written.
+  naming it, and the page offers a reload; nothing is written. The snapshot
+  is what the form mounted with, so a read that changes while the page still
+  shows a skeleton never stands in for it. A failed save's rollback expects
+  only that membership plus the proxies the save itself attached, and leaves
+  a proxy attached since in place, reporting the configuration as not
+  restored, instead of restoring a scope that would detach it.
 
 ### Security
 

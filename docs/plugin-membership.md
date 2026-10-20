@@ -43,12 +43,15 @@ members.
 Every plugin `PUT` and `DELETE` also carries Edge's association precondition
 (forge-ops #569): `expected_proxy_ids`. From the plugin page it names the
 membership the page showed (#630), not a fresh listing taken just before
-the write: the group's members the form was seeded with (advanced by each
-accepted save and by an explicit reload, never by a background refetch),
-the target proxy for a proxy-scoped plugin, and none for a global one. A
-listing just before the write would name a proxy another operator attached
-after the page loaded, and Edge would then accept a write that silently
-detaches it.
+the write: the group's members the form was seeded with, the target proxy
+for a proxy-scoped plugin, and none for a global one. The form reports that
+seed when it mounts, so a read that changes while the page still shows a
+skeleton (the plugin catalog still loading, say) never becomes membership
+the operator did not see. An accepted save advances it to the membership it
+established, and an explicit reload remounts the form with a fresh one; a
+background refetch never moves it. A listing just before the write would
+name a proxy another operator attached after the page loaded, and Edge would
+then accept a write that silently detaches it.
 
 Edge checks the set atomically with the write, so a proxy attached since the
 page loaded refuses the scope change or delete below with `412`. The plan
@@ -58,8 +61,17 @@ and ignore the parameter. Either way the page reports that the membership
 changed, names the proxies, and offers **Reload current membership**, which
 reseeds the form and its membership from fresh reads; nothing was written. A
 proxy the page showed that has since been detached does not refuse the write,
-since the write cannot detach it. Rollback writes, which restore the plan's
-own earlier read, carry a listing taken at restore time.
+since the write cannot detach it.
+
+A failed save's rollback is fenced the same way. Restoring a global or
+proxy scope detaches every other reference, so the rollback `PUT` expects
+only the membership the editor showed plus the references the failed save
+established: the proxies its association writes attached, and a move to
+proxy scope's target. A proxy another operator attached after the plugin
+`PUT` falls outside that set. When the rollback's listing shows one, the
+configuration is not restored, the proxy stays attached, and the recovery
+report names it; when the attach lands after that listing, Edge's `412`
+refuses the restore and the same report follows.
 
 Creating a proxy-scoped plugin (`POST /plugins/config`) or moving one to proxy
 scope makes Edge attach it to the target proxy in the same transaction

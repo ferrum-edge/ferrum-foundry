@@ -1436,6 +1436,104 @@ describe("the membership the editor showed (#630)", () => {
     expect(state.counts().updateProxyCalls).toBe(0);
   });
 
+  it("does not roll back over a proxy attached after the plugin PUT, and reports it", async () => {
+    const state = harness(
+      [makeProxy("p1"), makeProxy("p2"), makeProxy("p3"), makeProxy("p4")],
+      [makePlugin("plugin-1", "global")],
+      { failProxyOnce: "p3" },
+    );
+    const sent = recordExpected(state);
+    const updatePlugin = state.deps.updatePlugin;
+    state.deps.updatePlugin = async (id, data, basis, expected) => {
+      const written = await updatePlugin(id, data, basis, expected);
+      // Another operator attaches p4 to the new group as soon as the move
+      // to group scope commits, before the membership step fails.
+      if (sent.length === 1) attach(state, "p4", "plugin-1");
+      return written;
+    };
+
+    const failure = await updatePluginWithMembership(
+      "plugin-1",
+      groupInput(),
+      ["p2", "p3"],
+      state.deps,
+      null,
+      [],
+    ).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(PluginMembershipError);
+    const recovery = (failure as PluginMembershipError).recovery;
+    const skipped = recovery.find((entry) => entry.includes("was not restored"));
+    expect(skipped).toContain("p4 references it");
+    expect(skipped).toContain("left attached");
+    // Restoring global scope would have detached p4: only the forward PUT.
+    expect(sent).toEqual([[]]);
+    expect(state.plugins.get("plugin-1")?.scope).toBe("proxy_group");
+    expect(memberships(state.proxies, "plugin-1")).toEqual(["p2", "p4"]);
+  });
+
+  it("restores with the observed and attached set, so Edge refuses it over a later attach", async () => {
+    const state = harness(
+      [makeProxy("p1"), makeProxy("p2"), makeProxy("p3"), makeProxy("p4")],
+      [makePlugin("plugin-1", "global")],
+      { failProxyOnce: "p3" },
+    );
+    const sent = recordExpected(state);
+    const listProxies = state.deps.listProxies;
+    let listings = 0;
+    state.deps.listProxies = async () => {
+      const listed = await listProxies();
+      // The plan's listing, then the rollback's: p4 is attached right after
+      // the rollback has listed, just before its PUT.
+      if (++listings === 2) attach(state, "p4", "plugin-1");
+      return listed;
+    };
+
+    const failure = await updatePluginWithMembership(
+      "plugin-1",
+      groupInput(),
+      ["p2", "p3"],
+      state.deps,
+      null,
+      [],
+    ).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(PluginMembershipError);
+    // The rollback PUT expected only p2, which this save attached; a listing
+    // at restore time would have named p4 and detached it.
+    expect(sent).toEqual([[], ["p2"]]);
+    const recovery = (failure as PluginMembershipError).recovery;
+    expect(recovery.find((entry) => entry.includes("was not restored"))).toContain(
+      "p4 references it",
+    );
+    expect(state.plugins.get("plugin-1")?.scope).toBe("proxy_group");
+    expect(memberships(state.proxies, "plugin-1")).toEqual(["p2", "p4"]);
+  });
+
+  it("still restores a non-group scope when only the plan's own references remain", async () => {
+    const state = harness(
+      [makeProxy("p1", ["plugin-1"]), makeProxy("p2"), makeProxy("p3")],
+      [{ ...makePlugin("plugin-1", "proxy"), proxy_id: "p1" }],
+      { failProxyOnce: "p3" },
+    );
+    const sent = recordExpected(state);
+
+    await expect(
+      updatePluginWithMembership(
+        "plugin-1",
+        groupInput(),
+        ["p2", "p3"],
+        state.deps,
+        null,
+        ["p1"],
+      ),
+    ).rejects.toThrow("rollback was attempted");
+
+    expect(sent).toEqual([["p1"], ["p1", "p2"]]);
+    expect(state.plugins.get("plugin-1")?.scope).toBe("proxy");
+    expect(memberships(state.proxies, "plugin-1")).toEqual(["p1"]);
+  });
+
   it("saves with the rendered membership as the expected set", async () => {
     const state = harness(
       [makeProxy("p1", ["plugin-1"]), makeProxy("p2", ["plugin-1"]), makeProxy("p3")],

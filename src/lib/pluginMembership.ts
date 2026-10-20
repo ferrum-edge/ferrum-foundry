@@ -50,8 +50,8 @@ export interface PluginMembershipDependencies {
     basis: PluginConfig | null,
     /**
      * The association precondition's expected set (forge-ops #569): the
-     * proxies the editor showed referencing this configuration (#630), or
-     * for a rollback those a listing at restore time shows. The gateway
+     * proxies the editor showed referencing this configuration (#630), and
+     * for a rollback those plus the ones the failed save attached. The gateway
      * refuses the write if another proxy references it by the time the
      * write lands, so an attachment the operator never saw is never
      * silently detached.
@@ -513,6 +513,52 @@ async function rollbackAssociations(
 }
 
 /**
+ * The references a failed save's rollback may write over (#630): the
+ * membership the editor showed, plus the ones this plan established — the
+ * proxies its association writes attached and, for a move to proxy scope,
+ * the target Edge attached in the plugin `PUT`'s transaction. Restoring a
+ * global or proxy scope detaches every other reference, so the rollback's
+ * `expected_proxy_ids` is this set, never a listing taken at restore time,
+ * which would name (and so detach) a proxy another operator attached after
+ * the plugin `PUT`.
+ */
+function rollbackFence(
+  observed: readonly string[],
+  applied: readonly AppliedProxyChange[],
+  pluginId: string,
+  data: PluginConfigCreate,
+): string[] {
+  const ids = new Set(observed);
+  for (const change of applied) {
+    if (referencesPlugin(change.after, pluginId)) ids.add(change.after.id);
+  }
+  if (data.scope === "proxy" && data.proxy_id) ids.add(data.proxy_id);
+  return [...ids];
+}
+
+function unaccountedReferences(
+  proxies: readonly Proxy[],
+  pluginId: string,
+  fence: readonly string[],
+): string[] {
+  const accounted = new Set(fence);
+  return referencingProxyIds(proxies, pluginId).filter((id) => !accounted.has(id));
+}
+
+function notRestoredOver(before: PluginConfig, unaccounted: readonly string[]): string {
+  const one = unaccounted.length === 1;
+  const why = before.scope === "proxy_group"
+    ? "and Foundry does not restore over a reference it did not account for"
+    : `and restoring scope ${before.scope} would detach ${one ? "it" : "them"}`;
+  return (
+    `plugin ${before.id} was not restored: ${unaccounted.join(", ")} ` +
+    `${one ? "references" : "reference"} it without having been part of this save, ${why}, ` +
+    `so ${unaccounted.join(", ")} ${one ? "was" : "were"} left attached. Review the ` +
+    "membership, then restore the previous configuration manually if it is still wanted"
+  );
+}
+
+/**
  * Put `before` back. A `before` read through a masked projection carries a
  * placeholder for each withheld secret; writing it would be refused
  * (ferrum-edge#5925), or on an older gateway store the placeholder as the
@@ -525,6 +571,7 @@ async function rollbackPlugin(
   before: PluginConfig,
   after: PluginConfig,
   deps: PluginMembershipDependencies,
+  fence: readonly string[],
 ): Promise<string[]> {
   const masked = pluginConfigPlaceholderSites(before.plugin_name, before.config, deps.role)
     .blocking;
@@ -544,11 +591,16 @@ async function rollbackPlugin(
     if (current.updated_at !== after.updated_at) {
       return [`plugin ${after.id} changed after Foundry updated it; config was not overwritten`];
     }
-    const expected = referencingProxyIds(await deps.listProxies(), before.id);
-    await deps.updatePlugin(before.id, pluginsApi.toUpdatePayload(before), current, expected);
+    const unaccounted = unaccountedReferences(await deps.listProxies(), before.id, fence);
+    if (unaccounted.length > 0) return [notRestoredOver(before, unaccounted)];
+    await deps.updatePlugin(before.id, pluginsApi.toUpdatePayload(before), current, fence);
     return [];
   } catch (error) {
     if (isPreconditionFailed(error)) {
+      // Edge's association precondition: a proxy attached after that listing.
+      const proxies = await deps.listProxies().catch(() => undefined);
+      const unaccounted = proxies ? unaccountedReferences(proxies, before.id, fence) : [];
+      if (unaccounted.length > 0) return [notRestoredOver(before, unaccounted)];
       return [`plugin ${after.id} changed after Foundry updated it; config was not overwritten`];
     }
     return [
@@ -849,14 +901,15 @@ export async function updatePluginWithMembership(
       );
     }
     const recovery: string[] = [];
+    const fence = rollbackFence(observed, applied, pluginId, data);
     if (updatedPlugin && beforePlugin.scope !== "proxy_group") {
       // Restore non-group scope first: its atomic reconciliation removes group
       // attachments without ever orphaning a group config.
-      recovery.push(...await rollbackPlugin(beforePlugin, updatedPlugin, deps));
+      recovery.push(...await rollbackPlugin(beforePlugin, updatedPlugin, deps, fence));
     } else {
       recovery.push(...await rollbackAssociations(applied, pluginId, deps));
       if (updatedPlugin) {
-        recovery.push(...await rollbackPlugin(beforePlugin, updatedPlugin, deps));
+        recovery.push(...await rollbackPlugin(beforePlugin, updatedPlugin, deps, fence));
       }
     }
     recovery.push(...await recoveryState(pluginId, deps));
