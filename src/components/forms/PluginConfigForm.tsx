@@ -55,6 +55,12 @@ export interface PluginFormDefaults {
   proxyGroupIds?: string[];
 }
 
+/** What an edit form's fields were seeded from when they mounted (`onSeeded`). */
+export interface PluginFormSeed {
+  plugin: PluginConfig;
+  proxyGroupIds: readonly string[];
+}
+
 export interface PluginConfigFormProps {
   initialData?: PluginConfig;
   defaults?: PluginFormDefaults;
@@ -77,6 +83,16 @@ export interface PluginConfigFormProps {
    * or omitted) is treated as a non-admin role.
    */
   role?: GatewayRole | null;
+  /**
+   * Edit mode: called with the plugin and proxy-group membership the fields
+   * were seeded from when they mount, and with `null` when they unmount. The
+   * plugin page sends the membership the operator sees as a save's or
+   * delete's `expected_proxy_ids` (#630), so it takes it from the seed that
+   * actually mounted rather than from a read that may have changed before the
+   * form appeared. Pass a stable callback: a new one reports the mount's seed
+   * again.
+   */
+  onSeeded?: (seed: PluginFormSeed | null) => void;
 }
 
 const NO_PLACEHOLDERS: PlaceholderSites = { blocking: [], other: [] };
@@ -141,6 +157,7 @@ function PluginConfigFormFields({
   initialProxyGroupIds,
   capability,
   role,
+  onSeeded,
 }: PluginConfigFormProps) {
   const readOnly = capability !== undefined && !capability.allowed;
   const navigate = useNavigate();
@@ -159,6 +176,18 @@ function PluginConfigFormFields({
   const [proxyGroupIds, setProxyGroupIds] = useState<string[]>(
     initialProxyGroupIds ?? defaults?.proxyGroupIds ?? [],
   );
+  // What this mount's fields were seeded from, reported once per mount.
+  const [seed] = useState<PluginFormSeed | null>(() =>
+    initialData
+      ? { plugin: initialData, proxyGroupIds: initialProxyGroupIds ?? defaults?.proxyGroupIds ?? [] }
+      : null,
+  );
+  useEffect(() => {
+    if (!seed || !onSeeded) return;
+    const report = onSeeded;
+    report(seed);
+    return () => report(null);
+  }, [seed, onSeeded]);
   const [enabled, setEnabled] = useState(initialData?.enabled ?? true);
   const [priorityOverride, setPriorityOverride] = useState<number | "">(
     initialData?.priority_override ?? "",

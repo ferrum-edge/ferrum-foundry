@@ -172,11 +172,14 @@ export function useUpdatePluginWithMembership() {
       data,
       proxyIds = [],
       guard,
+      observedProxyIds,
     }: {
       id: string;
       data: PluginConfigCreate;
       proxyIds?: string[];
       guard: WriteGuard<PluginConfig | PluginConfigCreate> | null;
+      /** The membership the editor showed (`observedMembership`), #630. */
+      observedProxyIds: readonly string[];
     }) =>
       updatePluginWithMembership(
         id,
@@ -184,6 +187,7 @@ export function useUpdatePluginWithMembership() {
         proxyIds,
         bindPluginMembership(scope, facts.role),
         guard,
+        observedProxyIds,
       ),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ["pluginConfig"] });
@@ -201,14 +205,17 @@ export function useDeletePluginWithMembership() {
     mutationFn: async ({
       id,
       guard,
+      observedProxyIds,
     }: {
       id: string;
       guard: WriteGuard<PluginConfig | PluginConfigCreate> | null;
+      /** The membership the page showed (`observedMembership`), #630. */
+      observedProxyIds: readonly string[];
     }): Promise<DeleteOutcome> => {
       // A committed-but-not-live answer is a completed delete: its detail
       // cache is retired below exactly as for a 204.
       const committed = await removeCommitted(() =>
-        deletePluginWithMembership(id, bindPluginMembership(scope), guard),
+        deletePluginWithMembership(id, bindPluginMembership(scope), guard, observedProxyIds),
       );
       // Carry the mutation's namespace through completion, even after a switch.
       return { namespace: scope.namespace, id, committed };

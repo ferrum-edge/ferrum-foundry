@@ -3,7 +3,7 @@ import { ResourceLabels } from "@/components/shared/ResourceLabels";
 /*  Ferrum Foundry – Plugin Config detail / edit page                  */
 /* ------------------------------------------------------------------ */
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useCallback } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import {
   usePluginConfig,
@@ -20,14 +20,18 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { TrashIcon } from "@/components/ui/icons";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { SkeletonCard } from "@/components/ui/Skeleton";
-import { PluginConfigForm } from "@/components/forms/PluginConfigForm";
+import { PluginConfigForm, type PluginFormSeed } from "@/components/forms/PluginConfigForm";
 import { PluginMembershipRecovery } from "@/components/forms/PluginMembershipRecovery";
 import { MaskedSecretRefusal } from "@/components/shared/MaskedSecretRefusal";
 import { maskedPlaceholderRefusal } from "@/api/maskedSecrets";
 import { committedWriteMessage, getApiErrorMessage } from "@/api/client";
 import { formatPluginName } from "@/lib/pluginConfigDefaults";
 import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
-import { PluginSavedUnverifiedError } from "@/lib/pluginMembership";
+import {
+  observedMembership,
+  PluginMembershipChangedError,
+  PluginSavedUnverifiedError,
+} from "@/lib/pluginMembership";
 import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
 import { useCapabilities } from "@/stores/capabilities";
 import { WriteAction } from "@/components/shared/CapabilityGate";
@@ -94,20 +98,39 @@ function PluginEditor({ session }: { session: EditorSession }) {
       .map((p) => p.id);
   }, [allProxies, plugin, pluginId]);
 
+  // The membership the mounted form was seeded with: what the operator sees.
+  // A save or delete sends it as `expected_proxy_ids` (#630), so a proxy
+  // attached since — even one a background refetch has picked up without
+  // reseeding the form — refuses the write instead of being silently
+  // detached. The form reports its seed when it mounts (`onSeeded`), so a read
+  // that changes while the page still shows a skeleton (the plugin catalog
+  // pending, say) never becomes membership the operator did not see. A
+  // remount (an explicit reload) reseeds it; an accepted save advances it.
+  // `null` while no form is mounted: nothing is sent.
+  const membershipSeen = useRef<readonly string[] | null>(null);
+  const handleSeeded = useCallback((seed: PluginFormSeed | null) => {
+    membershipSeen.current = seed ? observedMembership(seed.plugin, seed.proxyGroupIds) : null;
+  }, []);
+
   /* ---------- Handlers ---------- */
 
   const handleSubmit = session.bind(
     async (data: PluginConfigCreate, proxyGroupIds?: string[]) => {
-      if (!capability.allowed) return;
+      const seen = membershipSeen.current;
+      if (!capability.allowed || !seen) return;
       setMembershipError(null);
+      const proxyIds = data.scope === "proxy_group" ? proxyGroupIds ?? [] : [];
       try {
         const updated = await updatePlugin.mutateAsync({
           id: pluginId,
           data,
-          proxyIds: data.scope === "proxy_group" ? proxyGroupIds ?? [] : [],
+          proxyIds,
           guard: baseline.current(),
+          observedProxyIds: seen,
         });
         baseline.adopt(updated);
+        // The form now shows the membership this save established.
+        membershipSeen.current = observedMembership(updated, proxyIds);
 
         toast("success", "Plugin configuration updated successfully");
       } catch (err: unknown) {
@@ -142,10 +165,12 @@ function PluginEditor({ session }: { session: EditorSession }) {
   };
 
   /**
-   * Reload after a saved-but-unverified move (#610). Only fresh reads are
-   * adopted: the plugin, and for a group its complete proxy membership, which
-   * the form seeds once. If either read fails, the draft and the recovery
-   * report stay as they are.
+   * Reload after a saved-but-unverified move (#610), or a save or delete
+   * refused because the membership changed since the form was seeded (#630);
+   * the remounted form reports its new seed as the membership snapshot. Only
+   * fresh reads are adopted: the plugin, and for a group its complete proxy
+   * membership, which the form seeds once. If either read fails, the draft
+   * and the recovery report stay as they are.
    */
   const handleReloadSaved = async () => {
     const refreshed = await resourceQuery.refetch();
@@ -166,14 +191,16 @@ function PluginEditor({ session }: { session: EditorSession }) {
   };
 
   const handleDelete = session.bind(async () => {
-    if (!plugin || !capability.allowed) return;
+    const seen = membershipSeen.current;
+    if (!plugin || !capability.allowed || !seen) return;
     setMembershipError(null);
     try {
       // Judged against the configuration this page is displaying — see the
-      // proxy detail page.
+      // proxy detail page — and the membership its form shows.
       const deleted = await deletePlugin.mutateAsync({
         id: pluginId,
         guard: pluginsApi.pluginDeleteGuard(plugin),
+        observedProxyIds: seen,
       });
       if (deleted.committed) {
         toast(
@@ -289,6 +316,14 @@ function PluginEditor({ session }: { session: EditorSession }) {
           Reload saved configuration
         </Button>
       )}
+      {membershipError instanceof PluginMembershipChangedError && (
+        <Button
+          variant="secondary"
+          onClick={() => void handleReloadSaved()}
+        >
+          Reload current membership (discards your draft)
+        </Button>
+      )}
       <Card>
         <ResourceLabels labels={plugin.labels} />
         <PluginConfigForm
@@ -301,6 +336,7 @@ function PluginEditor({ session }: { session: EditorSession }) {
           availablePlugins={availablePlugins ?? []}
           initialProxyGroupIds={initialProxyGroupIds}
           initialProxyGroupIdsLoaded={!needsMembership || allProxies !== undefined}
+          onSeeded={handleSeeded}
         />
       </Card>
 
