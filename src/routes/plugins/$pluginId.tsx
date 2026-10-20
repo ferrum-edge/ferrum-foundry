@@ -3,7 +3,7 @@ import { ResourceLabels } from "@/components/shared/ResourceLabels";
 /*  Ferrum Foundry – Plugin Config detail / edit page                  */
 /* ------------------------------------------------------------------ */
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import {
   usePluginConfig,
@@ -27,7 +27,11 @@ import { maskedPlaceholderRefusal } from "@/api/maskedSecrets";
 import { committedWriteMessage, getApiErrorMessage } from "@/api/client";
 import { formatPluginName } from "@/lib/pluginConfigDefaults";
 import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
-import { PluginSavedUnverifiedError } from "@/lib/pluginMembership";
+import {
+  observedMembership,
+  PluginMembershipChangedError,
+  PluginSavedUnverifiedError,
+} from "@/lib/pluginMembership";
 import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
 import { useCapabilities } from "@/stores/capabilities";
 import { WriteAction } from "@/components/shared/CapabilityGate";
@@ -94,20 +98,44 @@ function PluginEditor({ session }: { session: EditorSession }) {
       .map((p) => p.id);
   }, [allProxies, plugin, pluginId]);
 
+  // The membership the form was seeded with for this generation: what the
+  // operator saw. A save or delete sends it as `expected_proxy_ids` (#630),
+  // so a proxy attached since — even one a background refetch has picked up
+  // without reseeding the form — refuses the write instead of being silently
+  // detached. Like the baseline, only an accepted save or an explicit reload
+  // (a new form generation) moves it.
+  const membershipSeen = useRef<{ generation: number; ids: readonly string[] } | null>(null);
+  const membershipReady =
+    plugin !== undefined && (plugin.scope !== "proxy_group" || allProxies !== undefined);
+  if (plugin && membershipReady && membershipSeen.current?.generation !== formGeneration) {
+    membershipSeen.current = {
+      generation: formGeneration,
+      ids: observedMembership(plugin, initialProxyGroupIds),
+    };
+  }
+
   /* ---------- Handlers ---------- */
 
   const handleSubmit = session.bind(
     async (data: PluginConfigCreate, proxyGroupIds?: string[]) => {
-      if (!capability.allowed) return;
+      const seen = membershipSeen.current;
+      if (!capability.allowed || !seen) return;
       setMembershipError(null);
+      const proxyIds = data.scope === "proxy_group" ? proxyGroupIds ?? [] : [];
       try {
         const updated = await updatePlugin.mutateAsync({
           id: pluginId,
           data,
-          proxyIds: data.scope === "proxy_group" ? proxyGroupIds ?? [] : [],
+          proxyIds,
           guard: baseline.current(),
+          observedProxyIds: seen.ids,
         });
         baseline.adopt(updated);
+        // The form now shows the membership this save established.
+        membershipSeen.current = {
+          generation: seen.generation,
+          ids: observedMembership(updated, proxyIds),
+        };
 
         toast("success", "Plugin configuration updated successfully");
       } catch (err: unknown) {
@@ -142,7 +170,9 @@ function PluginEditor({ session }: { session: EditorSession }) {
   };
 
   /**
-   * Reload after a saved-but-unverified move (#610). Only fresh reads are
+   * Reload after a saved-but-unverified move (#610), or a save or delete
+   * refused because the membership changed since the form was seeded (#630);
+   * the new form generation reseeds the membership snapshot too. Only fresh reads are
    * adopted: the plugin, and for a group its complete proxy membership, which
    * the form seeds once. If either read fails, the draft and the recovery
    * report stay as they are.
@@ -166,14 +196,16 @@ function PluginEditor({ session }: { session: EditorSession }) {
   };
 
   const handleDelete = session.bind(async () => {
-    if (!plugin || !capability.allowed) return;
+    const seen = membershipSeen.current;
+    if (!plugin || !capability.allowed || !seen) return;
     setMembershipError(null);
     try {
       // Judged against the configuration this page is displaying — see the
-      // proxy detail page.
+      // proxy detail page — and the membership its form shows.
       const deleted = await deletePlugin.mutateAsync({
         id: pluginId,
         guard: pluginsApi.pluginDeleteGuard(plugin),
+        observedProxyIds: seen.ids,
       });
       if (deleted.committed) {
         toast(
@@ -287,6 +319,14 @@ function PluginEditor({ session }: { session: EditorSession }) {
           onClick={() => void handleReloadSaved()}
         >
           Reload saved configuration
+        </Button>
+      )}
+      {membershipError instanceof PluginMembershipChangedError && (
+        <Button
+          variant="secondary"
+          onClick={() => void handleReloadSaved()}
+        >
+          Reload current membership (discards your draft)
         </Button>
       )}
       <Card>

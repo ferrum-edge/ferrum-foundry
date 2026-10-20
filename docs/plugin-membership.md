@@ -41,12 +41,25 @@ group members first. Entering group scope writes the plugin first, then adds
 members.
 
 Every plugin `PUT` and `DELETE` also carries Edge's association precondition
-(forge-ops #569): `expected_proxy_ids` names every proxy the plan's own
-reads showed referencing the configuration. Edge checks it atomically with
-the write, so a proxy another operator attached after Foundry's read refuses
-the write with `412` — shown as a concurrent change — instead of being
-silently detached by the scope change or delete below. Gateways that predate
-the precondition ignore the parameter.
+(forge-ops #569): `expected_proxy_ids`. From the plugin page it names the
+membership the page showed (#630), not a fresh listing taken just before
+the write: the group's members the form was seeded with (advanced by each
+accepted save and by an explicit reload, never by a background refetch),
+the target proxy for a proxy-scoped plugin, and none for a global one. A
+listing just before the write would name a proxy another operator attached
+after the page loaded, and Edge would then accept a write that silently
+detaches it.
+
+Edge checks the set atomically with the write, so a proxy attached since the
+page loaded refuses the scope change or delete below with `412`. The plan
+also refuses before writing anything when its own listing already shows such
+a proxy, which keeps the guarantee on gateways that predate the precondition
+and ignore the parameter. Either way the page reports that the membership
+changed, names the proxies, and offers **Reload current membership**, which
+reseeds the form and its membership from fresh reads; nothing was written. A
+proxy the page showed that has since been detached does not refuse the write,
+since the write cannot detach it. Rollback writes, which restore the plan's
+own earlier read, carry a listing taken at restore time.
 
 Creating a proxy-scoped plugin (`POST /plugins/config`) or moving one to proxy
 scope makes Edge attach it to the target proxy in the same transaction
@@ -130,8 +143,8 @@ handles them as follows:
 
 Deleting a plugin configuration, a group included, is a single
 `DELETE /plugins/config/{id}`, conditional on the read the plugin page's
-baseline was compared with and on the referencing proxies a fresh listing
-shows (`expected_proxy_ids`, above). Edge removes the configuration from every proxy
+baseline was compared with and on the membership the page showed
+(`expected_proxy_ids`, above). Edge removes the configuration from every proxy
 that lists it in the same transaction. Foundry does not detach members first:
 the last detach would make Edge delete the configuration before Foundry could
 check it again, so a concurrent configuration change could be deleted unseen

@@ -87,7 +87,11 @@ function UpstreamDeleteProbe() {
 function PluginDeleteProbe() {
   const mutation = useDeletePluginWithMembership();
   useEffect(() => {
-    submit = () => mutation.mutateAsync({ id: "edge", guard: plugins.pluginWriteGuard(PLUGIN) });
+    submit = () => mutation.mutateAsync({
+      id: "edge",
+      guard: plugins.pluginWriteGuard(PLUGIN),
+      observedProxyIds: [],
+    });
   });
   return <p>probe</p>;
 }

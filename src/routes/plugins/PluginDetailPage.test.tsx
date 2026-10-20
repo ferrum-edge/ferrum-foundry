@@ -6,7 +6,22 @@ import type { PluginConfig, Proxy } from "@/api/types";
 import { PluginConfigForm } from "@/components/forms/PluginConfigForm";
 import PluginDetailPage from "./$pluginId";
 
-const { get } = vi.hoisted(() => ({ get: vi.fn() }));
+const { get, updatePlan, deletePlan } = vi.hoisted(() => ({
+  get: vi.fn(),
+  updatePlan: vi.fn(),
+  deletePlan: vi.fn(),
+}));
+
+// The membership plans themselves are covered in `src/lib`; here only what
+// the page hands them matters.
+vi.mock("@/lib/pluginMembership", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/pluginMembership")>();
+  return {
+    ...actual,
+    updatePluginWithMembership: updatePlan,
+    deletePluginWithMembership: deletePlan,
+  };
+});
 
 vi.mock("@/api/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/api/client")>();
@@ -98,6 +113,8 @@ beforeEach(() => {
   vi.useFakeTimers();
   Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
   get.mockReset();
+  updatePlan.mockReset();
+  deletePlan.mockReset();
   pluginResponse = deferred<PluginConfig>();
   firstPage = deferred<ReturnType<typeof page>>();
   secondPage = deferred<ReturnType<typeof page>>();
@@ -385,4 +402,76 @@ describe("proxy group membership loading", () => {
     expect(selectedIds()).toEqual([]);
   });
 
+});
+
+describe("the membership a save or delete expects (#630)", () => {
+  async function submit() {
+    await act(async () => {
+      host.querySelector("form")!.dispatchEvent(
+        new Event("submit", { bubbles: true, cancelable: true }),
+      );
+    });
+    await settle();
+  }
+
+  it("saves with the membership the form was seeded with, then the one it saved", async () => {
+    updatePlan.mockResolvedValue(plugin);
+    await render();
+    pluginResponse.resolve(plugin);
+    firstPage.resolve(page([member("source"), member("destination")]));
+    await settle();
+    // A background refetch picks up a proxy another operator attached. The
+    // form is not reseeded, so the operator never saw it.
+    await act(async () => {
+      client.setQueryData(["proxies", "default", "all"], [
+        member("source"),
+        member("destination"),
+        member("late"),
+      ]);
+    });
+    await settle();
+    expect(selectedIds()).toEqual(["Remove /source", "Remove /destination"]);
+
+    await act(async () => {
+      host
+        .querySelector<HTMLButtonElement>("button[aria-label='Remove /destination']")
+        ?.click();
+    });
+    await submit();
+    expect(updatePlan).toHaveBeenCalledTimes(1);
+    expect(updatePlan.mock.calls[0]![2]).toEqual(["source"]);
+    expect(updatePlan.mock.calls[0]![5]).toEqual(["source", "destination"]);
+
+    // The accepted save is what the form now shows.
+    await submit();
+    expect(updatePlan).toHaveBeenCalledTimes(2);
+    expect(updatePlan.mock.calls[1]![5]).toEqual(["source"]);
+  });
+
+  it("deletes with the membership the page showed, not a later refetch", async () => {
+    deletePlan.mockResolvedValue(undefined);
+    await render();
+    pluginResponse.resolve(plugin);
+    firstPage.resolve(page([member("source")]));
+    await settle();
+    await act(async () => {
+      client.setQueryData(["proxies", "default", "all"], [member("source"), member("late")]);
+    });
+    await settle();
+
+    const open = [...host.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.trim() === "Delete")!;
+    expect(open).toBeTruthy();
+    await act(async () => open.click());
+    await settle();
+    const confirm = [...document.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.trim() === "Delete Plugin")!;
+    expect(confirm).toBeTruthy();
+    await act(async () => confirm.click());
+    await settle();
+
+    expect(deletePlan).toHaveBeenCalledTimes(1);
+    expect(deletePlan.mock.calls[0]![0]).toBe("group-1");
+    expect(deletePlan.mock.calls[0]![3]).toEqual(["source"]);
+  });
 });
