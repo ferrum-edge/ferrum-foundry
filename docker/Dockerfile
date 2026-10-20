@@ -3,7 +3,7 @@
 # Keep the build and runtime on the same active LTS Node.js major (24 until
 # Node 26 enters LTS). Both multi-platform base indexes are digest-pinned so
 # release provenance identifies exact inputs; move both majors together.
-FROM node:24-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS builder
+FROM node:24-bookworm-slim@sha256:a5f4366e834695d5f363b920c104953a535d3a9864d1bdf74566a0ebe01daee5 AS builder
 WORKDIR /app
 
 COPY package.json package-lock.json ./
