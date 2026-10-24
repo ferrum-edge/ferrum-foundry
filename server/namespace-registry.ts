@@ -217,7 +217,8 @@ function unavailable(outcome: Extract<ScanOutcome, { status: number }>): Respons
 // name, and a collision across even the largest page budget (10^6 names) is
 // about 10^-17 likely.
 function witnessKey(name: string): string {
-  return createHash('sha256').update(name).digest('latin1').slice(0, 12);
+  // Each of the first 12 digest bytes maps to exactly one latin1 character.
+  return createHash('sha256').update(name).digest().toString('latin1', 0, 12);
 }
 
 // Filtering individual pages leaves gaps and exposes the fleet total, so the
