@@ -145,6 +145,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The critical-journey guide says an unset `FOUNDRY_IMAGE` runs the
+  published release digest the starter pins, not `ferrum-foundry:main`, and
+  keeps the instruction to set it for a local build (#635).
 - Stream proxies count `fault_injection`, `api_chargeback` and
   `proxy_alerts` as applied, as Ferrum Edge v0.9.15 runs them on TCP/UDP
   listeners, and `waf` when its configuration enables stream inspection

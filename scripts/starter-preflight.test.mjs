@@ -521,6 +521,9 @@ test("starter defaults select the published Foundry digest and stop grace exceed
   const bootstrap = await readFile(new URL("bootstrap-demo.sh", STARTER), "utf8");
   assert.ok(!bootstrap.includes("ferrum-foundry:main"), "the demo bootstrap must not default to the moving main tag");
   assert.match(bootstrap, /FOUNDRY_IMAGE=\$\{FOUNDRY_IMAGE:-\}/);
+  const journeyGuide = await readFile(new URL("../e2e/README.md", import.meta.url), "utf8");
+  assert.ok(!journeyGuide.includes("ferrum-foundry:main"), "the journey guide must not name the moving main tag as the default");
+  assert.match(journeyGuide, /published release digest/);
   const compose = await readFile(new URL("compose.yaml", STARTER), "utf8");
   const foundry = compose.slice(compose.indexOf("  foundry:"), compose.indexOf("  oauth2-proxy:"));
   const grace = Number(foundry.match(/stop_grace_period:\s*(\d+)s/)?.[1] ?? 0);
