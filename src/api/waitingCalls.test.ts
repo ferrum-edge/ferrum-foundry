@@ -94,6 +94,24 @@ describe("configured client server-side waiting calls", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps a restore open through the BFF's upload and response budgets", async () => {
+    // 300 s upload + 120 s restore response + 5 s transport margin (#633).
+    const fetcher = vi.fn((request: Request) => new Promise<Response>((_resolve, reject) => {
+      request.signal.addEventListener("abort", () => reject(request.signal.reason));
+    }));
+    vi.stubGlobal("fetch", fetcher);
+    const { restore } = await import("./ops");
+    const result = restore({ namespace: "default" }, { version: "1", proxies: [] })
+      .catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(150_000);
+    expect(fetcher.mock.calls[0]![0].signal.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(425_000 - 150_000 - 1);
+    expect(fetcher.mock.calls[0]![0].signal.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await result).toBeInstanceOf(Error);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
   it("does not automatically repeat a failed backup GET", async () => {
     const fetcher = vi.fn(async () => Response.json({ error: "busy" }, { status: 503 }));
     vi.stubGlobal("fetch", fetcher);

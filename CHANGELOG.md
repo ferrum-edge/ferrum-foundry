@@ -145,6 +145,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A restore's browser deadline covers the BFF's whole upload budget (300 s at
+  the shipped default) plus restore's response budget (at least 120 s), 425 s
+  in all, instead of a fixed 120 s that could abort a slow upload the BFF was
+  still admitting (#633).
 - A namespace rename answered with the committed-but-not-live `503` is
   treated as the rename it is (#637). The old name's caches are retired, the
   active scope follows the destination, and the dialog closes with the

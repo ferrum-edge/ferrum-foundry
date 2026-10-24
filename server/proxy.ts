@@ -16,7 +16,7 @@ import {
 } from './proxy-path.js';
 import { getDispatcher } from './tls.js';
 import { closeUnreadUpload, setUploadBudget } from './upload-drain.js';
-import { waitingRouteTimeout } from './waitBudget.js';
+import { BACKUP_RESTORE_OPERATION_TIMEOUT, waitingRouteTimeout } from './waitBudget.js';
 import {
   authorizeRegistryBody,
   authorizeRegistryPath,
@@ -30,7 +30,6 @@ import {
 const DEFAULT_BODY_LIMIT = 2 * 1024 * 1024;
 const API_SPEC_BODY_LIMIT = 30 * 1024 * 1024;
 const RESTORE_BODY_LIMIT = 110 * 1024 * 1024;
-const BACKUP_RESTORE_OPERATION_TIMEOUT = 120_000;
 
 const REQUEST_HEADER_ALLOWLIST = [
   'accept',

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ACME_MAX_WAIT_MS,
   APPLY_WAIT_MS,
+  BACKUP_RESTORE_OPERATION_TIMEOUT,
   longRunningClientTimeout,
   serverWaitTimeout,
   waitingRouteTimeout,
@@ -29,6 +30,9 @@ it.each([
   ['GET', '/api-specs/example', 0, 60_000],
   ['POST', '/admin/tls/acme/orders', 60_000, 60_000],
   ['POST', '/admin/tls/acme/renew/example', 60_000, 60_000],
+  // Restore admits a 110 MiB body over the upload budget, then waits at least
+  // the backup/restore operation budget for Edge's answer.
+  ['POST', '/restore', 300_000, BACKUP_RESTORE_OPERATION_TIMEOUT],
 ] as const)('covers upload and response budgets for %s %s', (method, path, upload, response) => {
   expect(longRunningClientTimeout(method, path)).toBe(upload + response + 5_000);
 });
