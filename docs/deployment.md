@@ -531,9 +531,14 @@ fleet-global, so the probe needs no tenant. Results are cached for 5 seconds
 and concurrent probes share one check, so a short probe interval does not
 multiply gateway load.
 
-It returns `200` when both calls succeed, and `503` when the gateway is unreachable,
-unhealthy, or rejects the JWT. Wire it as the readiness probe so a gateway
-outage or signing-key mismatch takes Foundry out of rotation.
+It returns `200` when both calls succeed and `/health` answers a valid health
+snapshot (a recognized `status` and a boolean `ready: true`; a `degraded`
+snapshot is still ready). It returns `503` when the gateway is unreachable,
+unhealthy, or rejects the JWT, and when `/health` answers anything else, such
+as a `200` HTML fallback page, an empty or `{}` body, or a body without
+`ready`: something answered at the admin origin, but not a ready gateway.
+Wire it as the readiness probe so a gateway outage, a misrouted admin origin,
+or a signing-key mismatch takes Foundry out of rotation.
 
 The UI header polls readiness every 15 seconds. It shows **Connected** for
 `ready`, **Degraded** for `degraded`, **Disconnected** for `unavailable`, and
@@ -653,6 +658,17 @@ bounded:
   answers `503` with `code: FERRUM_BFF_NAMESPACE_SCAN_BUDGET`, never a partial
   list. Raise the budget for a fleet that large, or give the identity exact
   grants that exist;
+- short of finding every grant, it is complete only if it was consistent:
+  every page kept the first page's total, no more names arrived than that
+  total, and no name repeated one from any earlier page. A registry change
+  the traversal can see (a repeated name is the trace of a delete plus an
+  earlier-sorting insert that skipped another name) answers `503` with
+  `code: FERRUM_BFF_NAMESPACE_SCAN_INCONSISTENT` instead of a smaller list;
+  retry it. Offset pages cannot detect every change: a delete before the
+  cursor plus a later-sorting insert skips a name without repeating one or
+  changing the total ([data loading](data-loading.md), rule 7). Each name is
+  remembered as a 12-byte digest, so the traversal's memory stays bounded by
+  its page budget;
 - identical lists in flight at the same time (same identity, grants, and
   query apart from `offset` and `limit`) share one read. Nothing is cached
   after it finishes;

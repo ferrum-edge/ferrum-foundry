@@ -12,12 +12,31 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 const PROXY_SECRET = 'health-route-proxy-test-secret-long-enough';
 const BFF_TOKEN = 'health-route-static-test-token-long-enough';
 
-type GatewayMode = 'ok' | 'degraded' | 'down' | 'reject';
+// 200 answers at `/health` that are not a gateway health snapshot, as a
+// misrouted proxy or a catch-all origin would serve them (#634).
+const INVALID_HEALTH = {
+  html: { type: 'text/html', body: '<!doctype html><html><body>Welcome</body></html>' },
+  empty: { type: 'application/json', body: '' },
+  emptyObject: { type: 'application/json', body: '{}' },
+  missingReady: { type: 'application/json', body: '{"status":"ok"}' },
+  stringReady: { type: 'application/json', body: '{"status":"ok","ready":"true"}' },
+  unknownStatus: { type: 'application/json', body: '{"status":"fine","ready":true}' },
+  array: { type: 'application/json', body: '[{"status":"ok","ready":true}]' },
+};
+type InvalidHealth = keyof typeof INVALID_HEALTH;
+
+type GatewayMode = 'ok' | 'degraded' | 'down' | 'reject' | InvalidHealth;
 let gatewayMode: GatewayMode = 'ok';
 
 const gateway = createServer((request, response) => {
   response.setHeader('content-type', 'application/json');
   if (request.url === '/health') {
+    if (Object.hasOwn(INVALID_HEALTH, gatewayMode)) {
+      const fallback = INVALID_HEALTH[gatewayMode as InvalidHealth];
+      response.setHeader('content-type', fallback.type);
+      response.end(fallback.body);
+      return;
+    }
     if (gatewayMode === 'down') {
       response.statusCode = 503;
       response.end('{"status":"unavailable","ready":false}');
@@ -149,6 +168,22 @@ describe('health disclosure (#592)', () => {
         const detailed = await app.inject({ method: 'GET', url: '/api/health/ready', headers: authenticated });
         expect(detailed.json()).toMatchObject({ components: { gateway: { httpStatus: 401 } } });
       });
+
+      for (const invalid of Object.keys(INVALID_HEALTH) as InvalidHealth[]) {
+        it(`is not ready on a 200 /health answer without a health snapshot: ${invalid} (#634)`, async () => {
+          const { app, authenticated } = await setup(mode, invalid);
+          const anonymous = await app.inject({ method: 'GET', url: '/api/health/ready' });
+          expect(anonymous.statusCode).toBe(503);
+          expect(anonymous.json()).toEqual({ status: 'unavailable', ready: false });
+          const detailed = await app.inject({ method: 'GET', url: '/api/health/ready', headers: authenticated });
+          expect(detailed.statusCode).toBe(503);
+          expect(detailed.json()).toMatchObject({
+            status: 'unavailable',
+            ready: false,
+            components: { gateway: { status: 'unavailable', httpStatus: 200 } },
+          });
+        });
+      }
 
       it('gives liveness its version only with a session', async () => {
         const { app, authenticated } = await setup(mode, 'ok');

@@ -107,6 +107,12 @@ function gatewayHandler(request: IncomingMessage, response: ServerResponse): voi
       response.end('{"ok":true}');
       return;
     }
+    if (request.url === '/health') {
+      // Readiness accepts only a gateway health snapshot.
+      response.setHeader('content-type', 'application/json');
+      response.end('{"status":"ok","ready":true}');
+      return;
+    }
     if (request.url?.startsWith('/gzip')) {
       const compressed = gzipSync(GZIP_RESPONSE);
       response.setHeader('content-type', 'application/json');

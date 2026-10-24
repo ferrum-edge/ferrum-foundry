@@ -43,7 +43,8 @@ answer.
    one whose pages chained from offset 0, kept the first page's total,
    returned exactly that many records, and, for the proxy, upstream,
    consumer, and plugin-configuration traversals (complete or budgeted), the
-   API-spec inventory, and the namespace registry, never repeated a record
+   API-spec inventory, and the namespace registry (in the browser and in the
+   BFF's namespace-scoped traversal), never repeated a record
    `id` or name. A repeated `id` is the visible trace of a delete plus an
    earlier-sorting insert that kept the total equal (the later page shifts
    back one row and repeats the boundary record while another is skipped), so
