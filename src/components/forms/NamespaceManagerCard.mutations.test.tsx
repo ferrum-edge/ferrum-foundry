@@ -459,6 +459,47 @@ describe("committed-but-not-live rename", () => {
     expect(writes[0].body).toEqual({ description: "Committed description" });
   });
 
+  it("does not follow a committed rename of a namespace that is not the active scope", async () => {
+    localStorage.setItem(NAMESPACE_STORAGE_KEY, "tenant-c");
+    adoptProductionClient();
+    await render();
+    expect(host.querySelector("select")!.value).toBe("tenant-c");
+    await click("Edit", row());
+    await input(0, "tenant-b");
+    names = names.map((name) => name === "tenant-a" ? "tenant-b" : name);
+    nextMutationResponse = Response.json({ applied: false, reason: "config_rejected" }, { status: 503 });
+    await click("Save");
+    await settle(() => {
+      expect(client.isMutating()).toBe(0);
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+    });
+    expect(toast).toHaveBeenCalledWith("warning", expect.stringContaining('Namespace "tenant-b" updated: committed'));
+    expect(host.querySelector("select")!.value).toBe("tenant-c");
+    expect(host.querySelector('[data-testid="scope"]')!.textContent).toBe("tenant-c");
+    expect(localStorage.getItem(NAMESPACE_STORAGE_KEY)).toBe("tenant-c");
+    expect(client.getQueryData(["namespace", "tenant-a"])).toBeUndefined();
+    expect(client.getQueryData(["proxy", "tenant-a", "p1"])).toBeUndefined();
+    expect(detailReads).not.toContain("tenant-a");
+  });
+
+  it("keeps everything on a 503 from the nothing-applied family", async () => {
+    adoptProductionClient();
+    await render();
+    await click("Edit", row());
+    await input(0, "tenant-b");
+    // No X-Ferrum-Config-Cursor and no `applied: false`: nothing was committed.
+    nextMutationResponse = Response.json({ error: "namespace admission unavailable" }, { status: 503 });
+    await click("Save");
+    await settle(() => expect(toast).toHaveBeenCalledWith("error", expect.any(String)));
+    expect(toast).not.toHaveBeenCalledWith("warning", expect.anything());
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(host.querySelector("select")!.value).toBe("tenant-a");
+    expect(host.querySelector('[data-testid="scope"]')!.textContent).toBe("tenant-a");
+    expect(client.getQueryData(["namespace", "tenant-a"])).toBeDefined();
+    expect(client.getQueryData(["proxy", "tenant-a", "p1"])).toBeDefined();
+    expect(writes).toHaveLength(1);
+  });
+
   it("keeps the dialog open on an ordinary failure", async () => {
     adoptProductionClient();
     await render();

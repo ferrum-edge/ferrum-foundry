@@ -72,23 +72,55 @@ const STREAM_CAPABLE_PLUGINS: ReadonlySet<string> = new Set([
  * live stream inspection (Edge `src/plugins/waf/mod.rs`, `supported_protocols`):
  * `mode` is not `disabled` and `config.stream` is effective, meaning it enables
  * `tcp_require_tls` or carries a signature whose `action` is not disabled. An
- * HTTP-only or disabled WAF stays HTTP-only.
+ * HTTP-only or disabled WAF stays HTTP-only. A configuration Edge would refuse
+ * to construct (a wrongly typed field, an unknown mode or action, a signature
+ * without `id` or `pattern`, a duplicate signature id) runs nowhere, so it
+ * never counts as inspecting.
  */
+const WAF_STREAM_MODES: ReadonlySet<string> = new Set(["enforce", "monitor"]);
+const WAF_ENABLED_ACTIONS: ReadonlySet<string> = new Set([
+  "enforce", "block", "reject", "monitor", "log", "warn",
+]);
 const WAF_DISABLED_ACTIONS: ReadonlySet<string> = new Set(["disabled", "disable", "off"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** Edge's optional fields treat `null` as absent. */
+function absent(value: unknown): value is null | undefined {
+  return value === undefined || value === null;
+}
+
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value !== "";
+}
+
+function wafSignatureEnabled(signature: Record<string, unknown>): boolean {
+  return absent(signature.action) || WAF_ENABLED_ACTIONS.has(signature.action as string);
+}
+
+function wafSignatureValid(signature: unknown): signature is Record<string, unknown> {
+  if (!isRecord(signature) || !nonEmptyString(signature.id) || !nonEmptyString(signature.pattern)) {
+    return false;
+  }
+  const action = signature.action;
+  return absent(action) ||
+    (typeof action === "string" && (WAF_ENABLED_ACTIONS.has(action) || WAF_DISABLED_ACTIONS.has(action)));
+}
+
 function wafInspectsStreams(config: unknown): boolean {
-  if (!isRecord(config) || config.mode === "disabled") return false;
+  if (!isRecord(config)) return false;
+  const mode = config.mode;
+  if (!absent(mode) && !(typeof mode === "string" && WAF_STREAM_MODES.has(mode))) return false;
   const stream = config.stream;
   if (!isRecord(stream)) return false;
-  if (stream.tcp_require_tls === true) return true;
-  const signatures = stream.signatures;
-  return Array.isArray(signatures) && signatures.some((signature) =>
-    isRecord(signature) &&
-    !(typeof signature.action === "string" && WAF_DISABLED_ACTIONS.has(signature.action)));
+  const requireTls = stream.tcp_require_tls;
+  if (!absent(requireTls) && typeof requireTls !== "boolean") return false;
+  const signatures = absent(stream.signatures) ? [] : stream.signatures;
+  if (!Array.isArray(signatures) || !signatures.every(wafSignatureValid)) return false;
+  if (new Set(signatures.map((signature) => signature.id)).size !== signatures.length) return false;
+  return requireTls === true || signatures.some(wafSignatureEnabled);
 }
 
 /** Stream plugins restricted to the connection-oriented TCP listeners. */
@@ -99,17 +131,6 @@ const TCP_ONLY_STREAM_PLUGINS: ReadonlySet<string> = new Set([
 /** Stream plugins restricted to the datagram listeners. */
 const UDP_ONLY_STREAM_PLUGINS: ReadonlySet<string> = new Set([
   "udp_rate_limiting",
-]);
-
-/**
- * Every plugin name that can run on at least one stream scheme (`waf` only
- * with stream inspection configured).
- */
-export const STREAM_PLUGIN_NAMES: ReadonlySet<string> = new Set([
-  ...STREAM_CAPABLE_PLUGINS,
-  ...TCP_ONLY_STREAM_PLUGINS,
-  ...UDP_ONLY_STREAM_PLUGINS,
-  "waf",
 ]);
 
 /**

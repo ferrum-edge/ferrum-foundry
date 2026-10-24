@@ -97,15 +97,16 @@ describe("Edge v0.9.15 stream declarations (#636)", () => {
     },
   );
 
-  const signature = (action?: string) => ({ id: "sig-1", pattern: "^EVIL", ...(action ? { action } : {}) });
+  const signature = (action?: string, id = "sig-1") => ({ id, pattern: "^EVIL", ...(action ? { action } : {}) });
 
   it.each<[string, Record<string, unknown>]>([
     ["signatures", { stream: { signatures: [signature()] } }],
     ["monitor-mode signatures", { mode: "monitor", stream: { signatures: [signature("monitor")] } }],
     ["the TLS-shape guard alone", { stream: { tcp_require_tls: true } }],
     ["one enabled signature among disabled ones", {
-      stream: { signatures: [signature("disabled"), signature("block")] },
+      stream: { signatures: [signature("disabled"), signature("block", "sig-2")] },
     }],
+    ["null optional fields", { mode: null, stream: { tcp_require_tls: null, signatures: [signature()] } }],
   ])("runs waf on stream proxies with %s", (_label, config) => {
     for (const scheme of ["tcp", "tcps", "udp", "dtls"] as const) {
       expect(pluginAppliesToProxy(named("waf", config), proxy(scheme)), scheme).toBe(true);
@@ -117,10 +118,21 @@ describe("Edge v0.9.15 stream declarations (#636)", () => {
     ["a null stream block", { stream: null }],
     ["an empty stream block", { stream: {} }],
     ["only disabled signatures", {
-      stream: { signatures: [signature("disabled"), signature("off"), signature("disable")] },
+      stream: { signatures: [signature("disabled"), signature("off", "sig-2"), signature("disable", "sig-3")] },
     }],
     ["tcp_require_tls off and no signatures", { stream: { tcp_require_tls: false, signatures: [] } }],
     ["the plugin disabled by mode", { mode: "disabled", stream: { tcp_require_tls: true, signatures: [signature()] } }],
+    // Configurations Edge refuses to construct run nowhere.
+    ["a non-string mode", { mode: 1, stream: { tcp_require_tls: true } }],
+    ["an unknown mode", { mode: "bogus", stream: { signatures: [signature()] } }],
+    ["a non-boolean TLS guard", { stream: { tcp_require_tls: "true" } }],
+    ["non-array signatures", { stream: { signatures: { id: "sig-1", pattern: "^EVIL" } } }],
+    ["a signature without a pattern", { stream: { signatures: [{ id: "sig-1" }] } }],
+    ["a signature without an id", { stream: { signatures: [{ pattern: "^EVIL" }] } }],
+    ["a non-string action", { stream: { signatures: [{ id: "sig-1", pattern: "^EVIL", action: true }] } }],
+    ["an unknown action", { stream: { signatures: [signature("sometimes")] } }],
+    ["duplicate signature ids", { stream: { signatures: [signature(), signature("monitor")] } }],
+    ["the TLS guard beside a malformed signature", { stream: { tcp_require_tls: true, signatures: [{ id: "sig-1" }] } }],
   ])("skips waf on stream proxies with %s", (_label, config) => {
     for (const scheme of ["tcp", "tcps", "udp", "dtls"] as const) {
       expect(pluginAppliesToProxy(named("waf", config), proxy(scheme)), scheme).toBe(false);
