@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Response } from 'undici';
 import type { AuthPrincipal } from './auth-types.js';
 
@@ -212,6 +213,13 @@ function unavailable(outcome: Extract<ScanOutcome, { status: number }>): Respons
   });
 }
 
+// 96 bits of SHA-256 as a 12-character one-byte string: constant-size per
+// name, and a collision across even the largest page budget (10^6 names) is
+// about 10^-17 likely.
+function witnessKey(name: string): string {
+  return createHash('sha256').update(name).digest('latin1').slice(0, 12);
+}
+
 // Filtering individual pages leaves gaps and exposes the fleet total, so the
 // traversal retains only granted names and the caller paginates that set. Its
 // cost is bounded three ways: it stops as soon as every grant is found (the
@@ -223,13 +231,22 @@ function unavailable(outcome: Extract<ScanOutcome, { status: number }>): Respons
 // traversal was consistent (docs/data-loading.md): pages chained from offset 0,
 // kept the first page's total, returned no more than that many names, and
 // never repeated one. A repeated name is the visible trace of a delete plus an
-// earlier-sorting insert under an equal total, which shifts the next page back
+// earlier-sorting insert under an equal total, which shifts later pages back
 // and skips a name, so it is refused rather than deduplicated; so is a total
 // that changed. Either is reported unavailable (retryable), never as a smaller
-// complete list the browser could not tell apart. A shift between two reads
-// repeats the tail of the previous page, so repeats are checked against that
-// page and against every granted name seen, which bounds the memory by one
-// page plus the grants rather than by the whole registry.
+// complete list the browser could not tell apart. A shift can be any size (a
+// bulk replace can re-serve a page read long before), so every name the
+// traversal witnessed is remembered, not only the previous page.
+//
+// Each is remembered as a fixed-size digest (`witnessKey`), so the memory is
+// bounded by the page budget alone: at most `maxPages` × PAGE_SIZE entries of
+// constant size (a page is validated before its names are), however long the
+// names are; a single legacy array page is bounded by PAGE_BYTES instead. A digest collision reports a
+// repeat, which fails closed as the same retryable 503 and never omits a name.
+//
+// Offset reads cannot prove more than that: a delete before the cursor plus a
+// later-sorting insert skips a name without repeating one, and stays
+// undetectable until the gateway exposes a collection revision.
 async function scanGrantedNames(
   target: URL,
   grants: ReadonlySet<string>,
@@ -238,7 +255,7 @@ async function scanGrantedNames(
   signal: AbortSignal,
 ): Promise<ScanOutcome> {
   const found = new Set<string>();
-  let previousPage: ReadonlySet<string> = new Set();
+  const witnessed = new Set<string>();
   let firstTotal: number | undefined;
   let upstreamOffset = 0;
   let pages = 0;
@@ -270,14 +287,7 @@ async function scanGrantedNames(
     if (!Array.isArray(data) || data.some((name) => typeof name !== 'string' || !NAME_PATTERN.test(name))) {
       throw new Error('Invalid namespace list');
     }
-    const pageNames = new Set<string>();
-    let repeated = false;
-    for (const name of data as string[]) {
-      if (pageNames.has(name) || previousPage.has(name) || found.has(name)) repeated = true;
-      pageNames.add(name);
-      if (grants.has(name)) found.add(name);
-    }
-    let consistent = !repeated;
+    let consistent = true;
     if (!legacy) {
       const total = envelope?.pagination?.total;
       if (typeof total !== 'number' || !Number.isSafeInteger(total) || total < 0
@@ -286,7 +296,13 @@ async function scanGrantedNames(
       }
       firstTotal ??= total;
       upstreamOffset += data.length;
-      consistent &&= total === firstTotal && upstreamOffset <= firstTotal;
+      consistent = total === firstTotal && upstreamOffset <= firstTotal;
+    }
+    for (const name of data as string[]) {
+      const key = witnessKey(name);
+      if (witnessed.has(key)) consistent = false;
+      witnessed.add(key);
+      if (grants.has(name)) found.add(name);
     }
     // Every grant has been positively listed, so no other page can change the
     // result, however the registry moved meanwhile. The first page always
@@ -301,7 +317,6 @@ async function scanGrantedNames(
     }
     if (legacy || upstreamOffset >= firstTotal!) break;
     if (data.length === 0) throw new Error('Namespace pagination made no progress');
-    previousPage = pageNames;
   }
   return { names: [...found].sort() };
 }

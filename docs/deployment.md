@@ -660,12 +660,15 @@ bounded:
   grants that exist;
 - short of finding every grant, it is complete only if it was consistent:
   every page kept the first page's total, no more names arrived than that
-  total, and no name repeated a granted name or one on the previous page
-  (where a shift between two reads repeats them). A registry that changed
-  between pages (a repeated name is the trace of a delete plus an
+  total, and no name repeated one from any earlier page. A registry change
+  the traversal can see (a repeated name is the trace of a delete plus an
   earlier-sorting insert that skipped another name) answers `503` with
-  `code: FERRUM_BFF_NAMESPACE_SCAN_INCONSISTENT`, never a smaller list; retry
-  it;
+  `code: FERRUM_BFF_NAMESPACE_SCAN_INCONSISTENT` instead of a smaller list;
+  retry it. Offset pages cannot detect every change: a delete before the
+  cursor plus a later-sorting insert skips a name without repeating one or
+  changing the total ([data loading](data-loading.md), rule 7). Each name is
+  remembered as a 12-byte digest, so the traversal's memory stays bounded by
+  its page budget;
 - identical lists in flight at the same time (same identity, grants, and
   query apart from `offset` and `limit`) share one read. Nothing is cached
   after it finishes;

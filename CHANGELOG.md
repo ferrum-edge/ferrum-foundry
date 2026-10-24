@@ -244,8 +244,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   traversal deduplicated a repeated name, checked each page's total on its
   own, and stopped at the latest one, so a delete plus an earlier-sorting
   insert, or a shrinking total, could silently omit an existing granted
-  namespace. A repeated name, a changed first-page total, or more names than
-  that total now answers `503` with
+  namespace. A name repeated from any earlier page, a changed first-page
+  total, or more names than that total now answers `503` with
   `code: FERRUM_BFF_NAMESPACE_SCAN_INCONSISTENT`, unless every granted name
   had already been listed, in which case the result is unaffected.
 - `/api/health/ready` is ready only on a valid gateway health snapshot

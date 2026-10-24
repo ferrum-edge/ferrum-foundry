@@ -60,6 +60,18 @@ const gateway = createServer((request, response) => {
         response.end(JSON.stringify({ data, pagination: { offset, limit, total } }));
         return;
       }
+      if (url.searchParams.has('bulk')) {
+        // Pages one and two read b-0000…b-2998 and z-last. Before page three,
+        // another writer inserts a-0000…a-1998 and deletes b-1000…b-2998:
+        // the total is unchanged, page three re-serves names from page one
+        // (two pages back), and a-0000 is never listed.
+        const run = (prefix: string, count: number) => Array.from({ length: count },
+          (_, i) => `${prefix}-${String(i).padStart(4, '0')}`);
+        const current = offset < 2000 ? [...run('b', 2999), 'z-last'] : [...run('a', 1999), ...run('b', 1000), 'z-last'];
+        response.end(JSON.stringify({ data: current.slice(offset, offset + limit),
+          pagination: { offset, limit, total: current.length } }));
+        return;
+      }
       if (url.searchParams.has('shift')) {
         // The first page reads the initial registry; every later page reads
         // it after one change made by another writer in between. Edge orders
@@ -519,6 +531,18 @@ describe('registry authorization at the forwarding boundary', () => {
       expect(arrivals.length - before).toBe(2);
     }
 
+    // A repeat from any earlier page counts, not only the previous one: a
+    // bulk replace before page three re-serves page one's names under an
+    // unchanged total, and z-last alone is not the complete answer.
+    const bulk = (scope: string) => call('/api/proxy/namespaces?bulk=1', 'GET', '',
+      identity({ 'x-registry-grants': scope, 'x-ferrum-namespace': scope.split(', ')[0] }));
+    const before = arrivals.length;
+    const replaced = await bulk('a-0000, z-last');
+    expect(replaced.status).toBe(503);
+    expect(JSON.parse(replaced.body)).toEqual(inconsistent);
+    expect(arrivals.slice(before).map((entry) => new URL(entry.path, 'http://fixture').searchParams.get('offset')))
+      .toEqual(['0', '1000', '2000']);
+
     // Once every grant has been listed, no other page can change the
     // result, so a changed registry still answers.
     for (const [shift, scope] of [['grow', 'b-0005, z-last'], ['append', 'c-new, b-0005']]) {
@@ -527,6 +551,9 @@ describe('registry authorization at the forwarding boundary', () => {
       expect(JSON.parse(response.body)).toEqual({ data: scope.split(', ').sort(),
         pagination: { offset: 0, limit: 100, total: 2 } });
     }
+    const listed = await bulk('b-0005, z-last');
+    expect(listed.status).toBe(200);
+    expect(JSON.parse(listed.body)).toEqual({ data: ['b-0005', 'z-last'], pagination: { offset: 0, limit: 100, total: 2 } });
   });
 
   it('shares one in-flight traversal between identical lists and keeps no result after it', async () => {
