@@ -434,7 +434,8 @@ function ProxyEditor({ session }: { session: EditorSession }) {
                     Not applied on this stream proxy
                   </h3>
                   <p className="text-text-muted text-sm mt-1 mb-3">
-                    The gateway skips HTTP-only plugins on TCP/UDP listeners.
+                    The gateway skips HTTP-only plugins on TCP/UDP listeners,
+                    including a WAF configured without active stream inspection.
                   </p>
                   <div className="space-y-2">
                     {skippedPlugins.map((plugin) => (

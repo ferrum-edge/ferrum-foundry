@@ -145,6 +145,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Stream proxies count `fault_injection`, `api_chargeback` and
+  `proxy_alerts` as applied, as Ferrum Edge v0.9.15 runs them on TCP/UDP
+  listeners, and `waf` when its configuration enables stream inspection
+  (`mode` not `disabled`, plus `stream.tcp_require_tls` or an enabled stream
+  signature). An HTTP-only or disabled WAF is still listed as not applied
+  (#636).
 - A restore's browser deadline covers the BFF's whole upload budget (300 s at
   the shipped default) plus restore's response budget (at least 120 s), 425 s
   in all, instead of a fixed 120 s that could abort a slow upload the BFF was

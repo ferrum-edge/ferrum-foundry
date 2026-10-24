@@ -292,6 +292,40 @@ describe("effective authorization policy", () => {
     ]);
   });
 
+  it("counts the stream plugins Edge runs, and waf only with stream inspection (#636)", () => {
+    const plugins = [
+      plugin("global-fault", "fault_injection", "global", { stream_abort_percent: 100 }),
+      plugin("global-chargeback", "api_chargeback", "global"),
+      plugin("global-alerts", "proxy_alerts", "global"),
+      plugin("global-waf-http", "waf", "global", { mode: "enforce" }),
+      plugin("group-waf-stream", "waf", "proxy_group", {
+        stream: { signatures: [{ id: "sig-1", pattern: "^EVIL" }] },
+      }),
+      plugin("group-waf-disabled", "waf", "proxy_group", {
+        mode: "disabled", stream: { tcp_require_tls: true },
+      }),
+    ];
+    const streamProxy = (id: string, attached: string[]) => proxy({
+      id,
+      backend_scheme: "tcp",
+      listen_port: 18_443,
+      listen_path: null,
+      plugins: attached.map((plugin_config_id) => ({ plugin_config_id })),
+    });
+    const always = ["global-fault", "global-chargeback", "global-alerts"];
+    const cases: [Proxy, string[], string[]][] = [
+      // The attached stream WAF shadows the global HTTP-only one and runs.
+      [streamProxy("waf-stream", ["group-waf-stream"]), [...always, "group-waf-stream"], []],
+      [streamProxy("waf-disabled", ["group-waf-disabled"]), always, ["group-waf-disabled"]],
+      [streamProxy("waf-http", []), always, ["global-waf-http"]],
+    ];
+    const sortedIds = (entries: EffectivePlugin[]) => entries.map((entry) => entry.id).sort();
+    for (const [target, effective, skipped] of cases) {
+      expect(sortedIds(effectivePluginsForProxy(target, plugins)), target.id).toEqual([...effective].sort());
+      expect(sortedIds(inapplicablePluginsForProxy(target, plugins)), target.id).toEqual([...skipped].sort());
+    }
+  });
+
   it("reports no authentication for a stream proxy whose only auth plugin is HTTP-only", () => {
     const streamProxy = proxy({
       backend_scheme: "tcp",
@@ -457,10 +491,10 @@ describe("effective authorization policy", () => {
     for (const fixture of fixtures) {
       const reference = referenceAttachedPlugins(fixture, plugins);
       const referenceEffective = reference.filter((entry) =>
-        pluginAppliesToProxy(entry.plugin_name, fixture),
+        pluginAppliesToProxy(entry, fixture),
       );
       const referenceInapplicable = reference.filter(
-        (entry) => !pluginAppliesToProxy(entry.plugin_name, fixture),
+        (entry) => !pluginAppliesToProxy(entry, fixture),
       );
 
       expect(reference.map((entry) => entry.id), fixture.id).toEqual(expectedAttached[fixture.id]);
@@ -532,10 +566,10 @@ describe("gateway scope merge: scoped instances shadow same-name globals", () =>
   function expectOracleParity(target: Proxy, plugins: PluginConfig[]) {
     const reference = referenceAttachedPlugins(target, plugins);
     expect(ids(effectivePluginsForProxy(target, plugins))).toEqual(
-      ids(reference.filter((entry) => pluginAppliesToProxy(entry.plugin_name, target))),
+      ids(reference.filter((entry) => pluginAppliesToProxy(entry, target))),
     );
     expect(ids(inapplicablePluginsForProxy(target, plugins))).toEqual(
-      ids(reference.filter((entry) => !pluginAppliesToProxy(entry.plugin_name, target))),
+      ids(reference.filter((entry) => !pluginAppliesToProxy(entry, target))),
     );
   }
 
