@@ -35,7 +35,12 @@ import {
   normalizeNamespaceDescription,
   validateNamespaceDescription,
 } from "@/api/namespaces";
-import { getApiErrorDetail, getApiErrorMessage } from "@/api/client";
+import {
+  committedWriteMessage,
+  getApiErrorDetail,
+  getApiErrorMessage,
+  getCommittedWrite,
+} from "@/api/client";
 
 const DEFAULT_NAMESPACE = "ferrum";
 
@@ -230,6 +235,18 @@ function EditNamespaceDialog({
       toast("success", `Namespace "${updated.name}" updated`);
       onOpenChange(false);
     } catch (err) {
+      const committed = getCommittedWrite(err);
+      if (committed) {
+        // Committed, only not yet proven live: a rename already retired the
+        // old name (the mutation removed its caches), so follow the
+        // destination and close instead of re-observing a name the gateway no
+        // longer resolves or offering another Save against it.
+        const destination = payload.name ?? target;
+        if (payload.name) replaceNamespaceIfCurrent(target, destination);
+        toast("warning", committedWriteMessage(`Namespace "${destination}" updated`, committed));
+        onOpenChange(false);
+        return;
+      }
       // Nothing was renamed, so the detail key still resolves — resume
       // observing it so a retry compares against fresh server state.
       setSubmitted(false);

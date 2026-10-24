@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – Plugin/protocol applicability                     */
 /* ------------------------------------------------------------------ */
 
-import type { BackendScheme, Proxy } from "@/api/types";
+import type { BackendScheme, PluginConfig, Proxy } from "@/api/types";
 
 /**
  * Provenance for the stream-capable plugin matrix below. The gateway
@@ -11,7 +11,8 @@ import type { BackendScheme, Proxy } from "@/api/types";
  */
 export const STREAM_PLUGIN_MATRIX_SOURCE =
   "ferrum-edge docs/tcp_udp_proxy.md (Compatible Plugins) and " +
-  "docs/plugin_execution_order.md (stream matrix)";
+  "docs/plugin_execution_order.md (stream matrix), checked against each " +
+  "plugin's supported_protocols() at v0.9.15 (25b37395)";
 
 /** Backend schemes served by the L4 stream listener rather than the HTTP stack. */
 const STREAM_SCHEMES: ReadonlySet<BackendScheme> = new Set<BackendScheme>([
@@ -58,10 +59,69 @@ const STREAM_CAPABLE_PLUGINS: ReadonlySet<string> = new Set([
   "udp_logging",
   "ws_logging",
   "prometheus_metrics",
+  "api_chargeback",
   "api_chargeback_sink",
   "workload_metrics",
   "transaction_debugger",
+  "fault_injection",
+  "proxy_alerts",
 ]);
+
+/**
+ * `waf` declares the stream protocols only when its configuration gives it
+ * live stream inspection (Edge `src/plugins/waf/mod.rs`, `supported_protocols`):
+ * `mode` is not `disabled` and `config.stream` is effective, meaning it enables
+ * `tcp_require_tls` or carries a signature whose `action` is not disabled. An
+ * HTTP-only or disabled WAF stays HTTP-only. A configuration Edge would refuse
+ * to construct (a wrongly typed field, an unknown mode or action, a signature
+ * without `id` or `pattern`, a duplicate signature id) runs nowhere, so it
+ * never counts as inspecting.
+ */
+const WAF_STREAM_MODES: ReadonlySet<string> = new Set(["enforce", "monitor"]);
+const WAF_ENABLED_ACTIONS: ReadonlySet<string> = new Set([
+  "enforce", "block", "reject", "monitor", "log", "warn",
+]);
+const WAF_DISABLED_ACTIONS: ReadonlySet<string> = new Set(["disabled", "disable", "off"]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Edge's optional fields treat `null` as absent. */
+function absent(value: unknown): value is null | undefined {
+  return value === undefined || value === null;
+}
+
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value !== "";
+}
+
+function wafSignatureEnabled(signature: Record<string, unknown>): boolean {
+  return absent(signature.action) || WAF_ENABLED_ACTIONS.has(signature.action as string);
+}
+
+function wafSignatureValid(signature: unknown): signature is Record<string, unknown> {
+  if (!isRecord(signature) || !nonEmptyString(signature.id) || !nonEmptyString(signature.pattern)) {
+    return false;
+  }
+  const action = signature.action;
+  return absent(action) ||
+    (typeof action === "string" && (WAF_ENABLED_ACTIONS.has(action) || WAF_DISABLED_ACTIONS.has(action)));
+}
+
+function wafInspectsStreams(config: unknown): boolean {
+  if (!isRecord(config)) return false;
+  const mode = config.mode;
+  if (!absent(mode) && !(typeof mode === "string" && WAF_STREAM_MODES.has(mode))) return false;
+  const stream = config.stream;
+  if (!isRecord(stream)) return false;
+  const requireTls = stream.tcp_require_tls;
+  if (!absent(requireTls) && typeof requireTls !== "boolean") return false;
+  const signatures = absent(stream.signatures) ? [] : stream.signatures;
+  if (!Array.isArray(signatures) || !signatures.every(wafSignatureValid)) return false;
+  if (new Set(signatures.map((signature) => signature.id)).size !== signatures.length) return false;
+  return requireTls === true || signatures.some(wafSignatureEnabled);
+}
 
 /** Stream plugins restricted to the connection-oriented TCP listeners. */
 const TCP_ONLY_STREAM_PLUGINS: ReadonlySet<string> = new Set([
@@ -71,13 +131,6 @@ const TCP_ONLY_STREAM_PLUGINS: ReadonlySet<string> = new Set([
 /** Stream plugins restricted to the datagram listeners. */
 const UDP_ONLY_STREAM_PLUGINS: ReadonlySet<string> = new Set([
   "udp_rate_limiting",
-]);
-
-/** Every plugin name that runs on at least one stream scheme. */
-export const STREAM_PLUGIN_NAMES: ReadonlySet<string> = new Set([
-  ...STREAM_CAPABLE_PLUGINS,
-  ...TCP_ONLY_STREAM_PLUGINS,
-  ...UDP_ONLY_STREAM_PLUGINS,
 ]);
 
 /**
@@ -94,18 +147,21 @@ export function isStreamProxy(proxy: Pick<Proxy, "backend_scheme">): boolean {
 }
 
 /**
- * Whether the gateway actually invokes `pluginName` on this proxy.
+ * Whether the gateway actually invokes `plugin` on this proxy.
  *
  * HTTP proxies run every plugin. Stream proxies run only the documented
  * stream-capable set, so an unknown or HTTP-only plugin attached globally
- * is never executed on a TCP/UDP listener.
+ * is never executed on a TCP/UDP listener. The configuration is required
+ * because `waf`'s protocols depend on it.
  */
 export function pluginAppliesToProxy(
-  pluginName: string,
+  plugin: Pick<PluginConfig, "plugin_name" | "config">,
   proxy: Pick<Proxy, "backend_scheme">,
 ): boolean {
   if (!isStreamProxy(proxy)) return true;
 
+  const pluginName = plugin.plugin_name;
+  if (pluginName === "waf") return wafInspectsStreams(plugin.config);
   const scheme = schemeOf(proxy);
   if (TCP_ONLY_STREAM_PLUGINS.has(pluginName)) {
     return TCP_STREAM_SCHEMES.has(scheme);

@@ -19,7 +19,8 @@ The suite does not start the stack. It runs against the checked-in starter
 
 ```bash
 # 1. The stack. To test a local build, set FOUNDRY_IMAGE before bootstrapping
-#    (it is written to .env; the default is ferrumedge/ferrum-foundry:main).
+#    (it is written to .env). Left unset, it is written empty and compose.yaml
+#    falls back to the published release digest it pins, not your changes.
 (cd deploy/starter && ./bootstrap-demo.sh)
 docker compose -f deploy/starter/compose.yaml -f e2e/compose.e2e.yaml \
   --profile demo up -d --wait

@@ -21,11 +21,17 @@ export function waitingRouteTimeout(method: string, path: string): number {
 export const DEFAULT_RESPONSE_TIMEOUT = 60_000;
 export const DEFAULT_UPLOAD_TIMEOUT = 300_000;
 export const DEFAULT_WRITE_TIMEOUT = 60_000;
+/** The response budget floor for backup and restore, whatever the read timeout. */
+export const BACKUP_RESTORE_OPERATION_TIMEOUT = 120_000;
 
 /** Total browser budget, including upload before the response deadline starts. */
 export function longRunningClientTimeout(method: string, path: string): number {
-  const response = Math.max(DEFAULT_RESPONSE_TIMEOUT, waitingRouteTimeout(method, path));
-  const largeUpload = path === '/api-specs' || path.startsWith('/api-specs/');
+  const restore = path === '/restore';
+  const response = Math.max(
+    DEFAULT_RESPONSE_TIMEOUT,
+    restore ? BACKUP_RESTORE_OPERATION_TIMEOUT : waitingRouteTimeout(method, path),
+  );
+  const largeUpload = restore || path === '/api-specs' || path.startsWith('/api-specs/');
   let upload = 0;
   if (method === 'POST' || method === 'PUT') {
     upload = largeUpload ? DEFAULT_UPLOAD_TIMEOUT : DEFAULT_WRITE_TIMEOUT;

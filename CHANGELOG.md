@@ -145,6 +145,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The critical-journey guide says an unset `FOUNDRY_IMAGE` runs the
+  published release digest the starter pins, not `ferrum-foundry:main`, and
+  keeps the instruction to set it for a local build (#635).
+- Stream proxies count `fault_injection`, `api_chargeback` and
+  `proxy_alerts` as applied, as Ferrum Edge v0.9.15 runs them on TCP/UDP
+  listeners, and `waf` when its configuration enables stream inspection
+  (`mode` not `disabled`, plus `stream.tcp_require_tls` or an enabled stream
+  signature). An HTTP-only or disabled WAF is still listed as not applied
+  (#636).
+- A restore's browser deadline covers the BFF's whole upload budget (300 s at
+  the shipped default) plus restore's response budget (at least 120 s), 425 s
+  in all, instead of a fixed 120 s that could abort a slow upload the BFF was
+  still admitting (#633).
+- A namespace rename answered with the committed-but-not-live `503` is
+  treated as the rename it is (#637). The old name's caches are retired, the
+  active scope follows the destination, and the dialog closes with the
+  live-apply warning, instead of staying open on the retired name, where a
+  refetch could pop a spurious `404` and offer another Save against it.
 - A group plugin moved to proxy or global scope is no longer half rolled back
   when a step after its committed plugin `PUT` fails (#610). The rollback
   restored the group configuration but not the members Edge had detached, so

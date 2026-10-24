@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NamespaceManagerCard } from "./NamespaceManagerCard";
 import { NamespaceProvider, NAMESPACE_STORAGE_KEY, useNamespace } from "@/stores/namespace";
+import { createQueryClient } from "@/lib/queryClient";
 
 vi.mock("@/stores/auth", () => ({ useAuth: () => ({ principal: { role: "admin" } }) }));
 const { toast } = vi.hoisted(() => ({ toast: vi.fn() }));
@@ -41,6 +42,7 @@ let listReads: number;
 let delayDetail: boolean;
 let failDetail: boolean;
 let releaseDetail: (() => void) | undefined;
+let detailReads: string[];
 
 beforeEach(() => {
   names = ["ferrum", "tenant-a", "tenant-c"];
@@ -53,6 +55,7 @@ beforeEach(() => {
   delayDetail = false;
   failDetail = false;
   releaseDetail = undefined;
+  detailReads = [];
   localStorage.setItem(NAMESPACE_STORAGE_KEY, "tenant-a");
   vi.stubGlobal("Request", BasedRequest);
   vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
@@ -62,6 +65,7 @@ beforeEach(() => {
         listReads += 1;
         return Response.json({ data: names, pagination: { offset: 0, limit: 250, total: names.length } });
       }
+      detailReads.push(url.pathname.split("/").at(-1)!);
       const detail = record(url.pathname.split("/").at(-1)!, "Existing description");
       if (failDetail) return Response.json({ error: "unavailable" }, { status: 500 });
       if (delayDetail) return new Promise<Response>((resolve) => { releaseDetail = () => resolve(Response.json(detail)); });
@@ -386,4 +390,126 @@ it("clears an existing description with null after Unicode whitespace normalizat
   await click("Save");
   await settle(() => expect(writes).toHaveLength(1));
   expect(writes[0].body).toEqual({ description: null });
+});
+
+describe("committed-but-not-live rename", () => {
+  // The client the app runs with: its MutationCache refreshes every cached
+  // read after a committed write, which is what made the retired detail
+  // refetchable.
+  function adoptProductionClient() {
+    client.clear();
+    client = createQueryClient();
+    client.setDefaultOptions({ queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } });
+    client.setQueryData(["namespaces"], names);
+    for (const name of [...names, "tenant-b"]) client.setQueryData(["namespace", name], record(name));
+    client.setQueryData(["proxy", "tenant-a", "p1"], { id: "p1" });
+  }
+
+  it.each([false, true])("retires the old name, follows the destination and closes; reloaded = %s", async (closeFirst) => {
+    adoptProductionClient();
+    delayMutation = closeFirst;
+    await render();
+    await click("Edit", row());
+    await input(0, "tenant-b");
+    // Edge committed the rename, then could not prove it live.
+    names = names.map((name) => name === "tenant-a" ? "tenant-b" : name);
+    const committed = Response.json(
+      { error: "reload timed out", applied: false, reason: "reload_timeout" },
+      { status: 503 },
+    );
+    if (!closeFirst) nextMutationResponse = committed;
+    await click("Save");
+    if (closeFirst) {
+      await settle(() => expect(completeMutation).toBeTypeOf("function"));
+      await closeDialog();
+      await act(async () => completeMutation!(committed));
+    }
+    await settle(() => {
+      expect(client.isMutating()).toBe(0);
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+      expect(host.querySelector("select")!.value).toBe("tenant-b");
+      expect(host.querySelector('[data-testid="scope"]')!.textContent).toBe("tenant-b");
+      expect(client.getQueryData(["namespaces"])).toEqual(names);
+    });
+    expect(toast).toHaveBeenCalledTimes(1);
+    expect(toast).toHaveBeenCalledWith(
+      "warning",
+      expect.stringContaining('Namespace "tenant-b" updated: committed, not yet proven live. Reason: reload_timeout.'),
+    );
+    expect(client.getQueryData(["namespace", "tenant-a"])).toBeUndefined();
+    expect(client.getQueryData(["proxy", "tenant-a", "p1"])).toBeUndefined();
+    expect(client.getQueryState(["namespace", "tenant-b"])?.isInvalidated).toBe(true);
+    // The retired name is never read again, so no spurious 404.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(detailReads).not.toContain("tenant-a");
+    expect(writes).toHaveLength(1);
+    expect(writes[0].body).toEqual({ name: "tenant-b" });
+  });
+
+  it("closes a committed description-only update without moving the selection", async () => {
+    adoptProductionClient();
+    await render();
+    await click("Edit", row());
+    await input(1, "Committed description");
+    nextMutationResponse = Response.json({ applied: false }, { status: 503 });
+    await click("Save");
+    await settle(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
+    expect(toast).toHaveBeenCalledWith("warning", expect.stringContaining('Namespace "tenant-a" updated: committed'));
+    expect(host.querySelector("select")!.value).toBe("tenant-a");
+    expect(writes[0].body).toEqual({ description: "Committed description" });
+  });
+
+  it("does not follow a committed rename of a namespace that is not the active scope", async () => {
+    localStorage.setItem(NAMESPACE_STORAGE_KEY, "tenant-c");
+    adoptProductionClient();
+    await render();
+    expect(host.querySelector("select")!.value).toBe("tenant-c");
+    await click("Edit", row());
+    await input(0, "tenant-b");
+    names = names.map((name) => name === "tenant-a" ? "tenant-b" : name);
+    nextMutationResponse = Response.json({ applied: false, reason: "config_rejected" }, { status: 503 });
+    await click("Save");
+    await settle(() => {
+      expect(client.isMutating()).toBe(0);
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+    });
+    expect(toast).toHaveBeenCalledWith("warning", expect.stringContaining('Namespace "tenant-b" updated: committed'));
+    expect(host.querySelector("select")!.value).toBe("tenant-c");
+    expect(host.querySelector('[data-testid="scope"]')!.textContent).toBe("tenant-c");
+    expect(localStorage.getItem(NAMESPACE_STORAGE_KEY)).toBe("tenant-c");
+    expect(client.getQueryData(["namespace", "tenant-a"])).toBeUndefined();
+    expect(client.getQueryData(["proxy", "tenant-a", "p1"])).toBeUndefined();
+    expect(detailReads).not.toContain("tenant-a");
+  });
+
+  it("keeps everything on a 503 from the nothing-applied family", async () => {
+    adoptProductionClient();
+    await render();
+    await click("Edit", row());
+    await input(0, "tenant-b");
+    // No X-Ferrum-Config-Cursor and no `applied: false`: nothing was committed.
+    nextMutationResponse = Response.json({ error: "namespace admission unavailable" }, { status: 503 });
+    await click("Save");
+    await settle(() => expect(toast).toHaveBeenCalledWith("error", expect.any(String)));
+    expect(toast).not.toHaveBeenCalledWith("warning", expect.anything());
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(host.querySelector("select")!.value).toBe("tenant-a");
+    expect(host.querySelector('[data-testid="scope"]')!.textContent).toBe("tenant-a");
+    expect(client.getQueryData(["namespace", "tenant-a"])).toBeDefined();
+    expect(client.getQueryData(["proxy", "tenant-a", "p1"])).toBeDefined();
+    expect(writes).toHaveLength(1);
+  });
+
+  it("keeps the dialog open on an ordinary failure", async () => {
+    adoptProductionClient();
+    await render();
+    await click("Edit", row());
+    await input(0, "tenant-b");
+    nextMutationResponse = Response.json({ error: "protected" }, { status: 409 });
+    await click("Save");
+    await settle(() => expect(toast).toHaveBeenCalledWith("error", expect.any(String)));
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(host.querySelector("select")!.value).toBe("tenant-a");
+    expect(client.getQueryData(["namespace", "tenant-a"])).toBeDefined();
+  });
 });

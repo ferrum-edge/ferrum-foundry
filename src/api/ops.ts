@@ -6,6 +6,7 @@
 
 import { classifyCommittedWrite, type CommittedWrite } from "./gatewayMetadata";
 import { restoreSecrets, secretValues, withRedactedFailure } from "./secretRedaction";
+import { longRunningClientTimeout } from "../../server/waitBudget";
 import {
   SILENT_ERRORS,
   REDACT_ERRORS,
@@ -683,7 +684,9 @@ export async function restore(
         scoped(scope, {
           json: data,
           searchParams,
-          timeout: 120000,
+          // Covers the BFF's whole upload budget plus restore's response
+          // budget: ky's deadline starts before the body is sent.
+          timeout: longRunningClientTimeout("POST", "/restore"),
           context: { [SILENT_ERRORS]: true },
         }),
       )

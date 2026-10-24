@@ -435,6 +435,10 @@ Namespaces are a full CRUD registry on the gateway, not just a header value.
   other query scoped under the retired name (`[kind, name, …]`) is removed too,
   so a recreated namespace never seeds an editor from a resource the cascade
   destroyed.
+- A rename answered with the committed-but-not-live `503` is a rename: the
+  mutation reconciles the cache to the destination as on success, and the edit
+  dialog follows the destination, closes, and reports the commit as a warning.
+  Never re-observe or offer another Save against the retired name.
 - Delete is a two-stage, gateway-driven flow (`DeleteNamespaceDialog`), not a
   cascade checkbox. Stage 1 always sends the **unconfirmed** DELETE, so an empty
   namespace goes in one click. The gateway's `409` ("not empty") promotes stage

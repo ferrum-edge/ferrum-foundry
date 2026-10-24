@@ -290,7 +290,7 @@ function attachedPluginsForProxy(
 /**
  * Plugins the gateway actually runs for this proxy: attached by scope, not
  * shadowed by a same-name scoped instance, AND applicable to the proxy's
- * protocol. A stream (tcp/tcps/udp/dtls) proxy
+ * protocol (for `waf`, as its configuration declares). A stream (tcp/tcps/udp/dtls) proxy
  * never executes HTTP-only plugins, so counting them would overstate both
  * policy coverage and consumer exposure.
  */
@@ -299,14 +299,15 @@ export function effectivePluginsForProxy(
   pluginConfigs: PluginConfig[],
 ): EffectivePlugin[] {
   return attachedPluginsForProxy(proxy, pluginAttachmentIndex(pluginConfigs)).filter(
-    (plugin) => pluginAppliesToProxy(plugin.plugin_name, proxy),
+    (plugin) => pluginAppliesToProxy(plugin, proxy),
   );
 }
 
 /**
  * The counterpart of {@link effectivePluginsForProxy}: enabled global,
  * direct, and proxy-group plugins that are attached to this proxy but which
- * the gateway skips because they are HTTP-only. Always empty for an HTTP
+ * the gateway skips because they are HTTP-only (including a `waf` without
+ * active stream inspection). Always empty for an HTTP
  * proxy; the UI shows them so an attachment never silently disappears.
  */
 export function inapplicablePluginsForProxy(
@@ -314,7 +315,7 @@ export function inapplicablePluginsForProxy(
   pluginConfigs: PluginConfig[],
 ): EffectivePlugin[] {
   return attachedPluginsForProxy(proxy, pluginAttachmentIndex(pluginConfigs)).filter(
-    (plugin) => !pluginAppliesToProxy(plugin.plugin_name, proxy),
+    (plugin) => !pluginAppliesToProxy(plugin, proxy),
   );
 }
 

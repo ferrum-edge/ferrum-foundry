@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – TanStack Query hooks for Namespaces              */
 /* ------------------------------------------------------------------ */
 
-import { queryScope } from "@/api/client";
+import { getCommittedWrite, queryScope } from "@/api/client";
 import {
   useMutation,
   useQuery,
@@ -103,6 +103,13 @@ export function useUpdateNamespace() {
       namespaces.update(scope, name, data),
     onSuccess: (updated, { name }) => {
       reconcileNamespaceCache(qc, name, updated.name);
+    },
+    // A committed-but-not-live `503` is a durable update: a rename already
+    // retired the old name, so its caches go exactly as on success. Without
+    // this the blanket committed-write refresh would leave the retired detail
+    // cached and stale, and the next observer would refetch it into a 404.
+    onError: (error, { name, data }) => {
+      if (getCommittedWrite(error)) reconcileNamespaceCache(qc, name, data.name ?? name);
     },
   });
 }

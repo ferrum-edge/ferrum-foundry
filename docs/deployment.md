@@ -345,6 +345,7 @@ Some admin calls wait on the gateway. The BFF gives them longer deadlines than
 | API-spec import or replace | `FERRUM_UPLOAD_TIMEOUT`, then `FERRUM_READ_TIMEOUT` | 365 s |
 | API-spec read or document download | `FERRUM_READ_TIMEOUT` | 65 s |
 | ACME order create or renew | `FERRUM_WRITE_TIMEOUT`, then `FERRUM_READ_TIMEOUT` | 125 s |
+| Backup restore | `FERRUM_UPLOAD_TIMEOUT`, then `FERRUM_READ_TIMEOUT` (at least 120 s) | 425 s |
 
 The ACME polling budget defaults to 60 s and must be 1-600 s. The browser
 figures use the shipped BFF defaults; it cannot see runtime overrides, so a
