@@ -257,6 +257,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refuse it with a `403` that reads as header stripping. Without
   `FERRUM_NAMESPACE` or `FERRUM_TRUSTED_PROXY_SECRET` the check is unknown
   rather than sent as a request the BFF would refuse on its own (#603).
+- A namespace-scoped `GET /namespaces` no longer reports a registry that
+  changed between upstream pages as a smaller complete list (#638). The BFF's
+  traversal deduplicated a repeated name, checked each page's total on its
+  own, and stopped at the latest one, so a delete plus an earlier-sorting
+  insert, or a shrinking total, could silently omit an existing granted
+  namespace. A name repeated from any earlier page, a changed first-page
+  total, or more names than that total now answers `503` with
+  `code: FERRUM_BFF_NAMESPACE_SCAN_INCONSISTENT`, unless every granted name
+  had already been listed, in which case the result is unaffected.
+- `/api/health/ready` is ready only on a valid gateway health snapshot
+  (#634): a recognized `status` and a boolean `ready`, as the UI's own health
+  read requires. A `200` HTML fallback page, an empty or `{}` body, or one
+  without `ready` from a misrouted admin origin was reported ready; it is now
+  `503` `unavailable`. A valid `degraded` snapshot is still ready.
 
 ### Changed
 

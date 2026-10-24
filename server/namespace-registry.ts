@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Response } from 'undici';
 import type { AuthPrincipal } from './auth-types.js';
 
@@ -212,12 +213,41 @@ function unavailable(outcome: Extract<ScanOutcome, { status: number }>): Respons
   });
 }
 
+// 96 bits of SHA-256 as a 12-character one-byte string: constant-size per
+// name, and a collision across even the largest page budget (10^6 names) is
+// about 10^-17 likely.
+function witnessKey(name: string): string {
+  // Each of the first 12 digest bytes maps to exactly one latin1 character.
+  return createHash('sha256').update(name).digest().toString('latin1', 0, 12);
+}
+
 // Filtering individual pages leaves gaps and exposes the fleet total, so the
 // traversal retains only granted names and the caller paginates that set. Its
 // cost is bounded three ways: it stops as soon as every grant is found (the
 // result is a subset of the grants, so no later page can change it), it reads
 // at most `maxPages` pages and otherwise reports the list unavailable rather
 // than partial, and it runs under its own deadline.
+//
+// Short of finding every grant, the result is only as complete as the
+// traversal was consistent (docs/data-loading.md): pages chained from offset 0,
+// kept the first page's total, returned no more than that many names, and
+// never repeated one. A repeated name is the visible trace of a delete plus an
+// earlier-sorting insert under an equal total, which shifts later pages back
+// and skips a name, so it is refused rather than deduplicated; so is a total
+// that changed. Either is reported unavailable (retryable), never as a smaller
+// complete list the browser could not tell apart. A shift can be any size (a
+// bulk replace can re-serve a page read long before), so every name the
+// traversal witnessed is remembered, not only the previous page.
+//
+// Each is remembered as a fixed-size digest (`witnessKey`), so the memory is
+// bounded by the page budget alone: at most `maxPages` × PAGE_SIZE entries of
+// constant size (a page is validated before its names are), however long the
+// names are; a single legacy array page is bounded by PAGE_BYTES instead. A digest collision reports a
+// repeat, which fails closed as the same retryable 503 and never omits a name.
+//
+// Offset reads cannot prove more than that: a delete before the cursor plus a
+// later-sorting insert skips a name without repeating one, and stays
+// undetectable until the gateway exposes a collection revision.
 async function scanGrantedNames(
   target: URL,
   grants: ReadonlySet<string>,
@@ -225,7 +255,9 @@ async function scanGrantedNames(
   maxPages: number,
   signal: AbortSignal,
 ): Promise<ScanOutcome> {
-  const names = new Set<string>();
+  const found = new Set<string>();
+  const witnessed = new Set<string>();
+  let firstTotal: number | undefined;
   let upstreamOffset = 0;
   let pages = 0;
   while (true) {
@@ -256,21 +288,38 @@ async function scanGrantedNames(
     if (!Array.isArray(data) || data.some((name) => typeof name !== 'string' || !NAME_PATTERN.test(name))) {
       throw new Error('Invalid namespace list');
     }
-    for (const name of data as string[]) if (grants.has(name)) names.add(name);
-    if (legacy) break;
-    const total = envelope?.pagination?.total;
-    if (typeof total !== 'number' || !Number.isSafeInteger(total) || total < 0
-      || envelope?.pagination?.offset !== upstreamOffset || data.length > PAGE_SIZE) {
-      throw new Error('Invalid namespace pagination');
+    let consistent = true;
+    if (!legacy) {
+      const total = envelope?.pagination?.total;
+      if (typeof total !== 'number' || !Number.isSafeInteger(total) || total < 0
+        || envelope?.pagination?.offset !== upstreamOffset || data.length > PAGE_SIZE) {
+        throw new Error('Invalid namespace pagination');
+      }
+      firstTotal ??= total;
+      upstreamOffset += data.length;
+      consistent = total === firstTotal && upstreamOffset <= firstTotal;
     }
-    upstreamOffset += data.length;
-    if (upstreamOffset >= total) break;
-    // The first page always runs, so the gateway's own answer (including a
-    // refusal) still decides a request whose grants are all found.
-    if (names.size === grants.size) break;
+    for (const name of data as string[]) {
+      const key = witnessKey(name);
+      if (witnessed.has(key)) consistent = false;
+      witnessed.add(key);
+      if (grants.has(name)) found.add(name);
+    }
+    // Every grant has been positively listed, so no other page can change the
+    // result, however the registry moved meanwhile. The first page always
+    // runs, so the gateway's own answer (including a refusal) still decides a
+    // request whose grants are all found.
+    if (found.size === grants.size) break;
+    if (!consistent) {
+      return {
+        status: 503,
+        body: { error: 'Namespace list unavailable', code: 'FERRUM_BFF_NAMESPACE_SCAN_INCONSISTENT' },
+      };
+    }
+    if (legacy || upstreamOffset >= firstTotal!) break;
     if (data.length === 0) throw new Error('Namespace pagination made no progress');
   }
-  return { names: [...names].sort() };
+  return { names: [...found].sort() };
 }
 
 function startScan(key: string, deadline: number, run: (signal: AbortSignal) => Promise<ScanOutcome>): SharedScan {
