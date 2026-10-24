@@ -60,6 +60,26 @@ const gateway = createServer((request, response) => {
         response.end(JSON.stringify({ data, pagination: { offset, limit, total } }));
         return;
       }
+      if (url.searchParams.has('shift')) {
+        // The first page reads the initial registry; every later page reads
+        // it after one change made by another writer in between. Edge orders
+        // the registry by name.
+        const base = Array.from({ length: 1000 }, (_, i) => `b-${String(i).padStart(4, '0')}`);
+        const changed: Record<string, string[]> = {
+          // Delete z-last, insert a-new: equal total, b-0999 repeats, a-new is skipped.
+          swap: ['a-new', ...base],
+          // Insert a-new: the total grows and b-0999 repeats.
+          grow: ['a-new', ...base, 'z-last'],
+          // Insert c-new after the cursor: the total grows, nothing repeats.
+          append: [...base, 'c-new', 'z-last'],
+          // Delete b-0000: the total shrinks and z-last is skipped.
+          shrink: [...base.slice(1), 'z-last'],
+        };
+        const current = offset === 0 ? [...base, 'z-last'] : changed[url.searchParams.get('shift')!]!;
+        response.end(JSON.stringify({ data: current.slice(offset, offset + limit),
+          pagination: { offset, limit, total: current.length } }));
+        return;
+      }
       response.setHeader('etag', '"fleet-only"');
       const page = JSON.stringify({ data: names.slice(offset, offset + limit),
         pagination: { offset, limit, total: names.length } });
@@ -473,6 +493,40 @@ describe('registry authorization at the forwarding boundary', () => {
     expect(refused.headers['cache-control']).toBe('no-store');
     expect(arrivals.slice(before).map((entry) => new URL(entry.path, 'http://fixture').searchParams.get('offset')))
       .toEqual(['0', '1000', '2000']);
+  });
+
+  it('refuses a traversal the registry changed under unless every grant was already listed', async () => {
+    const list = (shift: string, scope: string) => call(`/api/proxy/namespaces?shift=${shift}`, 'GET', '',
+      identity({ 'x-registry-grants': scope, 'x-ferrum-namespace': scope.split(', ')[0] }));
+    const inconsistent = { error: 'Namespace list unavailable', code: 'FERRUM_BFF_NAMESPACE_SCAN_INCONSISTENT' };
+    for (const [shift, scope] of [
+      // A repeated granted name is not deduplicated into a smaller list
+      // that silently omits the existing a-new.
+      ['swap', 'b-0999, a-new'],
+      // Nor is a repeated ungranted one: the same shift skipped a-new.
+      ['swap', 'b-0000, a-new'],
+      // A shrinking total would otherwise end the traversal before z-last.
+      ['shrink', 'b-0500, z-last'],
+      // A grown total cannot rule out the absent grant either.
+      ['append', 'z-last, absent'],
+    ]) {
+      const before = arrivals.length;
+      const response = await list(shift, scope);
+      expect(response.status).toBe(503);
+      expect(JSON.parse(response.body)).toEqual(inconsistent);
+      expect(response.headers['cache-control']).toBe('no-store');
+      expect(response.body).not.toContain('b-');
+      expect(arrivals.length - before).toBe(2);
+    }
+
+    // Once every grant has been listed, no other page can change the
+    // result, so a changed registry still answers.
+    for (const [shift, scope] of [['grow', 'b-0005, z-last'], ['append', 'c-new, b-0005']]) {
+      const response = await list(shift, scope);
+      expect(response.status).toBe(200);
+      expect(JSON.parse(response.body)).toEqual({ data: scope.split(', ').sort(),
+        pagination: { offset: 0, limit: 100, total: 2 } });
+    }
   });
 
   it('shares one in-flight traversal between identical lists and keeps no result after it', async () => {

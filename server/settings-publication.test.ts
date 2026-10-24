@@ -129,7 +129,7 @@ describe('settings publication and dispatcher retirement', () => {
     const current = await app!.inject({ method: 'GET', url: '/api/health/ready' });
     expect(current.statusCode).toBe(503);
     expect(current.json().ready).toBe(false);
-    held!.end('{"ready":true}');
+    held!.end('{"status":"ok","ready":true}');
     expect((await oldProbe).statusCode).toBe(200);
     const cached = await app!.inject({ method: 'GET', url: '/api/health/ready' });
     expect(cached.statusCode).toBe(503);

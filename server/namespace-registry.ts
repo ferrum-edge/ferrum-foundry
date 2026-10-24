@@ -218,6 +218,18 @@ function unavailable(outcome: Extract<ScanOutcome, { status: number }>): Respons
 // result is a subset of the grants, so no later page can change it), it reads
 // at most `maxPages` pages and otherwise reports the list unavailable rather
 // than partial, and it runs under its own deadline.
+//
+// Short of finding every grant, the result is only as complete as the
+// traversal was consistent (docs/data-loading.md): pages chained from offset 0,
+// kept the first page's total, returned no more than that many names, and
+// never repeated one. A repeated name is the visible trace of a delete plus an
+// earlier-sorting insert under an equal total, which shifts the next page back
+// and skips a name, so it is refused rather than deduplicated; so is a total
+// that changed. Either is reported unavailable (retryable), never as a smaller
+// complete list the browser could not tell apart. A shift between two reads
+// repeats the tail of the previous page, so repeats are checked against that
+// page and against every granted name seen, which bounds the memory by one
+// page plus the grants rather than by the whole registry.
 async function scanGrantedNames(
   target: URL,
   grants: ReadonlySet<string>,
@@ -225,7 +237,9 @@ async function scanGrantedNames(
   maxPages: number,
   signal: AbortSignal,
 ): Promise<ScanOutcome> {
-  const names = new Set<string>();
+  const found = new Set<string>();
+  let previousPage: ReadonlySet<string> = new Set();
+  let firstTotal: number | undefined;
   let upstreamOffset = 0;
   let pages = 0;
   while (true) {
@@ -256,21 +270,40 @@ async function scanGrantedNames(
     if (!Array.isArray(data) || data.some((name) => typeof name !== 'string' || !NAME_PATTERN.test(name))) {
       throw new Error('Invalid namespace list');
     }
-    for (const name of data as string[]) if (grants.has(name)) names.add(name);
-    if (legacy) break;
-    const total = envelope?.pagination?.total;
-    if (typeof total !== 'number' || !Number.isSafeInteger(total) || total < 0
-      || envelope?.pagination?.offset !== upstreamOffset || data.length > PAGE_SIZE) {
-      throw new Error('Invalid namespace pagination');
+    const pageNames = new Set<string>();
+    let repeated = false;
+    for (const name of data as string[]) {
+      if (pageNames.has(name) || previousPage.has(name) || found.has(name)) repeated = true;
+      pageNames.add(name);
+      if (grants.has(name)) found.add(name);
     }
-    upstreamOffset += data.length;
-    if (upstreamOffset >= total) break;
-    // The first page always runs, so the gateway's own answer (including a
-    // refusal) still decides a request whose grants are all found.
-    if (names.size === grants.size) break;
+    let consistent = !repeated;
+    if (!legacy) {
+      const total = envelope?.pagination?.total;
+      if (typeof total !== 'number' || !Number.isSafeInteger(total) || total < 0
+        || envelope?.pagination?.offset !== upstreamOffset || data.length > PAGE_SIZE) {
+        throw new Error('Invalid namespace pagination');
+      }
+      firstTotal ??= total;
+      upstreamOffset += data.length;
+      consistent &&= total === firstTotal && upstreamOffset <= firstTotal;
+    }
+    // Every grant has been positively listed, so no other page can change the
+    // result, however the registry moved meanwhile. The first page always
+    // runs, so the gateway's own answer (including a refusal) still decides a
+    // request whose grants are all found.
+    if (found.size === grants.size) break;
+    if (!consistent) {
+      return {
+        status: 503,
+        body: { error: 'Namespace list unavailable', code: 'FERRUM_BFF_NAMESPACE_SCAN_INCONSISTENT' },
+      };
+    }
+    if (legacy || upstreamOffset >= firstTotal!) break;
     if (data.length === 0) throw new Error('Namespace pagination made no progress');
+    previousPage = pageNames;
   }
-  return { names: [...names].sort() };
+  return { names: [...found].sort() };
 }
 
 function startScan(key: string, deadline: number, run: (signal: AbortSignal) => Promise<ScanOutcome>): SharedScan {
