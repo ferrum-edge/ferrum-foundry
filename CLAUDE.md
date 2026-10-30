@@ -37,11 +37,6 @@ a local copy would go stale.
 
 Shared org contracts are vendored under `contracts/ferrum-contracts/`; see
 [Contracts](README.md#contracts).
-Published Foundry v0.5.5 adopts `contracts-edge-0.9.15` at
-`6fb64c5dc2e014204c17609fc717d976f3b4589e`. The shared manifest is implemented;
-qualification and publication evidence are recorded in
-`docs/compatibility.json` and its immutable v0.5.5 snapshot. Earlier release
-notes and records remain unchanged.
 
 ## Development
 
@@ -61,7 +56,8 @@ npm run dev
 FERRUM_DEMO_BACKEND_BIND=0.0.0.0 node scripts/demo-backend.mjs
 
 # OR: a mock admin API on :9000 (no gateway needed). It serves sample data for
-# every admin surface and implements ETag/If-Match on the four
+# most admin surfaces (mesh routes other than the service graph and, in mesh
+# mode, the runtime overlay 404) and implements ETag/If-Match on the four
 # full-replacement resource families.
 node scripts/mock-admin-gateway.mjs
 # The same mock with a read-only admin API (MOCK_GATEWAY_MODE=file, dp or mesh)
@@ -81,8 +77,7 @@ node scripts/demo-traffic-client.mjs mixed
 
 Run the Ferrum Edge image CI pins, by digest, so local results match CI. It is
 the published Ferrum Edge v0.9.15 security release qualified with published
-Foundry v0.5.5. Published v0.5.4, v0.5.3, v0.5.2, v0.5.1, v0.5.0 and v0.4.0
-pairings remain in history.
+Foundry v0.5.5.
 `edge.image` in `docs/compatibility.json` is the single source: CI reads it
 (`node scripts/supported-pairing.mjs edge-image`), and
 `scripts/supported-pairing.test.mjs` fails if the starter, this command, or any
@@ -193,8 +188,8 @@ Dark and light themes via CSS custom properties. Dark is the default.
 - `src/components/mcp/` - the proxy page's MCP Tools tab: the node-local
   `mcp_gateway` tool catalog (`src/api/mcpTools.ts`), inline per-tool policy
   edits (one `policy.tools` entry per guarded write, `src/lib/mcpToolPolicy.ts`),
-  and the AI governance summary (`src/lib/mcpGovernance.ts`). See the v0.9.9
-  section of `docs/compatibility.md`
+  and the AI governance summary (`src/lib/mcpGovernance.ts`). See
+  `docs/mcp-tools.md`
 - `src/api/` - API client, types, and endpoint modules (`tls.ts`, `mesh.ts`, `ops.ts`, `apiSpecs.ts`, `trust.ts` carry their own response types)
 - `src/hooks/` - React Query hooks
 - `src/lib/pluginConfigDefaults.ts` - plugin catalog: per-plugin default configs plus `PLUGIN_METADATA` (category + description) for the plugin picker
@@ -205,9 +200,11 @@ Dark and light themes via CSS custom properties. Dark is the default.
   - Foundry stores no copy of the spec, so each component's SHA-256 is pinned
     alongside the spec commit it was read at (`PLUGIN_SCHEMA_SPEC.ref`).
     `npm run check:plugin-schemas` (`scripts/plugin-schema-drift.mjs`) fetches
-    the spec at that commit on every PR and compares the digests;
+    the spec at `edge.source_commit` from `docs/compatibility.json` in the
+    Pinned Gateway Contract job and compares the digests;
     `FERRUM_SPEC_REF=main` checks against the current upstream instead. Never
-    update a digest or the ref without re-reading the schema.
+    update a digest or `PLUGIN_SCHEMA_SPEC.ref` without re-reading the schema;
+    after re-review keep the ref equal to the checked commit.
   - Guided edits are lossless: unmodelled keys, key order, and omission/`null`
     semantics all survive. A shape the descriptors cannot model falls back to
     raw JSON with a stated reason rather than being rewritten.
@@ -259,14 +256,13 @@ See `docs/concurrent-edits.md`.
   Edge refuses it with `412` if anything commits in between. The guard then
   re-verifies, and re-sends only if the fields this write replaces are still
   unchanged.
-- Adopted policy #542 (v0.5.2, #544): `guardedReplace`/`guardedRemove` refuse an
-  initial fresh read without one nonempty quoted visible-ASCII strong `ETag`,
-  before writing, with a fixed `GuardVerificationError`. Older/database-less
-  gateways and cached reads cannot establish an atomic guard. Released v0.5.1
-  and earlier permit that initial unconditional fallback; v0.5.2 removes it.
-  Explicit `null`-guard read-derived calls use `replaceFromRead` and retain
-  their fallback; low-level helpers and plugin membership plans keep their
-  semantics. Never use them to bypass a refused editor write. An untagged re-read after a `412` was already refused.
+- Policy #542: `guardedReplace`/`guardedRemove` refuse an initial fresh read
+  without one nonempty quoted visible-ASCII strong `ETag`, before writing, with
+  a fixed `GuardVerificationError`. Older/database-less gateways and cached
+  reads cannot establish an atomic guard. Explicit `null`-guard read-derived
+  calls use `replaceFromRead` and retain their fallback; low-level helpers and
+  plugin membership plans keep their semantics. Never use them to bypass a
+  refused editor write. An untagged re-read after a `412` was already refused.
 - Send `If-Match` only on `PUT`/`DELETE` of the four resource item paths
   (proxies, upstreams, consumers, plugin configs), and only a strong tag from a
   read. Anywhere else, or a malformed or empty value, is a `400`.

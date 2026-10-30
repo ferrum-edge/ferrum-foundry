@@ -88,26 +88,16 @@ the org's central contract store, in
 [`contracts/ferrum-contracts/PIN`](../contracts/ferrum-contracts/PIN).
 The pinned files and the local plugin names and provisioning markers are checked
 by `scripts/ferrum-contracts.test.mjs` in the normal contract test suite.
-The canonical pin is now published `contracts-edge-0.9.15` at
-`6fb64c5dc2e014204c17609fc717d976f3b4589e`, mapped to Edge v0.9.15. The plugin
-catalog and provisioning vocabulary refresh provenance to released Edge source
-`25b37395ff61bfea0f3ffd189d9011c4984fa755`, and the catalog notes the v0.9.15
-config-schema changes; plugin entries, lifecycle metadata, provisioning values
-and historical first availability are unchanged. The
-vocabulary schemas retain their exact earlier bytes. The pin also includes the
-implemented service-manifest schema, every shared manifest fixture and the
-canonical invalid-expectations file for the
+The canonical pin is published `contracts-edge-0.9.15` at
+`6fb64c5dc2e014204c17609fc717d976f3b4589e`, mapped to Edge v0.9.15. Besides the
+plugin catalog, the provisioning vocabulary and their vocabulary schemas, the
+pin includes the implemented service-manifest schema, every shared manifest
+fixture and the canonical invalid-expectations file for the
 [Alloy preview consumer](alloy-manifest-preview.md). Every adopted file is
-byte-identical to the immutable canonical commit, including descriptions with
-historical preparation wording. The complete canonical invalid-expectations
-file versions its deployment-snapshot and backend-egress-policy negatives and
-adds their v2 entries, including the v0.9.14 data-plane attestation negatives;
-v0.9.15 adds diagnostic-ref and gateway-headers negatives. Foundry's same
-18-file scope includes no deployment, egress-policy, diagnostic or header
-schemas or profile implementation. Manifest schema, fixtures and
-owner-unreleased status remain unchanged. Foundry v0.5.5 passed hosted pairing
-qualification and was published; see [the compatibility record](compatibility.md).
-v0.5.4 and earlier evidence belongs to their unchanged immutable release records.
+byte-identical to the canonical commit. Foundry's 18-file scope includes no
+deployment, egress-policy, diagnostic or header schemas or profile
+implementation. Release and qualification evidence is in
+[the compatibility record](compatibility.md).
 
 Edge v0.9.15 confines every plugin-config environment reference to
 `FERRUM_PLUGIN_SECRET_<NAME>` (`<NAME>` uppercase `[A-Z_][A-Z0-9_]*`) and
