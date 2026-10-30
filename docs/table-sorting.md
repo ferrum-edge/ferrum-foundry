@@ -73,14 +73,15 @@ even when the collection is empty.
   reordered input), input immutability, and disabled server-page and column
   sorting.
 - `src/routes/resourceGrids.test.tsx` mounts nine of the ten `ResourceGrid`
-  surfaces (not the Metrics per-route table) and checks the scroller, minimum width, shared header/row template, identity
-  cell, and placement of empty/error feedback. Vitest runs these in jsdom,
-  which cannot measure layout or prove text is visible.
+  surfaces (not the Metrics per-route table) and checks the scroller, minimum
+  width, shared header/row template, identity cell, and placement of
+  empty/error feedback. Vitest runs these in jsdom, which cannot measure
+  layout or prove text is visible.
 
 No CI job checks narrow-viewport layout. The Critical Journeys job drives
 Chromium through Playwright, but its journeys do not test layout. Check by hand
 in a browser at 390×844: populated and empty lists, the mesh service graph, TLS
 inventory, cluster capabilities, the authorization tabs in proxy and consumer
-details, and the Metrics per-route table. Confirm identity text has room, horizontal scrolling reaches
-every column without page overflow, headers stay aligned with rows, and
-empty-state actions stay visible. Also check a desktop viewport in both themes.
+details, and the Metrics per-route table. Confirm identity text has room,
+horizontal scrolling reaches every column without page overflow, headers stay
+aligned with rows, and empty-state actions stay visible. Also check a desktop viewport in both themes.

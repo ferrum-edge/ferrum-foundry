@@ -154,7 +154,8 @@ Plugin-config `PUT`/`DELETE` also send Edge's `expected_proxy_ids` association
 precondition
 ([ferrum-edge-git-forge-ops#569](https://github.com/ferrum-edge/ferrum-edge-git-forge-ops/issues/569),
 [ferrum-edge#6744](https://github.com/ferrum-edge/ferrum-edge/pull/6744)),
-which Edge requires from v0.9.19. It is not a requirement of this pairing: the
+which Edge requires from v0.9.18 (tagged but unpublished; first published in
+v0.9.19). It is not a requirement of this pairing: the
 v0.5.5 / v0.9.15 qualification predates the parameter, and v0.9.15 ignores it.
 On this pairing Foundry's own membership preflight is the only association
 check, and it cannot close the race between its listing and the write; see

@@ -42,8 +42,11 @@ needs `operator` or above on a writable gateway, replaces one
 `config.policy.tools` entry through the conditional-write path, omits
 `labels` (so `provisioned-by` survives), and is refused before sending when
 the session's read masks a value. In practice an `operator` read masks the
-path of every MCP server URL that has one, so such configurations need an
-`admin`, or the masked values re-entered on the plugin page first.
+path of every MCP server URL that has one. Every inline save re-reads the
+configuration and refuses again, and re-entered URLs are masked again on the
+next `operator` read. For such configurations an `admin` must make the inline
+edit, or the `operator` must change `policy.tools` on the plugin page in the
+same save that re-enters the masked values.
 
 The capability parity contract probes the catalog read as each role (see
 [capabilities.md](capabilities.md)); `scripts/mock-admin-gateway.mjs` serves it
