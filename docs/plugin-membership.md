@@ -148,8 +148,10 @@ handles them as follows:
   pointers from Edge's error as written, never a value.
 - **Upstream targets.** A targets save resends every upstream setting from a
   fresh read. When that read masks the Consul token (a non-admin session),
-  Foundry refuses the save before sending it; re-enter or clear the token on the Configuration tab
-  first, or have an admin make the change.
+  Foundry refuses the save before sending it, and a token re-entered in an
+  earlier save is masked again on that read. Have an admin make the change, or
+  change the targets on the Configuration tab in the same save that re-enters
+  or clears the token.
 - **Rollback.** A failed membership change restores the plugin configuration it
   read first. When that read has a placeholder at a field masked for the
   session's role, the restore is not attempted: the

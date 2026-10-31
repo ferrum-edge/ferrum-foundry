@@ -151,6 +151,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- An MCP tool policy save, or an upstream targets save, refused because the
+  session's read masks a value now says to have an admin make the change, or
+  to make it on the plugin page (for a policy) or the Configuration tab (for
+  targets) in the same save that re-enters or clears the masked values. It no
+  longer suggests re-entering them in an earlier save, which the save's fresh
+  read masks again.
 - The critical-journey guide says an unset `FOUNDRY_IMAGE` runs the
   published release digest the starter pins, not `ferrum-foundry:main`, and
   keeps the instruction to set it for a local build (#635).

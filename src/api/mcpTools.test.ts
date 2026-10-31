@@ -357,7 +357,7 @@ describe("per-tool policy write", () => {
       "/config/servers/github/upstream_url",
     ]);
     expect((refused as Error).message).toContain("hidden from your role");
-    expect((refused as Error).message).toContain("Re-enter the URL");
+    expect((refused as Error).message).toContain("in the same save that re-enters the URL");
     expect(gateway.wire.map((call) => call.method)).toEqual(["GET"]);
   });
 
@@ -396,9 +396,11 @@ describe("per-tool policy write", () => {
 
 describe("masked-value advice", () => {
   it("never suggests clearing a required server URL", () => {
-    expect(maskedToolPolicyAdvice(["/config/servers/github/upstream_url"]))
-      .toBe("Re-enter the URL on the plugin page first, or have an admin make the change.");
-    expect(maskedToolPolicyAdvice(["/config/upstream_url"])).toContain("Re-enter the URL");
+    expect(maskedToolPolicyAdvice(["/config/servers/github/upstream_url"])).toBe(
+      "Have an admin make the change, or change policy.tools on the plugin page in the " +
+        "same save that re-enters the URL.",
+    );
+    expect(maskedToolPolicyAdvice(["/config/upstream_url"])).toContain("re-enters the URL");
     const mixed = maskedToolPolicyAdvice([
       "/config/servers/github/upstream_url",
       "/config/servers/github/headers/authorization",
@@ -406,5 +408,17 @@ describe("masked-value advice", () => {
     expect(mixed).toContain("a server URL must be re-entered");
     expect(maskedToolPolicyAdvice(["/config/servers/github/headers/authorization"]))
       .toContain("clearing deletes the stored secret");
+  });
+
+  it("never suggests a separate save first, which the policy save's re-read masks again", () => {
+    for (const pointers of [
+      ["/config/servers/github/upstream_url"],
+      ["/config/servers/github/upstream_url", "/config/servers/github/headers/authorization"],
+      ["/config/servers/github/headers/authorization"],
+    ]) {
+      const advice = maskedToolPolicyAdvice(pointers);
+      expect(advice).toContain("in the same save");
+      expect(advice).not.toContain("first");
+    }
   });
 });

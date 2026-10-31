@@ -341,9 +341,27 @@ describe("MCP Tools tab", () => {
       expect(panel().textContent).toContain("Tool policy cannot be saved by your role"));
     expect(panel().textContent).toContain("/config/servers/github/upstream_url");
     // A server URL is required and not a secret: it cannot be cleared.
-    expect(panel().textContent).toContain("Re-enter the URL on the plugin page first");
+    expect(panel().textContent).toContain("in the same save that re-enters the URL");
     expect(panel().textContent).not.toContain("clearing deletes the stored secret");
     expect(button("Edit policy for github.search").disabled).toBe(true);
+  });
+
+  it("gives the same-save advice when the save's own read masks a value the page did not", async () => {
+    role = "operator";
+    await openTools();
+    await settle(() => expect(button("Edit policy for github.search").disabled).toBe(false));
+    await act(async () => button("Edit policy for github.search").click());
+    // The save's fresh read now masks the server URL.
+    stored = mcpPlugin("https://mcp.example.com/[REDACTED_PATH]");
+    await selectOption("Action", "Hide from discovery");
+    await act(async () => button("Save policy").click());
+
+    const banner = () => [...panel().querySelectorAll('[role="alert"]')]
+      .find((alert) => alert.textContent?.includes("Foundry did not send this save"));
+    await settle(() => expect(banner()).toBeDefined());
+    expect(banner()!.textContent).toContain("in the same save that re-enters the URL");
+    expect(banner()!.textContent).not.toContain("Re-enter each value");
+    expect(puts).toHaveLength(0);
   });
 
   it("explains a control plane's node-local not_served catalog and keeps the stored policy editable", async () => {

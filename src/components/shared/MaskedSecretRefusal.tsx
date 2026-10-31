@@ -9,8 +9,19 @@ import { maskedPlaceholderRefusal } from "@/api/maskedSecrets";
  * a placeholder the caller's read put in place of a stored secret: Edge's
  * `400` (ferrum-edge#5925), or Foundry's own refusal before sending. The JSON
  * pointers are shown exactly as reported; no value is.
+ *
+ * The default advice suits an editor that resends the fields it shows. A
+ * caller whose save rebuilds the body from a fresh read (an MCP tool policy
+ * save) passes `advice` built from the refused pointers instead, since
+ * re-entering a value there is only possible in another form's save.
  */
-export function MaskedSecretRefusal({ error }: { error: unknown }) {
+export function MaskedSecretRefusal({
+  error,
+  advice,
+}: {
+  error: unknown;
+  advice?: (pointers: readonly string[]) => string;
+}) {
   const refusal = maskedPlaceholderRefusal(error);
   if (!refusal) return null;
 
@@ -20,8 +31,11 @@ export function MaskedSecretRefusal({ error }: { error: unknown }) {
       <p className="text-sm text-danger">
         {refusal.local ? "Foundry did not send this save" : "Ferrum Edge refused this save"}:
         these fields carry the placeholder that {reader} show in place of a stored
-        secret. Re-enter each value, or clear it (clearing deletes the stored
-        secret), or have an admin make the change.
+        secret.{" "}
+        {advice
+          ? advice(refusal.pointers)
+          : "Re-enter each value, or clear it (clearing deletes the stored secret), or " +
+            "have an admin make the change."}
       </p>
       <ul className="list-disc pl-5 text-xs text-text-primary">
         {refusal.pointers.map((pointer) => (
