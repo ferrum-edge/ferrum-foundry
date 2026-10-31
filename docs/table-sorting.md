@@ -84,4 +84,5 @@ in a browser at 390×844: populated and empty lists, the mesh service graph, TLS
 inventory, cluster capabilities, the authorization tabs in proxy and consumer
 details, and the Metrics per-route table. Confirm identity text has room,
 horizontal scrolling reaches every column without page overflow, headers stay
-aligned with rows, and empty-state actions stay visible. Also check a desktop viewport in both themes.
+aligned with rows, and empty-state actions stay visible. Also check a desktop
+viewport in both themes.

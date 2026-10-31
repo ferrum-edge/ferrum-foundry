@@ -9,7 +9,8 @@ Tools tab (#505) needs; none of it is in v0.9.8:
   `schema_hash`, and `discovered_at`, plus each instance's `catalog_state`,
   servers, `tools_refresh` outcome, and fixed-text `refresh_error`. Every role
   from `viewer` up gets the same projection; a server's `upstream_url` is
-  always reduced to `scheme://host[:port]` plus `/[REDACTED_PATH]`.
+  always reduced to `scheme://host[:port]`, plus `/[REDACTED_PATH]` when the
+  URL has a non-empty, non-root path.
 - **Generated OpenAPI tools** (`servers.*.openapi`, ferrum-edge#5906): the
   catalog reports them as `source.type: openapi` with the operation's name,
   method, and path. Their `listed` and `callable` flags also account for the
