@@ -341,7 +341,7 @@ describe("MCP Tools tab", () => {
       expect(panel().textContent).toContain("Tool policy cannot be saved by your role"));
     expect(panel().textContent).toContain("/config/servers/github/upstream_url");
     // A server URL is required and not a secret: it cannot be cleared.
-    expect(panel().textContent).toContain("Re-enter the URL on the plugin page first");
+    expect(panel().textContent).toContain("in the same save that re-enters the URL");
     expect(panel().textContent).not.toContain("clearing deletes the stored secret");
     expect(button("Edit policy for github.search").disabled).toBe(true);
   });

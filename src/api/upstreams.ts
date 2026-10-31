@@ -292,8 +292,8 @@ export async function updateTargets(
       throw new MaskedSecretWriteError(
         `Targets were not saved: upstream ${id} has a value hidden from your role ` +
           `(${masked.join(", ")}), and a targets save resends every setting with it. ` +
-          "Re-enter or clear it on the Configuration tab first (clearing deletes the " +
-          "stored secret), or have an admin make the change.",
+          "Have an admin make the change, or change the targets on the Configuration tab " +
+          "in the same save that re-enters or clears it (clearing deletes the stored secret).",
         [...masked],
       );
     }

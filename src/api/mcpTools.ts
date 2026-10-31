@@ -274,7 +274,11 @@ export async function getToolCatalog(
 /* ---------- Per-tool policy write ---------- */
 
 /**
- * What an operator blocked by masked values can do. A server's
+ * What an operator blocked by masked values can do. Every policy save re-reads
+ * the configuration, and a re-entered value is masked again on that read, so
+ * re-entering it in an earlier save does not help: an admin must make the
+ * change, or the operator must change `policy.tools` on the plugin page in the
+ * same save that re-enters (or clears) the masked values. A server's
  * `upstream_url` is required (Edge refuses a server without `upstream_url` or
  * `openapi`) and is not a secret, so it cannot be cleared: it has to be
  * re-entered. Any other masked value may be re-entered or cleared.
@@ -282,18 +286,21 @@ export async function getToolCatalog(
 export function maskedToolPolicyAdvice(pointers: readonly string[]): string {
   const isUrl = (pointer: string) => pointer.endsWith("/upstream_url");
   if (pointers.length > 0 && pointers.every(isUrl)) {
-    return "Re-enter the URL on the plugin page first, or have an admin make the change.";
+    return (
+      "Have an admin make the change, or change policy.tools on the plugin page in the " +
+      "same save that re-enters the URL."
+    );
   }
   if (pointers.some(isUrl)) {
     return (
-      "Re-enter them on the plugin page first (a server URL must be re-entered; other " +
-      "values may instead be cleared, which deletes the stored secret), or have an admin " +
-      "make the change."
+      "Have an admin make the change, or change policy.tools on the plugin page in the " +
+      "same save that re-enters them (a server URL must be re-entered; other values may " +
+      "instead be cleared, which deletes the stored secret)."
     );
   }
   return (
-    "Re-enter or clear them on the plugin page first (clearing deletes the stored " +
-    "secret), or have an admin make the change."
+    "Have an admin make the change, or change policy.tools on the plugin page in the " +
+    "same save that re-enters or clears them (clearing deletes the stored secret)."
   );
 }
 
