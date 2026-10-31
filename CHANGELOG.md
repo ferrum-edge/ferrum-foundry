@@ -142,6 +142,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `/consumers/{id}/credentials/{type}/{index}`. Any other method from a scoped
   session is refused with `403 Namespace access denied` before signing, as on
   every other route class (#565).
+- Bump the transitive `seroval` and `seroval-plugins` dependencies (pulled in
+  by `@tanstack/router-core`) to 1.6.12, fixing GHSA-f86p-h4j2-7qgj and
+  GHSA-9wx9-5pv9-3349. Override `@fastify/static`'s `glob` to `^14.0.2` with
+  an npm `overrides` entry, which also brings `minimatch` 11, fixing
+  GHSA-3g3m-2fjr-6pw4 and GHSA-g3hv-75wg-m249. No `@fastify/static` release
+  allows a patched `glob` yet; drop the override once one does (#647).
 
 ### Fixed
 
