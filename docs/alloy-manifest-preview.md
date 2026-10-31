@@ -18,42 +18,24 @@ switches clear the draft and result and abort an outstanding preview.
 
 The canonical pin is `contracts/ferrum-contracts/PIN`: immutable tag
 [`contracts-edge-0.9.15`](https://github.com/ferrum-edge/ferrum-contracts/tree/6fb64c5dc2e014204c17609fc717d976f3b4589e)
-at `6fb64c5dc2e014204c17609fc717d976f3b4589e`, published as
-[release 407246047](https://github.com/ferrum-edge/ferrum-contracts/releases/tag/contracts-edge-0.9.15)
-on 2026-10-08 at 20:42:07 UTC. The adopted files are the existing
+at `6fb64c5dc2e014204c17609fc717d976f3b4589e`. The adopted files are the existing
 plugin/provisioning vocabularies and schemas, plus the service-manifest schema
 and every shared valid/invalid manifest fixture, including agents, plus the
 canonical invalid-expectations file. Each exact published file has a SHA-256 in
-the same pin. Vocabulary provenance now binds released Edge v0.9.15 at 25b37395,
-and the plugin catalog adds a note on the v0.9.15 config-schema changes;
-plugin entries, lifecycle metadata, provisioning values and first availability
-are unchanged. Both vocabulary schemas and all 12 manifest fixtures retain
-their earlier bytes. The manifest validation fields are unchanged, with current
-owner/status metadata and full published descriptions retained verbatim.
-Historical preparation/pending wording inside immutable canonical files records
-their source state before publication; the tag and release above establish the
-actual publication after successful main Validate contracts run 37841329610.
-The same 18-file scope retains complete canonical invalid expectations,
-including the versioned deployment-snapshot and backend-egress-policy entries
-and the v0.9.14 data-plane attestation negatives, plus the v0.9.15
-diagnostic-ref route-protocol-admission and gateway-headers availability
-negatives; it does not vendor those schemas or adopt that runtime profile.
-Foundry v0.5.5 passed hosted qualification and was published; see the
-[compatibility record](compatibility.md). v0.5.4 and earlier evidence is
-historical.
+the same pin. The invalid expectations include deployment-snapshot,
+backend-egress-policy, diagnostic-ref and gateway-headers negatives, but
+Foundry does not vendor those schemas or adopt that runtime profile. Release
+and qualification evidence is in the [compatibility record](compatibility.md).
 
 The independently reviewed producer is Alloy commit
 [`690aed7a9fa8458aeea4ac8416170c8daeb0470b`](https://github.com/ferrum-edge/ferrum-alloy/tree/690aed7a9fa8458aeea4ac8416170c8daeb0470b).
-Foundry reads its `manifest.rs` normalization rules and `export.rs` field mapping.
-That original Foundry mapping review remains producer evidence. The newly
-published schema separately records qualified Alloy owner
-`81cbb410d34ff5fba1f3d54cfd2e7ebccaed397e`, its successful main PUSH run
-`37238543236`, and root's accepted unchanged shared v1 freeze. Its shared status
-is **EXISTING**, with `x-contract.status: implemented` and owner availability
-`unreleased`. The schema remains a transcription of owner code, with
-post-default and cross-field limitations stated in its provenance. It does not
-publish Alloy crates or establish a Foundry diagnostic importer. The earlier
-r2 tag and its original transcription provenance remain immutable upstream.
+Foundry reads its `manifest.rs` normalization rules and `export.rs` field
+mapping; that review is producer evidence. The published schema separately
+records its owner, Alloy `81cbb410d34ff5fba1f3d54cfd2e7ebccaed397e`: shared
+status **EXISTING**, with `x-contract.status: implemented` and owner
+availability `unreleased`. The schema remains a transcription of owner code,
+with post-default and cross-field limitations stated in its provenance. It does
+not publish Alloy crates or establish a Foundry diagnostic importer.
 
 ## What the result means
 

@@ -49,16 +49,9 @@ works the same way against a live Ferrum Edge gateway.
 
 ## Supported Ferrum Edge version
 
-The published pairing is **Foundry v0.5.5 / Ferrum Edge v0.9.15**, with the
-published Edge security release. Its source, image, platform digests, qualification and
-publication evidence are preserved in the
-[immutable v0.5.5 record](docs/release-notes/v0.5.5.compatibility.json).
-Published v0.5.4 / Edge v0.9.14, v0.5.3 / Edge v0.9.14, v0.5.2 / Edge v0.9.13,
-v0.5.1 / Edge v0.9.12, v0.5.0 / Edge v0.9.11 and v0.4.0 / Edge v0.9.10
-records remain unchanged in
-[history](docs/compatibility.md#history). The
-[pairing record](docs/compatibility.md) records publication evidence and its
-verification limits.
+The published pairing is **Foundry v0.5.5 / Ferrum Edge v0.9.15**. Its
+qualification and publication evidence, and earlier pairings, are in the
+[pairing record](docs/compatibility.md).
 
 The qualification envelope stays `database` mode on SQLite (writable and
 `FERRUM_ADMIN_READ_ONLY`), the trusted-proxy starter, Chromium, and
@@ -80,17 +73,11 @@ its valid/invalid fixtures and the canonical invalid-expectations file, under
 files, Foundry's local plugin names and provisioning markers, and the pin's tie
 to the paired Edge release are checked by
 [Plugin configuration templates](docs/plugin-defaults.md#shared-plugin-catalog-contract).
-Canonical [release 407246047](https://github.com/ferrum-edge/ferrum-contracts/releases/tag/contracts-edge-0.9.15)
-was published on 2026-10-08 after successful main Validate contracts run
-37841329610. Its owner qualification marks the shared manifest
-and diagnostic report EXISTING/implemented; Alloy remains unpublished. Exact
-vendored descriptions retain their historical preparation wording. Foundry
-adopts only the same 18 files listed in its pin. The complete canonical invalid
-expectations include versioned deployment-snapshot and backend-egress-policy
-entries and the v0.9.15 diagnostic-ref and gateway-headers negatives, but
-Foundry does not vendor those schemas or adopt the native deployment profile.
-Diagnostic import remains future work. Foundry v0.5.5 passed hosted
-qualification with this contract scope.
+Foundry adopts only the 18 files listed in its pin: it does not vendor the
+deployment-snapshot or backend-egress-policy schemas or adopt the native
+deployment profile, and diagnostic import remains future work. The pin's
+release and qualification evidence are in the
+[pairing record](docs/compatibility.md#qualification-evidence).
 The [Alloy manifest preview](docs/alloy-manifest-preview.md) consumes
 the existing fields through an authenticated, read-only BFF route.
 
@@ -207,7 +194,8 @@ http://localhost:5173.
 Static-token sign-in is for local development only. The SPA exchanges
 `FERRUM_BFF_AUTH_TOKEN` once for an HttpOnly, SameSite session cookie; the
 token is never stored in the browser or reused as a bearer token. Production
-startup refuses static auth unless a trusted identity proxy is configured. See
+startup (`NODE_ENV=production`) rejects static auth by default; configure
+`FERRUM_AUTH_MODE=trusted-proxy` behind an identity proxy. See
 [Production authentication](docs/authentication.md).
 
 `FERRUM_JWT_NAMESPACES` scopes the development principal and is required in
@@ -267,11 +255,16 @@ Edge contract:
 - creates of proxies, consumers, upstreams, and plugin configs record
   `labels.provisioned-by` from `X-Ferrum-Provisioned-By` unless the body sets
   it; `PUT` without `labels` keeps the stored labels; empty label maps are
-  omitted.
+  omitted;
+- plugin config `PUT`/`DELETE` require `expected_proxy_ids` (an empty value
+  expects none): the mock implements the newer Edge association precondition
+  described in [plugin membership](docs/plugin-membership.md#scope-changes-and-proxy-scoped-plugins),
+  which the paired v0.9.15 ignores.
 
-The mock is a **non-mesh** gateway. Only `GET /mesh/service-graph` returns
-data; other `/mesh/*`, `/node-waypoint/*`, and `/service-waypoint/*` routes
-answer `404`, and the UI shows empty states. Use a mesh-mode Ferrum Edge
+`GET /mesh/service-graph` always returns sample data, and with
+`MOCK_GATEWAY_MODE=mesh` so does `GET /mesh/runtime-overlay`; other `/mesh/*`,
+`/node-waypoint/*`, and `/service-waypoint/*` routes answer `404`, and the UI
+shows empty states. Use a mesh-mode Ferrum Edge
 gateway to see the mesh surfaces.
 
 ### Seeding a real gateway
@@ -364,6 +357,7 @@ image with a different digest. See
 - [Production authentication](docs/authentication.md): trusted-proxy identity contract and downstream JWT claims
 - [Operator visibility](docs/operator-visibility.md): health and audit evidence, proxy-bound specs, mesh runtime
 - [Supported pairing](docs/compatibility.md): the qualified Ferrum Edge image, tested envelope, best-effort and unqualified modes
+- [MCP Tools tab](docs/mcp-tools.md): the node-local MCP tool catalog, per-tool policy edits, and per-group grants
 - [Critical journeys](e2e/README.md): the browser-to-gateway release gate and how to run it locally
 - [Release and supply-chain gates](docs/release-security.md): publication gates, image tags, provenance and SBOM
 - [Security](SECURITY.md): supported versions and private vulnerability reporting

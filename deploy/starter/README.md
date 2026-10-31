@@ -15,20 +15,12 @@ For a walkthrough that ends in an authenticated request through the data
 plane, see [`docs/getting-started.md`](../../docs/getting-started.md).
 
 **Published pairing.** The demo profile pins published Edge v0.9.15 with
-published Foundry v0.5.5. The default Foundry image is pinned to its released
-digest below. The [v0.5.5 record](../../docs/release-notes/v0.5.5.compatibility.json)
-preserves source `359e1cd4efab110475b294452dfeeaefc7a4d5e6`, hosted
-[qualification run 37846502086](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37846502086)
-(source `f947a607`, tested merge `8126d6b7`), and actual
-[publication run 37848400800](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37848400800)
-(published 2026-10-08 at 21:48:04 UTC). The default Foundry image is pinned to
+published Foundry v0.5.5; the evidence is in the
+[pairing record](../../docs/compatibility.md). The default Foundry image is
+pinned to
 `ferrumedge/ferrum-foundry@sha256:5bdfa947adead6895e9dbdc4b4db5ed7e960bd7fc5ebb9872ac722ced86a8b0f`;
 set `FOUNDRY_IMAGE` to another released digest when selecting a different
-pairing. Both profiles and authority tiers are unchanged. This release adopts
-published `contracts-edge-0.9.15` at
-`6fb64c5dc2e014204c17609fc717d976f3b4589e`; its service-manifest schema and all
-manifest fixtures are unchanged from the prior pin. The native deployment
-profile is not adopted.
+pairing.
 
 ## Two profiles
 

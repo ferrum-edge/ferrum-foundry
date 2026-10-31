@@ -32,14 +32,10 @@ workflow (`.github/workflows/ci.yml`) has passed:
 ## Supported Edge image
 
 Passing these gates qualifies Foundry with that one Ferrum Edge image and no
-other build. Published Foundry v0.5.5 pairs with Edge v0.9.15, a security
-release that fixes 26 published Ferrum Edge advisories, and published
-`contracts-edge-0.9.15`; its full pairing qualification and publication are
-recorded in
-[the compatibility record](compatibility.md#qualification-evidence).
-Published v0.5.4 / Edge v0.9.14, v0.5.3 / Edge v0.9.14, v0.5.2 / Edge v0.9.13,
-v0.5.1 / Edge v0.9.12, v0.5.0 / Edge v0.9.11 and v0.4.0 / Edge v0.9.10
-pairings remain immutable in their [release records](compatibility.md#history).
+other build. Published Foundry v0.5.5 pairs with Edge v0.9.15; its
+qualification and publication are recorded in
+[the compatibility record](compatibility.md#qualification-evidence), and
+earlier pairings in its [history](compatibility.md#history).
 
 Moving the pin is a re-qualification: change `edge.image` in
 `docs/compatibility.json`, and the pull request re-runs every gate above against
@@ -50,8 +46,11 @@ or `CLAUDE.md` does not name `edge.image`.
 ## Build inputs
 
 The Docker build context is deny-by-default (`.dockerignore`). Only package
-manifests, TypeScript and Vite configuration, `src/`, `server/`, `shared/`, and
-`public/` are sent. `.env` files, Git history, documentation, build output,
+manifests, `index.html`, TypeScript and Vite configuration (including
+`vite-env.d.ts`), `src/`, `server/`, `shared/`, `public/`, and the vendored
+service-manifest schema
+(`contracts/ferrum-contracts/schemas/service-manifest/v1.schema.json`) are
+sent. `.env` files, Git history, documentation, build output,
 coverage, and caches never enter the context.
 
 The Dockerfile frontend, the Node 24 builder, and the Node 24 runtime are pinned
@@ -71,19 +70,10 @@ Every third-party GitHub Action is pinned to a full commit SHA.
 
 ## Publishing
 
-For v0.5.5, release PR #567 merged as protected commit
-`359e1cd4efab110475b294452dfeeaefc7a4d5e6`, whose second parent was
-`d1e46e227d2d868ec51a1ca6bd6bfa04b51de8a5`. Qualification run `37846502086`,
-attempt 1, binds source `f947a607f0bbb920d508e88568969bbe69e5ed58` to tested
-merge `8126d6b771f90bd76e8a54b48ddfa26441175c27`. Release run `37848400800`
-succeeded; GitHub release `407290286` was published at 2026-10-08 21:48:04 UTC.
-The immutable release record contains the tag source, final multi-architecture
-image index, platform digests and CI evidence. The supplied publication evidence
-does not establish anonymous GHCR access, independent cryptographic attestation
-verification or account-level registry immutability. See the
-[v0.5.5 record](release-notes/v0.5.5.compatibility.json) and
-[compatibility record](compatibility.md). Earlier release notes and records
-remain unchanged.
+Each release's publication evidence is in its immutable record and the
+[compatibility record](compatibility.md). That evidence does not establish
+anonymous GHCR access, independent cryptographic attestation verification or
+account-level registry immutability.
 
 Pushes to `main` and release tags publish multi-architecture images with
 BuildKit provenance (`mode=max`) and SBOM attestations. Each manifest job

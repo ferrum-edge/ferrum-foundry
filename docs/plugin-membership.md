@@ -41,9 +41,13 @@ group members first. Entering group scope writes the plugin first, then adds
 members.
 
 Every plugin `PUT` and `DELETE` also carries Edge's association precondition
-(forge-ops #569): `expected_proxy_ids`. From the plugin page it names the
-membership the page showed (#630), not a fresh listing taken just before
-the write: the group's members the form was seeded with, the target proxy
+([ferrum-edge-git-forge-ops#569](https://github.com/ferrum-edge/ferrum-edge-git-forge-ops/issues/569)):
+`expected_proxy_ids`. Edge requires it from v0.9.18
+([ferrum-edge#6744](https://github.com/ferrum-edge/ferrum-edge/pull/6744);
+tagged but unpublished, so first published in v0.9.19); the paired v0.9.15
+predates it and ignores the parameter. From the plugin page it
+names the membership the page showed (#630), not a fresh listing taken just
+before the write: the group's members the form was seeded with, the target proxy
 for a proxy-scoped plugin, and none for a global one. The form reports that
 seed when it mounts, so a read that changes while the page still shows a
 skeleton (the plugin catalog still loading, say) never becomes membership
@@ -56,12 +60,13 @@ then accept a write that silently detaches it.
 Edge checks the set atomically with the write, so a proxy attached since the
 page loaded refuses the scope change or delete below with `412`. The plan
 also refuses before writing anything when its own listing already shows such
-a proxy, which keeps the guarantee on gateways that predate the precondition
-and ignore the parameter. Either way the page reports that the membership
-changed, names the proxies, and offers **Reload current membership**, which
-reseeds the form and its membership from fresh reads; nothing was written. A
-proxy the page showed that has since been detached does not refuse the write,
-since the write cannot detach it.
+a proxy. Either way the page reports that the membership changed, names the
+proxies, and offers **Reload current membership**, which reseeds the form and
+its membership from fresh reads; nothing was written. On a gateway that
+predates the precondition, such as the paired v0.9.15, that listing is the
+only check: a proxy attached between the listing and the write is not
+detected. A proxy the page showed that has since been detached does not refuse
+the write, since the write cannot detach it.
 
 A failed save's rollback is fenced the same way. Restoring a global or
 proxy scope detaches every other reference, so the rollback `PUT` expects
@@ -71,7 +76,8 @@ proxy scope's target. A proxy another operator attached after the plugin
 `PUT` falls outside that set. When the rollback's listing shows one, the
 configuration is not restored, the proxy stays attached, and the recovery
 report names it; when the attach lands after that listing, Edge's `412`
-refuses the restore and the same report follows.
+refuses the restore and the same report follows. On a gateway that predates
+the precondition, an attach after the rollback's listing is not detected.
 
 Creating a proxy-scoped plugin (`POST /plugins/config`) or moving one to proxy
 scope makes Edge attach it to the target proxy in the same transaction
@@ -207,10 +213,10 @@ If a change fails, Foundry attempts a compensating rollback:
 
 Every write is guarded against concurrent changes. Foundry compares
 `updated_at` with the read it just made, and sends `If-Match` with that read's
-`ETag`. On the Ferrum Edge v0.9.9 release, ferrum-edge#5661
-(since v0.9.7) makes the check and write atomic and catches changes that did not move
-`updated_at`. A save or delete from the plugin page is also refused if the
-configuration no longer matches what the editor opened; see
+`ETag`. On the paired Edge release (any release since v0.9.7,
+ferrum-edge#5661), the check and write are atomic and catch changes that did
+not move `updated_at`. A save or delete from the plugin page is also refused if
+the configuration no longer matches what the editor opened; see
 [concurrent edits](concurrent-edits.md).
 
 Concurrent writers or ambiguous network failures can still prevent rollback.

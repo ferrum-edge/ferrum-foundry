@@ -317,19 +317,10 @@ existing masked metadata write workflow remain supported. Intentional archival
 backup downloads are described in
 [Backup export](concurrent-edits.md#backup-export).
 
-Edge v0.9.13 through v0.9.15 keep the snapshot secret-complete: its evidence
-carries stored spec documents only as SHA-256 and length, but the
-`api_spec_contents` array returns one base64 copy of every stored spec
-document. The path-based
-refusal is unchanged. Conditional snapshot paths that Foundry itself never
-issues (`GET /backup?conditional=true`, a tagged `POST /restore` and the two
-deployment mutations) can answer a deterministic
-`507 Insufficient Storage`; the BFF relays that status and body unchanged and
-releases the request's capacity permit like any other answer. Edge v0.9.14
-also separates a deployment mutation's `durable: "not_started"` and
-`durable: "not_committed"` `503` outcomes from `"unknown"`. Foundry issues no
-deployment mutation and shows none of these outcomes; the BFF relays such an
-answer unchanged.
+The snapshot stays secret-complete (its `api_spec_contents` array returns a
+base64 copy of every stored spec document), which is why the path-based refusal
+is unchanged. Edge answers on conditional paths Foundry never issues are relayed
+unchanged.
 
 ### Runtime identity defaults
 
@@ -632,12 +623,5 @@ The initial strong-ETag requirement is an additional verification
 condition within the same captured namespace, resource, and gateway target;
 it changes none of the identity or authorization fences above. A guarded
 replacement or deletion whose initial fresh read has no usable validator is
-refused before writing. Its fixed capability explanation retains no resource
-or credential data, and leaves the mounted draft and baseline intact. It does
-not claim that another writer changed content and never falls back to the
-seed's tag or an explicitly unguarded path. Older, database-less, or cached
-reads consequently lose the guarded-write fallback that v0.5.1 and earlier
-releases shipped; explicit unguarded calls and unrelated writes keep their
-supported semantics. The owner's delegate adopted this policy on 2026-10-06,
-#544 implements it, and v0.5.2 is the first release that ships it; see
+refused before writing; see
 [concurrent-edits.md](concurrent-edits.md#without-a-tag).

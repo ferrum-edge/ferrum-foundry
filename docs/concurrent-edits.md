@@ -9,23 +9,12 @@ it.
 This page covers what the gateway does, how Foundry guards these writes, and
 what is still open.
 
-> **Guarded-write initial-validator policy (#542), adopted for v0.5.2.** The
-> owner's delegate approved it on 2026-10-06, and #544 implements it. The
-> initial-validator requirement below removes the untagged fallback that
-> v0.5.1 and earlier releases shipped for guarded editor writes.
-
 ## Measured baseline
 
 `scripts/concurrent-edit-contract.mjs` runs a two-administrator sequence
 against the pinned Ferrum Edge image. `scripts/gateway-contract-smoke.mjs`
 runs it in the `Pinned Gateway Contract` CI job on every pull request. It
-records the baseline below. Foundry v0.5.2, which adopted this policy, passed
-hosted qualification against published Edge v0.9.13, including its
-concurrent-edit contract; see the qualification evidence in
-[compatibility.md](compatibility.md). Foundry v0.5.3 moved the pin to published
-Edge v0.9.14 and passed hosted qualification against it, as did v0.5.4.
-Foundry v0.5.5 moved the pin to published Edge v0.9.15, passed hosted
-qualification against it, and was published; see
+records the baseline below, which is part of each pairing's qualification; see
 [compatibility.md](compatibility.md).
 
 | Observation | Result |
@@ -175,11 +164,9 @@ stricter parser is shared by tagged reads and `validatorOf`; an unusable value
 is no longer retained as a validator. None of these paths is a recovery option
 for a refused guarded save or delete.
 
-**Earlier releases:** Foundry v0.4.0 through v0.5.1 deliberately send an
-initial untagged guarded write unconditionally after comparing the content.
-That narrows the race to one gateway round trip; a writer in the gap can still
-be overwritten. Policy #542 removes that fallback only from the guarded
-operations above.
+**Earlier releases:** Foundry v0.4.0 through v0.5.1 send an initial untagged
+guarded write unconditionally after comparing the content, which narrows the
+race to one round trip without closing it.
 
 A lock inside the BFF is not an alternative. It cannot see another BFF replica
 or a direct admin API client, which are exactly the writers the guard is for.

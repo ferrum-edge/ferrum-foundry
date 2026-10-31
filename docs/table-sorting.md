@@ -54,7 +54,8 @@ Custom resource grids wrap their header and rows in `ResourceGrid`
 (`src/components/ui/ResourceGrid.tsx`), an inner horizontal scroller. Header
 and rows share one canvas at least 52rem wide, so fixed columns cannot squeeze
 out the resource identity column. Cluster backend capabilities use 48rem; the
-authorization grids in proxy and consumer details use 40rem. On wide cards the
+authorization grids in proxy and consumer details and the Metrics per-route
+table use 40rem. On wide cards the
 existing column templates still fill the space. Scrolling depends on the card
 width, not a viewport breakpoint, so it also applies with the desktop sidebar
 open.
@@ -71,15 +72,17 @@ even when the collection is empty.
   across page boundaries, the offset reset, ID tie-breaks (including after
   reordered input), input immutability, and disabled server-page and column
   sorting.
-- `src/routes/resourceGrids.test.tsx` mounts all nine `ResourceGrid` surfaces
-  and checks the scroller, minimum width, shared header/row template, identity
-  cell, and placement of empty/error feedback. Vitest runs these in jsdom,
-  which cannot measure layout or prove text is visible.
+- `src/routes/resourceGrids.test.tsx` mounts nine of the ten `ResourceGrid`
+  surfaces (not the Metrics per-route table) and checks the scroller, minimum
+  width, shared header/row template, identity cell, and placement of
+  empty/error feedback. Vitest runs these in jsdom, which cannot measure
+  layout or prove text is visible.
 
 No CI job checks narrow-viewport layout. The Critical Journeys job drives
 Chromium through Playwright, but its journeys do not test layout. Check by hand
 in a browser at 390×844: populated and empty lists, the mesh service graph, TLS
-inventory, cluster capabilities, and the authorization tabs in proxy and
-consumer details. Confirm identity text has room, horizontal scrolling reaches
-every column without page overflow, headers stay aligned with rows, and
-empty-state actions stay visible. Also check a desktop viewport in both themes.
+inventory, cluster capabilities, the authorization tabs in proxy and consumer
+details, and the Metrics per-route table. Confirm identity text has room,
+horizontal scrolling reaches every column without page overflow, headers stay
+aligned with rows, and empty-state actions stay visible. Also check a desktop
+viewport in both themes.
