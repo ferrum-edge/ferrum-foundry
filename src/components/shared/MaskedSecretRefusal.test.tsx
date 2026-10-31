@@ -58,6 +58,22 @@ describe("MaskedSecretRefusal", () => {
     expect(listed()).toEqual(["/service_discovery/consul/token"]);
   });
 
+  it("gives the default advice unless the caller supplies its own", async () => {
+    const refused = new MaskedSecretWriteError("not sent", ["/config/servers/github/upstream_url"]);
+    await render(refused);
+    expect(host.textContent).toContain("Re-enter each value, or clear it");
+
+    await act(async () =>
+      root.render(
+        <MaskedSecretRefusal
+          error={refused}
+          advice={(pointers) => `Advice for ${pointers.join(", ")}.`}
+        />,
+      ));
+    expect(host.textContent).toContain("Advice for /config/servers/github/upstream_url.");
+    expect(host.textContent).not.toContain("Re-enter each value");
+  });
+
   it("renders nothing for any other failure", async () => {
     await render(new Error("Request failed with status code 500"));
     expect(host.innerHTML).toBe("");

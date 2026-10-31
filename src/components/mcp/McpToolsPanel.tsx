@@ -671,7 +671,7 @@ function McpGatewayInstance({
           </p>
         )}
 
-        <MaskedSecretRefusal error={refusal} />
+        <MaskedSecretRefusal error={refusal} advice={maskedToolPolicyAdvice} />
 
         {rows.length === 0 ? (
           <p className="text-sm text-text-muted">
