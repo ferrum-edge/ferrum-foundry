@@ -148,6 +148,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an npm `overrides` entry, which also brings `minimatch` 11, fixing
   GHSA-3g3m-2fjr-6pw4 and GHSA-g3hv-75wg-m249. No `@fastify/static` release
   allows a patched `glob` yet; drop the override once one does (#647).
+- Override the development-only `minimatch` copies held by `eslint`,
+  `@eslint/config-array` and `@typescript-eslint/typescript-estree` to
+  `^11.0.1` with scoped npm `overrides` entries, fixing GHSA-g3hv-75wg-m249
+  for the lint toolchain. They use only `minimatch()` and `new Minimatch()`
+  with `.match()`, which minimatch 11 keeps. No release of these packages
+  allows minimatch 11 yet; drop the overrides once one does.
 
 ### Fixed
 
