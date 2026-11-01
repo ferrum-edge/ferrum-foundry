@@ -80,6 +80,12 @@
     "@fastify/static": {
       "glob": "^14.0.2"
     },
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "^11.0.1"
+    },
+    "eslint": {
+      "minimatch": "^11.0.1"
+    },
     "shell-quote": "1.12.0"
   }
 }
