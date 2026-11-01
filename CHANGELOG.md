@@ -153,7 +153,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `^11.0.1` with scoped npm `overrides` entries, fixing GHSA-g3hv-75wg-m249
   for the lint toolchain. They use only `minimatch()` and `new Minimatch()`
   with `.match()`, which minimatch 11 keeps. No release of these packages
-  allows minimatch 11 yet; drop the overrides once one does.
+  allows minimatch 11 yet. Drop each override only once every package under
+  it does: the `eslint` entry also covers `@eslint/config-array`.
 
 ### Fixed
 
