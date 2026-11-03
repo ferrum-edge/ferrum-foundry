@@ -3,7 +3,7 @@
 # Keep the build and runtime on the same active LTS Node.js major (24 until
 # Node 26 enters LTS). Both multi-platform base indexes are digest-pinned so
 # release provenance identifies exact inputs; move both majors together.
-FROM node:24-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 AS builder
+FROM node:24-bookworm-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c AS builder
 WORKDIR /app
 
 COPY package.json package-lock.json ./
@@ -23,7 +23,7 @@ RUN npm run build \
 # Distroless: no shell, no package manager, and Node as the only executable
 # entrypoint at /nodejs/bin/node. The image's own user is nonroot (65532), set
 # numerically below so Kubernetes `runAsNonRoot` can verify it.
-FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:cb606325b7ec4af55462cb0b424a53b452a5b4a894ffe841fcf1048d216fb9f8
+FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:b8cec4b2f2126ff7bd034ec9ac207ffb3272667dfdc48376e3b035d3270549ba
 
 WORKDIR /app
 
