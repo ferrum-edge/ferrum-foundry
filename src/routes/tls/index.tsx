@@ -4,7 +4,7 @@
 /*  surface rotation, and material validation.                        */
 /* ------------------------------------------------------------------ */
 
-import { useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
@@ -50,7 +50,13 @@ import {
   useValidateTlsMaterial,
 } from "@/hooks/useTls";
 import { MutationOutcomeUnknownError } from '@/api/mutationOutcome';
-import { acmeOrderInProgress, AcmeFinalizationUnknownError, getAcmeOrder, TLS_VALIDATE_FIELDS } from "@/api/tls";
+import {
+  acmeOrderInProgress,
+  AcmeFinalizationUnknownError,
+  getAcmeOrder,
+  probeAcmeOrder,
+  TLS_VALIDATE_FIELDS,
+} from "@/api/tls";
 import type {
   ManagedTlsCollection,
   ManagedTlsRecord,
@@ -62,6 +68,18 @@ import type {
 import type { PaginatedResponse } from "@/api/types";
 import { usePaginationParams } from "@/hooks/usePagination";
 import { useCapabilities } from "@/stores/capabilities";
+import {
+  beginWrite,
+  correlationId,
+  getOutcomeLatches,
+  isWriteInFlight,
+  ORDER_PROBE_DELAYS_MS,
+  useWritesInFlight,
+  latchKeys,
+  latchOutcome,
+  settleOutcomeLatches,
+  useOutcomeLatches,
+} from "@/stores/outcomeLatches";
 import { CapabilityNotice } from "@/components/shared/CapabilityGate";
 import { FleetViewGate } from "@/components/shared/FleetViewGate";
 import {
@@ -439,6 +457,7 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
         title={`Delete ${deleteTarget?.name || deleteTarget?.id}?`}
         description="This is a fleet-global record shared by every namespace. Records still referenced by TLS configuration cannot be deleted (the gateway returns 409)."
         confirmLabel="Delete"
+        loading={deleteRecord.isPending}
         onConfirm={async () => {
           if (!deleteTarget || !canWrite.allowed) return;
           try {
@@ -739,9 +758,75 @@ function AcmeTab() {
   const createOrder = useCreateAcmeOrder();
   const deleteOrder = useDeleteAcmeOrder();
   const finalizeOrder = useFinalizeAcmeOrder();
-  const [unknownCreation, setUnknownCreation] = useState<string | null>(null);
-  const [unknownRenewals, setUnknownRenewals] = useState<ReadonlySet<string>>(new Set());
-  const [unknownOrders, setUnknownOrders] = useState<ReadonlySet<string>>(new Set());
+  // Outcome-unknown latches outlive this tab: Radix unmounts an inactive
+  // panel, and a remount must not re-arm an action that may already have run.
+  // Each ends only when an orders read shows the order its request created.
+  const latches = useOutcomeLatches();
+  const creationLatch = latches.get(latchKeys.acmeOrderCreation());
+  const unknownCreation =
+    creationLatch?.kind === "acme_order_creation"
+      ? `${creationLatch.message} Foundry named this order ${creationLatch.orderId}.`
+      : null;
+  /** The order id an uncertain renewal named, while it is latched. */
+  const unknownRenewalOrder = (certificateId: string) => {
+    const latch = latches.get(latchKeys.acmeRenewal(certificateId));
+    return latch?.kind === "acme_renewal" ? latch.orderId : null;
+  };
+  const renewalUnknown = (certificateId: string) => unknownRenewalOrder(certificateId) !== null;
+  // Creates, renewals and finalizations still running, including those an
+  // earlier mount of this tab started: a remount must not allow a second one.
+  const writesInFlight = useWritesInFlight();
+  const creationInFlight = writesInFlight.has(latchKeys.acmeOrderCreation());
+  // The order a latched create or renew named may sit on a page nobody reads,
+  // so it is read directly when the tab opens or the latch is set, and again
+  // after each `ORDER_PROBE_DELAYS_MS` delay while the latch holds: Edge
+  // stores the order only after its CA round-trip, so an early read can miss
+  // it. Only that order, found, settles the latch; any other answer keeps it.
+  const orderProbes = useRef(new Map<string, { reads: number; timer: ReturnType<typeof setTimeout> | null }>());
+  useEffect(() => {
+    const probes = orderProbes.current;
+    return () => {
+      for (const probe of probes.values()) if (probe.timer) clearTimeout(probe.timer);
+      probes.clear();
+    };
+  }, []);
+  useEffect(() => {
+    const stillLatched = (orderId: string) =>
+      [...getOutcomeLatches().values()].some(
+        (latch) =>
+          (latch.kind === "acme_order_creation" || latch.kind === "acme_renewal") &&
+          latch.orderId === orderId,
+      );
+    const read = (orderId: string) => {
+      const probe = orderProbes.current.get(orderId);
+      if (!probe) return;
+      probe.timer = null;
+      probe.reads += 1;
+      void probeAcmeOrder(orderId)
+        .then((order) => settleOutcomeLatches({ acmeOrders: [order] }), () => undefined)
+        .finally(() => {
+          // Gone once the tab unmounted; bounded; pointless once settled.
+          const current = orderProbes.current.get(orderId);
+          if (!current || current.reads > ORDER_PROBE_DELAYS_MS.length || !stillLatched(orderId)) return;
+          current.timer = setTimeout(() => read(orderId), ORDER_PROBE_DELAYS_MS[current.reads - 1]);
+        });
+    };
+    for (const latch of latches.values()) {
+      if (latch.kind !== "acme_order_creation" && latch.kind !== "acme_renewal") continue;
+      if (orderProbes.current.has(latch.orderId)) continue;
+      orderProbes.current.set(latch.orderId, { reads: 0, timer: null });
+      read(latch.orderId);
+    }
+  }, [latches]);
+  // Re-run on every orders read and whenever a latch is added, so a read
+  // that landed while the request was still in flight is also considered.
+  useEffect(() => {
+    settleOutcomeLatches({
+      acmeOrders: queryClient
+        .getQueriesData<AcmeOrderPage>({ queryKey: ACME_ORDERS_PREFIX })
+        .flatMap(([, page]) => page?.data ?? []),
+    });
+  }, [orders, latches, queryClient]);
   const renewCert = useRenewAcmeCertificate();
   const deleteCert = useDeleteAcmeCertificate();
   const { capabilities } = useCapabilities();
@@ -828,11 +913,12 @@ function AcmeTab() {
   const visibleOrders = orders?.data ?? [];
   // A terminal observation resolves an ambiguous finalization without replaying it.
   const orderIsUnknown = (order: AcmeOrder) =>
-    unknownOrders.has(order.id) && acmeOrderInProgress(order);
+    latches.has(latchKeys.acmeFinalization(order.id)) && acmeOrderInProgress(order);
 
   const handleCreateOrder = async () => {
     if (!canWrite.allowed) return;
-    if (unknownCreation || createOrder.isPending) return;
+    const creationKey = latchKeys.acmeOrderCreation();
+    if (getOutcomeLatches().has(creationKey) || isWriteInFlight(creationKey)) return;
     const domains = orderForm.domains
       .split(",")
       .map((d) => d.trim())
@@ -841,8 +927,19 @@ function AcmeTab() {
       toast("error", "At least one domain is required");
       return;
     }
+    // Foundry names the order, so a later read can prove this request created
+    // it (and Edge refuses a second order with the same id).
+    let orderId: string;
+    try {
+      orderId = correlationId();
+    } catch {
+      toast("error", "This browser cannot generate an ACME order id; the order was not sent.");
+      return;
+    }
+    const release = beginWrite(creationKey);
     try {
       await createOrder.mutateAsync({
+        id: orderId,
         domains,
         directory_url: orderForm.directory_url,
         ...(orderForm.contact.trim() && {
@@ -859,8 +956,12 @@ function AcmeTab() {
       setOrderOpen(false);
       setOrderForm(EMPTY_ACME_ORDER_FORM);
     } catch (err) {
-      if (err instanceof MutationOutcomeUnknownError) setUnknownCreation(err.message);
+      if (err instanceof MutationOutcomeUnknownError) {
+        latchOutcome({ kind: "acme_order_creation", message: err.message, orderId });
+      }
       toast("error", await getApiErrorMessage(err, "Failed to create order"));
+    } finally {
+      release();
     }
   };
 
@@ -912,9 +1013,10 @@ function AcmeTab() {
                   {expiryBadge(cert.not_after)}
                 </div>
                 <Mono>{cert.source_uri}</Mono>
-                {unknownRenewals.has(cert.id) && (
+                {renewalUnknown(cert.id) && (
                   <p role="alert">
-                    Renewal outcome unknown. Check orders and certificates before retrying.
+                    Renewal outcome unknown. Check orders and certificates before retrying;
+                    Foundry named this renewal order {unknownRenewalOrder(cert.id)}.
                   </p>
                 )}
               </div>
@@ -937,22 +1039,37 @@ function AcmeTab() {
                 <Button
                   variant="secondary"
                   size="sm"
-                  loading={pendingKeys.has(`renew:${cert.id}`)}
-                  disabled={unknownRenewals.has(cert.id) || !canWrite.allowed}
+                  loading={
+                    pendingKeys.has(`renew:${cert.id}`) ||
+                    writesInFlight.has(latchKeys.acmeRenewal(cert.id))
+                  }
+                  disabled={renewalUnknown(cert.id) || !canWrite.allowed}
                   onClick={() =>
                     void runRowAction(`renew:${cert.id}`, async () => {
-                      if (unknownRenewals.has(cert.id)) return;
+                      const renewalKey = latchKeys.acmeRenewal(cert.id);
+                      if (getOutcomeLatches().has(renewalKey) || isWriteInFlight(renewalKey)) return;
+                      // The renewal order is named here, as for a new order.
+                      let orderId: string;
+                      try {
+                        orderId = `renew-${correlationId().replaceAll("-", "")}`;
+                      } catch {
+                        toast("error", "This browser cannot generate an ACME order id; the renewal was not sent.");
+                        return;
+                      }
+                      const release = beginWrite(renewalKey);
                       try {
                         await renewCert.mutateAsync({
                           id: cert.id,
-                          data: { terms_of_service_agreed: true },
+                          data: { id: orderId, terms_of_service_agreed: true },
                         });
                         toast("success", `Renewal order created for ${cert.domains.join(", ")}`);
                       } catch (err) {
                         if (err instanceof MutationOutcomeUnknownError) {
-                          setUnknownRenewals((previous) => new Set([...previous, cert.id]));
+                          latchOutcome({ kind: "acme_renewal", certificateId: cert.id, orderId });
                         }
                         toast("error", await getApiErrorMessage(err, "Renewal failed"));
+                      } finally {
+                        release();
                       }
                     })
                   }
@@ -1031,7 +1148,10 @@ function AcmeTab() {
                     <Button
                       variant="secondary"
                       size="sm"
-                      loading={pendingKeys.has(`finalize:${order.id}`)}
+                      loading={
+                        pendingKeys.has(`finalize:${order.id}`) ||
+                        writesInFlight.has(latchKeys.acmeFinalization(order.id))
+                      }
                       // Only the Finalize rendering is a write. The same button
                       // reads `GET /admin/tls/acme/orders/{id}` for an unknown
                       // or processing order, which an operator may run.
@@ -1079,13 +1199,7 @@ function AcmeTab() {
                                   },
                                 );
                               }
-                              if (!acmeOrderInProgress(checked)) {
-                                setUnknownOrders((previous) => {
-                                  const next = new Set(previous);
-                                  next.delete(order.id);
-                                  return next;
-                                });
-                              }
+                              settleOutcomeLatches({ acmeOrders: [checked] });
                               toast("success", `Order status: ${checked.status}`);
                               return;
                             }
@@ -1093,12 +1207,21 @@ function AcmeTab() {
                               toast("error", canWrite.summary ?? "Finalizing is unavailable");
                               return;
                             }
-                            await finalizeOrder.mutateAsync({ id: order.id });
-                            toast("success", `Order finalized for ${order.domains.join(", ")}`);
-                          } catch (err) {
-                            if (err instanceof AcmeFinalizationUnknownError) {
-                              setUnknownOrders((previous) => new Set([...previous, order.id]));
+                            const finalizationKey = latchKeys.acmeFinalization(order.id);
+                            if (isWriteInFlight(finalizationKey)) return;
+                            const release = beginWrite(finalizationKey);
+                            try {
+                              await finalizeOrder.mutateAsync({ id: order.id });
+                              toast("success", `Order finalized for ${order.domains.join(", ")}`);
+                            } catch (err) {
+                              if (err instanceof AcmeFinalizationUnknownError) {
+                                latchOutcome({ kind: "acme_finalization", orderId: order.id });
+                              }
+                              throw err;
+                            } finally {
+                              release();
                             }
+                          } catch (err) {
                             toast("error", await getApiErrorMessage(err, "Finalize failed"));
                           }
                         })
@@ -1478,8 +1601,8 @@ function AcmeTab() {
             </Button>
             <Button
               onClick={handleCreateOrder}
-              loading={createOrder.isPending}
-              disabled={Boolean(unknownCreation)}
+              loading={creationInFlight}
+              disabled={Boolean(unknownCreation) || creationInFlight}
             >
               Create Order
             </Button>

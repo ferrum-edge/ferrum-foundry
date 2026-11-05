@@ -363,9 +363,22 @@ which reads the order without repeating the POST. Keep checking until the
 gateway reports a terminal state.
 
 An interrupted spec import or replacement, or an ACME create or renew, shows
-**outcome unknown** and blocks resubmission in that view. Inspect the spec
-resources or ACME orders before you reload or retry; the warning does not
-survive a page load. Only a BFF timeout with `phase: "upload"` is treated as
+**outcome unknown** and blocks resubmission. The block outlives a tab switch
+or leaving the page. For ACME it ends only when a read shows that request's
+own result: Foundry names each order it creates or renews (the request's
+`id`, shown in the warning), so the order with that id ends it, and Edge
+refuses a second order with the same id. Foundry reads that order directly
+when the block starts and whenever the ACME tab opens, and again a few
+times with growing delays while the block holds (Edge stores the order only
+after its CA round-trip), so it need not be on a page you have open. A newer order on another page proves nothing and is
+ignored. A
+spec import or replacement carries nothing a read can match to the request
+(Edge assigns the spec id, and a spec with the same document may already have
+existed), so no read ends it: check the spec list and the resources the
+document manages, then choose **Allow another import or replacement** and
+confirm; this stays unavailable while any spec write for the namespace is
+still running, even one started before you left the page. Inspect the spec
+resources or ACME orders before you reload or retry; the warning does not survive a page load. Only a BFF timeout with `phase: "upload"` is treated as
 a definite failure: the BFF streams the body, so the gateway may already have
 the request headers and part of the body, but the complete body never reached
 it, and the gateway acts on a write only once it has the whole body. A

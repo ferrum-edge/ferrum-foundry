@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Restore is one explicit flow: while a restore runs, its confirmation
+  dialogs refuse the close button, Escape and an outside click, and the file
+  picker is disabled, so a late answer can no longer reopen the typed
+  API-spec deletion prompt for a dismissed file or clear a newly chosen one.
+  Every `ConfirmDialog` refuses to close or re-confirm while its action's
+  request runs (`busy`, defaulting to `loading`); credential deletes stay closable during a
+  background refresh.
+- "Outcome unknown" blocks on spec import/replace and ACME order creation,
+  renewal and finalization outlive the ACME tab and the API specs page, so a
+  tab switch no longer re-arms a request that may have run. ACME create and
+  renew now send a Foundry-chosen order `id` (from `getRandomValues` outside
+  a secure context; nothing is sent if no id can be made), and only a read of
+  the order with that id ends their block; Foundry reads it directly when the
+  block starts and when the ACME tab opens, and a few more times with growing
+  delays while it holds. A spec import or replacement
+  block ends only when the operator, after checking the gateway, chooses
+  "Allow another import or replacement" and confirms (or reloads): no list
+  read can prove what such a request did. A spec import that finishes after
+  its dialog was closed is still reported. A create, renewal, finalization,
+  spec import or replacement, or restore that is still running after its
+  view was left keeps another one, and any re-arm, disabled until it
+  settles, and its late answer still latches. A restore's "outcome unknown"
+  panel is such a latch too: it survives leaving the page and keeps the file
+  picker refused until "Re-arm this restore" (same backup, while its card is
+  open) or a confirmed "Allow another restore"; the backup itself is never
+  kept past its card.
+- A namespace-scoped session's "committed, live-apply not monitored" banner
+  survives the next write, exactly as an unscoped `pending` monitor does.
+- An upstream sends `hash_on` only while a consistent-hashing lane falls back
+  to it (the upstream itself, or a subset or projected port override without
+  its own key), and `hash_on_cookie_config` while any hashing lane's effective
+  key is a cookie, since Edge mints every lane's cookie from it. Switching the
+  algorithm away clears whichever no lane reads.
+
 - Plugin configuration updates and deletes send Ferrum Edge's
   `expected_proxy_ids` association precondition (forge-ops #569): the
   proxies the membership plan's own reads showed referencing the

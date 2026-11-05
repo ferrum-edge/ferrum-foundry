@@ -225,6 +225,54 @@ type PassiveHealthCheckDraft = WithNumberDrafts<
 type HashOnCookieConfigDraft = WithNumberDrafts<HashOnCookieConfig, "ttl_seconds">;
 
 /**
+ * Which upstream hash settings Edge reads for this draft. Every lane that
+ * hashes (the upstream itself, each subset, each projected port override, and
+ * each port override applied to a hashing subset) uses its own `hash_on` or
+ * falls back to the upstream's, and every cookie
+ * lane mints its cookie with the upstream's one `hash_on_cookie_config`.
+ * So the two questions are separate: `hashKey` is whether any hashing lane
+ * falls back to the upstream key, and `cookie` is whether any hashing lane's
+ * effective key is a cookie. A setting no lane reads is neither shown,
+ * validated, nor sent, so switching the algorithm away from consistent
+ * hashing also clears it on save.
+ */
+function upstreamHashSettings(
+  algorithm: Upstream["algorithm"],
+  hashOn: string,
+  subsets: readonly { name: string; algorithm: Upstream["algorithm"] | ""; hashOn: string }[],
+  portOverrides: Upstream["port_overrides"],
+): { hashKey: boolean; cookie: boolean } {
+  const hashing = "consistent_hashing";
+  // The key of each hashing lane; `null` when it falls back to the upstream's.
+  const laneKeys: (string | null)[] = [];
+  if (algorithm === hashing) laneKeys.push(null);
+  let subsetHashes = false;
+  for (const subset of subsets) {
+    if (subset.name.trim() && (subset.algorithm || algorithm) === hashing) {
+      subsetHashes = true;
+      laneKeys.push(subset.hashOn.trim() || null);
+    }
+  }
+  for (const override of Object.values(portOverrides ?? {})) {
+    const policy = (override ?? {}) as { algorithm?: unknown; hash_on?: unknown };
+    const algorithmOverridden = typeof policy.algorithm === "string";
+    const ownKey =
+      typeof policy.hash_on === "string" && policy.hash_on.trim() ? policy.hash_on.trim() : null;
+    // The port's own lane.
+    if ((algorithmOverridden ? policy.algorithm : algorithm) === hashing) laneKeys.push(ownKey);
+    // A port that does not override the algorithm, serving a hashing subset,
+    // hashes on its own key when it has one (Edge's
+    // `hash_on_strategy_for_selection`); without one the subset's lane applies.
+    if (!algorithmOverridden && subsetHashes && ownKey !== null) laneKeys.push(ownKey);
+  }
+  const upstreamKey = hashOn.trim();
+  return {
+    hashKey: laneKeys.includes(null),
+    cookie: laneKeys.some((key) => (key ?? upstreamKey).startsWith("cookie:")),
+  };
+}
+
+/**
  * A status-code list resolved for submit. A hidden field (non-HTTP probe)
  * that does not parse keeps its seeded list; validate() has already rejected
  * an invalid visible field.
@@ -423,6 +471,13 @@ export function UpstreamForm({
 
   const isHttpProbe = (activeHc.probe_type ?? "http") === "http";
 
+  const hashSettings = upstreamHashSettings(
+    algorithm,
+    hashOn,
+    subsets,
+    initialData?.port_overrides,
+  );
+
   const validate = (): boolean => {
     const errs: Record<string, string> = {};
     if (targets.length === 0 && !sdEnabled) errs.targets = "At least one target is required (unless service discovery is enabled)";
@@ -450,7 +505,7 @@ export function UpstreamForm({
       const codes = resolveStatusCodeListDraft(unhealthyCodes);
       if (!codes.ok) errs.unhealthy_status_codes = codes.error;
     }
-    if (hashOn.startsWith("cookie:")) {
+    if (hashSettings.cookie) {
       const error = missingNumberError(cookieConfig.ttl_seconds, "TTL");
       if (error) errs.cookie_ttl_seconds = error;
     }
@@ -530,7 +585,7 @@ export function UpstreamForm({
 
     const sameSite = cookieConfig.same_site ?? unsetSameSite;
     const hashOnCookie: HashOnCookieConfig | undefined =
-      hashOn.startsWith("cookie:")
+      hashSettings.cookie
         ? {
             path: cookieConfig.path,
             ttl_seconds: resolveNumberDrafts(cookieConfig, ["ttl_seconds"]).ttl_seconds,
@@ -623,7 +678,7 @@ export function UpstreamForm({
       targets,
       algorithm,
       ...(name.trim() && { name: name.trim() }),
-      ...(hashOn.trim() && { hash_on: hashOn.trim() }),
+      ...(hashSettings.hashKey && hashOn.trim() && { hash_on: hashOn.trim() }),
       ...(hashOnCookie && { hash_on_cookie_config: hashOnCookie }),
       ...(healthChecks && { health_checks: healthChecks }),
       ...(serviceDiscovery && { service_discovery: serviceDiscovery }),
@@ -681,7 +736,7 @@ export function UpstreamForm({
 
   /* ---------- Helpers ---------- */
 
-  const showHashCookie = hashOn.startsWith("cookie:");
+  const showHashCookie = hashSettings.cookie;
 
   /* ================================================================ */
   /*  Render                                                           */
@@ -707,15 +762,19 @@ export function UpstreamForm({
               onValueChange={(v) => setAlgorithm(v as Upstream["algorithm"])}
               options={ALGORITHM_OPTIONS}
             />
-            {algorithm === "consistent_hashing" && (
+            {hashSettings.hashKey && (
               <Input
                 label="Hash On"
                 value={hashOn}
                 onChange={(e) => setHashOn(e.target.value)}
                 placeholder="ip, header:<name>, cookie:<name>"
-                helpText="Key used for consistent hashing: ip, header:<name>, or cookie:<name>"
+                helpText={
+                  algorithm === "consistent_hashing"
+                    ? "Key used for consistent hashing: ip, header:<name>, or cookie:<name>"
+                    : "Fallback key for subsets that use consistent hashing without their own key"
+                }
                 error={errors.hash_on}
-                required
+                required={algorithm === "consistent_hashing"}
               />
             )}
           </div>

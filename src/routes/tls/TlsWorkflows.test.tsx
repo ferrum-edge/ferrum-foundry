@@ -741,6 +741,8 @@ describe("ACME workflows", () => {
     await click("Create Order", dialog());
     await settle(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
     const expected: AcmeOrderRequest = {
+      // Foundry names the order so an unanswered request can be proven later.
+      id: expect.stringMatching(/^[0-9a-f-]{36}$/),
       domains: ["edge.example.test", "www.example.test"], directory_url: "https://ca.example.test/directory",
       contact: ["mailto:ops@example.test", "mailto:admin@example.test"], challenge_type: "dns01", terms_of_service_agreed: true,
     };
@@ -805,7 +807,9 @@ describe("ACME workflows", () => {
     expect(await writes()[0].json()).toEqual({ poll_timeout_seconds: 60 });
     await click("Renew", panel());
     await settle(() => expect(document.body.textContent).toContain("Renewal order created for edge.example.test"));
-    expect(await writes()[1].json()).toEqual({ terms_of_service_agreed: true });
+    expect(await writes()[1].json()).toEqual({
+      id: expect.stringMatching(/^renew-[0-9a-f]{32}$/), terms_of_service_agreed: true,
+    });
     expect(new URL(writes()[1].url).pathname).toBe("/api/proxy/admin/tls/acme/renew/acme-edge");
     expect(writes()).toHaveLength(2);
   });

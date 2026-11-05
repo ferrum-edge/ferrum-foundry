@@ -7,7 +7,8 @@ import { ToastProvider } from "@/components/ui/Toast";
 import { ErrorPopupProvider } from "@/stores/error";
 import { GatewayMetadataBanner } from "@/components/shared/GatewayMetadataBanner";
 import { clearGatewayMetadata, getGatewayMetadataSnapshot } from "@/api/gatewayMetadata";
-import { BackupRestoreCard } from "./BackupRestoreCard";
+import { clearOutcomeLatches } from "@/stores/outcomeLatches";
+import { BackupRestoreCard, restoreFlowReducer } from "./BackupRestoreCard";
 
 vi.mock("@/stores/auth", () => ({ useAuth: () => ({ principal: null }) }));
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -19,7 +20,7 @@ class BasedRequest extends Request {
 let root: Root;
 let host: HTMLDivElement;
 let qc: QueryClient;
-let responses: (Response | Error)[];
+let responses: (Response | Error | Promise<Response>)[];
 const requests: Request[] = [];
 
 async function click(label: string) {
@@ -27,8 +28,8 @@ async function click(label: string) {
   expect(button, label).toBeTruthy();
   await act(async () => { button!.click(); });
 }
-async function chooseBackup() {
-  const file = Object.assign(new File(["{}"], "synthetic-backup.json", { type: "application/json" }), {
+async function chooseBackup(name = "synthetic-backup.json") {
+  const file = Object.assign(new File(["{}"], name, { type: "application/json" }), {
     text: async () => "{}",
   });
   await act(async () => {
@@ -55,7 +56,7 @@ beforeEach(async () => {
   vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
     requests.push(request.clone());
     if (request.method === "POST") {
-      const next = responses.shift()!;
+      const next = await responses.shift()!;
       // A rejected fetch is the transport dropping mid-operation, which is
       // exactly the outcome Foundry cannot observe.
       if (next instanceof Error) throw next;
@@ -73,14 +74,19 @@ beforeEach(async () => {
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
+  await renderCard(true);
+});
+
+async function renderCard(card: boolean) {
   await act(async () => {
     root.render(<QueryClientProvider client={qc}><NamespaceProvider><ToastProvider><ErrorPopupProvider>
-      <GatewayMetadataBanner /><BackupRestoreCard />
+      <GatewayMetadataBanner />{card && <BackupRestoreCard />}
     </ErrorPopupProvider></ToastProvider></NamespaceProvider></QueryClientProvider>);
   });
-});
+}
 afterEach(async () => {
   await act(async () => { root.unmount(); });
+  clearOutcomeLatches();
   qc.clear();
   host.remove();
   clearGatewayMetadata();
@@ -245,5 +251,170 @@ describe("restore recovery presentation", () => {
     expect(requests).toHaveLength(1);
     // A rollback that did not complete may have left restored content behind.
     expect(qc.getQueryState(["consumer", "tenant-a", "old"])).toBeUndefined();
+  });
+
+  it("keeps a running restore's dialog and picker locked until its own answer arrives", async () => {
+    let answer!: (response: Response) => void;
+    responses.push(new Promise<Response>((resolve) => { answer = resolve; }));
+    await chooseBackup();
+    await click("Restore");
+    await settle(() => expect(requests.filter((request) => request.method === "POST")).toHaveLength(1));
+
+    // Neither the close button, Escape, nor a click outside abandons a
+    // destructive restore whose answer has not arrived.
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!;
+    const close = dialog.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!;
+    expect(close.disabled).toBe(true);
+    await act(async () => { close.click(); });
+    await act(async () => {
+      dialog.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    await act(async () => {
+      document.body.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+      document.body.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, button: 0 }));
+      document.body.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0 }));
+    });
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Restore configuration?");
+
+    // A second file cannot be armed over the running one.
+    const picker = [...document.querySelectorAll("button")]
+      .find((button) => button.textContent?.trim() === "Restore From File…")!;
+    expect(picker.disabled).toBe(true);
+    await chooseBackup("other-backup.json");
+    expect(document.body.textContent).not.toContain("other-backup.json");
+
+    // The late 409 belongs to the flow that is still open, for that file.
+    await act(async () => answer(Response.json({
+      error: "restore would delete API specs", api_specs_at_risk: 2,
+      confirmation_required: "confirm_api_spec_deletion=true",
+    }, { status: 409 })));
+    await settle(() => expect(document.body.textContent).toContain("Confirm API spec deletion"));
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("synthetic-backup.json");
+    expect(picker.disabled).toBe(false);
+  });
+
+  it("keeps the picker disabled after a remount while the earlier restore still runs", async () => {
+    let answer!: (response: Response) => void;
+    responses.push(new Promise<Response>((resolve) => { answer = resolve; }));
+    await chooseBackup();
+    await click("Restore");
+    await settle(() => expect(requests.filter((request) => request.method === "POST")).toHaveLength(1));
+
+    // Leaving the page unmounts the card; the restore keeps running.
+    await renderCard(false);
+    await renderCard(true);
+    const picker = () => [...document.querySelectorAll("button")]
+      .find((button) => button.textContent?.trim() === "Restore From File…")!;
+    expect(picker().disabled).toBe(true);
+    expect(document.body.textContent).toContain("started earlier is still");
+    await chooseBackup("other-backup.json");
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+
+    await act(async () => answer(Response.json({
+      restored: {
+        proxies: 1, consumers: 0, plugin_configs: 0, upstreams: 0,
+        api_specs: 0, gateway_trust_bundles: 0,
+      },
+    })));
+    await settle(() => expect(picker().disabled).toBe(false));
+    expect(document.body.textContent).toContain("Restored 1 proxies");
+  });
+
+  it("keeps an unknown outcome that arrives after the card unmounted, until a confirmed re-arm", async () => {
+    let answer!: (response: Response) => void;
+    responses.push(new Promise<Response>((resolve) => { answer = resolve; }));
+    await chooseBackup();
+    await click("Restore");
+    await settle(() => expect(requests.filter((request) => request.method === "POST")).toHaveLength(1));
+
+    // The card is gone when the restore's answer is lost.
+    await renderCard(false);
+    await act(async () => answer(Response.json(
+      { error: "Gateway Timeout", code: "FERRUM_BFF_TIMEOUT", phase: "response" },
+      { status: 504 },
+    )));
+    await renderCard(true);
+    await settle(() => expect(document.body.textContent).toContain("Restore outcome unknown"));
+    expect(document.body.textContent).toContain("synthetic-backup.json");
+
+    // The picker stays refused, and the backup is not retained to replay.
+    const picker = () => [...document.querySelectorAll("button")]
+      .find((button) => button.textContent?.trim() === "Restore From File…")!;
+    expect(picker().disabled).toBe(true);
+    await chooseBackup("other-backup.json");
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.body.textContent).not.toContain("Re-arm this restore");
+
+    // Re-arming asks first; declining keeps the block.
+    await click("Allow another restore");
+    await settle(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Allow another restore?"));
+    await click("Cancel");
+    await settle(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
+    expect(document.body.textContent).toContain("Restore outcome unknown");
+    expect(picker().disabled).toBe(true);
+
+    await click("Allow another restore");
+    await settle(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull());
+    await click("I've checked — allow a restore");
+    await settle(() => expect(document.body.textContent).not.toContain("Restore outcome unknown"));
+    expect(picker().disabled).toBe(false);
+    await chooseBackup("other-backup.json");
+    await settle(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("other-backup.json"));
+    expect(requests.filter((request) => request.method === "POST")).toHaveLength(1);
+  });
+
+  it("refuses to close the typed API-spec confirmation while the confirmed restore runs", async () => {
+    responses.push(Response.json({
+      error: "restore would delete API specs", api_specs_at_risk: 2,
+      confirmation_required: "confirm_api_spec_deletion=true",
+    }, { status: 409 }));
+    let answer!: (response: Response) => void;
+    responses.push(new Promise<Response>((resolve) => { answer = resolve; }));
+    await chooseBackup();
+    await click("Restore");
+    await settle(() => expect(document.body.textContent).toContain("Confirm API spec deletion"));
+    await act(async () => {
+      const input = document.querySelector<HTMLInputElement>('input[placeholder="DELETE 2 API SPECS IN tenant-a"]')!;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "DELETE 2 API SPECS IN tenant-a");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await click("Delete specs and restore");
+    await settle(() => expect(requests.filter((request) => request.method === "POST")).toHaveLength(2));
+
+    const close = document.querySelector<HTMLButtonElement>('[role="dialog"] button[aria-label="Close"]')!;
+    await act(async () => { close.click(); });
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Confirm API spec deletion");
+
+    await act(async () => answer(Response.json({
+      restored: {
+        proxies: 1, consumers: 0, plugin_configs: 0, upstreams: 0,
+        api_specs: 0, gateway_trust_bundles: 0,
+      },
+    })));
+    await settle(() => expect(document.body.textContent).toContain("Restored 1 proxies"));
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+});
+
+describe("restoreFlowReducer", () => {
+  const pending = { data: {}, namespace: "tenant-a", fileName: "a.json" };
+  const running = restoreFlowReducer({ kind: "armed", pending }, { type: "start", attempt: 7 });
+
+  it("only leaves running on that attempt's own answer", () => {
+    expect(running).toMatchObject({ kind: "running", attempt: 7 });
+    expect(restoreFlowReducer(running, { type: "dismiss" })).toBe(running);
+    expect(restoreFlowReducer(running, {
+      type: "select", pending: { ...pending, fileName: "b.json" },
+    })).toBe(running);
+    expect(restoreFlowReducer(running, { type: "settled", attempt: 6, result: { kind: "done" } })).toBe(running);
+    expect(restoreFlowReducer(running, { type: "settled", attempt: 7, result: { kind: "done" } }))
+      .toEqual({ kind: "idle" });
+  });
+
+  it("drops an answer that arrives after its flow ended", () => {
+    const rearmed = restoreFlowReducer({ kind: "idle" }, { type: "select", pending });
+    expect(restoreFlowReducer(rearmed, {
+      type: "settled", attempt: 7, result: { kind: "riskRequired", count: 2, serverMessage: "x" },
+    })).toBe(rearmed);
   });
 });

@@ -1275,7 +1275,9 @@ export const server = createServer(async (req, res) => {
   if (path === '/admin/tls/acme/certificates' && method === 'GET') return send(200, paginate(acmeCerts, url));
   if (path === '/admin/tls/acme/orders' && method === 'GET') return send(200, paginate(acmeOrders, url));
   if (path === '/admin/tls/acme/orders' && method === 'POST') {
-    const order = { id: `order-${randomUUID().slice(0, 8)}`, domains: body.domains ?? [], directory_url: body.directory_url, status: 'pending_challenges', http01_challenges: (body.domains ?? []).map((d) => ({ identifier: d, token: 'tok', key_authorization: 'tok.abc', path: '/.well-known/acme-challenge/tok' })), created_at: now(), updated_at: now() };
+    // Like Edge, a caller-chosen id names the order and is never reused.
+    if (body.id && acmeOrders.some((o) => o.id === body.id)) return send(409, { error: `ACME order already exists: ${body.id}` });
+    const order = { id: body.id || `order-${randomUUID().slice(0, 8)}`, domains: body.domains ?? [], directory_url: body.directory_url, status: 'pending_challenges', http01_challenges: (body.domains ?? []).map((d) => ({ identifier: d, token: 'tok', key_authorization: 'tok.abc', path: '/.well-known/acme-challenge/tok' })), created_at: now(), updated_at: now() };
     acmeOrders.push(order);
     return send(201, order);
   }
@@ -1293,7 +1295,8 @@ export const server = createServer(async (req, res) => {
   }
   const renewMatch = path.match(/^\/admin\/tls\/acme\/renew\/([^/]+)$/);
   if (renewMatch) {
-    const order = { id: `order-renew-${randomUUID().slice(0, 6)}`, certificate_id: renewMatch[1], domains: acmeCerts[0].domains, directory_url: acmeCerts[0].directory_url, status: 'processing', created_at: now(), updated_at: now() };
+    if (body.id && acmeOrders.some((o) => o.id === body.id)) return send(409, { error: `ACME order already exists: ${body.id}` });
+    const order = { id: body.id || `order-renew-${randomUUID().slice(0, 6)}`, certificate_id: renewMatch[1], domains: acmeCerts[0].domains, directory_url: acmeCerts[0].directory_url, status: 'processing', created_at: now(), updated_at: now() };
     acmeOrders.push(order);
     return send(201, order);
   }

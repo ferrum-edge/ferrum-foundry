@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "@/components/ui/Toast";
 import type { ApiSpecSummary } from "@/api/apiSpecs";
 import ApiSpecsPage from "./index";
+import { clearOutcomeLatches, latchOutcome } from "@/stores/outcomeLatches";
 
 vi.mock("@/stores/namespace", () => ({
   useNamespace: () => ({ scope: { namespace: "tenant-a" } }),
@@ -32,15 +33,22 @@ function summary(id: string): ApiSpecSummary {
   };
 }
 
+// Edge's `content_hash` (the SHA-256 of the stored bytes) for a spec holding
+// 'document A' and 'document A edited': reads that match what was sent.
+const DOCUMENT_A_SHA256 = '09fb3f175100d052d86fa9ae67e5dedf94d2c239d1bfec4da5f3e217585652b4';
+const EDITED_SHA256 = '70dd68d6fa151c951b1bb09761d71ffcc0aef18fd44f7c623804eec3c352f1ad';
+
 let host: HTMLDivElement;
 let root: Root;
 let client: QueryClient;
 let reads: { id: string; resolve: (response: Response) => void }[];
 let writes: { id: string; document: string; resolve: (response: Response) => void }[];
+let specList: ApiSpecSummary[];
 
 beforeEach(() => {
   reads = [];
   writes = [];
+  specList = [summary("A"), summary("B")];
   vi.stubGlobal("Request", BasedRequest);
   vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
     const path = new URL(request.url).pathname;
@@ -50,7 +58,7 @@ beforeEach(() => {
       return new Promise<Response>((resolve) => writes.push({ id, document, resolve }));
     }
     if (id === "api-specs") {
-      return Response.json({ items: [summary("A"), summary("B")], total: 2, limit: 20, offset: 0, next_offset: null });
+      return Response.json({ items: specList, total: specList.length, limit: 20, offset: 0, next_offset: null });
     }
     return new Promise<Response>((resolve) => reads.push({ id, resolve }));
   }));
@@ -62,6 +70,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await act(async () => root.unmount());
+  clearOutcomeLatches();
   client.clear();
   host.remove();
   vi.unstubAllGlobals();
@@ -269,4 +278,161 @@ it.each(['import', 'replace'])('reports a committed-but-not-live spec %s as save
   await click('Import Spec');
   expect(document.querySelector('[role="dialog"]')!.textContent).not.toContain('outcome unknown');
   expect(editor().disabled).toBe(false);
+});
+
+const REARM = 'Allow another import or replacement';
+const CONFIRM_REARM = "I've checked — allow writes";
+
+it.each(['import', 'replace'])('keeps an uncertain spec %s disarmed through matching reads and remounts until the operator re-arms it', async (mode) => {
+  await mount();
+  if (mode === 'replace') {
+    await openReplace(0, 1);
+    await resolveRead(0, 'document A');
+    await settle(() => expect(editor().disabled).toBe(false));
+    await edit('document A edited');
+  } else {
+    await click('Import Spec');
+    await edit('document A');
+  }
+  const label = mode === 'replace' ? 'Replace Spec' : 'Import Spec';
+  const submit = () => [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
+    .find((button) => button.textContent?.trim() === label)!;
+  await act(async () => submit().click());
+  await settle(() => expect(writes).toHaveLength(1));
+  await act(async () => writes[0]!.resolve(Response.json({
+    code: 'FERRUM_BFF_TIMEOUT', phase: 'response',
+  }, { status: 504 })));
+  await settle(() => expect(document.querySelector('[role="dialog"]')!.textContent).toContain('outcome unknown'));
+  await click('Cancel');
+  expect(host.textContent).toContain('Spec write outcome unknown');
+
+  // A read holding exactly the document sent proves nothing about this
+  // request: the spec may have held it already.
+  specList = mode === 'replace'
+    ? [{ ...summary('A'), content_hash: EDITED_SHA256, updated_at: '2026-09-07T00:00:00Z' }, summary('B')]
+    : [summary('A'), summary('B'), { ...summary('C'), content_hash: DOCUMENT_A_SHA256, created_at: '2026-09-07T00:00:00Z' }];
+  await act(async () => { await client.refetchQueries({ queryKey: ['apiSpecs'] }); });
+  await settle(() => expect(host.textContent).toContain(mode === 'replace' ? 'API A' : 'API C'));
+  expect(host.textContent).toContain('Spec write outcome unknown');
+
+  // Leaving the route unmounts the workspace; coming back must not re-arm it.
+  await act(async () => root.render(
+    <QueryClientProvider client={client}><ToastProvider><div /></ToastProvider></QueryClientProvider>,
+  ));
+  await mount();
+  expect(host.textContent).toContain('Spec write outcome unknown');
+  await click('Import Spec');
+  expect(document.querySelector('[role="dialog"]')!.textContent).toContain('outcome unknown');
+  expect(editor().disabled).toBe(true);
+  await click('Cancel');
+
+  // Re-arming asks first; declining keeps the block.
+  await click(REARM);
+  await settle(() => expect(document.querySelector('[role="dialog"]')?.textContent)
+    .toContain('Allow another spec import or replacement?'));
+  await click('Cancel');
+  await settle(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
+  expect(host.textContent).toContain('Spec write outcome unknown');
+
+  await click(REARM);
+  await settle(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull());
+  await click(CONFIRM_REARM);
+  await settle(() => expect(host.textContent).not.toContain('Spec write outcome unknown'));
+  await click('Import Spec');
+  expect(document.querySelector('[role="dialog"]')!.textContent).not.toContain('outcome unknown');
+  expect(editor().disabled).toBe(false);
+  expect(writes).toHaveLength(1);
+});
+
+it('keeps submit and re-arm disabled across remounts while any spec write for the namespace runs', async () => {
+  const remount = async () => {
+    await act(async () => root.render(
+      <QueryClientProvider client={client}><ToastProvider><div /></ToastProvider></QueryClientProvider>,
+    ));
+    await mount();
+  };
+  const dialogSubmit = () => [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
+    .find((button) => button.textContent?.trim() === 'Import Spec')!;
+  const rearm = () => [...host.querySelectorAll<HTMLButtonElement>('button')]
+    .find((button) => button.textContent?.trim() === REARM);
+
+  // Write A starts, then the workspace is left while it runs.
+  await mount();
+  await click('Import Spec');
+  await edit('document A');
+  await act(async () => dialogSubmit().click());
+  await settle(() => expect(writes).toHaveLength(1));
+  await click('Cancel');
+  await remount();
+
+  // The new mount's own mutation observers are idle, but A is not.
+  await click('Import Spec');
+  await edit('document B');
+  expect(dialogSubmit().disabled).toBe(true);
+  await act(async () => dialogSubmit().click());
+  expect(writes).toHaveLength(1);
+  await click('Cancel');
+
+  // An earlier unanswered write is latched meanwhile; re-arming it now would
+  // let another write start while A may still land.
+  await act(async () => latchOutcome({
+    kind: 'api_spec_write', namespace: 'tenant-a', message: 'Spec import outcome unknown.',
+  }));
+  await remount();
+  await settle(() => expect(rearm()).toBeTruthy());
+  expect(rearm()!.disabled).toBe(true);
+  await act(async () => rearm()!.click());
+  expect(document.body.textContent).not.toContain('Allow another spec import or replacement?');
+
+  // A's lost answer, arriving after two remounts, still latches the namespace.
+  await act(async () => writes[0]!.resolve(Response.json({
+    code: 'FERRUM_BFF_TIMEOUT', phase: 'response',
+  }, { status: 504 })));
+  await settle(() => expect(rearm()!.disabled).toBe(false));
+  expect(host.textContent).toContain('Spec write outcome unknown');
+
+  // Only now, with nothing in flight, can the operator re-arm and write again.
+  await act(async () => rearm()!.click());
+  await settle(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull());
+  await click(CONFIRM_REARM);
+  await settle(() => expect(host.textContent).not.toContain('Spec write outcome unknown'));
+  await click('Import Spec');
+  await edit('document B');
+  expect(dialogSubmit().disabled).toBe(false);
+  await act(async () => dialogSubmit().click());
+  await settle(() => expect(writes).toHaveLength(2));
+});
+
+it('re-arms only the unknown write the operator reviewed', async () => {
+  await mount();
+  await act(async () => latchOutcome({
+    kind: 'api_spec_write', namespace: 'tenant-a', message: 'Spec import outcome unknown.',
+  }));
+  await click(REARM);
+  await settle(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull());
+
+  // Another unanswered write replaces it while the confirmation is open.
+  await act(async () => latchOutcome({
+    kind: 'api_spec_write', namespace: 'tenant-a', message: 'Spec replacement outcome unknown.',
+  }));
+  await click(CONFIRM_REARM);
+  await settle(() => expect(document.body.textContent).toContain('review it before allowing writes again'));
+  expect(host.textContent).toContain('Spec replacement outcome unknown.');
+  expect(host.textContent).toContain('Spec write outcome unknown');
+});
+
+it('reports an import that succeeds after its dialog was closed', async () => {
+  await mount();
+  await click('Import Spec');
+  await edit('document C');
+  const submit = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
+    .find((button) => button.textContent?.trim() === 'Import Spec')!;
+  await act(async () => submit.click());
+  await settle(() => expect(writes).toHaveLength(1));
+  await click('Cancel');
+  await act(async () => writes[0]!.resolve(Response.json({
+    id: 'C', proxy_id: 'proxy-C', spec_version: '3.1.0', content_hash: 'C',
+  }, { status: 201 })));
+  await settle(() => expect(document.body.textContent).toContain('Spec imported — proxy proxy-C created'));
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
 });

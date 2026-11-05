@@ -32,6 +32,17 @@ import { usePaginationParams } from "@/hooks/usePagination";
 import { filterAndPage } from "@/lib/collectionSearch";
 import { useNamespace } from "@/stores/namespace";
 import { useCapabilities } from "@/stores/capabilities";
+import {
+  beginWrite,
+  getOutcomeLatches,
+  isWriteInFlight,
+  latchKeys,
+  latchOutcome,
+  releaseOutcomeLatch,
+  useOutcomeLatches,
+  useWritesInFlight,
+  type OutcomeLatch,
+} from "@/stores/outcomeLatches";
 import { CapabilityNotice } from "@/components/shared/CapabilityGate";
 import { formatDateTime } from "@/lib/format";
 
@@ -86,7 +97,20 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
   const { capabilities } = useCapabilities();
   const canWrite = capabilities.apiSpecs;
 
-  const [unknownWrite, setUnknownWrite] = useState<string | null>(null);
+  // The outcome-unknown latch outlives this workspace (a namespace switch or
+  // leaving the route remounts it). No read can prove what an unanswered spec
+  // write did (Edge generates the spec id, and matching content is not an
+  // operation id), so it ends only on the operator's deliberate re-arm, after
+  // checking the gateway, or with the page.
+  const writeLatchKey = latchKeys.apiSpecWrite(scope.namespace);
+  const writeLatch = useOutcomeLatches().get(writeLatchKey);
+  const unknownWrite = writeLatch?.kind === "api_spec_write" ? writeLatch.message : null;
+  // The latch the re-arm confirmation was opened for, and so the only one it
+  // may release.
+  const [rearmTarget, setRearmTarget] = useState<OutcomeLatch | null>(null);
+  // Any import or replace for this namespace still running, including one
+  // started by an earlier mount of this workspace whose observers are gone.
+  const writePending = useWritesInFlight().has(writeLatchKey);
   const [importOpen, setImportOpen] = useState(false);
   const [importDoc, setImportDoc] = useState("");
   const [importLoading, setImportLoading] = useState(false);
@@ -150,9 +174,8 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
     if (!canWrite.allowed) return;
     if (
       importLoading ||
-      unknownWrite ||
-      importSpec.isPending ||
-      updateSpec.isPending ||
+      getOutcomeLatches().has(writeLatchKey) ||
+      isWriteInFlight(writeLatchKey) ||
       (replaceTarget && !collectionAvailable)
     ) {
       return;
@@ -162,6 +185,9 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
       return;
     }
     const generation = importGeneration.current;
+    const namespace = scope.namespace;
+    // Released in `finally`, whatever became of this workspace meanwhile.
+    const release = beginWrite(writeLatchKey);
     try {
       let message: string;
       if (replaceTarget) {
@@ -171,8 +197,10 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
         const created = await importSpec.mutateAsync(importDoc);
         message = `Spec imported — proxy ${created.proxy_id} created`;
       }
-      if (generation !== importGeneration.current) return;
+      // The result is reported even if the dialog was closed meanwhile; only
+      // the dialog it was submitted from is closed.
       toast("success", message);
+      if (generation !== importGeneration.current) return;
       closeImport();
       setImportDoc("");
       setReplaceTarget(null);
@@ -182,7 +210,6 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
       // a second time. Cached reads are refreshed by the mutation cache.
       const committed = getCommittedWrite(err);
       if (committed) {
-        if (generation !== importGeneration.current) return;
         toast(
           "warning",
           committedWriteMessage(
@@ -192,15 +219,22 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
             committed,
           ),
         );
+        if (generation !== importGeneration.current) return;
         closeImport();
         setImportDoc("");
         setReplaceTarget(null);
         return;
       }
       // Retain the warning even if the operator closed/reopened the dialog.
-      if (err instanceof MutationOutcomeUnknownError) setUnknownWrite(err.message);
+      // It is installed before the write is released, so the namespace is
+      // never briefly both idle and unlatched.
+      if (err instanceof MutationOutcomeUnknownError) {
+        latchOutcome({ kind: "api_spec_write", namespace, message: err.message });
+      }
       const message = await getApiErrorMessage(err, "Spec import failed");
       if (generation === importGeneration.current) toast("error", message);
+    } finally {
+      release();
     }
   };
 
@@ -245,6 +279,34 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
       />
 
       <CapabilityNotice verdict={canWrite} />
+
+      {unknownWrite && (
+        <div
+          role="alert"
+          className="rounded-lg border border-warning/40 bg-warning/5 p-4 space-y-3"
+        >
+          <div>
+            <p className="text-sm font-semibold text-warning">
+              Spec write outcome unknown — imports and replacements are disarmed
+            </p>
+            <p className="text-sm text-text-secondary mt-1">{unknownWrite}</p>
+          </div>
+          <p className="text-xs text-text-muted">
+            Foundry cannot tell from the spec list whether that write ran: the gateway
+            assigns the spec id, and a spec holding the same document may already have
+            existed. Check the spec list below, and the proxy, upstream, and plugins the
+            document declares, before allowing another import or replacement.
+          </p>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={writePending}
+            onClick={() => setRearmTarget(writeLatch ?? null)}
+          >
+            Allow another import or replacement
+          </Button>
+        </div>
+      )}
 
       <SearchBar
         value={search}
@@ -350,7 +412,12 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
               <code className="font-mono">x-ferrum-plugins</code>, and{" "}
               <code className="font-mono">x-ferrum-validate</code> are optional.
             </p>
-            {unknownWrite && <p role="alert">{unknownWrite}</p>}
+            {unknownWrite && (
+              <p role="alert">
+                {unknownWrite} Close this dialog and check the spec list; once you have,
+                use “Allow another import or replacement” on the page.
+              </p>
+            )}
             <textarea
               aria-label="OpenAPI document"
               disabled={importLoading || Boolean(unknownWrite)}
@@ -368,9 +435,12 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
               <Button
                 onClick={handleImport}
                 disabled={
-                  importLoading || Boolean(unknownWrite) || (!!replaceTarget && !collectionAvailable)
+                  importLoading ||
+                  Boolean(unknownWrite) ||
+                  writePending ||
+                  (!!replaceTarget && !collectionAvailable)
                 }
-                loading={importSpec.isPending || updateSpec.isPending}
+                loading={writePending}
               >
                 {replaceTarget ? "Replace Spec" : "Import Spec"}
               </Button>
@@ -388,6 +458,23 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
           </pre>
         </DialogContent>
       </Dialog>
+
+      {/* Deliberate re-arm of an outcome-unknown spec write */}
+      <ConfirmDialog
+        open={rearmTarget !== null && unknownWrite !== null}
+        onOpenChange={(open) => !open && setRearmTarget(null)}
+        title="Allow another spec import or replacement?"
+        description={`The earlier write in namespace "${scope.namespace}" may already have run. Confirm only after reading the spec list and the resources it manages back from the gateway; another import or replacement is sent as a new request.`}
+        confirmLabel="I've checked — allow writes"
+        variant="primary"
+        onConfirm={() => {
+          if (!rearmTarget || isWriteInFlight(writeLatchKey)) return;
+          setRearmTarget(null);
+          if (!releaseOutcomeLatch(writeLatchKey, rearmTarget)) {
+            toast("warning", "Another spec write's outcome became unknown meanwhile; review it before allowing writes again.");
+          }
+        }}
+      />
 
       {/* Delete confirm */}
       <ConfirmDialog

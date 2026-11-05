@@ -245,6 +245,71 @@ describe("TargetForm inside the upstream payload editor", () => {
     expect(ui.host.textContent).toContain("backup:9090");
   });
 
+  describe("hash settings follow the algorithm that reads them", () => {
+    it("drops the hash key and cookie config after switching away from consistent hashing", async () => {
+      await mount({
+        ...initial, algorithm: "consistent_hashing", hash_on: "cookie:route",
+        hash_on_cookie_config: { path: "/", ttl_seconds: 3600, http_only: true, secure: false, session_cookie: false },
+      });
+      expect(ui.host.textContent).toContain("Hash Cookie Config");
+      await selectOption("Algorithm", "Round Robin");
+      expect(ui.host.textContent).not.toContain("Hash Cookie Config");
+      await save();
+      const payload = submit.mock.calls[0][0];
+      expect(payload.algorithm).toBe("round_robin");
+      expect(payload).not.toHaveProperty("hash_on");
+      expect(payload).not.toHaveProperty("hash_on_cookie_config");
+    });
+
+    // Edge mints every cookie lane's cookie with the upstream's cookie config,
+    // so a lane with its own `cookie:` key still consumes it.
+    const cookieConfig = {
+      path: "/canary", ttl_seconds: 120, http_only: false, secure: true,
+      same_site: "None", session_cookie: false,
+    } satisfies HashOnCookieConfig;
+    it.each<[string, Partial<Upstream>]>([
+      ["a subset", {
+        subsets: [{
+          name: "canary", labels: { version: "v1" },
+          traffic_policy: { load_balancer_algorithm: "consistent_hashing", hash_on: "cookie:canary" },
+        }],
+      }],
+      ["a projected port override", {
+        port_overrides: { "8443": { algorithm: "consistent_hashing", hash_on: "cookie:port" } },
+      }],
+      // Edge hashes a hashing subset's traffic on such a port with the port's
+      // own key, though the port alone does not hash.
+      ["a port override serving a hashing subset", {
+        subsets: [{
+          name: "canary", labels: { version: "v1" },
+          traffic_policy: { load_balancer_algorithm: "consistent_hashing", hash_on: "header:x-user" },
+        }],
+        port_overrides: { "8443": { hash_on: "cookie:port" } },
+      }],
+    ])("keeps the cookie config %s with its own cookie key reads, dropping the unused upstream key", async (_lane, lane) => {
+      await mount({
+        ...initial, hash_on: "cookie:route", hash_on_cookie_config: cookieConfig, ...lane,
+      });
+      expect(ui.host.textContent).toContain("Hash Cookie Config");
+      await fill(inputByLabel(ui.host, "Name"), "Renamed");
+      await save();
+      const payload = submit.mock.calls[0][0];
+      expect(payload.name).toBe("Renamed");
+      expect(payload).not.toHaveProperty("hash_on");
+      expect(payload.hash_on_cookie_config).toEqual(cookieConfig);
+    });
+
+    it("keeps, and shows, the upstream key a hashing subset falls back to", async () => {
+      await mount({
+        ...initial, hash_on: "header:x-user",
+        subsets: [{ name: "canary", labels: { version: "v1" }, traffic_policy: { load_balancer_algorithm: "consistent_hashing" } }],
+      });
+      expect(inputByLabel(ui.host, "Hash On").value).toBe("header:x-user");
+      await save();
+      expect(submit.mock.calls[0][0].hash_on).toBe("header:x-user");
+    });
+  });
+
   describe("sticky-cookie SameSite through an unrelated save (#449)", () => {
     type SameSite = Pick<HashOnCookieConfig, "same_site">;
     const cookieUpstream = (sameSite: SameSite): Upstream => ({

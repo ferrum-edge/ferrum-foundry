@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  beginGatewayRequest,
   getGatewayMetadataSnapshot,
   observeGatewayResponse,
   parseConfigCursor,
@@ -398,6 +399,42 @@ describe("observeGatewayResponse", () => {
         polling: false,
       });
       expect(fetchStatus).not.toHaveBeenCalled();
+    });
+
+    // The scoped twin of "keeps a known commit monitor through a later
+    // pre-commit failure": a commit the session cannot monitor is still a
+    // known commit, and the next write must not erase it.
+    it("keeps an unmonitored commit through the next write and its pre-commit failure", async () => {
+      setNamespaceScopedSession(true);
+      await observeGatewayResponse(
+        mutationRequest("tenant-a"),
+        new Response(JSON.stringify({ applied: false, reason: "config_rejected" }), {
+          status: 503,
+          headers: { "x-ferrum-config-cursor": "6:3" },
+        }),
+      );
+      const kept = { state: "unmonitored", cursor: "6:3", reason: "config_rejected" };
+      expect(getGatewayMetadataSnapshot().apply).toMatchObject(kept);
+
+      const next = mutationRequest("tenant-a");
+      const identity = beginGatewayRequest(next);
+      expect(getGatewayMetadataSnapshot().apply).toMatchObject(kept);
+      await observeGatewayResponse(
+        next,
+        new Response(JSON.stringify({ error: "write gate unavailable" }), {
+          status: 503,
+          headers: { "content-type": "application/json" },
+        }),
+        identity,
+      );
+      expect(getGatewayMetadataSnapshot().apply).toMatchObject(kept);
+
+      // A later commit supersedes it, as it would a pending monitor.
+      await observeGatewayResponse(
+        mutationRequest("tenant-a"),
+        new Response("{}", { status: 200, headers: { "x-ferrum-config-cursor": "6:4" } }),
+      );
+      expect(getGatewayMetadataSnapshot().apply).toMatchObject({ state: "applied", cursor: "6:4" });
     });
 
     it("still reports a write the gateway applied synchronously as live", async () => {

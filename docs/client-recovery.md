@@ -219,8 +219,13 @@ For unknown outcomes, an upload-phase `504` stays on the ordinary retryable
 path with the confirmation still armed. Any other unknown outcome may already
 have replaced the namespace, so restore shows an "outcome unknown" panel that
 names the cause and clears the loaded backup, so the destructive action is no
-longer one click away. The same backup can be restored again with an explicit
-"Re-arm this restore" action.
+longer one click away. The panel, and the refusal to choose another backup,
+outlive the card: leaving the page and coming back, even when the answer was
+lost after you left, shows it again until you re-arm or reload. While the card that
+loaded the backup is still open, "Re-arm this restore" reopens the
+destructive confirmation for the same backup. Otherwise the backup (which
+carries credentials) is not retained, and "Allow another restore", after a
+confirmation, lets you choose a file again.
 
 Connectivity failures before commit keep the gateway's `restore_errors` and
 `failure_class` in the recovery panel. The typed confirmation for a restore that
