@@ -28,8 +28,10 @@ export function ConfirmDialog({
   loading = false,
 }: ConfirmDialogProps) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+    // While the confirmed action runs, every way out is refused: the answer
+    // still belongs to this dialog's flow.
+    <Dialog open={open} onOpenChange={(next) => (next || !loading) && onOpenChange(next)}>
+      <DialogContent busy={loading}>
         <DialogTitle>{title}</DialogTitle>
         {description && (
           <DialogDescription className="mt-2">

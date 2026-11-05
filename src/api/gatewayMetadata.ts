@@ -12,6 +12,38 @@ export type ApplyState =
   | "unverifiable"
   | "unmonitored";
 
+/**
+ * Whether a monitor state records a write the gateway is known to have
+ * committed whose liveness is not yet proven (or was proven not to be live).
+ * Such a state must survive the next write, and any later failure that did
+ * not commit, until a later commit supersedes it: dropping it would hide a
+ * committed change the runtime may not be serving.
+ *
+ * `unmonitored` is that same fact for a session that may not poll
+ * `/config/apply-status` (or whose poll was refused), so it survives exactly
+ * as `pending` does. `outcome_unknown` is not a known commit: it describes the
+ * latest mutation only and is replaced by the next one.
+ */
+export function holdsKnownCommit(state: ApplyState): boolean {
+  switch (state) {
+    case "pending":
+    case "rejected":
+    case "unverifiable":
+    case "unmonitored":
+      return true;
+    case "idle":
+    case "nothing_applied":
+    case "outcome_unknown":
+    case "succeeded":
+    case "applied":
+      return false;
+    default: {
+      const unhandled: never = state;
+      throw new Error(`Unhandled apply state: ${String(unhandled)}`);
+    }
+  }
+}
+
 export interface ConfigCursor {
   raw: string;
   epoch: string;
@@ -144,7 +176,7 @@ export function beginGatewayRequest(request: Request): GatewayRequestIdentity {
   const identity: GatewayRequestIdentity = { session: sessionGeneration };
   if (!request.url.includes("/api/proxy/") || !isConfigurationMutation(request)) return identity;
   latestMutationOrder += 1;
-  if (["applied", "succeeded", "nothing_applied", "outcome_unknown", "unmonitored"].includes(snapshot.apply.state)) {
+  if (snapshot.apply.state !== "idle" && !holdsKnownCommit(snapshot.apply.state)) {
     publish({ ...snapshot, apply: IDLE_APPLY });
   }
   return { ...identity, mutationOrder: latestMutationOrder };
@@ -408,7 +440,7 @@ export async function observeGatewayResponse(
     body,
   );
   const committed = response.ok || notLive !== null;
-  if (!committed && ["pending", "rejected", "unverifiable"].includes(snapshot.apply.state)) {
+  if (!committed && holdsKnownCommit(snapshot.apply.state)) {
     publish(next);
     return;
   }
@@ -541,7 +573,7 @@ export function observeGatewayFailure(
   if (identity.session !== sessionGeneration || identity.mutationOrder !== latestMutationOrder) {
     return outcome;
   }
-  if (["pending", "rejected", "unverifiable"].includes(snapshot.apply.state)) return outcome;
+  if (holdsKnownCommit(snapshot.apply.state)) return outcome;
   publish({
     ...snapshot,
     apply: {

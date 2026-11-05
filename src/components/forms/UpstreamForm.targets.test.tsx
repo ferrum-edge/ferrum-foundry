@@ -245,6 +245,33 @@ describe("TargetForm inside the upstream payload editor", () => {
     expect(ui.host.textContent).toContain("backup:9090");
   });
 
+  describe("hash settings follow the algorithm that reads them", () => {
+    it("drops the hash key and cookie config after switching away from consistent hashing", async () => {
+      await mount({
+        ...initial, algorithm: "consistent_hashing", hash_on: "cookie:route",
+        hash_on_cookie_config: { path: "/", ttl_seconds: 3600, http_only: true, secure: false, session_cookie: false },
+      });
+      expect(ui.host.textContent).toContain("Hash Cookie Config");
+      await selectOption("Algorithm", "Round Robin");
+      expect(ui.host.textContent).not.toContain("Hash Cookie Config");
+      await save();
+      const payload = submit.mock.calls[0][0];
+      expect(payload.algorithm).toBe("round_robin");
+      expect(payload).not.toHaveProperty("hash_on");
+      expect(payload).not.toHaveProperty("hash_on_cookie_config");
+    });
+
+    it("keeps, and shows, the upstream key a hashing subset falls back to", async () => {
+      await mount({
+        ...initial, hash_on: "header:x-user",
+        subsets: [{ name: "canary", labels: { version: "v1" }, traffic_policy: { load_balancer_algorithm: "consistent_hashing" } }],
+      });
+      expect(inputByLabel(ui.host, "Hash On").value).toBe("header:x-user");
+      await save();
+      expect(submit.mock.calls[0][0].hash_on).toBe("header:x-user");
+    });
+  });
+
   describe("sticky-cookie SameSite through an unrelated save (#449)", () => {
     type SameSite = Pick<HashOnCookieConfig, "same_site">;
     const cookieUpstream = (sameSite: SameSite): Upstream => ({

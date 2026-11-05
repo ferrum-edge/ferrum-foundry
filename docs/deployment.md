@@ -363,9 +363,12 @@ which reads the order without repeating the POST. Keep checking until the
 gateway reports a terminal state.
 
 An interrupted spec import or replacement, or an ACME create or renew, shows
-**outcome unknown** and blocks resubmission in that view. Inspect the spec
-resources or ACME orders before you reload or retry; the warning does not
-survive a page load. Only a BFF timeout with `phase: "upload"` is treated as
+**outcome unknown** and blocks resubmission. The block outlives a tab switch
+or leaving the page, and ends when a read shows the outcome: a spec created
+after the attempt, or the replaced spec's new content; an order for the same
+domains, or a renewal order for the certificate, created after the attempt.
+Inspect the spec resources or ACME orders before you reload or retry; the
+warning does not survive a page load. Only a BFF timeout with `phase: "upload"` is treated as
 a definite failure: the BFF streams the body, so the gateway may already have
 the request headers and part of the body, but the complete body never reached
 it, and the gateway acts on a write only once it has the whole body. A

@@ -225,6 +225,36 @@ type PassiveHealthCheckDraft = WithNumberDrafts<
 type HashOnCookieConfigDraft = WithNumberDrafts<HashOnCookieConfig, "ttl_seconds">;
 
 /**
+ * Which upstream hash settings Edge reads for this draft. The upstream
+ * `hash_on` is the key of an upstream that hashes, and the fallback key of
+ * every subset (or projected port override) that hashes without a key of its
+ * own. The cookie config belongs to that key. A setting Edge would not read
+ * is neither shown, validated, nor sent, so switching the algorithm away from
+ * consistent hashing also clears it on save.
+ */
+function upstreamHashSettings(
+  algorithm: Upstream["algorithm"],
+  hashOn: string,
+  subsets: readonly { name: string; algorithm: Upstream["algorithm"] | ""; hashOn: string }[],
+  portOverrides: Upstream["port_overrides"],
+): { hashKey: boolean; cookie: boolean } {
+  const hashing = "consistent_hashing";
+  const hashKey =
+    algorithm === hashing ||
+    subsets.some(
+      (subset) =>
+        subset.name.trim() !== "" &&
+        (subset.algorithm || algorithm) === hashing &&
+        !subset.hashOn.trim(),
+    ) ||
+    Object.values(portOverrides ?? {}).some((override) => {
+      const policy = (override ?? {}) as { algorithm?: unknown; hash_on?: unknown };
+      return policy.algorithm === hashing && !policy.hash_on;
+    });
+  return { hashKey, cookie: hashKey && hashOn.trim().startsWith("cookie:") };
+}
+
+/**
  * A status-code list resolved for submit. A hidden field (non-HTTP probe)
  * that does not parse keeps its seeded list; validate() has already rejected
  * an invalid visible field.
@@ -423,6 +453,13 @@ export function UpstreamForm({
 
   const isHttpProbe = (activeHc.probe_type ?? "http") === "http";
 
+  const hashSettings = upstreamHashSettings(
+    algorithm,
+    hashOn,
+    subsets,
+    initialData?.port_overrides,
+  );
+
   const validate = (): boolean => {
     const errs: Record<string, string> = {};
     if (targets.length === 0 && !sdEnabled) errs.targets = "At least one target is required (unless service discovery is enabled)";
@@ -450,7 +487,7 @@ export function UpstreamForm({
       const codes = resolveStatusCodeListDraft(unhealthyCodes);
       if (!codes.ok) errs.unhealthy_status_codes = codes.error;
     }
-    if (hashOn.startsWith("cookie:")) {
+    if (hashSettings.cookie) {
       const error = missingNumberError(cookieConfig.ttl_seconds, "TTL");
       if (error) errs.cookie_ttl_seconds = error;
     }
@@ -530,7 +567,7 @@ export function UpstreamForm({
 
     const sameSite = cookieConfig.same_site ?? unsetSameSite;
     const hashOnCookie: HashOnCookieConfig | undefined =
-      hashOn.startsWith("cookie:")
+      hashSettings.cookie
         ? {
             path: cookieConfig.path,
             ttl_seconds: resolveNumberDrafts(cookieConfig, ["ttl_seconds"]).ttl_seconds,
@@ -623,7 +660,7 @@ export function UpstreamForm({
       targets,
       algorithm,
       ...(name.trim() && { name: name.trim() }),
-      ...(hashOn.trim() && { hash_on: hashOn.trim() }),
+      ...(hashSettings.hashKey && hashOn.trim() && { hash_on: hashOn.trim() }),
       ...(hashOnCookie && { hash_on_cookie_config: hashOnCookie }),
       ...(healthChecks && { health_checks: healthChecks }),
       ...(serviceDiscovery && { service_discovery: serviceDiscovery }),
@@ -681,7 +718,7 @@ export function UpstreamForm({
 
   /* ---------- Helpers ---------- */
 
-  const showHashCookie = hashOn.startsWith("cookie:");
+  const showHashCookie = hashSettings.cookie;
 
   /* ================================================================ */
   /*  Render                                                           */
@@ -707,15 +744,19 @@ export function UpstreamForm({
               onValueChange={(v) => setAlgorithm(v as Upstream["algorithm"])}
               options={ALGORITHM_OPTIONS}
             />
-            {algorithm === "consistent_hashing" && (
+            {hashSettings.hashKey && (
               <Input
                 label="Hash On"
                 value={hashOn}
                 onChange={(e) => setHashOn(e.target.value)}
                 placeholder="ip, header:<name>, cookie:<name>"
-                helpText="Key used for consistent hashing: ip, header:<name>, or cookie:<name>"
+                helpText={
+                  algorithm === "consistent_hashing"
+                    ? "Key used for consistent hashing: ip, header:<name>, or cookie:<name>"
+                    : "Fallback key for subsets that use consistent hashing without their own key"
+                }
                 error={errors.hash_on}
-                required
+                required={algorithm === "consistent_hashing"}
               />
             )}
           </div>

@@ -8,6 +8,7 @@ import type { AcmeOrder } from "@/api/tls";
 import type { PaginatedResponse } from "@/api/types";
 import TlsPage from "./index";
 import { inputByLabel } from "@/test/fields";
+import { clearOutcomeLatches } from "@/stores/outcomeLatches";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 class BasedRequest extends Request {
@@ -28,6 +29,8 @@ let details: ((response: Response) => void)[];
 let collections: ((response: Response) => void)[];
 let holdCollections: boolean;
 let posts: number;
+let extraOrders: AcmeOrder[];
+let certificates: unknown[];
 
 function cachedOrders() {
   return client.getQueryData<PaginatedResponse<AcmeOrder>>(firstPage)?.data;
@@ -47,6 +50,8 @@ beforeEach(() => {
   collections = [];
   holdCollections = false;
   posts = 0;
+  extraOrders = [];
+  certificates = [];
   vi.stubGlobal("Request", BasedRequest);
   vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
     const path = new URL(request.url).pathname;
@@ -57,7 +62,9 @@ beforeEach(() => {
     if (path.endsWith("/orders/fixture-order")) {
       return new Promise<Response>((resolve) => details.push(resolve));
     }
-    const data = path.endsWith("/orders") ? [order()] : [];
+    const data = path.endsWith("/orders")
+      ? [order(), ...extraOrders]
+      : path.endsWith("/certificates") ? certificates : [];
     const response = Response.json({ data, pagination: { offset: 0, limit: 250, total: data.length } });
     if (path.endsWith("/orders") && holdCollections) {
       return new Promise<Response>((resolve) => collections.push(resolve));
@@ -72,6 +79,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await act(async () => root.unmount());
+  clearOutcomeLatches();
   client.clear();
   host.remove();
   vi.unstubAllGlobals();
@@ -95,11 +103,27 @@ async function mount() {
     await router.load();
     root.render(<QueryClientProvider client={client}><ToastProvider><RouterProvider router={router} /></ToastProvider></QueryClientProvider>);
   });
+  await selectTab("ACME");
+  await settle(() => expect(panel().textContent).toContain("fixture-order"));
+}
+
+async function selectTab(label: string) {
   await act(async () => {
-    [...document.querySelectorAll('[role="tab"]')].find((tab) => tab.textContent === "ACME")!
+    [...document.querySelectorAll('[role="tab"]')].find((tab) => tab.textContent === label)!
       .dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
   });
+}
+
+/** Leave the ACME tab (Radix unmounts its panel) and come back. */
+async function revisitAcmeTab() {
+  await selectTab("Validate");
+  await settle(() => expect(panel().textContent).not.toContain("fixture-order"));
+  await selectTab("ACME");
   await settle(() => expect(panel().textContent).toContain("fixture-order"));
+}
+
+async function refetchOrders() {
+  await act(async () => { await client.refetchQueries({ queryKey: key }); });
 }
 
 function panel() {
@@ -237,4 +261,97 @@ it('blocks renewal after an uncertain response', async () => {
   });
   await act(async () => renew().click());
   expect(posts).toBe(1);
+});
+
+const fixtureCertificate = {
+  id: 'fixture-cert', domains: ['example.test'], status: 'issued',
+  directory_url: 'https://ca.example.test/directory', source_uri: 'acme://fixture-cert',
+  created_at: '2026-09-06T00:00:00Z', updated_at: '2026-09-06T00:00:00Z',
+};
+
+describe('outcome-unknown latches outlive the ACME tab', () => {
+  const renew = () => [...panel().querySelectorAll<HTMLButtonElement>('button')]
+    .find((button) => button.textContent?.trim() === 'Renew')!;
+  const submit = () => [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
+    .find((button) => button.textContent?.trim() === 'Create Order')!;
+
+  it('keeps an uncertain renewal disarmed across a tab switch until an order shows it', async () => {
+    certificates = [fixtureCertificate];
+    await mount();
+    await settle(() => expect(renew()?.disabled).toBe(false));
+    await click('Renew');
+    await settle(() => expect(panel().textContent).toContain('Renewal outcome unknown'));
+
+    await revisitAcmeTab();
+    await settle(() => expect(renew()).toBeTruthy());
+    expect(panel().textContent).toContain('Renewal outcome unknown');
+    expect(renew().disabled).toBe(true);
+    await act(async () => renew().click());
+    expect(posts).toBe(1);
+
+    // An older order for the certificate proves nothing about this request.
+    extraOrders = [{
+      ...order('valid'), id: 'old-renewal', certificate_id: 'fixture-cert',
+      created_at: '2026-09-05T00:00:00Z',
+    }];
+    await refetchOrders();
+    await settle(() => expect(panel().textContent).toContain('old-renewal'));
+    expect(renew().disabled).toBe(true);
+
+    // The renewal order it created ends the latch.
+    extraOrders = [{
+      ...order('pending_challenges'), id: 'new-renewal', certificate_id: 'fixture-cert',
+      created_at: '2026-09-07T00:00:00Z',
+    }];
+    await refetchOrders();
+    await settle(() => {
+      expect(panel().textContent).not.toContain('Renewal outcome unknown');
+      expect(renew().disabled).toBe(false);
+    });
+    expect(posts).toBe(1);
+  });
+
+  it('keeps uncertain order creation disarmed across a tab switch until the order appears', async () => {
+    await mount();
+    await click('New ACME Order');
+    const domains = inputByLabel(document.querySelector('[role="dialog"]')!, 'Domains');
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+        .call(domains, 'example.test');
+      domains.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => submit().click());
+    await settle(() => expect(submit().disabled).toBe(true));
+    const cancel = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
+      .find((button) => button.textContent?.trim() === 'Cancel')!;
+    await act(async () => cancel.click());
+
+    await revisitAcmeTab();
+    await click('New ACME Order');
+    expect(document.querySelector('[role="dialog"]')!.textContent).toContain('outcome unknown');
+    expect(submit().disabled).toBe(true);
+    await act(async () => submit().click());
+    expect(posts).toBe(1);
+
+    extraOrders = [{ ...order('pending_challenges'), id: 'created-order', domains: ['example.test'], created_at: '2026-09-07T00:00:00Z' }];
+    await refetchOrders();
+    await settle(() => {
+      expect(document.querySelector('[role="dialog"]')!.textContent).not.toContain('outcome unknown');
+      expect(submit().disabled).toBe(false);
+    });
+  });
+
+  it('keeps an uncertain finalization on Re-check across a tab switch', async () => {
+    status = 'ready';
+    await mount();
+    await click('Finalize');
+    await settle(() => expect(panel().textContent).toContain('Finalization in progress / unknown'));
+
+    await revisitAcmeTab();
+    expect(panel().textContent).toContain('Finalization in progress / unknown');
+    const labels = [...panel().querySelectorAll('button')].map((button) => button.textContent?.trim());
+    expect(labels).toContain('Re-check status');
+    expect(labels).not.toContain('Finalize');
+    expect(posts).toBe(1);
+  });
 });

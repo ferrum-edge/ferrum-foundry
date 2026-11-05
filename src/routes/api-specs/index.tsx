@@ -32,6 +32,13 @@ import { usePaginationParams } from "@/hooks/usePagination";
 import { filterAndPage } from "@/lib/collectionSearch";
 import { useNamespace } from "@/stores/namespace";
 import { useCapabilities } from "@/stores/capabilities";
+import {
+  latchKeys,
+  latchOutcome,
+  settleOutcomeLatches,
+  timestampFloor,
+  useOutcomeLatches,
+} from "@/stores/outcomeLatches";
 import { CapabilityNotice } from "@/components/shared/CapabilityGate";
 import { formatDateTime } from "@/lib/format";
 
@@ -86,7 +93,14 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
   const { capabilities } = useCapabilities();
   const canWrite = capabilities.apiSpecs;
 
-  const [unknownWrite, setUnknownWrite] = useState<string | null>(null);
+  // The outcome-unknown latch outlives this workspace (a namespace switch or
+  // leaving the route remounts it) and ends only when a spec read shows the
+  // write's outcome.
+  const writeLatch = useOutcomeLatches().get(latchKeys.apiSpecWrite(scope.namespace));
+  const unknownWrite =
+    writeLatch?.kind === "api_spec_import" || writeLatch?.kind === "api_spec_replace"
+      ? writeLatch.message
+      : null;
   const [importOpen, setImportOpen] = useState(false);
   const [importDoc, setImportDoc] = useState("");
   const [importLoading, setImportLoading] = useState(false);
@@ -120,6 +134,16 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
   const total = searching ? searchPage.total : (pageQuery.data?.total ?? 0);
   const collectionQuery = searching ? allQuery : pageQuery;
   const collectionAvailable = resolveReadState(collectionQuery) === 'loaded';
+  // Every spec summary either read holds.
+  const specsSeen = useMemo(
+    () => [...(pageQuery.data?.items ?? []), ...(allQuery.data ?? [])],
+    [pageQuery.data, allQuery.data],
+  );
+  useEffect(() => {
+    if (specsSeen.length > 0) {
+      settleOutcomeLatches({ apiSpecs: { namespace: scope.namespace, specs: specsSeen } });
+    }
+  }, [scope.namespace, specsSeen]);
 
   // Each opening is a new session, even when the same spec is reopened.
   const closeImport = () => {
@@ -162,6 +186,11 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
       return;
     }
     const generation = importGeneration.current;
+    // Taken before sending, so a later read can show what this write did.
+    const replaced = replaceTarget
+      ? (specsSeen.find((spec) => spec.id === replaceTarget.id) ?? replaceTarget)
+      : null;
+    const createdAfter = timestampFloor(specsSeen, pageQuery.data?.total === 0);
     try {
       let message: string;
       if (replaceTarget) {
@@ -171,8 +200,10 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
         const created = await importSpec.mutateAsync(importDoc);
         message = `Spec imported — proxy ${created.proxy_id} created`;
       }
-      if (generation !== importGeneration.current) return;
+      // The result is reported even if the dialog was closed meanwhile; only
+      // the dialog it was submitted from is closed.
       toast("success", message);
+      if (generation !== importGeneration.current) return;
       closeImport();
       setImportDoc("");
       setReplaceTarget(null);
@@ -182,7 +213,6 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
       // a second time. Cached reads are refreshed by the mutation cache.
       const committed = getCommittedWrite(err);
       if (committed) {
-        if (generation !== importGeneration.current) return;
         toast(
           "warning",
           committedWriteMessage(
@@ -192,13 +222,32 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
             committed,
           ),
         );
+        if (generation !== importGeneration.current) return;
         closeImport();
         setImportDoc("");
         setReplaceTarget(null);
         return;
       }
       // Retain the warning even if the operator closed/reopened the dialog.
-      if (err instanceof MutationOutcomeUnknownError) setUnknownWrite(err.message);
+      if (err instanceof MutationOutcomeUnknownError) {
+        latchOutcome(
+          replaced
+            ? {
+                kind: "api_spec_replace",
+                namespace: scope.namespace,
+                message: err.message,
+                specId: replaced.id,
+                contentHash: replaced.content_hash,
+                updatedAt: replaced.updated_at,
+              }
+            : {
+                kind: "api_spec_import",
+                namespace: scope.namespace,
+                message: err.message,
+                createdAfter,
+              },
+        );
+      }
       const message = await getApiErrorMessage(err, "Spec import failed");
       if (generation === importGeneration.current) toast("error", message);
     }

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "@/components/ui/Toast";
 import type { ApiSpecSummary } from "@/api/apiSpecs";
 import ApiSpecsPage from "./index";
+import { clearOutcomeLatches } from "@/stores/outcomeLatches";
 
 vi.mock("@/stores/namespace", () => ({
   useNamespace: () => ({ scope: { namespace: "tenant-a" } }),
@@ -37,10 +38,12 @@ let root: Root;
 let client: QueryClient;
 let reads: { id: string; resolve: (response: Response) => void }[];
 let writes: { id: string; document: string; resolve: (response: Response) => void }[];
+let specList: ApiSpecSummary[];
 
 beforeEach(() => {
   reads = [];
   writes = [];
+  specList = [summary("A"), summary("B")];
   vi.stubGlobal("Request", BasedRequest);
   vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
     const path = new URL(request.url).pathname;
@@ -50,7 +53,7 @@ beforeEach(() => {
       return new Promise<Response>((resolve) => writes.push({ id, document, resolve }));
     }
     if (id === "api-specs") {
-      return Response.json({ items: [summary("A"), summary("B")], total: 2, limit: 20, offset: 0, next_offset: null });
+      return Response.json({ items: specList, total: specList.length, limit: 20, offset: 0, next_offset: null });
     }
     return new Promise<Response>((resolve) => reads.push({ id, resolve }));
   }));
@@ -62,6 +65,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await act(async () => root.unmount());
+  clearOutcomeLatches();
   client.clear();
   host.remove();
   vi.unstubAllGlobals();
@@ -269,4 +273,62 @@ it.each(['import', 'replace'])('reports a committed-but-not-live spec %s as save
   await click('Import Spec');
   expect(document.querySelector('[role="dialog"]')!.textContent).not.toContain('outcome unknown');
   expect(editor().disabled).toBe(false);
+});
+
+it.each(['import', 'replace'])('keeps an uncertain spec %s disarmed after leaving the page, until a read shows it', async (mode) => {
+  await mount();
+  if (mode === 'replace') {
+    await openReplace(0, 1);
+    await resolveRead(0, 'document A');
+    await settle(() => expect(editor().disabled).toBe(false));
+  } else {
+    await click('Import Spec');
+    await edit('document A');
+  }
+  const label = mode === 'replace' ? 'Replace Spec' : 'Import Spec';
+  const submit = () => [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
+    .find((button) => button.textContent?.trim() === label)!;
+  await act(async () => submit().click());
+  await settle(() => expect(writes).toHaveLength(1));
+  await act(async () => writes[0]!.resolve(Response.json({
+    code: 'FERRUM_BFF_TIMEOUT', phase: 'response',
+  }, { status: 504 })));
+  await settle(() => expect(document.querySelector('[role="dialog"]')!.textContent).toContain('outcome unknown'));
+  await click('Cancel');
+
+  // Leaving the route unmounts the workspace; coming back must not re-arm it.
+  await act(async () => root.render(
+    <QueryClientProvider client={client}><ToastProvider><div /></ToastProvider></QueryClientProvider>,
+  ));
+  await mount();
+  await click('Import Spec');
+  expect(document.querySelector('[role="dialog"]')!.textContent).toContain('outcome unknown');
+  expect(editor().disabled).toBe(true);
+
+  // A read that shows the write's outcome ends the latch.
+  specList = mode === 'replace'
+    ? [{ ...summary('A'), content_hash: 'A2', updated_at: '2026-09-07T00:00:00Z' }, summary('B')]
+    : [summary('A'), summary('B'), { ...summary('C'), created_at: '2026-09-07T00:00:00Z' }];
+  await act(async () => { await client.refetchQueries({ queryKey: ['apiSpecs'] }); });
+  await settle(() => {
+    expect(document.querySelector('[role="dialog"]')!.textContent).not.toContain('outcome unknown');
+    expect(editor().disabled).toBe(false);
+  });
+  expect(writes).toHaveLength(1);
+});
+
+it('reports an import that succeeds after its dialog was closed', async () => {
+  await mount();
+  await click('Import Spec');
+  await edit('document C');
+  const submit = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
+    .find((button) => button.textContent?.trim() === 'Import Spec')!;
+  await act(async () => submit.click());
+  await settle(() => expect(writes).toHaveLength(1));
+  await click('Cancel');
+  await act(async () => writes[0]!.resolve(Response.json({
+    id: 'C', proxy_id: 'proxy-C', spec_version: '3.1.0', content_hash: 'C',
+  }, { status: 201 })));
+  await settle(() => expect(document.body.textContent).toContain('Spec imported — proxy proxy-C created'));
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
 });

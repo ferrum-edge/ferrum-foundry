@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Restore is one explicit flow: while a restore runs, its confirmation
+  dialogs refuse the close button, Escape and an outside click, and the file
+  picker is disabled, so a late answer can no longer reopen the typed
+  API-spec deletion prompt for a dismissed file or clear a newly chosen one.
+  Every `ConfirmDialog` refuses to close while its action is `loading`.
+- "Outcome unknown" blocks on spec import/replace and ACME order creation,
+  renewal and finalization outlive the ACME tab and the API specs page, so a
+  tab switch no longer re-arms a request that may have run. Each ends when a
+  read shows the outcome. A spec import that finishes after its dialog was
+  closed is still reported.
+- A namespace-scoped session's "committed, live-apply not monitored" banner
+  survives the next write, exactly as an unscoped `pending` monitor does.
+- An upstream sends `hash_on` (and its cookie config) only while consistent
+  hashing reads it: the upstream's algorithm, or a hashing subset without its
+  own key. Switching the algorithm away clears both on save.
+
 - Plugin configuration updates and deletes send Ferrum Edge's
   `expected_proxy_ids` association precondition (forge-ops #569): the
   proxies the membership plan's own reads showed referencing the
