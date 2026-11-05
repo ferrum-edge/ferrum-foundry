@@ -47,6 +47,13 @@ interface SessionResponse {
   logoutUrl?: string;
 }
 
+/** A session read in flight, with the ticket and abort controller it was sent under. */
+interface SessionRead {
+  ticket: number;
+  controller: AbortController;
+  response: Promise<SessionResponse>;
+}
+
 interface AuthContextValue {
   status: AuthStatus;
   mode: AuthMode | null;
@@ -128,6 +135,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const appliedTicketRef = useRef(0);
   const disposedRef = useRef(false);
   const readsRef = useRef(new Set<AbortController>());
+  // Ticket of the boot session read, whose BFF 401 the client must not publish.
+  const bootReadTicketRef = useRef(0);
 
   const isCurrent = useCallback(
     (ticket: number) => !disposedRef.current && ticket > appliedTicketRef.current,
@@ -179,20 +188,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLockout(null);
   }, [queryClient]);
 
-  const refreshSession = useCallback(async () => {
+  // Send a session read under a fresh ticket. Its outcome is applied separately
+  // (`applySessionRead`), so the boot sequence can send it alongside the config read.
+  const startSessionRead = useCallback((): SessionRead => {
     const ticket = issueRequestTicket();
     const controller = new AbortController();
     readsRef.current.add(controller);
-    try {
-      const session = await api.get("api/auth/session", {
+    const response = api
+      .get("api/auth/session", {
         signal: controller.signal,
         context: { [SILENT_ERRORS]: true, [REQUEST_TICKET]: ticket },
-      }).json<SessionResponse>();
+      })
+      .json<SessionResponse>()
+      .finally(() => readsRef.current.delete(controller));
+    return { ticket, controller, response };
+  }, []);
+
+  const applySessionRead = useCallback(
+    (read: SessionRead, outcome: PromiseSettledResult<SessionResponse>) => {
+      const { ticket, controller } = read;
       if (controller.signal.aborted || !isCurrent(ticket)) return;
-      appliedTicketRef.current = ticket;
-      acceptSession(session);
-    } catch (sessionError) {
-      if (controller.signal.aborted || !isCurrent(ticket)) return;
+      if (outcome.status === "fulfilled") {
+        appliedTicketRef.current = ticket;
+        acceptSession(outcome.value);
+        return;
+      }
+      const sessionError: unknown = outcome.reason;
       const lockedOut = lockoutMessage(sessionError);
       if (responseStatus(sessionError) === 401) {
         appliedTicketRef.current = ticket;
@@ -210,31 +231,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setError("Unable to verify your Foundry session.");
         setStatus("unauthenticated");
       }
-    } finally {
-      readsRef.current.delete(controller);
-    }
-  }, [acceptSession, clearLocalSession, isCurrent]);
+    },
+    [acceptSession, clearLocalSession, isCurrent],
+  );
+
+  const refreshSession = useCallback(async () => {
+    const read = startSessionRead();
+    const [outcome] = await Promise.allSettled([read.response]);
+    applySessionRead(read, outcome);
+  }, [applySessionRead, startSessionRead]);
 
   useEffect(() => {
     removeLegacyCredential();
     let cancelled = false;
     void (async () => {
+      // The session read uses nothing from the config: the BFF path is fixed,
+      // a GET carries no CSRF header, and `/api/auth/config` sets no cookie or
+      // state. So both are sent at once. Nothing from the session read is
+      // published until the config has loaded (its BFF 401 included; see
+      // `handleUnauthorized`), and a config failure discards it.
+      const configRead = api.get("api/auth/config", {
+        context: { [SILENT_ERRORS]: true },
+      }).json<AuthConfig>();
+      const read = startSessionRead();
+      bootReadTicketRef.current = read.ticket;
+      const sessionOutcome = Promise.allSettled([read.response]);
+      let nextConfig: AuthConfig;
       try {
-        const nextConfig = await api.get("api/auth/config", {
-          context: { [SILENT_ERRORS]: true },
-        }).json<AuthConfig>();
-        if (cancelled) return;
-        setConfig(nextConfig);
-        await refreshSession();
+        nextConfig = await configRead;
       } catch {
-        if (!cancelled) {
-          setError("Unable to load the Foundry authentication configuration.");
-          setStatus("unauthenticated");
-        }
+        read.controller.abort();
+        // A sign-in (or other newer evidence) published meanwhile stands.
+        if (cancelled || !isCurrent(read.ticket)) return;
+        setError("Unable to load the Foundry authentication configuration.");
+        setStatus("unauthenticated");
+        return;
       }
+      if (cancelled) return;
+      setConfig(nextConfig);
+      const [outcome] = await sessionOutcome;
+      if (cancelled) return;
+      applySessionRead(read, outcome);
     })();
     return () => { cancelled = true; };
-  }, [refreshSession]);
+  }, [applySessionRead, isCurrent, startSessionRead]);
 
   useEffect(() => {
     if (status !== "authenticated") return;
@@ -244,8 +284,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // The client reports every BFF 401 with the ticket of the request it
   // answered, so a late 401 cannot clear a session accepted after it was sent.
+  // The boot session read is the exception: boot applies its outcome itself,
+  // after the config, so a 401 cannot show a sign-in form for an unknown mode.
   const handleUnauthorized = useCallback((ticket: number) => {
-    if (!isCurrent(ticket)) return;
+    if (ticket === bootReadTicketRef.current || !isCurrent(ticket)) return;
     appliedTicketRef.current = ticket;
     clearLocalSession();
   }, [clearLocalSession, isCurrent]);

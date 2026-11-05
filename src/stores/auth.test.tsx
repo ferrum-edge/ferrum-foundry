@@ -286,3 +286,123 @@ describe("session authorization refresh", () => {
     });
   });
 });
+
+// The config and session reads are independent, so boot sends both at once.
+// What they publish must still not depend on which answer arrives first.
+describe("boot reads", () => {
+  let root: Root;
+  let host: HTMLDivElement;
+  let config: ReturnType<typeof deferred<unknown>>;
+  let session: ReturnType<typeof deferred<unknown>>;
+  const principal: AuthPrincipal = {
+    subject: "boot-user",
+    displayName: "Boot user",
+    role: "operator",
+    authMode: "trusted-proxy",
+  };
+
+  /** Run `action`, then let every promise reaction it releases settle. */
+  async function flush(action: () => void) {
+    await act(async () => {
+      action();
+      await new Promise((done) => setTimeout(done, 0));
+    });
+  }
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    config = deferred<unknown>();
+    session = deferred<unknown>();
+    transport.get.mockImplementation((path: string) => ({
+      json: () => (path === "api/auth/config" ? config.promise : session.promise),
+    }));
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={new QueryClient()}>
+          <AuthProvider><Workspace /></AuthProvider>
+        </QueryClientProvider>,
+      );
+    });
+  });
+
+  afterEach(async () => {
+    await act(async () => { root.unmount(); });
+    host.remove();
+    resetGatewayMetadata();
+    vi.clearAllMocks();
+  });
+
+  it("sends the session read without waiting for the config read", async () => {
+    expect(transport.get.mock.calls.map(([path]) => path)).toEqual([
+      "api/auth/config",
+      "api/auth/session",
+    ]);
+    expect(auth.status).toBe("loading");
+
+    // A session that arrives first is not published until the config has.
+    await flush(() => session.resolve({ principal, csrfToken: "boot-csrf" }));
+    expect(auth.status).toBe("loading");
+    expect(setCsrfToken).not.toHaveBeenCalled();
+
+    await flush(() => config.resolve({ mode: "trusted-proxy" }));
+    expect(auth.status).toBe("authenticated");
+    expect(auth.mode).toBe("trusted-proxy");
+    expect(auth.principal).toEqual(principal);
+    expect(setCsrfToken).toHaveBeenLastCalledWith("boot-csrf", undefined);
+  });
+
+  function expectConfigFailure() {
+    expect(auth.status).toBe("unauthenticated");
+    expect(auth.error).toBe("Unable to load the Foundry authentication configuration.");
+    expect(auth.mode).toBeNull();
+    expect(auth.principal).toBeNull();
+    expect(setCsrfToken).not.toHaveBeenCalled();
+  }
+
+  it("discards a session that arrives before a config failure", async () => {
+    await flush(() => session.resolve({ principal, csrfToken: "boot-csrf" }));
+    expect(auth.status).toBe("loading");
+    await flush(() => config.reject(new Error("HTTP 503")));
+    expectConfigFailure();
+  });
+
+  it("shows a config failure without waiting for the session read, then discards it", async () => {
+    await flush(() => config.reject(new Error("HTTP 503")));
+    expectConfigFailure();
+    await flush(() => session.resolve({ principal, csrfToken: "boot-csrf" }));
+    expectConfigFailure();
+  });
+
+  it("does not let the client publish the boot read's 401 before the config", async () => {
+    // The boot read holds the newest ticket; the client reports its BFF 401 first.
+    const onUnauthorized = vi.mocked(setOnUnauthorized).mock.calls.at(-1)![0]!;
+    act(() => { onUnauthorized(tickets.last); });
+    expect(auth.status).toBe("loading");
+    await flush(() => session.reject(unauthorized()));
+    expect(auth.status).toBe("loading");
+    await flush(() => config.resolve({ mode: "trusted-proxy" }));
+    expect(auth.status).toBe("unauthenticated");
+    expect(auth.mode).toBe("trusted-proxy");
+  });
+
+  it("reports a failed session read as a session failure once the config loads", async () => {
+    await flush(() => session.reject(new Error("HTTP 502")));
+    expect(auth.status).toBe("loading");
+    await flush(() => config.resolve({ mode: "static" }));
+    expect(auth.status).toBe("unauthenticated");
+    expect(auth.mode).toBe("static");
+    expect(auth.error).toBe("Unable to verify your Foundry session.");
+  });
+
+  it("signs out on a refused session read once the config loads", async () => {
+    await flush(() => session.reject(unauthorized()));
+    await flush(() => config.resolve({ mode: "trusted-proxy" }));
+    expect(auth.status).toBe("unauthenticated");
+    expect(auth.mode).toBe("trusted-proxy");
+    expect(auth.error).toBeNull();
+    expect(setCsrfToken).toHaveBeenLastCalledWith(null);
+  });
+});
