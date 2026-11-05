@@ -15,6 +15,7 @@ let requests: Request[];
 let completeLogin: (response: Response) => void;
 let deferSession: boolean;
 let lockoutMarked: boolean;
+let refusalMarked: boolean;
 let completeSession: ((response: Response) => void) | undefined;
 let completeProbe: ((response: Response) => void) | undefined;
 
@@ -35,6 +36,7 @@ beforeEach(() => {
   configStatus = 200;
   deferSession = false;
   lockoutMarked = true;
+  refusalMarked = false;
   completeSession = undefined;
   completeProbe = undefined;
   requests = [];
@@ -63,7 +65,13 @@ beforeEach(() => {
             : { status: 429, headers: { "retry-after": "0" } },
         );
       }
-      return sessionStatus === 200 ? session() : Response.json({}, { status: sessionStatus });
+      if (sessionStatus === 200) return session();
+      // The BFF marks its own refusal, which the client reports to the auth store.
+      const marked = refusalMarked && sessionStatus === 401;
+      return Response.json({}, {
+        status: sessionStatus,
+        headers: marked ? { "x-ferrum-auth-layer": "bff" } : {},
+      });
     }
     if (path === "/api/auth/login") {
       return new Promise<Response>((resolve) => { completeLogin = resolve; });
@@ -305,13 +313,93 @@ describe("LoginGate session exchange", () => {
 
   it("shows a configuration failure without exposing protected content", async () => {
     configStatus = 403;
-    // The session read is sent alongside the config read; a valid session
-    // still must not open the workspace when the config read fails.
-    sessionStatus = 200;
     await mount();
     await settle(() => expect(ui.host.textContent).toContain("Unable to load the Foundry authentication configuration."));
     expect(ui.host.textContent).not.toContain("Protected workspace");
-    expect(requests.map((request) => new URL(request.url).pathname).sort())
-      .toEqual(["/api/auth/config", "/api/auth/session"]);
+  });
+});
+
+// The config and session reads are sent together on load. Nothing the session
+// read says may be shown until the config names the sign-in mode.
+describe("LoginGate concurrent boot reads", () => {
+  let completeConfig: (response: Response) => void;
+  const configFailure = "Unable to load the Foundry authentication configuration.";
+
+  /** Hold the config read open until the test answers it. */
+  function holdConfig() {
+    const answer = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((request) =>
+      new URL((request as Request).url).pathname === "/api/auth/config"
+        ? new Promise((done) => { completeConfig = done; })
+        : answer(request));
+  }
+
+  function sessionReads() {
+    return requests.filter((request) => new URL(request.url).pathname === "/api/auth/session");
+  }
+
+  /** Let every answer already delivered run through the client and the store. */
+  async function drain() {
+    await act(async () => { await new Promise((done) => setTimeout(done, 20)); });
+  }
+
+  function SignInNow() {
+    const { login } = useAuth();
+    const signIn = () => void login("development-fixture").catch(() => undefined);
+    return <button type="button" onClick={signIn}>Sign in now</button>;
+  }
+
+  it("keeps checking until the config loads when the BFF refuses the session first", async () => {
+    mode = "trusted-proxy";
+    loginUrl = "https://identity.example.test/login";
+    refusalMarked = true;
+    holdConfig();
+    await mount();
+    await settle(() => expect(sessionReads()).toHaveLength(1));
+    await drain();
+    expect(ui.host.querySelector('[role="status"]')?.textContent).toContain("Checking your session");
+    expect(ui.host.textContent).not.toContain("Local development sign in");
+    expect(ui.host.querySelector("input")).toBeNull();
+
+    await act(async () => completeConfig(Response.json({ mode, loginUrl })));
+    await settle(() => expect(button("Continue with SSO")).toBeTruthy());
+    expect(ui.host.textContent).not.toContain("Local development sign in");
+    expect(ui.host.querySelector("input")).toBeNull();
+    expect(sessionReads()).toHaveLength(1);
+  });
+
+  it("shows a configuration failure without waiting for the session read", async () => {
+    configStatus = 403;
+    sessionStatus = 200;
+    deferSession = true;
+    await mount();
+    await settle(() => expect(ui.host.textContent).toContain(configFailure));
+    // The session read was sent alongside, and is still unanswered.
+    expect(completeSession).toBeDefined();
+
+    // A valid session landing afterwards is discarded.
+    await act(async () => completeSession!(session()));
+    await drain();
+    expect(ui.host.textContent).toContain(configFailure);
+    expect(ui.host.textContent).not.toContain("Protected workspace");
+  });
+
+  it("keeps a sign-in completed while the config read is pending when it then fails", async () => {
+    refusalMarked = true;
+    holdConfig();
+    await ui.render(
+      <AuthProvider><SignInNow /><LoginGate><h2>Protected workspace</h2></LoginGate></AuthProvider>,
+    );
+    await settle(() => expect(sessionReads()).toHaveLength(1));
+    await drain();
+    await click("Sign in now");
+    await settle(() => expect(requests.some((request) => request.method === "POST")).toBe(true));
+    await act(async () => completeLogin(session()));
+    await settle(() => expect(ui.host.textContent).toContain("Protected workspace"));
+
+    await act(async () => completeConfig(Response.json({}, { status: 403 })));
+    await drain();
+    expect(ui.host.textContent).toContain("Protected workspace");
+    expect(ui.host.textContent).not.toContain(configFailure);
   });
 });

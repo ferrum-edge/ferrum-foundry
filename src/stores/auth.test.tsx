@@ -354,20 +354,38 @@ describe("boot reads", () => {
     expect(setCsrfToken).toHaveBeenLastCalledWith("boot-csrf", undefined);
   });
 
-  it.each<[string, boolean]>([
-    ["before", true],
-    ["after", false],
-  ])("discards a session that arrives %s a config failure", async (_order, sessionFirst) => {
-    const failConfig = () => config.reject(new Error("HTTP 503"));
-    const answerSession = () => session.resolve({ principal, csrfToken: "boot-csrf" });
-    await flush(sessionFirst ? answerSession : failConfig);
-    expect(auth.status).toBe("loading");
-    await flush(sessionFirst ? failConfig : answerSession);
+  function expectConfigFailure() {
     expect(auth.status).toBe("unauthenticated");
     expect(auth.error).toBe("Unable to load the Foundry authentication configuration.");
     expect(auth.mode).toBeNull();
     expect(auth.principal).toBeNull();
     expect(setCsrfToken).not.toHaveBeenCalled();
+  }
+
+  it("discards a session that arrives before a config failure", async () => {
+    await flush(() => session.resolve({ principal, csrfToken: "boot-csrf" }));
+    expect(auth.status).toBe("loading");
+    await flush(() => config.reject(new Error("HTTP 503")));
+    expectConfigFailure();
+  });
+
+  it("shows a config failure without waiting for the session read, then discards it", async () => {
+    await flush(() => config.reject(new Error("HTTP 503")));
+    expectConfigFailure();
+    await flush(() => session.resolve({ principal, csrfToken: "boot-csrf" }));
+    expectConfigFailure();
+  });
+
+  it("does not let the client publish the boot read's 401 before the config", async () => {
+    // The boot read holds the newest ticket; the client reports its BFF 401 first.
+    const onUnauthorized = vi.mocked(setOnUnauthorized).mock.calls.at(-1)![0]!;
+    act(() => { onUnauthorized(tickets.last); });
+    expect(auth.status).toBe("loading");
+    await flush(() => session.reject(unauthorized()));
+    expect(auth.status).toBe("loading");
+    await flush(() => config.resolve({ mode: "trusted-proxy" }));
+    expect(auth.status).toBe("unauthenticated");
+    expect(auth.mode).toBe("trusted-proxy");
   });
 
   it("reports a failed session read as a session failure once the config loads", async () => {

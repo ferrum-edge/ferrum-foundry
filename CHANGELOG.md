@@ -64,9 +64,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   restored, instead of restoring a scope that would detach it.
 - The SPA sends its `/api/auth/config` and `/api/auth/session` reads at the
   same time on load instead of one after the other, saving one BFF round trip
-  before the first page renders. A failed config read still shows the
-  configuration error and discards the session answer, whichever arrives
-  first; the error now appears once both reads have settled.
+  before the first page renders. The session answer, a BFF `401` included, is
+  applied only once the config has loaded, so no sign-in form is shown for an
+  unknown mode. A failed config read still shows the configuration error at
+  once and discards the session answer, and never replaces a sign-in that
+  completed meanwhile.
 
 ### Security
 
