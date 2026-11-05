@@ -43,6 +43,16 @@ describe("ConfirmDialog busy state", () => {
     expect(onOpenChange).not.toHaveBeenCalled();
   });
 
+  it("disables Cancel and Confirm while busy even when not loading", async () => {
+    await mount({ loading: false, busy: true });
+    const buttons = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
+      .filter((button) => button.getAttribute("aria-label") !== "Close");
+    expect(buttons.map((button) => button.textContent?.trim())).toEqual(["Cancel", "Delete"]);
+    expect(buttons.every((button) => button.disabled)).toBe(true);
+    await act(async () => buttons[0]!.click());
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
   it("still closes while it only shows loading for something else, such as a refetch", async () => {
     await mount({ loading: true, busy: false });
     await tryToClose();

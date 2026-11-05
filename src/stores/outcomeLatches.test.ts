@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  beginWrite,
   clearOutcomeLatches,
+  isWriteInFlight,
   correlationId,
   latchKeys,
   latchOutcome,
@@ -52,9 +54,29 @@ describe("api_spec_write latch", () => {
     expect(getOutcomeLatches().has(latchKeys.acmeFinalization("o-1"))).toBe(false);
     expect(getOutcomeLatches().get(key)).toEqual(latch);
 
-    releaseOutcomeLatch(latchKeys.apiSpecWrite("tenant-b"));
+    const reviewed = getOutcomeLatches().get(key)!;
+    expect(releaseOutcomeLatch(latchKeys.apiSpecWrite("tenant-b"), reviewed)).toBe(false);
     expect(getOutcomeLatches().has(key)).toBe(true);
-    releaseOutcomeLatch(key);
+
+    // A newer unanswered write replaced the one the operator reviewed.
+    latchOutcome({ ...latch, message: "newer" });
+    expect(releaseOutcomeLatch(key, reviewed)).toBe(false);
+    expect(getOutcomeLatches().get(key)).toMatchObject({ message: "newer" });
+    expect(releaseOutcomeLatch(key, getOutcomeLatches().get(key)!)).toBe(true);
     expect(getOutcomeLatches().has(key)).toBe(false);
+  });
+});
+
+describe("writes in flight", () => {
+  it("count every dispatched write for a key until each is released once", () => {
+    const key = latchKeys.apiSpecWrite("tenant-a");
+    const first = beginWrite(key);
+    const second = beginWrite(key);
+    first();
+    first();
+    expect(isWriteInFlight(key)).toBe(true);
+    expect(isWriteInFlight(latchKeys.apiSpecWrite("tenant-b"))).toBe(false);
+    second();
+    expect(isWriteInFlight(key)).toBe(false);
   });
 });

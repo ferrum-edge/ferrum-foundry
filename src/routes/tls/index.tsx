@@ -69,7 +69,12 @@ import type { PaginatedResponse } from "@/api/types";
 import { usePaginationParams } from "@/hooks/usePagination";
 import { useCapabilities } from "@/stores/capabilities";
 import {
+  beginWrite,
   correlationId,
+  getOutcomeLatches,
+  isWriteInFlight,
+  ORDER_PROBE_DELAYS_MS,
+  useWritesInFlight,
   latchKeys,
   latchOutcome,
   settleOutcomeLatches,
@@ -768,19 +773,49 @@ function AcmeTab() {
     return latch?.kind === "acme_renewal" ? latch.orderId : null;
   };
   const renewalUnknown = (certificateId: string) => unknownRenewalOrder(certificateId) !== null;
+  // Creates, renewals and finalizations still running, including those an
+  // earlier mount of this tab started: a remount must not allow a second one.
+  const writesInFlight = useWritesInFlight();
+  const creationInFlight = writesInFlight.has(latchKeys.acmeOrderCreation());
   // The order a latched create or renew named may sit on a page nobody reads,
-  // so each is read directly once per mount, when the tab opens or the latch
-  // is set. Only that order, found, settles it; any other answer keeps it.
-  const probedOrders = useRef(new Set<string>());
+  // so it is read directly when the tab opens or the latch is set, and again
+  // after each `ORDER_PROBE_DELAYS_MS` delay while the latch holds: Edge
+  // stores the order only after its CA round-trip, so an early read can miss
+  // it. Only that order, found, settles the latch; any other answer keeps it.
+  const orderProbes = useRef(new Map<string, { reads: number; timer: ReturnType<typeof setTimeout> | null }>());
   useEffect(() => {
+    const probes = orderProbes.current;
+    return () => {
+      for (const probe of probes.values()) if (probe.timer) clearTimeout(probe.timer);
+      probes.clear();
+    };
+  }, []);
+  useEffect(() => {
+    const stillLatched = (orderId: string) =>
+      [...getOutcomeLatches().values()].some(
+        (latch) =>
+          (latch.kind === "acme_order_creation" || latch.kind === "acme_renewal") &&
+          latch.orderId === orderId,
+      );
+    const read = (orderId: string) => {
+      const probe = orderProbes.current.get(orderId);
+      if (!probe) return;
+      probe.timer = null;
+      probe.reads += 1;
+      void probeAcmeOrder(orderId)
+        .then((order) => settleOutcomeLatches({ acmeOrders: [order] }), () => undefined)
+        .finally(() => {
+          // Gone once the tab unmounted; bounded; pointless once settled.
+          const current = orderProbes.current.get(orderId);
+          if (!current || current.reads > ORDER_PROBE_DELAYS_MS.length || !stillLatched(orderId)) return;
+          current.timer = setTimeout(() => read(orderId), ORDER_PROBE_DELAYS_MS[current.reads - 1]);
+        });
+    };
     for (const latch of latches.values()) {
       if (latch.kind !== "acme_order_creation" && latch.kind !== "acme_renewal") continue;
-      if (probedOrders.current.has(latch.orderId)) continue;
-      probedOrders.current.add(latch.orderId);
-      void probeAcmeOrder(latch.orderId).then(
-        (order) => settleOutcomeLatches({ acmeOrders: [order] }),
-        () => undefined,
-      );
+      if (orderProbes.current.has(latch.orderId)) continue;
+      orderProbes.current.set(latch.orderId, { reads: 0, timer: null });
+      read(latch.orderId);
     }
   }, [latches]);
   // Re-run on every orders read and whenever a latch is added, so a read
@@ -882,7 +917,8 @@ function AcmeTab() {
 
   const handleCreateOrder = async () => {
     if (!canWrite.allowed) return;
-    if (unknownCreation || createOrder.isPending) return;
+    const creationKey = latchKeys.acmeOrderCreation();
+    if (getOutcomeLatches().has(creationKey) || isWriteInFlight(creationKey)) return;
     const domains = orderForm.domains
       .split(",")
       .map((d) => d.trim())
@@ -900,6 +936,7 @@ function AcmeTab() {
       toast("error", "This browser cannot generate an ACME order id; the order was not sent.");
       return;
     }
+    const release = beginWrite(creationKey);
     try {
       await createOrder.mutateAsync({
         id: orderId,
@@ -923,6 +960,8 @@ function AcmeTab() {
         latchOutcome({ kind: "acme_order_creation", message: err.message, orderId });
       }
       toast("error", await getApiErrorMessage(err, "Failed to create order"));
+    } finally {
+      release();
     }
   };
 
@@ -1000,11 +1039,15 @@ function AcmeTab() {
                 <Button
                   variant="secondary"
                   size="sm"
-                  loading={pendingKeys.has(`renew:${cert.id}`)}
+                  loading={
+                    pendingKeys.has(`renew:${cert.id}`) ||
+                    writesInFlight.has(latchKeys.acmeRenewal(cert.id))
+                  }
                   disabled={renewalUnknown(cert.id) || !canWrite.allowed}
                   onClick={() =>
                     void runRowAction(`renew:${cert.id}`, async () => {
-                      if (renewalUnknown(cert.id)) return;
+                      const renewalKey = latchKeys.acmeRenewal(cert.id);
+                      if (getOutcomeLatches().has(renewalKey) || isWriteInFlight(renewalKey)) return;
                       // The renewal order is named here, as for a new order.
                       let orderId: string;
                       try {
@@ -1013,6 +1056,7 @@ function AcmeTab() {
                         toast("error", "This browser cannot generate an ACME order id; the renewal was not sent.");
                         return;
                       }
+                      const release = beginWrite(renewalKey);
                       try {
                         await renewCert.mutateAsync({
                           id: cert.id,
@@ -1024,6 +1068,8 @@ function AcmeTab() {
                           latchOutcome({ kind: "acme_renewal", certificateId: cert.id, orderId });
                         }
                         toast("error", await getApiErrorMessage(err, "Renewal failed"));
+                      } finally {
+                        release();
                       }
                     })
                   }
@@ -1102,7 +1148,10 @@ function AcmeTab() {
                     <Button
                       variant="secondary"
                       size="sm"
-                      loading={pendingKeys.has(`finalize:${order.id}`)}
+                      loading={
+                        pendingKeys.has(`finalize:${order.id}`) ||
+                        writesInFlight.has(latchKeys.acmeFinalization(order.id))
+                      }
                       // Only the Finalize rendering is a write. The same button
                       // reads `GET /admin/tls/acme/orders/{id}` for an unknown
                       // or processing order, which an operator may run.
@@ -1158,12 +1207,21 @@ function AcmeTab() {
                               toast("error", canWrite.summary ?? "Finalizing is unavailable");
                               return;
                             }
-                            await finalizeOrder.mutateAsync({ id: order.id });
-                            toast("success", `Order finalized for ${order.domains.join(", ")}`);
-                          } catch (err) {
-                            if (err instanceof AcmeFinalizationUnknownError) {
-                              latchOutcome({ kind: "acme_finalization", orderId: order.id });
+                            const finalizationKey = latchKeys.acmeFinalization(order.id);
+                            if (isWriteInFlight(finalizationKey)) return;
+                            const release = beginWrite(finalizationKey);
+                            try {
+                              await finalizeOrder.mutateAsync({ id: order.id });
+                              toast("success", `Order finalized for ${order.domains.join(", ")}`);
+                            } catch (err) {
+                              if (err instanceof AcmeFinalizationUnknownError) {
+                                latchOutcome({ kind: "acme_finalization", orderId: order.id });
+                              }
+                              throw err;
+                            } finally {
+                              release();
                             }
+                          } catch (err) {
                             toast("error", await getApiErrorMessage(err, "Finalize failed"));
                           }
                         })
@@ -1543,8 +1601,8 @@ function AcmeTab() {
             </Button>
             <Button
               onClick={handleCreateOrder}
-              loading={createOrder.isPending}
-              disabled={Boolean(unknownCreation)}
+              loading={creationInFlight}
+              disabled={Boolean(unknownCreation) || creationInFlight}
             >
               Create Order
             </Button>

@@ -33,10 +33,15 @@ import { filterAndPage } from "@/lib/collectionSearch";
 import { useNamespace } from "@/stores/namespace";
 import { useCapabilities } from "@/stores/capabilities";
 import {
+  beginWrite,
+  getOutcomeLatches,
+  isWriteInFlight,
   latchKeys,
   latchOutcome,
   releaseOutcomeLatch,
   useOutcomeLatches,
+  useWritesInFlight,
+  type OutcomeLatch,
 } from "@/stores/outcomeLatches";
 import { CapabilityNotice } from "@/components/shared/CapabilityGate";
 import { formatDateTime } from "@/lib/format";
@@ -100,8 +105,12 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
   const writeLatchKey = latchKeys.apiSpecWrite(scope.namespace);
   const writeLatch = useOutcomeLatches().get(writeLatchKey);
   const unknownWrite = writeLatch?.kind === "api_spec_write" ? writeLatch.message : null;
-  const [rearmOpen, setRearmOpen] = useState(false);
-  const writePending = importSpec.isPending || updateSpec.isPending;
+  // The latch the re-arm confirmation was opened for, and so the only one it
+  // may release.
+  const [rearmTarget, setRearmTarget] = useState<OutcomeLatch | null>(null);
+  // Any import or replace for this namespace still running, including one
+  // started by an earlier mount of this workspace whose observers are gone.
+  const writePending = useWritesInFlight().has(writeLatchKey);
   const [importOpen, setImportOpen] = useState(false);
   const [importDoc, setImportDoc] = useState("");
   const [importLoading, setImportLoading] = useState(false);
@@ -165,9 +174,8 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
     if (!canWrite.allowed) return;
     if (
       importLoading ||
-      unknownWrite ||
-      importSpec.isPending ||
-      updateSpec.isPending ||
+      getOutcomeLatches().has(writeLatchKey) ||
+      isWriteInFlight(writeLatchKey) ||
       (replaceTarget && !collectionAvailable)
     ) {
       return;
@@ -177,6 +185,9 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
       return;
     }
     const generation = importGeneration.current;
+    const namespace = scope.namespace;
+    // Released in `finally`, whatever became of this workspace meanwhile.
+    const release = beginWrite(writeLatchKey);
     try {
       let message: string;
       if (replaceTarget) {
@@ -215,11 +226,15 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
         return;
       }
       // Retain the warning even if the operator closed/reopened the dialog.
+      // It is installed before the write is released, so the namespace is
+      // never briefly both idle and unlatched.
       if (err instanceof MutationOutcomeUnknownError) {
-        latchOutcome({ kind: "api_spec_write", namespace: scope.namespace, message: err.message });
+        latchOutcome({ kind: "api_spec_write", namespace, message: err.message });
       }
       const message = await getApiErrorMessage(err, "Spec import failed");
       if (generation === importGeneration.current) toast("error", message);
+    } finally {
+      release();
     }
   };
 
@@ -286,7 +301,7 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
             size="sm"
             variant="secondary"
             disabled={writePending}
-            onClick={() => setRearmOpen(true)}
+            onClick={() => setRearmTarget(writeLatch ?? null)}
           >
             Allow another import or replacement
           </Button>
@@ -420,9 +435,12 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
               <Button
                 onClick={handleImport}
                 disabled={
-                  importLoading || Boolean(unknownWrite) || (!!replaceTarget && !collectionAvailable)
+                  importLoading ||
+                  Boolean(unknownWrite) ||
+                  writePending ||
+                  (!!replaceTarget && !collectionAvailable)
                 }
-                loading={importSpec.isPending || updateSpec.isPending}
+                loading={writePending}
               >
                 {replaceTarget ? "Replace Spec" : "Import Spec"}
               </Button>
@@ -443,16 +461,18 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
 
       {/* Deliberate re-arm of an outcome-unknown spec write */}
       <ConfirmDialog
-        open={rearmOpen && unknownWrite !== null}
-        onOpenChange={(open) => !open && setRearmOpen(false)}
+        open={rearmTarget !== null && unknownWrite !== null}
+        onOpenChange={(open) => !open && setRearmTarget(null)}
         title="Allow another spec import or replacement?"
         description={`The earlier write in namespace "${scope.namespace}" may already have run. Confirm only after reading the spec list and the resources it manages back from the gateway; another import or replacement is sent as a new request.`}
         confirmLabel="I've checked — allow writes"
         variant="primary"
         onConfirm={() => {
-          if (writePending) return;
-          releaseOutcomeLatch(writeLatchKey);
-          setRearmOpen(false);
+          if (!rearmTarget || isWriteInFlight(writeLatchKey)) return;
+          setRearmTarget(null);
+          if (!releaseOutcomeLatch(writeLatchKey, rearmTarget)) {
+            toast("warning", "Another spec write's outcome became unknown meanwhile; review it before allowing writes again.");
+          }
         }}
       />
 

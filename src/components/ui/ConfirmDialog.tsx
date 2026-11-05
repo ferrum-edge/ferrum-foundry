@@ -49,7 +49,7 @@ export function ConfirmDialog({
           <Button
             variant="secondary"
             onClick={() => onOpenChange(false)}
-            disabled={loading}
+            disabled={loading || busy}
           >
             Cancel
           </Button>
@@ -57,6 +57,7 @@ export function ConfirmDialog({
             variant={variant}
             onClick={onConfirm}
             loading={loading}
+            disabled={busy}
           >
             {confirmLabel}
           </Button>

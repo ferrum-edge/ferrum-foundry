@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – configuration backup & restore card               */
 /* ------------------------------------------------------------------ */
 
-import { useReducer, useRef } from "react";
+import { useReducer, useRef, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -26,6 +26,17 @@ import {
   type RestoreFailure,
 } from "@/api/ops";
 import { classifyUnobservedOutcome, type UnobservedOutcome } from "@/api/mutationOutcome";
+import {
+  beginWrite,
+  getOutcomeLatches,
+  isWriteInFlight,
+  latchKeys,
+  latchOutcome,
+  releaseOutcomeLatch,
+  useOutcomeLatches,
+  useWritesInFlight,
+  type OutcomeLatch,
+} from "@/stores/outcomeLatches";
 
 interface PendingRestore {
   data: Record<string, unknown>;
@@ -203,7 +214,22 @@ export function BackupRestoreCard() {
   // Each request carries the attempt it started; only that attempt's answer
   // may report or settle the flow.
   const attemptRef = useRef(0);
-  const running = flow.kind === "running";
+  // A restore this card started before it was last unmounted keeps running;
+  // while it does, no other restore of the namespace may start.
+  const restoreKey = latchKeys.restore(selectedNamespace);
+  const restoreInFlight = useWritesInFlight().has(restoreKey);
+  const running = flow.kind === "running" || restoreInFlight;
+  // An unknown outcome is a module latch, so it outlives this card: leaving
+  // the page and coming back must not put a restore one click away again.
+  // It ends only on a deliberate re-arm or a reload.
+  const storedLatch = useOutcomeLatches().get(restoreKey);
+  const unknownRestore = storedLatch?.kind === "restore" ? storedLatch : null;
+  // The backup itself survives only in this card's flow, never in the latch.
+  const rearmable =
+    flow.kind === "unknown" && flow.pending.namespace === selectedNamespace ? flow.pending : null;
+  // The latch the "allow another restore" confirmation was opened for.
+  const [allowRestoreTarget, setAllowRestoreTarget] = useState<OutcomeLatch | null>(null);
+  const restoreBlocked = running || unknownRestore !== null;
 
   const handleDownload = async () => {
     if (!canExport.allowed) return;
@@ -221,7 +247,14 @@ export function BackupRestoreCard() {
   };
 
   const handleFileSelected = async (file: File) => {
-    if (!canRestore.allowed || running) return;
+    if (
+      !canRestore.allowed ||
+      running ||
+      isWriteInFlight(restoreKey) ||
+      getOutcomeLatches().has(restoreKey)
+    ) {
+      return;
+    }
     try {
       const text = await file.text();
       const parsed = JSON.parse(text) as unknown;
@@ -290,8 +323,11 @@ export function BackupRestoreCard() {
     } else {
       return;
     }
+    const inFlightKey = latchKeys.restore(pending.namespace);
+    if (isWriteInFlight(inFlightKey) || getOutcomeLatches().has(inFlightKey)) return;
     const attempt = ++attemptRef.current;
     dispatch({ type: "start", attempt });
+    const release = beginWrite(inFlightKey);
     let result: RestoreResult;
     try {
       const restored = await restore.mutateAsync({
@@ -318,6 +354,20 @@ export function BackupRestoreCard() {
           outcome: { reason: "transport", detail: "Foundry could not read the gateway's answer." },
         };
       }
+      // Installed by this continuation even if the card has unmounted, and
+      // before the write is released, so the namespace is never briefly
+      // neither running nor latched.
+      if (result.kind === "unknown") {
+        latchOutcome({
+          kind: "restore",
+          namespace: pending.namespace,
+          fileName: pending.fileName,
+          outcome: result.outcome,
+          confirmedApiSpecDeletion: confirmed,
+        });
+      }
+    } finally {
+      release();
     }
     dispatch({ type: "settled", attempt, result });
   };
@@ -356,8 +406,9 @@ export function BackupRestoreCard() {
             <Button
               variant="secondary"
               // A file chosen mid-restore would otherwise open a second flow
-              // that the running attempt's answer then lands in.
-              disabled={running}
+              // that the running attempt's answer then lands in; after an
+              // unknown outcome, only a deliberate re-arm allows another.
+              disabled={restoreBlocked}
               onClick={() => fileInputRef.current?.click()}
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -371,7 +422,7 @@ export function BackupRestoreCard() {
             type="file"
             accept="application/json"
             className="hidden"
-            disabled={running}
+            disabled={restoreBlocked}
             onChange={(e) => {
               const file = e.target.files?.[0];
               if (file) void handleFileSelected(file);
@@ -379,6 +430,12 @@ export function BackupRestoreCard() {
             }}
           />
         </div>
+        {restoreInFlight && flow.kind !== "running" && (
+          <p role="status" className="text-xs text-text-muted">
+            A restore of namespace &quot;{selectedNamespace}&quot; started earlier is still
+            running. Another restore can be chosen once its answer arrives.
+          </p>
+        )}
         {/* The full explanation for whichever denial is the more fundamental. */}
         <CapabilityNotice verdict={canExport.allowed ? canRestore : canExport} />
         {flow.kind === "failed" && (
@@ -442,7 +499,7 @@ export function BackupRestoreCard() {
             </Button>
           </div>
         )}
-        {flow.kind === "unknown" && (
+        {unknownRestore && (
           <div
             role="alert"
             className="rounded-lg border border-warning/40 bg-warning/5 p-4 space-y-3"
@@ -452,17 +509,17 @@ export function BackupRestoreCard() {
                 Restore outcome unknown — verify the gateway before retrying
               </p>
               <p className="text-sm text-text-secondary mt-1">
-                {UNKNOWN_RESTORE_CAUSE[flow.outcome.reason]} The restore of
-                namespace &quot;{flow.pending.namespace}&quot; from{" "}
-                {flow.pending.fileName} may already have run, in full or in
+                {UNKNOWN_RESTORE_CAUSE[unknownRestore.outcome.reason]} The restore of
+                namespace &quot;{unknownRestore.namespace}&quot; from{" "}
+                {unknownRestore.fileName} may already have run, in full or in
                 part. Foundry cannot tell: the gateway offers no restore operation id
                 to read back.
               </p>
             </div>
-            {flow.outcome.detail && (
-              <p className="text-sm text-text-secondary">{flow.outcome.detail}</p>
+            {unknownRestore.outcome.detail && (
+              <p className="text-sm text-text-secondary">{unknownRestore.outcome.detail}</p>
             )}
-            {flow.confirmedApiSpecDeletion && (
+            {unknownRestore.confirmedApiSpecDeletion && (
               <p className="text-sm text-text-secondary">
                 This attempt already carried the API-spec deletion confirmation.
               </p>
@@ -474,20 +531,49 @@ export function BackupRestoreCard() {
               back.
             </p>
             <div className="flex flex-wrap gap-3">
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => dispatch({ type: "rearm" })}
-              >
-                Re-arm this restore
-              </Button>
-              <Button size="sm" variant="secondary" onClick={() => dispatch({ type: "dismiss" })}>
-                Dismiss
-              </Button>
+              {rearmable ? (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={running}
+                  onClick={() => {
+                    if (isWriteInFlight(restoreKey)) return;
+                    // The destructive confirmation for the same backup opens next,
+                    // but only if this is still the outcome the panel shows.
+                    if (releaseOutcomeLatch(restoreKey, unknownRestore)) dispatch({ type: "rearm" });
+                  }}
+                >
+                  Re-arm this restore
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={running}
+                  onClick={() => setAllowRestoreTarget(unknownRestore)}
+                >
+                  Allow another restore
+                </Button>
+              )}
             </div>
           </div>
         )}
       </div>
+
+      {/* After a remount the backup is gone, so re-arming only allows a new file. */}
+      <ConfirmDialog
+        open={allowRestoreTarget !== null && unknownRestore !== null}
+        onOpenChange={(open) => !open && setAllowRestoreTarget(null)}
+        title="Allow another restore?"
+        description={`The earlier restore of namespace "${unknownRestore?.namespace ?? selectedNamespace}" from "${unknownRestore?.fileName ?? "the backup"}" may already have run. Confirm only after reading the namespace's live configuration back from the gateway; you then choose a backup file again.`}
+        confirmLabel="I've checked — allow a restore"
+        variant="primary"
+        onConfirm={() => {
+          if (!allowRestoreTarget || isWriteInFlight(restoreKey)) return;
+          setAllowRestoreTarget(null);
+          if (releaseOutcomeLatch(restoreKey, allowRestoreTarget)) dispatch({ type: "dismiss" });
+        }}
+      />
 
       <ConfirmDialog
         open={armedPending !== null}

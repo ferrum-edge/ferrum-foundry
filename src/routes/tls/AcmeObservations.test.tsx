@@ -8,7 +8,7 @@ import type { AcmeOrder } from "@/api/tls";
 import type { PaginatedResponse } from "@/api/types";
 import TlsPage from "./index";
 import { inputByLabel } from "@/test/fields";
-import { clearOutcomeLatches } from "@/stores/outcomeLatches";
+import { clearOutcomeLatches, ORDER_PROBE_DELAYS_MS } from "@/stores/outcomeLatches";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 class BasedRequest extends Request {
@@ -36,6 +36,8 @@ let postBodies: Record<string, unknown>[];
 /** Orders the gateway answers a direct by-id read with. */
 let ordersById: Record<string, AcmeOrder>;
 let probes: string[];
+/** When set, writes wait for the test to answer them. */
+let heldPosts: ((response: Response) => void)[] | null;
 
 function cachedOrders() {
   return client.getQueryData<PaginatedResponse<AcmeOrder>>(firstPage)?.data;
@@ -61,6 +63,7 @@ beforeEach(() => {
   postBodies = [];
   ordersById = {};
   probes = [];
+  heldPosts = null;
   vi.stubGlobal("Request", BasedRequest);
   vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
     const url = new URL(request.url);
@@ -68,6 +71,10 @@ beforeEach(() => {
     if (request.method === "POST") {
       posts += 1;
       postBodies.push(await request.clone().json().catch(() => ({})));
+      if (heldPosts) {
+        const held = heldPosts;
+        return new Promise<Response>((resolve) => held.push(resolve));
+      }
       return new Response("Unavailable", { status: 503 });
     }
     if (path.endsWith("/orders/fixture-order")) {
@@ -372,6 +379,33 @@ describe('outcome-unknown latches outlive the ACME tab', () => {
     expect(posts).toBe(1);
   });
 
+  it("reads a latched renewal's order again while it holds, so a late order settles it in place", async () => {
+    const delays = ORDER_PROBE_DELAYS_MS.splice(0, ORDER_PROBE_DELAYS_MS.length, 100, 200, 400);
+    try {
+      certificates = [fixtureCertificate];
+      await mount();
+      await settle(() => expect(renew()?.disabled).toBe(false));
+      await click('Renew');
+      await settle(() => expect(panel().textContent).toContain('Renewal outcome unknown'));
+      const orderId = postBodies[0]!.id as string;
+      await settle(() => expect(probes.length).toBeGreaterThanOrEqual(1));
+
+      // Edge stores the order only after its CA round-trip.
+      ordersById[orderId] = {
+        ...order('pending_challenges'), id: orderId, certificate_id: 'fixture-cert',
+      };
+      await settle(() => {
+        expect(panel().textContent).not.toContain('Renewal outcome unknown');
+        expect(renew().disabled).toBe(false);
+      });
+      expect(probes.length).toBeLessThanOrEqual(4);
+      expect(new Set(probes)).toEqual(new Set([orderId]));
+      expect(posts).toBe(1);
+    } finally {
+      ORDER_PROBE_DELAYS_MS.splice(0, ORDER_PROBE_DELAYS_MS.length, ...delays);
+    }
+  });
+
   it('keeps uncertain order creation disarmed across a tab switch and pages until its own order shows', async () => {
     // The same domains, already ordered before this request, on a page not
     // yet read and newer than everything on the first page.
@@ -412,6 +446,41 @@ describe('outcome-unknown latches outlive the ACME tab', () => {
     await click('New ACME Order');
     expect(document.querySelector('[role="dialog"]')!.textContent).not.toContain('outcome unknown');
     expect(submit().disabled).toBe(false);
+  });
+
+  it('keeps Create Order disabled across a tab switch while the first create still runs', async () => {
+    heldPosts = [];
+    const typeDomains = async () => {
+      const domains = inputByLabel(document.querySelector('[role="dialog"]')!, 'Domains');
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+          .call(domains, 'example.test');
+        domains.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    };
+    const cancel = () => [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
+      .find((button) => button.textContent?.trim() === 'Cancel')!;
+    await mount();
+    await click('New ACME Order');
+    await typeDomains();
+    await act(async () => submit().click());
+    await settle(() => expect(posts).toBe(1));
+    await act(async () => cancel().click());
+
+    // The remounted tab's own mutation observer is idle; the create is not.
+    await revisitAcmeTab();
+    await click('New ACME Order');
+    await typeDomains();
+    expect(submit().disabled).toBe(true);
+    await act(async () => submit().click());
+    expect(posts).toBe(1);
+
+    // Its lost answer, arriving after the remount, still latches creation.
+    await act(async () => heldPosts![0]!(new Response("Unavailable", { status: 503 })));
+    await settle(() => expect(document.querySelector('[role="dialog"]')!.textContent).toContain('outcome unknown'));
+    expect(submit().disabled).toBe(true);
+    await act(async () => submit().click());
+    expect(posts).toBe(1);
   });
 
   it('keeps an uncertain finalization on Re-check across a tab switch', async () => {

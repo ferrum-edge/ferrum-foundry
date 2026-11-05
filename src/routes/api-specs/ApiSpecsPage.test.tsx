@@ -344,26 +344,80 @@ it.each(['import', 'replace'])('keeps an uncertain spec %s disarmed through matc
   expect(writes).toHaveLength(1);
 });
 
-it('offers no re-arm while a spec write is in flight', async () => {
+it('keeps submit and re-arm disabled across remounts while any spec write for the namespace runs', async () => {
+  const remount = async () => {
+    await act(async () => root.render(
+      <QueryClientProvider client={client}><ToastProvider><div /></ToastProvider></QueryClientProvider>,
+    ));
+    await mount();
+  };
+  const dialogSubmit = () => [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
+    .find((button) => button.textContent?.trim() === 'Import Spec')!;
+  const rearm = () => [...host.querySelectorAll<HTMLButtonElement>('button')]
+    .find((button) => button.textContent?.trim() === REARM);
+
+  // Write A starts, then the workspace is left while it runs.
   await mount();
-  await openReplace(0, 1);
-  await resolveRead(0, 'document A');
-  await settle(() => expect(editor().disabled).toBe(false));
-  await click('Replace Spec');
+  await click('Import Spec');
+  await edit('document A');
+  await act(async () => dialogSubmit().click());
   await settle(() => expect(writes).toHaveLength(1));
-  // Another view of this namespace recorded an unanswered write meanwhile.
+  await click('Cancel');
+  await remount();
+
+  // The new mount's own mutation observers are idle, but A is not.
+  await click('Import Spec');
+  await edit('document B');
+  expect(dialogSubmit().disabled).toBe(true);
+  await act(async () => dialogSubmit().click());
+  expect(writes).toHaveLength(1);
+  await click('Cancel');
+
+  // An earlier unanswered write is latched meanwhile; re-arming it now would
+  // let another write start while A may still land.
   await act(async () => latchOutcome({
     kind: 'api_spec_write', namespace: 'tenant-a', message: 'Spec import outcome unknown.',
   }));
-  const rearm = () => [...host.querySelectorAll<HTMLButtonElement>('button')]
-    .find((button) => button.textContent?.trim() === REARM)!;
+  await remount();
   await settle(() => expect(rearm()).toBeTruthy());
-  expect(rearm().disabled).toBe(true);
-  await act(async () => rearm().click());
+  expect(rearm()!.disabled).toBe(true);
+  await act(async () => rearm()!.click());
   expect(document.body.textContent).not.toContain('Allow another spec import or replacement?');
 
-  await act(async () => writes[0]!.resolve(Response.json({ id: 'A', proxy_id: 'proxy-A' })));
-  await settle(() => expect(rearm().disabled).toBe(false));
+  // A's lost answer, arriving after two remounts, still latches the namespace.
+  await act(async () => writes[0]!.resolve(Response.json({
+    code: 'FERRUM_BFF_TIMEOUT', phase: 'response',
+  }, { status: 504 })));
+  await settle(() => expect(rearm()!.disabled).toBe(false));
+  expect(host.textContent).toContain('Spec write outcome unknown');
+
+  // Only now, with nothing in flight, can the operator re-arm and write again.
+  await act(async () => rearm()!.click());
+  await settle(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull());
+  await click(CONFIRM_REARM);
+  await settle(() => expect(host.textContent).not.toContain('Spec write outcome unknown'));
+  await click('Import Spec');
+  await edit('document B');
+  expect(dialogSubmit().disabled).toBe(false);
+  await act(async () => dialogSubmit().click());
+  await settle(() => expect(writes).toHaveLength(2));
+});
+
+it('re-arms only the unknown write the operator reviewed', async () => {
+  await mount();
+  await act(async () => latchOutcome({
+    kind: 'api_spec_write', namespace: 'tenant-a', message: 'Spec import outcome unknown.',
+  }));
+  await click(REARM);
+  await settle(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull());
+
+  // Another unanswered write replaces it while the confirmation is open.
+  await act(async () => latchOutcome({
+    kind: 'api_spec_write', namespace: 'tenant-a', message: 'Spec replacement outcome unknown.',
+  }));
+  await click(CONFIRM_REARM);
+  await settle(() => expect(document.body.textContent).toContain('review it before allowing writes again'));
+  expect(host.textContent).toContain('Spec replacement outcome unknown.');
   expect(host.textContent).toContain('Spec write outcome unknown');
 });
 
