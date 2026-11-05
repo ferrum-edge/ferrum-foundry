@@ -254,13 +254,19 @@ describe("restore recovery presentation", () => {
     await click("Restore");
     await settle(() => expect(requests.filter((request) => request.method === "POST")).toHaveLength(1));
 
-    // Neither the close button nor Escape abandons a destructive restore
-    // whose answer has not arrived.
-    const close = document.querySelector<HTMLButtonElement>('[role="dialog"] button[aria-label="Close"]')!;
+    // Neither the close button, Escape, nor a click outside abandons a
+    // destructive restore whose answer has not arrived.
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!;
+    const close = dialog.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!;
+    expect(close.disabled).toBe(true);
     await act(async () => { close.click(); });
     await act(async () => {
-      document.activeElement?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      dialog.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    await act(async () => {
+      document.body.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+      document.body.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, button: 0 }));
+      document.body.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0 }));
     });
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Restore configuration?");
 

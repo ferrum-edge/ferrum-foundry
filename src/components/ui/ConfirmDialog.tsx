@@ -15,6 +15,12 @@ export interface ConfirmDialogProps {
   variant?: "danger" | "primary";
   onConfirm: () => void;
   loading?: boolean;
+  /**
+   * The confirmed action's request is in flight, so the dialog refuses to
+   * close. Defaults to `loading`; pass it separately when `loading` also
+   * covers something that is not this dialog's request, such as a refetch.
+   */
+  busy?: boolean;
 }
 
 export function ConfirmDialog({
@@ -26,12 +32,13 @@ export function ConfirmDialog({
   variant = "danger",
   onConfirm,
   loading = false,
+  busy = loading,
 }: ConfirmDialogProps) {
   return (
     // While the confirmed action runs, every way out is refused: the answer
     // still belongs to this dialog's flow.
-    <Dialog open={open} onOpenChange={(next) => (next || !loading) && onOpenChange(next)}>
-      <DialogContent busy={loading}>
+    <Dialog open={open} onOpenChange={(next) => (next || !busy) && onOpenChange(next)}>
+      <DialogContent busy={busy}>
         <DialogTitle>{title}</DialogTitle>
         {description && (
           <DialogDescription className="mt-2">

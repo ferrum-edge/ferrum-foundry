@@ -33,11 +33,12 @@ import { filterAndPage } from "@/lib/collectionSearch";
 import { useNamespace } from "@/stores/namespace";
 import { useCapabilities } from "@/stores/capabilities";
 import {
+  documentHash,
   latchKeys,
   latchOutcome,
   settleOutcomeLatches,
-  timestampFloor,
   useOutcomeLatches,
+  type OutcomeLatch,
 } from "@/stores/outcomeLatches";
 import { CapabilityNotice } from "@/components/shared/CapabilityGate";
 import { formatDateTime } from "@/lib/format";
@@ -95,7 +96,7 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
 
   // The outcome-unknown latch outlives this workspace (a namespace switch or
   // leaving the route remounts it) and ends only when a spec read shows the
-  // write's outcome.
+  // document this write sent.
   const writeLatch = useOutcomeLatches().get(latchKeys.apiSpecWrite(scope.namespace));
   const unknownWrite =
     writeLatch?.kind === "api_spec_import" || writeLatch?.kind === "api_spec_replace"
@@ -139,11 +140,13 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
     () => [...(pageQuery.data?.items ?? []), ...(allQuery.data ?? [])],
     [pageQuery.data, allQuery.data],
   );
+  // Re-run when a latch is added too: a read that landed while the request was
+  // still in flight may already show its outcome.
   useEffect(() => {
-    if (specsSeen.length > 0) {
+    if (writeLatch && specsSeen.length > 0) {
       settleOutcomeLatches({ apiSpecs: { namespace: scope.namespace, specs: specsSeen } });
     }
-  }, [scope.namespace, specsSeen]);
+  }, [scope.namespace, specsSeen, writeLatch]);
 
   // Each opening is a new session, even when the same spec is reopened.
   const closeImport = () => {
@@ -186,11 +189,13 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
       return;
     }
     const generation = importGeneration.current;
-    // Taken before sending, so a later read can show what this write did.
+    // Taken before sending, so a later read can show what this write did:
+    // Edge's `content_hash` is the SHA-256 of the document it stored.
     const replaced = replaceTarget
       ? (specsSeen.find((spec) => spec.id === replaceTarget.id) ?? replaceTarget)
       : null;
-    const createdAfter = timestampFloor(specsSeen, pageQuery.data?.total === 0);
+    const seenBefore = specsSeen;
+    const sentHash = documentHash(importDoc);
     try {
       let message: string;
       if (replaceTarget) {
@@ -230,23 +235,30 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
       }
       // Retain the warning even if the operator closed/reopened the dialog.
       if (err instanceof MutationOutcomeUnknownError) {
-        latchOutcome(
+        // Disarm at once; the document hash only adds the way out.
+        const latchMessage = err.message;
+        const latch = (contentHash: string | null): OutcomeLatch =>
           replaced
             ? {
                 kind: "api_spec_replace",
                 namespace: scope.namespace,
-                message: err.message,
+                message: latchMessage,
                 specId: replaced.id,
-                contentHash: replaced.content_hash,
+                contentHash,
                 updatedAt: replaced.updated_at,
               }
             : {
                 kind: "api_spec_import",
                 namespace: scope.namespace,
-                message: err.message,
-                createdAfter,
-              },
-        );
+                message: latchMessage,
+                contentHash,
+                knownIds: seenBefore
+                  .filter((spec) => contentHash !== null && spec.content_hash === contentHash)
+                  .map((spec) => spec.id),
+              };
+        latchOutcome(latch(null));
+        const hash = await sentHash;
+        if (hash !== null) latchOutcome(latch(hash));
       }
       const message = await getApiErrorMessage(err, "Spec import failed");
       if (generation === importGeneration.current) toast("error", message);

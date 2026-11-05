@@ -632,6 +632,7 @@ export function CredentialForm({
         variant="danger"
         onConfirm={handleDelete}
         loading={deleteCredentialByIndex.isPending || isRefreshing}
+        busy={deleteCredentialByIndex.isPending}
       />
       <ConfirmDialog
         open={deleteAllRevision !== null}
@@ -642,6 +643,7 @@ export function CredentialForm({
         variant="danger"
         onConfirm={handleDeleteAll}
         loading={deleteCredentials.isPending || isRefreshing}
+        busy={deleteCredentials.isPending}
       />
     </div>
   );

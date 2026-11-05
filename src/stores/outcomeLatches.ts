@@ -13,30 +13,40 @@ import type { ApiSpecSummary } from "@/api/apiSpecs";
  *
  * Latches live in this module, not in the component that issued the request,
  * so neither a tab switch (Radix unmounts inactive panels) nor leaving the
- * route re-arms the action. A latch ends only when the gateway shows the
- * outcome (`settledBy`), or with the page itself. Each `createdAfter` is a
- * gateway timestamp floor taken before the request was sent, so a record the
- * gateway created later can only be this request's (or a concurrent one's)
- * work, never an older record from an unread page. `null` means no floor
- * could be established and the latch never settles by observation.
+ * route re-arms the action. A latch ends only when a read shows *this
+ * request's* outcome (`settledBy`), or with the page itself. Proof is a
+ * correlation the request itself carried, never a timestamp boundary inferred
+ * from whichever records happened to be read: Edge lists ACME orders in id
+ * order and API specs unsorted, so a record on an unread page says nothing
+ * about when it was created relative to this request.
+ *
+ * - ACME creation and renewal send a Foundry-chosen order `id`; only an order
+ *   with that id settles them. Edge refuses a second order with the same id.
+ * - API spec writes record the SHA-256 of the exact document sent, which is
+ *   Edge's `content_hash`. An import settles on a spec with that hash that
+ *   was not already known to hold it; a replace settles when its target spec
+ *   is read holding that hash at a new `updated_at`. Without Web Crypto
+ *   (`contentHash: null`) nothing settles them before a reload.
  */
 export type OutcomeLatch =
-  | {
-      kind: "acme_order_creation";
-      message: string;
-      /** The requested domain set, normalized by `domainSet`. */
-      domains: string;
-      createdAfter: number | null;
-    }
-  | { kind: "acme_renewal"; certificateId: string; createdAfter: number | null }
+  | { kind: "acme_order_creation"; message: string; orderId: string }
+  | { kind: "acme_renewal"; certificateId: string; orderId: string }
   | { kind: "acme_finalization"; orderId: string }
-  | { kind: "api_spec_import"; namespace: string; message: string; createdAfter: number | null }
+  | {
+      kind: "api_spec_import";
+      namespace: string;
+      message: string;
+      contentHash: string | null;
+      /** Specs already read holding that document before it was sent. */
+      knownIds: readonly string[];
+    }
   | {
       kind: "api_spec_replace";
       namespace: string;
       message: string;
       specId: string;
-      contentHash: string;
+      contentHash: string | null;
+      /** The target's `updated_at` as read before the document was sent. */
       updatedAt: string;
     };
 
@@ -75,49 +85,28 @@ function latchKey(latch: OutcomeLatch): string {
   }
 }
 
-export function domainSet(domains: readonly string[]): string {
-  return [...new Set(domains.map((domain) => domain.trim().toLowerCase()))].sort().join(",");
-}
-
-function createdAfter(record: { created_at: string }, floor: number | null): boolean {
-  if (floor === null) return false;
-  const created = Date.parse(record.created_at);
-  return Number.isFinite(created) && created > floor;
-}
-
 /**
- * The gateway-clock floor for a request about to be sent: the newest
- * timestamp among the records already read. A collection read as empty gives
- * no records to compare, so every later record is new (`-Infinity`); a
- * collection never read gives no floor at all (`null`).
+ * The lowercase hex SHA-256 of a document's UTF-8 bytes, which is what Edge
+ * stores as an API spec's `content_hash`; `null` where Web Crypto is not
+ * available (an insecure context).
  */
-export function timestampFloor(
-  records: readonly { created_at: string; updated_at: string }[],
-  collectionEmpty: boolean,
-): number | null {
-  let floor: number | null = collectionEmpty ? Number.NEGATIVE_INFINITY : null;
-  for (const record of records) {
-    for (const stamp of [record.created_at, record.updated_at]) {
-      const value = Date.parse(stamp);
-      if (Number.isFinite(value)) floor = Math.max(floor ?? value, value);
-    }
+export async function documentHash(document: string): Promise<string | null> {
+  try {
+    const subtle = globalThis.crypto?.subtle;
+    if (!subtle) return null;
+    const digest = await subtle.digest("SHA-256", new TextEncoder().encode(document));
+    return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  } catch {
+    return null;
   }
-  return floor;
 }
 
 /** Whether an observation shows the outcome the latch was waiting for. */
 export function settledBy(latch: OutcomeLatch, observation: LatchObservation): boolean {
   switch (latch.kind) {
     case "acme_order_creation":
-      return (observation.acmeOrders ?? []).some(
-        (order) =>
-          domainSet(order.domains) === latch.domains && createdAfter(order, latch.createdAfter),
-      );
     case "acme_renewal":
-      return (observation.acmeOrders ?? []).some(
-        (order) =>
-          order.certificate_id === latch.certificateId && createdAfter(order, latch.createdAfter),
-      );
+      return (observation.acmeOrders ?? []).some((order) => order.id === latch.orderId);
     case "acme_finalization":
       return (observation.acmeOrders ?? []).some(
         (order) => order.id === latch.orderId && !acmeOrderInProgress(order),
@@ -125,18 +114,23 @@ export function settledBy(latch: OutcomeLatch, observation: LatchObservation): b
     case "api_spec_import": {
       const seen = observation.apiSpecs;
       return (
+        latch.contentHash !== null &&
         seen?.namespace === latch.namespace &&
-        seen.specs.some((spec) => createdAfter(spec, latch.createdAfter))
+        seen.specs.some(
+          (spec) => spec.content_hash === latch.contentHash && !latch.knownIds.includes(spec.id),
+        )
       );
     }
     case "api_spec_replace": {
       const seen = observation.apiSpecs;
       return (
+        latch.contentHash !== null &&
         seen?.namespace === latch.namespace &&
         seen.specs.some(
           (spec) =>
             spec.id === latch.specId &&
-            (spec.content_hash !== latch.contentHash || spec.updated_at !== latch.updatedAt),
+            spec.content_hash === latch.contentHash &&
+            spec.updated_at !== latch.updatedAt,
         )
       );
     }

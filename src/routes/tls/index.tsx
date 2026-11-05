@@ -63,11 +63,9 @@ import type { PaginatedResponse } from "@/api/types";
 import { usePaginationParams } from "@/hooks/usePagination";
 import { useCapabilities } from "@/stores/capabilities";
 import {
-  domainSet,
   latchKeys,
   latchOutcome,
   settleOutcomeLatches,
-  timestampFloor,
   useOutcomeLatches,
 } from "@/stores/outcomeLatches";
 import { CapabilityNotice } from "@/components/shared/CapabilityGate";
@@ -749,16 +747,22 @@ function AcmeTab() {
   const finalizeOrder = useFinalizeAcmeOrder();
   // Outcome-unknown latches outlive this tab: Radix unmounts an inactive
   // panel, and a remount must not re-arm an action that may already have run.
-  // Each ends only when an orders read shows its outcome.
+  // Each ends only when an orders read shows the order its request created.
   const latches = useOutcomeLatches();
   const creationLatch = latches.get(latchKeys.acmeOrderCreation());
   const unknownCreation =
     creationLatch?.kind === "acme_order_creation" ? creationLatch.message : null;
   const renewalUnknown = (certificateId: string) =>
     latches.has(latchKeys.acmeRenewal(certificateId));
+  // Re-run on every orders read and whenever a latch is added, so a read
+  // that landed while the request was still in flight is also considered.
   useEffect(() => {
-    if (orders) settleOutcomeLatches({ acmeOrders: orders.data });
-  }, [orders]);
+    settleOutcomeLatches({
+      acmeOrders: queryClient
+        .getQueriesData<AcmeOrderPage>({ queryKey: ACME_ORDERS_PREFIX })
+        .flatMap(([, page]) => page?.data ?? []),
+    });
+  }, [orders, latches, queryClient]);
   const renewCert = useRenewAcmeCertificate();
   const deleteCert = useDeleteAcmeCertificate();
   const { capabilities } = useCapabilities();
@@ -846,11 +850,6 @@ function AcmeTab() {
   // A terminal observation resolves an ambiguous finalization without replaying it.
   const orderIsUnknown = (order: AcmeOrder) =>
     latches.has(latchKeys.acmeFinalization(order.id)) && acmeOrderInProgress(order);
-  // Every order any cached page holds, whatever its offset and limit.
-  const cachedAcmeOrders = () =>
-    queryClient
-      .getQueriesData<AcmeOrderPage>({ queryKey: ACME_ORDERS_PREFIX })
-      .flatMap(([, page]) => page?.data ?? []);
 
   const handleCreateOrder = async () => {
     if (!canWrite.allowed) return;
@@ -863,13 +862,12 @@ function AcmeTab() {
       toast("error", "At least one domain is required");
       return;
     }
-    // Taken before sending: an order the gateway creates later is new.
-    const createdAfter = timestampFloor(
-      cachedAcmeOrders(),
-      orders !== undefined && orders.pagination.total === 0,
-    );
+    // Foundry names the order, so a later read can prove this request created
+    // it (and Edge refuses a second order with the same id).
+    const orderId = crypto.randomUUID();
     try {
       await createOrder.mutateAsync({
+        id: orderId,
         domains,
         directory_url: orderForm.directory_url,
         ...(orderForm.contact.trim() && {
@@ -887,14 +885,7 @@ function AcmeTab() {
       setOrderForm(EMPTY_ACME_ORDER_FORM);
     } catch (err) {
       if (err instanceof MutationOutcomeUnknownError) {
-        latchOutcome({
-          kind: "acme_order_creation",
-          message: err.message,
-          domains: domainSet(domains),
-          createdAfter,
-        });
-        // A read that landed while the request was in flight may already show it.
-        settleOutcomeLatches({ acmeOrders: cachedAcmeOrders() });
+        latchOutcome({ kind: "acme_order_creation", message: err.message, orderId });
       }
       toast("error", await getApiErrorMessage(err, "Failed to create order"));
     }
@@ -978,22 +969,17 @@ function AcmeTab() {
                   onClick={() =>
                     void runRowAction(`renew:${cert.id}`, async () => {
                       if (renewalUnknown(cert.id)) return;
-                      // A renewal creates an order for this certificate; one
-                      // created after everything already read is this one's.
-                      const createdAfter = timestampFloor(
-                        [cert, ...cachedAcmeOrders().filter((entry) => entry.certificate_id === cert.id)],
-                        false,
-                      );
+                      // The renewal order is named here, as for a new order.
+                      const orderId = `renew-${crypto.randomUUID().replaceAll("-", "")}`;
                       try {
                         await renewCert.mutateAsync({
                           id: cert.id,
-                          data: { terms_of_service_agreed: true },
+                          data: { id: orderId, terms_of_service_agreed: true },
                         });
                         toast("success", `Renewal order created for ${cert.domains.join(", ")}`);
                       } catch (err) {
                         if (err instanceof MutationOutcomeUnknownError) {
-                          latchOutcome({ kind: "acme_renewal", certificateId: cert.id, createdAfter });
-                          settleOutcomeLatches({ acmeOrders: cachedAcmeOrders() });
+                          latchOutcome({ kind: "acme_renewal", certificateId: cert.id, orderId });
                         }
                         toast("error", await getApiErrorMessage(err, "Renewal failed"));
                       }

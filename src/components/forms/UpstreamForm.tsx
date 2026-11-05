@@ -225,12 +225,15 @@ type PassiveHealthCheckDraft = WithNumberDrafts<
 type HashOnCookieConfigDraft = WithNumberDrafts<HashOnCookieConfig, "ttl_seconds">;
 
 /**
- * Which upstream hash settings Edge reads for this draft. The upstream
- * `hash_on` is the key of an upstream that hashes, and the fallback key of
- * every subset (or projected port override) that hashes without a key of its
- * own. The cookie config belongs to that key. A setting Edge would not read
- * is neither shown, validated, nor sent, so switching the algorithm away from
- * consistent hashing also clears it on save.
+ * Which upstream hash settings Edge reads for this draft. Every lane that
+ * hashes (the upstream itself, each subset, each projected port override)
+ * uses its own `hash_on` or falls back to the upstream's, and every cookie
+ * lane mints its cookie with the upstream's one `hash_on_cookie_config`.
+ * So the two questions are separate: `hashKey` is whether any hashing lane
+ * falls back to the upstream key, and `cookie` is whether any hashing lane's
+ * effective key is a cookie. A setting no lane reads is neither shown,
+ * validated, nor sent, so switching the algorithm away from consistent
+ * hashing also clears it on save.
  */
 function upstreamHashSettings(
   algorithm: Upstream["algorithm"],
@@ -239,19 +242,26 @@ function upstreamHashSettings(
   portOverrides: Upstream["port_overrides"],
 ): { hashKey: boolean; cookie: boolean } {
   const hashing = "consistent_hashing";
-  const hashKey =
-    algorithm === hashing ||
-    subsets.some(
-      (subset) =>
-        subset.name.trim() !== "" &&
-        (subset.algorithm || algorithm) === hashing &&
-        !subset.hashOn.trim(),
-    ) ||
-    Object.values(portOverrides ?? {}).some((override) => {
-      const policy = (override ?? {}) as { algorithm?: unknown; hash_on?: unknown };
-      return policy.algorithm === hashing && !policy.hash_on;
-    });
-  return { hashKey, cookie: hashKey && hashOn.trim().startsWith("cookie:") };
+  // The key of each hashing lane; `null` when it falls back to the upstream's.
+  const laneKeys: (string | null)[] = [];
+  if (algorithm === hashing) laneKeys.push(null);
+  for (const subset of subsets) {
+    if (subset.name.trim() && (subset.algorithm || algorithm) === hashing) {
+      laneKeys.push(subset.hashOn.trim() || null);
+    }
+  }
+  for (const override of Object.values(portOverrides ?? {})) {
+    const policy = (override ?? {}) as { algorithm?: unknown; hash_on?: unknown };
+    const effective = typeof policy.algorithm === "string" ? policy.algorithm : algorithm;
+    if (effective === hashing) {
+      laneKeys.push(typeof policy.hash_on === "string" && policy.hash_on.trim() ? policy.hash_on.trim() : null);
+    }
+  }
+  const upstreamKey = hashOn.trim();
+  return {
+    hashKey: laneKeys.includes(null),
+    cookie: laneKeys.some((key) => (key ?? upstreamKey).startsWith("cookie:")),
+  };
 }
 
 /**

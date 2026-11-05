@@ -261,6 +261,35 @@ describe("TargetForm inside the upstream payload editor", () => {
       expect(payload).not.toHaveProperty("hash_on_cookie_config");
     });
 
+    // Edge mints every cookie lane's cookie with the upstream's cookie config,
+    // so a lane with its own `cookie:` key still consumes it.
+    const cookieConfig = {
+      path: "/canary", ttl_seconds: 120, http_only: false, secure: true,
+      same_site: "None", session_cookie: false,
+    } satisfies HashOnCookieConfig;
+    it.each<[string, Partial<Upstream>]>([
+      ["a subset", {
+        subsets: [{
+          name: "canary", labels: { version: "v1" },
+          traffic_policy: { load_balancer_algorithm: "consistent_hashing", hash_on: "cookie:canary" },
+        }],
+      }],
+      ["a projected port override", {
+        port_overrides: { "8443": { algorithm: "consistent_hashing", hash_on: "cookie:port" } },
+      }],
+    ])("keeps the cookie config %s with its own cookie key reads, dropping the unused upstream key", async (_lane, lane) => {
+      await mount({
+        ...initial, hash_on: "cookie:route", hash_on_cookie_config: cookieConfig, ...lane,
+      });
+      expect(ui.host.textContent).toContain("Hash Cookie Config");
+      await fill(inputByLabel(ui.host, "Name"), "Renamed");
+      await save();
+      const payload = submit.mock.calls[0][0];
+      expect(payload.name).toBe("Renamed");
+      expect(payload).not.toHaveProperty("hash_on");
+      expect(payload.hash_on_cookie_config).toEqual(cookieConfig);
+    });
+
     it("keeps, and shows, the upstream key a hashing subset falls back to", async () => {
       await mount({
         ...initial, hash_on: "header:x-user",

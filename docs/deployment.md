@@ -364,9 +364,12 @@ gateway reports a terminal state.
 
 An interrupted spec import or replacement, or an ACME create or renew, shows
 **outcome unknown** and blocks resubmission. The block outlives a tab switch
-or leaving the page, and ends when a read shows the outcome: a spec created
-after the attempt, or the replaced spec's new content; an order for the same
-domains, or a renewal order for the certificate, created after the attempt.
+or leaving the page, and ends only when a read shows that request's own
+result. Foundry names each ACME order it creates or renews (the request's
+`id`), so the order with that id ends it; Edge refuses a second order with
+the same id. A spec write ends when a spec is read holding the exact document
+sent (its `content_hash`, the document's SHA-256; this needs a secure
+context). A newer record on another page proves nothing and is ignored.
 Inspect the spec resources or ACME orders before you reload or retry; the
 warning does not survive a page load. Only a BFF timeout with `phase: "upload"` is treated as
 a definite failure: the BFF streams the body, so the gateway may already have

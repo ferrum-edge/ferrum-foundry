@@ -30,7 +30,9 @@ let collections: ((response: Response) => void)[];
 let holdCollections: boolean;
 let posts: number;
 let extraOrders: AcmeOrder[];
+let secondPage: AcmeOrder[];
 let certificates: unknown[];
+let postBodies: Record<string, unknown>[];
 
 function cachedOrders() {
   return client.getQueryData<PaginatedResponse<AcmeOrder>>(firstPage)?.data;
@@ -51,21 +53,32 @@ beforeEach(() => {
   holdCollections = false;
   posts = 0;
   extraOrders = [];
+  secondPage = [];
   certificates = [];
+  postBodies = [];
   vi.stubGlobal("Request", BasedRequest);
   vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
-    const path = new URL(request.url).pathname;
+    const url = new URL(request.url);
+    const path = url.pathname;
     if (request.method === "POST") {
       posts += 1;
+      postBodies.push(await request.clone().json().catch(() => ({})));
       return new Response("Unavailable", { status: 503 });
     }
     if (path.endsWith("/orders/fixture-order")) {
       return new Promise<Response>((resolve) => details.push(resolve));
     }
+    // Orders past the first page are served only to a read of that page, as
+    // Edge pages its id-ordered list.
+    const offset = Number(url.searchParams.get("offset") ?? 0);
+    const firstPageOrders = [order(), ...extraOrders];
     const data = path.endsWith("/orders")
-      ? [order(), ...extraOrders]
+      ? offset === 0 ? firstPageOrders : secondPage
       : path.endsWith("/certificates") ? certificates : [];
-    const response = Response.json({ data, pagination: { offset: 0, limit: 250, total: data.length } });
+    const total = path.endsWith("/orders") && secondPage.length > 0
+      ? 20 + secondPage.length
+      : data.length;
+    const response = Response.json({ data, pagination: { offset, limit: 20, total } });
     if (path.endsWith("/orders") && holdCollections) {
       return new Promise<Response>((resolve) => collections.push(resolve));
     }
@@ -120,6 +133,12 @@ async function revisitAcmeTab() {
   await settle(() => expect(panel().textContent).not.toContain("fixture-order"));
   await selectTab("ACME");
   await settle(() => expect(panel().textContent).toContain("fixture-order"));
+}
+
+/** Page the orders list (the last pagination control on the tab). */
+async function orderPage(direction: 'Next page' | 'Previous page') {
+  const buttons = panel().querySelectorAll<HTMLButtonElement>(`button[aria-label="${direction}"]`);
+  await act(async () => buttons[buttons.length - 1]!.click());
 }
 
 async function refetchOrders() {
@@ -275,12 +294,20 @@ describe('outcome-unknown latches outlive the ACME tab', () => {
   const submit = () => [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
     .find((button) => button.textContent?.trim() === 'Create Order')!;
 
-  it('keeps an uncertain renewal disarmed across a tab switch until an order shows it', async () => {
+  it('keeps an uncertain renewal disarmed across a tab switch and pages until its own order shows', async () => {
     certificates = [fixtureCertificate];
+    // Already on the gateway before the renewal, on a page not yet read, and
+    // newer than everything on the first page.
+    secondPage = [{
+      ...order('pending_challenges'), id: 'zz-earlier-renewal', certificate_id: 'fixture-cert',
+      created_at: '2026-09-08T00:00:00Z', updated_at: '2026-09-08T00:00:00Z',
+    }];
     await mount();
     await settle(() => expect(renew()?.disabled).toBe(false));
     await click('Renew');
     await settle(() => expect(panel().textContent).toContain('Renewal outcome unknown'));
+    const orderId = postBodies[0]!.id as string;
+    expect(orderId).toMatch(/^renew-[0-9a-f]{32}$/);
 
     await revisitAcmeTab();
     await settle(() => expect(renew()).toBeTruthy());
@@ -289,19 +316,17 @@ describe('outcome-unknown latches outlive the ACME tab', () => {
     await act(async () => renew().click());
     expect(posts).toBe(1);
 
-    // An older order for the certificate proves nothing about this request.
-    extraOrders = [{
-      ...order('valid'), id: 'old-renewal', certificate_id: 'fixture-cert',
-      created_at: '2026-09-05T00:00:00Z',
-    }];
-    await refetchOrders();
-    await settle(() => expect(panel().textContent).toContain('old-renewal'));
+    // Another order for the certificate proves nothing about this request.
+    await orderPage('Next page');
+    await settle(() => expect(panel().textContent).toContain('zz-earlier-renewal'));
+    await orderPage('Previous page');
+    await settle(() => expect(panel().textContent).toContain('fixture-order'));
+    expect(panel().textContent).toContain('Renewal outcome unknown');
     expect(renew().disabled).toBe(true);
 
-    // The renewal order it created ends the latch.
+    // The order this renewal named ends the latch.
     extraOrders = [{
-      ...order('pending_challenges'), id: 'new-renewal', certificate_id: 'fixture-cert',
-      created_at: '2026-09-07T00:00:00Z',
+      ...order('pending_challenges'), id: orderId, certificate_id: 'fixture-cert',
     }];
     await refetchOrders();
     await settle(() => {
@@ -311,7 +336,13 @@ describe('outcome-unknown latches outlive the ACME tab', () => {
     expect(posts).toBe(1);
   });
 
-  it('keeps uncertain order creation disarmed across a tab switch until the order appears', async () => {
+  it('keeps uncertain order creation disarmed across a tab switch and pages until its own order shows', async () => {
+    // The same domains, already ordered before this request, on a page not
+    // yet read and newer than everything on the first page.
+    secondPage = [{
+      ...order('pending_challenges'), id: 'zz-earlier-order', domains: ['example.test'],
+      created_at: '2026-09-08T00:00:00Z', updated_at: '2026-09-08T00:00:00Z',
+    }];
     await mount();
     await click('New ACME Order');
     const domains = inputByLabel(document.querySelector('[role="dialog"]')!, 'Domains');
@@ -322,23 +353,29 @@ describe('outcome-unknown latches outlive the ACME tab', () => {
     });
     await act(async () => submit().click());
     await settle(() => expect(submit().disabled).toBe(true));
-    const cancel = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
+    const orderId = postBodies[0]!.id as string;
+    expect(orderId).toMatch(/^[0-9a-f-]{36}$/);
+    const cancel = () => [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
       .find((button) => button.textContent?.trim() === 'Cancel')!;
-    await act(async () => cancel.click());
+    await act(async () => cancel().click());
 
     await revisitAcmeTab();
+    await orderPage('Next page');
+    await settle(() => expect(panel().textContent).toContain('zz-earlier-order'));
     await click('New ACME Order');
     expect(document.querySelector('[role="dialog"]')!.textContent).toContain('outcome unknown');
     expect(submit().disabled).toBe(true);
     await act(async () => submit().click());
     expect(posts).toBe(1);
+    await act(async () => cancel().click());
 
-    extraOrders = [{ ...order('pending_challenges'), id: 'created-order', domains: ['example.test'], created_at: '2026-09-07T00:00:00Z' }];
+    await orderPage('Previous page');
+    extraOrders = [{ ...order('pending_challenges'), id: orderId, domains: ['example.test'] }];
     await refetchOrders();
-    await settle(() => {
-      expect(document.querySelector('[role="dialog"]')!.textContent).not.toContain('outcome unknown');
-      expect(submit().disabled).toBe(false);
-    });
+    await settle(() => expect(panel().textContent).toContain(orderId));
+    await click('New ACME Order');
+    expect(document.querySelector('[role="dialog"]')!.textContent).not.toContain('outcome unknown');
+    expect(submit().disabled).toBe(false);
   });
 
   it('keeps an uncertain finalization on Re-check across a tab switch', async () => {
