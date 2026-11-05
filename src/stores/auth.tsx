@@ -47,6 +47,13 @@ interface SessionResponse {
   logoutUrl?: string;
 }
 
+/** A session read in flight, with the ticket and abort controller it was sent under. */
+interface SessionRead {
+  ticket: number;
+  controller: AbortController;
+  response: Promise<SessionResponse>;
+}
+
 interface AuthContextValue {
   status: AuthStatus;
   mode: AuthMode | null;
@@ -179,20 +186,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLockout(null);
   }, [queryClient]);
 
-  const refreshSession = useCallback(async () => {
+  // Send a session read under a fresh ticket. Its outcome is applied separately
+  // (`applySessionRead`), so the boot sequence can send it alongside the config read.
+  const startSessionRead = useCallback((): SessionRead => {
     const ticket = issueRequestTicket();
     const controller = new AbortController();
     readsRef.current.add(controller);
-    try {
-      const session = await api.get("api/auth/session", {
+    const response = api
+      .get("api/auth/session", {
         signal: controller.signal,
         context: { [SILENT_ERRORS]: true, [REQUEST_TICKET]: ticket },
-      }).json<SessionResponse>();
+      })
+      .json<SessionResponse>()
+      .finally(() => readsRef.current.delete(controller));
+    return { ticket, controller, response };
+  }, []);
+
+  const applySessionRead = useCallback(
+    (read: SessionRead, outcome: PromiseSettledResult<SessionResponse>) => {
+      const { ticket, controller } = read;
       if (controller.signal.aborted || !isCurrent(ticket)) return;
-      appliedTicketRef.current = ticket;
-      acceptSession(session);
-    } catch (sessionError) {
-      if (controller.signal.aborted || !isCurrent(ticket)) return;
+      if (outcome.status === "fulfilled") {
+        appliedTicketRef.current = ticket;
+        acceptSession(outcome.value);
+        return;
+      }
+      const sessionError: unknown = outcome.reason;
       const lockedOut = lockoutMessage(sessionError);
       if (responseStatus(sessionError) === 401) {
         appliedTicketRef.current = ticket;
@@ -210,31 +229,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setError("Unable to verify your Foundry session.");
         setStatus("unauthenticated");
       }
-    } finally {
-      readsRef.current.delete(controller);
-    }
-  }, [acceptSession, clearLocalSession, isCurrent]);
+    },
+    [acceptSession, clearLocalSession, isCurrent],
+  );
+
+  const refreshSession = useCallback(async () => {
+    const read = startSessionRead();
+    const [outcome] = await Promise.allSettled([read.response]);
+    applySessionRead(read, outcome);
+  }, [applySessionRead, startSessionRead]);
 
   useEffect(() => {
     removeLegacyCredential();
     let cancelled = false;
     void (async () => {
-      try {
-        const nextConfig = await api.get("api/auth/config", {
-          context: { [SILENT_ERRORS]: true },
-        }).json<AuthConfig>();
-        if (cancelled) return;
-        setConfig(nextConfig);
-        await refreshSession();
-      } catch {
-        if (!cancelled) {
-          setError("Unable to load the Foundry authentication configuration.");
-          setStatus("unauthenticated");
-        }
+      // The session read uses nothing from the config: the BFF path is fixed,
+      // a GET carries no CSRF header, and `/api/auth/config` sets no cookie or
+      // state. So both are sent at once. A config failure still discards the
+      // session outcome, as when the session read came second, so the final
+      // state does not depend on which answer arrives first.
+      const configRead = api.get("api/auth/config", {
+        context: { [SILENT_ERRORS]: true },
+      }).json<AuthConfig>();
+      const read = startSessionRead();
+      const [configOutcome, sessionOutcome] = await Promise.allSettled([configRead, read.response]);
+      if (cancelled) return;
+      if (configOutcome.status === "rejected") {
+        setError("Unable to load the Foundry authentication configuration.");
+        setStatus("unauthenticated");
+        return;
       }
+      setConfig(configOutcome.value);
+      applySessionRead(read, sessionOutcome);
     })();
     return () => { cancelled = true; };
-  }, [refreshSession]);
+  }, [applySessionRead, startSessionRead]);
 
   useEffect(() => {
     if (status !== "authenticated") return;

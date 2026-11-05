@@ -62,6 +62,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only that membership plus the proxies the save itself attached, and leaves
   a proxy attached since in place, reporting the configuration as not
   restored, instead of restoring a scope that would detach it.
+- The SPA sends its `/api/auth/config` and `/api/auth/session` reads at the
+  same time on load instead of one after the other, saving one BFF round trip
+  before the first page renders. A failed config read still shows the
+  configuration error and discards the session answer, whichever arrives
+  first; the error now appears once both reads have settled.
 
 ### Security
 

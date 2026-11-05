@@ -112,7 +112,11 @@ async function submit() {
 describe("LoginGate session exchange", () => {
   it("shows a loading status until authentication configuration arrives", async () => {
     let resolve!: (response: Response) => void;
-    vi.mocked(fetch).mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    const answer = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((request) =>
+      new URL((request as Request).url).pathname === "/api/auth/config"
+        ? new Promise((done) => { resolve = done; })
+        : answer(request));
     await mount();
     expect(ui.host.querySelector('[role="status"]')?.textContent).toContain("Checking your session");
     expect(ui.host.textContent).not.toContain("Protected workspace");
@@ -301,9 +305,13 @@ describe("LoginGate session exchange", () => {
 
   it("shows a configuration failure without exposing protected content", async () => {
     configStatus = 403;
+    // The session read is sent alongside the config read; a valid session
+    // still must not open the workspace when the config read fails.
+    sessionStatus = 200;
     await mount();
     await settle(() => expect(ui.host.textContent).toContain("Unable to load the Foundry authentication configuration."));
     expect(ui.host.textContent).not.toContain("Protected workspace");
-    expect(requests).toHaveLength(1);
+    expect(requests.map((request) => new URL(request.url).pathname).sort())
+      .toEqual(["/api/auth/config", "/api/auth/session"]);
   });
 });
