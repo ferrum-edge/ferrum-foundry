@@ -23,10 +23,15 @@ import type { ApiSpecSummary } from "@/api/apiSpecs";
  * - ACME creation and renewal send a Foundry-chosen order `id`; only an order
  *   with that id settles them. Edge refuses a second order with the same id.
  * - API spec writes record the SHA-256 of the exact document sent, which is
- *   Edge's `content_hash`. An import settles on a spec with that hash that
- *   was not already known to hold it; a replace settles when its target spec
- *   is read holding that hash at a new `updated_at`. Without Web Crypto
- *   (`contentHash: null`) nothing settles them before a reload.
+ *   Edge's `content_hash`. A replace settles when its target spec is read
+ *   holding that hash, unless the target already held it before the request
+ *   (as the cached summary or the document the Replace dialog read): an
+ *   unchanged resubmission cannot be told apart from what was already
+ *   stored, so it stays latched. An import settles on a spec
+ *   holding that hash that a complete read before the request did not list;
+ *   after only a partial read, an existing spec on an unread page could hold
+ *   the same document, so nothing settles it. Without Web Crypto
+ *   (`contentHash: null`) neither settles before a reload.
  */
 export type OutcomeLatch =
   | { kind: "acme_order_creation"; message: string; orderId: string }
@@ -37,8 +42,11 @@ export type OutcomeLatch =
       namespace: string;
       message: string;
       contentHash: string | null;
-      /** Specs already read holding that document before it was sent. */
-      knownIds: readonly string[];
+      /**
+       * Every spec id a complete read listed before the document was sent, or
+       * `null` when no complete read preceded it.
+       */
+      knownIds: readonly string[] | null;
     }
   | {
       kind: "api_spec_replace";
@@ -46,8 +54,12 @@ export type OutcomeLatch =
       message: string;
       specId: string;
       contentHash: string | null;
-      /** The target's `updated_at` as read before the document was sent. */
-      updatedAt: string;
+      /**
+       * The target's content hashes read before the document was sent (the
+       * cached summary and the Replace dialog's fresh document read), or
+       * `null` when there was no fresh read.
+       */
+      priorHashes: readonly string[] | null;
     };
 
 /** What the gateway has been seen to hold, from any read. */
@@ -86,6 +98,22 @@ function latchKey(latch: OutcomeLatch): string {
 }
 
 /**
+ * A random RFC 4122 version-4 id for a request that must be recognizable in a
+ * later read. `crypto.randomUUID` needs a secure context; `getRandomValues`
+ * does not, so it is the fallback. Throws only where the browser has no Web
+ * Crypto at all, before anything is sent.
+ */
+export function correlationId(): string {
+  const webCrypto = globalThis.crypto;
+  if (typeof webCrypto?.randomUUID === "function") return webCrypto.randomUUID();
+  const bytes = webCrypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+/**
  * The lowercase hex SHA-256 of a document's UTF-8 bytes, which is what Edge
  * stores as an API spec's `content_hash`; `null` where Web Crypto is not
  * available (an insecure context).
@@ -113,25 +141,23 @@ export function settledBy(latch: OutcomeLatch, observation: LatchObservation): b
       );
     case "api_spec_import": {
       const seen = observation.apiSpecs;
+      const known = latch.knownIds;
       return (
         latch.contentHash !== null &&
+        known !== null &&
         seen?.namespace === latch.namespace &&
-        seen.specs.some(
-          (spec) => spec.content_hash === latch.contentHash && !latch.knownIds.includes(spec.id),
-        )
+        seen.specs.some((spec) => spec.content_hash === latch.contentHash && !known.includes(spec.id))
       );
     }
     case "api_spec_replace": {
       const seen = observation.apiSpecs;
+      const sent = latch.contentHash;
       return (
-        latch.contentHash !== null &&
+        sent !== null &&
+        latch.priorHashes !== null &&
+        !latch.priorHashes.includes(sent) &&
         seen?.namespace === latch.namespace &&
-        seen.specs.some(
-          (spec) =>
-            spec.id === latch.specId &&
-            spec.content_hash === latch.contentHash &&
-            spec.updated_at !== latch.updatedAt,
-        )
+        seen.specs.some((spec) => spec.id === latch.specId && spec.content_hash === sent)
       );
     }
     default:

@@ -148,6 +148,11 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
     }
   }, [scope.namespace, specsSeen, writeLatch]);
 
+  // The hash of the document the Replace dialog read fresh from the gateway:
+  // the target's content just before this operator's edit, which a cached
+  // list summary may predate.
+  const replaceRead = useRef<{ specId: string; hash: Promise<string | null> } | null>(null);
+
   // Each opening is a new session, even when the same spec is reopened.
   const closeImport = () => {
     importGeneration.current += 1;
@@ -158,13 +163,17 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
   const openReplace = async (spec: ApiSpecSummary) => {
     if (!canWrite.allowed) return;
     const generation = ++importGeneration.current;
+    replaceRead.current = null;
     setReplaceTarget(spec);
     setImportDoc("");
     setImportLoading(true);
     setImportOpen(true);
     try {
       const doc = await apiSpecsApi.getDocument(scope, spec.id);
-      if (generation === importGeneration.current) setImportDoc(doc);
+      if (generation === importGeneration.current) {
+        replaceRead.current = { specId: spec.id, hash: documentHash(doc) };
+        setImportDoc(doc);
+      }
     } catch (err) {
       const message = await getApiErrorMessage(err, "Failed to load document");
       if (generation === importGeneration.current) toast("error", message);
@@ -194,7 +203,16 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
     const replaced = replaceTarget
       ? (specsSeen.find((spec) => spec.id === replaceTarget.id) ?? replaceTarget)
       : null;
+    const freshRead =
+      replaced && replaceRead.current?.specId === replaced.id ? replaceRead.current.hash : null;
     const seenBefore = specsSeen;
+    // Only a complete listing can show that a spec holding this document is
+    // new: the search collection, or a first page that holds every spec.
+    const completeBefore =
+      allQuery.data !== undefined ||
+      (pageQuery.data !== undefined &&
+        pageQuery.data.offset === 0 &&
+        pageQuery.data.items.length >= pageQuery.data.total);
     const sentHash = documentHash(importDoc);
     try {
       let message: string;
@@ -237,7 +255,10 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
       if (err instanceof MutationOutcomeUnknownError) {
         // Disarm at once; the document hash only adds the way out.
         const latchMessage = err.message;
-        const latch = (contentHash: string | null): OutcomeLatch =>
+        const latch = (
+          contentHash: string | null,
+          freshHash: string | null,
+        ): OutcomeLatch =>
           replaced
             ? {
                 kind: "api_spec_replace",
@@ -245,20 +266,21 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
                 message: latchMessage,
                 specId: replaced.id,
                 contentHash,
-                updatedAt: replaced.updated_at,
+                // Without the fresh read, no observation can be told apart
+                // from content that was already stored before this request.
+                priorHashes:
+                  freshHash === null ? null : [replaced.content_hash, freshHash],
               }
             : {
                 kind: "api_spec_import",
                 namespace: scope.namespace,
                 message: latchMessage,
                 contentHash,
-                knownIds: seenBefore
-                  .filter((spec) => contentHash !== null && spec.content_hash === contentHash)
-                  .map((spec) => spec.id),
+                knownIds: completeBefore ? seenBefore.map((spec) => spec.id) : null,
               };
-        latchOutcome(latch(null));
-        const hash = await sentHash;
-        if (hash !== null) latchOutcome(latch(hash));
+        latchOutcome(latch(null, null));
+        const [hash, freshHash] = await Promise.all([sentHash, freshRead]);
+        if (hash !== null) latchOutcome(latch(hash, freshHash));
       }
       const message = await getApiErrorMessage(err, "Spec import failed");
       if (generation === importGeneration.current) toast("error", message);

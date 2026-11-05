@@ -369,7 +369,14 @@ result. Foundry names each ACME order it creates or renews (the request's
 `id`), so the order with that id ends it; Edge refuses a second order with
 the same id. A spec write ends when a spec is read holding the exact document
 sent (its `content_hash`, the document's SHA-256; this needs a secure
-context). A newer record on another page proves nothing and is ignored.
+context): the replaced spec holding content it did not hold before (an
+unchanged resubmission of the document the Replace dialog read stays blocked
+until reload, since it cannot be told apart from what was already stored),
+or, for an import, a spec that a complete listing taken before the import
+did not hold. An import made
+after only a partial listing stays blocked until reload, since a spec on an
+unread page could already hold the same document. A newer record on another
+page proves nothing and is ignored.
 Inspect the spec resources or ACME orders before you reload or retry; the
 warning does not survive a page load. Only a BFF timeout with `phase: "upload"` is treated as
 a definite failure: the BFF streams the body, so the gateway may already have

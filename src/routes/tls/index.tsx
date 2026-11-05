@@ -63,6 +63,7 @@ import type { PaginatedResponse } from "@/api/types";
 import { usePaginationParams } from "@/hooks/usePagination";
 import { useCapabilities } from "@/stores/capabilities";
 import {
+  correlationId,
   latchKeys,
   latchOutcome,
   settleOutcomeLatches,
@@ -864,7 +865,13 @@ function AcmeTab() {
     }
     // Foundry names the order, so a later read can prove this request created
     // it (and Edge refuses a second order with the same id).
-    const orderId = crypto.randomUUID();
+    let orderId: string;
+    try {
+      orderId = correlationId();
+    } catch {
+      toast("error", "This browser cannot generate an ACME order id; the order was not sent.");
+      return;
+    }
     try {
       await createOrder.mutateAsync({
         id: orderId,
@@ -970,7 +977,13 @@ function AcmeTab() {
                     void runRowAction(`renew:${cert.id}`, async () => {
                       if (renewalUnknown(cert.id)) return;
                       // The renewal order is named here, as for a new order.
-                      const orderId = `renew-${crypto.randomUUID().replaceAll("-", "")}`;
+                      let orderId: string;
+                      try {
+                        orderId = `renew-${correlationId().replaceAll("-", "")}`;
+                      } catch {
+                        toast("error", "This browser cannot generate an ACME order id; the renewal was not sent.");
+                        return;
+                      }
                       try {
                         await renewCert.mutateAsync({
                           id: cert.id,

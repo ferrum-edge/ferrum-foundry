@@ -226,8 +226,9 @@ type HashOnCookieConfigDraft = WithNumberDrafts<HashOnCookieConfig, "ttl_seconds
 
 /**
  * Which upstream hash settings Edge reads for this draft. Every lane that
- * hashes (the upstream itself, each subset, each projected port override)
- * uses its own `hash_on` or falls back to the upstream's, and every cookie
+ * hashes (the upstream itself, each subset, each projected port override, and
+ * each port override applied to a hashing subset) uses its own `hash_on` or
+ * falls back to the upstream's, and every cookie
  * lane mints its cookie with the upstream's one `hash_on_cookie_config`.
  * So the two questions are separate: `hashKey` is whether any hashing lane
  * falls back to the upstream key, and `cookie` is whether any hashing lane's
@@ -245,17 +246,24 @@ function upstreamHashSettings(
   // The key of each hashing lane; `null` when it falls back to the upstream's.
   const laneKeys: (string | null)[] = [];
   if (algorithm === hashing) laneKeys.push(null);
+  let subsetHashes = false;
   for (const subset of subsets) {
     if (subset.name.trim() && (subset.algorithm || algorithm) === hashing) {
+      subsetHashes = true;
       laneKeys.push(subset.hashOn.trim() || null);
     }
   }
   for (const override of Object.values(portOverrides ?? {})) {
     const policy = (override ?? {}) as { algorithm?: unknown; hash_on?: unknown };
-    const effective = typeof policy.algorithm === "string" ? policy.algorithm : algorithm;
-    if (effective === hashing) {
-      laneKeys.push(typeof policy.hash_on === "string" && policy.hash_on.trim() ? policy.hash_on.trim() : null);
-    }
+    const algorithmOverridden = typeof policy.algorithm === "string";
+    const ownKey =
+      typeof policy.hash_on === "string" && policy.hash_on.trim() ? policy.hash_on.trim() : null;
+    // The port's own lane.
+    if ((algorithmOverridden ? policy.algorithm : algorithm) === hashing) laneKeys.push(ownKey);
+    // A port that does not override the algorithm, serving a hashing subset,
+    // hashes on its own key when it has one (Edge's
+    // `hash_on_strategy_for_selection`); without one the subset's lane applies.
+    if (!algorithmOverridden && subsetHashes && ownKey !== null) laneKeys.push(ownKey);
   }
   const upstreamKey = hashOn.trim();
   return {

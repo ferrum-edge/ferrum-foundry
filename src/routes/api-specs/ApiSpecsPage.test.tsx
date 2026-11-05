@@ -1,5 +1,4 @@
 import { act } from "react";
-import { createHash } from "node:crypto";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -34,7 +33,11 @@ function summary(id: string): ApiSpecSummary {
   };
 }
 
-const sha256 = (document: string) => createHash('sha256').update(document).digest('hex');
+// The lowercase-hex SHA-256 of the fixture document's UTF-8 bytes, which is
+// Edge's `content_hash` for a spec holding it.
+const DOCUMENT_A_SHA256 = '09fb3f175100d052d86fa9ae67e5dedf94d2c239d1bfec4da5f3e217585652b4';
+// The same for 'document A edited'.
+const EDITED_SHA256 = '70dd68d6fa151c951b1bb09761d71ffcc0aef18fd44f7c623804eec3c352f1ad';
 
 let host: HTMLDivElement;
 let root: Root;
@@ -42,11 +45,14 @@ let client: QueryClient;
 let reads: { id: string; resolve: (response: Response) => void }[];
 let writes: { id: string; document: string; resolve: (response: Response) => void }[];
 let specList: ApiSpecSummary[];
+/** Specs the list reports beyond the page it serves (an unread page). */
+let unreadSpecs: number;
 
 beforeEach(() => {
   reads = [];
   writes = [];
   specList = [summary("A"), summary("B")];
+  unreadSpecs = 0;
   vi.stubGlobal("Request", BasedRequest);
   vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
     const path = new URL(request.url).pathname;
@@ -56,7 +62,10 @@ beforeEach(() => {
       return new Promise<Response>((resolve) => writes.push({ id, document, resolve }));
     }
     if (id === "api-specs") {
-      return Response.json({ items: specList, total: specList.length, limit: 20, offset: 0, next_offset: null });
+      return Response.json({
+        items: specList, total: specList.length + unreadSpecs, limit: 20, offset: 0,
+        next_offset: unreadSpecs > 0 ? 20 : null,
+      });
     }
     return new Promise<Response>((resolve) => reads.push({ id, resolve }));
   }));
@@ -284,6 +293,7 @@ it.each(['import', 'replace'])('keeps an uncertain spec %s disarmed after leavin
     await openReplace(0, 1);
     await resolveRead(0, 'document A');
     await settle(() => expect(editor().disabled).toBe(false));
+    await edit('document A edited');
   } else {
     await click('Import Spec');
     await edit('document A');
@@ -320,8 +330,8 @@ it.each(['import', 'replace'])('keeps an uncertain spec %s disarmed after leavin
 
   // A read holding the very document this request sent ends the latch.
   specList = mode === 'replace'
-    ? [{ ...summary('A'), content_hash: sha256('document A'), updated_at: '2026-09-07T00:00:00Z' }, summary('B')]
-    : [summary('A'), summary('B'), { ...summary('C'), content_hash: sha256('document A') }];
+    ? [{ ...summary('A'), content_hash: EDITED_SHA256, updated_at: '2026-09-07T00:00:00Z' }, summary('B')]
+    : [summary('A'), summary('B'), { ...summary('C'), content_hash: DOCUMENT_A_SHA256 }];
   await act(async () => { await client.refetchQueries({ queryKey: ['apiSpecs'] }); });
   await settle(() => {
     expect(document.querySelector('[role="dialog"]')!.textContent).not.toContain('outcome unknown');
@@ -330,16 +340,40 @@ it.each(['import', 'replace'])('keeps an uncertain spec %s disarmed after leavin
   expect(writes).toHaveLength(1);
 });
 
+it('keeps an uncertain import latched when only part of the collection was read before it', async () => {
+  // A spec already holding the same document could sit on the unread page.
+  unreadSpecs = 20;
+  await mount();
+  await click('Import Spec');
+  await edit('document A');
+  const submit = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
+    .find((button) => button.textContent?.trim() === 'Import Spec')!;
+  await act(async () => submit.click());
+  await settle(() => expect(writes).toHaveLength(1));
+  await act(async () => writes[0]!.resolve(Response.json({
+    code: 'FERRUM_BFF_TIMEOUT', phase: 'response',
+  }, { status: 504 })));
+  await settle(() => expect(document.querySelector('[role="dialog"]')!.textContent).toContain('outcome unknown'));
+
+  specList = [summary('A'), summary('B'), { ...summary('C'), content_hash: DOCUMENT_A_SHA256 }];
+  await act(async () => { await client.refetchQueries({ queryKey: ['apiSpecs'] }); });
+  await settle(() => expect(host.textContent).toContain('API C'));
+  expect(document.querySelector('[role="dialog"]')!.textContent).toContain('outcome unknown');
+  expect(editor().disabled).toBe(true);
+  expect(writes).toHaveLength(1);
+});
+
 it('settles at once when a read during the request already shows the replacement', async () => {
   await mount();
   await openReplace(0, 1);
   await resolveRead(0, 'document A');
   await settle(() => expect(editor().disabled).toBe(false));
+  await edit('document A edited');
   await click('Replace Spec');
   await settle(() => expect(writes).toHaveLength(1));
 
   // The replacement lands and a list read shows it before the lost answer.
-  specList = [{ ...summary('A'), content_hash: sha256('document A'), updated_at: '2026-09-07T00:00:00Z' }, summary('B')];
+  specList = [{ ...summary('A'), content_hash: EDITED_SHA256, updated_at: '2026-09-07T00:00:00Z' }, summary('B')];
   await act(async () => { await client.refetchQueries({ queryKey: ['apiSpecs'] }); });
   await act(async () => writes[0]!.resolve(Response.json({
     code: 'FERRUM_BFF_TIMEOUT', phase: 'response',
@@ -349,6 +383,30 @@ it('settles at once when a read during the request already shows the replacement
     expect(document.querySelector('[role="dialog"]')!.textContent).not.toContain('outcome unknown');
     expect(editor().disabled).toBe(false);
   });
+});
+
+it('keeps an unchanged replacement latched when the cached summary predates what the dialog read', async () => {
+  await mount();
+  // The list cached A as summary('A'); another operator has since stored
+  // 'document A', which the Replace dialog reads fresh. It is resubmitted
+  // unchanged.
+  await openReplace(0, 1);
+  await resolveRead(0, 'document A');
+  await settle(() => expect(editor().disabled).toBe(false));
+  await click('Replace Spec');
+  await settle(() => expect(writes).toHaveLength(1));
+
+  // A refresh returns that pre-existing version, newer than the summary.
+  specList = [{ ...summary('A'), content_hash: DOCUMENT_A_SHA256, updated_at: '2026-09-07T00:00:00Z' }, summary('B')];
+  await act(async () => { await client.refetchQueries({ queryKey: ['apiSpecs'] }); });
+  await act(async () => writes[0]!.resolve(Response.json({
+    code: 'FERRUM_BFF_TIMEOUT', phase: 'response',
+  }, { status: 504 })));
+  await settle(() => expect(document.body.textContent).toContain('the gateway may already have committed this change'));
+  await act(async () => { await client.refetchQueries({ queryKey: ['apiSpecs'] }); });
+  expect(document.querySelector('[role="dialog"]')!.textContent).toContain('outcome unknown');
+  expect(editor().disabled).toBe(true);
+  expect(writes).toHaveLength(1);
 });
 
 it('reports an import that succeeds after its dialog was closed', async () => {

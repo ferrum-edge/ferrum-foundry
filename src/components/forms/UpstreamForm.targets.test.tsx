@@ -277,6 +277,15 @@ describe("TargetForm inside the upstream payload editor", () => {
       ["a projected port override", {
         port_overrides: { "8443": { algorithm: "consistent_hashing", hash_on: "cookie:port" } },
       }],
+      // Edge hashes a hashing subset's traffic on such a port with the port's
+      // own key, though the port alone does not hash.
+      ["a port override serving a hashing subset", {
+        subsets: [{
+          name: "canary", labels: { version: "v1" },
+          traffic_policy: { load_balancer_algorithm: "consistent_hashing", hash_on: "header:x-user" },
+        }],
+        port_overrides: { "8443": { hash_on: "cookie:port" } },
+      }],
     ])("keeps the cookie config %s with its own cookie key reads, dropping the unused upstream key", async (_lane, lane) => {
       await mount({
         ...initial, hash_on: "cookie:route", hash_on_cookie_config: cookieConfig, ...lane,
