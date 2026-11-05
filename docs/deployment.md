@@ -364,21 +364,19 @@ gateway reports a terminal state.
 
 An interrupted spec import or replacement, or an ACME create or renew, shows
 **outcome unknown** and blocks resubmission. The block outlives a tab switch
-or leaving the page, and ends only when a read shows that request's own
-result. Foundry names each ACME order it creates or renews (the request's
-`id`), so the order with that id ends it; Edge refuses a second order with
-the same id. A spec write ends when a spec is read holding the exact document
-sent (its `content_hash`, the document's SHA-256; this needs a secure
-context): the replaced spec holding content it did not hold before (an
-unchanged resubmission of the document the Replace dialog read stays blocked
-until reload, since it cannot be told apart from what was already stored),
-or, for an import, a spec that a complete listing taken before the import
-did not hold. An import made
-after only a partial listing stays blocked until reload, since a spec on an
-unread page could already hold the same document. A newer record on another
-page proves nothing and is ignored.
-Inspect the spec resources or ACME orders before you reload or retry; the
-warning does not survive a page load. Only a BFF timeout with `phase: "upload"` is treated as
+or leaving the page. For ACME it ends only when a read shows that request's
+own result: Foundry names each order it creates or renews (the request's
+`id`, shown in the warning), so the order with that id ends it, and Edge
+refuses a second order with the same id. Foundry reads that order directly
+when the block starts and whenever the ACME tab opens, so it need not be on
+a page you have open. A newer order on another page proves nothing and is
+ignored. A
+spec import or replacement carries nothing a read can match to the request
+(Edge assigns the spec id, and a spec with the same document may already have
+existed), so no read ends it: check the spec list and the resources the
+document manages, then choose **Allow another import or replacement** and
+confirm. Inspect the spec resources or ACME orders before you reload or
+retry; the warning does not survive a page load. Only a BFF timeout with `phase: "upload"` is treated as
 a definite failure: the BFF streams the body, so the gateway may already have
 the request headers and part of the body, but the complete body never reached
 it, and the gateway acts on a write only once it has the whole body. A

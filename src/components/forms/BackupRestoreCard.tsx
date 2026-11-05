@@ -308,7 +308,16 @@ export function BackupRestoreCard() {
       result = { kind: "done" };
     } catch (err) {
       if (attempt !== attemptRef.current) return;
-      result = await restoreRejection(err, pending, confirmed);
+      try {
+        result = await restoreRejection(err, pending, confirmed);
+      } catch {
+        // An answer Foundry cannot even classify says nothing about what ran:
+        // report it as unknown rather than leaving the flow running.
+        result = {
+          kind: "unknown",
+          outcome: { reason: "transport", detail: "Foundry could not read the gateway's answer." },
+        };
+      }
     }
     dispatch({ type: "settled", attempt, result });
   };

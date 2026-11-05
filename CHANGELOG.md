@@ -18,14 +18,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   background refresh.
 - "Outcome unknown" blocks on spec import/replace and ACME order creation,
   renewal and finalization outlive the ACME tab and the API specs page, so a
-  tab switch no longer re-arms a request that may have run. Each ends only on
-  a read of that request's own result: ACME create and renew now send a
-  Foundry-chosen order `id` (from `getRandomValues` outside a secure
-  context; nothing is sent if no id can be made), and a spec write matches
-  its document's SHA-256 `content_hash` (an import only against a complete
-  listing taken before it; a replace only with content the target did not
-  already hold, so an unchanged resubmission stays blocked until reload). A spec import that finishes after its dialog was
-  closed is still reported.
+  tab switch no longer re-arms a request that may have run. ACME create and
+  renew now send a Foundry-chosen order `id` (from `getRandomValues` outside
+  a secure context; nothing is sent if no id can be made), and only a read of
+  the order with that id ends their block; Foundry reads it directly when the
+  block starts and when the ACME tab opens. A spec import or replacement
+  block ends only when the operator, after checking the gateway, chooses
+  "Allow another import or replacement" and confirms (or reloads): no list
+  read can prove what such a request did. A spec import that finishes after
+  its dialog was closed is still reported.
 - A namespace-scoped session's "committed, live-apply not monitored" banner
   survives the next write, exactly as an unscoped `pending` monitor does.
 - An upstream sends `hash_on` only while a consistent-hashing lane falls back

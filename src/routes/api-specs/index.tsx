@@ -33,12 +33,10 @@ import { filterAndPage } from "@/lib/collectionSearch";
 import { useNamespace } from "@/stores/namespace";
 import { useCapabilities } from "@/stores/capabilities";
 import {
-  documentHash,
   latchKeys,
   latchOutcome,
-  settleOutcomeLatches,
+  releaseOutcomeLatch,
   useOutcomeLatches,
-  type OutcomeLatch,
 } from "@/stores/outcomeLatches";
 import { CapabilityNotice } from "@/components/shared/CapabilityGate";
 import { formatDateTime } from "@/lib/format";
@@ -95,13 +93,15 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
   const canWrite = capabilities.apiSpecs;
 
   // The outcome-unknown latch outlives this workspace (a namespace switch or
-  // leaving the route remounts it) and ends only when a spec read shows the
-  // document this write sent.
-  const writeLatch = useOutcomeLatches().get(latchKeys.apiSpecWrite(scope.namespace));
-  const unknownWrite =
-    writeLatch?.kind === "api_spec_import" || writeLatch?.kind === "api_spec_replace"
-      ? writeLatch.message
-      : null;
+  // leaving the route remounts it). No read can prove what an unanswered spec
+  // write did (Edge generates the spec id, and matching content is not an
+  // operation id), so it ends only on the operator's deliberate re-arm, after
+  // checking the gateway, or with the page.
+  const writeLatchKey = latchKeys.apiSpecWrite(scope.namespace);
+  const writeLatch = useOutcomeLatches().get(writeLatchKey);
+  const unknownWrite = writeLatch?.kind === "api_spec_write" ? writeLatch.message : null;
+  const [rearmOpen, setRearmOpen] = useState(false);
+  const writePending = importSpec.isPending || updateSpec.isPending;
   const [importOpen, setImportOpen] = useState(false);
   const [importDoc, setImportDoc] = useState("");
   const [importLoading, setImportLoading] = useState(false);
@@ -135,23 +135,6 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
   const total = searching ? searchPage.total : (pageQuery.data?.total ?? 0);
   const collectionQuery = searching ? allQuery : pageQuery;
   const collectionAvailable = resolveReadState(collectionQuery) === 'loaded';
-  // Every spec summary either read holds.
-  const specsSeen = useMemo(
-    () => [...(pageQuery.data?.items ?? []), ...(allQuery.data ?? [])],
-    [pageQuery.data, allQuery.data],
-  );
-  // Re-run when a latch is added too: a read that landed while the request was
-  // still in flight may already show its outcome.
-  useEffect(() => {
-    if (writeLatch && specsSeen.length > 0) {
-      settleOutcomeLatches({ apiSpecs: { namespace: scope.namespace, specs: specsSeen } });
-    }
-  }, [scope.namespace, specsSeen, writeLatch]);
-
-  // The hash of the document the Replace dialog read fresh from the gateway:
-  // the target's content just before this operator's edit, which a cached
-  // list summary may predate.
-  const replaceRead = useRef<{ specId: string; hash: Promise<string | null> } | null>(null);
 
   // Each opening is a new session, even when the same spec is reopened.
   const closeImport = () => {
@@ -163,17 +146,13 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
   const openReplace = async (spec: ApiSpecSummary) => {
     if (!canWrite.allowed) return;
     const generation = ++importGeneration.current;
-    replaceRead.current = null;
     setReplaceTarget(spec);
     setImportDoc("");
     setImportLoading(true);
     setImportOpen(true);
     try {
       const doc = await apiSpecsApi.getDocument(scope, spec.id);
-      if (generation === importGeneration.current) {
-        replaceRead.current = { specId: spec.id, hash: documentHash(doc) };
-        setImportDoc(doc);
-      }
+      if (generation === importGeneration.current) setImportDoc(doc);
     } catch (err) {
       const message = await getApiErrorMessage(err, "Failed to load document");
       if (generation === importGeneration.current) toast("error", message);
@@ -198,22 +177,6 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
       return;
     }
     const generation = importGeneration.current;
-    // Taken before sending, so a later read can show what this write did:
-    // Edge's `content_hash` is the SHA-256 of the document it stored.
-    const replaced = replaceTarget
-      ? (specsSeen.find((spec) => spec.id === replaceTarget.id) ?? replaceTarget)
-      : null;
-    const freshRead =
-      replaced && replaceRead.current?.specId === replaced.id ? replaceRead.current.hash : null;
-    const seenBefore = specsSeen;
-    // Only a complete listing can show that a spec holding this document is
-    // new: the search collection, or a first page that holds every spec.
-    const completeBefore =
-      allQuery.data !== undefined ||
-      (pageQuery.data !== undefined &&
-        pageQuery.data.offset === 0 &&
-        pageQuery.data.items.length >= pageQuery.data.total);
-    const sentHash = documentHash(importDoc);
     try {
       let message: string;
       if (replaceTarget) {
@@ -253,34 +216,7 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
       }
       // Retain the warning even if the operator closed/reopened the dialog.
       if (err instanceof MutationOutcomeUnknownError) {
-        // Disarm at once; the document hash only adds the way out.
-        const latchMessage = err.message;
-        const latch = (
-          contentHash: string | null,
-          freshHash: string | null,
-        ): OutcomeLatch =>
-          replaced
-            ? {
-                kind: "api_spec_replace",
-                namespace: scope.namespace,
-                message: latchMessage,
-                specId: replaced.id,
-                contentHash,
-                // Without the fresh read, no observation can be told apart
-                // from content that was already stored before this request.
-                priorHashes:
-                  freshHash === null ? null : [replaced.content_hash, freshHash],
-              }
-            : {
-                kind: "api_spec_import",
-                namespace: scope.namespace,
-                message: latchMessage,
-                contentHash,
-                knownIds: completeBefore ? seenBefore.map((spec) => spec.id) : null,
-              };
-        latchOutcome(latch(null, null));
-        const [hash, freshHash] = await Promise.all([sentHash, freshRead]);
-        if (hash !== null) latchOutcome(latch(hash, freshHash));
+        latchOutcome({ kind: "api_spec_write", namespace: scope.namespace, message: err.message });
       }
       const message = await getApiErrorMessage(err, "Spec import failed");
       if (generation === importGeneration.current) toast("error", message);
@@ -328,6 +264,34 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
       />
 
       <CapabilityNotice verdict={canWrite} />
+
+      {unknownWrite && (
+        <div
+          role="alert"
+          className="rounded-lg border border-warning/40 bg-warning/5 p-4 space-y-3"
+        >
+          <div>
+            <p className="text-sm font-semibold text-warning">
+              Spec write outcome unknown — imports and replacements are disarmed
+            </p>
+            <p className="text-sm text-text-secondary mt-1">{unknownWrite}</p>
+          </div>
+          <p className="text-xs text-text-muted">
+            Foundry cannot tell from the spec list whether that write ran: the gateway
+            assigns the spec id, and a spec holding the same document may already have
+            existed. Check the spec list below, and the proxy, upstream, and plugins the
+            document declares, before allowing another import or replacement.
+          </p>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={writePending}
+            onClick={() => setRearmOpen(true)}
+          >
+            Allow another import or replacement
+          </Button>
+        </div>
+      )}
 
       <SearchBar
         value={search}
@@ -433,7 +397,12 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
               <code className="font-mono">x-ferrum-plugins</code>, and{" "}
               <code className="font-mono">x-ferrum-validate</code> are optional.
             </p>
-            {unknownWrite && <p role="alert">{unknownWrite}</p>}
+            {unknownWrite && (
+              <p role="alert">
+                {unknownWrite} Close this dialog and check the spec list; once you have,
+                use “Allow another import or replacement” on the page.
+              </p>
+            )}
             <textarea
               aria-label="OpenAPI document"
               disabled={importLoading || Boolean(unknownWrite)}
@@ -471,6 +440,21 @@ function ApiSpecsWorkspace({ initialSpec }: { initialSpec: string }) {
           </pre>
         </DialogContent>
       </Dialog>
+
+      {/* Deliberate re-arm of an outcome-unknown spec write */}
+      <ConfirmDialog
+        open={rearmOpen && unknownWrite !== null}
+        onOpenChange={(open) => !open && setRearmOpen(false)}
+        title="Allow another spec import or replacement?"
+        description={`The earlier write in namespace "${scope.namespace}" may already have run. Confirm only after reading the spec list and the resources it manages back from the gateway; another import or replacement is sent as a new request.`}
+        confirmLabel="I've checked — allow writes"
+        variant="primary"
+        onConfirm={() => {
+          if (writePending) return;
+          releaseOutcomeLatch(writeLatchKey);
+          setRearmOpen(false);
+        }}
+      />
 
       {/* Delete confirm */}
       <ConfirmDialog

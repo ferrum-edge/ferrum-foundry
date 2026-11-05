@@ -50,7 +50,13 @@ import {
   useValidateTlsMaterial,
 } from "@/hooks/useTls";
 import { MutationOutcomeUnknownError } from '@/api/mutationOutcome';
-import { acmeOrderInProgress, AcmeFinalizationUnknownError, getAcmeOrder, TLS_VALIDATE_FIELDS } from "@/api/tls";
+import {
+  acmeOrderInProgress,
+  AcmeFinalizationUnknownError,
+  getAcmeOrder,
+  probeAcmeOrder,
+  TLS_VALIDATE_FIELDS,
+} from "@/api/tls";
 import type {
   ManagedTlsCollection,
   ManagedTlsRecord,
@@ -446,6 +452,7 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
         title={`Delete ${deleteTarget?.name || deleteTarget?.id}?`}
         description="This is a fleet-global record shared by every namespace. Records still referenced by TLS configuration cannot be deleted (the gateway returns 409)."
         confirmLabel="Delete"
+        loading={deleteRecord.isPending}
         onConfirm={async () => {
           if (!deleteTarget || !canWrite.allowed) return;
           try {
@@ -752,9 +759,30 @@ function AcmeTab() {
   const latches = useOutcomeLatches();
   const creationLatch = latches.get(latchKeys.acmeOrderCreation());
   const unknownCreation =
-    creationLatch?.kind === "acme_order_creation" ? creationLatch.message : null;
-  const renewalUnknown = (certificateId: string) =>
-    latches.has(latchKeys.acmeRenewal(certificateId));
+    creationLatch?.kind === "acme_order_creation"
+      ? `${creationLatch.message} Foundry named this order ${creationLatch.orderId}.`
+      : null;
+  /** The order id an uncertain renewal named, while it is latched. */
+  const unknownRenewalOrder = (certificateId: string) => {
+    const latch = latches.get(latchKeys.acmeRenewal(certificateId));
+    return latch?.kind === "acme_renewal" ? latch.orderId : null;
+  };
+  const renewalUnknown = (certificateId: string) => unknownRenewalOrder(certificateId) !== null;
+  // The order a latched create or renew named may sit on a page nobody reads,
+  // so each is read directly once per mount, when the tab opens or the latch
+  // is set. Only that order, found, settles it; any other answer keeps it.
+  const probedOrders = useRef(new Set<string>());
+  useEffect(() => {
+    for (const latch of latches.values()) {
+      if (latch.kind !== "acme_order_creation" && latch.kind !== "acme_renewal") continue;
+      if (probedOrders.current.has(latch.orderId)) continue;
+      probedOrders.current.add(latch.orderId);
+      void probeAcmeOrder(latch.orderId).then(
+        (order) => settleOutcomeLatches({ acmeOrders: [order] }),
+        () => undefined,
+      );
+    }
+  }, [latches]);
   // Re-run on every orders read and whenever a latch is added, so a read
   // that landed while the request was still in flight is also considered.
   useEffect(() => {
@@ -948,7 +976,8 @@ function AcmeTab() {
                 <Mono>{cert.source_uri}</Mono>
                 {renewalUnknown(cert.id) && (
                   <p role="alert">
-                    Renewal outcome unknown. Check orders and certificates before retrying.
+                    Renewal outcome unknown. Check orders and certificates before retrying;
+                    Foundry named this renewal order {unknownRenewalOrder(cert.id)}.
                   </p>
                 )}
               </div>

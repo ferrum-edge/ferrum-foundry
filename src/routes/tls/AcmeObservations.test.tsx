@@ -33,6 +33,9 @@ let extraOrders: AcmeOrder[];
 let secondPage: AcmeOrder[];
 let certificates: unknown[];
 let postBodies: Record<string, unknown>[];
+/** Orders the gateway answers a direct by-id read with. */
+let ordersById: Record<string, AcmeOrder>;
+let probes: string[];
 
 function cachedOrders() {
   return client.getQueryData<PaginatedResponse<AcmeOrder>>(firstPage)?.data;
@@ -56,6 +59,8 @@ beforeEach(() => {
   secondPage = [];
   certificates = [];
   postBodies = [];
+  ordersById = {};
+  probes = [];
   vi.stubGlobal("Request", BasedRequest);
   vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
     const url = new URL(request.url);
@@ -67,6 +72,12 @@ beforeEach(() => {
     }
     if (path.endsWith("/orders/fixture-order")) {
       return new Promise<Response>((resolve) => details.push(resolve));
+    }
+    const byId = path.match(/\/orders\/([^/]+)$/);
+    if (byId) {
+      probes.push(byId[1]!);
+      const found = ordersById[byId[1]!];
+      return found ? Response.json(found) : Response.json({ error: "not found" }, { status: 404 });
     }
     // Orders past the first page are served only to a read of that page, as
     // Edge pages its id-ordered list.
@@ -330,6 +341,31 @@ describe('outcome-unknown latches outlive the ACME tab', () => {
     }];
     await refetchOrders();
     await settle(() => {
+      expect(panel().textContent).not.toContain('Renewal outcome unknown');
+      expect(renew().disabled).toBe(false);
+    });
+    expect(posts).toBe(1);
+  });
+
+  it('reads the order a latched renewal named directly, so it settles off-page', async () => {
+    certificates = [fixtureCertificate];
+    await mount();
+    await settle(() => expect(renew()?.disabled).toBe(false));
+    await click('Renew');
+    await settle(() => expect(panel().textContent).toContain('Renewal outcome unknown'));
+    const orderId = postBodies[0]!.id as string;
+    // Probed once when the latch was set: not there yet, so it holds.
+    await settle(() => expect(probes).toEqual([orderId]));
+    expect(panel().textContent).toContain(orderId);
+    expect(renew().disabled).toBe(true);
+
+    // The order exists now, though on no page this tab has read.
+    ordersById[orderId] = {
+      ...order('pending_challenges'), id: orderId, certificate_id: 'fixture-cert',
+    };
+    await revisitAcmeTab();
+    await settle(() => {
+      expect(probes).toEqual([orderId, orderId]);
       expect(panel().textContent).not.toContain('Renewal outcome unknown');
       expect(renew().disabled).toBe(false);
     });

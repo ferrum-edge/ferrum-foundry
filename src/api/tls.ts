@@ -650,6 +650,19 @@ export async function getAcmeOrder(id: string): Promise<AcmeOrder> {
     .json<AcmeOrder>();
 }
 
+/**
+ * Read one order by the id Foundry chose for it, to resolve an unanswered
+ * create or renew. Silent: a `404` only means the order is not (yet) there.
+ */
+export async function probeAcmeOrder(id: string): Promise<AcmeOrder> {
+  return proxyApi
+    .get(`admin/tls/acme/orders/${pathSegment(id)}`, {
+      context: FLEET_GLOBAL_SILENT_CONTEXT,
+      retry: 0,
+    })
+    .json<AcmeOrder>();
+}
+
 export async function finalizeAcmeOrder(
   id: string,
   data: AcmeOrderFinalizeRequest = {},
