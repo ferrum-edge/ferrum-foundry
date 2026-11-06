@@ -23,6 +23,8 @@ import MeshPage from './mesh';
 import AuditPage from './audit';
 import ApiSpecsPage from './api-specs';
 
+const ROUTE_PARAM_PATTERN = /\$\w+/;
+
 // All components, providers, hooks, query transitions, and ky are real. Only
 // transport is controlled; no cache injection can manufacture an error state.
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -169,7 +171,7 @@ async function mount(Page: RouteComponent, path = '/view') {
   const route = createRoute({ getParentRoute: () => parent, path, component: Page });
   const router = createRouter({
     routeTree: parent.addChildren([route]),
-    history: createMemoryHistory({ initialEntries: [path.replace(/\$\w+/, 'shared')] }),
+    history: createMemoryHistory({ initialEntries: [path.replace(ROUTE_PARAM_PATTERN, 'shared')] }),
   });
   await act(async () => {
     await router.load();

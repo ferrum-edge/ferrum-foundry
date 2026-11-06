@@ -21,6 +21,9 @@ import {
   type Identity,
 } from "../support/stack";
 
+const HTTP_SCHEME_OPTION_PATTERN = /^HTTP \(/;
+const SEARCH_PROXIES_BY_NAME_PATH_PATTERN = /search proxies by name, path, or ID/i;
+
 const BACKEND_HOST = process.env.FERRUM_STARTER_BACKEND_HOST ?? "demo-backend";
 const BACKEND_PORT = process.env.FERRUM_STARTER_BACKEND_PORT ?? "8081";
 
@@ -105,7 +108,7 @@ test.describe("first route, first authenticated request", () => {
     // Plaintext to the disposable backend. The scheme is a real choice the
     // form makes explicit; it is not a protocol the gateway guesses.
     await page.getByRole("combobox", { name: "Backend Scheme" }).click();
-    await page.getByRole("option", { name: /^HTTP \(/ }).click();
+    await page.getByRole("option", { name: HTTP_SCHEME_OPTION_PATTERN }).click();
 
     await page.getByRole("button", { name: "Create Proxy" }).click();
     await expect(page.getByText("Proxy created successfully")).toBeVisible();
@@ -136,7 +139,7 @@ test.describe("first route, first authenticated request", () => {
     await page.getByRole("option", { name: "Proxy", exact: true }).click();
 
     // The proxy picker searches the catalog rather than asking for an id.
-    await page.getByPlaceholder(/search proxies by name, path, or ID/i).fill(created.proxyName);
+    await page.getByPlaceholder(SEARCH_PROXIES_BY_NAME_PATH_PATTERN).fill(created.proxyName);
     await page.getByRole("button", { name: new RegExp(created.proxyName) }).first().click();
 
     await page.getByRole("button", { name: "Create Plugin" }).click();

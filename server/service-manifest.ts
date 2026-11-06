@@ -8,6 +8,11 @@ import type {
 } from '../shared/service-manifest.js';
 export type { ServiceManifestPreview } from '../shared/service-manifest.js';
 
+const PATH_TEMPLATE_CHARACTER_PATTERN = /[{}*~ ?#;%\\]/;
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/;
+const TRAILING_SLASHES_PATTERN = /\/+$/;
+
 export const MANIFEST_BODY_LIMIT = 32 * 1024;
 export const MANIFEST_RESPONSE_LIMIT = 16 * 1024;
 export const TLS_PATH_REDACTION = '[REDACTED: TLS path metadata]';
@@ -63,15 +68,14 @@ export function parseManifestJson(raw: string): unknown {
 }
 
 function literalPath(value: string): boolean {
-  return value.startsWith('/') && !/[{}*~ ?#;%\\]/.test(value) && !value.includes('//')
+  return value.startsWith('/') && !PATH_TEMPLATE_CHARACTER_PATTERN.test(value) && !value.includes('//')
     && !value.split('/').some((part) => part === '.' || part === '..');
 }
 
 function safeStrings(value: unknown): boolean {
   if (typeof value === 'string') {
     // Bound presentation strings and reject control characters.
-    // eslint-disable-next-line no-control-regex
-    return value.length <= 2048 && !/[\u0000-\u001f\u007f]/.test(value);
+    return value.length <= 2048 && !CONTROL_CHARACTER_PATTERN.test(value);
   }
   if (Array.isArray(value)) return value.every(safeStrings);
   if (value && typeof value === 'object') return Object.values(value).every(safeStrings);
@@ -101,7 +105,7 @@ export function validatedManifest(body: unknown): Manifest | null {
   if (!literalPath(api.public_path) || !literalPath(api.service_base_path)
     || (health && !literalPath(health.path))) return null;
   if (agents?.endpoint_path) {
-    const prefix = `${api.public_path.replace(/\/+$/, '')}/`;
+    const prefix = `${api.public_path.replace(TRAILING_SLASHES_PATTERN, '')}/`;
     if (!literalPath(agents.endpoint_path) || !agents.endpoint_path.startsWith(prefix)
       || agents.endpoint_path.length === prefix.length) return null;
   }
@@ -164,7 +168,7 @@ export function createManifestPreview(manifest: Manifest): ServiceManifestPrevie
     id, name: service.name, namespace, listen_path: api.public_path,
     backend_scheme: upstream.scheme, strip_listen_path: api.strip_public_path,
     ...(api.service_base_path !== '/' ? {
-      backend_path: api.service_base_path.replace(/\/+$/, ''),
+      backend_path: api.service_base_path.replace(TRAILING_SLASHES_PATTERN, ''),
     } : {}),
     backend_connect_timeout_ms: timeouts.connect_ms,
     backend_read_timeout_ms: timeouts.read_ms,
@@ -201,7 +205,7 @@ export function createManifestPreview(manifest: Manifest): ServiceManifestPrevie
       openapiDeclared: api.openapi !== undefined,
       agents: agents ? {
         enabled: agents.enabled,
-        endpointPath: agents.endpoint_path ?? `${api.public_path.replace(/\/+$/, '')}/mcp`,
+        endpointPath: agents.endpoint_path ?? `${api.public_path.replace(TRAILING_SLASHES_PATTERN, '')}/mcp`,
         namespace: agents.namespace ?? service.name,
       } : null,
       tlsPathFields,

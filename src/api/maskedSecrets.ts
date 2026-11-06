@@ -71,9 +71,17 @@ export function isRedactionPlaceholder(value: unknown): boolean {
 // Kept here, import-free, so the gateway contract can load it; the failed-write
 // redaction (`secretRedaction.ts`) uses the same functions.
 
+const KEY_SEPARATORS_PATTERN = /[-._]/g;
+const KEY_WORD_PATTERN = /[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z0-9]+|[A-Z0-9]+/g;
+const TILDES_PATTERN = /~/g;
+const SLASHES_PATTERN = /\//g;
+const ESCAPED_SLASH_PATTERN = /~1/g;
+const ESCAPED_TILDE_PATTERN = /~0/g;
+const ARRAY_INDEX_PATTERN = /^(0|[1-9]\d*)$/;
+
 /** Edge's `normalize_config_key`: case and `-`, `.`, `_` do not distinguish keys. */
 export function normalizeConfigKey(key: string): string {
-  return key.replace(/[-._]/g, "").toLowerCase();
+  return key.replace(KEY_SEPARATORS_PATTERN, "").toLowerCase();
 }
 
 /** Edge's `DEFAULT_SENSITIVE_METADATA_KEYS`, matched as case-insensitive substrings. */
@@ -109,7 +117,7 @@ const SENSITIVE_NORMALIZED_SUBSTRINGS = [
 
 /** A key's words, split at delimiters and case changes (`APIKey` → `API`, `Key`). */
 function keySegments(key: string): string[] {
-  return key.match(/[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z0-9]+|[A-Z0-9]+/g) ?? [];
+  return key.match(KEY_WORD_PATTERN) ?? [];
 }
 
 /**
@@ -137,11 +145,11 @@ export function isEdgeSensitiveConfigKey(key: string): boolean {
 
 /** One RFC 6901 reference token, escaped as Edge's `push_json_pointer_segment` does. */
 export function pointerSegment(key: string): string {
-  return key.replace(/~/g, "~0").replace(/\//g, "~1");
+  return key.replace(TILDES_PATTERN, "~0").replace(SLASHES_PATTERN, "~1");
 }
 
 function unescapeSegment(segment: string): string {
-  return segment.replace(/~1/g, "/").replace(/~0/g, "~");
+  return segment.replace(ESCAPED_SLASH_PATTERN, "/").replace(ESCAPED_TILDE_PATTERN, "~");
 }
 
 /**
@@ -204,7 +212,7 @@ export function removeAtPointer(value: unknown, pointer: string): unknown {
     const last = depth === segments.length - 1;
     if (Array.isArray(node)) {
       const position = Number(segment);
-      if (!/^(0|[1-9]\d*)$/.test(segment) || position >= node.length) return node;
+      if (!ARRAY_INDEX_PATTERN.test(segment) || position >= node.length) return node;
       const copy = [...node];
       if (last) copy.splice(position, 1);
       else copy[position] = remove(copy[position], depth + 1);

@@ -11,6 +11,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createHarness, settle } from "@/test/__tests__/harness";
 import { PageHeader } from "./PageHeader";
 
+const H1_PATTERN = /<h1/g;
+
 let ui: ReturnType<typeof createHarness>;
 beforeEach(() => { ui = createHarness(); });
 afterEach(async () => ui.dispose());
@@ -50,7 +52,7 @@ describe("PageHeader", () => {
       <PageHeader title="Metrics" description="Gateway traffic" actions={<button type="button">Refresh Now</button>} />,
     );
     expect(html).toContain("<h1");
-    expect(html.match(/<h1/g)).toHaveLength(1);
+    expect(html.match(H1_PATTERN)).toHaveLength(1);
     expect(html).toContain("Gateway traffic");
     expect(html).toContain("Refresh Now");
     expect(html).not.toContain('aria-label="Breadcrumb"');

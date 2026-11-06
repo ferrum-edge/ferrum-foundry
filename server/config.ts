@@ -10,6 +10,8 @@ import {
   DEFAULT_WRITE_TIMEOUT,
 } from './waitBudget.js';
 
+const INTEGER_PATTERN = /^-?\d+$/;
+
 export type GatewayRole = 'viewer' | 'operator' | 'admin';
 export type AuthMode = 'static' | 'trusted-proxy';
 
@@ -191,7 +193,7 @@ function parseInteger(
 ): number {
   const raw = optionalEnv(name);
   if (raw === undefined) return fallback;
-  if (!/^-?\d+$/.test(raw)) throw new Error(`${name} must be an integer`);
+  if (!INTEGER_PATTERN.test(raw)) throw new Error(`${name} must be an integer`);
   const value = Number(raw);
   if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
     throw new Error(`${name} must be an integer between ${minimum} and ${maximum}`);

@@ -14,6 +14,36 @@ import {
   getGuidedSchema,
 } from "../src/lib/pluginSchemas.ts";
 
+const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/;
+const ID_SCHEMA_HASH_PATTERN = /id: schema-hash\n/;
+const ALWAYS_STEPS_GUIDED_SCHEMAS_OUTCOME_PATTERN =
+  /always\(\) && steps\.guided-schemas\.outcome != 'skipped'/;
+const TEST_PLUGIN_SCHEMA_PRODUCER_JSON_PATTERN =
+  /test -s plugin-schema-producer\.json\n\s+sha256sum plugin-schema-producer\.json > plugin-schema-producer\.json\.sha256\n\s+test -s plugin-schema-producer\.json\.sha256/;
+const IF_ALWAYS_STEPS_SCHEMA_HASH_PATTERN =
+  /if: \$\{\{ always\(\) && steps\.schema-hash\.outcome == 'success' \}\}/;
+const NAME_PLUGIN_SCHEMA_PRODUCER_GITHUB_PATTERN =
+  /name: plugin-schema-producer-\$\{\{ github\.sha \}\}-attempt-\$\{\{ github\.run_attempt \}\}/;
+const PATH_RUNNER_TEMP_PLUGIN_SCHEMA_PATTERN =
+  /path: \|\n\s+\$\{\{ runner\.temp \}\}\/plugin-schema-producer\.json\n\s+\$\{\{ runner\.temp \}\}\/plugin-schema-producer\.json\.sha256/;
+const IF_NO_FILES_FOUND_ERROR_PATTERN = /if-no-files-found: error/;
+const OVERWRITE_CONTINUE_ON_ERROR_PATTERN = /overwrite:|continue-on-error:/;
+const NAME_QUALIFICATION_SOURCE_GITHUB_SHA_PATTERN =
+  /name: Qualification Source \(\$\{\{ github\.sha \}\}; source /;
+const SOURCE_GITHUB_EVENT_PULL_REQUEST_HEAD_PATTERN =
+  /source \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/;
+const BASE_GITHUB_EVENT_PULL_REQUEST_SHA_PATTERN =
+  /base \$\{\{ github\.event\.pull_request\.base\.sha \|\| github\.sha \}\}/;
+const REF_GITHUB_EVENT_PULL_REQUEST_BASE_PATTERN =
+  /ref \$\{\{ github\.event\.pull_request\.base\.ref \|\| github\.ref_name \}\}\)/;
+const FETCH_DEPTH_2_PATTERN = /fetch-depth: 2/;
+const TEST_GIT_REV_PARSE_HEAD_PATTERN = /test "\$\(git rev-parse HEAD\)" = "\$GITHUB_SHA"/;
+const TEST_GIT_REV_PARSE_HEAD_1_PATTERN =
+  /test "\$\(git rev-parse HEAD\^1\)" = "\$QUALIFICATION_BASE"/;
+const TEST_GIT_REV_PARSE_HEAD_2_PATTERN =
+  /test "\$\(git rev-parse HEAD\^2\)" = "\$QUALIFICATION_SOURCE"/;
+const CONTINUE_ON_ERROR_IF_PATTERN = /continue-on-error:|\n\s+if:/;
+
 const SPEC = [
   "components:",
   "  schemas:",
@@ -86,7 +116,7 @@ test("every guided plugin's schema components are pinned", () => {
 
 test("every pinned digest is a full SHA-256", () => {
   for (const entry of PLUGIN_SCHEMA_PROVENANCE) {
-    assert.match(entry.sha256, /^[0-9a-f]{64}$/, entry.component);
+    assert.match(entry.sha256, SHA256_HEX_PATTERN, entry.component);
   }
 });
 
@@ -113,25 +143,25 @@ test("hosted producer uploads require both nonempty files and successful hashing
   const end = workflow.indexOf("      - name: Verify the plugin sensitivity table", uploadStart);
   assert.ok(hashStart > 0 && uploadStart > hashStart && end > uploadStart);
   const hash = workflow.slice(hashStart, uploadStart);
-  assert.match(hash, /id: schema-hash\n/);
+  assert.match(hash, ID_SCHEMA_HASH_PATTERN);
   // Drift remains a failing job, but its valid exporter output can be hashed.
-  assert.match(hash, /always\(\) && steps\.guided-schemas\.outcome != 'skipped'/);
+  assert.match(hash, ALWAYS_STEPS_GUIDED_SCHEMAS_OUTCOME_PATTERN);
   assert.match(
     hash,
-    /test -s plugin-schema-producer\.json\n\s+sha256sum plugin-schema-producer\.json > plugin-schema-producer\.json\.sha256\n\s+test -s plugin-schema-producer\.json\.sha256/,
+    TEST_PLUGIN_SCHEMA_PRODUCER_JSON_PATTERN,
   );
   const upload = workflow.slice(uploadStart, end);
-  assert.match(upload, /if: \$\{\{ always\(\) && steps\.schema-hash\.outcome == 'success' \}\}/);
+  assert.match(upload, IF_ALWAYS_STEPS_SCHEMA_HASH_PATTERN);
   assert.match(
     upload,
-    /name: plugin-schema-producer-\$\{\{ github\.sha \}\}-attempt-\$\{\{ github\.run_attempt \}\}/,
+    NAME_PLUGIN_SCHEMA_PRODUCER_GITHUB_PATTERN,
   );
   assert.match(
     upload,
-    /path: \|\n\s+\$\{\{ runner\.temp \}\}\/plugin-schema-producer\.json\n\s+\$\{\{ runner\.temp \}\}\/plugin-schema-producer\.json\.sha256/,
+    PATH_RUNNER_TEMP_PLUGIN_SCHEMA_PATTERN,
   );
-  assert.match(upload, /if-no-files-found: error/);
-  assert.doesNotMatch(upload, /overwrite:|continue-on-error:/);
+  assert.match(upload, IF_NO_FILES_FOUND_ERROR_PATTERN);
+  assert.doesNotMatch(upload, OVERWRITE_CONTINUE_ON_ERROR_PATTERN);
 });
 
 test("hosted qualification captures original tested, source and base identities", () => {
@@ -140,13 +170,13 @@ test("hosted qualification captures original tested, source and base identities"
     workflow.indexOf("  qualification-source:"),
     workflow.indexOf("  quality:"),
   );
-  assert.match(source, /name: Qualification Source \(\$\{\{ github\.sha \}\}; source /);
-  assert.match(source, /source \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/);
-  assert.match(source, /base \$\{\{ github\.event\.pull_request\.base\.sha \|\| github\.sha \}\}/);
-  assert.match(source, /ref \$\{\{ github\.event\.pull_request\.base\.ref \|\| github\.ref_name \}\}\)/);
-  assert.match(source, /fetch-depth: 2/);
-  assert.match(source, /test "\$\(git rev-parse HEAD\)" = "\$GITHUB_SHA"/);
-  assert.match(source, /test "\$\(git rev-parse HEAD\^1\)" = "\$QUALIFICATION_BASE"/);
-  assert.match(source, /test "\$\(git rev-parse HEAD\^2\)" = "\$QUALIFICATION_SOURCE"/);
-  assert.doesNotMatch(source, /continue-on-error:|\n\s+if:/);
+  assert.match(source, NAME_QUALIFICATION_SOURCE_GITHUB_SHA_PATTERN);
+  assert.match(source, SOURCE_GITHUB_EVENT_PULL_REQUEST_HEAD_PATTERN);
+  assert.match(source, BASE_GITHUB_EVENT_PULL_REQUEST_SHA_PATTERN);
+  assert.match(source, REF_GITHUB_EVENT_PULL_REQUEST_BASE_PATTERN);
+  assert.match(source, FETCH_DEPTH_2_PATTERN);
+  assert.match(source, TEST_GIT_REV_PARSE_HEAD_PATTERN);
+  assert.match(source, TEST_GIT_REV_PARSE_HEAD_1_PATTERN);
+  assert.match(source, TEST_GIT_REV_PARSE_HEAD_2_PATTERN);
+  assert.doesNotMatch(source, CONTINUE_ON_ERROR_IF_PATTERN);
 });

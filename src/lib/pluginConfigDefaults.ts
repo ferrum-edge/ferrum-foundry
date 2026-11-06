@@ -240,6 +240,10 @@ function formatPluginWord(word: string): string {
   return ACRONYM_TOKENS[lower] ?? lower.charAt(0).toUpperCase() + lower.slice(1);
 }
 
+const PLUGIN_NAME_SEPARATORS_PATTERN = /[_\s-]+/;
+const PLACEHOLDER_SECRET_PATTERN =
+  /^(?:change[-_]?me(?:[-_].*)?|replace[-_](?:with|me)(?:[-_].*)?)$/i;
+
 /**
  * Human-readable display name for a plugin key
  * (`ai_prompt_shield` -> "AI Prompt Shield", `cors` -> "CORS").
@@ -256,7 +260,7 @@ export function formatPluginName(pluginName: string): string {
   const override = PLUGIN_DISPLAY_NAMES[key.toLowerCase()];
   if (override) return override;
   return key
-    .split(/[_\s-]+/)
+    .split(PLUGIN_NAME_SEPARATORS_PATTERN)
     .filter(Boolean)
     .map(formatPluginWord)
     .join(" ");
@@ -1189,10 +1193,7 @@ export function oidcEncryptionSecretProblem(config: unknown): string | null {
 
 function oidcSecretValueProblem(value: string, label = ""): string | null {
   const secret = value.trim();
-  if (
-    secret.startsWith("${") ||
-    /^(?:change[-_]?me(?:[-_].*)?|replace[-_](?:with|me)(?:[-_].*)?)$/i.test(secret)
-  ) {
+  if (secret.startsWith("${") || PLACEHOLDER_SECRET_PATTERN.test(secret)) {
     return `Replace the placeholder with a unique ${label}session encryption secret.`;
   }
   if (new TextEncoder().encode(secret).length < 32) {

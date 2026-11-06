@@ -15,6 +15,10 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "../support/stack";
 
+const CONTENT_SECURITY_POLICY_PATTERN = /content security policy/i;
+const NONCE_PATTERN = /'nonce-([^']+)'/;
+const NAMESPACE_PATTERN = /namespace/i;
+
 type ViolationWindow = Window & { __cspViolations?: string[] };
 
 /** The style-src directive of a response's policy. */
@@ -54,14 +58,14 @@ test.describe("content security policy", () => {
     });
     const consoleViolations: string[] = [];
     page.on("console", (message) => {
-      if (/content security policy/i.test(message.text())) consoleViolations.push(message.text());
+      if (CONTENT_SECURITY_POLICY_PATTERN.test(message.text())) consoleViolations.push(message.text());
     });
 
     const response = await page.goto("/proxies");
     expect(response?.status()).toBe(200);
     const policy = styleSrc(response?.headers()["content-security-policy"]);
     expect(policy).not.toContain("'unsafe-inline'");
-    const nonce = /'nonce-([^']+)'/.exec(policy)?.[1];
+    const nonce = NONCE_PATTERN.exec(policy)?.[1];
     expect(nonce, "style-src names a per-response nonce").toBeTruthy();
     // The shell hands the app the same nonce the header names.
     await expect
@@ -71,7 +75,7 @@ test.describe("content security policy", () => {
       .toBe(nonce);
 
     // Select: the scroll lock, and the viewport's own <style>.
-    const namespace = page.getByRole("combobox", { name: /namespace/i });
+    const namespace = page.getByRole("combobox", { name: NAMESPACE_PATTERN });
     await namespace.click();
     await expect(page.getByRole("listbox")).toBeVisible();
     await expectScrollLockApplied(page);

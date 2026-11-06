@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const IN_PROGRESS_UNKNOWN_RE_CHECK_PATTERN = /in progress.*unknown.*Re-check/;
+
 const NativeRequest = Request;
 class BasedRequest extends NativeRequest {
   constructor(input: RequestInfo | URL, init?: RequestInit) {
@@ -147,7 +149,7 @@ describe("configured client server-side waiting calls", () => {
     await vi.advanceTimersByTimeAsync(1);
     const error = await result;
     expect(error).toBeInstanceOf(AcmeFinalizationUnknownError);
-    expect(error.message).toMatch(/in progress.*unknown.*Re-check/);
+    expect(error.message).toMatch(IN_PROGRESS_UNKNOWN_RE_CHECK_PATTERN);
     await expect(getAcmeOrder("order")).resolves.toMatchObject({ status: "processing" });
     expect(requests.map((request) => request.method)).toEqual(["POST", "GET"]);
     expect(await requests[0].json()).toMatchObject({ poll_timeout_seconds: seconds });

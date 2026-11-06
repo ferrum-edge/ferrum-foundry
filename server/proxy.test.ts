@@ -6,6 +6,8 @@ import type { FastifyInstance } from 'fastify';
 import { decodeJwt } from 'jose';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
+const BEARER_PATTERN = /^Bearer /;
+
 const BFF_TOKEN = 'proxy-test-bff-token-is-long-enough-123';
 const JWT_SECRET = 'proxy-test-jwt-secret-is-long-enough-123';
 const snapshot: Record<string, string | undefined> = {};
@@ -704,7 +706,7 @@ describe('streaming gateway proxy', () => {
     const request = observed.at(-1);
     expect(request?.url).toBe('/echo?apply=async');
     expect(request?.body).toBe(raw);
-    const token = request?.authorization?.replace(/^Bearer /, '');
+    const token = request?.authorization?.replace(BEARER_PATTERN, '');
     expect(token).toBeTruthy();
     expect(decodeJwt(token as string)).toMatchObject({
       sub: 'ferrum-foundry-static',

@@ -5,6 +5,8 @@ import type { FastifyInstance } from 'fastify';
 import { decodeJwt } from 'jose';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const BEARER_PATTERN = /^Bearer /;
+
 const TOKEN = 'settings-publication-login-fixture-long-enough';
 let upstream: Server | undefined;
 let app: FastifyInstance | undefined;
@@ -34,7 +36,7 @@ beforeEach(async () => {
       response.end('{"ready":false}');
       return;
     }
-    const token = request.headers.authorization?.replace(/^Bearer /, '') ?? '';
+    const token = request.headers.authorization?.replace(BEARER_PATTERN, '') ?? '';
     response.end(JSON.stringify({ issuer: decodeJwt(token).iss }));
   });
   upstream.listen(0, '127.0.0.1');

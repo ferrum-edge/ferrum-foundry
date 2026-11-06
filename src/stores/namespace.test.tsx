@@ -9,6 +9,8 @@ import {
   useNamespace,
 } from "./namespace";
 
+const URL_SCHEME_PATTERN = /^[a-z][a-z0-9+.-]*:/i;
+
 // The provider only reads `principal` from the auth store; a real
 // AuthProvider would need a query client and a session round-trip.
 const auth = vi.hoisted(() => ({
@@ -50,7 +52,7 @@ function FirstRequest({ onDispatch }: { onDispatch: (namespace: string) => void 
 
 class BasedRequest extends Request {
   constructor(input: RequestInfo | URL, init?: RequestInit) {
-    if (typeof input === "string" && !/^[a-z][a-z0-9+.-]*:/i.test(input)) {
+    if (typeof input === "string" && !URL_SCHEME_PATTERN.test(input)) {
       input = new URL(input, "http://localhost").toString();
     }
     super(input, init);

@@ -16,6 +16,11 @@ function optionalEnv(
   return value || undefined;
 }
 
+const INTEGER_PATTERN = /^-?\d+$/;
+const IPV4_OCTET_PATTERN = /^(0|[1-9]\d{0,2})$/;
+const NON_IPV6_CHARACTER_PATTERN = /[^0-9A-Fa-f:.]/;
+const UNSAFE_HOST_CHARACTER_PATTERN = /[/\\?#@%\s]/;
+
 function parsePort(
   env: Record<string, string | undefined>,
   name: string,
@@ -23,7 +28,7 @@ function parsePort(
 ): number {
   const raw = optionalEnv(env, name);
   if (raw === undefined) return fallback;
-  if (!/^-?\d+$/.test(raw)) throw new Error(`${name} must be an integer`);
+  if (!INTEGER_PATTERN.test(raw)) throw new Error(`${name} must be an integer`);
   const value = Number(raw);
   if (!Number.isSafeInteger(value) || value < 1 || value > 65_535) {
     throw new Error(`${name} must be an integer between 1 and 65535`);
@@ -70,13 +75,13 @@ function isIPv4(value: string): boolean {
   const octets = value.split(".");
   if (octets.length !== 4) return false;
   return octets.every((octet) => {
-    if (!/^(0|[1-9]\d{0,2})$/.test(octet)) return false;
+    if (!IPV4_OCTET_PATTERN.test(octet)) return false;
     return Number(octet) <= 255;
   });
 }
 
 function isIPv6(value: string): boolean {
-  if (!value.includes(":") || /[^0-9A-Fa-f:.]/.test(value)) return false;
+  if (!value.includes(":") || NON_IPV6_CHARACTER_PATTERN.test(value)) return false;
   try {
     const parsed = new URL(`http://[${value}]`);
     return !parsed.port && !parsed.username && parsed.pathname === "/";
@@ -98,7 +103,7 @@ function parseDevHost(env: Record<string, string | undefined>): string {
     throw new Error(rejected);
   }
   if (lowered === "localhost") return DEFAULT_DEV_HOST;
-  if (/[/\\?#@%\s]/.test(raw)) throw new Error(rejected);
+  if (UNSAFE_HOST_CHARACTER_PATTERN.test(raw)) throw new Error(rejected);
 
   const address = unwrapIpv6Brackets(raw);
   if (isIPv4(address) || isIPv6(address)) return address;

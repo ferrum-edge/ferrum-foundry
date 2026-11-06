@@ -20,6 +20,11 @@ import {
   updatePluginWithMembership,
 } from "./pluginMembership";
 
+const REMAINING_PROXY_REFERENCES_NONE_PATTERN = /remaining proxy references: none/;
+const PLUGIN_KEYAUTH_1_WAS_CREATED_PATTERN = /plugin keyauth-1 was created and kept/;
+const WAS_CREATED_AND_KEPT_PATTERN = /was created and kept/;
+const REMAINING_PROXY_REFERENCES_CHECKOUT_PATTERN = /remaining proxy references: checkout/;
+
 function makeProxy(id: string, pluginIds: string[] = []): Proxy {
   return {
     id,
@@ -1114,7 +1119,7 @@ describe("proxy-scoped attachment", () => {
     // that no proxy runs it. Deleting it could not be made safe (#608).
     expect(failure).toBeInstanceOf(PluginMembershipError);
     expect(failure!.message).toContain("the new plugin was kept");
-    expect(failure!.recovery.join(" ")).toMatch(/remaining proxy references: none/);
+    expect(failure!.recovery.join(" ")).toMatch(REMAINING_PROXY_REFERENCES_NONE_PATTERN);
     expect(stack.plugins.has("keyauth-1")).toBe(true);
     expect(memberships(stack.proxies, "keyauth-1")).toEqual([]);
     expect(stack.counts().deleteCalls).toBe(0);
@@ -1130,8 +1135,8 @@ describe("proxy-scoped attachment", () => {
       .then(() => null, (error: unknown) => error as PluginMembershipError);
 
     expect(failure).toBeInstanceOf(PluginMembershipError);
-    expect(failure!.recovery.join(" ")).toMatch(/plugin keyauth-1 was created and kept/);
-    expect(failure!.recovery.join(" ")).toMatch(/remaining proxy references: none/);
+    expect(failure!.recovery.join(" ")).toMatch(PLUGIN_KEYAUTH_1_WAS_CREATED_PATTERN);
+    expect(failure!.recovery.join(" ")).toMatch(REMAINING_PROXY_REFERENCES_NONE_PATTERN);
     expect(failure!.lastKnownConfig?.plugin_name).toBe("key_auth");
   });
 
@@ -1153,9 +1158,9 @@ describe("proxy-scoped attachment", () => {
       .then(() => null, (error: unknown) => error as PluginMembershipError);
 
     expect(failure).toBeInstanceOf(PluginMembershipError);
-    expect(failure!.recovery.join(" ")).toMatch(/was created and kept/);
+    expect(failure!.recovery.join(" ")).toMatch(WAS_CREATED_AND_KEPT_PATTERN);
     // The association Edge made is reported as observed, not assumed absent.
-    expect(failure!.recovery.join(" ")).toMatch(/remaining proxy references: checkout/);
+    expect(failure!.recovery.join(" ")).toMatch(REMAINING_PROXY_REFERENCES_CHECKOUT_PATTERN);
     expect(stack.plugins.get("keyauth-1")?.config).toEqual({ key_location: "header:X-Other" });
     expect(stack.counts().deleteCalls).toBe(0);
   });
@@ -1170,7 +1175,7 @@ describe("proxy-scoped attachment", () => {
       .then(() => null, (error: unknown) => error as PluginMembershipError);
 
     expect(failure).toBeInstanceOf(PluginMembershipError);
-    expect(failure!.recovery.join(" ")).toMatch(/was created and kept/);
+    expect(failure!.recovery.join(" ")).toMatch(WAS_CREATED_AND_KEPT_PATTERN);
     expect(stack.counts().deleteCalls).toBe(0);
     expect(stack.plugins.has("keyauth-1")).toBe(true);
   });

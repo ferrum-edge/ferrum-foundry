@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { confirmTarget, runIdentityBoundary, status } from "./starter-journey.mjs";
 
+const REFUSING_TO_SEND_THE_PROOF_PATTERN = /Refusing to send the proof secret/;
+
 test("status refuses to send the proof header to a remote plaintext URL", async () => {
   let requests = 0;
 
@@ -15,7 +17,7 @@ test("status refuses to send the proof header to a remote plaintext URL", async 
       },
       "http://foundry.example.com",
     ),
-    /Refusing to send the proof secret/,
+    REFUSING_TO_SEND_THE_PROOF_PATTERN,
   );
 
   assert.equal(requests, 0, "status must refuse before making a request");
@@ -34,7 +36,7 @@ test("the journey rejects a confirmed 127-prefixed DNS target before its first r
         return new Response("", { status: 401 });
       },
     }),
-    /Refusing to send the proof secret/,
+    REFUSING_TO_SEND_THE_PROOF_PATTERN,
   );
 
   assert.equal(requests, 0, "the identity checks must not start for a rejected target");

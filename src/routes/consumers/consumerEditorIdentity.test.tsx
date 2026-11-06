@@ -20,6 +20,9 @@ import {
 import { inputByLabelOrNull } from "@/test/fields";
 import ConsumerDetailPage from "./$consumerId";
 
+const URL_SCHEME_PATTERN = /^[a-z][a-z0-9+.-]*:/i;
+const PROXIES_PLUGINS_CONFIG_CONSUMERS_PATTERN = /\/(proxies|plugins\/config|consumers)$/;
+
 vi.mock("@/stores/auth", () => ({
   useAuth: () => ({ principal: null }),
 }));
@@ -30,7 +33,7 @@ vi.mock("@/stores/auth", () => ({
 
 class BasedRequest extends Request {
   constructor(input: RequestInfo | URL, init?: RequestInit) {
-    if (typeof input === "string" && !/^[a-z][a-z0-9+.-]*:/i.test(input)) {
+    if (typeof input === "string" && !URL_SCHEME_PATTERN.test(input)) {
       input = new URL(input, "http://localhost").toString();
     }
     super(input, init);
@@ -367,7 +370,7 @@ describe("consumer editor identity across a namespace switch", () => {
     await waitFor(() => heading() === "tenant-a-user");
     const collectionReads = () => captured.filter((request) => {
       const path = new URL(request.url).pathname;
-      return request.method === "GET" && /\/(proxies|plugins\/config|consumers)$/.test(path);
+      return request.method === "GET" && PROXIES_PLUGINS_CONFIG_CONSUMERS_PATTERN.test(path);
     });
     expect(collectionReads()).toEqual([]);
     expect(pageText()).toContain("Matched Proxies (unknown)");

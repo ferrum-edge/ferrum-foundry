@@ -12,6 +12,14 @@ import {
   NAMESPACE_NAME_MAX_LENGTH,
 } from "./namespaces";
 
+const REQUIRED_PATTERN = /required/;
+const LENGTH_254_PATTERN = /254/;
+const API_PROXY_NAMESPACES_STAGING_PATTERN = /\/api\/proxy\/namespaces\/staging$/;
+const API_PROXY_NAMESPACES_PATTERN = /\/api\/proxy\/namespaces$/;
+const API_PROXY_NAMESPACES_QA_PATTERN = /\/api\/proxy\/namespaces\/qa$/;
+const API_PROXY_NAMESPACES_QA_CONFIRM_PATTERN = /\/api\/proxy\/namespaces\/qa\?confirm=qa$/;
+const API_PROXY_NAMESPACES_A_2FB_PATTERN = /\/api\/proxy\/namespaces\/a%2Fb$/;
+
 /* ================================================================== */
 /*  validateNamespaceName (mirrors ^[a-zA-Z0-9][a-zA-Z0-9._-]*$)      */
 /* ================================================================== */
@@ -33,13 +41,13 @@ describe("validateNamespaceName", () => {
   });
 
   it("rejects the empty string", () => {
-    expect(validateNamespaceName("")).toMatch(/required/);
+    expect(validateNamespaceName("")).toMatch(REQUIRED_PATTERN);
   });
 
   it("rejects names longer than 254 characters", () => {
     expect(
       validateNamespaceName("a".repeat(NAMESPACE_NAME_MAX_LENGTH + 1)),
-    ).toMatch(/254/);
+    ).toMatch(LENGTH_254_PATTERN);
   });
 
   it("rejects names starting with a separator", () => {
@@ -292,7 +300,7 @@ describe("namespace API requests", () => {
     const namespace = await get(scope, "staging");
     expect(namespace.name).toBe("staging");
     expect(captured[0].method).toBe("GET");
-    expect(captured[0].url).toMatch(/\/api\/proxy\/namespaces\/staging$/);
+    expect(captured[0].url).toMatch(API_PROXY_NAMESPACES_STAGING_PATTERN);
   });
 
   it("create() POSTs the CreateNamespaceRequest body", async () => {
@@ -309,7 +317,7 @@ describe("namespace API requests", () => {
 
     await create(scope, { name: "qa", description: "QA tenant" });
     expect(captured[0].method).toBe("POST");
-    expect(captured[0].url).toMatch(/\/api\/proxy\/namespaces$/);
+    expect(captured[0].url).toMatch(API_PROXY_NAMESPACES_PATTERN);
     expect(captured[0].body).toEqual({ name: "qa", description: "QA tenant" });
   });
 
@@ -326,7 +334,7 @@ describe("namespace API requests", () => {
 
     await update(scope, "qa", { name: "quality" });
     expect(captured[0].method).toBe("PUT");
-    expect(captured[0].url).toMatch(/\/api\/proxy\/namespaces\/qa$/);
+    expect(captured[0].url).toMatch(API_PROXY_NAMESPACES_QA_PATTERN);
     expect(captured[0].body).toEqual({ name: "quality" });
   });
 
@@ -335,7 +343,7 @@ describe("namespace API requests", () => {
 
     await remove(scope, "qa");
     expect(captured[0].method).toBe("DELETE");
-    expect(captured[0].url).toMatch(/\/api\/proxy\/namespaces\/qa$/);
+    expect(captured[0].url).toMatch(API_PROXY_NAMESPACES_QA_PATTERN);
     expect(captured[0].url).not.toContain("confirm");
   });
 
@@ -343,7 +351,7 @@ describe("namespace API requests", () => {
     nextResponse = () => new Response(null, { status: 204 });
 
     await remove(scope, "qa", { confirm: "qa" });
-    expect(captured[0].url).toMatch(/\/api\/proxy\/namespaces\/qa\?confirm=qa$/);
+    expect(captured[0].url).toMatch(API_PROXY_NAMESPACES_QA_CONFIRM_PATTERN);
   });
 
   it("URL-encodes namespace names in paths", async () => {
@@ -352,7 +360,7 @@ describe("namespace API requests", () => {
     // Not producible via the create form (validation rejects it), but the
     // API layer must never build a broken path from a hostile name.
     await remove(scope, "a/b");
-    expect(captured[0].url).toMatch(/\/api\/proxy\/namespaces\/a%2Fb$/);
+    expect(captured[0].url).toMatch(API_PROXY_NAMESPACES_A_2FB_PATTERN);
   });
 
   it("a description-only update never sends a name key", async () => {

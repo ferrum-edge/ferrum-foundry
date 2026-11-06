@@ -6,6 +6,9 @@ import { loadCaBundle, type CaBundle } from './ca.js';
 import { parseCidr } from './cidr.js';
 import type { Config } from './config.js';
 
+const TRAILING_DOTTED_QUAD_PATTERN = /(\d+)\.(\d+)\.(\d+)\.(\d+)$/;
+const IPV6_BRACKETS_PATTERN = /^\[|\]$/g;
+
 interface ManagedDispatcher {
   fingerprint: string;
   agent: Agent;
@@ -81,7 +84,7 @@ function ipv6Bytes(address: string): number[] | null {
   let text = address.split('%', 1)[0]!;
   if (isIP(text) !== 6) return null;
   // A trailing dotted quad (`::ffff:1.2.3.4`) becomes two hex groups.
-  const dotted = /(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(text);
+  const dotted = TRAILING_DOTTED_QUAD_PATTERN.exec(text);
   if (dotted) {
     const [a, b, c, d] = dotted.slice(1).map(Number) as [number, number, number, number];
     text = `${text.slice(0, dotted.index)}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
@@ -135,7 +138,7 @@ function addressIsAllowed(address: string, family: number, config: Config): bool
 }
 
 function assertLiteralAddressAllowed(config: Config): void {
-  const address = new URL(config.adminUrl).hostname.replace(/^\[|\]$/g, '');
+  const address = new URL(config.adminUrl).hostname.replace(IPV6_BRACKETS_PATTERN, '');
   const family = isIP(address);
   if (family !== 0 && !addressIsAllowed(address, family, config)) {
     throw new Error('Configured gateway address is outside the permitted network policy');

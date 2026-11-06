@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 
+const HMAC_SHA256_HASH_PATTERN = /^hmac_sha256:[0-9a-f]{64}$/;
+
 /** Hosted disposable-gateway check only; never used to infer UI access. */
 export async function verifyBasicAuthContract(exchange) {
   const id = "contract-smoke-basic-auth";
@@ -31,7 +33,7 @@ export async function verifyBasicAuthContract(exchange) {
     assert.equal(entries?.length, count, "backup must reflect basic rotation count");
     for (const entry of entries) {
       assert.deepEqual(Object.keys(entry), ["password_hash"], "backup must contain only canonical basic hashes");
-      assert.ok(/^hmac_sha256:[0-9a-f]{64}$/.test(entry.password_hash), "canonical HMAC-SHA256 basic hash");
+      assert.ok(HMAC_SHA256_HASH_PATTERN.test(entry.password_hash), "canonical HMAC-SHA256 basic hash");
     }
     return entries.map((entry) => entry.password_hash);
   }

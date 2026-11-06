@@ -19,6 +19,15 @@ import {
   validateUpstreamWrite,
 } from "./mock-admin-gateway.mjs";
 
+const INVALID_BODY_UNKNOWN_FIELD_NAME_PATTERN =
+  /^Invalid body: unknown field `name`, expected one of /;
+const PLUGIN_NAME_PATTERN = /`plugin_name`/;
+const SCOPE_PATTERN = /`scope`/;
+const UNKNOWN_FIELD_NAME_PATTERN = /unknown field `name`/;
+const QUOTED_HEX_32_ETAG_PATTERN = /^"[0-9a-f]{32}"$/;
+const HTTP_PATH_PATTERN = /http_path/;
+const UDP_PROBE_PAYLOAD_PATTERN = /udp_probe_payload/;
+
 const url = new URL("http://127.0.0.1/");
 const proxyDefaults = { plugins: [], auth_mode: "single" };
 
@@ -102,9 +111,9 @@ test("POST /plugins/config rejects unknown top-level name", () => {
     validatePluginConfigWrite,
   );
   assert.equal(status, 400);
-  assert.match(payload.error, /^Invalid body: unknown field `name`, expected one of /);
-  assert.match(payload.error, /`plugin_name`/);
-  assert.match(payload.error, /`scope`/);
+  assert.match(payload.error, INVALID_BODY_UNKNOWN_FIELD_NAME_PATTERN);
+  assert.match(payload.error, PLUGIN_NAME_PATTERN);
+  assert.match(payload.error, SCOPE_PATTERN);
   assert.equal(list.length, 0);
 });
 
@@ -176,7 +185,7 @@ test("PUT /plugins/config rejects unknown name and keeps the stored plugin_name"
     validatePluginConfigWrite,
   );
   assert.equal(status, 400);
-  assert.match(payload.error, /unknown field `name`/);
+  assert.match(payload.error, UNKNOWN_FIELD_NAME_PATTERN);
   assert.equal(list[0].plugin_name, "cors");
 });
 
@@ -517,7 +526,7 @@ test("detailed mock health carries conditional diagnostics and namespace serving
 test("item GET carries a strong ETag that changes when the resource does", () => {
   const list = [{ id: "orders", namespace: "ferrum", backend_host: "a.internal", plugins: [] }];
   const [, , first] = crud(list, url, "GET", "orders", {}, proxyDefaults, "ferrum", undefined, undefined, { kind: "proxies" });
-  assert.match(first.etag, /^"[0-9a-f]{32}"$/);
+  assert.match(first.etag, QUOTED_HEX_32_ETAG_PATTERN);
   crud(list, url, "PUT", "orders", { backend_host: "b.internal" }, proxyDefaults, "ferrum", undefined, undefined, { kind: "proxies", ifMatch: first.etag });
   const [, , second] = crud(list, url, "GET", "orders", {}, proxyDefaults, "ferrum", undefined, undefined, { kind: "proxies" });
   assert.notEqual(second.etag, first.etag);
@@ -610,10 +619,10 @@ test("upstream health checks follow the Edge v0.9.7 path and payload rules", () 
   assert.equal(validateUpstreamWrite(upstream({ probe_type: "udp", udp_probe_payload: null })), null);
   assert.equal(validateUpstreamWrite(upstream({ probe_type: "udp", udp_probe_payload: "" })), null);
   assert.equal(validateUpstreamWrite({ name: "orders", targets: [] }), null);
-  assert.match(validateUpstreamWrite(upstream({ http_path: "health" })).error, /http_path/);
-  assert.match(validateUpstreamWrite(upstream({ http_path: "@169.254.169.254/" })).error, /http_path/);
-  assert.match(validateUpstreamWrite(upstream({ udp_probe_payload: "abc" })).error, /udp_probe_payload/);
-  assert.match(validateUpstreamWrite(upstream({ udp_probe_payload: "zz" })).error, /udp_probe_payload/);
+  assert.match(validateUpstreamWrite(upstream({ http_path: "health" })).error, HTTP_PATH_PATTERN);
+  assert.match(validateUpstreamWrite(upstream({ http_path: "@169.254.169.254/" })).error, HTTP_PATH_PATTERN);
+  assert.match(validateUpstreamWrite(upstream({ udp_probe_payload: "abc" })).error, UDP_PROBE_PAYLOAD_PATTERN);
+  assert.match(validateUpstreamWrite(upstream({ udp_probe_payload: "zz" })).error, UDP_PROBE_PAYLOAD_PATTERN);
 
   const list = [];
   const [status] = crud(list, url, "POST", undefined, upstream({ http_path: "health" }), {}, "ferrum", validateUpstreamWrite);

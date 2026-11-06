@@ -7,6 +7,9 @@ import { Badge } from "@/components/ui/Badge";
 import { GRID_HEADER_CLASS, GRID_ROW_CLASS, ResourceGrid } from "@/components/ui/ResourceGrid";
 import { EMPTY_VALUE } from "@/lib/format";
 
+const RATE_LIMIT_EXCEEDED_TOTAL_PATTERN =
+  /^ferrum_rate_limit_exceeded_total(?:\{[^}]*\})?\s+(\d+)/m;
+
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
@@ -129,9 +132,7 @@ function percentileFromBuckets(
 }
 
 function parseRateLimitTotal(text: string): number | null {
-  const m = /^ferrum_rate_limit_exceeded_total(?:\{[^}]*\})?\s+(\d+)/m.exec(
-    text,
-  );
+  const m = RATE_LIMIT_EXCEEDED_TOTAL_PATTERN.exec(text);
   return m ? Number(m[1]) : null;
 }
 

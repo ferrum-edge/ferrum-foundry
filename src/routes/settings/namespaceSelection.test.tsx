@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import SettingsPage from "./index";
 import { BasedRequest, click, createHarness, settle, stubFetch } from "@/test/__tests__/harness";
 
+const NAMESPACES_PATTERN = /\/namespaces\/?$/;
+
 const { setNamespace } = vi.hoisted(() => ({ setNamespace: vi.fn() }));
 
 vi.mock("@/stores/namespace", () => ({
@@ -37,7 +39,7 @@ describe("Settings namespace selection", () => {
     let requests = 0;
     stubFetch((request) => {
       const path = new URL(request.url).pathname;
-      if (!/\/namespaces\/?$/.test(path)) {
+      if (!NAMESPACES_PATTERN.test(path)) {
         return Response.json({});
       }
       requests += 1;

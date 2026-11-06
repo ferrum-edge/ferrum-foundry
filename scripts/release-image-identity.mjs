@@ -30,6 +30,11 @@
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
+const REGISTRY_HOST_MARKER_PATTERN = /[.:]/;
+const BEARER_CHALLENGE_PATTERN = /^Bearer\s+(.+)$/i;
+const CHALLENGE_PARAMETER_PATTERN = /([A-Za-z]+)="([^"]*)"/g;
+const WHITESPACE_RUN_PATTERN = /\s+/;
+
 export const MANIFEST_ACCEPT = [
   "application/vnd.oci.image.index.v1+json",
   "application/vnd.docker.distribution.manifest.list.v2+json",
@@ -48,7 +53,7 @@ const REPOSITORY_PATH = /^[a-z0-9]+(?:[._-][a-z0-9]+)*(?:\/[a-z0-9]+(?:[._-][a-z
 /** `ferrumedge/ferrum-foundry` or `ghcr.io/owner/name` → registry host and path. */
 export function parseRepository(reference) {
   const parts = String(reference).split("/");
-  const explicitHost = parts.length > 1 && /[.:]/.test(parts[0]);
+  const explicitHost = parts.length > 1 && REGISTRY_HOST_MARKER_PATTERN.test(parts[0]);
   const host = explicitHost ? parts[0] : DOCKER_HUB;
   const rest = explicitHost ? parts.slice(1) : parts;
   if (!explicitHost && rest.length === 1) rest.unshift("library");
@@ -73,10 +78,10 @@ export function sha256Digest(bytes) {
 
 /** The parameters of a `WWW-Authenticate: Bearer ...` challenge. */
 export function parseBearerChallenge(header) {
-  const match = /^Bearer\s+(.+)$/i.exec(header ?? "");
+  const match = BEARER_CHALLENGE_PATTERN.exec(header ?? "");
   if (!match) throw new Error(`Registry asked for unsupported authentication: ${header ?? "none"}`);
   const params = {};
-  for (const [, key, value] of match[1].matchAll(/([A-Za-z]+)="([^"]*)"/g)) {
+  for (const [, key, value] of match[1].matchAll(CHALLENGE_PARAMETER_PATTERN)) {
     params[key.toLowerCase()] = value;
   }
   if (!params.realm || new URL(params.realm).protocol !== "https:") {
@@ -261,7 +266,7 @@ export async function preflight({ repositories, tags, revision, fetchImpl = glob
 
 async function main([command, ...args]) {
   if (command === "preflight") {
-    const repositories = (process.env.IMAGE_REPOSITORIES ?? "").split(/\s+/).filter(Boolean);
+    const repositories = (process.env.IMAGE_REPOSITORIES ?? "").split(WHITESPACE_RUN_PATTERN).filter(Boolean);
     const tags = [process.env.RELEASE_TAG, process.env.RELEASE_VERSION].map(requireTag);
     const report = await preflight({ repositories, tags, revision: process.env.SOURCE_REVISION });
     for (const line of report) console.log(line);

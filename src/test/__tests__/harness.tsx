@@ -4,6 +4,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { expect, vi } from "vitest";
 import { ToastProvider } from "@/components/ui/Toast";
 
+const WHITESPACE_RUN_PATTERN = /\s+/;
+
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean })
   .IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -101,7 +103,7 @@ export function panel(): HTMLElement {
 
 export async function selectOption(label: string, value: string) {
   const trigger = [...document.querySelectorAll<HTMLElement>('[role="combobox"]')].find(
-    (entry) => entry.getAttribute("aria-labelledby")?.split(/\s+/)
+    (entry) => entry.getAttribute("aria-labelledby")?.split(WHITESPACE_RUN_PATTERN)
       .map((id) => document.getElementById(id)?.textContent).join(" ") === label,
   );
   expect(trigger, `select ${label}`).toBeTruthy();

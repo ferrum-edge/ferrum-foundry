@@ -10,6 +10,10 @@ import {
 } from 'node:fs';
 import { dirname, relative, sep } from 'node:path';
 
+const PEM_CERTIFICATE_BLOCK_PATTERN =
+  /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g;
+const COMMENT_LINE_PATTERN = /^\s*#.*$/gm;
+
 export const MAX_CA_BUNDLE_BYTES = 1024 * 1024;
 
 export interface CaBundle {
@@ -94,10 +98,10 @@ export function loadCaBundle(
     }
 
     const pem = contents.toString('utf8');
-    const certificates = pem.match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g) ?? [];
+    const certificates = pem.match(PEM_CERTIFICATE_BLOCK_PATTERN) ?? [];
     const remainder = pem
-      .replace(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g, '')
-      .replace(/^\s*#.*$/gm, '')
+      .replace(PEM_CERTIFICATE_BLOCK_PATTERN, '')
+      .replace(COMMENT_LINE_PATTERN, '')
       .trim();
     if (certificates.length === 0 || remainder.length > 0) {
       throw new Error('TLS CA bundle must contain valid PEM certificates');

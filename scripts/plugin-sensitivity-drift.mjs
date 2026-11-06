@@ -28,6 +28,14 @@ import {
 } from "../src/api/pluginSensitivity.ts";
 import { readSupportedPairing } from "./supported-pairing.mjs";
 
+const WHITESPACE_PATTERN = /\s/;
+const IDENTIFIER_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*/;
+const RULE_CONSTRUCTOR_PATTERN =
+  /\bconst\s+fn\s+([a-z_][a-z0-9_]*)\s*\([^)]*\)\s*->\s*SensitivityRule\s*\{\s*SensitivityRule\s*\{\s*path\s*,\s*sensitivity\s*:\s*FieldSensitivity::([A-Za-z]+)\s*,?\s*\}\s*\}/g;
+const RULE_SET_DECLARATION_PATTERN =
+  /\bconst\s+([A-Z][A-Z0-9_]*)\s*:\s*&(?:'static\s+)?\[\s*SensitivityRule\s*\]\s*=/g;
+const KEY_SEPARATORS_PATTERN = /[-._]/g;
+
 /** Edge's `FieldSensitivity` variants, as Foundry names them. */
 export const SENSITIVITY_VARIANTS = {
   Secret: "secret",
@@ -49,7 +57,7 @@ function* rustTokens(source, start = 0) {
   let index = start;
   while (index < source.length) {
     const character = source[index];
-    if (/\s/.test(character)) {
+    if (WHITESPACE_PATTERN.test(character)) {
       index += 1;
     } else if (source.startsWith("//", index)) {
       const end = source.indexOf("\n", index);
@@ -80,7 +88,7 @@ function* rustTokens(source, start = 0) {
       index += 1;
       yield { type: "punct", value: character };
     } else {
-      const identifier = /^[A-Za-z_][A-Za-z0-9_]*/.exec(source.slice(index, index + 256));
+      const identifier = IDENTIFIER_PATTERN.exec(source.slice(index, index + 256));
       if (identifier) {
         index += identifier[0].length;
         yield { type: "ident", value: identifier[0] };
@@ -163,9 +171,7 @@ function constantLiteral(source, name) {
  */
 function ruleConstructors(source) {
   const constructors = new Map();
-  const pattern =
-    /\bconst\s+fn\s+([a-z_][a-z0-9_]*)\s*\([^)]*\)\s*->\s*SensitivityRule\s*\{\s*SensitivityRule\s*\{\s*path\s*,\s*sensitivity\s*:\s*FieldSensitivity::([A-Za-z]+)\s*,?\s*\}\s*\}/g;
-  for (const [, name, variant] of source.matchAll(pattern)) {
+  for (const [, name, variant] of source.matchAll(RULE_CONSTRUCTOR_PATTERN)) {
     constructors.set(name, variant);
   }
   return constructors;
@@ -216,9 +222,7 @@ function parseRule(tokens, constructors) {
 /** The rule sets the file names as constants (`NONE`, `REDIS_BACKED`). */
 function namedRuleSets(source, constructors) {
   const sets = new Map();
-  for (const [, name] of source.matchAll(
-    /\bconst\s+([A-Z][A-Z0-9_]*)\s*:\s*&(?:'static\s+)?\[\s*SensitivityRule\s*\]\s*=/g,
-  )) {
+  for (const [, name] of source.matchAll(RULE_SET_DECLARATION_PATTERN)) {
     const tokens = new TokenStream(source, constantLiteral(source, name));
     sets.set(name, tokens.slice(() => parseRule(tokens, constructors)));
   }
@@ -274,7 +278,7 @@ function ruleKeys(rules) {
 
 /** Edge's `normalize_config_key`: case and `-`, `.`, `_` do not distinguish keys. */
 function normalizeKey(key) {
-  return key.replace(/[-._]/g, "").toLowerCase();
+  return key.replace(KEY_SEPARATORS_PATTERN, "").toLowerCase();
 }
 
 function segmentsOverlap(a, b) {

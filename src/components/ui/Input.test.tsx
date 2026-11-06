@@ -3,6 +3,8 @@ import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { Input } from "./Input";
 
+const WHITESPACE_RUN_PATTERN = /\s+/;
+
 (
   globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
@@ -26,7 +28,7 @@ async function render(ui: ReactElement) {
 }
 
 function referencedText(element: Element, attribute: string) {
-  const ids = element.getAttribute(attribute)?.split(/\s+/) ?? [];
+  const ids = element.getAttribute(attribute)?.split(WHITESPACE_RUN_PATTERN) ?? [];
   expect(ids.length).toBeGreaterThan(0);
   return ids
     .map((id) => {

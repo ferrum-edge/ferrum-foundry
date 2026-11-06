@@ -3,6 +3,10 @@ import type { LookupFunction } from 'node:net';
 import type { Agent } from 'undici';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const FERRUM_ADMIN_ALLOWED_CIDRS_PATTERN = /FERRUM_ADMIN_ALLOWED_CIDRS/;
+const NETWORK_POLICY_PATTERN = /network policy/;
+const FERRUM_ADMIN_ALLOWED_ORIGINS_PATTERN = /FERRUM_ADMIN_ALLOWED_ORIGINS/;
+
 const transport = vi.hoisted(() => ({
   lookup: vi.fn(),
   lookups: [] as LookupFunction[],
@@ -75,14 +79,14 @@ describe('shared configuration and dispatcher CIDR policy', () => {
   it.each(malformed)('rejects malformed CIDR %j in the loader and enforcement', async (cidr) => {
     vi.stubEnv('FERRUM_ADMIN_ALLOWED_CIDRS', cidr);
     const { loadConfig, updateRuntimeConfig } = await import('./config.js');
-    expect(() => loadConfig()).toThrow(/FERRUM_ADMIN_ALLOWED_CIDRS/);
+    expect(() => loadConfig()).toThrow(FERRUM_ADMIN_ALLOWED_CIDRS_PATTERN);
 
     vi.stubEnv('FERRUM_ADMIN_ALLOWED_CIDRS', undefined);
     vi.stubEnv('FERRUM_ADMIN_ALLOWED_ORIGINS', 'http://192.168.99.99');
     await updateRuntimeConfig({ adminUrl: 'http://192.168.99.99' });
     const { getDispatcher } = await import('./tls.js');
     expect(() => getDispatcher({ ...loadConfig(), adminAllowedCidrs: [cidr] }))
-      .toThrow(/FERRUM_ADMIN_ALLOWED_CIDRS/);
+      .toThrow(FERRUM_ADMIN_ALLOWED_CIDRS_PATTERN);
   });
 
   it.each([
@@ -120,7 +124,7 @@ describe('shared configuration and dispatcher CIDR policy', () => {
     const { getDispatcher } = await import('./tls.js');
     await updateRuntimeConfig({ adminUrl: origin });
     if (allowed) expect(() => getDispatcher(loadConfig())).not.toThrow();
-    else expect(() => getDispatcher(loadConfig())).toThrow(/network policy/);
+    else expect(() => getDispatcher(loadConfig())).toThrow(NETWORK_POLICY_PATTERN);
 
     await updateRuntimeConfig({ adminUrl: 'https://runtime.example' });
     getDispatcher(loadConfig());
@@ -143,7 +147,7 @@ describe('shared configuration and dispatcher CIDR policy', () => {
     vi.stubEnv('FERRUM_ADMIN_ALLOWED_CIDRS', '0.0.0.0/0,::/0');
     const { loadConfig, updateRuntimeConfig } = await import('./config.js');
     await expect(updateRuntimeConfig({ adminUrl: 'http://192.168.99.99' }))
-      .rejects.toThrow(/FERRUM_ADMIN_ALLOWED_ORIGINS/);
+      .rejects.toThrow(FERRUM_ADMIN_ALLOWED_ORIGINS_PATTERN);
     expect(loadConfig().adminUrl).toBe('https://initial.example');
   });
 

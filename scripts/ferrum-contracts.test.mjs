@@ -7,6 +7,21 @@ import {
   PLUGIN_METADATA,
 } from "../src/lib/pluginConfigDefaults.ts";
 
+const LINE_BREAK_PATTERN = /\r?\n/;
+const CHECKSUM_LINE_PATTERN = /^sha256\s+([a-f0-9]{64})\s+(.+)$/;
+const TAG_CONTRACTS_EDGE_R_PATTERN = /^tag=contracts-edge-[0-9.]+(?:-r[1-9][0-9]*)?$/m;
+const PIN_COMMIT_PATTERN = /^commit=[a-f0-9]{40}$/m;
+const PIN_TAG_CAPTURE_PATTERN = /^tag=(contracts-edge-[0-9.]+(?:-r[1-9][0-9]*)?)$/m;
+const PINNED_CONTRACTS_TAG_PATTERN = /^tag=contracts-edge-0\.9\.15$/m;
+const PINNED_CONTRACTS_COMMIT_PATTERN = /^commit=6fb64c5dc2e014204c17609fc717d976f3b4589e$/m;
+const EXISTING_SHARED_V1_PATTERN = /^EXISTING shared v1/;
+const COMPONENTS_SCHEMAS_PATTERN = /^#\/components\/schemas\/[A-Za-z0-9]+$/;
+const CONFIG_FROM_DEFAULT_PATTERN = /const config = getPluginConfigDefault\(name\);/;
+const RANDOM_ENCRYPTION_SECRET_PATTERN =
+  /config\.session\.encryption_secret = randomBytes\(32\)\.toString\("base64"\);/;
+const REQUIRED_INPUTS_ASSERTION_PATTERN = /assertOnlyRequiredOperatorInputs\(name, config\);/;
+const VERIFIED_CONFIG_SUBMISSION_PATTERN = /config,\s*\},\s*\}\);/;
+
 const contractRoot = new URL("../contracts/ferrum-contracts/", import.meta.url);
 const pinText = readFileSync(new URL("PIN", contractRoot), "utf8");
 const pluginCatalog = JSON.parse(
@@ -18,8 +33,8 @@ const provisionedBy = JSON.parse(
 
 function pinnedFiles() {
   const files = new Map();
-  for (const line of pinText.split(/\r?\n/)) {
-    const match = /^sha256\s+([a-f0-9]{64})\s+(.+)$/.exec(line);
+  for (const line of pinText.split(LINE_BREAK_PATTERN)) {
+    const match = CHECKSUM_LINE_PATTERN.exec(line);
     if (match) files.set(match[2], match[1]);
   }
   return files;
@@ -56,8 +71,8 @@ function describeSetDrift(actual, expected, label) {
 }
 
 test("vendored Ferrum Contracts files match their PIN digests", () => {
-  assert.match(pinText, /^tag=contracts-edge-[0-9.]+(?:-r[1-9][0-9]*)?$/m);
-  assert.match(pinText, /^commit=[a-f0-9]{40}$/m);
+  assert.match(pinText, TAG_CONTRACTS_EDGE_R_PATTERN);
+  assert.match(pinText, PIN_COMMIT_PATTERN);
   const files = pinnedFiles();
   const actualFiles = readdirSync(contractRoot, { recursive: true, withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name !== "PIN")
@@ -66,7 +81,7 @@ test("vendored Ferrum Contracts files match their PIN digests", () => {
   assert.equal(files.size, 18,
     "PIN must include the reviewed vocabularies, schema, fixtures and invalid expectations");
   assert.deepEqual([...files.keys()].sort(), actualFiles, "PIN must cover every vendored file");
-  assert.equal(pinText.split(/\r?\n/).filter((line) => line.startsWith("sha256")).length,
+  assert.equal(pinText.split(LINE_BREAK_PATTERN).filter((line) => line.startsWith("sha256")).length,
     files.size, "PIN must not contain duplicate entries");
   for (const [path, expected] of files) {
     const contents = readFileSync(new URL(path, contractRoot));
@@ -76,7 +91,7 @@ test("vendored Ferrum Contracts files match their PIN digests", () => {
 });
 
 test("the contracts pin tracks the qualified Ferrum Edge release", () => {
-  const tag = /^tag=(contracts-edge-[0-9.]+(?:-r[1-9][0-9]*)?)$/m.exec(pinText)?.[1];
+  const tag = PIN_TAG_CAPTURE_PATTERN.exec(pinText)?.[1];
   assert.ok(tag, "PIN must name a contracts-edge tag");
   const compatibility = JSON.parse(
     readFileSync(new URL("../docs/compatibility.json", import.meta.url), "utf8"),
@@ -97,13 +112,13 @@ test("the contracts pin tracks the qualified Ferrum Edge release", () => {
 });
 
 test("the published manifest pin retains owner status and complete canonical integrity", () => {
-  assert.match(pinText, /^tag=contracts-edge-0\.9\.15$/m);
-  assert.match(pinText, /^commit=6fb64c5dc2e014204c17609fc717d976f3b4589e$/m);
+  assert.match(pinText, PINNED_CONTRACTS_TAG_PATTERN);
+  assert.match(pinText, PINNED_CONTRACTS_COMMIT_PATTERN);
   const schema = JSON.parse(readFileSync(
     new URL("schemas/service-manifest/v1.schema.json", contractRoot), "utf8",
   ));
   assert.equal(schema["x-contract"].status, "implemented");
-  assert.match(schema["x-contract"].shared_status, /^EXISTING shared v1/);
+  assert.match(schema["x-contract"].shared_status, EXISTING_SHARED_V1_PATTERN);
   assert.equal(schema["x-contract"].owner, "ferrum-edge/ferrum-alloy");
   assert.equal(schema["x-contract"].provenance[0].commit,
     "81cbb410d34ff5fba1f3d54cfd2e7ebccaed397e");
@@ -165,7 +180,7 @@ test("Foundry plugin metadata and defaults use the pinned plugin catalog", () =>
     assert.ok(contractPlugin, `DEFAULT_PLUGIN_CONFIGS has extra plugin ${name}`);
     assert.match(
       contractPlugin.config_schema.pointer,
-      /^#\/components\/schemas\/[A-Za-z0-9]+$/,
+      COMPONENTS_SCHEMAS_PATTERN,
       `${name} has no valid config schema pointer in plugin-catalog.json`,
     );
     assert.ok(
@@ -181,22 +196,22 @@ test("Foundry plugin metadata and defaults use the pinned plugin catalog", () =>
   );
   assert.match(
     gatewayContract,
-    /const config = getPluginConfigDefault\(name\);/,
+    CONFIG_FROM_DEFAULT_PATTERN,
     "the pinned-gateway schema check must start from Foundry's defaults",
   );
   assert.match(
     gatewayContract,
-    /config\.session\.encryption_secret = randomBytes\(32\)\.toString\("base64"\);/,
+    RANDOM_ENCRYPTION_SECRET_PATTERN,
     "the pinned-gateway schema check must generate a 32-byte OIDC operator secret",
   );
   assert.match(
     gatewayContract,
-    /assertOnlyRequiredOperatorInputs\(name, config\);/,
+    REQUIRED_INPUTS_ASSERTION_PATTERN,
     "the pinned-gateway schema check must verify no undeclared default changes",
   );
   assert.match(
     gatewayContract,
-    /config,\s*\},\s*\}\);/,
+    VERIFIED_CONFIG_SUBMISSION_PATTERN,
     "the pinned-gateway schema check must submit the config it verified",
   );
 });

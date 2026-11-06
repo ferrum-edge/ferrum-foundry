@@ -27,6 +27,8 @@ import {
   PLUGIN_SENSITIVITY,
 } from "../src/api/pluginSensitivity.ts";
 
+const CONFIG_CURSOR_PATTERN = /^\d+:\d+$/;
+
 const config = readSeedConfig();
 confirmDestructiveTarget(config);
 
@@ -55,7 +57,7 @@ async function exchange(
   });
   const text = await response.text();
   const cursor = response.headers.get("x-ferrum-config-cursor");
-  if (cursor !== null) assert.match(cursor, /^\d+:\d+$/);
+  if (cursor !== null) assert.match(cursor, CONFIG_CURSOR_PATTERN);
   return {
     status: response.status,
     body: text ? JSON.parse(text) : undefined,

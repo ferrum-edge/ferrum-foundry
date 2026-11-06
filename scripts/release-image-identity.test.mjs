@@ -11,6 +11,28 @@ import {
   sha256Digest,
 } from "./release-image-identity.mjs";
 
+const NOT_AN_IMAGE_REPOSITORY_PATTERN = /Not an image repository/;
+const UNSUPPORTED_AUTHENTICATION_PATTERN = /unsupported authentication/;
+const HTTPS_PATTERN = /https/;
+const ALREADY_NAMES_SHA256_NOT_THIS_PATTERN =
+  /already names sha256:[0-9a-f]{64}, not this run's .*never reassigned/;
+const ANSWERED_500_PATTERN = /answered 500/;
+const ANSWERED_403_PATTERN = /answered 403/;
+const ANONYMOUS_TOKEN_REQUEST_FAILED_503_PATTERN = /anonymous token request failed \(503\)/;
+const THE_REGISTRY_ISSUED_NO_TOKEN_PATTERN = /the registry issued no token/;
+const ANSWERED_401_CANNOT_TELL_WHETHER_PATTERN = /answered 401; cannot tell whether it exists/;
+const NOT_A_SHA256_DIGEST_PATTERN = /not a sha256 digest/;
+const NOT_AN_IMAGE_TAG_PATTERN = /Not an image tag/;
+const FROM_THIS_COMMIT_PATTERN = /from this commit/;
+const FERRUMEDGE_FERRUM_FOUNDRY_1_2_PATTERN =
+  /ferrumedge\/ferrum-foundry:1\.2\.3 is already published/;
+const NEVER_REASSIGNED_PATTERN = /never reassigned/;
+const V1_2_3_IS_ALREADY_PATTERN = /:v1\.2\.3 is already/;
+const CONTENT_DOES_NOT_MATCH_PATTERN = /content does not match/;
+const FULL_COMMIT_SHA_PATTERN = /full commit SHA/;
+const REPOSITORIES_PATTERN = /repositories/;
+const RELEASE_TAGS_PATTERN = /release tags/;
+
 const THIS_COMMIT = "a".repeat(40);
 const OTHER_COMMIT = "b".repeat(40);
 const REALM = "https://auth.registry.test/token";
@@ -126,8 +148,8 @@ describe("parseRepository", () => {
   });
 
   it("refuses a reference that is not a repository", () => {
-    assert.throws(() => parseRepository("ferrumedge/Ferrum Foundry"), /Not an image repository/);
-    assert.throws(() => parseRepository("ghcr.io/../x"), /Not an image repository/);
+    assert.throws(() => parseRepository("ferrumedge/Ferrum Foundry"), NOT_AN_IMAGE_REPOSITORY_PATTERN);
+    assert.throws(() => parseRepository("ghcr.io/../x"), NOT_AN_IMAGE_REPOSITORY_PATTERN);
   });
 });
 
@@ -140,9 +162,9 @@ describe("parseBearerChallenge", () => {
   });
 
   it("refuses a non-bearer challenge and a plaintext realm", () => {
-    assert.throws(() => parseBearerChallenge('Basic realm="x"'), /unsupported authentication/);
-    assert.throws(() => parseBearerChallenge(undefined), /unsupported authentication/);
-    assert.throws(() => parseBearerChallenge('Bearer realm="http://auth.test/token"'), /https/);
+    assert.throws(() => parseBearerChallenge('Basic realm="x"'), UNSUPPORTED_AUTHENTICATION_PATTERN);
+    assert.throws(() => parseBearerChallenge(undefined), UNSUPPORTED_AUTHENTICATION_PATTERN);
+    assert.throws(() => parseBearerChallenge('Bearer realm="http://auth.test/token"'), HTTPS_PATTERN);
   });
 });
 
@@ -172,19 +194,19 @@ describe("compareTag", () => {
     const client = registryClient(repository, registry.fetchImpl);
     await assert.rejects(
       compareTag(client, "1.2.3", `sha256:${"1".repeat(64)}`),
-      /already names sha256:[0-9a-f]{64}, not this run's .*never reassigned/,
+      ALREADY_NAMES_SHA256_NOT_THIS_PATTERN,
     );
   });
 
   it("fails closed when the registry cannot answer", async () => {
     const registry = fakeRegistry({ ...target, status: { "v1.2.3": 500 } });
     const client = registryClient(repository, registry.fetchImpl);
-    await assert.rejects(compareTag(client, "v1.2.3", `sha256:${"1".repeat(64)}`), /answered 500/);
+    await assert.rejects(compareTag(client, "v1.2.3", `sha256:${"1".repeat(64)}`), ANSWERED_500_PATTERN);
 
     const denied = fakeRegistry({ ...target, status: { "v1.2.3": 403 } });
     await assert.rejects(
       compareTag(registryClient(repository, denied.fetchImpl), "v1.2.3", `sha256:${"1".repeat(64)}`),
-      /answered 403/,
+      ANSWERED_403_PATTERN,
     );
   });
 
@@ -192,7 +214,7 @@ describe("compareTag", () => {
     const registry = fakeRegistry({ ...target, token: { status: 503 } });
     await assert.rejects(
       compareTag(registryClient(repository, registry.fetchImpl), "v1.2.3", `sha256:${"1".repeat(64)}`),
-      /anonymous token request failed \(503\)/,
+      ANONYMOUS_TOKEN_REQUEST_FAILED_503_PATTERN,
     );
   });
 
@@ -200,7 +222,7 @@ describe("compareTag", () => {
     const registry = fakeRegistry({ ...target, token: { body: { access: "not-a-token" } } });
     await assert.rejects(
       compareTag(registryClient(repository, registry.fetchImpl), "v1.2.3", `sha256:${"1".repeat(64)}`),
-      /the registry issued no token/,
+      THE_REGISTRY_ISSUED_NO_TOKEN_PATTERN,
     );
   });
 
@@ -208,7 +230,7 @@ describe("compareTag", () => {
     const registry = fakeRegistry({ ...target, denyAuthenticated: true });
     await assert.rejects(
       compareTag(registryClient(repository, registry.fetchImpl), "v1.2.3", `sha256:${"1".repeat(64)}`),
-      /answered 401; cannot tell whether it exists/,
+      ANSWERED_401_CANNOT_TELL_WHETHER_PATTERN,
     );
   });
 
@@ -223,7 +245,7 @@ describe("compareTag", () => {
       });
       await assert.rejects(
         compareTag(registryClient(repository, registry.fetchImpl), "v1.2.3", `sha256:${"1".repeat(64)}`),
-        /not a sha256 digest/,
+        NOT_A_SHA256_DIGEST_PATTERN,
       );
     }
   });
@@ -231,8 +253,8 @@ describe("compareTag", () => {
   it("refuses a malformed expected digest or tag before asking the registry", async () => {
     const registry = fakeRegistry(target);
     const client = registryClient(repository, registry.fetchImpl);
-    await assert.rejects(compareTag(client, "v1.2.3", "latest"), /not a sha256 digest/);
-    await assert.rejects(compareTag(client, "../v1", `sha256:${"1".repeat(64)}`), /Not an image tag/);
+    await assert.rejects(compareTag(client, "v1.2.3", "latest"), NOT_A_SHA256_DIGEST_PATTERN);
+    await assert.rejects(compareTag(client, "../v1", `sha256:${"1".repeat(64)}`), NOT_AN_IMAGE_TAG_PATTERN);
     assert.equal(registry.calls.length, 0);
   });
 
@@ -269,7 +291,7 @@ describe("preflight", () => {
     const registry = fakeRegistry({ ...target, tags: { "v1.2.3": index, "1.2.3": index }, objects });
     const report = await preflight({ repositories, tags, revision: THIS_COMMIT, fetchImpl: registry.fetchImpl });
     assert.equal(report.length, 2);
-    for (const line of report) assert.match(line, /from this commit/);
+    for (const line of report) assert.match(line, FROM_THIS_COMMIT_PATTERN);
   });
 
   it("refuses version tags already published from another commit", async () => {
@@ -278,10 +300,10 @@ describe("preflight", () => {
     await assert.rejects(
       preflight({ repositories, tags, revision: THIS_COMMIT, fetchImpl: registry.fetchImpl }),
       (error) => {
-        assert.match(error.message, /ferrumedge\/ferrum-foundry:1\.2\.3 is already published/);
+        assert.match(error.message, FERRUMEDGE_FERRUM_FOUNDRY_1_2_PATTERN);
         assert.match(error.message, new RegExp(`linux/amd64 from ${OTHER_COMMIT}`));
-        assert.match(error.message, /never reassigned/);
-        assert.doesNotMatch(error.message, /:v1\.2\.3 is already/);
+        assert.match(error.message, NEVER_REASSIGNED_PATTERN);
+        assert.doesNotMatch(error.message, V1_2_3_IS_ALREADY_PATTERN);
         return true;
       },
     );
@@ -315,15 +337,15 @@ describe("preflight", () => {
     const registry = fakeRegistry({ ...target, tags: { "v1.2.3": index }, objects });
     await assert.rejects(
       preflight({ repositories, tags, revision: THIS_COMMIT, fetchImpl: registry.fetchImpl }),
-      /content does not match/,
+      CONTENT_DOES_NOT_MATCH_PATTERN,
     );
   });
 
   it("requires a full source commit, repositories, and tags", async () => {
     const registry = fakeRegistry(target);
     const fetchImpl = registry.fetchImpl;
-    await assert.rejects(preflight({ repositories, tags, revision: "abc123", fetchImpl }), /full commit SHA/);
-    await assert.rejects(preflight({ repositories: [], tags, revision: THIS_COMMIT, fetchImpl }), /repositories/);
-    await assert.rejects(preflight({ repositories, tags: [], revision: THIS_COMMIT, fetchImpl }), /release tags/);
+    await assert.rejects(preflight({ repositories, tags, revision: "abc123", fetchImpl }), FULL_COMMIT_SHA_PATTERN);
+    await assert.rejects(preflight({ repositories: [], tags, revision: THIS_COMMIT, fetchImpl }), REPOSITORIES_PATTERN);
+    await assert.rejects(preflight({ repositories, tags: [], revision: THIS_COMMIT, fetchImpl }), RELEASE_TAGS_PATTERN);
   });
 });

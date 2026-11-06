@@ -6,6 +6,11 @@ import {
   resolveViteDevServer,
 } from "./viteDevServer";
 
+const VITE_DEV_HOST_PATTERN = /VITE_DEV_HOST/;
+const VITE_DEV_PORT_PATTERN = /VITE_DEV_PORT/;
+const PORT_PATTERN = /PORT/;
+const VITE_BFF_URL_PATTERN = /VITE_BFF_URL/;
+
 describe("resolveViteDevServer", () => {
   it("keeps the current listen host, port, and BFF proxy target when env is unset", () => {
     expect(resolveViteDevServer({})).toEqual({
@@ -93,7 +98,7 @@ describe("resolveViteDevServer", () => {
       "user@localhost",
     ]) {
       expect(() => resolveViteDevServer({ VITE_DEV_HOST: value })).toThrow(
-        /VITE_DEV_HOST/,
+        VITE_DEV_HOST_PATTERN,
       );
     }
   });
@@ -101,14 +106,14 @@ describe("resolveViteDevServer", () => {
   it("rejects a non-integer or out-of-range VITE_DEV_PORT", () => {
     for (const value of ["NaN", "1.5", "-1", "0", "65536", "Infinity"]) {
       expect(() => resolveViteDevServer({ VITE_DEV_PORT: value })).toThrow(
-        /VITE_DEV_PORT/,
+        VITE_DEV_PORT_PATTERN,
       );
     }
   });
 
   it("rejects a non-integer or out-of-range PORT used as the default proxy port", () => {
     for (const value of ["soon", "70000"]) {
-      expect(() => resolveViteDevServer({ PORT: value })).toThrow(/PORT/);
+      expect(() => resolveViteDevServer({ PORT: value })).toThrow(PORT_PATTERN);
     }
   });
 
@@ -135,7 +140,7 @@ describe("resolveViteDevServer", () => {
       "http://localhost:3001#frag",
     ]) {
       expect(() => resolveViteDevServer({ VITE_BFF_URL: url })).toThrow(
-        /VITE_BFF_URL/,
+        VITE_BFF_URL_PATTERN,
       );
     }
   });

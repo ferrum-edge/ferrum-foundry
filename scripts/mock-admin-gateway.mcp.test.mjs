@@ -16,6 +16,10 @@ import {
   validateMcpGatewayPolicy,
 } from "./mock-admin-gateway.mjs";
 
+const QUOTED_HEX_ETAG_PATTERN = /^"[0-9a-f]+"$/;
+const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/;
+const INVALID_MCP_GATEWAY_CONFIG_PATTERN = /^Invalid mcp_gateway config: /;
+
 const PROXY = "proxy-agent-tools";
 const PLUGIN = "plg-mcp-gateway";
 let base;
@@ -65,7 +69,7 @@ async function readPlugin() {
   const response = await request(`/plugins/config/${PLUGIN}?expected_proxy_ids=${PROXY}`);
   assert.equal(response.status, 200);
   const etag = response.headers.get("etag");
-  assert.match(etag, /^"[0-9a-f]+"$/);
+  assert.match(etag, QUOTED_HEX_ETAG_PATTERN);
   return { plugin: await response.json(), etag };
 }
 
@@ -110,7 +114,7 @@ test("the catalog follows the v0.9.9 response shape", async () => {
   });
   assert.equal(search.allowed_groups, null);
   assert.deepEqual(search.denied_groups, []);
-  assert.match(search.schema_hash, /^[0-9a-f]{64}$/);
+  assert.match(search.schema_hash, SHA256_HEX_PATTERN);
   assert.deepEqual(search.annotations, { readOnlyHint: true });
 
   // Not named in policy.tools under on_new_tool: hide_until_configured.
@@ -296,6 +300,6 @@ test("the mock refuses the policy.tools shapes Edge refuses", () => {
     config({ "a.b": { action: "allow", allowed_groups: ["x"], denied_groups: ["x"] } }),
     config({ "a.b": { action: "allow", groups: ["x"] } }),
   ]) {
-    assert.match(validateMcpGatewayPolicy(refused).error, /^Invalid mcp_gateway config: /);
+    assert.match(validateMcpGatewayPolicy(refused).error, INVALID_MCP_GATEWAY_CONFIG_PATTERN);
   }
 });

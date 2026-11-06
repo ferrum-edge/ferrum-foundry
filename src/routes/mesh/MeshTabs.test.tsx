@@ -6,6 +6,8 @@ import { click, createHarness, fill, page, panel, selectTab, settle, stubFetch }
 import { config, denies, graph, meshResponses } from "@/test/__tests__/meshFixtures";
 import MeshPage from "./index";
 
+const DISCOVERED_ONLY_PATTERN = /discovered only/g;
+
 vi.mock("@/stores/namespace", () => ({
   useNamespace: () => ({ selectedNamespace: "tenant-a", scope: { namespace: "tenant-a" } }),
 }));
@@ -102,7 +104,7 @@ describe("mesh tab observations", () => {
       "inbound trust inactive", "control plane", "private-west", "2 x509", "1 jwt", "20s old"]) {
       expect(panel().textContent).toContain(label);
     }
-    expect(panel().textContent?.match(/discovered only/g)).toHaveLength(1);
+    expect(panel().textContent?.match(DISCOVERED_ONLY_PATTERN)).toHaveLength(1);
   });
 
   it("renders waypoint identities, cookie totals, scoped policies and service ports", async () => {

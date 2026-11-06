@@ -28,6 +28,9 @@ import {
   targetsGateway,
 } from "./gatewayTarget";
 
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARACTERS_PATTERN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;
+
 // ── Global error handler (event-emitter style) ───────────────────
 
 type ApiErrorHandler = (error: ApiError) => void;
@@ -66,8 +69,7 @@ const MAX_FIELD_LENGTH = 600;
  * kept — they are how multi-part details stay readable.
  */
 function boundField(value: string): string {
-  // eslint-disable-next-line no-control-regex
-  const cleaned = value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ").trim();
+  const cleaned = value.replace(CONTROL_CHARACTERS_PATTERN, " ").trim();
   return cleaned.length > MAX_FIELD_LENGTH
     ? `${cleaned.slice(0, MAX_FIELD_LENGTH)}…`
     : cleaned;

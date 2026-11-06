@@ -11,6 +11,9 @@ import {
   updatePluginWithMembership,
 } from "./pluginMembership";
 
+const URL_SCHEME_PATTERN = /^[a-z][a-z0-9+.-]*:/i;
+const PROXIES_P_PATTERN = /^proxies\/(p\d)$/;
+
 /**
  * Wire-level check that a membership plan — listing, preflight reads, the
  * association writes, and the compensating rollback after a failure — stays
@@ -19,7 +22,7 @@ import {
 
 class BasedRequest extends Request {
   constructor(input: RequestInfo | URL, init?: RequestInit) {
-    if (typeof input === "string" && !/^[a-z][a-z0-9+.-]*:/i.test(input)) {
+    if (typeof input === "string" && !URL_SCHEME_PATTERN.test(input)) {
       input = new URL(input, "http://localhost").toString();
     }
     super(input, init);
@@ -112,7 +115,7 @@ describe("plugin membership plans bind every request to the starting namespace",
             pagination: { offset: 0, limit: 250, total: proxies.size },
           });
         }
-        const proxyMatch = /^proxies\/(p\d)$/.exec(path);
+        const proxyMatch = PROXIES_P_PATTERN.exec(path);
         if (proxyMatch && request.method === "GET") {
           return json(proxies.get(proxyMatch[1]));
         }

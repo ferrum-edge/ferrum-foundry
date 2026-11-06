@@ -5,6 +5,9 @@
 import { readFileSync } from "node:fs";
 import { test as base, expect, type BrowserContext, type Page } from "@playwright/test";
 
+const FERRUM_TRUSTED_PROXY_SECRET_PATTERN = /^FERRUM_TRUSTED_PROXY_SECRET=(.+)$/m;
+const NAMESPACE_PATTERN = /namespace/i;
+
 export const FOUNDRY_URL = process.env.FOUNDRY_URL ?? "http://127.0.0.1:8088";
 export const DATA_PLANE_URL = process.env.FERRUM_DATA_PLANE_URL ?? "http://127.0.0.1:8000";
 export const ADMIN_URL = process.env.FERRUM_ADMIN_URL ?? "http://127.0.0.1:9000";
@@ -34,7 +37,7 @@ export function proofSecret(): string {
   if (fromEnv) return fromEnv;
   try {
     const env = readFileSync(new URL("../../deploy/starter/.env", import.meta.url), "utf8");
-    const match = /^FERRUM_TRUSTED_PROXY_SECRET=(.+)$/m.exec(env);
+    const match = FERRUM_TRUSTED_PROXY_SECRET_PATTERN.exec(env);
     if (match?.[1]) return match[1].trim();
   } catch {
     // Fall through to the explicit failure below.
@@ -248,7 +251,7 @@ export { expect };
 
 /** Switch the active namespace through the header control, as an operator does. */
 export async function selectNamespace(page: Page, namespace: string): Promise<void> {
-  const trigger = page.getByRole("combobox", { name: /namespace/i });
+  const trigger = page.getByRole("combobox", { name: NAMESPACE_PATTERN });
   await trigger.click();
   await page.getByRole("option", { name: namespace, exact: true }).click();
   await expect(trigger).toContainText(namespace);

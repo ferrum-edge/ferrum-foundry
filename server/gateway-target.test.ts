@@ -4,6 +4,8 @@ import type { AddressInfo } from 'node:net';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const TARGET_ID_PATTERN = /^[A-Za-z0-9_-]{32}$/;
+
 const TOKEN = 'gateway-target-login-fixture-long-enough';
 const SECRET = 'gateway-target-signing-fixture-long-enough';
 
@@ -123,7 +125,7 @@ describe('gateway target identity', () => {
     expect(gatewayTargetId({ adminUrl: 'https://a.example', jwtSecret: SECRET })).toBe(a);
     expect(gatewayTargetId({ adminUrl: 'https://b.example', jwtSecret: SECRET })).not.toBe(a);
     expect(gatewayTargetId({ adminUrl: 'https://a.example', jwtSecret: `${SECRET}-rotated` })).not.toBe(a);
-    expect(a).toMatch(/^[A-Za-z0-9_-]{32}$/);
+    expect(a).toMatch(TARGET_ID_PATTERN);
     expect(a).not.toContain('a.example');
   });
 });

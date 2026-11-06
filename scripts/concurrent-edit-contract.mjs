@@ -35,6 +35,8 @@ import {
   PROXY_BASELINE_OMIT,
 } from "../src/lib/resourceBaseline.ts";
 
+const STRONG_ETAG_PATTERN = /^"[\x21\x23-\x7e]+"$(?![\s\S])/;
+
 const PROXY_ID = "concurrent-edit-contract-proxy";
 const CREATE_PROBE_ID = "concurrent-edit-contract-create-probe";
 const BACKEND_A = "backend-a.contract.invalid";
@@ -56,7 +58,7 @@ function toUpdatePayload(proxy) {
 
 /** Nonempty visible-ASCII strong token, as `strongEtag()` in `conditionalWrite.ts`. */
 function strongEtag(header) {
-  return typeof header === "string" && /^"[\x21\x23-\x7e]+"$(?![\s\S])/.test(header)
+  return typeof header === "string" && STRONG_ETAG_PATTERN.test(header)
     ? header
     : null;
 }

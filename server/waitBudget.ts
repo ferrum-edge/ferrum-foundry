@@ -7,11 +7,13 @@ export function serverWaitTimeout(requestedWaitMs: number): number {
   return requestedWaitMs + TRANSPORT_MARGIN_MS;
 }
 
+const ACME_FINALIZE_PATH_PATTERN = /^\/admin\/tls\/acme\/orders\/[^/]+\/finalize$/;
+
 export function waitingRouteTimeout(method: string, path: string): number {
   if (method === 'GET' && path === '/config/apply-status') {
     return serverWaitTimeout(serverWaitTimeout(APPLY_WAIT_MS));
   }
-  if (method === 'POST' && /^\/admin\/tls\/acme\/orders\/[^/]+\/finalize$/.test(path)) {
+  if (method === 'POST' && ACME_FINALIZE_PATH_PATTERN.test(path)) {
     return serverWaitTimeout(serverWaitTimeout(ACME_MAX_WAIT_MS));
   }
   return 0;

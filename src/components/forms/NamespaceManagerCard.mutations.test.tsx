@@ -6,6 +6,8 @@ import { NamespaceManagerCard } from "./NamespaceManagerCard";
 import { NamespaceProvider, NAMESPACE_STORAGE_KEY, useNamespace } from "@/stores/namespace";
 import { createQueryClient } from "@/lib/queryClient";
 
+const NAMESPACES_TENANT_A_PATTERN = /\/namespaces\/tenant-a$/;
+
 vi.mock("@/stores/auth", () => ({ useAuth: () => ({ principal: { role: "admin" } }) }));
 const { toast } = vi.hoisted(() => ({ toast: vi.fn() }));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
@@ -145,7 +147,7 @@ describe("pending namespace completion", () => {
       await click(operation === "rename" ? "Save" : "Delete Namespace");
       await settle(() => expect(completeMutation).toBeTypeOf("function"));
       expect(writes[0].namespace).toBe("tenant-a");
-      expect(writes[0].url.pathname).toMatch(/\/namespaces\/tenant-a$/);
+      expect(writes[0].url.pathname).toMatch(NAMESPACES_TENANT_A_PATTERN);
       expect(writes[0].url.search).toBe("");
       expect(writes[0].method).toBe(operation === "rename" ? "PUT" : "DELETE");
       expect(writes[0].body).toEqual(operation === "rename" ? { name: "tenant-b" } : {});

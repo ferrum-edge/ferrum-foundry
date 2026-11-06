@@ -12,6 +12,9 @@ import type { PaginatedResponse } from "./types";
 import { ALL_PAGE_SIZE, collectAllPages } from "./pagination";
 import { pathSegment } from "./pathSegment";
 
+const OUTER_WHITE_SPACE_PATTERN = /^\p{White_Space}+|\p{White_Space}+$/gu;
+const LAST_NAMESPACE_REFUSAL_PATTERN = /FERRUM_NAMESPACE|FERRUM_CP_NAMESPACES|last remaining/i;
+
 // ── Types (mirror the upstream Namespace registry contract) ──────
 
 export interface Namespace {
@@ -51,7 +54,7 @@ export const NAMESPACE_DESCRIPTION_MAX_LENGTH = 1024;
 
 /** Match Edge's str::trim and the BFF, including NEXT LINE but excluding BOM. */
 export function normalizeNamespaceDescription(description: string): string {
-  return description.replace(/^\p{White_Space}+|\p{White_Space}+$/gu, "");
+  return description.replace(OUTER_WHITE_SPACE_PATTERN, "");
 }
 
 /** The limit counts Unicode scalar values, not native input UTF-16 units. */
@@ -204,7 +207,7 @@ export async function getOccupancy(name: string): Promise<NamespaceOccupancy> {
  */
 export function isCascadableDeleteError(status: number, body: string): boolean {
   if (status !== 409) return false;
-  return !/FERRUM_NAMESPACE|FERRUM_CP_NAMESPACES|last remaining/i.test(body);
+  return !LAST_NAMESPACE_REFUSAL_PATTERN.test(body);
 }
 
 // ── API functions ────────────────────────────────────────────────

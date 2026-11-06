@@ -3,6 +3,8 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { FAIL, PASS, checkTrustBoundary } from '../scripts/starter-preflight.mjs';
 
+const FORGED_X_FERRUM_ROLE_ADMIN_PATTERN = /forged X-Ferrum-Role: admin request was served/;
+
 // The starter preflight's header-stripping probe against the real BFF
 // authentication chain (#603). A denial proves stripping only if the BFF
 // would have served the forged identity had it arrived intact, so a
@@ -98,7 +100,7 @@ describe('starter preflight header-stripping probe against the BFF (#603)', () =
     const results = await checkTrustBoundary(PREFLIGHT_ENV, passthrough);
 
     expect(results.map((result: { status: string }) => result.status)).toEqual([PASS, FAIL]);
-    expect(results[1].detail).toMatch(/forged X-Ferrum-Role: admin request was served/);
+    expect(results[1].detail).toMatch(FORGED_X_FERRUM_ROLE_ADMIN_PATTERN);
   });
 
   it('passes when the front door strips client identity headers', async () => {

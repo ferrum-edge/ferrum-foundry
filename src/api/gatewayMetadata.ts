@@ -1,6 +1,10 @@
 import { APPLY_WAIT_MS } from "../../server/waitBudget";
 import { classifyUnobservedOutcome, type UnobservedOutcome } from "./mutationOutcome";
 
+const CONFIG_CURSOR_PATTERN = /^\d+:\d+$/;
+const DIGITS_PATTERN = /^\d+$/;
+const RETRY_AFTER_SECONDS_PATTERN = /^\d{1,6}$/;
+
 export type ApplyState =
   | "idle"
   | "nothing_applied"
@@ -135,7 +139,7 @@ function publish(next: GatewayMetadataSnapshot): void {
 }
 
 export function parseConfigCursor(value: string | null): ConfigCursor | null {
-  if (!value || !/^\d+:\d+$/.test(value)) return null;
+  if (!value || !CONFIG_CURSOR_PATTERN.test(value)) return null;
   const [epoch, sequence] = value.split(":");
   if (uint64(epoch) === null || uint64(sequence) === null) return null;
   return { raw: value, epoch, sequence };
@@ -186,7 +190,7 @@ function uint64(value: unknown): string | null {
   if (typeof value === "number" && (!Number.isSafeInteger(value) || value < 0)) return null;
   if (typeof value !== "number" && typeof value !== "string") return null;
   const text = String(value);
-  if (!/^\d+$/.test(text) || text.length > 20 || BigInt(text) > 18446744073709551615n) return null;
+  if (!DIGITS_PATTERN.test(text) || text.length > 20 || BigInt(text) > 18446744073709551615n) return null;
   return BigInt(text).toString();
 }
 
@@ -287,7 +291,7 @@ export function capacityRetryDelay(error: unknown): number | null {
   const response = (error as { response?: { status?: unknown; headers?: Headers } }).response;
   if (response?.status !== 429) return null;
   const header = response.headers?.get("retry-after")?.trim() ?? "";
-  const seconds = /^\d{1,6}$/.test(header) ? Number(header) : 1;
+  const seconds = RETRY_AFTER_SECONDS_PATTERN.test(header) ? Number(header) : 1;
   return Math.min(Math.max(seconds, 1) * 1000, MAX_CAPACITY_WAIT_MS);
 }
 

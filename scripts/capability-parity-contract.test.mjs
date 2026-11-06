@@ -15,6 +15,36 @@ import {
   verifyCapabilityParity,
 } from "./capability-parity-contract.mjs";
 
+const SCOPED_ADMIN_READ_OF_AUDIT_PATTERN = /scoped admin read of audit log was refused \(403\)/;
+const SCOPED_HEALTH_REPORTS_MODE_FILE_PATTERN =
+  /scoped \/health reports mode "file", unrestricted \/health "database"/;
+const CONFIG_BACKUP_MODEL_EXPECTS_ADMITTED_PATTERN =
+  /configBackup .*model expects admitted, gateway answered 503 "No database"/;
+const CONFIG_BACKUP_MODEL_EXPECTS_READ_ONLY_PATTERN =
+  /configBackup .*model expects read-only denial, gateway answered 503 unavailable/;
+const CONFIG_BACKUP_MODEL_EXPECTS_READ_ONLY_DENIAL_PATTERN =
+  /configBackup .*model expects read-only denial, gateway answered admitted \(200\)/;
+const EXPECTED_A_READ_ONLY_GATEWAY_PATTERN = /expected a read-only gateway/;
+const EXPECTED_A_WRITABLE_GATEWAY_PATTERN = /expected a writable gateway/;
+const EXPECTATION_PATTERN = /expectation must be/;
+const VIEWER_READ_OF_MCP_TOOL_PATTERN =
+  /viewer read of MCP tool catalog answered "Not Found", expected the handler's "Proxy not found"/;
+const OPERATOR_PROXIES_MODEL_EXPECTS_ADMITTED_PATTERN =
+  /operator proxies .*model expects admitted, gateway answered role denial requiring admin/;
+const OPERATIONAL_ACTIONS_EXPECTS_ADMITTED_PATTERN =
+  /operationalActions .*model expects admitted, gateway answered read-only denial/;
+const READ_OF_AUDIT_LOG_EXPECTED_PATTERN =
+  /read of audit log: expected an explicit 403 requiring admin/;
+const VIEWER_READ_OF_PROXIES_REFUSED_PATTERN = /viewer read of proxies was refused \(403\)/;
+const READ_OF_UPSTREAMS_RETURNED_200_PATTERN =
+  /read of upstreams returned 200 without a collection/;
+const GATEWAY_ANSWERED_401_AUTHENTICATION_FAILED_PATTERN =
+  /gateway answered 401: authentication failed/;
+const OPERATOR_PROXIES_GATEWAY_ANSWERED_ADMITTED_PATTERN =
+  /operator proxies .*gateway answered admitted \(204\)/;
+const FERRUM_DEMO_CONFIRM_TARGET_MISMATCH_PATTERN =
+  /FERRUM_DEMO_CONFIRM_TARGET must exactly equal "https:\/\/gateway\.example#tenant-a"/;
+
 const RANK = { viewer: 0, operator: 1, admin: 2 };
 
 /**
@@ -184,7 +214,7 @@ describe("capability parity contract", () => {
     });
     await assert.rejects(
       verifyCapabilityParity(send, { expectation: "writable" }),
-      /scoped admin read of audit log was refused \(403\)/,
+      SCOPED_ADMIN_READ_OF_AUDIT_PATTERN,
     );
   });
 
@@ -195,7 +225,7 @@ describe("capability parity contract", () => {
       : send(role, request, options);
     await assert.rejects(
       verifyCapabilityParity(contradicting, { expectation: "writable" }),
-      /scoped \/health reports mode "file", unrestricted \/health "database"/,
+      SCOPED_HEALTH_REPORTS_MODE_FILE_PATTERN,
     );
   });
 
@@ -241,7 +271,7 @@ describe("capability parity contract", () => {
     });
     await assert.rejects(
       verifyCapabilityParity(send, { expectation: "writable" }),
-      /configBackup .*model expects admitted, gateway answered 503 "No database"/,
+      CONFIG_BACKUP_MODEL_EXPECTS_ADMITTED_PATTERN,
     );
   });
 
@@ -255,7 +285,7 @@ describe("capability parity contract", () => {
     });
     await assert.rejects(
       verifyCapabilityParity(send, { expectation: "read-only" }),
-      /configBackup .*model expects read-only denial, gateway answered 503 unavailable/,
+      CONFIG_BACKUP_MODEL_EXPECTS_READ_ONLY_PATTERN,
     );
   });
 
@@ -268,20 +298,20 @@ describe("capability parity contract", () => {
     });
     await assert.rejects(
       verifyCapabilityParity(send, { expectation: "read-only" }),
-      /configBackup .*model expects read-only denial, gateway answered admitted \(200\)/,
+      CONFIG_BACKUP_MODEL_EXPECTS_READ_ONLY_DENIAL_PATTERN,
     );
   });
 
   it("refuses to pass against a gateway in the wrong mode", async () => {
     await assert.rejects(
       verifyCapabilityParity(fakeGateway().send, { expectation: "read-only" }),
-      /expected a read-only gateway/,
+      EXPECTED_A_READ_ONLY_GATEWAY_PATTERN,
     );
     await assert.rejects(
       verifyCapabilityParity(fakeGateway({ readOnly: true }).send, { expectation: "writable" }),
-      /expected a writable gateway/,
+      EXPECTED_A_WRITABLE_GATEWAY_PATTERN,
     );
-    await assert.rejects(verifyCapabilityParity(fakeGateway().send, {}), /expectation must be/);
+    await assert.rejects(verifyCapabilityParity(fakeGateway().send, {}), EXPECTATION_PATTERN);
   });
 
   it("fails when the MCP catalog 404 is not the handler's missing-proxy answer", async () => {
@@ -292,7 +322,7 @@ describe("capability parity contract", () => {
     });
     await assert.rejects(
       verifyCapabilityParity(send, { expectation: "writable" }),
-      /viewer read of MCP tool catalog answered "Not Found", expected the handler's "Proxy not found"/,
+      VIEWER_READ_OF_MCP_TOOL_PATTERN,
     );
   });
 
@@ -305,7 +335,7 @@ describe("capability parity contract", () => {
     });
     await assert.rejects(
       verifyCapabilityParity(send, { expectation: "writable" }),
-      /operator proxies .*model expects admitted, gateway answered role denial requiring admin/,
+      OPERATOR_PROXIES_MODEL_EXPECTS_ADMITTED_PATTERN,
     );
   });
 
@@ -318,7 +348,7 @@ describe("capability parity contract", () => {
     });
     await assert.rejects(
       verifyCapabilityParity(send, { expectation: "read-only" }),
-      /operationalActions .*model expects admitted, gateway answered read-only denial/,
+      OPERATIONAL_ACTIONS_EXPECTS_ADMITTED_PATTERN,
     );
   });
 
@@ -330,7 +360,7 @@ describe("capability parity contract", () => {
     });
     await assert.rejects(
       verifyCapabilityParity(send, { expectation: "writable" }),
-      /read of audit log: expected an explicit 403 requiring admin/,
+      READ_OF_AUDIT_LOG_EXPECTED_PATTERN,
     );
   });
 
@@ -342,7 +372,7 @@ describe("capability parity contract", () => {
     });
     await assert.rejects(
       verifyCapabilityParity(refused.send, { expectation: "writable" }),
-      /viewer read of proxies was refused \(403\)/,
+      VIEWER_READ_OF_PROXIES_REFUSED_PATTERN,
     );
     const shapeless = fakeGateway({
       override: (role, request) => request.path.startsWith("/upstreams?")
@@ -351,7 +381,7 @@ describe("capability parity contract", () => {
     });
     await assert.rejects(
       verifyCapabilityParity(shapeless.send, { expectation: "writable" }),
-      /read of upstreams returned 200 without a collection/,
+      READ_OF_UPSTREAMS_RETURNED_200_PATTERN,
     );
   });
 
@@ -361,7 +391,7 @@ describe("capability parity contract", () => {
         ? { status: 401, body: { error: "Unauthorized" } }
         : undefined,
     });
-    await assert.rejects(verifyCapabilityParity(send, { expectation: "writable" }), /gateway answered 401: authentication failed/);
+    await assert.rejects(verifyCapabilityParity(send, { expectation: "writable" }), GATEWAY_ANSWERED_401_AUTHENTICATION_FAILED_PATTERN);
   });
 
   it("fails if an admitted delete finds and removes the reserved probe id", async () => {
@@ -372,7 +402,7 @@ describe("capability parity contract", () => {
     });
     await assert.rejects(
       verifyCapabilityParity(send, { expectation: "writable" }),
-      /operator proxies .*gateway answered admitted \(204\)/,
+      OPERATOR_PROXIES_GATEWAY_ANSWERED_ADMITTED_PATTERN,
     );
   });
 
@@ -384,7 +414,7 @@ describe("capability parity contract", () => {
     };
     assert.throws(
       () => confirmWritableParityTarget(config, "writable"),
-      /FERRUM_DEMO_CONFIRM_TARGET must exactly equal "https:\/\/gateway\.example#tenant-a"/,
+      FERRUM_DEMO_CONFIRM_TARGET_MISMATCH_PATTERN,
     );
     config.destructiveConfirmation = "https://gateway.example#tenant-a";
     assert.doesNotThrow(() => confirmWritableParityTarget(config, "writable"));

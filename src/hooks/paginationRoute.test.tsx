@@ -12,6 +12,8 @@ import {
 } from "@tanstack/react-router";
 import ProxiesPage from "@/routes/proxies/index";
 
+const URL_SCHEME_PATTERN = /^[a-z][a-z0-9+.-]*:/i;
+
 vi.mock("@/stores/namespace", () => ({
   useNamespace: () => ({ scope: { namespace: "ferrum" } }),
 }));
@@ -22,7 +24,7 @@ vi.mock("@/stores/namespace", () => ({
 
 class BasedRequest extends Request {
   constructor(input: RequestInfo | URL, init?: RequestInit) {
-    if (typeof input === "string" && !/^[a-z][a-z0-9+.-]*:/i.test(input)) {
+    if (typeof input === "string" && !URL_SCHEME_PATTERN.test(input)) {
       input = new URL(input, "http://localhost").toString();
     }
     super(input, init);

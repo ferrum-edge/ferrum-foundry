@@ -16,6 +16,9 @@ import {
   UnboundNamespaceError,
 } from "./client";
 
+const URL_SCHEME_PATTERN = /^[a-z][a-z0-9+.-]*:/i;
+const NON_EMPTY_NAMESPACE_PATTERN = /non-empty namespace/;
+
 describe("extractApiErrorDetail", () => {
   it("returns empty string for empty body", () => {
     expect(extractApiErrorDetail("")).toBe("");
@@ -357,7 +360,7 @@ describe("session request hooks", () => {
 
   class BasedRequest extends Request {
     constructor(input: RequestInfo | URL, init?: RequestInit) {
-      if (typeof input === "string" && !/^[a-z][a-z0-9+.-]*:/i.test(input)) {
+      if (typeof input === "string" && !URL_SCHEME_PATTERN.test(input)) {
         input = new URL(input, "http://localhost").toString();
       }
       super(input, init);
@@ -591,6 +594,6 @@ describe("scoped", () => {
   });
 
   it("rejects an empty scope before any request is built", () => {
-    expect(() => scoped({ namespace: "" })).toThrow(/non-empty namespace/);
+    expect(() => scoped({ namespace: "" })).toThrow(NON_EMPTY_NAMESPACE_PATTERN);
   });
 });

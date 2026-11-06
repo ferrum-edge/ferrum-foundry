@@ -10,6 +10,26 @@ import {
 import { hostedQualificationFixture } from "./fixtures/hosted-qualification.mjs";
 import { readSupportedPairing } from "./supported-pairing.mjs";
 
+const STILL_PENDING_PATTERN = /still pending/;
+const DOES_NOT_MATCH_PATTERN = /does not match/;
+const COMPLETED_AND_SUCCESSFUL_PATTERN = /completed and successful/;
+const SUCCESSFUL_CURRENT_ATTEMPT_JOB_PATTERN = /successful current-attempt job/;
+const INCOMPLETE_PATTERN = /incomplete/;
+const SOURCE_COMMIT_PATTERN = /source [0-9a-f]{40}/;
+const BASE_COMMIT_PATTERN = /base [0-9a-f]{40}/;
+const PARENTHESIZED_COMMIT_PATTERN = /\([0-9a-f]{40};/;
+const IMMUTABLE_SOURCE_BINDING_TESTED_PR_PATTERN = /immutable source binding|tested PR merge/;
+const CHANGED_AFTER_HOSTED_QUALIFICATION_PATTERN = /changed after hosted qualification/;
+const LAST_CHARACTER_PATTERN = /.$/;
+const ONLY_QUALIFICATION_EVIDENCE_PATTERN = /Only qualification evidence/;
+const TESTED_PR_MERGE_PATTERN = /tested PR merge/;
+const NOT_AN_ANCESTOR_PATTERN = /not an ancestor/;
+const SOURCE_TREES_ONLY_QUALIFICATION_EVIDENCE_PATTERN = /source trees|Only qualification evidence/;
+const REQUIRES_HOSTED_GITHUB_ACTIONS_PATTERN = /requires hosted GitHub Actions/;
+const INCOMPLETE_OR_UNREADABLE_QUALIFICATION_PATTERN =
+  /incomplete qualification jobs|unreadable qualification record/;
+const CHANGED_DURING_VERIFICATION_PATTERN = /changed during verification/;
+
 const base = readSupportedPairing();
 const fixture = () => hostedQualificationFixture(base);
 
@@ -72,7 +92,7 @@ describe("hosted qualification binding", () => {
       assert.ok(qualificationErrors(pending).some((error) => error.includes(field)));
     }
     record.qualification.extra = "unreviewed";
-    assert.throws(() => requireHostedQualification(record, evidence), /still pending/);
+    assert.throws(() => requireHostedQualification(record, evidence), STILL_PENDING_PATTERN);
   });
 
   it("also accepts a successful main-push source followed by evidence recording", () => {
@@ -90,11 +110,11 @@ describe("hosted qualification binding", () => {
 
   it("refuses URL-only, old, failed, pending and nonexistent evidence", () => {
     const { record, evidence } = fixture();
-    assert.throws(() => requireHostedQualification(record), /does not match/);
+    assert.throws(() => requireHostedQualification(record), DOES_NOT_MATCH_PATTERN);
     const old = structuredClone(record);
     old.qualification.ci_evidence =
       "https://github.com/ferrum-edge/ferrum-foundry/actions/runs/36874319153";
-    assert.throws(() => requireHostedQualification(old, evidence), /does not match/);
+    assert.throws(() => requireHostedQualification(old, evidence), DOES_NOT_MATCH_PATTERN);
     for (const update of [
       { status: "completed", conclusion: "failure" },
       { status: "in_progress", conclusion: null },
@@ -102,12 +122,12 @@ describe("hosted qualification binding", () => {
     ]) {
       const changed = structuredClone(evidence);
       Object.assign(changed.run, update);
-      assert.throws(() => requireHostedQualification(record, changed), /completed and successful/);
+      assert.throws(() => requireHostedQualification(record, changed), COMPLETED_AND_SUCCESSFUL_PATTERN);
     }
     for (const field of ["source_commit", "tested_commit", "run_attempt"]) {
       const incomplete = structuredClone(record);
       delete incomplete.qualification[field];
-      assert.throws(() => requireHostedQualification(incomplete, evidence), /still pending/);
+      assert.throws(() => requireHostedQualification(incomplete, evidence), STILL_PENDING_PATTERN);
     }
   });
 
@@ -134,7 +154,7 @@ describe("hosted qualification binding", () => {
     ]) {
       const { record, evidence } = fixture();
       mutate(evidence);
-      assert.throws(() => requireHostedQualification(record, evidence), /does not match/);
+      assert.throws(() => requireHostedQualification(record, evidence), DOES_NOT_MATCH_PATTERN);
     }
   });
 
@@ -153,7 +173,7 @@ describe("hosted qualification binding", () => {
         Object.assign(changed.jobs.jobs[index], change);
         assert.throws(
           () => requireHostedQualification(record, changed),
-          /successful current-attempt job/,
+          SUCCESSFUL_CURRENT_ATTEMPT_JOB_PATTERN,
         );
       }
       const missing = structuredClone(evidence);
@@ -161,7 +181,7 @@ describe("hosted qualification binding", () => {
       missing.jobs.total_count -= 1;
       assert.throws(
         () => requireHostedQualification(record, missing),
-        /successful current-attempt job/,
+        SUCCESSFUL_CURRENT_ATTEMPT_JOB_PATTERN,
       );
     }
     const duplicate = structuredClone(evidence);
@@ -169,18 +189,18 @@ describe("hosted qualification binding", () => {
     duplicate.jobs.total_count += 1;
     assert.throws(
       () => requireHostedQualification(record, duplicate),
-      /successful current-attempt job/,
+      SUCCESSFUL_CURRENT_ATTEMPT_JOB_PATTERN,
     );
     const partial = structuredClone(evidence);
     partial.jobs.total_count += 1;
-    assert.throws(() => requireHostedQualification(record, partial), /incomplete/);
+    assert.throws(() => requireHostedQualification(record, partial), INCOMPLETE_PATTERN);
   });
 
   it("rejects wrong producer source, base, tested commit, target ref and legacy bindings", () => {
     for (const change of [
-      (name) => name.replace(/source [0-9a-f]{40}/, `source ${"9".repeat(40)}`),
-      (name) => name.replace(/base [0-9a-f]{40}/, `base ${"9".repeat(40)}`),
-      (name) => name.replace(/\([0-9a-f]{40};/, `(${"9".repeat(40)};`),
+      (name) => name.replace(SOURCE_COMMIT_PATTERN, `source ${"9".repeat(40)}`),
+      (name) => name.replace(BASE_COMMIT_PATTERN, `base ${"9".repeat(40)}`),
+      (name) => name.replace(PARENTHESIZED_COMMIT_PATTERN, `(${"9".repeat(40)};`),
       (name) => name.replace("ref main", "ref other"),
       () => `Qualification Source (${"b".repeat(40)})`,
     ]) {
@@ -188,7 +208,7 @@ describe("hosted qualification binding", () => {
       evidence.jobs.jobs.at(-1).name = change(evidence.jobs.jobs.at(-1).name);
       assert.throws(
         () => requireHostedQualification(record, evidence),
-        /immutable source binding|tested PR merge/,
+        IMMUTABLE_SOURCE_BINDING_TESTED_PR_PATTERN,
       );
     }
   });
@@ -200,7 +220,7 @@ describe("hosted qualification binding", () => {
     assert.equal(evidence.run.pull_requests[0].head.sha, evidence.target.commit.sha);
     assert.throws(
       () => requireHostedQualification(record, evidence),
-      /changed after hosted qualification/,
+      CHANGED_AFTER_HOSTED_QUALIFICATION_PATTERN,
     );
   });
 
@@ -211,12 +231,12 @@ describe("hosted qualification binding", () => {
       evidence.target.tree.tree.find((entry) => entry.path === path).sha = "9".repeat(40);
       assert.throws(
         () => requireHostedQualification(record, evidence),
-        /changed after hosted qualification/,
+        CHANGED_AFTER_HOSTED_QUALIFICATION_PATTERN,
       );
     }
     for (const mutate of [
       (r) => {
-        r.edge.image = r.edge.image.replace(/.$/, "f");
+        r.edge.image = r.edge.image.replace(LAST_CHARACTER_PATTERN, "f");
       },
       (r) => {
         r.edge.source_commit = "9".repeat(40);
@@ -233,7 +253,7 @@ describe("hosted qualification binding", () => {
       evidence.target.record = structuredClone(record);
       assert.throws(
         () => requireHostedQualification(record, evidence),
-        /Only qualification evidence/,
+        ONLY_QUALIFICATION_EVIDENCE_PATTERN,
       );
     }
   });
@@ -252,19 +272,19 @@ describe("hosted qualification binding", () => {
     ]) {
       const { record, evidence } = fixture();
       mutate(evidence);
-      assert.throws(() => requireHostedQualification(record, evidence), /tested PR merge/);
+      assert.throws(() => requireHostedQualification(record, evidence), TESTED_PR_MERGE_PATTERN);
     }
     const { record, evidence } = fixture();
     evidence.tested.tree.tree[1].sha = "9".repeat(40);
     assert.throws(
       () => requireHostedQualification(record, evidence),
-      /changed after hosted qualification/,
+      CHANGED_AFTER_HOSTED_QUALIFICATION_PATTERN,
     );
     const unrelated = fixture();
     unrelated.evidence.comparison.status = "diverged";
     assert.throws(
       () => requireHostedQualification(unrelated.record, unrelated.evidence),
-      /not an ancestor/,
+      NOT_AN_ANCESTOR_PATTERN,
     );
   });
 
@@ -287,7 +307,7 @@ describe("hosted qualification binding", () => {
       mutate(evidence);
       assert.throws(
         () => requireHostedQualification(record, evidence),
-        /source trees|Only qualification evidence/,
+        SOURCE_TREES_ONLY_QUALIFICATION_EVIDENCE_PATTERN,
       );
     }
     const { record, evidence } = fixture();
@@ -300,7 +320,7 @@ describe("hosted qualification binding", () => {
     for (const job of evidence.jobs.jobs) job.head_sha = selfSha;
     evidence.jobs.jobs.at(-1).name =
       `Qualification Source (${selfSha}; source ${selfSha}; base ${selfSha}; ref main)`;
-    assert.throws(() => requireHostedQualification(record, evidence), /Only qualification evidence/);
+    assert.throws(() => requireHostedQualification(record, evidence), ONLY_QUALIFICATION_EVIDENCE_PATTERN);
   });
 });
 
@@ -353,7 +373,7 @@ describe("hosted qualification API reader", () => {
     ]) {
       await assert.rejects(
         readHostedQualification(f.record, { ...f.env, ...change }, apiFixture(f)),
-        /requires hosted GitHub Actions/,
+        REQUIRES_HOSTED_GITHUB_ACTIONS_PATTERN,
       );
     }
   });
@@ -419,7 +439,7 @@ describe("hosted qualification API reader", () => {
           mutate(path, value);
           return value;
         }),
-        /incomplete qualification jobs|unreadable qualification record/,
+        INCOMPLETE_OR_UNREADABLE_QUALIFICATION_PATTERN,
       );
     }
     const f = fixture();
@@ -431,7 +451,7 @@ describe("hosted qualification API reader", () => {
         if (path === "actions/runs/123" && ++runs === 2) value.run_attempt += 1;
         return value;
       }),
-      /changed during verification/,
+      CHANGED_DURING_VERIFICATION_PATTERN,
     );
   });
 });

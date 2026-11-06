@@ -3,6 +3,11 @@ import type {
   AcmeCertificateRequest,
 } from "@/api/tls";
 
+const PRIVATE_KEY_PEM_PATTERN =
+  /^-----BEGIN ((?:RSA |EC )?PRIVATE KEY)-----[\s\S]+-----END \1-----$/;
+const NON_DNS_IDENTIFIER_PATTERN = /\s|:\/\//;
+const DIGITS_PATTERN = /^\d+$/;
+
 export interface AcmeCertificateFormState {
   id: string;
   domains: string;
@@ -67,9 +72,7 @@ function validateCertificatePem(value: string, label: string): string {
 
 function validatePrivateKeyPem(value: string): string {
   const material = value.trim();
-  const match = material.match(
-    /^-----BEGIN ((?:RSA |EC )?PRIVATE KEY)-----[\s\S]+-----END \1-----$/,
-  );
+  const match = material.match(PRIVATE_KEY_PEM_PATTERN);
   if (!match) {
     throw new AcmeCertificateFormError(
       "Private key must be complete PRIVATE KEY, RSA PRIVATE KEY, or EC PRIVATE KEY PEM",
@@ -90,12 +93,12 @@ export function buildAcmeCertificateRequest(
   if (domains.length === 0) {
     throw new AcmeCertificateFormError("At least one certificate domain is required");
   }
-  if (domains.some((domain) => /\s|:\/\//.test(domain))) {
+  if (domains.some((domain) => NON_DNS_IDENTIFIER_PATTERN.test(domain))) {
     throw new AcmeCertificateFormError("Certificate domains must be DNS identifiers, not URLs");
   }
   // `Number("")` is 0, which would silently disable expiry warnings.
   const expiryWarningText = form.expiryWarningDays.trim();
-  const expiryWarningDays = /^\d+$/.test(expiryWarningText) ? Number(expiryWarningText) : NaN;
+  const expiryWarningDays = DIGITS_PATTERN.test(expiryWarningText) ? Number(expiryWarningText) : NaN;
   if (!Number.isSafeInteger(expiryWarningDays)) {
     throw new AcmeCertificateFormError("Expiry warning days must be a non-negative integer");
   }
