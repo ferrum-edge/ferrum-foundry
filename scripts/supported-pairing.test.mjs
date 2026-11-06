@@ -36,7 +36,6 @@ const TAG_THE_COMMIT_THAT_PREPARED_PATTERN = /Tag the commit that prepared this 
 const DOES_NOT_NAME_A_QUALIFIED_PATTERN = /does not name a qualified Ferrum Edge release/;
 const COMMAND_RELEASE_READY_CONST_EVIDENCE_PATTERN =
   /command === "release-ready"\) \{\n\s+const evidence = await readHostedQualification\(record\);\n\s+console\.log\(JSON\.stringify\(requireReleaseReady\(record, evidence\)\)\)/;
-const IMAGE_REGEX_METACHARACTERS_PATTERN = /[/.]/g;
 const DOCKER_RUN_PATTERN = /docker run [^\n]*\\\n(?:[^\n]*\\\n)*[^\n]*\n/g;
 const FERRUM_MODE_DATABASE_PATTERN = /FERRUM_MODE=database/;
 const FERRUM_EDGE_IMAGE_PATTERN = /"\$FERRUM_EDGE_IMAGE"\s*$/;
@@ -647,7 +646,7 @@ describe("repository alignment", () => {
     assert.deepEqual(missingRequiredReferences(record), []);
     assert.match(
       repoFile("deploy/starter/compose.yaml"),
-      new RegExp(`demo-gateway:\\n\\s+image: ${record.edge.image.replace(IMAGE_REGEX_METACHARACTERS_PATTERN, "\\$&")}(?: #[^\\n]*)?\\n`),
+      new RegExp(`demo-gateway:\\n\\s+image: ${record.edge.image.replace(/[/.]/g, "\\$&")}(?: #[^\\n]*)?\\n`),
     );
   });
 
