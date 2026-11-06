@@ -27,6 +27,9 @@ import { resolve, sep } from "node:path";
 import { signAdminJwt } from "../shared/admin-jwt.js";
 import { mayCarrySecret } from "../shared/admin-origin.js";
 
+const PLACEHOLDER_SECRET_PATTERN = /replace[-_]?me/i;
+const TLS_ERROR_CODE_PATTERN = /CERT|SELF_SIGNED|UNABLE_TO_VERIFY|altnames/i;
+
 export const PASS = "pass";
 export const FAIL = "fail";
 export const UNKNOWN = "unknown";
@@ -89,7 +92,7 @@ export function checkSecrets(env) {
           `Replace ${key} with a longer random value.`,
         ),
       );
-    } else if (/replace[-_]?me/i.test(value)) {
+    } else if (PLACEHOLDER_SECRET_PATTERN.test(value)) {
       results.push(
         check(key, FAIL, "still the placeholder from .env.example", `Generate a real ${key}.`),
       );
@@ -241,7 +244,7 @@ export async function checkGatewayReachable(env, fetchImpl = fetch) {
     return check("gateway reachable", PASS, `GET ${origin}/health returned 200`);
   } catch (error) {
     const cause = error?.cause?.code ?? error?.code ?? error?.name ?? "unknown";
-    const tls = /CERT|SELF_SIGNED|UNABLE_TO_VERIFY|altnames/i.test(String(error?.cause?.code ?? ""));
+    const tls = TLS_ERROR_CODE_PATTERN.test(String(error?.cause?.code ?? ""));
     return check(
       "gateway reachable",
       FAIL,

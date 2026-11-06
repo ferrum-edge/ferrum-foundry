@@ -19,6 +19,8 @@ import { useNamespace } from "@/stores/namespace";
 import type { AuditEvent } from "@/api/ops";
 import { formatDateTime } from "@/lib/format";
 
+const UNDERSCORES_PATTERN = /_/g;
+
 const PAGE_SIZE = 50;
 
 function outcomeBadge(outcome?: AuditEvent["outcome"]) {
@@ -29,7 +31,7 @@ function outcomeBadge(outcome?: AuditEvent["outcome"]) {
       : outcome === "denied" || outcome === "failure"
         ? "red"
         : "yellow";
-  return <Badge variant={variant}>{outcome.replace(/_/g, " ")}</Badge>;
+  return <Badge variant={variant}>{outcome.replace(UNDERSCORES_PATTERN, " ")}</Badge>;
 }
 
 function actionBadge(action: string) {

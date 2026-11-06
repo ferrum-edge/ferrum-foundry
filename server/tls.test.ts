@@ -10,6 +10,8 @@ import type { Config } from './config.js';
 import { fetch } from 'undici';
 import { closeDispatchers, getDispatcher, getProbeDispatcher } from './tls.js';
 
+const NETWORK_POLICY_PATTERN = /network policy/;
+
 const directories: string[] = [];
 
 function tempDirectory(): string {
@@ -144,7 +146,7 @@ describe('managed Undici dispatchers', () => {
       initialAdminOrigin: 'https://gateway.example',
       adminAllowedOrigins: ['http://169.254.169.254'],
     });
-    expect(() => getDispatcher(config)).toThrow(/network policy/);
+    expect(() => getDispatcher(config)).toThrow(NETWORK_POLICY_PATTERN);
   });
 
   it.each([
@@ -162,7 +164,7 @@ describe('managed Undici dispatchers', () => {
       initialAdminOrigin: 'https://gateway.example',
       adminAllowedOrigins: [`http://${host}`],
     });
-    expect(() => getDispatcher(config)).toThrow(/network policy/);
+    expect(() => getDispatcher(config)).toThrow(NETWORK_POLICY_PATTERN);
   });
 
   it.each([

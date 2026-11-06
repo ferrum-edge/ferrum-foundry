@@ -8,12 +8,14 @@ import {
   isoDateTime,
 } from "./format";
 
+const YEAR_2026_PATTERN = /2026/;
+
 const STAMP = "2026-09-25T20:40:00Z";
 
 describe("date and time formatting", () => {
   it("renders every accepted input shape the same way", () => {
     const expected = formatDateTime(STAMP);
-    expect(expected).toMatch(/2026/);
+    expect(expected).toMatch(YEAR_2026_PATTERN);
     expect(formatDateTime(Date.parse(STAMP))).toBe(expected);
     expect(formatDateTime(new Date(STAMP))).toBe(expected);
   });

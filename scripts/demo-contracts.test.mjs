@@ -15,6 +15,19 @@ import {
   runSeed,
 } from "./seed-demo-gateway.mjs";
 
+const FERRUM_JWT_SECRET_IS_REQUIRED_PATTERN = /FERRUM_JWT_SECRET is required/;
+const AT_LEAST_32_BYTES_PATTERN = /at least 32 bytes/;
+const DNS_HOSTNAME_WITHOUT_A_PORT_PATTERN = /DNS hostname without a port/;
+const FERRUM_ADMIN_URL_HTTPS_UNLESS_LOOPBACK_PATTERN =
+  /FERRUM_ADMIN_URL must use https unless it is a loopback address/;
+const FERRUM_ADMIN_URL_MUST_USE_HTTPS_PATTERN = /FERRUM_ADMIN_URL must use https/;
+const MUST_EXACTLY_EQUAL_HTTPS_GATEWAY_PATTERN =
+  /must exactly equal "https:\/\/gateway\.example#payments"/;
+const CONTRACT_PATTERN = /^contract-[0-9a-f]{40}$/;
+const PAYMENTS_PATTERN = /payments/;
+const FERRUM_DEMO_INCLUDE_BASIC_AUTH_TRUE_PATTERN = /FERRUM_DEMO_INCLUDE_BASIC_AUTH=true/;
+const FERRUM_BASIC_AUTH_HMAC_SECRET_PATTERN = /FERRUM_BASIC_AUTH_HMAC_SECRET/;
+
 const SIGNING_SECRET = "contract-test-signing-secret-at-least-32-characters";
 
 test("demo admin token matches the Ferrum admin claim contract", async () => {
@@ -60,7 +73,7 @@ test("demo seeder signs with the exact configured key bytes, as Ferrum Edge veri
     { code: "ERR_JWS_SIGNATURE_VERIFICATION_FAILED" },
   );
 
-  assert.throws(() => readSeedConfig({ FERRUM_JWT_SECRET: " \t\n ".repeat(10) }), /FERRUM_JWT_SECRET is required/);
+  assert.throws(() => readSeedConfig({ FERRUM_JWT_SECRET: " \t\n ".repeat(10) }), FERRUM_JWT_SECRET_IS_REQUIRED_PATTERN);
 });
 
 test("the shared signer measures its key in UTF-8 bytes, as Ferrum Edge does", async () => {
@@ -79,12 +92,12 @@ test("the shared signer measures its key in UTF-8 bytes, as Ferrum Edge does", a
 
   await assert.rejects(
     adminToken({ jwtSecret: "é".repeat(15), jwtIssuer: "ferrum-edge", namespace: "ferrum-foundry-demo" }),
-    /at least 32 bytes/,
+    AT_LEAST_32_BYTES_PATTERN,
   );
 });
 
 test("demo seeder has no fallback signing credential and requires a target-bound confirmation", () => {
-  assert.throws(() => readSeedConfig({}), /FERRUM_JWT_SECRET is required/);
+  assert.throws(() => readSeedConfig({}), FERRUM_JWT_SECRET_IS_REQUIRED_PATTERN);
 
   const config = readSeedConfig({ FERRUM_JWT_SECRET: SIGNING_SECRET });
   assert.equal(config.namespace, "ferrum-foundry-demo");
@@ -110,7 +123,7 @@ test("demo seeder has no fallback signing credential and requires a target-bound
   assert.throws(() => readSeedConfig({
     FERRUM_JWT_SECRET: SIGNING_SECRET,
     FERRUM_DEMO_BACKEND_HOST: "backend:9101",
-  }), /DNS hostname without a port/);
+  }), DNS_HOSTNAME_WITHOUT_A_PORT_PATTERN);
 });
 
 test("real-gateway helpers refuse a plaintext admin origin to another host", () => {
@@ -126,7 +139,7 @@ test("real-gateway helpers refuse a plaintext admin origin to another host", () 
     // parity) reads its target here, before it signs or sends anything.
     assert.throws(
       () => readSeedConfig({ FERRUM_JWT_SECRET: SIGNING_SECRET, FERRUM_ADMIN_URL: url }),
-      /FERRUM_ADMIN_URL must use https unless it is a loopback address/,
+      FERRUM_ADMIN_URL_HTTPS_UNLESS_LOOPBACK_PATTERN,
       url,
     );
   }
@@ -137,7 +150,7 @@ test("real-gateway helpers refuse a plaintext admin origin to another host", () 
       FERRUM_ADMIN_URL: "http://gateway.internal:9000",
       FERRUM_ALLOW_INSECURE_ADMIN_HTTP: "true",
     }),
-    /FERRUM_ADMIN_URL must use https/,
+    FERRUM_ADMIN_URL_MUST_USE_HTTPS_PATTERN,
   );
 });
 
@@ -164,7 +177,7 @@ test("demo seeder rejects a confirmation copied from a different target before H
   });
   await assert.rejects(
     runSeed(config),
-    /must exactly equal "https:\/\/gateway\.example#payments"/,
+    MUST_EXACTLY_EQUAL_HTTPS_GATEWAY_PATTERN,
   );
 });
 
@@ -173,7 +186,7 @@ test("restore fixture uses current resource names and versioned API-spec semanti
   const payload = buildRestorePayload(timestamp);
 
   assert.equal(payload.version, "1");
-  assert.match(payload.ferrum_version, /^contract-[0-9a-f]{40}$/);
+  assert.match(payload.ferrum_version, CONTRACT_PATTERN);
   assert.deepEqual(payload.api_specs, { section_version: "2", items: [] });
   assert.equal(payload.exported_at, timestamp);
   assert.equal(payload.counts.consumers, payload.consumers.length);
@@ -392,8 +405,8 @@ test("preflight omits a conflicting global prometheus and still restores without
     prepared.payload.plugin_configs.some((plugin) => plugin.plugin_name === "basic_auth"),
     false,
   );
-  assert.match(prepared.skipped.join("\n"), /payments/);
-  assert.match(prepared.skipped.join("\n"), /FERRUM_DEMO_INCLUDE_BASIC_AUTH=true/);
+  assert.match(prepared.skipped.join("\n"), PAYMENTS_PATTERN);
+  assert.match(prepared.skipped.join("\n"), FERRUM_DEMO_INCLUDE_BASIC_AUTH_TRUE_PATTERN);
   assert.equal(admin.calls.some((call) => call.route === "/restore"), false);
 });
 
@@ -409,7 +422,7 @@ test("missing HMAC secret aborts before restore when basic auth is opted in", as
 
   await assert.rejects(
     runSeed(config, { request: admin.request, report: admin.report }),
-    /FERRUM_BASIC_AUTH_HMAC_SECRET/,
+    FERRUM_BASIC_AUTH_HMAC_SECRET_PATTERN,
   );
   assert.equal(admin.calls.some((call) => call.route === "/restore"), false);
   assert.equal(admin.calls.some((call) => call.method === "POST" && call.route === "/consumers"), true);
@@ -444,7 +457,7 @@ test("runSeed posts restore only after preflight and omits a foreign prometheus 
     false,
   );
   assert.equal(result.skipped.length, 2);
-  assert.match(result.skipped[0], /payments/);
+  assert.match(result.skipped[0], PAYMENTS_PATTERN);
 
   const written = JSON.parse(readFileSync(config.manifestPath, "utf8"));
   assert.equal(written.include_basic_auth, false);

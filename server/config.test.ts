@@ -1,6 +1,52 @@
 import { jwtVerify } from 'jose';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const FERRUM_ADMIN_URL_PATTERN = /FERRUM_ADMIN_URL/;
+const FERRUM_JWT_SECRET_PATTERN = /FERRUM_JWT_SECRET/;
+const FERRUM_BFF_AUTH_TOKEN_PATTERN = /FERRUM_BFF_AUTH_TOKEN/;
+const BYTES_32_PATTERN = /32/;
+const FERRUM_JWT_SECRET_IS_NOT_SET_PATTERN = /FERRUM_JWT_SECRET is not set/;
+const FERRUM_JWT_SECRET_TOO_SHORT_PATTERN = /FERRUM_JWT_SECRET must be at least 32 bytes/;
+const FERRUM_BIND_ADDRESS_INVALID_PATTERN =
+  /FERRUM_BIND_ADDRESS must be an IP address or localhost/;
+const FERRUM_SHUTDOWN_TIMEOUT_PATTERN = /FERRUM_SHUTDOWN_TIMEOUT/;
+const FERRUM_UPLOAD_TIMEOUT_PATTERN = /FERRUM_UPLOAD_TIMEOUT/;
+const FERRUM_MAX_ACTIVE_UPLOADS_PATTERN = /FERRUM_MAX_ACTIVE_UPLOADS/;
+const FERRUM_MAX_LARGE_UPLOADS_PATTERN = /FERRUM_MAX_LARGE_UPLOADS/;
+const UPLOADS_PER_PRINCIPAL_EXCEEDS_ACTIVE_PATTERN =
+  /FERRUM_MAX_UPLOADS_PER_PRINCIPAL must not exceed FERRUM_MAX_ACTIVE_UPLOADS/;
+const LARGE_UPLOADS_PER_PRINCIPAL_EXCEEDS_LARGE_PATTERN =
+  /FERRUM_MAX_LARGE_UPLOADS_PER_PRINCIPAL must not exceed FERRUM_MAX_LARGE_UPLOADS/;
+const LARGE_UPLOADS_PER_PRINCIPAL_EXCEEDS_PER_PRINCIPAL_PATTERN =
+  /FERRUM_MAX_LARGE_UPLOADS_PER_PRINCIPAL must not exceed FERRUM_MAX_UPLOADS_PER_PRINCIPAL/;
+const FERRUM_MAX_UPLOADS_PER_PRINCIPAL_PATTERN = /FERRUM_MAX_UPLOADS_PER_PRINCIPAL/;
+const LARGE_UPLOADS_EXCEEDS_ACTIVE_PATTERN =
+  /FERRUM_MAX_LARGE_UPLOADS must not exceed FERRUM_MAX_ACTIVE_UPLOADS/;
+const LONG_READS_PER_PRINCIPAL_EXCEEDS_ACTIVE_PATTERN =
+  /FERRUM_MAX_LONG_READS_PER_PRINCIPAL must not exceed FERRUM_MAX_ACTIVE_LONG_READS/;
+const FERRUM_MAX_GATEWAY_CONNECTIONS_PATTERN = /FERRUM_MAX_GATEWAY_CONNECTIONS/;
+const FERRUM_JWT_NAMESPACES_IS_REQUIRED_PATTERN =
+  /FERRUM_JWT_NAMESPACES is required in static authentication mode \(FERRUM_AUTH_MODE=static, the default\); set it to namespace names, or \* for every namespace/;
+const FERRUM_JWT_NAMESPACES_MUST_LIST_PATTERN =
+  /FERRUM_JWT_NAMESPACES must list at least one namespace, or \* for every namespace/;
+const FERRUM_JWT_NAMESPACES_INVALID_PATTERN = /FERRUM_JWT_NAMESPACES contains an invalid namespace/;
+const FERRUM_JWT_NAMESPACES_MIXED_WILDCARD_PATTERN =
+  /FERRUM_JWT_NAMESPACES must not combine \* with namespace names/;
+const FERRUM_AUTH_LOGIN_URL_PATTERN = /FERRUM_AUTH_LOGIN_URL/;
+const FERRUM_ADMIN_ALLOWED_CIDRS_PATTERN = /FERRUM_ADMIN_ALLOWED_CIDRS/;
+const MUST_NOT_EXCEED_PATTERN = /must not exceed/;
+const STATIC_AUTHENTICATION_IS_DISABLED_PATTERN = /Static authentication is disabled/;
+const FERRUM_ADMIN_URL_HTTPS_UNLESS_LOOPBACK_PATTERN =
+  /FERRUM_ADMIN_URL must use https unless it is a loopback/;
+const ADMIN_URL_OR_INSECURE_HTTP_PATTERN = /FERRUM_ADMIN_URL|FERRUM_ALLOW_INSECURE_ADMIN_HTTP/;
+const FERRUM_TLS_VERIFY_REQUIRED_PATTERN = /FERRUM_TLS_VERIFY must be true in production/;
+const FERRUM_ADMIN_ALLOWED_ORIGINS_HTTPS_PATTERN = /FERRUM_ADMIN_ALLOWED_ORIGINS must use https/;
+const ADMIN_URL_HTTPS_UNLESS_LOOPBACK_PATTERN = /adminUrl must use https unless it is a loopback/;
+const MUST_NOT_REUSE_PATTERN = /must not reuse/;
+const DISABLED_PATTERN = /disabled/;
+const ALLOW_PATTERN = /allow/i;
+const READ_TIMEOUT_PATTERN = /readTimeout/;
+
 const ENV_KEYS = [
   'NODE_ENV',
   'FERRUM_ADMIN_URL',
@@ -121,25 +167,25 @@ describe('config', () => {
   it('requires the gateway URL, signing secret, and static development token', async () => {
     setValidEnv({ FERRUM_ADMIN_URL: undefined });
     const missingUrl = await loadModule();
-    expect(() => missingUrl.loadConfig()).toThrow(/FERRUM_ADMIN_URL/);
+    expect(() => missingUrl.loadConfig()).toThrow(FERRUM_ADMIN_URL_PATTERN);
 
     setValidEnv({ FERRUM_JWT_SECRET: undefined });
     const missingSecret = await loadModule();
-    expect(() => missingSecret.loadConfig()).toThrow(/FERRUM_JWT_SECRET/);
+    expect(() => missingSecret.loadConfig()).toThrow(FERRUM_JWT_SECRET_PATTERN);
 
     setValidEnv({ FERRUM_BFF_AUTH_TOKEN: undefined });
     const missingToken = await loadModule();
-    expect(() => missingToken.loadConfig()).toThrow(/FERRUM_BFF_AUTH_TOKEN/);
+    expect(() => missingToken.loadConfig()).toThrow(FERRUM_BFF_AUTH_TOKEN_PATTERN);
   });
 
   it('rejects gateway signing and static secrets shorter than 32 characters', async () => {
     setValidEnv({ FERRUM_JWT_SECRET: 'short' });
     const weakJwt = await loadModule();
-    expect(() => weakJwt.loadConfig()).toThrow(/32/);
+    expect(() => weakJwt.loadConfig()).toThrow(BYTES_32_PATTERN);
 
     setValidEnv({ FERRUM_BFF_AUTH_TOKEN: 'short' });
     const weakBff = await loadModule();
-    expect(() => weakBff.loadConfig()).toThrow(/32/);
+    expect(() => weakBff.loadConfig()).toThrow(BYTES_32_PATTERN);
   });
 
   it('signs with the exact configured key bytes, as Ferrum Edge verifies', async () => {
@@ -168,7 +214,7 @@ describe('config', () => {
     for (const blank of ['', ' '.repeat(40), '\t\n'.repeat(20)]) {
       setValidEnv({ FERRUM_JWT_SECRET: blank });
       const { loadConfig } = await loadModule();
-      expect(() => loadConfig()).toThrow(/FERRUM_JWT_SECRET is not set/);
+      expect(() => loadConfig()).toThrow(FERRUM_JWT_SECRET_IS_NOT_SET_PATTERN);
     }
   });
 
@@ -178,7 +224,7 @@ describe('config', () => {
 
     setValidEnv({ FERRUM_JWT_SECRET: '\u00e9'.repeat(15) });
     const short = await loadModule();
-    expect(() => short.loadConfig()).toThrow(/FERRUM_JWT_SECRET must be at least 32 bytes/);
+    expect(() => short.loadConfig()).toThrow(FERRUM_JWT_SECRET_TOO_SHORT_PATTERN);
   });
 
   it('applies bounded launch-safe defaults', async () => {
@@ -233,7 +279,7 @@ describe('config', () => {
         // An empty value is indistinguishable from an unset variable.
         expect(loadConfig().bindAddress).toBe('0.0.0.0');
       } else {
-        expect(() => loadConfig()).toThrow(/FERRUM_BIND_ADDRESS must be an IP address or localhost/);
+        expect(() => loadConfig()).toThrow(FERRUM_BIND_ADDRESS_INVALID_PATTERN);
       }
     }
   });
@@ -247,7 +293,7 @@ describe('config', () => {
       clearTestEnv();
       setValidEnv({ FERRUM_SHUTDOWN_TIMEOUT: value });
       const invalid = await loadModule();
-      expect(() => invalid.loadConfig()).toThrow(/FERRUM_SHUTDOWN_TIMEOUT/);
+      expect(() => invalid.loadConfig()).toThrow(FERRUM_SHUTDOWN_TIMEOUT_PATTERN);
     }
   });
 
@@ -260,7 +306,7 @@ describe('config', () => {
       clearTestEnv();
       setValidEnv({ FERRUM_UPLOAD_TIMEOUT: value });
       const invalid = await loadModule();
-      expect(() => invalid.loadConfig()).toThrow(/FERRUM_UPLOAD_TIMEOUT/);
+      expect(() => invalid.loadConfig()).toThrow(FERRUM_UPLOAD_TIMEOUT_PATTERN);
     }
   });
 
@@ -273,14 +319,14 @@ describe('config', () => {
       clearTestEnv();
       setValidEnv({ FERRUM_MAX_ACTIVE_UPLOADS: value });
       const invalid = await loadModule();
-      expect(() => invalid.loadConfig()).toThrow(/FERRUM_MAX_ACTIVE_UPLOADS/);
+      expect(() => invalid.loadConfig()).toThrow(FERRUM_MAX_ACTIVE_UPLOADS_PATTERN);
     }
 
     for (const value of ['0', '33']) {
       clearTestEnv();
       setValidEnv({ FERRUM_MAX_LARGE_UPLOADS: value });
       const invalid = await loadModule();
-      expect(() => invalid.loadConfig()).toThrow(/FERRUM_MAX_LARGE_UPLOADS/);
+      expect(() => invalid.loadConfig()).toThrow(FERRUM_MAX_LARGE_UPLOADS_PATTERN);
     }
   });
 
@@ -298,10 +344,10 @@ describe('config', () => {
     });
 
     for (const [env, pattern] of [
-      [{ FERRUM_MAX_UPLOADS_PER_PRINCIPAL: '64', FERRUM_MAX_ACTIVE_UPLOADS: '32' }, /FERRUM_MAX_UPLOADS_PER_PRINCIPAL must not exceed FERRUM_MAX_ACTIVE_UPLOADS/],
-      [{ FERRUM_MAX_LARGE_UPLOADS_PER_PRINCIPAL: '4', FERRUM_MAX_LARGE_UPLOADS: '2' }, /FERRUM_MAX_LARGE_UPLOADS_PER_PRINCIPAL must not exceed FERRUM_MAX_LARGE_UPLOADS/],
-      [{ FERRUM_MAX_LARGE_UPLOADS_PER_PRINCIPAL: '2', FERRUM_MAX_LARGE_UPLOADS: '4', FERRUM_MAX_UPLOADS_PER_PRINCIPAL: '1' }, /FERRUM_MAX_LARGE_UPLOADS_PER_PRINCIPAL must not exceed FERRUM_MAX_UPLOADS_PER_PRINCIPAL/],
-      [{ FERRUM_MAX_UPLOADS_PER_PRINCIPAL: '0' }, /FERRUM_MAX_UPLOADS_PER_PRINCIPAL/],
+      [{ FERRUM_MAX_UPLOADS_PER_PRINCIPAL: '64', FERRUM_MAX_ACTIVE_UPLOADS: '32' }, UPLOADS_PER_PRINCIPAL_EXCEEDS_ACTIVE_PATTERN],
+      [{ FERRUM_MAX_LARGE_UPLOADS_PER_PRINCIPAL: '4', FERRUM_MAX_LARGE_UPLOADS: '2' }, LARGE_UPLOADS_PER_PRINCIPAL_EXCEEDS_LARGE_PATTERN],
+      [{ FERRUM_MAX_LARGE_UPLOADS_PER_PRINCIPAL: '2', FERRUM_MAX_LARGE_UPLOADS: '4', FERRUM_MAX_UPLOADS_PER_PRINCIPAL: '1' }, LARGE_UPLOADS_PER_PRINCIPAL_EXCEEDS_PER_PRINCIPAL_PATTERN],
+      [{ FERRUM_MAX_UPLOADS_PER_PRINCIPAL: '0' }, FERRUM_MAX_UPLOADS_PER_PRINCIPAL_PATTERN],
     ] as const) {
       clearTestEnv();
       setValidEnv(env);
@@ -313,7 +359,7 @@ describe('config', () => {
   it('rejects a large-upload pool wider than the global in-flight upload pool', async () => {
     setValidEnv({ FERRUM_MAX_LARGE_UPLOADS: '8', FERRUM_MAX_ACTIVE_UPLOADS: '4' });
     const { loadConfig } = await loadModule();
-    expect(() => loadConfig()).toThrow(/FERRUM_MAX_LARGE_UPLOADS must not exceed FERRUM_MAX_ACTIVE_UPLOADS/);
+    expect(() => loadConfig()).toThrow(LARGE_UPLOADS_EXCEEDS_ACTIVE_PATTERN);
   });
 
   it('bounds the long-running read pool, its per-subject share, and the namespace scan budget', async () => {
@@ -347,7 +393,7 @@ describe('config', () => {
     setValidEnv({ FERRUM_MAX_ACTIVE_LONG_READS: '4', FERRUM_MAX_LONG_READS_PER_PRINCIPAL: '8' });
     const wider = await loadModule();
     expect(() => wider.loadConfig()).toThrow(
-      /FERRUM_MAX_LONG_READS_PER_PRINCIPAL must not exceed FERRUM_MAX_ACTIVE_LONG_READS/,
+      LONG_READS_PER_PRINCIPAL_EXCEEDS_ACTIVE_PATTERN,
     );
   });
 
@@ -366,7 +412,7 @@ describe('config', () => {
       clearTestEnv();
       setValidEnv({ FERRUM_MAX_GATEWAY_CONNECTIONS: value });
       const invalid = await loadModule();
-      expect(() => invalid.loadConfig()).toThrow(/FERRUM_MAX_GATEWAY_CONNECTIONS/);
+      expect(() => invalid.loadConfig()).toThrow(FERRUM_MAX_GATEWAY_CONNECTIONS_PATTERN);
     }
   });
 
@@ -388,7 +434,7 @@ describe('config', () => {
     setValidEnv({ FERRUM_JWT_NAMESPACES: undefined });
     const { loadConfig } = await loadModule();
     expect(() => loadConfig()).toThrow(
-      /FERRUM_JWT_NAMESPACES is required in static authentication mode \(FERRUM_AUTH_MODE=static, the default\); set it to namespace names, or \* for every namespace/,
+      FERRUM_JWT_NAMESPACES_IS_REQUIRED_PATTERN,
     );
   });
 
@@ -420,7 +466,7 @@ describe('config', () => {
         });
         const { loadConfig } = await loadModule();
         expect(() => loadConfig(), JSON.stringify({ authMode, value }))
-          .toThrow(/FERRUM_JWT_NAMESPACES must list at least one namespace, or \* for every namespace/);
+          .toThrow(FERRUM_JWT_NAMESPACES_MUST_LIST_PATTERN);
       }
     }
   });
@@ -441,9 +487,9 @@ describe('config', () => {
 
   it('rejects malformed namespace entries and a wildcard mixed with names', async () => {
     for (const [value, message] of [
-      ['tenant a', /FERRUM_JWT_NAMESPACES contains an invalid namespace/],
-      ['tenant-*', /FERRUM_JWT_NAMESPACES contains an invalid namespace/],
-      ['*,tenant-a', /FERRUM_JWT_NAMESPACES must not combine \* with namespace names/],
+      ['tenant a', FERRUM_JWT_NAMESPACES_INVALID_PATTERN],
+      ['tenant-*', FERRUM_JWT_NAMESPACES_INVALID_PATTERN],
+      ['*,tenant-a', FERRUM_JWT_NAMESPACES_MIXED_WILDCARD_PATTERN],
     ] as const) {
       clearTestEnv();
       setValidEnv({ FERRUM_JWT_NAMESPACES: value });
@@ -468,19 +514,19 @@ describe('config', () => {
       clearTestEnv();
       setValidEnv({ FERRUM_ADMIN_URL: url });
       const { loadConfig } = await loadModule();
-      expect(() => loadConfig()).toThrow(/FERRUM_ADMIN_URL/);
+      expect(() => loadConfig()).toThrow(FERRUM_ADMIN_URL_PATTERN);
     }
   });
 
   it('rejects unsafe authentication redirects and malformed CIDR policy', async () => {
     setValidEnv({ FERRUM_AUTH_LOGIN_URL: 'javascript:alert(1)' });
     const redirect = await loadModule();
-    expect(() => redirect.loadConfig()).toThrow(/FERRUM_AUTH_LOGIN_URL/);
+    expect(() => redirect.loadConfig()).toThrow(FERRUM_AUTH_LOGIN_URL_PATTERN);
 
     clearTestEnv();
     setValidEnv({ FERRUM_ADMIN_ALLOWED_CIDRS: '10.0.0.0/99' });
     const cidr = await loadModule();
-    expect(() => cidr.loadConfig()).toThrow(/FERRUM_ADMIN_ALLOWED_CIDRS/);
+    expect(() => cidr.loadConfig()).toThrow(FERRUM_ADMIN_ALLOWED_CIDRS_PATTERN);
   });
 
   it('rejects non-integer, non-finite, negative, and out-of-range numeric settings', async () => {
@@ -501,13 +547,13 @@ describe('config', () => {
   it('rejects a token TTL above the configured gateway maximum', async () => {
     setValidEnv({ FERRUM_JWT_TTL: '3601', FERRUM_JWT_MAX_TTL: '3600' });
     const { loadConfig } = await loadModule();
-    expect(() => loadConfig()).toThrow(/must not exceed/);
+    expect(() => loadConfig()).toThrow(MUST_NOT_EXCEED_PATTERN);
   });
 
   it('fails closed on static authentication in production', async () => {
     setValidEnv({ NODE_ENV: 'production' });
     const { loadConfig } = await loadModule();
-    expect(() => loadConfig()).toThrow(/Static authentication is disabled/);
+    expect(() => loadConfig()).toThrow(STATIC_AUTHENTICATION_IS_DISABLED_PATTERN);
   });
 
   it('allows an explicit development-only static production override', async () => {
@@ -567,7 +613,7 @@ describe('config', () => {
       clearTestEnv();
       setProductionEnv({ FERRUM_ADMIN_URL: url });
       const { loadConfig } = await loadModule();
-      expect(() => loadConfig(), url).toThrow(/FERRUM_ADMIN_URL must use https unless it is a loopback/);
+      expect(() => loadConfig(), url).toThrow(FERRUM_ADMIN_URL_HTTPS_UNLESS_LOOPBACK_PATTERN);
     }
   });
 
@@ -599,7 +645,7 @@ describe('config', () => {
         FERRUM_ALLOW_INSECURE_ADMIN_HTTP: value,
       });
       const { loadConfig } = await loadModule();
-      expect(() => loadConfig(), value).toThrow(/FERRUM_ADMIN_URL|FERRUM_ALLOW_INSECURE_ADMIN_HTTP/);
+      expect(() => loadConfig(), value).toThrow(ADMIN_URL_OR_INSECURE_HTTP_PATTERN);
     }
   });
 
@@ -609,7 +655,7 @@ describe('config', () => {
       FERRUM_TLS_VERIFY: 'false',
     });
     const { loadConfig } = await loadModule();
-    expect(() => loadConfig()).toThrow(/FERRUM_TLS_VERIFY must be true in production/);
+    expect(() => loadConfig()).toThrow(FERRUM_TLS_VERIFY_REQUIRED_PATTERN);
 
     clearTestEnv();
     setProductionEnv({ FERRUM_TLS_VERIFY: 'false' });
@@ -641,7 +687,7 @@ describe('config', () => {
       FERRUM_ADMIN_ALLOWED_ORIGINS: 'https://gateway.example,http://gateway.internal:9000',
     });
     const { loadConfig } = await loadModule();
-    expect(() => loadConfig()).toThrow(/FERRUM_ADMIN_ALLOWED_ORIGINS must use https/);
+    expect(() => loadConfig()).toThrow(FERRUM_ADMIN_ALLOWED_ORIGINS_HTTPS_PATTERN);
   });
 
   it('refuses a remote plaintext runtime admin origin in production before the allowlist', async () => {
@@ -651,7 +697,7 @@ describe('config', () => {
     });
     const { loadConfig, updateRuntimeConfig } = await loadModule();
     await expect(updateRuntimeConfig({ adminUrl: 'http://gateway.internal:9000' }))
-      .rejects.toThrow(/adminUrl must use https unless it is a loopback/);
+      .rejects.toThrow(ADMIN_URL_HTTPS_UNLESS_LOOPBACK_PATTERN);
     expect(loadConfig().adminUrl).toBe('http://127.0.0.1:9000');
     await updateRuntimeConfig({ adminUrl: 'https://gateway.example' });
     expect(loadConfig().adminUrl).toBe('https://gateway.example');
@@ -665,7 +711,7 @@ describe('config', () => {
     });
     const { loadConfig, updateRuntimeConfig } = await loadModule();
     await expect(updateRuntimeConfig({ tlsVerify: false }))
-      .rejects.toThrow(/FERRUM_TLS_VERIFY must be true in production/);
+      .rejects.toThrow(FERRUM_TLS_VERIFY_REQUIRED_PATTERN);
     expect(loadConfig().tlsVerify).toBe(true);
   });
 
@@ -682,7 +728,7 @@ describe('config', () => {
     });
 
     await expect(updateRuntimeConfig({ adminUrl: 'https://gateway.internal:9443' }))
-      .rejects.toThrow(/FERRUM_TLS_VERIFY must be true in production/);
+      .rejects.toThrow(FERRUM_TLS_VERIFY_REQUIRED_PATTERN);
     expect(loadConfig().adminUrl).toBe('http://127.0.0.1:9000');
   });
 
@@ -746,7 +792,7 @@ describe('config', () => {
       clearTestEnv();
       setProductionEnv(overrides);
       const { loadConfig } = await loadModule();
-      expect(() => loadConfig(), JSON.stringify(overrides)).toThrow(/must not reuse/);
+      expect(() => loadConfig(), JSON.stringify(overrides)).toThrow(MUST_NOT_REUSE_PATTERN);
     }
   });
 
@@ -793,7 +839,7 @@ describe('config', () => {
   it('keeps runtime connection mutation disabled by default', async () => {
     setValidEnv();
     const { updateRuntimeConfig } = await loadModule();
-    await expect(updateRuntimeConfig({ adminUrl: 'https://gateway.example' })).rejects.toThrow(/disabled/);
+    await expect(updateRuntimeConfig({ adminUrl: 'https://gateway.example' })).rejects.toThrow(DISABLED_PATTERN);
   });
 
   it('allows only pre-authorized runtime gateway origins', async () => {
@@ -804,7 +850,7 @@ describe('config', () => {
     const { loadConfig, updateRuntimeConfig } = await loadModule();
     await updateRuntimeConfig({ adminUrl: 'https://gateway.example' });
     expect(loadConfig().adminUrl).toBe('https://gateway.example');
-    await expect(updateRuntimeConfig({ adminUrl: 'http://169.254.169.254' })).rejects.toThrow(/allow/i);
+    await expect(updateRuntimeConfig({ adminUrl: 'http://169.254.169.254' })).rejects.toThrow(ALLOW_PATTERN);
   });
 
   it('validates a runtime update atomically before changing any field', async () => {
@@ -816,7 +862,7 @@ describe('config', () => {
     await expect(updateRuntimeConfig({
       adminUrl: 'https://gateway.example',
       readTimeout: -1,
-    })).rejects.toThrow(/readTimeout/);
+    })).rejects.toThrow(READ_TIMEOUT_PATTERN);
     expect(loadConfig().adminUrl).toBe('http://127.0.0.1:9000');
   });
 

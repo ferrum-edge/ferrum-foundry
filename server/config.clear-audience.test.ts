@@ -2,6 +2,8 @@ import { decodeJwt } from 'jose';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AuthPrincipal } from './auth-types.js';
 
+const JWT_NAMESPACES_PATTERN = /jwtNamespaces/;
+
 const principal: AuthPrincipal = {
   subject: 'settings-test',
   displayName: 'Settings test',
@@ -59,7 +61,7 @@ describe('runtime namespace grants', () => {
     'refuses %j instead of clearing the restriction',
     async (jwtNamespaces) => {
       const config = await import('./config.js');
-      await expect(config.updateRuntimeConfig({ jwtAudience: '', jwtNamespaces })).rejects.toThrow(/jwtNamespaces/);
+      await expect(config.updateRuntimeConfig({ jwtAudience: '', jwtNamespaces })).rejects.toThrow(JWT_NAMESPACES_PATTERN);
       expect(config.loadConfig()).toMatchObject({ jwtAudience: 'old-audience', jwtNamespaces: ['tenant-a'] });
       expect(config.getPublicRuntimeConfig().jwtNamespaces).toEqual(['tenant-a']);
     },

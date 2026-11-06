@@ -19,6 +19,69 @@ import {
   verdictForForgedProbe,
 } from "./starter-preflight.mjs";
 
+const PLACEHOLDER_PATTERN = /placeholder/;
+const DISPOSABLE_LOCAL_STACK_PATTERN = /disposable local stack/;
+const HTTPS_PATTERN = /https/;
+const FERRUM_ALLOW_INSECURE_ADMIN_HTTP_PATTERN = /FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true/;
+const EACCES_PATTERN = /EACCES/;
+const HAS_NOT_VERIFIED_PATTERN = /has not verified/;
+const CANNOT_TELL_FROM_HERE_PATTERN = /cannot tell from here/;
+const ECONNREFUSED_PATTERN = /ECONNREFUSED/;
+const FERRUM_TLS_CA_PATH_PATTERN = /FERRUM_TLS_CA_PATH/;
+const DISABLE_PATTERN = /disable/i;
+const FERRUM_ADMIN_JWT_SECRET_PATTERN = /FERRUM_ADMIN_JWT_SECRET/;
+const NAMESPACE_GRANT_PATTERN = /namespace grant/;
+const PROXIES_OFFSET_0_LIMIT_1_PATTERN = /\/proxies\?offset=0&limit=1$/;
+const BEARER_EY_PATTERN = /^Bearer ey/;
+const NEITHER_HTTPS_NOR_LOOPBACK_PATTERN = /neither https nor loopback/;
+const LOOPBACK_PROXIES_URL_PATTERN = /^http:\/\/127\.0\.0\.1:9000\/proxies/;
+const PROXY_SET_HEADER_PATTERN = /proxy_set_header/;
+const AUTH_REQUEST_PATTERN = /auth_request/;
+const FERRUM_ALLOW_INSECURE_ADMIN_HTTP_DEFAULT_PATTERN =
+  /FERRUM_ALLOW_INSECURE_ADMIN_HTTP: \$\{FERRUM_ALLOW_INSECURE_ADMIN_HTTP:-false\}/;
+const FERRUM_ADMIN_URL_DEMO_GATEWAY_PATTERN = /^FERRUM_ADMIN_URL=http:\/\/demo-gateway:9000$/m;
+const FERRUM_ALLOW_INSECURE_ADMIN_HTTP_TRUE_PATTERN = /^FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true$/m;
+const INCLUDE_ETC_NGINX_IDENTITY_POLICY_PATTERN = /include \/etc\/nginx\/identity\/policy\.conf;/;
+const INCLUDE_ETC_NGINX_IDENTITY_INJECT_PATTERN = /include \/etc\/nginx\/identity\/inject\.conf;/;
+const MAP_AUTH_GROUPS_PATTERN = /map \$auth_groups/;
+const X_FERRUM_AUTH_SECRET_PATTERN = /X-Ferrum-Auth-Secret/;
+const MAP_AUTH_GROUPS_FERRUM_ROLE_DEFAULT_PATTERN =
+  /map \$auth_groups \$ferrum_role \{\s*\n\s*default\s+"";/;
+const MAP_AUTH_GROUPS_FERRUM_NAMESPACES_PATTERN =
+  /map \$auth_groups \$ferrum_namespaces \{\s*\n\s*default\s+"";/;
+const E2E_NAMESPACE_GRANTS_PATTERN = /ferrum-foundry-demo,ferrum-foundry-demo-b/;
+const EXPOSE_PATTERN = /expose:/;
+const INDENTED_PORTS_PATTERN = /^\s{4}ports:/m;
+const FOUNDRY_IMAGE_PATTERN = /^FOUNDRY_IMAGE=/m;
+const FOUNDRY_IMAGE_DEFAULT_PATTERN = /FOUNDRY_IMAGE=\$\{FOUNDRY_IMAGE:-\}/;
+const PUBLISHED_RELEASE_DIGEST_PATTERN = /published release digest/;
+const STOP_GRACE_PERIOD_PATTERN = /stop_grace_period:\s*(\d+)s/;
+const FERRUM_SHUTDOWN_TIMEOUT_PATTERN = /FERRUM_SHUTDOWN_TIMEOUT:\s*"?(\d+)"?/;
+const COMPOSE_IMAGE_PATTERN = /^\s+image:\s*(\S+)/gm;
+const SHA256_DIGEST_PATTERN = /@sha256:[0-9a-f]{64}/;
+const REQUIRED_VARIABLE_PATTERN = /\$\{([A-Z0-9_]+):\?/g;
+const OIDC_ISSUER_URL_PATTERN = /--oidc-issuer-url/;
+const REDIRECT_URL_PATTERN = /--redirect-url/;
+const EMAIL_DOMAIN_PATTERN = /--email-domain/;
+const ENV_FILE_PATTERN = /env_file:/;
+const HEALTHCHECK_PATTERN = /healthcheck:/;
+const BACKEND_HEALTH_ADDRESS_PATTERN = /127\.0\.0\.1:8081/;
+const COPY_FROM_BUILDER_CHOWN_65532_PATTERN =
+  /^COPY --from=builder --chown=65532:65532 \/app\/shared \.\/shared\/$/m;
+const ENTRYPOINT_PATTERN = /^ENTRYPOINT \["([^"]+)"\]$/m;
+const DISTROLESS_BASE =
+  /^FROM gcr\.io\/distroless\/nodejs\d+-debian\d+:nonroot@sha256:[0-9a-f]{64}$/;
+const RUN_PATTERN = /^RUN /m;
+const NONROOT_USER_PATTERN = /^USER 65532:65532$/m;
+const COMMAND_E_PATTERN = /^ {4}command:\n {6}- "-e"\n/m;
+const DOT_ENV_ENTRY_PATTERN = /-\s+\.env\s*$/m;
+const PATH_OAUTH2_PROXY_ENV_PATTERN = /path: oauth2-proxy\.env/;
+const STARTER_SECRET_NAMES_PATTERN = /FERRUM_JWT_SECRET|FERRUM_TRUSTED_PROXY_SECRET/;
+const FERRUM_AUTH_MAX_FAILURES_DEFAULT_PATTERN =
+  /FERRUM_AUTH_MAX_FAILURES: \$\{FERRUM_AUTH_MAX_FAILURES:-10\}/;
+const FERRUM_AUTH_LOCKOUT_SECONDS_DEFAULT_PATTERN =
+  /FERRUM_AUTH_LOCKOUT_SECONDS: \$\{FERRUM_AUTH_LOCKOUT_SECONDS:-60\}/;
+
 const STARTER = new URL("../deploy/starter/", import.meta.url);
 
 function statFor(overrides = {}) {
@@ -73,7 +136,7 @@ test("a missing, short, or placeholder secret fails", () => {
     FERRUM_TRUSTED_PROXY_SECRET: "b".repeat(48),
   });
   assert.equal(placeholder.status, FAIL);
-  assert.match(placeholder.detail, /placeholder/);
+  assert.match(placeholder.detail, PLACEHOLDER_PATTERN);
 });
 
 test("a secret is never echoed, only measured", () => {
@@ -97,7 +160,7 @@ test("the admin URL must be a bare origin", () => {
 test("a plaintext admin URL is unknown, not a pass", () => {
   const result = checkAdminUrl({ FERRUM_ADMIN_URL: "http://127.0.0.1:9000" });
   assert.equal(result.status, UNKNOWN);
-  assert.match(result.remedy, /disposable local stack/);
+  assert.match(result.remedy, DISPOSABLE_LOCAL_STACK_PATTERN);
 });
 
 test("a plaintext admin URL to another host fails, as the production BFF refuses it", () => {
@@ -108,7 +171,7 @@ test("a plaintext admin URL to another host fails, as the production BFF refuses
   ]) {
     const result = checkAdminUrl({ FERRUM_ADMIN_URL: url });
     assert.equal(result.status, FAIL, url);
-    assert.match(result.remedy, /https/);
+    assert.match(result.remedy, HTTPS_PATTERN);
   }
 });
 
@@ -118,7 +181,7 @@ test("the explicit plaintext override is reported as unknown, never a pass", () 
     FERRUM_ALLOW_INSECURE_ADMIN_HTTP: "true",
   });
   assert.equal(result.status, UNKNOWN);
-  assert.match(result.detail, /FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true/);
+  assert.match(result.detail, FERRUM_ALLOW_INSECURE_ADMIN_HTTP_PATTERN);
   assert.equal(
     checkAdminUrl({
       FERRUM_ADMIN_URL: "http://demo-gateway:9000",
@@ -144,7 +207,7 @@ test("an unreadable CA bundle fails with its errno", async () => {
     { stat: async () => { const error = new Error("nope"); error.code = "EACCES"; throw error; } },
   );
   assert.equal(result.status, FAIL);
-  assert.match(result.detail, /EACCES/);
+  assert.match(result.detail, EACCES_PATTERN);
 });
 
 test("a readable bundle is still unknown, because anchoring was not proved", async () => {
@@ -153,13 +216,13 @@ test("a readable bundle is still unknown, because anchoring was not proved", asy
     statFor(),
   );
   assert.equal(result.status, UNKNOWN);
-  assert.match(result.remedy, /has not verified/);
+  assert.match(result.remedy, HAS_NOT_VERIFIED_PATTERN);
 });
 
 test("an https gateway with no configured bundle is unknown, not a pass", async () => {
   const result = await checkTlsTrust({ FERRUM_ADMIN_URL: "https://host:9000" }, statFor());
   assert.equal(result.status, UNKNOWN);
-  assert.match(result.remedy, /cannot tell from here/);
+  assert.match(result.remedy, CANNOT_TELL_FROM_HERE_PATTERN);
 });
 
 /* ---------------- gateway reachability ---------------- */
@@ -169,15 +232,15 @@ test("an unreachable gateway fails with an actionable remedy", async () => {
   error.cause = { code: "ECONNREFUSED" };
   const result = await checkGatewayReachable(workingEnv, async () => { throw error; });
   assert.equal(result.status, FAIL);
-  assert.match(result.detail, /ECONNREFUSED/);
+  assert.match(result.detail, ECONNREFUSED_PATTERN);
 });
 
 test("a certificate failure names the trust remedy, not a verification bypass", async () => {
   const error = new Error("fetch failed");
   error.cause = { code: "UNABLE_TO_VERIFY_LEAF_SIGNATURE" };
   const result = await checkGatewayReachable(workingEnv, async () => { throw error; });
-  assert.match(result.remedy, /FERRUM_TLS_CA_PATH/);
-  assert.ok(!/disable/i.test(result.remedy.replace("do not disable", "")));
+  assert.match(result.remedy, FERRUM_TLS_CA_PATH_PATTERN);
+  assert.ok(!DISABLE_PATTERN.test(result.remedy.replace("do not disable", "")));
 });
 
 /* ---------------- admin credentials ---------------- */
@@ -185,14 +248,14 @@ test("a certificate failure names the trust remedy, not a verification bypass", 
 test("a 401 from the gateway names the signing key and audience", async () => {
   const [result] = await checkAdminCredentials(workingEnv, async () => new Response("", { status: 401 }));
   assert.equal(result.status, FAIL);
-  assert.match(result.remedy, /FERRUM_ADMIN_JWT_SECRET/);
+  assert.match(result.remedy, FERRUM_ADMIN_JWT_SECRET_PATTERN);
 });
 
 test("a 403 separates an accepted key from a refused namespace", async () => {
   const results = await checkAdminCredentials(workingEnv, async () => new Response("", { status: 403 }));
   assert.equal(results[0].status, PASS);
   assert.equal(results[1].status, FAIL);
-  assert.match(results[1].name, /namespace grant/);
+  assert.match(results[1].name, NAMESPACE_GRANT_PATTERN);
 });
 
 test("a 200 confirms both, and the request carries the namespace header", async () => {
@@ -202,9 +265,9 @@ test("a 200 confirms both, and the request carries the namespace header", async 
     return Response.json({ data: [], pagination: { offset: 0, limit: 1, total: 0 } });
   });
   assert.deepEqual(results.map((result) => result.status), [PASS, PASS]);
-  assert.match(seen.url, /\/proxies\?offset=0&limit=1$/);
+  assert.match(seen.url, PROXIES_OFFSET_0_LIMIT_1_PATTERN);
   assert.equal(seen.headers["x-ferrum-namespace"], "production");
-  assert.match(seen.headers.authorization, /^Bearer ey/);
+  assert.match(seen.headers.authorization, BEARER_EY_PATTERN);
 });
 
 test("a missing namespace is unknown rather than silently skipped", async () => {
@@ -231,7 +294,7 @@ test("no admin token is minted or sent to a plaintext remote admin URL", async (
       return new Response("", { status: 200 });
     });
     assert.equal(result.status, UNKNOWN, env.FERRUM_ADMIN_URL);
-    assert.match(result.detail, /neither https nor loopback/);
+    assert.match(result.detail, NEITHER_HTTPS_NOR_LOOPBACK_PATTERN);
     assert.equal(requests, 0, `${env.FERRUM_ADMIN_URL} must receive no credentialed probe`);
   }
 });
@@ -246,8 +309,8 @@ test("a loopback plaintext admin URL still gets the credentialed probe", async (
     },
   );
   assert.deepEqual(results.map((result) => result.status), [PASS, PASS]);
-  assert.match(seen.url, /^http:\/\/127\.0\.0\.1:9000\/proxies/);
-  assert.match(seen.headers.authorization, /^Bearer ey/);
+  assert.match(seen.url, LOOPBACK_PROXIES_URL_PATTERN);
+  assert.match(seen.headers.authorization, BEARER_EY_PATTERN);
 });
 
 test("the full preflight sends only the anonymous health probe to a remote plaintext gateway", async () => {
@@ -283,7 +346,7 @@ test("a served forged-identity request fails", async () => {
   );
   assert.equal(results[0].status, PASS);
   assert.equal(results[1].status, FAIL);
-  assert.match(results[1].remedy, /proxy_set_header/);
+  assert.match(results[1].remedy, PROXY_SET_HEADER_PATTERN);
 });
 
 test("the forged request selects the namespace it grants", async () => {
@@ -391,7 +454,7 @@ test("a served anonymous request fails", async () => {
     async () => Response.json({ data: [] }),
   );
   assert.equal(anonymous.status, FAIL);
-  assert.match(anonymous.remedy, /auth_request/);
+  assert.match(anonymous.remedy, AUTH_REQUEST_PATTERN);
 });
 
 test("without a front-door URL the boundary is unknown, not assumed sound", async () => {
@@ -445,7 +508,7 @@ test("only the demo bootstrap lets Foundry use a plaintext admin URL to another 
   const foundry = compose.slice(compose.indexOf("  foundry:"), compose.indexOf("  oauth2-proxy:"));
   assert.match(
     foundry,
-    /FERRUM_ALLOW_INSECURE_ADMIN_HTTP: \$\{FERRUM_ALLOW_INSECURE_ADMIN_HTTP:-false\}/,
+    FERRUM_ALLOW_INSECURE_ADMIN_HTTP_DEFAULT_PATTERN,
     "the BFF must default to refusing remote plaintext in both profiles",
   );
 
@@ -454,22 +517,22 @@ test("only the demo bootstrap lets Foundry use a plaintext admin URL to another 
   assert.equal(checkAdminUrl(example).status, PASS, "the production example must use https");
 
   const bootstrap = await readFile(new URL("bootstrap-demo.sh", STARTER), "utf8");
-  assert.match(bootstrap, /^FERRUM_ADMIN_URL=http:\/\/demo-gateway:9000$/m);
-  assert.match(bootstrap, /^FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true$/m);
+  assert.match(bootstrap, FERRUM_ADMIN_URL_DEMO_GATEWAY_PATTERN);
+  assert.match(bootstrap, FERRUM_ALLOW_INSECURE_ADMIN_HTTP_TRUE_PATTERN);
 });
 
 test("production and demo proxies share one authorization policy", async () => {
   const production = await readFile(new URL("nginx/foundry.conf", STARTER), "utf8");
   const demo = await readFile(new URL("nginx/foundry.demo.conf", STARTER), "utf8");
   for (const config of [production, demo]) {
-    assert.match(config, /include \/etc\/nginx\/identity\/policy\.conf;/);
-    assert.match(config, /include \/etc\/nginx\/identity\/inject\.conf;/);
+    assert.match(config, INCLUDE_ETC_NGINX_IDENTITY_POLICY_PATTERN);
+    assert.match(config, INCLUDE_ETC_NGINX_IDENTITY_INJECT_PATTERN);
   }
   // The demo may differ only in its identity source, so it must not carry its
   // own copy of the policy or the header injection.
-  assert.ok(!/map \$auth_groups/.test(demo));
-  assert.ok(!/X-Ferrum-Auth-Secret/.test(demo));
-  assert.ok(!/map \$auth_groups/.test(production));
+  assert.ok(!MAP_AUTH_GROUPS_PATTERN.test(demo));
+  assert.ok(!X_FERRUM_AUTH_SECRET_PATTERN.test(demo));
+  assert.ok(!MAP_AUTH_GROUPS_PATTERN.test(production));
 });
 
 test("the shared injection replaces every identity header a client could send", async () => {
@@ -490,8 +553,8 @@ test("the shared injection replaces every identity header a client could send", 
 
 test("an unmapped identity is denied by the shared policy's default", async () => {
   const policy = await readFile(new URL("nginx/identity/policy.conf", STARTER), "utf8");
-  assert.match(policy, /map \$auth_groups \$ferrum_role \{\s*\n\s*default\s+"";/);
-  assert.match(policy, /map \$auth_groups \$ferrum_namespaces \{\s*\n\s*default\s+"";/);
+  assert.match(policy, MAP_AUTH_GROUPS_FERRUM_ROLE_DEFAULT_PATTERN);
+  assert.match(policy, MAP_AUTH_GROUPS_FERRUM_NAMESPACES_PATTERN);
 });
 
 test("the shipped policy grants no test-only second namespace", async () => {
@@ -499,7 +562,7 @@ test("the shipped policy grants no test-only second namespace", async () => {
   assert.ok(!policy.includes("ferrum-foundry-demo-b"));
 
   const e2ePolicy = await readFile(new URL("../e2e/nginx/policy.conf", import.meta.url), "utf8");
-  assert.match(e2ePolicy, /ferrum-foundry-demo,ferrum-foundry-demo-b/);
+  assert.match(e2ePolicy, E2E_NAMESPACE_GRANTS_PATTERN);
 });
 
 test("the BFF publishes no host port in either profile", async () => {
@@ -508,36 +571,36 @@ test("the BFF publishes no host port in either profile", async () => {
     compose.indexOf("  foundry:"),
     compose.indexOf("  oauth2-proxy:"),
   );
-  assert.ok(/expose:/.test(foundryService));
+  assert.ok(EXPOSE_PATTERN.test(foundryService));
   assert.ok(
-    !/^\s{4}ports:/m.test(foundryService),
+    !INDENTED_PORTS_PATTERN.test(foundryService),
     "anyone who can reach the BFF port and knows the proof secret is an administrator",
   );
 });
 
 test("starter defaults select the published Foundry digest and stop grace exceeds the BFF deadline", async () => {
   const example = await readFile(new URL(".env.example", STARTER), "utf8");
-  assert.ok(!/^FOUNDRY_IMAGE=/m.test(example), "a copied .env must not override the compose digest fallback");
+  assert.ok(!FOUNDRY_IMAGE_PATTERN.test(example), "a copied .env must not override the compose digest fallback");
   const bootstrap = await readFile(new URL("bootstrap-demo.sh", STARTER), "utf8");
   assert.ok(!bootstrap.includes("ferrum-foundry:main"), "the demo bootstrap must not default to the moving main tag");
-  assert.match(bootstrap, /FOUNDRY_IMAGE=\$\{FOUNDRY_IMAGE:-\}/);
+  assert.match(bootstrap, FOUNDRY_IMAGE_DEFAULT_PATTERN);
   const journeyGuide = await readFile(new URL("../e2e/README.md", import.meta.url), "utf8");
   assert.ok(!journeyGuide.includes("ferrum-foundry:main"), "the journey guide must not name the moving main tag as the default");
-  assert.match(journeyGuide, /published release digest/);
+  assert.match(journeyGuide, PUBLISHED_RELEASE_DIGEST_PATTERN);
   const compose = await readFile(new URL("compose.yaml", STARTER), "utf8");
   const foundry = compose.slice(compose.indexOf("  foundry:"), compose.indexOf("  oauth2-proxy:"));
-  const grace = Number(foundry.match(/stop_grace_period:\s*(\d+)s/)?.[1] ?? 0);
-  const deadline = Number(foundry.match(/FERRUM_SHUTDOWN_TIMEOUT:\s*"?(\d+)"?/)?.[1] ?? 0) / 1000;
+  const grace = Number(foundry.match(STOP_GRACE_PERIOD_PATTERN)?.[1] ?? 0);
+  const deadline = Number(foundry.match(FERRUM_SHUTDOWN_TIMEOUT_PATTERN)?.[1] ?? 0) / 1000;
   assert.ok(grace > deadline, `stop grace ${grace}s must exceed the BFF shutdown deadline ${deadline}s`);
 });
 
 test("every third-party image in the starter is pinned by digest", async () => {
   const compose = await readFile(new URL("compose.yaml", STARTER), "utf8");
-  const images = [...compose.matchAll(/^\s+image:\s*(\S+)/gm)].map((match) => match[1]);
+  const images = [...compose.matchAll(COMPOSE_IMAGE_PATTERN)].map((match) => match[1]);
   assert.ok(images.length >= 4);
   for (const image of images) {
     if (image.startsWith("${FOUNDRY_IMAGE")) continue; // operator-selected release
-    assert.match(image, /@sha256:[0-9a-f]{64}/, `${image} must be pinned by digest`);
+    assert.match(image, SHA256_DIGEST_PATTERN, `${image} must be pinned by digest`);
   }
 });
 
@@ -547,7 +610,7 @@ test("only variables both profiles need are required by compose", async () => {
   // all — and the other way round. Only the three the BFF cannot run without
   // may be required here; everything else is the reading service's business.
   const compose = await readFile(new URL("compose.yaml", STARTER), "utf8");
-  const required = [...compose.matchAll(/\$\{([A-Z0-9_]+):\?/g)].map((match) => match[1]);
+  const required = [...compose.matchAll(REQUIRED_VARIABLE_PATTERN)].map((match) => match[1]);
 
   assert.deepEqual(
     [...new Set(required)].sort(),
@@ -564,10 +627,10 @@ test("oauth2-proxy takes its identity settings from the environment", async () =
   );
   // Passing these on the command line would reintroduce the interpolation the
   // demo profile cannot satisfy.
-  assert.ok(!/--oidc-issuer-url/.test(service));
-  assert.ok(!/--redirect-url/.test(service));
-  assert.ok(!/--email-domain/.test(service));
-  assert.match(service, /env_file:/);
+  assert.ok(!OIDC_ISSUER_URL_PATTERN.test(service));
+  assert.ok(!REDIRECT_URL_PATTERN.test(service));
+  assert.ok(!EMAIL_DOMAIN_PATTERN.test(service));
+  assert.match(service, ENV_FILE_PATTERN);
 
   const env = parseEnvFile(
     await readFile(new URL("oauth2-proxy.env.example", STARTER), "utf8"),
@@ -587,8 +650,8 @@ test("every demo service can prove it is ready", async () => {
   // backend runs the Foundry image for its Node runtime, not for its server.
   const compose = await readFile(new URL("compose.yaml", STARTER), "utf8");
   const backend = compose.slice(compose.indexOf("  demo-backend:"));
-  assert.match(backend, /healthcheck:/);
-  assert.match(backend, /127\.0\.0\.1:8081/, "the probe must target this service's own port");
+  assert.match(backend, HEALTHCHECK_PATTERN);
+  assert.match(backend, BACKEND_HEALTH_ADDRESS_PATTERN, "the probe must target this service's own port");
 });
 
 test("the demo backend runs and probes with the image's own Node", async () => {
@@ -605,28 +668,27 @@ test("the demo backend runs and probes with the image's own Node", async () => {
   const base = runtime.slice(0, runtime.indexOf("\n"));
   assert.match(
     runtime,
-    /^COPY --from=builder --chown=65532:65532 \/app\/shared \.\/shared\/$/m,
+    COPY_FROM_BUILDER_CHOWN_65532_PATTERN,
     "the runtime image must include every shared module imported by the server",
   );
-  const entrypoint = runtime.match(/^ENTRYPOINT \["([^"]+)"\]$/m);
+  const entrypoint = runtime.match(ENTRYPOINT_PATTERN);
   assert.ok(entrypoint, "the runtime stage must name Node as its exec-form entrypoint");
   assert.equal(entrypoint[1], DISTROLESS_NODE, "the entrypoint must be Node at the distroless path");
   assert.ok(
     runtime.includes(`CMD ["${DISTROLESS_NODE}", "-e",`),
     "the image HEALTHCHECK must use the entrypoint's Node binary",
   );
-  const DISTROLESS_BASE = /^FROM gcr\.io\/distroless\/nodejs\d+-debian\d+:nonroot@sha256:[0-9a-f]{64}$/;
   assert.match(
     base,
     DISTROLESS_BASE,
     `the runtime base must be the digest-pinned distroless nonroot Node image (${base})`,
   );
-  assert.doesNotMatch(runtime, /^RUN /m, "a distroless runtime stage has no shell to RUN in");
-  assert.match(runtime, /^USER 65532:65532$/m, "the runtime must run as the numeric nonroot user");
+  assert.doesNotMatch(runtime, RUN_PATTERN, "a distroless runtime stage has no shell to RUN in");
+  assert.match(runtime, NONROOT_USER_PATTERN, "the runtime must run as the numeric nonroot user");
 
   const compose = await readFile(new URL("compose.yaml", STARTER), "utf8");
   const backend = compose.slice(compose.indexOf("  demo-backend:"));
-  assert.match(backend, /^ {4}command:\n {6}- "-e"\n/m, "the command must be Node arguments");
+  assert.match(backend, COMMAND_E_PATTERN, "the command must be Node arguments");
   assert.ok(
     backend.includes(`- CMD\n        - ${DISTROLESS_NODE}\n`),
     "the demo probe must use the Node path every published Foundry image has",
@@ -638,11 +700,11 @@ test("oauth2-proxy never receives the gateway admin secrets", async () => {
   // that signs gateway admin tokens and the proxy proof secret.
   const compose = await readFile(new URL("compose.yaml", STARTER), "utf8");
   const service = compose.slice(compose.indexOf("  oauth2-proxy:"), compose.indexOf("  proxy:"));
-  assert.ok(!/-\s+\.env\s*$/m.test(service), "oauth2-proxy must not read .env");
-  assert.match(service, /path: oauth2-proxy\.env/);
+  assert.ok(!DOT_ENV_ENTRY_PATTERN.test(service), "oauth2-proxy must not read .env");
+  assert.match(service, PATH_OAUTH2_PROXY_ENV_PATTERN);
 
   const oauthEnv = await readFile(new URL("oauth2-proxy.env.example", STARTER), "utf8");
-  assert.ok(!/FERRUM_JWT_SECRET|FERRUM_TRUSTED_PROXY_SECRET/.test(oauthEnv));
+  assert.ok(!STARTER_SECRET_NAMES_PATTERN.test(oauthEnv));
   const mainEnv = parseEnvFile(await readFile(new URL(".env.example", STARTER), "utf8"));
   assert.ok(
     !Object.keys(mainEnv).some((key) => key.startsWith("OAUTH2_PROXY_")),
@@ -750,8 +812,8 @@ test("a 127-prefixed DNS name never receives the proof after other checks fail",
 test("the starter forwards the failed-authentication throttle settings to Foundry", async () => {
   const compose = await readFile(new URL("compose.yaml", STARTER), "utf8");
   const foundry = compose.slice(compose.indexOf("  foundry:"), compose.indexOf("  oauth2-proxy:"));
-  assert.match(foundry, /FERRUM_AUTH_MAX_FAILURES: \$\{FERRUM_AUTH_MAX_FAILURES:-10\}/);
-  assert.match(foundry, /FERRUM_AUTH_LOCKOUT_SECONDS: \$\{FERRUM_AUTH_LOCKOUT_SECONDS:-60\}/);
+  assert.match(foundry, FERRUM_AUTH_MAX_FAILURES_DEFAULT_PATTERN);
+  assert.match(foundry, FERRUM_AUTH_LOCKOUT_SECONDS_DEFAULT_PATTERN);
   const example = parseEnvFile(await readFile(new URL(".env.example", STARTER), "utf8"));
   assert.equal(example.FERRUM_AUTH_MAX_FAILURES, "10");
   assert.equal(example.FERRUM_AUTH_LOCKOUT_SECONDS, "60");

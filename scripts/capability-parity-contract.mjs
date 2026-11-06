@@ -93,6 +93,8 @@ import {
   readSeedConfig,
 } from "./seed-demo-gateway.mjs";
 
+const SCOPED_GLOBAL_READ_PATTERN = /^\/(plugins|live|health|status)(\?|$)/;
+
 export const ROLES = ["viewer", "operator", "admin"];
 const ROLE_RANK = { viewer: 0, operator: 1, admin: 2 };
 
@@ -120,7 +122,7 @@ export function bffForwardsScoped(method, path) {
  * `/live`, `/health`, `/status`) and every fleet-global route does not.
  */
 export function addressesNamespace(method, path) {
-  return bffForwardsScoped(method, path) && !/^\/(plugins|live|health|status)(\?|$)/.test(path);
+  return bffForwardsScoped(method, path) && !SCOPED_GLOBAL_READ_PATTERN.test(path);
 }
 
 /**

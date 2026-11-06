@@ -5,6 +5,14 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { CSP_NONCE_PLACEHOLDER } from '../shared/csp-nonce.js';
 import type { BuildAppOptions } from './app.js';
 
+const FERRUM_JWT_NAMESPACES_IS_REQUIRED_PATTERN =
+  /FERRUM_JWT_NAMESPACES is required in static authentication mode \(FERRUM_AUTH_MODE=static, the default\); set it to namespace names, or \* for every namespace/;
+const FERRUM_JWT_NAMESPACES_MUST_LIST_PATTERN =
+  /FERRUM_JWT_NAMESPACES must list at least one namespace, or \* for every namespace/;
+const NONCE_PATTERN = /'nonce-([^']+)'/;
+const HEX_32_PATTERN = /^[0-9a-f]{32}$/;
+const NO_CSP_NONCE_PLACEHOLDER_PATTERN = /no CSP nonce placeholder/;
+
 const ENV = {
   NODE_ENV: 'production',
   FERRUM_ADMIN_URL: 'http://127.0.0.1:9999',
@@ -119,13 +127,13 @@ describe('static namespace scope at startup', () => {
 
   it('refuses to start when FERRUM_JWT_NAMESPACES is unset, naming both options', async () => {
     await expect(loadApp({ ...STATIC_MODE, FERRUM_JWT_NAMESPACES: undefined })).rejects.toThrow(
-      /FERRUM_JWT_NAMESPACES is required in static authentication mode \(FERRUM_AUTH_MODE=static, the default\); set it to namespace names, or \* for every namespace/,
+      FERRUM_JWT_NAMESPACES_IS_REQUIRED_PATTERN,
     );
   });
 
   it('refuses to start when FERRUM_JWT_NAMESPACES names no namespace', async () => {
     await expect(loadApp({ ...STATIC_MODE, FERRUM_JWT_NAMESPACES: ' , ' })).rejects.toThrow(
-      /FERRUM_JWT_NAMESPACES must list at least one namespace, or \* for every namespace/,
+      FERRUM_JWT_NAMESPACES_MUST_LIST_PATTERN,
     );
   });
 
@@ -213,8 +221,8 @@ describe('SPA shell nonce (#594)', () => {
 
         const policy = styleSrc(response.headers['content-security-policy']);
         expect(policy).not.toContain('unsafe-inline');
-        const nonce = /'nonce-([^']+)'/.exec(policy)?.[1];
-        expect(nonce, url).toMatch(/^[0-9a-f]{32}$/);
+        const nonce = NONCE_PATTERN.exec(policy)?.[1];
+        expect(nonce, url).toMatch(HEX_32_PATTERN);
 
         expect(response.body).not.toContain(P);
         expect(response.body).toContain(`<meta property="csp-nonce" nonce="${nonce}">`);
@@ -253,7 +261,7 @@ describe('SPA shell nonce (#594)', () => {
     try {
       await writeFile(join(stale, 'index.html'), '<!doctype html><html><head></head></html>');
       await expect(loadApp({}, false, { serveStatic: true, distPath: stale })).rejects.toThrow(
-        /no CSP nonce placeholder/,
+        NO_CSP_NONCE_PLACEHOLDER_PATTERN,
       );
     } finally {
       await rm(stale, { recursive: true, force: true });

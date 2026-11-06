@@ -37,6 +37,8 @@ import { CapabilityNotice } from "@/components/shared/CapabilityGate";
 import { formatDateTime, formatTime } from "@/lib/format";
 import { resolveFleetView } from "@/lib/capabilities";
 
+const UNDERSCORES_PATTERN = /_/g;
+
 function NotMeshEmpty({ what }: { what: string }) {
   return (
     <EmptyState
@@ -112,7 +114,7 @@ function OverviewTab() {
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-6 gap-y-2">
               {Object.entries(drift.slice.resources).map(([key, count]) => (
                 <div key={key} className="flex items-center justify-between text-sm">
-                  <span className="text-text-secondary">{key.replace(/_/g, " ")}</span>
+                  <span className="text-text-secondary">{key.replace(UNDERSCORES_PATTERN, " ")}</span>
                   <span className="text-text-primary font-medium">{count}</span>
                 </div>
               ))}
@@ -130,7 +132,7 @@ function OverviewTab() {
               <h3 className="text-sm font-semibold text-danger mb-2">Quarantined Revision</h3>
               <p className="text-sm text-text-secondary">
                 {drift.revision.quarantined.authority} seq {drift.revision.quarantined.sequence} —{" "}
-                {drift.revision.quarantined.reason.replace(/_/g, " ")} (
+                {drift.revision.quarantined.reason.replace(UNDERSCORES_PATTERN, " ")} (
                 {drift.revision.quarantined.consecutive} consecutive)
               </p>
             </Card>
@@ -363,7 +365,7 @@ function ClustersTab() {
                     </Badge>
                   </div>
                   <p className="text-xs text-text-muted mt-1">
-                    {cluster.trust_domain} · trust via {cluster.trust_source.replace(/_/g, " ")}
+                    {cluster.trust_domain} · trust via {cluster.trust_source.replace(UNDERSCORES_PATTERN, " ")}
                     {cluster.network ? ` · network ${cluster.network}` : ""}
                   </p>
                 </div>

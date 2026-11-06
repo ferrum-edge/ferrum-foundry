@@ -1,5 +1,8 @@
 import type { FastifyRequest } from 'fastify';
 
+const UNSAFE_SEGMENT_CHARACTER_PATTERN = /[%/\\]/;
+const CONSUMER_VERIFICATION_PATH_PATTERN = /^\/consumers\/[^/]+\/verification\/?$/;
+
 const MAX_DECODE_PASSES = 8;
 const PROXY_PREFIX = '/api/proxy/';
 const targetPaths = new WeakMap<FastifyRequest, string>();
@@ -93,7 +96,7 @@ export function proxyTargetPath(request: FastifyRequest): string {
     // No recursive decoding: a remaining percent sign is ambiguous to later
     // parsers. Reject separators, controls and dot segments before URL can
     // remove or reinterpret any of them. Ordinary dots inside IDs are valid.
-    if (containsControl(decoded) || /[%/\\]/.test(decoded) || decoded === '.' || decoded === '..') {
+    if (containsControl(decoded) || UNSAFE_SEGMENT_CHARACTER_PATTERN.test(decoded) || decoded === '.' || decoded === '..') {
       throw new UnsafeProxyPathError();
     }
     return decoded;
@@ -129,7 +132,7 @@ export function proxyTargetUrl(request: FastifyRequest, adminUrl: string): URL {
 export function proxyPathIsConsumerVerification(path: string): boolean {
   // Consume proxyTargetPath's serialized pathname, exactly as proxyTargetUrl
   // forwards it. IDs may still contain URL escapes; never decode it again.
-  return /^\/consumers\/[^/]+\/verification\/?$/.test(path);
+  return CONSUMER_VERIFICATION_PATH_PATTERN.test(path);
 }
 
 /** Deployment evidence includes original credentials and is not a browser read. */

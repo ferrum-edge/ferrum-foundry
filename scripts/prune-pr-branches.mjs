@@ -1,5 +1,8 @@
 import { appendFileSync } from "node:fs";
 
+const LINK_TARGET_PATTERN = /^<([^>]+)>/;
+const OWNER_REPOSITORY_PATTERN = /^[^/]+\/[^/]+$/;
+
 const PROTECTED_BRANCHES = new Set(["main", "master", "develop"]);
 
 function parseTimestamp(value) {
@@ -116,7 +119,7 @@ function nextPage(linkHeader) {
   return linkHeader?.split(",")
     .map((entry) => entry.trim())
     .find((entry) => entry.endsWith('rel="next"'))
-    ?.match(/^<([^>]+)>/)?.[1];
+    ?.match(LINK_TARGET_PATTERN)?.[1];
 }
 
 async function run() {
@@ -125,7 +128,7 @@ async function run() {
   const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
   const apiUrl = process.env.GITHUB_API_URL || "https://api.github.com";
   const apiOrigin = new URL(apiUrl).origin;
-  if (!repository?.match(/^[^/]+\/[^/]+$/)) throw new Error("GITHUB_REPOSITORY must be owner/repository");
+  if (!repository?.match(OWNER_REPOSITORY_PATTERN)) throw new Error("GITHUB_REPOSITORY must be owner/repository");
   if (!token) throw new Error("GITHUB_TOKEN is required");
   if (args.deleteLive && args.confirmation !== repository) {
     throw new Error(`Live deletion requires --confirm-repository ${repository}`);

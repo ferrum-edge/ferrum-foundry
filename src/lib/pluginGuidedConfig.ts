@@ -24,6 +24,8 @@
 import type { JsonValue } from "./pluginConfigDefaults";
 import type { GuidedField, GuidedSection, PluginGuidedSchema } from "./pluginSchemas";
 
+const INTEGER_PATTERN = /^-?\d+$/;
+
 export type JsonObject = Record<string, JsonValue>;
 
 /** One field's editing state. `present: false` means the key is absent. */
@@ -121,7 +123,7 @@ function parseValue(field: GuidedField, state: FieldState): JsonValue {
       // empty or malformed draft is kept as text (and flagged) rather than
       // silently saved as 0 once the operator switches to the JSON editor.
       const text = state.text.trim();
-      return /^-?\d+$/.test(text) ? Number(text) : text;
+      return INTEGER_PATTERN.test(text) ? Number(text) : text;
     }
     case "stringList":
       return state.text
@@ -255,7 +257,7 @@ function validateField(
   }
 
   if (field.kind === "integer") {
-    if (!/^-?\d+$/.test(text)) {
+    if (!INTEGER_PATTERN.test(text)) {
       return { path, message: `${field.label} must be a whole number.` };
     }
     const parsed = Number(text);

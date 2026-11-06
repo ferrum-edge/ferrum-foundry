@@ -26,6 +26,8 @@ import {
   PLUGIN_SCHEMA_SPEC,
 } from "../src/lib/pluginSchemas.ts";
 
+const SCHEMA_COMPONENT_KEY_PATTERN = /^ {4}[A-Za-z0-9_]+:/;
+
 /**
  * Extract one `components.schemas.<name>` block from an OpenAPI document.
  *
@@ -42,7 +44,7 @@ export function extractSchemaBlock(spec, component) {
 
   const block = [lines[start]];
   for (let index = start + 1; index < lines.length; index += 1) {
-    if (/^ {4}[A-Za-z0-9_]+:/.test(lines[index])) break;
+    if (SCHEMA_COMPONENT_KEY_PATTERN.test(lines[index])) break;
     block.push(lines[index]);
   }
   while (block.length > 0 && block[block.length - 1].trim() === "") block.pop();

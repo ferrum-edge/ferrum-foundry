@@ -47,6 +47,10 @@ import type {
   ServiceDiscoveryConfig,
 } from "@/api/types";
 
+const UNDERSCORES_PATTERN = /_/g;
+const WORD_INITIAL_PATTERN = /\b\w/g;
+const HEX_BYTES_PATTERN = /^(?:[0-9a-fA-F]{2})*$/;
+
 const UPSTREAM_COLLAPSIBLE_SECTIONS = [
   {
     id: "health-checks",
@@ -117,7 +121,7 @@ const ALGORITHMS: Upstream["algorithm"][] = [
 
 const ALGORITHM_OPTIONS = ALGORITHMS.map((a) => ({
   value: a,
-  label: a.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+  label: a.replace(UNDERSCORES_PATTERN, " ").replace(WORD_INITIAL_PATTERN, (c) => c.toUpperCase()),
 }));
 
 const SD_PROVIDERS = [
@@ -184,7 +188,7 @@ function httpPathError(path: string | undefined): string | undefined {
 
 function udpPayloadError(payload: string | null | undefined): string | undefined {
   if (payload == null) return undefined;
-  if (!/^(?:[0-9a-fA-F]{2})*$/.test(payload)) {
+  if (!HEX_BYTES_PATTERN.test(payload)) {
     return "UDP probe payload must be hex with two digits per byte, e.g. 0000";
   }
   if (payload.length > PROBE_TEXT_MAX_LENGTH) {

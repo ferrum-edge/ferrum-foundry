@@ -2,6 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { blockingReleaseRuns } from './release-run-order.mjs';
 
+const WORKFLOW_RUNS_PATTERN = /workflow_runs/;
+const GITHUB_RUN_NUMBER_PATTERN = /GITHUB_RUN_NUMBER/;
+const GITHUB_RUN_ID_PATTERN = /GITHUB_RUN_ID/;
+const INCOMPLETE_PATTERN = /incomplete/;
+const INVALID_RELEASE_RUN_PATTERN = /invalid release run/;
+
 const WORKFLOW_PATH = '.github/workflows/release.yml';
 
 test('release promotion waits for every earlier active run in run-number order', () => {
@@ -36,24 +42,24 @@ test('completed, current, newer, and unrelated runs never block promotion', () =
 });
 
 test('malformed API responses and run identities fail closed', () => {
-  assert.throws(() => blockingReleaseRuns({}, 2, 20, WORKFLOW_PATH), /workflow_runs/);
+  assert.throws(() => blockingReleaseRuns({}, 2, 20, WORKFLOW_PATH), WORKFLOW_RUNS_PATTERN);
   assert.throws(
     () => blockingReleaseRuns({ total_count: 0, workflow_runs: [] }, Number.NaN, 20, WORKFLOW_PATH),
-    /GITHUB_RUN_NUMBER/,
+    GITHUB_RUN_NUMBER_PATTERN,
   );
   assert.throws(
     () => blockingReleaseRuns({ total_count: 0, workflow_runs: [] }, 2, 0, WORKFLOW_PATH),
-    /GITHUB_RUN_ID/,
+    GITHUB_RUN_ID_PATTERN,
   );
   assert.throws(
     () => blockingReleaseRuns({ total_count: 2, workflow_runs: [] }, 2, 20, WORKFLOW_PATH),
-    /incomplete/,
+    INCOMPLETE_PATTERN,
   );
   assert.throws(
     () => blockingReleaseRuns({
       total_count: 1,
       workflow_runs: [{ id: 10, run_number: '1', status: 'queued', path: WORKFLOW_PATH }],
     }, 2, 20, WORKFLOW_PATH),
-    /invalid release run/,
+    INVALID_RELEASE_RUN_PATTERN,
   );
 });

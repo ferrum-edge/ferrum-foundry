@@ -17,6 +17,8 @@ import {
 } from "@/lib/pluginGuidedConfig";
 import type { GuidedField, GuidedSection, PluginGuidedSchema } from "@/lib/pluginSchemas";
 
+const NON_ALPHANUMERIC_PATTERN = /[^a-zA-Z0-9]/g;
+
 export interface PluginGuidedConfigProps {
   schema: PluginGuidedSchema;
   /** The configuration as JSON. Guided edits are written back through this. */
@@ -164,7 +166,7 @@ function FieldControl({
   error?: string;
   onUpdate: (path: string, next: FieldState) => void;
 }) {
-  const controlId = `guided-${path.replace(/[^a-zA-Z0-9]/g, "-")}`;
+  const controlId = `guided-${path.replace(NON_ALPHANUMERIC_PATTERN, "-")}`;
   const errorId = `${controlId}-error`;
   const noteId = `${controlId}-note`;
   const describedBy = [error ? errorId : null, field.prerequisite ? noteId : null]

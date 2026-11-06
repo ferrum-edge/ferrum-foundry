@@ -3,6 +3,8 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { decodeJwt } from "jose";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const BEARER_PATTERN = /^Bearer /;
+
 const upstream = vi.hoisted(() => vi.fn());
 vi.mock("undici", async (importOriginal) => ({
   ...await importOriginal<typeof import("undici")>(),
@@ -78,7 +80,7 @@ describe("settings status publication", () => {
     const [url, options] = upstream.mock.calls[0];
     expect(String(url)).toBe("https://next.example.test/health");
     expect(options).toMatchObject({ method: "GET", redirect: "error" });
-    const claims = decodeJwt(options.headers.authorization.replace(/^Bearer /, ""));
+    const claims = decodeJwt(options.headers.authorization.replace(BEARER_PATTERN, ""));
     expect(claims).toMatchObject({
       sub: before.json().principal.subject, role: "admin", iss: "new-issuer", aud: "edge-health",
     });

@@ -2,6 +2,9 @@ import { createHash } from 'node:crypto';
 import { Response } from 'undici';
 import type { AuthPrincipal } from './auth-types.js';
 
+const OUTER_WHITE_SPACE_PATTERN = /^\p{White_Space}+|\p{White_Space}+$/gu;
+const PAGINATION_INTEGER_PATTERN = /^\+?\d+(?![\s\S])/;
+
 // Absolute end assertion: JS `$` alone also matches before a final newline.
 const NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}(?![\s\S])/;
 const PAGE_SIZE = 1000;
@@ -113,7 +116,7 @@ export function authorizeRegistryBody(bytes: Buffer, method: string, principal: 
     })) throw new RegistryRequestError(400, 'Invalid namespace description');
     // Rust str::trim uses Unicode White_Space (unlike JS trim, which also
     // strips BOM and does not strip NEXT LINE).
-    const trimmed = body.description.replace(/^\p{White_Space}+|\p{White_Space}+$/gu, '');
+    const trimmed = body.description.replace(OUTER_WHITE_SPACE_PATTERN, '');
     if ([...trimmed].length > 1024) {
       throw new RegistryRequestError(400, 'Namespace description exceeds 1024 characters');
     }
@@ -131,7 +134,7 @@ export function registryPagination(query: URLSearchParams): { offset: bigint; li
   let limit = 100;
   for (const [key, value] of query) {
     if (key !== 'offset' && key !== 'limit') continue;
-    if (!/^\+?\d+(?![\s\S])/.test(value)) {
+    if (!PAGINATION_INTEGER_PATTERN.test(value)) {
       throw new RegistryRequestError(400, `Invalid ${key} pagination parameter`);
     }
     const parsed = BigInt(value);

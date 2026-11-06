@@ -7,6 +7,9 @@ import { rootCertificates } from 'node:tls';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadCaBundle } from './ca.js';
 
+const TLS_CA_BUNDLE_PATTERN = /TLS CA bundle/;
+const CHANGED_WHILE_IT_WAS_BEING_PATTERN = /changed while it was being read/;
+
 vi.mock('node:fs', async (importOriginal) => {
   const original = await importOriginal<typeof import('node:fs')>();
   return {
@@ -40,7 +43,7 @@ describe('bounded CA descriptor reads', () => {
         : kind === 'empty' ? '' : kind === 'oversized' ? Buffer.alloc(8193) : 'invalid certificate');
     }
     if (kind === 'valid') expect(loadCaBundle(path, root, 8192).pem).toBe(rootCertificates[0]);
-    else expect(() => loadCaBundle(path, root, 8192)).toThrow(/TLS CA bundle/);
+    else expect(() => loadCaBundle(path, root, 8192)).toThrow(TLS_CA_BUNDLE_PATTERN);
     if (['empty', 'oversized', 'directory'].includes(kind)) expect(readSync).not.toHaveBeenCalled();
     expectDescriptorClosed();
   });
@@ -54,7 +57,7 @@ describe('bounded CA descriptor reads', () => {
       appendFileSync(path, Buffer.alloc(16 * 1024));
       return original.readSync(...args);
     });
-    expect(() => loadCaBundle(path, root)).toThrow(/changed while it was being read/);
+    expect(() => loadCaBundle(path, root)).toThrow(CHANGED_WHILE_IT_WAS_BEING_PATTERN);
     expect(readSync).toHaveBeenCalledTimes(1);
     const buffer = vi.mocked(readSync).mock.calls[0][1] as Buffer;
     expect(buffer.length).toBe(Buffer.byteLength(pem) + 1);

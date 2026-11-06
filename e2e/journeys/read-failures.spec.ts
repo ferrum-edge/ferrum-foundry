@@ -16,6 +16,12 @@
 
 import { expect, test, uniqueId, GatewayClient, NAMESPACE } from "../support/stack";
 
+const FAILED_TO_LOAD_PROXIES_PATTERN = /failed to load proxies/i;
+const NO_PROXIES_YET_PATTERN = /no proxies yet/i;
+const CREATE_YOUR_FIRST_PROXY_PATTERN = /create your first proxy/i;
+const PROXY_CONFIGURATION_COULD_NOT_REFRESH_PATTERN = /proxy configuration could not refresh/i;
+const FAILED_TO_LOAD_PROXY_CONFIGURATION_PATTERN = /failed to load proxy configuration/i;
+
 const PROXY_ID = uniqueId("e2e-read");
 
 test.describe("read failures", () => {
@@ -52,7 +58,7 @@ test.describe("read failures", () => {
 
     await expect(page.getByText(PROXY_ID).first()).toBeVisible();
     await expect(page.getByRole("dialog")).toHaveCount(0);
-    await expect(page.getByText(/failed to load proxies/i)).toHaveCount(0);
+    await expect(page.getByText(FAILED_TO_LOAD_PROXIES_PATTERN)).toHaveCount(0);
 
     // The failure really did happen; the journey did not pass by not testing.
     await faults.expectAllConsumed();
@@ -73,13 +79,13 @@ test.describe("read failures", () => {
 
     // The retry ladder is deliberate, so this waits for the terminal state
     // rather than asserting on a still-loading page.
-    await expect(page.getByText(/failed to load proxies/i)).toBeVisible({
+    await expect(page.getByText(FAILED_TO_LOAD_PROXIES_PATTERN)).toBeVisible({
       timeout: 40_000,
     });
     // The empty state would invite an operator to create a proxy that may
     // already exist. It must not appear.
-    await expect(page.getByText(/no proxies yet/i)).toHaveCount(0);
-    await expect(page.getByText(/create your first proxy/i)).toHaveCount(0);
+    await expect(page.getByText(NO_PROXIES_YET_PATTERN)).toHaveCount(0);
+    await expect(page.getByText(CREATE_YOUR_FIRST_PROXY_PATTERN)).toHaveCount(0);
   });
 
   test("a failed background read keeps the operator's unsaved draft", async ({
@@ -113,10 +119,10 @@ test.describe("read failures", () => {
     });
 
     // The failure is reported as a refresh problem, not as a missing proxy…
-    await expect(page.getByText(/proxy configuration could not refresh/i)).toBeVisible({
+    await expect(page.getByText(PROXY_CONFIGURATION_COULD_NOT_REFRESH_PATTERN)).toBeVisible({
       timeout: 40_000,
     });
-    await expect(page.getByText(/failed to load proxy configuration/i)).toHaveCount(0);
+    await expect(page.getByText(FAILED_TO_LOAD_PROXY_CONFIGURATION_PATTERN)).toHaveCount(0);
     // …and the draft is exactly where the operator left it.
     await expect(listenPath).toHaveValue(draft);
 

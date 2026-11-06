@@ -40,6 +40,9 @@ import {
   requireHostedQualification,
 } from "./hosted-qualification.mjs";
 
+const CI_EVIDENCE_URL_PATTERN =
+  /^https:\/\/github\.com\/ferrum-edge\/ferrum-foundry\/actions\/runs\/\d+/;
+
 export const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 export const RECORD_PATH = "docs/compatibility.json";
 
@@ -228,7 +231,7 @@ export function validatePairing(record) {
     ["version", FOUNDRY_VERSION],
     ["source_commit", COMMIT],
     ["image", FOUNDRY_IMAGE],
-    ["ci_evidence", /^https:\/\/github\.com\/ferrum-edge\/ferrum-foundry\/actions\/runs\/\d+/],
+    ["ci_evidence", CI_EVIDENCE_URL_PATTERN],
   ];
   for (const [field, pattern] of fields) {
     const value = foundry[field];

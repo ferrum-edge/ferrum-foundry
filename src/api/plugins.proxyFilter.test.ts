@@ -15,6 +15,8 @@ import { ALL_PAGE_SIZE } from "./pagination";
 import { resetGatewayMetadata } from "./gatewayMetadata";
 import type { PluginConfig } from "./types";
 
+const FERRUM_EDGE_V0_9_7_PATTERN = /Ferrum Edge v0\.9\.7/;
+
 const NAMESPACE_SIZE = 50_000;
 /** Every hundredth configuration targets `proxy-7`, spread across the namespace. */
 const TARGETING = NAMESPACE_SIZE / 100;
@@ -113,7 +115,7 @@ describe("listConfigsForProxy", () => {
 
     const read = plugins.listConfigsForProxy(scope, "proxy-7");
     await expect(read).rejects.toBeInstanceOf(plugins.ProxyFilterNotAppliedError);
-    await expect(read).rejects.toThrow(/Ferrum Edge v0\.9\.7/);
+    await expect(read).rejects.toThrow(FERRUM_EDGE_V0_9_7_PATTERN);
     // The first page gave it away; the remaining 199 were never requested.
     expect(requests).toHaveLength(1);
   });

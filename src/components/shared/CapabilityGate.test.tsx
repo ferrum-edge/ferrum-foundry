@@ -11,6 +11,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CapabilityVerdict } from "@/lib/capabilities";
 import { ReadOnlySurface, WriteAction } from "./CapabilityGate";
 
+const WHITESPACE_RUN_PATTERN = /\s+/;
+
 (
   globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
@@ -111,7 +113,7 @@ describe("ReadOnlySurface", () => {
     expect(fieldset.disabled).toBe(true);
     expect(fieldset.className).toContain("min-w-0");
     expect(fieldset.className).toContain("space-y-4");
-    expect(fieldset.className.split(/\s+/)).not.toContain("contents");
+    expect(fieldset.className.split(WHITESPACE_RUN_PATTERN)).not.toContain("contents");
   });
 
   it("renders children without a fieldset when allowed", async () => {

@@ -5,6 +5,11 @@ import type {
   TrustBundleJwtAuthority,
 } from "@/api/trust";
 
+const WHITESPACE_PATTERN = /\s/;
+const BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+const PRIVATE_KEY_HEADER_PATTERN = /-----BEGIN (?:RSA |EC )?PRIVATE KEY-----/;
+const LINE_BREAK_PATTERN = /\r?\n/;
+
 export interface TrustBundleFormState {
   id: string;
   trustDomain: string;
@@ -49,7 +54,7 @@ function validateTrustDomain(value: unknown, label: string): string {
     throw new TrustBundleFormError(`${label} is required`);
   }
   const domain = value.trim();
-  if (domain.includes("://") || /\s/.test(domain)) {
+  if (domain.includes("://") || WHITESPACE_PATTERN.test(domain)) {
     throw new TrustBundleFormError(
       `${label} must be a trust domain without a URI scheme or whitespace`,
     );
@@ -65,10 +70,7 @@ function validateBase64Der(value: unknown, label: string): string {
   if (encoded.length > 21_848) {
     throw new TrustBundleFormError(`${label} exceeds the 16 KiB decoded limit`);
   }
-  if (
-    encoded.length % 4 !== 0 ||
-    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)
-  ) {
+  if (encoded.length % 4 !== 0 || !BASE64_PATTERN.test(encoded)) {
     throw new TrustBundleFormError(`${label} is not valid base64 DER`);
   }
   let decodedLength: number;
@@ -91,7 +93,7 @@ function validatePublicKey(value: unknown, label: string): string {
   if (material.length > 16 * 1024) {
     throw new TrustBundleFormError(`${label} exceeds 16 KiB`);
   }
-  if (/-----BEGIN (?:RSA |EC )?PRIVATE KEY-----/.test(material)) {
+  if (PRIVATE_KEY_HEADER_PATTERN.test(material)) {
     throw new TrustBundleFormError(`${label} must not contain a private key`);
   }
   if (
@@ -214,7 +216,7 @@ export function buildTrustBundlePayload(
   }
   const trustDomain = validateTrustDomain(form.trustDomain, "Trust domain");
   const x509Authorities = form.x509Authorities
-    .split(/\r?\n/)
+    .split(LINE_BREAK_PATTERN)
     .map((value) => value.trim())
     .filter(Boolean)
     .map((value, index) => validateBase64Der(value, `X.509 authority ${index + 1}`));

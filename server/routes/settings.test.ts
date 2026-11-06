@@ -2,6 +2,8 @@ import cookie from '@fastify/cookie';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
+const UNSUPPORTED_PATTERN = /unsupported/;
+
 const BFF_TOKEN = 'settings-test-bff-token-is-long-enough';
 const JWT_SECRET = 'settings-test-jwt-secret-is-long-enough';
 const ENV = {
@@ -114,7 +116,7 @@ describe('settings routes', () => {
         payload: { jwtSecret: 'attacker-controlled-secret' },
       });
       expect(response.statusCode).toBe(400);
-      expect(response.json().error).toMatch(/unsupported/);
+      expect(response.json().error).toMatch(UNSUPPORTED_PATTERN);
     } finally {
       await app.close();
     }

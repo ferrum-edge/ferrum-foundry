@@ -9,6 +9,22 @@ import {
   verifyPluginDefaults,
 } from "./plugin-defaults-contract.mjs";
 
+const ONLY_SESSION_ENCRYPTION_SECRET_MAY_PATTERN =
+  /only session\.encryption_secret may differ from Foundry's defaults/;
+const ENCODE_32_RANDOM_BYTES_PATTERN = /encode 32 random bytes/;
+const REJECTION_REASON_DRIFT_PATTERN = /rejection reason drift/;
+const EXPECTED_400_RECEIVED_201_PATTERN = /expected 400, received 201/;
+const CORRELATION_ID_EXPECTED_201_RECEIVED_400_PATTERN =
+  /correlation_id: expected 201, received 400/;
+const MTLS_AUTH_EXPECTED_400_RECEIVED_503_PATTERN = /mtls_auth: expected 400, received 503/;
+const SAME_NON_INTERNAL_CATALOG_PATTERN = /same non-internal catalog/;
+const PROMETHEUS_METRICS_EXPECTED_201_RECEIVED_PATTERN =
+  /prometheus_metrics: expected 201, received 409/;
+const KAFKA_LOGGING_REJECTION_REASON_DRIFT_PATTERN = /kafka_logging: rejection reason drift/;
+const CLEANUP_EXPECTED_200_204_404_PATTERN = /cleanup:.*expected 200\/204\/404, received 503/;
+const EXPECTED_201_RECEIVED_400_PATTERN = /expected 201, received 400/;
+const CLEANUP_TRANSPORT_FAILED_PATTERN = /cleanup transport failed/;
+
 // This transport double tests the gate's failure behavior. Real validation is
 // exclusively the existing Pinned Gateway Contract job's enabled submissions.
 function transport(override = () => undefined) {
@@ -94,12 +110,12 @@ test("operator-input admission permits only the declared generated secret", () =
   withUndeclaredChange.session.cookie_name = "changed-cookie";
   assert.throws(
     () => assertOnlyRequiredOperatorInputs(name, withUndeclaredChange),
-    /only session\.encryption_secret may differ from Foundry's defaults/,
+    ONLY_SESSION_ENCRYPTION_SECRET_MAY_PATTERN,
   );
 
   const shortSecret = structuredClone(config);
   shortSecret.session.encryption_secret = Buffer.alloc(31, 0xab).toString("base64");
-  assert.throws(() => assertOnlyRequiredOperatorInputs(name, shortSecret), /encode 32 random bytes/);
+  assert.throws(() => assertOnlyRequiredOperatorInputs(name, shortSecret), ENCODE_32_RANDOM_BYTES_PATTERN);
 
   const unchangedDefault = getPluginConfigDefault(name);
   assert.equal(unchangedDefault.session.encryption_secret, "");
@@ -136,13 +152,13 @@ for (const name of Object.keys(OPERATOR_INPUT_REJECTIONS)) {
     const fixture = transport((body) => body.plugin_name === name
       ? { status: 400, body: { error: `${OPERATOR_INPUT_REJECTIONS[name].error}; unknown config key 'drift'` } }
       : undefined);
-    await assert.rejects(verifyPluginDefaults(fixture.exchange, quiet), /rejection reason drift/);
+    await assert.rejects(verifyPluginDefaults(fixture.exchange, quiet), REJECTION_REASON_DRIFT_PATTERN);
     assert.equal(fixture.writes.length, 81, "continue through all templates after a failure");
   });
 
   test(`${name}: unexpected acceptance fails and is cleaned up`, async () => {
     const fixture = transport((body) => body.plugin_name === name ? { status: 201, body } : undefined);
-    await assert.rejects(verifyPluginDefaults(fixture.exchange, quiet), /expected 400, received 201/);
+    await assert.rejects(verifyPluginDefaults(fixture.exchange, quiet), EXPECTED_400_RECEIVED_201_PATTERN);
     assert.equal(fixture.writes.length, 81);
     assert.equal(fixture.plugins.size, 0);
     assert.equal(fixture.proxies.size, 0);
@@ -156,8 +172,8 @@ test("an accepted control's rejection and an exemption's wrong status both fail"
   });
   await assert.rejects(verifyPluginDefaults(fixture.exchange, quiet), (error) => {
     assert.equal(error.errors.length, 2);
-    assert.match(error.message, /correlation_id: expected 201, received 400/);
-    assert.match(error.message, /mtls_auth: expected 400, received 503/);
+    assert.match(error.message, CORRELATION_ID_EXPECTED_201_RECEIVED_400_PATTERN);
+    assert.match(error.message, MTLS_AUTH_EXPECTED_400_RECEIVED_503_PATTERN);
     return true;
   });
   assert.equal(fixture.writes.length, 81);
@@ -167,7 +183,7 @@ test("gateway catalog drift fails before any submission", async () => {
   const fixture = transport();
   await assert.rejects(verifyPluginDefaults((path, options) => path === "/plugins"
     ? { status: 200, body: Object.keys(DEFAULT_PLUGIN_CONFIGS).filter((name) => name !== "compression") }
-    : fixture.exchange(path, options), quiet), /same non-internal catalog/);
+    : fixture.exchange(path, options), quiet), SAME_NON_INTERNAL_CATALOG_PATTERN);
   assert.equal(fixture.writes.length, 0);
 });
 
@@ -175,7 +191,7 @@ test("a Prometheus registry conflict fails rather than exempting the template", 
   const fixture = transport((body) => body.plugin_name === "prometheus_metrics"
     ? { status: 409, body: { error: "prometheus_metrics permits at most one enabled global instance; another config already owns the process registry" } }
     : undefined);
-  await assert.rejects(verifyPluginDefaults(fixture.exchange, quiet), /prometheus_metrics: expected 201, received 409/);
+  await assert.rejects(verifyPluginDefaults(fixture.exchange, quiet), PROMETHEUS_METRICS_EXPECTED_201_RECEIVED_PATTERN);
   assert.equal(fixture.writes.length, 81);
 });
 
@@ -183,7 +199,7 @@ test("Kafka's constructor-error prefix cannot substitute for the egress field-va
   const fixture = transport((body) => body.plugin_name === "kafka_logging"
     ? { status: 400, body: { error: OPERATOR_INPUT_REJECTIONS.kafka_logging.error.replace("Invalid plugin config fields:", "Invalid plugin config:") } }
     : undefined);
-  await assert.rejects(verifyPluginDefaults(fixture.exchange, quiet), /kafka_logging: rejection reason drift/);
+  await assert.rejects(verifyPluginDefaults(fixture.exchange, quiet), KAFKA_LOGGING_REJECTION_REASON_DRIFT_PATTERN);
   assert.equal(fixture.writes.length, 81);
 });
 
@@ -191,7 +207,7 @@ test("cleanup failure fails the gate and stops potentially contaminated submissi
   const fixture = transport();
   await assert.rejects(verifyPluginDefaults((path, options) => options?.method === "DELETE"
     ? { status: 503, body: { error: "cleanup unavailable" } }
-    : fixture.exchange(path, options), quiet), /cleanup:.*expected 200\/204\/404, received 503/);
+    : fixture.exchange(path, options), quiet), CLEANUP_EXPECTED_200_204_404_PATTERN);
   assert.equal(fixture.writes.length, 1);
 });
 
@@ -203,8 +219,8 @@ test("admission and thrown cleanup failures are both reported before stopping", 
     return fixture.exchange(path, options);
   }, { report: (value) => { report = JSON.parse(value); } }), (error) => {
     assert.equal(error.errors.length, 2);
-    assert.match(error.errors[0].message, /expected 201, received 400/);
-    assert.match(error.errors[1].message, /cleanup transport failed/);
+    assert.match(error.errors[0].message, EXPECTED_201_RECEIVED_400_PATTERN);
+    assert.match(error.errors[1].message, CLEANUP_TRANSPORT_FAILED_PATTERN);
     return true;
   });
   assert.equal(fixture.writes.length, 1);

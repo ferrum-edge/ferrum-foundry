@@ -6,6 +6,8 @@ import { useCallback, useEffect, useMemo } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import type { PaginationParams } from "@/api/types";
 
+const DIGITS_PATTERN = /^\d+$/;
+
 export const PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
 export const DEFAULT_PAGE_SIZE = 20;
 export const MAX_OFFSET = 10_000_000;
@@ -24,7 +26,7 @@ function exactInteger(value: unknown): number | undefined {
   if (typeof value === "number") {
     return Number.isSafeInteger(value) && value >= 0 ? value : undefined;
   }
-  if (typeof value !== "string" || !/^\d+$/.test(value)) return undefined;
+  if (typeof value !== "string" || !DIGITS_PATTERN.test(value)) return undefined;
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) ? parsed : undefined;
 }

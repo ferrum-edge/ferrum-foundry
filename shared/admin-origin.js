@@ -1,5 +1,7 @@
 import { isIP } from "node:net";
 
+const IPV6_BRACKETS_PATTERN = /^\[|\]$/g;
+
 /** True when an origin points to this machine's loopback interface. */
 export function isLoopbackAdminOrigin(value) {
   let parsed;
@@ -8,7 +10,7 @@ export function isLoopbackAdminOrigin(value) {
   } catch {
     return false;
   }
-  const host = parsed.hostname.replace(/^\[|\]$/g, "");
+  const host = parsed.hostname.replace(IPV6_BRACKETS_PATTERN, "");
   return (
     host === "localhost" ||
     (isIP(host) === 4 && host.startsWith("127.")) ||

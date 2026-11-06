@@ -29,6 +29,21 @@ import {
 } from "./pluginSensitivity";
 import { isEdgeSensitiveConfigKey, normalizeConfigKey } from "./maskedSecrets";
 
+const DOUBLE_QUOTED_ESCAPE_PATTERN = /\\(x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|[\s\S])/g;
+const WHITESPACE_PATTERN = /\s/;
+const QUOTED_KEY_SEPARATOR_PATTERN = /^\s*:/;
+const MAPPING_SEPARATOR_PATTERN = /:(?:\s|$)/;
+const NODE_PROPERTIES_PATTERN = /^(?:[&!]\S*\s+)+/;
+const EDGE_QUOTES_PATTERN = /^["']|["']$/g;
+const TRAILING_COMMENT_PATTERN = /\s+#.*$/;
+const FLOW_QUOTE_BOUNDARY_PATTERN = /[\s,[\]{}:]/;
+const LINE_BREAK_PATTERN = /\r\n|\r|\n/;
+const COLLECTION_INDICATORS_PATTERN = /^(?:[-?:](?:\s+|$))+/;
+const DOCUMENT_START_PATTERN = /^---\s+/;
+const LINE_BREAK_CHARACTER_PATTERN = /[\r\n]/;
+const LINE_SPLIT_PATTERN = /\r?\n|\r/;
+const TOKEN_CHARACTER_PATTERN = /[\p{L}\p{N}_]/u;
+
 /** What a submitted secret is replaced with, the gateway's own read marker. */
 export const REDACTION_MARKER = "[REDACTED]";
 
@@ -321,19 +336,16 @@ const YAML_ESCAPES: Readonly<Record<string, string>> = {
 };
 
 function unescapeDoubleQuoted(text: string): string {
-  return text.replace(
-    /\\(x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|[\s\S])/g,
-    (escape, code: string) => {
-      if (code.length > 1) {
-        try {
-          return String.fromCodePoint(Number.parseInt(code.slice(1), 16));
-        } catch {
-          return escape;
-        }
+  return text.replace(DOUBLE_QUOTED_ESCAPE_PATTERN, (escape, code: string) => {
+    if (code.length > 1) {
+      try {
+        return String.fromCodePoint(Number.parseInt(code.slice(1), 16));
+      } catch {
+        return escape;
       }
-      return YAML_ESCAPES[code] ?? escape;
-    },
-  );
+    }
+    return YAML_ESCAPES[code] ?? escape;
+  });
 }
 
 /** The index just past the quoted scalar `text` opens with, or -1 if it does not close. */
@@ -382,7 +394,7 @@ function flowPieces(text: string): string[] {
       pieces.push(text.slice(start, index));
       start = index + 1;
       lastVisible = null;
-    } else if (!/\s/.test(character)) {
+    } else if (!WHITESPACE_PATTERN.test(character)) {
       lastVisible = character;
     }
   }
@@ -399,11 +411,11 @@ function mappingValue(text: string): string | null {
   if (text.startsWith('"') || text.startsWith("'")) {
     const end = quotedEnd(text);
     if (end === -1) return null;
-    const separator = /^\s*:/.exec(text.slice(end));
+    const separator = QUOTED_KEY_SEPARATOR_PATTERN.exec(text.slice(end));
     return separator ? text.slice(end + separator[0].length).trim() : null;
   }
   if (text.startsWith("{") || text.startsWith("[")) return null;
-  const separator = /:(?:\s|$)/.exec(text);
+  const separator = MAPPING_SEPARATOR_PATTERN.exec(text);
   return separator ? text.slice(separator.index + separator[0].length).trim() : null;
 }
 
@@ -429,7 +441,7 @@ function addScalar(raw: string, found: Set<string>, visited = new Set<string>())
     if (!text || visited.has(text) || BLOCK_SCALAR_HEADER.test(text)) continue;
     visited.add(text);
     found.add(text);
-    const bare = text.replace(/^(?:[&!]\S*\s+)+/, "");
+    const bare = text.replace(NODE_PROPERTIES_PATTERN, "");
     if (bare !== text) {
       pending.push(bare);
       continue;
@@ -468,9 +480,9 @@ function addScalar(raw: string, found: Set<string>, visited = new Set<string>())
     // A plain scalar, or a line of a multi-line one: without a trailing comment
     // or a stray quote from the line that closes a quoted scalar, and unescaped
     // in case it continues a double-quoted one, itself continued with a backslash.
-    const unquoted = text.replace(/^["']|["']$/g, "");
+    const unquoted = text.replace(EDGE_QUOTES_PATTERN, "");
     for (const variant of [
-      text.replace(/\s+#.*$/, ""),
+      text.replace(TRAILING_COMMENT_PATTERN, ""),
       unquoted,
       unescapeDoubleQuoted(text),
       unescapeDoubleQuoted(withoutContinuation(unquoted)),
@@ -501,7 +513,7 @@ function openDoubleQuoted(text: string): string | null {
       }
     } else if (
       (character === '"' || character === "'") &&
-      (index === 0 || /[\s,[\]{}:]/.test(text[index - 1]))
+      (index === 0 || FLOW_QUOTE_BOUNDARY_PATTERN.test(text[index - 1]))
     ) {
       quote = character;
       start = index + 1;
@@ -550,7 +562,7 @@ export function yamlScalars(document: string): string[] {
   let continuation: string[] | null = null;
   // The column a block scalar's content lines are indented past.
   let blockIndent: number | null = null;
-  for (const line of document.split(/\r\n|\r|\n/)) {
+  for (const line of document.split(LINE_BREAK_PATTERN)) {
     const indentation = line.length - line.trimStart().length;
     const inBlock = blockIndent !== null && (line.trim() === "" || indentation > blockIndent);
     if (!inBlock) blockIndent = null;
@@ -592,9 +604,9 @@ export function yamlScalars(document: string): string[] {
       if (lineOpen !== null) continuation = [lineOpen];
     }
     const trimmed = line.trim();
-    const rest = trimmed.replace(/^(?:[-?:](?:\s+|$))+/, "");
+    const rest = trimmed.replace(COLLECTION_INDICATORS_PATTERN, "");
     const value = mappingValue(rest);
-    const blockHeader = value?.replace(/^(?:[&!]\S*\s+)+/, "");
+    const blockHeader = value?.replace(NODE_PROPERTIES_PATTERN, "");
     // A block scalar's content is indented past the key that introduces it,
     // wherever a `- ` or `? ` before the key puts it, or past the `-` of `- |`.
     if (
@@ -613,8 +625,10 @@ export function yamlScalars(document: string): string[] {
       blockIndent = indentation;
     } else if (
       !inBlock &&
-      /^---\s+/.test(trimmed) &&
-      BLOCK_SCALAR_HEADER.test(trimmed.replace(/^---\s+/, "").replace(/^(?:[&!]\S*\s+)+/, ""))
+      DOCUMENT_START_PATTERN.test(trimmed) &&
+      BLOCK_SCALAR_HEADER.test(
+        trimmed.replace(DOCUMENT_START_PATTERN, "").replace(NODE_PROPERTIES_PATTERN, ""),
+      )
     ) {
       // A document-level block scalar: `--- |` starts its content on the next lines.
       blockIndent = indentation;
@@ -647,8 +661,8 @@ const MIN_SECRET_LINE = 16;
 const PEM_ARMOR_LINE = /^-----(BEGIN|END) [A-Z0-9 ]+-----$/;
 
 function secretLines(value: string): string[] {
-  if (!/[\r\n]/.test(value)) return [];
-  return value.split(/\r?\n|\r/).filter((line) => {
+  if (!LINE_BREAK_CHARACTER_PATTERN.test(value)) return [];
+  return value.split(LINE_SPLIT_PATTERN).filter((line) => {
     const trimmed = line.trim();
     return trimmed.length >= MIN_SECRET_LINE && !PEM_ARMOR_LINE.test(trimmed);
   });
@@ -704,7 +718,7 @@ export function redactionForms(secrets: Secrets | readonly string[]): RedactionF
 }
 
 function isTokenCharacter(character: string | undefined): boolean {
-  return character !== undefined && /[\p{L}\p{N}_]/u.test(character);
+  return character !== undefined && TOKEN_CHARACTER_PATTERN.test(character);
 }
 
 /** Where each of `forms` occurs in `text`, as `[start, end)` spans. */

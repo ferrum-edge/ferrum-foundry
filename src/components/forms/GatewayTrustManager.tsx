@@ -40,6 +40,8 @@ import {
 import { useNamespace } from "@/stores/namespace";
 import { formatDateTime } from "@/lib/format";
 
+const UNDERSCORES_PATTERN = /_/g;
+
 interface EditorState {
   mode: "create" | "edit";
   namespace: string;
@@ -275,7 +277,7 @@ export function GatewayTrustManager() {
             </div>
             {status.process.last_failure_reason !== "none" && (
               <p className="text-xs text-warning mt-2">
-                Last rejection: {status.process.last_failure_reason.replace(/_/g, " ")}
+                Last rejection: {status.process.last_failure_reason.replace(UNDERSCORES_PATTERN, " ")}
               </p>
             )}
           </Card>

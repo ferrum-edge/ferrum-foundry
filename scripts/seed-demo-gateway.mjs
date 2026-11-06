@@ -10,6 +10,9 @@ import { pathToFileURL } from "node:url";
 import { signAdminJwt } from "../shared/admin-jwt.js";
 import { mayCarrySecret } from "../shared/admin-origin.js";
 
+const DNS_LABEL_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
+const HYPHENS_PATTERN = /-/g;
+
 const CONTRACT_REVISION = "50e65b5798555209114cbe08ab2d011b3896ad00";
 const COLLECTION_PAGE_SIZE = 100;
 const BASIC_AUTH_PROBE_ID = "ff-demo-basic-auth-hmac-probe";
@@ -115,7 +118,7 @@ function parseAdminOrigin(value, name, fallback) {
 function parseBackendHost(value) {
   const host = value?.trim() || "127.0.0.1";
   const validHostname = host.length <= 253 && host.split(".").every((label) => (
-    /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(label)
+    DNS_LABEL_PATTERN.test(label)
   ));
   if (!isIP(host) && !validHostname) {
     throw new Error("FERRUM_DEMO_BACKEND_HOST must be an IP address or DNS hostname without a port");
@@ -695,7 +698,7 @@ function makeProxies(now, backendHost, plans = proxyPlans) {
 
     return {
       id: proxyId,
-      name: `${plan.slug.replace(/-/g, " ")} edge route`,
+      name: `${plan.slug.replace(HYPHENS_PATTERN, " ")} edge route`,
       listen_path: `/demo/${plan.slug}`,
       hosts: [],
       backend_scheme: "http",

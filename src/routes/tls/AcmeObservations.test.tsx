@@ -10,6 +10,10 @@ import TlsPage from "./index";
 import { inputByLabel } from "@/test/fields";
 import { clearOutcomeLatches, ORDER_PROBE_DELAYS_MS } from "@/stores/outcomeLatches";
 
+const ORDERS_PATTERN = /\/orders\/([^/]+)$/;
+const RENEW_PATTERN = /^renew-[0-9a-f]{32}$/;
+const UUID_PATTERN = /^[0-9a-f-]{36}$/;
+
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 class BasedRequest extends Request {
   constructor(input: RequestInfo | URL, init?: RequestInit) {
@@ -80,7 +84,7 @@ beforeEach(() => {
     if (path.endsWith("/orders/fixture-order")) {
       return new Promise<Response>((resolve) => details.push(resolve));
     }
-    const byId = path.match(/\/orders\/([^/]+)$/);
+    const byId = path.match(ORDERS_PATTERN);
     if (byId) {
       probes.push(byId[1]!);
       const found = ordersById[byId[1]!];
@@ -325,7 +329,7 @@ describe('outcome-unknown latches outlive the ACME tab', () => {
     await click('Renew');
     await settle(() => expect(panel().textContent).toContain('Renewal outcome unknown'));
     const orderId = postBodies[0]!.id as string;
-    expect(orderId).toMatch(/^renew-[0-9a-f]{32}$/);
+    expect(orderId).toMatch(RENEW_PATTERN);
 
     await revisitAcmeTab();
     await settle(() => expect(renew()).toBeTruthy());
@@ -424,7 +428,7 @@ describe('outcome-unknown latches outlive the ACME tab', () => {
     await act(async () => submit().click());
     await settle(() => expect(submit().disabled).toBe(true));
     const orderId = postBodies[0]!.id as string;
-    expect(orderId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(orderId).toMatch(UUID_PATTERN);
     const cancel = () => [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
       .find((button) => button.textContent?.trim() === 'Cancel')!;
     await act(async () => cancel().click());

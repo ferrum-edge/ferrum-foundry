@@ -21,6 +21,77 @@ import {
 } from "./supported-pairing.mjs";
 import { hostedQualificationFixture } from "./fixtures/hosted-qualification.mjs";
 
+const FERRUMEDGE_FERRUM_EDGE_SHA256_PATTERN = /^ferrumedge\/ferrum-edge@sha256:[0-9a-f]{64}$/;
+const SEMVER_TAG_PATTERN = /^v\d+\.\d+\.\d+$/;
+const V0_9_15_PATTERN = /v0\.9\.15/;
+const EDGE_COMMIT_5DB1D77A8_PATTERN = /5db1d77a8/;
+const EDGE_ISSUE_409_PATTERN = /#409/;
+const HOSTED_QUALIFICATION_IS_STILL_PENDING_PATTERN = /hosted qualification is still pending/;
+const RUN_DOES_NOT_MATCH_PATTERN = /run does not match/;
+const RELEASED_RETAINED_IN_FERRUM_EDGE_PATTERN = /(?:released|retained) in Ferrum Edge (.+)$/;
+const LIST_SEPARATOR_PATTERN = /,\s*(?:and\s+)?|\s+and\s+/;
+const COMPLETED_AND_SUCCESSFUL_PATTERN = /completed and successful/;
+const IS_NOT_AN_UNRELEASED_CANDIDATE_PATTERN = /is not an unreleased candidate/;
+const TAG_THE_COMMIT_THAT_PREPARED_PATTERN = /Tag the commit that prepared this version/;
+const DOES_NOT_NAME_A_QUALIFIED_PATTERN = /does not name a qualified Ferrum Edge release/;
+const COMMAND_RELEASE_READY_CONST_EVIDENCE_PATTERN =
+  /command === "release-ready"\) \{\n\s+const evidence = await readHostedQualification\(record\);\n\s+console\.log\(JSON\.stringify\(requireReleaseReady\(record, evidence\)\)\)/;
+const DOCKER_RUN_PATTERN = /docker run [^\n]*\\\n(?:[^\n]*\\\n)*[^\n]*\n/g;
+const FERRUM_MODE_DATABASE_PATTERN = /FERRUM_MODE=database/;
+const FERRUM_EDGE_IMAGE_PATTERN = /"\$FERRUM_EDGE_IMAGE"\s*$/;
+const NODE_SCRIPTS_SUPPORTED_PAIRING_MJS_PATTERN =
+  /node scripts\/supported-pairing\.mjs edge-image/;
+const NODE_SCRIPTS_SUPPORTED_PAIRING_MJS_RELEASE_PATTERN =
+  /node scripts\/supported-pairing\.mjs release-ready\n/;
+const READ_ONLY_PERMISSIONS_PATTERN = /permissions:\n\s+actions: read\n\s+contents: read\n/;
+const GH_TOKEN_SECRETS_GITHUB_TOKEN_PATTERN = /GH_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}/;
+const WRITE_PERMISSION_PATTERN = /actions: write|contents: write/;
+const NEXT_JOB_PATTERN = /\n {2}[a-z-]+:\n/;
+const GIT_FETCH_NO_TAGS_ORIGIN_PATTERN =
+  /git fetch --no-tags origin "\+refs\/tags\/\$\{RELEASE_TAG\}:refs\/release-check\/tag"/;
+const GH_API_REPOS_GITHUB_REPOSITORY_RELEASES_PATTERN =
+  /gh api "repos\/\$\{GITHUB_REPOSITORY\}\/releases\/tags\/\$\{RELEASE_TAG\}"/;
+const GREP_QUIET_HTTP_404_PATTERN = /grep --quiet 'HTTP 404'/;
+const RUN_NODE_SCRIPTS_RELEASE_IMAGE_PATTERN =
+  /run: node scripts\/release-image-identity\.mjs preflight\n/;
+const IMAGE_REPOSITORIES_FERRUMEDGE_FERRUM_FOUNDRY_PATTERN =
+  /IMAGE_REPOSITORIES: ferrumedge\/ferrum-foundry ghcr\.io\/\$\{\{ github\.repository \}\}\n/;
+const SOURCE_REVISION_GITHUB_SHA_PATTERN = /SOURCE_REVISION: \$\{\{ github\.sha \}\}\n/;
+const LOGIN_ACTION_SECRETS_DOCKERHUB_PATTERN = /login-action|secrets\.DOCKERHUB/;
+const NEEDS_PATTERN = /needs: \[quality-gates, release-metadata\]/;
+const IMAGETOOLS_CREATE_DRY_RUN_PATTERN = /imagetools create (?!--dry-run)/;
+const IMAGETOOLS_CREATE_DRY_RUN_2_PATTERN = /imagetools create --dry-run/;
+const FOR_REPOSITORY_IN_FERRUMEDGE_FERRUM_PATTERN =
+  /for repository in ferrumedge\/ferrum-foundry "\$GHCR_REPOSITORY"; do/;
+const FOR_TAG_IN_RELEASE_TAG_RELEASE_VERSION_PATTERN =
+  /for tag in "\$RELEASE_TAG" "\$RELEASE_VERSION"; do/;
+const RELEASE_IMAGE_IDENTITY_MJS_COMPARE_PATTERN =
+  /release-image-identity\.mjs" compare "\$repository" "\$release_digest" "\$tag"/;
+const DOCKER_BUILDX_IMAGETOOLS_CREATE_DRY_PATTERN =
+  /^\s*docker buildx imagetools create (?!--dry-run)(.*)$/gm;
+const CHANNEL_TAGS_PATTERN = /channel_tags\+?=\((.*)\)$/gm;
+const TAG_IS_THIS_COMMIT =
+  /if \[\[ "\$tag_commit" != "\$GITHUB_SHA" \]\]; then\n\s+echo [^\n]*\n\s+exit 1/;
+const ABSENT_TAG_GUARDED_CREATE_PATTERN =
+  /if \[\[ "\$state" == "absent" \]\]; then\n\s+docker buildx imagetools create -t "\$IMAGE_REPOSITORY:\$tag" "\$@"/g;
+const UNPUBLISHED_STATE_GUARD_PATTERN = /if \[\[ "\$state" != "published" \]\]; then/g;
+const PUBLISH_VERSION_TAG_RELEASE_TAG_IMAGES_PATTERN =
+  /publish_version_tag "\$RELEASE_TAG" "\$\{images\[@\]\}"/g;
+const PUBLISH_VERSION_TAG_RELEASE_VERSION_PATTERN =
+  /publish_version_tag "\$RELEASE_VERSION" "\$IMAGE_REPOSITORY@\$RELEASE_DIGEST"/g;
+const IDENTITY_DIGEST_OUTPUT_PATTERN =
+  /outputs:\n\s+digest: \$\{\{ steps\.identity\.outputs\.digest \}\}/;
+const RELEASE_DIGEST_NEEDS_DOCKER_MANIFEST_PATTERN =
+  /RELEASE_DIGEST: \$\{\{ needs\.docker-manifest\.outputs\.digest \}\}/;
+const FERRUMEDGE_FERRUM_FOUNDRY_DIGEST_PATTERN = /ferrumedge\/ferrum-foundry@\{digest\}/;
+const NAME_RELEASE_DOCKER_DIGEST_MATRIX_PATTERN =
+  /name: release-docker-digest-\$\{\{ matrix\.arch_dir \}\}\n\s+path: \/tmp\/digests\/\*\n\s+if-no-files-found: error\n\s+retention-days: 90/;
+const NAME_RELEASE_PLANNED_DIGESTS_PATH_PATTERN =
+  /name: release-planned-digests\n\s+path: \/tmp\/release-plan\.txt\n\s+if-no-files-found: error\n\s+retention-days: 90/;
+const ECHO_INDEX_RELEASE_DIGEST_PLATFORM_PATTERN =
+  /echo "index=\$RELEASE_DIGEST"\n[\s\S]*?echo "platform=sha256:\$digest"\n\s+done\n\s+\} > \/tmp\/release-plan\.txt/;
+const FERRUM_EDGE_RELEASE_STEP_PATTERN = /\| Ferrum Edge \| \*release step\*/;
+
 const record = readSupportedPairing();
 const qualifiedFixture = hostedQualificationFixture(record);
 
@@ -48,7 +119,7 @@ function repoFile(path) {
 describe("the supported pairing record", () => {
   it("is structurally valid and pins the gateway CI runs by digest", () => {
     assert.deepEqual(validatePairing(record), []);
-    assert.match(record.edge.image, /^ferrumedge\/ferrum-edge@sha256:[0-9a-f]{64}$/);
+    assert.match(record.edge.image, FERRUMEDGE_FERRUM_EDGE_SHA256_PATTERN);
   });
 
   it("names the Edge release to pair with only once it is recorded and qualified", () => {
@@ -62,7 +133,7 @@ describe("the supported pairing record", () => {
     } else {
       assert.match(
         release.version,
-        /^v\d+\.\d+\.\d+$/,
+        SEMVER_TAG_PATTERN,
         "a recorded release is a published Edge version",
       );
     }
@@ -79,7 +150,7 @@ describe("the supported pairing record", () => {
     assert.equal(record.edge.image, image);
     assert.equal(record.edge.source_commit, sourceCommit);
     assert.deepEqual(record.edge.platform_manifests, manifests);
-    assert.match(record.edge.build, /v0\.9\.15/);
+    assert.match(record.edge.build, V0_9_15_PATTERN);
 
     const release = record.edge.release;
     assert.equal(release.version, "v0.9.15");
@@ -140,8 +211,8 @@ describe("the supported pairing record", () => {
       requirement.includes("ferrum-edge#4611"),
     );
     assert.ok(semantics, "the association and namespace-identity requirement must stay recorded");
-    assert.match(semantics, /5db1d77a8/);
-    assert.match(semantics, /#409/);
+    assert.match(semantics, EDGE_COMMIT_5DB1D77A8_PATTERN);
+    assert.match(semantics, EDGE_ISSUE_409_PATTERN);
   });
 
   it("records the Foundry release against the verified Edge distribution", () => {
@@ -269,10 +340,10 @@ describe("the supported pairing record", () => {
       tested_commit: null,
       run_attempt: null,
     };
-    assert.throws(() => requireReleaseReady(pending), /hosted qualification is still pending/);
+    assert.throws(() => requireReleaseReady(pending), HOSTED_QUALIFICATION_IS_STILL_PENDING_PATTERN);
     const reused = structuredClone(qualifiedFixture.record);
     reused.qualification = structuredClone(previous.qualification);
-    assert.throws(() => requireReleaseReady(reused, qualifiedFixture.evidence), /run does not match/);
+    assert.throws(() => requireReleaseReady(reused, qualifiedFixture.evidence), RUN_DOES_NOT_MATCH_PATTERN);
   });
 
   it("preserves the published v0.4.0 facts separately from the candidate", () => {
@@ -303,9 +374,9 @@ describe("the supported pairing record", () => {
     // edge.release must be one of them, whatever the others are.
     for (const dependency of record.edge_dependencies) {
       const clause = dependency.status.split(";").at(-1);
-      const carriedBy = /(?:released|retained) in Ferrum Edge (.+)$/.exec(clause)?.[1] ?? "";
+      const carriedBy = RELEASED_RETAINED_IN_FERRUM_EDGE_PATTERN.exec(clause)?.[1] ?? "";
       assert.ok(
-        carriedBy.split(/,\s*(?:and\s+)?|\s+and\s+/).includes(record.edge.release.version),
+        carriedBy.split(LIST_SEPARATOR_PATTERN).includes(record.edge.release.version),
         `${dependency.change}: ${dependency.status}`,
       );
     }
@@ -503,10 +574,10 @@ describe("requireReleaseReady", () => {
   });
 
   it("refuses a URL without verified hosted evidence", () => {
-    assert.throws(() => requireReleaseReady(candidate), /run does not match/);
+    assert.throws(() => requireReleaseReady(candidate), RUN_DOES_NOT_MATCH_PATTERN);
     const failed = structuredClone(evidence);
     failed.run.conclusion = "failure";
-    assert.throws(() => requireReleaseReady(candidate, failed), /completed and successful/);
+    assert.throws(() => requireReleaseReady(candidate, failed), COMPLETED_AND_SUCCESSFUL_PATTERN);
   });
 
   it("refuses a published version through foundryReleaseErrors", () => {
@@ -527,8 +598,8 @@ describe("requireReleaseReady", () => {
       assert.throws(
         () => requireReleaseReady(published, evidence),
         (error) => {
-          assert.match(error.message, /is not an unreleased candidate/);
-          assert.match(error.message, /Tag the commit that prepared this version/);
+          assert.match(error.message, IS_NOT_AN_UNRELEASED_CANDIDATE_PATTERN);
+          assert.match(error.message, TAG_THE_COMMIT_THAT_PREPARED_PATTERN);
           return true;
         },
       );
@@ -540,7 +611,7 @@ describe("requireReleaseReady", () => {
     unqualified.edge.release.image = `${PLACEHOLDER_PREFIX}: edge release image`;
     assert.throws(
       () => requireReleaseReady(unqualified, evidence),
-      /does not name a qualified Ferrum Edge release/,
+      DOES_NOT_NAME_A_QUALIFIED_PATTERN,
     );
   });
 
@@ -551,7 +622,7 @@ describe("requireReleaseReady", () => {
     ]) {
       assert.throws(
         () => requireReleaseReady({ ...candidate, qualification }, evidence),
-        /hosted qualification is still pending/,
+        HOSTED_QUALIFICATION_IS_STILL_PENDING_PATTERN,
       );
     }
   });
@@ -561,7 +632,7 @@ describe("requireReleaseReady", () => {
     // main() actually calls it rather than reverting to an inline edge check.
     assert.match(
       repoFile("scripts/supported-pairing.mjs"),
-      /command === "release-ready"\) \{\n\s+const evidence = await readHostedQualification\(record\);\n\s+console\.log\(JSON\.stringify\(requireReleaseReady\(record, evidence\)\)\)/,
+      COMMAND_RELEASE_READY_CONST_EVIDENCE_PATTERN,
     );
   });
 });
@@ -582,25 +653,25 @@ describe("repository alignment", () => {
   it("has CI read the gateway image from the record rather than repeat it", () => {
     const workflow = repoFile(".github/workflows/ci.yml");
     assert.equal(workflow.match(EDGE_REFERENCE), null, "ci.yml must not pin an Edge image itself");
-    const runs = [...workflow.matchAll(/docker run [^\n]*\\\n(?:[^\n]*\\\n)*[^\n]*\n/g)]
+    const runs = [...workflow.matchAll(DOCKER_RUN_PATTERN)]
       .map(([block]) => block)
-      .filter((block) => /FERRUM_MODE=database/.test(block));
+      .filter((block) => FERRUM_MODE_DATABASE_PATTERN.test(block));
     assert.ok(runs.length >= 3, "the contract, read-only parity, and container gateways");
-    for (const block of runs) assert.match(block, /"\$FERRUM_EDGE_IMAGE"\s*$/);
-    assert.match(workflow, /node scripts\/supported-pairing\.mjs edge-image/);
+    for (const block of runs) assert.match(block, FERRUM_EDGE_IMAGE_PATTERN);
+    assert.match(workflow, NODE_SCRIPTS_SUPPORTED_PAIRING_MJS_PATTERN);
   });
 
   it("has the release workflow refuse a tag until the Edge release is qualified", () => {
     const workflow = repoFile(".github/workflows/release.yml");
-    assert.match(workflow, /node scripts\/supported-pairing\.mjs release-ready\n/);
+    assert.match(workflow, NODE_SCRIPTS_SUPPORTED_PAIRING_MJS_RELEASE_PATTERN);
     const metadata = workflow.slice(
       workflow.indexOf("  release-metadata:"),
       workflow.indexOf("  quality-gates:"),
     );
-    assert.match(metadata, /permissions:\n\s+actions: read\n\s+contents: read\n/);
+    assert.match(metadata, READ_ONLY_PERMISSIONS_PATTERN);
     const pairingStep = metadata.slice(metadata.indexOf("Require the supported pairing"));
-    assert.match(pairingStep, /GH_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}/);
-    assert.doesNotMatch(metadata, /actions: write|contents: write/);
+    assert.match(pairingStep, GH_TOKEN_SECRETS_GITHUB_TOKEN_PATTERN);
+    assert.doesNotMatch(metadata, WRITE_PERMISSION_PATTERN);
   });
 
   describe("the release workflow never reassigns a release (GHSA-rw8r-hrr2-vpc2)", () => {
@@ -608,19 +679,18 @@ describe("repository alignment", () => {
     const job = (name) => {
       const start = workflow.indexOf(`\n  ${name}:\n`);
       assert.ok(start >= 0, `release.yml has a ${name} job`);
-      const next = workflow.slice(start + 1).search(/\n {2}[a-z-]+:\n/);
+      const next = workflow.slice(start + 1).search(NEXT_JOB_PATTERN);
       return next < 0 ? workflow.slice(start) : workflow.slice(start, start + 1 + next);
     };
     const metadata = job("release-metadata");
     const build = job("docker");
     const manifest = job("docker-manifest");
     const release = job("create-release");
-    const TAG_IS_THIS_COMMIT = /if \[\[ "\$tag_commit" != "\$GITHUB_SHA" \]\]; then\n\s+echo [^\n]*\n\s+exit 1/;
 
     it("binds the tag to this run's commit before building, publishing, and releasing", () => {
       assert.match(metadata, TAG_IS_THIS_COMMIT);
       for (const later of [manifest, release]) {
-        assert.match(later, /git fetch --no-tags origin "\+refs\/tags\/\$\{RELEASE_TAG\}:refs\/release-check\/tag"/);
+        assert.match(later, GIT_FETCH_NO_TAGS_ORIGIN_PATTERN);
         assert.match(later, TAG_IS_THIS_COMMIT);
       }
       // The manifest job re-checks after waiting for earlier runs, before any login.
@@ -631,28 +701,28 @@ describe("repository alignment", () => {
     });
 
     it("refuses an existing GitHub release and foreign registry tags before any build", () => {
-      assert.match(metadata, /gh api "repos\/\$\{GITHUB_REPOSITORY\}\/releases\/tags\/\$\{RELEASE_TAG\}"/);
-      assert.match(metadata, /grep --quiet 'HTTP 404'/);
-      assert.match(metadata, /run: node scripts\/release-image-identity\.mjs preflight\n/);
-      assert.match(metadata, /IMAGE_REPOSITORIES: ferrumedge\/ferrum-foundry ghcr\.io\/\$\{\{ github\.repository \}\}\n/);
-      assert.match(metadata, /SOURCE_REVISION: \$\{\{ github\.sha \}\}\n/);
-      assert.doesNotMatch(metadata, /login-action|secrets\.DOCKERHUB/);
-      assert.match(build, /needs: \[quality-gates, release-metadata\]/);
+      assert.match(metadata, GH_API_REPOS_GITHUB_REPOSITORY_RELEASES_PATTERN);
+      assert.match(metadata, GREP_QUIET_HTTP_404_PATTERN);
+      assert.match(metadata, RUN_NODE_SCRIPTS_RELEASE_IMAGE_PATTERN);
+      assert.match(metadata, IMAGE_REPOSITORIES_FERRUMEDGE_FERRUM_FOUNDRY_PATTERN);
+      assert.match(metadata, SOURCE_REVISION_GITHUB_SHA_PATTERN);
+      assert.doesNotMatch(metadata, LOGIN_ACTION_SECRETS_DOCKERHUB_PATTERN);
+      assert.match(build, NEEDS_PATTERN);
     });
 
     it("compares both version tags in both registries before writing either registry", () => {
       const identity = manifest.indexOf("Refuse to reassign published release version tags");
-      const firstWrite = manifest.search(/imagetools create (?!--dry-run)/);
+      const firstWrite = manifest.search(IMAGETOOLS_CREATE_DRY_RUN_PATTERN);
       assert.ok(identity > 0 && identity < firstWrite, "the comparison precedes every registry write");
       const step = manifest.slice(identity, manifest.indexOf("Create and push multi-arch manifest (Docker Hub)"));
-      assert.match(step, /imagetools create --dry-run/);
-      assert.match(step, /for repository in ferrumedge\/ferrum-foundry "\$GHCR_REPOSITORY"; do/);
-      assert.match(step, /for tag in "\$RELEASE_TAG" "\$RELEASE_VERSION"; do/);
-      assert.match(step, /release-image-identity\.mjs" compare "\$repository" "\$release_digest" "\$tag"/);
+      assert.match(step, IMAGETOOLS_CREATE_DRY_RUN_2_PATTERN);
+      assert.match(step, FOR_REPOSITORY_IN_FERRUMEDGE_FERRUM_PATTERN);
+      assert.match(step, FOR_TAG_IN_RELEASE_TAG_RELEASE_VERSION_PATTERN);
+      assert.match(step, RELEASE_IMAGE_IDENTITY_MJS_COMPARE_PATTERN);
     });
 
     it("writes a version tag only when absent and only as this run's digest", () => {
-      const writes = [...manifest.matchAll(/^\s*docker buildx imagetools create (?!--dry-run)(.*)$/gm)]
+      const writes = [...manifest.matchAll(DOCKER_BUILDX_IMAGETOOLS_CREATE_DRY_PATTERN)]
         .map(([, args]) => args.trim());
       assert.deepEqual(writes, [
         '-t "$IMAGE_REPOSITORY:$tag" "$@"',
@@ -661,7 +731,7 @@ describe("repository alignment", () => {
         '"${channel_tags[@]}" "$IMAGE_REPOSITORY@$RELEASE_DIGEST"',
       ]);
       // Only X.Y and latest are channels; X.Y.Z is a version tag.
-      const channels = [...manifest.matchAll(/channel_tags\+?=\((.*)\)$/gm)].map(([, tags]) => tags);
+      const channels = [...manifest.matchAll(CHANNEL_TAGS_PATTERN)].map(([, tags]) => tags);
       assert.deepEqual(channels.sort(), [
         "",
         "",
@@ -670,20 +740,19 @@ describe("repository alignment", () => {
         '-t "$IMAGE_REPOSITORY:latest"',
         '-t "$IMAGE_REPOSITORY:latest"',
       ].sort());
-      const guarded = /if \[\[ "\$state" == "absent" \]\]; then\n\s+docker buildx imagetools create -t "\$IMAGE_REPOSITORY:\$tag" "\$@"/g;
-      assert.equal(manifest.match(guarded)?.length, 2);
-      assert.equal(manifest.match(/if \[\[ "\$state" != "published" \]\]; then/g)?.length, 2);
-      assert.equal(manifest.match(/publish_version_tag "\$RELEASE_TAG" "\$\{images\[@\]\}"/g)?.length, 2);
+      assert.equal(manifest.match(ABSENT_TAG_GUARDED_CREATE_PATTERN)?.length, 2);
+      assert.equal(manifest.match(UNPUBLISHED_STATE_GUARD_PATTERN)?.length, 2);
+      assert.equal(manifest.match(PUBLISH_VERSION_TAG_RELEASE_TAG_IMAGES_PATTERN)?.length, 2);
       assert.equal(
-        manifest.match(/publish_version_tag "\$RELEASE_VERSION" "\$IMAGE_REPOSITORY@\$RELEASE_DIGEST"/g)?.length,
+        manifest.match(PUBLISH_VERSION_TAG_RELEASE_VERSION_PATTERN)?.length,
         2,
       );
     });
 
     it("records the published digest in the GitHub release", () => {
-      assert.match(manifest, /outputs:\n\s+digest: \$\{\{ steps\.identity\.outputs\.digest \}\}/);
-      assert.match(release, /RELEASE_DIGEST: \$\{\{ needs\.docker-manifest\.outputs\.digest \}\}/);
-      assert.match(release, /ferrumedge\/ferrum-foundry@\{digest\}/);
+      assert.match(manifest, IDENTITY_DIGEST_OUTPUT_PATTERN);
+      assert.match(release, RELEASE_DIGEST_NEEDS_DOCKER_MANIFEST_PATTERN);
+      assert.match(release, FERRUMEDGE_FERRUM_FOUNDRY_DIGEST_PATTERN);
     });
 
     it("persists the first run's planned digests for a later attempt to name", () => {
@@ -694,22 +763,22 @@ describe("repository alignment", () => {
       // docs/release-security.md -> "A half-published version is stranded".
       assert.match(
         build,
-        /name: release-docker-digest-\$\{\{ matrix\.arch_dir \}\}\n\s+path: \/tmp\/digests\/\*\n\s+if-no-files-found: error\n\s+retention-days: 90/,
+        NAME_RELEASE_DOCKER_DIGEST_MATRIX_PATTERN,
       );
       assert.match(
         manifest,
-        /name: release-planned-digests\n\s+path: \/tmp\/release-plan\.txt\n\s+if-no-files-found: error\n\s+retention-days: 90/,
+        NAME_RELEASE_PLANNED_DIGESTS_PATH_PATTERN,
       );
       assert.match(
         manifest,
-        /echo "index=\$RELEASE_DIGEST"\n[\s\S]*?echo "platform=sha256:\$digest"\n\s+done\n\s+\} > \/tmp\/release-plan\.txt/,
+        ECHO_INDEX_RELEASE_DIGEST_PLATFORM_PATTERN,
       );
     });
 
     it("records and uploads the plan before the first registry write", () => {
       const record = manifest.indexOf("Record the first run's planned digests");
       const upload = manifest.indexOf("Upload the first run's planned digests");
-      const firstWrite = manifest.search(/imagetools create (?!--dry-run)/);
+      const firstWrite = manifest.search(IMAGETOOLS_CREATE_DRY_RUN_PATTERN);
       assert.ok(record > 0 && record < upload, "the plan is recorded before it is uploaded");
       assert.ok(upload < firstWrite, "the plan upload precedes every registry write");
     });
@@ -726,7 +795,7 @@ describe("repository alignment", () => {
     if (isPlaceholder(release.image)) {
       // The notes must not present the CI pin, which is not the pairing, as the pairing.
       assert.ok(!notes.includes(record.edge.image), "the draft must not pair with edge.image");
-      assert.match(notes, /\| Ferrum Edge \| \*release step\*/);
+      assert.match(notes, FERRUM_EDGE_RELEASE_STEP_PATTERN);
     } else {
       assert.ok(notes.includes(release.image));
       assert.ok(notes.includes(release.source_commit));

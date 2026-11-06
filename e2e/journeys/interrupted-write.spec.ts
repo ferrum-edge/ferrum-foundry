@@ -15,6 +15,12 @@
 
 import { expect, test, uniqueId, GatewayClient, NAMESPACE } from "../support/stack";
 
+const DID_NOT_REPLAY_PATTERN = /did not replay it/i;
+const OUTCOME_UNKNOWN_THE_GATEWAY_MAY_PATTERN =
+  /^Outcome unknown: the gateway may already have committed this change/;
+const FERRUM_BFF_UPSTREAM_FAILURE_PATTERN = /FERRUM_BFF_UPSTREAM_FAILURE/;
+const THE_REQUEST_WAS_NOT_REPLAYED_PATTERN = /the request was not replayed/i;
+
 const CREATED = uniqueId("e2e-interrupted");
 
 test.describe("an interrupted mutation", () => {
@@ -58,13 +64,13 @@ test.describe("an interrupted mutation", () => {
     await expect(dialog.getByRole("heading", { name: "Outcome unknown" })).toBeVisible({
       timeout: 40_000,
     });
-    await expect(dialog.getByText(/did not replay it/i)).toBeVisible();
+    await expect(dialog.getByText(DID_NOT_REPLAY_PATTERN)).toBeVisible();
     // The form's own toast says the same thing rather than "failed".
     await expect(
-      page.getByText(/^Outcome unknown: the gateway may already have committed this change/),
+      page.getByText(OUTCOME_UNKNOWN_THE_GATEWAY_MAY_PATTERN),
     ).toBeVisible();
     // The BFF's own code stays visible for diagnosis.
-    await expect(dialog.getByText(/FERRUM_BFF_UPSTREAM_FAILURE/)).toBeVisible();
+    await expect(dialog.getByText(FERRUM_BFF_UPSTREAM_FAILURE_PATTERN)).toBeVisible();
     await dialog.getByRole("button", { name: "Dismiss" }).click();
 
     // The live-apply banner keeps the report after the dialog is gone, bound to
@@ -108,7 +114,7 @@ test.describe("an interrupted mutation", () => {
     await page.getByRole("button", { name: "Add Target", exact: true }).last().click();
     await page.getByRole("button", { name: "Create Upstream" }).click();
 
-    await expect(page.getByText(/the request was not replayed/i)).toBeVisible({
+    await expect(page.getByText(THE_REQUEST_WAS_NOT_REPLAYED_PATTERN)).toBeVisible({
       timeout: 40_000,
     });
     await expect(page.getByText("Upstream created successfully")).toHaveCount(0);

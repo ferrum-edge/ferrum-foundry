@@ -82,6 +82,8 @@ export type StatusCodeListResult =
   | { ok: true; codes: number[] }
   | { ok: false; error: string };
 
+const DIGITS_PATTERN = /^\d+$/;
+
 /**
  * Parse comma-separated HTTP status codes. Every entry must be a complete
  * integer in the gateway's accepted range; a partial token such as `200x` is
@@ -90,7 +92,7 @@ export type StatusCodeListResult =
 export function parseStatusCodeList(text: string): StatusCodeListResult {
   const codes: number[] = [];
   for (const entry of parseCommaList(text)) {
-    const code = /^\d+$/.test(entry) ? Number(entry) : NaN;
+    const code = DIGITS_PATTERN.test(entry) ? Number(entry) : NaN;
     if (!Number.isInteger(code) || code < HTTP_STATUS_MIN || code > HTTP_STATUS_MAX) {
       return {
         ok: false,

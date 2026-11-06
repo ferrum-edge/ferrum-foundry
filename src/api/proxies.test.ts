@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Proxy } from "./types";
 import { listAll, mergeFormUpdatePayload, remove, toUpdatePayload } from "./proxies";
 
+const URL_SCHEME_PATTERN = /^[a-z][a-z0-9+.-]*:/i;
+
 function fullProxy(): Proxy {
   return {
     id: "proxy-1",
@@ -126,7 +128,7 @@ describe("listAll", () => {
 
   class BasedRequest extends Request {
     constructor(input: RequestInfo | URL, init?: RequestInit) {
-      if (typeof input === "string" && !/^[a-z][a-z0-9+.-]*:/i.test(input)) {
+      if (typeof input === "string" && !URL_SCHEME_PATTERN.test(input)) {
         input = new URL(input, "http://localhost").toString();
       }
       super(input, init);

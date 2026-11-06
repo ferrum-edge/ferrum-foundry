@@ -13,6 +13,15 @@ import {
 } from "../support/stack";
 import { mayCarrySecret } from "../support/may-carry-secret.mjs";
 
+const SIGN_IN_TO_FERRUM_FOUNDRY_PATTERN = /sign in to ferrum foundry/i;
+const CREATE_PROXY_PATTERN = /create proxy/i;
+const VIEWER_ROLE_WHICH_CANNOT_CREATE_PATTERN =
+  /viewer role, which cannot create, edit, or delete proxies/i;
+const PROXY_CONFIGURATION_IS_READ_ONLY_PATTERN = /proxy configuration is read-only/i;
+const CANCEL_PATTERN = /^cancel$/i;
+const CANNOT_CREATE_EDIT_OR_DELETE_PATTERN = /cannot create, edit, or delete proxies/i;
+const PROXIES_PATTERN = /\/proxies(\?.*)?$/;
+
 const ADMIN_ROUTE = "/api/proxy/proxies?offset=0&limit=1";
 
 test.describe("authorization through the identity proxy", () => {
@@ -48,7 +57,7 @@ test.describe("authorization through the identity proxy", () => {
 
     const { page } = await signIn("unmapped");
     await page.goto("/proxies");
-    await expect(page.getByText(/sign in to ferrum foundry/i)).toBeVisible();
+    await expect(page.getByText(SIGN_IN_TO_FERRUM_FOUNDRY_PATTERN)).toBeVisible();
     // No administrative content leaked behind the gate.
     await expect(page.getByRole("link", { name: "Consumers" })).toHaveCount(0);
   });
@@ -106,7 +115,7 @@ test.describe("authorization through the identity proxy", () => {
 
     // The reason is on screen before anything is edited, and every write
     // control carries it as its accessible name rather than just looking grey.
-    const create = page.getByRole("button", { name: /create proxy/i });
+    const create = page.getByRole("button", { name: CREATE_PROXY_PATTERN });
     await expect(create.first()).toBeDisabled();
     for (const control of await create.all()) {
       await expect(control).toBeDisabled();
@@ -115,17 +124,17 @@ test.describe("authorization through the identity proxy", () => {
       const describedBy = await control.getAttribute("aria-describedby");
       expect(describedBy, "a denied control must describe why").toBeTruthy();
       await expect(page.locator(`[id="${describedBy}"]`)).toContainText(
-        /viewer role, which cannot create, edit, or delete proxies/i,
+        VIEWER_ROLE_WHICH_CANNOT_CREATE_PATTERN,
       );
     }
 
     // The create page is presented read-only rather than accepting a full
     // form and failing with a 403 at the end of it.
     await page.goto("/proxies/new");
-    await expect(page.getByText(/proxy configuration is read-only/i)).toBeVisible();
+    await expect(page.getByText(PROXY_CONFIGURATION_IS_READ_ONLY_PATTERN)).toBeVisible();
     // A read-only surface still shows everything the editable one does.
     await expect(page.getByLabel("Backend Host", { exact: true })).toBeDisabled();
-    await expect(page.getByRole("button", { name: /^cancel$/i })).toBeEnabled();
+    await expect(page.getByRole("button", { name: CANCEL_PATTERN })).toBeEnabled();
   });
 
   test("a read the gateway withholds from a viewer is a denial, not an empty store", async ({
@@ -146,7 +155,7 @@ test.describe("authorization through the identity proxy", () => {
     const { page } = await signIn("operator");
     await page.goto("/proxies");
     await expect(page.getByRole("heading", { name: "Proxies", exact: true })).toBeVisible();
-    await expect(page.getByText(/cannot create, edit, or delete proxies/i)).toHaveCount(0);
+    await expect(page.getByText(CANNOT_CREATE_EDIT_OR_DELETE_PATTERN)).toHaveCount(0);
 
     const read = await request.get(`${FOUNDRY_URL}${ADMIN_ROUTE}`, {
       headers: { [IDENTITY_HEADER]: "operator", "X-Ferrum-Namespace": NAMESPACE },
@@ -186,7 +195,7 @@ test.describe("authorization through the identity proxy", () => {
     const { page } = await signIn("admin");
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Proxies", exact: true })).toBeVisible();
-    await expect(page).toHaveURL(/\/proxies(\?.*)?$/);
+    await expect(page).toHaveURL(PROXIES_PATTERN);
     await expect(page.getByRole("link", { name: "TLS", exact: true })).toHaveCount(0);
 
     // Every TLS route, reads and validation included, is refused to a scoped

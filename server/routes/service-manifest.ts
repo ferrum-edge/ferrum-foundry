@@ -14,13 +14,18 @@ import {
   validatedManifest,
 } from '../service-manifest.js';
 
+const ABSOLUTE_URL_ORIGIN_PATTERN = /^https?:\/\/[^/]+/;
+const ASCII_PERCENT_ESCAPE_PATTERN = /%([0-7][0-9a-f])/gi;
+const NAMESPACE_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$/;
+const JSON_CONTENT_TYPE_PATTERN = /^application\/json(?:\s*;|$)/i;
+
 const PREVIEW_PATH = '/api/service-manifest/preview';
 
 function isManifestRequest(url: string | undefined): boolean {
-  const path = (url ?? '').split('?', 1)[0].replace(/^https?:\/\/[^/]+/, '');
+  const path = (url ?? '').split('?', 1)[0].replace(ABSOLUTE_URL_ORIGIN_PATTERN, '');
   // The router decodes static ASCII path segments too. Decode just ASCII
   // escapes, so a malformed suffix cannot defeat prefix recognition or throw.
-  const decoded = path.replace(/%([0-7][0-9a-f])/gi, (_escape, hex: string) =>
+  const decoded = path.replace(ASCII_PERCENT_ESCAPE_PATTERN, (_escape, hex: string) =>
     String.fromCharCode(Number.parseInt(hex, 16)),
   );
   return decoded.startsWith('/api/service-manifest/');
@@ -137,7 +142,7 @@ const serviceManifestPlugin: FastifyPluginAsync = async (fastify) => {
       const count = request.raw.rawHeaders.filter((value, index) => index % 2 === 0
         && value.toLowerCase() === 'x-ferrum-namespace').length;
       if (count !== 1 || typeof namespace !== 'string'
-        || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$/.test(namespace)) {
+        || !NAMESPACE_PATTERN.test(namespace)) {
         return reply.status(400).send({ error: 'A single namespace binding is required' });
       }
       const principal = request.authPrincipal;
@@ -145,7 +150,7 @@ const serviceManifestPlugin: FastifyPluginAsync = async (fastify) => {
         reply.header('x-ferrum-auth-layer', 'bff');
         return reply.status(403).send({ error: 'Namespace access denied' });
       }
-      if (!/^application\/json(?:\s*;|$)/i.test(request.headers['content-type'] ?? '')) {
+      if (!JSON_CONTENT_TYPE_PATTERN.test(request.headers['content-type'] ?? '')) {
         return reply.status(415).send({ error: 'Manifest preview requires JSON' });
       }
       if (request.url.includes('?')) {

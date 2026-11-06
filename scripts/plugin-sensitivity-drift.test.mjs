@@ -10,6 +10,13 @@ import {
 import { readSupportedPairing } from "./supported-pairing.mjs";
 import { PLUGIN_SENSITIVITY_SOURCE } from "../src/api/pluginSensitivity.ts";
 
+const UNKNOWN_RULE_CONSTRUCTOR_JWT_CLAIM_PATTERN = /unknown rule constructor `jwt_claim`/;
+const UNSUPPORTED_HASHED_SENSITIVITY_PATTERN =
+  /FieldSensitivity::Hashed is not one Foundry implements/;
+const UNKNOWN_RULE_SET_EXTRA_RULES_PATTERN = /unknown rule set `EXTRA_RULES`/;
+const CORS_APPEARS_TWICE_PATTERN = /`cors` appears twice/;
+const PLUGIN_SENSITIVITY_SCHEMAS_NOT_FOUND_PATTERN = /`PLUGIN_SENSITIVITY_SCHEMAS` not found/;
+
 /** Shaped like Edge's `plugin_config_projection.rs`, comments and all. */
 const SOURCE = `
 //! Module docs mentioning \`const fn\` and "quotes".
@@ -211,23 +218,23 @@ test("reports a built-in Foundry is missing, a changed rule, an extra plugin, an
 test("fails loudly on a shape it cannot read rather than passing over it", () => {
   assert.throws(
     () => parseSensitivitySchemas(SOURCE.replace('("cors", NONE)', '("cors", &[jwt_claim(&["sub"])])')),
-    /unknown rule constructor `jwt_claim`/,
+    UNKNOWN_RULE_CONSTRUCTOR_JWT_CLAIM_PATTERN,
   );
   assert.throws(
     () => parseSensitivitySchemas(SOURCE.replace("FieldSensitivity::KafkaProducerProperties,\n        }", "FieldSensitivity::Hashed,\n        }")),
-    /FieldSensitivity::Hashed is not one Foundry implements/,
+    UNSUPPORTED_HASHED_SENSITIVITY_PATTERN,
   );
   assert.throws(
     () => parseSensitivitySchemas(SOURCE.replace('("cors", NONE)', '("cors", EXTRA_RULES)')),
-    /unknown rule set `EXTRA_RULES`/,
+    UNKNOWN_RULE_SET_EXTRA_RULES_PATTERN,
   );
   assert.throws(
     () => parseSensitivitySchemas(SOURCE.replace('("rate_limiting", REDIS_BACKED)', '("cors", REDIS_BACKED)')),
-    /`cors` appears twice/,
+    CORS_APPEARS_TWICE_PATTERN,
   );
   assert.throws(
     () => parseSensitivitySchemas(SOURCE.replace("PLUGIN_SENSITIVITY_SCHEMAS", "RENAMED")),
-    /`PLUGIN_SENSITIVITY_SCHEMAS` not found/,
+    PLUGIN_SENSITIVITY_SCHEMAS_NOT_FOUND_PATTERN,
   );
 });
 

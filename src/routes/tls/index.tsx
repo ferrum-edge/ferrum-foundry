@@ -92,6 +92,9 @@ import {
 import { formatDateTime } from "@/lib/format";
 import type { ReadQuery } from "@/lib/readState";
 
+const PLURAL_SUFFIX_PATTERN = /s$/;
+const UNDERSCORES_PATTERN = /_/g;
+
 /* ------------------------------------------------------------------ */
 /*  Small helpers                                                      */
 /* ------------------------------------------------------------------ */
@@ -320,7 +323,7 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
       <div className="flex items-start justify-between gap-4">
         <p className="text-text-muted text-sm max-w-2xl">{config.description}</p>
         <Button size="sm" disabled={!canWrite.allowed} onClick={() => setCreateOpen(true)}>
-          Add {config.title.replace(/s$/, "")}
+          Add {config.title.replace(PLURAL_SUFFIX_PATTERN, "")}
         </Button>
       </div>
 
@@ -390,7 +393,7 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
       {/* Create dialog */}
       <Dialog open={createOpen} onOpenChange={(open) => (open ? setCreateOpen(true) : closeCreate())}>
         <DialogContent className="max-h-[85vh] overflow-y-auto">
-          <DialogTitle>{`Add ${config.title.replace(/s$/, "")}`}</DialogTitle>
+          <DialogTitle>{`Add ${config.title.replace(PLURAL_SUFFIX_PATTERN, "")}`}</DialogTitle>
           <div className="space-y-4 mt-4">
           <div className="grid grid-cols-2 gap-3">
             <Input
@@ -715,7 +718,7 @@ function acmeStatusBadge(status: AcmeOrder["status"] | string): ReactNode {
       : status === "failed" || status === "revoked" || status === "cancelled"
         ? "red"
         : "yellow";
-  return <Badge variant={variant}>{status.replace(/_/g, " ")}</Badge>;
+  return <Badge variant={variant}>{status.replace(UNDERSCORES_PATTERN, " ")}</Badge>;
 }
 
 const EMPTY_ACME_ORDER_FORM = {
@@ -1511,7 +1514,7 @@ function AcmeTab() {
       <ConfirmDialog
         open={!!deleteOrderTarget}
         onOpenChange={(open) => !open && setDeleteOrderTarget(null)}
-        title={`Delete ${deleteOrderTarget?.status.replace(/_/g, " ") ?? "ACME"} order?`}
+        title={`Delete ${deleteOrderTarget?.status.replace(UNDERSCORES_PATTERN, " ") ?? "ACME"} order?`}
         description={`Fleet-global order "${deleteOrderTarget?.id ?? ""}" covers ${deleteOrderTarget?.domains.join(", ") ?? "the selected domains"}. Deleting an active order cancels/removes the challenge workflow for every namespace and cannot be undone.`}
         confirmLabel="Delete Order"
         loading={Boolean(

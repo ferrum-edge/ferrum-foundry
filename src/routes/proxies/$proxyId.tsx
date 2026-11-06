@@ -43,6 +43,8 @@ import { isStreamProxy } from "@/lib/pluginProtocols";
 import { McpToolsPanel } from "@/components/mcp/McpToolsPanel";
 import { McpGovernanceCard } from "@/components/mcp/McpGovernanceCard";
 
+const UNDERSCORES_PATTERN = /_/g;
+
 /**
  * Plugin config JSON preview. Scrolls in both axes inside a bounded box so a
  * long line is never clipped mid-glyph by a horizontal-only overflow.
@@ -624,7 +626,7 @@ function ProxyEditor({ session }: { session: EditorSession }) {
                       </p>
                     )}
                   </div>
-                  <Badge variant="blue">{upstream.algorithm.replace(/_/g, " ")}</Badge>
+                  <Badge variant="blue">{upstream.algorithm.replace(UNDERSCORES_PATTERN, " ")}</Badge>
                 </div>
 
                 <div className="flex gap-4 text-sm text-text-secondary">

@@ -11,6 +11,9 @@
 
 import { expect, test, uniqueId, GatewayClient, NAMESPACE } from "../support/stack";
 
+const BACKEND_TIMEOUTS_PATTERN = /backend timeouts/i;
+const FAILED_TO_LOAD_PROXY_CONFIGURATION_PATTERN = /failed to load proxy configuration/i;
+
 const PROXY_ID = uniqueId("e2e-lifecycle");
 const UPSTREAM_ID = uniqueId("e2e-lifecycle-up");
 
@@ -53,7 +56,7 @@ test.describe("resource lifecycle", () => {
   }) => {
     await page.goto(`/proxies/${PROXY_ID}`);
     const timeout = page.getByLabel("Read Timeout (ms)", { exact: true });
-    await page.getByRole("button", { name: /backend timeouts/i }).click();
+    await page.getByRole("button", { name: BACKEND_TIMEOUTS_PATTERN }).click();
     await expect(timeout).toBeVisible();
 
     await timeout.fill("12345");
@@ -73,7 +76,7 @@ test.describe("resource lifecycle", () => {
     adminPage: page,
   }) => {
     await page.goto(`/proxies/${PROXY_ID}`);
-    await page.getByRole("button", { name: /backend timeouts/i }).click();
+    await page.getByRole("button", { name: BACKEND_TIMEOUTS_PATTERN }).click();
     await expect(page.getByLabel("Read Timeout (ms)", { exact: true })).toHaveValue("12345");
   });
 
@@ -104,7 +107,7 @@ test.describe("resource lifecycle", () => {
 
   test("a deleted resource's detail page does not resurrect it", async ({ adminPage: page }) => {
     await page.goto(`/proxies/${PROXY_ID}`);
-    await expect(page.getByText(/failed to load proxy configuration/i)).toBeVisible();
+    await expect(page.getByText(FAILED_TO_LOAD_PROXY_CONFIGURATION_PATTERN)).toBeVisible();
     await expect(page.getByLabel("Listen Path", { exact: true })).toHaveCount(0);
   });
 });

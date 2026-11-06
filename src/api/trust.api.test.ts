@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create, remove, update, type GatewayTrustBundleCreate } from "./trust";
 
+const GATEWAY_TRUST_BUNDLES_TRUST_1_PATTERN = /\/gateway-trust-bundles\/trust-1$/;
+
 describe("gateway trust mutation wiring", () => {
   const captured: Array<{
     url: string;
@@ -62,6 +64,6 @@ describe("gateway trust mutation wiring", () => {
     expect(captured.map(({ method }) => method)).toEqual(["POST", "PUT", "DELETE"]);
     expect(captured.every(({ namespace }) => namespace === "production")).toBe(true);
     expect(captured[1].body).toMatchObject({ revision: 77, trust_domain: "example.org" });
-    expect(captured[1].url).toMatch(/\/gateway-trust-bundles\/trust-1$/);
+    expect(captured[1].url).toMatch(GATEWAY_TRUST_BUNDLES_TRUST_1_PATTERN);
   });
 });

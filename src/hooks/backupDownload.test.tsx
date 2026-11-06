@@ -17,6 +17,8 @@ import {
 import { click, createHarness, settle, stubFetch } from "@/test/__tests__/harness";
 import { useBackup } from "./useOps";
 
+const FERRUM_BACKUP_TENANT_A_PATTERN = /^ferrum-backup-tenant-a-/;
+
 vi.mock("@/stores/auth", () => ({ useAuth: () => ({ principal: null }) }));
 
 const SECRET = "synthetic-backup-credential-0123456789";
@@ -206,7 +208,7 @@ describe("backup download through the real mutation and card", () => {
     expect(namespace.selectedNamespace).toBe("tenant-b");
     expect(requests[0].headers.get("x-ferrum-namespace")).toBe("tenant-a");
     expect(requests[0].headers.get(GATEWAY_TARGET_HEADER)).toBe("target-a");
-    expect(downloads[0].filename).toMatch(/^ferrum-backup-tenant-a-/);
+    expect(downloads[0].filename).toMatch(FERRUM_BACKUP_TENANT_A_PATTERN);
     expect(ui.host.textContent).toContain("Credentials are UNREDACTED — store securely.");
     expect(revokeUrl).toHaveBeenCalledExactlyOnceWith(OBJECT_URL);
     expect(assertSafeState().state.data).toEqual({ proxies: 1, consumers: 1 });
@@ -230,7 +232,7 @@ describe("backup download through the real mutation and card", () => {
       await pending;
     });
     expect(requests[0].headers.get("x-ferrum-namespace")).toBe("tenant-a");
-    expect(downloads[0].filename).toMatch(/^ferrum-backup-tenant-a-/);
+    expect(downloads[0].filename).toMatch(FERRUM_BACKUP_TENANT_A_PATTERN);
     expect(assertSafeState().state.variables).toEqual({ namespace: "tenant-a" });
   });
 

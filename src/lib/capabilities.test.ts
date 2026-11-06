@@ -14,6 +14,8 @@ import {
   type GatewayRole,
 } from "./capabilities";
 
+const IS_ARE_UNAVAILABLE_PATTERN = / (is|are) unavailable$/;
+
 /**
  * Surfaces behind `AdminState::admit_write`, observable as
  * `admin_writes_enabled` (ferrum-edge `src/admin/mod.rs:499`).
@@ -272,7 +274,7 @@ describe("namespace-scoped sessions", () => {
       const verdict = resolveFleetView(view, facts(role, "database", true, "ok", true));
       expect(verdict.allowed).toBe(false);
       expect(verdict.blockedBy).toBe("namespace-scope");
-      expect(verdict.headline).toMatch(/ (is|are) unavailable$/);
+      expect(verdict.headline).toMatch(IS_ARE_UNAVAILABLE_PATTERN);
       expect(verdict.summary).toBe("Requires a session without namespace grants");
       expect(verdict.explanation).toContain("namespace grants do not scope");
     }

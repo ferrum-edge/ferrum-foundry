@@ -12,6 +12,11 @@ import {
 } from "@/test/__tests__/harness";
 import TlsPage from "./index";
 
+const WHITESPACE_RUN_PATTERN = /\s+/;
+const WHITESPACE_RUNS_PATTERN = /\s+/g;
+const UUID_PATTERN = /^[0-9a-f-]{36}$/;
+const RENEW_PATTERN = /^renew-[0-9a-f]{32}$/;
+
 const at = "2026-09-01T00:00:00Z";
 // Deliberately invalid cryptographic material: these fixtures only exercise
 // form serialization. The mocked gateway owns material validation results.
@@ -160,19 +165,19 @@ function getByRole<Role extends keyof NativeRoleElements>(
   };
   const matches = [...root.querySelectorAll<NativeRoleElements[Role]>(selectors[role])]
     .filter((control) => {
-      const referencedName = control.getAttribute("aria-labelledby")?.split(/\s+/)
+      const referencedName = control.getAttribute("aria-labelledby")?.split(WHITESPACE_RUN_PATTERN)
         .map((id) => document.getElementById(id)?.textContent ?? "").join(" ");
       const labelName = Array.from(control.labels ?? [], (label) => label.textContent).join(" ");
       const accessibleName = referencedName ?? control.getAttribute("aria-label")
         ?? (labelName || (role === "button" ? control.textContent : "")) ?? "";
-      return accessibleName.replace(/\s+/g, " ").trim() === name;
+      return accessibleName.replace(WHITESPACE_RUNS_PATTERN, " ").trim() === name;
     });
   expect(matches, `${role} named ${name}`).toHaveLength(1);
   return matches[0];
 }
 
 function describedText(control: Element) {
-  const ids = control.getAttribute("aria-describedby")?.split(/\s+/) ?? [];
+  const ids = control.getAttribute("aria-describedby")?.split(WHITESPACE_RUN_PATTERN) ?? [];
   expect(ids.length).toBeGreaterThan(0);
   return ids.map((id) => {
     const description = document.getElementById(id);
@@ -742,7 +747,7 @@ describe("ACME workflows", () => {
     await settle(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
     const expected: AcmeOrderRequest = {
       // Foundry names the order so an unanswered request can be proven later.
-      id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      id: expect.stringMatching(UUID_PATTERN),
       domains: ["edge.example.test", "www.example.test"], directory_url: "https://ca.example.test/directory",
       contact: ["mailto:ops@example.test", "mailto:admin@example.test"], challenge_type: "dns01", terms_of_service_agreed: true,
     };
@@ -808,7 +813,7 @@ describe("ACME workflows", () => {
     await click("Renew", panel());
     await settle(() => expect(document.body.textContent).toContain("Renewal order created for edge.example.test"));
     expect(await writes()[1].json()).toEqual({
-      id: expect.stringMatching(/^renew-[0-9a-f]{32}$/), terms_of_service_agreed: true,
+      id: expect.stringMatching(RENEW_PATTERN), terms_of_service_agreed: true,
     });
     expect(new URL(writes()[1].url).pathname).toBe("/api/proxy/admin/tls/acme/renew/acme-edge");
     expect(writes()).toHaveLength(2);

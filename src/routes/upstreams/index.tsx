@@ -20,12 +20,15 @@ import { SkeletonRow } from "@/components/ui/Skeleton";
 import { filterAndPage } from "@/lib/collectionSearch";
 import { formatDateTime } from "@/lib/format";
 
+const UNDERSCORES_PATTERN = /_/g;
+const WORD_INITIAL_PATTERN = /\b\w/g;
+
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
 function formatAlgorithm(algo: string): string {
-  return algo.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  return algo.replace(UNDERSCORES_PATTERN, " ").replace(WORD_INITIAL_PATTERN, (c) => c.toUpperCase());
 }
 
 function algorithmBadgeVariant(algo: string) {

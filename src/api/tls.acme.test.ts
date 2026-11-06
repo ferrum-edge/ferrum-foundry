@@ -7,6 +7,9 @@ import {
   type AcmeCertificateRequest,
 } from "./tls";
 
+const ADMIN_TLS_ACME_CERTIFICATES_PATTERN = /\/admin\/tls\/acme\/certificates$/;
+const ADMIN_TLS_ACME_CERTIFICATES_EDGE_PATTERN = /\/admin\/tls\/acme\/certificates\/edge-cert$/;
+
 interface CapturedRequest {
   url: string;
   method: string;
@@ -74,9 +77,9 @@ describe("ACME certificate API wiring", () => {
 
     expect(captured.map(({ method }) => method)).toEqual(["POST", "GET", "PUT", "DELETE"]);
     expect(captured.every(({ namespace }) => namespace === null)).toBe(true);
-    expect(captured[0].url).toMatch(/\/admin\/tls\/acme\/certificates$/);
-    expect(captured[1].url).toMatch(/\/admin\/tls\/acme\/certificates\/edge-cert$/);
+    expect(captured[0].url).toMatch(ADMIN_TLS_ACME_CERTIFICATES_PATTERN);
+    expect(captured[1].url).toMatch(ADMIN_TLS_ACME_CERTIFICATES_EDGE_PATTERN);
     expect(captured[2].body).toMatchObject({ id: "edge-cert", key_pem: request.key_pem });
-    expect(captured[3].url).toMatch(/\/admin\/tls\/acme\/certificates\/edge-cert$/);
+    expect(captured[3].url).toMatch(ADMIN_TLS_ACME_CERTIFICATES_EDGE_PATTERN);
   });
 });

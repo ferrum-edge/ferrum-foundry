@@ -7,6 +7,16 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { fetch as upstreamFetch } from 'undici';
 import { generateToken } from './jwt.js';
 
+const BEARER_PATTERN = /^Bearer /;
+const CONSUMERS_PATTERN = /^\/consumers\/[^/]+\/?$/;
+const HTTP_1_1_STATUS_LINE_PATTERN = /^HTTP\/1\.1 (\d+)/;
+const ETAG_PATTERN = /^etag:/im;
+const LAST_MODIFIED_PATTERN = /^last-modified:/im;
+const CACHE_CONTROL_NO_STORE_PATTERN = /^cache-control: no-store$/im;
+const RETRY_AFTER_5_PATTERN = /^retry-after: 5$/im;
+const ETAG_HEALTH_DETAIL_PATTERN = /^etag: "health-detail"$/im;
+const FINALIZE_APPLY_STATUS_PATTERN = /finalize|apply-status/;
+
 vi.mock('undici', async (importOriginal) => {
   const original = await importOriginal<typeof import('undici')>();
   return { ...original, fetch: vi.fn(original.fetch) };
@@ -85,7 +95,7 @@ const gateway = createServer((request, response) => {
   arrivals.push({
     url, method: request.method ?? '',
     namespace: request.headers['x-ferrum-namespace'] as string | undefined,
-    token: request.headers.authorization?.replace(/^Bearer /, '') ?? '',
+    token: request.headers.authorization?.replace(BEARER_PATTERN, '') ?? '',
     range: request.headers.range,
     ifNoneMatch: request.headers['if-none-match'],
   });
@@ -142,7 +152,7 @@ const gateway = createServer((request, response) => {
       }
     } else if (path === '/consumers') {
       response.end(JSON.stringify({ data: [MASKED_CONSUMER] }));
-    } else if (/^\/consumers\/[^/]+\/?$/.test(path)) {
+    } else if (CONSUMERS_PATTERN.test(path)) {
       response.end(JSON.stringify(MASKED_CONSUMER));
     } else {
       response.end(JSON.stringify({ data: TENANT_DATA }));
@@ -203,7 +213,7 @@ function rawRequest(
     socket.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
     socket.on('end', () => {
       const wire = Buffer.concat(chunks).toString('utf8');
-      resolve({ status: Number(/^HTTP\/1\.1 (\d+)/.exec(wire)?.[1] ?? 0), wire });
+      resolve({ status: Number(HTTP_1_1_STATUS_LINE_PATTERN.exec(wire)?.[1] ?? 0), wire });
       socket.destroy();
     });
     socket.on('connect', () => {
@@ -743,10 +753,10 @@ describe('raw BFF path confinement', () => {
         expect(parsed).toEqual(HEALTH_SUMMARY);
         for (const key of detailKeys) expect(parsed, key).not.toHaveProperty(key);
         // No header describing the upstream representation survives.
-        expect(head).not.toMatch(/^etag:/im);
-        expect(head).not.toMatch(/^last-modified:/im);
+        expect(head).not.toMatch(ETAG_PATTERN);
+        expect(head).not.toMatch(LAST_MODIFIED_PATTERN);
         expect(head).toMatch(new RegExp(`^content-length: ${Buffer.byteLength(body)}$`, 'im'));
-        expect(head).toMatch(/^cache-control: no-store$/im);
+        expect(head).toMatch(CACHE_CONTROL_NO_STORE_PATTERN);
       }
     }
     // A granted active namespace keeps its serving block, as Edge's tenant
@@ -759,7 +769,7 @@ describe('raw BFF path confinement', () => {
 
     const headRead = await rawRequest('/api/proxy/health', 'HEAD', identity('viewer'));
     expect(headRead.status).toBe(200);
-    expect(headRead.wire).not.toMatch(/^etag:/im);
+    expect(headRead.wire).not.toMatch(ETAG_PATTERN);
     expect(arrivals.at(-1)).toMatchObject({ url: '/health', method: 'HEAD' });
 
     // The overload snapshot has no summary projection and stays withheld.
@@ -787,11 +797,11 @@ describe('raw BFF path confinement', () => {
         expect(JSON.parse(body)).toEqual(summary);
         expect(body).not.toContain('gateway_listeners');
         expect(body).not.toContain('tenant-b');
-        expect(head).not.toMatch(/^etag:/im);
-        expect(head).not.toMatch(/^last-modified:/im);
+        expect(head).not.toMatch(ETAG_PATTERN);
+        expect(head).not.toMatch(LAST_MODIFIED_PATTERN);
         expect(head).toMatch(new RegExp(`^content-length: ${Buffer.byteLength(body)}$`, 'im'));
-        expect(head).toMatch(/^cache-control: no-store$/im);
-        expect(head).toMatch(/^retry-after: 5$/im);
+        expect(head).toMatch(CACHE_CONTROL_NO_STORE_PATTERN);
+        expect(head).toMatch(RETRY_AFTER_5_PATTERN);
       }
     }
     // An unrestricted admin still receives the detailed non-200 answer.
@@ -843,7 +853,7 @@ describe('raw BFF path confinement', () => {
       expect(JSON.parse(body)).toEqual({ error: 'Bad Gateway', code: 'FERRUM_BFF_UPSTREAM_FAILURE' });
       expect(body).not.toContain('upstream proxy failure');
       expect(body).not.toContain('gateway_listeners');
-      expect(head).not.toMatch(/^etag:/im);
+      expect(head).not.toMatch(ETAG_PATTERN);
     }
   });
 
@@ -853,7 +863,7 @@ describe('raw BFF path confinement', () => {
       expect(response.status).toBe(200);
       const { head, body } = splitWire(response.wire);
       expect(JSON.parse(body)).toEqual(HEALTH_DETAIL);
-      expect(head).toMatch(/^etag: "health-detail"$/im);
+      expect(head).toMatch(ETAG_HEALTH_DETAIL_PATTERN);
     }
   });
 
@@ -866,7 +876,7 @@ describe('raw BFF path confinement', () => {
       expect(response.status, path).toBe(200);
       const { head, body } = splitWire(response.wire);
       expect(JSON.parse(body)).toEqual(expected);
-      expect(head).not.toMatch(/^etag:/im);
+      expect(head).not.toMatch(ETAG_PATTERN);
     }
   });
 
@@ -918,7 +928,7 @@ describe('raw BFF path confinement', () => {
       ['POST', '/admin/tls/acme/orders/order-1/%66inalize'], ['POST', '/%72estore'],
     ]) {
       // ACME finalize and apply status are fleet-global, refused to a scoped principal.
-      const fleetGlobal = /finalize|apply-status/.test(decodeURIComponent(path));
+      const fleetGlobal = FINALIZE_APPLY_STATUS_PATTERN.test(decodeURIComponent(path));
       const headers = fleetGlobal ? globalAdmin() : identity('admin');
       expect((await rawRequest(`/api/proxy${path}?delay=1`, method, headers, method === 'POST' ? '{}' : '')).status).toBe(200);
       expect(arrivals.at(-1)?.url).toBe(`${decodeURIComponent(path)}?delay=1`);

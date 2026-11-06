@@ -5,6 +5,10 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadCaBundle } from './ca.js';
 
+const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/;
+const INSIDE_FERRUM_TLS_CA_ROOT_PATTERN = /inside FERRUM_TLS_CA_ROOT/;
+const BETWEEN_1_AND_1024_PATTERN = /between 1 and 1024/;
+
 const directories: string[] = [];
 
 function tempDirectory(): string {
@@ -26,7 +30,7 @@ describe('loadCaBundle', () => {
     const bundle = loadCaBundle(path, root);
     expect(bundle.path).toBe(realpathSync(path));
     expect(bundle.pem).toContain('BEGIN CERTIFICATE');
-    expect(bundle.fingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(bundle.fingerprint).toMatch(SHA256_HEX_PATTERN);
   });
 
   it('rejects traversal outside the approved root', () => {
@@ -34,7 +38,7 @@ describe('loadCaBundle', () => {
     const outside = tempDirectory();
     const path = join(outside, 'ca.pem');
     writeFileSync(path, 'certificate');
-    expect(() => loadCaBundle(path, root)).toThrow(/inside FERRUM_TLS_CA_ROOT/);
+    expect(() => loadCaBundle(path, root)).toThrow(INSIDE_FERRUM_TLS_CA_ROOT_PATTERN);
   });
 
   it('supports a projected-volume symlink whose target remains inside the approved root', () => {
@@ -55,7 +59,7 @@ describe('loadCaBundle', () => {
     const link = join(root, 'link.pem');
     writeFileSync(target, rootCertificates[0]!);
     symlinkSync(target, link);
-    expect(() => loadCaBundle(link, root)).toThrow(/inside FERRUM_TLS_CA_ROOT/);
+    expect(() => loadCaBundle(link, root)).toThrow(INSIDE_FERRUM_TLS_CA_ROOT_PATTERN);
   });
 
   it('accepts multiple certificates with whitespace and hash comments', () => {
@@ -82,6 +86,6 @@ describe('loadCaBundle', () => {
     const root = tempDirectory();
     const large = join(root, 'large.pem');
     writeFileSync(large, Buffer.alloc(1025));
-    expect(() => loadCaBundle(large, root, 1024)).toThrow(/between 1 and 1024/);
+    expect(() => loadCaBundle(large, root, 1024)).toThrow(BETWEEN_1_AND_1024_PATTERN);
   });
 });

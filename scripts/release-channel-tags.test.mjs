@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { parseReleaseTag, releaseChannelPolicy } from './release-channel-tags.mjs';
 
+const SAFE_PRERELEASE_SUFFIX_PATTERN = /safe prerelease suffix/;
+
 test('release metadata accepts safe tags and rejects unsafe spellings', () => {
   assert.deepEqual(
     parseReleaseTag('v12.34.56-rc.2'),
@@ -13,8 +15,8 @@ test('release metadata accepts safe tags and rejects unsafe spellings', () => {
       numeric: [12n, 34n, 56n],
     },
   );
-  assert.throws(() => parseReleaseTag('v1.2.3;echo-owned'), /safe prerelease suffix/);
-  assert.throws(() => parseReleaseTag('v01.2.3'), /safe prerelease suffix/);
+  assert.throws(() => parseReleaseTag('v1.2.3;echo-owned'), SAFE_PRERELEASE_SUFFIX_PATTERN);
+  assert.throws(() => parseReleaseTag('v01.2.3'), SAFE_PRERELEASE_SUFFIX_PATTERN);
 });
 
 test('a backport advances its release line without regressing latest', () => {

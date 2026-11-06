@@ -13,14 +13,14 @@ import {
 } from "./outcomeLatches";
 import type { AcmeOrder } from "@/api/tls";
 
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
 afterEach(() => {
   vi.unstubAllGlobals();
   clearOutcomeLatches();
 });
 
 describe("correlationId", () => {
-  const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-
   it("falls back to getRandomValues outside a secure context", () => {
     vi.stubGlobal("crypto", {
       getRandomValues: (bytes: Uint8Array) => bytes.fill(0xff),

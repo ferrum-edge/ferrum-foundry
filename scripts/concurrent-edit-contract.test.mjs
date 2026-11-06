@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { verifyConcurrentEditContract } from "./concurrent-edit-contract.mjs";
 
+const ADMINISTRATOR_1_WAS_REFUSED_UNEXPECTEDLY_PATTERN = /administrator 1 was refused unexpectedly/;
+
 for (const etag of [null, "", 'W/"r1"', '""', "unquoted", '"r1", "r2"', '"r1"\n']) {
   test(`contract refusal for initial verification tag: ${JSON.stringify(etag)}`, async () => {
     const methods = [];
@@ -24,7 +26,7 @@ for (const etag of [null, "", 'W/"r1"', '""', "unquoted", '"r1", "r2"', '"r1"\n'
 
     await assert.rejects(
       verifyConcurrentEditContract(exchange, { backend_scheme: "http", backend_port: 8080 }),
-      /administrator 1 was refused unexpectedly/,
+      ADMINISTRATOR_1_WAS_REFUSED_UNEXPECTEDLY_PATTERN,
     );
     assert.deepEqual(methods, ["POST", "GET", "GET", "DELETE", "DELETE"]);
     assert.equal(stored.backend_read_timeout_ms, 5_000);

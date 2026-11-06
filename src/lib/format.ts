@@ -119,6 +119,8 @@ const ACRONYMS: Record<string, string> = {
   xds: "xDS",
 };
 
+const KEY_WORD_SEPARATORS_PATTERN = /[_\-\s]+/;
+
 /**
  * A snake_case (or kebab-case) machine key as a sentence-case label:
  * `mtls_credentials` → "mTLS credentials", `config_generation` →
@@ -126,7 +128,7 @@ const ACRONYMS: Record<string, string> = {
  */
 export function humanizeKey(key: string): string {
   const words = key
-    .split(/[_\-\s]+/)
+    .split(KEY_WORD_SEPARATORS_PATTERN)
     .filter(Boolean)
     .map((word) => word.toLowerCase());
   return words

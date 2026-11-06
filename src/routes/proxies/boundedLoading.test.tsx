@@ -21,6 +21,16 @@ import { NamespaceProvider, NAMESPACE_STORAGE_KEY } from "@/stores/namespace";
 import { SUMMARY_SCAN_BUDGET } from "@/api/pagination";
 import type { Proxy, Upstream, PluginConfig } from "@/api/types";
 
+const GET_API_PROXY_UPSTREAMS_PATTERN = /GET \/api\/proxy\/upstreams\?/;
+const GET_API_PROXY_UPSTREAMS_UPSTREAM_PATTERN = /GET \/api\/proxy\/upstreams\/upstream-\d+/;
+const GET_API_PROXY_PLUGINS_CONFIG_PATTERN = /GET \/api\/proxy\/plugins\/config\?/;
+const PLUGINS_CONFIG_PATTERN = /plugins\/config/;
+const CONSUMERS_PATTERN = /consumers/;
+const UPSTREAMS_PATTERN = /upstreams/;
+const PLUGINS_CONFIG_OFFSET_LIMIT_PATTERN = /plugins\/config\?offset=\d+&limit=\d+$/;
+const API_PROXY_CONSUMERS_PATTERN = /\/api\/proxy\/consumers/;
+const GET_API_PROXY_UPSTREAMS_UPSTREAM_0_PATTERN = /GET \/api\/proxy\/upstreams\/upstream-0/;
+
 const PROXY_COUNT = 5_000;
 const UPSTREAM_COUNT = 3_000;
 const PLUGIN_COUNT = SUMMARY_SCAN_BUDGET + 500;
@@ -227,15 +237,15 @@ describe("bounded loading on ordinary navigation", () => {
     ]);
 
     // Upstream names: one catalog page, then at most one read per visible row.
-    const catalogPages = countOf(/GET \/api\/proxy\/upstreams\?/);
-    const rowReads = countOf(/GET \/api\/proxy\/upstreams\/upstream-\d+/);
+    const catalogPages = countOf(GET_API_PROXY_UPSTREAMS_PATTERN);
+    const rowReads = countOf(GET_API_PROXY_UPSTREAMS_UPSTREAM_PATTERN);
     expect(catalogPages).toBe(1);
     expect(rowReads).toBeLessThanOrEqual(PAGE_SIZE);
     // 3,000 upstreams would have been 12 sequential pages under the old load.
     expect(catalogPages + rowReads).toBeLessThan(Math.ceil(UPSTREAM_COUNT / 250));
 
     // The plugin summary stops at its budget instead of traversing 2,500.
-    const pluginPages = countOf(/GET \/api\/proxy\/plugins\/config\?/);
+    const pluginPages = countOf(GET_API_PROXY_PLUGINS_CONFIG_PATTERN);
     expect(pluginPages).toBeLessThanOrEqual(Math.ceil(SUMMARY_SCAN_BUDGET / 250));
     expect(pluginPages * 250).toBeLessThan(PLUGIN_COUNT);
   });
@@ -260,14 +270,14 @@ describe("bounded loading on ordinary navigation", () => {
     // Exactly the proxy itself. Not the plugin collection, not the consumer
     // collection, not even the linked upstream until its tab is asked for.
     expect(calls).toEqual(["GET /api/proxy/proxies/proxy-0?offset=0&limit=20"]);
-    expect(countOf(/plugins\/config/)).toBe(0);
-    expect(countOf(/consumers/)).toBe(0);
-    expect(countOf(/upstreams/)).toBe(0);
+    expect(countOf(PLUGINS_CONFIG_PATTERN)).toBe(0);
+    expect(countOf(CONSUMERS_PATTERN)).toBe(0);
+    expect(countOf(UPSTREAMS_PATTERN)).toBe(0);
   });
 
   it("starts the policy traversal only when its tab is opened", async () => {
     await render(<ProxyDetailPage />);
-    expect(countOf(/plugins\/config/)).toBe(0);
+    expect(countOf(PLUGINS_CONFIG_PATTERN)).toBe(0);
 
     const pluginsTab = [...document.querySelectorAll<HTMLElement>('[role="tab"]')].find(
       (tab) => tab.textContent?.startsWith("Plugins"),
@@ -281,9 +291,9 @@ describe("bounded loading on ordinary navigation", () => {
 
     // The policy answer is an authorization conclusion, so this traversal is
     // complete by design — it just does not happen before it is asked for.
-    expect(countOf(/plugins\/config\?offset=\d+&limit=\d+$/)).toBeGreaterThan(0);
+    expect(countOf(PLUGINS_CONFIG_OFFSET_LIMIT_PATTERN)).toBeGreaterThan(0);
     // And the consumer traversal still waits for its own tab.
-    expect(countOf(/\/api\/proxy\/consumers/)).toBe(0);
+    expect(countOf(API_PROXY_CONSUMERS_PATTERN)).toBe(0);
   });
 
   it("lists what targets this proxy from one filtered read, not the namespace", async () => {
@@ -310,7 +320,7 @@ describe("bounded loading on ordinary navigation", () => {
 
   it("opening the upstream tab loads it without flashing a failure", async () => {
     await render(<ProxyDetailPage />);
-    expect(countOf(/upstreams/)).toBe(0);
+    expect(countOf(UPSTREAMS_PATTERN)).toBe(0);
 
     const upstreamTab = [...document.querySelectorAll<HTMLElement>('[role="tab"]')].find(
       (tab) => tab.textContent?.startsWith("Upstream"),
@@ -323,7 +333,7 @@ describe("bounded loading on ordinary navigation", () => {
     expect(host.textContent).not.toContain("Failed to load upstream data");
 
     await settle();
-    expect(countOf(/GET \/api\/proxy\/upstreams\/upstream-0/)).toBe(1);
+    expect(countOf(GET_API_PROXY_UPSTREAMS_UPSTREAM_0_PATTERN)).toBe(1);
     expect(host.textContent).toContain("upstream 0");
   });
 });

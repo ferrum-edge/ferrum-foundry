@@ -14,6 +14,24 @@ import { createServer } from 'node:http';
 import { createHash, randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
+const YAML_TITLE_PATTERN = /^\s*title:\s*['"]?(.+?)['"]?\s*$/m;
+const HEX_BYTES_PATTERN = /^(?:[0-9a-fA-F]{2})*$/;
+const TRAILING_SLASHES_PATTERN = /\/+$/;
+const API_SPEC_BY_PROXY_PATH_PATTERN = /^\/api-specs\/by-proxy\/([^/]+)$/;
+const API_SPEC_PATH_PATTERN = /^\/api-specs\/([^/]+)$/;
+const TLS_ROTATE_PATH_PATTERN = /^\/admin\/tls\/rotate\/([^/]+)$/;
+const ACME_ORDER_PATH_PATTERN = /^\/admin\/tls\/acme\/orders\/([^/]+)(\/finalize)?$/;
+const ACME_RENEW_PATH_PATTERN = /^\/admin\/tls\/acme\/renew\/([^/]+)$/;
+const MANAGED_TLS_PATH_PATTERN =
+  /^\/admin\/tls\/(certificates|ca-bundles|crls|ocsp-responses|jwks)(?:\/([^/]+))?$/;
+const NAMESPACE_PATH_PATTERN = /^\/namespaces\/([^/]+)$/;
+const MCP_TOOLS_PATH_PATTERN = /^\/proxies\/([^/]+)\/mcp\/tools$/;
+const PROXIES_PATH_PATTERN = /^\/proxies(?:\/([^/]+))?$/;
+const CONSUMERS_PATH_PATTERN = /^\/consumers(?:\/([^/]+))?$/;
+const PLUGIN_CONFIGS_PATH_PATTERN = /^\/plugins\/config(?:\/([^/]+))?$/;
+const UPSTREAMS_PATH_PATTERN = /^\/upstreams(?:\/([^/]+))?$/;
+const CREDENTIAL_PATH_PATTERN = /^\/consumers\/([^/]+)\/credentials\/([^/]+)(?:\/(\d+))?$/;
+
 const PORT = Number(process.env.MOCK_ADMIN_PORT ?? 9000);
 /**
  * Gateway operating mode the mock reports on `/health` and enforces on writes.
@@ -264,7 +282,7 @@ function extractSpecTitle(doc) {
       const title = JSON.parse(doc)?.info?.title;
       if (title) return String(title);
     } else {
-      const m = doc.match(/^\s*title:\s*['"]?(.+?)['"]?\s*$/m);
+      const m = doc.match(YAML_TITLE_PATTERN);
       if (m) return m[1];
     }
   } catch {
@@ -391,7 +409,7 @@ export function validateUpstreamWrite(body) {
   }
   if (active.udp_probe_payload != null
     && (typeof active.udp_probe_payload !== 'string'
-      || !/^(?:[0-9a-fA-F]{2})*$/.test(active.udp_probe_payload))) {
+      || !HEX_BYTES_PATTERN.test(active.udp_probe_payload))) {
     return { error: '`health_checks.active.udp_probe_payload` must be an even-length hex string' };
   }
   return null;
@@ -1136,7 +1154,7 @@ export function mcpToolCatalogResponse({
 
 export const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
-  const path = url.pathname.replace(/\/+$/, '') || '/';
+  const path = url.pathname.replace(TRAILING_SLASHES_PATTERN, '') || '/';
   const method = req.method ?? 'GET';
   const raw = await readBody(req);
   let body;
@@ -1247,9 +1265,9 @@ export const server = createServer(async (req, res) => {
     apiSpecs.push({ id, proxy_id: `proxy-${id}`, namespace: ns, spec_version: '3.1.0', spec_format: doc.trimStart().startsWith('{') ? 'json' : 'yaml', title: extractSpecTitle(doc), info_version: '1.0.0', description: null, contact_name: null, contact_email: null, license_name: null, license_identifier: null, tags: [], server_urls: [], operation_count: 1, uncompressed_size: doc.length, content_hash: 'cafebabe', content_encoding: 'gzip', created_at: now(), updated_at: now() });
     return send(201, { id, proxy_id: `proxy-${id}`, spec_version: '3.1.0', content_hash: 'cafebabe' });
   }
-  const byProxyMatch = path.match(/^\/api-specs\/by-proxy\/([^/]+)$/);
+  const byProxyMatch = path.match(API_SPEC_BY_PROXY_PATH_PATTERN);
   if (byProxyMatch && method === 'GET') return send(...apiSpecByProxyResponse(apiSpecs, specDocuments, ns, decodeURIComponent(byProxyMatch[1])));
-  const specMatch = path.match(/^\/api-specs\/([^/]+)$/);
+  const specMatch = path.match(API_SPEC_PATH_PATTERN);
   if (specMatch) {
     const spec = apiSpecs.find((s) => s.id === specMatch[1] && s.namespace === ns);
     if (!spec) return send(404, { error: 'not found' });
@@ -1270,7 +1288,7 @@ export const server = createServer(async (req, res) => {
   if (path === '/admin/tls/inventory') return send(200, paginate(tlsInventory, url));
   if (path === '/admin/tls/events') return send(200, paginate(tlsEvents, url));
   if (path === '/admin/tls/validate') return send(200, { valid: true, validated: { cert: { subject: 'CN=test', days_until_expiry: 90 } } });
-  const rotateMatch = path.match(/^\/admin\/tls\/rotate\/([^/]+)$/);
+  const rotateMatch = path.match(TLS_ROTATE_PATH_PATTERN);
   if (rotateMatch) return send(202, { accepted: true, requested_surface: rotateMatch[1], surface: rotateMatch[1] });
   if (path === '/admin/tls/acme/certificates' && method === 'GET') return send(200, paginate(acmeCerts, url));
   if (path === '/admin/tls/acme/orders' && method === 'GET') return send(200, paginate(acmeOrders, url));
@@ -1282,7 +1300,7 @@ export const server = createServer(async (req, res) => {
     return send(201, order);
   }
   if (path === '/admin/tls/acme/accounts') return send(200, paginate([{ account_id: 'https://acme-v02.api.letsencrypt.org/acme/acct/123', directory_url: 'https://acme-v02.api.letsencrypt.org/directory', order_count: 2, certificate_count: 1, has_persisted_credentials: true, last_order_at: ago(10) }], url));
-  const acmeOrderMatch = path.match(/^\/admin\/tls\/acme\/orders\/([^/]+)(\/finalize)?$/);
+  const acmeOrderMatch = path.match(ACME_ORDER_PATH_PATTERN);
   if (acmeOrderMatch) {
     const order = acmeOrders.find((o) => o.id === acmeOrderMatch[1]);
     if (!order) return send(404, { error: 'not found' });
@@ -1293,14 +1311,14 @@ export const server = createServer(async (req, res) => {
     if (method === 'DELETE') { acmeOrders.splice(acmeOrders.indexOf(order), 1); return send(200, null); }
     return send(200, order);
   }
-  const renewMatch = path.match(/^\/admin\/tls\/acme\/renew\/([^/]+)$/);
+  const renewMatch = path.match(ACME_RENEW_PATH_PATTERN);
   if (renewMatch) {
     if (body.id && acmeOrders.some((o) => o.id === body.id)) return send(409, { error: `ACME order already exists: ${body.id}` });
     const order = { id: body.id || `order-renew-${randomUUID().slice(0, 6)}`, certificate_id: renewMatch[1], domains: acmeCerts[0].domains, directory_url: acmeCerts[0].directory_url, status: 'processing', created_at: now(), updated_at: now() };
     acmeOrders.push(order);
     return send(201, order);
   }
-  const managedMatch = path.match(/^\/admin\/tls\/(certificates|ca-bundles|crls|ocsp-responses|jwks)(?:\/([^/]+))?$/);
+  const managedMatch = path.match(MANAGED_TLS_PATH_PATTERN);
   if (managedMatch) {
     const [, collection, id] = managedMatch;
     const list = managedTls[collection];
@@ -1353,7 +1371,7 @@ export const server = createServer(async (req, res) => {
     }
     return send(405, { error: 'method not allowed' });
   }
-  const namespaceMatch = path.match(/^\/namespaces\/([^/]+)$/);
+  const namespaceMatch = path.match(NAMESPACE_PATH_PATTERN);
   if (namespaceMatch) {
     const name = decodeURIComponent(namespaceMatch[1]);
     const existing = namespaceRegistry.get(name);
@@ -1414,7 +1432,7 @@ export const server = createServer(async (req, res) => {
   if (path === '/plugins' && method === 'GET') return send(200, AVAILABLE_PLUGINS);
 
   /* MCP tool catalog — read-only and node-local */
-  const mcpToolsMatch = path.match(/^\/proxies\/([^/]+)\/mcp\/tools$/);
+  const mcpToolsMatch = path.match(MCP_TOOLS_PATH_PATTERN);
   if (mcpToolsMatch) {
     if (method !== 'GET') return send(405, { error: 'method not allowed' });
     return send(...mcpToolCatalogResponse({
@@ -1428,10 +1446,10 @@ export const server = createServer(async (req, res) => {
     // The real gateway always returns a plugins association array on proxies;
     // default it on create so upstream-only proxies match that shape. `auth_mode`
     // defaults to `single` the same way Edge's serde Default does.
-    [/^\/proxies(?:\/([^/]+))?$/, proxies, { plugins: [], auth_mode: 'single' }, validateProxyWrite, 'proxies'],
-    [/^\/consumers(?:\/([^/]+))?$/, consumers, {}, undefined, 'consumers'],
-    [/^\/plugins\/config(?:\/([^/]+))?$/, pluginConfigs, {}, validatePluginConfigWrite, 'plugins/config'],
-    [/^\/upstreams(?:\/([^/]+))?$/, upstreams, {}, validateUpstreamWrite, 'upstreams'],
+    [PROXIES_PATH_PATTERN, proxies, { plugins: [], auth_mode: 'single' }, validateProxyWrite, 'proxies'],
+    [CONSUMERS_PATH_PATTERN, consumers, {}, undefined, 'consumers'],
+    [PLUGIN_CONFIGS_PATH_PATTERN, pluginConfigs, {}, validatePluginConfigWrite, 'plugins/config'],
+    [UPSTREAMS_PATH_PATTERN, upstreams, {}, validateUpstreamWrite, 'upstreams'],
   ];
   for (const [pattern, list, defaults, validate, kind] of routes) {
     const match = path.match(pattern);
@@ -1445,7 +1463,7 @@ export const server = createServer(async (req, res) => {
   }
 
   /* consumer credential endpoints — return the consumer */
-  const credMatch = path.match(/^\/consumers\/([^/]+)\/credentials\/([^/]+)(?:\/(\d+))?$/);
+  const credMatch = path.match(CREDENTIAL_PATH_PATTERN);
   if (credMatch) {
     const consumer = consumers.find((c) => c.id === credMatch[1]);
     if (!consumer) return send(404, { error: 'not found' });

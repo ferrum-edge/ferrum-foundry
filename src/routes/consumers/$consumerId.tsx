@@ -43,6 +43,8 @@ import { StaleWriteDialog } from "@/components/shared/StaleWriteDialog";
 import { reseedAfterCommit, useEditBaseline } from "@/hooks/useEditBaseline";
 import { formatDateTime } from "@/lib/format";
 
+const UNDERSCORES_PATTERN = /_/g;
+
 /* ================================================================== */
 /*  ConsumerDetailPage                                                 */
 /* ================================================================== */
@@ -376,7 +378,7 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
                       <div className="flex flex-wrap gap-1">
                         {authTypes.map((t) => (
                           <Badge key={t} variant="blue">
-                            {t.replace(/_/g, " ")}
+                            {t.replace(UNDERSCORES_PATTERN, " ")}
                           </Badge>
                         ))}
                       </div>
