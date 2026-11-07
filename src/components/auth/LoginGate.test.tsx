@@ -412,6 +412,44 @@ describe("LoginGate session exchange", () => {
     expect(ui.host.querySelector('[role="alert"]')).toBeNull();
   });
 
+  it("keeps a failed sign-out's notice through further locked-out session checks", async () => {
+    mode = "trusted-proxy";
+    sessionStatus = 200;
+    await ui.render(
+      <AuthProvider>
+        <LoginGate><AuthSessionBanner /><h2>Protected workspace</h2><Recheck /><SignOut /></LoginGate>
+      </AuthProvider>,
+    );
+    await settle(() => expect(ui.host.textContent).toContain("Protected workspace"));
+    const alerts = () => [...ui.host.querySelectorAll('[role="alert"]')].map((alert) => alert.textContent);
+    const lockedOut = "Too many failed sign-in attempts from this address. Try again in 30 seconds.";
+    const notSignedOut = "Sign out could not be confirmed by the server. Please try again.";
+
+    sessionStatus = 429;
+    await click("Recheck");
+    await settle(() => expect(alerts()).toHaveLength(1));
+    expect(alerts()[0]).toContain(lockedOut);
+
+    logoutStatus = 429;
+    await click("Sign out");
+    await settle(() => expect(alerts()).toHaveLength(2));
+
+    // Another locked-out check confirms nothing about the sign-out.
+    const before = requests.length;
+    await click("Recheck");
+    await settle(() => expect(requests.length - before).toBe(1));
+    await settle(() => expect(alerts()).toHaveLength(2));
+    expect(alerts()[0]).toContain(lockedOut);
+    expect(alerts()[1]).toContain(notSignedOut);
+    expect(ui.host.textContent).toContain("Protected workspace");
+
+    // A successful session check clears both.
+    sessionStatus = 200;
+    await click("Recheck");
+    await settle(() => expect(alerts()).toHaveLength(0));
+    expect(ui.host.textContent).toContain("Protected workspace");
+  });
+
   it("clears a failed sign-out's notice when a retried sign-out succeeds", async () => {
     sessionStatus = 200;
     logoutStatus = 500;

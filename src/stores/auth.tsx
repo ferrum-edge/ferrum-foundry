@@ -173,7 +173,11 @@ function authReducer(state: AuthState, event: AuthEvent): AuthState {
         config,
         principal: principalOf(state),
         lockout: event.lockout,
-        signOutError: null,
+        // A lockout does not confirm a sign-out that failed: keep its notice
+        // until another sign-out attempt or a successful session check.
+        signOutError: state.status === "authenticated" || state.status === "lockedOut"
+          ? state.signOutError
+          : null,
       };
     }
     case "verificationFailed": {
