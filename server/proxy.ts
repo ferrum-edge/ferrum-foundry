@@ -16,7 +16,12 @@ import {
 } from './proxy-path.js';
 import { getDispatcher } from './tls.js';
 import { closeUnreadUpload, setUploadBudget } from './upload-drain.js';
-import { BACKUP_RESTORE_OPERATION_TIMEOUT, waitingRouteTimeout } from './waitBudget.js';
+import {
+  BACKUP_RESTORE_OPERATION_TIMEOUT,
+  isBackupRestoreOperation,
+  largeUploadRoute,
+  waitingRouteTimeout,
+} from './waitBudget.js';
 import {
   authorizeRegistryBody,
   authorizeRegistryPath,
@@ -146,9 +151,11 @@ class GuardedUpload extends Transform {
 }
 
 function bodyLimitFor(path: string): number {
-  if (path === '/restore') return RESTORE_BODY_LIMIT;
-  if (path === '/api-specs' || path.startsWith('/api-specs/')) return API_SPEC_BODY_LIMIT;
-  return DEFAULT_BODY_LIMIT;
+  switch (largeUploadRoute(path)) {
+    case 'restore': return RESTORE_BODY_LIMIT;
+    case 'api-spec': return API_SPEC_BODY_LIMIT;
+    case null: return DEFAULT_BODY_LIMIT;
+  }
 }
 
 function carriesRequestBody(request: FastifyRequest): boolean {
@@ -545,7 +552,7 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
     const controller = new AbortController();
     let timeoutPhase = 'response';
     const waitTimeout = waitingRouteTimeout(request.method, targetPath);
-    const responseTimeout = targetPath === '/restore' || (request.method === 'GET' && targetPath === '/backup')
+    const responseTimeout = isBackupRestoreOperation(request.method, targetPath)
       ? Math.max(config.readTimeout, BACKUP_RESTORE_OPERATION_TIMEOUT)
       : Math.max(config.readTimeout, waitTimeout);
     let responseTimer: NodeJS.Timeout | undefined;

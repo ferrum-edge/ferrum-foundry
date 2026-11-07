@@ -3,6 +3,8 @@ import {
   ACME_MAX_WAIT_MS,
   APPLY_WAIT_MS,
   BACKUP_RESTORE_OPERATION_TIMEOUT,
+  isBackupRestoreOperation,
+  largeUploadRoute,
   longRunningClientTimeout,
   serverWaitTimeout,
   waitingRouteTimeout,
@@ -35,4 +37,35 @@ it.each([
   ['POST', '/restore', 300_000, BACKUP_RESTORE_OPERATION_TIMEOUT],
 ] as const)('covers upload and response budgets for %s %s', (method, path, upload, response) => {
   expect(longRunningClientTimeout(method, path)).toBe(upload + response + 5_000);
+});
+
+// One route classification for the BFF's body limits and upload deadlines
+// (server/proxy.ts) and the browser's budget above.
+it.each([
+  ['/restore', 'restore'],
+  ['/api-specs', 'api-spec'],
+  ['/api-specs/example', 'api-spec'],
+  ['/api-specs/example/document', 'api-spec'],
+  // Trailing-slash and look-alike spellings stay ordinary (2 MiB, write budget).
+  ['/restore/', null],
+  ['/api-specsx', null],
+  ['/backup', null],
+  ['/proxies', null],
+] as const)('classifies %s as large upload route %s', (path, route) => {
+  expect(largeUploadRoute(path)).toBe(route);
+});
+
+it.each([
+  ['POST', '/restore', true],
+  ['GET', '/restore', true],
+  ['GET', '/backup', true],
+  // HEAD /backup is a long read for admission (isLongRead in server/proxy.ts),
+  // but only GET has had the floored response deadline.
+  ['HEAD', '/backup', false],
+  ['POST', '/backup', false],
+  ['GET', '/backup/', false],
+  ['GET', '/restore/', false],
+  ['GET', '/proxies', false],
+] as const)('floors %s %s at the backup/restore operation budget: %s', (method, path, floored) => {
+  expect(isBackupRestoreOperation(method, path)).toBe(floored);
 });
