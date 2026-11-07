@@ -11,6 +11,7 @@ import { clearGatewayMetadata } from "@/api/gatewayMetadata";
 import type { Proxy, ProxyCreate } from "@/api/types";
 import { resolveReadState } from "@/lib/readState";
 import { createHarness, settle, stubFetch } from "@/test/__tests__/harness";
+import { proxyFromWrite } from "@/test/proxyWrites";
 import {
   useCreateProxy,
   useDeleteProxy,
@@ -138,14 +139,14 @@ beforeEach(() => {
     }
     if (path === "/api/proxy/proxies" && request.method === "POST") {
       const body = await request.json() as ProxyCreate & { id: string };
-      const created = { ...proxy(body.id), ...body };
+      const created = proxyFromWrite(proxy(body.id), body);
       rows = [...rows, created];
       return Response.json(created, { status: 201 });
     }
     const id = decodeURIComponent(path.replace("/api/proxy/proxies/", ""));
     if (request.method === "PUT") {
       const body = await request.json() as ProxyCreate;
-      rows = rows.map((entry) => (entry.id === id ? { ...entry, ...body } : entry));
+      rows = rows.map((entry) => (entry.id === id ? proxyFromWrite(entry, body) : entry));
       return Response.json(rows.find((entry) => entry.id === id));
     }
     if (request.method === "DELETE") {

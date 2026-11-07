@@ -9,7 +9,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useDeleteApiSpec, useImportApiSpec, useUpdateApiSpec } from "./useApiSpecs";
 import { useDeleteProxy } from "./useProxies";
-import type { Proxy } from "@/api/types";
+import type { Proxy, ProxyCreate } from "@/api/types";
+import { proxyFromWrite } from "@/test/proxyWrites";
 import ProxyDetailPage from "@/routes/proxies/$proxyId";
 
 let namespace: string;
@@ -148,10 +149,10 @@ beforeEach(() => {
         const ifMatch = request.headers.get("If-Match");
         if (ifMatch !== null && ifMatch !== proxyEtag()) return new Response(null, { status: 412 });
 
-        const data = (await request.json()) as Partial<Proxy>;
+        const data = (await request.json()) as ProxyCreate;
         updates.push(data);
         proxyUpdateTags.push(ifMatch);
-        serverProxy = { ...serverProxy, ...data };
+        serverProxy = proxyFromWrite(serverProxy, data);
         serverProxyRevision += 1;
         return Response.json(serverProxy);
       }

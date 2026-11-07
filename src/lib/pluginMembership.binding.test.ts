@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PluginConfig, Proxy } from "@/api/types";
+import type { PluginConfig, Proxy, ProxyCreate } from "@/api/types";
+import { proxyFromWrite } from "@/test/proxyWrites";
 import { isStaleResourceError } from "@/api/conditionalWrite";
 import { setApiErrorHandler } from "@/api/client";
 import { pluginWriteGuard, toUpdatePayload } from "@/api/plugins";
@@ -123,9 +124,9 @@ describe("plugin membership plans bind every request to the starting namespace",
           if (proxyMatch[1] === "p2") {
             return json({ error: "injected failure" }, 422);
           }
-          const body = (await request.clone().json()) as Partial<Proxy>;
+          const body = (await request.clone().json()) as ProxyCreate;
           const current = proxies.get(proxyMatch[1])!;
-          const next = { ...current, ...body, id: current.id, updated_at: "v2" } as Proxy;
+          const next: Proxy = { ...proxyFromWrite(current, body), id: current.id, updated_at: "v2" };
           proxies.set(current.id, next);
           return json(next);
         }
