@@ -16,6 +16,16 @@ import {
 } from './namespace-registry.js';
 
 const INVALID_NAMESPACE_PATTERN = /invalid namespace/;
+// The rule as a regex, the shape it had before it was scanned linearly.
+const REFERENCE_TRIM_PATTERN = /^\p{White_Space}+|\p{White_Space}+$/gu;
+// Every Unicode White_Space character, plus near misses that are not.
+const WHITE_SPACE_CHARACTERS = [
+  '\t', '\n', '\v', '\f', '\r', ' ', '\u0085', '\u00a0', '\u1680',
+  '\u2000', '\u2001', '\u2002', '\u2003', '\u2004', '\u2005', '\u2006',
+  '\u2007', '\u2008', '\u2009', '\u200a', '\u2028', '\u2029', '\u202f',
+  '\u205f', '\u3000',
+];
+const NOT_WHITE_SPACE = ['\ufeff', '\u180e', '\u200b', '\ud800', '\udc00', '😀', 'x'];
 const SECRET = 'namespace-policy-test-secret-at-least-32-bytes';
 
 // Edge's grammar: ^[a-zA-Z0-9][a-zA-Z0-9._-]*$, 1-254 characters.
@@ -151,5 +161,28 @@ describe('shared namespace description rule', () => {
     // Unlike the SPA, which sends the normalized text, the BFF only checks.
     expect(JSON.parse(authorizeRegistryBody(body('\u0085 team '), 'PUT', ADMIN)))
       .toEqual({ description: '\u0085 team ' });
+  });
+
+  it('trims exactly as the White_Space regex does, character by character', () => {
+    for (const edge of [...WHITE_SPACE_CHARACTERS, ...NOT_WHITE_SPACE]) {
+      for (const inner of NOT_WHITE_SPACE) {
+        for (const text of [edge, `${edge}${inner}`, `${inner}${edge}`, `${edge}${inner}${edge}${inner}${edge}`]) {
+          expect(normalizeNamespaceDescription(text), JSON.stringify(text))
+            .toBe(text.replace(REFERENCE_TRIM_PATTERN, ''));
+        }
+      }
+    }
+  });
+
+  it('checks a long whitespace run inside a description in linear time', () => {
+    // A `\p{White_Space}+$` regex backtracks quadratically here: seconds at
+    // this size, and far longer at the BFF's 2 MiB body limit.
+    const description = `a${' '.repeat(100_000)}b${'\u0085'.repeat(100_000)}`;
+    const started = performance.now();
+    // Refused for its length, promptly, rather than after the trim stalls.
+    expect(() => authorizeRegistryBody(Buffer.from(JSON.stringify({ description })), 'PUT', ADMIN))
+      .toThrow(new RegistryRequestError(400, 'Namespace description exceeds 1024 characters'));
+    expect(normalizeNamespaceDescription(description)).toBe(`a${' '.repeat(100_000)}b`);
+    expect(performance.now() - started).toBeLessThan(1_000);
   });
 });

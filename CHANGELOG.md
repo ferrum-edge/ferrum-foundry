@@ -72,6 +72,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- The BFF checks a namespace description's length without stalling on long
+  whitespace. Its Unicode `White_Space` trim was a `\p{White_Space}+$`
+  regex, which backtracks quadratically over a whitespace run inside the
+  text: an admin's 2 MiB registry write could hold the BFF's event loop for
+  far longer than any request deadline (about 38 s at 200,000 characters).
+  The trim now scans from both ends, with the same result.
 - Proxied gateway responses are confined to API media types (#601). A
   response through `/api/proxy/*` only ever carries a JSON/YAML/plain-text/
   octet-stream content type — any other or missing upstream type is

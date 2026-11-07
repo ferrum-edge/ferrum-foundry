@@ -22,14 +22,22 @@ export function isNamespaceName(value) {
 
 /** Edge's description limit, in Unicode scalar values after trimming. */
 export const NAMESPACE_DESCRIPTION_MAX_LENGTH = 1024;
-const OUTER_WHITE_SPACE_PATTERN = /^\p{White_Space}+|\p{White_Space}+$/gu;
+const WHITE_SPACE_PATTERN = /^\p{White_Space}$/u;
 
 /**
  * Trim a description as Edge's `str::trim` does: Unicode `White_Space`, which
  * includes NEXT LINE (U+0085) but, unlike JS `trim()`, not the BOM (U+FEFF).
+ *
+ * Scanned from both ends in linear time: a `\p{White_Space}+$` regex
+ * backtracks quadratically over a long whitespace run inside the text. Every
+ * `White_Space` character is in the BMP, so testing UTF-16 code units is exact.
  */
 export function normalizeNamespaceDescription(description) {
-  return description.replace(OUTER_WHITE_SPACE_PATTERN, '');
+  let start = 0;
+  let end = description.length;
+  while (start < end && WHITE_SPACE_PATTERN.test(description[start])) start += 1;
+  while (end > start && WHITE_SPACE_PATTERN.test(description[end - 1])) end -= 1;
+  return description.slice(start, end);
 }
 
 /**
