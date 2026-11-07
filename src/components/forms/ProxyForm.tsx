@@ -23,6 +23,7 @@ import {
 import { ReadOnlySurface } from "@/components/shared/CapabilityGate";
 import type { CapabilityVerdict } from "@/lib/capabilities";
 import type {
+  BackendScheme,
   Proxy,
   ProxyCreate,
   CircuitBreakerConfig,
@@ -113,6 +114,94 @@ const ALL_HTTP_METHODS = [
   "TRACE",
   "CONNECT",
 ] as const;
+
+/* ------------------------------------------------------------------ */
+/*  Per-scheme field set                                               */
+/* ------------------------------------------------------------------ */
+
+/** gRPC and WebSocket ride the HTTP family; tcps and dtls add TLS/DTLS. */
+type SchemeFamily = "http" | "tcp" | "udp";
+
+const SCHEME_FAMILY: Record<BackendScheme, SchemeFamily> = {
+  http: "http",
+  https: "http",
+  tcp: "tcp",
+  tcps: "tcp",
+  udp: "udp",
+  dtls: "udp",
+};
+
+/**
+ * The proxy fields Ferrum Edge reads for one backend scheme. Display,
+ * validation and serialization all follow this one set: a field outside it is
+ * hidden, never validated and never sent, so a value left over from another
+ * scheme can neither block a save nor reach the gateway (#655).
+ *
+ * Taken from Edge's `Proxy::validate_fields` and its stream relays
+ * (`tcp_proxy.rs`, `udp_proxy.rs`):
+ * - TCP and UDP both consult `circuit_breaker` on every backend dial; only
+ *   HTTP reads its `failure_status_codes`.
+ * - TCP re-dials under `retry` (`max_retries`, backoff,
+ *   `retry_on_connect_failure`); UDP never retries. Retryable status codes and
+ *   methods are HTTP-only.
+ * - TCP uses the backend read/write timeouts as per-direction inactivity
+ *   bounds; UDP reads only the connect timeout.
+ * - Connection-pool overrides (HTTP/2 tuning included, which the h2c gRPC
+ *   pool of an `http` proxy also reads), `backend_path`, method restriction
+ *   and the other routing options exist only on the HTTP path. HTTP/3 needs
+ *   TLS, so only `https` reads its pool size.
+ * - Edge refuses `upstream_subset` on udp/dtls, `passthrough` and inbound
+ *   `stream_proxy_protocol` on HTTP, and outbound PROXY protocol off TCP.
+ *
+ * `udp_idle_timeout_seconds` is not in the set: Edge stores and range-checks
+ * it on every proxy, so the form keeps sending it for every scheme.
+ */
+interface SchemeFields {
+  listenPath: boolean;
+  backendPath: boolean;
+  /** Strip/preserve, path parameters, auth and body modes, methods, WebSocket. */
+  routing: boolean;
+  /** `backend_read_timeout_ms` and `backend_write_timeout_ms`. */
+  ioTimeouts: boolean;
+  circuitBreaker: boolean;
+  circuitBreakerStatusCodes: boolean;
+  retry: boolean;
+  /** `retryable_status_codes` and `retryable_methods`. */
+  retryHttpMatchers: boolean;
+  connectionPool: boolean;
+  http3Pool: boolean;
+  upstreamSubset: boolean;
+  passthrough: boolean;
+  streamProxyProtocol: boolean;
+  backendProxyProtocol: boolean;
+  tcpIdleTimeout: boolean;
+  udpSession: boolean;
+}
+
+function proxySchemeFields(scheme: BackendScheme): SchemeFields {
+  const family = SCHEME_FAMILY[scheme];
+  const http = family === "http";
+  const tcp = family === "tcp";
+  const udp = family === "udp";
+  return {
+    listenPath: http,
+    backendPath: http,
+    routing: http,
+    ioTimeouts: !udp,
+    circuitBreaker: true,
+    circuitBreakerStatusCodes: http,
+    retry: !udp,
+    retryHttpMatchers: http,
+    connectionPool: http,
+    http3Pool: scheme === "https",
+    upstreamSubset: !udp,
+    passthrough: !http,
+    streamProxyProtocol: !http,
+    backendProxyProtocol: tcp,
+    tcpIdleTimeout: tcp,
+    udpSession: udp,
+  };
+}
 
 /* ------------------------------------------------------------------ */
 /*  Helper: Checkbox group for methods                                 */
@@ -402,19 +491,17 @@ export function ProxyForm({
     initialData?.pool_http3_connections_per_backend ?? "",
   );
 
-  /* ---------- Scheme family checks ---------- */
+  /* ---------- Scheme field set ---------- */
 
-  const isTcpLike = backendScheme === "tcp" || backendScheme === "tcps";
-  const isUdpLike = backendScheme === "udp" || backendScheme === "dtls";
-  const isStream = isTcpLike || isUdpLike;
-  const isHttpLike = !isStream;
+  const fields = proxySchemeFields(backendScheme);
+  const isStream = SCHEME_FAMILY[backendScheme] !== "http";
 
   /* ---------- Validation ---------- */
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const validate = (): boolean => {
     const errs: Record<string, string> = {};
-    if (isHttpLike && !listenPath.trim() && hosts.length === 0) {
+    if (fields.listenPath && !listenPath.trim() && hosts.length === 0) {
       errs.listen_path = "Set a listen path or at least one host";
     }
     if (isStream && (listenPort === "" || Number(listenPort) <= 0)) {
@@ -432,12 +519,14 @@ export function ProxyForm({
       if (error) errs[key] = error;
     };
     requireNumber("connect_timeout", connectTimeout, "Connect timeout");
-    requireNumber("read_timeout", readTimeout, "Read timeout");
-    requireNumber("write_timeout", writeTimeout, "Write timeout");
-    if (cbEnabled) {
+    if (fields.ioTimeouts) {
+      requireNumber("read_timeout", readTimeout, "Read timeout");
+      requireNumber("write_timeout", writeTimeout, "Write timeout");
+    }
+    if (fields.circuitBreaker && cbEnabled) {
       for (const [key, label] of CB_NUMBER_FIELDS) requireNumber(`cb_${key}`, cb[key], label);
     }
-    if (retryEnabled) {
+    if (fields.retry && retryEnabled) {
       requireNumber("retry_max_retries", retry.max_retries, "Max retries");
       if (backoffType === "fixed") {
         requireNumber("retry_fixed_delay", fixedDelay, "Delay");
@@ -446,10 +535,10 @@ export function ProxyForm({
         requireNumber("retry_exp_max", expMax, "Max delay");
       }
     }
-    if (isUdpLike) requireNumber("udp_idle_timeout", udpIdleTimeout, "UDP idle timeout");
+    if (fields.udpSession) requireNumber("udp_idle_timeout", udpIdleTimeout, "UDP idle timeout");
     // The gateway requires at least one method (`minItems: 1`); an empty
     // restriction is a 400, not "allow nothing".
-    if (isHttpLike && restrictMethods && allowedMethods.length === 0) {
+    if (fields.routing && restrictMethods && allowedMethods.length === 0) {
       errs.allowed_methods = "Select at least one method, or stop restricting methods";
     }
     setErrors(errs);
@@ -475,10 +564,14 @@ export function ProxyForm({
       return { exponential: { base_ms: Number(expBase), max_ms: Number(expMax) } };
     };
 
+    // Every field outside `fields` is omitted, never sent with a stale value.
+    // An omitted optional is cleared on update (`mergeFormUpdatePayload`); the
+    // fields Edge constrains on stream proxies are sent with the value it
+    // requires there instead, because an omitted one keeps the stored value.
     const data: ProxyCreate = {
       // Stream proxies must omit listen_path entirely; HTTP proxies may be
       // host-only (null listen_path).
-      ...(isHttpLike && listenPath.trim() && { listen_path: listenPath }),
+      ...(fields.listenPath && listenPath.trim() && { listen_path: listenPath }),
       backend_scheme: backendScheme,
       backend_host: backendHost,
       // Only an upstream-linked proxy may leave the port empty; the gateway
@@ -486,65 +579,79 @@ export function ProxyForm({
       backend_port: backendPort === "" ? 0 : backendPort,
       ...(name && { name }),
       ...(hosts.length > 0 && { hosts }),
-      ...(backendPath && { backend_path: backendPath }),
-      strip_listen_path: stripListenPath,
-      preserve_host_header: preserveHostHeader,
-      // Edge reads it only for HTTP-family proxies; a stream proxy sends false.
-      allow_path_parameters: isHttpLike && allowPathParameters,
-      auth_mode: authMode,
-      response_body_mode: responseBodyMode,
-      allowed_methods: restrictMethods
-        ? allowedMethods as ProxyCreate["allowed_methods"]
-        : null,
-      ...(allowedWsOrigins.length > 0 && { allowed_ws_origins: allowedWsOrigins }),
+      ...(fields.backendPath && backendPath && { backend_path: backendPath }),
+      ...(fields.routing && {
+        strip_listen_path: stripListenPath,
+        preserve_host_header: preserveHostHeader,
+        auth_mode: authMode,
+        allowed_methods: restrictMethods
+          ? allowedMethods as ProxyCreate["allowed_methods"]
+          : null,
+        ...(allowedWsOrigins.length > 0 && { allowed_ws_origins: allowedWsOrigins }),
+        ...(wsIdleTimeout !== "" && {
+          websocket_idle_timeout_seconds: Number(wsIdleTimeout),
+        }),
+      }),
+      // Edge reads these only for HTTP-family proxies and requires a stream
+      // proxy to send false and "stream".
+      allow_path_parameters: fields.routing && allowPathParameters,
+      response_body_mode: fields.routing ? responseBodyMode : "stream",
       backend_connect_timeout_ms: Number(connectTimeout),
-      backend_read_timeout_ms: Number(readTimeout),
-      backend_write_timeout_ms: Number(writeTimeout),
+      ...(fields.ioTimeouts && {
+        backend_read_timeout_ms: Number(readTimeout),
+        backend_write_timeout_ms: Number(writeTimeout),
+      }),
       frontend_tls: frontendTls,
-      passthrough,
+      // Edge refuses passthrough on HTTP-family proxies.
+      passthrough: fields.passthrough && passthrough,
       backend_tls_verify_server_cert: backendTlsVerify,
       ...(backendTlsCertPath && { backend_tls_client_cert_path: backendTlsCertPath }),
       ...(backendTlsKeyPath && { backend_tls_client_key_path: backendTlsKeyPath }),
       ...(backendTlsCaPath && { backend_tls_server_ca_cert_path: backendTlsCaPath }),
       ...(upstreamId && { upstream_id: upstreamId }),
-      ...(upstreamId && upstreamSubset && { upstream_subset: upstreamSubset }),
+      ...(fields.upstreamSubset && upstreamId && upstreamSubset && { upstream_subset: upstreamSubset }),
       ...(dnsOverride && { dns_override: dnsOverride }),
       ...(dnsCacheTtl !== "" && { dns_cache_ttl_seconds: Number(dnsCacheTtl) }),
-      ...(cbEnabled && { circuit_breaker: resolveNumberDrafts(cb, CB_NUMBER_KEYS) }),
-      ...(retryEnabled && {
+      ...(fields.circuitBreaker && cbEnabled && {
+        circuit_breaker: resolveNumberDrafts(cb, CB_NUMBER_KEYS),
+      }),
+      ...(fields.retry && retryEnabled && {
         retry: {
           ...resolveNumberDrafts(retry, ["max_retries"]),
           backoff: buildBackoff(),
         },
       }),
-      ...(poolIdleTimeout !== "" && { pool_idle_timeout_seconds: Number(poolIdleTimeout) }),
-      ...(poolKeepAlive !== null && { pool_enable_http_keep_alive: poolKeepAlive }),
-      ...(poolHttp2 !== null && { pool_enable_http2: poolHttp2 }),
-      ...(poolTcpKeepAlive !== "" && { pool_tcp_keepalive_seconds: Number(poolTcpKeepAlive) }),
-      ...(poolH2KeepAliveInterval !== "" && { pool_http2_keep_alive_interval_seconds: Number(poolH2KeepAliveInterval) }),
-      ...(poolH2KeepAliveTimeout !== "" && { pool_http2_keep_alive_timeout_seconds: Number(poolH2KeepAliveTimeout) }),
-      ...(poolH2InitStreamWindow !== "" && { pool_http2_initial_stream_window_size: Number(poolH2InitStreamWindow) }),
-      ...(poolH2InitConnWindow !== "" && { pool_http2_initial_connection_window_size: Number(poolH2InitConnWindow) }),
-      ...(poolH2AdaptiveWindow !== null && {
-        pool_http2_adaptive_window: poolH2AdaptiveWindow,
+      ...(fields.connectionPool && {
+        ...(poolIdleTimeout !== "" && { pool_idle_timeout_seconds: Number(poolIdleTimeout) }),
+        ...(poolKeepAlive !== null && { pool_enable_http_keep_alive: poolKeepAlive }),
+        ...(poolHttp2 !== null && { pool_enable_http2: poolHttp2 }),
+        ...(poolTcpKeepAlive !== "" && { pool_tcp_keepalive_seconds: Number(poolTcpKeepAlive) }),
+        ...(poolH2KeepAliveInterval !== "" && { pool_http2_keep_alive_interval_seconds: Number(poolH2KeepAliveInterval) }),
+        ...(poolH2KeepAliveTimeout !== "" && { pool_http2_keep_alive_timeout_seconds: Number(poolH2KeepAliveTimeout) }),
+        ...(poolH2InitStreamWindow !== "" && { pool_http2_initial_stream_window_size: Number(poolH2InitStreamWindow) }),
+        ...(poolH2InitConnWindow !== "" && { pool_http2_initial_connection_window_size: Number(poolH2InitConnWindow) }),
+        ...(poolH2AdaptiveWindow !== null && {
+          pool_http2_adaptive_window: poolH2AdaptiveWindow,
+        }),
+        ...(poolH2MaxFrameSize !== "" && { pool_http2_max_frame_size: Number(poolH2MaxFrameSize) }),
+        ...(poolH2MaxConcurrentStreams !== "" && { pool_http2_max_concurrent_streams: Number(poolH2MaxConcurrentStreams) }),
+        ...(poolMaxRequests !== "" && {
+          pool_max_requests_per_connection: Number(poolMaxRequests),
+        }),
       }),
-      ...(poolH2MaxFrameSize !== "" && { pool_http2_max_frame_size: Number(poolH2MaxFrameSize) }),
-      ...(poolH2MaxConcurrentStreams !== "" && { pool_http2_max_concurrent_streams: Number(poolH2MaxConcurrentStreams) }),
-      ...(poolMaxRequests !== "" && {
-        pool_max_requests_per_connection: Number(poolMaxRequests),
+      ...(fields.http3Pool && poolH3ConnsPerBackend !== "" && {
+        pool_http3_connections_per_backend: Number(poolH3ConnsPerBackend),
       }),
       ...(listenPort !== "" && { listen_port: Number(listenPort) }),
-      ...(tcpIdleTimeout !== "" && { tcp_idle_timeout_seconds: Number(tcpIdleTimeout) }),
+      ...(fields.tcpIdleTimeout && tcpIdleTimeout !== "" && {
+        tcp_idle_timeout_seconds: Number(tcpIdleTimeout),
+      }),
       // Sent for every scheme as before; a cleared value is only rejected
       // where the field is shown (UDP/DTLS) and is otherwise omitted.
       ...(udpIdleTimeout !== "" && { udp_idle_timeout_seconds: udpIdleTimeout }),
-      ...(poolH3ConnsPerBackend !== "" && { pool_http3_connections_per_backend: Number(poolH3ConnsPerBackend) }),
-      ...(isStream && streamProxyProtocol && { stream_proxy_protocol: true }),
-      ...(isTcpLike && backendProxyProtocol && { backend_proxy_protocol: "v2" as const }),
-      ...(isHttpLike && wsIdleTimeout !== "" && {
-        websocket_idle_timeout_seconds: Number(wsIdleTimeout),
-      }),
-      ...(isUdpLike && udpAmplificationFactor !== "" && {
+      ...(fields.streamProxyProtocol && streamProxyProtocol && { stream_proxy_protocol: true }),
+      ...(fields.backendProxyProtocol && backendProxyProtocol && { backend_proxy_protocol: "v2" as const }),
+      ...(fields.udpSession && udpAmplificationFactor !== "" && {
         udp_max_response_amplification_factor: Number(udpAmplificationFactor),
       }),
     };
@@ -561,15 +668,14 @@ export function ProxyForm({
 
   /* ---------- Section visibility ---------- */
 
-  const showListenPath = isHttpLike;
+  const showListenPath = fields.listenPath;
   // Hosts double as SNI route predicates for opaque stream listeners.
   const showHosts = true;
-  const showBackendPath = isHttpLike;
-  const showRoutingOptions = isHttpLike;
-  const showConnectionPool = isHttpLike;
-  const supportsHttp2 = backendScheme === "https";
-  const showCircuitBreaker = isHttpLike;
-  const showRetry = isHttpLike;
+  const showBackendPath = fields.backendPath;
+  const showRoutingOptions = fields.routing;
+  const showConnectionPool = fields.connectionPool;
+  const showCircuitBreaker = fields.circuitBreaker;
+  const showRetry = fields.retry;
   const showProtocolSection = true;
 
   /* ================================================================ */
@@ -731,20 +837,38 @@ export function ProxyForm({
             onChange={setNum(setConnectTimeout)}
             error={errors.connect_timeout}
           />
-          <Input
-            label="Read Timeout (ms)"
-            type="number"
-            value={numVal(readTimeout)}
-            onChange={setNum(setReadTimeout)}
-            error={errors.read_timeout}
-          />
-          <Input
-            label="Write Timeout (ms)"
-            type="number"
-            value={numVal(writeTimeout)}
-            onChange={setNum(setWriteTimeout)}
-            error={errors.write_timeout}
-          />
+          {fields.ioTimeouts ? (
+            <>
+              <Input
+                label="Read Timeout (ms)"
+                type="number"
+                value={numVal(readTimeout)}
+                onChange={setNum(setReadTimeout)}
+                error={errors.read_timeout}
+                helpText={
+                  isStream
+                    ? "For TCP, an inactivity timeout on the backend read direction. 0 disables it."
+                    : undefined
+                }
+              />
+              <Input
+                label="Write Timeout (ms)"
+                type="number"
+                value={numVal(writeTimeout)}
+                onChange={setNum(setWriteTimeout)}
+                error={errors.write_timeout}
+                helpText={
+                  isStream
+                    ? "For TCP, an inactivity timeout on the backend write direction. 0 disables it."
+                    : undefined
+                }
+              />
+            </>
+          ) : (
+            <p className="text-text-muted text-xs">
+              UDP proxies use only the connect timeout; the session idle timeout is under Protocol-Specific.
+            </p>
+          )}
         </CollapsibleSection>
 
         {/* ── Section 4: TLS Settings ── */}
@@ -761,7 +885,7 @@ export function ProxyForm({
             }}
             helpText="Terminate TLS on the gateway for incoming connections"
           />
-          {isStream && (
+          {fields.passthrough && (
             <Checkbox
               label="Passthrough"
               checked={passthrough}
@@ -811,7 +935,7 @@ export function ProxyForm({
             placeholder="upstream-uuid"
             helpText="Link this proxy to an upstream load-balancer group. Overrides backend host/port."
           />
-          {upstreamId && (
+          {fields.upstreamSubset && upstreamId && (
             <Input
               label="Upstream Subset"
               value={upstreamSubset}
@@ -873,13 +997,15 @@ export function ProxyForm({
                 onChange={(e) => setCb({ ...cb, timeout_seconds: numberDraftFromInput(e.target.value) })}
                 error={errors.cb_timeout_seconds}
               />
-              <TagInput
-                label="Failure Status Codes"
-                values={cb.failure_status_codes}
-                onChange={(v) => setCb({ ...cb, failure_status_codes: v as number[] })}
-                placeholder="500, 502, 503"
-                parseAsNumber
-              />
+              {fields.circuitBreakerStatusCodes && (
+                <TagInput
+                  label="Failure Status Codes"
+                  values={cb.failure_status_codes}
+                  onChange={(v) => setCb({ ...cb, failure_status_codes: v as number[] })}
+                  placeholder="500, 502, 503"
+                  parseAsNumber
+                />
+              )}
               <Input
                 label="Half-Open Max Requests"
                 type="number"
@@ -920,19 +1046,27 @@ export function ProxyForm({
                 }
                 error={errors.retry_max_retries}
               />
-              <TagInput
-                label="Retryable Status Codes"
-                values={retry.retryable_status_codes}
-                onChange={(v) => setRetry({ ...retry, retryable_status_codes: v as number[] })}
-                placeholder="502, 503, 504"
-                parseAsNumber
-              />
-              <MethodCheckboxGroup
-                label="Retryable Methods"
-                selected={retry.retryable_methods}
-                onChange={(v) => setRetry({ ...retry, retryable_methods: v })}
-                options={ALL_HTTP_METHODS}
-              />
+              {fields.retryHttpMatchers ? (
+                <>
+                  <TagInput
+                    label="Retryable Status Codes"
+                    values={retry.retryable_status_codes}
+                    onChange={(v) => setRetry({ ...retry, retryable_status_codes: v as number[] })}
+                    placeholder="502, 503, 504"
+                    parseAsNumber
+                  />
+                  <MethodCheckboxGroup
+                    label="Retryable Methods"
+                    selected={retry.retryable_methods}
+                    onChange={(v) => setRetry({ ...retry, retryable_methods: v })}
+                    options={ALL_HTTP_METHODS}
+                  />
+                </>
+              ) : (
+                <p className="text-text-muted text-xs">
+                  TCP proxies retry only the backend dial, and only with Retry on connect failure enabled.
+                </p>
+              )}
               <Select
                 label="Backoff Strategy"
                 value={backoffType}
@@ -1020,58 +1154,54 @@ export function ProxyForm({
               value={numVal(poolTcpKeepAlive)}
               onChange={setNum(setPoolTcpKeepAlive)}
             />
-            {supportsHttp2 && (
-              <>
-                <Input
-                  label="HTTP/2 Keep-Alive Interval (seconds)"
-                  type="number"
-                  value={numVal(poolH2KeepAliveInterval)}
-                  onChange={setNum(setPoolH2KeepAliveInterval)}
-                />
-                <Input
-                  label="HTTP/2 Keep-Alive Timeout (seconds)"
-                  type="number"
-                  value={numVal(poolH2KeepAliveTimeout)}
-                  onChange={setNum(setPoolH2KeepAliveTimeout)}
-                />
-                <Input
-                  label="HTTP/2 Initial Stream Window Size"
-                  type="number"
-                  value={numVal(poolH2InitStreamWindow)}
-                  onChange={setNum(setPoolH2InitStreamWindow)}
-                />
-                <Input
-                  label="HTTP/2 Initial Connection Window Size"
-                  type="number"
-                  value={numVal(poolH2InitConnWindow)}
-                  onChange={setNum(setPoolH2InitConnWindow)}
-                />
-                <Select
-                  label="HTTP/2 Adaptive Window Override"
-                  value={poolH2AdaptiveWindow === null ? "inherit" : String(poolH2AdaptiveWindow)}
-                  onValueChange={(value) =>
-                    setPoolH2AdaptiveWindow(value === "inherit" ? null : value === "true")
-                  }
-                  options={[
-                    { value: "inherit", label: "Inherit gateway default" },
-                    { value: "true", label: "Enabled" },
-                    { value: "false", label: "Disabled" },
-                  ]}
-                />
-                <Input
-                  label="HTTP/2 Max Frame Size"
-                  type="number"
-                  value={numVal(poolH2MaxFrameSize)}
-                  onChange={setNum(setPoolH2MaxFrameSize)}
-                />
-                <Input
-                  label="HTTP/2 Max Concurrent Streams"
-                  type="number"
-                  value={numVal(poolH2MaxConcurrentStreams)}
-                  onChange={setNum(setPoolH2MaxConcurrentStreams)}
-                />
-              </>
-            )}
+            <Input
+              label="HTTP/2 Keep-Alive Interval (seconds)"
+              type="number"
+              value={numVal(poolH2KeepAliveInterval)}
+              onChange={setNum(setPoolH2KeepAliveInterval)}
+            />
+            <Input
+              label="HTTP/2 Keep-Alive Timeout (seconds)"
+              type="number"
+              value={numVal(poolH2KeepAliveTimeout)}
+              onChange={setNum(setPoolH2KeepAliveTimeout)}
+            />
+            <Input
+              label="HTTP/2 Initial Stream Window Size"
+              type="number"
+              value={numVal(poolH2InitStreamWindow)}
+              onChange={setNum(setPoolH2InitStreamWindow)}
+            />
+            <Input
+              label="HTTP/2 Initial Connection Window Size"
+              type="number"
+              value={numVal(poolH2InitConnWindow)}
+              onChange={setNum(setPoolH2InitConnWindow)}
+            />
+            <Select
+              label="HTTP/2 Adaptive Window Override"
+              value={poolH2AdaptiveWindow === null ? "inherit" : String(poolH2AdaptiveWindow)}
+              onValueChange={(value) =>
+                setPoolH2AdaptiveWindow(value === "inherit" ? null : value === "true")
+              }
+              options={[
+                { value: "inherit", label: "Inherit gateway default" },
+                { value: "true", label: "Enabled" },
+                { value: "false", label: "Disabled" },
+              ]}
+            />
+            <Input
+              label="HTTP/2 Max Frame Size"
+              type="number"
+              value={numVal(poolH2MaxFrameSize)}
+              onChange={setNum(setPoolH2MaxFrameSize)}
+            />
+            <Input
+              label="HTTP/2 Max Concurrent Streams"
+              type="number"
+              value={numVal(poolH2MaxConcurrentStreams)}
+              onChange={setNum(setPoolH2MaxConcurrentStreams)}
+            />
             <Input
               label="Max Requests per Connection"
               type="number"
@@ -1101,7 +1231,7 @@ export function ProxyForm({
               }
               error={errors.listen_port}
             />
-            {isTcpLike && (
+            {fields.tcpIdleTimeout && (
               <Input
                 label="TCP Idle Timeout (seconds)"
                 type="number"
@@ -1109,7 +1239,7 @@ export function ProxyForm({
                 onChange={setNum(setTcpIdleTimeout)}
               />
             )}
-            {isUdpLike && (
+            {fields.udpSession && (
               <>
                 <Input
                   label="UDP Idle Timeout (seconds)"
@@ -1128,7 +1258,7 @@ export function ProxyForm({
                 />
               </>
             )}
-            {isStream && (
+            {fields.streamProxyProtocol && (
               <Checkbox
                 label="Inbound PROXY protocol"
                 checked={streamProxyProtocol}
@@ -1136,7 +1266,7 @@ export function ProxyForm({
                 helpText="Read PROXY protocol v1/v2 headers from a trusted load balancer to recover client IPs."
               />
             )}
-            {isTcpLike && (
+            {fields.backendProxyProtocol && (
               <Checkbox
                 label="Outbound PROXY protocol v2 to backend"
                 checked={backendProxyProtocol}
@@ -1144,7 +1274,7 @@ export function ProxyForm({
                 helpText="Prepend a PROXY v2 header on backend connects so backends see the client IP."
               />
             )}
-            {backendScheme === "https" && (
+            {fields.http3Pool && (
               <Input
                 label="HTTP/3 Connections Per Backend"
                 type="number"
