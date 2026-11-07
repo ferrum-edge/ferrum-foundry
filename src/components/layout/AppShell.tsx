@@ -4,7 +4,7 @@ import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { GatewayMetadataBanner } from "@/components/shared/GatewayMetadataBanner";
-import { AuthLockoutBanner } from "@/components/auth/AuthLockoutBanner";
+import { AuthSessionBanner } from "@/components/auth/AuthSessionBanner";
 
 export function AppShell() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -24,7 +24,7 @@ export function AppShell() {
       />
 
       <main className="md:ml-[var(--sidebar-width)] mt-[var(--nav-height)] p-4 sm:p-6">
-        <AuthLockoutBanner />
+        <AuthSessionBanner />
         <GatewayMetadataBanner />
         <ErrorBoundary>
           <Outlet />

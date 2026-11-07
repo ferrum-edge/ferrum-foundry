@@ -145,9 +145,32 @@ export interface Proxy {
   updated_at: string;
 }
 
-export type ProxyCreate = Partial<Omit<Proxy, "created_at" | "updated_at">> & {
+/**
+ * Write form of `CircuitBreakerConfig`. Edge defaults an omitted
+ * `failure_status_codes` (500, 502, 503, 504); a stream proxy omits it because
+ * only the HTTP path reads status codes.
+ */
+export type CircuitBreakerConfigInput = Omit<CircuitBreakerConfig, "failure_status_codes"> & {
+  failure_status_codes?: number[];
+};
+
+/**
+ * Write form of `RetryConfig`. Edge defaults omitted HTTP matchers (no status
+ * codes; GET, HEAD, OPTIONS, PUT, DELETE); a TCP proxy omits them because it
+ * retries only the backend dial.
+ */
+export type RetryConfigInput = Omit<RetryConfig, "retryable_status_codes" | "retryable_methods"> & {
+  retryable_status_codes?: number[];
+  retryable_methods?: string[];
+};
+
+export type ProxyCreate = Partial<
+  Omit<Proxy, "created_at" | "updated_at" | "circuit_breaker" | "retry">
+> & {
   backend_host: string;
   backend_port: number;
+  circuit_breaker?: CircuitBreakerConfigInput | null;
+  retry?: RetryConfigInput | null;
 };
 
 // ── Consumers ─────────────────────────────────────────────────────

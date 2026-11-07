@@ -107,6 +107,29 @@ describe("proxy full-replacement builders", () => {
     expect(payload.pool_http2_adaptive_window).toBe(false);
   });
 
+  it.each(["udp", "dtls", "http", "https"] as const)(
+    "clears stream_match when a form save moves a TCP proxy to %s",
+    (backendScheme) => {
+      const tcpProxy: Proxy = { ...fullProxy(), backend_scheme: "tcp", listen_path: null };
+      const payload = mergeFormUpdatePayload(tcpProxy, {
+        backend_host: "backend.example.com",
+        backend_port: 443,
+        backend_scheme: backendScheme,
+      });
+      expect(payload.stream_match).toBeNull();
+    },
+  );
+
+  it.each(["tcp", "tcps"] as const)("keeps stream_match on a %s save", (backendScheme) => {
+    const tcpProxy: Proxy = { ...fullProxy(), backend_scheme: "tcp", listen_path: null };
+    const payload = mergeFormUpdatePayload(tcpProxy, {
+      backend_host: "backend.example.com",
+      backend_port: 443,
+      backend_scheme: backendScheme,
+    });
+    expect(payload.stream_match).toEqual(fullProxy().stream_match);
+  });
+
   it("uses explicit null/empty values to clear form-owned optionals", () => {
     const payload = mergeFormUpdatePayload(fullProxy(), {
       backend_host: "backend.example.com",

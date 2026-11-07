@@ -72,6 +72,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- The BFF checks a namespace description's length without stalling on long
+  whitespace. Its Unicode `White_Space` trim was a `\p{White_Space}+$`
+  regex, which backtracks quadratically over a whitespace run inside the
+  text: an admin's 2 MiB registry write could hold the BFF's event loop for
+  far longer than any request deadline (about 38 s at 200,000 characters).
+  The trim now scans from both ends, with the same result.
 - Proxied gateway responses are confined to API media types (#601). A
   response through `/api/proxy/*` only ever carries a JSON/YAML/plain-text/
   octet-stream content type — any other or missing upstream type is
@@ -199,6 +205,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The browser session is one explicit state (`loading`, `configFailed`,
+  `unauthenticated`, `authenticated` or `lockedOut`) driven by a reducer in
+  `src/stores/auth.tsx` (#656). A failed authentication-config load no longer
+  shows the development-token form, which a trusted-proxy (SSO) deployment
+  refuses: it shows the error and a Retry action that reloads the config and
+  session. An error from an earlier step (a rejected token, a failed session
+  check or sign-out) no longer carries over to a later sign-in page. A sign-out
+  the BFF does not confirm now keeps the workspace and says so at the top of
+  the page content (`AuthSessionBanner`, which replaces `AuthLockoutBanner`).
+- The proxy form shows, validates and sends only the settings Ferrum Edge
+  reads for the selected backend scheme (#655), nested ones included. A TCP or
+  UDP proxy no longer sends connection-pool overrides, `backend_path`, method
+  restriction (`allowed_methods: []` included) or the other routing options,
+  and always sends `response_body_mode: "stream"`; values left over from an
+  HTTP scheme no longer block its save. The circuit breaker is now offered for
+  TCP and UDP, whose relays use it, without `failure_status_codes`, and retry
+  for TCP, which re-dials on connect failure, without
+  `retryable_status_codes` or `retryable_methods`; Edge applies its defaults
+  to the omitted matchers. UDP proxies send no retry, read/write timeouts or
+  upstream subset, and an HTTP proxy sends no passthrough, TCP idle timeout or
+  PROXY protocol settings. Backend TLS client material, the server CA and an
+  unverified backend are offered only for https, tcps and dtls without
+  passthrough; otherwise the paths are cleared and verification is sent as
+  `true`. A save that moves a proxy off tcp/tcps clears its `stream_match`,
+  which Edge accepts only there. HTTP/2 pool tuning is shown for `http`
+  proxies too, whose h2c gRPC pool reads it; the HTTP/3 pool size is sent
+  only for `https`.
+- A backup download's browser deadline is the BFF's backup budget (at least
+  120 s) plus the 5 s transport margin, 125 s at the shipped defaults, as a
+  restore's already is. It was a fixed 120 s, the same instant the BFF would
+  answer with its own diagnosed `504`, so the browser could give up first and
+  report a bare timeout instead.
 - An MCP tool policy save, or an upstream targets save, refused because the
   session's read masks a value now says to have an admin make the change, or
   to make it on the plugin page (for a policy) or the Configuration tab (for

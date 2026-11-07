@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, useEffect, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
-import { AuthProvider, useAuth, type AuthPrincipal } from "./auth";
+import { AuthProvider, useAuth, type AuthPrincipal, type AuthSession } from "./auth";
 
 import { issueRequestTicket, setCsrfToken, setOnUnauthorized } from "@/api/client";
 import { getGatewayMetadataSnapshot, observeGatewayResponse, resetGatewayMetadata } from "@/api/gatewayMetadata";
@@ -52,6 +52,16 @@ function holdSessionRead() {
   return held;
 }
 
+/** The sign-in mode the session names, or `null` while it is unknown. */
+function modeOf(session: AuthSession) {
+  return "mode" in session ? session.mode : null;
+}
+
+/** The sign-in page's error, or `null` outside the signed-out states. */
+function errorOf(session: AuthSession) {
+  return session.status === "unauthenticated" || session.status === "configFailed" ? session.error : null;
+}
+
 function unauthorized() {
   return Object.assign(new Error("HTTP 401"), { response: new Response(null, { status: 401 }) });
 }
@@ -89,7 +99,7 @@ describe("session authorization refresh", () => {
         </QueryClientProvider>,
       );
     });
-    expect(auth.status).toBe("authenticated");
+    expect(auth.session.status).toBe("authenticated");
     expect(host.textContent).toBe("old-admin-settings");
     await observeGatewayResponse(
       new Request("http://localhost/api/proxy/proxies/p-1", { method: "PUT", headers: { "X-Ferrum-Namespace": "tenant-b" } }),
@@ -147,9 +157,34 @@ describe("session authorization refresh", () => {
     expect(getGatewayMetadataSnapshot().apply.state).toBe("idle");
   });
 
+  it("keeps the session and reports a sign-out the BFF did not confirm", async () => {
+    transport.post.mockReturnValueOnce({ json: async () => { throw new Error("HTTP 500"); } });
+    await act(async () => { await auth.logout(); });
+    expect(auth.session).toMatchObject({
+      status: "authenticated",
+      signOutError: "Sign out could not be confirmed by the server. Please try again.",
+    });
+    expect(queryClient.getQueryData(["privileged"])).toBe("old-admin-settings");
+
+    // A later sign-out ends the session, with no error left behind.
+    await act(async () => { await auth.logout(); });
+    expect(auth.session).toEqual({ status: "unauthenticated", mode: "trusted-proxy", loginUrl: undefined, error: null });
+  });
+
+  it("does not carry a failed sign-out's error to the signed-out session", async () => {
+    transport.post.mockReturnValueOnce({ json: async () => { throw new Error("HTTP 500"); } });
+    await act(async () => { await auth.logout(); });
+    expect(auth.session.status).toBe("authenticated");
+    transport.get.mockImplementationOnce(() => ({
+      json: async () => { throw unauthorized(); },
+    }));
+    await act(async () => { await auth.refreshSession(); });
+    expect(auth.session).toEqual({ status: "unauthenticated", mode: "trusted-proxy", loginUrl: undefined, error: null });
+  });
+
   it("discards cached data and mounted form state on logout", async () => {
     await act(async () => { await auth.logout(); });
-    expect(auth.status).toBe("unauthenticated");
+    expect(auth.session.status).toBe("unauthenticated");
     expect(queryClient.getQueryData(["privileged"])).toBeUndefined();
     expect(getGatewayMetadataSnapshot().apply.state).toBe("idle");
     expect(host.textContent).toBe("empty");
@@ -162,7 +197,7 @@ describe("session authorization refresh", () => {
       const held = holdSessionRead();
       const late = auth.refreshSession();
       await act(async () => { await auth.logout(); });
-      expect(auth.status).toBe("unauthenticated");
+      expect(auth.session.status).toBe("unauthenticated");
       expect(queryClient.getQueryData(["privileged"])).toBeUndefined();
 
       vi.mocked(setCsrfToken).mockClear();
@@ -170,7 +205,7 @@ describe("session authorization refresh", () => {
         held.resolve({ principal: nextPrincipal, csrfToken: "retired-csrf" });
         await late;
       });
-      expect(auth.status).toBe("unauthenticated");
+      expect(auth.session.status).toBe("unauthenticated");
       expect(auth.principal).toBeNull();
       expect(setCsrfToken).not.toHaveBeenCalled();
       expect(queryClient.getQueryData(["privileged"])).toBeUndefined();
@@ -185,7 +220,7 @@ describe("session authorization refresh", () => {
         held.reject(unauthorized());
         await late;
       });
-      expect(auth.status).toBe("authenticated");
+      expect(auth.session.status).toBe("authenticated");
       expect(auth.principal).toEqual(nextPrincipal);
       expect(queryClient.getQueryData(["privileged"])).toBe("old-admin-settings");
     });
@@ -209,7 +244,7 @@ describe("session authorization refresh", () => {
         held.reject(unauthorized());
         await late;
       });
-      expect(auth.status).toBe("authenticated");
+      expect(auth.session.status).toBe("authenticated");
       expect(auth.principal).toEqual(signedIn);
       expect(vi.mocked(setCsrfToken).mock.calls.at(-1)?.[0]).toBe("new-csrf");
     });
@@ -219,12 +254,12 @@ describe("session authorization refresh", () => {
       await act(async () => { await auth.refreshSession(); });
       const onUnauthorized = vi.mocked(setOnUnauthorized).mock.calls.at(-1)![0]!;
       act(() => { onUnauthorized(stale); });
-      expect(auth.status).toBe("authenticated");
+      expect(auth.session.status).toBe("authenticated");
       expect(queryClient.getQueryData(["privileged"])).toBe("old-admin-settings");
 
       // A 401 for a request sent after it still signs this tab out.
       act(() => { onUnauthorized(issueRequestTicket()); });
-      expect(auth.status).toBe("unauthenticated");
+      expect(auth.session.status).toBe("unauthenticated");
       expect(queryClient.getQueryData(["privileged"])).toBeUndefined();
     });
 
@@ -262,7 +297,7 @@ describe("session authorization refresh", () => {
           </QueryClientProvider>,
         );
       });
-      expect(auth.status).toBe("authenticated");
+      expect(auth.session.status).toBe("authenticated");
       queryClient.setQueryData(["privileged"], "replacement-data");
 
       vi.mocked(setCsrfToken).mockClear();
@@ -272,7 +307,7 @@ describe("session authorization refresh", () => {
       });
       expect(setCsrfToken).not.toHaveBeenCalled();
       expect(queryClient.getQueryData(["privileged"])).toBe("replacement-data");
-      expect(auth.status).toBe("authenticated");
+      expect(auth.session.status).toBe("authenticated");
       expect(auth.principal).toEqual(nextPrincipal);
     });
 
@@ -281,7 +316,7 @@ describe("session authorization refresh", () => {
         json: async () => { throw unauthorized(); },
       }));
       await act(async () => { await auth.refreshSession(); });
-      expect(auth.status).toBe("unauthenticated");
+      expect(auth.session.status).toBe("unauthenticated");
       expect(queryClient.getQueryData(["privileged"])).toBeUndefined();
     });
   });
@@ -340,31 +375,31 @@ describe("boot reads", () => {
       "api/auth/config",
       "api/auth/session",
     ]);
-    expect(auth.status).toBe("loading");
+    expect(auth.session.status).toBe("loading");
 
     // A session that arrives first is not published until the config has.
     await flush(() => session.resolve({ principal, csrfToken: "boot-csrf" }));
-    expect(auth.status).toBe("loading");
+    expect(auth.session.status).toBe("loading");
     expect(setCsrfToken).not.toHaveBeenCalled();
 
     await flush(() => config.resolve({ mode: "trusted-proxy" }));
-    expect(auth.status).toBe("authenticated");
-    expect(auth.mode).toBe("trusted-proxy");
+    expect(auth.session.status).toBe("authenticated");
+    expect(modeOf(auth.session)).toBe("trusted-proxy");
     expect(auth.principal).toEqual(principal);
     expect(setCsrfToken).toHaveBeenLastCalledWith("boot-csrf", undefined);
   });
 
   function expectConfigFailure() {
-    expect(auth.status).toBe("unauthenticated");
-    expect(auth.error).toBe("Unable to load the Foundry authentication configuration.");
-    expect(auth.mode).toBeNull();
+    expect(auth.session.status).toBe("configFailed");
+    expect(errorOf(auth.session)).toBe("Unable to load the Foundry authentication configuration.");
+    expect(modeOf(auth.session)).toBeNull();
     expect(auth.principal).toBeNull();
     expect(setCsrfToken).not.toHaveBeenCalled();
   }
 
   it("discards a session that arrives before a config failure", async () => {
     await flush(() => session.resolve({ principal, csrfToken: "boot-csrf" }));
-    expect(auth.status).toBe("loading");
+    expect(auth.session.status).toBe("loading");
     await flush(() => config.reject(new Error("HTTP 503")));
     expectConfigFailure();
   });
@@ -376,33 +411,76 @@ describe("boot reads", () => {
     expectConfigFailure();
   });
 
+  it("retries a failed config load and then publishes the session it finds", async () => {
+    await flush(() => config.reject(new Error("HTTP 503")));
+    expectConfigFailure();
+    const failed = auth.session;
+    if (failed.status !== "configFailed") throw new Error("expected a config failure");
+
+    const retriedConfig = deferred<unknown>();
+    const retriedSession = deferred<unknown>();
+    transport.get.mockImplementation((path: string) => ({
+      json: () => (path === "api/auth/config" ? retriedConfig.promise : retriedSession.promise),
+    }));
+    await flush(() => failed.retry());
+    expect(auth.session.status).toBe("loading");
+    expect(transport.get.mock.calls.map(([path]) => path)).toEqual([
+      "api/auth/config",
+      "api/auth/session",
+      "api/auth/config",
+      "api/auth/session",
+    ]);
+
+    await flush(() => retriedSession.resolve({ principal, csrfToken: "retry-csrf" }));
+    await flush(() => retriedConfig.resolve({ mode: "trusted-proxy" }));
+    expect(auth.session.status).toBe("authenticated");
+    expect(modeOf(auth.session)).toBe("trusted-proxy");
+    expect(auth.principal).toEqual(principal);
+    expect(setCsrfToken).toHaveBeenLastCalledWith("retry-csrf", undefined);
+
+    // The superseded failure's retry no longer restarts anything.
+    await flush(() => failed.retry());
+    expect(transport.get).toHaveBeenCalledTimes(4);
+    expect(auth.session.status).toBe("authenticated");
+  });
+
+  it("never names a sign-in mode for a config failure, even after the BFF refused the session", async () => {
+    await flush(() => session.reject(unauthorized()));
+    await flush(() => config.reject(new Error("HTTP 503")));
+    expectConfigFailure();
+    // A later BFF 401 for another request cannot pick a mode either.
+    const onUnauthorized = vi.mocked(setOnUnauthorized).mock.calls.at(-1)![0]!;
+    act(() => { onUnauthorized(issueRequestTicket()); });
+    expect(auth.session.status).toBe("configFailed");
+  });
+
   it("does not let the client publish the boot read's 401 before the config", async () => {
     // The boot read holds the newest ticket; the client reports its BFF 401 first.
     const onUnauthorized = vi.mocked(setOnUnauthorized).mock.calls.at(-1)![0]!;
     act(() => { onUnauthorized(tickets.last); });
-    expect(auth.status).toBe("loading");
+    expect(auth.session.status).toBe("loading");
     await flush(() => session.reject(unauthorized()));
-    expect(auth.status).toBe("loading");
+    expect(auth.session.status).toBe("loading");
     await flush(() => config.resolve({ mode: "trusted-proxy" }));
-    expect(auth.status).toBe("unauthenticated");
-    expect(auth.mode).toBe("trusted-proxy");
+    expect(auth.session.status).toBe("unauthenticated");
+    expect(modeOf(auth.session)).toBe("trusted-proxy");
   });
 
   it("reports a failed session read as a session failure once the config loads", async () => {
     await flush(() => session.reject(new Error("HTTP 502")));
-    expect(auth.status).toBe("loading");
+    expect(auth.session.status).toBe("loading");
     await flush(() => config.resolve({ mode: "static" }));
-    expect(auth.status).toBe("unauthenticated");
-    expect(auth.mode).toBe("static");
-    expect(auth.error).toBe("Unable to verify your Foundry session.");
+    expect(auth.session.status).toBe("unauthenticated");
+    expect(modeOf(auth.session)).toBe("static");
+    expect(errorOf(auth.session)).toBe("Unable to verify your Foundry session.");
   });
 
   it("signs out on a refused session read once the config loads", async () => {
     await flush(() => session.reject(unauthorized()));
     await flush(() => config.resolve({ mode: "trusted-proxy" }));
-    expect(auth.status).toBe("unauthenticated");
-    expect(auth.mode).toBe("trusted-proxy");
-    expect(auth.error).toBeNull();
+    expect(auth.session.status).toBe("unauthenticated");
+    expect(modeOf(auth.session)).toBe("trusted-proxy");
+    expect(errorOf(auth.session)).toBeNull();
     expect(setCsrfToken).toHaveBeenLastCalledWith(null);
   });
 });

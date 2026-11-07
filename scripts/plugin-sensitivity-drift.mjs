@@ -26,6 +26,7 @@ import {
   PLUGIN_SENSITIVITY,
   PLUGIN_SENSITIVITY_SOURCE,
 } from "../src/api/pluginSensitivity.ts";
+import { fetchPinnedSource } from "./pinned-source.mjs";
 import { readSupportedPairing } from "./supported-pairing.mjs";
 
 const WHITESPACE_PATTERN = /\s/;
@@ -377,36 +378,10 @@ export function foundryTables() {
   return { schemas: PLUGIN_SENSITIVITY, kafka: KAFKA_SAFE_PRODUCER_PROPERTIES };
 }
 
-const TRANSPORT_FAILURE = /ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|fetch failed/i;
-
-async function fetchSource(ref) {
-  const url =
-    `https://raw.githubusercontent.com/${PLUGIN_SENSITIVITY_SOURCE.repository}/` +
-    `${ref}/${PLUGIN_SENSITIVITY_SOURCE.path}`;
-
-  // An outage must not be reported as drift, and it must not pass either.
-  // Transport failures are retried; an HTTP error is fatal.
-  let lastError;
-  for (let attempt = 1; attempt <= 4; attempt += 1) {
-    try {
-      const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
-      if (!response.ok) {
-        throw new Error(`${url} returned ${response.status}`);
-      }
-      return await response.text();
-    } catch (error) {
-      lastError = error;
-      if (!TRANSPORT_FAILURE.test(String(error?.message ?? error))) throw error;
-      await new Promise((resolve) => setTimeout(resolve, attempt * 2_000));
-    }
-  }
-  throw new Error(`Could not fetch ${url}: ${lastError?.message ?? "unknown error"}`);
-}
-
 if (import.meta.url === `file://${process.argv[1]}`) {
   const pinned = readSupportedPairing().edge.source_commit;
   const ref = process.env.FERRUM_EDGE_REF?.trim() || pinned;
-  const source = await fetchSource(ref);
+  const source = await fetchPinnedSource(PLUGIN_SENSITIVITY_SOURCE, ref);
   const edge = {
     schemas: parseSensitivitySchemas(source),
     kafka: parseKafkaSafeProperties(source),

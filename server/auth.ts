@@ -1,5 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
+import { isNamespaceName } from '../shared/namespace.js';
 import type { AuthPrincipal } from './auth-types.js';
 import {
   loadConfig,
@@ -23,7 +24,6 @@ interface StaticSession {
 
 const MAX_STATIC_SESSIONS = 256;
 const staticSessions = new Map<string, StaticSession>();
-const NAMESPACE_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$/;
 // Domain-separated key derivation so the CSRF MAC can never be confused with
 // any other use of the trusted-proxy proof secret.
 const CSRF_KEY_LABEL = 'ferrum-foundry-csrf-v1';
@@ -141,7 +141,7 @@ function parseTrustedNamespaces(value: string | string[] | undefined): string[] 
   if (value === undefined) return undefined;
   if (Array.isArray(value)) return null;
   const namespaces = [...new Set(value.split(',').map((entry) => entry.trim()).filter(Boolean))];
-  if (namespaces.length === 0 || namespaces.some((namespace) => !NAMESPACE_PATTERN.test(namespace))) {
+  if (namespaces.length === 0 || namespaces.some((namespace) => !isNamespaceName(namespace))) {
     return null;
   }
   return namespaces;

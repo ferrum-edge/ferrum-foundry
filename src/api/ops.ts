@@ -528,7 +528,8 @@ export async function getBackup(
       "backup",
       scoped(scope, {
         searchParams,
-        timeout: 120_000,
+        // The BFF's backup response budget plus the transport margin.
+        timeout: longRunningClientTimeout("GET", "/backup"),
         retry: 0,
         context: { [SILENT_ERRORS]: true },
       }),

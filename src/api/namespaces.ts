@@ -11,8 +11,19 @@ import {
 import type { PaginatedResponse } from "./types";
 import { ALL_PAGE_SIZE, collectAllPages } from "./pagination";
 import { pathSegment } from "./pathSegment";
+import {
+  isNamespaceName,
+  NAMESPACE_DESCRIPTION_MAX_LENGTH,
+  NAMESPACE_NAME_MAX_LENGTH,
+  namespaceDescriptionProblem,
+  normalizeNamespaceDescription,
+} from "../../shared/namespace.js";
 
-const OUTER_WHITE_SPACE_PATTERN = /^\p{White_Space}+|\p{White_Space}+$/gu;
+export {
+  NAMESPACE_DESCRIPTION_MAX_LENGTH,
+  NAMESPACE_NAME_MAX_LENGTH,
+  normalizeNamespaceDescription,
+};
 const LAST_NAMESPACE_REFUSAL_PATTERN = /FERRUM_NAMESPACE|FERRUM_CP_NAMESPACES|last remaining/i;
 
 // ── Types (mirror the upstream Namespace registry contract) ──────
@@ -46,28 +57,18 @@ export interface NamespaceUpdate {
   description?: string | null;
 }
 
-// ── Client-side name validation (mirrors the OpenAPI schema) ─────
-
-export const NAMESPACE_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
-export const NAMESPACE_NAME_MAX_LENGTH = 254;
-export const NAMESPACE_DESCRIPTION_MAX_LENGTH = 1024;
-
-/** Match Edge's str::trim and the BFF, including NEXT LINE but excluding BOM. */
-export function normalizeNamespaceDescription(description: string): string {
-  return description.replace(OUTER_WHITE_SPACE_PATTERN, "");
-}
+// ── Client-side validation (the BFF's and Edge's rules, shared/namespace.js) ─
 
 /** The limit counts Unicode scalar values, not native input UTF-16 units. */
 export function validateNamespaceDescription(description: string): string | null {
-  const characters = [...normalizeNamespaceDescription(description)];
-  if (characters.some((character) => {
-    const code = character.codePointAt(0)!;
-    return code >= 0xd800 && code <= 0xdfff;
-  })) return "Namespace description must contain valid Unicode characters";
-  if (characters.length > NAMESPACE_DESCRIPTION_MAX_LENGTH) {
-    return `Namespace description must be at most ${NAMESPACE_DESCRIPTION_MAX_LENGTH} characters`;
+  switch (namespaceDescriptionProblem(description)) {
+    case "invalid-unicode":
+      return "Namespace description must contain valid Unicode characters";
+    case "too-long":
+      return `Namespace description must be at most ${NAMESPACE_DESCRIPTION_MAX_LENGTH} characters`;
+    case null:
+      return null;
   }
-  return null;
 }
 
 /**
@@ -80,7 +81,7 @@ export function validateNamespaceName(name: string): string | null {
   if (name.length > NAMESPACE_NAME_MAX_LENGTH) {
     return `Namespace name must be at most ${NAMESPACE_NAME_MAX_LENGTH} characters`;
   }
-  if (!NAMESPACE_NAME_PATTERN.test(name)) {
+  if (!isNamespaceName(name)) {
     return "Namespace name must start with a letter or digit and contain only letters, digits, dots, hyphens, and underscores";
   }
   return null;
