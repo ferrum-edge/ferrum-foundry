@@ -82,14 +82,16 @@ describe("configured client server-side waiting calls", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
-  it("bounds backup at 120 seconds without retrying an unknown export", async () => {
+  it("bounds backup at the BFF's 120 s operation budget plus transport margin without retrying", async () => {
     const fetcher = vi.fn((request: Request) => new Promise<Response>((_resolve, reject) => {
       request.signal.addEventListener("abort", () => reject(request.signal.reason));
     }));
     vi.stubGlobal("fetch", fetcher);
     const { getBackup } = await import("./ops");
     const result = getBackup({ namespace: "default" }).catch((error) => error);
-    await vi.advanceTimersByTimeAsync(119_999);
+    // 120 s backup response budget + 5 s transport margin, so the BFF's own
+    // diagnosed 504 arrives before the browser gives up.
+    await vi.advanceTimersByTimeAsync(124_999);
     expect(fetcher.mock.calls[0]![0].signal.aborted).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     expect((await result).name).toBe("TimeoutError");

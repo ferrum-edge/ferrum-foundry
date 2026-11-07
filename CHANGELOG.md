@@ -72,6 +72,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- The BFF checks a namespace description's length without stalling on long
+  whitespace. Its Unicode `White_Space` trim was a `\p{White_Space}+$`
+  regex, which backtracks quadratically over a whitespace run inside the
+  text: an admin's 2 MiB registry write could hold the BFF's event loop for
+  far longer than any request deadline (about 38 s at 200,000 characters).
+  The trim now scans from both ends, with the same result.
 - Proxied gateway responses are confined to API media types (#601). A
   response through `/api/proxy/*` only ever carries a JSON/YAML/plain-text/
   octet-stream content type — any other or missing upstream type is
@@ -199,6 +205,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A backup download's browser deadline is the BFF's backup budget (at least
+  120 s) plus the 5 s transport margin, 125 s at the shipped defaults, as a
+  restore's already is. It was a fixed 120 s, the same instant the BFF would
+  answer with its own diagnosed `504`, so the browser could give up first and
+  report a bare timeout instead.
 - An MCP tool policy save, or an upstream targets save, refused because the
   session's read masks a value now says to have an admin make the change, or
   to make it on the plugin page (for a policy) or the Configuration tab (for

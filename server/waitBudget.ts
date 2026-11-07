@@ -26,17 +26,40 @@ export const DEFAULT_WRITE_TIMEOUT = 60_000;
 /** The response budget floor for backup and restore, whatever the read timeout. */
 export const BACKUP_RESTORE_OPERATION_TIMEOUT = 120_000;
 
+/**
+ * Routes whose body may exceed the ordinary limit, and so get the upload
+ * budget rather than the write budget. Each class has its own byte limit in
+ * the BFF (`server/proxy.ts`).
+ */
+export type LargeUploadRoute = 'restore' | 'api-spec';
+
+export function largeUploadRoute(path: string): LargeUploadRoute | null {
+  if (path === '/restore') return 'restore';
+  if (path === '/api-specs' || path.startsWith('/api-specs/')) return 'api-spec';
+  return null;
+}
+
+/**
+ * Requests whose response deadline the BFF floors at
+ * `BACKUP_RESTORE_OPERATION_TIMEOUT`: a restore by any method, and a backup
+ * download (`GET` only).
+ */
+export function isBackupRestoreOperation(method: string, path: string): boolean {
+  return path === '/restore' || (method === 'GET' && path === '/backup');
+}
+
 /** Total browser budget, including upload before the response deadline starts. */
 export function longRunningClientTimeout(method: string, path: string): number {
-  const restore = path === '/restore';
+  const route = largeUploadRoute(path);
   const response = Math.max(
     DEFAULT_RESPONSE_TIMEOUT,
-    restore ? BACKUP_RESTORE_OPERATION_TIMEOUT : waitingRouteTimeout(method, path),
+    isBackupRestoreOperation(method, path)
+      ? BACKUP_RESTORE_OPERATION_TIMEOUT
+      : waitingRouteTimeout(method, path),
   );
-  const largeUpload = restore || path === '/api-specs' || path.startsWith('/api-specs/');
   let upload = 0;
   if (method === 'POST' || method === 'PUT') {
-    upload = largeUpload ? DEFAULT_UPLOAD_TIMEOUT : DEFAULT_WRITE_TIMEOUT;
+    upload = route !== null ? DEFAULT_UPLOAD_TIMEOUT : DEFAULT_WRITE_TIMEOUT;
   }
   return serverWaitTimeout(upload + response);
 }

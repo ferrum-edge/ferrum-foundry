@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { SignJWT } from 'jose';
+import { isNamespaceName } from './namespace.js';
 
 const MIN_SECRET_LENGTH = 32;
 const MAX_TTL_SECONDS = 86_400;
-const NAMESPACE_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$/;
 const ROLES = new Set(['viewer', 'operator', 'admin']);
 
 function requireNonEmpty(value, name) {
@@ -27,7 +27,7 @@ function normalizeNamespaces(namespaces) {
     throw new Error('namespaces must be a non-empty array when provided');
   }
   const values = [...new Set(namespaces.map((entry) => requireNonEmpty(entry, 'namespace').trim()))];
-  if (values.some((entry) => !NAMESPACE_PATTERN.test(entry))) {
+  if (values.some((entry) => !isNamespaceName(entry))) {
     throw new Error('namespaces contains an invalid namespace');
   }
   return values;
