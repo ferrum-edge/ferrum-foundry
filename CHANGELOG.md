@@ -215,17 +215,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the BFF does not confirm now keeps the workspace and says so at the top of
   the page content (`AuthSessionBanner`, which replaces `AuthLockoutBanner`).
 - The proxy form shows, validates and sends only the settings Ferrum Edge
-  reads for the selected backend scheme (#655). A TCP or UDP proxy no longer
-  sends connection-pool overrides, `backend_path`, method restriction
-  (`allowed_methods: []` included) or the other routing options, and always
-  sends `response_body_mode: "stream"`; values left over from an HTTP scheme
-  no longer block its save. The circuit breaker is now offered for TCP and
-  UDP, whose relays use it, and retry for TCP, which re-dials on connect
-  failure (without the HTTP status-code and method matchers). UDP proxies
-  send no retry, read/write timeouts or upstream subset, and an HTTP proxy
-  sends no passthrough, TCP idle timeout or PROXY protocol settings. HTTP/2
-  pool tuning is shown for `http` proxies too, whose h2c gRPC pool reads it;
-  the HTTP/3 pool size is sent only for `https`.
+  reads for the selected backend scheme (#655), nested ones included. A TCP or
+  UDP proxy no longer sends connection-pool overrides, `backend_path`, method
+  restriction (`allowed_methods: []` included) or the other routing options,
+  and always sends `response_body_mode: "stream"`; values left over from an
+  HTTP scheme no longer block its save. The circuit breaker is now offered for
+  TCP and UDP, whose relays use it, without `failure_status_codes`, and retry
+  for TCP, which re-dials on connect failure, without
+  `retryable_status_codes` or `retryable_methods`; Edge applies its defaults
+  to the omitted matchers. UDP proxies send no retry, read/write timeouts or
+  upstream subset, and an HTTP proxy sends no passthrough, TCP idle timeout or
+  PROXY protocol settings. Backend TLS client material, the server CA and an
+  unverified backend are offered only for https, tcps and dtls without
+  passthrough; otherwise the paths are cleared and verification is sent as
+  `true`. A save that moves a proxy off tcp/tcps clears its `stream_match`,
+  which Edge accepts only there. HTTP/2 pool tuning is shown for `http`
+  proxies too, whose h2c gRPC pool reads it; the HTTP/3 pool size is sent
+  only for `https`.
 - A backup download's browser deadline is the BFF's backup budget (at least
   120 s) plus the 5 s transport margin, 125 s at the shipped defaults, as a
   restore's already is. It was a fixed 120 s, the same instant the BFF would

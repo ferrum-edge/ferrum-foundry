@@ -27,7 +27,9 @@ import type {
   Proxy,
   ProxyCreate,
   CircuitBreakerConfig,
+  CircuitBreakerConfigInput,
   RetryConfig,
+  RetryConfigInput,
   BackoffStrategy,
 } from "@/api/types";
 
@@ -135,15 +137,19 @@ const SCHEME_FAMILY: Record<BackendScheme, SchemeFamily> = {
  * The proxy fields Ferrum Edge reads for one backend scheme. Display,
  * validation and serialization all follow this one set: a field outside it is
  * hidden, never validated and never sent, so a value left over from another
- * scheme can neither block a save nor reach the gateway (#655).
+ * scheme can neither block a save nor reach the gateway (#655). That holds for
+ * nested fields too, because Edge validates every member of an object it is
+ * sent.
  *
  * Taken from Edge's `Proxy::validate_fields` and its stream relays
  * (`tcp_proxy.rs`, `udp_proxy.rs`):
  * - TCP and UDP both consult `circuit_breaker` on every backend dial; only
- *   HTTP reads its `failure_status_codes`.
+ *   HTTP reads its `failure_status_codes`, so a stream proxy's breaker omits
+ *   them and Edge applies its default.
  * - TCP re-dials under `retry` (`max_retries`, backoff,
  *   `retry_on_connect_failure`); UDP never retries. Retryable status codes and
- *   methods are HTTP-only.
+ *   methods are HTTP-only, so a TCP proxy's retry omits them and Edge applies
+ *   its defaults.
  * - TCP uses the backend read/write timeouts as per-direction inactivity
  *   bounds; UDP reads only the connect timeout.
  * - Connection-pool overrides (HTTP/2 tuning included, which the h2c gRPC
@@ -152,6 +158,9 @@ const SCHEME_FAMILY: Record<BackendScheme, SchemeFamily> = {
  *   TLS, so only `https` reads its pool size.
  * - Edge refuses `upstream_subset` on udp/dtls, `passthrough` and inbound
  *   `stream_proxy_protocol` on HTTP, and outbound PROXY protocol off TCP.
+ * - Backend TLS client material, the custom CA and an unverified backend are
+ *   refused on plaintext schemes (http, tcp, udp), and the material and CA
+ *   under passthrough, where Ferrum originates no backend TLS.
  *
  * `udp_idle_timeout_seconds` is not in the set: Edge stores and range-checks
  * it on every proxy, so the form keeps sending it for every scheme.
@@ -176,9 +185,16 @@ interface SchemeFields {
   backendProxyProtocol: boolean;
   tcpIdleTimeout: boolean;
   udpSession: boolean;
+  /**
+   * Backend TLS client cert/key, server CA and `verify_server_cert: false`.
+   * Off, the paths are omitted and verification is sent as Edge's default.
+   */
+  backendTls: boolean;
 }
 
-function proxySchemeFields(scheme: BackendScheme): SchemeFields {
+const TLS_BACKEND_SCHEMES: ReadonlySet<BackendScheme> = new Set(["https", "tcps", "dtls"]);
+
+function proxySchemeFields(scheme: BackendScheme, passthrough: boolean): SchemeFields {
   const family = SCHEME_FAMILY[scheme];
   const http = family === "http";
   const tcp = family === "tcp";
@@ -200,6 +216,8 @@ function proxySchemeFields(scheme: BackendScheme): SchemeFields {
     backendProxyProtocol: tcp,
     tcpIdleTimeout: tcp,
     udpSession: udp,
+    // Passthrough exists only on stream proxies (an HTTP proxy sends false).
+    backendTls: TLS_BACKEND_SCHEMES.has(scheme) && (http || !passthrough),
   };
 }
 
@@ -493,7 +511,7 @@ export function ProxyForm({
 
   /* ---------- Scheme field set ---------- */
 
-  const fields = proxySchemeFields(backendScheme);
+  const fields = proxySchemeFields(backendScheme, passthrough);
   const isStream = SCHEME_FAMILY[backendScheme] !== "http";
 
   /* ---------- Validation ---------- */
@@ -563,6 +581,22 @@ export function ProxyForm({
       if (backoffType === "fixed") return { fixed: { delay_ms: Number(fixedDelay) } };
       return { exponential: { base_ms: Number(expBase), max_ms: Number(expMax) } };
     };
+    // Nested HTTP matchers follow the field set too: Edge validates whatever
+    // it is sent, and the whole object replaces the stored one on update.
+    const buildCircuitBreaker = (): CircuitBreakerConfigInput => {
+      const { failure_status_codes, ...breaker } = resolveNumberDrafts(cb, CB_NUMBER_KEYS);
+      return fields.circuitBreakerStatusCodes ? { ...breaker, failure_status_codes } : breaker;
+    };
+    const buildRetry = (): RetryConfigInput => {
+      const { retryable_status_codes, retryable_methods, ...rest } = resolveNumberDrafts(
+        retry,
+        ["max_retries"],
+      );
+      const policy = { ...rest, backoff: buildBackoff() };
+      return fields.retryHttpMatchers
+        ? { ...policy, retryable_status_codes, retryable_methods }
+        : policy;
+    };
 
     // Every field outside `fields` is omitted, never sent with a stale value.
     // An omitted optional is cleared on update (`mergeFormUpdatePayload`); the
@@ -604,23 +638,20 @@ export function ProxyForm({
       frontend_tls: frontendTls,
       // Edge refuses passthrough on HTTP-family proxies.
       passthrough: fields.passthrough && passthrough,
-      backend_tls_verify_server_cert: backendTlsVerify,
-      ...(backendTlsCertPath && { backend_tls_client_cert_path: backendTlsCertPath }),
-      ...(backendTlsKeyPath && { backend_tls_client_key_path: backendTlsKeyPath }),
-      ...(backendTlsCaPath && { backend_tls_server_ca_cert_path: backendTlsCaPath }),
+      // Edge refuses `false` without backend TLS; an omitted value would keep
+      // the stored one on update, so the default is sent instead.
+      backend_tls_verify_server_cert: !fields.backendTls || backendTlsVerify,
+      ...(fields.backendTls && {
+        ...(backendTlsCertPath && { backend_tls_client_cert_path: backendTlsCertPath }),
+        ...(backendTlsKeyPath && { backend_tls_client_key_path: backendTlsKeyPath }),
+        ...(backendTlsCaPath && { backend_tls_server_ca_cert_path: backendTlsCaPath }),
+      }),
       ...(upstreamId && { upstream_id: upstreamId }),
       ...(fields.upstreamSubset && upstreamId && upstreamSubset && { upstream_subset: upstreamSubset }),
       ...(dnsOverride && { dns_override: dnsOverride }),
       ...(dnsCacheTtl !== "" && { dns_cache_ttl_seconds: Number(dnsCacheTtl) }),
-      ...(fields.circuitBreaker && cbEnabled && {
-        circuit_breaker: resolveNumberDrafts(cb, CB_NUMBER_KEYS),
-      }),
-      ...(fields.retry && retryEnabled && {
-        retry: {
-          ...resolveNumberDrafts(retry, ["max_retries"]),
-          backoff: buildBackoff(),
-        },
-      }),
+      ...(fields.circuitBreaker && cbEnabled && { circuit_breaker: buildCircuitBreaker() }),
+      ...(fields.retry && retryEnabled && { retry: buildRetry() }),
       ...(fields.connectionPool && {
         ...(poolIdleTimeout !== "" && { pool_idle_timeout_seconds: Number(poolIdleTimeout) }),
         ...(poolKeepAlive !== null && { pool_enable_http_keep_alive: poolKeepAlive }),
@@ -896,30 +927,40 @@ export function ProxyForm({
               helpText="Forward encrypted bytes directly to backend without terminating TLS/DTLS. Mutually exclusive with Frontend TLS."
             />
           )}
-          <Checkbox
-            label="Verify backend TLS server certificate"
-            checked={backendTlsVerify}
-            onChange={setBackendTlsVerify}
-          />
-          <p className="text-text-muted text-xs">{BACKEND_TLS_OPERATOR_SCOPE_NOTE}</p>
-          <Input
-            label="Backend TLS Client Cert Path"
-            value={backendTlsCertPath}
-            onChange={(e) => setBackendTlsCertPath(e.target.value)}
-            placeholder="/path/to/cert.pem"
-          />
-          <Input
-            label="Backend TLS Client Key Path"
-            value={backendTlsKeyPath}
-            onChange={(e) => setBackendTlsKeyPath(e.target.value)}
-            placeholder="/path/to/key.pem"
-          />
-          <Input
-            label="Backend TLS Server CA Cert Path"
-            value={backendTlsCaPath}
-            onChange={(e) => setBackendTlsCaPath(e.target.value)}
-            placeholder="/path/to/ca.pem"
-          />
+          {fields.backendTls ? (
+            <>
+              <Checkbox
+                label="Verify backend TLS server certificate"
+                checked={backendTlsVerify}
+                onChange={setBackendTlsVerify}
+              />
+              <p className="text-text-muted text-xs">{BACKEND_TLS_OPERATOR_SCOPE_NOTE}</p>
+              <Input
+                label="Backend TLS Client Cert Path"
+                value={backendTlsCertPath}
+                onChange={(e) => setBackendTlsCertPath(e.target.value)}
+                placeholder="/path/to/cert.pem"
+              />
+              <Input
+                label="Backend TLS Client Key Path"
+                value={backendTlsKeyPath}
+                onChange={(e) => setBackendTlsKeyPath(e.target.value)}
+                placeholder="/path/to/key.pem"
+              />
+              <Input
+                label="Backend TLS Server CA Cert Path"
+                value={backendTlsCaPath}
+                onChange={(e) => setBackendTlsCaPath(e.target.value)}
+                placeholder="/path/to/ca.pem"
+              />
+            </>
+          ) : (
+            <p className="text-text-muted text-xs">
+              {passthrough && isStream
+                ? "Passthrough forwards the client's encrypted stream, so Ferrum originates no backend TLS."
+                : "Backend TLS settings apply only to https, tcps and dtls backends."}
+            </p>
+          )}
         </CollapsibleSection>
 
         {/* ── Section 5: Upstream ── */}
