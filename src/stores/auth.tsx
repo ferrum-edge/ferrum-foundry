@@ -6,8 +6,8 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useReducer,
   useRef,
-  useState,
   type ReactNode,
 } from "react";
 import {
@@ -22,7 +22,6 @@ import {
 import { clearGatewayMetadata, setNamespaceScopedSession } from "@/api/gatewayMetadata";
 
 export type AuthMode = "static" | "trusted-proxy";
-export type AuthStatus = "loading" | "authenticated" | "unauthenticated";
 
 export interface AuthPrincipal {
   subject: string;
@@ -54,22 +53,152 @@ interface SessionRead {
   response: Promise<SessionResponse>;
 }
 
+const CONFIG_FAILURE = "Unable to load the Foundry authentication configuration.";
+const SESSION_FAILURE = "Unable to verify your Foundry session.";
+const LOGIN_REJECTED = "The token was rejected.";
+const SIGN_OUT_FAILURE = "Sign out could not be confirmed by the server. Please try again.";
+
+/**
+ * The browser's view of its Foundry session: exactly one of these at a time.
+ *
+ * - `loading`: the authentication configuration (and the boot session read)
+ *   have not answered. The sign-in mode is unknown, so no sign-in form shows.
+ * - `configFailed`: the configuration could not be loaded. The mode is still
+ *   unknown, so the only action is `retry`, never the development-token form.
+ * - `unauthenticated`: no session; `mode` picks the sign-in page. `error` is
+ *   the failure of the last sign-in step only, and is cleared on every
+ *   transition.
+ * - `authenticated`: a verified principal. `signOutError` reports a sign-out
+ *   the BFF did not confirm (the session is kept).
+ * - `lockedOut`: the BFF refused authentication from this address after
+ *   repeated failures (a `429`). A tab that was signed in keeps its
+ *   `principal` and workspace, and shows the lockout over it.
+ */
+export type AuthSession =
+  | { status: "loading" }
+  | { status: "configFailed"; error: string; retry: () => void }
+  | { status: "unauthenticated"; mode: AuthMode; loginUrl?: string; error: string | null }
+  | { status: "authenticated"; mode: AuthMode; principal: AuthPrincipal; signOutError: string | null }
+  | {
+    status: "lockedOut";
+    mode: AuthMode;
+    loginUrl?: string;
+    principal: AuthPrincipal | null;
+    lockout: string;
+    signOutError: string | null;
+  };
+
+export type AuthStatus = AuthSession["status"];
+
 interface AuthContextValue {
-  status: AuthStatus;
-  mode: AuthMode | null;
-  principal: AuthPrincipal | null;
-  loginUrl?: string;
-  error: string | null;
+  session: AuthSession;
   /**
-   * Set while this address is locked out after repeated failed
-   * authentication (a BFF `429`). Unlike `error` it is shown over the
-   * workspace too, because a signed-in tab polling its session is refused as
-   * well until the lockout ends.
+   * The principal whose workspace is open: the authenticated one, or the one
+   * a locked-out tab was signed in as. `null` in every other state.
    */
-  lockout: string | null;
+  principal: AuthPrincipal | null;
   login: (token: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshSession: () => Promise<void>;
+}
+
+// The reducer's state is the session without its callbacks, plus the loaded
+// configuration (whose mode it projects) once the mode is known.
+type AuthState =
+  | { status: "loading" }
+  | { status: "configFailed"; error: string }
+  | { status: "unauthenticated"; config: AuthConfig; error: string | null }
+  | { status: "authenticated"; config: AuthConfig; principal: AuthPrincipal; signOutError: string | null }
+  | {
+    status: "lockedOut";
+    config: AuthConfig;
+    principal: AuthPrincipal | null;
+    lockout: string;
+    signOutError: string | null;
+  };
+
+/**
+ * Events that move the session. One that would need a sign-in mode the state
+ * does not know (a sign-out or failure before the configuration has loaded)
+ * leaves the state unchanged: the boot sequence decides once it has the mode.
+ * A `config` on an event is the configuration boot just loaded.
+ */
+type AuthEvent =
+  | { type: "configFailed" }
+  | { type: "retry" }
+  | { type: "configLoaded"; config: AuthConfig }
+  | { type: "sessionAccepted"; principal: AuthPrincipal; config?: AuthConfig }
+  | { type: "signedOut"; config?: AuthConfig }
+  | { type: "lockedOut"; lockout: string; config?: AuthConfig }
+  | { type: "verificationFailed"; config?: AuthConfig }
+  | { type: "loginStarted" }
+  | { type: "loginFailed"; error: string }
+  | { type: "signOutStarted" }
+  | { type: "signOutFailed"; error: string };
+
+function configOf(state: AuthState): AuthConfig | null {
+  return state.status === "loading" || state.status === "configFailed" ? null : state.config;
+}
+
+function principalOf(state: AuthState): AuthPrincipal | null {
+  return state.status === "authenticated" || state.status === "lockedOut" ? state.principal : null;
+}
+
+function authReducer(state: AuthState, event: AuthEvent): AuthState {
+  switch (event.type) {
+    case "configFailed":
+      // Only boot reports this, and newer evidence (a sign-in) stands.
+      return state.status === "loading" ? { status: "configFailed", error: CONFIG_FAILURE } : state;
+    case "retry":
+      return state.status === "configFailed" ? { status: "loading" } : state;
+    case "configLoaded":
+      if (state.status === "loading") return { status: "unauthenticated", config: event.config, error: null };
+      if (state.status === "configFailed") return state;
+      return { ...state, config: event.config };
+    case "sessionAccepted": {
+      // A session names its own mode, so it can be accepted before the
+      // configuration has loaded (a sign-in sent meanwhile).
+      const config = event.config ?? configOf(state) ?? { mode: event.principal.authMode };
+      return { status: "authenticated", config, principal: event.principal, signOutError: null };
+    }
+    case "signedOut": {
+      const config = event.config ?? configOf(state);
+      return config ? { status: "unauthenticated", config, error: null } : state;
+    }
+    case "lockedOut": {
+      const config = event.config ?? configOf(state);
+      if (!config) return state;
+      return {
+        status: "lockedOut",
+        config,
+        principal: principalOf(state),
+        lockout: event.lockout,
+        signOutError: null,
+      };
+    }
+    case "verificationFailed": {
+      // A transient failure keeps a signed-in workspace (and a lockout, which
+      // is newer than any answer this read could replace).
+      if (state.status === "authenticated" || state.status === "lockedOut") return state;
+      const config = event.config ?? configOf(state);
+      return config ? { status: "unauthenticated", config, error: SESSION_FAILURE } : state;
+    }
+    case "loginStarted":
+      return state.status === "unauthenticated" ? { ...state, error: null } : state;
+    case "loginFailed":
+      if (state.status === "unauthenticated" || (state.status === "lockedOut" && !state.principal)) {
+        return { status: "unauthenticated", config: state.config, error: event.error };
+      }
+      return state;
+    case "signOutStarted":
+      return (state.status === "authenticated" || state.status === "lockedOut") && state.signOutError
+        ? { ...state, signOutError: null }
+        : state;
+    case "signOutFailed":
+      return state.status === "authenticated" || (state.status === "lockedOut" && state.principal)
+        ? { ...state, signOutError: event.error }
+        : state;
+  }
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -122,11 +251,7 @@ function authorizationKey(principal: AuthPrincipal | null): string {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
-  const [status, setStatus] = useState<AuthStatus>("loading");
-  const [config, setConfig] = useState<AuthConfig | null>(null);
-  const [principal, setPrincipal] = useState<AuthPrincipal | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [lockout, setLockout] = useState<string | null>(null);
+  const [state, dispatch] = useReducer(authReducer, { status: "loading" });
   const principalRef = useRef<AuthPrincipal | null>(null);
   // Request ticket of the newest evidence this provider has published. A
   // session read, or another request's BFF 401, may change the session only if
@@ -137,6 +262,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const readsRef = useRef(new Set<AbortController>());
   // Ticket of the boot session read, whose BFF 401 the client must not publish.
   const bootReadTicketRef = useRef(0);
+  // Each boot (the first, and every configuration retry) takes a generation;
+  // only the newest one, in a mounted provider, may publish.
+  const bootGenerationRef = useRef(0);
 
   const isCurrent = useCallback(
     (ticket: number) => !disposedRef.current && ticket > appliedTicketRef.current,
@@ -155,22 +283,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     disposedRef.current = false;
     return () => {
       disposedRef.current = true;
+      bootGenerationRef.current += 1;
       retireInFlight();
     };
   }, [retireInFlight]);
 
-  const clearLocalSession = useCallback(() => {
+  const clearLocalSession = useCallback((config?: AuthConfig) => {
     if (disposedRef.current) return;
     setCsrfToken(null);
     principalRef.current = null;
-    setPrincipal(null);
-    setStatus("unauthenticated");
     queryClient.clear();
     clearGatewayMetadata();
     setNamespaceScopedSession(false);
+    dispatch({ type: "signedOut", config });
   }, [queryClient]);
 
-  const acceptSession = useCallback((session: SessionResponse) => {
+  const acceptSession = useCallback((session: SessionResponse, config?: AuthConfig) => {
     if (disposedRef.current) return;
     const previous = principalRef.current;
     if (previous && authorizationKey(previous) !== authorizationKey(session.principal)) {
@@ -181,11 +309,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     setNamespaceScopedSession(session.principal.namespaces !== undefined);
     principalRef.current = session.principal;
-    setPrincipal(session.principal);
     setCsrfToken(session.csrfToken, session.csrfCookie);
-    setStatus("authenticated");
-    setError(null);
-    setLockout(null);
+    dispatch({ type: "sessionAccepted", principal: session.principal, config });
   }, [queryClient]);
 
   // Send a session read under a fresh ticket. Its outcome is applied separately
@@ -204,32 +329,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { ticket, controller, response };
   }, []);
 
+  // Apply a session read's outcome. Boot passes the configuration it loaded,
+  // which also leaves `loading` when newer evidence superseded the read.
   const applySessionRead = useCallback(
-    (read: SessionRead, outcome: PromiseSettledResult<SessionResponse>) => {
+    (read: SessionRead, outcome: PromiseSettledResult<SessionResponse>, config?: AuthConfig) => {
       const { ticket, controller } = read;
-      if (controller.signal.aborted || !isCurrent(ticket)) return;
+      if (controller.signal.aborted || !isCurrent(ticket)) {
+        if (config && !disposedRef.current) dispatch({ type: "configLoaded", config });
+        return;
+      }
       if (outcome.status === "fulfilled") {
         appliedTicketRef.current = ticket;
-        acceptSession(outcome.value);
+        acceptSession(outcome.value, config);
         return;
       }
       const sessionError: unknown = outcome.reason;
       const lockedOut = lockoutMessage(sessionError);
       if (responseStatus(sessionError) === 401) {
         appliedTicketRef.current = ticket;
-        clearLocalSession();
+        clearLocalSession(config);
       } else if (lockedOut) {
         // Newer evidence than any answer still in flight: an older 401 or
         // session read must not clear the workspace or the notice after it.
         appliedTicketRef.current = ticket;
-        setError(lockedOut);
-        setLockout(lockedOut);
-        if (!principalRef.current) setStatus("unauthenticated");
-      } else if (principalRef.current) {
-        setError("Session verification is temporarily unavailable.");
+        dispatch({ type: "lockedOut", lockout: lockedOut, config });
       } else {
-        setError("Unable to verify your Foundry session.");
-        setStatus("unauthenticated");
+        dispatch({ type: "verificationFailed", config });
       }
     },
     [acceptSession, clearLocalSession, isCurrent],
@@ -241,9 +366,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     applySessionRead(read, outcome);
   }, [applySessionRead, startSessionRead]);
 
-  useEffect(() => {
-    removeLegacyCredential();
-    let cancelled = false;
+  const boot = useCallback(() => {
+    const generation = ++bootGenerationRef.current;
+    const live = () => !disposedRef.current && generation === bootGenerationRef.current;
     void (async () => {
       // The session read uses nothing from the config: the BFF path is fixed,
       // a GET carries no CSRF header, and `/api/auth/config` sets no cookie or
@@ -256,31 +381,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const read = startSessionRead();
       bootReadTicketRef.current = read.ticket;
       const sessionOutcome = Promise.allSettled([read.response]);
-      let nextConfig: AuthConfig;
+      let config: AuthConfig;
       try {
-        nextConfig = await configRead;
+        config = await configRead;
       } catch {
         read.controller.abort();
-        // A sign-in (or other newer evidence) published meanwhile stands.
-        if (cancelled || !isCurrent(read.ticket)) return;
-        setError("Unable to load the Foundry authentication configuration.");
-        setStatus("unauthenticated");
+        // The mode is unknown: no sign-in form, only a retry. A sign-in
+        // published meanwhile stands (the reducer applies this only while loading).
+        if (live()) dispatch({ type: "configFailed" });
         return;
       }
-      if (cancelled) return;
-      setConfig(nextConfig);
+      if (!live()) return;
       const [outcome] = await sessionOutcome;
-      if (cancelled) return;
-      applySessionRead(read, outcome);
+      if (!live()) return;
+      applySessionRead(read, outcome, config);
     })();
-    return () => { cancelled = true; };
-  }, [applySessionRead, isCurrent, startSessionRead]);
+  }, [applySessionRead, startSessionRead]);
 
   useEffect(() => {
-    if (status !== "authenticated") return;
+    removeLegacyCredential();
+    boot();
+  }, [boot]);
+
+  // The committed state, for `retry`: a stale `configFailed` session object
+  // must not restart boot once the session has moved on.
+  const stateRef = useRef(state);
+  useEffect(() => { stateRef.current = state; }, [state]);
+
+  const retry = useCallback(() => {
+    if (stateRef.current.status !== "configFailed") return;
+    stateRef.current = { status: "loading" };
+    dispatch({ type: "retry" });
+    boot();
+  }, [boot]);
+
+  const principal = principalOf(state);
+  const signedIn = principal !== null;
+
+  // A tab with a workspace open keeps checking its session, a locked-out one
+  // included: its lockout clears on the next successful check.
+  useEffect(() => {
+    if (!signedIn) return;
     const timer = window.setInterval(() => void refreshSession(), 60_000);
     return () => window.clearInterval(timer);
-  }, [refreshSession, status]);
+  }, [refreshSession, signedIn]);
 
   // The client reports every BFF 401 with the ticket of the request it
   // answered, so a late 401 cannot clear a session accepted after it was sent.
@@ -295,7 +439,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => setOnUnauthorized(handleUnauthorized), [handleUnauthorized]);
 
   const login = useCallback(async (token: string) => {
-    setError(null);
+    dispatch({ type: "loginStarted" });
     let session: SessionResponse;
     try {
       session = await api.post("api/auth/login", {
@@ -303,7 +447,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         context: { [SILENT_ERRORS]: true },
       }).json<SessionResponse>();
     } catch (loginError) {
-      setError(lockoutMessage(loginError) ?? "The token was rejected.");
+      if (!disposedRef.current) {
+        const lockedOut = lockoutMessage(loginError);
+        dispatch(lockedOut
+          ? { type: "lockedOut", lockout: lockedOut }
+          : { type: "loginFailed", error: LOGIN_REJECTED });
+      }
       throw new Error("Authentication failed", { cause: loginError });
     }
     if (disposedRef.current) return;
@@ -311,15 +460,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     acceptSession(session);
   }, [acceptSession, retireInFlight]);
 
+  const configuredLogoutUrl = configOf(state)?.logoutUrl;
   const logout = useCallback(async () => {
-    let logoutUrl = config?.logoutUrl;
+    dispatch({ type: "signOutStarted" });
+    let logoutUrl = configuredLogoutUrl;
     try {
       const response = await api.post("api/auth/logout", {
         context: { [SILENT_ERRORS]: true },
       }).json<{ logoutUrl?: string }>();
       logoutUrl = response.logoutUrl ?? logoutUrl;
     } catch {
-      setError("Sign out could not be confirmed by the server. Please try again.");
+      // The session may still be live on the BFF: keep it, and say so.
+      if (!disposedRef.current) dispatch({ type: "signOutFailed", error: SIGN_OUT_FAILURE });
       return;
     }
     if (!disposedRef.current) {
@@ -327,19 +479,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearLocalSession();
     }
     if (logoutUrl) window.location.assign(logoutUrl);
-  }, [clearLocalSession, config?.logoutUrl, retireInFlight]);
+  }, [clearLocalSession, configuredLogoutUrl, retireInFlight]);
+
+  const session = useMemo<AuthSession>(() => {
+    switch (state.status) {
+      case "loading":
+        return state;
+      case "configFailed":
+        return { status: "configFailed", error: state.error, retry };
+      case "unauthenticated":
+        return {
+          status: "unauthenticated",
+          mode: state.config.mode,
+          loginUrl: state.config.loginUrl,
+          error: state.error,
+        };
+      case "authenticated":
+        return {
+          status: "authenticated",
+          mode: state.config.mode,
+          principal: state.principal,
+          signOutError: state.signOutError,
+        };
+      case "lockedOut":
+        return {
+          status: "lockedOut",
+          mode: state.config.mode,
+          loginUrl: state.config.loginUrl,
+          principal: state.principal,
+          lockout: state.lockout,
+          signOutError: state.signOutError,
+        };
+    }
+  }, [retry, state]);
 
   const value = useMemo<AuthContextValue>(() => ({
-    status,
-    mode: config?.mode ?? null,
+    session,
     principal,
-    loginUrl: config?.loginUrl,
-    error,
-    lockout,
     login,
     logout,
     refreshSession,
-  }), [config, error, lockout, login, logout, principal, refreshSession, status]);
+  }), [login, logout, principal, refreshSession, session]);
 
   return (
     <AuthContext.Provider value={value}>

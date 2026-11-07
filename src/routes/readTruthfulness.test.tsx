@@ -164,7 +164,7 @@ async function settle(check: () => void) {
   });
 }
 function Authenticated({ children }: { children: ReactNode }) {
-  return useAuth().status === 'authenticated' ? children : null;
+  return useAuth().session.status === 'authenticated' ? children : null;
 }
 async function mount(Page: RouteComponent, path = '/view') {
   const parent = createRootRoute();
