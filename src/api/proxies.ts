@@ -163,6 +163,17 @@ export function mergeFormUpdatePayload(
   if (!("allowed_ws_origins" in changes)) payload.allowed_ws_origins = [];
   if (!("stream_proxy_protocol" in changes)) payload.stream_proxy_protocol = false;
   if (!("backend_proxy_protocol" in changes)) payload.backend_proxy_protocol = null;
+  // The form does not model `stream_match`, and Edge accepts it only on
+  // tcp/tcps. A save that moves the proxy to another scheme clears it (Edge
+  // reads null as "no matcher"); otherwise the PUT would be refused with no
+  // field the operator could fix.
+  if (
+    changes.backend_scheme != null &&
+    changes.backend_scheme !== "tcp" &&
+    changes.backend_scheme !== "tcps"
+  ) {
+    payload.stream_match = null;
+  }
 
   // ProxyForm does not own membership. Edge preserves the current live
   // associations only when this key is absent, so never replay a cached list.

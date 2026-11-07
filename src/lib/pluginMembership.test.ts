@@ -9,6 +9,7 @@ import { GuardVerificationError, StaleResourceError } from "@/api/conditionalWri
 import { RedactedWriteError } from "@/api/secretRedaction";
 import { markCommittedWrite } from "@/api/client";
 import { pluginWriteGuard } from "@/api/plugins";
+import { proxyFromWrite } from "@/test/proxyWrites";
 import {
   createPluginWithMembership,
   deletePluginWithMembership,
@@ -168,7 +169,11 @@ function harness(
           throw new Error(`incompatible plugin scope on ${id}`);
         }
       }
-      const next = { ...current, ...structuredClone(data), id, updated_at: stamp() } as Proxy;
+      const next: Proxy = {
+        ...proxyFromWrite(current, structuredClone(data)),
+        id,
+        updated_at: stamp(),
+      };
       proxies.set(id, next);
       for (const association of current.plugins) {
         const pluginId = association.plugin_config_id;

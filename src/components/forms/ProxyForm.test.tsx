@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mergeFormUpdatePayload } from "@/api/proxies";
 import type { Proxy, ProxyCreate } from "@/api/types";
 import { clearText, inputByLabel, inputByLabelOrNull, typeText } from "@/test/fields";
+import { selectOption } from "@/test/__tests__/harness";
 import { ProxyForm } from "./ProxyForm";
 
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn() }));
@@ -288,5 +289,252 @@ describe("ProxyForm method restriction", () => {
     await renderForm({ ...httpProxy, allowed_methods: null });
     await save();
     expect(submitted().allowed_methods).toBeNull();
+  });
+});
+
+describe("ProxyForm per-scheme fields (#655)", () => {
+  // 999 is not a status code Edge accepts: a stream proxy must not send it.
+  const breaker = {
+    failure_threshold: 5,
+    success_threshold: 3,
+    timeout_seconds: 30,
+    failure_status_codes: [999],
+    half_open_max_requests: 1,
+    trip_on_connection_errors: true,
+  };
+  const retry = {
+    max_retries: 2,
+    retryable_status_codes: [999],
+    retryable_methods: ["GET"],
+    backoff: { fixed: { delay_ms: 100 } },
+    retry_on_connect_failure: true,
+  };
+  const { failure_status_codes: _breakerCodes, ...streamBreaker } = breaker;
+  const {
+    retryable_status_codes: _retryCodes,
+    retryable_methods: _retryMethods,
+    ...tcpRetry
+  } = retry;
+  const expectNoMatchers = (body: ProxyCreate) => {
+    expect(body.circuit_breaker).toEqual(streamBreaker);
+    for (const key of ["retryable_status_codes", "retryable_methods"]) {
+      expect(body.retry ?? {}, key).not.toHaveProperty(key);
+    }
+  };
+  // Every HTTP-only setting filled in, plus an empty method restriction that
+  // the HTTP form refuses.
+  const tunedHttpProxy: Proxy = {
+    ...httpProxy,
+    listen_port: 9100,
+    backend_path: "/v2",
+    preserve_host_header: true,
+    auth_mode: "multi",
+    response_body_mode: "buffer",
+    allowed_methods: [] as unknown as Proxy["allowed_methods"],
+    allowed_ws_origins: ["https://app.example.test"],
+    websocket_idle_timeout_seconds: 120,
+    upstream_id: "orders-pool",
+    upstream_subset: "v2",
+    circuit_breaker: breaker,
+    retry,
+    pool_idle_timeout_seconds: 30,
+    pool_enable_http_keep_alive: true,
+    pool_enable_http2: true,
+    pool_tcp_keepalive_seconds: 60,
+    pool_http2_keep_alive_interval_seconds: 10,
+    pool_http2_max_concurrent_streams: 100,
+    pool_max_requests_per_connection: 1000,
+  };
+  const httpOnlyKeys = [
+    "listen_path",
+    "backend_path",
+    "strip_listen_path",
+    "preserve_host_header",
+    "auth_mode",
+    "allowed_methods",
+    "allowed_ws_origins",
+    "websocket_idle_timeout_seconds",
+    "pool_idle_timeout_seconds",
+    "pool_enable_http_keep_alive",
+    "pool_enable_http2",
+    "pool_tcp_keepalive_seconds",
+    "pool_http2_keep_alive_interval_seconds",
+    "pool_http2_max_concurrent_streams",
+    "pool_max_requests_per_connection",
+  ];
+  const sectionButton = (title: string) =>
+    Array.from(host.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes(title),
+    );
+
+  it("neither validates nor sends HTTP-only settings or retry after switching to UDP", async () => {
+    await renderForm({
+      ...tunedHttpProxy,
+      backend_read_timeout_ms: "" as unknown as number,
+      retry: { ...retry, max_retries: "" as unknown as number },
+    });
+    await save();
+    expect(submit).not.toHaveBeenCalled();
+    expect(host.textContent).toContain("Select at least one method");
+    expect(host.textContent).toContain("Read timeout is required");
+    expect(host.textContent).toContain("Max retries is required");
+
+    await selectOption("Backend Scheme", "UDP (datagram)");
+    for (const title of ["Routing Options", "Retry", "Connection Pool"]) {
+      expect(sectionButton(title), title).toBeUndefined();
+    }
+    expect(inputByLabelOrNull(host, "Read Timeout (ms)")).toBeNull();
+    expect(inputByLabelOrNull(host, "Upstream Subset")).toBeNull();
+    await save();
+    const payload = submitted();
+    for (const key of [
+      ...httpOnlyKeys,
+      "retry",
+      "backend_read_timeout_ms",
+      "backend_write_timeout_ms",
+      "upstream_subset",
+    ]) {
+      expect(payload, key).not.toHaveProperty(key);
+    }
+    // Edge's UDP relay consults the breaker on every backend dial, but never
+    // its HTTP status codes.
+    expect(payload).toMatchObject({
+      backend_scheme: "udp",
+      response_body_mode: "stream",
+      allow_path_parameters: false,
+      listen_port: 9100,
+      upstream_id: "orders-pool",
+    });
+    expectNoMatchers(payload);
+    const update = mergeFormUpdatePayload(tunedHttpProxy, payload);
+    expectNoMatchers(update);
+    expect(update).toMatchObject({
+      allowed_methods: null,
+      backend_path: null,
+      retry: null,
+      upstream_subset: null,
+      pool_idle_timeout_seconds: null,
+      websocket_idle_timeout_seconds: null,
+      allowed_ws_origins: [],
+      response_body_mode: "stream",
+    });
+  });
+
+  it("keeps the circuit breaker, retry and I/O timeouts TCP uses and drops the rest", async () => {
+    await renderForm(tunedHttpProxy);
+    await save();
+    expect(submit).not.toHaveBeenCalled();
+    expect(host.textContent).toContain("Select at least one method");
+
+    await selectOption("Backend Scheme", "TCP (raw stream)");
+    expect(sectionButton("Routing Options")).toBeUndefined();
+    expect(sectionButton("Connection Pool")).toBeUndefined();
+    expect(sectionButton("Retry")).toBeDefined();
+    await save();
+    const payload = submitted();
+    for (const key of httpOnlyKeys) expect(payload, key).not.toHaveProperty(key);
+    expect(payload).toMatchObject({
+      backend_scheme: "tcp",
+      response_body_mode: "stream",
+      backend_read_timeout_ms: 30000,
+      backend_write_timeout_ms: 30000,
+      upstream_subset: "v2",
+      retry: tcpRetry,
+    });
+    expectNoMatchers(payload);
+    const update = mergeFormUpdatePayload(tunedHttpProxy, payload);
+    expectNoMatchers(update);
+    expect(update.retry).toEqual(tcpRetry);
+    expect(update.allowed_methods).toBeNull();
+  });
+
+  it("keeps the HTTP matchers an HTTP proxy reads", async () => {
+    await renderForm({ ...tunedHttpProxy, allowed_methods: null });
+    await save();
+    const payload = submitted();
+    expect(payload.circuit_breaker).toEqual(breaker);
+    expect(payload.retry).toEqual(retry);
+  });
+
+  it("drops backend TLS settings after switching an HTTPS proxy to plain TCP", async () => {
+    const tlsProxy: Proxy = {
+      ...httpProxy,
+      backend_scheme: "https",
+      listen_port: 9100,
+      backend_tls_verify_server_cert: false,
+      backend_tls_client_cert_path: "/certs/client.pem",
+      backend_tls_client_key_path: "/certs/client.key",
+      backend_tls_server_ca_cert_path: "/certs/ca.pem",
+    };
+    await renderForm(tlsProxy);
+    await toggleSection("TLS Settings");
+    expect(inputByLabel(host, "Backend TLS Client Cert Path").value).toBe("/certs/client.pem");
+
+    await selectOption("Backend Scheme", "TCP (raw stream)");
+    expect(inputByLabelOrNull(host, "Backend TLS Client Cert Path")).toBeNull();
+    expect(inputByLabelOrNull(host, "Verify backend TLS server certificate")).toBeNull();
+    await save();
+    const payload = submitted();
+    const paths = [
+      "backend_tls_client_cert_path",
+      "backend_tls_client_key_path",
+      "backend_tls_server_ca_cert_path",
+    ];
+    for (const key of paths) expect(payload, key).not.toHaveProperty(key);
+    expect(payload.backend_tls_verify_server_cert).toBe(true);
+    const update = mergeFormUpdatePayload(tlsProxy, payload);
+    for (const key of paths) expect(update[key as keyof ProxyCreate], key).toBeNull();
+    expect(update.backend_tls_verify_server_cert).toBe(true);
+  });
+
+  it("sends no backend TLS material for a passthrough TCP + TLS proxy", async () => {
+    await renderForm({
+      ...streamProxy,
+      backend_scheme: "tcps",
+      listen_port: 9100,
+      passthrough: true,
+      backend_tls_server_ca_cert_path: "/certs/ca.pem",
+    });
+    await save();
+    const payload = submitted();
+    expect(payload).toMatchObject({ backend_scheme: "tcps", passthrough: true });
+    expect(payload).not.toHaveProperty("backend_tls_server_ca_cert_path");
+  });
+
+  it("validates the circuit breaker a TCP proxy uses, without HTTP status codes", async () => {
+    await renderForm({
+      ...streamProxy,
+      listen_port: 9100,
+      circuit_breaker: { ...breaker, failure_threshold: "" as unknown as number },
+    });
+    await save();
+    expect(submit).not.toHaveBeenCalled();
+    expect(host.textContent).toContain("Failure threshold is required");
+    expect(inputByLabel(host, "Failure Threshold").value).toBe("");
+    expect(host.textContent).not.toContain("Failure Status Codes");
+  });
+
+  it("drops stream-only settings after switching a TCP proxy to HTTPS", async () => {
+    await renderForm({
+      ...streamProxy,
+      hosts: ["api.example.test"],
+      listen_port: 9100,
+      passthrough: true,
+      tcp_idle_timeout_seconds: 30,
+      stream_proxy_protocol: true,
+      backend_proxy_protocol: "v2",
+    });
+    await selectOption("Backend Scheme", "HTTPS (REST / gRPC / WebSocket, auto H2/H3)");
+    await save();
+    const payload = submitted();
+    expect(payload).toMatchObject({ backend_scheme: "https", passthrough: false });
+    for (const key of [
+      "tcp_idle_timeout_seconds",
+      "stream_proxy_protocol",
+      "backend_proxy_protocol",
+      "udp_max_response_amplification_factor",
+    ]) {
+      expect(payload, key).not.toHaveProperty(key);
+    }
   });
 });
