@@ -53,7 +53,9 @@ export function longRunningClientTimeout(method: string, path: string): number {
   const route = largeUploadRoute(path);
   const response = Math.max(
     DEFAULT_RESPONSE_TIMEOUT,
-    route === 'restore' ? BACKUP_RESTORE_OPERATION_TIMEOUT : waitingRouteTimeout(method, path),
+    isBackupRestoreOperation(method, path)
+      ? BACKUP_RESTORE_OPERATION_TIMEOUT
+      : waitingRouteTimeout(method, path),
   );
   let upload = 0;
   if (method === 'POST' || method === 'PUT') {
