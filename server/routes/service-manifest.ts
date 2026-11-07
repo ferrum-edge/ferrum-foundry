@@ -4,6 +4,7 @@ import type {
   FastifyRequest,
   FastifyServerOptions,
 } from 'fastify';
+import { isNamespaceName } from '../../shared/namespace.js';
 import { requireAdminAuth } from '../auth.js';
 import { serviceManifestSchema } from '../service-manifest-schema.js';
 import {
@@ -16,7 +17,6 @@ import {
 
 const ABSOLUTE_URL_ORIGIN_PATTERN = /^https?:\/\/[^/]+/;
 const ASCII_PERCENT_ESCAPE_PATTERN = /%([0-7][0-9a-f])/gi;
-const NAMESPACE_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$/;
 const JSON_CONTENT_TYPE_PATTERN = /^application\/json(?:\s*;|$)/i;
 
 const PREVIEW_PATH = '/api/service-manifest/preview';
@@ -142,7 +142,7 @@ const serviceManifestPlugin: FastifyPluginAsync = async (fastify) => {
       const count = request.raw.rawHeaders.filter((value, index) => index % 2 === 0
         && value.toLowerCase() === 'x-ferrum-namespace').length;
       if (count !== 1 || typeof namespace !== 'string'
-        || !NAMESPACE_PATTERN.test(namespace)) {
+        || !isNamespaceName(namespace)) {
         return reply.status(400).send({ error: 'A single namespace binding is required' });
       }
       const principal = request.authPrincipal;

@@ -8,12 +8,14 @@ import {
   list,
   remove,
   update,
+  validateNamespaceDescription,
   validateNamespaceName,
   NAMESPACE_NAME_MAX_LENGTH,
 } from "./namespaces";
 
 const REQUIRED_PATTERN = /required/;
 const LENGTH_254_PATTERN = /254/;
+const START_WITH_LETTER_PATTERN = /must start with a letter or digit/;
 const API_PROXY_NAMESPACES_STAGING_PATTERN = /\/api\/proxy\/namespaces\/staging$/;
 const API_PROXY_NAMESPACES_PATTERN = /\/api\/proxy\/namespaces$/;
 const API_PROXY_NAMESPACES_QA_PATTERN = /\/api\/proxy\/namespaces\/qa$/;
@@ -62,6 +64,20 @@ describe("validateNamespaceName", () => {
     expect(validateNamespaceName("tenant@corp")).not.toBeNull();
     expect(validateNamespaceName("émeraude")).not.toBeNull();
   });
+});
+
+it("reports the BFF's name refusals with the form's own messages", () => {
+  // Length is reported before the grammar, even for a long invalid name.
+  expect(validateNamespaceName("-".repeat(NAMESPACE_NAME_MAX_LENGTH + 1))).toMatch(LENGTH_254_PATTERN);
+  expect(validateNamespaceName("a\n")).toMatch(START_WITH_LETTER_PATTERN);
+});
+
+it("reports the BFF's description refusals with the form's own messages", () => {
+  expect(validateNamespaceDescription(`\u0085${"😀".repeat(1024)}\u0085`)).toBeNull();
+  expect(validateNamespaceDescription("😀".repeat(1025)))
+    .toBe("Namespace description must be at most 1024 characters");
+  expect(validateNamespaceDescription("\ud800"))
+    .toBe("Namespace description must contain valid Unicode characters");
 });
 
 it("compares descriptions using Edge whitespace rules without losing omission or BOM", () => {

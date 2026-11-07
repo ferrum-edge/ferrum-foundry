@@ -4,6 +4,7 @@ import { loadCaBundle } from './ca.js';
 import { parseCidr } from './cidr.js';
 import { GATEWAY_TARGET_HEADER } from './gateway-target.js';
 import { isLoopbackAdminOrigin, mayCarrySecret } from '../shared/admin-origin.js';
+import { isNamespaceName } from '../shared/namespace.js';
 import {
   DEFAULT_RESPONSE_TIMEOUT,
   DEFAULT_UPLOAD_TIMEOUT,
@@ -107,7 +108,6 @@ const MIN_SECRET_LENGTH = 32;
  */
 export const MIN_GATEWAY_CONNECTION_HEADROOM = 16;
 const DEFAULT_GATEWAY_CONNECTION_HEADROOM = 64;
-const NAMESPACE_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$/;
 /** The only spelling of a grant for every namespace. */
 export const NAMESPACE_WILDCARD = '*';
 const HEADER_NAME_PATTERN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
@@ -236,7 +236,7 @@ function parseNamespaceGrants(entries: readonly string[], name: string): string[
     throw new Error(`${name} must not combine ${NAMESPACE_WILDCARD} with namespace names`);
   }
   for (const namespace of values) {
-    if (!NAMESPACE_PATTERN.test(namespace)) {
+    if (!isNamespaceName(namespace)) {
       throw new Error(`${name} contains an invalid namespace`);
     }
   }

@@ -1,12 +1,14 @@
 import { createHash } from 'node:crypto';
 import { Response } from 'undici';
+import {
+  isNamespaceName,
+  NAMESPACE_DESCRIPTION_MAX_LENGTH,
+  namespaceDescriptionProblem,
+} from '../shared/namespace.js';
 import type { AuthPrincipal } from './auth-types.js';
 
-const OUTER_WHITE_SPACE_PATTERN = /^\p{White_Space}+|\p{White_Space}+$/gu;
 const PAGINATION_INTEGER_PATTERN = /^\+?\d+(?![\s\S])/;
 
-// Absolute end assertion: JS `$` alone also matches before a final newline.
-const NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}(?![\s\S])/;
 const PAGE_SIZE = 1000;
 const PAGE_BYTES = 1024 * 1024;
 
@@ -31,7 +33,7 @@ export function authorizeRegistryPath(path: string, method: string, principal: A
   const collection = path === '/namespaces';
   const name = path.slice('/namespaces/'.length);
   if (!(collection ? ['GET', 'POST'] : ['GET', 'PUT', 'DELETE']).includes(method)
-    || (!collection && !NAME_PATTERN.test(name))) {
+    || (!collection && !isNamespaceName(name))) {
     throw new RegistryRequestError(400, 'Unsupported namespace registry operation');
   }
   if (method !== 'GET' && principal.role !== 'admin') {
@@ -97,7 +99,7 @@ export function authorizeRegistryBody(bytes: Buffer, method: string, principal: 
   }
   const body = value as Record<string, unknown>;
   const hasName = Object.hasOwn(body, 'name');
-  if ((method === 'POST' || hasName) && (typeof body.name !== 'string' || !NAME_PATTERN.test(body.name))) {
+  if ((method === 'POST' || hasName) && !isNamespaceName(body.name)) {
     throw new RegistryRequestError(400, 'Invalid namespace name');
   }
   if (hasName && !registryNameAllowed(principal, body.name as string)) {
@@ -108,17 +110,15 @@ export function authorizeRegistryBody(bytes: Buffer, method: string, principal: 
     throw new RegistryRequestError(400, 'Invalid namespace description');
   }
   // Edge trims descriptions and counts Unicode scalar values, not UTF-8 bytes.
+  // The check only refuses: the original description is what is forwarded.
   if (typeof body.description === 'string') {
-    const characters = [...body.description];
-    if (characters.some((character) => {
-      const code = character.codePointAt(0)!;
-      return code >= 0xd800 && code <= 0xdfff;
-    })) throw new RegistryRequestError(400, 'Invalid namespace description');
-    // Rust str::trim uses Unicode White_Space (unlike JS trim, which also
-    // strips BOM and does not strip NEXT LINE).
-    const trimmed = body.description.replace(OUTER_WHITE_SPACE_PATTERN, '');
-    if ([...trimmed].length > 1024) {
-      throw new RegistryRequestError(400, 'Namespace description exceeds 1024 characters');
+    const problem = namespaceDescriptionProblem(body.description);
+    if (problem === 'invalid-unicode') throw new RegistryRequestError(400, 'Invalid namespace description');
+    if (problem === 'too-long') {
+      throw new RegistryRequestError(
+        400,
+        `Namespace description exceeds ${NAMESPACE_DESCRIPTION_MAX_LENGTH} characters`,
+      );
     }
   }
   // Forward exactly the inspected meaning, including omission vs null. This
@@ -288,7 +288,7 @@ async function scanGrantedNames(
     const legacy = Array.isArray(page);
     const envelope = page as { data?: unknown; pagination?: { offset?: unknown; total?: unknown } } | null;
     const data = legacy ? page : envelope?.data;
-    if (!Array.isArray(data) || data.some((name) => typeof name !== 'string' || !NAME_PATTERN.test(name))) {
+    if (!Array.isArray(data) || data.some((name) => !isNamespaceName(name))) {
       throw new Error('Invalid namespace list');
     }
     let consistent = true;
