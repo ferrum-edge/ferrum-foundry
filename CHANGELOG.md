@@ -205,6 +205,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The browser session is one explicit state (`loading`, `configFailed`,
+  `unauthenticated`, `authenticated` or `lockedOut`) driven by a reducer in
+  `src/stores/auth.tsx` (#656). A failed authentication-config load no longer
+  shows the development-token form, which a trusted-proxy (SSO) deployment
+  refuses: it shows the error and a Retry action that reloads the config and
+  session. An error from an earlier step (a rejected token, a failed session
+  check or sign-out) no longer carries over to a later sign-in page. A sign-out
+  the BFF does not confirm now keeps the workspace and says so at the top of
+  the page content (`AuthSessionBanner`, which replaces `AuthLockoutBanner`).
 - A backup download's browser deadline is the BFF's backup budget (at least
   120 s) plus the 5 s transport margin, 125 s at the shipped defaults, as a
   restore's already is. It was a fixed 120 s, the same instant the BFF would

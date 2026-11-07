@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthProvider, useAuth } from "@/stores/auth";
 import { api, setCsrfToken, SILENT_ERRORS } from "@/api/client";
 import { BasedRequest, button, click, createHarness, fill, settle } from "@/test/__tests__/harness";
-import { AuthLockoutBanner } from "./AuthLockoutBanner";
+import { AuthSessionBanner } from "./AuthSessionBanner";
 import { LoginGate } from "./LoginGate";
 
 let ui: ReturnType<typeof createHarness>;
@@ -11,6 +11,7 @@ let mode: "static" | "trusted-proxy";
 let loginUrl: string | undefined;
 let sessionStatus: number;
 let configStatus: number;
+let logoutStatus: number;
 let requests: Request[];
 let completeLogin: (response: Response) => void;
 let deferSession: boolean;
@@ -34,6 +35,7 @@ beforeEach(() => {
   loginUrl = undefined;
   sessionStatus = 401;
   configStatus = 200;
+  logoutStatus = 200;
   deferSession = false;
   lockoutMarked = true;
   refusalMarked = false;
@@ -73,6 +75,9 @@ beforeEach(() => {
         headers: marked ? { "x-ferrum-auth-layer": "bff" } : {},
       });
     }
+    if (path === "/api/auth/logout") {
+      return Response.json({}, { status: logoutStatus });
+    }
     if (path === "/api/auth/login") {
       return new Promise<Response>((resolve) => { completeLogin = resolve; });
     }
@@ -91,6 +96,11 @@ afterEach(async () => {
 function Recheck() {
   const { refreshSession } = useAuth();
   return <button type="button" onClick={() => void refreshSession()}>Recheck</button>;
+}
+
+function SignOut() {
+  const { logout } = useAuth();
+  return <button type="button" onClick={() => void logout()}>Sign out</button>;
 }
 
 function Probe() {
@@ -207,7 +217,7 @@ describe("LoginGate session exchange", () => {
     mode = "trusted-proxy";
     sessionStatus = 200;
     await ui.render(
-      <AuthProvider><LoginGate><AuthLockoutBanner /><h2>Protected workspace</h2><Recheck /></LoginGate></AuthProvider>,
+      <AuthProvider><LoginGate><AuthSessionBanner /><h2>Protected workspace</h2><Recheck /></LoginGate></AuthProvider>,
     );
     await settle(() => expect(ui.host.textContent).toContain("Protected workspace"));
     expect(ui.host.querySelector('[role="alert"]')).toBeNull();
@@ -225,7 +235,7 @@ describe("LoginGate session exchange", () => {
     mode = "trusted-proxy";
     sessionStatus = 200;
     await ui.render(
-      <AuthProvider><LoginGate><AuthLockoutBanner /><h2>Protected workspace</h2><Recheck /></LoginGate></AuthProvider>,
+      <AuthProvider><LoginGate><AuthSessionBanner /><h2>Protected workspace</h2><Recheck /></LoginGate></AuthProvider>,
     );
     await settle(() => expect(ui.host.textContent).toContain("Protected workspace"));
     sessionStatus = 429;
@@ -243,7 +253,7 @@ describe("LoginGate session exchange", () => {
     sessionStatus = 200;
     await ui.render(
       <AuthProvider>
-        <LoginGate><AuthLockoutBanner /><h2>Protected workspace</h2><Recheck /><Probe /></LoginGate>
+        <LoginGate><AuthSessionBanner /><h2>Protected workspace</h2><Recheck /><Probe /></LoginGate>
       </AuthProvider>,
     );
     await settle(() => expect(ui.host.textContent).toContain("Protected workspace"));
@@ -316,6 +326,146 @@ describe("LoginGate session exchange", () => {
     await mount();
     await settle(() => expect(ui.host.textContent).toContain("Unable to load the Foundry authentication configuration."));
     expect(ui.host.textContent).not.toContain("Protected workspace");
+  });
+
+  // #656: an SSO deployment whose config read fails must not be offered the
+  // development-token form, whose sign-in it would refuse.
+  it("offers only a retry when a trusted-proxy deployment's config fails to load", async () => {
+    mode = "trusted-proxy";
+    loginUrl = "https://identity.example.test/login";
+    configStatus = 403;
+    refusalMarked = true;
+    await mount();
+    await settle(() => expect(button("Retry")).toBeTruthy());
+    expect(ui.host.querySelector('[role="alert"]')?.textContent)
+      .toBe("Unable to load the Foundry authentication configuration.");
+    expect(ui.host.querySelector("form")).toBeNull();
+    expect(ui.host.querySelector("input")).toBeNull();
+    expect(ui.host.textContent).not.toContain("Local development sign in");
+    expect(ui.host.textContent).not.toContain("Continue with SSO");
+    expect(ui.host.textContent).not.toContain("Protected workspace");
+
+    // The retry reloads the config and shows the deployment's own sign-in.
+    configStatus = 200;
+    await click("Retry");
+    await settle(() => expect(button("Continue with SSO")).toBeTruthy());
+    expect(ui.host.querySelector("input")).toBeNull();
+    expect(ui.host.querySelector('[role="alert"]')).toBeNull();
+    expect(requests.filter((request) => new URL(request.url).pathname === "/api/auth/config")).toHaveLength(2);
+  });
+
+  it("recovers a signed-in session when a retried config load succeeds", async () => {
+    mode = "trusted-proxy";
+    configStatus = 403;
+    sessionStatus = 200;
+    await mount();
+    await settle(() => expect(button("Retry")).toBeTruthy());
+    expect(ui.host.textContent).not.toContain("Protected workspace");
+    configStatus = 200;
+    await click("Retry");
+    await settle(() => expect(ui.host.textContent).toBe("Protected workspace"));
+  });
+
+  it("does not carry a rejected token's error to the next sign-in page", async () => {
+    await ui.render(
+      <AuthProvider><LoginGate><h2>Protected workspace</h2><SignOut /></LoginGate></AuthProvider>,
+    );
+    await settle(() => expect(ui.host.querySelector("input")).not.toBeNull());
+    await fill(ui.host.querySelector("input")!, "rejected-fixture");
+    await submit();
+    await settle(() => expect(requests.some((request) => request.method === "POST")).toBe(true));
+    await act(async () => completeLogin(Response.json({}, { status: 401 })));
+    await settle(() => expect(ui.host.querySelector('[role="alert"]')?.textContent).toBe("The token was rejected."));
+
+    await fill(ui.host.querySelector("input")!, "corrected-fixture");
+    await submit();
+    await settle(() => expect(requests.filter((request) => request.method === "POST")).toHaveLength(2));
+    await act(async () => completeLogin(session()));
+    await settle(() => expect(ui.host.textContent).toContain("Protected workspace"));
+
+    await click("Sign out");
+    await settle(() => expect(ui.host.textContent).toContain("Local development sign in"));
+    expect(ui.host.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it("shows a failed sign-out over the workspace, then not on the sign-in page", async () => {
+    sessionStatus = 200;
+    logoutStatus = 500;
+    await ui.render(
+      <AuthProvider>
+        <LoginGate><AuthSessionBanner /><h2>Protected workspace</h2><Recheck /><SignOut /></LoginGate>
+      </AuthProvider>,
+    );
+    await settle(() => expect(ui.host.textContent).toContain("Protected workspace"));
+    expect(ui.host.querySelector('[role="alert"]')).toBeNull();
+
+    await click("Sign out");
+    await settle(() => expect(ui.host.querySelector('[role="alert"]')?.textContent)
+      .toContain("Sign out could not be confirmed by the server. Please try again."));
+    // The BFF may still hold the session, so the workspace stays.
+    expect(ui.host.textContent).toContain("Protected workspace");
+
+    // The session then ends: the sign-in page starts without the old error.
+    sessionStatus = 401;
+    await click("Recheck");
+    await settle(() => expect(ui.host.textContent).toContain("Local development sign in"));
+    expect(ui.host.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it("keeps a failed sign-out's notice through further locked-out session checks", async () => {
+    mode = "trusted-proxy";
+    sessionStatus = 200;
+    await ui.render(
+      <AuthProvider>
+        <LoginGate><AuthSessionBanner /><h2>Protected workspace</h2><Recheck /><SignOut /></LoginGate>
+      </AuthProvider>,
+    );
+    await settle(() => expect(ui.host.textContent).toContain("Protected workspace"));
+    const alerts = () => [...ui.host.querySelectorAll('[role="alert"]')].map((alert) => alert.textContent);
+    const lockedOut = "Too many failed sign-in attempts from this address. Try again in 30 seconds.";
+    const notSignedOut = "Sign out could not be confirmed by the server. Please try again.";
+
+    sessionStatus = 429;
+    await click("Recheck");
+    await settle(() => expect(alerts()).toHaveLength(1));
+    expect(alerts()[0]).toContain(lockedOut);
+
+    logoutStatus = 429;
+    await click("Sign out");
+    await settle(() => expect(alerts()).toHaveLength(2));
+
+    // Another locked-out check confirms nothing about the sign-out.
+    const before = requests.length;
+    await click("Recheck");
+    await settle(() => expect(requests.length - before).toBe(1));
+    await settle(() => expect(alerts()).toHaveLength(2));
+    expect(alerts()[0]).toContain(lockedOut);
+    expect(alerts()[1]).toContain(notSignedOut);
+    expect(ui.host.textContent).toContain("Protected workspace");
+
+    // A successful session check clears both.
+    sessionStatus = 200;
+    await click("Recheck");
+    await settle(() => expect(alerts()).toHaveLength(0));
+    expect(ui.host.textContent).toContain("Protected workspace");
+  });
+
+  it("clears a failed sign-out's notice when a retried sign-out succeeds", async () => {
+    sessionStatus = 200;
+    logoutStatus = 500;
+    await ui.render(
+      <AuthProvider>
+        <LoginGate><AuthSessionBanner /><h2>Protected workspace</h2><SignOut /></LoginGate>
+      </AuthProvider>,
+    );
+    await settle(() => expect(ui.host.textContent).toContain("Protected workspace"));
+    await click("Sign out");
+    await settle(() => expect(ui.host.querySelector('[role="alert"]')).not.toBeNull());
+    logoutStatus = 200;
+    sessionStatus = 401;
+    await click("Sign out");
+    await settle(() => expect(ui.host.textContent).toContain("Local development sign in"));
+    expect(ui.host.querySelector('[role="alert"]')).toBeNull();
   });
 });
 

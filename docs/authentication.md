@@ -571,6 +571,25 @@ every request already in flight and aborts pending session reads. As a result:
 A `401` for a request sent after the current session was accepted still signs
 the tab out.
 
+### Sign-in states
+
+The browser's session is exactly one of `loading`, `configFailed`,
+`unauthenticated` (with the sign-in mode), `authenticated`, or `lockedOut`
+(`AuthSession` in `src/stores/auth.tsx`, moved only by its reducer):
+
+- The sign-in page depends on the mode `/api/auth/config` names. Until that
+  read succeeds the mode is unknown, so no sign-in form is shown. If it fails,
+  the page shows the error and a **Retry** action that sends the config and
+  session reads again; it never falls back to the development-token form,
+  which a trusted-proxy deployment would refuse.
+- A sign-in page shows only the failure of its own last step (a rejected token,
+  a failed session check, or a lockout). Every transition clears it, so an
+  error from an earlier session never appears on a later sign-in page.
+- A sign-out the BFF does not confirm keeps the session (the BFF may still hold
+  it) and shows "Not signed out" at the top of the page content, beside any
+  lockout notice. It clears on the next sign-out attempt or successful session
+  check.
+
 ### Gateway target binding
 
 With `FERRUM_ALLOW_RUNTIME_SETTINGS=true`, an administrator can point the BFF

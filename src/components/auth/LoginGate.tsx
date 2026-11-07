@@ -5,22 +5,47 @@ import { Card } from "@/components/ui/Card";
 import { BrandMark } from "@/components/layout/BrandMark";
 
 export function LoginGate({ children }: { children: ReactNode }) {
-  const { status, mode, loginUrl, error, login, refreshSession } = useAuth();
+  const { session, login, refreshSession } = useAuth();
   const [input, setInput] = useState("");
   const [showSecret, setShowSecret] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  // A lockout while signed in is shown by `AuthLockoutBanner` inside the
-  // workspace, which stays mounted.
-  if (status === "authenticated") return <>{children}</>;
+  // A lockout or failed sign-out while signed in is shown by
+  // `AuthSessionBanner` inside the workspace, which stays mounted.
+  if (session.status === "authenticated" || (session.status === "lockedOut" && session.principal)) {
+    return <>{children}</>;
+  }
 
-  if (status === "loading") {
+  if (session.status === "loading") {
     return (
       <div className="min-h-screen flex items-center justify-center bg-bg-primary">
         <p className="text-sm text-text-muted" role="status">Checking your session…</p>
       </div>
     );
   }
+
+  // The sign-in mode is unknown, so neither sign-in form can be offered: a
+  // trusted-proxy deployment has no development token to accept.
+  if (session.status === "configFailed") {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-6 bg-bg-primary px-4">
+        <BrandMark size="lg" />
+        <Card className="w-full max-w-md">
+          <h1 className="text-lg font-semibold text-text-primary mb-1">Sign-in is unavailable</h1>
+          <p className="text-text-muted text-sm mb-6">
+            Foundry could not load its sign-in configuration, so it cannot tell which sign-in to offer.
+          </p>
+          <p className="mb-4 text-sm text-danger" role="alert">{session.error}</p>
+          <Button className="w-full" onClick={session.retry}>
+            Retry
+          </Button>
+        </Card>
+      </div>
+    );
+  }
+
+  const { mode, loginUrl } = session;
+  const notice = session.status === "lockedOut" ? session.lockout : session.error;
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -46,7 +71,7 @@ export function LoginGate({ children }: { children: ReactNode }) {
           <p className="text-text-muted text-sm mb-6">
             Your organization&apos;s identity provider did not supply a valid Foundry session.
           </p>
-          {error && <p className="mb-4 text-sm text-danger" role="alert">{error}</p>}
+          {notice && <p className="mb-4 text-sm text-danger" role="alert">{notice}</p>}
           {loginUrl ? (
             <Button className="w-full" onClick={() => window.location.assign(loginUrl)}>
               Continue with SSO
@@ -71,7 +96,7 @@ export function LoginGate({ children }: { children: ReactNode }) {
           HttpOnly session and is never saved in browser storage.
         </p>
 
-        {error && <p className="mb-4 text-sm text-danger" role="alert">{error}</p>}
+        {notice && <p className="mb-4 text-sm text-danger" role="alert">{notice}</p>}
         <form onSubmit={onSubmit} className="space-y-4">
           <div className="flex min-w-0 flex-col gap-1.5">
             <label htmlFor="bff-auth-token" className="text-text-secondary text-sm font-medium">
