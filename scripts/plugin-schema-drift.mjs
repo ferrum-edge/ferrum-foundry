@@ -25,6 +25,7 @@ import {
   PLUGIN_SCHEMA_PROVENANCE,
   PLUGIN_SCHEMA_SPEC,
 } from "../src/lib/pluginSchemas.ts";
+import { fetchPinnedSource } from "./pinned-source.mjs";
 
 const SCHEMA_COMPONENT_KEY_PATTERN = /^ {4}[A-Za-z0-9_]+:/;
 
@@ -53,32 +54,6 @@ export function extractSchemaBlock(spec, component) {
 
 export function digestOf(block) {
   return createHash("sha256").update(block, "utf8").digest("hex");
-}
-
-const TRANSPORT_FAILURE = /ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|fetch failed/i;
-
-async function fetchSpec(ref) {
-  const url =
-    `https://raw.githubusercontent.com/${PLUGIN_SCHEMA_SPEC.repository}/` +
-    `${ref}/${PLUGIN_SCHEMA_SPEC.path}`;
-
-  // A registry outage must not be reported as schema drift, and it must not
-  // pass either. Transport failures are retried; an HTTP error is fatal.
-  let lastError;
-  for (let attempt = 1; attempt <= 4; attempt += 1) {
-    try {
-      const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
-      if (!response.ok) {
-        throw new Error(`${url} returned ${response.status}`);
-      }
-      return await response.text();
-    } catch (error) {
-      lastError = error;
-      if (!TRANSPORT_FAILURE.test(String(error?.message ?? error))) throw error;
-      await new Promise((resolve) => setTimeout(resolve, attempt * 2_000));
-    }
-  }
-  throw new Error(`Could not fetch ${url}: ${lastError?.message ?? "unknown error"}`);
 }
 
 /** Compare every pinned component against `spec`. Returns the findings. */
@@ -120,7 +95,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     readFileSync(new URL("../docs/compatibility.json", import.meta.url), "utf8"),
   );
   const ref = process.env.FERRUM_SPEC_REF?.trim() || pairing.edge.source_commit;
-  const spec = await fetchSpec(ref);
+  const spec = await fetchPinnedSource(PLUGIN_SCHEMA_SPEC, ref);
   const findings = compareProvenance(spec);
   const drifted = findings.filter((finding) => finding.status !== "unchanged");
 
