@@ -58,7 +58,10 @@ describe('RequestPermits', () => {
     permits.hold(held, heldReply, 'subject-a');
     expect(onRelease).not.toHaveBeenCalled();
 
+    // The raw close alone returns it: a completed body can lose its socket
+    // without either terminal hook firing.
     raw.emit('close');
+    expect(onRelease).toHaveBeenCalledTimes(1);
     permits.release(held); // onResponse
     permits.release(held); // onRequestAbort
     raw.emit('close');
@@ -116,6 +119,8 @@ describe('RequestPermits', () => {
     expect(count.heldBy('a')).toBe(2);
 
     firstReply.raw.emit('close');
+    expect(count.heldBy('a')).toBe(1);
+    expect(count.total).toBe(1);
     permits.release(first);
     expect(count.heldBy('a')).toBe(1);
     expect(count.total).toBe(1);
