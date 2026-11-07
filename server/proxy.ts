@@ -2,6 +2,7 @@ import { Readable, Transform, type TransformCallback } from 'node:stream';
 import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { fetch, type RequestInit, type Response } from 'undici';
+import { PermitCount, RequestPermits } from './admission.js';
 import { requireAdminAuth, requireNamespaceCeiling } from './auth.js';
 import { loadConfig } from './config.js';
 import { gatewayTargetId, rejectStaleGatewayTarget, stampGatewayTarget } from './gateway-target.js';
@@ -330,18 +331,12 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
   // per-subject share, reserved atomically with the global permits before a
   // token is signed or the gateway is contacted, so one authenticated
   // principal cannot hold every permit while other tenants are refused.
-  let activeUploads = 0;
-  let activeLargeUploads = 0;
-  const uploadsBySubject = new Map<string, number>();
-  const largeUploadsBySubject = new Map<string, number>();
-  const reservedUploads = new WeakMap<FastifyRequest, { subject?: string; large: boolean }>();
-
-  const decrementSubject = (counts: Map<string, number>, subject: string | undefined) => {
-    if (subject === undefined) return;
-    const remaining = (counts.get(subject) ?? 1) - 1;
-    if (remaining > 0) counts.set(subject, remaining);
-    else counts.delete(subject);
-  };
+  const uploads = new PermitCount();
+  const largeUploads = new PermitCount();
+  const uploadPermits = new RequestPermits<{ subject?: string; large: boolean }>(({ subject, large }) => {
+    if (large) largeUploads.give(subject);
+    uploads.give(subject);
+  });
 
   const reserveUpload = async (request: FastifyRequest, reply: Parameters<typeof requireAdminAuth>[1]) => {
     if (!carriesRequestBody(request)) return;
@@ -357,65 +352,37 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
     // reserves nothing. The global pools are reported first: when the whole
     // pool is exhausted the refusal is `all`/`large` even for a subject that
     // is also at its own share.
-    if (activeUploads >= config.maxActiveUploads) return refuse('all');
-    if (subject !== undefined && (uploadsBySubject.get(subject) ?? 0) >= config.maxUploadsPerPrincipal) {
+    if (uploads.total >= config.maxActiveUploads) return refuse('all');
+    if (subject !== undefined && uploads.heldBy(subject) >= config.maxUploadsPerPrincipal) {
       return refuse('principal');
     }
     if (large) {
-      if (activeLargeUploads >= config.maxLargeUploads) return refuse('large');
-      if (subject !== undefined && (largeUploadsBySubject.get(subject) ?? 0) >= config.maxLargeUploadsPerPrincipal) {
+      if (largeUploads.total >= config.maxLargeUploads) return refuse('large');
+      if (subject !== undefined && largeUploads.heldBy(subject) >= config.maxLargeUploadsPerPrincipal) {
         return refuse('principal_large');
       }
-      activeLargeUploads += 1;
-      if (subject !== undefined) {
-        largeUploadsBySubject.set(subject, (largeUploadsBySubject.get(subject) ?? 0) + 1);
-      }
+      largeUploads.take(subject);
     }
-    activeUploads += 1;
-    if (subject !== undefined) {
-      uploadsBySubject.set(subject, (uploadsBySubject.get(subject) ?? 0) + 1);
-    }
-    reservedUploads.set(request, { subject, large });
-    // A completed request body can lose its response socket without triggering
-    // either Fastify terminal hook. Install this at reservation lifetime, not
-    // inside forwarding, and retain it through every handler cleanup path.
-    reply.raw.once('close', () => releaseUpload(request));
-    // A socket that closed before the listener existed never emits again, and
-    // a leaked permit would now shrink that subject's share until restart.
-    if (reply.raw.destroyed) releaseUpload(request);
-  };
-
-  // The release is keyed off WeakMap membership, so a request that holds one
-  // or both permits gives back exactly what it took, exactly once, whichever
-  // terminal hook or raw response close fires first.
-  const releaseUpload = (request: FastifyRequest) => {
-    const held = reservedUploads.get(request);
-    if (held === undefined) return;
-    reservedUploads.delete(request);
-    if (held.large) {
-      activeLargeUploads = Math.max(0, activeLargeUploads - 1);
-      decrementSubject(largeUploadsBySubject, held.subject);
-    }
-    activeUploads = Math.max(0, activeUploads - 1);
-    decrementSubject(uploadsBySubject, held.subject);
+    uploads.take(subject);
+    // Returned exactly once, whichever terminal hook or raw response close
+    // fires first, including for a socket that had already closed.
+    uploadPermits.hold(request, reply, { subject, large });
   };
 
   // Reads never enter the upload pools, so long-running ones get their own:
   // a global bound, and a per-subject share of it so one identity cannot hold
   // the whole allowance. Like the upload pools it never queues; a full pool
   // answers 429 before a token is signed or the gateway is contacted.
-  let activeLongReads = 0;
-  const longReadsBySubject = new Map<string, number>();
-  const reservedLongReads = new WeakMap<FastifyRequest, string>();
+  const longReads = new PermitCount();
+  const longReadPermits = new RequestPermits<string>((subject) => longReads.give(subject));
 
   const reserveLongRead = async (request: FastifyRequest, reply: Parameters<typeof requireAdminAuth>[1]) => {
     const subject = request.authPrincipal?.subject;
     if (subject === undefined || !isLongRead(request)) return;
     const config = loadConfig();
-    const held = longReadsBySubject.get(subject) ?? 0;
-    const scope = held >= config.maxLongReadsPerPrincipal
+    const scope = longReads.heldBy(subject) >= config.maxLongReadsPerPrincipal
       ? 'principal'
-      : activeLongReads >= config.maxActiveLongReads ? 'all' : undefined;
+      : longReads.total >= config.maxActiveLongReads ? 'all' : undefined;
     if (scope) {
       return reply.status(429).header('retry-after', '1').send({
         error: 'Too Many Requests',
@@ -423,29 +390,13 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
         scope,
       });
     }
-    activeLongReads += 1;
-    longReadsBySubject.set(subject, held + 1);
-    reservedLongReads.set(request, subject);
-    reply.raw.once('close', () => releaseLongRead(request));
-    // A socket that closed before the listener existed never emits again.
-    if (reply.raw.destroyed) releaseLongRead(request);
-  };
-
-  // Keyed off WeakMap membership, so the permit is returned exactly once
-  // whichever terminal hook or raw response close fires first.
-  const releaseLongRead = (request: FastifyRequest) => {
-    const subject = reservedLongReads.get(request);
-    if (subject === undefined) return;
-    reservedLongReads.delete(request);
-    activeLongReads = Math.max(0, activeLongReads - 1);
-    const remaining = (longReadsBySubject.get(subject) ?? 1) - 1;
-    if (remaining > 0) longReadsBySubject.set(subject, remaining);
-    else longReadsBySubject.delete(subject);
+    longReads.take(subject);
+    longReadPermits.hold(request, reply, subject);
   };
 
   const releaseCapacity = (request: FastifyRequest) => {
-    releaseUpload(request);
-    releaseLongRead(request);
+    uploadPermits.release(request);
+    longReadPermits.release(request);
   };
 
   fastify.addHook('onResponse', async (request) => releaseCapacity(request));
