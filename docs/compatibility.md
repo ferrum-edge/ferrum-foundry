@@ -562,6 +562,9 @@ Moving the Edge pin is a re-qualification, not a tag edit:
 4. Review the actual hosted schema producer artifact before changing schema
    refs/digests, and adopt only a qualified, published canonical contract tag.
    Record pending qualification until every existing gate passes.
+   `PLUGIN_SCHEMA_SPEC.ref` must become the new `edge.source_commit` even when
+   no digest changed: `scripts/plugin-schema-drift.test.mjs` and
+   `npm run check:plugin-schemas` fail until it does.
 5. Open a pull request. Every gateway-backed gate (contract, capability
    parity, starter, critical journeys, container) runs against the new image.
    A failure is a compatibility finding to review, not a test to relax.

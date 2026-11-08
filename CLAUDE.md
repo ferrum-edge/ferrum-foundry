@@ -201,10 +201,12 @@ Dark and light themes via CSS custom properties. Dark is the default.
     alongside the spec commit it was read at (`PLUGIN_SCHEMA_SPEC.ref`).
     `npm run check:plugin-schemas` (`scripts/plugin-schema-drift.mjs`) fetches
     the spec at `edge.source_commit` from `docs/compatibility.json` in the
-    Pinned Gateway Contract job and compares the digests;
-    `FERRUM_SPEC_REF=main` checks against the current upstream instead. Never
-    update a digest or `PLUGIN_SCHEMA_SPEC.ref` without re-reading the schema;
-    after re-review keep the ref equal to the checked commit.
+    Pinned Gateway Contract job and compares the digests. It also fails when
+    `PLUGIN_SCHEMA_SPEC.ref` is not the checked commit, even with every digest
+    unchanged; `FERRUM_SPEC_REF=main` checks against the current upstream
+    instead. Never update a digest or `PLUGIN_SCHEMA_SPEC.ref` without
+    re-reading the schema; after re-review keep the ref equal to the checked
+    commit.
   - Guided edits are lossless: unmodelled keys, key order, and omission/`null`
     semantics all survive. A shape the descriptors cannot model falls back to
     raw JSON with a stated reason rather than being rewritten.

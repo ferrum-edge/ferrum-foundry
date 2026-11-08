@@ -72,6 +72,32 @@ export function compareProvenance(spec, provenance = PLUGIN_SCHEMA_PROVENANCE) {
   });
 }
 
+/**
+ * The whole verdict for one checked `ref`: every component's finding, the ones
+ * that drifted, and whether the reviewed ref the descriptors record is the ref
+ * that was checked.
+ *
+ * Digest equality alone cannot prove a re-review: after a compatibility bump
+ * whose components happen not to change, every digest still matches while
+ * `PLUGIN_SCHEMA_SPEC.ref` names a commit nobody re-read, and the exported
+ * `reviewed_ref` would vouch for it. So a ref that is not the checked one fails
+ * too, as `PLUGIN_SENSITIVITY_SOURCE.commit` does in
+ * `plugin-sensitivity-drift.mjs` (issue #663). The two checks stay separate.
+ */
+export function checkSchemaPins(
+  spec,
+  ref,
+  { provenance = PLUGIN_SCHEMA_PROVENANCE, reviewedRef = PLUGIN_SCHEMA_SPEC.ref } = {},
+) {
+  const findings = compareProvenance(spec, provenance);
+  return {
+    findings,
+    drifted: findings.filter((finding) => finding.status !== "unchanged"),
+    reviewedRef,
+    refMatches: reviewedRef === ref,
+  };
+}
+
 /** Exact fetched source blocks and hashes for a hosted, serial pin review. */
 export function schemaProducerExport(spec, ref) {
   return {
@@ -96,8 +122,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   );
   const ref = process.env.FERRUM_SPEC_REF?.trim() || pairing.edge.source_commit;
   const spec = await fetchPinnedSource(PLUGIN_SCHEMA_SPEC, ref);
-  const findings = compareProvenance(spec);
-  const drifted = findings.filter((finding) => finding.status !== "unchanged");
+  const { findings, drifted, reviewedRef, refMatches } = checkSchemaPins(spec, ref);
 
   const exportPath = process.env.FERRUM_SCHEMA_EXPORT_PATH;
   if (exportPath) {
@@ -105,7 +130,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       flag: "wx",
     });
   }
-  console.log(JSON.stringify({ ref, findings }, null, 2));
+  console.log(JSON.stringify({ ref, reviewed_ref: reviewedRef, findings }, null, 2));
 
   if (drifted.length > 0) {
     console.error(
@@ -122,6 +147,13 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         "Do not update the digest without re-reading the schema: the digest is " +
         "the only record of what the field set was checked against.",
     );
-    process.exit(1);
   }
+  if (!refMatches) {
+    console.error(
+      `\nPLUGIN_SCHEMA_SPEC.ref is ${reviewedRef}, but the spec was checked at ${ref}. ` +
+        "Re-read the guided descriptors' schema components at the checked ref, then " +
+        "record it in PLUGIN_SCHEMA_SPEC.ref, even when no digest changed.",
+    );
+  }
+  if (drifted.length > 0 || !refMatches) process.exit(1);
 }

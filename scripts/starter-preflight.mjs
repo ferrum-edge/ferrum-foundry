@@ -74,21 +74,35 @@ function check(name, status, detail, remedy) {
   return remedy ? { name, status, detail, remedy } : { name, status, detail };
 }
 
+/**
+ * How each secret's length is measured, in the unit the BFF measures it in
+ * (`server/config.ts`): the JWT signing key in UTF-8 bytes, the unit Ferrum
+ * Edge measures its admin JWT secret in (`validateSigningKey`), and the
+ * trusted-proxy proof in characters (`validateSecret`).
+ */
+const SECRET_LENGTHS = [
+  ["FERRUM_JWT_SECRET", (value) => Buffer.byteLength(value, "utf8"), "bytes"],
+  ["FERRUM_TRUSTED_PROXY_SECRET", (value) => value.length, "characters"],
+];
+
 /** Values that must be present and long enough to be worth anything. */
 export function checkSecrets(env) {
   const results = [];
-  for (const key of ["FERRUM_JWT_SECRET", "FERRUM_TRUSTED_PROXY_SECRET"]) {
+  for (const [key, measure, unit] of SECRET_LENGTHS) {
     const value = env[key];
     if (!value) {
       results.push(
         check(key, FAIL, "not set", `Set ${key} in .env. Generate one with: openssl rand -base64 48`),
       );
-    } else if (value.length < MIN_SECRET_LENGTH) {
+      continue;
+    }
+    const length = measure(value);
+    if (length < MIN_SECRET_LENGTH) {
       results.push(
         check(
           key,
           FAIL,
-          `${value.length} characters; the BFF requires at least ${MIN_SECRET_LENGTH}`,
+          `${length} ${unit}; the BFF requires at least ${MIN_SECRET_LENGTH}`,
           `Replace ${key} with a longer random value.`,
         ),
       );
@@ -97,7 +111,7 @@ export function checkSecrets(env) {
         check(key, FAIL, "still the placeholder from .env.example", `Generate a real ${key}.`),
       );
     } else {
-      results.push(check(key, PASS, `${value.length} characters`));
+      results.push(check(key, PASS, `${length} ${unit}`));
     }
   }
   return results;

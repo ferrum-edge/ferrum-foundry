@@ -331,11 +331,30 @@ function namespaceHasResources(name) {
     .some((r) => r.namespace === name);
 }
 
-function normalizeNamespaceDescription(description) {
-  return typeof description === 'string' ? description.trim() : '';
+// Written here rather than imported from `shared/namespace.js`, so the mock
+// stays an independent stand-in for Edge rather than an echo of the BFF.
+const NAMESPACE_DESCRIPTION_SPACE = /^\p{White_Space}$/u;
+
+/**
+ * Trim a description as Edge does (Rust `str::trim`): Unicode `White_Space`,
+ * so NEXT LINE (U+0085) is trimmed and the BOM (U+FEFF) is not. JS `trim()`
+ * differs on both. Every `White_Space` character is in the BMP.
+ */
+export function normalizeNamespaceDescription(description) {
+  if (typeof description !== 'string') return '';
+  let start = 0;
+  let end = description.length;
+  while (start < end && NAMESPACE_DESCRIPTION_SPACE.test(description[start])) start += 1;
+  while (end > start && NAMESPACE_DESCRIPTION_SPACE.test(description[end - 1])) end -= 1;
+  return description.slice(start, end);
 }
 
-function validateNamespaceBody(body, nameRequired) {
+/**
+ * Edge's namespace body rules. A description is limited to 1024 Unicode scalar
+ * values counted **after** trimming, and a lone surrogate is not a scalar
+ * value, so Edge refuses it.
+ */
+export function validateNamespaceBody(body, nameRequired) {
   const hasName = body.name !== undefined;
   if (nameRequired && !hasName) return 'name is required';
   if (hasName && (typeof body.name !== 'string' || body.name.length > 254 || !NAMESPACE_NAME_PATTERN.test(body.name))) {
@@ -343,7 +362,10 @@ function validateNamespaceBody(body, nameRequired) {
   }
   if (body.description !== undefined && body.description !== null) {
     if (typeof body.description !== 'string') return 'description must be a string or null';
-    if ([...body.description].length > 1024) return 'description must be at most 1024 characters';
+    if (!body.description.isWellFormed()) return 'description must be valid Unicode';
+    if ([...normalizeNamespaceDescription(body.description)].length > 1024) {
+      return 'description must be at most 1024 characters';
+    }
   }
   return null;
 }

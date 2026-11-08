@@ -9,11 +9,13 @@ import {
   detachDeletedPluginConfig,
   evaluateIfMatch,
   ifMatchRouteRefusal,
+  normalizeNamespaceDescription,
   provisionerFromHeaders,
   resourceEtag,
   READ_ONLY_GATEWAY_MODES,
   readOnlyModeRefusal,
   stampProvisionedBy,
+  validateNamespaceBody,
   validatePluginConfigWrite,
   validateProxyWrite,
   validateUpstreamWrite,
@@ -683,4 +685,28 @@ test("a plugin DELETE detaches its proxies, and a stale If-Match changes neither
   }
   // Another namespace's same-id association is untouched.
   assert.deepEqual(proxies.find((entry) => entry.id === "p3"), before[2]);
+});
+
+// Issue #663: the mock's namespace description rule matches Edge's, written
+// independently of shared/namespace.js.
+test("namespace descriptions are trimmed and counted as Edge does", () => {
+  // 1030 characters with 10 leading spaces is 1020 after trimming.
+  assert.equal(
+    validateNamespaceBody({ name: "team", description: `${" ".repeat(10)}${"d".repeat(1020)}` }, true),
+    null,
+  );
+  assert.equal(
+    validateNamespaceBody({ name: "team", description: "d".repeat(1025) }, true),
+    "description must be at most 1024 characters",
+  );
+  // Counted in scalar values, so an astral character is one, not two.
+  assert.equal(validateNamespaceBody({ name: "team", description: "😀".repeat(1024) }, true), null);
+  assert.equal(
+    validateNamespaceBody({ name: "team", description: "ok \ud800 not" }, true),
+    "description must be valid Unicode",
+  );
+  // NEXT LINE is Unicode White_Space and is trimmed; the BOM is not.
+  assert.equal(normalizeNamespaceDescription("\u0085 billing \u0085"), "billing");
+  assert.equal(normalizeNamespaceDescription("\ufeffbilling"), "\ufeffbilling");
+  assert.equal(normalizeNamespaceDescription(null), "");
 });
