@@ -31,7 +31,17 @@ the SHA-256 of each source component block instead:
 `openapi.yaml`, extracts each block, and compares digests. A changed or missing
 block fails, naming the component. By default the **Pinned Gateway Contract**
 CI job checks the current `edge.source_commit` from `docs/compatibility.json`.
-To check against a newer spec, set the ref:
+
+The check also fails when `PLUGIN_SCHEMA_SPEC.ref` is not the ref it checked,
+even if every digest is unchanged. After an Edge pin bump whose components did
+not change, the digests alone would still pass while the recorded ref, and the
+export's `reviewed_ref`, named a commit nobody re-read. The plugin sensitivity
+check refuses a stale `PLUGIN_SENSITIVITY_SOURCE.commit` the same way, and
+`scripts/plugin-schema-drift.test.mjs` fails until the recorded ref is the
+pinned `edge.source_commit`.
+
+To compare the digests against a newer spec, set the ref. The run then reports
+the reviewed ref as stale, as expected until the descriptors are re-read there:
 
 ```bash
 FERRUM_SPEC_REF=main npm run check:plugin-schemas

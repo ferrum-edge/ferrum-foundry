@@ -205,6 +205,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The starter preflight measures `FERRUM_JWT_SECRET` in UTF-8 bytes, as the
+  BFF and the admin JWT signer do, and reports "N bytes": a non-ASCII secret of
+  32 bytes but fewer than 32 characters no longer gets a false FAIL.
+  `FERRUM_TRUSTED_PROXY_SECRET` stays in characters, as its BFF check is
+  (#663).
+- `npm run check:plugin-schemas` also fails when `PLUGIN_SCHEMA_SPEC.ref` is
+  not the checked ref, even with every digest unchanged, and a unit test
+  requires it to equal `edge.source_commit`, as the plugin sensitivity check
+  already does for its recorded commit. A pin bump can no longer leave the
+  exported `reviewed_ref` naming a commit nobody re-read (#663).
+- The mock admin gateway trims a namespace description with Unicode
+  `White_Space` (NEXT LINE included, the BOM not), counts the 1024 limit after
+  trimming, and refuses a lone surrogate, as Ferrum Edge does (#663).
+- The dashboard and the metrics page format gateway uptime the same way
+  (`1d 0h 5m`); the metrics page used to drop a zero hour (`1d 5m`) (#663).
 - The browser session is one explicit state (`loading`, `configFailed`,
   `unauthenticated`, `authenticated` or `lockedOut`) driven by a reducer in
   `src/stores/auth.tsx` (#656). A failed authentication-config load no longer

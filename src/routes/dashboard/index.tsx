@@ -15,23 +15,12 @@ import { StatCard } from "@/components/metrics/StatCard";
 import { CircuitStateBadge } from "@/components/metrics/CircuitBreakerPanel";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { NavIcon, type NavIconName } from "@/components/ui/icons";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTime, formatUptime } from "@/lib/format";
 import { useNamespace } from "@/stores/namespace";
 import {
   getStoredMetricsRefreshInterval,
   setStoredMetricsRefreshInterval,
 } from '@/utils/metricsRefresh';
-
-/* ── Helpers ───────────────────────────────────────────────────────── */
-
-function formatUptime(seconds: number): string {
-  const d = Math.floor(seconds / 86400);
-  const h = Math.floor((seconds % 86400) / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  if (d > 0) return `${d}d ${h}h ${m}m`;
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
-}
 
 /* ── Navigation cards config ──────────────────────────────────────── */
 

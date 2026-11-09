@@ -767,9 +767,9 @@ SBOM attestations. See [Release and supply-chain gates](release-security.md).
       its own values for all four.
 - [ ] Group-to-role mapping denies by default, so an unmapped user gets no role.
 - [ ] Every non-admin identity receives an exact `X-Ferrum-Namespaces` list.
-- [ ] `FERRUM_JWT_SECRET` and `FERRUM_TRUSTED_PROXY_SECRET` are at least 32
-      characters, generated from a CSPRNG, kept in a secret store, and rotated
-      on a schedule.
+- [ ] `FERRUM_JWT_SECRET` is at least 32 UTF-8 bytes and
+      `FERRUM_TRUSTED_PROXY_SECRET` at least 32 characters, both generated from
+      a CSPRNG, kept in a secret store, and rotated on a schedule.
 - [ ] `FERRUM_JWT_SECRET` matches the gateway's `FERRUM_ADMIN_JWT_SECRET`.
 - [ ] `NODE_ENV=production` is set.
 - [ ] `FERRUM_AUTH_MODE=trusted-proxy` is set and

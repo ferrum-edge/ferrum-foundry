@@ -20,6 +20,8 @@ import {
 } from "./starter-preflight.mjs";
 
 const PLACEHOLDER_PATTERN = /placeholder/;
+const SIXTEEN_CHARACTERS = /^16 characters;/;
+const THIRTY_ONE_BYTES = /^31 bytes;/;
 const DISPOSABLE_LOCAL_STACK_PATTERN = /disposable local stack/;
 const HTTPS_PATTERN = /https/;
 const FERRUM_ALLOW_INSECURE_ADMIN_HTTP_PATTERN = /FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true/;
@@ -137,6 +139,28 @@ test("a missing, short, or placeholder secret fails", () => {
   });
   assert.equal(placeholder.status, FAIL);
   assert.match(placeholder.detail, PLACEHOLDER_PATTERN);
+});
+
+test("the JWT secret is measured in UTF-8 bytes and the proxy secret in characters", () => {
+  // The BFF and the signer measure FERRUM_JWT_SECRET in UTF-8 bytes (#663):
+  // 16 × "é" is 32 bytes but only 16 characters.
+  const accented = "é".repeat(16);
+  const [jwt, proxy] = checkSecrets({
+    FERRUM_JWT_SECRET: accented,
+    FERRUM_TRUSTED_PROXY_SECRET: accented,
+  });
+  assert.equal(jwt.status, PASS);
+  assert.equal(jwt.detail, "32 bytes");
+  // The trusted-proxy proof stays in characters, as its BFF check does.
+  assert.equal(proxy.status, FAIL);
+  assert.match(proxy.detail, SIXTEEN_CHARACTERS);
+
+  const [ascii] = checkSecrets({
+    FERRUM_JWT_SECRET: "a".repeat(31),
+    FERRUM_TRUSTED_PROXY_SECRET: "b".repeat(48),
+  });
+  assert.equal(ascii.status, FAIL);
+  assert.match(ascii.detail, THIRTY_ONE_BYTES);
 });
 
 test("a secret is never echoed, only measured", () => {
