@@ -191,6 +191,7 @@ test.describe("namespace isolation", () => {
     // The premise is that tenant A's read is in flight when the switch
     // happens: wait until the proxy has taken it rather than racing it.
     await faults.waitUntilTaken();
+    const heldUntil = Date.now() + DELAY_MS + 1_000;
     await selectNamespace(page, NAMESPACE_B);
 
     // Tenant B does not hold this id. The page reaches that conclusion only
@@ -200,8 +201,10 @@ test.describe("namespace isolation", () => {
       timeout: 40_000,
     });
 
-    // Let tenant A's held response land, then look again.
-    await page.waitForTimeout(DELAY_MS + 1_000);
+    // Let tenant A's held response land, then look again. The hold started
+    // when the proxy took the read, so only the part not already spent here
+    // is left to wait out.
+    await page.waitForTimeout(Math.max(0, heldUntil - Date.now()));
     await faults.expectAllConsumed();
     await expect(page.getByText(`${tenants[0].backend}:8081`)).toHaveCount(0);
     await expect(page.getByLabel("Name", { exact: true })).toHaveCount(0);
@@ -245,11 +248,14 @@ test.describe("namespace isolation", () => {
     // The premise is that tenant A's read is in flight when the switch
     // happens: wait until the proxy has taken it rather than racing it.
     await faults.waitUntilTaken();
+    const heldUntil = Date.now() + DELAY_MS + 1_000;
     await selectNamespace(page, NAMESPACE_B);
     await expect(page.getByLabel("Name", { exact: true })).toHaveValue(sharedName(NAMESPACE_B));
 
-    // Let tenant A's held response land, then look again.
-    await page.waitForTimeout(DELAY_MS + 1_000);
+    // Let tenant A's held response land, then look again. The hold started
+    // when the proxy took the read, so only the part not already spent here
+    // is left to wait out.
+    await page.waitForTimeout(Math.max(0, heldUntil - Date.now()));
     await faults.expectAllConsumed();
     await expect(page.getByLabel("Name", { exact: true })).toHaveValue(sharedName(NAMESPACE_B));
     await expect(page.getByText(`${sharedBackend(NAMESPACE_B)}:8081`)).toBeVisible();
