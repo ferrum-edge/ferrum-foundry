@@ -505,33 +505,6 @@ describe('streaming gateway proxy', () => {
     expect(observed.at(-1)?.url).toBe('/echo');
   });
 
-  it('does not strand a keep-alive connection when the gateway is unreachable', async () => {
-    const path = '/api/proxy/proxies/unreachable';
-    const agent = new Agent({ keepAlive: true, maxSockets: 1 });
-    try {
-      const configModule = await import('./config.js');
-      const configSpy = vi.spyOn(configModule, 'loadConfig').mockReturnValue({
-        ...configModule.loadConfig(),
-        adminUrl: 'http://127.0.0.1:1',
-      });
-      let upload: KeepAliveOutcome;
-      try {
-        upload = await keepAliveRequest(agent, 'PUT', path, Buffer.alloc(1_900_000, 'a'));
-        expect(upload.status).toBe(502);
-      } finally {
-        configSpy?.mockRestore();
-      }
-      // The next request on the same agent must be answered, not queued
-      // behind an unread upload until the server's request timeout, and on
-      // the same connection, because the BFF discarded the unread remainder.
-      const followUp = await keepAliveRequest(agent, 'GET', '/api/auth/session');
-      expect(followUp.status).toBe(200);
-      expectSameConnection(upload, followUp);
-    } finally {
-      agent.destroy();
-    }
-  });
-
   it('closes a sender that stalls after its upload was rejected unread', async () => {
     const port = (app.server.address() as AddressInfo).port;
     const started = Date.now();
@@ -1163,6 +1136,47 @@ describe('unread upload drains', () => {
         target,
       );
       expect(upload.status).toBe(400);
+      const followUp = await keepAliveRequest(agent, 'GET', '/api/auth/session', undefined, target);
+      expect(followUp.status).toBe(200);
+      expectSameConnection(upload, followUp);
+    } finally {
+      agent.destroy();
+    }
+  });
+
+  // Under the 100 ms FERRUM_WRITE_TIMEOUT of the suite above, the drain's
+  // budget (the request's remaining write budget) could run out before a
+  // loaded runner had read the 1.9 MB remainder, closing the connection the
+  // follow-up is asserted to reuse. Here only the drain's own bounds apply.
+  it('does not strand a keep-alive connection when the gateway is unreachable', async () => {
+    const agent = new Agent({ keepAlive: true, maxSockets: 1 });
+    const target = {
+      port: (lingering.server.address() as AddressInfo).port,
+      headers: lingeringHeaders,
+      timeoutMs: 30_000,
+    };
+    try {
+      const configModule = await import('./config.js');
+      const configSpy = vi.spyOn(configModule, 'loadConfig').mockReturnValue({
+        ...configModule.loadConfig(),
+        adminUrl: 'http://127.0.0.1:1',
+      });
+      let upload: KeepAliveOutcome;
+      try {
+        upload = await keepAliveRequest(
+          agent,
+          'PUT',
+          '/api/proxy/proxies/unreachable',
+          Buffer.alloc(1_900_000, 'a'),
+          target,
+        );
+        expect(upload.status).toBe(502);
+      } finally {
+        configSpy.mockRestore();
+      }
+      // The next request on the same agent must be answered, not queued
+      // behind an unread upload until the server's request timeout, and on
+      // the same connection, because the BFF discarded the unread remainder.
       const followUp = await keepAliveRequest(agent, 'GET', '/api/auth/session', undefined, target);
       expect(followUp.status).toBe(200);
       expectSameConnection(upload, followUp);
