@@ -198,12 +198,20 @@ succeeds, and the release notes name it once the release exists. The record
 survives 90 days — `retention-days: 90` in the workflow equals GitHub's maximum
 for a public repository.
 
+Every job that holds registry credentials or publishes (`docker`,
+`docker-manifest`, `create-release`) runs in the `release` environment, so a
+reviewer approves each release before anything is pushed;
+`scripts/supported-pairing.test.mjs` fails if one of them stops naming it.
+
 The workflow cannot stop someone with registry credentials from writing a tag
 directly. These controls live outside the repository and are owner settings:
 immutable-tag rules on Docker Hub for release version tags (never for `main`,
-`X.Y`, or `latest`, which must move), a protected `release` environment with
-required reviewers, and the bypass list on the tag ruleset that blocks updating
-or deleting `v*` tags.
+`X.Y`, or `latest`, which must move), the `release` environment's protection
+(required reviewers, and the Docker Hub secrets held as environment secrets
+rather than repository secrets), and the bypass list on the tag ruleset that
+blocks updating or deleting `v*` tags. Until the environment has required
+reviewers, GitHub creates it unprotected on first use and the jobs run without
+waiting.
 
 ## Coverage floors
 
