@@ -415,7 +415,6 @@ jobs:
         env:
           FOUNDRY_URL: http://127.0.0.1:8088
           FERRUM_DATA_PLANE_URL: http://127.0.0.1:8000
-          FERRUM_ADMIN_URL: http://127.0.0.1:9000
           FAULT_PROXY_URL: http://127.0.0.1:9500
           FAULT_TOKEN: ci-fault-token
         run: npm run e2e

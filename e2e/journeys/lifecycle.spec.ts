@@ -26,13 +26,14 @@ async function admin(): Promise<GatewayClient> {
 test.describe("resource lifecycle", () => {
   test.beforeAll(async () => {
     const gateway = await admin();
-    await gateway.send("POST", "/upstreams?apply=sync", {
+    const upstream = await gateway.send("POST", "/upstreams?apply=sync", {
       id: UPSTREAM_ID,
       name: UPSTREAM_ID,
       algorithm: "round_robin",
       targets: [{ host: "demo-backend", port: 8081, weight: 1 }],
     });
-    await gateway.send("POST", "/proxies?apply=sync", {
+    expect([200, 201], `creating ${UPSTREAM_ID}`).toContain(upstream.status);
+    const proxy = await gateway.send("POST", "/proxies?apply=sync", {
       id: PROXY_ID,
       name: PROXY_ID,
       listen_path: `/${PROXY_ID}`,
@@ -43,6 +44,7 @@ test.describe("resource lifecycle", () => {
       strip_listen_path: true,
       hosts: [],
     });
+    expect([200, 201], `creating ${PROXY_ID}`).toContain(proxy.status);
   });
 
   test.afterAll(async () => {

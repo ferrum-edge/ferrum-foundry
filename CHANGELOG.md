@@ -403,6 +403,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read requires. A `200` HTML fallback page, an empty or `{}` body, or one
   without `ready` from a misrouted admin origin was reported ready; it is now
   `503` `unavailable`. A valid `degraded` snapshot is still ready.
+- `plugin-schema-drift.mjs`, `plugin-sensitivity-drift.mjs` and
+  `starter-preflight.mjs` ran nothing and exited 0 when started from a path
+  with a space or non-ASCII character or through a symlink, because they
+  compared `import.meta.url` with an unencoded, unresolved `argv[1]`. Every
+  script now compares it with `pathToFileURL(realpathSync(argv[1]))`, and a
+  contract test fails on any other form (#685).
+- The mock admin API (`scripts/mock-admin-gateway.mjs`) listens on
+  `127.0.0.1` instead of every interface, since it is writable and
+  unauthenticated; `MOCK_ADMIN_BIND` names another address, and the log line
+  prints the address it actually listens on (#685).
+- The demo seed's restore payload stamps `ferrum_version` with the Edge
+  source commit `docs/compatibility.json` pins instead of a fixed August
+  commit; the critical journeys fail at a refused setup write with its
+  status instead of a later UI timeout, and CI no longer sets the unused
+  `FERRUM_ADMIN_URL` for them (#685).
 
 ### Changed
 

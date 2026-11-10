@@ -28,7 +28,7 @@ test.describe("read failures", () => {
   test.beforeAll(async () => {
     const gateway = new GatewayClient("admin", NAMESPACE);
     await gateway.session();
-    await gateway.send("POST", "/proxies?apply=sync", {
+    const created = await gateway.send("POST", "/proxies?apply=sync", {
       id: PROXY_ID,
       name: PROXY_ID,
       listen_path: `/${PROXY_ID}`,
@@ -38,6 +38,7 @@ test.describe("read failures", () => {
       strip_listen_path: true,
       hosts: [],
     });
+    expect([200, 201], `creating ${PROXY_ID}`).toContain(created.status);
   });
 
   test.afterAll(async () => {
