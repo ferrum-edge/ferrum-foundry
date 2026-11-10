@@ -28,7 +28,7 @@ import {
   selectNamespace,
 } from "../support/stack";
 
-const FAILED_TO_LOAD_UPSTREAM_CONFIGURATION_PATTERN = /failed to load upstream configuration/i;
+const UPSTREAM_CONFIGURATION_UNAVAILABLE_PATTERN = /upstream configuration unavailable/i;
 
 const tenants = [
   { namespace: NAMESPACE, id: uniqueId("e2e-tenant-a"), backend: "tenant-a-backend.invalid" },
@@ -197,7 +197,7 @@ test.describe("namespace isolation", () => {
     // Tenant B does not hold this id. The page reaches that conclusion only
     // after the query layer's retry ladder, so wait for the terminal state
     // rather than racing it — as the suite's other terminal-state checks do.
-    await expect(page.getByText(FAILED_TO_LOAD_UPSTREAM_CONFIGURATION_PATTERN)).toBeVisible({
+    await expect(page.getByText(UPSTREAM_CONFIGURATION_UNAVAILABLE_PATTERN)).toBeVisible({
       timeout: 40_000,
     });
 
@@ -208,7 +208,7 @@ test.describe("namespace isolation", () => {
     await faults.expectAllConsumed();
     await expect(page.getByText(`${tenants[0].backend}:8081`)).toHaveCount(0);
     await expect(page.getByLabel("Name", { exact: true })).toHaveCount(0);
-    await expect(page.getByText(FAILED_TO_LOAD_UPSTREAM_CONFIGURATION_PATTERN)).toBeVisible();
+    await expect(page.getByText(UPSTREAM_CONFIGURATION_UNAVAILABLE_PATTERN)).toBeVisible();
   });
 
   test("switching namespaces on an id both hold shows the new tenant's resource", async ({

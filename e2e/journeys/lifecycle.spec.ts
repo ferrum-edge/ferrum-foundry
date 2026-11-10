@@ -12,7 +12,7 @@
 import { expect, test, uniqueId, GatewayClient, NAMESPACE } from "../support/stack";
 
 const BACKEND_TIMEOUTS_PATTERN = /backend timeouts/i;
-const FAILED_TO_LOAD_PROXY_CONFIGURATION_PATTERN = /failed to load proxy configuration/i;
+const PROXY_CONFIGURATION_UNAVAILABLE_PATTERN = /proxy configuration unavailable/i;
 
 const PROXY_ID = uniqueId("e2e-lifecycle");
 const UPSTREAM_ID = uniqueId("e2e-lifecycle-up");
@@ -109,7 +109,7 @@ test.describe("resource lifecycle", () => {
 
   test("a deleted resource's detail page does not resurrect it", async ({ adminPage: page }) => {
     await page.goto(`/proxies/${PROXY_ID}`);
-    await expect(page.getByText(FAILED_TO_LOAD_PROXY_CONFIGURATION_PATTERN)).toBeVisible();
+    await expect(page.getByText(PROXY_CONFIGURATION_UNAVAILABLE_PATTERN)).toBeVisible();
     await expect(page.getByLabel("Listen Path", { exact: true })).toHaveCount(0);
   });
 });

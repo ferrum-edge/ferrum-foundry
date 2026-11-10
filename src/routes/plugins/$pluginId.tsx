@@ -276,25 +276,21 @@ function PluginEditor({ session }: { session: EditorSession }) {
       return null;
     }
     return (
-      <div className="max-w-2xl">
+      <div className="max-w-2xl space-y-4">
         <PluginMembershipRecovery error={membershipError} />
-        <Card>
-          <p className="text-text-secondary">
-            {needsMembership && proxiesError
-              ? "Failed to load proxy group membership. Reload to try again."
-              : "Failed to load plugin configuration."}
-          </p>
-          {needsMembership && proxiesError && (
-            <ReadStateNotice query={proxiesQuery} label="Proxy group membership" />
-          )}
-          <Button
-            variant="secondary"
-            className="mt-4"
-            onClick={() => navigate({ to: "/plugins" })}
-          >
-            Back to Plugins
-          </Button>
-        </Card>
+        {/* Denied, unavailable or gone: the shared notice says which, instead
+            of a fixed failure line (#680). */}
+        {plugin ? (
+          <ReadStateNotice query={proxiesQuery} label="Proxy group membership" />
+        ) : (
+          <ReadStateNotice query={resourceQuery} label="Plugin configuration" />
+        )}
+        <Button
+          variant="secondary"
+          onClick={() => navigate({ to: "/plugins" })}
+        >
+          Back to Plugins
+        </Button>
       </div>
     );
   }

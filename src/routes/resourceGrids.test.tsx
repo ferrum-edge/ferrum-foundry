@@ -81,14 +81,16 @@ const details: Surface[] = [
 let ui: ReturnType<typeof createHarness>;
 let empty: boolean;
 let failure: string | undefined;
+let failureStatus: number;
 
 beforeEach(() => {
   ui = createHarness();
   empty = false;
   failure = undefined;
+  failureStatus = 400;
   stubFetch((request) => {
     const path = new URL(request.url).pathname.replace("/api/proxy/", "");
-    if (path === failure) return Response.json({ error: "Unavailable" }, { status: 400 });
+    if (path === failure) return Response.json({ error: "Unavailable" }, { status: failureStatus });
     const responses: Record<string, unknown> = {
       ...meshResponses,
       proxies: page(empty ? [] : [proxy]),
@@ -182,10 +184,20 @@ describe("responsive resource grid structure", () => {
     expect(region.parentElement!.textContent).toContain(surface.empty);
   });
 
+  it.each(lists.filter((surface) => surface.endpoint))("reports a refused $label read as a denial, not a failure (#680)", async (surface) => {
+    failure = surface.endpoint;
+    failureStatus = 403;
+    await mount(surface);
+    const message = `${surface.label}: read not permitted for this session`;
+    await settle(() => expect(ui.host.textContent).toContain(message));
+    expect(ui.host.textContent).not.toContain(`${surface.label} unavailable`);
+    expect(ui.host.textContent).not.toContain(surface.empty);
+  });
+
   it.each(lists.filter((surface) => surface.endpoint))("keeps $label error feedback outside the wide canvas", async (surface) => {
     failure = surface.endpoint;
     await mount(surface);
-    const message = `Failed to load ${surface.label.toLowerCase()}`;
+    const message = `${surface.label} unavailable`;
     await settle(() => expect(ui.host.textContent).toContain(message));
     const { region } = scrollRegion(surface);
     expect(region.textContent).not.toContain(message);

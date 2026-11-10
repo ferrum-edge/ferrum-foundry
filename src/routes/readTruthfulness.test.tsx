@@ -268,7 +268,7 @@ describe('detail drafts survive terminal background errors (#299)', () => {
     function Page() { return <><h1>Initial load</h1><c.Page /></>; }
     await mount(Page, c.path);
     await settle(() => {
-      expect(host.textContent).toContain(`Failed to load ${c.name.toLowerCase()}`);
+      expect(host.textContent).toContain(`${c.name} configuration unavailable`);
     });
     expect(host.querySelector('form')).toBeNull();
   });

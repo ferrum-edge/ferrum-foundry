@@ -626,7 +626,7 @@ describe("upstream target route integration", () => {
   it("offers a route back when the requested upstream no longer exists", async () => {
     current = undefined;
     const router = await mount();
-    await settle(() => expect(ui.host.textContent).toContain("Failed to load upstream configuration"));
+    await settle(() => expect(ui.host.textContent).toContain("Upstream configuration unavailable"));
     await click("Back to Upstreams", ui.host);
     await settle(() => expect(router.state.location.pathname).toBe("/upstreams"));
   });

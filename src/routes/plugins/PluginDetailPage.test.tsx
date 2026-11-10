@@ -264,7 +264,7 @@ describe("proxy group membership loading", () => {
       firstPage.reject(new Error("List failed"));
     }
     await settle();
-    expect(host.textContent).toContain("Failed to load proxy group membership");
+    expect(host.textContent).toContain("Proxy group membership unavailable");
     expect(host.querySelector("form")).toBeNull();
     expect(
       host.querySelector("input[placeholder='Search proxies to add...']"),
