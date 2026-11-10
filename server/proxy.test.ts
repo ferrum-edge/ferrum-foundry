@@ -1,5 +1,6 @@
 import { Agent, createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http';
 import { once } from 'node:events';
+import { readFileSync } from 'node:fs';
 import type { AddressInfo, Socket } from 'node:net';
 import { gzipSync } from 'node:zlib';
 import type { FastifyInstance } from 'fastify';
@@ -7,6 +8,11 @@ import { decodeJwt } from 'jose';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 const BEARER_PATTERN = /^Bearer /;
+// Read independently of server/version.ts, so a release bump needs no edit here
+// and a version reported as 'unknown' still fails.
+const PACKAGE_VERSION = (
+  JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }
+).version;
 
 const BFF_TOKEN = 'proxy-test-bff-token-is-long-enough-123';
 const JWT_SECRET = 'proxy-test-jwt-secret-is-long-enough-123';
@@ -401,13 +407,13 @@ describe('streaming gateway proxy', () => {
   it('separates liveness from authenticated downstream readiness', async () => {
     const live = await app.inject({ method: 'GET', url: '/api/health/live', headers: sessionHeaders });
     expect(live.statusCode).toBe(200);
-    expect(live.json()).toMatchObject({ status: 'ok', version: '0.5.5' });
+    expect(live.json()).toMatchObject({ status: 'ok', version: PACKAGE_VERSION });
 
     const ready = await app.inject({ method: 'GET', url: '/api/health/ready', headers: sessionHeaders });
     expect(ready.statusCode).toBe(200);
     expect(ready.json()).toMatchObject({
       ready: true,
-      version: '0.5.5',
+      version: PACKAGE_VERSION,
       components: { bff: { status: 'ok' }, gateway: { status: 'ok', httpStatus: 200 } },
     });
     expect(observed.some(({ url }) => url === '/namespaces?offset=0&limit=1')).toBe(true);

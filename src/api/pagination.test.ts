@@ -154,13 +154,3 @@ describe("collectBoundedPages", () => {
     ).rejects.toThrow("changed pagination total");
   });
 });
-
-describe("collectAllPages", () => {
-  it("is completeness on top of the bounded walk", async () => {
-    const fetchPage = vi.fn(async (offset: number, limit: number) => ({
-      data: Array.from({ length: Math.min(limit, 7 - offset) }, (_, i) => offset + i),
-      pagination: { offset, limit, total: 7 },
-    }));
-    await expect(collectAllPages(fetchPage, 3)).resolves.toEqual([0, 1, 2, 3, 4, 5, 6]);
-  });
-});

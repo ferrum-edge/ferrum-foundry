@@ -108,7 +108,7 @@ describe("PluginConfigForm mcp_gateway", () => {
     }
   });
 
-  it("submits aggregate mode with policy and discovery defaults intact", async () => {
+  it("submits aggregate mode with policy defaults intact", async () => {
     await renderForm();
     await submitForm();
 
