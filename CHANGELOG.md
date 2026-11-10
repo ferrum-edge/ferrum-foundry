@@ -443,6 +443,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Cache-Control` and `Content-Disposition`, which nothing read, and a read
   publishes only when the cached-response notice changes, so the metadata
   banner no longer re-renders on every API response (#683).
+- Coverage no longer counts the shared test helpers under `src/test/` toward
+  the source floors (#683).
 - Docs: the deployment guide's upload bullet named `proxy_read_timeout`, a
   response-side timer, as one to keep at or below the upload budgets,
   contradicting the deadlines section; it now names `proxy_send_timeout` and
