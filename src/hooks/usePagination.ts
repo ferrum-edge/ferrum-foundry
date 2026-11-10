@@ -95,35 +95,3 @@ export function usePaginationParams(opts: UsePaginationOptions = {}) {
     setParams,
   };
 }
-
-export function usePagination(total: number, opts: UsePaginationOptions = {}) {
-  const pagination = usePaginationParams(opts);
-  const page = Math.floor(pagination.offset / pagination.limit) + 1;
-  const totalPages = Math.max(1, Math.ceil(total / pagination.limit));
-  const setPage = useCallback(
-    (requested: number) => {
-      const clamped = Math.max(1, Math.min(requested, totalPages));
-      pagination.setParams({
-        offset: (clamped - 1) * pagination.limit,
-        limit: pagination.limit,
-      });
-    },
-    [pagination.limit, pagination.setParams, totalPages],
-  );
-  const setLimit = useCallback(
-    (limit: number) => pagination.setParams({ offset: 0, limit }),
-    [pagination.setParams],
-  );
-
-  return {
-    ...pagination,
-    total,
-    page,
-    totalPages,
-    setPage,
-    setLimit,
-    nextPage: () => setPage(page + 1),
-    prevPage: () => setPage(page - 1),
-    setTotal: (_total: number) => undefined,
-  };
-}

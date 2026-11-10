@@ -32,8 +32,9 @@ const settings = {
 
 // These cases are about *ordering* between this client's own writes, which the
 // serialized queue owns. They pass `null` for the cross-session guard on
-// purpose: the guard is exercised in `upstreams.writeGuard.test.ts`, and
-// comparing a baseline here would change what these regressions measure.
+// purpose: the guard is exercised in `writeGuard.test.ts` and
+// `conditionalWrite.test.ts`, and comparing a baseline here would change what
+// these regressions measure.
 describe("upstream target writes", () => {
   beforeEach(() => {
     resetGatewayMetadata();

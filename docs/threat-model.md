@@ -51,7 +51,7 @@ literal. Operators should use HTTPS for remote targets.
 - **Content-Security-Policy.** `script-src 'self'` with `script-src-attr 'none'`,
   `object-src 'none'` and `frame-ancestors 'none'`. `style-src` is `'self'` plus
   a per-response nonce, with no `'unsafe-inline'` (#594). Radix's scroll lock
-  (Dialog, Select, DropdownMenu) injects a `<style>` element with computed
+  (Dialog and Select) injects a `<style>` element with computed
   widths at runtime, and Select's viewport renders another, so no hash could
   cover them. The BFF templates the SPA shell per request instead of serving it
   as a static file: it writes the nonce into every tag and into

@@ -654,6 +654,3 @@ export function CredentialForm({
 /* ------------------------------------------------------------------ */
 
 export const CREDENTIAL_TYPES = Object.keys(CREDENTIAL_CONFIGS) as BuiltInCredentialType[];
-export const CREDENTIAL_LABELS = Object.fromEntries(
-  Object.entries(CREDENTIAL_CONFIGS).map(([k, v]) => [k, v.label]),
-);

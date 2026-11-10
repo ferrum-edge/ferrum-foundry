@@ -562,7 +562,8 @@ describe("validatePairing", () => {
 
 describe("requireReleaseReady", () => {
   // Fictitious successful hosted evidence for the pending tree, followed only
-  // by an evidence record. The live record remains pending and cannot release.
+  // by an evidence record, applied to a candidate copy of the live record. The
+  // live record itself is already released and cannot release again.
   const { record: candidate, evidence } = qualifiedFixture;
 
   it("passes the unreleased candidate the release workflow tags", () => {

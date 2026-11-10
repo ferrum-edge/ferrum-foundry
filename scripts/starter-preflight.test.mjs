@@ -613,8 +613,14 @@ test("starter defaults select the published Foundry digest and stop grace exceed
   assert.match(journeyGuide, PUBLISHED_RELEASE_DIGEST_PATTERN);
   const compose = await readFile(new URL("compose.yaml", STARTER), "utf8");
   const foundry = compose.slice(compose.indexOf("  foundry:"), compose.indexOf("  oauth2-proxy:"));
-  const grace = Number(foundry.match(STOP_GRACE_PERIOD_PATTERN)?.[1] ?? 0);
-  const deadline = Number(foundry.match(FERRUM_SHUTDOWN_TIMEOUT_PATTERN)?.[1] ?? 0) / 1000;
+  const graceMatch = foundry.match(STOP_GRACE_PERIOD_PATTERN);
+  const deadlineMatch = foundry.match(FERRUM_SHUTDOWN_TIMEOUT_PATTERN);
+  assert.ok(
+    graceMatch && deadlineMatch,
+    "compose must state the stop grace and the BFF shutdown deadline literally",
+  );
+  const grace = Number(graceMatch[1]);
+  const deadline = Number(deadlineMatch[1]) / 1000;
   assert.ok(grace > deadline, `stop grace ${grace}s must exceed the BFF shutdown deadline ${deadline}s`);
 });
 

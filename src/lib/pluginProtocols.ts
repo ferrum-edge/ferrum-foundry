@@ -134,8 +134,8 @@ const UDP_ONLY_STREAM_PLUGINS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The proxy's effective backend scheme. The admin API omits the field on
- * older rows, where HTTP is the documented default.
+ * The proxy's effective backend scheme. The admin API may omit the field;
+ * `https` is the documented default.
  */
 function schemeOf(proxy: Pick<Proxy, "backend_scheme">): BackendScheme {
   return proxy.backend_scheme ?? "https";

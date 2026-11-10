@@ -42,7 +42,6 @@ export default defineConfig({
         "**/__tests__/**",
         "src/**/*.d.ts",
         "src/main.tsx",
-        "src/routeTree.gen.ts",
       ],
     },
     projects: [

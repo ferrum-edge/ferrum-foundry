@@ -88,8 +88,6 @@ export type AuthSession =
     signOutError: string | null;
   };
 
-export type AuthStatus = AuthSession["status"];
-
 interface AuthContextValue {
   session: AuthSession;
   /**

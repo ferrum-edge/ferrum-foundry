@@ -61,11 +61,11 @@ export function ErrorPopup({
       <DialogContent>
         <div className="flex items-center gap-3 mb-4">
           <DialogTitle>{outcome ? "Outcome unknown" : "API Error"}</DialogTitle>
-          {statusCode && (
+          {statusCode ? (
             <Badge variant={statusBadgeVariant(statusCode)}>
               {statusCode}
             </Badge>
-          )}
+          ) : null}
         </div>
 
         {outcome && (

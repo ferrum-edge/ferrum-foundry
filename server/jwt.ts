@@ -38,10 +38,6 @@ function pruneCache(now: number): void {
   }
 }
 
-export function clearTokenCache(): void {
-  tokenCache.clear();
-}
-
 export async function generateToken(config: Config, principal: AuthPrincipal): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   const fingerprint = tokenFingerprint(config, principal);

@@ -134,11 +134,6 @@ export class PluginMembershipError extends Error {
 }
 
 /**
- * A failed step as the plan reports it: the error and the gateway's detail.
- * A plugin write's failure is redacted (`plugins.createConfig`), so its detail
- * is safe to carry into the plan's own message, which the editor shows.
- */
-/**
  * A save that left group scope committed, but its attachment could not be
  * verified afterwards (#610). Edge's scope `PUT` detached the group's members
  * in the same transaction; Foundry does not roll that back, because restoring
@@ -232,6 +227,11 @@ function assertMembershipUnchanged(
   );
 }
 
+/**
+ * A failed step as the plan reports it: the error and the gateway's detail.
+ * A plugin write's failure is redacted (`plugins.createConfig`), so its detail
+ * is safe to carry into the plan's own message, which the editor shows.
+ */
 function failureText(error: unknown): string {
   if (!(error instanceof Error)) return "unknown error";
   const detail = "data" in error ? extractApiErrorData((error as { data?: unknown }).data) : "";

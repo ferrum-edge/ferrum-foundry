@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Drop three dependencies nothing imports: the production dependency
+  `@radix-ui/react-dropdown-menu` (with its `@radix-ui/react-menu`), and the
+  development dependencies `autoprefixer` and `postcss`, left from a Tailwind
+  v3 toolchain. Tailwind v4 runs through `@tailwindcss/vite`, and Vite keeps
+  its own `postcss`.
 - Restore is one explicit flow: while a restore runs, its confirmation
   dialogs refuse the close button, Escape and an outside click, and the file
   picker is disabled, so a late answer can no longer reopen the typed
@@ -205,6 +210,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The error dialog no longer shows a stray `0` beside "Outcome unknown" or
+  "API Error" when no HTTP answer arrived (a dropped connection or a client
+  timeout); the status badge appears only for a real HTTP status.
+- The plugin picker describes `rate_limiting` as limiting by client IP,
+  consumer, or SPIFFE identity, the keys Ferrum Edge accepts; it used to offer
+  a header key the gateway does not have.
+- The header of `deploy/starter/compose.yaml` runs the preflight with
+  `--env .env`, as the starter README does. Run from `deploy/starter/` without
+  it, the preflight read no file and reported every required secret as unset.
 - The starter preflight measures `FERRUM_JWT_SECRET` in UTF-8 bytes, as the
   BFF and the admin JWT signer do, and reports "N bytes": a non-ASCII secret of
   32 bytes but fewer than 32 characters no longer gets a false FAIL.

@@ -24,7 +24,7 @@
 #
 #   ./bootstrap-demo.sh            # demo only: generate throwaway secrets
 #   docker compose --profile demo up -d
-#   node ../../scripts/starter-preflight.mjs
+#   node ../../scripts/starter-preflight.mjs --env .env   # README.md: host-side URL overrides
 #
 # See README.md, and docs/getting-started.md for the first-route walkthrough.
 

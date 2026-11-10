@@ -2,7 +2,9 @@
 
 Status: accepted for the unreleased Foundry boundary. Manifest preview is
 implemented; diagnostic presentation and telemetry/report import are future
-work tracked by [Alloy issue 27](https://github.com/ferrum-edge/ferrum-alloy/issues/27).
+work. [Alloy issue 27](https://github.com/ferrum-edge/ferrum-alloy/issues/27),
+which tracked consumer adoption, closed on 2026-10-06; no open issue tracks
+this remaining work.
 
 ## Context
 
@@ -65,10 +67,10 @@ The published `contracts-edge-0.9.15` metadata marks the shared manifest and
 diagnostic report EXISTING/implemented after root's accepted owner/consumer
 qualification. Foundry adopts the exact manifest schema and fixtures, with
 owner-unreleased availability and historical descriptions retained. Alloy crate
-publication and remaining coordinated adoption are separate decisions tracked
-by issue 27; diagnostic presentation stays future work here. Normal resource
-editor saves are separately approved operations with the existing
-gateway-qualified behavior.
+publication and coordinated adoption were separate decisions, tracked by
+issue 27 until it closed; diagnostic presentation stays future work here.
+Normal resource editor saves are separately approved operations with the
+existing gateway-qualified behavior.
 
 ## Consequences
 
