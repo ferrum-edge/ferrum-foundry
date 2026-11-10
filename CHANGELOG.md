@@ -205,6 +205,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The error dialog no longer shows a stray `0` beside "Outcome unknown" or
+  "API Error" when no HTTP answer arrived (a dropped connection or a client
+  timeout); the status badge appears only for a real HTTP status.
+- The plugin picker describes `rate_limiting` as limiting by client IP,
+  consumer, or SPIFFE identity, the keys Ferrum Edge accepts; it used to offer
+  a header key the gateway does not have.
 - The starter preflight measures `FERRUM_JWT_SECRET` in UTF-8 bytes, as the
   BFF and the admin JWT signer do, and reports "N bytes": a non-ASCII secret of
   32 bytes but fewer than 32 characters no longer gets a false FAIL.

@@ -50,7 +50,7 @@ export const PLUGIN_METADATA: Record<string, PluginMeta> = {
   cors: { category: "Security", description: "Cross-Origin Resource Sharing policy enforcement." },
 
   /* ── Traffic Control ── */
-  rate_limiting: { category: "Traffic Control", description: "Request rate limiting by consumer, IP, or header." },
+  rate_limiting: { category: "Traffic Control", description: "Request rate limiting by client IP, consumer, or SPIFFE identity." },
   request_size_limiting: { category: "Traffic Control", description: "Rejects request bodies above a byte limit." },
   response_size_limiting: { category: "Traffic Control", description: "Rejects response bodies above a byte limit." },
   tcp_connection_throttle: { category: "Traffic Control", description: "Caps concurrent TCP connections per client IP." },
