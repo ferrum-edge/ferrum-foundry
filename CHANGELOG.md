@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Remove code nothing used, with its dependencies (#682): the `Tooltip`
+  component and `TooltipProvider` with `@radix-ui/react-tooltip`; the
+  `DataTable` component with `@tanstack/react-table` and
+  `@tanstack/react-virtual` (`docs/table-sorting.md` keeps the sorting
+  rules); the BFF's `@fastify/cors` registration, which granted nothing
+  (a server test now pins the absent CORS grant); and the test-only API
+  helpers `tls.updateManagedRecord`, `mesh.resetConfigRevision`,
+  `ops.batchCreate` and `buildMcpGatewayTemplate`.
+- The BFF's scoped namespace list requires the paginated envelope on every
+  upstream page and answers `502` for a bare array, as the SPA already does
+  (#681). The boot-time removal of the pre-v0.1.0
+  `localStorage["ferrum:bff-auth-token"]` key is gone.
+- The proxy, upstream, consumer and plugin lists and detail pages, Health,
+  and Metrics report a failed read through the shared read-state notice
+  (#680): a `403` reads "read not permitted for this session", an outage
+  "unavailable", and a failed refresh "could not refresh" with the last
+  successful observation, instead of a fixed "Failed to load …" line or a
+  transport error message.
+- `npm run lint` now lints the e2e suite and the root `*.config.ts` files,
+  and `npm run typecheck` type-checks the server tests
+  (`tsconfig.server.test.json`) (#675).
+- CI builds the production image once for the Deployment Starter and
+  Critical Journeys and hands it to both as an artifact, instead of
+  building it in each job (#685).
+- `docs/compatibility.md` records Edge v0.9.20 as the next, not yet
+  qualified, pairing and what moving to it must review (#686).
+
 - Drop three dependencies nothing imports: the production dependency
   `@radix-ui/react-dropdown-menu` (with its `@radix-ui/react-menu`), and the
   development dependencies `autoprefixer` and `postcss`, left from a Tailwind
@@ -82,6 +109,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- The release workflow's publishing jobs (`docker`, `docker-manifest`,
+  `create-release`) run in the `release` environment, so its required
+  reviewers approve a release before anything is pushed (#684). A contract
+  test fails if one stops naming it.
 - The deployment starter's production nginx sets every forwarded header
   oauth2-proxy reads (`X-Forwarded-For`, `-Host`, `-Proto`, `-Uri`,
   `X-Real-IP`) from its own values on `/oauth2/` and on the `/oauth2/auth`
@@ -224,6 +255,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A plugin save answered with the committed-but-not-live `503` is a save
+  (#674): the membership plan re-reads the plugin, finishes its association
+  steps, and the editor reseeds plugin, membership and baseline with a
+  "committed, not yet proven live" warning, instead of reporting a rollback
+  that never ran.
+- A committed-but-not-live create closes the proxy, upstream, consumer or
+  plugin create page (or the namespace create dialog) with a warning, so a
+  second click no longer sends a second `POST` (#674).
+- The `mcp_gateway` editor no longer rewrites the JSON under the cursor while
+  in Transparent mode (#679). Aggregate-only fields typed there stay as
+  written, are stripped on save, and merge over the stashed ones on a switch
+  back to Aggregate.
 - The Plugins list shows Ferrum Edge's built-in priorities again (#673). Its
   hard-coded table had drifted: 17 values were wrong (`spec_expose` showed
   9900 instead of 210, `ws_rate_limiting` 9750 instead of 2910) and 24
