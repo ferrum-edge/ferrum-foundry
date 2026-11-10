@@ -77,6 +77,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- The deployment starter's production nginx sets every forwarded header
+  oauth2-proxy reads (`X-Forwarded-For`, `-Host`, `-Proto`, `-Uri`,
+  `X-Real-IP`) from its own values on `/oauth2/` and on the `/oauth2/auth`
+  subrequest (GHSA-q866-mwp4-hgw3). The subrequest used to pass a client's
+  `X-Forwarded-For` and `X-Forwarded-Uri` through unchanged, and oauth2-proxy
+  runs with `--reverse-proxy`, so a deployment that added `--trusted-ip` or a
+  skip-auth route would have been open to oauth2-proxy's header-spoofing
+  bypasses. The starter's pinned oauth2-proxy (v7.7.1) and nginx (1.27) are
+  still to be moved; that needs the starter's qualification.
 - The BFF checks a namespace description's length without stalling on long
   whitespace. Its Unicode `White_Space` trim was a `\p{White_Space}+$`
   regex, which backtracks quadratically over a whitespace run inside the
