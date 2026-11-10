@@ -482,8 +482,8 @@ See `docs/authentication.md` → "Editor identity".
 ## Build & check
 
 ```bash
-npm run typecheck    # TypeScript: frontend, server, and e2e
+npm run typecheck    # TypeScript: frontend, server, server tests, and e2e
 npm run build        # Production build (Vite + server tsc)
-npm run lint         # ESLint
+npm run lint         # ESLint: src, server, scripts, shared, e2e, root *.config.ts
 npm test             # Vitest, then the node --test contract suites in scripts/
 ```

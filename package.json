@@ -15,7 +15,7 @@
     "build:server": "tsc -p tsconfig.server.json",
     "preview": "vite preview",
     "start": "node dist-server/index.js",
-    "lint": "eslint src server scripts shared e2e",
+    "lint": "eslint src server scripts shared e2e playwright.config.ts vite.config.ts vitest.config.ts",
     "test": "vitest run && npm run test:contracts",
     "test:contracts": "node --test scripts/*.test.mjs",
     "check:plugin-schemas": "node scripts/plugin-schema-drift.mjs",
@@ -27,7 +27,7 @@
     "e2e:fault-proxy": "node e2e/fault-proxy.mjs",
     "e2e:gate-self-test": "node scripts/e2e-gate-self-test.mjs",
     "e2e:report": "playwright show-report e2e-report",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.e2e.json --noEmit"
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.server.test.json && tsc -p tsconfig.e2e.json --noEmit"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.5",

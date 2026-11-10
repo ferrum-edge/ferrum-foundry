@@ -20,7 +20,7 @@ vi.mock('undici', async (importOriginal) => {
     Agent: class extends original.Agent {
       constructor(options: Agent.Options) {
         super(options);
-        if (typeof options.connect === 'object' && options.connect.lookup) {
+        if (typeof options.connect === 'object' && 'lookup' in options.connect && options.connect.lookup) {
           transport.lookups.push(options.connect.lookup);
         }
       }
