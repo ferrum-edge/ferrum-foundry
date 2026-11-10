@@ -198,7 +198,9 @@ export function sanitizeMcpGatewayConfigForSubmit(config: unknown): JsonObject {
 /**
  * Switch modes. Leaving aggregate mode always yields a (possibly empty)
  * stash, so returning restores exactly what was there; `null` means nothing
- * has been captured.
+ * has been captured. An aggregate-only field typed while in transparent mode
+ * is merged over the stash on return (a deep merge, so a typed
+ * `policy.default_action` keeps the stashed `policy.tools`).
  */
 export function switchMcpGatewayMode(
   config: unknown,
@@ -212,6 +214,8 @@ export function switchMcpGatewayMode(
     stripped.mode = "transparent_proxy";
     return { config: stripped, stash: nextStash };
   }
-  const restored = applyMcpGatewayAggregateDefaults(base, stash);
+  const restoredStash =
+    stash === null ? null : mergeDefined(stash, pickMcpGatewayAggregateOnlyFields(base));
+  const restored = applyMcpGatewayAggregateDefaults(base, restoredStash);
   return { config: restored, stash: null };
 }

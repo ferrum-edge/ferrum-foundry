@@ -148,6 +148,28 @@ describe("mcpGatewayConfig", () => {
     expect(restored.config.policy).toEqual(denyByDefault.policy);
   });
 
+  it("merges an aggregate field typed in transparent mode over the stash", () => {
+    const transparent = switchMcpGatewayMode(
+      {
+        ...aggregateConfig,
+        policy: {
+          default_action: "allow",
+          tools: { "github.create_issue": { action: "deny" } },
+        },
+      },
+      "transparent_proxy",
+    );
+    const edited = { ...transparent.config, policy: { default_action: "deny" } };
+
+    const restored = switchMcpGatewayMode(edited, "aggregate_router", transparent.stash);
+
+    expect(restored.config.policy).toEqual({
+      default_action: "deny",
+      tools: { "github.create_issue": { action: "deny" } },
+    });
+    expect(restored.stash).toBeNull();
+  });
+
   it("restores an aggregate config that relied on gateway defaults without adding a policy", () => {
     const relyingOnDefaults = { ...aggregateConfig };
     delete (relyingOnDefaults as Record<string, unknown>).policy;
