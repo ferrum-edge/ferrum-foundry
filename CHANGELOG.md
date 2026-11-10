@@ -443,6 +443,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Cache-Control` and `Content-Disposition`, which nothing read, and a read
   publishes only when the cached-response notice changes, so the metadata
   banner no longer re-renders on every API response (#683).
+- Docs: the deployment guide's upload bullet named `proxy_read_timeout`, a
+  response-side timer, as one to keep at or below the upload budgets,
+  contradicting the deadlines section; it now names `proxy_send_timeout` and
+  points response timers at the deadlines. The deployment and authentication
+  guides say the image healthcheck probes `127.0.0.1`, so a
+  `FERRUM_BIND_ADDRESS` other than `0.0.0.0` or `127.0.0.1` needs it
+  overridden (#684).
 
 ### Changed
 
