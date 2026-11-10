@@ -74,6 +74,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unknown mode. A failed config read still shows the configuration error at
   once and discards the session answer, and never replaces a sign-in that
   completed meanwhile.
+- The Astra and Luna dispatch launchers send `service_tier="fast"` with
+  `features.fast_mode=true` for `--fast` instead of the `priority` tier, and
+  accept `--no-fast`; the Sol launcher no longer sends
+  `features.fast_mode=false` on a standard run. The launchers, their tests and
+  the skill wording match Ferrum Edge's again (#687).
 
 ### Security
 
