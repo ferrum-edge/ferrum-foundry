@@ -238,43 +238,6 @@ export async function getCharges(
     .json<ChargebackResponse>();
 }
 
-export interface ChargebackSinkStatusResponse {
-  enabled: boolean;
-  instance_count: number;
-  snapshot_finalizations_pending: number;
-  totals: {
-    queue: { depth?: number; capacity?: number; full_drops_total?: number };
-    spool: { files?: number; bytes?: number; drops_total?: number; available?: boolean };
-    export: {
-      events_enqueued_total?: number;
-      events_exported_total?: number;
-      failures_total?: number;
-    };
-  };
-  instances: Array<{
-    plugin_config_id: string;
-    mode: "per_event" | "snapshot";
-    clickhouse: { endpoint?: string; database?: string; table?: string };
-    queue: { depth?: number; capacity?: number };
-    export: {
-      events_exported_total?: number;
-      failures_total?: number;
-      last_success_at?: string | null;
-      last_failure_at?: string | null;
-      last_failure_reason?: string | null;
-    };
-    [extra: string]: unknown;
-  }>;
-}
-
-export async function getChargesSinkStatus(
-  scope: NamespaceScope,
-): Promise<ChargebackSinkStatusResponse> {
-  return proxyApi
-    .get("charges/sink/status", scoped(scope))
-    .json<ChargebackSinkStatusResponse>();
-}
-
 /* ---------- Cluster ---------- */
 
 /**

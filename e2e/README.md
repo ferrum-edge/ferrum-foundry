@@ -37,9 +37,11 @@ npm run e2e:report   # HTML report from the last run
 ```
 
 `e2e/support/stack.ts` defaults the rest to the starter's ports: `FOUNDRY_URL`
-(`http://127.0.0.1:8088`), `FERRUM_DATA_PLANE_URL` (`:8000`), `FERRUM_ADMIN_URL`
-(`:9000`), and `FAULT_PROXY_URL` (`:9500`). CI runs the same steps in the
-**Critical Journeys** job, against an image built from the commit.
+(`http://127.0.0.1:8088`), `FERRUM_DATA_PLANE_URL` (`:8000`), and
+`FAULT_PROXY_URL` (`:9500`). The journeys reach the gateway only through
+Foundry, the same front door the browser uses, so they need no admin API URL.
+CI runs the same steps in the **Critical Journeys** job, against an image built
+from the commit.
 
 ## What each journey is for
 

@@ -50,15 +50,6 @@ export function useCharges(refetchInterval?: number | false) {
   });
 }
 
-export function useChargesSinkStatus() {
-  const { scope } = useNamespace();
-  return useQuery({
-    queryKey: ["chargesSinkStatus"],
-    queryFn: () => ops.getChargesSinkStatus(queryScope(scope)),
-    retry: false,
-  });
-}
-
 export function useClusterStatus() {
   const { scope } = useNamespace();
   return useQuery({

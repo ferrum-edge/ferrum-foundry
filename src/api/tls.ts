@@ -4,7 +4,6 @@
 
 import { FLEET_GLOBAL, REDACT_ERRORS, SILENT_ERRORS, proxyApi } from "./client";
 import type { PaginatedResponse, PaginationParams } from "./types";
-import { collectAllPages } from "./pagination";
 import {
   ACME_MAX_WAIT_MS,
   longRunningClientTimeout,
@@ -445,19 +444,6 @@ export async function listManagedRecords(
     .json<PaginatedResponse<ManagedTlsRecord>>();
 }
 
-export async function listAllManagedRecords(
-  collection: ManagedTlsCollection,
-  context: Record<string, unknown> = {},
-  signal?: AbortSignal,
-): Promise<ManagedTlsRecord[]> {
-  return collectAllPages(
-    (offset, limit, pageSignal) =>
-      listManagedRecords(collection, { offset, limit }, context, pageSignal),
-    undefined,
-    signal,
-  );
-}
-
 export async function createManagedRecord(
   collection: ManagedTlsCollection,
   data: ManagedTlsRequest,
@@ -511,17 +497,6 @@ export async function listAcmeCertificates(
       ...(signal && { signal }),
     })
     .json<PaginatedResponse<AcmeCertificateRecord>>();
-}
-
-export async function listAllAcmeCertificates(
-  context: Record<string, unknown> = {},
-  signal?: AbortSignal,
-): Promise<AcmeCertificateRecord[]> {
-  return collectAllPages(
-    (offset, limit, pageSignal) => listAcmeCertificates({ offset, limit }, context, pageSignal),
-    undefined,
-    signal,
-  );
 }
 
 export async function createAcmeCertificate(
@@ -583,17 +558,6 @@ export async function listAcmeOrders(
       ...(signal && { signal }),
     })
     .json<PaginatedResponse<AcmeOrder>>();
-}
-
-export async function listAllAcmeOrders(
-  context: Record<string, unknown> = {},
-  signal?: AbortSignal,
-): Promise<AcmeOrder[]> {
-  return collectAllPages(
-    (offset, limit, pageSignal) => listAcmeOrders({ offset, limit }, context, pageSignal),
-    undefined,
-    signal,
-  );
 }
 
 const TERMINAL_ACME_ORDER_STATUSES: ReadonlySet<AcmeOrderStatus> = new Set([
@@ -724,17 +688,6 @@ export async function listAcmeAccounts(
       ...(signal && { signal }),
     })
     .json<PaginatedResponse<AcmeAccount>>();
-}
-
-export async function listAllAcmeAccounts(
-  context: Record<string, unknown> = {},
-  signal?: AbortSignal,
-): Promise<AcmeAccount[]> {
-  return collectAllPages(
-    (offset, limit, pageSignal) => listAcmeAccounts({ offset, limit }, context, pageSignal),
-    undefined,
-    signal,
-  );
 }
 
 /* ---------- Rotate / validate ---------- */

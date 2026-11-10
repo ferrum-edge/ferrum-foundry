@@ -94,16 +94,6 @@ export function useAllApiSpecs(enabled = true) {
   });
 }
 
-export function useApiSpecDocument(id: string, enabled = true) {
-  const { scope } = useNamespace();
-  return useQuery({
-    queryKey: ["apiSpecDocument", scope.namespace, id],
-    queryFn: () => apiSpecs.getDocument(queryScope(scope), id),
-    enabled: enabled && !!id,
-    retry: false,
-  });
-}
-
 export function useImportApiSpec() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
