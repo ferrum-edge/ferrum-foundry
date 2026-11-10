@@ -143,6 +143,100 @@ export function isInternalPlugin(pluginName: string): boolean {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Built-in priorities                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Built-in plugin priorities from Ferrum Edge (lower runs first), one per
+ * plugin in the vendored catalog (`contracts/ferrum-contracts/vocabularies/
+ * plugin-catalog.json`). `scripts/ferrum-contracts.test.mjs` fails when this
+ * map differs from the pinned catalog, so regenerate it with the catalog.
+ */
+export const PLUGIN_PRIORITY: Record<string, number> = {
+  otel_tracing: 25,
+  correlation_id: 50,
+  cors: 100,
+  request_termination: 125,
+  mesh_outbound_registry: 130,
+  ip_restriction: 150,
+  geo_restriction: 175,
+  bot_detection: 200,
+  spec_expose: 210,
+  sse: 250,
+  grpc_web: 260,
+  grpc_method_router: 275,
+  spiffe_identity: 940,
+  mtls_auth: 950,
+  jwks_auth: 1000,
+  oauth2_introspection: 1050,
+  oidc_relying_party: 1075,
+  jwt_auth: 1100,
+  key_auth: 1200,
+  ldap_auth: 1250,
+  basic_auth: 1300,
+  hmac_auth: 1400,
+  soap_ws_security: 1500,
+  access_control: 2000,
+  tcp_connection_throttle: 2050,
+  mesh_authz: 2075,
+  opa: 2080,
+  adaptive_concurrency: 2090,
+  ai_transcript_audit: 2740,
+  request_size_limiting: 2800,
+  ws_message_size_limiting: 2810,
+  graphql: 2850,
+  rate_limiting: 2900,
+  ws_rate_limiting: 2910,
+  udp_rate_limiting: 2915,
+  ai_prompt_shield: 2925,
+  waf: 2930,
+  fault_injection: 2940,
+  body_validator: 2950,
+  openapi_validator: 2960,
+  ai_semantic_firewall: 2968,
+  ai_request_guard: 2975,
+  ai_tool_governor: 2978,
+  ai_stream_router: 2984,
+  mcp_gateway: 2992,
+  a2a_gateway: 2993,
+  mesh_route_dispatch: 2995,
+  request_transformer: 3000,
+  request_deduplication: 3010,
+  serverless_function: 3025,
+  response_mock: 3030,
+  grpc_deadline: 3050,
+  load_testing: 3070,
+  request_mirror: 3075,
+  response_size_limiting: 3490,
+  response_caching: 3500,
+  response_transformer: 4000,
+  compression: 4050,
+  ai_prompt_compressor: 4055,
+  ai_semantic_cache: 4057,
+  ai_federation: 4060,
+  ai_response_guard: 4075,
+  security_headers: 4080,
+  ai_token_metrics: 4100,
+  ai_rate_limiter: 4200,
+  stdout_logging: 9000,
+  ws_frame_logging: 9050,
+  statsd_logging: 9075,
+  http_logging: 9100,
+  tcp_logging: 9125,
+  kafka_logging: 9150,
+  loki_logging: 9155,
+  udp_logging: 9160,
+  ws_logging: 9175,
+  transaction_debugger: 9200,
+  proxy_alerts: 9250,
+  prometheus_metrics: 9300,
+  api_chargeback: 9350,
+  api_chargeback_sink: 9351,
+  workload_metrics: 9360,
+  transaction_log_schema: 9999,
+};
+
+/* ------------------------------------------------------------------ */
 /*  Display names                                                     */
 /* ------------------------------------------------------------------ */
 

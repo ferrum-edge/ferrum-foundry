@@ -20,7 +20,7 @@ import {
 } from "@/hooks/useConsumers";
 import { buildCredentialInput, CredentialInputError } from "@/lib/credentials";
 import type { EditorSession } from "@/hooks/useEditorIdentity";
-import type { BuiltInCredentialType } from "@/api/types";
+import { REDACTED, type BuiltInCredentialType } from "@/api/types";
 import type { CapabilityVerdict } from "@/lib/capabilities";
 
 /* ------------------------------------------------------------------ */
@@ -147,17 +147,33 @@ function renderCredentialSummary(
   cred: Record<string, unknown>,
 ): string {
   switch (credType) {
-    case "keyauth":
-      return cred.key ? `Key: ${maskString(String(cred.key))}` : "Key (auto-generated)";
-    case "jwt":
-      return cred.secret ? `Secret: ${maskString(String(cred.secret))}` : "JWT credential";
-    case "hmac_auth":
-      return cred.secret ? `Secret: ${maskString(String(cred.secret))}` : "HMAC credential";
+    case "keyauth": {
+      const key = storedSecret(cred.key);
+      return key ? `Key: ${maskString(key)}` : "Key credential";
+    }
+    case "jwt": {
+      const secret = storedSecret(cred.secret);
+      return secret ? `Secret: ${maskString(secret)}` : "JWT credential";
+    }
+    case "hmac_auth": {
+      const secret = storedSecret(cred.secret);
+      return secret ? `Secret: ${maskString(secret)}` : "HMAC credential";
+    }
     case "mtls_auth":
       return cred.identity ? `Identity: ${String(cred.identity)}` : "mTLS credential";
     default:
       return JSON.stringify(cred);
   }
+}
+
+/**
+ * A secret value the gateway returned, or null when it is absent or is the
+ * `[REDACTED]` marker ordinary consumer reads carry: masking the marker would
+ * show "[RED****TED]" as if it were part of a key.
+ */
+function storedSecret(value: unknown): string | null {
+  if (value == null || value === "" || value === REDACTED) return null;
+  return String(value);
 }
 
 function maskString(value: string): string {

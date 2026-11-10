@@ -5,6 +5,7 @@ import { test } from "node:test";
 import {
   DEFAULT_PLUGIN_CONFIGS,
   PLUGIN_METADATA,
+  PLUGIN_PRIORITY,
 } from "../src/lib/pluginConfigDefaults.ts";
 
 const LINE_BREAK_PATTERN = /\r?\n/;
@@ -213,6 +214,17 @@ test("Foundry plugin metadata and defaults use the pinned plugin catalog", () =>
     gatewayContract,
     VERIFIED_CONFIG_SUBMISSION_PATTERN,
     "the pinned-gateway schema check must submit the config it verified",
+  );
+});
+
+test("Foundry's built-in plugin priorities equal the pinned plugin catalog", () => {
+  const expected = Object.fromEntries(pluginCatalog.plugins
+    .filter((plugin) => plugin.classification !== "reserved")
+    .map((plugin) => [plugin.name, plugin.priority]));
+  assert.deepEqual(
+    { ...PLUGIN_PRIORITY },
+    expected,
+    "PLUGIN_PRIORITY must list every non-reserved catalog plugin with its catalog priority",
   );
 });
 

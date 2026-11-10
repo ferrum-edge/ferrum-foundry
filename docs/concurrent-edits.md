@@ -383,6 +383,11 @@ delete mutations with `committed` set instead of rejecting them. Their
 (and, for a proxy, the cascade) exactly as for a `204`, and the page leaves
 with "Proxy deleted: committed, not yet proven live".
 
+A namespace delete does the same: `useDeleteNamespace` resolves a committed
+`DELETE` through `removeCommitted()`, so the retired name's caches are removed
+as on success, an active scope on that namespace moves to the default, and the
+delete dialog closes with a warning instead of offering a second `DELETE`.
+
 ### Committed credential writes
 
 A consumer credential append, basic replacement, indexed delete, or delete of
@@ -623,6 +628,7 @@ so the next successful read seeds a fresh baseline.
 | Committed-but-not-live classification, popup suppression, cache refresh, save-twice regression | `src/api/committedWrite.test.ts`, `src/lib/queryClient.test.ts` |
 | Editor reseed after a committed save; committed delete reported as deleted | `src/routes/proxies/concurrentEdit.test.tsx` |
 | Committed delete retires the seeded detail and list caches | `src/hooks/deleteDetailCache.test.tsx` |
+| Committed namespace rename and delete reconcile the cache, follow or leave the scope, and close the dialog | `src/components/forms/NamespaceManagerCard.mutations.test.tsx` |
 | Committed and unobserved credential writes disarm the card and reconcile before a retry | `src/routes/consumers/credentialCommittedWrite.test.tsx` |
 | Mock gateway precondition contract | `scripts/mock-admin-gateway.test.mjs` |
 | Real gateway behavior and the `If-Match` contract | `scripts/concurrent-edit-contract.mjs` |

@@ -1,7 +1,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Upstream, UpstreamCreate } from "@/api/types";
+import type { ServiceDiscoveryConfig, Upstream, UpstreamCreate } from "@/api/types";
 import { blurField, clearText, inputByLabel, inputByLabelOrNull, typeText } from "@/test/fields";
 import { UpstreamForm } from "./UpstreamForm";
 
@@ -497,6 +497,30 @@ describe("UpstreamForm numeric drafts (#402)", () => {
     await typeText(poll, "60");
     await save();
     expect(submitted().service_discovery?.dns_sd?.poll_interval_seconds).toBe(60);
+  });
+});
+
+describe("UpstreamForm discovery service name (#678)", () => {
+  const providers = ["dns_sd", "kubernetes", "mesh"] as const;
+  function discovery(
+    provider: (typeof providers)[number],
+    serviceName: string,
+  ): ServiceDiscoveryConfig {
+    return { provider, [provider]: { service_name: serviceName } } as never;
+  }
+
+  it.each(providers)("rejects a blank %s service name before submit", async (provider) => {
+    await mountPlain({ targets: [], service_discovery: discovery(provider, "   ") });
+    await save();
+    expect(submit).not.toHaveBeenCalled();
+    expect(host.textContent).toContain("Service name is required");
+    expect(inputByLabel(host, "Service Name").getAttribute("aria-invalid")).toBe("true");
+  });
+
+  it.each(providers)("submits a trimmed %s service name", async (provider) => {
+    await mountPlain({ targets: [], service_discovery: discovery(provider, " orders ") });
+    await save();
+    expect(submitted().service_discovery?.[provider]?.service_name).toBe("orders");
   });
 });
 

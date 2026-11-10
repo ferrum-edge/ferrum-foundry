@@ -394,7 +394,7 @@ it("clears an existing description with null after Unicode whitespace normalizat
   expect(writes[0].body).toEqual({ description: null });
 });
 
-describe("committed-but-not-live rename", () => {
+describe("committed-but-not-live rename and delete", () => {
   // The client the app runs with: its MutationCache refreshes every cached
   // read after a committed write, which is what made the retired detail
   // refetchable.
@@ -482,6 +482,36 @@ describe("committed-but-not-live rename", () => {
     expect(client.getQueryData(["namespace", "tenant-a"])).toBeUndefined();
     expect(client.getQueryData(["proxy", "tenant-a", "p1"])).toBeUndefined();
     expect(detailReads).not.toContain("tenant-a");
+  });
+
+  it("resolves a committed delete as a delete: retires the name, leaves the scope and closes (#674)", async () => {
+    adoptProductionClient();
+    await render();
+    await click("Delete", row());
+    // Edge committed the delete, then could not prove it live.
+    names = names.filter((name) => name !== "tenant-a");
+    nextMutationResponse = Response.json(
+      { error: "reload timed out", applied: false, reason: "reload_timeout" },
+      { status: 503 },
+    );
+    await click("Delete Namespace");
+    await settle(() => {
+      expect(client.isMutating()).toBe(0);
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+      expect(host.querySelector("select")!.value).toBe("ferrum");
+      expect(host.querySelector('[data-testid="scope"]')!.textContent).toBe("ferrum");
+    });
+    expect(toast).toHaveBeenCalledTimes(1);
+    expect(toast).toHaveBeenCalledWith(
+      "warning",
+      expect.stringContaining('Namespace "tenant-a" deleted: committed, not yet proven live. Reason: reload_timeout.'),
+    );
+    expect(client.getQueryData(["namespace", "tenant-a"])).toBeUndefined();
+    expect(client.getQueryData(["proxy", "tenant-a", "p1"])).toBeUndefined();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(detailReads).not.toContain("tenant-a");
+    expect(writes).toHaveLength(1);
+    expect(writes[0].method).toBe("DELETE");
   });
 
   it("keeps everything on a 503 from the nothing-applied family", async () => {
