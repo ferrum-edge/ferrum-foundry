@@ -41,6 +41,7 @@ import {
   getApiErrorMessage,
   getCommittedWrite,
 } from "@/api/client";
+import type { CommittedWrite } from "@/api/gatewayMetadata";
 
 const DEFAULT_NAMESPACE = "ferrum";
 
@@ -343,21 +344,25 @@ function DeleteNamespaceDialog({
     }
   }, [target]);
 
-  function finish(name: string) {
+  function finish(name: string, committed: CommittedWrite | null) {
     // The deleted namespace can no longer be the active scope.
     replaceNamespaceIfCurrent(name, DEFAULT_NAMESPACE);
-    toast("success", `Namespace "${name}" deleted`);
+    if (committed) {
+      toast("warning", committedWriteMessage(`Namespace "${name}" deleted`, committed));
+    } else {
+      toast("success", `Namespace "${name}" deleted`);
+    }
     onOpenChange(false);
   }
 
   async function handleDelete(confirm: boolean) {
     if (!target) return;
     try {
-      await deleteNamespace.mutateAsync({
+      const committed = await deleteNamespace.mutateAsync({
         name: target,
         confirm: confirm ? typed.trim() : undefined,
       });
-      finish(target);
+      finish(target, committed);
     } catch (err) {
       const status =
         err instanceof Error && "response" in err

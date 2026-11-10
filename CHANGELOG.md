@@ -238,6 +238,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Transparent mode replaced the whole stashed `policy` object, so switching
   back to Aggregate restored the typed field without the tool policies. The
   stash now merges nested fields, as a mode switch does.
+- A namespace delete answered with the committed-but-not-live `503` is
+  reported as a delete (#674). It used to reject: the retired name's caches
+  stayed, an active scope stayed on the deleted namespace, and the dialog
+  stayed open offering a second `DELETE`. It now resolves through
+  `removeCommitted`, moves the scope to the default, closes the dialog and
+  warns that the delete is committed but not yet proven live.
 - The error dialog no longer shows a stray `0` beside "Outcome unknown" or
   "API Error" when no HTTP answer arrived (a dropped connection or a client
   timeout); the status badge appears only for a real HTTP status.
