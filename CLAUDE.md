@@ -306,6 +306,8 @@ See `docs/concurrent-edits.md`.
     write having happened: it re-reads the plugin, finishes the association
     steps, then rethrows the commit, and the editor reseeds plugin,
     membership and baseline.
+  - A committed create closes its form (or dialog) with a warning, as a
+    `201` does, so it is never sent twice.
 
 ### Secret redaction
 

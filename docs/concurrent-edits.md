@@ -397,6 +397,17 @@ A namespace delete does the same: `useDeleteNamespace` resolves a committed
 as on success, an active scope on that namespace moves to the default, and the
 delete dialog closes with a warning instead of offering a second `DELETE`.
 
+### Committed creates
+
+A committed create **is** a completed create (#674). The proxy, upstream,
+consumer, and plugin create pages and the namespace create dialog close as on
+a `201` and warn "… created: committed, not yet proven live", so a second
+click cannot `POST` the same resource again. The answer carries no body, so a
+create page opens the collection rather than the new resource. A consumer
+create still shows its submitted secrets once first. A plugin create's
+membership plan stops at the create, so a proxy group's members are not
+attached; the warning says so.
+
 ### Committed credential writes
 
 A consumer credential append, basic replacement, indexed delete, or delete of

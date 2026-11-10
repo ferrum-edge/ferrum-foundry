@@ -52,8 +52,9 @@ The client marks the rejection (`getCommittedWrite()`), shows no error popup
 `getApiErrorMessage()` says the change was saved but is not yet proven live. A
 proxy, upstream, or consumer detail editor reseeds its form and write-guard
 baseline from a fresh read, so the next Save is not refused as a conflict with
-its own commit. A committed delete resolves as a delete and retires its cached
-detail. See
+its own commit; the plugin editor finishes its membership plan first and then
+reseeds the plugin and its membership. A committed delete resolves as a delete
+and retires its cached detail, and a committed create closes its form. See
 [concurrent-edits.md](concurrent-edits.md#committed-but-not-yet-live).
 
 ## Write queues

@@ -394,7 +394,7 @@ it("clears an existing description with null after Unicode whitespace normalizat
   expect(writes[0].body).toEqual({ description: null });
 });
 
-describe("committed-but-not-live rename and delete", () => {
+describe("committed-but-not-live create, rename and delete", () => {
   // The client the app runs with: its MutationCache refreshes every cached
   // read after a committed write, which is what made the retired detail
   // refetchable.
@@ -512,6 +512,28 @@ describe("committed-but-not-live rename and delete", () => {
     expect(detailReads).not.toContain("tenant-a");
     expect(writes).toHaveLength(1);
     expect(writes[0].method).toBe("DELETE");
+  });
+
+  it("closes the create dialog on a committed create instead of offering a second POST (#674)", async () => {
+    adoptProductionClient();
+    await render();
+    await click("New Namespace", host);
+    await input(0, "tenant-b");
+    // Edge committed the create, then could not prove it live.
+    names = [...names, "tenant-b"];
+    nextMutationResponse = Response.json(
+      { error: "reload timed out", applied: false, reason: "reload_timeout" },
+      { status: 503 },
+    );
+    await click("Create");
+    await settle(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
+    expect(toast).toHaveBeenCalledTimes(1);
+    expect(toast).toHaveBeenCalledWith(
+      "warning",
+      expect.stringContaining('Namespace "tenant-b" created: committed, not yet proven live. Reason: reload_timeout.'),
+    );
+    expect(writes).toHaveLength(1);
+    expect(writes[0].method).toBe("POST");
   });
 
   it("keeps everything on a 503 from the nothing-applied family", async () => {
