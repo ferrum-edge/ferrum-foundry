@@ -7,8 +7,6 @@ import {
   MCP_GATEWAY_AGGREGATE_ONLY_PATHS,
   MCP_GATEWAY_TRANSPARENT_NOTE,
   mcpGatewayConfigHasAggregateOnlyFields,
-  omitMcpGatewayAggregateOnlyFields,
-  pickMcpGatewayAggregateOnlyFields,
   readMcpGatewayMode,
   sanitizeMcpGatewayConfigForSubmit,
   switchMcpGatewayMode,
@@ -438,12 +436,15 @@ function PluginConfigFormFields({
     if (readMcpGatewayMode(parsedMcpGatewayConfig) !== "transparent_proxy") return;
     if (!mcpGatewayConfigHasAggregateOnlyFields(parsedMcpGatewayConfig)) return;
 
-    mcpAggregateStashRef.current = {
-      ...(mcpAggregateStashRef.current ?? {}),
-      ...pickMcpGatewayAggregateOnlyFields(parsedMcpGatewayConfig),
-    };
-    const stripped = omitMcpGatewayAggregateOnlyFields(parsedMcpGatewayConfig);
-    stripped.mode = "transparent_proxy";
+    // Stash exactly as a mode switch does: a deep merge, so a nested field
+    // typed here (`policy.default_action`) cannot replace the stashed
+    // `policy` object and lose its `tools` map.
+    const { config: stripped, stash } = switchMcpGatewayMode(
+      parsedMcpGatewayConfig,
+      "transparent_proxy",
+      mcpAggregateStashRef.current,
+    );
+    mcpAggregateStashRef.current = stash;
     const nextJson = JSON.stringify(stripped, null, 2);
     if (nextJson !== configJson) {
       setConfigJson(nextJson);

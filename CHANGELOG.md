@@ -233,6 +233,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   backend and listen ports as whole numbers from 1 to 65535, as the target
   form does (which now also refuses a fractional port), instead of sending
   `70000` or `80.5` to a gateway `400`.
+- The `mcp_gateway` editor no longer loses a stashed `policy.tools` map
+  (#679). Typing an aggregate-only field such as `policy.default_action` in
+  Transparent mode replaced the whole stashed `policy` object, so switching
+  back to Aggregate restored the typed field without the tool policies. The
+  stash now merges nested fields, as a mode switch does.
 - The error dialog no longer shows a stray `0` beside "Outcome unknown" or
   "API Error" when no HTTP answer arrived (a dropped connection or a client
   timeout); the status badge appears only for a real HTTP status.
