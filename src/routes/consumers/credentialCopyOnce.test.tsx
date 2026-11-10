@@ -24,6 +24,7 @@ class BasedRequest extends Request {
 const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
 let namespace: ReturnType<typeof useNamespace>;
 let type: BuiltInCredentialType = "keyauth";
+let existing: Record<string, unknown>[] = [];
 function Probe() {
   const value = useNamespace();
   useEffect(() => { namespace = value; });
@@ -32,7 +33,7 @@ function Probe() {
 function AppendPage() {
   const session = useEditorIdentity("new-user");
   return <CredentialForm key={session.key} session={session} credentialType={type}
-    existingCredentials={[]} revision={1} isRefreshing={false} />;
+    existingCredentials={existing} revision={1} isRefreshing={false} />;
 }
 
 const rootRoute = createRootRoute({ component: () => <Outlet /> });
@@ -85,6 +86,7 @@ function assertNoPersistence(secret: string) {
 }
 
 beforeEach(() => {
+  existing = [];
   writes.length = 0;
   fail = false;
   hold = undefined;
@@ -211,5 +213,23 @@ describe("submitted credential recovery", () => {
     await act(async () => { release!(); await hold; });
     expect(host.querySelector("textarea")).toBeNull();
     expect(host.textContent).not.toContain("tenant-a-late-secret");
+  });
+});
+
+describe("stored credential rows (#676)", () => {
+  const rows: [BuiltInCredentialType, Record<string, unknown>, string][] = [
+    ["keyauth", { key: "[REDACTED]" }, "Key credential"],
+    ["jwt", { secret: "[REDACTED]" }, "JWT credential"],
+    ["hmac_auth", { secret: "[REDACTED]" }, "HMAC credential"],
+    ["keyauth", {}, "Key credential"],
+  ];
+  it.each(rows)("shows a redacted %s credential by its type, not a masked marker", async (credType, cred, label) => {
+    type = credType;
+    existing = [cred];
+    await mount("/append");
+    const row = host.querySelector(".font-mono");
+    expect(row?.textContent).toBe(label);
+    expect(host.textContent).not.toContain("RED****TED");
+    expect(host.textContent).not.toContain("auto-generated");
   });
 });

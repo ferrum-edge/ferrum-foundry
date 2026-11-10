@@ -216,6 +216,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plugins, among them `waf`, `opa` and `mcp_gateway`, showed no priority. The
   table (`PLUGIN_PRIORITY`) now lists every plugin in the vendored plugin
   catalog, and the contracts test fails when it differs from the catalog.
+- A consumer's stored key-auth, JWT and HMAC credentials are listed as "Key
+  credential", "JWT credential" and "HMAC credential" (#676). The list masked
+  the gateway's `[REDACTED]` marker as if it were the secret and showed
+  `[RED****TED]` for every credential; a key-auth row without a key read "Key
+  (auto-generated)", which this gateway endpoint never does.
 - The error dialog no longer shows a stray `0` beside "Outcome unknown" or
   "API Error" when no HTTP answer arrived (a dropped connection or a client
   timeout); the status badge appears only for a real HTTP status.
