@@ -22,8 +22,10 @@
  *   node scripts/starter-preflight.mjs --json
  */
 
+import { realpathSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { resolve, sep } from "node:path";
+import { pathToFileURL } from "node:url";
 import { signAdminJwt } from "../shared/admin-jwt.js";
 import { mayCarrySecret } from "../shared/admin-origin.js";
 
@@ -626,7 +628,10 @@ function render(report) {
   return lines.join("\n");
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
+) {
   const argv = process.argv.slice(2);
   const envIndex = argv.indexOf("--env");
   const envPath = envIndex === -1 ? "deploy/starter/.env" : argv[envIndex + 1];

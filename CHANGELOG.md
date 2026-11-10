@@ -74,6 +74,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unknown mode. A failed config read still shows the configuration error at
   once and discards the session answer, and never replaces a sign-in that
   completed meanwhile.
+- The Astra and Luna dispatch launchers send `service_tier="fast"` with
+  `features.fast_mode=true` for `--fast` instead of the `priority` tier, and
+  accept `--no-fast`; the Sol launcher no longer sends
+  `features.fast_mode=false` on a standard run. The launchers, their tests and
+  the skill wording match Ferrum Edge's again (#687).
 
 ### Security
 
@@ -441,6 +446,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read requires. A `200` HTML fallback page, an empty or `{}` body, or one
   without `ready` from a misrouted admin origin was reported ready; it is now
   `503` `unavailable`. A valid `degraded` snapshot is still ready.
+- `plugin-schema-drift.mjs`, `plugin-sensitivity-drift.mjs` and
+  `starter-preflight.mjs` ran nothing and exited 0 when started from a path
+  with a space or non-ASCII character or through a symlink, because they
+  compared `import.meta.url` with an unencoded, unresolved `argv[1]`. Every
+  script now compares it with `pathToFileURL(realpathSync(argv[1]))`, and a
+  contract test fails on any other form (#685).
+- The mock admin API (`scripts/mock-admin-gateway.mjs`) listens on
+  `127.0.0.1` instead of every interface, since it is writable and
+  unauthenticated; `MOCK_ADMIN_BIND` names another address, and the log line
+  prints the address it actually listens on (#685).
+- The demo seed's restore payload stamps `ferrum_version` with the Edge
+  source commit `docs/compatibility.json` pins instead of a fixed August
+  commit; the critical journeys fail at a refused setup write with its
+  status instead of a later UI timeout, and CI no longer sets the unused
+  `FERRUM_ADMIN_URL` for them (#685).
+- The namespace list no longer accepts a bare `string[]` from
+  `GET /namespaces` as a complete registry, a branch kept for development
+  gateways that predate the paginated envelope. Any list page without the
+  `{ data, pagination }` envelope is refused as inconsistent pagination
+  metadata instead of failing on a missing field (#681).
+- Metrics: load balancer, circuit breaker and health-check rows from a
+  namespace other than the selected one are labelled with it; the load
+  balancer panel compared with the literal `ferrum` instead, and the other
+  two never showed it. Unhealthy-target rows on Metrics and the dashboard are
+  keyed by namespace, check kind, upstream or proxy, and target, so repeated
+  targets no longer share a React key (#683).
+- Toasts are announced to screen readers (a polite live region), and their
+  dismiss button and the consumer ACL group remove button carry labels. The
+  error dialog's Copy Error reports a refused clipboard and asks for a manual
+  copy instead of failing silently (#683).
+- The proxy picker's "Searching the first N of M proxies" note follows the
+  results it describes. Managed TLS, ACME certificate and ACME order lists
+  say "No results on this page" after the last record on a later page is
+  deleted, as Inventory and Events do. The upstream list names the
+  configured health-check kinds ("Active", "Passive", "Active + passive")
+  instead of calling passive-only checks "Active" (#683).
+- The gateway metadata store no longer keeps the last response's `ETag`,
+  `Cache-Control` and `Content-Disposition`, which nothing read, and a read
+  publishes only when the cached-response notice changes, so the metadata
+  banner no longer re-renders on every API response (#683).
+- Coverage no longer counts the shared test helpers under `src/test/` toward
+  the source floors (#683).
+- Docs: the deployment guide's upload bullet named `proxy_read_timeout`, a
+  response-side timer, as one to keep at or below the upload budgets,
+  contradicting the deadlines section; it now names `proxy_send_timeout` and
+  points response timers at the deadlines. The deployment and authentication
+  guides say the image healthcheck probes `127.0.0.1`, so a
+  `FERRUM_BIND_ADDRESS` other than `0.0.0.0` or `127.0.0.1` needs it
+  overridden (#684).
 
 ### Changed
 

@@ -16,6 +16,7 @@ import {
   readSeedConfig,
   runSeed,
 } from "./seed-demo-gateway.mjs";
+import { readSupportedPairing } from "./supported-pairing.mjs";
 
 const FERRUM_JWT_SECRET_IS_REQUIRED_PATTERN = /FERRUM_JWT_SECRET is required/;
 const AT_LEAST_32_BYTES_PATTERN = /at least 32 bytes/;
@@ -25,7 +26,6 @@ const FERRUM_ADMIN_URL_HTTPS_UNLESS_LOOPBACK_PATTERN =
 const FERRUM_ADMIN_URL_MUST_USE_HTTPS_PATTERN = /FERRUM_ADMIN_URL must use https/;
 const MUST_EXACTLY_EQUAL_HTTPS_GATEWAY_PATTERN =
   /must exactly equal "https:\/\/gateway\.example#payments"/;
-const CONTRACT_PATTERN = /^contract-[0-9a-f]{40}$/;
 const PAYMENTS_PATTERN = /payments/;
 const FERRUM_DEMO_INCLUDE_BASIC_AUTH_TRUE_PATTERN = /FERRUM_DEMO_INCLUDE_BASIC_AUTH=true/;
 const FERRUM_BASIC_AUTH_HMAC_SECRET_PATTERN = /FERRUM_BASIC_AUTH_HMAC_SECRET/;
@@ -188,7 +188,7 @@ test("restore fixture uses current resource names and versioned API-spec semanti
   const payload = buildRestorePayload(timestamp);
 
   assert.equal(payload.version, "1");
-  assert.match(payload.ferrum_version, CONTRACT_PATTERN);
+  assert.equal(payload.ferrum_version, `contract-${readSupportedPairing().edge.source_commit}`);
   assert.deepEqual(payload.api_specs, { section_version: "2", items: [] });
   assert.equal(payload.exported_at, timestamp);
   assert.equal(payload.counts.consumers, payload.consumers.length);

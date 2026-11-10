@@ -40,6 +40,8 @@ export default defineConfig({
       exclude: [
         "**/*.test.{ts,tsx}",
         "**/__tests__/**",
+        // Shared test helpers are not application source.
+        "src/test/**",
         "src/**/*.d.ts",
         "src/main.tsx",
       ],

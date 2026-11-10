@@ -3,17 +3,21 @@ import {
   constants as fsConstants,
   fchmodSync,
   openSync,
+  realpathSync,
   writeFileSync,
 } from "node:fs";
 import { isIP } from "node:net";
 import { pathToFileURL } from "node:url";
 import { signAdminJwt } from "../shared/admin-jwt.js";
 import { mayCarrySecret } from "../shared/admin-origin.js";
+import { readSupportedPairing } from "./supported-pairing.mjs";
 
 const DNS_LABEL_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
 const HYPHENS_PATTERN = /-/g;
 
-const CONTRACT_REVISION = "50e65b5798555209114cbe08ab2d011b3896ad00";
+// The restore payload names the Edge source the pairing pins, not a fixed
+// commit that goes stale when the pin moves.
+const CONTRACT_REVISION = readSupportedPairing().edge.source_commit;
 const COLLECTION_PAGE_SIZE = 100;
 const BASIC_AUTH_PROBE_ID = "ff-demo-basic-auth-hmac-probe";
 
@@ -914,7 +918,10 @@ export async function runSeed(config = readSeedConfig(), { request = adminReques
   };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
+) {
   runSeed()
     .then((result) => console.log(JSON.stringify(result, null, 2)))
     .catch((error) => {

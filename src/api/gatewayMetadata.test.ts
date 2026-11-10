@@ -7,6 +7,7 @@ import {
   resetGatewayMetadata,
   setApplyStatusFetcher,
   setNamespaceScopedSession,
+  subscribeGatewayMetadata,
   type ApplyStatusResponse,
 } from "./gatewayMetadata";
 
@@ -104,7 +105,7 @@ describe("observeGatewayResponse", () => {
     },
   );
 
-  it("retains cached-response and safe HTTP metadata", async () => {
+  it("retains only the cached-response notice from a read", async () => {
     await observeGatewayResponse(
       new Request("http://localhost/api/proxy/backup"),
       new Response("{}", {
@@ -117,12 +118,37 @@ describe("observeGatewayResponse", () => {
       }),
     );
 
-    expect(getGatewayMetadataSnapshot()).toMatchObject({
-      cachedResponse: { url: "http://localhost/api/proxy/backup" },
-      etag: '"revision-4"',
-      cacheControl: "private, max-age=5",
-      contentDisposition: 'attachment; filename="backup.json"',
+    expect(Object.keys(getGatewayMetadataSnapshot()).sort()).toEqual(["apply", "cachedResponse"]);
+    expect(getGatewayMetadataSnapshot().cachedResponse).toMatchObject({
+      url: "http://localhost/api/proxy/backup",
     });
+  });
+
+  it("publishes nothing for a read that changes nothing it shows", async () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeGatewayMetadata(listener);
+    try {
+      await observeGatewayResponse(
+        new Request("http://localhost/api/proxy/proxies"),
+        new Response("{}", { headers: { etag: '"revision-5"' } }),
+      );
+      expect(listener).not.toHaveBeenCalled();
+
+      await observeGatewayResponse(
+        new Request("http://localhost/api/proxy/proxies"),
+        new Response("{}", { headers: { "x-data-source": "cached" } }),
+      );
+      expect(listener).toHaveBeenCalledTimes(1);
+      // A live answer for the same URL clears the notice it raised.
+      await observeGatewayResponse(
+        new Request("http://localhost/api/proxy/proxies"),
+        new Response("{}"),
+      );
+      expect(listener).toHaveBeenCalledTimes(2);
+      expect(getGatewayMetadataSnapshot().cachedResponse).toBeNull();
+    } finally {
+      unsubscribe();
+    }
   });
 
   it("classifies a pre-commit 503 without polling or replay", async () => {

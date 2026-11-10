@@ -240,35 +240,6 @@ export function ProxySearchPicker(props: ProxySearchPickerProps) {
                 </div>
               )}
 
-              {/* The search above ran over what is loaded. Say so, and make
-                  completing it a deliberate, cancellable action rather than
-                  something every picker pays for on open. */}
-              {!catalog.complete && !disabled && (
-                <div className="border-t border-border/60 mt-1 px-3 py-2 text-xs text-text-muted">
-                  <p>
-                    Searching the first {proxies.length} of {catalog.total} proxies
-                    in this namespace.
-                    {catalog.inconsistent &&
-                      " The collection changed while it was loading, so the full list could not be confirmed."}
-                  </p>
-                  <button
-                    type="button"
-                    disabled={catalog.expanding}
-                    onClick={() => {
-                      if (catalog.inconsistent) catalog.retry();
-                      else setExpanded(true);
-                    }}
-                    className="mt-1 text-orange hover:text-orange-light font-medium transition-colors disabled:opacity-60"
-                  >
-                    {catalog.expanding
-                      ? `Loading all ${catalog.total} proxies…`
-                      : catalog.inconsistent
-                        ? "Retry loading all proxies"
-                        : `Search all ${catalog.total} proxies`}
-                  </button>
-                </div>
-              )}
-
               {!isLoading &&
                 filtered.map((proxy) => {
                   const selected = isSelected(proxy.id);
@@ -318,6 +289,35 @@ export function ProxySearchPicker(props: ProxySearchPickerProps) {
                     </button>
                   );
                 })}
+
+              {/* The search above ran over what is loaded. Say so, and make
+                  completing it a deliberate, cancellable action rather than
+                  something every picker pays for on open. */}
+              {!catalog.complete && !disabled && (
+                <div className="border-t border-border/60 mt-1 px-3 py-2 text-xs text-text-muted">
+                  <p>
+                    Searching the first {proxies.length} of {catalog.total} proxies
+                    in this namespace.
+                    {catalog.inconsistent &&
+                      " The collection changed while it was loading, so the full list could not be confirmed."}
+                  </p>
+                  <button
+                    type="button"
+                    disabled={catalog.expanding}
+                    onClick={() => {
+                      if (catalog.inconsistent) catalog.retry();
+                      else setExpanded(true);
+                    }}
+                    className="mt-1 text-orange hover:text-orange-light font-medium transition-colors disabled:opacity-60"
+                  >
+                    {catalog.expanding
+                      ? `Loading all ${catalog.total} proxies…`
+                      : catalog.inconsistent
+                        ? "Retry loading all proxies"
+                        : `Search all ${catalog.total} proxies`}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}

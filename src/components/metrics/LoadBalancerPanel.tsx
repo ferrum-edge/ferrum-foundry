@@ -6,9 +6,11 @@ import type { AdminMetrics } from "@/api/types";
 
 interface LoadBalancerPanelProps {
   loadBalancers: AdminMetrics["load_balancers"];
+  /** The payload is fleet-wide; rows from any other namespace are labelled. */
+  selectedNamespace: string;
 }
 
-export function LoadBalancerPanel({ loadBalancers }: LoadBalancerPanelProps) {
+export function LoadBalancerPanel({ loadBalancers, selectedNamespace }: LoadBalancerPanelProps) {
   const upstreams = loadBalancers.active_connections;
 
   if (upstreams.length === 0) {
@@ -24,7 +26,7 @@ export function LoadBalancerPanel({ loadBalancers }: LoadBalancerPanelProps) {
           <h4 className="text-text-secondary text-xs font-medium mb-2">
             Upstream:{" "}
             <span className="text-text-primary font-mono">{upstream.upstream_id}</span>
-            {upstream.namespace !== "ferrum" && (
+            {upstream.namespace !== selectedNamespace && (
               <span className="text-text-muted"> · ns {upstream.namespace}</span>
             )}
           </h4>

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -43,6 +44,12 @@ export function ErrorPopup({
   outcome,
 }: ErrorPopupProps) {
   const formattedBody = formatBody(body);
+  const [copyStatus, setCopyStatus] = useState("");
+
+  const close = () => {
+    setCopyStatus("");
+    onClose();
+  };
 
   const handleCopy = async () => {
     const text = [
@@ -53,11 +60,17 @@ export function ErrorPopup({
     ]
       .filter(Boolean)
       .join("\n");
-    await navigator.clipboard.writeText(text);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyStatus("Error details copied.");
+    } catch {
+      // No clipboard outside a secure context or without permission.
+      setCopyStatus("Clipboard unavailable. Select the details above and copy them manually.");
+    }
   };
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+    <Dialog open={open} onOpenChange={(o) => !o && close()}>
       <DialogContent>
         <div className="flex items-center gap-3 mb-4">
           <DialogTitle>{outcome ? "Outcome unknown" : "API Error"}</DialogTitle>
@@ -98,11 +111,17 @@ export function ErrorPopup({
           </div>
         )}
 
+        {copyStatus && (
+          <p role="status" className="mb-3 text-sm text-text-secondary">
+            {copyStatus}
+          </p>
+        )}
+
         <div className="flex justify-end gap-3">
           <Button variant="secondary" onClick={handleCopy}>
             Copy Error
           </Button>
-          <Button variant="primary" onClick={onClose}>
+          <Button variant="primary" onClick={close}>
             Dismiss
           </Button>
         </div>

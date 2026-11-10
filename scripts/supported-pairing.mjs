@@ -31,7 +31,7 @@
  *   node scripts/supported-pairing.mjs release-ready  # the release workflow's gate
  */
 
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, realpathSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -359,7 +359,10 @@ async function main(command) {
   console.log(JSON.stringify({ aligned: true, image: record.edge.image }));
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
+) {
   main(process.argv[2]).catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;

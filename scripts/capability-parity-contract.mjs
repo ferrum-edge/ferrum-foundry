@@ -76,6 +76,7 @@
  */
 
 import assert from "node:assert/strict";
+import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import {
   CAPABILITY_SURFACES,
@@ -512,7 +513,10 @@ export function confirmWritableParityTarget(config, expectation) {
   if (expectation === "writable") confirmDestructiveTarget(config);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
+) {
   const config = readSeedConfig();
   const expectation = process.env.FERRUM_CAPABILITY_EXPECT?.trim();
   confirmWritableParityTarget(config, expectation);

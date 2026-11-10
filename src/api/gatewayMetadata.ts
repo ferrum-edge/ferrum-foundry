@@ -64,9 +64,6 @@ export interface ApplyStatusResponse {
 
 export interface GatewayMetadataSnapshot {
   cachedResponse: { url: string; observedAt: string } | null;
-  etag: string | null;
-  cacheControl: string | null;
-  contentDisposition: string | null;
   apply: {
     state: ApplyState;
     namespace: string | null;
@@ -105,9 +102,6 @@ const IDLE_APPLY: GatewayMetadataSnapshot["apply"] = {
 
 let snapshot: GatewayMetadataSnapshot = {
   cachedResponse: null,
-  etag: null,
-  cacheControl: null,
-  contentDisposition: null,
   apply: IDLE_APPLY,
 };
 let statusFetcher: ApplyStatusFetcher | undefined;
@@ -407,16 +401,12 @@ export async function observeGatewayResponse(
       ? null
       : snapshot.cachedResponse;
 
-  let next: GatewayMetadataSnapshot = {
-    ...snapshot,
-    cachedResponse,
-    etag: response.headers.get("etag"),
-    cacheControl: response.headers.get("cache-control"),
-    contentDisposition: response.headers.get("content-disposition"),
-  };
+  let next: GatewayMetadataSnapshot = { ...snapshot, cachedResponse };
 
   if (!isConfigurationMutation(request)) {
-    publish(next);
+    // A read can change only the cached-response notice. Publishing an
+    // unchanged snapshot would re-render every subscriber once per response.
+    if (cachedResponse !== snapshot.cachedResponse) publish(next);
     return;
   }
 
@@ -437,7 +427,7 @@ export async function observeGatewayResponse(
   if (owner.session !== sessionGeneration || order !== latestMutationOrder) return;
   // Body reads and status polls may both have completed since this observer
   // started. Base publication on the current monitor, never its earlier copy.
-  next = { ...snapshot, cachedResponse, etag: next.etag, cacheControl: next.cacheControl, contentDisposition: next.contentDisposition };
+  next = { ...snapshot, cachedResponse };
   const notLive = committedNotLiveAnswer(
     response.status,
     response.headers.get("x-ferrum-config-cursor"),
@@ -600,9 +590,6 @@ export function clearGatewayMetadata(): void {
   latestMutationOrder += 1;
   publish({
     cachedResponse: null,
-    etag: null,
-    cacheControl: null,
-    contentDisposition: null,
     apply: IDLE_APPLY,
   });
 }
