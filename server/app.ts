@@ -77,8 +77,8 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
         imgSrc: ["'self'", 'data:'],
         objectSrc: ["'none'"],
         scriptSrc: ["'self'"],
-        // No 'unsafe-inline' (issue #594). Radix's scroll lock (Dialog, Select,
-        // DropdownMenu) injects a <style> element with computed widths at
+        // No 'unsafe-inline' (issue #594). Radix's scroll lock (Dialog and
+        // Select) injects a <style> element with computed widths at
         // runtime and Select's viewport renders another, so no hash can cover
         // them. Both carry the per-response nonce helmet appends here, which
         // the shell hands the app through <meta property="csp-nonce">. React

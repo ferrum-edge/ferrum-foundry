@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Drop three dependencies nothing imports: the production dependency
+  `@radix-ui/react-dropdown-menu` (with its `@radix-ui/react-menu`), and the
+  development dependencies `autoprefixer` and `postcss`, left from a Tailwind
+  v3 toolchain. Tailwind v4 runs through `@tailwindcss/vite`, and Vite keeps
+  its own `postcss`.
 - Restore is one explicit flow: while a restore runs, its confirmation
   dialogs refuse the close button, Escape and an outside click, and the file
   picker is disabled, so a late answer can no longer reopen the typed

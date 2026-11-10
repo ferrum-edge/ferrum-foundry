@@ -370,7 +370,7 @@ image with a different digest. See
 | Frontend | React 19, TypeScript 6, Tailwind CSS v4 |
 | Routing | TanStack Router v1 |
 | Data | TanStack Query v5, TanStack Table v8, TanStack Virtual v3 |
-| UI | Radix UI primitives (Dialog, Dropdown Menu, Select, Tabs, Tooltip) |
+| UI | Radix UI primitives (Dialog, Select, Tabs, Tooltip) |
 | Backend | Node.js, Fastify 5 |
 | JWT | jose (HS256) |
 | Docker | Distroless Node.js 24 (Debian 13), non-root |
