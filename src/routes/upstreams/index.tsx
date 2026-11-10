@@ -19,6 +19,7 @@ import { useCapabilities } from "@/stores/capabilities";
 import { SkeletonRow } from "@/components/ui/Skeleton";
 import { filterAndPage } from "@/lib/collectionSearch";
 import { formatDateTime } from "@/lib/format";
+import type { HealthCheckConfig } from "@/api/types";
 
 const UNDERSCORES_PATTERN = /_/g;
 const WORD_INITIAL_PATTERN = /\b\w/g;
@@ -26,6 +27,20 @@ const WORD_INITIAL_PATTERN = /\b\w/g;
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
+
+/**
+ * The configured health-check kinds, by name: "Active" alone would also read
+ * as "checks are on" for an upstream with only passive checks. Enablement is
+ * presence, not an `enabled` field.
+ */
+export function healthCheckLabel(healthChecks: HealthCheckConfig | null | undefined): string | null {
+  const active = Boolean(healthChecks?.active);
+  const passive = Boolean(healthChecks?.passive);
+  if (active && passive) return "Active + passive";
+  if (active) return "Active";
+  if (passive) return "Passive";
+  return null;
+}
 
 function formatAlgorithm(algo: string): string {
   return algo.replace(UNDERSCORES_PATTERN, " ").replace(WORD_INITIAL_PATTERN, (c) => c.toUpperCase());
@@ -251,8 +266,8 @@ export default function UpstreamsPage() {
 
                 {/* Health check status */}
                 <span>
-                  {upstream.health_checks?.active || upstream.health_checks?.passive ? (
-                    <Badge variant="green">Active</Badge>
+                  {healthCheckLabel(upstream.health_checks) ? (
+                    <Badge variant="green">{healthCheckLabel(upstream.health_checks)}</Badge>
                   ) : (
                     <Badge variant="default">None</Badge>
                   )}
