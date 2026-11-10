@@ -221,6 +221,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the gateway's `[REDACTED]` marker as if it were the secret and showed
   `[RED****TED]` for every credential; a key-auth row without a key read "Key
   (auto-generated)", which this gateway endpoint never does.
+- The Settings namespace field shown when the registry is unavailable or
+  lists nothing no longer switches the namespace on every keystroke (#677).
+  Each prefix of a typed name became the active namespace, refetching every
+  scoped read, and clearing the field left an empty scope that refused every
+  request. The typed name now switches only on Switch or Enter, and only once
+  it passes the gateway's namespace name rule; otherwise the field shows why.
 - The error dialog no longer shows a stray `0` beside "Outcome unknown" or
   "API Error" when no HTTP answer arrived (a dropped connection or a client
   timeout); the status badge appears only for a real HTTP status.
