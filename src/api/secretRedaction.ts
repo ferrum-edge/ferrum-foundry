@@ -237,7 +237,7 @@ export function pluginConfigSecrets(pluginName: string, config: unknown): Secret
  * closed on a whole subtree — `credentials`, `headers`, a `*_secret` object —
  * rather than trying to recognise which of its leaves is sensitive. A plugin
  * configuration (`plugin_name` beside `config`) at any depth — a plugin write,
- * or one entry of a batch — has its `config` classified by
+ * or one entry of a larger payload — has its `config` classified by
  * `pluginConfigSecrets`.
  */
 export function secretValues(data: unknown): Secrets {

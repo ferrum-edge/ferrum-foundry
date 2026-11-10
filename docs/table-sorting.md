@@ -1,27 +1,8 @@
 # Table sorting and pagination
 
-## `DataTable` sorting
-
-`DataTable` (`src/components/ui/DataTable.tsx`) sorts only complete
-collections, in the browser. A single page of gateway results cannot be sorted
-as if it were the whole collection.
-
-| Props | Sorting |
-| --- | --- |
-| `pagination` with the default `paginationMode="server"` | Disabled for every column, even one with `enableSorting: true`. Headers have no sort indicator or click handler. |
-| `pagination` with `paginationMode="client"` and unsliced `data` | Sorts the whole collection, then slices by offset and limit. The footer counts the full collection, and a sort change calls `onPaginationChange` with offset zero. |
-| No `pagination` | Treats `data` as the complete collection and sorts it without slicing. |
-
-Columns can opt out with `enableSorting: false`.
-
-Every record needs a unique, stable string `id`. Rows with equal sort values
-are ordered by ascending ID in both directions, regardless of fetch order. The
-table does not mutate the supplied array, and clearing the sort restores the
-supplied order. `aria-sort` reflects the active direction.
-
 ## Current pages
 
-No application page uses `DataTable` today. Current strategies:
+No application table sorts. Current strategies:
 
 | Surface | Data available | Sort behavior |
 | --- | --- | --- |
@@ -29,10 +10,12 @@ No application page uses `DataTable` today. Current strategies:
 | API specs | A server page normally; the complete collection during search | Cards, no sort control. |
 | Other inventory and observability tables | Endpoint-specific snapshots or pages | Static headers, no sort control. |
 
-When adopting `DataTable` for a `listAll()` caller, pass the complete filtered
-collection, not `filterAndPage(...).items`. Keep namespace binding in the data
-hook: every `listAll(scope)` request must keep the operation's
-`NamespaceScope`.
+A single page of gateway results cannot be sorted as if it were the whole
+collection. A table that adds browser-side sorting must sort only a complete
+collection (for a `listAll()` caller, the complete filtered collection, not
+`filterAndPage(...).items`), tie-break equal values by a unique, stable ID, and
+keep namespace binding in the data hook: every `listAll(scope)` request must
+keep the operation's `NamespaceScope`.
 
 ## Gateway sorting support
 
@@ -67,11 +50,6 @@ even when the collection is empty.
 
 ## Test coverage
 
-- `src/components/ui/DataTable.test.tsx` mounts the real component and checks
-  row order and indicators in both directions, clearing the sort, sorting
-  across page boundaries, the offset reset, ID tie-breaks (including after
-  reordered input), input immutability, and disabled server-page and column
-  sorting.
 - `src/routes/resourceGrids.test.tsx` mounts nine of the ten `ResourceGrid`
   surfaces (not the Metrics per-route table) and checks the scroller, minimum
   width, shared header/row template, identity cell, and placement of

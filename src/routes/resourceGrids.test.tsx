@@ -2,7 +2,6 @@ import type { ReactElement } from "react";
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Consumer, PluginConfig, Proxy, Upstream } from "@/api/types";
-import { TooltipProvider } from "@/components/ui/Tooltip";
 import { createHarness, page, selectTab, settle, stubFetch } from "@/test/__tests__/harness";
 import { graph, meshResponses } from "@/test/__tests__/meshFixtures";
 import ProxiesPage from "./proxies";
@@ -131,7 +130,7 @@ async function mount(surface: Surface) {
     history: createMemoryHistory({ initialEntries: [surface.entry ?? surface.path] }),
   });
   await router.load();
-  await ui.render(<TooltipProvider><RouterProvider router={router} /></TooltipProvider>);
+  await ui.render(<RouterProvider router={router} />);
   if (surface.tab) {
     await settle(() => expect([...ui.host.querySelectorAll('[role="tab"]')]
       .some((tab) => tab.textContent === surface.tab)).toBe(true));

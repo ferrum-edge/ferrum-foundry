@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getPluginConfigDefault } from "./pluginConfigDefaults";
 import {
-  MCP_GATEWAY_AGGREGATE_ONLY_PATHS,
-  buildMcpGatewayTemplate,
   mcpGatewayConfigHasAggregateOnlyFields,
   omitMcpGatewayAggregateOnlyFields,
   sanitizeMcpGatewayConfigForSubmit,
@@ -53,17 +51,6 @@ describe("mcpGatewayConfig", () => {
         },
       },
     });
-  });
-
-  it("builds a transparent template without aggregate-only keys", () => {
-    const template = buildMcpGatewayTemplate("transparent_proxy");
-    expect(template.mode).toBe("transparent_proxy");
-    expect(template.policy).toBeUndefined();
-    expect(template.discovery).toBeUndefined();
-    for (const path of MCP_GATEWAY_AGGREGATE_ONLY_PATHS) {
-      const [section, field] = path.split(".");
-      expect((template as Record<string, Record<string, unknown>>)[section]?.[field]).toBeUndefined();
-    }
   });
 
   it("strips rejected keys from transparent-mode submissions", () => {

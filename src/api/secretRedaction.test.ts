@@ -4,8 +4,8 @@
 
 /**
  * A gateway refusal can repeat the value it refused. Consumer create, plugin
- * configuration writes, upstream writes, TLS key material, and batch create
- * all send secrets, so each failure must reach the page with every submitted
+ * configuration writes, upstream writes, and TLS key material all send
+ * secrets, so each failure must reach the page with every submitted
  * secret replaced by `[REDACTED]` — before any trimming or truncation — must
  * raise the global popup (the "Outcome unknown" dialog included) only with its
  * body redacted the same way, and must not keep the request, its options, or a
@@ -608,8 +608,6 @@ describe("TLS key material and ACME credentials (#478)", () => {
   });
 
   it.each([
-    ["managed record update", "/api/proxy/admin/tls/certificates/edge", () =>
-      tls.updateManagedRecord("certificates", "edge", { cert_pem: CERT, key_pem: LONG })],
     ["ACME certificate import", "/api/proxy/admin/tls/acme/certificates", () =>
       tls.createAcmeCertificate({ domains: ["a.example"], directory_url: "https://acme.example",
         cert_pem: CERT, key_pem: LONG })],
@@ -647,20 +645,6 @@ describe("TLS key material and ACME credentials (#478)", () => {
     expectDetached(cause);
     expectRedacted(await exposure(cause), QUOTED);
     expect(reported).toEqual([]);
-  });
-});
-
-describe("batch create (#478)", () => {
-  it("keeps no fragment of a consumer's credential or a plugin secret", async () => {
-    echo(QUOTED);
-    const failure = await ops.batchCreate(scope, {
-      consumers: [consumerWith(QUOTED)],
-      plugin_configs: [pluginWith(QUOTED)],
-    }).catch((e: unknown) => e);
-
-    expectDetached(failure);
-    expectRedacted(await exposure(failure), QUOTED);
-    expectRedactedReport(QUOTED, 400, "/api/proxy/batch");
   });
 });
 

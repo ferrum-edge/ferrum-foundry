@@ -30,20 +30,6 @@ const AGGREGATE_FIELD_DEFAULTS: JsonObject = {
   },
 };
 
-const SHARED_TEMPLATE: JsonObject = {
-  endpoint: {
-    path: "/mcp",
-    protocol_versions: ["2025-11-25"],
-  },
-  servers: {
-    github: {
-      upstream_url: "https://mcp-github.internal.example.com/mcp",
-      namespace: "github",
-      expose_tools: true,
-    },
-  },
-};
-
 function isPlainObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -170,19 +156,6 @@ export function applyMcpGatewayAggregateDefaults(
   if (stash !== null) return mergeDefined(next, stash);
   if (mcpGatewayConfigHasAggregateOnlyFields(next)) return next;
   return mergeDefined(next, AGGREGATE_FIELD_DEFAULTS);
-}
-
-export function buildMcpGatewayTemplate(mode: McpGatewayMode): JsonObject {
-  if (mode === "transparent_proxy") {
-    return {
-      mode: "transparent_proxy",
-      ...deepClone(SHARED_TEMPLATE),
-    };
-  }
-  return applyMcpGatewayAggregateDefaults({
-    mode: "aggregate_router",
-    ...deepClone(SHARED_TEMPLATE),
-  });
 }
 
 export function sanitizeMcpGatewayConfigForSubmit(config: unknown): JsonObject {

@@ -311,9 +311,8 @@ See `docs/concurrent-edits.md`.
   `withRedactedFailure(secretValues(body), …)` (`src/api/secretRedaction.ts`).
   That covers consumer create and credential writes, plugin configurations,
   proxy writes (membership `replace` included) and upstreams (inline backend
-  TLS keys), TLS key material and ACME account credentials, batch create,
-  backup restore (`restoreSecrets`), and API spec import/replace
-  (`specDocumentSecrets`). **Add any new secret-bearing write to it.**
+  TLS keys), TLS key material and ACME account credentials, backup restore
+  (`restoreSecrets`), and API spec import/replace (`specDocumentSecrets`). **Add any new secret-bearing write to it.**
 - Its failure becomes a `RedactedWriteError`: every submitted secret is replaced
   by `[REDACTED]` in the message and parsed body (before any trim or
   truncation), with a bodiless response for the status and no `request`,

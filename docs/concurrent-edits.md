@@ -438,7 +438,7 @@ carries a secret: consumer create, plugin configuration create and update
 (including a membership plan's rollback), proxy create, update, and a
 membership plan's `replace`, upstream create and update, managed
 TLS and ACME certificate writes, ACME order creation and renewal, TLS
-validation, batch create, backup restore, and API spec import and replacement.
+validation, backup restore, and API spec import and replacement.
 
 `secretValues()` finds secrets by position, not by resource type:
 
@@ -457,7 +457,7 @@ validation, batch create, backup restore, and API spec import and replacement.
   (`-----BEGIN CERTIFICATE-----`) stay readable.
 
 **Plugin `config`.** A plugin configuration's `config`, in a plugin write or a
-batch entry, is classified the way Ferrum Edge projects it for a non-admin read
+restore entry, is classified the way Ferrum Edge projects it for a non-admin read
 (`src/admin/plugin_config_projection.rs`), so nothing Edge hides from a read can
 come back in a refusal. `PLUGIN_SENSITIVITY` transcribes Edge's per-plugin
 rules (for example `ai_semantic_cache`'s `semantic_embedding_auth_header`,
@@ -624,7 +624,7 @@ so the next successful read seeds a fresh baseline.
 | Guarded deletes, consumer saves and rotation re-send, nested redaction of plugin `config` | `src/api/conditionalWrite.test.ts`, `src/lib/resourceBaseline.test.ts` |
 | Plugin editor baseline, membership writes conditional on their reads | `src/lib/pluginMembership.test.ts`, `src/lib/pluginMembership.binding.test.ts` |
 | Refused delete dialog | `src/routes/proxies/concurrentEdit.test.tsx` |
-| Echoed secrets redacted on consumer create, plugin, upstream, TLS, and batch writes, in the error and in the popup; plugin `config` classified by Edge's projection; no request retained; status, `412`, and outcome markers kept | `src/api/secretRedaction.test.ts`, `src/routes/consumers/createSecretEcho.test.tsx` |
+| Echoed secrets redacted on consumer create, plugin, upstream, and TLS writes, in the error and in the popup; plugin `config` classified by Edge's projection; no request retained; status, `412`, and outcome markers kept | `src/api/secretRedaction.test.ts`, `src/routes/consumers/createSecretEcho.test.tsx` |
 | Committed-but-not-live classification, popup suppression, cache refresh, save-twice regression | `src/api/committedWrite.test.ts`, `src/lib/queryClient.test.ts` |
 | Editor reseed after a committed save; committed delete reported as deleted | `src/routes/proxies/concurrentEdit.test.tsx` |
 | Committed delete retires the seeded detail and list caches | `src/hooks/deleteDetailCache.test.tsx` |

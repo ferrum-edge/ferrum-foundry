@@ -13,7 +13,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider, useAuth } from '@/stores/auth';
 import { NamespaceProvider } from '@/stores/namespace';
 import { ToastProvider } from '@/components/ui/Toast';
-import { TooltipProvider } from '@/components/ui/Tooltip';
 import ProxyPage from './proxies/$proxyId';
 import ConsumerPage from './consumers/$consumerId';
 import PluginPage from './plugins/$pluginId';
@@ -181,7 +180,7 @@ async function mount(Page: RouteComponent, path = '/view') {
           <Authenticated>
             <NamespaceProvider>
               <ToastProvider>
-                <TooltipProvider><RouterProvider router={router} /></TooltipProvider>
+                <RouterProvider router={router} />
               </ToastProvider>
             </NamespaceProvider>
           </Authenticated>
