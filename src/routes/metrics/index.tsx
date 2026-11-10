@@ -31,6 +31,7 @@ import {
   setStoredMetricsRefreshInterval,
 } from "@/utils/metricsRefresh";
 import { FleetViewGate } from "@/components/shared/FleetViewGate";
+import { useNamespace } from "@/stores/namespace";
 
 /* ================================================================== */
 /*  MetricsPage                                                        */
@@ -47,6 +48,7 @@ export default function MetricsPage() {
 }
 
 function MetricsWorkspace() {
+  const { selectedNamespace } = useNamespace();
   const [refreshInterval, setRefreshInterval] = useState(
     getStoredMetricsRefreshInterval,
   );
@@ -191,7 +193,10 @@ function MetricsWorkspace() {
             <h3 className="text-sm font-semibold text-text-primary mb-3">
               Circuit Breakers
             </h3>
-            <CircuitBreakerPanel breakers={metrics.circuit_breakers} />
+            <CircuitBreakerPanel
+              breakers={metrics.circuit_breakers}
+              selectedNamespace={selectedNamespace}
+            />
           </Card>
         )}
 
@@ -209,7 +214,10 @@ function MetricsWorkspace() {
             <h3 className="text-sm font-semibold text-text-primary mb-3">
               Health Checks
             </h3>
-            <HealthCheckPanel healthCheck={metrics.health_check} />
+            <HealthCheckPanel
+              healthCheck={metrics.health_check}
+              selectedNamespace={selectedNamespace}
+            />
           </Card>
         )}
 
@@ -218,7 +226,10 @@ function MetricsWorkspace() {
             <h3 className="text-sm font-semibold text-text-primary mb-3">
               Load Balancers
             </h3>
-            <LoadBalancerPanel loadBalancers={metrics.load_balancers} />
+            <LoadBalancerPanel
+              loadBalancers={metrics.load_balancers}
+              selectedNamespace={selectedNamespace}
+            />
           </Card>
         )}
 

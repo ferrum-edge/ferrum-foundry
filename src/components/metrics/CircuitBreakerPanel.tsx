@@ -8,6 +8,8 @@ import { humanizeKey } from "@/lib/format";
 
 interface CircuitBreakerPanelProps {
   breakers: AdminMetrics["circuit_breakers"];
+  /** The payload is fleet-wide; rows from any other namespace are labelled. */
+  selectedNamespace: string;
 }
 
 const STATE_LABELS: Record<string, string> = {
@@ -38,7 +40,7 @@ export function CircuitStateBadge({ state }: { state: string }) {
   );
 }
 
-export function CircuitBreakerPanel({ breakers }: CircuitBreakerPanelProps) {
+export function CircuitBreakerPanel({ breakers, selectedNamespace }: CircuitBreakerPanelProps) {
   if (breakers.length === 0) {
     return (
       <p className="text-text-muted text-sm">No active circuit breakers</p>
@@ -66,6 +68,9 @@ export function CircuitBreakerPanel({ breakers }: CircuitBreakerPanelProps) {
                 {cb.proxy_id}
                 {cb.target && (
                   <span className="text-text-muted"> → {cb.target}</span>
+                )}
+                {cb.namespace !== selectedNamespace && (
+                  <span className="text-text-muted font-sans"> · ns {cb.namespace}</span>
                 )}
               </td>
               <td className="py-2 pr-4">

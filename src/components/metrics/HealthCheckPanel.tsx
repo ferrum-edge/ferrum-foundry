@@ -2,15 +2,25 @@
 /*  Ferrum Foundry – Health check status panel                         */
 /* ------------------------------------------------------------------ */
 
-import type { AdminMetrics } from "@/api/types";
+import type { AdminMetrics, AdminMetricsUnhealthyTarget } from "@/api/types";
 import { StatCard } from "./StatCard";
 import { formatDateTime } from "@/lib/format";
 
-interface HealthCheckPanelProps {
-  healthCheck: AdminMetrics["health_check"];
+/**
+ * One unhealthy-target row: a target can be unhealthy for both check kinds,
+ * in several namespaces, and under several upstreams or proxies at once.
+ */
+export function unhealthyTargetKey(t: AdminMetricsUnhealthyTarget): string {
+  return `${t.namespace}:${t.type}:${t.upstream_id ?? t.proxy_id ?? ""}:${t.target}`;
 }
 
-export function HealthCheckPanel({ healthCheck }: HealthCheckPanelProps) {
+interface HealthCheckPanelProps {
+  healthCheck: AdminMetrics["health_check"];
+  /** The payload is fleet-wide; rows from any other namespace are labelled. */
+  selectedNamespace: string;
+}
+
+export function HealthCheckPanel({ healthCheck, selectedNamespace }: HealthCheckPanelProps) {
   const hasUnhealthy = healthCheck.unhealthy_target_count > 0;
 
   return (
@@ -29,13 +39,14 @@ export function HealthCheckPanel({ healthCheck }: HealthCheckPanelProps) {
           <ul className="space-y-2">
             {healthCheck.unhealthy_targets.map((t) => (
               <li
-                key={`${t.namespace}:${t.type}:${t.target}`}
+                key={unhealthyTargetKey(t)}
                 className="flex items-center justify-between gap-3 text-sm bg-danger/5 border border-danger/20 rounded-lg px-3 py-2"
               >
                 <span className="text-text-primary font-mono text-xs min-w-0 break-all">
                   {t.target}
                   <span className="text-text-muted font-sans">
-                    {" "}({t.type}{t.upstream_id ? ` · ${t.upstream_id}` : t.proxy_id ? ` · ${t.proxy_id}` : ""})
+                    {" "}({t.type}{t.upstream_id ? ` · ${t.upstream_id}` : t.proxy_id ? ` · ${t.proxy_id}` : ""}
+                    {t.namespace !== selectedNamespace ? ` · ns ${t.namespace}` : ""})
                   </span>
                 </span>
                 <span className="text-text-muted text-xs shrink-0">

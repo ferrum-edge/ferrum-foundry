@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/Badge";
 import { BffConnectionCard } from "@/components/shared/BffConnectionCard";
 import { StatCard } from "@/components/metrics/StatCard";
 import { CircuitStateBadge } from "@/components/metrics/CircuitBreakerPanel";
+import { unhealthyTargetKey } from "@/components/metrics/HealthCheckPanel";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { NavIcon, type NavIconName } from "@/components/ui/icons";
 import { formatDateTime, formatUptime } from "@/lib/format";
@@ -227,7 +228,7 @@ export default function DashboardPage() {
               <div className="space-y-2">
                 {metrics.data.health_check.unhealthy_targets.map((t) => (
                   <div
-                    key={t.target}
+                    key={unhealthyTargetKey(t)}
                     className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-sm"
                   >
                     <span className="min-w-0 break-all text-text-primary font-mono text-xs">

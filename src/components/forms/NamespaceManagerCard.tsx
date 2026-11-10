@@ -15,7 +15,7 @@ import {
   DialogDescription,
 } from "@/components/ui/Dialog";
 import { useToast } from "@/components/ui/Toast";
-import { useNamespace } from "@/stores/namespace";
+import { DEFAULT_NAMESPACE, useNamespace } from "@/stores/namespace";
 import { useAuth } from "@/stores/auth";
 import { useCapabilities } from "@/stores/capabilities";
 import { CapabilityNotice } from "@/components/shared/CapabilityGate";
@@ -41,8 +41,6 @@ import {
   getApiErrorMessage,
   getCommittedWrite,
 } from "@/api/client";
-
-const DEFAULT_NAMESPACE = "ferrum";
 
 /* ================================================================== */
 /*  Create dialog                                                     */
