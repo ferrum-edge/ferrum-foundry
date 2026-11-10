@@ -566,6 +566,7 @@ function AclGroupsManager({
                   <button
                     type="button"
                     onClick={() => handleRemoveGroup(group)}
+                    aria-label={`Remove group ${group}`}
                     className="text-text-muted hover:text-danger cursor-pointer transition-colors"
                     disabled={updateConsumer.isPending}
                   >
