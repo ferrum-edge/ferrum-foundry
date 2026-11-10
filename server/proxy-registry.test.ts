@@ -41,7 +41,7 @@ const gateway = createServer((request, response) => {
         response.end('{"error":"other-private-name"}');
         return;
       }
-      if (url.searchParams.has('legacy')) {
+      if (url.searchParams.has('bare-array')) {
         response.end(JSON.stringify(names));
         return;
       }
@@ -446,7 +446,7 @@ describe('registry authorization at the forwarding boundary', () => {
     ]);
     expect(arrivals.at(-1)!.headers['if-none-match']).toBeUndefined();
     expect(arrivals.at(-1)!.headers.range).toBeUndefined();
-    for (const query of ['', '?limit=0', '?limit=18446744073709551615', '?legacy=1']) {
+    for (const query of ['', '?limit=0', '?limit=18446744073709551615']) {
       const page = await call(`/api/proxy/namespaces${query}`);
       expect(JSON.parse(page.body).data).toEqual(['tenant-a', 'tenant-c', 'z-derived']);
       expect(page.body).not.toContain('other-');
@@ -476,6 +476,11 @@ describe('registry authorization at the forwarding boundary', () => {
     expect(failure.status).toBe(503);
     expect(failure.body).not.toContain('other-private-name');
     expect((await call('/api/proxy/namespaces?oversize=1')).status).toBe(502);
+    // A bare array is not the paginated envelope: malformed, never a
+    // complete registry (#681).
+    const bare = await call('/api/proxy/namespaces?bare-array=1');
+    expect(bare.status).toBe(502);
+    expect(bare.body).not.toContain('tenant-a');
   });
 
   it('keeps one response deadline across every filtered list page', async () => {
