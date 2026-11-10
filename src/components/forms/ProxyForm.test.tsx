@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mergeFormUpdatePayload } from "@/api/proxies";
 import type { Proxy, ProxyCreate } from "@/api/types";
 import { clearText, inputByLabel, inputByLabelOrNull, typeText } from "@/test/fields";
-import { selectOption } from "@/test/__tests__/harness";
+import { fill, selectOption } from "@/test/__tests__/harness";
 import { ProxyForm } from "./ProxyForm";
 
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn() }));
@@ -196,6 +196,30 @@ describe("ProxyForm numeric drafts (#402)", () => {
       backend_write_timeout_ms: 30000,
       udp_idle_timeout_seconds: 60,
     });
+  });
+
+  it.each(["0", "65536", "70000", "80.5"])(
+    "rejects backend port %s outside 1-65535 before submit (#678)",
+    async (value) => {
+      await renderForm(httpProxy);
+      const port = inputByLabel(host, "Backend Port");
+      await fill(port, value);
+      await save();
+      expect(submit).not.toHaveBeenCalled();
+      expect(port.getAttribute("aria-invalid")).toBe("true");
+      expect(host.textContent).toContain("Valid port required (1-65535)");
+    },
+  );
+
+  it.each([
+    ["stream", streamProxy],
+    ["HTTP", httpProxy],
+  ] as const)("rejects a %s listen port outside 1-65535 before submit (#678)", async (_kind, proxy) => {
+    await renderForm({ ...proxy, listen_port: 70000 });
+    await save();
+    expect(submit).not.toHaveBeenCalled();
+    expect(host.textContent).toContain("Valid port required (1-65535)");
+    expect(inputByLabel(host, "Listen Port").getAttribute("aria-invalid")).toBe("true");
   });
 
   it("sends the documented 0 for an empty port on an upstream-linked proxy", async () => {

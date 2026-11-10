@@ -227,6 +227,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scoped read, and clearing the field left an empty scope that refused every
   request. The typed name now switches only on Switch or Enter, and only once
   it passes the gateway's namespace name rule; otherwise the field shows why.
+- The upstream form requires a service-discovery service name for every
+  provider, not only Consul, and sends it trimmed (#678); Ferrum Edge refuses
+  an empty name for DNS-SD, Kubernetes and mesh too. The proxy form checks
+  backend and listen ports as whole numbers from 1 to 65535, as the target
+  form does (which now also refuses a fractional port), instead of sending
+  `70000` or `80.5` to a gateway `400`.
 - The error dialog no longer shows a stray `0` beside "Outcome unknown" or
   "API Error" when no HTTP answer arrived (a dropped connection or a client
   timeout); the status badge appears only for a real HTTP status.
