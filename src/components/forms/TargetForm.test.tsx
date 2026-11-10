@@ -32,7 +32,7 @@ async function key(input: HTMLInputElement, value: string) {
 }
 
 describe("TargetForm inline editor", () => {
-  it.each(["", "0", "-1", "65536"])("rejects blank hosts, invalid port %j, and negative weights", async (port) => {
+  it.each(["", "0", "-1", "65536", "80.5"])("rejects blank hosts, invalid port %j, and negative weights", async (port) => {
     await mount();
     await fill(inputByLabel(ui.host, "Host"), "   ");
     await fill(inputByLabel(ui.host, "Port"), port);

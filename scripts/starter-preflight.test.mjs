@@ -575,6 +575,29 @@ test("the shared injection replaces every identity header a client could send", 
   }
 });
 
+test("the production proxy sets every forwarded header oauth2-proxy reads", async () => {
+  // oauth2-proxy runs with --reverse-proxy and trusts these headers; a value
+  // passed through from the client is what its header-spoofing bypasses use.
+  const production = await readFile(new URL("nginx/foundry.conf", STARTER), "utf8");
+  const expected = {
+    "X-Real-IP": "$remote_addr",
+    "X-Forwarded-For": "$remote_addr",
+    "X-Forwarded-Host": "$host",
+    "X-Forwarded-Proto": "$scheme",
+    "X-Forwarded-Uri": "$request_uri",
+  };
+  for (const location of ["location /oauth2/ {", "location = /oauth2/auth {"]) {
+    const start = production.indexOf(location);
+    assert.ok(start >= 0, `foundry.conf must define ${location}`);
+    const block = production.slice(start, production.indexOf("}", start));
+    for (const [header, value] of Object.entries(expected)) {
+      const set = [...block.matchAll(new RegExp(`proxy_set_header\\s+${header}\\s+(\\S+);`, "g"))]
+        .map((match) => match[1]);
+      assert.deepEqual(set, [value], `${location} must set ${header} to ${value}`);
+    }
+  }
+});
+
 test("an unmapped identity is denied by the shared policy's default", async () => {
   const policy = await readFile(new URL("nginx/identity/policy.conf", STARTER), "utf8");
   assert.match(policy, MAP_AUTH_GROUPS_FERRUM_ROLE_DEFAULT_PATTERN);

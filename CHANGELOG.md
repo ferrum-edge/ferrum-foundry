@@ -77,6 +77,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- The deployment starter's production nginx sets every forwarded header
+  oauth2-proxy reads (`X-Forwarded-For`, `-Host`, `-Proto`, `-Uri`,
+  `X-Real-IP`) from its own values on `/oauth2/` and on the `/oauth2/auth`
+  subrequest (GHSA-q866-mwp4-hgw3). The subrequest used to pass a client's
+  `X-Forwarded-For` and `X-Forwarded-Uri` through unchanged, and oauth2-proxy
+  runs with `--reverse-proxy`, so a deployment that added `--trusted-ip` or a
+  skip-auth route would have been open to oauth2-proxy's header-spoofing
+  bypasses. The starter's pinned oauth2-proxy (v7.7.1) and nginx (1.27) are
+  still to be moved; that needs the starter's qualification.
 - The BFF checks a namespace description's length without stalling on long
   whitespace. Its Unicode `White_Space` trim was a `\p{White_Space}+$`
   regex, which backtracks quadratically over a whitespace run inside the
@@ -210,6 +219,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Plugins list shows Ferrum Edge's built-in priorities again (#673). Its
+  hard-coded table had drifted: 17 values were wrong (`spec_expose` showed
+  9900 instead of 210, `ws_rate_limiting` 9750 instead of 2910) and 24
+  plugins, among them `waf`, `opa` and `mcp_gateway`, showed no priority. The
+  table (`PLUGIN_PRIORITY`) now lists every plugin in the vendored plugin
+  catalog, and the contracts test fails when it differs from the catalog.
+- A consumer's stored key-auth, JWT and HMAC credentials are listed as "Key
+  credential", "JWT credential" and "HMAC credential" (#676). The list masked
+  the gateway's `[REDACTED]` marker as if it were the secret and showed
+  `[RED****TED]` for every credential; a key-auth row without a key read "Key
+  (auto-generated)", which this gateway endpoint never does.
+- The Settings namespace field shown when the registry is unavailable or
+  lists nothing no longer switches the namespace on every keystroke (#677).
+  Each prefix of a typed name became the active namespace, refetching every
+  scoped read, and clearing the field left an empty scope that refused every
+  request. The typed name now switches only on Switch or Enter, and only once
+  it passes the gateway's namespace name rule; otherwise the field shows why.
+- The upstream form requires a service-discovery service name for every
+  provider, not only Consul, and sends it trimmed (#678); Ferrum Edge refuses
+  an empty name for DNS-SD, Kubernetes and mesh too. The proxy form checks
+  backend and listen ports as whole numbers from 1 to 65535, as the target
+  form does (which now also refuses a fractional port), instead of sending
+  `70000` or `80.5` to a gateway `400`.
+- The `mcp_gateway` editor no longer loses a stashed `policy.tools` map
+  (#679). Typing an aggregate-only field such as `policy.default_action` in
+  Transparent mode replaced the whole stashed `policy` object, so switching
+  back to Aggregate restored the typed field without the tool policies. The
+  stash now merges nested fields, as a mode switch does.
+- A namespace delete answered with the committed-but-not-live `503` is
+  reported as a delete (#674). It used to reject: the retired name's caches
+  stayed, an active scope stayed on the deleted namespace, and the dialog
+  stayed open offering a second `DELETE`. It now resolves through
+  `removeCommitted`, moves the scope to the default, closes the dialog and
+  warns that the delete is committed but not yet proven live.
 - The error dialog no longer shows a stray `0` beside "Outcome unknown" or
   "API Error" when no HTTP answer arrived (a dropped connection or a client
   timeout); the status badge appears only for a real HTTP status.

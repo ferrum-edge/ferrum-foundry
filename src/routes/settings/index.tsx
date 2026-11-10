@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – Settings page                                     */
 /* ------------------------------------------------------------------ */
 
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { SettingsForm } from "@/components/forms/SettingsForm";
 import { BackupRestoreCard } from "@/components/forms/BackupRestoreCard";
 import { NamespaceManagerCard } from "@/components/forms/NamespaceManagerCard";
@@ -11,16 +11,75 @@ import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Select } from "@/components/ui/Select";
 import { Input } from "@/components/ui/Input";
+import { Button } from "@/components/ui/Button";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { ReadStateNotice } from "@/components/shared/ReadState";
 import { useToast } from "@/components/ui/Toast";
 import { useNamespace } from "@/stores/namespace";
 import { useNamespaces } from "@/hooks/useNamespaces";
+import { validateNamespaceName } from "@/api/namespaces";
 import {
   getStoredMetricsRefreshInterval,
   METRICS_REFRESH_OPTIONS,
   setStoredMetricsRefreshInterval,
 } from "@/utils/metricsRefresh";
+
+/* ================================================================== */
+/*  NamespaceEntry                                                     */
+/* ================================================================== */
+
+/**
+ * Free-text namespace selection, offered when the registry lists nothing or
+ * cannot be read. The typed name is a draft: it becomes the active namespace
+ * only on an explicit Switch (or Enter), and only once it passes the
+ * gateway's name rule, so a half-typed or empty name never retargets the
+ * session's reads and writes.
+ */
+function NamespaceEntry({
+  label,
+  helpText,
+  selectedNamespace,
+  onSwitch,
+}: {
+  label: string;
+  helpText: string;
+  selectedNamespace: string;
+  onSwitch: (namespace: string) => void;
+}) {
+  const [draft, setDraft] = useState(selectedNamespace);
+  const [error, setError] = useState<string | undefined>();
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    const problem = validateNamespaceName(draft);
+    if (problem) {
+      setError(problem);
+      return;
+    }
+    if (draft !== selectedNamespace) onSwitch(draft);
+  }
+
+  return (
+    <form className="flex items-start gap-2" onSubmit={handleSubmit} noValidate>
+      <div className="min-w-0 flex-1">
+        <Input
+          label={label}
+          value={draft}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            setError(undefined);
+          }}
+          error={error}
+          helpText={helpText}
+        />
+      </div>
+      <Button type="submit" variant="secondary" className="shrink-0 mt-[1.625rem]"
+        disabled={draft === selectedNamespace}>
+        Switch
+      </Button>
+    </form>
+  );
+}
 
 /* ================================================================== */
 /*  SettingsPage                                                       */
@@ -95,10 +154,11 @@ export default function SettingsPage() {
                     }))}
                   />
                 ) : (
-                  <Input
+                  <NamespaceEntry
+                    key={selectedNamespace}
                     label="Namespace fallback"
-                    value={selectedNamespace}
-                    onChange={(e) => setNamespace(e.target.value)}
+                    selectedNamespace={selectedNamespace}
+                    onSwitch={setNamespace}
                     helpText="The registry is unavailable. You can enter a namespace manually as a fallback."
                   />
                 )}
@@ -114,10 +174,11 @@ export default function SettingsPage() {
                 }))}
               />
             ) : (
-              <Input
+              <NamespaceEntry
+                key={selectedNamespace}
                 label="Namespace"
-                value={selectedNamespace}
-                onChange={(e) => setNamespace(e.target.value)}
+                selectedNamespace={selectedNamespace}
+                onSwitch={setNamespace}
                 helpText="No namespaces are currently listed. Enter a namespace name manually."
               />
             )}
