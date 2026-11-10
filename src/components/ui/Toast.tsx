@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -14,7 +15,6 @@ interface ToastItem {
   id: number;
   variant: ToastVariant;
   message: string;
-  createdAt: number;
 }
 
 interface ToastContextValue {
@@ -173,11 +173,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
   const toast = useCallback((variant: ToastVariant, message: string) => {
     const id = ++nextId;
-    setToasts((prev) => [...prev, { id, variant, message, createdAt: Date.now() }]);
+    setToasts((prev) => [...prev, { id, variant, message }]);
   }, []);
 
+  // `toast` is stable, so consumers re-render only when it would change.
+  const value = useMemo(() => ({ toast }), [toast]);
+
   return (
-    <ToastContext.Provider value={{ toast }}>
+    <ToastContext.Provider value={value}>
       {children}
       {/* Top-right so toasts never cover a page's primary save/cancel
           actions, which live at the bottom of forms. */}
