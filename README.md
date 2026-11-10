@@ -180,7 +180,7 @@ gateway or identity provider of your own.
 ```bash
 npm install
 
-export FERRUM_ADMIN_URL=http://localhost:9000         # Ferrum Admin API URL
+export FERRUM_ADMIN_URL=http://127.0.0.1:9000         # Ferrum Admin API URL
 export FERRUM_JWT_SECRET=$(openssl rand -hex 32)      # HS256 signing key, 32+ bytes; must match the gateway
 export FERRUM_BFF_AUTH_TOKEN=$(openssl rand -hex 32)  # development sign-in token
 export FERRUM_JWT_NAMESPACES='*'                      # namespace scope: exact names, or * for every namespace
@@ -243,7 +243,7 @@ surfaces (CRUD, TLS/ACME, audit, cluster, overload, chargeback, gateway trust
 bundles):
 
 ```bash
-node scripts/mock-admin-gateway.mjs   # listens on :9000 (MOCK_ADMIN_PORT)
+node scripts/mock-admin-gateway.mjs   # 127.0.0.1:9000 (MOCK_ADMIN_BIND, MOCK_ADMIN_PORT)
 ```
 
 `MOCK_GATEWAY_MODE=file` makes it a read-only gateway. Writes follow the live

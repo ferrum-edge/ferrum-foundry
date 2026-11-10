@@ -7,7 +7,7 @@
 /*  mesh observability, overload/runtime/chargeback metrics — so the  */
 /*  dashboard can be exercised without a running gateway.             */
 /*                                                                    */
-/*    node scripts/mock-admin-gateway.mjs        # listens on :9000   */
+/*    node scripts/mock-admin-gateway.mjs   # 127.0.0.1:9000          */
 /* ------------------------------------------------------------------ */
 
 import { createServer } from 'node:http';
@@ -34,6 +34,10 @@ const UPSTREAMS_PATH_PATTERN = /^\/upstreams(?:\/([^/]+))?$/;
 const CREDENTIAL_PATH_PATTERN = /^\/consumers\/([^/]+)\/credentials\/([^/]+)(?:\/(\d+))?$/;
 
 const PORT = Number(process.env.MOCK_ADMIN_PORT ?? 9000);
+// The admin API is writable and unauthenticated, so it listens on loopback
+// only unless MOCK_ADMIN_BIND names another address (for example 0.0.0.0 when
+// a container must reach it).
+const BIND_ADDRESS = process.env.MOCK_ADMIN_BIND?.trim() || '127.0.0.1';
 /**
  * Gateway operating mode the mock reports on `/health` and enforces on writes.
  *   MOCK_GATEWAY_MODE=file node scripts/mock-admin-gateway.mjs
@@ -1501,7 +1505,9 @@ if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
 ) {
-  server.listen(PORT, () => {
-    console.log(`Mock Ferrum Edge admin API listening on http://127.0.0.1:${PORT}`);
+  server.listen(PORT, BIND_ADDRESS, () => {
+    const { address, port } = server.address();
+    const host = address.includes(':') ? `[${address}]` : address;
+    console.log(`Mock Ferrum Edge admin API listening on http://${host}:${port}`);
   });
 }
