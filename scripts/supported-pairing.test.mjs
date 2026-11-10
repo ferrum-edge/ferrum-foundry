@@ -21,7 +21,7 @@ import {
 } from "./supported-pairing.mjs";
 import { hostedQualificationFixture } from "./fixtures/hosted-qualification.mjs";
 
-const RELEASE_ENVIRONMENT_PATTERN = /^    environment: release$/m;
+const RELEASE_ENVIRONMENT_PATTERN = /^ {4}environment: release$/m;
 const FERRUMEDGE_FERRUM_EDGE_SHA256_PATTERN = /^ferrumedge\/ferrum-edge@sha256:[0-9a-f]{64}$/;
 const SEMVER_TAG_PATTERN = /^v\d+\.\d+\.\d+$/;
 const V0_9_15_PATTERN = /v0\.9\.15/;

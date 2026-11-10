@@ -181,7 +181,7 @@ describe('Strict-Transport-Security (#589)', () => {
 });
 
 describe('no CORS grant (#590)', () => {
-  it.each([
+  it.each<[string, Record<string, string | undefined>]>([
     ['production', {}],
     ['development', {
       NODE_ENV: 'test',
