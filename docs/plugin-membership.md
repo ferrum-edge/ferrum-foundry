@@ -189,6 +189,11 @@ If a change fails, Foundry attempts a compensating rollback:
   details; detach it once the group's membership is confirmed.
 - A failed move into group scope first restores the original non-group scope,
   relying on Edge's atomic reconciliation.
+- A plugin `PUT` answered with the committed-but-not-live `503` is a
+  completed plugin write, not a failure (#674). The plan re-reads the plugin
+  and carries on with the association and reconcile steps; when they converge
+  the editor reseeds from fresh reads and warns that the save is not yet
+  live. A later step that fails is handled as after any accepted `PUT`.
 - A move out of group scope is not rolled back once its plugin `PUT` has
   committed (#610). That `PUT` detached the group's members in the same
   transaction; restoring them, or removing the new proxy-scope target, could

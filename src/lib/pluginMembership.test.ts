@@ -7,7 +7,7 @@ import type {
 } from "@/api/types";
 import { GuardVerificationError, StaleResourceError } from "@/api/conditionalWrite";
 import { RedactedWriteError } from "@/api/secretRedaction";
-import { markCommittedWrite } from "@/api/client";
+import { getCommittedWrite, markCommittedWrite } from "@/api/client";
 import { pluginWriteGuard } from "@/api/plugins";
 import { proxyFromWrite } from "@/test/proxyWrites";
 import {
@@ -314,6 +314,23 @@ function groupInput(scope: PluginConfig["scope"] = "proxy_group"): PluginConfigC
     scope,
     enabled: true,
   };
+}
+
+/**
+ * Make the next plugin PUT commit on the fake gateway and then answer with
+ * Edge's committed-but-not-live `503` (`markCommittedWrite`).
+ */
+function commitWithoutAnswer(state: { deps: PluginMembershipDependencies }): { error: Error } {
+  const updatePlugin = state.deps.updatePlugin;
+  const error = markCommittedWrite(new Error("reload timed out"), {
+    cursor: "1:2",
+    reason: "reload_timeout",
+  });
+  state.deps.updatePlugin = async (id, data, basis, expectedProxyIds) => {
+    await updatePlugin(id, data, basis, expectedProxyIds);
+    throw error;
+  };
+  return { error };
 }
 
 function memberships(proxies: Map<string, Proxy>, pluginId: string): string[] {
@@ -1017,14 +1034,7 @@ describe("leaving group scope (#610)", () => {
       [makeProxy("p1", ["plugin-1"]), makeProxy("p2", ["plugin-1"]), makeProxy("p3")],
       [makePlugin("plugin-1")],
     );
-    const updatePlugin = state.deps.updatePlugin;
-    state.deps.updatePlugin = async (id, data, basis, expectedProxyIds) => {
-      await updatePlugin(id, data, basis, expectedProxyIds);
-      throw markCommittedWrite(new Error("reload timed out"), {
-        cursor: "1:2",
-        reason: "reload_timeout",
-      });
-    };
+    const committed = commitWithoutAnswer(state);
 
     const failure = await updatePluginWithMembership(
       "plugin-1",
@@ -1035,16 +1045,67 @@ describe("leaving group scope (#610)", () => {
       seen(state, "plugin-1"),
     ).then(() => null, (error: unknown) => error);
 
+    // The plan finished from a fresh read and reports the commit itself, the
+    // way every committed save is resolved: reseed, warn, never roll back.
+    expect(failure).toBe(committed.error);
+    expect(getCommittedWrite(failure)).toMatchObject({ cursor: "1:2" });
+    expect(state.counts().updatePluginCalls).toBe(1);
+    expect(state.counts().updateProxyCalls).toBe(0);
+    expect(state.plugins.get("plugin-1")).toMatchObject({ scope: "proxy", proxy_id: "p3" });
+    expect(memberships(state.proxies, "plugin-1")).toEqual(["p3"]);
+  });
+
+  it("carries on with the group's association plan after a committed plugin PUT (#674)", async () => {
+    const state = harness(
+      [makeProxy("p1", ["plugin-1"]), makeProxy("p2"), makeProxy("p3")],
+      [makePlugin("plugin-1")],
+    );
+    const committed = commitWithoutAnswer(state);
+
+    const failure = await updatePluginWithMembership(
+      "plugin-1",
+      groupInput(),
+      ["p2", "p3"],
+      state.deps,
+      null,
+      seen(state, "plugin-1"),
+    ).then(() => null, (error: unknown) => error);
+
+    expect(failure).toBe(committed.error);
+    expect(failure).not.toBeInstanceOf(PluginMembershipError);
+    // The membership the operator asked for was applied, not skipped.
+    expect(memberships(state.proxies, "plugin-1")).toEqual(["p2", "p3"]);
+    expect(state.plugins.get("plugin-1")).toMatchObject({ config: { requests: 20 } });
+    expect(state.counts().updatePluginCalls).toBe(1);
+  });
+
+  it("reports a committed plugin PUT it cannot re-read as saved, without rolling back", async () => {
+    const state = harness(
+      [makeProxy("p1", ["plugin-1"])],
+      [makePlugin("plugin-1")],
+      // Reads: the plan's preflight, the PUT's own verification read, then
+      // the re-read after the commit.
+      { failPluginGetCall: 3 },
+    );
+    commitWithoutAnswer(state);
+
+    const failure = await updatePluginWithMembership(
+      "plugin-1",
+      groupInput(),
+      ["p1"],
+      state.deps,
+      null,
+      seen(state, "plugin-1"),
+    ).then(() => null, (error: unknown) => error);
+
     expect(failure).toBeInstanceOf(PluginSavedUnverifiedError);
     const saved = failure as PluginSavedUnverifiedError;
     expect(saved.message).toContain("committed, not yet proven live");
+    expect(saved.message).toContain("Nothing was rolled back");
     expect(saved.savedFromLaterRead).toBe(true);
-    expect(saved.saved).toMatchObject({ scope: "proxy", proxy_id: "p3" });
-    // The saved configuration is the recovery snapshot too.
-    expect(saved.lastKnownConfig).toMatchObject({ scope: "proxy", proxy_id: "p3" });
+    expect(getCommittedWrite(saved)).not.toBeNull();
     expect(state.counts().updatePluginCalls).toBe(1);
     expect(state.counts().updateProxyCalls).toBe(0);
-    expect(memberships(state.proxies, "plugin-1")).toEqual(["p3"]);
   });
 
   it("still rolls back when the plugin PUT itself failed", async () => {

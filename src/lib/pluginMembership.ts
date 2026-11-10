@@ -811,6 +811,13 @@ export async function createPluginWithMembership(
  * `PUT`'s `expected_proxy_ids`, and the plan refuses with
  * `PluginMembershipChangedError`, before anything is written, when its own
  * listing already shows a proxy outside it.
+ *
+ * A committed-but-not-live answer to the plugin `PUT` (`getCommittedWrite`)
+ * is a committed save, not a failure: the plan re-reads the plugin and
+ * carries on with the association and reconcile steps. When they converge,
+ * the `PUT`'s committed error is rethrown, so the caller resolves it as every
+ * committed save is resolved (reseed from one fresh read, warn that it is not
+ * yet live). If the re-read fails, it is a `PluginSavedUnverifiedError`.
  */
 export async function updatePluginWithMembership(
   pluginId: string,
@@ -834,18 +841,38 @@ export async function updatePluginWithMembership(
 
   const applied: AppliedProxyChange[] = [];
   let updatedPlugin: PluginConfig | undefined;
+  // The plugin PUT's committed-but-not-live answer, when it gave one.
+  let committedPut: unknown = null;
 
   try {
     // Edge atomically reconciles associations when PUT changes scope to global
     // or proxy. Do not detach first or remove the proxy-scoped target it adds.
     // Group membership remains operator-managed through proxy PUTs.
-    updatedPlugin = await updatePluginIfUnchanged(
-      beforePlugin,
-      data,
-      deps,
-      guard,
-      observed,
-    );
+    try {
+      updatedPlugin = await updatePluginIfUnchanged(
+        beforePlugin,
+        data,
+        deps,
+        guard,
+        observed,
+      );
+    } catch (error) {
+      if (getCommittedWrite(error) === null) throw error;
+      // Committed, not yet proven live: the write happened. Its answer has no
+      // body, so the rest of the plan works from a fresh read of it.
+      committedPut = error;
+      updatedPlugin = await getPluginIfPresent(pluginId, deps).catch(() => undefined);
+      if (!updatedPlugin) {
+        throw new PluginSavedUnverifiedError(
+          `Plugin ${pluginId} was saved (committed, not yet proven live), but Foundry ` +
+            "could not re-read it to finish the save. Nothing was rolled back.",
+          await recoveryState(pluginId, deps),
+          { cause: error },
+          undefined,
+          true,
+        );
+      }
+    }
     if (nextIsGroup) {
       await applyAssociationPlan(plan.proxies, pluginId, desired, deps, applied);
     } else if (data.scope === "proxy" && data.proxy_id) {
@@ -857,8 +884,12 @@ export async function updatePluginWithMembership(
     } else if (beforePlugin.scope === "proxy" && beforePlugin.proxy_id) {
       await detachFormerProxyScope(pluginId, beforePlugin.proxy_id, deps);
     }
+    // Converged. A committed save is reported as one, not as a success.
+    if (committedPut !== null) throw committedPut;
     return updatedPlugin;
   } catch (error) {
+    if (committedPut !== null && error === committedPut) throw error;
+    if (error instanceof PluginSavedUnverifiedError) throw error;
     // Refused before the plugin write: nothing was changed, so there is
     // nothing to roll back, and the editor needs the comparison, not a
     // recovery report.
@@ -869,19 +900,16 @@ export async function updatePluginWithMembership(
       throw error;
     }
     const failure = failureText(error);
-    // A committed-but-not-live answer to the plugin PUT is a committed save.
-    const committedPut = !updatedPlugin && getCommittedWrite(error) !== null;
-    if ((updatedPlugin || committedPut) && beforePlugin.scope === "proxy_group" && !nextIsGroup) {
+    const committed = committedPut !== null;
+    if (updatedPlugin && beforePlugin.scope === "proxy_group" && !nextIsGroup) {
       // The scope change committed, and with it Edge detached every member.
       // Leave the gateway's committed state alone and say what to check.
       const members = plan.proxies
         .filter((proxy) => referencesPlugin(proxy, pluginId))
         .map((proxy) => proxy.id);
-      const saved = updatedPlugin ??
-        await getPluginIfPresent(pluginId, deps).catch(() => undefined);
       throw new PluginSavedUnverifiedError(
         `Plugin ${pluginId} was saved with scope ${data.scope}` +
-          (committedPut ? " (committed, not yet proven live)" : "") +
+          (committed ? " (committed, not yet proven live)" : "") +
           `, but its attachment could not be verified (${failure}). Nothing was rolled back.`,
         [
           `before this save the group's members were: ${members.join(", ") || "none"}`,
@@ -896,8 +924,8 @@ export async function updatePluginWithMembership(
           ...await recoveryState(pluginId, deps),
         ],
         { cause: error },
-        saved,
-        !updatedPlugin,
+        updatedPlugin,
+        committed,
       );
     }
     const recovery: string[] = [];

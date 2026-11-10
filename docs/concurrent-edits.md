@@ -334,6 +334,15 @@ points to the live-apply banner. If that read fails, nothing moves: the form
 keeps the draft, the toast says to reload before saving again, and a further
 Save is judged against the old baseline.
 
+The plugin editor does the same, through its membership plan (#674). A
+committed plugin `PUT` is the save having happened: the plan re-reads the
+plugin, finishes its association and reconcile steps, and only then reports
+the commit. The page reseeds the plugin, its group membership and the
+baseline from fresh reads, and warns "Plugin configuration saved: committed,
+not yet proven live". If the plan cannot re-read the committed plugin it
+reports "saved, but … could not re-read it" and rolls nothing back, and
+**Reload saved configuration** reseeds the form.
+
 The two single-field editors take their guard from the list they were computed
 from rather than the settings form's seed. The update hooks refresh the
 resource before the rejection reaches them, so an upstream **targets** save or

@@ -302,6 +302,10 @@ See `docs/concurrent-edits.md`.
     keeping the form's fields.
   - A committed delete resolves as a delete (`removeCommitted`) so its detail
     cache is retired.
+  - A plugin save's membership plan treats a committed plugin `PUT` as the
+    write having happened: it re-reads the plugin, finishes the association
+    steps, then rethrows the commit, and the editor reseeds plugin,
+    membership and baseline.
 
 ### Secret redaction
 
