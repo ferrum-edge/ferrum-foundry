@@ -3,6 +3,7 @@ import {
   constants as fsConstants,
   fchmodSync,
   openSync,
+  realpathSync,
   writeFileSync,
 } from "node:fs";
 import { isIP } from "node:net";
@@ -914,7 +915,10 @@ export async function runSeed(config = readSeedConfig(), { request = adminReques
   };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
+) {
   runSeed()
     .then((result) => console.log(JSON.stringify(result, null, 2)))
     .catch((error) => {

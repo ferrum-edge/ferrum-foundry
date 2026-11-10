@@ -21,6 +21,8 @@
  *   FERRUM_EDGE_REF=main node scripts/plugin-sensitivity-drift.mjs
  */
 
+import { realpathSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import {
   KAFKA_SAFE_PRODUCER_PROPERTIES,
   PLUGIN_SENSITIVITY,
@@ -378,7 +380,10 @@ export function foundryTables() {
   return { schemas: PLUGIN_SENSITIVITY, kafka: KAFKA_SAFE_PRODUCER_PROPERTIES };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
+) {
   const pinned = readSupportedPairing().edge.source_commit;
   const ref = process.env.FERRUM_EDGE_REF?.trim() || pinned;
   const source = await fetchPinnedSource(PLUGIN_SENSITIVITY_SOURCE, ref);

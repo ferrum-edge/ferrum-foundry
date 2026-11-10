@@ -12,6 +12,7 @@
 
 import { createServer } from 'node:http';
 import { createHash, randomUUID } from 'node:crypto';
+import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 const YAML_TITLE_PATTERN = /^\s*title:\s*['"]?(.+?)['"]?\s*$/m;
@@ -1496,7 +1497,10 @@ export const server = createServer(async (req, res) => {
   send(404, { error: `mock: no handler for ${method} ${path}` });
 });
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
+) {
   server.listen(PORT, () => {
     console.log(`Mock Ferrum Edge admin API listening on http://127.0.0.1:${PORT}`);
   });
