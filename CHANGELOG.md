@@ -423,6 +423,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gateways that predate the paginated envelope. Any list page without the
   `{ data, pagination }` envelope is refused as inconsistent pagination
   metadata instead of failing on a missing field (#681).
+- Metrics: load balancer, circuit breaker and health-check rows from a
+  namespace other than the selected one are labelled with it; the load
+  balancer panel compared with the literal `ferrum` instead, and the other
+  two never showed it. Unhealthy-target rows on Metrics and the dashboard are
+  keyed by namespace, check kind, upstream or proxy, and target, so repeated
+  targets no longer share a React key (#683).
+- Toasts are announced to screen readers (a polite live region), and their
+  dismiss button and the consumer ACL group remove button carry labels. The
+  error dialog's Copy Error reports a refused clipboard and asks for a manual
+  copy instead of failing silently (#683).
+- The proxy picker's "Searching the first N of M proxies" note follows the
+  results it describes. Managed TLS, ACME certificate and ACME order lists
+  say "No results on this page" after the last record on a later page is
+  deleted, as Inventory and Events do. The upstream list names the
+  configured health-check kinds ("Active", "Passive", "Active + passive")
+  instead of calling passive-only checks "Active" (#683).
+- The gateway metadata store no longer keeps the last response's `ETag`,
+  `Cache-Control` and `Content-Disposition`, which nothing read, and a read
+  publishes only when the cached-response notice changes, so the metadata
+  banner no longer re-renders on every API response (#683).
 
 ### Changed
 
