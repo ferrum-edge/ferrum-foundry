@@ -19,8 +19,10 @@ workflow (`.github/workflows/ci.yml`) has passed:
    answers as `viewer`, `operator`, and `admin`, on that image and on a second
    copy started with `FERRUM_ADMIN_READ_ONLY=true`.
 3. **Deployment Starter** and **Critical Journeys**: bring up the checked-in
-   starter with the freshly built image and the same gateway image, then run the
-   first-success walkthrough and the [browser journeys](../e2e/README.md).
+   starter with the production image (built once per run by **Production
+   Image** and handed to both as an artifact) and the same gateway image, then
+   run the first-success walkthrough and the
+   [browser journeys](../e2e/README.md).
 4. **Container Gate** (amd64 and arm64): builds the release Dockerfile, checks
    that a planted `.env` canary is absent from image history and layers,
    requires a numeric non-root user and runs Node as the entrypoint to prove

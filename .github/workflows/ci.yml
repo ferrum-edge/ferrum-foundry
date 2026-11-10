@@ -285,8 +285,36 @@ jobs:
           docker logs ferrum-edge-read-only
           cat /tmp/ferrum-demo-backend.log
 
+  image:
+    # One production build for the Deployment Starter and the Critical
+    # Journeys, which run the image an operator would pull, not a development
+    # server. The Container Gate builds its own per platform: it plants a
+    # build-context canary and covers arm64 as well.
+    name: Production Image
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Build the production image
+        run: |
+          docker build \
+            --file docker/Dockerfile \
+            --build-arg SOURCE_REVISION="${GITHUB_SHA}" \
+            --tag ferrum-foundry:ci \
+            .
+          docker save --output "${RUNNER_TEMP}/ferrum-foundry-image.tar" ferrum-foundry:ci
+
+      - name: Hand the image to the jobs that run it
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ferrum-foundry-image
+          path: ${{ runner.temp }}/ferrum-foundry-image.tar
+          if-no-files-found: error
+          retention-days: 1
+
   starter:
     name: Deployment Starter
+    needs: image
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -300,20 +328,19 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
-      - name: Build the production image the starter runs
-        # The starter is exercised with the same image an operator would pull,
-        # not with a development server.
-        run: |
-          docker build \
-            --file docker/Dockerfile \
-            --build-arg SOURCE_REVISION="${GITHUB_SHA}" \
-            --tag ferrum-foundry:starter \
-            .
+      - name: Download the production image the starter runs
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: ferrum-foundry-image
+          path: ${{ runner.temp }}/image
+
+      - name: Load the production image
+        run: docker load --input "${RUNNER_TEMP}/image/ferrum-foundry-image.tar"
 
       - name: Bring the checked-in starter up from a clean environment
         working-directory: deploy/starter
         env:
-          FOUNDRY_IMAGE: ferrum-foundry:starter
+          FOUNDRY_IMAGE: ferrum-foundry:ci
         run: |
           ./bootstrap-demo.sh
           docker compose --profile demo up --detach --wait --wait-timeout 180
@@ -352,6 +379,7 @@ jobs:
 
   critical-journeys:
     name: Critical Journeys
+    needs: image
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -370,23 +398,24 @@ jobs:
         # libraries Chromium needs on the runner image.
         run: npx playwright install --with-deps chromium
 
-      - name: Build the production image the journeys run against
-        run: |
-          docker build \
-            --file docker/Dockerfile \
-            --build-arg SOURCE_REVISION="${GITHUB_SHA}" \
-            --tag ferrum-foundry:e2e \
-            .
+      - name: Download the production image the journeys run against
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: ferrum-foundry-image
+          path: ${{ runner.temp }}/image
+
+      - name: Load the production image
+        run: docker load --input "${RUNNER_TEMP}/image/ferrum-foundry-image.tar"
 
       - name: Bring up the starter stack with the fault forwarder in the path
         working-directory: deploy/starter
         env:
-          FOUNDRY_IMAGE: ferrum-foundry:e2e
+          FOUNDRY_IMAGE: ferrum-foundry:ci
         run: ./bootstrap-demo.sh
 
       - name: Start the stack
         env:
-          FOUNDRY_IMAGE: ferrum-foundry:e2e
+          FOUNDRY_IMAGE: ferrum-foundry:ci
         run: |
           docker compose \
             -f deploy/starter/compose.yaml \
