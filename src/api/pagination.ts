@@ -89,9 +89,13 @@ export async function collectBoundedPages<T>(
   for (;;) {
     options.signal?.throwIfAborted();
     const page = await fetchPage(offset, pageSize, options.signal);
-    const { pagination } = page;
+    // A body without the envelope (a bare array, say) is malformed, not a
+    // complete collection.
+    const pagination = page?.pagination;
 
     if (
+      !pagination ||
+      !Array.isArray(page.data) ||
       !Number.isSafeInteger(pagination.total) ||
       pagination.total < 0 ||
       !Number.isSafeInteger(pagination.offset) ||

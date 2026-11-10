@@ -29,6 +29,16 @@ describe("collectAllPages", () => {
     }))).rejects.toThrow("inconsistent pagination");
   });
 
+  it("rejects a page without the paginated envelope", async () => {
+    await expect(collectAllPages(async () => ["a"] as never)).rejects.toThrow(
+      "inconsistent pagination",
+    );
+    await expect(collectAllPages(async () => ({
+      data: undefined as unknown as number[],
+      pagination: { offset: 0, limit: 10, total: 1 },
+    }))).rejects.toThrow("inconsistent pagination");
+  });
+
   it("rejects a total that changes between pages", async () => {
     await expect(
       collectAllPages(

@@ -292,14 +292,16 @@ describe("namespace API requests", () => {
     await expect(list(scope)).rejects.toThrow("repeated resource");
   });
 
-  it("list() passes through a bare array response", async () => {
+  it("list() refuses a bare array response as malformed", async () => {
     nextResponse = () =>
       new Response(JSON.stringify(["ferrum"]), {
         status: 200,
         headers: { "content-type": "application/json" },
       });
 
-    await expect(list(scope)).resolves.toEqual(["ferrum"]);
+    await expect(list(scope)).rejects.toThrow(
+      "Gateway returned inconsistent pagination metadata",
+    );
   });
 
   it("get() targets /namespaces/{name}", async () => {

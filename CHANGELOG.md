@@ -418,6 +418,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   commit; the critical journeys fail at a refused setup write with its
   status instead of a later UI timeout, and CI no longer sets the unused
   `FERRUM_ADMIN_URL` for them (#685).
+- The namespace list no longer accepts a bare `string[]` from
+  `GET /namespaces` as a complete registry, a branch kept for development
+  gateways that predate the paginated envelope. Any list page without the
+  `{ data, pagination }` envelope is refused as inconsistent pagination
+  metadata instead of failing on a missing field (#681).
 
 ### Changed
 
