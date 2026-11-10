@@ -210,6 +210,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Plugins list shows Ferrum Edge's built-in priorities again (#673). Its
+  hard-coded table had drifted: 17 values were wrong (`spec_expose` showed
+  9900 instead of 210, `ws_rate_limiting` 9750 instead of 2910) and 24
+  plugins, among them `waf`, `opa` and `mcp_gateway`, showed no priority. The
+  table (`PLUGIN_PRIORITY`) now lists every plugin in the vendored plugin
+  catalog, and the contracts test fails when it differs from the catalog.
 - The error dialog no longer shows a stray `0` beside "Outcome unknown" or
   "API Error" when no HTTP answer arrived (a dropped connection or a client
   timeout); the status badge appears only for a real HTTP status.
