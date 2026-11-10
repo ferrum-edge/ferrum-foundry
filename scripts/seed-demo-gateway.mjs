@@ -10,11 +10,14 @@ import { isIP } from "node:net";
 import { pathToFileURL } from "node:url";
 import { signAdminJwt } from "../shared/admin-jwt.js";
 import { mayCarrySecret } from "../shared/admin-origin.js";
+import { readSupportedPairing } from "./supported-pairing.mjs";
 
 const DNS_LABEL_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
 const HYPHENS_PATTERN = /-/g;
 
-const CONTRACT_REVISION = "50e65b5798555209114cbe08ab2d011b3896ad00";
+// The restore payload names the Edge source the pairing pins, not a fixed
+// commit that goes stale when the pin moves.
+const CONTRACT_REVISION = readSupportedPairing().edge.source_commit;
 const COLLECTION_PAGE_SIZE = 100;
 const BASIC_AUTH_PROBE_ID = "ff-demo-basic-auth-hmac-probe";
 
