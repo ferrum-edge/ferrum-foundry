@@ -117,6 +117,10 @@ jobs:
   docker:
     name: Docker (${{ matrix.platform }})
     needs: [quality-gates, release-metadata]
+    # Every job that holds registry credentials or publishes waits on the
+    # protected `release` environment, so its required reviewers approve a
+    # release before anything is pushed (docs/release-security.md).
+    environment: release
     runs-on: ubuntu-26.04
     permissions:
       contents: read
@@ -194,6 +198,7 @@ jobs:
   docker-manifest:
     name: Docker Manifest
     needs: [docker, release-metadata]
+    environment: release
     runs-on: ubuntu-26.04
     permissions:
       actions: read
@@ -492,6 +497,7 @@ jobs:
   create-release:
     name: Create GitHub Release
     needs: [docker-manifest, release-metadata]
+    environment: release
     runs-on: ubuntu-26.04
     permissions:
       contents: write

@@ -2,7 +2,6 @@ import type { ReactElement } from "react";
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Consumer, PluginConfig, Proxy, Upstream } from "@/api/types";
-import { TooltipProvider } from "@/components/ui/Tooltip";
 import { createHarness, page, selectTab, settle, stubFetch } from "@/test/__tests__/harness";
 import { graph, meshResponses } from "@/test/__tests__/meshFixtures";
 import ProxiesPage from "./proxies";
@@ -82,14 +81,16 @@ const details: Surface[] = [
 let ui: ReturnType<typeof createHarness>;
 let empty: boolean;
 let failure: string | undefined;
+let failureStatus: number;
 
 beforeEach(() => {
   ui = createHarness();
   empty = false;
   failure = undefined;
+  failureStatus = 400;
   stubFetch((request) => {
     const path = new URL(request.url).pathname.replace("/api/proxy/", "");
-    if (path === failure) return Response.json({ error: "Unavailable" }, { status: 400 });
+    if (path === failure) return Response.json({ error: "Unavailable" }, { status: failureStatus });
     const responses: Record<string, unknown> = {
       ...meshResponses,
       proxies: page(empty ? [] : [proxy]),
@@ -131,7 +132,7 @@ async function mount(surface: Surface) {
     history: createMemoryHistory({ initialEntries: [surface.entry ?? surface.path] }),
   });
   await router.load();
-  await ui.render(<TooltipProvider><RouterProvider router={router} /></TooltipProvider>);
+  await ui.render(<RouterProvider router={router} />);
   if (surface.tab) {
     await settle(() => expect([...ui.host.querySelectorAll('[role="tab"]')]
       .some((tab) => tab.textContent === surface.tab)).toBe(true));
@@ -183,10 +184,20 @@ describe("responsive resource grid structure", () => {
     expect(region.parentElement!.textContent).toContain(surface.empty);
   });
 
+  it.each(lists.filter((surface) => surface.endpoint))("reports a refused $label read as a denial, not a failure (#680)", async (surface) => {
+    failure = surface.endpoint;
+    failureStatus = 403;
+    await mount(surface);
+    const message = `${surface.label}: read not permitted for this session`;
+    await settle(() => expect(ui.host.textContent).toContain(message));
+    expect(ui.host.textContent).not.toContain(`${surface.label} unavailable`);
+    expect(ui.host.textContent).not.toContain(surface.empty);
+  });
+
   it.each(lists.filter((surface) => surface.endpoint))("keeps $label error feedback outside the wide canvas", async (surface) => {
     failure = surface.endpoint;
     await mount(surface);
-    const message = `Failed to load ${surface.label.toLowerCase()}`;
+    const message = `${surface.label} unavailable`;
     await settle(() => expect(ui.host.textContent).toContain(message));
     const { region } = scrollRegion(surface);
     expect(region.textContent).not.toContain(message);

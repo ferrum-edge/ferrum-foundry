@@ -180,6 +180,43 @@ describe('Strict-Transport-Security (#589)', () => {
   });
 });
 
+describe('no CORS grant (#590)', () => {
+  it.each<[string, Record<string, string | undefined>]>([
+    ['production', {}],
+    ['development', {
+      NODE_ENV: 'test',
+      FERRUM_AUTH_MODE: 'static',
+      FERRUM_BFF_AUTH_TOKEN: 'development-bff-token-is-long-enough-123',
+      FERRUM_JWT_NAMESPACES: '*',
+    }],
+  ])('answers a cross-origin request and preflight without any grant in %s', async (_label, env) => {
+    const app = await loadApp(env);
+    try {
+      const simple = await app.inject({
+        method: 'GET',
+        url: '/api/health/live',
+        headers: { origin: 'https://evil.example' },
+      });
+      expect(simple.headers['access-control-allow-origin']).toBeUndefined();
+      expect(simple.headers['access-control-allow-credentials']).toBeUndefined();
+
+      const preflight = await app.inject({
+        method: 'OPTIONS',
+        url: '/api/health/live',
+        headers: {
+          origin: 'https://evil.example',
+          'access-control-request-method': 'POST',
+        },
+      });
+      expect(preflight.headers['access-control-allow-origin']).toBeUndefined();
+      expect(preflight.headers['access-control-allow-methods']).toBeUndefined();
+      expect(preflight.headers['access-control-allow-credentials']).toBeUndefined();
+    } finally {
+      await app.close();
+    }
+  });
+});
+
 describe('SPA shell nonce (#594)', () => {
   const P = CSP_NONCE_PLACEHOLDER;
   // The shape Vite's html.cspNonce emits: every tag and a csp-nonce meta.

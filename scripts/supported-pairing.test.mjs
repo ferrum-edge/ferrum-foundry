@@ -21,6 +21,7 @@ import {
 } from "./supported-pairing.mjs";
 import { hostedQualificationFixture } from "./fixtures/hosted-qualification.mjs";
 
+const RELEASE_ENVIRONMENT_PATTERN = /^ {4}environment: release$/m;
 const FERRUMEDGE_FERRUM_EDGE_SHA256_PATTERN = /^ferrumedge\/ferrum-edge@sha256:[0-9a-f]{64}$/;
 const SEMVER_TAG_PATTERN = /^v\d+\.\d+\.\d+$/;
 const V0_9_15_PATTERN = /v0\.9\.15/;
@@ -687,6 +688,15 @@ describe("repository alignment", () => {
     const build = job("docker");
     const manifest = job("docker-manifest");
     const release = job("create-release");
+
+    it("holds every publishing job behind the protected release environment", () => {
+      // Required reviewers gate only jobs that name the environment, so a job
+      // that pushes or releases without it would publish unapproved.
+      for (const publishing of [build, manifest, release]) {
+        assert.match(publishing, RELEASE_ENVIRONMENT_PATTERN);
+      }
+      assert.doesNotMatch(metadata, RELEASE_ENVIRONMENT_PATTERN);
+    });
 
     it("binds the tag to this run's commit before building, publishing, and releasing", () => {
       assert.match(metadata, TAG_IS_THIS_COMMIT);

@@ -185,10 +185,13 @@ describe("PluginConfigForm mcp_gateway", () => {
     expect(transparent.policy).toBeUndefined();
 
     // An edit made in transparent mode that names an aggregate-only field.
-    await fill(configTextarea(), JSON.stringify({
+    const typed = JSON.stringify({
       ...transparent,
       policy: { default_action: "deny" },
-    }, null, 2));
+    }, null, 2);
+    await fill(configTextarea(), typed);
+    // The editor does not rewrite the text under the operator's cursor.
+    expect(configTextarea().value).toBe(typed);
 
     await chooseMode("Aggregate router");
     const restored = JSON.parse(configTextarea().value) as Record<string, unknown>;

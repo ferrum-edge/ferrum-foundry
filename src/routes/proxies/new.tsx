@@ -8,7 +8,7 @@ import { useToast } from "@/components/ui/Toast";
 import { Card } from "@/components/ui/Card";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { ProxyForm } from "@/components/forms/ProxyForm";
-import { getApiErrorMessage } from "@/api/client";
+import { committedWriteMessage, getApiErrorMessage, getCommittedWrite } from "@/api/client";
 import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
 import { useCapabilities } from "@/stores/capabilities";
 import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
@@ -45,6 +45,15 @@ function ProxyCreateEditor({ session }: { session: EditorSession }) {
         params: { proxyId: created.id },
       });
     } catch (err: unknown) {
+      // A committed-but-not-live answer is a completed create (#674): close
+      // the form as a 2xx does, so a second click cannot POST it again. The
+      // answer has no body, so the new resource is opened from the list.
+      const committed = getCommittedWrite(err);
+      if (committed) {
+        toast("warning", committedWriteMessage("Proxy created", committed));
+        if (session.isCurrent()) navigate({ to: "/proxies" });
+        return;
+      }
       const message = await getApiErrorMessage(err, "Failed to create proxy");
       toast("error", message);
     }

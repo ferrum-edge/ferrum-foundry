@@ -508,6 +508,23 @@ CI. Report problems; they do not block releases.
   and `0.9.15-ebpf-tools` variants of the same release.
 - Browser latency, and more than one operator editing at scale.
 
+### Next pairing (not yet qualified)
+
+Ferrum Edge v0.9.20 (published 2026-11-03) and its contracts tag
+`contracts-edge-0.9.20` are outside the tested envelope until the pin moves
+through [Changing the pairing](#changing-the-pairing) (tracked in #686).
+Already known to need review in that move:
+
+- Three vendored contract files differ between `contracts-edge-0.9.15` and
+  `contracts-edge-0.9.20`: `vocabularies/plugin-catalog.json`,
+  `vocabularies/provisioned-by.json`, and `fixtures/invalid-expectations.json`.
+- Edge v0.9.19 and v0.9.20 refuse plugin configuration with unknown keys, so
+  the plugin templates, `PLUGIN_SCHEMA_SPEC`, `PLUGIN_SENSITIVITY_SOURCE`, and
+  `MCP_GATEWAY_AGGREGATE_ONLY_PATHS` must be re-read against that release.
+- From v0.9.18 Edge requires the `expected_proxy_ids` association
+  precondition that Foundry already sends (see
+  [The Edge release to pair with](#the-edge-release-to-pair-with)).
+
 ## Conditional writes on the paired release
 
 ferrum-edge#5661 (a strong `ETag` on resource reads and `If-Match` on

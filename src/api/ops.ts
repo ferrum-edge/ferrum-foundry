@@ -1,15 +1,14 @@
 /* ------------------------------------------------------------------ */
 /*  Ferrum Foundry – gateway operations API                            */
 /*  (overload, runtime metrics, charges, cluster, capabilities,       */
-/*   audit, batch, backup/restore)                                    */
+/*   audit, backup/restore)                                           */
 /* ------------------------------------------------------------------ */
 
 import { classifyCommittedWrite, type CommittedWrite } from "./gatewayMetadata";
-import { restoreSecrets, secretValues, withRedactedFailure } from "./secretRedaction";
+import { restoreSecrets, withRedactedFailure } from "./secretRedaction";
 import { longRunningClientTimeout } from "../../server/waitBudget";
 import {
   SILENT_ERRORS,
-  REDACT_ERRORS,
   reportRequestError,
   DEFER_QUERY_ERRORS,
   proxyApi,
@@ -18,13 +17,9 @@ import {
 } from "./client";
 import type {
   ConsumerBackup,
-  ConsumerCreate,
   PluginConfig,
-  PluginConfigCreate,
   Proxy,
-  ProxyCreate,
   Upstream,
-  UpstreamCreate,
 } from "./types";
 
 /* ---------- Overload ---------- */
@@ -420,39 +415,7 @@ export async function listAuditEvents(
     .json<AuditEventListResponse>();
 }
 
-/* ---------- Batch / backup / restore ---------- */
-
-export interface BatchCreateRequest {
-  proxies?: ProxyCreate[];
-  consumers?: ConsumerCreate[];
-  plugin_configs?: PluginConfigCreate[];
-  upstreams?: UpstreamCreate[];
-}
-
-export interface BatchCreateResponse {
-  created: {
-    proxies: number;
-    consumers: number;
-    plugin_configs: number;
-    upstreams: number;
-  };
-}
-
-/**
- * Consumers' credentials and plugin configurations travel in the body, so a
- * failure is reported like theirs (`consumers.create`): redacted, without the
- * request, to the caller and the global error popup alike (#478).
- */
-export async function batchCreate(
-  scope: NamespaceScope,
-  data: BatchCreateRequest,
-): Promise<BatchCreateResponse> {
-  return withRedactedFailure(secretValues(data), () =>
-    proxyApi
-      .post("batch", scoped(scope, { json: data, context: { [REDACT_ERRORS]: true } }))
-      .json<BatchCreateResponse>(),
-  );
-}
+/* ---------- Backup / restore ---------- */
 
 export interface BackupResponse {
   version: string;

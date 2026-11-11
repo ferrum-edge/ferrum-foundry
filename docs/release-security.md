@@ -19,8 +19,10 @@ workflow (`.github/workflows/ci.yml`) has passed:
    answers as `viewer`, `operator`, and `admin`, on that image and on a second
    copy started with `FERRUM_ADMIN_READ_ONLY=true`.
 3. **Deployment Starter** and **Critical Journeys**: bring up the checked-in
-   starter with the freshly built image and the same gateway image, then run the
-   first-success walkthrough and the [browser journeys](../e2e/README.md).
+   starter with the production image (built once per run by **Production
+   Image** and handed to both as an artifact) and the same gateway image, then
+   run the first-success walkthrough and the
+   [browser journeys](../e2e/README.md).
 4. **Container Gate** (amd64 and arm64): builds the release Dockerfile, checks
    that a planted `.env` canary is absent from image history and layers,
    requires a numeric non-root user and runs Node as the entrypoint to prove
@@ -196,12 +198,20 @@ succeeds, and the release notes name it once the release exists. The record
 survives 90 days — `retention-days: 90` in the workflow equals GitHub's maximum
 for a public repository.
 
+Every job that holds registry credentials or publishes (`docker`,
+`docker-manifest`, `create-release`) runs in the `release` environment, so a
+reviewer approves each release before anything is pushed;
+`scripts/supported-pairing.test.mjs` fails if one of them stops naming it.
+
 The workflow cannot stop someone with registry credentials from writing a tag
 directly. These controls live outside the repository and are owner settings:
 immutable-tag rules on Docker Hub for release version tags (never for `main`,
-`X.Y`, or `latest`, which must move), a protected `release` environment with
-required reviewers, and the bypass list on the tag ruleset that blocks updating
-or deleting `v*` tags.
+`X.Y`, or `latest`, which must move), the `release` environment's protection
+(required reviewers, and the Docker Hub secrets held as environment secrets
+rather than repository secrets), and the bypass list on the tag ruleset that
+blocks updating or deleting `v*` tags. Until the environment has required
+reviewers, GitHub creates it unprotected on first use and the jobs run without
+waiting.
 
 ## Coverage floors
 

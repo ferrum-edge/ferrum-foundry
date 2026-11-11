@@ -8,7 +8,7 @@ import { useToast } from "@/components/ui/Toast";
 import { Card } from "@/components/ui/Card";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { UpstreamForm } from "@/components/forms/UpstreamForm";
-import { getApiErrorMessage } from "@/api/client";
+import { committedWriteMessage, getApiErrorMessage, getCommittedWrite } from "@/api/client";
 import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
 import { useCapabilities } from "@/stores/capabilities";
 import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
@@ -45,6 +45,15 @@ function UpstreamCreateEditor({ session }: { session: EditorSession }) {
         params: { upstreamId: created.id },
       });
     } catch (err: unknown) {
+      // A committed-but-not-live answer is a completed create (#674): close
+      // the form as a 2xx does, so a second click cannot POST it again. The
+      // answer has no body, so the new resource is opened from the list.
+      const committed = getCommittedWrite(err);
+      if (committed) {
+        toast("warning", committedWriteMessage("Upstream created", committed));
+        if (session.isCurrent()) navigate({ to: "/upstreams" });
+        return;
+      }
       const message = await getApiErrorMessage(err, "Failed to create upstream");
       toast("error", message);
     }

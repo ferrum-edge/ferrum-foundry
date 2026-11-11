@@ -6,7 +6,6 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   MCP_GATEWAY_AGGREGATE_ONLY_PATHS,
   MCP_GATEWAY_TRANSPARENT_NOTE,
-  mcpGatewayConfigHasAggregateOnlyFields,
   readMcpGatewayMode,
   sanitizeMcpGatewayConfigForSubmit,
   switchMcpGatewayMode,
@@ -431,25 +430,9 @@ function PluginConfigFormFields({
     setErrors(({ config: _config, ...remainingErrors }) => remainingErrors);
   };
 
-  useEffect(() => {
-    if (pluginName !== "mcp_gateway" || !parsedMcpGatewayConfig) return;
-    if (readMcpGatewayMode(parsedMcpGatewayConfig) !== "transparent_proxy") return;
-    if (!mcpGatewayConfigHasAggregateOnlyFields(parsedMcpGatewayConfig)) return;
-
-    // Stash exactly as a mode switch does: a deep merge, so a nested field
-    // typed here (`policy.default_action`) cannot replace the stashed
-    // `policy` object and lose its `tools` map.
-    const { config: stripped, stash } = switchMcpGatewayMode(
-      parsedMcpGatewayConfig,
-      "transparent_proxy",
-      mcpAggregateStashRef.current,
-    );
-    mcpAggregateStashRef.current = stash;
-    const nextJson = JSON.stringify(stripped, null, 2);
-    if (nextJson !== configJson) {
-      setConfigJson(nextJson);
-    }
-  }, [configJson, parsedMcpGatewayConfig, pluginName]);
+  // An aggregate-only field typed in transparent mode stays in the textarea as
+  // written: submit strips it (`sanitizeMcpGatewayConfigForSubmit`), and a
+  // switch back to aggregate mode merges it over the stash.
 
   // Picking a plugin in create mode reseeds its default config in the same
   // update, so the guided editor (keyed on the plugin name) never mounts

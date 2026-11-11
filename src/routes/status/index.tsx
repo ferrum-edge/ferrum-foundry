@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/Badge";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { BffConnectionCard } from "@/components/shared/BffConnectionCard";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { ReadStateNotice } from "@/components/shared/ReadState";
 import { formatDateTime } from "@/lib/format";
 
 function statusVariant(
@@ -50,7 +51,7 @@ export default function StatusPage() {
   // every cycle while the next read was in flight, flashing "Current state is
   // unknown" over a healthy gateway whenever that read ran a little slower.
   const query = useHealth(REFRESH_MS, 2 * REFRESH_MS);
-  const { data: health, isLoading, isError, error } = query;
+  const { data: health, isLoading, isError } = query;
 
   const header = (
     <PageHeader
@@ -72,18 +73,16 @@ export default function StatusPage() {
     );
   }
 
+  // A failed read shows no verdict, not even the last one. The shared notice
+  // says whether the read was denied or is unavailable, or, with a snapshot
+  // held, that it could not refresh and when it was last observed (#680).
   if (isError) {
     return (
       <div className="space-y-6">
         {header}
         <div className={GRID}>
           <BffConnectionCard />
-          <Card>
-            <p className="text-danger font-medium">Failed to fetch health status</p>
-            <p className="text-text-muted text-sm mt-1">
-              {error instanceof Error ? error.message : "Unknown error"}
-            </p>
-          </Card>
+          <ReadStateNotice query={query} label="Health status" />
         </div>
       </div>
     );

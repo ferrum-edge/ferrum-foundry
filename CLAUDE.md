@@ -302,6 +302,12 @@ See `docs/concurrent-edits.md`.
     keeping the form's fields.
   - A committed delete resolves as a delete (`removeCommitted`) so its detail
     cache is retired.
+  - A plugin save's membership plan treats a committed plugin `PUT` as the
+    write having happened: it re-reads the plugin, finishes the association
+    steps, then rethrows the commit, and the editor reseeds plugin,
+    membership and baseline.
+  - A committed create closes its form (or dialog) with a warning, as a
+    `201` does, so it is never sent twice.
 
 ### Secret redaction
 
@@ -311,9 +317,8 @@ See `docs/concurrent-edits.md`.
   `withRedactedFailure(secretValues(body), …)` (`src/api/secretRedaction.ts`).
   That covers consumer create and credential writes, plugin configurations,
   proxy writes (membership `replace` included) and upstreams (inline backend
-  TLS keys), TLS key material and ACME account credentials, batch create,
-  backup restore (`restoreSecrets`), and API spec import/replace
-  (`specDocumentSecrets`). **Add any new secret-bearing write to it.**
+  TLS keys), TLS key material and ACME account credentials, backup restore
+  (`restoreSecrets`), and API spec import/replace (`specDocumentSecrets`). **Add any new secret-bearing write to it.**
 - Its failure becomes a `RedactedWriteError`: every submitted secret is replaced
   by `[REDACTED]` in the message and parsed body (before any trim or
   truncation), with a bodiless response for the status and no `request`,
@@ -483,8 +488,8 @@ See `docs/authentication.md` → "Editor identity".
 ## Build & check
 
 ```bash
-npm run typecheck    # TypeScript: frontend, server, and e2e
+npm run typecheck    # TypeScript: frontend, server, server tests, and e2e
 npm run build        # Production build (Vite + server tsc)
-npm run lint         # ESLint
+npm run lint         # ESLint: src, server, scripts, shared, e2e, root *.config.ts
 npm test             # Vitest, then the node --test contract suites in scripts/
 ```

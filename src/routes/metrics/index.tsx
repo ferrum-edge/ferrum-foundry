@@ -9,6 +9,7 @@ import { useAdminMetrics, usePrometheusMetrics } from "@/hooks/useMetrics";
 import { useGatewayRequestStats } from "@/hooks/useGatewayRequestStats";
 import { Card } from "@/components/ui/Card";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { ReadStateNotice } from "@/components/shared/ReadState";
 import { humanizeKey } from "@/lib/format";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { RefreshControl } from "@/components/metrics/RefreshControl";
@@ -58,15 +59,15 @@ function MetricsWorkspace() {
     ["overload", "runtimeMetrics", "charges"].includes(String(query.queryKey[0])),
   }) > 0;
 
+  const adminMetricsQuery = useAdminMetrics(refreshInterval);
   const {
     data: metrics,
     isLoading,
     isError,
-    error,
     dataUpdatedAt,
     isFetching: isAdminMetricsFetching,
     refetch: refetchAdminMetrics,
-  } = useAdminMetrics(refreshInterval);
+  } = adminMetricsQuery;
 
   const {
     data: prometheusText,
@@ -143,13 +144,10 @@ function MetricsWorkspace() {
   // overload/runtime/chargeback panels (and stop their polling) or hide the
   // Prometheus sample: each endpoint keeps its own unavailable state, and
   // the admin-derived panels render only when a sample exists.
+  // The shared notice tells a denial from an outage and, when a sample is
+  // still held, says it could not refresh and when it was observed (#680).
   const adminError = isError ? (
-    <Card>
-      <p className="text-danger font-medium">Failed to load metrics</p>
-      <p className="text-text-muted text-sm mt-1">
-        {error instanceof Error ? error.message : "Unknown error"}
-      </p>
-    </Card>
+    <ReadStateNotice query={adminMetricsQuery} label="Gateway metrics" />
   ) : null;
 
   /* ---------------------------------------------------------------- */

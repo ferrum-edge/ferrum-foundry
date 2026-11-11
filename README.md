@@ -369,8 +369,8 @@ image with a different digest. See
 |---|---|
 | Frontend | React 19, TypeScript 6, Tailwind CSS v4 |
 | Routing | TanStack Router v1 |
-| Data | TanStack Query v5, TanStack Table v8, TanStack Virtual v3 |
-| UI | Radix UI primitives (Dialog, Select, Tabs, Tooltip) |
+| Data | TanStack Query v5 |
+| UI | Radix UI primitives (Dialog, Select, Tabs) |
 | Backend | Node.js, Fastify 5 |
 | JWT | jose (HS256) |
 | Docker | Distroless Node.js 24 (Debian 13), non-root |
@@ -380,8 +380,7 @@ image with a different digest. See
 The BFF sends `X-Ferrum-Provisioned-By: ferrum-foundry` on every proxied admin
 request, and the demo seeder does the same. A gateway with resource-label
 support records it as `labels.provisioned-by` on newly created proxies,
-consumers, upstreams, and plugin configs, including batch creates and API-spec
-imports. Existing labels survive edits, and restore keeps recorded origins.
+consumers, upstreams, and plugin configs, including API-spec imports. Existing labels survive edits, and restore keeps recorded origins.
 Detail pages show all labels, including those set by other tools.
 
 Labels are informational. They do not affect authentication, ownership, or

@@ -168,7 +168,7 @@ describe("Metrics page refresh policy", () => {
     await act(async () => root.render(<QueryClientProvider client={client}><MetricsPage /></QueryClientProvider>));
     // The client retries a 503 GET twice before the query settles as an error.
     await advance(2000);
-    expect(host.textContent).toContain("Failed to load metrics");
+    expect(host.textContent).toContain("Gateway metrics unavailable");
     expect(host.textContent).toContain("Overload Protection");
     expect(host.textContent).toContain("Requests by Route");
     for (const path of paths) expect(counts[path], path).toBeGreaterThanOrEqual(1);
@@ -181,7 +181,7 @@ describe("Metrics page refresh policy", () => {
     // Recovery restores the admin-derived panels.
     failAdmin = false;
     await advance(10000);
-    expect(host.textContent).not.toContain("Failed to load metrics");
+    expect(host.textContent).not.toContain("Gateway metrics unavailable");
     expect(host.textContent).toContain("Gateway");
   });
 
@@ -190,7 +190,7 @@ describe("Metrics page refresh policy", () => {
     localStorage.setItem(METRICS_REFRESH_INTERVAL_KEY, "10000");
     await act(async () => root.render(<QueryClientProvider client={client}><MetricsPage /></QueryClientProvider>));
     await advance(2000);
-    expect(host.textContent).toContain("Failed to load metrics");
+    expect(host.textContent).toContain("Gateway metrics unavailable");
     const heading = (text: string) =>
       [...host.querySelectorAll("h3")].find((node) => node.textContent?.trim() === text);
     const overload = heading("Overload Protection")!;
@@ -246,13 +246,13 @@ describe("Metrics page refresh policy", () => {
     localStorage.setItem(METRICS_REFRESH_INTERVAL_KEY, "0");
     await act(async () => root.render(<QueryClientProvider client={client}><MetricsPage /></QueryClientProvider>));
     await advance(2000);
-    expect(host.textContent).toContain("Failed to load metrics");
+    expect(host.textContent).toContain("Gateway metrics unavailable");
     expect(refreshButton().disabled).toBe(false);
     failAdmin = false;
     await act(async () => refreshButton().click());
     await advance(100);
     await advance(100);
-    expect(host.textContent).not.toContain("Failed to load metrics");
+    expect(host.textContent).not.toContain("Gateway metrics unavailable");
     expect(host.textContent).toContain("Requests by Route");
   });
 

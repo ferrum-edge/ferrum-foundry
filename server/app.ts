@@ -2,7 +2,6 @@ import { readFile } from 'node:fs/promises';
 import { dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import cookie from '@fastify/cookie';
-import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import { CSP_NONCE_PLACEHOLDER } from '../shared/csp-nonce.js';
@@ -57,11 +56,11 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   installUploadDrain(fastify);
 
   await fastify.register(cookie);
-  // No CORS grant in any environment (issue #590). The SPA is served
-  // same-origin in production, and in development Vite proxies `/api/` to the
-  // BFF, so the browser never makes a cross-origin call. Reflecting any Origin
-  // outside production let every site a developer visited read a running BFF.
-  await fastify.register(cors, { origin: false });
+  // No CORS grant in any environment (issue #590), so no CORS plugin: the SPA
+  // is served same-origin in production, and in development Vite proxies
+  // `/api/` to the BFF, so the browser never makes a cross-origin call.
+  // Reflecting any Origin outside production let every site a developer
+  // visited read a running BFF. `app.test.ts` pins the absent grant.
   await fastify.register(helmet, {
     // A fresh random nonce per response, appended to script-src and
     // style-src. The SPA shell carries the style nonce (issue #594).

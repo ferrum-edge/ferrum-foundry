@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getPluginConfigDefault } from "./pluginConfigDefaults";
 import {
-  MCP_GATEWAY_AGGREGATE_ONLY_PATHS,
-  buildMcpGatewayTemplate,
   mcpGatewayConfigHasAggregateOnlyFields,
   omitMcpGatewayAggregateOnlyFields,
   sanitizeMcpGatewayConfigForSubmit,
@@ -53,17 +51,6 @@ describe("mcpGatewayConfig", () => {
         },
       },
     });
-  });
-
-  it("builds a transparent template without aggregate-only keys", () => {
-    const template = buildMcpGatewayTemplate("transparent_proxy");
-    expect(template.mode).toBe("transparent_proxy");
-    expect(template.policy).toBeUndefined();
-    expect(template.discovery).toBeUndefined();
-    for (const path of MCP_GATEWAY_AGGREGATE_ONLY_PATHS) {
-      const [section, field] = path.split(".");
-      expect((template as Record<string, Record<string, unknown>>)[section]?.[field]).toBeUndefined();
-    }
   });
 
   it("strips rejected keys from transparent-mode submissions", () => {
@@ -146,6 +133,28 @@ describe("mcpGatewayConfig", () => {
     );
 
     expect(restored.config.policy).toEqual(denyByDefault.policy);
+  });
+
+  it("merges an aggregate field typed in transparent mode over the stash", () => {
+    const transparent = switchMcpGatewayMode(
+      {
+        ...aggregateConfig,
+        policy: {
+          default_action: "allow",
+          tools: { "github.create_issue": { action: "deny" } },
+        },
+      },
+      "transparent_proxy",
+    );
+    const edited = { ...transparent.config, policy: { default_action: "deny" } };
+
+    const restored = switchMcpGatewayMode(edited, "aggregate_router", transparent.stash);
+
+    expect(restored.config.policy).toEqual({
+      default_action: "deny",
+      tools: { "github.create_issue": { action: "deny" } },
+    });
+    expect(restored.stash).toBeNull();
   });
 
   it("restores an aggregate config that relied on gateway defaults without adding a policy", () => {

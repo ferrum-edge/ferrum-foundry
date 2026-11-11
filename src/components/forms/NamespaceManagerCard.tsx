@@ -89,6 +89,14 @@ function CreateNamespaceDialog({
       toast("success", `Namespace "${name.trim()}" created`);
       onOpenChange(false);
     } catch (err) {
+      // A committed-but-not-live answer is a completed create (#674): close
+      // the dialog with a warning so Create cannot be sent twice.
+      const committed = getCommittedWrite(err);
+      if (committed) {
+        toast("warning", committedWriteMessage(`Namespace "${name.trim()}" created`, committed));
+        onOpenChange(false);
+        return;
+      }
       toast("error", await getApiErrorMessage(err, "Failed to create namespace"));
     }
   }

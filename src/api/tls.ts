@@ -458,21 +458,6 @@ export async function createManagedRecord(
   );
 }
 
-export async function updateManagedRecord(
-  collection: ManagedTlsCollection,
-  id: string,
-  data: ManagedTlsRequest,
-): Promise<ManagedTlsRecord> {
-  return withRedactedFailure(secretValues(data), () =>
-    proxyApi
-      .put(
-        `admin/tls/${pathSegment(collection)}/${pathSegment(id)}`,
-        { json: data, context: FLEET_GLOBAL_REDACTED_CONTEXT },
-      )
-      .json<ManagedTlsRecord>(),
-  );
-}
-
 export async function removeManagedRecord(
   collection: ManagedTlsCollection,
   id: string,

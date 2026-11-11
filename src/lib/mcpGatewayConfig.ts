@@ -30,20 +30,6 @@ const AGGREGATE_FIELD_DEFAULTS: JsonObject = {
   },
 };
 
-const SHARED_TEMPLATE: JsonObject = {
-  endpoint: {
-    path: "/mcp",
-    protocol_versions: ["2025-11-25"],
-  },
-  servers: {
-    github: {
-      upstream_url: "https://mcp-github.internal.example.com/mcp",
-      namespace: "github",
-      expose_tools: true,
-    },
-  },
-};
-
 function isPlainObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -172,19 +158,6 @@ export function applyMcpGatewayAggregateDefaults(
   return mergeDefined(next, AGGREGATE_FIELD_DEFAULTS);
 }
 
-export function buildMcpGatewayTemplate(mode: McpGatewayMode): JsonObject {
-  if (mode === "transparent_proxy") {
-    return {
-      mode: "transparent_proxy",
-      ...deepClone(SHARED_TEMPLATE),
-    };
-  }
-  return applyMcpGatewayAggregateDefaults({
-    mode: "aggregate_router",
-    ...deepClone(SHARED_TEMPLATE),
-  });
-}
-
 export function sanitizeMcpGatewayConfigForSubmit(config: unknown): JsonObject {
   if (!isPlainObject(config)) return {};
   if (readMcpGatewayMode(config) !== "transparent_proxy") {
@@ -198,7 +171,9 @@ export function sanitizeMcpGatewayConfigForSubmit(config: unknown): JsonObject {
 /**
  * Switch modes. Leaving aggregate mode always yields a (possibly empty)
  * stash, so returning restores exactly what was there; `null` means nothing
- * has been captured.
+ * has been captured. An aggregate-only field typed while in transparent mode
+ * is merged over the stash on return (a deep merge, so a typed
+ * `policy.default_action` keeps the stashed `policy.tools`).
  */
 export function switchMcpGatewayMode(
   config: unknown,
@@ -212,6 +187,8 @@ export function switchMcpGatewayMode(
     stripped.mode = "transparent_proxy";
     return { config: stripped, stash: nextStash };
   }
-  const restored = applyMcpGatewayAggregateDefaults(base, stash);
+  const restoredStash =
+    stash === null ? null : mergeDefined(stash, pickMcpGatewayAggregateOnlyFields(base));
+  const restored = applyMcpGatewayAggregateDefaults(base, restoredStash);
   return { config: restored, stash: null };
 }

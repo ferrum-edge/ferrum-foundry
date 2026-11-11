@@ -334,6 +334,15 @@ points to the live-apply banner. If that read fails, nothing moves: the form
 keeps the draft, the toast says to reload before saving again, and a further
 Save is judged against the old baseline.
 
+The plugin editor does the same, through its membership plan (#674). A
+committed plugin `PUT` is the save having happened: the plan re-reads the
+plugin, finishes its association and reconcile steps, and only then reports
+the commit. The page reseeds the plugin, its group membership and the
+baseline from fresh reads, and warns "Plugin configuration saved: committed,
+not yet proven live". If the plan cannot re-read the committed plugin it
+reports "saved, but … could not re-read it" and rolls nothing back, and
+**Reload saved configuration** reseeds the form.
+
 The two single-field editors take their guard from the list they were computed
 from rather than the settings form's seed. The update hooks refresh the
 resource before the rejection reaches them, so an upstream **targets** save or
@@ -388,6 +397,17 @@ A namespace delete does the same: `useDeleteNamespace` resolves a committed
 as on success, an active scope on that namespace moves to the default, and the
 delete dialog closes with a warning instead of offering a second `DELETE`.
 
+### Committed creates
+
+A committed create **is** a completed create (#674). The proxy, upstream,
+consumer, and plugin create pages and the namespace create dialog close as on
+a `201` and warn "… created: committed, not yet proven live", so a second
+click cannot `POST` the same resource again. The answer carries no body, so a
+create page opens the collection rather than the new resource. A consumer
+create still shows its submitted secrets once first. A plugin create's
+membership plan stops at the create, so a proxy group's members are not
+attached; the warning says so.
+
 ### Committed credential writes
 
 A consumer credential append, basic replacement, indexed delete, or delete of
@@ -438,7 +458,7 @@ carries a secret: consumer create, plugin configuration create and update
 (including a membership plan's rollback), proxy create, update, and a
 membership plan's `replace`, upstream create and update, managed
 TLS and ACME certificate writes, ACME order creation and renewal, TLS
-validation, batch create, backup restore, and API spec import and replacement.
+validation, backup restore, and API spec import and replacement.
 
 `secretValues()` finds secrets by position, not by resource type:
 
@@ -457,7 +477,7 @@ validation, batch create, backup restore, and API spec import and replacement.
   (`-----BEGIN CERTIFICATE-----`) stay readable.
 
 **Plugin `config`.** A plugin configuration's `config`, in a plugin write or a
-batch entry, is classified the way Ferrum Edge projects it for a non-admin read
+restore entry, is classified the way Ferrum Edge projects it for a non-admin read
 (`src/admin/plugin_config_projection.rs`), so nothing Edge hides from a read can
 come back in a refusal. `PLUGIN_SENSITIVITY` transcribes Edge's per-plugin
 rules (for example `ai_semantic_cache`'s `semantic_embedding_auth_header`,
@@ -624,7 +644,7 @@ so the next successful read seeds a fresh baseline.
 | Guarded deletes, consumer saves and rotation re-send, nested redaction of plugin `config` | `src/api/conditionalWrite.test.ts`, `src/lib/resourceBaseline.test.ts` |
 | Plugin editor baseline, membership writes conditional on their reads | `src/lib/pluginMembership.test.ts`, `src/lib/pluginMembership.binding.test.ts` |
 | Refused delete dialog | `src/routes/proxies/concurrentEdit.test.tsx` |
-| Echoed secrets redacted on consumer create, plugin, upstream, TLS, and batch writes, in the error and in the popup; plugin `config` classified by Edge's projection; no request retained; status, `412`, and outcome markers kept | `src/api/secretRedaction.test.ts`, `src/routes/consumers/createSecretEcho.test.tsx` |
+| Echoed secrets redacted on consumer create, plugin, upstream, and TLS writes, in the error and in the popup; plugin `config` classified by Edge's projection; no request retained; status, `412`, and outcome markers kept | `src/api/secretRedaction.test.ts`, `src/routes/consumers/createSecretEcho.test.tsx` |
 | Committed-but-not-live classification, popup suppression, cache refresh, save-twice regression | `src/api/committedWrite.test.ts`, `src/lib/queryClient.test.ts` |
 | Editor reseed after a committed save; committed delete reported as deleted | `src/routes/proxies/concurrentEdit.test.tsx` |
 | Committed delete retires the seeded detail and list caches | `src/hooks/deleteDetailCache.test.tsx` |
