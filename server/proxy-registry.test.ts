@@ -791,6 +791,13 @@ describe('long-running read admission over TCP', () => {
       const b1 = await holdRead('reader-b');
       try {
         await assertFull();
+        // Both bounds are exhausted for reader-a: a long read reports its own
+        // share first (uploads report the global pool first).
+        const before = arrivals.length;
+        const both = await call('/api/proxy/backup', 'GET', '', as('reader-a'));
+        expect(both.status).toBe(429);
+        expect(JSON.parse(both.body)).toEqual({ error: 'Too Many Requests', code: 'FERRUM_BFF_READ_CAPACITY', scope: 'principal' });
+        expect(arrivals).toHaveLength(before);
       } finally { await release(b1); }
       // Freed global capacity goes to another subject, not past a full share.
       await release(await holdRead('reader-c'));
