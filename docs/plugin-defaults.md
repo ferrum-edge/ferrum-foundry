@@ -43,7 +43,7 @@ expects admission, so it is never counted as an unmodified-template admission.
 | `ai_stream_router` | Provider API keys in the gateway environment (the template references `${FERRUM_PLUGIN_SECRET_OPENAI_API_KEY}` first). |
 | `load_testing` | A trigger `key` of at least 32 characters. |
 | `proxy_alerts` | `FERRUM_PLUGIN_SECRET_ALERTS_SLACK_WEBHOOK` in the gateway environment. |
-| `kafka_logging` | An unrestricted backend egress policy. Under the default restrictive policy the gateway refuses librdkafka during field validation (the error starts with `Invalid plugin config fields: kafka_logging:`), before contacting a broker. Use another log sink if egress must stay restricted. |
+| `kafka_logging` | Under the default restrictive backend egress policy, either every broker of a trusted cluster listed in `FERRUM_KAFKA_ALLOWED_BROKERS` on every node that admits or runs the plugin (Edge v0.9.19+), or an unrestricted egress policy. Otherwise the gateway refuses librdkafka during field validation (the error starts with `Invalid plugin config fields: kafka_logging:`), before contacting a broker. Use another log sink if egress must stay restricted. |
 | `openapi_validator` | Proxy scope, on a proxy with an attached API spec. |
 | `oidc_relying_party` | A valid `session.encryption_secret`; the shipped template deliberately leaves it empty. |
 
