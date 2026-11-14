@@ -26,7 +26,7 @@ records the baseline below, which is part of each pairing's qualification; see
 | `PUT` with a malformed `If-Match`, or `POST /proxies` with any `If-Match` | **`400`, nothing written** (`malformedIfMatchStatus: 400`, `createIfMatchStatus: 400`) |
 
 Conditional writes come from ferrum-edge#5661, first released in Ferrum Edge
-v0.9.7; v0.9.8 through v0.9.15 retain it
+v0.9.7; every published release since, v0.9.8 through v0.9.20, retains it
 ([compatibility.md](compatibility.md)).
 `gateway-contract-smoke.mjs` fails if the pinned gateway issues no tag. The
 contract itself requires a usable strong tag for a guarded write and checks

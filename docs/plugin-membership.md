@@ -44,8 +44,9 @@ Every plugin `PUT` and `DELETE` also carries Edge's association precondition
 ([ferrum-edge-git-forge-ops#569](https://github.com/ferrum-edge/ferrum-edge-git-forge-ops/issues/569)):
 `expected_proxy_ids`. Edge requires it from v0.9.18
 ([ferrum-edge#6744](https://github.com/ferrum-edge/ferrum-edge/pull/6744);
-tagged but unpublished, so first published in v0.9.19); the paired v0.9.15
-predates it and ignores the parameter. From the plugin page it
+tagged but unpublished, so first published in v0.9.19), and the paired
+v0.9.20 enforces it; the published v0.5.5 pairing's v0.9.15 predates it and
+ignores the parameter. From the plugin page it
 names the membership the page showed (#630), not a fresh listing taken just
 before the write: the group's members the form was seeded with, the target proxy
 for a proxy-scoped plugin, and none for a global one. The form reports that
@@ -63,7 +64,7 @@ also refuses before writing anything when its own listing already shows such
 a proxy. Either way the page reports that the membership changed, names the
 proxies, and offers **Reload current membership**, which reseeds the form and
 its membership from fresh reads; nothing was written. On a gateway that
-predates the precondition, such as the paired v0.9.15, that listing is the
+predates the precondition, such as v0.9.15, that listing is the
 only check: a proxy attached between the listing and the write is not
 detected. A proxy the page showed that has since been detached does not refuse
 the write, since the write cannot detach it.

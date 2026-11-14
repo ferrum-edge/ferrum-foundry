@@ -33,8 +33,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI builds the production image once for the Deployment Starter and
   Critical Journeys and hands it to both as an artifact, instead of
   building it in each job (#685).
-- `docs/compatibility.md` records Edge v0.9.20 as the next, not yet
-  qualified, pairing and what moving to it must review (#686).
+- Prepare the unreleased Foundry v0.5.6 candidate against published Ferrum
+  Edge v0.9.20 (#686): source `e4a606a0`, index `sha256:32a0b057…`, platform
+  manifests, release binary hashes and raw OpenAPI identity. The starter's
+  demo gateway and the local-run command use the same digest, and package and
+  lockfile root versions are 0.5.6. Hosted qualification and Foundry
+  publication remain pending; v0.5.5 and earlier release records are
+  immutable. `ferrum-edge#6744` (`expected_proxy_ids`), which v0.9.20 enforces
+  and Foundry already sends, joins the recorded Edge dependencies. The
+  image's binaries were not byte-compared with the release assets for this
+  pin, and the record says so.
+- Re-vendor the same 18 scoped files from published `contracts-edge-0.9.20`
+  at `39da322083044c2e92617209e62983c92387f0ad` (#686). The two vocabularies'
+  Edge provenance and the canonical invalid expectations change;
+  `ai_token_metrics` moves from priority 4100 to 4070, and `PLUGIN_PRIORITY`
+  follows. All 82 plugin entries, the manifest schema and the fixtures are
+  unchanged.
+- Re-read the guided schemas, the plugin sensitivity source and
+  `McpGatewayConfig` at Edge v0.9.20 (#686). The guided `rate_limiting`
+  editor models `limit_by: service` and `max_state_entries`; the guided `cors`
+  editor models `allow_private_network` and bounds its method and header
+  lists at 128 entries; the guided `key_auth` editor hands an ordered list of
+  key locations to the JSON editor instead of flattening it. Four component
+  digests and `PLUGIN_SCHEMA_SPEC.ref` move to v0.9.20. The sensitivity table
+  marks `request_transformer` and `mesh_route_dispatch` rule values,
+  `response_mock` and `fault_injection` match values, `waf` exemption header
+  values and `ws_logging` `custom_headers` secret and `ldap_auth`
+  `failover_ldap_urls` an endpoint, so a failed write no longer echoes them.
+  `mcp_gateway` transparent mode also strips the prompt and resource policy
+  keys v0.9.19 added.
+- The `opa` template names an `https://` OPA host, because Edge v0.9.19+
+  refuses a cleartext `opa_host` off loopback (#686). The plugin-defaults
+  contract expects v0.9.20's `kafka_logging` egress refusal, which now names
+  `FERRUM_KAFKA_ALLOWED_BROKERS`; every other template keeps its v0.9.15
+  outcome. Demo seed API keys grow to 17 characters to meet v0.9.19+'s
+  16-character floor.
 
 - Drop three dependencies nothing imports: the production dependency
   `@radix-ui/react-dropdown-menu` (with its `@radix-ui/react-menu`), and the
