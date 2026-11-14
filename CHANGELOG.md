@@ -164,10 +164,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shipped. The starter's flags and `oauth2-proxy.env` settings are unchanged
   across those releases. Third-party images are now written as
   `name:tag@sha256:<digest>` rather than a digest with the tag in a comment,
-  and Dependabot watches `/deploy/starter` and `/e2e` (`docker-compose`), so
-  the pins move with upstream releases; Ferrum's own images stay with the
-  pairing record. A contract test fails if a third-party starter image loses
-  its tag.
+  and Dependabot watches `/deploy/starter` (`docker-compose`), so the pins
+  move with upstream releases; Ferrum's own images stay with the pairing
+  record. The critical-journey overlay `e2e/compose.e2e.yaml` runs the
+  starter's images and declares none of its own. Contract tests fail if a
+  third-party starter image loses its tag, or if a directory Dependabot
+  watches for `docker-compose` declares no image.
 - The BFF checks a namespace description's length without stalling on long
   whitespace. Its Unicode `White_Space` trim was a `\p{White_Space}+$`
   regex, which backtracks quadratically over a whitespace run inside the
