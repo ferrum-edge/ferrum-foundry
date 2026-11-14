@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { test } from "node:test";
 import { mayCarrySecret as e2eMayCarrySecret } from "../e2e/support/may-carry-secret.mjs";
 import { isLoopbackAdminOrigin, mayCarrySecret } from "../shared/admin-origin.js";
@@ -64,6 +64,10 @@ const SHA256_DIGEST_PATTERN = /@sha256:[0-9a-f]{64}/;
 // `registry/name:tag@sha256:<digest>`: the digest is what runs, and the tag is
 // what Dependabot reads to propose the next release.
 const TAG_AND_DIGEST_PATTERN = /^[a-z0-9./_-]+:[A-Za-z0-9_][A-Za-z0-9_.-]*@sha256:[0-9a-f]{64}$/;
+// A `docker-compose` entry in .github/dependabot.yml and the directory it watches.
+const DEPENDABOT_COMPOSE_DIRECTORY_PATTERN =
+  /package-ecosystem:\s*"docker-compose"\s*\n\s*directory:\s*"([^"]+)"/g;
+const COMPOSE_FILE_NAME_PATTERN = /^(?:docker-)?compose[\w.-]*\.ya?ml$/;
 const REQUIRED_VARIABLE_PATTERN = /\$\{([A-Z0-9_]+):\?/g;
 const OIDC_ISSUER_URL_PATTERN = /--oidc-issuer-url/;
 const REDIRECT_URL_PATTERN = /--redirect-url/;
@@ -671,6 +675,27 @@ test("third-party starter images carry their tag next to the digest", async () =
   assert.ok(images.length >= 3, "the starter runs oauth2-proxy and two nginx services");
   for (const image of images) {
     assert.match(image, TAG_AND_DIGEST_PATTERN, `${image} must be written as name:tag@sha256:<digest>`);
+  }
+});
+
+test("every docker-compose Dependabot directory declares an image to update", async () => {
+  // Dependabot reads docker-compose dependencies from `image:` keys only. A
+  // directory whose compose files declare none, such as an overlay that only
+  // adds volumes and environment, gives it nothing to move, and listing it
+  // would claim coverage that does not exist.
+  const config = await readFile(new URL("../.github/dependabot.yml", import.meta.url), "utf8");
+  const directories = [...config.matchAll(DEPENDABOT_COMPOSE_DIRECTORY_PATTERN)].map((match) => match[1]);
+  assert.ok(directories.includes("/deploy/starter"), "Dependabot watches the deployment starter");
+  for (const directory of directories) {
+    const base = new URL(`..${directory}/`, import.meta.url);
+    const files = (await readdir(base)).filter((name) => COMPOSE_FILE_NAME_PATTERN.test(name));
+    assert.ok(files.length > 0, `${directory} has no compose file`);
+    let images = 0;
+    for (const file of files) {
+      const compose = await readFile(new URL(file, base), "utf8");
+      images += [...compose.matchAll(COMPOSE_IMAGE_PATTERN)].length;
+    }
+    assert.ok(images > 0, `${directory} declares no image for Dependabot to update`);
   }
 });
 
