@@ -256,6 +256,23 @@ describe("plugin configurations follow Ferrum Edge's projection", () => {
     ["otel_tracing", { headers: { "x-honeycomb-team": "hc-1" }, service_name: "edge" }, ["hc-1"]],
     ["serverless_function", { azure_function_key: "fk-1", provider: "azure" }, ["fk-1"]],
     ["loki_logging", { authorization_header: "Basic b64-1", batch_size: "100" }, ["Basic b64-1"]],
+    // Rules Edge v0.9.20 adds to its projection (plugin_config_projection.rs).
+    ["request_transformer", {
+      rules: [{ operation: "add", target: "header", key: "X-Upstream-Auth", value: "Bearer up-1" }],
+    }, ["Bearer up-1", "X-Upstream-Auth"]],
+    ["mesh_route_dispatch", {
+      rules: [{ request_transform: [{ operation: "set", value: "rt-1" }] }],
+    }, ["rt-1"]],
+    ["response_mock", {
+      rules: [{ match: { query_params: { variant: "q-1" } }, status_code: 200 }],
+    }, ["q-1"]],
+    ["fault_injection", { match: { headers: { "x-chaos": "chaos-1" } } }, ["chaos-1"]],
+    ["waf", { global_exemptions: { header_present: { "x-scan-bypass": "bypass-1" } } }, ["bypass-1"]],
+    ["ws_logging", {
+      endpoint_url: "wss://collector.internal",
+      custom_headers: { "x-collector": "wl-1" },
+    }, ["wl-1"]],
+    ["ldap_auth", { failover_ldap_urls: ["ldap2.internal/t0ken"] }, ["ldap2.internal/t0ken"]],
   ])("%s: takes the paths Edge redacts and nothing else", (plugin, config, expected) => {
     expect(classifiedValues(pluginConfigSecrets(plugin, config))).toEqual([...expected].sort());
   });
