@@ -343,7 +343,7 @@ function makeConsumers(now, { includeBasicAuth = false } = {}) {
     id: `demo-key-consumer-${index + 1}`,
     username: `demo-key-${index + 1}`,
     custom_id: `key-app-${index + 1}`,
-    credentials: { keyauth: [{ key: `ff-key-${index + 1}` }] },
+    credentials: { keyauth: [{ key: `ff-demo-api-key-${index + 1}` }] },
     acl_groups: ["demo", index < 3 ? "commerce" : "warehouse", index === 4 ? "finance" : "edge"],
     created_at: now,
     updated_at: now,
@@ -757,7 +757,7 @@ export function buildManifest(proxyBaseUrl, {
   const plans = effectiveProxyPlans(includeBasicAuth);
   const keyConsumers = Array.from({ length: 6 }, (_, index) => ({
     username: `demo-key-${index + 1}`,
-    key: `ff-key-${index + 1}`,
+    key: `ff-demo-api-key-${index + 1}`,
   }));
   const basicConsumers = includeBasicAuth
     ? Array.from({ length: 6 }, (_, index) => ({

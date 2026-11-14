@@ -24,7 +24,7 @@ import { hostedQualificationFixture } from "./fixtures/hosted-qualification.mjs"
 const RELEASE_ENVIRONMENT_PATTERN = /^ {4}environment: release$/m;
 const FERRUMEDGE_FERRUM_EDGE_SHA256_PATTERN = /^ferrumedge\/ferrum-edge@sha256:[0-9a-f]{64}$/;
 const SEMVER_TAG_PATTERN = /^v\d+\.\d+\.\d+$/;
-const V0_9_15_PATTERN = /v0\.9\.15/;
+const V0_9_20_PATTERN = /v0\.9\.20/;
 const EDGE_COMMIT_5DB1D77A8_PATTERN = /5db1d77a8/;
 const EDGE_ISSUE_409_PATTERN = /#409/;
 const HOSTED_QUALIFICATION_IS_STILL_PENDING_PATTERN = /hosted qualification is still pending/;
@@ -140,21 +140,21 @@ describe("the supported pairing record", () => {
     }
   });
 
-  it("pins the verified v0.9.15 distribution for hosted qualification", () => {
+  it("pins the verified v0.9.20 distribution for hosted qualification", () => {
     const image =
-      "ferrumedge/ferrum-edge@sha256:29b468dfeea13b1ecaac8dfbc7e019f310e71e647611d43800a1dc64436eaca3";
-    const sourceCommit = "25b37395ff61bfea0f3ffd189d9011c4984fa755";
+      "ferrumedge/ferrum-edge@sha256:32a0b0574bb2ed105d315888fab12e33242e1cec3ae9f1ae34c1fb4d0c9a2689";
+    const sourceCommit = "e4a606a00352674daaef08636e3e359e6c48ba18";
     const manifests = {
-      "linux/amd64": "sha256:0404dc6d70d67abb70feea4e5aa295fdb1c19a0968900f467fc4b908528d19d1",
-      "linux/arm64": "sha256:51b8134770441b3ad340ba87ca9acd8a03fd864315c54d79911b27d95437c91a",
+      "linux/amd64": "sha256:d3e3e7e8409d0583b23e0fa4eee4b85c7b20885a314d4ada2ca8aad66bd33e1c",
+      "linux/arm64": "sha256:406d8335e60f15ee024141762a7b280bea4abe76fef37ac26b65c45085ae7426",
     };
     assert.equal(record.edge.image, image);
     assert.equal(record.edge.source_commit, sourceCommit);
     assert.deepEqual(record.edge.platform_manifests, manifests);
-    assert.match(record.edge.build, V0_9_15_PATTERN);
+    assert.match(record.edge.build, V0_9_20_PATTERN);
 
     const release = record.edge.release;
-    assert.equal(release.version, "v0.9.15");
+    assert.equal(release.version, "v0.9.20");
     assert.equal(release.image, image);
     assert.equal(release.source_commit, sourceCommit);
     assert.deepEqual(release.platform_manifests, manifests);
@@ -166,31 +166,33 @@ describe("the supported pairing record", () => {
     const release = record.edge.release;
     assert.deepEqual(release.binary_sha256, {
       "ferrum-cni-linux-aarch64":
-        "sha256:f73e8289494898c1ba272fcd4a8a52ab3e2ba801a8e169d417fb735866486314",
+        "sha256:47e7e991af1f565b7cc5abcb1f90862daf5a43aa2cc99d948c890991671f0161",
       "ferrum-cni-linux-x86_64":
-        "sha256:e26ee784d4f9f3772b682747ae7388f442dd79504261a8a3c22ed48a8183b71d",
+        "sha256:03cb1d4fb757ea669ae1f46328cf757ad4979d56882205c924cae3487ba114a8",
       "ferrum-edge-linux-aarch64":
-        "sha256:0d287f938c19d0721d47586e9d5c18061ee9722fa371283b56128d6afad086bc",
+        "sha256:7cb5a849fabd6d02ea83af965ac9249de35cc718400625ae528a95c9276cee2f",
       "ferrum-edge-linux-x86_64":
-        "sha256:69ae2402e1741d96b48ce0011d94088c9a4ec8240019e9dbb17d596cfa2082c5",
+        "sha256:9d357a41ae61cf85d697f01c84beff15f2b8af8bcfd70dd1c50f32397fee66ac",
       "ferrum-edge-macos-aarch64":
-        "sha256:0cc4333b6e6944169549e12b8efd35c91c429cbfa410b6567b82b5996d881ab2",
+        "sha256:c36b586507bd1ed072fbd9f3e2222ef07b2427f460a2ed923f21dbb973eb7061",
       "ferrum-edge-macos-x86_64":
-        "sha256:dbd4ad8434be1bb24e53e657c0ba8ec918fd9ec0c16b917570ed5a4dffc72b44",
+        "sha256:6e5950a31a54552389b25559024f5fa2fe3c4b4fb59803c4f3df3983bc087371",
       "ferrum-edge-windows-x86_64.exe":
-        "sha256:89817cb54ce2c99535a0c5eec5e4e222f712d57b9b219dbad6957a8c65d160cb",
+        "sha256:6cd00219e86b4f6429437c5d09513284b64532e1c660287044fc44e326a839f1",
     });
     assert.deepEqual(release.openapi, {
       info_version: "0.2.0",
-      sha256: "f6c7d8b1d247060c4d0ae66e5c149ad3d76721addb8176eff45b6fc3d1b4d6b2",
+      sha256: "8fa7232d96e1094578dee03cfa1966a4fdd9df77b8e027a9625f56ce6bfd355e",
     });
     assert.equal(
       release.github_release,
-      "https://github.com/ferrum-edge/ferrum-edge/releases/tag/v0.9.15",
+      "https://github.com/ferrum-edge/ferrum-edge/releases/tag/v0.9.20",
     );
     assert.equal(release.distribution.ci_evidence, record.edge.source_evidence);
     assert.equal(release.distribution.status, "VERIFIED_DISTRIBUTION");
-    assert.equal(release.distribution.default_image_binaries_match_release_assets, true);
+    // The image layers were not downloaded for this pin, so no byte comparison
+    // of the default image's binaries with the release assets is claimed.
+    assert.equal(release.distribution.default_image_binaries_match_release_assets, null);
     assert.equal(release.distribution.revision_label, null);
     assert.equal(release.distribution.ghcr_anonymous_access, false);
   });
@@ -216,19 +218,11 @@ describe("the supported pairing record", () => {
     assert.match(semantics, EDGE_ISSUE_409_PATTERN);
   });
 
-  it("records the Foundry release against the verified Edge distribution", () => {
-    assert.equal(record.foundry.version, "0.5.5");
-    assert.equal(record.foundry.previous_release, "v0.5.4");
-    assert.equal(record.status, "released");
-    assert.equal(record.foundry.source_commit, "359e1cd4efab110475b294452dfeeaefc7a4d5e6");
-    assert.equal(
-      record.foundry.image,
-      "ferrumedge/ferrum-foundry@sha256:5bdfa947adead6895e9dbdc4b4db5ed7e960bd7fc5ebb9872ac722ced86a8b0f",
-    );
-    assert.equal(
-      record.foundry.ci_evidence,
-      "https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37848400800",
-    );
+  it("records the Foundry candidate against the verified Edge distribution", () => {
+    assert.equal(record.foundry.version, "0.5.6");
+    assert.equal(record.foundry.previous_release, "v0.5.5");
+    assert.equal(record.status, "candidate");
+    assert.equal(record.qualification.status, "pending");
     const pkg = JSON.parse(repoFile("package.json"));
     const lock = JSON.parse(repoFile("package-lock.json"));
     // The release workflow requires the tag, package.json, and the record to agree.
@@ -275,11 +269,19 @@ describe("the supported pairing record", () => {
       const bytes = repoFile(`docs/release-notes/v${version}.compatibility.json`);
       assert.equal(createHash("sha256").update(bytes).digest("hex"), digest);
     }
+    // The latest release tested Foundry v0.5.5 against Edge v0.9.15; its
+    // evidence cannot qualify the candidate's moved pin.
     const currentRelease = JSON.parse(repoFile("docs/release-notes/v0.5.5.compatibility.json"));
     assert.equal(currentRelease.status, "released");
-    assert.equal(currentRelease.foundry.source_commit, record.foundry.source_commit);
-    assert.equal(currentRelease.foundry.image, record.foundry.image);
-    assert.equal(currentRelease.qualification.ci_evidence, record.qualification.ci_evidence);
+    assert.equal(currentRelease.foundry.version, "0.5.5");
+    assert.equal(currentRelease.foundry.source_commit, "359e1cd4efab110475b294452dfeeaefc7a4d5e6");
+    assert.equal(
+      currentRelease.foundry.image,
+      "ferrumedge/ferrum-foundry@sha256:5bdfa947adead6895e9dbdc4b4db5ed7e960bd7fc5ebb9872ac722ced86a8b0f",
+    );
+    assert.equal(currentRelease.edge.release.version, "v0.9.15");
+    assert.notEqual(currentRelease.edge.image, record.edge.image);
+    assert.notDeepEqual(record.qualification, currentRelease.qualification);
     assert.ok(
       currentRelease.edge.release.requirements.some(
         (requirement) =>
@@ -369,7 +371,7 @@ describe("the supported pairing record", () => {
 
   it("records the Edge changes the pairing depends on as released in it", () => {
     const changes = record.edge_dependencies.map((entry) => entry.change);
-    assert.deepEqual(changes, ["ferrum-edge#5661", "ferrum-edge#5726"]);
+    assert.deepEqual(changes, ["ferrum-edge#5661", "ferrum-edge#5726", "ferrum-edge#6744"]);
     // The status's last clause lists the releases that carry the change
     // ("released in Ferrum Edge vA" or "retained in Ferrum Edge vA and vB");
     // edge.release must be one of them, whatever the others are.
