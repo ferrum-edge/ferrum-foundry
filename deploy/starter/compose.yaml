@@ -71,7 +71,10 @@ services:
     # BFF's environment.
 
   oauth2-proxy:
-    image: quay.io/oauth2-proxy/oauth2-proxy@sha256:f6a4aa83a27e316114bf79664302b1ffb2cc8ce697fb479273af4feb3fb16fe3 # v7.7.1
+    # Third-party images name their tag and digest together: the digest is what
+    # runs, and the tag lets Dependabot (.github/dependabot.yml) propose the next
+    # release. A tag in a comment is invisible to it.
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.6@sha256:c3415e8660af553f5e18f5d90db050614c02493c0ac6260ac59442f6d9b12048
     restart: unless-stopped
     profiles: [production]
     expose:
@@ -99,11 +102,17 @@ services:
       - --allowed-group=ferrum-operators
       - --allowed-group=ferrum-viewers
       - --set-xauthrequest=true
+      # Trusts the X-Forwarded-* headers nginx sets (nginx/foundry.conf
+      # overwrites every one of them). Without --trusted-proxy-ip it trusts
+      # them from any peer, which is safe here only because this service
+      # publishes no port and the starter sets neither --trusted-ip nor a
+      # skip-auth route. A deployment that adds either must also set
+      # --trusted-proxy-ip to the proxy's address.
       - --reverse-proxy=true
       - --http-address=0.0.0.0:4180
 
   proxy:
-    image: nginx@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10 # 1.27-alpine
+    image: nginx:1.31.8-alpine@sha256:fed7e14be83cbd2661a75cdc5b872d936cf155d46c327084d30b8df19ae88d72
     restart: unless-stopped
     profiles: [production]
     depends_on:
@@ -120,7 +129,7 @@ services:
   # ---------------- demo profile ----------------
 
   demo-proxy:
-    image: nginx@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10 # 1.27-alpine
+    image: nginx:1.31.8-alpine@sha256:fed7e14be83cbd2661a75cdc5b872d936cf155d46c327084d30b8df19ae88d72
     restart: unless-stopped
     profiles: [demo]
     depends_on:

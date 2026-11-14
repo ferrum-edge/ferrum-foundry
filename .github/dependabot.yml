@@ -49,6 +49,36 @@ updates:
         update-types:
           - "version-update:semver-major"
 
+  # The deployment starter and the critical-journey overlay pin third-party
+  # images as `name:tag@sha256:<digest>`; Dependabot reads the tag and moves
+  # both together. Ferrum's own images are pinned by digest alone and move
+  # only with the pairing record (docs/compatibility.json), never here.
+  - package-ecosystem: "docker-compose"
+    directory: "/deploy/starter"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "deps"
+    labels:
+      - "dependencies"
+    ignore:
+      # Ferrum Edge and Ferrum Foundry move with the pairing record.
+      - dependency-name: "ferrumedge/*"
+
+  - package-ecosystem: "docker-compose"
+    directory: "/e2e"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "deps"
+    labels:
+      - "dependencies"
+    ignore:
+      # Ferrum Edge and Ferrum Foundry move with the pairing record.
+      - dependency-name: "ferrumedge/*"
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
