@@ -12,7 +12,7 @@ import type { BackendScheme, PluginConfig, Proxy } from "@/api/types";
 export const STREAM_PLUGIN_MATRIX_SOURCE =
   "ferrum-edge docs/tcp_udp_proxy.md (Compatible Plugins) and " +
   "docs/plugin_execution_order.md (stream matrix), checked against each " +
-  "plugin's supported_protocols() at v0.9.15 (25b37395)";
+  "plugin's supported_protocols() at v0.9.20 (e4a606a0)";
 
 /** Backend schemes served by the L4 stream listener rather than the HTTP stack. */
 const STREAM_SCHEMES: ReadonlySet<BackendScheme> = new Set<BackendScheme>([

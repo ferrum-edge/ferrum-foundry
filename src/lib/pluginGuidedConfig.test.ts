@@ -321,6 +321,12 @@ describe("unsupported shapes fall back rather than reshaping", () => {
     ).toContain("unmatched_preflights");
   });
 
+  it("declines an ordered list of key locations instead of flattening it", () => {
+    const reason = keyAuth.unsupported({ key_location: ["header:X-API-Key", "query:api_key"] });
+    expect(reason).toContain("ordered list");
+    expect(keyAuth.unsupported({ key_location: "header:X-API-Key" })).toBeNull();
+  });
+
   it("accepts the ordinary shapes", () => {
     expect(cors.unsupported({ allowed_origins: ["https://app.example.com"] })).toBeNull();
     expect(
@@ -359,6 +365,46 @@ describe("validation", () => {
     expect(issuesFor(rateLimiting, config, perAddress)).toEqual([]);
     const values = { ...readGuidedConfig(rateLimiting, config), ...perAddress };
     expect(writeGuidedConfig(rateLimiting, config, values, values).ipv6_prefix).toBe(128);
+  });
+
+  it("models the Edge v0.9.19+ aggregate limit and key-state cap", () => {
+    const config: JsonObject = { limits: [{ scope: "default", requests_per_second: 10 }] };
+    expect("max_state_entries" in roundTrip(rateLimiting, config)).toBe(false);
+    expect(issuesFor(rateLimiting, config, { limit_by: { present: true, text: "service" } }))
+      .toEqual([]);
+    for (const [text, message] of [
+      ["0", "Maximum tracked keys must be at least 1."],
+      ["10000001", "Maximum tracked keys must be at most 10000000."],
+    ]) {
+      const issues = issuesFor(rateLimiting, config, { max_state_entries: { present: true, text } });
+      expect(issues.map((issue) => issue.message)).toEqual([message]);
+    }
+    const capped = {
+      limit_by: { present: true, text: "service" },
+      max_state_entries: { present: true, text: "5000" },
+    };
+    const values = { ...readGuidedConfig(rateLimiting, config), ...capped };
+    expect(writeGuidedConfig(rateLimiting, config, values, values)).toMatchObject({
+      limit_by: "service",
+      max_state_entries: 5000,
+    });
+  });
+
+  it("bounds the Edge v0.9.19+ CORS lists at 128 entries", () => {
+    const config: JsonObject = { allowed_origins: ["https://app.example.com"] };
+    const methods = Array.from({ length: 129 }, (_, index) => `M${index}`).join("\n");
+    const issues = issuesFor(cors, config, { allowed_methods: { present: true, text: methods } });
+    expect(issues.map((issue) => issue.message)).toEqual([
+      "Allowed methods allows at most 128 entries.",
+    ]);
+  });
+
+  it("writes the Edge v0.9.19+ Private Network Access opt-in only when set", () => {
+    const config: JsonObject = { allowed_origins: ["https://app.example.com"] };
+    expect("allow_private_network" in roundTrip(cors, config)).toBe(false);
+    const optIn = { allow_private_network: { present: true, text: "", checked: true } };
+    const values = { ...readGuidedConfig(cors, config), ...optIn };
+    expect(writeGuidedConfig(cors, config, values, values).allow_private_network).toBe(true);
   });
 
   it("reports a non-integer where the schema requires one", () => {

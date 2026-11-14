@@ -42,8 +42,8 @@ export interface SchemaProvenance {
 export const PLUGIN_SCHEMA_SPEC = {
   repository: "ferrum-edge/ferrum-edge",
   path: "openapi.yaml",
-  /** Released source the descriptors were last re-read against (Edge v0.9.15). */
-  ref: "25b37395ff61bfea0f3ffd189d9011c4984fa755",
+  /** Released source the descriptors were last re-read against (Edge v0.9.20). */
+  ref: "e4a606a00352674daaef08636e3e359e6c48ba18",
   /** `info.version` at that revision. */
   version: "0.2.0",
 } as const;
@@ -51,11 +51,11 @@ export const PLUGIN_SCHEMA_SPEC = {
 export const PLUGIN_SCHEMA_PROVENANCE: readonly SchemaProvenance[] = [
   {
     component: "KeyAuthConfig",
-    sha256: "2489182cc16c230dd69d984441a2efcee271df44a934a8ca6d5d868f77da4deb",
+    sha256: "9385df5fb8f1900b720cdda6ac8c5ede0382b90517921d6cf9de5604c182c818",
   },
   {
     component: "RateLimitingConfig",
-    sha256: "fc6778eda49ab4999909b430a6c90a8abf38b43f8ddf0bfa1e894c5208033037",
+    sha256: "bdf7cf6c6da35aabe48a79b5f4f6ddd768c37f3e0a39c870d8be2fe2697d7e1a",
   },
   {
     component: "RateLimitingRuleConfig",
@@ -63,11 +63,11 @@ export const PLUGIN_SCHEMA_PROVENANCE: readonly SchemaProvenance[] = [
   },
   {
     component: "CorsConfig",
-    sha256: "96fcc1b45b3c20b27713b0bc0c7eef23bd92810587b21115a233081da7932bf3",
+    sha256: "e85a83a4743491dc1b7fa8e80e0d2213af269de94392c250c17de2373f8005c3",
   },
   {
     component: "PrometheusMetricsConfig",
-    sha256: "ee96fad934766a3195cd0aa2231c55287732973f246bf4a830e4ae890b980623",
+    sha256: "dc406f5e376290918f45dab2b3cac64234582b52951fcbbc480216171a0ac543",
   },
 ];
 
@@ -145,7 +145,11 @@ const KEY_AUTH: PluginGuidedSchema = {
   plugin: "key_auth",
   summary: "API key authentication.",
   components: ["KeyAuthConfig"],
-  unsupported: () => null,
+  unsupported: (config) =>
+    Array.isArray(config.key_location)
+      ? "`key_location` is an ordered list of credential locations (Edge v0.9.19+). " +
+        "The guided view models a single location; edit the list as JSON."
+      : null,
   sections: [
     {
       title: "Credential location",
@@ -156,7 +160,7 @@ const KEY_AUTH: PluginGuidedSchema = {
           label: "Key location",
           kind: "text",
           description:
-            "Exact credential location (header:<name> or query:<name>). Whitespace is not trimmed; header names must be valid HTTP tokens, and query names must be non-empty and contain no whitespace.",
+            "Exact credential location (header:<name> or query:<name>). Whitespace is not trimmed; header names must be valid HTTP tokens, and query names must be non-empty and contain no whitespace. An ordered list of 1 to 8 locations is edited as JSON.",
           omissionMeans: "header:X-API-Key",
           pattern: /^(header:[!#$%&'*+.^_`|~0-9A-Za-z-]+|query:\S+)$/,
           patternHint:
@@ -169,7 +173,7 @@ const KEY_AUTH: PluginGuidedSchema = {
           label: "Hide credentials from the backend",
           kind: "boolean",
           description:
-            "Remove the configured API-key header or query parameter before forwarding an authenticated request upstream, including when another mechanism wins a multi-auth chain. Disable only when a legacy backend explicitly requires the reusable credential.",
+            "Remove every configured API-key header and query parameter before forwarding an authenticated request upstream, including when another mechanism wins a multi-auth chain. Disable only when a legacy backend explicitly requires the reusable credential.",
           omissionMeans: "true",
         },
       ],
@@ -194,7 +198,7 @@ function isPlainObject(value: JsonValue | undefined): value is Record<string, Js
 // the raw JSON editor and gateway constructor remain the complete authority.
 const RATE_LIMITING: PluginGuidedSchema = {
   plugin: "rate_limiting",
-  summary: "Per-IP, per-consumer, or per-SPIFFE-identity request rate limiting.",
+  summary: "Per-IP, per-consumer, per-SPIFFE-identity, or per-policy aggregate request rate limiting.",
   components: ["RateLimitingConfig", "RateLimitingRuleConfig"],
   unsupported: (config) => {
     const limits = asArray(config.limits);
@@ -320,12 +324,13 @@ const RATE_LIMITING: PluginGuidedSchema = {
           label: "Limit by",
           kind: "enum",
           description:
-            "Rate limit key. `ip` uses the client IP; `consumer` uses the identified consumer and falls back to client IP when none is present; `spiffe_identity` uses the SPIFFE ID from the peer certificate and falls back to client IP.",
+            "Rate limit key. `ip` uses the client IP; `consumer` uses the identified consumer and falls back to client IP when none is present; `spiffe_identity` uses the SPIFFE ID from the peer certificate and falls back to client IP; `service` is one aggregate budget per policy shared by every caller, charged after authentication.",
           omissionMeans: "ip",
           enumValues: [
             { value: "ip", label: "Client IP" },
             { value: "consumer", label: "Identified consumer" },
             { value: "spiffe_identity", label: "SPIFFE identity" },
+            { value: "service", label: "Whole policy (aggregate)" },
           ],
         },
         {
@@ -337,6 +342,16 @@ const RATE_LIMITING: PluginGuidedSchema = {
           minimum: 1,
           maximum: 128,
           omissionMeans: "64",
+        },
+        {
+          key: "max_state_entries",
+          label: "Maximum tracked keys",
+          kind: "integer",
+          description:
+            "Hard cap on distinct keys this policy keeps in local (and Redis-fallback) state. At the cap, keys already tracked keep their budgets and a previously unseen key is refused with 429 until idle keys are pruned.",
+          minimum: 1,
+          maximum: 10_000_000,
+          omissionMeans: "100000",
         },
         {
           key: "expose_headers",
@@ -524,6 +539,7 @@ const CORS: PluginGuidedSchema = {
           kind: "stringList",
           description:
             "Preflight-only allowed methods returned in Access-Control-Allow-Methods. Method tokens are case-sensitive.",
+          maxItems: 128,
           itemPattern: HTTP_TOKEN,
           itemPatternHint: "Each entry must be an HTTP method token, e.g. GET.",
           omissionMeans:
@@ -535,6 +551,7 @@ const CORS: PluginGuidedSchema = {
           kind: "stringList",
           description:
             "Preflight-only allowed request headers returned in Access-Control-Allow-Headers. Header names are case-insensitive. With credentials disabled, `*` permits every header except Authorization, which must be listed explicitly.",
+          maxItems: 128,
           itemPattern: HTTP_TOKEN,
           itemPatternHint: "Each entry must be an HTTP header token.",
           omissionMeans: "Accept, Authorization, Content-Type, Origin, X-Requested-With",
@@ -543,7 +560,9 @@ const CORS: PluginGuidedSchema = {
           key: "exposed_headers",
           label: "Exposed response headers",
           kind: "stringList",
-          description: "Response headers exposed to browser JavaScript.",
+          description:
+            "Response headers exposed to browser JavaScript, returned in Access-Control-Expose-Headers. Header names are case-insensitive. With credentials disabled, `*` exposes every response header; with credentials enabled, it is a literal token.",
+          maxItems: 128,
           itemPattern: HTTP_TOKEN,
           itemPatternHint: "Each entry must be an HTTP header token.",
           omissionMeans: "none",
@@ -562,6 +581,14 @@ const CORS: PluginGuidedSchema = {
           kind: "boolean",
           description:
             "Pass allowed preflights to the backend. Backend status and body are retained, but every Access-Control response field is replaced by the gateway-authoritative policy.",
+          omissionMeans: "false",
+        },
+        {
+          key: "allow_private_network",
+          label: "Allow Private Network Access",
+          kind: "boolean",
+          description:
+            "Private Network Access opt-in. A preflight from an allowed origin that carries Access-Control-Request-Private-Network: true is answered with Access-Control-Allow-Private-Network: true. With multiple policies, every matching policy must opt in.",
           omissionMeans: "false",
         },
       ],

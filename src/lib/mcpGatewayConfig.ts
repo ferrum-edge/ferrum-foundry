@@ -2,10 +2,21 @@ type JsonObject = { [key: string]: unknown };
 
 export type McpGatewayMode = "aggregate_router" | "transparent_proxy";
 
-/** Keys rejected by the gateway for `mode: transparent_proxy` (presence-based). */
+/**
+ * Keys rejected by the gateway for `mode: transparent_proxy` (presence-based),
+ * per `McpGatewayConfig` at Edge v0.9.20 (e4a606a0). The prompt and resource
+ * policy keys are new in v0.9.19. Per-server `openapi` and
+ * `forward_client_credentials` are refused there too; they sit under
+ * operator-named `servers.*` keys, so they stay with the raw JSON editor and
+ * Edge admission.
+ */
 export const MCP_GATEWAY_AGGREGATE_ONLY_PATHS = [
   "policy.default_action",
+  "policy.default_prompt_action",
+  "policy.default_resource_action",
   "policy.tools",
+  "policy.prompts",
+  "policy.resources",
   "policy.hide_denied_tools",
   "discovery.aggregate_tools",
   "discovery.aggregate_resources",
