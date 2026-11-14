@@ -63,8 +63,8 @@ updates:
     labels:
       - "dependencies"
     ignore:
-      - dependency-name: "ferrumedge/ferrum-edge"
-      - dependency-name: "ferrumedge/ferrum-foundry"
+      # Ferrum Edge and Ferrum Foundry move with the pairing record.
+      - dependency-name: "ferrumedge/*"
 
   - package-ecosystem: "docker-compose"
     directory: "/e2e"
@@ -76,8 +76,8 @@ updates:
     labels:
       - "dependencies"
     ignore:
-      - dependency-name: "ferrumedge/ferrum-edge"
-      - dependency-name: "ferrumedge/ferrum-foundry"
+      # Ferrum Edge and Ferrum Foundry move with the pairing record.
+      - dependency-name: "ferrumedge/*"
 
   - package-ecosystem: "github-actions"
     directory: "/"
