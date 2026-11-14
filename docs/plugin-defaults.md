@@ -43,7 +43,7 @@ expects admission, so it is never counted as an unmodified-template admission.
 | `ai_stream_router` | Provider API keys in the gateway environment (the template references `${FERRUM_PLUGIN_SECRET_OPENAI_API_KEY}` first). |
 | `load_testing` | A trigger `key` of at least 32 characters. |
 | `proxy_alerts` | `FERRUM_PLUGIN_SECRET_ALERTS_SLACK_WEBHOOK` in the gateway environment. |
-| `kafka_logging` | An unrestricted backend egress policy. Under the default restrictive policy the gateway refuses librdkafka during field validation (the error starts with `Invalid plugin config fields: kafka_logging:`), before contacting a broker. Use another log sink if egress must stay restricted. |
+| `kafka_logging` | Under the default restrictive backend egress policy, either every broker of a trusted cluster listed in `FERRUM_KAFKA_ALLOWED_BROKERS` on every node that admits or runs the plugin (Edge v0.9.19+), or an unrestricted egress policy. Otherwise the gateway refuses librdkafka during field validation (the error starts with `Invalid plugin config fields: kafka_logging:`), before contacting a broker. Use another log sink if egress must stay restricted. |
 | `openapi_validator` | Proxy scope, on a proxy with an attached API spec. |
 | `oidc_relying_party` | A valid `session.encryption_secret`; the shipped template deliberately leaves it empty. |
 
@@ -88,8 +88,8 @@ the org's central contract store, in
 [`contracts/ferrum-contracts/PIN`](../contracts/ferrum-contracts/PIN).
 The pinned files and the local plugin names and provisioning markers are checked
 by `scripts/ferrum-contracts.test.mjs` in the normal contract test suite.
-The canonical pin is published `contracts-edge-0.9.15` at
-`6fb64c5dc2e014204c17609fc717d976f3b4589e`, mapped to Edge v0.9.15. Besides the
+The canonical pin is published `contracts-edge-0.9.20` at
+`39da322083044c2e92617209e62983c92387f0ad`, mapped to Edge v0.9.20. Besides the
 plugin catalog, the provisioning vocabulary and their vocabulary schemas, the
 pin includes the implemented service-manifest schema, every shared manifest
 fixture and the canonical invalid-expectations file for the
@@ -109,6 +109,13 @@ through a `_FILE` / `_VAULT` / `_AWS` / `_AZURE` / `_GCP` source. The
 `FERRUM_PLUGIN_SECRET_AZURE_FUNCTIONS_KEY` and
 `FERRUM_PLUGIN_SECRET_GCP_CLOUD_FUNCTIONS_BEARER_TOKEN`. The `ldap_auth`
 template never set `consumer_mapping`, which v0.9.15 removes and refuses.
+
+Edge v0.9.19 and v0.9.20 close every plugin configuration: an unknown key at
+any depth is refused with `400`. They also refuse a cleartext endpoint off
+loopback for `opa`, `serverless_function`, `otel_tracing` and
+`workload_metrics` unless the plugin sets `allow_plaintext: true`, so the `opa`
+template names an `https://` OPA host. Every other template keeps its v0.9.15
+outcome against v0.9.20; the contract gate above proves it.
 
 To bump the pin, choose a `contracts-edge-*` release, download the adopted
 vocabulary and schema files from that tag into the same paths, resolve the tag

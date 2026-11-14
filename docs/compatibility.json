@@ -1,83 +1,71 @@
 {
   "$comment": "Supported Foundry-Edge pairing, metadata version 2. qualification records hosted pairing acceptance separately from actual Foundry publication and verified Edge distribution. Immutable v0.4.0, v0.5.0, v0.5.1, v0.5.2, v0.5.3, v0.5.4 and v0.5.5 release records are under docs/release-notes/. CI reads edge.image; docs/compatibility.md records the unchanged support envelope.",
   "record_version": 2,
-  "status": "released",
+  "status": "candidate",
   "foundry": {
-    "version": "0.5.5",
-    "previous_release": "v0.5.4",
-    "source_commit": "359e1cd4efab110475b294452dfeeaefc7a4d5e6",
-    "image": "ferrumedge/ferrum-foundry@sha256:5bdfa947adead6895e9dbdc4b4db5ed7e960bd7fc5ebb9872ac722ced86a8b0f",
-    "ci_evidence": "https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37848400800",
+    "version": "0.5.6",
+    "previous_release": "v0.5.5",
+    "source_commit": null,
+    "image": null,
+    "ci_evidence": null,
     "platforms": [
       "linux/amd64",
       "linux/arm64"
-    ],
-    "registries": [
-      "ferrumedge/ferrum-foundry:v0.5.5",
-      "ghcr.io/ferrum-edge/ferrum-foundry:v0.5.5"
-    ],
-    "release_id": 407290286,
-    "merge_second_parent": "d1e46e227d2d868ec51a1ca6bd6bfa04b51de8a5",
-    "platform_manifests": {
-      "linux/amd64": "sha256:1c5ead0beb5d7608895c4ca3ebc87b11d449948066efd1397042810fb69f847a",
-      "linux/arm64": "sha256:52a4617dcb20bb99e0180f6bb4ff8cd451b93b0dee99c01830c71a7519be87dc"
-    },
-    "github_release": "https://github.com/ferrum-edge/ferrum-foundry/releases/tag/v0.5.5",
-    "published_at": "2026-10-08T21:48:04Z"
+    ]
   },
   "qualification": {
-    "status": "qualified",
-    "ci_evidence": "https://github.com/ferrum-edge/ferrum-foundry/actions/runs/37846502086",
-    "source_commit": "f947a607f0bbb920d508e88568969bbe69e5ed58",
-    "tested_commit": "8126d6b771f90bd76e8a54b48ddfa26441175c27",
-    "run_attempt": 1
+    "status": "pending",
+    "ci_evidence": null,
+    "source_commit": null,
+    "tested_commit": null,
+    "run_attempt": null
   },
   "edge": {
-    "image": "ferrumedge/ferrum-edge@sha256:29b468dfeea13b1ecaac8dfbc7e019f310e71e647611d43800a1dc64436eaca3",
-    "build": "published release v0.9.15; verified distribution at 25b37395ff61bfea0f3ffd189d9011c4984fa755. Foundry v0.5.5 was qualified and published with this pairing",
-    "source_commit": "25b37395ff61bfea0f3ffd189d9011c4984fa755",
-    "source_evidence": "https://github.com/ferrum-edge/ferrum-edge/actions/runs/37823250818",
+    "image": "ferrumedge/ferrum-edge@sha256:32a0b0574bb2ed105d315888fab12e33242e1cec3ae9f1ae34c1fb4d0c9a2689",
+    "build": "published release v0.9.20; verified distribution at e4a606a00352674daaef08636e3e359e6c48ba18. Foundry v0.5.6 candidate qualification and publication are pending; prior release evidence does not qualify this pairing",
+    "source_commit": "e4a606a00352674daaef08636e3e359e6c48ba18",
+    "source_evidence": "https://github.com/ferrum-edge/ferrum-edge/actions/runs/41590569525",
     "platform_manifests": {
-      "linux/amd64": "sha256:0404dc6d70d67abb70feea4e5aa295fdb1c19a0968900f467fc4b908528d19d1",
-      "linux/arm64": "sha256:51b8134770441b3ad340ba87ca9acd8a03fd864315c54d79911b27d95437c91a"
+      "linux/amd64": "sha256:d3e3e7e8409d0583b23e0fa4eee4b85c7b20885a314d4ada2ca8aad66bd33e1c",
+      "linux/arm64": "sha256:406d8335e60f15ee024141762a7b280bea4abe76fef37ac26b65c45085ae7426"
     },
     "release": {
-      "version": "v0.9.15",
-      "github_release": "https://github.com/ferrum-edge/ferrum-edge/releases/tag/v0.9.15",
-      "source_commit": "25b37395ff61bfea0f3ffd189d9011c4984fa755",
-      "image": "ferrumedge/ferrum-edge@sha256:29b468dfeea13b1ecaac8dfbc7e019f310e71e647611d43800a1dc64436eaca3",
+      "version": "v0.9.20",
+      "github_release": "https://github.com/ferrum-edge/ferrum-edge/releases/tag/v0.9.20",
+      "source_commit": "e4a606a00352674daaef08636e3e359e6c48ba18",
+      "image": "ferrumedge/ferrum-edge@sha256:32a0b0574bb2ed105d315888fab12e33242e1cec3ae9f1ae34c1fb4d0c9a2689",
       "platform_manifests": {
-        "linux/amd64": "sha256:0404dc6d70d67abb70feea4e5aa295fdb1c19a0968900f467fc4b908528d19d1",
-        "linux/arm64": "sha256:51b8134770441b3ad340ba87ca9acd8a03fd864315c54d79911b27d95437c91a"
+        "linux/amd64": "sha256:d3e3e7e8409d0583b23e0fa4eee4b85c7b20885a314d4ada2ca8aad66bd33e1c",
+        "linux/arm64": "sha256:406d8335e60f15ee024141762a7b280bea4abe76fef37ac26b65c45085ae7426"
       },
       "requirements": [
         "It retains ferrum-edge#5661 conditional writes, ferrum-edge#4611 proxy association, and namespace-qualified resource identity (ferrum-edge 5db1d77a8, aligned in #409). The qualification checks these contracts against the published release.",
         "GET /proxies/{id}/mcp/tools remains a viewer-readable, namespace-scoped MCP catalog read; viewer-key namespace ceilings apply to every namespace route and deny global routes outside the documented allowlist. Capability parity includes the new read route.",
         "Operator reads of upstreams mask the Consul ACL token, and operator reads of plugin configs mask secrets and credential-bearing endpoint URL components, with redaction placeholders. A POST or PUT of an upstream or plugin config that echoes a placeholder at a masked field is refused with 400 before update merging (ferrum-edge#5925), so for upstreams and plugin configs a placeholder is not a round-trip marker; admin-only consumer credential entries still round-trip [REDACTED]. Admin reads are raw and never refused. Foundry's editors block such a save, for a non-admin role and only at the sites Edge masks, until each field is re-entered or cleared.",
-        "Ferrum Edge v0.9.15 is a security release that fixes 26 published Ferrum Edge advisories (5 high, 19 medium, 2 low), including namespace isolation for Gateway API routes, DestinationRule TLS material and Admin API backend TLS references (ferrum-edge#6092/#6094), refusal of native gRPC and WebSocket requests a route's authentication or admission plugins cannot run on (ferrum-edge#6087/#6090), FERRUM_PLUGIN_SECRET_<NAME> confinement of plugin-config environment references (ferrum-edge#6086/#6089), a separate gateway-owned X-Authenticated-Identity header for external identities with LDAP consumer_mapping removed (ferrum-edge#6082/#6088), IPv6 prefix grouping and per-principal MCP session caps (ferrum-edge#6079), and separate ferrum-mesh chart workload ServiceAccounts (ferrum-edge#6096/#6084). It retains v0.9.11's MCP charset and JSON-RPC batch inspection fixes (ferrum-edge#5954) and v0.9.13's HTTP/3 retained-request admission (ferrum-edge#6009). Its publication is not a claim that all upstream security issues are fixed.",
-        "v0.9.15 changes plugin-config admission that Foundry's templates and guided editor reflect. Every plugin-config environment reference must name FERRUM_PLUGIN_SECRET_<NAME> or is refused with 400, so the ai_semantic_firewall, ai_stream_router, api_chargeback_sink and proxy_alerts templates reference FERRUM_PLUGIN_SECRET_* names, and the plugin-defaults contract expects the two unset-variable refusals Edge now returns for ai_stream_router and proxy_alerts. LdapAuthConfig drops consumer_mapping (refused with 400; no Foundry template or form sets it). RateLimitingConfig adds ipv6_prefix (1-128, default 64), which the guided rate-limiting editor models; McpGatewayConfig adds sessions.max_sessions_per_principal and BodyValidatorConfig grpc_max_decompressed_size_bytes now has minimum 1, both left to the raw JSON editor and Edge admission. X-Authenticated-Identity is gateway-owned and refused as a configured header destination at config load; Foundry neither displays nor sets it and shows Edge's 400 as returned. Where the admin ns claim is enforced, as in this qualification (FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM=true), an operator may set backend_tls_client_cert_path, backend_tls_client_key_path and backend_tls_server_ca_cert_path only to inline PEM, system:// or a k8s:// Secret in the addressed namespace; the proxy and upstream forms state the rule and show Edge's 400 rather than refusing locally. Data-plane 403s for gRPC and WebSocket protocol flavors, Connection-nomination handling, HTTP/3 and mesh changes are data-plane behavior with no admin contract change for Foundry; Foundry references no Helm chart.",
-        "Foundry v0.5.5 retains guarded-write policy #542, first shipped in v0.5.2 (#544): guarded replacement and deletion refuse an initial fresh verification read without one nonempty quoted visible-ASCII strong ETag, before any PUT/DELETE. Explicit unguarded calls, low-level helpers and plugin membership plans keep their semantics, and the post-412 untagged refusal is unchanged. The paired release issues strong item ETags, confirmed by the hosted qualification.",
-        "Static guided-schema review at 25b37395ff61bfea0f3ffd189d9011c4984fa755: KeyAuthConfig, RateLimitingRuleConfig, CorsConfig and PrometheusMetricsConfig are byte-identical to 9bd4d5f9caa4ebe8f0ea13e76d8a6e2172eaca7d, so their pinned hashes are unchanged. RateLimitingConfig adds only the ipv6_prefix property; its block SHA-256 moves from f6f4c095e2c9f326ba62d87094fb9e8ac3833bba9503476cf01daca1ebc6e4a1 to fc6778eda49ab4999909b430a6c90a8abf38b43f8ddf0bfa1e894c5208033037, the guided editor adds ipv6_prefix, and PLUGIN_SCHEMA_SPEC.ref moves to 25b37395ff61bfea0f3ffd189d9011c4984fa755 with it. The sensitivity source is byte-identical to 9bd4d5f9 (Git blob 827bf3a7c998c7ea9c995093ab38320facbd072a) and its provenance is now 25b37395ff61bfea0f3ffd189d9011c4984fa755.",
-        "The canonical pin adopts published contracts-edge-0.9.15 at 6fb64c5dc2e014204c17609fc717d976f3b4589e, release 407246047, after successful main Validate contracts run 37841329610. The same 18 scoped files and descriptions are byte-exact. All 82 plugin entries, provisioning values, manifest schema and all 12 fixtures are unchanged; the plugin catalog records the v0.9.15 config-schema changes in a provenance note, and the complete invalid-expectations file adds a diagnostic-ref route-protocol-admission negative and a gateway-headers availability negative without Foundry adopting those schemas. Shared manifest/report status remains EXISTING/implemented at Alloy owner 81cbb, with Alloy unpublished.",
-        "Foundry v0.5.5 qualified against this published Edge release in hosted run 37846502086, attempt 1; source f947a607f0bbb920d508e88568969bbe69e5ed58 was tested at merge 8126d6b771f90bd76e8a54b48ddfa26441175c27, with every job green: Qualification Source, Quality Gate on Node 22 and 24, Pinned Gateway Contract (including capability parity, writable and read-only), Deployment Starter, Critical Journeys, Container Gate (amd64), and Container Gate (arm64). The release and tag evidence is preserved in docs/release-notes/v0.5.5.compatibility.json."
+        "Ferrum Edge v0.9.20 (published 2026-11-03) is the latest Edge release. Between v0.9.15 and v0.9.20 Edge published v0.9.17 and v0.9.19 (v0.9.16 and v0.9.18 were tagged but not published); their plugin-config admission is stricter than v0.9.15's: every plugin config is closed at every depth and refuses unknown keys, and many built-in plugins add bounds, refuse cleartext endpoints off loopback (opa, serverless_function, otel_tracing, workload_metrics and the AI embedding and approval endpoints) and refuse values that could never match. Its publication is not a claim that all upstream security issues are fixed.",
+        "Plugin-config PUT and DELETE require the expected_proxy_ids association precondition (ferrum-edge-git-forge-ops#569, ferrum-edge#6744, first published in v0.9.19); Foundry's membership plan already sends it, and a write that would detach a proxy outside the expected set is refused with 412. An admin token's ns claim always bounds its authority (ferrum-edge#6093): Foundry's BFF namespace route ceiling already matches it, and scoped /health and /status answer the tenant tier, which projectHealthSummary reduces. Gateway material references are default-deny for namespace-claimed operators (ferrum-edge#6092 residual): backend TLS references and the TLS-material plugin fields admit only inline PEM, system:// or a k8s:// Secret in the addressed namespace, and plugin fields naming a gateway file path (for example geo_restriction db_path, kafka_logging ssl_*_location, api_chargeback_sink spool.dir) are refused for such an operator; Foundry shows Edge's 400 as returned. Consumer keyauth keys need at least 16 non-whitespace characters, consumer jwt secrets 32 and are unique per namespace, shared keyauth, basicauth and mtls_auth credentials are refused, and renaming a Consumer that an access_control config names is refused with 409. Foundry's forms submit what the operator enters and show these refusals as returned; the demo seed and journey credentials meet the floors.",
+        "Foundry v0.5.6 retains guarded-write policy #542, first shipped in v0.5.2 (#544): guarded replacement and deletion refuse an initial fresh verification read without one nonempty quoted visible-ASCII strong ETag, before any PUT/DELETE. Explicit unguarded calls, low-level helpers and plugin membership plans keep their semantics, and the post-412 untagged refusal is unchanged. The paired release issues strong item ETags, so qualification must show every guarded editor write still succeeds against it.",
+        "Static guided-schema review at e4a606a00352674daaef08636e3e359e6c48ba18: RateLimitingRuleConfig is byte-identical to 25b37395ff61bfea0f3ffd189d9011c4984fa755. KeyAuthConfig key_location also admits an ordered array of 1 to 8 locations, which the guided key_auth editor declines and leaves to the JSON editor (digest 9385df5fb8f1900b720cdda6ac8c5ede0382b90517921d6cf9de5604c182c818). RateLimitingConfig adds limit_by service and max_state_entries (1-10000000, default 100000), both modelled by the guided editor (bdf7cf6c6da35aabe48a79b5f4f6ddd768c37f3e0a39c870d8be2fe2697d7e1a). CorsConfig bounds allowed_methods, allowed_headers and exposed_headers at 128 entries of at most 256 bytes and adds allow_private_network, which the guided editor models (e85a83a4743491dc1b7fa8e80e0d2213af269de94392c250c17de2373f8005c3). PrometheusMetricsConfig adds request_duration_buckets_ms and session_duration_buckets_ms, left to the JSON editor (dc406f5e376290918f45dab2b3cac64234582b52951fcbbc480216171a0ac543). PLUGIN_SCHEMA_SPEC.ref moves to e4a606a00352674daaef08636e3e359e6c48ba18. The sensitivity source changes (Git blob 827bf3a7c998c7ea9c995093ab38320facbd072a to d50b0d53b7a4ace7454a25a7e8034b4a8ea5c1a8): ldap_auth failover_ldap_urls is an endpoint, and waf global_exemptions.header_present values, fault_injection match.headers values, mesh_route_dispatch request_transform values, request_transformer rule values, response_mock match header and query values and ws_logging custom_headers values are secret; Foundry's table follows and its provenance is now e4a606a00352674daaef08636e3e359e6c48ba18. McpGatewayConfig refuses policy.default_prompt_action, policy.default_resource_action, policy.prompts and policy.resources in transparent_proxy mode, which Foundry strips with the other aggregate-only keys.",
+        "The canonical pin adopts published contracts-edge-0.9.20 at 39da322083044c2e92617209e62983c92387f0ad, release 432497834, published 2026-11-03 after successful main Validate contracts run 41611708250. The same 18 scoped files are byte-exact. All 82 plugin entries are retained; ai_token_metrics moves from priority 4100 to 4070, stdout_logging's failure policy becomes keep_last_known_good, openapi_validator records its proxy scope constraint, and several active_phases and request_transformer's websocket protocol change. Provisioning values, the manifest schema and all 12 fixtures are unchanged; the complete invalid-expectations file changes without Foundry adopting further schemas.",
+        "Qualification is pending. The full qualification must be re-run with edge.image moved to that release, and every job is green on the pull request that moves it, before any Foundry release is published: Qualification Source, Quality Gate on Node 22 and 24, Pinned Gateway Contract (including capability parity, writable and read-only), Deployment Starter, Critical Journeys, Container Gate (amd64), and Container Gate (arm64)."
       ],
       "binary_sha256": {
-        "ferrum-cni-linux-aarch64": "sha256:f73e8289494898c1ba272fcd4a8a52ab3e2ba801a8e169d417fb735866486314",
-        "ferrum-cni-linux-x86_64": "sha256:e26ee784d4f9f3772b682747ae7388f442dd79504261a8a3c22ed48a8183b71d",
-        "ferrum-edge-linux-aarch64": "sha256:0d287f938c19d0721d47586e9d5c18061ee9722fa371283b56128d6afad086bc",
-        "ferrum-edge-linux-x86_64": "sha256:69ae2402e1741d96b48ce0011d94088c9a4ec8240019e9dbb17d596cfa2082c5",
-        "ferrum-edge-macos-aarch64": "sha256:0cc4333b6e6944169549e12b8efd35c91c429cbfa410b6567b82b5996d881ab2",
-        "ferrum-edge-macos-x86_64": "sha256:dbd4ad8434be1bb24e53e657c0ba8ec918fd9ec0c16b917570ed5a4dffc72b44",
-        "ferrum-edge-windows-x86_64.exe": "sha256:89817cb54ce2c99535a0c5eec5e4e222f712d57b9b219dbad6957a8c65d160cb"
+        "ferrum-cni-linux-aarch64": "sha256:47e7e991af1f565b7cc5abcb1f90862daf5a43aa2cc99d948c890991671f0161",
+        "ferrum-cni-linux-x86_64": "sha256:03cb1d4fb757ea669ae1f46328cf757ad4979d56882205c924cae3487ba114a8",
+        "ferrum-edge-linux-aarch64": "sha256:7cb5a849fabd6d02ea83af965ac9249de35cc718400625ae528a95c9276cee2f",
+        "ferrum-edge-linux-x86_64": "sha256:9d357a41ae61cf85d697f01c84beff15f2b8af8bcfd70dd1c50f32397fee66ac",
+        "ferrum-edge-macos-aarch64": "sha256:c36b586507bd1ed072fbd9f3e2222ef07b2427f460a2ed923f21dbb973eb7061",
+        "ferrum-edge-macos-x86_64": "sha256:6e5950a31a54552389b25559024f5fa2fe3c4b4fb59803c4f3df3983bc087371",
+        "ferrum-edge-windows-x86_64.exe": "sha256:6cd00219e86b4f6429437c5d09513284b64532e1c660287044fc44e326a839f1"
       },
       "openapi": {
         "info_version": "0.2.0",
-        "sha256": "f6c7d8b1d247060c4d0ae66e5c149ad3d76721addb8176eff45b6fc3d1b4d6b2"
+        "sha256": "8fa7232d96e1094578dee03cfa1966a4fdd9df77b8e027a9625f56ce6bfd355e"
       },
       "distribution": {
         "status": "VERIFIED_DISTRIBUTION",
-        "ci_evidence": "https://github.com/ferrum-edge/ferrum-edge/actions/runs/37823250818",
-        "default_image_binaries_match_release_assets": true,
+        "ci_evidence": "https://github.com/ferrum-edge/ferrum-edge/actions/runs/41590569525",
+        "default_image_binaries_match_release_assets": null,
         "revision_label": null,
         "ghcr_anonymous_access": false
       }
@@ -139,22 +127,28 @@
   ],
   "not_qualified": [
     "file, dp, mesh, and node_agent gateway modes (modelled read-only in the UI, not run in CI)",
-    "any Ferrum Edge release other than v0.9.15 (edge.release) for this release",
-    "any Ferrum Edge image other than edge.image for this qualification, including the 0.9.15-ebpf and 0.9.15-ebpf-tools variants",
+    "any Ferrum Edge release other than v0.9.20 (edge.release) for this release",
+    "any Ferrum Edge image other than edge.image for this qualification, including the 0.9.20-ebpf and 0.9.20-ebpf-tools variants",
     "browser latency and more than one concurrent operator at scale"
   ],
   "edge_dependencies": [
     {
       "change": "ferrum-edge#5661",
       "what": "strong ETag on resource reads and If-Match on PUT/DELETE of proxies, upstreams, consumers, and plugin configs; a malformed If-Match, or one on a route that does not evaluate it, is 400",
-      "status": "first released in Ferrum Edge v0.9.7; retained in Ferrum Edge v0.9.8, v0.9.9, v0.9.10, v0.9.11, v0.9.12, v0.9.13, v0.9.14, and v0.9.15",
+      "status": "first released in Ferrum Edge v0.9.7; retained in Ferrum Edge v0.9.8, v0.9.9, v0.9.10, v0.9.11, v0.9.12, v0.9.13, v0.9.14, v0.9.15, v0.9.17, v0.9.19, and v0.9.20",
       "effect_on_pinned_edge": "Foundry's write guard sends If-Match with the ETag of its verification read, so a writer that commits between that read and the write is refused with 412; the gateway contract asserts the 412s and the 400s"
     },
     {
       "change": "ferrum-edge#5726",
       "what": "optional proxy_id filter on GET /plugins/config (exact match, paginated over the filtered set, invalid value is 400)",
-      "status": "first released in Ferrum Edge v0.9.7; retained in Ferrum Edge v0.9.8, v0.9.9, v0.9.10, v0.9.11, v0.9.12, v0.9.13, v0.9.14, and v0.9.15",
+      "status": "first released in Ferrum Edge v0.9.7; retained in Ferrum Edge v0.9.8, v0.9.9, v0.9.10, v0.9.11, v0.9.12, v0.9.13, v0.9.14, v0.9.15, v0.9.17, v0.9.19, and v0.9.20",
       "effect_on_pinned_edge": "a proxy's Plugins tab lists the proxy-scoped configurations targeting it from the filtered collection instead of the whole namespace; a response the filter did not narrow is refused rather than shown"
+    },
+    {
+      "change": "ferrum-edge#6744",
+      "what": "PUT and DELETE of /plugins/config/{id} require the expected_proxy_ids association precondition (an empty value expects none; absent or malformed is 400); a write that would detach a referencing proxy outside that set is refused with 412, atomically with the write (ferrum-edge-git-forge-ops#569)",
+      "status": "tagged in Ferrum Edge v0.9.18, which was not published; released in Ferrum Edge v0.9.19 and v0.9.20",
+      "effect_on_pinned_edge": "Foundry's membership plan sends the proxies its own reads showed referencing the configuration, so a proxy another writer attached after that read is refused with 412 instead of being silently detached"
     }
   ]
 }

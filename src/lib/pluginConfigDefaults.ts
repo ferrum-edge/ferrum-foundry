@@ -216,7 +216,7 @@ export const PLUGIN_PRIORITY: Record<string, number> = {
   ai_federation: 4060,
   ai_response_guard: 4075,
   security_headers: 4080,
-  ai_token_metrics: 4100,
+  ai_token_metrics: 4070,
   ai_rate_limiter: 4200,
   stdout_logging: 9000,
   ws_frame_logging: 9050,
@@ -919,7 +919,7 @@ export const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
     },
   },
   opa: {
-    opa_host: "http://opa.opa-system.svc.cluster.local:8181",
+    opa_host: "https://opa.opa-system.svc.cluster.local:8181",
     policy_path: "ferrum/authz/allow",
     timeout_ms: 1000,
     fail_open: false,
