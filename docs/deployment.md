@@ -276,6 +276,13 @@ Things that are easy to get wrong:
   not set is forwarded from the client as-is. nginx drops a header whose value
   is empty, so an identity mapped to no namespaces arrives without the header
   rather than with an empty one.
+- **Set every `X-Forwarded-*` header oauth2-proxy reads from nginx's own
+  variables** on `/oauth2/` and on the `/oauth2/auth` subrequest
+  (`$remote_addr`, `$host`, `$scheme`, `$request_uri`). oauth2-proxy runs with
+  `--reverse-proxy` and believes them; a client's `X-Forwarded-For` or
+  `X-Forwarded-Uri` passed through is what its header-spoofing bypasses use.
+  If you add `--trusted-ip` or a skip-auth route, also set
+  `--trusted-proxy-ip` to the proxy's address.
 - **Deny by default.** The `map` default is empty, so an unmapped user gets no
   role and Foundry answers `401` with `x-ferrum-auth-layer: bff`. oauth2-proxy's
   `--allowed-group` also refuses such a user at login.
@@ -391,7 +398,8 @@ prove nothing was created.
 ## 4. Docker Compose example
 
 [`deploy/starter/compose.yaml`](../deploy/starter/compose.yaml) is the
-Compose version of this topology, with third-party images pinned by digest.
+Compose version of this topology, with third-party images pinned by tag and
+digest (`name:tag@sha256:<digest>`) so Dependabot can propose their updates.
 Its `production` profile runs Foundry, oauth2-proxy, and nginx against your
 own gateway; see the [starter README](../deploy/starter/README.md#production)
 for setup. What it gets right:

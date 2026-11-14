@@ -42,7 +42,7 @@ config grows its own copy.
 
 | Path | What it is |
 | --- | --- |
-| `compose.yaml` | Both profiles. Third-party images are pinned by digest |
+| `compose.yaml` | Both profiles. Third-party images are pinned as `name:tag@sha256:<digest>` |
 | `.env.example` | Foundry and gateway inputs, with placeholders. No working secrets |
 | `oauth2-proxy.env.example` | Identity-provider settings, read by oauth2-proxy alone |
 | `bootstrap-demo.sh` | Generates throwaway demo secrets; refuses to overwrite an existing `.env` |
@@ -124,8 +124,11 @@ or `unmapped`). It is for a first run and for CI. Do not expose it.
   login, and by the empty `map` default, which asserts no role.
 - **`FERRUM_AUTH_MODE=trusted-proxy` with `NODE_ENV=production`.** The BFF
   refuses static-token auth in production.
-- **Third-party images are pinned by digest**, so a rebuild cannot silently
-  change what runs.
+- **Third-party images are pinned by tag and digest**
+  (`name:tag@sha256:<digest>`), so a rebuild cannot silently change what runs,
+  and Dependabot (`.github/dependabot.yml`) still proposes each new
+  oauth2-proxy and nginx release as a pull request. Move them in your own
+  copy too: a pin that never moves collects published advisories.
 
 ### Still yours to decide
 

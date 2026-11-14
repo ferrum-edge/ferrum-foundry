@@ -120,8 +120,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `X-Forwarded-For` and `X-Forwarded-Uri` through unchanged, and oauth2-proxy
   runs with `--reverse-proxy`, so a deployment that added `--trusted-ip` or a
   skip-auth route would have been open to oauth2-proxy's header-spoofing
-  bypasses. The starter's pinned oauth2-proxy (v7.7.1) and nginx (1.27) are
-  still to be moved; that needs the starter's qualification.
+  bypasses.
+- The deployment starter runs oauth2-proxy v7.15.6
+  (`quay.io/oauth2-proxy/oauth2-proxy:v7.15.6@sha256:c3415e8660af553f5e18f5d90db050614c02493c0ac6260ac59442f6d9b12048`)
+  instead of v7.7.1, and nginx 1.31.8 mainline
+  (`nginx:1.31.8-alpine@sha256:fed7e14be83cbd2661a75cdc5b872d936cf155d46c327084d30b8df19ae88d72`)
+  instead of the closed 1.27 line (GHSA-q866-mwp4-hgw3). v7.7.1 predates ten
+  oauth2-proxy advisories, among them GHSA-hhqp-vx7f-5c6m (credentials logged
+  on a bad CSRF cookie, fixed in v7.15.5), which applied to the starter as
+  shipped. The starter's flags and `oauth2-proxy.env` settings are unchanged
+  across those releases. Third-party images are now written as
+  `name:tag@sha256:<digest>` rather than a digest with the tag in a comment,
+  and Dependabot watches `/deploy/starter` and `/e2e` (`docker-compose`), so
+  the pins move with upstream releases; Ferrum's own images stay with the
+  pairing record. A contract test fails if a third-party starter image loses
+  its tag.
 - The BFF checks a namespace description's length without stalling on long
   whitespace. Its Unicode `White_Space` trim was a `\p{White_Space}+$`
   regex, which backtracks quadratically over a whitespace run inside the

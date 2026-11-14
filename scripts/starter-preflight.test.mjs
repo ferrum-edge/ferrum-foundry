@@ -61,6 +61,9 @@ const STOP_GRACE_PERIOD_PATTERN = /stop_grace_period:\s*(\d+)s/;
 const FERRUM_SHUTDOWN_TIMEOUT_PATTERN = /FERRUM_SHUTDOWN_TIMEOUT:\s*"?(\d+)"?/;
 const COMPOSE_IMAGE_PATTERN = /^\s+image:\s*(\S+)/gm;
 const SHA256_DIGEST_PATTERN = /@sha256:[0-9a-f]{64}/;
+// `registry/name:tag@sha256:<digest>`: the digest is what runs, and the tag is
+// what Dependabot reads to propose the next release.
+const TAG_AND_DIGEST_PATTERN = /^[a-z0-9./_-]+:[A-Za-z0-9_][A-Za-z0-9_.-]*@sha256:[0-9a-f]{64}$/;
 const REQUIRED_VARIABLE_PATTERN = /\$\{([A-Z0-9_]+):\?/g;
 const OIDC_ISSUER_URL_PATTERN = /--oidc-issuer-url/;
 const REDIRECT_URL_PATTERN = /--redirect-url/;
@@ -654,6 +657,20 @@ test("every third-party image in the starter is pinned by digest", async () => {
   for (const image of images) {
     if (image.startsWith("${FOUNDRY_IMAGE")) continue; // operator-selected release
     assert.match(image, SHA256_DIGEST_PATTERN, `${image} must be pinned by digest`);
+  }
+});
+
+test("third-party starter images carry their tag next to the digest", async () => {
+  // A tag kept only in a comment is invisible to Dependabot, so the pin would
+  // never move. Ferrum's own images are excluded: the pairing record in
+  // docs/compatibility.json moves them, by digest alone.
+  const compose = await readFile(new URL("compose.yaml", STARTER), "utf8");
+  const images = [...compose.matchAll(COMPOSE_IMAGE_PATTERN)]
+    .map((match) => match[1])
+    .filter((image) => !image.startsWith("${FOUNDRY_IMAGE") && !image.startsWith("ferrumedge/"));
+  assert.ok(images.length >= 3, "the starter runs oauth2-proxy and two nginx services");
+  for (const image of images) {
+    assert.match(image, TAG_AND_DIGEST_PATTERN, `${image} must be written as name:tag@sha256:<digest>`);
   }
 });
 
