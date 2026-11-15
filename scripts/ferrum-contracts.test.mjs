@@ -13,8 +13,8 @@ const CHECKSUM_LINE_PATTERN = /^sha256\s+([a-f0-9]{64})\s+(.+)$/;
 const TAG_CONTRACTS_EDGE_R_PATTERN = /^tag=contracts-edge-[0-9.]+(?:-r[1-9][0-9]*)?$/m;
 const PIN_COMMIT_PATTERN = /^commit=[a-f0-9]{40}$/m;
 const PIN_TAG_CAPTURE_PATTERN = /^tag=(contracts-edge-[0-9.]+(?:-r[1-9][0-9]*)?)$/m;
-const PINNED_CONTRACTS_TAG_PATTERN = /^tag=contracts-edge-0\.9\.15$/m;
-const PINNED_CONTRACTS_COMMIT_PATTERN = /^commit=6fb64c5dc2e014204c17609fc717d976f3b4589e$/m;
+const PINNED_CONTRACTS_TAG_PATTERN = /^tag=contracts-edge-0\.9\.20$/m;
+const PINNED_CONTRACTS_COMMIT_PATTERN = /^commit=39da322083044c2e92617209e62983c92387f0ad$/m;
 const EXISTING_SHARED_V1_PATTERN = /^EXISTING shared v1/;
 const COMPONENTS_SCHEMAS_PATTERN = /^#\/components\/schemas\/[A-Za-z0-9]+$/;
 const CONFIG_FROM_DEFAULT_PATTERN = /const config = getPluginConfigDefault\(name\);/;
@@ -57,6 +57,9 @@ const CONTRACTS_TAG_EDGE_VERSIONS = {
   "contracts-edge-0.9.13": ["v0.9.13"],
   "contracts-edge-0.9.14": ["v0.9.14"],
   "contracts-edge-0.9.15": ["v0.9.15"],
+  // Foundry moved from v0.9.15 straight to v0.9.20 (#686) and never vendored
+  // contracts-edge-0.9.17 or contracts-edge-0.9.19.
+  "contracts-edge-0.9.20": ["v0.9.20"],
 };
 
 function describeSetDrift(actual, expected, label) {
@@ -129,11 +132,11 @@ test("the published manifest pin retains owner status and complete canonical int
   assert.equal(pinnedFiles().get("schemas/service-manifest/v1.schema.json"),
     "3d086aec773345df3547adf6e026ad466168b27bf98163614d44171b7862b5dc");
   assert.equal(pinnedFiles().get("vocabularies/plugin-catalog.json"),
-    "1f8cd895b17fcba5a29ad3de15746d508a36feef25b90f6004cb732cf570e110");
+    "6263b10e8f327286d796dcea62cea59bb758458b5e1ce50069fcd5773fcf083a");
   assert.equal(pinnedFiles().get("vocabularies/provisioned-by.json"),
-    "213e8ae60ba1a97dbdb34ef859af01082459ce1300cd7ccc62861760647b45ba");
+    "9f1b2ede95dd0e760662c285c3ac6d9f57e443a6847de935119cfa514a35613f");
   assert.equal(pinnedFiles().get("fixtures/invalid-expectations.json"),
-    "841c930817a77d017ebef11633a77fe7d961b6ab057a53ef95d41aed1f127b69");
+    "01a73757e6c76d9a3de2c7ac42296726be443406fec53270a67422a2de5c76a3");
 });
 
 test("the vocabularies bind the published Edge source without changing attribution semantics", () => {

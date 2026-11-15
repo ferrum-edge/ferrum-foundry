@@ -49,7 +49,8 @@ const RANK = { viewer: 0, operator: 1, admin: 2 };
 
 /**
  * An independent transcription of ferrum-edge's route roles (first taken from
- * v0.9.10, checked against the pinned v0.9.15), including
+ * v0.9.10, checked against v0.9.15; the pinned v0.9.20 passes the same live
+ * capability parity contract), including
  * its viewer-readable MCP catalog read. The unchanged CRUD role matrix matches
  * v0.9.8, v0.9.7, v0.9.5, and the earlier b96cfaa build.
  * (`require_admin_role` in each `src/admin/mod.rs` arm) and the admission

@@ -23,7 +23,7 @@ Foundry keeps no copy of `openapi.yaml`. It stores the reviewed descriptors and
 the SHA-256 of each source component block instead:
 
 - `PLUGIN_SCHEMA_SPEC` pins the upstream commit
-  (`ferrum-edge/ferrum-edge@25b37395ff61bfea0f3ffd189d9011c4984fa755`,
+  (`ferrum-edge/ferrum-edge@e4a606a00352674daaef08636e3e359e6c48ba18`, Edge v0.9.20,
   `info.version: 0.2.0`).
 - `PLUGIN_SCHEMA_PROVENANCE` pins one digest per component.
 
@@ -88,8 +88,21 @@ The reviewed ref and the five component digests are `PLUGIN_SCHEMA_SPEC` and
   raw keys and key order survive guided rate edits. No guided control infers
   this mode or inserts defaults; the raw JSON editor is the full surface and
   the gateway remains admission authority.
-- The other v0.9.15 plugin-schema changes touch components Foundry does not
-  guide; see [Admin API changes in v0.9.15](compatibility.md#admin-api-changes-in-v0915).
+- `KeyAuthConfig` `key_location` admits an ordered list of 1 to 8 locations
+  from Edge v0.9.19. The guided editor models a single location and declines a
+  list, so such a configuration is edited as JSON and never flattened.
+- `RateLimitingConfig` adds `limit_by: service` (one aggregate budget per
+  policy, charged after authentication) and `max_state_entries` (1 to
+  10,000,000; omission means 100,000). The guided editor offers both.
+- `CorsConfig` bounds `allowed_methods`, `allowed_headers` and
+  `exposed_headers` at 128 entries of at most 256 bytes each and adds
+  `allow_private_network`. The guided editor enforces the entry count (the
+  per-entry byte bound stays with Edge) and models the opt-in.
+- `PrometheusMetricsConfig` adds `request_duration_buckets_ms` and
+  `session_duration_buckets_ms`. They stay unmodelled and round-trip untouched.
+- The other v0.9.16–v0.9.20 plugin-schema changes touch components Foundry
+  does not guide; see
+  [Admin API changes in v0.9.16 through v0.9.20](compatibility.md#admin-api-changes-in-v0916-through-v0920).
 
 ### Review history
 
@@ -104,6 +117,24 @@ See the [v0.5.5 tagged copy](https://github.com/ferrum-edge/ferrum-foundry/blob/
 #### v0.5.1 hosted schema adoption
 
 See the [v0.5.5 tagged copy](https://github.com/ferrum-edge/ferrum-foundry/blob/v0.5.5/docs/plugin-schemas.md#v051-hosted-schema-adoption).
+
+#### v0.5.6 candidate review at Edge v0.9.20
+
+Re-read at `e4a606a00352674daaef08636e3e359e6c48ba18` (#686), against the
+v0.9.15 blocks at `25b37395ff61bfea0f3ffd189d9011c4984fa755`:
+
+| Component | v0.9.15 digest | v0.9.20 digest |
+| --- | --- | --- |
+| `KeyAuthConfig` | `2489182cc16c230dd69d984441a2efcee271df44a934a8ca6d5d868f77da4deb` | `9385df5fb8f1900b720cdda6ac8c5ede0382b90517921d6cf9de5604c182c818` |
+| `RateLimitingConfig` | `fc6778eda49ab4999909b430a6c90a8abf38b43f8ddf0bfa1e894c5208033037` | `bdf7cf6c6da35aabe48a79b5f4f6ddd768c37f3e0a39c870d8be2fe2697d7e1a` |
+| `RateLimitingRuleConfig` | `baeb7755166ff2af60d33fdc8eff36e94fb04e5b15ef099c69792a064eb2489d` | unchanged |
+| `CorsConfig` | `96fcc1b45b3c20b27713b0bc0c7eef23bd92810587b21115a233081da7932bf3` | `e85a83a4743491dc1b7fa8e80e0d2213af269de94392c250c17de2373f8005c3` |
+| `PrometheusMetricsConfig` | `ee96fad934766a3195cd0aa2231c55287732973f246bf4a830e4ae890b980623` | `dc406f5e376290918f45dab2b3cac64234582b52951fcbbc480216171a0ac543` |
+
+The descriptor changes are listed under
+[Current schema notes](#current-schema-notes). The hosted producer export of
+the candidate's Pinned Gateway Contract run reports every component
+`unchanged` at the new digests.
 
 ## What guided editing does to a configuration
 
@@ -136,6 +167,7 @@ raw JSON and states why. Nothing is changed.
 | `rate_limiting` without a `limits` array, with more than one rule, or whose single rule is not `scope: default` | Per-consumer rules carry their own counters and cross-rule constraints the field set does not express |
 | `cors` without an `allowed_origins` array, or with Istio `StringMatch` objects in it | `exact`/`prefix`/`regex` objects match differently from the native string form and must not be rewritten |
 | `cors` with `unmatched_preflights` | That marker changes what omitted method, header, and max-age fields mean |
+| `key_auth` whose `key_location` is a list | The field models one location; flattening an ordered list would drop credential locations |
 | An enum value in a spelling the gateway accepts but the control does not offer (`limit_by: "Consumer"`, the `spiffe` alias, `sync_mode: "Redis"`) | The schema parses these case-insensitively; canonicalising them would rewrite the operator's configuration |
 
 ### Secrets are never displayed

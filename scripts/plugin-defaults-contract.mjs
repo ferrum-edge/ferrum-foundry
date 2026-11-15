@@ -63,7 +63,7 @@ export const OPERATOR_INPUT_REJECTIONS = {
   },
   kafka_logging: {
     status: 400,
-    error: "Invalid plugin config fields: kafka_logging: cannot be admitted while a restrictive backend egress policy is in force: the pinned librdkafka client resolves bootstrap hostnames itself and dials brokers advertised by cluster metadata, and rdkafka 0.39 exposes no connect/resolve callback, so those addresses cannot be screened. Ferrum fails closed rather than leaving an unenforced egress path. Use a different log sink (http_logging, tcp_logging, ws_logging, loki_logging), or accept an unrestricted backend egress policy (FERRUM_BACKEND_ALLOW_IPS=both, no FERRUM_BACKEND_DENY_CIDRS, FERRUM_BACKEND_BLOCK_DANGEROUS_RANGES=false)",
+    error: "Invalid plugin config fields: kafka_logging: cannot be admitted while a restrictive backend egress policy is in force: the pinned librdkafka client resolves bootstrap hostnames itself and dials brokers advertised by cluster metadata, and rdkafka 0.39 exposes no connect/resolve callback, so those addresses cannot be screened. Ferrum fails closed rather than leaving an unenforced egress path. List every broker of a trusted cluster in FERRUM_KAFKA_ALLOWED_BROKERS on every node that admits or runs this plugin, use a different log sink (http_logging, tcp_logging, ws_logging, loki_logging), or accept an unrestricted backend egress policy (FERRUM_BACKEND_ALLOW_IPS=both, no FERRUM_BACKEND_DENY_CIDRS, FERRUM_BACKEND_BLOCK_DANGEROUS_RANGES=false)",
   },
   openapi_validator: {
     status: 400,

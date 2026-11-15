@@ -49,9 +49,13 @@ works the same way against a live Ferrum Edge gateway.
 
 ## Supported Ferrum Edge version
 
-The published pairing is **Foundry v0.5.5 / Ferrum Edge v0.9.15**. Its
-qualification and publication evidence, and earlier pairings, are in the
-[pairing record](docs/compatibility.md).
+The **Foundry v0.5.6 candidate** pins published **Ferrum Edge v0.9.20** by
+digest in `docs/compatibility.json` (#686). Hosted pairing qualification and
+Foundry publication are pending; verified Edge distribution does not qualify
+Foundry. The latest published pairing is **Foundry v0.5.5 / Ferrum Edge
+v0.9.15**, preserved in its
+[immutable record](docs/release-notes/v0.5.5.compatibility.json); earlier
+pairings are in the [pairing record](docs/compatibility.md).
 
 The qualification envelope stays `database` mode on SQLite (writable and
 `FERRUM_ADMIN_READ_ONLY`), the trusted-proxy starter, Chromium, and
@@ -68,7 +72,7 @@ Foundry vendors the `plugin-catalog` and `provisioned-by` vocabularies with
 their vocabulary schemas, plus the implemented service-manifest schema, all
 its valid/invalid fixtures and the canonical invalid-expectations file, under
 [`contracts/ferrum-contracts/`](contracts/ferrum-contracts/), pinned to
-`contracts-edge-0.9.15` at `6fb64c5dc2e014204c17609fc717d976f3b4589e` in
+`contracts-edge-0.9.20` at `39da322083044c2e92617209e62983c92387f0ad` in
 [`contracts/ferrum-contracts/PIN`](contracts/ferrum-contracts/PIN). The vendored
 files, Foundry's local plugin names and provisioning markers, and the pin's tie
 to the paired Edge release are checked by
@@ -259,7 +263,7 @@ Edge contract:
 - plugin config `PUT`/`DELETE` require `expected_proxy_ids` (an empty value
   expects none): the mock implements the newer Edge association precondition
   described in [plugin membership](docs/plugin-membership.md#scope-changes-and-proxy-scoped-plugins),
-  which the paired v0.9.15 ignores.
+  which the paired v0.9.20 enforces.
 
 `GET /mesh/service-graph` always returns sample data, and with
 `MOCK_GATEWAY_MODE=mesh` so does `GET /mesh/runtime-overlay`; other `/mesh/*`,

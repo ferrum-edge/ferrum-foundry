@@ -14,13 +14,18 @@ request.
 For a walkthrough that ends in an authenticated request through the data
 plane, see [`docs/getting-started.md`](../../docs/getting-started.md).
 
-**Published pairing.** The demo profile pins published Edge v0.9.15 with
-published Foundry v0.5.5; the evidence is in the
-[pairing record](../../docs/compatibility.md). The default Foundry image is
-pinned to
+**Candidate pairing.** The demo profile pins published Edge v0.9.20 for the
+Foundry v0.5.6 candidate (#686). Hosted qualification and Foundry publication
+are pending in the [pairing record](../../docs/compatibility.md). Production
+must use a published pairing and its released Foundry digest. The latest is
+published Foundry v0.5.5 with Edge v0.9.15, preserved in the
+[v0.5.5 record](../../docs/release-notes/v0.5.5.compatibility.json). The
+default Foundry image stays pinned to that release,
 `ferrumedge/ferrum-foundry@sha256:5bdfa947adead6895e9dbdc4b4db5ed7e960bd7fc5ebb9872ac722ced86a8b0f`;
 set `FOUNDRY_IMAGE` to another released digest when selecting a different
-pairing.
+pairing. The demo profile therefore runs released Foundry v0.5.5 against Edge
+v0.9.20, outside the qualified envelope, until v0.5.6 is published; CI runs
+the starter with the candidate's own production image.
 
 ## Two profiles
 

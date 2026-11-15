@@ -21,9 +21,9 @@ export const PLUGIN_SENSITIVITY_SOURCE = {
   repository: "ferrum-edge/ferrum-edge",
   path: "src/admin/plugin_config_projection.rs",
   /** The Edge source the table was last checked against. */
-  commit: "25b37395ff61bfea0f3ffd189d9011c4984fa755",
+  commit: "e4a606a00352674daaef08636e3e359e6c48ba18",
   /** The Edge release at that commit. */
-  release: "v0.9.15",
+  release: "v0.9.20",
 } as const;
 
 /**
@@ -96,7 +96,7 @@ export const PLUGIN_SENSITIVITY = new Map<string, readonly SensitivityRule[]>([
   ]],
   ["jwt_auth", NONE],
   ["key_auth", NONE],
-  ["ldap_auth", [endpoint("ldap_url")]],
+  ["ldap_auth", [endpoint("ldap_url"), endpoint("failover_ldap_urls")]],
   ["basic_auth", NONE],
   ["hmac_auth", NONE],
   ["soap_ws_security", NONE],
@@ -120,8 +120,8 @@ export const PLUGIN_SENSITIVITY = new Map<string, readonly SensitivityRule[]>([
     secret("custom_headers", "*"),
   ]],
   ["ai_prompt_shield", NONE],
-  ["waf", NONE],
-  ["fault_injection", NONE],
+  ["waf", [secret("global_exemptions", "header_present", "*")]],
+  ["fault_injection", [secret("match", "headers", "*")]],
   ["body_validator", NONE],
   ["openapi_validator", NONE],
   ["ai_semantic_firewall", [endpoint("provider", "endpoint")]],
@@ -130,19 +130,22 @@ export const PLUGIN_SENSITIVITY = new Map<string, readonly SensitivityRule[]>([
   ["ai_stream_router", [endpoint("providers", "*", "endpoint")]],
   ["mcp_gateway", [endpoint("servers", "*", "upstream_url"), endpoint("upstream_url")]],
   ["a2a_gateway", NONE],
-  ["mesh_route_dispatch", NONE],
+  ["mesh_route_dispatch", [secret("rules", "*", "request_transform", "*", "value")]],
   ["ai_semantic_cache", [
     redis("redis_url"),
     endpoint("semantic_embedding_endpoint"),
     secret("semantic_embedding_auth_header"),
   ]],
-  ["request_transformer", NONE],
+  ["request_transformer", [secret("rules", "*", "value")]],
   ["serverless_function", [
     endpoint("function_url"),
     endpoint("aws_endpoint_url"),
     secret("azure_function_key"),
   ]],
-  ["response_mock", NONE],
+  ["response_mock", [
+    secret("rules", "*", "match", "headers", "*"),
+    secret("rules", "*", "match", "query_params", "*"),
+  ]],
   ["grpc_deadline", NONE],
   ["load_testing", NONE],
   ["request_mirror", NONE],
@@ -168,7 +171,7 @@ export const PLUGIN_SENSITIVITY = new Map<string, readonly SensitivityRule[]>([
     secret("custom_headers", "*"),
   ]],
   ["udp_logging", NONE],
-  ["ws_logging", [endpoint("endpoint_url")]],
+  ["ws_logging", [endpoint("endpoint_url"), secret("custom_headers", "*")]],
   ["transaction_debugger", NONE],
   ["proxy_alerts", [
     endpoint("channels", "*", "webhook_url"),

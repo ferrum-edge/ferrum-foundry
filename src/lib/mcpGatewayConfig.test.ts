@@ -53,6 +53,25 @@ describe("mcpGatewayConfig", () => {
     });
   });
 
+  it("strips the v0.9.19 prompt and resource policy keys from transparent mode", () => {
+    const submitted = sanitizeMcpGatewayConfigForSubmit({
+      mode: "transparent_proxy",
+      endpoint: { path: "/mcp", protocol_versions: ["2025-11-25"] },
+      policy: {
+        default_prompt_action: "deny",
+        default_resource_action: "deny",
+        prompts: { "github.triage": { action: "allow" } },
+        resources: { "mcp://github/readme": { action: "allow" } },
+      },
+    });
+
+    expect(submitted).toEqual({
+      mode: "transparent_proxy",
+      endpoint: { path: "/mcp", protocol_versions: ["2025-11-25"] },
+    });
+    expect(mcpGatewayConfigHasAggregateOnlyFields({ policy: { prompts: {} } })).toBe(true);
+  });
+
   it("strips rejected keys from transparent-mode submissions", () => {
     const submitted = sanitizeMcpGatewayConfigForSubmit({
       mode: "transparent_proxy",
