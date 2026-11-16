@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A **Starter Production Profile** CI job runs the deployment starter's
+  production profile as shipped, TLS nginx and oauth2-proxy included, against
+  a mock OIDC provider (`ghcr.io/navikt/mock-oauth2-server`, pinned by tag and
+  digest and watched by Dependabot), with test-only certificates and only the
+  operator files filled in (`e2e/production-smoke/`). Until now CI ran only the
+  demo profile, so the GHSA-q866-mwp4-hgw3 forwarded-header fix and the
+  oauth2-proxy v7.15.6 / nginx 1.31.8 upgrade had been checked by review
+  alone. Using curl and a cookie jar, it checks that an unauthenticated page
+  load is redirected to the provider's authorize endpoint; that a completed
+  login reaches Foundry with the role and namespaces the shared policy maps
+  the user's groups to, while a user in no Ferrum group is refused at login;
+  and, reading the traffic between nginx and oauth2-proxy with `tcpdump`,
+  that nginx sends every forwarded header oauth2-proxy reads exactly once,
+  with its own value, on `/oauth2/start` and the `/oauth2/auth` subrequest,
+  whatever the client sent. A failing run prints every container's logs.
+  `ci.yml` also accepts `workflow_dispatch`: pull requests run `main`'s copy of
+  the workflow (the required-workflow ruleset), so a change to it is proved by
+  dispatching the branch's copy.
+
 ### Changed
 
 - Remove code nothing used, with its dependencies (#682): the `Tooltip`
@@ -161,6 +182,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runs with `--reverse-proxy`, so a deployment that added `--trusted-ip` or a
   skip-auth route would have been open to oauth2-proxy's header-spoofing
   bypasses.
+- The deployment starter's production nginx sends its own `$request_id` as
+  `X-Request-Id` to oauth2-proxy and to Foundry (the demo proxy does the same
+  for Foundry). oauth2-proxy logs that header as the request ID, so a client
+  could choose the ID on its own log lines. nginx also clears
+  `X-Auth-Request-Redirect` on the `/oauth2/auth` subrequest, which had
+  inherited the client's value; it stays set to the request URI on the
+  `/oauth2/` sign-in routes, the only ones that read it. The production smoke
+  test fails if either reaches an upstream, and contract tests pin the
+  directives. The starter README now states that the actor Foundry receives is
+  the ID token's `sub` claim, and what that means when choosing an identity
+  provider. Both starter proxies now also set or clear every `X-Forwarded-*`
+  header and `X-Auth-Request-Redirect` they send Foundry. The BFF trusts
+  `X-Forwarded-*` from nginx, but `location /` set no `X-Forwarded-Host`, so a
+  client's value reached it; the production smoke test showed it in the BFF's
+  request log. nginx now sends `X-Forwarded-Host: $host` and no
+  `X-Forwarded-Uri` or `X-Auth-Request-Redirect`. `X-Forwarded-For` still
+  appends nginx's peer to the client's list, and the BFF trusts only that last
+  hop. nginx also clears oauth2-proxy's `X-Auth-Request-User`, `-Email`,
+  `-Preferred-Username` and `-Groups` toward Foundry, where a client's copies
+  had arrived unread. The smoke test fails if a forged forwarded or identity
+  value reaches Foundry, and a contract test pins the directives in both
+  configurations. `docs/deployment.md` lists every one of these directives.
 - The deployment starter runs oauth2-proxy v7.15.6
   (`quay.io/oauth2-proxy/oauth2-proxy:v7.15.6@sha256:c3415e8660af553f5e18f5d90db050614c02493c0ac6260ac59442f6d9b12048`)
   instead of v7.7.1, and nginx 1.31.8 mainline

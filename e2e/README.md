@@ -95,3 +95,53 @@ gateway or the data plane rather than the page. If it needs a failure, arm it
 and assert it was consumed. If it needs a role, use `signIn(identity)`
 (`admin`, `operator`, `viewer`, or `unmapped`) so the real group-to-role policy
 decides what that identity can do.
+
+## The production profile
+
+The journeys run the starter's `demo` profile, whose identity provider is an
+nginx stub. `e2e/production-smoke/` runs the `production` profile as shipped:
+nginx terminating TLS, oauth2-proxy owning an OIDC login, and Foundry behind
+both. Its overlay (`e2e/production-smoke/compose.yaml`) adds a mock OIDC
+provider and changes no shipped service, and `run.sh configure` writes only the
+files an operator fills in (`.env` and `oauth2-proxy.env` from their examples,
+the proxy-proof include, and a certificate from a CA generated for the run).
+
+```bash
+export FOUNDRY_IMAGE=ferrum-foundry:ci   # optional: the image to test
+e2e/production-smoke/run.sh configure    # refuses to overwrite existing files
+e2e/production-smoke/run.sh up
+e2e/production-smoke/run.sh verify       # needs curl, jq, node, and sudo tcpdump
+e2e/production-smoke/run.sh down
+```
+
+`verify` logs in with curl and a cookie jar and checks that:
+
+- an unauthenticated page load is redirected to the provider's authorize
+  endpoint, and an unauthenticated API call gets a bare `401`;
+- a completed login reaches Foundry with the identity the shared policy maps
+  the user's groups to (`/api/auth/session`; the actor is the ID token's
+  `sub`, which oauth2-proxy sends as `X-Auth-Request-User`), a user in several
+  groups gets the Ferrum one, and a user in no Ferrum group is refused at
+  login;
+- with spoofed `X-Forwarded-*`, `X-Real-IP`, `X-Auth-Request-Redirect`,
+  `X-Request-Id`, and identity headers on the request, the session is
+  unchanged. Reading nginx's upstream traffic off the wire with `tcpdump`
+  (`forwarded-headers.mjs`), the requests to oauth2-proxy carry exactly one of
+  each forwarded header it reads, with nginx's own value, on `/oauth2/start`
+  and on the `/oauth2/auth` subrequest. `X-Auth-Request-Redirect` is the
+  request URI on `/oauth2/start` and absent on the subrequest. Foundry
+  receives nginx's `X-Forwarded-Host`, `-Proto` and `X-Real-IP`, an
+  `X-Forwarded-For` ending with nginx's peer, and no `X-Forwarded-Uri`,
+  `X-Auth-Request-Redirect`, or oauth2-proxy `X-Auth-Request-*` identity
+  header. Both upstreams receive nginx's `$request_id` as `X-Request-Id`.
+  Neither oauth2-proxy's log nor Foundry's may name a spoofed value, and a log
+  that cannot be read fails.
+
+Every forwarded and identity value the probes forge carries a marker string,
+except the role, which is an enum; the session check shows the client's role
+is ignored. Any other header carrying a marker fails at Foundry. At
+oauth2-proxy it is printed as a note, because oauth2-proxy reads only the
+headers checked above. A client header without a marker is not detected.
+
+CI runs this as the **Starter Production Profile** job, against the image built
+from the commit, and prints every container's logs when it fails.

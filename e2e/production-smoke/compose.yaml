@@ -1,0 +1,30 @@
+# ------------------------------------------------------------------
+# Production-profile smoke overlay for the starter stack
+# ------------------------------------------------------------------
+#
+# Layered over deploy/starter/compose.yaml. It adds one service, a mock OpenID
+# Connect provider standing in for the operator's identity provider, and
+# changes none of the starter's own: oauth2-proxy, nginx, and Foundry run
+# exactly as shipped, configured only through the files an operator fills in
+# (.env, oauth2-proxy.env, secrets/, tls/). scripts/starter-production-smoke.test.mjs
+# fails if this file grows an entry for a shipped service.
+#
+#   e2e/production-smoke/run.sh configure
+#   e2e/production-smoke/run.sh up
+#   e2e/production-smoke/run.sh verify
+#
+# Its port is published on loopback only, so the smoke test's curl can play
+# the browser's half of the login against the same issuer URL oauth2-proxy
+# uses on the compose network (http://mock-oidc:8080/default).
+
+services:
+  mock-oidc:
+    # Third-party images name their tag and digest together; Dependabot
+    # (.github/dependabot.yml) watches this directory and moves both.
+    image: ghcr.io/navikt/mock-oauth2-server:6.1.5@sha256:d88e445d55c4ff6eed59b02d86adfece47d985233b1616fb712669b98328c8a2
+    profiles: [production]
+    # Without JSON_CONFIG it serves the interactive login form: the posted
+    # username becomes `sub` and the posted claims JSON is added to the ID
+    # token, so each login chooses its own email and groups.
+    ports:
+      - "127.0.0.1:18080:8080"

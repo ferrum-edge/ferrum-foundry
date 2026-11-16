@@ -127,6 +127,19 @@ or `unmapped`). It is for a first run and for CI. Do not expose it.
   `X-Ferrum-Role: admin`.
 - **An unmapped user is denied twice:** by oauth2-proxy's `--allowed-group` at
   login, and by the empty `map` default, which asserts no role.
+- **nginx, not the client, sets what oauth2-proxy trusts.** oauth2-proxy runs
+  with `--reverse-proxy`, so on `/oauth2/` and the `/oauth2/auth` subrequest
+  nginx sets `X-Forwarded-For`, `-Host`, `-Proto`, `-Uri` and `X-Real-IP`
+  from its own view of the request. `X-Auth-Request-Redirect` is set to the
+  request URI on the sign-in routes and cleared on the subrequest, and every
+  upstream gets nginx's own `X-Request-Id` (`$request_id`), so a client cannot
+  choose the request ID oauth2-proxy logs.
+- **nginx, not the client, sets what Foundry trusts.** The BFF trusts
+  `X-Forwarded-*` from nginx, its directly connected hop, so on `location /`
+  (in both profiles) nginx sets `X-Forwarded-Host`, `-Proto` and `X-Real-IP`,
+  clears `X-Forwarded-Uri`, `X-Auth-Request-Redirect` and oauth2-proxy's
+  `X-Auth-Request-*` identity headers, and appends its peer to
+  `X-Forwarded-For`, the only hop the BFF trusts.
 - **`FERRUM_AUTH_MODE=trusted-proxy` with `NODE_ENV=production`.** The BFF
   refuses static-token auth in production.
 - **Third-party images are pinned by tag and digest**
@@ -137,6 +150,24 @@ or `unmapped`). It is for a first run and for CI. Do not expose it.
 
 ### Still yours to decide
 
+- **Which claim is the actor.** With the starter's flags, oauth2-proxy sends
+  the ID token's `sub` claim as `X-Auth-Request-User`, not the email. nginx
+  passes it on as `X-Forwarded-User`, and Foundry uses it as the actor: the
+  admin JWT's `sub`, and so the name in Ferrum Edge's audit log and Foundry's
+  own logs. The starter's production smoke test asserts this
+  (`e2e/production-smoke/`). When choosing an identity provider:
+  - Its `sub` must be stable for the life of the account and never reissued
+    to another person. OIDC requires this, but check a provider that lets
+    administrators recreate users with the same subject.
+  - Many providers issue an opaque `sub` (a UUID, a number, or a value that
+    differs per client application). Audit entries then name that value, not
+    a person, so keep a way to map it back in the provider.
+  - Moving the starter to another provider, or to another client registration
+    of the same provider, can change every user's `sub`. Audit history then
+    names the old values.
+  - The email is a weaker actor: providers let it change and be reassigned.
+    If you change what oauth2-proxy sends as `X-Auth-Request-User`, re-run the
+    smoke test to see what Foundry receives.
 - **Secrets.** Plain files are the simplest thing that works; a secret manager
   that renders the same files is better.
 - **Namespace grants.** `nginx/identity/policy.conf` ships one namespace and

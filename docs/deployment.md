@@ -276,13 +276,29 @@ Things that are easy to get wrong:
   not set is forwarded from the client as-is. nginx drops a header whose value
   is empty, so an identity mapped to no namespaces arrives without the header
   rather than with an empty one.
-- **Set every `X-Forwarded-*` header oauth2-proxy reads from nginx's own
-  variables** on `/oauth2/` and on the `/oauth2/auth` subrequest
-  (`$remote_addr`, `$host`, `$scheme`, `$request_uri`). oauth2-proxy runs with
-  `--reverse-proxy` and believes them; a client's `X-Forwarded-For` or
-  `X-Forwarded-Uri` passed through is what its header-spoofing bypasses use.
-  If you add `--trusted-ip` or a skip-auth route, also set
-  `--trusted-proxy-ip` to the proxy's address.
+- **Set every header oauth2-proxy reads from nginx's own variables** on
+  `/oauth2/` and on the `/oauth2/auth` subrequest: `X-Real-IP` and
+  `X-Forwarded-For` (`$remote_addr`), `X-Forwarded-Host` (`$host`),
+  `X-Forwarded-Proto` (`$scheme`), `X-Forwarded-Uri` (`$request_uri`), and
+  `X-Request-Id` (`$request_id`), which oauth2-proxy logs as the request ID.
+  Set `X-Auth-Request-Redirect` to `$request_uri` on `/oauth2/`, and to `""`
+  on `/oauth2/auth`, which does not read it and would otherwise inherit the
+  client's copy. oauth2-proxy runs with `--reverse-proxy` and believes these
+  headers; a client's `X-Forwarded-For` or `X-Forwarded-Uri` passed through is
+  what its header-spoofing bypasses use. If you add `--trusted-ip` or a
+  skip-auth route, also set `--trusted-proxy-ip` to the proxy's address.
+- **On the location that proxies to the BFF, set or clear every forwarded
+  header too.** The BFF trusts `X-Forwarded-*` from the proxy, so set
+  `X-Forwarded-Host` (`$host`), `X-Forwarded-Proto` (`$scheme`), `X-Real-IP`
+  (`$remote_addr`) and `X-Request-Id` (`$request_id`), and append to
+  `X-Forwarded-For` (`$proxy_add_x_forwarded_for`; the BFF trusts only that
+  last hop). Set `X-Forwarded-Uri`, `X-Auth-Request-Redirect`, and
+  oauth2-proxy's identity headers (`X-Auth-Request-User`, `-Email`,
+  `-Preferred-Username`, `-Groups`) to `""`, which sends no header, so no
+  client copy of them reaches the BFF. `location /` in
+  [`deploy/starter/nginx/foundry.conf`](../deploy/starter/nginx/foundry.conf)
+  is the reference, and the starter's production smoke test
+  (`e2e/production-smoke/`) checks it on the wire.
 - **Deny by default.** The `map` default is empty, so an unmapped user gets no
   role and Foundry answers `401` with `x-ferrum-auth-layer: bff`. oauth2-proxy's
   `--allowed-group` also refuses such a user at login.
@@ -779,6 +795,10 @@ SBOM attestations. See [Release and supply-chain gates](release-security.md).
 - [ ] The proxy strips client copies of `X-Ferrum-Auth-Secret`,
       `X-Forwarded-User`, `X-Ferrum-Role`, and `X-Ferrum-Namespaces` and sets
       its own values for all four.
+- [ ] The proxy sets or clears every `X-Forwarded-*` header,
+      `X-Auth-Request-Redirect`, and `X-Request-Id` it sends oauth2-proxy and
+      the BFF, as `deploy/starter/nginx/foundry.conf` does, and clears
+      oauth2-proxy's `X-Auth-Request-*` identity headers toward the BFF.
 - [ ] Group-to-role mapping denies by default, so an unmapped user gets no role.
 - [ ] Every non-admin identity receives an exact `X-Ferrum-Namespaces` list.
 - [ ] `FERRUM_JWT_SECRET` is at least 32 UTF-8 bytes and
