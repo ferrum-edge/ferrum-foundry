@@ -13,6 +13,8 @@ import {
   parseRequests,
   readPcap,
 } from "../e2e/production-smoke/forwarded-headers.mjs";
+import { appRedirectFromLocation } from "../e2e/production-smoke/direct-probe.mjs";
+import { checkTokenExchange, s256Challenge } from "../e2e/production-smoke/pkce.mjs";
 
 const OVERLAY = new URL("../e2e/production-smoke/compose.yaml", import.meta.url);
 const SMOKE_LIB = fileURLToPath(new URL("../e2e/production-smoke/lib.sh", import.meta.url));
@@ -358,6 +360,125 @@ test("at oauth2-proxy, a client value in a header no rule covers is reported, no
     header: "x-original-uri",
     marker: "/spoofed/uri",
   }]);
+});
+
+// ---- PKCE: the token request, read off the wire -------------------------------
+
+// RFC 7636 appendix B.
+const RFC_VERIFIER = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+const RFC_CHALLENGE = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+const MOCK_OIDC = "172.18.0.5";
+const TOKEN_PATH = "/default/token";
+const FAKE_CODE = "smoke-test-authorization-code";
+
+function httpPost(target, body) {
+  const bytes = Buffer.from(body, "latin1");
+  return Buffer.concat([
+    Buffer.from(
+      `POST ${target} HTTP/1.1\r\nHost: mock-oidc:8080\r\n` +
+        "Content-Type: application/x-www-form-urlencoded\r\n" +
+        `Content-Length: ${bytes.length}\r\n\r\n`,
+      "latin1",
+    ),
+    bytes,
+  ]);
+}
+
+function tokenBody(overrides = {}) {
+  const params = new URLSearchParams({
+    code: FAKE_CODE,
+    code_verifier: RFC_VERIFIER,
+    grant_type: "authorization_code",
+    redirect_uri: "https://foundry.example.com/oauth2/callback",
+  });
+  for (const [name, value] of Object.entries(overrides)) {
+    if (value === undefined) params.delete(name);
+    else params.set(name, value);
+  }
+  return params.toString();
+}
+
+/** The requests oauth2-proxy sent the provider, through a synthetic capture. */
+function capturedProviderRequests(...payloads) {
+  const frames = payloads.map((payload, index) => sll2(ipv4Tcp({
+    source: OAUTH2_PROXY, destination: MOCK_OIDC, sourcePort: 41000 + index, destinationPort: 8080,
+    sequence: 1000, payload,
+  })));
+  return clientStreams(readPcap(pcap(276, frames)), 8080).flatMap(parseRequests);
+}
+
+test("the S256 challenge is RFC 7636's", () => {
+  assert.equal(s256Challenge(RFC_VERIFIER), RFC_CHALLENGE);
+});
+
+test("a token request with the verifier of the authorize redirect's challenge passes", () => {
+  const requests = capturedProviderRequests(
+    // The discovery and JWKS reads share the port and are not token requests.
+    httpRequest("/default/.well-known/openid-configuration", [["Host", "mock-oidc:8080"]]),
+    httpPost(TOKEN_PATH, tokenBody()),
+  );
+  assert.equal(requests.at(-1).body.toString("latin1"), tokenBody());
+  assert.deepEqual(checkTokenExchange(requests, { tokenPath: TOKEN_PATH, challenge: RFC_CHALLENGE }), []);
+});
+
+test("a token request without the matching verifier fails, without printing the body", () => {
+  const otherVerifier = "a".repeat(43);
+  for (const [overrides, expected] of [
+    [{ code_verifier: undefined }, "the token request carries 0 code_verifier parameters, expected one"],
+    [{ code_verifier: otherVerifier }, "the code_verifier's S256 digest is not the authorize redirect's code_challenge"],
+    [{ code_verifier: "short" }, "the code_verifier is not 43-128 unreserved characters (length 5)"],
+    [{ grant_type: "refresh_token" }, 'the token request is not one authorization_code grant (["refresh_token"])'],
+  ]) {
+    const errors = checkTokenExchange(
+      capturedProviderRequests(httpPost(TOKEN_PATH, tokenBody(overrides))),
+      { tokenPath: TOKEN_PATH, challenge: RFC_CHALLENGE },
+    );
+    assert.deepEqual(errors, [expected], JSON.stringify(overrides));
+    for (const secret of [FAKE_CODE, RFC_VERIFIER, otherVerifier]) {
+      assert.ok(!errors.join("\n").includes(secret), "no body value is echoed");
+    }
+  }
+  const twice = `${tokenBody()}&code_verifier=${RFC_VERIFIER}`;
+  assert.deepEqual(
+    checkTokenExchange(capturedProviderRequests(httpPost(TOKEN_PATH, twice)), {
+      tokenPath: TOKEN_PATH,
+      challenge: RFC_CHALLENGE,
+    }),
+    ["the token request carries 2 code_verifier parameters, expected one"],
+  );
+});
+
+test("no token request, two, or a malformed challenge fails rather than passing on nothing", () => {
+  const options = { tokenPath: TOKEN_PATH, challenge: RFC_CHALLENGE };
+  assert.deepEqual(checkTokenExchange([], options), [
+    `expected exactly one token request to ${TOKEN_PATH}, found 0`,
+  ]);
+  const two = capturedProviderRequests(httpPost(TOKEN_PATH, tokenBody()), httpPost(TOKEN_PATH, tokenBody()));
+  assert.deepEqual(checkTokenExchange(two, options), [
+    `expected exactly one token request to ${TOKEN_PATH}, found 2`,
+  ]);
+  const one = capturedProviderRequests(httpPost(TOKEN_PATH, tokenBody()));
+  for (const challenge of ["", "plain-challenge", `${RFC_CHALLENGE}=`]) {
+    assert.deepEqual(checkTokenExchange(one, { tokenPath: TOKEN_PATH, challenge }), [
+      "the authorize redirect's code_challenge is not an S256 challenge",
+    ]);
+  }
+});
+
+// ---- the trust boundary: the redirect oauth2-proxy chose -----------------------
+
+test("the post-login redirect is read from the authorize redirect's state", () => {
+  const authorize = "http://mock-oidc:8080/default/authorize?client_id=foundry-starter-smoke";
+  // oauth2-proxy writes <nonce>:<url.QueryEscape(redirect)>, and the URL
+  // query escapes the whole state again.
+  const location = (redirect) =>
+    `${authorize}&state=${encodeURIComponent(`nonce123:${encodeURIComponent(redirect)}`)}&code_challenge_method=S256`;
+  assert.equal(appRedirectFromLocation(location("/trusted-probe")), "/trusted-probe");
+  assert.equal(appRedirectFromLocation(location("/")), "/");
+  assert.equal(appRedirectFromLocation(location("/a?b=c d")), "/a?b=c d");
+  assert.equal(appRedirectFromLocation(authorize), null, "no state");
+  assert.equal(appRedirectFromLocation(`${authorize}&state=nonce-only`), null);
+  assert.equal(appRedirectFromLocation("not a url"), null);
 });
 
 // ---- run.sh helpers (lib.sh) -------------------------------------------------
