@@ -139,13 +139,16 @@ or `unmapped`). It is for a first run and for CI. Do not expose it.
 - **oauth2-proxy believes those headers only from this stack's network.**
   The Compose network has a fixed subnet, `10.73.88.0/24` unless
   `FOUNDRY_STARTER_SUBNET` in `.env` says otherwise, and oauth2-proxy runs
-  with `--trusted-proxy-ip` set to the same value. A request from any other
-  address is judged by its own Host, path and peer address, so a client that
-  somehow reaches oauth2-proxy directly cannot choose the redirect, host or
-  client address it acts on. The range includes the Docker host (the bridge
-  gateway) and every container on the network, so attach nothing else to it.
-  The production smoke test sends the same forged headers from inside and
-  from outside the range and checks that only the inside copy is believed.
+  with `--trusted-proxy-ip` set to the same value. A request from an address
+  outside that range is judged by its own Host, path and peer address, so a
+  client outside the range that reaches oauth2-proxy directly cannot choose
+  the redirect, host or client address it acts on. The range is not nginx
+  alone: it also holds the Docker host (the bridge gateway, which a Compose
+  subnet always includes) and every container on the network, and each of
+  them is believed as nginx is. Anything that can send from the Docker host
+  is therefore trusted, so attach nothing else to the network. The
+  production smoke test sends the same forged headers from inside and from
+  outside the range and checks that only the inside copy is believed.
 - **nginx, not the client, sets what Foundry trusts.** The BFF trusts
   `X-Forwarded-*` from nginx, its directly connected hop, so on `location /`
   (in both profiles) nginx sets `X-Forwarded-Host`, `-Proto` and `X-Real-IP`,
@@ -200,9 +203,9 @@ or `unmapped`). It is for a first run and for CI. Do not expose it.
   host reaches, the containers lose their route to it. Set
   `FOUNDRY_STARTER_SUBNET` in `.env` to a free private IPv4 range: Compose
   uses it for both the network and oauth2-proxy's `--trusted-proxy-ip`, so
-  the two never disagree. If you put another proxy in front of nginx, it
-  stays outside this range, which is correct: oauth2-proxy should trust nginx
-  alone.
+  the two never disagree. If you put another proxy in front of nginx, keep it
+  off this network: oauth2-proxy should believe forwarded headers from the
+  stack's own peers, not from a proxy whose headers nginx already replaces.
 - **Secrets.** Plain files are the simplest thing that works; a secret manager
   that renders the same files is better.
 - **Namespace grants.** `nginx/identity/policy.conf` ships one namespace and

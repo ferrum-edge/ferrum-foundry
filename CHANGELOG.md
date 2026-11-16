@@ -188,17 +188,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the token request off the wire to check that its `code_verifier` computes
   to that challenge; a contract test pins the setting.
 - The deployment starter's oauth2-proxy believes `X-Forwarded-*` and
-  `X-Real-IP` only from its own Compose network. The network now has a fixed
-  subnet, `10.73.88.0/24` (outside Docker's default pools and the usual
+  `X-Real-IP` only from its own Compose network, which holds the stack's
+  containers and the Docker host's bridge address. The network now has a
+  fixed subnet, `10.73.88.0/24` (outside Docker's default pools and the usual
   Podman, Kubernetes and cloud defaults), overridable with
   `FOUNDRY_STARTER_SUBNET` in `.env`, and oauth2-proxy keeps
   `--reverse-proxy` with `--trusted-proxy-ip` set to the same value. It used
   to trust those headers from any peer, which was safe only while nothing
   but nginx could reach it. The production smoke test checks that the
-  network and the flag agree, then sends forged headers straight to
+  running network and the flag both match the subnet Compose resolves (from
+  the shell or the starter's `.env`), then sends forged headers straight to
   oauth2-proxy: from inside the range they are believed (the positive
-  control), and from a second network outside it they change neither the
-  post-login redirect nor the host and address oauth2-proxy logs. The docs
+  control), and from a second network, which Docker allocates and the test
+  proves disjoint from the range, they change neither the post-login
+  redirect nor the host and address oauth2-proxy logs. The docs
   note that Foundry still trusts only the last `X-Forwarded-For` hop, which
   nginx appends. **Upgrade note:** Compose does not change an existing
   network's subnet, so bring a running starter stack down

@@ -287,16 +287,19 @@ Things that are easy to get wrong:
   client's copy. oauth2-proxy runs with `--reverse-proxy` and believes these
   headers; a client's `X-Forwarded-For` or `X-Forwarded-Uri` passed through is
   what its header-spoofing bypasses use.
-- **Believe those headers only from the proxy.** Set oauth2-proxy's
-  `--trusted-proxy-ip` (`OAUTH2_PROXY_TRUSTED_PROXY_IPS`) to the proxy's
-  address or a range holding only it. Without it oauth2-proxy believes
+- **Believe those headers only from the proxy's network.** Set
+  oauth2-proxy's `--trusted-proxy-ip` (`OAUTH2_PROXY_TRUSTED_PROXY_IPS`) to
+  the narrowest range that holds the proxy. Without it oauth2-proxy believes
   `X-Forwarded-*` and `X-Real-IP` from any peer that reaches it. The starter
   gives its Compose network a fixed subnet (`10.73.88.0/24`, or
   `FOUNDRY_STARTER_SUBNET` from `.env`) and passes the same value to
   `--trusted-proxy-ip`, so a request from outside the stack's network is
-  judged by its own Host, path and peer address. That range also holds the
-  Docker host (the bridge gateway) and every container on the network; attach
-  nothing else to it. Choose a range that overlaps no other Docker network
+  judged by its own Host, path and peer address. That range is wider than
+  the proxy: it holds every container on the network and the Docker host
+  (the bridge gateway, which a Compose subnet always includes), and
+  oauth2-proxy believes each of them as it believes nginx. Attach nothing
+  else to the network. If you need oauth2-proxy to believe nginx alone, give
+  nginx a fixed address and trust only that address. Choose a range that overlaps no other Docker network
   (`up` fails) and no LAN or VPN the host reaches (the containers lose their
   route to it).
 - **Use PKCE.** Set `OAUTH2_PROXY_CODE_CHALLENGE_METHOD=S256` (the starter's
@@ -818,8 +821,10 @@ SBOM attestations. See [Release and supply-chain gates](release-security.md).
       `X-Auth-Request-Redirect`, and `X-Request-Id` it sends oauth2-proxy and
       the BFF, as `deploy/starter/nginx/foundry.conf` does, and clears
       oauth2-proxy's `X-Auth-Request-*` identity headers toward the BFF.
-- [ ] oauth2-proxy's `--trusted-proxy-ip` names only the proxy's address or a
-      range that holds only the proxy (the starter's Compose network).
+- [ ] oauth2-proxy's `--trusted-proxy-ip` names the proxy's address or the
+      network it shares with oauth2-proxy (the starter's Compose subnet, which
+      also holds the Docker host and every container on it), and nothing else
+      is attached to that network.
 - [ ] oauth2-proxy uses PKCE (`OAUTH2_PROXY_CODE_CHALLENGE_METHOD=S256`),
       unless the identity provider does not support it.
 - [ ] Group-to-role mapping denies by default, so an unmapped user gets no role.
