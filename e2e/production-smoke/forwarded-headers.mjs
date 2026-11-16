@@ -43,7 +43,7 @@ export const REQUEST_ID_HEADER = "x-request-id";
  * oauth2-proxy's identity response headers. nginx reads them from the auth
  * subrequest; a client's copies must never reach Foundry under these names.
  */
-export const OAUTH2_PROXY_IDENTITY_HEADERS = [
+export const CLEARED_TOWARD_FOUNDRY = [
   "x-auth-request-user",
   "x-auth-request-email",
   "x-auth-request-preferred-username",
@@ -278,7 +278,7 @@ function rulesFor(probe, upstream, { host, proto }) {
       "x-real-ip": isAddress,
       [REQUEST_ID_HEADER]: isRequestId,
     },
-    absent: ["x-forwarded-uri", REDIRECT_HEADER, ...OAUTH2_PROXY_IDENTITY_HEADERS],
+    absent: ["x-forwarded-uri", REDIRECT_HEADER, ...CLEARED_TOWARD_FOUNDRY],
     appendedForwardedFor: true,
   };
 }
