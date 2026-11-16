@@ -59,6 +59,9 @@ fail() {
   exit 1
 }
 
+# shellcheck source=e2e/production-smoke/lib.sh
+. "$SMOKE/lib.sh"
+
 step() {
   echo
   echo "== $*"
@@ -248,34 +251,11 @@ SPOOF_HEADERS=(
   -H "X-Auth-Request-Groups: ferrum-admins"
 )
 
-start_capture() {
+ensure_tcpdump() {
   if ! command -v tcpdump >/dev/null; then
     sudo apt-get update -qq
     sudo apt-get install -y -qq tcpdump
   fi
-  # Pipe through cat so the file is written by this user, not by tcpdump
-  # (which drops privileges and is confined by AppArmor on Ubuntu). The
-  # capture holds this run's throwaway proof secret and session cookies; it
-  # stays in the work directory and is never uploaded or printed.
-  sudo tcpdump -i any -U -s 0 -w - "tcp port $OAUTH2_PROXY_PORT or tcp port $FOUNDRY_PORT" \
-    2>"$WORK/tcpdump.log" | cat > "$WORK/upstreams.pcap" &
-  CAPTURE_PID=$!
-  for _attempt in $(seq 1 50); do
-    if grep -q 'listening on' "$WORK/tcpdump.log" 2>/dev/null; then
-      return 0
-    fi
-    sleep 0.2
-  done
-  cat "$WORK/tcpdump.log" >&2 || true
-  fail "tcpdump did not start"
-}
-
-stop_capture() {
-  # Let nginx finish writing the last request before the capture stops.
-  sleep 1
-  sudo pkill -INT -x tcpdump || true
-  wait "$CAPTURE_PID" || true
-  cat "$WORK/tcpdump.log"
 }
 
 verify() {
@@ -343,7 +323,11 @@ verify() {
   expect_equal "refused user's next page load" "$result" "302 $ORIGIN/oauth2/start?rd=/"
 
   step "3. Forwarded headers, read off the wire between nginx and its upstreams"
-  start_capture
+  ensure_tcpdump
+  # The capture holds this run's throwaway proof secret and session cookies; it
+  # stays in the work directory and is never uploaded or printed.
+  capture_start "tcp port $OAUTH2_PROXY_PORT or tcp port $FOUNDRY_PORT" \
+    "$WORK/upstreams.pcap" "$WORK/tcpdump.log"
   status="$(browser -o /dev/null -w '%{http_code}' -c "$anon_jar" -b "$anon_jar" \
     "${SPOOF_HEADERS[@]}" -H 'X-Smoke-Probe: start' "$ORIGIN/oauth2/start?rd=%2F")"
   expect_equal "spoofed /oauth2/start status" "$status" 302
@@ -352,7 +336,10 @@ verify() {
   expect_equal "spoofed unauthenticated page load status" "$status" 302
   body="$(browser --fail -b "$viewer_jar" \
     "${SPOOF_HEADERS[@]}" -H 'X-Smoke-Probe: auth-session' "$ORIGIN/api/auth/session")"
-  stop_capture
+  # Let nginx finish writing the last request before the capture stops.
+  sleep 1
+  capture_stop
+  cat "$WORK/tcpdump.log"
 
   # inject.conf replaces every identity header, so the viewer stays a viewer
   # whatever the client claims.
@@ -386,17 +373,14 @@ verify() {
   # oauth2-proxy's own request log is a second witness: it records the client
   # address (X-Real-IP), host (X-Forwarded-Host), and request ID (X-Request-Id)
   # it trusted, and would name a spoofed redirect it rejected.
-  if compose logs --no-color oauth2-proxy \
-    | grep -F -e "$SPOOFED_ADDRESS" -e "$SPOOFED_HOST" -e "$SPOOFED_REQUEST_ID"; then
-    fail "oauth2-proxy logged a spoofed client address, host, redirect, or request ID"
-  fi
-  echo "ok: oauth2-proxy's log names no spoofed address, host, redirect, or request ID"
+  # A log that cannot be read fails rather than passing as clean.
+  read_log "oauth2-proxy's log" "$WORK/oauth2-proxy.log" compose logs --no-color oauth2-proxy
+  log_names_none "oauth2-proxy's log" "$WORK/oauth2-proxy.log" \
+    "$SPOOFED_ADDRESS" "$SPOOFED_HOST" "$SPOOFED_REQUEST_ID"
   # The BFF trusts X-Forwarded-* from nginx and logs the host it resolves, so
   # its log is a witness that nginx set X-Forwarded-Host itself.
-  if compose logs --no-color foundry | grep -F -e "$SPOOFED_HOST"; then
-    fail "Foundry logged the client's spoofed host"
-  fi
-  echo "ok: Foundry's log names no spoofed host"
+  read_log "Foundry's log" "$WORK/foundry.log" compose logs --no-color foundry
+  log_names_none "Foundry's log" "$WORK/foundry.log" "$SPOOFED_HOST"
 
   echo
   echo "Production profile smoke test passed."

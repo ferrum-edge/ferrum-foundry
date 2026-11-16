@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
+import { spawn, spawnSync } from "node:child_process";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import {
   checkProbes,
   clientStreams,
@@ -9,6 +15,8 @@ import {
 } from "../e2e/production-smoke/forwarded-headers.mjs";
 
 const OVERLAY = new URL("../e2e/production-smoke/compose.yaml", import.meta.url);
+const SMOKE_LIB = fileURLToPath(new URL("../e2e/production-smoke/lib.sh", import.meta.url));
+const ZOMBIE_STAT_PATTERN = /^\d+ \(.*\) Z /s;
 const COMPOSE_IMAGE_PATTERN = /^\s+image:\s*(\S+)/gm;
 const TOP_LEVEL_SERVICE_PATTERN = /^ {2}([a-z0-9][\w.-]*):\s*$/gm;
 const TAG_AND_DIGEST_PATTERN = /^[a-z0-9./_-]+:[A-Za-z0-9_][A-Za-z0-9_.-]*@sha256:[0-9a-f]{64}$/;
@@ -314,6 +322,133 @@ test("at oauth2-proxy, a client value in a header no rule covers is reported, no
     header: "x-original-uri",
     value: "/spoofed/uri",
   }]);
+});
+
+// ---- run.sh helpers (lib.sh) -------------------------------------------------
+
+// A stand-in for tcpdump: announces itself as tcpdump does, writes a capture
+// to stdout, and exits on SIGINT. Node installs its own handler, so it hears
+// SIGINT even though a background job starts with it ignored, as tcpdump does.
+const FAKE_CAPTURE = `#!/usr/bin/env node
+process.stderr.write("listening on fake, link-type LINUX_SLL2\\n");
+process.stdout.write("captured");
+process.on("SIGINT", () => process.exit(0));
+setInterval(() => {}, 1000);
+`;
+
+function smokeDir() {
+  const dir = mkdtempSync(join(tmpdir(), "starter-smoke-"));
+  const tool = join(dir, "fake-capture");
+  writeFileSync(tool, FAKE_CAPTURE);
+  chmodSync(tool, 0o755);
+  return { dir, tool };
+}
+
+// Runs `body` in bash with lib.sh sourced, as run.sh does.
+function runLib(body, { dir, tool }) {
+  return spawnSync(
+    "bash",
+    ["-c", `set -euo pipefail\nfail() { echo "::error::$*" >&2; exit 1; }\n. "$0"\n${body}`, SMOKE_LIB],
+    {
+      cwd: dir,
+      encoding: "utf8",
+      timeout: 60_000,
+      env: { ...process.env, WORK: dir, SMOKE_CAPTURE_SUDO: "env", SMOKE_CAPTURE_TOOL: tool },
+    },
+  );
+}
+
+function isRunning(pid) {
+  try {
+    process.kill(pid, 0);
+  } catch {
+    return false;
+  }
+  try {
+    return !ZOMBIE_STAT_PATTERN.test(readFileSync(`/proc/${pid}/stat`, "utf8"));
+  } catch {
+    return true;
+  }
+}
+
+async function stopped(pid) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (!isRunning(pid)) return true;
+    await delay(100);
+  }
+  return false;
+}
+
+const START = 'capture_start "tcp port 4180" "$WORK/capture.pcap" "$WORK/capture.log"';
+
+test("capture_stop stops only the capture it started, and waits for its output", async () => {
+  const smoke = smokeDir();
+  // Another capture on the host, which a name-based pkill would also stop.
+  const unrelated = spawn(smoke.tool, [], { stdio: "ignore" });
+  try {
+    const result = runLib(`${START}\ncapture_stop\ncat "$WORK/capture.pcap"`, smoke);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, "captured", "the writer finished before capture_stop returned");
+    const pid = Number(readFileSync(join(smoke.dir, "capture.pcap.pid"), "utf8"));
+    assert.ok(await stopped(pid), "the capture process is stopped");
+    assert.ok(isRunning(unrelated.pid), "an unrelated capture keeps running");
+  } finally {
+    unrelated.kill("SIGKILL");
+    rmSync(smoke.dir, { recursive: true, force: true });
+  }
+});
+
+test("a failure or a signal after capture_start stops the capture and keeps the exit status", async () => {
+  for (const [body, status] of [
+    ["exit 7", 7],
+    ["false", 1],
+    ['fail "probe failed"', 1],
+    ["kill -TERM $$\nsleep 5", 143],
+  ]) {
+    const smoke = smokeDir();
+    try {
+      const result = runLib(`${START}\n${body}\necho unreachable`, smoke);
+      assert.equal(result.status, status, `${body}: ${result.stderr}`);
+      assert.ok(!result.stdout.includes("unreachable"), body);
+      const pid = Number(readFileSync(join(smoke.dir, "capture.pcap.pid"), "utf8"));
+      assert.ok(await stopped(pid), `${body}: the capture process is stopped`);
+      assert.equal(readFileSync(join(smoke.dir, "capture.pcap"), "utf8"), "captured", body);
+    } finally {
+      rmSync(smoke.dir, { recursive: true, force: true });
+    }
+  }
+});
+
+test("a log that cannot be read, or is empty, fails instead of passing as clean", () => {
+  const smoke = smokeDir();
+  try {
+    const unreadable = runLib('read_log "the log" "$WORK/a.log" false\necho judged', smoke);
+    assert.equal(unreadable.status, 1);
+    assert.match(unreadable.stderr, /could not read the log/);
+    assert.ok(!unreadable.stdout.includes("judged"));
+
+    const empty = runLib('read_log "the log" "$WORK/b.log" true\necho judged', smoke);
+    assert.equal(empty.status, 1);
+    assert.match(empty.stderr, /the log is empty/);
+
+    const clean = runLib(
+      'read_log "the log" "$WORK/c.log" printf "host foundry.example.com\\n"\n' +
+        'log_names_none "the log" "$WORK/c.log" spoofed.invalid 203.0.113.66',
+      smoke,
+    );
+    assert.equal(clean.status, 0, clean.stderr);
+    assert.match(clean.stdout, /ok: the log names no spoofed value/);
+
+    const spoofed = runLib(
+      'read_log "the log" "$WORK/d.log" printf "host spoofed.invalid\\n"\n' +
+        'log_names_none "the log" "$WORK/d.log" spoofed.invalid',
+      smoke,
+    );
+    assert.equal(spoofed.status, 1);
+    assert.match(spoofed.stderr, /the log names a spoofed value/);
+  } finally {
+    rmSync(smoke.dir, { recursive: true, force: true });
+  }
 });
 
 // ---- the overlay -------------------------------------------------------------
