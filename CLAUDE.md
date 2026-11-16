@@ -220,8 +220,10 @@ Dark and light themes via CSS custom properties. Dark is the default.
   waited for, and `npm run e2e:gate-self-test` proves the gate fails when the
   journey is broken. `e2e/production-smoke/` runs the starter's production
   profile (TLS nginx, oauth2-proxy) against a mock OIDC provider and checks
-  the forwarded headers nginx sends oauth2-proxy on the wire (the **Starter
-  Production Profile** CI job). See `e2e/README.md`
+  the forwarded headers nginx sends oauth2-proxy on the wire, PKCE, and
+  oauth2-proxy's trusted-proxy range (the **Starter Production Profile** CI
+  job, a release-qualification gate in `QUALIFICATION_JOBS`). See
+  `e2e/README.md`
 - `docs/compatibility.md` / `docs/compatibility.json` - the Foundry–Edge
   pairing: the Edge image CI qualifies (`edge.image`), the published Edge
   release the Foundry release pairs with (`edge.release`) and its requirements,

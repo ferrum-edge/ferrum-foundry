@@ -8,6 +8,7 @@ export const QUALIFICATION_JOBS = [
   "Quality Gate (Node 24)",
   "Pinned Gateway Contract",
   "Deployment Starter",
+  "Starter Production Profile",
   "Critical Journeys",
   "Container Gate (linux/amd64)",
   "Container Gate (linux/arm64)",

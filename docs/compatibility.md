@@ -148,7 +148,9 @@ qualifies only if:
    `edge.release` and moves `edge.image` to that release must pass every job
    before any Foundry release is published: Quality Gate, Pinned Gateway
    Contract (including capability parity, writable and read-only), Deployment
-   Starter, Critical Journeys, and Container Gate.
+   Starter, Starter Production Profile, Critical Journeys, and Container Gate.
+   `QUALIFICATION_JOBS` in `scripts/hosted-qualification.mjs` is that list;
+   release readiness refuses a run in which any of them did not succeed.
 
 `node scripts/supported-pairing.mjs release-ready` verifies this through hosted
 GitHub Actions with `actions: read` and `contents: read`. The release workflow
@@ -535,10 +537,17 @@ envelope; they do not qualify other Edge images or gateway modes.
 | Read-only admin API | `database` started with `FERRUM_ADMIN_READ_ONLY=true` | Pinned Gateway Contract (capability parity, read-only half) |
 | Roles | `viewer`, `operator`, `admin` | capability parity (every surface and the launch reads, per role); critical journeys through the identity proxy |
 | Authentication | `trusted-proxy` behind the starter's nginx identity proxy, with the shared group-to-role policy | Deployment Starter, Critical Journeys |
+| Production identity path | The starter's `production` profile as shipped: TLS nginx and oauth2-proxy (OIDC with PKCE S256, `--trusted-proxy-ip` set to the stack's subnet) against a mock OIDC provider, with no gateway | Starter Production Profile |
 | Deployment path | `deploy/starter` (Compose) with the production Foundry image | Deployment Starter, Critical Journeys |
 | Browser | Chromium bundled with `@playwright/test` 1.63.0, Desktop Chrome profile | Critical Journeys |
 | Container platforms | `linux/amd64`, `linux/arm64` | Container Gate (both builds start and serve a protected request) |
 | BFF Node.js | 22.22.2 and 24.15.0 minimums (the image ships 24) | Quality Gate matrix |
+
+The production identity path row and its gate are new for the v0.5.6
+candidate: v0.5.5 was not qualified on it. It adds a required gate, not a
+dimension of the machine-readable `tested` record, which describes the
+gateway, roles, authentication mode and deployment the gates run and stays
+as v0.5.5 recorded it.
 
 ### Tested scale
 
