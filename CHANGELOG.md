@@ -30,6 +30,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Release qualification requires the **Starter Production Profile** job:
+  `QUALIFICATION_JOBS` in `scripts/hosted-qualification.mjs`, the pending
+  requirement in `docs/compatibility.json`, and the gate list and tested
+  support table in `docs/compatibility.md` name it next to the Deployment
+  Starter, so `supported-pairing.mjs release-ready` refuses a hosted run in
+  which it did not succeed. The envelope's other rules are unchanged. A
+  test checks that every required job name is a job `ci.yml` runs.
 - Remove code nothing used, with its dependencies (#682): the `Tooltip`
   component and `TooltipProvider` with `@radix-ui/react-tooltip`; the
   `DataTable` component with `@tanstack/react-table` and
@@ -170,6 +177,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- The deployment starter's oauth2-proxy uses PKCE:
+  `oauth2-proxy.env.example` sets `OAUTH2_PROXY_CODE_CHALLENGE_METHOD=S256`,
+  so each login sends an S256 `code_challenge` and redeems the code with its
+  `code_verifier`, and an authorization code intercepted on its way to the
+  callback cannot be redeemed without it. The starter README and
+  `docs/deployment.md` say how to turn it off for a provider without PKCE
+  (comment the line out; never `plain`). The production smoke test requires
+  the challenge on every authorize redirect, a fresh one per login, and reads
+  the token request off the wire to check that its `code_verifier` computes
+  to that challenge; a contract test pins the setting.
+- The deployment starter's oauth2-proxy believes `X-Forwarded-*` and
+  `X-Real-IP` only from its own Compose network. The network now has a fixed
+  subnet, `10.73.88.0/24` (outside Docker's default pools and the usual
+  Podman, Kubernetes and cloud defaults), overridable with
+  `FOUNDRY_STARTER_SUBNET` in `.env`, and oauth2-proxy keeps
+  `--reverse-proxy` with `--trusted-proxy-ip` set to the same value. It used
+  to trust those headers from any peer, which was safe only while nothing
+  but nginx could reach it. The production smoke test checks that the
+  network and the flag agree, then sends forged headers straight to
+  oauth2-proxy: from inside the range they are believed (the positive
+  control), and from a second network outside it they change neither the
+  post-login redirect nor the host and address oauth2-proxy logs. The docs
+  note that Foundry still trusts only the last `X-Forwarded-For` hop, which
+  nginx appends. **Upgrade note:** Compose does not change an existing
+  network's subnet, so bring a running starter stack down
+  (`docker compose --profile <profile> down`) before the next `up`; if
+  `10.73.88.0/24` overlaps a network on the host, set
+  `FOUNDRY_STARTER_SUBNET`.
 - The release workflow's publishing jobs (`docker`, `docker-manifest`,
   `create-release`) run in the `release` environment, so its required
   reviewers approve a release before anything is pushed (#684). A contract
