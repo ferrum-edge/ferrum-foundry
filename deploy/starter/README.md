@@ -137,8 +137,9 @@ or `unmapped`). It is for a first run and for CI. Do not expose it.
 - **nginx, not the client, sets what Foundry trusts.** The BFF trusts
   `X-Forwarded-*` from nginx, its directly connected hop, so on `location /`
   (in both profiles) nginx sets `X-Forwarded-Host`, `-Proto` and `X-Real-IP`,
-  clears `X-Forwarded-Uri` and `X-Auth-Request-Redirect`, and appends its peer
-  to `X-Forwarded-For`, the only hop the BFF trusts.
+  clears `X-Forwarded-Uri`, `X-Auth-Request-Redirect` and oauth2-proxy's
+  `X-Auth-Request-*` identity headers, and appends its peer to
+  `X-Forwarded-For`, the only hop the BFF trusts.
 - **`FERRUM_AUTH_MODE=trusted-proxy` with `NODE_ENV=production`.** The BFF
   refuses static-token auth in production.
 - **Third-party images are pinned by tag and digest**

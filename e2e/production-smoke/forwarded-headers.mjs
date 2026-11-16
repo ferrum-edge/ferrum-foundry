@@ -15,12 +15,16 @@
 //     /oauth2/auth subrequest;
 //   - at Foundry, which trusts X-Forwarded-* from nginx, X-Forwarded-Host,
 //     -Proto and X-Real-IP are nginx's, X-Forwarded-For ends with nginx's
-//     peer, and X-Forwarded-Uri and X-Auth-Request-Redirect are not sent;
+//     peer, and X-Forwarded-Uri, X-Auth-Request-Redirect and oauth2-proxy's
+//     X-Auth-Request-* identity headers are not sent;
 //   - at every upstream, X-Request-Id is nginx's own $request_id;
 //   - no spoofed value reaches the upstream in any of them.
 //
-// Any other header that still carries a client value fails at Foundry and is
-// reported at oauth2-proxy (see e2e/README.md).
+// "Spoofed value" means one of the marker strings in the expectations: the
+// probes put a marker in every forwarded and identity value they forge (all
+// but the role, an enum the session check covers). Any other header carrying
+// a marker fails at Foundry and is reported at oauth2-proxy (see
+// e2e/README.md). A client header with no marker is not detected.
 //
 //   node e2e/production-smoke/forwarded-headers.mjs <capture.pcap> <expectations.json>
 
@@ -34,6 +38,17 @@ export const REDIRECT_HEADER = "x-auth-request-redirect";
 
 /** Logged by oauth2-proxy as the request ID; nginx sends its own $request_id. */
 export const REQUEST_ID_HEADER = "x-request-id";
+
+/**
+ * oauth2-proxy's identity response headers. nginx reads them from the auth
+ * subrequest; a client's copies must never reach Foundry under these names.
+ */
+export const OAUTH2_PROXY_IDENTITY_HEADERS = [
+  "x-auth-request-user",
+  "x-auth-request-email",
+  "x-auth-request-preferred-username",
+  "x-auth-request-groups",
+];
 
 /** The header the smoke test marks each probe with. nginx forwards it untouched. */
 export const PROBE_HEADER = "x-smoke-probe";
@@ -263,7 +278,7 @@ function rulesFor(probe, upstream, { host, proto }) {
       "x-real-ip": isAddress,
       [REQUEST_ID_HEADER]: isRequestId,
     },
-    absent: ["x-forwarded-uri", REDIRECT_HEADER],
+    absent: ["x-forwarded-uri", REDIRECT_HEADER, ...OAUTH2_PROXY_IDENTITY_HEADERS],
     appendedForwardedFor: true,
   };
 }

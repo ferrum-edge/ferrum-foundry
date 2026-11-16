@@ -53,6 +53,13 @@ SPOOFED_ADDRESS=203.0.113.66
 SPOOFED_HOST=spoofed.invalid
 SPOOFED_URI=/spoofed/uri
 SPOOFED_REQUEST_ID=smoke-spoofed-request-id
+# Every identity value a probe claims carries one of these markers, so the wire
+# check can recognise it wherever it lands. (The role is an enum and cannot;
+# the session check below proves the client's role is ignored.)
+SPOOFED_USER=spoofed-user
+SPOOFED_GROUP=spoofed-group
+SPOOFED_NAMESPACE=spoofed-namespace
+SPOOFED_SECRET=spoofed-proof-secret
 
 fail() {
   echo "::error::$*" >&2
@@ -234,7 +241,8 @@ session_field() {
 }
 
 # The forwarded headers a client sends to try to steer oauth2-proxy, plus the
-# identity headers it sends to try to steer Foundry.
+# identity headers (Foundry's and oauth2-proxy's) it sends to try to steer
+# Foundry.
 SPOOF_HEADERS=(
   -H "X-Forwarded-For: $SPOOFED_ADDRESS"
   -H "X-Real-IP: $SPOOFED_ADDRESS"
@@ -243,12 +251,14 @@ SPOOF_HEADERS=(
   -H "X-Forwarded-Uri: $SPOOFED_URI"
   -H "X-Auth-Request-Redirect: https://$SPOOFED_HOST/after-login"
   -H "X-Request-Id: $SPOOFED_REQUEST_ID"
-  -H "X-Forwarded-User: spoofed-user@example.com"
+  -H "X-Forwarded-User: $SPOOFED_USER@example.com"
   -H "X-Ferrum-Role: admin"
-  -H "X-Ferrum-Namespaces: spoofed-namespace"
-  -H "X-Ferrum-Auth-Secret: spoofed-proof-secret-at-least-32-characters"
-  -H "X-Auth-Request-User: spoofed-user@example.com"
-  -H "X-Auth-Request-Groups: ferrum-admins"
+  -H "X-Ferrum-Namespaces: $SPOOFED_NAMESPACE"
+  -H "X-Ferrum-Auth-Secret: $SPOOFED_SECRET-at-least-32-characters"
+  -H "X-Auth-Request-User: $SPOOFED_USER@example.com"
+  -H "X-Auth-Request-Email: $SPOOFED_USER@example.com"
+  -H "X-Auth-Request-Preferred-Username: $SPOOFED_USER"
+  -H "X-Auth-Request-Groups: ferrum-admins,$SPOOFED_GROUP"
 )
 
 ensure_tcpdump() {
@@ -355,11 +365,15 @@ verify() {
     --arg spoofed_host "$SPOOFED_HOST" \
     --arg uri "$SPOOFED_URI" \
     --arg request_id "$SPOOFED_REQUEST_ID" \
+    --arg user "$SPOOFED_USER" \
+    --arg group "$SPOOFED_GROUP" \
+    --arg namespace "$SPOOFED_NAMESPACE" \
+    --arg secret "$SPOOFED_SECRET" \
     '{
       port: $port,
       host: $host,
       proto: "https",
-      spoofs: [$address, $spoofed_host, $uri, $request_id],
+      spoofs: [$address, $spoofed_host, $uri, $request_id, $user, $group, $namespace, $secret],
       probes: [
         {id: "start", path: "/oauth2/start", uri: "/oauth2/start?rd=%2F"},
         {id: "auth-anonymous", path: "/oauth2/auth", uri: "/smoke/anonymous"},

@@ -626,7 +626,8 @@ test("the production proxy sets every forwarded header oauth2-proxy reads", asyn
 test("the BFF receives only nginx's forwarded headers and request ID", async () => {
   // The BFF trusts X-Forwarded-* from its directly connected hop, nginx, so in
   // both profiles nginx sets or clears every one it could otherwise pass on
-  // from the client (an empty value sends no header). X-Forwarded-For appends
+  // from the client (an empty value sends no header), and clears the names
+  // oauth2-proxy uses for an identity. X-Forwarded-For appends
   // nginx's peer, the only hop the BFF trusts. oauth2-proxy logs X-Request-Id
   // as the request ID, and the BFF gets nginx's ID as well.
   const production = await readFile(new URL("nginx/foundry.conf", STARTER), "utf8");
@@ -638,6 +639,10 @@ test("the BFF receives only nginx's forwarded headers and request ID", async () 
     "X-Forwarded-Proto": "$scheme",
     "X-Forwarded-Uri": '""',
     "X-Auth-Request-Redirect": '""',
+    "X-Auth-Request-User": '""',
+    "X-Auth-Request-Email": '""',
+    "X-Auth-Request-Preferred-Username": '""',
+    "X-Auth-Request-Groups": '""',
     "X-Request-Id": "$request_id",
   };
   for (const [config, name] of [[production, "foundry.conf"], [demo, "foundry.demo.conf"]]) {

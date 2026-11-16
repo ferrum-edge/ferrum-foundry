@@ -28,7 +28,16 @@ const NGINX = "172.18.0.4";
 const OAUTH2_PROXY = "172.18.0.3";
 const PEER = "172.18.0.1";
 const HOST = "foundry.example.com";
-const SPOOFS = ["203.0.113.66", "spoofed.invalid", "/spoofed/uri", "smoke-spoofed-request-id"];
+const SPOOFS = [
+  "203.0.113.66",
+  "spoofed.invalid",
+  "/spoofed/uri",
+  "smoke-spoofed-request-id",
+  "spoofed-user",
+  "spoofed-group",
+  "spoofed-namespace",
+  "spoofed-proof-secret",
+];
 
 // ---- synthetic captures ----------------------------------------------------
 
@@ -297,6 +306,27 @@ test("Foundry gets nginx's host and no client X-Forwarded-Uri or redirect", () =
   other[2].headers.push(["x-original-host", "spoofed.invalid"]);
   assert.deepEqual(checkProbes(other, EXPECTATIONS).errors, [
     "probe foundry-session: x-original-host carried a client value to foundry (spoofed.invalid)",
+  ]);
+});
+
+test("a client's identity headers at Foundry fail", () => {
+  for (const [header, value] of [
+    ["x-auth-request-user", "spoofed-user@example.com"],
+    ["x-auth-request-email", "spoofed-user@example.com"],
+    ["x-auth-request-preferred-username", "spoofed-user"],
+    ["x-auth-request-groups", "ferrum-admins,spoofed-group"],
+  ]) {
+    const requests = cleanRequests();
+    requests[2].headers.push([header, value]);
+    assert.deepEqual(checkProbes(requests, EXPECTATIONS).errors, [
+      `probe foundry-session: ${header} must not reach foundry on /api/auth/session (${JSON.stringify([value])})`,
+    ]);
+  }
+  // inject.conf replaces these; a client copy left beside nginx's fails.
+  const forwardedUser = cleanRequests();
+  forwardedUser[2].headers.push(["x-forwarded-user", "spoofed-user@example.com"]);
+  assert.deepEqual(checkProbes(forwardedUser, EXPECTATIONS).errors, [
+    "probe foundry-session: x-forwarded-user carried a client value to foundry (spoofed-user@example.com)",
   ]);
 });
 
