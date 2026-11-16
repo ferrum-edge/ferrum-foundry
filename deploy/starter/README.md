@@ -49,7 +49,7 @@ config grows its own copy.
 | --- | --- |
 | `compose.yaml` | Both profiles. Third-party images are pinned as `name:tag@sha256:<digest>` |
 | `.env.example` | Foundry and gateway inputs, with placeholders. No working secrets |
-| `oauth2-proxy.env.example` | Identity-provider settings, read by oauth2-proxy alone |
+| `oauth2-proxy.env.example` | Identity-provider settings, PKCE included, read by oauth2-proxy alone |
 | `bootstrap-demo.sh` | Generates throwaway demo secrets; refuses to overwrite an existing `.env` |
 | `nginx/foundry.conf` | Production reverse proxy |
 | `nginx/foundry.demo.conf` | Demo reverse proxy plus the stub identity provider |
@@ -91,6 +91,8 @@ or `unmapped`). It is for a first run and for CI. Do not expose it.
    The files are separate on purpose. `.env` holds the gateway signing key and
    the proof secret; `oauth2-proxy.env` holds the `OAUTH2_PROXY_*` settings,
    which oauth2-proxy reads directly. Each service gets only its own file.
+   Keep `OAUTH2_PROXY_CODE_CHALLENGE_METHOD=S256` unless your provider lacks
+   PKCE (see [Still yours to decide](#still-yours-to-decide)).
    (The IdP settings are not Compose variables because Compose interpolates the
    whole file for every profile, and a production-only requirement would stop
    the demo from starting.)
@@ -134,12 +136,34 @@ or `unmapped`). It is for a first run and for CI. Do not expose it.
   request URI on the sign-in routes and cleared on the subrequest, and every
   upstream gets nginx's own `X-Request-Id` (`$request_id`), so a client cannot
   choose the request ID oauth2-proxy logs.
+- **oauth2-proxy believes those headers only from this stack's network.**
+  The Compose network has a fixed subnet, `10.73.88.0/24` unless
+  `FOUNDRY_STARTER_SUBNET` in `.env` says otherwise, and oauth2-proxy runs
+  with `--trusted-proxy-ip` set to the same value. A request from an address
+  outside that range is judged by its own Host, path and peer address, so a
+  client outside the range that reaches oauth2-proxy directly cannot choose
+  the redirect, host or client address it acts on. The range is not nginx
+  alone: it also holds the Docker host (the bridge gateway, which a Compose
+  subnet always includes) and every container on the network, and each of
+  them is believed as nginx is. Anything that can send from the Docker host
+  is therefore trusted, so attach nothing else to the network. The
+  production smoke test sends the same forged headers from inside and from
+  outside the range and checks that only the inside copy is believed.
 - **nginx, not the client, sets what Foundry trusts.** The BFF trusts
   `X-Forwarded-*` from nginx, its directly connected hop, so on `location /`
   (in both profiles) nginx sets `X-Forwarded-Host`, `-Proto` and `X-Real-IP`,
   clears `X-Forwarded-Uri`, `X-Auth-Request-Redirect` and oauth2-proxy's
   `X-Auth-Request-*` identity headers, and appends its peer to
-  `X-Forwarded-For`, the only hop the BFF trusts.
+  `X-Forwarded-For` (`$proxy_add_x_forwarded_for`). Foundry trusts only that
+  last hop: the client's own list, which nginx keeps in front of it, is never
+  taken as the client address.
+- **PKCE with S256.** `oauth2-proxy.env.example` sets
+  `OAUTH2_PROXY_CODE_CHALLENGE_METHOD=S256`, so every login sends a fresh
+  `code_challenge` to the provider and redeems the code with its
+  `code_verifier`. An authorization code stolen on its way back to the
+  callback is useless without the verifier, which never leaves oauth2-proxy.
+  The production smoke test checks the challenge on the authorize redirect
+  and the verifier in the token request, on the wire.
 - **`FERRUM_AUTH_MODE=trusted-proxy` with `NODE_ENV=production`.** The BFF
   refuses static-token auth in production.
 - **Third-party images are pinned by tag and digest**
@@ -168,6 +192,20 @@ or `unmapped`). It is for a first run and for CI. Do not expose it.
   - The email is a weaker actor: providers let it change and be reassigned.
     If you change what oauth2-proxy sends as `X-Auth-Request-User`, re-run the
     smoke test to see what Foundry receives.
+- **A provider without PKCE.** If your provider rejects the
+  `code_challenge` parameters (the login fails at the authorize or token
+  step), comment out `OAUTH2_PROXY_CODE_CHALLENGE_METHOD` in
+  `oauth2-proxy.env` (an empty value also turns it off) and restart
+  oauth2-proxy. Logins then rely on the client secret alone to redeem a code.
+  Do not switch to `plain`, which sends the verifier itself as the challenge.
+- **The network range.** If `10.73.88.0/24` overlaps another Docker network,
+  `up` fails with an overlapping-pool error; if it overlaps a LAN or VPN the
+  host reaches, the containers lose their route to it. Set
+  `FOUNDRY_STARTER_SUBNET` in `.env` to a free private IPv4 range: Compose
+  uses it for both the network and oauth2-proxy's `--trusted-proxy-ip`, so
+  the two never disagree. If you put another proxy in front of nginx, keep it
+  off this network: oauth2-proxy should believe forwarded headers from the
+  stack's own peers, not from a proxy whose headers nginx already replaces.
 - **Secrets.** Plain files are the simplest thing that works; a secret manager
   that renders the same files is better.
 - **Namespace grants.** `nginx/identity/policy.conf` ships one namespace and

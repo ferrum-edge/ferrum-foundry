@@ -26,8 +26,12 @@ workflow (`.github/workflows/ci.yml`) has passed:
    the starter's production profile as shipped (TLS nginx and oauth2-proxy)
    against a mock OIDC provider: it completes a login with curl, checks the
    identity Foundry receives, and checks on the wire that nginx sets every
-   forwarded header oauth2-proxy reads
-   ([production profile](../e2e/README.md#the-production-profile)).
+   forwarded header oauth2-proxy reads, that each login uses PKCE (an S256
+   challenge on the authorize redirect, its verifier in the token request),
+   and that oauth2-proxy believes forwarded headers only from the stack's own
+   subnet ([production profile](../e2e/README.md#the-production-profile)).
+   Release qualification requires it with the other pairing gates
+   (`QUALIFICATION_JOBS` in `scripts/hosted-qualification.mjs`).
 4. **Container Gate** (amd64 and arm64): builds the release Dockerfile, checks
    that a planted `.env` canary is absent from image history and layers,
    requires a numeric non-root user and runs Node as the entrypoint to prove

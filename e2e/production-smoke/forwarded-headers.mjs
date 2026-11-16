@@ -210,7 +210,10 @@ export function clientStreams(segments, port) {
   return result;
 }
 
-/** The HTTP/1.x request heads in one client byte stream. */
+/**
+ * The HTTP/1.x requests in one client byte stream: each head, and the body a
+ * Content-Length announces (as far as the capture holds it).
+ */
 export function parseRequests(stream) {
   const requests = [];
   let offset = 0;
@@ -226,10 +229,16 @@ export function parseRequests(stream) {
       if (colon <= 0) continue;
       headers.push([line.slice(0, colon).trim().toLowerCase(), line.slice(colon + 1).trim()]);
     }
-    requests.push({ method: requestLine[1], target: requestLine[2], headers });
     const contentLength = headers.find(([name]) => name === "content-length")?.[1];
     offset = end + HEADER_END.length;
-    if (contentLength && CONTENT_LENGTH_PATTERN.test(contentLength)) offset += Number(contentLength);
+    const length = contentLength && CONTENT_LENGTH_PATTERN.test(contentLength) ? Number(contentLength) : 0;
+    requests.push({
+      method: requestLine[1],
+      target: requestLine[2],
+      headers,
+      body: stream.subarray(offset, Math.min(stream.length, offset + length)),
+    });
+    offset += length;
   }
   return requests;
 }

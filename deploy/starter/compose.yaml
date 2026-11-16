@@ -88,7 +88,8 @@ services:
     # demo run does not have to supply production identity settings. Missing
     # ones are reported by oauth2-proxy itself at startup. `required: false`
     # keeps the demo profile, which never runs this service, from needing the
-    # file to exist.
+    # file to exist. PKCE (OAUTH2_PROXY_CODE_CHALLENGE_METHOD=S256) is set
+    # there too, because whether it can be used depends on the provider.
     env_file:
       - path: oauth2-proxy.env
         required: false
@@ -103,12 +104,16 @@ services:
       - --allowed-group=ferrum-viewers
       - --set-xauthrequest=true
       # Trusts the X-Forwarded-* headers nginx sets (nginx/foundry.conf
-      # overwrites every one of them). Without --trusted-proxy-ip it trusts
-      # them from any peer, which is safe here only because this service
-      # publishes no port and the starter sets neither --trusted-ip nor a
-      # skip-auth route. A deployment that adds either must also set
-      # --trusted-proxy-ip to the proxy's address.
+      # overwrites every one of them), but only from a peer on this stack's
+      # own network (`networks.default` below): a request from any other
+      # address is judged by its own Host, path and peer address, whatever
+      # X-Forwarded-* or X-Real-IP it carries. The range also holds the
+      # Docker host (the bridge gateway) and every container on this network,
+      # so keep it to the services here. This service still publishes no
+      # port. Both values come from FOUNDRY_STARTER_SUBNET, so they cannot
+      # drift apart.
       - --reverse-proxy=true
+      - --trusted-proxy-ip=${FOUNDRY_STARTER_SUBNET:-10.73.88.0/24}
       - --http-address=0.0.0.0:4180
 
   proxy:
@@ -209,3 +214,18 @@ services:
       timeout: 3s
       retries: 5
       start_period: 5s
+
+# Every service shares one network with a fixed subnet, so oauth2-proxy can
+# trust X-Forwarded-* from this range alone (--trusted-proxy-ip above) instead
+# of from any peer. 10.73.88.0/24 lies outside Docker's default address pools
+# (172.17.0.0/16-172.31.0.0/16 and 192.168.0.0/16) and outside the defaults of
+# Podman, kubeadm, k3s, and the major clouds' default networks. If it overlaps
+# another Docker network, `up` fails with an overlapping-pool error; if it
+# overlaps a network the host reaches (a LAN or a VPN), containers lose their
+# route to it. In either case set FOUNDRY_STARTER_SUBNET in .env to a free
+# private range. Both profiles use this network; no published port changes.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${FOUNDRY_STARTER_SUBNET:-10.73.88.0/24}

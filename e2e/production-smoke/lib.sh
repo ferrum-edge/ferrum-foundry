@@ -92,3 +92,47 @@ log_names_none() {
   fi
   echo "ok: $label names no spoofed value"
 }
+
+# ---- the trust boundary (check 4) --------------------------------------------
+
+# The default network's subnet(s) in a rendered Compose configuration
+# (`docker compose config --format json` on stdin), space-separated. Compose
+# has already resolved FOUNDRY_STARTER_SUBNET there, from the shell or from the
+# starter's .env, so this is the value the stack runs with.
+rendered_subnets() {
+  jq -r '[.networks.default.ipam.config[]?.subnet // empty] | join(" ")'
+}
+
+# oauth2-proxy's --trusted-proxy-ip value(s) in the same rendered configuration.
+rendered_trusted_proxy_ips() {
+  jq -r '[.services["oauth2-proxy"].command[]?
+    | select(startswith("--trusted-proxy-ip=")) | ltrimstr("--trusted-proxy-ip=")] | join(" ")'
+}
+
+# Prints "<first> <last>" for an IPv4 CIDR, as integers. Fails on anything else.
+ipv4_cidr_bounds() {
+  local cidr="$1" octet address=0 bits size
+  if ! [[ "$cidr" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})/([0-9]{1,2})$ ]]; then
+    fail "'$cidr' is not an IPv4 CIDR"
+  fi
+  for octet in "${BASH_REMATCH[@]:1:4}"; do
+    (( 10#$octet <= 255 )) || fail "'$cidr' is not an IPv4 CIDR"
+    address=$(( address * 256 + 10#$octet ))
+  done
+  bits=$(( 10#${BASH_REMATCH[5]} ))
+  (( bits <= 32 )) || fail "'$cidr' is not an IPv4 CIDR"
+  size=$(( 1 << (32 - bits) ))
+  address=$(( address - address % size ))
+  echo "$address $(( address + size - 1 ))"
+}
+
+# Succeeds when two IPv4 CIDRs share an address; fails the script on a value
+# that is not one, so a parse error is never read as "disjoint".
+ipv4_cidrs_overlap() {
+  local left right left_first left_last right_first right_last
+  left="$(ipv4_cidr_bounds "$1")" || exit 1
+  right="$(ipv4_cidr_bounds "$2")" || exit 1
+  read -r left_first left_last <<<"$left"
+  read -r right_first right_last <<<"$right"
+  (( left_first <= right_last && right_first <= left_last ))
+}

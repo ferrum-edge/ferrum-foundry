@@ -260,7 +260,8 @@ writing your own:
 | [`deploy/starter/nginx/foundry.conf`](../deploy/starter/nginx/foundry.conf) | Terminates TLS, runs `auth_request` against oauth2-proxy, proxies to the BFF |
 | [`deploy/starter/nginx/identity/policy.conf`](../deploy/starter/nginx/identity/policy.conf) | Group-to-role and group-to-namespace `map` blocks (`http` context) |
 | [`deploy/starter/nginx/identity/inject.conf`](../deploy/starter/nginx/identity/inject.conf) | The four `proxy_set_header` lines, with the proof secret read from `secrets/ferrum-proxy-secret.conf` |
-| [`deploy/starter/compose.yaml`](../deploy/starter/compose.yaml) | oauth2-proxy flags (`--set-xauthrequest`, `--reverse-proxy`, `--allowed-group=...`) |
+| [`deploy/starter/compose.yaml`](../deploy/starter/compose.yaml) | oauth2-proxy flags (`--set-xauthrequest`, `--reverse-proxy`, `--trusted-proxy-ip`, `--allowed-group=...`) and the network's fixed subnet |
+| [`deploy/starter/oauth2-proxy.env.example`](../deploy/starter/oauth2-proxy.env.example) | Identity-provider settings, including PKCE (`OAUTH2_PROXY_CODE_CHALLENGE_METHOD=S256`) |
 
 Point the SPA's sign-in and sign-out actions at the proxy:
 
@@ -285,14 +286,35 @@ Things that are easy to get wrong:
   on `/oauth2/auth`, which does not read it and would otherwise inherit the
   client's copy. oauth2-proxy runs with `--reverse-proxy` and believes these
   headers; a client's `X-Forwarded-For` or `X-Forwarded-Uri` passed through is
-  what its header-spoofing bypasses use. If you add `--trusted-ip` or a
-  skip-auth route, also set `--trusted-proxy-ip` to the proxy's address.
+  what its header-spoofing bypasses use.
+- **Believe those headers only from the proxy's network.** Set
+  oauth2-proxy's `--trusted-proxy-ip` (`OAUTH2_PROXY_TRUSTED_PROXY_IPS`) to
+  the narrowest range that holds the proxy. Without it oauth2-proxy believes
+  `X-Forwarded-*` and `X-Real-IP` from any peer that reaches it. The starter
+  gives its Compose network a fixed subnet (`10.73.88.0/24`, or
+  `FOUNDRY_STARTER_SUBNET` from `.env`) and passes the same value to
+  `--trusted-proxy-ip`, so a request from outside the stack's network is
+  judged by its own Host, path and peer address. That range is wider than
+  the proxy: it holds every container on the network and the Docker host
+  (the bridge gateway, which a Compose subnet always includes), and
+  oauth2-proxy believes each of them as it believes nginx. Attach nothing
+  else to the network. If you need oauth2-proxy to believe nginx alone, give
+  nginx a fixed address and trust only that address. Choose a range that overlaps no other Docker network
+  (`up` fails) and no LAN or VPN the host reaches (the containers lose their
+  route to it).
+- **Use PKCE.** Set `OAUTH2_PROXY_CODE_CHALLENGE_METHOD=S256` (the starter's
+  `oauth2-proxy.env.example` does), so each login sends a `code_challenge`
+  and redeems the code with its `code_verifier`; a code intercepted on its
+  way to the callback cannot be redeemed without the verifier. Only if your
+  provider rejects PKCE, comment that line out (an empty value also turns it
+  off). Never use `plain`.
 - **On the location that proxies to the BFF, set or clear every forwarded
   header too.** The BFF trusts `X-Forwarded-*` from the proxy, so set
   `X-Forwarded-Host` (`$host`), `X-Forwarded-Proto` (`$scheme`), `X-Real-IP`
   (`$remote_addr`) and `X-Request-Id` (`$request_id`), and append to
-  `X-Forwarded-For` (`$proxy_add_x_forwarded_for`; the BFF trusts only that
-  last hop). Set `X-Forwarded-Uri`, `X-Auth-Request-Redirect`, and
+  `X-Forwarded-For` (`$proxy_add_x_forwarded_for`). The BFF trusts only that
+  last hop, the proxy's own peer: the client's list in front of it is never
+  taken as the client address. Set `X-Forwarded-Uri`, `X-Auth-Request-Redirect`, and
   oauth2-proxy's identity headers (`X-Auth-Request-User`, `-Email`,
   `-Preferred-Username`, `-Groups`) to `""`, which sends no header, so no
   client copy of them reaches the BFF. `location /` in
@@ -799,6 +821,12 @@ SBOM attestations. See [Release and supply-chain gates](release-security.md).
       `X-Auth-Request-Redirect`, and `X-Request-Id` it sends oauth2-proxy and
       the BFF, as `deploy/starter/nginx/foundry.conf` does, and clears
       oauth2-proxy's `X-Auth-Request-*` identity headers toward the BFF.
+- [ ] oauth2-proxy's `--trusted-proxy-ip` names the proxy's address or the
+      network it shares with oauth2-proxy (the starter's Compose subnet, which
+      also holds the Docker host and every container on it), and nothing else
+      is attached to that network.
+- [ ] oauth2-proxy uses PKCE (`OAUTH2_PROXY_CODE_CHALLENGE_METHOD=S256`),
+      unless the identity provider does not support it.
 - [ ] Group-to-role mapping denies by default, so an unmapped user gets no role.
 - [ ] Every non-admin identity receives an exact `X-Ferrum-Namespaces` list.
 - [ ] `FERRUM_JWT_SECRET` is at least 32 UTF-8 bytes and
