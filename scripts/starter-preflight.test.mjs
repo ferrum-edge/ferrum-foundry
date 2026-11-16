@@ -1043,7 +1043,11 @@ test("oauth2-proxy trusts forwarded headers only from the stack's fixed subnet",
   assert.equal(COMMENTED_STARTER_SUBNET_PATTERN.exec(example)?.[1], subnet);
   assert.equal(parseEnvFile(example).FOUNDRY_STARTER_SUBNET, undefined, "a copied .env keeps the default");
 
-  // The production smoke test checks the running stack against the same default.
+  // The production smoke test takes the expected subnet from Compose's own
+  // resolution (`compose config`), so a .env override is compared like with
+  // like; it must not carry a second copy of the default.
   const smoke = await readFile(new URL("../e2e/production-smoke/run.sh", import.meta.url), "utf8");
-  assert.ok(smoke.includes(`STARTER_SUBNET="\${FOUNDRY_STARTER_SUBNET:-${subnet}}"`));
+  assert.ok(!smoke.includes(subnet), "run.sh must not hardcode the starter's subnet");
+  assert.ok(!smoke.includes("${FOUNDRY_STARTER_SUBNET"), "run.sh must not resolve the override itself");
+  assert.ok(smoke.includes("compose config --format json"));
 });

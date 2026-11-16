@@ -37,8 +37,9 @@
 #   run.sh down        stop the stack
 #
 # FOUNDRY_IMAGE selects the Foundry image, as it does for the starter, and
-# FOUNDRY_STARTER_SUBNET its network, as in .env. Needs docker compose, curl,
-# jq, openssl, node, and tcpdump with sudo for checks 2 and 3.
+# FOUNDRY_STARTER_SUBNET its network, from the shell or the starter's .env as
+# Compose resolves it. Needs docker compose, curl, jq, openssl, node, and
+# tcpdump with sudo for checks 2 and 3.
 
 set -euo pipefail
 
@@ -57,11 +58,10 @@ CLIENT_ID=foundry-starter-smoke
 NAMESPACE=ferrum-foundry-demo
 OAUTH2_PROXY_PORT=4180
 FOUNDRY_PORT=8080
-# compose.yaml's default; both the network and --trusted-proxy-ip use it.
-STARTER_SUBNET="${FOUNDRY_STARTER_SUBNET:-10.73.88.0/24}"
-# A network outside that range, for check 4 only. run.sh creates and removes it.
+# A network outside the trusted range, for check 4 only. run.sh creates and
+# removes it; Docker allocates its subnet, which check 4 proves is disjoint
+# from the stack's.
 OUTSIDE_NETWORK=foundry-smoke-outside
-OUTSIDE_SUBNET=10.74.88.0/24
 
 # Values a client must never get past nginx.
 SPOOFED_ADDRESS=203.0.113.66
@@ -477,6 +477,7 @@ address_on() {
 # 4. oauth2-proxy trusts X-Forwarded-* only from the stack's own subnet.
 trust_boundary() {
   local oauth2_proxy image networks network subnet trusted address result
+  local rendered expected outside_subnet
   step "4. oauth2-proxy believes X-Forwarded-* only from the stack's network"
   oauth2_proxy="$(compose ps -q oauth2-proxy)"
   [ -n "$oauth2_proxy" ] || fail "oauth2-proxy is not running"
@@ -488,8 +489,19 @@ trust_boundary() {
     "" | *" "*) fail "oauth2-proxy should be on exactly one network, found '$networks'" ;;
   esac
   network="$networks"
+  # What the stack should run with: Compose's own resolution of
+  # FOUNDRY_STARTER_SUBNET (the shell, then the starter's .env, then
+  # compose.yaml's default), from the same files and profile as `up`.
+  rendered="$(compose config --format json)"
+  expected="$(rendered_subnets <<<"$rendered")"
+  case "$expected" in
+    "" | *" "*) fail "the rendered configuration should give the default network one subnet, found '$expected'" ;;
+  esac
+  echo "Compose resolves the stack's subnet to $expected"
+  expect_equal "--trusted-proxy-ip in the rendered configuration" \
+    "$(rendered_trusted_proxy_ips <<<"$rendered")" "$expected"
   subnet="$(docker network inspect "$network" | jq -r '[.[0].IPAM.Config[].Subnet] | join(" ")')"
-  expect_equal "the stack network's subnet" "$subnet" "$STARTER_SUBNET"
+  expect_equal "the running network's subnet" "$subnet" "$expected"
   trusted="$(docker inspect "$oauth2_proxy" |
     jq -r '[.[0].Args[] | select(startswith("--trusted-proxy-ip=")) | ltrimstr("--trusted-proxy-ip=")] | join(" ")')"
   expect_equal "oauth2-proxy's --trusted-proxy-ip" "$trusted" "$subnet"
@@ -511,13 +523,23 @@ trust_boundary() {
   # probe only, as if a deployment had exposed it. The same forged headers
   # must change nothing: the redirect is the default "/".
   docker network rm "$OUTSIDE_NETWORK" >/dev/null 2>&1 || true
-  docker network create --subnet "$OUTSIDE_SUBNET" "$OUTSIDE_NETWORK" >/dev/null
+  docker network create "$OUTSIDE_NETWORK" >/dev/null ||
+    fail "Docker could not allocate a subnet for $OUTSIDE_NETWORK (are its address pools exhausted?)"
+  outside_subnet="$(docker network inspect "$OUTSIDE_NETWORK" |
+    jq -r '[.[0].IPAM.Config[].Subnet | select(contains(":") | not)] | join(" ")')"
+  case "$outside_subnet" in
+    "" | *" "*) fail "$OUTSIDE_NETWORK should have one IPv4 subnet, found '$outside_subnet'" ;;
+  esac
+  if ipv4_cidrs_overlap "$outside_subnet" "$subnet"; then
+    fail "Docker gave $OUTSIDE_NETWORK $outside_subnet, which overlaps the trusted range $subnet; the probe would not be outside it"
+  fi
+  echo "ok: $OUTSIDE_NETWORK's $outside_subnet is disjoint from the trusted range $subnet"
   docker network connect "$OUTSIDE_NETWORK" "$oauth2_proxy"
   address="$(address_on "$oauth2_proxy" "$OUTSIDE_NETWORK")"
   [ -n "$address" ] || fail "oauth2-proxy has no address on $OUTSIDE_NETWORK"
   result="$(direct_probe "$image" "$OUTSIDE_NETWORK" "$address" "$OUTSIDE_PROBE" "$OUTSIDE_PROBE_ADDRESS")"
   docker network disconnect "$OUTSIDE_NETWORK" "$oauth2_proxy"
-  echo "outside, from $OUTSIDE_SUBNET: $result"
+  echo "outside, from $outside_subnet: $result"
   expect_equal "status of a direct /oauth2/start from outside the range" "$(jq -r .status <<<"$result")" 302
   expect_equal "post-login redirect for an untrusted peer (its X-Forwarded-Uri ignored)" \
     "$(jq -r .redirect <<<"$result")" "/"

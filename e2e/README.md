@@ -144,16 +144,20 @@ e2e/production-smoke/run.sh down
   Neither oauth2-proxy's log nor Foundry's may name a spoofed value, and a log
   that cannot be read fails;
 - oauth2-proxy believes `X-Forwarded-*` only from the stack's network.
-  The network's subnet and oauth2-proxy's `--trusted-proxy-ip` must both be
-  `FOUNDRY_STARTER_SUBNET` (`10.73.88.0/24` by default). `direct-probe.mjs`,
+  The running network's subnet and oauth2-proxy's `--trusted-proxy-ip` must
+  both equal the subnet Compose renders (`docker compose config`), which
+  resolves `FOUNDRY_STARTER_SUBNET` from the shell or the starter's `.env`
+  (`10.73.88.0/24` by default). `direct-probe.mjs`,
   run in a throwaway container of the Foundry image, then asks oauth2-proxy
   directly to start a login with a forged `X-Forwarded-Uri`,
   `X-Forwarded-Host` and `X-Real-IP`: once from the stack's network, where
   the forged path becomes the post-login redirect (carried in the authorize
   redirect's `state`) and the forged host and address appear in
   oauth2-proxy's log, and once from a network outside the range
-  (`foundry-smoke-outside`, `10.74.88.0/24`, attached to oauth2-proxy for
-  that probe only), where the redirect stays `/` and the log names neither.
+  (`foundry-smoke-outside`, attached to oauth2-proxy for that probe only),
+  where the redirect stays `/` and the log names neither. Docker allocates
+  that network's subnet, and the check fails before the probe unless it is
+  disjoint from the trusted range.
 
 Every forwarded and identity value the probes forge carries a marker string,
 except the role, which is an enum; the session check shows the client's role
