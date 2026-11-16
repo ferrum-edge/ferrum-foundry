@@ -129,15 +129,16 @@ e2e/production-smoke/run.sh down
   (`forwarded-headers.mjs`), the requests to oauth2-proxy carry exactly one of
   each forwarded header it reads, with nginx's own value, on `/oauth2/start`
   and on the `/oauth2/auth` subrequest. `X-Auth-Request-Redirect` is the
-  request URI on `/oauth2/start` and absent on the subrequest. Both
-  oauth2-proxy and Foundry receive nginx's `$request_id` as `X-Request-Id`.
-  oauth2-proxy's log must name no spoofed address, host, redirect, or request
-  ID.
+  request URI on `/oauth2/start` and absent on the subrequest. Foundry
+  receives nginx's `X-Forwarded-Host`, `-Proto` and `X-Real-IP`, an
+  `X-Forwarded-For` ending with nginx's peer, and no `X-Forwarded-Uri` or
+  `X-Auth-Request-Redirect`. Both upstreams receive nginx's `$request_id` as
+  `X-Request-Id`. Neither oauth2-proxy's log nor Foundry's may name a spoofed
+  value.
 
-A client value that reaches an upstream in a header no check covers is printed
-as a note rather than failed, for example the client's `X-Forwarded-For` list,
-which `location /` extends for Foundry, and `X-Forwarded-Host`, which it passes
-through.
+Any other header carrying a client value fails at Foundry. At oauth2-proxy it
+is printed as a note, because oauth2-proxy reads only the headers checked
+above.
 
 CI runs this as the **Starter Production Profile** job, against the image built
 from the commit, and prints every container's logs when it fails.

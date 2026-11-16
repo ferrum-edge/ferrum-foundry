@@ -134,6 +134,11 @@ or `unmapped`). It is for a first run and for CI. Do not expose it.
   request URI on the sign-in routes and cleared on the subrequest, and every
   upstream gets nginx's own `X-Request-Id` (`$request_id`), so a client cannot
   choose the request ID oauth2-proxy logs.
+- **nginx, not the client, sets what Foundry trusts.** The BFF trusts
+  `X-Forwarded-*` from nginx, its directly connected hop, so on `location /`
+  (in both profiles) nginx sets `X-Forwarded-Host`, `-Proto` and `X-Real-IP`,
+  clears `X-Forwarded-Uri` and `X-Auth-Request-Redirect`, and appends its peer
+  to `X-Forwarded-For`, the only hop the BFF trusts.
 - **`FERRUM_AUTH_MODE=trusted-proxy` with `NODE_ENV=production`.** The BFF
   refuses static-token auth in production.
 - **Third-party images are pinned by tag and digest**

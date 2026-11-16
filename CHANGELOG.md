@@ -183,9 +183,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   inherited the client's value; it stays set to the request URI on the
   `/oauth2/` sign-in routes, the only ones that read it. The production smoke
   test fails if either reaches an upstream, and contract tests pin the
-  directives. The starter README now states that the actor Foundry receives
-  is the ID token's `sub` claim, and what that means when choosing an
-  identity provider.
+  directives. The starter README now states that the actor Foundry receives is
+  the ID token's `sub` claim, and what that means when choosing an identity
+  provider. Both starter proxies now also set or clear every `X-Forwarded-*`
+  header and `X-Auth-Request-Redirect` they send Foundry. The BFF trusts
+  `X-Forwarded-*` from nginx, but `location /` set no `X-Forwarded-Host`, so a
+  client's value reached it; the production smoke test showed it in the BFF's
+  request log. nginx now sends `X-Forwarded-Host: $host` and no
+  `X-Forwarded-Uri` or `X-Auth-Request-Redirect`. `X-Forwarded-For` still
+  appends nginx's peer to the client's list, and the BFF trusts only that last
+  hop. The smoke test fails if any other client value reaches Foundry, and a
+  contract test pins the directives in both configurations.
 - The deployment starter runs oauth2-proxy v7.15.6
   (`quay.io/oauth2-proxy/oauth2-proxy:v7.15.6@sha256:c3415e8660af553f5e18f5d90db050614c02493c0ac6260ac59442f6d9b12048`)
   instead of v7.7.1, and nginx 1.31.8 mainline
