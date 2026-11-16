@@ -335,10 +335,16 @@ export function checkProbes(requests, expectations) {
         }
       }
     }
+    // A header that must be absent may carry an identity or a secret, so its
+    // value is never logged: only the count and the forged marker it holds.
     for (const name of absent) {
       const found = values(request, name);
-      seen[name] = found;
-      if (found.length !== 0) fail(`${name} must not reach ${upstream} on ${probe.path} (${JSON.stringify(found)})`);
+      seen[name] = found.length === 0 ? [] : [`(${found.length} sent, value not shown)`];
+      if (found.length !== 0) {
+        const marker = found.map((value) => containsSpoof(value, spoofs)).find(Boolean);
+        fail(`${name} must not reach ${upstream} on ${probe.path} (${found.length} sent${
+          marker ? `, with the forged "${marker}"` : ""})`);
+      }
     }
     if (appendedForwardedFor) {
       const found = values(request, "x-forwarded-for");
@@ -352,12 +358,13 @@ export function checkProbes(requests, expectations) {
     }
 
     observed.push({ probe: probe.id, upstream, target: request.target, headers: seen });
+    // Name only the forged marker, never the header's value.
     for (const [name, value] of request.headers) {
       if (name in seen) continue;
-      const spoof = containsSpoof(value, spoofs);
-      if (!spoof) continue;
-      if (upstream === "foundry") fail(`${name} carried a client value to foundry (${value})`);
-      else passthrough.push({ probe: probe.id, upstream, header: name, value });
+      const marker = containsSpoof(value, spoofs);
+      if (!marker) continue;
+      if (upstream === "foundry") fail(`${name} carried the forged "${marker}" to foundry`);
+      else passthrough.push({ probe: probe.id, upstream, header: name, marker });
     }
   }
   return { errors, observed, passthrough };
@@ -380,8 +387,8 @@ async function main(capturePath, expectationsPath) {
       console.log(`  ${name}: ${found.length > 0 ? found.join(" | ") : "(not sent)"}`);
     }
   }
-  for (const { probe, upstream, header, value } of passthrough) {
-    console.log(`\nnote: ${probe}: ${header} carried a client value to ${upstream} (${value})`);
+  for (const { probe, upstream, header, marker } of passthrough) {
+    console.log(`\nnote: ${probe}: ${header} carried the forged "${marker}" to ${upstream}`);
   }
   if (errors.length > 0) {
     for (const error of errors) console.error(`::error::${error}`);

@@ -259,7 +259,7 @@ test("a client's X-Auth-Request-Redirect on the auth subrequest fails", () => {
   requests[1].headers.push(["x-auth-request-redirect", "https://spoofed.invalid/after-login"]);
   const { errors } = checkProbes(requests, EXPECTATIONS);
   assert.deepEqual(errors, [
-    'probe auth-session: x-auth-request-redirect must not reach oauth2-proxy on /oauth2/auth (["https://spoofed.invalid/after-login"])',
+    'probe auth-session: x-auth-request-redirect must not reach oauth2-proxy on /oauth2/auth (1 sent, with the forged "spoofed.invalid")',
   ]);
 });
 
@@ -294,39 +294,45 @@ test("Foundry gets nginx's host and no client X-Forwarded-Uri or redirect", () =
   assert.ok(checkProbes(spoofedHost, EXPECTATIONS).errors
     .some((error) => error.includes("foundry-session: x-forwarded-host passed the client's value through")));
 
-  for (const [header, value] of [["x-forwarded-uri", "/spoofed/uri"], ["x-auth-request-redirect", "https://spoofed.invalid/"]]) {
+  for (const [header, value, marker] of [
+    ["x-forwarded-uri", "/spoofed/uri", "/spoofed/uri"],
+    ["x-auth-request-redirect", "https://spoofed.invalid/", "spoofed.invalid"],
+  ]) {
     const requests = cleanRequests();
     requests[2].headers.push([header, value]);
     assert.deepEqual(checkProbes(requests, EXPECTATIONS).errors, [
-      `probe foundry-session: ${header} must not reach foundry on /api/auth/session (${JSON.stringify([value])})`,
+      `probe foundry-session: ${header} must not reach foundry on /api/auth/session (1 sent, with the forged "${marker}")`,
     ]);
   }
 
   const other = cleanRequests();
   other[2].headers.push(["x-original-host", "spoofed.invalid"]);
   assert.deepEqual(checkProbes(other, EXPECTATIONS).errors, [
-    "probe foundry-session: x-original-host carried a client value to foundry (spoofed.invalid)",
+    'probe foundry-session: x-original-host carried the forged "spoofed.invalid" to foundry',
   ]);
 });
 
 test("a client's identity headers at Foundry fail", () => {
-  for (const [header, value] of [
-    ["x-auth-request-user", "spoofed-user@example.com"],
-    ["x-auth-request-email", "spoofed-user@example.com"],
-    ["x-auth-request-preferred-username", "spoofed-user"],
-    ["x-auth-request-groups", "ferrum-admins,spoofed-group"],
+  for (const [header, value, marker] of [
+    ["x-auth-request-user", "spoofed-user@example.com", "spoofed-user"],
+    ["x-auth-request-email", "spoofed-user@example.com", "spoofed-user"],
+    ["x-auth-request-preferred-username", "spoofed-user-name", "spoofed-user"],
+    ["x-auth-request-groups", "ferrum-admins,spoofed-group", "spoofed-group"],
   ]) {
     const requests = cleanRequests();
     requests[2].headers.push([header, value]);
-    assert.deepEqual(checkProbes(requests, EXPECTATIONS).errors, [
-      `probe foundry-session: ${header} must not reach foundry on /api/auth/session (${JSON.stringify([value])})`,
+    const { errors, observed } = checkProbes(requests, EXPECTATIONS);
+    assert.deepEqual(errors, [
+      `probe foundry-session: ${header} must not reach foundry on /api/auth/session (1 sent, with the forged "${marker}")`,
     ]);
+    // An identity value is never echoed into the job log.
+    assert.ok(!JSON.stringify({ errors, observed }).includes(value), header);
   }
   // inject.conf replaces these; a client copy left beside nginx's fails.
   const forwardedUser = cleanRequests();
   forwardedUser[2].headers.push(["x-forwarded-user", "spoofed-user@example.com"]);
   assert.deepEqual(checkProbes(forwardedUser, EXPECTATIONS).errors, [
-    "probe foundry-session: x-forwarded-user carried a client value to foundry (spoofed-user@example.com)",
+    'probe foundry-session: x-forwarded-user carried the forged "spoofed-user" to foundry',
   ]);
 });
 
@@ -350,7 +356,7 @@ test("at oauth2-proxy, a client value in a header no rule covers is reported, no
     probe: "auth-session",
     upstream: "oauth2-proxy",
     header: "x-original-uri",
-    value: "/spoofed/uri",
+    marker: "/spoofed/uri",
   }]);
 });
 
