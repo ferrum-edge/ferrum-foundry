@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
+  QUALIFICATION_JOBS,
   QUALIFICATION_RECORD,
   githubQualificationReader,
   qualificationErrors,
@@ -29,6 +31,10 @@ const REQUIRES_HOSTED_GITHUB_ACTIONS_PATTERN = /requires hosted GitHub Actions/;
 const INCOMPLETE_OR_UNREADABLE_QUALIFICATION_PATTERN =
   /incomplete qualification jobs|unreadable qualification record/;
 const CHANGED_DURING_VERIFICATION_PATTERN = /changed during verification/;
+const WORKFLOW_JOB_NAME_PATTERN = /^ {4}name: (.+)$/gm;
+const NODE_MATRIX_PATTERN = /^ {10}- node: (\S+)$/gm;
+const PLATFORM_MATRIX_PATTERN = /^ {10}- platform: (\S+)$/gm;
+const STARTER_PRODUCTION_JOB_PATTERN = /successful current-attempt job: Starter Production Profile/;
 
 const base = readSupportedPairing();
 const fixture = () => hostedQualificationFixture(base);
@@ -194,6 +200,51 @@ describe("hosted qualification binding", () => {
     const partial = structuredClone(evidence);
     partial.jobs.total_count += 1;
     assert.throws(() => requireHostedQualification(record, partial), INCOMPLETE_PATTERN);
+  });
+
+  it("requires the pairing gates, the production-profile smoke test included", () => {
+    assert.deepEqual(QUALIFICATION_JOBS, [
+      "Quality Gate (Node 22)",
+      "Quality Gate (Node 24)",
+      "Pinned Gateway Contract",
+      "Deployment Starter",
+      "Starter Production Profile",
+      "Critical Journeys",
+      "Container Gate (linux/amd64)",
+      "Container Gate (linux/arm64)",
+    ]);
+    const { record, evidence } = fixture();
+    const index = evidence.jobs.jobs.findIndex((job) => job.name === "Starter Production Profile");
+    assert.ok(index >= 0);
+    const skipped = structuredClone(evidence);
+    skipped.jobs.jobs[index].conclusion = "skipped";
+    assert.throws(
+      () => requireHostedQualification(record, skipped),
+      STARTER_PRODUCTION_JOB_PATTERN,
+    );
+  });
+
+  it("names only jobs the qualification workflow runs, as GitHub names them", () => {
+    // A renamed or removed job would make every qualification fail closed;
+    // a name that never existed would do the same. Expand the workflow's job
+    // names the way GitHub does for its two matrices.
+    const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+    const nodes = [...workflow.matchAll(NODE_MATRIX_PATTERN)].map((match) => match[1]);
+    const platforms = [...workflow.matchAll(PLATFORM_MATRIX_PATTERN)].map((match) => match[1]);
+    const names = new Set(
+      [...workflow.matchAll(WORKFLOW_JOB_NAME_PATTERN)].flatMap(([, name]) => {
+        if (name === "Quality Gate (Node ${{ matrix.node }})") {
+          return nodes.map((node) => `Quality Gate (Node ${node})`);
+        }
+        if (name === "Container Gate (${{ matrix.platform }})") {
+          return platforms.map((platform) => `Container Gate (${platform})`);
+        }
+        return [name];
+      }),
+    );
+    for (const job of QUALIFICATION_JOBS) {
+      assert.ok(names.has(job), `${job} is not a job in .github/workflows/ci.yml`);
+    }
   });
 
   it("rejects wrong producer source, base, tested commit, target ref and legacy bindings", () => {

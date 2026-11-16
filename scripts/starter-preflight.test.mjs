@@ -90,6 +90,14 @@ const FERRUM_AUTH_MAX_FAILURES_DEFAULT_PATTERN =
   /FERRUM_AUTH_MAX_FAILURES: \$\{FERRUM_AUTH_MAX_FAILURES:-10\}/;
 const FERRUM_AUTH_LOCKOUT_SECONDS_DEFAULT_PATTERN =
   /FERRUM_AUTH_LOCKOUT_SECONDS: \$\{FERRUM_AUTH_LOCKOUT_SECONDS:-60\}/;
+const CODE_CHALLENGE_FLAG_PATTERN = /code-challenge-method|CODE_CHALLENGE_METHOD/;
+const REVERSE_PROXY_FLAG_PATTERN = /^ {6}- --reverse-proxy=true$/m;
+const TRUSTED_PROXY_IP_FLAG_PATTERN = /^ {6}- --trusted-proxy-ip=(.*)$/gm;
+const DEFAULT_NETWORK_SUBNET_PATTERN =
+  /^networks:\n {2}default:\n {4}ipam:\n {6}config:\n {8}- subnet: (.*)$/m;
+const STARTER_SUBNET_VARIABLE_PATTERN = /^\$\{FOUNDRY_STARTER_SUBNET:-([0-9./]+)\}$/;
+const COMMENTED_STARTER_SUBNET_PATTERN = /^# FOUNDRY_STARTER_SUBNET=(\S+)$/m;
+const IPV4_CIDR_PATTERN = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d{1,2})$/;
 
 const STARTER = new URL("../deploy/starter/", import.meta.url);
 
@@ -960,4 +968,86 @@ test("the starter forwards the failed-authentication throttle settings to Foundr
   const example = parseEnvFile(await readFile(new URL(".env.example", STARTER), "utf8"));
   assert.equal(example.FERRUM_AUTH_MAX_FAILURES, "10");
   assert.equal(example.FERRUM_AUTH_LOCKOUT_SECONDS, "60");
+});
+
+/* ---------------- oauth2-proxy hardening ---------------- */
+
+/** [first, last] address of an IPv4 CIDR, as unsigned integers. */
+function cidrRange(cidr) {
+  const match = IPV4_CIDR_PATTERN.exec(cidr);
+  assert.ok(match, `${cidr} must be an IPv4 CIDR`);
+  const octets = match.slice(1, 5).map(Number);
+  const bits = Number(match[5]);
+  assert.ok(octets.every((octet) => octet <= 255) && bits <= 32, `${cidr} must be an IPv4 CIDR`);
+  const address = octets.reduce((value, octet) => value * 256 + octet, 0);
+  const size = 2 ** (32 - bits);
+  assert.equal(address % size, 0, `${cidr} must name its network address`);
+  return [address, address + size - 1];
+}
+
+function overlaps(left, right) {
+  const [leftFirst, leftLast] = cidrRange(left);
+  const [rightFirst, rightLast] = cidrRange(right);
+  return leftFirst <= rightLast && rightFirst <= leftLast;
+}
+
+test("oauth2-proxy uses PKCE with S256, set where an operator can turn it off", async () => {
+  const env = parseEnvFile(await readFile(new URL("oauth2-proxy.env.example", STARTER), "utf8"));
+  assert.equal(env.OAUTH2_PROXY_CODE_CHALLENGE_METHOD, "S256");
+  // oauth2-proxy lets a command-line flag override its environment, so a
+  // flag in compose.yaml would make the documented off switch (commenting the
+  // line out of oauth2-proxy.env) do nothing.
+  const compose = await readFile(new URL("compose.yaml", STARTER), "utf8");
+  const service = compose.slice(compose.indexOf("  oauth2-proxy:"), compose.indexOf("  proxy:"));
+  const flags = service.slice(service.indexOf("    command:"));
+  assert.doesNotMatch(flags, CODE_CHALLENGE_FLAG_PATTERN);
+});
+
+test("oauth2-proxy trusts forwarded headers only from the stack's fixed subnet", async () => {
+  const compose = await readFile(new URL("compose.yaml", STARTER), "utf8");
+  const service = compose.slice(compose.indexOf("  oauth2-proxy:"), compose.indexOf("  proxy:"));
+  assert.match(service, REVERSE_PROXY_FLAG_PATTERN, "oauth2-proxy keeps --reverse-proxy");
+
+  const trusted = [...service.matchAll(TRUSTED_PROXY_IP_FLAG_PATTERN)].map((match) => match[1]);
+  assert.equal(trusted.length, 1, "oauth2-proxy names one trusted proxy range");
+  const network = DEFAULT_NETWORK_SUBNET_PATTERN.exec(compose);
+  assert.ok(network, "compose.yaml gives the default network a fixed subnet");
+  // One variable feeds both, so the trusted range is always the network.
+  assert.equal(trusted[0], network[1], "--trusted-proxy-ip and the network subnet are the same value");
+  const fallback = STARTER_SUBNET_VARIABLE_PATTERN.exec(network[1]);
+  assert.ok(fallback, "the subnet is ${FOUNDRY_STARTER_SUBNET:-<default>}");
+  const subnet = fallback[1];
+
+  // Private, and clear of the ranges Docker hands out on its own, so the
+  // fixed subnet does not take a range another network on the host needs.
+  assert.ok(overlaps(subnet, "10.0.0.0/8"), `${subnet} must be an RFC 1918 range`);
+  // Docker's default pools (172.17-31 and 192.168), Azure's and Docker
+  // Desktop's usual 10.0/10.1, k3s, Podman, Kubernetes services, GCP's auto
+  // mode, and flannel's pods.
+  const crowded = [
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "10.0.0.0/15",
+    "10.42.0.0/15",
+    "10.88.0.0/15",
+    "10.96.0.0/12",
+    "10.128.0.0/9",
+    "10.244.0.0/16",
+  ];
+  for (const pool of crowded) {
+    assert.ok(!overlaps(subnet, pool), `${subnet} must not overlap ${pool}`);
+  }
+
+  // .env.example documents the override with the same default.
+  const example = await readFile(new URL(".env.example", STARTER), "utf8");
+  assert.equal(COMMENTED_STARTER_SUBNET_PATTERN.exec(example)?.[1], subnet);
+  assert.equal(parseEnvFile(example).FOUNDRY_STARTER_SUBNET, undefined, "a copied .env keeps the default");
+
+  // The production smoke test takes the expected subnet from Compose's own
+  // resolution (`compose config`), so a .env override is compared like with
+  // like; it must not carry a second copy of the default.
+  const smoke = await readFile(new URL("../e2e/production-smoke/run.sh", import.meta.url), "utf8");
+  assert.ok(!smoke.includes(subnet), "run.sh must not hardcode the starter's subnet");
+  assert.ok(!smoke.includes("${FOUNDRY_STARTER_SUBNET"), "run.sh must not resolve the override itself");
+  assert.ok(smoke.includes("compose config --format json"));
 });

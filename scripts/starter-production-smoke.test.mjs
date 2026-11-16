@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,9 +13,13 @@ import {
   parseRequests,
   readPcap,
 } from "../e2e/production-smoke/forwarded-headers.mjs";
+import { appRedirectFromLocation } from "../e2e/production-smoke/direct-probe.mjs";
+import { checkTokenExchange, s256Challenge } from "../e2e/production-smoke/pkce.mjs";
 
 const OVERLAY = new URL("../e2e/production-smoke/compose.yaml", import.meta.url);
 const SMOKE_LIB = fileURLToPath(new URL("../e2e/production-smoke/lib.sh", import.meta.url));
+const STARTER_COMPOSE = fileURLToPath(new URL("../deploy/starter/compose.yaml", import.meta.url));
+const STARTER_DEFAULT_SUBNET = "10.73.88.0/24";
 const ZOMBIE_STAT_PATTERN = /^\d+ \(.*\) Z /s;
 const COMPOSE_IMAGE_PATTERN = /^\s+image:\s*(\S+)/gm;
 const TOP_LEVEL_SERVICE_PATTERN = /^ {2}([a-z0-9][\w.-]*):\s*$/gm;
@@ -360,6 +364,125 @@ test("at oauth2-proxy, a client value in a header no rule covers is reported, no
   }]);
 });
 
+// ---- PKCE: the token request, read off the wire -------------------------------
+
+// RFC 7636 appendix B.
+const RFC_VERIFIER = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+const RFC_CHALLENGE = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+const MOCK_OIDC = "172.18.0.5";
+const TOKEN_PATH = "/default/token";
+const FAKE_CODE = "smoke-test-authorization-code";
+
+function httpPost(target, body) {
+  const bytes = Buffer.from(body, "latin1");
+  return Buffer.concat([
+    Buffer.from(
+      `POST ${target} HTTP/1.1\r\nHost: mock-oidc:8080\r\n` +
+        "Content-Type: application/x-www-form-urlencoded\r\n" +
+        `Content-Length: ${bytes.length}\r\n\r\n`,
+      "latin1",
+    ),
+    bytes,
+  ]);
+}
+
+function tokenBody(overrides = {}) {
+  const params = new URLSearchParams({
+    code: FAKE_CODE,
+    code_verifier: RFC_VERIFIER,
+    grant_type: "authorization_code",
+    redirect_uri: "https://foundry.example.com/oauth2/callback",
+  });
+  for (const [name, value] of Object.entries(overrides)) {
+    if (value === undefined) params.delete(name);
+    else params.set(name, value);
+  }
+  return params.toString();
+}
+
+/** The requests oauth2-proxy sent the provider, through a synthetic capture. */
+function capturedProviderRequests(...payloads) {
+  const frames = payloads.map((payload, index) => sll2(ipv4Tcp({
+    source: OAUTH2_PROXY, destination: MOCK_OIDC, sourcePort: 41000 + index, destinationPort: 8080,
+    sequence: 1000, payload,
+  })));
+  return clientStreams(readPcap(pcap(276, frames)), 8080).flatMap(parseRequests);
+}
+
+test("the S256 challenge is RFC 7636's", () => {
+  assert.equal(s256Challenge(RFC_VERIFIER), RFC_CHALLENGE);
+});
+
+test("a token request with the verifier of the authorize redirect's challenge passes", () => {
+  const requests = capturedProviderRequests(
+    // The discovery and JWKS reads share the port and are not token requests.
+    httpRequest("/default/.well-known/openid-configuration", [["Host", "mock-oidc:8080"]]),
+    httpPost(TOKEN_PATH, tokenBody()),
+  );
+  assert.equal(requests.at(-1).body.toString("latin1"), tokenBody());
+  assert.deepEqual(checkTokenExchange(requests, { tokenPath: TOKEN_PATH, challenge: RFC_CHALLENGE }), []);
+});
+
+test("a token request without the matching verifier fails, without printing the body", () => {
+  const otherVerifier = "a".repeat(43);
+  for (const [overrides, expected] of [
+    [{ code_verifier: undefined }, "the token request carries 0 code_verifier parameters, expected one"],
+    [{ code_verifier: otherVerifier }, "the code_verifier's S256 digest is not the authorize redirect's code_challenge"],
+    [{ code_verifier: "short" }, "the code_verifier is not 43-128 unreserved characters (length 5)"],
+    [{ grant_type: "refresh_token" }, 'the token request is not one authorization_code grant (["refresh_token"])'],
+  ]) {
+    const errors = checkTokenExchange(
+      capturedProviderRequests(httpPost(TOKEN_PATH, tokenBody(overrides))),
+      { tokenPath: TOKEN_PATH, challenge: RFC_CHALLENGE },
+    );
+    assert.deepEqual(errors, [expected], JSON.stringify(overrides));
+    for (const secret of [FAKE_CODE, RFC_VERIFIER, otherVerifier]) {
+      assert.ok(!errors.join("\n").includes(secret), "no body value is echoed");
+    }
+  }
+  const twice = `${tokenBody()}&code_verifier=${RFC_VERIFIER}`;
+  assert.deepEqual(
+    checkTokenExchange(capturedProviderRequests(httpPost(TOKEN_PATH, twice)), {
+      tokenPath: TOKEN_PATH,
+      challenge: RFC_CHALLENGE,
+    }),
+    ["the token request carries 2 code_verifier parameters, expected one"],
+  );
+});
+
+test("no token request, two, or a malformed challenge fails rather than passing on nothing", () => {
+  const options = { tokenPath: TOKEN_PATH, challenge: RFC_CHALLENGE };
+  assert.deepEqual(checkTokenExchange([], options), [
+    `expected exactly one token request to ${TOKEN_PATH}, found 0`,
+  ]);
+  const two = capturedProviderRequests(httpPost(TOKEN_PATH, tokenBody()), httpPost(TOKEN_PATH, tokenBody()));
+  assert.deepEqual(checkTokenExchange(two, options), [
+    `expected exactly one token request to ${TOKEN_PATH}, found 2`,
+  ]);
+  const one = capturedProviderRequests(httpPost(TOKEN_PATH, tokenBody()));
+  for (const challenge of ["", "plain-challenge", `${RFC_CHALLENGE}=`]) {
+    assert.deepEqual(checkTokenExchange(one, { tokenPath: TOKEN_PATH, challenge }), [
+      "the authorize redirect's code_challenge is not an S256 challenge",
+    ]);
+  }
+});
+
+// ---- the trust boundary: the redirect oauth2-proxy chose -----------------------
+
+test("the post-login redirect is read from the authorize redirect's state", () => {
+  const authorize = "http://mock-oidc:8080/default/authorize?client_id=foundry-starter-smoke";
+  // oauth2-proxy writes <nonce>:<url.QueryEscape(redirect)>, and the URL
+  // query escapes the whole state again.
+  const location = (redirect) =>
+    `${authorize}&state=${encodeURIComponent(`nonce123:${encodeURIComponent(redirect)}`)}&code_challenge_method=S256`;
+  assert.equal(appRedirectFromLocation(location("/trusted-probe")), "/trusted-probe");
+  assert.equal(appRedirectFromLocation(location("/")), "/");
+  assert.equal(appRedirectFromLocation(location("/a?b=c d")), "/a?b=c d");
+  assert.equal(appRedirectFromLocation(authorize), null, "no state");
+  assert.equal(appRedirectFromLocation(`${authorize}&state=nonce-only`), null);
+  assert.equal(appRedirectFromLocation("not a url"), null);
+});
+
 // ---- run.sh helpers (lib.sh) -------------------------------------------------
 
 // A stand-in for tcpdump: announces itself as tcpdump does, writes a capture
@@ -485,6 +608,132 @@ test("a log that cannot be read, or is empty, fails instead of passing as clean"
   } finally {
     rmSync(smoke.dir, { recursive: true, force: true });
   }
+});
+
+// ---- check 4: the trusted range and the outside network -----------------------
+
+test("the trusted range is read from the rendered Compose configuration", () => {
+  const smoke = smokeDir();
+  try {
+    const rendered = JSON.stringify({
+      networks: { default: { ipam: { config: [{ subnet: "10.75.88.0/24" }] } } },
+      services: {
+        "oauth2-proxy": {
+          command: ["--provider=oidc", "--reverse-proxy=true", "--trusted-proxy-ip=10.75.88.0/24"],
+        },
+      },
+    });
+    writeFileSync(join(smoke.dir, "rendered.json"), rendered);
+    const result = runLib(
+      'rendered_subnets < "$WORK/rendered.json"\nrendered_trusted_proxy_ips < "$WORK/rendered.json"',
+      smoke,
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, "10.75.88.0/24\n10.75.88.0/24\n");
+
+    writeFileSync(join(smoke.dir, "bare.json"), JSON.stringify({ networks: {}, services: {} }));
+    const bare = runLib('rendered_subnets < "$WORK/bare.json"\nrendered_trusted_proxy_ips < "$WORK/bare.json"', smoke);
+    assert.equal(bare.status, 0, bare.stderr);
+    assert.equal(bare.stdout, "\n\n", "nothing rendered is an empty value, which run.sh refuses");
+  } finally {
+    rmSync(smoke.dir, { recursive: true, force: true });
+  }
+});
+
+test("IPv4 ranges are compared by address, and a malformed one fails", () => {
+  const smoke = smokeDir();
+  try {
+    for (const [left, right, overlap] of [
+      ["10.73.88.0/24", "10.73.88.0/24", true],
+      ["10.73.88.0/24", "10.73.88.128/25", true],
+      ["10.0.0.0/8", "10.74.88.0/24", true],
+      ["10.73.88.0/24", "10.73.89.0/24", false],
+      ["10.73.88.0/24", "172.18.0.0/16", false],
+      ["0.0.0.0/0", "192.168.1.0/24", true],
+      // A host address with a prefix is its network.
+      ["10.73.88.77/24", "10.73.88.0/30", true],
+      ["010.073.088.000/24", "10.73.88.0/24", true],
+    ]) {
+      const result = runLib(`ipv4_cidrs_overlap ${left} ${right} && echo overlap || echo disjoint`, smoke);
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.stdout.trim(), overlap ? "overlap" : "disjoint", `${left} ${right}`);
+    }
+    for (const bad of ["10.73.88.0", "10.73.88.256/24", "10.73.88.0/33", "fd00::/64", ""]) {
+      const result = runLib(`ipv4_cidrs_overlap "${bad}" 10.0.0.0/8 && echo overlap || echo disjoint`, smoke);
+      assert.equal(result.status, 1, bad);
+      assert.match(result.stderr, /is not an IPv4 CIDR/, bad);
+      assert.equal(result.stdout, "", `${bad} must not be read as either answer`);
+    }
+  } finally {
+    rmSync(smoke.dir, { recursive: true, force: true });
+  }
+});
+
+function dockerComposeAvailable() {
+  return spawnSync("docker", ["compose", "version"], { encoding: "utf8" }).status === 0;
+}
+
+test(
+  "Compose takes FOUNDRY_STARTER_SUBNET from the starter's .env, and run.sh reads what Compose renders",
+  { skip: !dockerComposeAvailable() && "docker compose is not installed" },
+  () => {
+    // `docker compose config` only renders files; it needs no daemon. A copy of
+    // the shipped compose.yaml in a scratch project directory, with a .env
+    // there, is exactly the operator's file-only override.
+    const smoke = smokeDir();
+    const project = join(smoke.dir, "starter");
+    try {
+      mkdirSync(project);
+      copyFileSync(STARTER_COMPOSE, join(project, "compose.yaml"));
+      const required = [
+        "FERRUM_ADMIN_URL=https://ferrum-admin.internal:9000",
+        "FERRUM_JWT_SECRET=dev-secret-at-least-32-characters-long",
+        "FERRUM_TRUSTED_PROXY_SECRET=dev-bff-token-at-least-32-characters-long",
+      ];
+      const env = { ...process.env };
+      delete env.FOUNDRY_STARTER_SUBNET;
+      const render = (dotenv, extra = {}) => {
+        writeFileSync(join(project, ".env"), `${dotenv.join("\n")}\n`);
+        writeFileSync(join(smoke.dir, "render.sh"), [
+          `. "${SMOKE_LIB}"`,
+          `rendered="$(docker compose -f "${join(project, "compose.yaml")}" --profile production config --format json)"`,
+          'rendered_subnets <<<"$rendered"',
+          'rendered_trusted_proxy_ips <<<"$rendered"',
+        ].join("\n"));
+        const result = spawnSync("bash", ["-c", 'set -euo pipefail\nfail() { echo "::error::$*" >&2; exit 1; }\n. "$0"', join(smoke.dir, "render.sh")], {
+          encoding: "utf8",
+          timeout: 60_000,
+          env: { ...env, ...extra },
+        });
+        assert.equal(result.status, 0, result.stderr);
+        return result.stdout.trim().split("\n");
+      };
+
+      assert.deepEqual(render(required), [STARTER_DEFAULT_SUBNET, STARTER_DEFAULT_SUBNET]);
+      assert.deepEqual(
+        render([...required, "FOUNDRY_STARTER_SUBNET=10.75.88.0/24"]),
+        ["10.75.88.0/24", "10.75.88.0/24"],
+        "a .env-only override reaches both the network and --trusted-proxy-ip",
+      );
+      assert.deepEqual(
+        render([...required, "FOUNDRY_STARTER_SUBNET=10.75.88.0/24"], { FOUNDRY_STARTER_SUBNET: "10.76.88.0/24" }),
+        ["10.76.88.0/24", "10.76.88.0/24"],
+        "the shell wins over .env, as Compose documents",
+      );
+    } finally {
+      rmSync(smoke.dir, { recursive: true, force: true });
+    }
+  },
+);
+
+test("check 4 lets Docker allocate the outside network and proves it disjoint", async () => {
+  const run = await readFile(new URL("../e2e/production-smoke/run.sh", import.meta.url), "utf8");
+  const boundary = run.slice(run.indexOf("trust_boundary() {"));
+  assert.ok(!boundary.includes("docker network create --subnet"), "no hardcoded outside range that could overlap");
+  assert.ok(boundary.includes('docker network create "$OUTSIDE_NETWORK"'));
+  assert.ok(boundary.indexOf("ipv4_cidrs_overlap") < boundary.indexOf("docker network connect"),
+    "the overlap check runs before oauth2-proxy is attached");
+  assert.ok(boundary.includes('expect_equal "the running network\'s subnet" "$subnet" "$expected"'));
 });
 
 // ---- the overlay -------------------------------------------------------------
