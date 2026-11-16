@@ -13,8 +13,9 @@
 #      and oauth2-proxy with the identity the shared policy maps the user's
 #      groups to, and a user in no Ferrum group is refused at login;
 #   3. nginx sets every forwarded header oauth2-proxy reads, on /oauth2/ and on
-#      the /oauth2/auth subrequest, and a client's spoofed values reach neither
-#      oauth2-proxy nor Foundry.
+#      the /oauth2/auth subrequest, clears X-Auth-Request-Redirect on the
+#      subrequest, sends its own X-Request-Id to oauth2-proxy and Foundry, and
+#      a client's spoofed values reach neither oauth2-proxy nor Foundry.
 #
 # Only the files an operator fills in are written: .env and oauth2-proxy.env
 # copied from their examples, the proxy-proof include, and a TLS certificate
@@ -44,6 +45,7 @@ MOCK_HOST_PORT=18080
 CLIENT_ID=foundry-starter-smoke
 NAMESPACE=ferrum-foundry-demo
 OAUTH2_PROXY_PORT=4180
+FOUNDRY_PORT=8080
 
 # Values a client must never get past nginx.
 SPOOFED_ADDRESS=203.0.113.66
@@ -251,9 +253,11 @@ start_capture() {
     sudo apt-get install -y -qq tcpdump
   fi
   # Pipe through cat so the file is written by this user, not by tcpdump
-  # (which drops privileges and is confined by AppArmor on Ubuntu).
-  sudo tcpdump -i any -U -s 0 -w - "tcp port $OAUTH2_PROXY_PORT" \
-    2>"$WORK/tcpdump.log" | cat > "$WORK/oauth2-proxy.pcap" &
+  # (which drops privileges and is confined by AppArmor on Ubuntu). The
+  # capture holds this run's throwaway proof secret and session cookies; it
+  # stays in the work directory and is never uploaded or printed.
+  sudo tcpdump -i any -U -s 0 -w - "tcp port $OAUTH2_PROXY_PORT or tcp port $FOUNDRY_PORT" \
+    2>"$WORK/tcpdump.log" | cat > "$WORK/upstreams.pcap" &
   CAPTURE_PID=$!
   for _attempt in $(seq 1 50); do
     if grep -q 'listening on' "$WORK/tcpdump.log" 2>/dev/null; then
@@ -337,7 +341,7 @@ verify() {
   result="$(status_and_location -b "$unmapped_jar" "$ORIGIN/")"
   expect_equal "refused user's next page load" "$result" "302 $ORIGIN/oauth2/start?rd=/"
 
-  step "3. Forwarded headers, read off the wire between nginx and oauth2-proxy"
+  step "3. Forwarded headers, read off the wire between nginx and its upstreams"
   start_capture
   status="$(browser -o /dev/null -w '%{http_code}' -c "$anon_jar" -b "$anon_jar" \
     "${SPOOF_HEADERS[@]}" -H 'X-Smoke-Probe: start' "$ORIGIN/oauth2/start?rd=%2F")"
@@ -357,6 +361,7 @@ verify() {
 
   jq -n \
     --argjson port "$OAUTH2_PROXY_PORT" \
+    --argjson foundry_port "$FOUNDRY_PORT" \
     --arg host "$HOST" \
     --arg address "$SPOOFED_ADDRESS" \
     --arg spoofed_host "$SPOOFED_HOST" \
@@ -370,23 +375,26 @@ verify() {
       probes: [
         {id: "start", path: "/oauth2/start", uri: "/oauth2/start?rd=%2F"},
         {id: "auth-anonymous", path: "/oauth2/auth", uri: "/smoke/anonymous"},
-        {id: "auth-session", path: "/oauth2/auth", uri: "/api/auth/session"}
+        {id: "auth-session", path: "/oauth2/auth", uri: "/api/auth/session"},
+        {id: "foundry-session", marker: "auth-session", upstream: "foundry",
+         port: $foundry_port, path: "/api/auth/session"}
       ]
     }' > "$WORK/expectations.json"
-  node "$SMOKE/forwarded-headers.mjs" "$WORK/oauth2-proxy.pcap" "$WORK/expectations.json"
+  node "$SMOKE/forwarded-headers.mjs" "$WORK/upstreams.pcap" "$WORK/expectations.json"
 
   # oauth2-proxy's own request log is a second witness: it records the client
-  # address (X-Real-IP) and host (X-Forwarded-Host) it trusted, and would name
-  # a spoofed redirect it rejected.
-  if compose logs --no-color oauth2-proxy | grep -F -e "$SPOOFED_ADDRESS" -e "$SPOOFED_HOST"; then
-    fail "oauth2-proxy logged a spoofed client address, host, or redirect"
+  # address (X-Real-IP), host (X-Forwarded-Host), and request ID (X-Request-Id)
+  # it trusted, and would name a spoofed redirect it rejected.
+  if compose logs --no-color oauth2-proxy \
+    | grep -F -e "$SPOOFED_ADDRESS" -e "$SPOOFED_HOST" -e "$SPOOFED_REQUEST_ID"; then
+    fail "oauth2-proxy logged a spoofed client address, host, redirect, or request ID"
   fi
-  echo "ok: oauth2-proxy's log names no spoofed address, host, or redirect"
-  # nginx does not set X-Request-Id, and oauth2-proxy logs a client's value as
-  # the request ID. Reported, not failed: it decides nothing.
-  local request_ids
-  request_ids="$(compose logs --no-color oauth2-proxy | grep -c -F -- "$SPOOFED_REQUEST_ID" || true)"
-  echo "note: $request_ids oauth2-proxy log line(s) carry the client's X-Request-Id as their request ID"
+  echo "ok: oauth2-proxy's log names no spoofed address, host, redirect, or request ID"
+  # Reported, not failed: location / does not set X-Forwarded-Host, and the
+  # BFF trusts X-Forwarded-* from nginx, so a client's host reaches its log.
+  local foundry_hosts
+  foundry_hosts="$(compose logs --no-color foundry | grep -c -F -- "$SPOOFED_HOST" || true)"
+  echo "note: $foundry_hosts Foundry log line(s) name the client's spoofed X-Forwarded-Host"
 
   echo
   echo "Production profile smoke test passed."

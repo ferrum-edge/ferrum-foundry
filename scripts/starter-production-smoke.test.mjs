@@ -78,6 +78,8 @@ function httpRequest(target, headers) {
   return Buffer.from(`${lines.join("\r\n")}\r\n\r\n`, "latin1");
 }
 
+const NGINX_REQUEST_ID = "0123456789abcdef0123456789abcdef";
+
 function nginxHeaders(uri, { redirect = false } = {}) {
   return [
     ["Host", HOST],
@@ -86,6 +88,7 @@ function nginxHeaders(uri, { redirect = false } = {}) {
     ["X-Forwarded-Host", HOST],
     ["X-Forwarded-Proto", "https"],
     ["X-Forwarded-Uri", uri],
+    ["X-Request-Id", NGINX_REQUEST_ID],
     ...(redirect ? [["X-Auth-Request-Redirect", uri]] : []),
   ];
 }
@@ -98,11 +101,18 @@ const EXPECTATIONS = {
   probes: [
     { id: "start", path: "/oauth2/start", uri: "/oauth2/start?rd=%2F" },
     { id: "auth-session", path: "/oauth2/auth", uri: "/api/auth/session" },
+    {
+      id: "foundry-session",
+      marker: "auth-session",
+      upstream: "foundry",
+      port: 8080,
+      path: "/api/auth/session",
+    },
   ],
 };
 
-function request(target, headers) {
-  return parseRequests(httpRequest(target, headers))[0];
+function request(target, headers, port) {
+  return { ...parseRequests(httpRequest(target, headers))[0], port };
 }
 
 function cleanRequests() {
@@ -110,12 +120,23 @@ function cleanRequests() {
     request("/oauth2/start?rd=%2F", [
       ...nginxHeaders("/oauth2/start?rd=%2F", { redirect: true }),
       ["x-smoke-probe", "start"],
-    ]),
+    ], 4180),
     request("/oauth2/auth", [
       ...nginxHeaders("/api/auth/session"),
       ["x-smoke-probe", "auth-session"],
-    ]),
+    ], 4180),
+    // The same probe, as nginx proxies it on to Foundry.
+    request("/api/auth/session", [
+      ["Host", HOST],
+      ["X-Request-Id", NGINX_REQUEST_ID],
+      ["x-smoke-probe", "auth-session"],
+    ], 8080),
   ];
+}
+
+function replaceHeader(requestToChange, header, value) {
+  requestToChange.headers = requestToChange.headers.map(([name, current]) =>
+    name === header ? [name, value] : [name, current]);
 }
 
 // ---- capture parsing -------------------------------------------------------
@@ -178,17 +199,47 @@ test("a pcapng or foreign file is refused rather than read as empty", () => {
 test("nginx's own forwarded headers pass", () => {
   const { errors, observed, passthrough } = checkProbes(cleanRequests(), EXPECTATIONS);
   assert.deepEqual(errors, []);
-  assert.deepEqual(observed.map((entry) => entry.probe), ["start", "auth-session"]);
+  assert.deepEqual(observed.map((entry) => entry.probe), ["start", "auth-session", "foundry-session"]);
+  assert.deepEqual(observed[1].headers["x-auth-request-redirect"], [], "the auth subrequest sends no redirect");
   assert.deepEqual(passthrough, []);
 });
 
 test("a client's forwarded value reaching oauth2-proxy fails", () => {
   const requests = cleanRequests();
   // $proxy_add_x_forwarded_for appends to the client's list instead of replacing it.
-  requests[1].headers = requests[1].headers.map(([name, value]) =>
-    name === "x-forwarded-for" ? [name, `203.0.113.66, ${value}`] : [name, value]);
+  replaceHeader(requests[1], "x-forwarded-for", `203.0.113.66, ${PEER}`);
   const { errors } = checkProbes(requests, EXPECTATIONS);
   assert.ok(errors.some((error) => error.includes("auth-session: x-forwarded-for passed the client's value through")));
+});
+
+test("a client's X-Request-Id reaching any upstream fails", () => {
+  for (const index of [0, 1, 2]) {
+    const requests = cleanRequests();
+    replaceHeader(requests[index], "x-request-id", "smoke-spoofed-request-id");
+    const { errors } = checkProbes(requests, EXPECTATIONS);
+    assert.ok(
+      errors.some((error) => error.includes("x-request-id passed the client's value through")),
+      `request ${index}: ${errors.join("; ")}`,
+    );
+  }
+  const notNginx = cleanRequests();
+  replaceHeader(notNginx[2], "x-request-id", "client-chosen");
+  assert.ok(checkProbes(notNginx, EXPECTATIONS).errors
+    .some((error) => error.includes("foundry-session: x-request-id \"client-chosen\" is not nginx's $request_id")));
+
+  const missing = cleanRequests();
+  missing[0].headers = missing[0].headers.filter(([name]) => name !== "x-request-id");
+  assert.ok(checkProbes(missing, EXPECTATIONS).errors
+    .some((error) => error.includes("start: x-request-id arrived 0 times")));
+});
+
+test("a client's X-Auth-Request-Redirect on the auth subrequest fails", () => {
+  const requests = cleanRequests();
+  requests[1].headers.push(["x-auth-request-redirect", "https://spoofed.invalid/after-login"]);
+  const { errors } = checkProbes(requests, EXPECTATIONS);
+  assert.deepEqual(errors, [
+    'probe auth-session: x-auth-request-redirect must not reach /oauth2/auth (["https://spoofed.invalid/after-login"])',
+  ]);
 });
 
 test("a duplicated, missing, or rewritten header fails", () => {
@@ -203,26 +254,29 @@ test("a duplicated, missing, or rewritten header fails", () => {
     .some((error) => error.includes("start: x-auth-request-redirect arrived 0 times")));
 
   const wrongProto = cleanRequests();
-  wrongProto[0].headers = wrongProto[0].headers.map(([name, value]) =>
-    name === "x-forwarded-proto" ? [name, "http"] : [name, value]);
+  replaceHeader(wrongProto[0], "x-forwarded-proto", "http");
   assert.ok(checkProbes(wrongProto, EXPECTATIONS).errors
     .some((error) => error.includes('start: x-forwarded-proto is "http", expected "https"')));
 });
 
-test("a probe that never reached oauth2-proxy fails, so the check cannot pass on nothing", () => {
+test("a probe that never reached its upstream fails, so the check cannot pass on nothing", () => {
   const { errors } = checkProbes(cleanRequests().slice(0, 1), EXPECTATIONS);
-  assert.deepEqual(errors, ["probe auth-session: expected exactly one request at oauth2-proxy, found 0"]);
+  assert.deepEqual(errors, [
+    "probe auth-session: expected exactly one request at oauth2-proxy, found 0",
+    "probe foundry-session: expected exactly one request at foundry, found 0",
+  ]);
 });
 
-test("a client value in a header oauth2-proxy does not read on that route is reported, not failed", () => {
+test("a client value in a header no check covers is reported, not failed", () => {
   const requests = cleanRequests();
-  requests[1].headers.push(["x-auth-request-redirect", "https://spoofed.invalid/after-login"]);
+  requests[2].headers.push(["x-forwarded-host", "spoofed.invalid"]);
   const { errors, passthrough } = checkProbes(requests, EXPECTATIONS);
   assert.deepEqual(errors, []);
   assert.deepEqual(passthrough, [{
-    probe: "auth-session",
-    header: "x-auth-request-redirect",
-    value: "https://spoofed.invalid/after-login",
+    probe: "foundry-session",
+    upstream: "foundry",
+    header: "x-forwarded-host",
+    value: "spoofed.invalid",
   }]);
 });
 

@@ -120,20 +120,24 @@ e2e/production-smoke/run.sh down
   endpoint, and an unauthenticated API call gets a bare `401`;
 - a completed login reaches Foundry with the identity the shared policy maps
   the user's groups to (`/api/auth/session`; the actor is the ID token's
-  `sub`, which oauth2-proxy sends as `X-Auth-Request-User`), a user in several groups gets
-  the Ferrum one, and a user in no Ferrum group is refused at login;
-- with spoofed `X-Forwarded-*`, `X-Real-IP`, `X-Auth-Request-Redirect`, and
-  identity headers on the request, the session is unchanged, and the requests
-  nginx sends oauth2-proxy carry exactly one of each forwarded header
-  oauth2-proxy reads (on `/oauth2/start` and on the `/oauth2/auth`
-  subrequest), each with nginx's own value. It reads them off the wire with
-  `tcpdump` (`forwarded-headers.mjs`), and also checks oauth2-proxy's log.
+  `sub`, which oauth2-proxy sends as `X-Auth-Request-User`), a user in several
+  groups gets the Ferrum one, and a user in no Ferrum group is refused at
+  login;
+- with spoofed `X-Forwarded-*`, `X-Real-IP`, `X-Auth-Request-Redirect`,
+  `X-Request-Id`, and identity headers on the request, the session is
+  unchanged. Reading nginx's upstream traffic off the wire with `tcpdump`
+  (`forwarded-headers.mjs`), the requests to oauth2-proxy carry exactly one of
+  each forwarded header it reads, with nginx's own value, on `/oauth2/start`
+  and on the `/oauth2/auth` subrequest. `X-Auth-Request-Redirect` is the
+  request URI on `/oauth2/start` and absent on the subrequest. Both
+  oauth2-proxy and Foundry receive nginx's `$request_id` as `X-Request-Id`.
+  oauth2-proxy's log must name no spoofed address, host, redirect, or request
+  ID.
 
-A client value that reaches oauth2-proxy in a header it does not use for the
-client address, a redirect, or authentication on that route is printed as a
-note rather than failed. Today that is `X-Request-Id`, which nginx does not set
-and oauth2-proxy logs as the request ID, and, on `/oauth2/auth`,
-`X-Auth-Request-Redirect`, which only the `/oauth2/` sign-in routes read.
+A client value that reaches an upstream in a header no check covers is printed
+as a note rather than failed, for example the client's `X-Forwarded-For` list,
+which `location /` extends for Foundry, and `X-Forwarded-Host`, which it passes
+through.
 
 CI runs this as the **Starter Production Profile** job, against the image built
 from the commit, and prints every container's logs when it fails.
