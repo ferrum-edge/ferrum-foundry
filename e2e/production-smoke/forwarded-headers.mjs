@@ -344,7 +344,7 @@ async function main(capturePath, expectationsPath) {
     }
   }
   for (const { probe, upstream, header, value } of passthrough) {
-    console.log(`\nnote: ${probe}: the client's ${header} reached ${upstream} unchanged (${value})`);
+    console.log(`\nnote: ${probe}: ${header} carried a client value to ${upstream} (${value})`);
   }
   if (errors.length > 0) {
     for (const error of errors) console.error(`::error::${error}`);
