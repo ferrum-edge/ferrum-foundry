@@ -314,11 +314,12 @@ verify() {
     "200 text/html"*) echo "ok: an authenticated page load reaches Foundry" ;;
     *) fail "authenticated page load answered '$status'" ;;
   esac
-  # oauth2-proxy's user is the email claim (its default --user-id-claim), and
-  # the shared policy maps ferrum-admins to admin on the configured namespace.
+  # Foundry's actor is oauth2-proxy's user, which is the ID token's `sub`
+  # (the login's username), not its email; the shared policy maps
+  # ferrum-admins to admin on the configured namespace.
   expect_equal "admin principal" \
     "$(session_field "$admin_jar" '.principal | [.subject, .role, .namespaces, .authMode]')" \
-    "[\"smoke-admin@example.com\",\"admin\",[\"$NAMESPACE\"],\"trusted-proxy\"]"
+    "[\"smoke-admin\",\"admin\",[\"$NAMESPACE\"],\"trusted-proxy\"]"
 
   viewer_jar="$WORK/viewer.jar"
   # A user in several groups, the Ferrum one not first: oauth2-proxy joins
@@ -327,7 +328,7 @@ verify() {
   expect_equal "viewer login callback" "$result" "302 $ORIGIN/"
   expect_equal "viewer principal" \
     "$(session_field "$viewer_jar" '.principal | [.subject, .role, .namespaces]')" \
-    "[\"smoke-viewer@example.com\",\"viewer\",[\"$NAMESPACE\"]]"
+    "[\"smoke-viewer\",\"viewer\",[\"$NAMESPACE\"]]"
 
   unmapped_jar="$WORK/unmapped.jar"
   result="$(login "$unmapped_jar" smoke-contractor smoke-contractor@example.com '["contractors"]')"
@@ -352,7 +353,7 @@ verify() {
   # whatever the client claims.
   expect_equal "viewer principal under spoofed identity headers" \
     "$(jq -c '.principal | [.subject, .role, .namespaces, .authMode]' <<<"$body")" \
-    "[\"smoke-viewer@example.com\",\"viewer\",[\"$NAMESPACE\"],\"trusted-proxy\"]"
+    "[\"smoke-viewer\",\"viewer\",[\"$NAMESPACE\"],\"trusted-proxy\"]"
 
   jq -n \
     --argjson port "$OAUTH2_PROXY_PORT" \

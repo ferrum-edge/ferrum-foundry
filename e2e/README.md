@@ -119,7 +119,8 @@ e2e/production-smoke/run.sh down
 - an unauthenticated page load is redirected to the provider's authorize
   endpoint, and an unauthenticated API call gets a bare `401`;
 - a completed login reaches Foundry with the identity the shared policy maps
-  the user's groups to (`/api/auth/session`), a user in several groups gets
+  the user's groups to (`/api/auth/session`; the actor is the ID token's
+  `sub`, which oauth2-proxy sends as `X-Auth-Request-User`), a user in several groups gets
   the Ferrum one, and a user in no Ferrum group is refused at login;
 - with spoofed `X-Forwarded-*`, `X-Real-IP`, `X-Auth-Request-Redirect`, and
   identity headers on the request, the session is unchanged, and the requests
