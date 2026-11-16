@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A **Starter Production Profile** CI job runs the deployment starter's
+  production profile as shipped, TLS nginx and oauth2-proxy included, against
+  a mock OIDC provider (`ghcr.io/navikt/mock-oauth2-server`, pinned by tag and
+  digest and watched by Dependabot), with test-only certificates and only the
+  operator files filled in (`e2e/production-smoke/`). Until now CI ran only the
+  demo profile, so the GHSA-q866-mwp4-hgw3 forwarded-header fix and the
+  oauth2-proxy v7.15.6 / nginx 1.31.8 upgrade had been checked by review
+  alone. Using curl and a cookie jar, it checks that an unauthenticated page
+  load is redirected to the provider's authorize endpoint; that a completed
+  login reaches Foundry with the role and namespaces the shared policy maps
+  the user's groups to, while a user in no Ferrum group is refused at login;
+  and, reading the traffic between nginx and oauth2-proxy with `tcpdump`,
+  that nginx sends every forwarded header oauth2-proxy reads exactly once,
+  with its own value, on `/oauth2/start` and the `/oauth2/auth` subrequest,
+  whatever the client sent. A failing run prints every container's logs.
+  `ci.yml` also accepts `workflow_dispatch`: pull requests run `main`'s copy of
+  the workflow (the required-workflow ruleset), so a change to it is proved by
+  dispatching the branch's copy.
+
 ### Changed
 
 - Remove code nothing used, with its dependencies (#682): the `Tooltip`

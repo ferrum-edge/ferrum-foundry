@@ -218,7 +218,10 @@ Dark and light themes via CSS custom properties. Dark is the default.
   data-plane requests. `retries: 0` on purpose. Failures are *arranged* through
   `e2e/fault-proxy.mjs` (arm exactly N, assert they were consumed) rather than
   waited for, and `npm run e2e:gate-self-test` proves the gate fails when the
-  journey is broken. See `e2e/README.md`
+  journey is broken. `e2e/production-smoke/` runs the starter's production
+  profile (TLS nginx, oauth2-proxy) against a mock OIDC provider and checks
+  the forwarded headers nginx sends oauth2-proxy on the wire (the **Starter
+  Production Profile** CI job). See `e2e/README.md`
 - `docs/compatibility.md` / `docs/compatibility.json` - the Foundry–Edge
   pairing: the Edge image CI qualifies (`edge.image`), the published Edge
   release the Foundry release pairs with (`edge.release`) and its requirements,
