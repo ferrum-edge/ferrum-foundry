@@ -14,7 +14,8 @@
 //   - no spoofed value reaches oauth2-proxy in any of them.
 //
 // Any other header that still carries a client value is reported, not failed:
-// oauth2-proxy does not read it on that route (see the README).
+// oauth2-proxy does not use it for the client address, a redirect, or
+// authentication on that route (see e2e/README.md).
 //
 //   node e2e/production-smoke/forwarded-headers.mjs <capture.pcap> <expectations.json>
 
@@ -310,7 +311,10 @@ async function main(capturePath, expectationsPath) {
     for (const [name, found] of Object.entries(headers)) console.log(`  ${name}: ${found.join(" | ")}`);
   }
   for (const { probe, header, value } of passthrough) {
-    console.log(`\nnote: ${probe}: the client's ${header} reached oauth2-proxy (${value}); oauth2-proxy does not read it on this route`);
+    console.log(
+      `\nnote: ${probe}: the client's ${header} reached oauth2-proxy unchanged (${value}); ` +
+        "oauth2-proxy does not use it for the client address, a redirect, or authentication on this route",
+    );
   }
   if (errors.length > 0) {
     for (const error of errors) console.error(`::error::${error}`);

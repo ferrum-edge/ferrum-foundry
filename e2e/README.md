@@ -129,10 +129,11 @@ e2e/production-smoke/run.sh down
   subrequest), each with nginx's own value. It reads them off the wire with
   `tcpdump` (`forwarded-headers.mjs`), and also checks oauth2-proxy's log.
 
-A client value in a header oauth2-proxy does not read on that route is printed
-as a note rather than failed. Today that is `X-Request-Id` (oauth2-proxy logs it
-as the request ID) and, on `/oauth2/auth`, `X-Auth-Request-Redirect` (only the
-`/oauth2/` sign-in routes read it).
+A client value that reaches oauth2-proxy in a header it does not use for the
+client address, a redirect, or authentication on that route is printed as a
+note rather than failed. Today that is `X-Request-Id`, which nginx does not set
+and oauth2-proxy logs as the request ID, and, on `/oauth2/auth`,
+`X-Auth-Request-Redirect`, which only the `/oauth2/` sign-in routes read.
 
 CI runs this as the **Starter Production Profile** job, against the image built
 from the commit, and prints every container's logs when it fails.

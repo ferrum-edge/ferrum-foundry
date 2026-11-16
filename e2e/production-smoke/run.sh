@@ -382,6 +382,11 @@ verify() {
     fail "oauth2-proxy logged a spoofed client address, host, or redirect"
   fi
   echo "ok: oauth2-proxy's log names no spoofed address, host, or redirect"
+  # nginx does not set X-Request-Id, and oauth2-proxy logs a client's value as
+  # the request ID. Reported, not failed: it decides nothing.
+  local request_ids
+  request_ids="$(compose logs --no-color oauth2-proxy | grep -c -F -- "$SPOOFED_REQUEST_ID" || true)"
+  echo "note: $request_ids oauth2-proxy log line(s) carry the client's X-Request-Id as their request ID"
 
   echo
   echo "Production profile smoke test passed."
