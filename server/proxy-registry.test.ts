@@ -821,6 +821,41 @@ describe('long-running read admission over TCP', () => {
       for (const client of clients) await release(client);
     }
   }, 20_000);
+
+  it('returns the permit when the upstream fails and when the response deadline fires', async () => {
+    // An upstream that drops the connection before answering is a 502 from
+    // the handler's error path, not a client disconnect.
+    for (let i = 0; i < 2; i += 1) {
+      const client = await holdRead('reader-f');
+      const response = held.get(client.id)!;
+      held.delete(client.id);
+      response.destroy();
+      const failed = await client.result;
+      expect(failed.status).toBe(502);
+      expect(JSON.parse(failed.body)).toMatchObject({ code: 'FERRUM_BFF_UPSTREAM_FAILURE' });
+    }
+    // A scoped namespace list is a long read too. A page that never arrives
+    // ends it at the response deadline (FERRUM_READ_TIMEOUT, 4 s here).
+    const firstPage = signal('gated:read-deadline:0');
+    const timing = call('/api/proxy/namespaces?gate=1&id=read-deadline', 'GET', '', as('reader-f'));
+    await firstPage;
+    const timedOut = await timing;
+    gates.delete('read-deadline:0');
+    expect(timedOut.status).toBe(504);
+    expect(JSON.parse(timedOut.body)).toMatchObject({ code: 'FERRUM_BFF_TIMEOUT', phase: 'response' });
+    // Each of the three permits came back exactly once: the subject gets its
+    // whole share again, and not one permit more.
+    const clients = [await holdRead('reader-f'), await holdRead('reader-f')];
+    try {
+      const before = arrivals.length;
+      const refused = await call('/api/proxy/backup', 'GET', '', as('reader-f'));
+      expect(refused.status).toBe(429);
+      expect(JSON.parse(refused.body)).toEqual({ error: 'Too Many Requests', code: 'FERRUM_BFF_READ_CAPACITY', scope: 'principal' });
+      expect(arrivals).toHaveLength(before);
+    } finally {
+      for (const client of clients) await release(client);
+    }
+  }, 15_000);
 });
 
 describe('per-subject upload admission over TCP', () => {
@@ -863,4 +898,44 @@ describe('per-subject upload admission over TCP', () => {
     // Released permits are returned exactly once: the same subject uploads again.
     expect((await call('/api/proxy/proxies', 'POST', '{"description":"again"}', await sessionIdentity('writer-a'))).status).toBe(200);
   }, 10_000);
+
+  it('reports the subject share before the large pool, and the large pool before the large share', async () => {
+    // `all` before `principal` is pinned in proxy.test.ts ("bounds every
+    // body-bearing proxied request").
+    async function holdLarge(user: string, path: '/restore' | '/api-specs') {
+      const id = `large-${++serial}`;
+      const ready = signal(`held:${id}`);
+      const client = start(`/api/proxy${path}?hold=1&id=${id}`, 'POST', '{}', await sessionIdentity(user), undefined, true);
+      await ready;
+      return { ...client, id };
+    }
+    async function refusal(user: string) {
+      const before = arrivals.length;
+      const refused = await call('/api/proxy/restore', 'POST', '{}', await sessionIdentity(user));
+      expect(refused.status).toBe(429);
+      expect(arrivals).toHaveLength(before);
+      return JSON.parse(refused.body).scope as string;
+    }
+    // Pools here: 4 uploads (2 per subject), of which 2 large (1 per subject).
+    const largeA = await holdLarge('writer-l', '/restore');
+    const largeB = await holdLarge('writer-m', '/api-specs');
+    try {
+      // The large pool and writer-l's large share are both full: the pool wins.
+      expect(await refusal('writer-l')).toBe('large');
+      const ordinary = await holdUpload('writer-l');
+      try {
+        // writer-l's upload share is full too, and is checked before the
+        // large pool.
+        expect(await refusal('writer-l')).toBe('principal');
+        await drop(largeB);
+        expect(await refusal('writer-l')).toBe('principal');
+      } finally { await drop(ordinary); }
+      // Only writer-l's large share is left full.
+      expect(await refusal('writer-l')).toBe('principal_large');
+    } finally {
+      await drop(largeA);
+      if (held.has(largeB.id)) await drop(largeB);
+    }
+    expect((await call('/api/proxy/restore', 'POST', '{}', await sessionIdentity('writer-l'))).status).toBe(200);
+  }, 15_000);
 });
