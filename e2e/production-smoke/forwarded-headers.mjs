@@ -13,11 +13,14 @@
 //     with nginx's own value; X-Auth-Request-Redirect arrives once, set to
 //     the request URI, on the /oauth2/ sign-in routes, and not at all on the
 //     /oauth2/auth subrequest;
+//   - at Foundry, which trusts X-Forwarded-* from nginx, X-Forwarded-Host,
+//     -Proto and X-Real-IP are nginx's, X-Forwarded-For ends with nginx's
+//     peer, and X-Forwarded-Uri and X-Auth-Request-Redirect are not sent;
 //   - at every upstream, X-Request-Id is nginx's own $request_id;
 //   - no spoofed value reaches the upstream in any of them.
 //
-// Any other header that still carries a client value is reported, not
-// failed (see e2e/README.md).
+// Any other header that still carries a client value fails at Foundry and is
+// reported at oauth2-proxy (see e2e/README.md).
 //
 //   node e2e/production-smoke/forwarded-headers.mjs <capture.pcap> <expectations.json>
 
@@ -25,15 +28,6 @@ import { realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { isIP } from "node:net";
 import { pathToFileURL } from "node:url";
-
-/** Read by oauth2-proxy on every route when --reverse-proxy is set. */
-export const FORWARDED_HEADERS = [
-  "x-forwarded-for",
-  "x-real-ip",
-  "x-forwarded-host",
-  "x-forwarded-proto",
-  "x-forwarded-uri",
-];
 
 /** Read by oauth2-proxy's redirect logic, which only /oauth2/ routes run. */
 export const REDIRECT_HEADER = "x-auth-request-redirect";
@@ -234,12 +228,53 @@ function containsSpoof(value, spoofs) {
 }
 
 /**
+ * What nginx must send each upstream for one probe: headers that arrive once
+ * with nginx's value, and headers that must not arrive at all.
+ */
+function rulesFor(probe, upstream, { host, proto }) {
+  const isAddress = (value) => isIP(value) !== 0;
+  const isRequestId = (value) => NGINX_REQUEST_ID_PATTERN.test(value);
+  if (upstream === "oauth2-proxy") {
+    // The sign-in routes read the redirect header, so nginx sets it there;
+    // the auth subrequest does not, and nginx clears it.
+    const signIn = probe.path !== "/oauth2/auth";
+    return {
+      exact: {
+        "x-forwarded-host": host,
+        "x-forwarded-proto": proto,
+        "x-forwarded-uri": probe.uri,
+        "x-real-ip": isAddress,
+        "x-forwarded-for": "x-real-ip",
+        [REQUEST_ID_HEADER]: isRequestId,
+        ...(signIn ? { [REDIRECT_HEADER]: probe.uri } : {}),
+      },
+      absent: signIn ? [] : [REDIRECT_HEADER],
+      appendedForwardedFor: false,
+    };
+  }
+  // Foundry trusts X-Forwarded-* from nginx (its directly connected hop), so
+  // nginx sets or clears every one. X-Forwarded-For is the exception by
+  // design: nginx appends its peer to the client's list, and the BFF trusts
+  // only that last hop, so the last entry must be nginx's peer.
+  return {
+    exact: {
+      "x-forwarded-host": host,
+      "x-forwarded-proto": proto,
+      "x-real-ip": isAddress,
+      [REQUEST_ID_HEADER]: isRequestId,
+    },
+    absent: ["x-forwarded-uri", REDIRECT_HEADER],
+    appendedForwardedFor: true,
+  };
+}
+
+/**
  * Checks every probe against what reached its upstream. Returns the failures,
  * the checked headers each probe arrived with, and the client values that
- * reached the upstream in headers this check does not cover.
+ * reached oauth2-proxy in headers no rule covers (at Foundry those fail).
  */
 export function checkProbes(requests, expectations) {
-  const { host, proto, spoofs, probes } = expectations;
+  const { spoofs, probes } = expectations;
   const errors = [];
   const observed = [];
   const passthrough = [];
@@ -247,80 +282,67 @@ export function checkProbes(requests, expectations) {
     const upstream = probe.upstream ?? "oauth2-proxy";
     const port = probe.port ?? expectations.port;
     const marker = probe.marker ?? probe.id;
+    const fail = (message) => errors.push(`probe ${probe.id}: ${message}`);
     const matches = requests.filter((request) =>
       (request.port === undefined || request.port === port) &&
       values(request, PROBE_HEADER).includes(marker));
     if (matches.length !== 1) {
-      errors.push(`probe ${probe.id}: expected exactly one request at ${upstream}, found ${matches.length}`);
+      fail(`expected exactly one request at ${upstream}, found ${matches.length}`);
       continue;
     }
     const [request] = matches;
     const path = request.target.split("?")[0];
-    if (path !== probe.path) {
-      errors.push(`probe ${probe.id}: reached ${upstream} as ${path}, expected ${probe.path}`);
-    }
+    if (path !== probe.path) fail(`reached ${upstream} as ${path}, expected ${probe.path}`);
 
-    // Every upstream gets nginx's own request ID, never the client's.
-    const once = upstream === "oauth2-proxy" ? [...FORWARDED_HEADERS, REQUEST_ID_HEADER] : [REQUEST_ID_HEADER];
-    // The sign-in routes read the redirect header, so nginx sets it there.
-    // The auth subrequest does not, and nginx clears it rather than letting
-    // the client's value through.
-    const redirectSet = upstream === "oauth2-proxy" && probe.path !== "/oauth2/auth";
-    if (redirectSet) once.push(REDIRECT_HEADER);
-    const checked = upstream === "oauth2-proxy" ? [...once, REDIRECT_HEADER] : once;
-
+    const { exact, absent, appendedForwardedFor } = rulesFor(probe, upstream, expectations);
     const seen = {};
-    for (const name of once) {
+    const single = (name) => (seen[name]?.length === 1 ? seen[name][0] : undefined);
+    for (const name of Object.keys(exact)) {
       const found = values(request, name);
       seen[name] = found;
       if (found.length !== 1) {
-        errors.push(`probe ${probe.id}: ${name} arrived ${found.length} times (${JSON.stringify(found)})`);
+        fail(`${name} arrived ${found.length} times (${JSON.stringify(found)})`);
         continue;
       }
       const spoof = containsSpoof(found[0], spoofs);
-      if (spoof) errors.push(`probe ${probe.id}: ${name} passed the client's value through (${spoof})`);
+      if (spoof) fail(`${name} passed the client's value through (${spoof})`);
     }
-    if (upstream === "oauth2-proxy" && !redirectSet) {
-      const found = values(request, REDIRECT_HEADER);
-      seen[REDIRECT_HEADER] = found;
-      if (found.length !== 0) {
-        errors.push(`probe ${probe.id}: ${REDIRECT_HEADER} must not reach /oauth2/auth (${JSON.stringify(found)})`);
-      }
-    }
-    const single = (name) => (seen[name]?.length === 1 ? seen[name][0] : undefined);
-    const requestId = single(REQUEST_ID_HEADER);
-    if (requestId !== undefined && !NGINX_REQUEST_ID_PATTERN.test(requestId)) {
-      errors.push(`probe ${probe.id}: ${REQUEST_ID_HEADER} ${JSON.stringify(requestId)} is not nginx's $request_id`);
-    }
-    if (upstream === "oauth2-proxy") {
-      const expected = {
-        "x-forwarded-host": host,
-        "x-forwarded-proto": proto,
-        "x-forwarded-uri": probe.uri,
-        ...(redirectSet ? { [REDIRECT_HEADER]: probe.uri } : {}),
-      };
-      for (const [name, value] of Object.entries(expected)) {
-        const actual = single(name);
-        if (actual !== undefined && actual !== value) {
-          errors.push(`probe ${probe.id}: ${name} is ${JSON.stringify(actual)}, expected ${JSON.stringify(value)}`);
+    for (const [name, rule] of Object.entries(exact)) {
+      const actual = single(name);
+      if (actual === undefined) continue;
+      if (typeof rule === "function") {
+        if (!rule(actual)) fail(`${name} ${JSON.stringify(actual)} is not a value nginx sets`);
+      } else {
+        // A rule naming another header means "equal to that header's value".
+        const expected = rule in exact ? single(rule) : rule;
+        if (expected !== undefined && actual !== expected) {
+          fail(`${name} is ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`);
         }
       }
-      const realIp = single("x-real-ip");
-      const forwardedFor = single("x-forwarded-for");
-      if (realIp !== undefined && !isIP(realIp)) {
-        errors.push(`probe ${probe.id}: x-real-ip ${JSON.stringify(realIp)} is not an address`);
-      }
-      if (realIp !== undefined && forwardedFor !== undefined && forwardedFor !== realIp) {
-        errors.push(
-          `probe ${probe.id}: x-forwarded-for ${JSON.stringify(forwardedFor)} is not nginx's view of the peer (${realIp})`,
-        );
+    }
+    for (const name of absent) {
+      const found = values(request, name);
+      seen[name] = found;
+      if (found.length !== 0) fail(`${name} must not reach ${upstream} on ${probe.path} (${JSON.stringify(found)})`);
+    }
+    if (appendedForwardedFor) {
+      const found = values(request, "x-forwarded-for");
+      seen["x-forwarded-for"] = found;
+      const lastHop = found.length === 1 ? found[0].split(",").at(-1).trim() : undefined;
+      if (found.length !== 1) {
+        fail(`x-forwarded-for arrived ${found.length} times (${JSON.stringify(found)})`);
+      } else if (lastHop !== single("x-real-ip")) {
+        fail(`x-forwarded-for ${JSON.stringify(found[0])} does not end with nginx's peer (${single("x-real-ip")})`);
       }
     }
+
     observed.push({ probe: probe.id, upstream, target: request.target, headers: seen });
     for (const [name, value] of request.headers) {
-      if (checked.includes(name)) continue;
+      if (name in seen) continue;
       const spoof = containsSpoof(value, spoofs);
-      if (spoof) passthrough.push({ probe: probe.id, upstream, header: name, value });
+      if (!spoof) continue;
+      if (upstream === "foundry") fail(`${name} carried a client value to foundry (${value})`);
+      else passthrough.push({ probe: probe.id, upstream, header: name, value });
     }
   }
   return { errors, observed, passthrough };

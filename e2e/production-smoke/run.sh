@@ -14,8 +14,9 @@
 #      groups to, and a user in no Ferrum group is refused at login;
 #   3. nginx sets every forwarded header oauth2-proxy reads, on /oauth2/ and on
 #      the /oauth2/auth subrequest, clears X-Auth-Request-Redirect on the
-#      subrequest, sends its own X-Request-Id to oauth2-proxy and Foundry, and
-#      a client's spoofed values reach neither oauth2-proxy nor Foundry.
+#      subrequest, sets or clears every X-Forwarded-* header and the redirect
+#      header it sends Foundry, sends its own X-Request-Id to both, and a
+#      client's spoofed values reach neither oauth2-proxy nor Foundry.
 #
 # Only the files an operator fills in are written: .env and oauth2-proxy.env
 # copied from their examples, the proxy-proof include, and a TLS certificate
@@ -390,11 +391,12 @@ verify() {
     fail "oauth2-proxy logged a spoofed client address, host, redirect, or request ID"
   fi
   echo "ok: oauth2-proxy's log names no spoofed address, host, redirect, or request ID"
-  # Reported, not failed: location / does not set X-Forwarded-Host, and the
-  # BFF trusts X-Forwarded-* from nginx, so a client's host reaches its log.
-  local foundry_hosts
-  foundry_hosts="$(compose logs --no-color foundry | grep -c -F -- "$SPOOFED_HOST" || true)"
-  echo "note: $foundry_hosts Foundry log line(s) name the client's spoofed X-Forwarded-Host"
+  # The BFF trusts X-Forwarded-* from nginx and logs the host it resolves, so
+  # its log is a witness that nginx set X-Forwarded-Host itself.
+  if compose logs --no-color foundry | grep -F -e "$SPOOFED_HOST"; then
+    fail "Foundry logged the client's spoofed host"
+  fi
+  echo "ok: Foundry's log names no spoofed host"
 
   echo
   echo "Production profile smoke test passed."

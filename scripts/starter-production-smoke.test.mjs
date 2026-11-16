@@ -128,6 +128,10 @@ function cleanRequests() {
     // The same probe, as nginx proxies it on to Foundry.
     request("/api/auth/session", [
       ["Host", HOST],
+      ["X-Real-IP", PEER],
+      ["X-Forwarded-For", PEER],
+      ["X-Forwarded-Proto", "https"],
+      ["X-Forwarded-Host", HOST],
       ["X-Request-Id", NGINX_REQUEST_ID],
       ["x-smoke-probe", "auth-session"],
     ], 8080),
@@ -225,7 +229,7 @@ test("a client's X-Request-Id reaching any upstream fails", () => {
   const notNginx = cleanRequests();
   replaceHeader(notNginx[2], "x-request-id", "client-chosen");
   assert.ok(checkProbes(notNginx, EXPECTATIONS).errors
-    .some((error) => error.includes("foundry-session: x-request-id \"client-chosen\" is not nginx's $request_id")));
+    .some((error) => error.includes('foundry-session: x-request-id "client-chosen" is not a value nginx sets')));
 
   const missing = cleanRequests();
   missing[0].headers = missing[0].headers.filter(([name]) => name !== "x-request-id");
@@ -238,7 +242,7 @@ test("a client's X-Auth-Request-Redirect on the auth subrequest fails", () => {
   requests[1].headers.push(["x-auth-request-redirect", "https://spoofed.invalid/after-login"]);
   const { errors } = checkProbes(requests, EXPECTATIONS);
   assert.deepEqual(errors, [
-    'probe auth-session: x-auth-request-redirect must not reach /oauth2/auth (["https://spoofed.invalid/after-login"])',
+    'probe auth-session: x-auth-request-redirect must not reach oauth2-proxy on /oauth2/auth (["https://spoofed.invalid/after-login"])',
   ]);
 });
 
@@ -267,16 +271,48 @@ test("a probe that never reached its upstream fails, so the check cannot pass on
   ]);
 });
 
-test("a client value in a header no check covers is reported, not failed", () => {
+test("Foundry gets nginx's host and no client X-Forwarded-Uri or redirect", () => {
+  const spoofedHost = cleanRequests();
+  replaceHeader(spoofedHost[2], "x-forwarded-host", "spoofed.invalid");
+  assert.ok(checkProbes(spoofedHost, EXPECTATIONS).errors
+    .some((error) => error.includes("foundry-session: x-forwarded-host passed the client's value through")));
+
+  for (const [header, value] of [["x-forwarded-uri", "/spoofed/uri"], ["x-auth-request-redirect", "https://spoofed.invalid/"]]) {
+    const requests = cleanRequests();
+    requests[2].headers.push([header, value]);
+    assert.deepEqual(checkProbes(requests, EXPECTATIONS).errors, [
+      `probe foundry-session: ${header} must not reach foundry on /api/auth/session (${JSON.stringify([value])})`,
+    ]);
+  }
+
+  const other = cleanRequests();
+  other[2].headers.push(["x-original-host", "spoofed.invalid"]);
+  assert.deepEqual(checkProbes(other, EXPECTATIONS).errors, [
+    "probe foundry-session: x-original-host carried a client value to foundry (spoofed.invalid)",
+  ]);
+});
+
+test("Foundry's X-Forwarded-For may carry the client's list only before nginx's peer", () => {
+  const appended = cleanRequests();
+  replaceHeader(appended[2], "x-forwarded-for", `203.0.113.66, ${PEER}`);
+  assert.deepEqual(checkProbes(appended, EXPECTATIONS).errors, []);
+
+  const lastHopSpoofed = cleanRequests();
+  replaceHeader(lastHopSpoofed[2], "x-forwarded-for", `${PEER}, 203.0.113.66`);
+  assert.ok(checkProbes(lastHopSpoofed, EXPECTATIONS).errors
+    .some((error) => error.includes("does not end with nginx's peer")));
+});
+
+test("at oauth2-proxy, a client value in a header no rule covers is reported, not failed", () => {
   const requests = cleanRequests();
-  requests[2].headers.push(["x-forwarded-host", "spoofed.invalid"]);
+  requests[1].headers.push(["x-original-uri", "/spoofed/uri"]);
   const { errors, passthrough } = checkProbes(requests, EXPECTATIONS);
   assert.deepEqual(errors, []);
   assert.deepEqual(passthrough, [{
-    probe: "foundry-session",
-    upstream: "foundry",
-    header: "x-forwarded-host",
-    value: "spoofed.invalid",
+    probe: "auth-session",
+    upstream: "oauth2-proxy",
+    header: "x-original-uri",
+    value: "/spoofed/uri",
   }]);
 });
 

@@ -623,14 +623,28 @@ test("the production proxy sets every forwarded header oauth2-proxy reads", asyn
   }
 });
 
-test("every proxied request carries nginx's request ID, never the client's", async () => {
-  // oauth2-proxy logs X-Request-Id as the request ID; a client's value would
-  // forge log correlation. The BFF location gets nginx's ID in both profiles.
+test("the BFF receives only nginx's forwarded headers and request ID", async () => {
+  // The BFF trusts X-Forwarded-* from its directly connected hop, nginx, so in
+  // both profiles nginx sets or clears every one it could otherwise pass on
+  // from the client (an empty value sends no header). X-Forwarded-For appends
+  // nginx's peer, the only hop the BFF trusts. oauth2-proxy logs X-Request-Id
+  // as the request ID, and the BFF gets nginx's ID as well.
   const production = await readFile(new URL("nginx/foundry.conf", STARTER), "utf8");
   const demo = await readFile(new URL("nginx/foundry.demo.conf", STARTER), "utf8");
+  const expected = {
+    "X-Real-IP": "$remote_addr",
+    "X-Forwarded-For": "$proxy_add_x_forwarded_for",
+    "X-Forwarded-Host": "$host",
+    "X-Forwarded-Proto": "$scheme",
+    "X-Forwarded-Uri": '""',
+    "X-Auth-Request-Redirect": '""',
+    "X-Request-Id": "$request_id",
+  };
   for (const [config, name] of [[production, "foundry.conf"], [demo, "foundry.demo.conf"]]) {
     const block = locationBlock(config, "location / {", name);
-    assert.deepEqual(proxySetHeader(block, "X-Request-Id"), ["$request_id"], `${name} location /`);
+    for (const [header, value] of Object.entries(expected)) {
+      assert.deepEqual(proxySetHeader(block, header), [value], `${name} location / must set ${header} to ${value}`);
+    }
   }
 });
 
