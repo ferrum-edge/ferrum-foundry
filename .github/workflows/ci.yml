@@ -6,6 +6,10 @@ on:
       - main
   pull_request:
   workflow_call:
+  # Pull requests run main's copy of this workflow (the required-workflow
+  # ruleset), so a change to it is proved by dispatching the branch's copy:
+  # `gh workflow run ci.yml --ref <branch>`.
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -377,6 +381,51 @@ jobs:
         working-directory: deploy/starter
         run: docker compose --profile demo down --volumes
 
+  starter-production:
+    # The Deployment Starter job runs the demo profile, whose identity provider
+    # is an nginx stub. This runs the production profile as shipped: nginx
+    # terminating TLS and oauth2-proxy owning an OIDC login against a mock
+    # provider (e2e/production-smoke/), and reads the forwarded headers nginx
+    # sends oauth2-proxy off the wire (GHSA-q866-mwp4-hgw3).
+    name: Starter Production Profile
+    needs: image
+    runs-on: ubuntu-26.04
+    env:
+      FOUNDRY_IMAGE: ferrum-foundry:ci
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+
+      - name: Download the production image the starter runs
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: ferrum-foundry-image
+          path: ${{ runner.temp }}/image
+
+      - name: Load the production image
+        run: docker load --input "${RUNNER_TEMP}/image/ferrum-foundry-image.tar"
+
+      - name: Fill in the operator files with test-only values
+        run: e2e/production-smoke/run.sh configure
+
+      - name: Bring the production profile up against a mock OIDC provider
+        run: e2e/production-smoke/run.sh up
+
+      - name: Log in, and check the forwarded headers nginx sends oauth2-proxy
+        run: e2e/production-smoke/run.sh verify
+
+      - name: Show every container's logs on failure
+        if: failure()
+        run: e2e/production-smoke/run.sh logs
+
+      - name: Tear the stack down
+        if: always()
+        run: e2e/production-smoke/run.sh down
+
   critical-journeys:
     name: Critical Journeys
     needs: image
@@ -645,7 +694,7 @@ jobs:
 
   docker:
     name: Docker (${{ matrix.platform }})
-    needs: [quality, gateway-contract, starter, critical-journeys, container]
+    needs: [quality, gateway-contract, starter, starter-production, critical-journeys, container]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-26.04
     permissions:
