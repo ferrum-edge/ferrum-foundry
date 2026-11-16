@@ -192,8 +192,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   request log. nginx now sends `X-Forwarded-Host: $host` and no
   `X-Forwarded-Uri` or `X-Auth-Request-Redirect`. `X-Forwarded-For` still
   appends nginx's peer to the client's list, and the BFF trusts only that last
-  hop. The smoke test fails if any other client value reaches Foundry, and a
-  contract test pins the directives in both configurations.
+  hop. nginx also clears oauth2-proxy's `X-Auth-Request-User`, `-Email`,
+  `-Preferred-Username` and `-Groups` toward Foundry, where a client's copies
+  had arrived unread. The smoke test fails if a forged forwarded or identity
+  value reaches Foundry, and a contract test pins the directives in both
+  configurations. `docs/deployment.md` lists every one of these directives.
 - The deployment starter runs oauth2-proxy v7.15.6
   (`quay.io/oauth2-proxy/oauth2-proxy:v7.15.6@sha256:c3415e8660af553f5e18f5d90db050614c02493c0ac6260ac59442f6d9b12048`)
   instead of v7.7.1, and nginx 1.31.8 mainline
