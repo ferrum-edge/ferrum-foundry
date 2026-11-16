@@ -12,7 +12,7 @@ import type { BackendScheme, PluginConfig, Proxy } from "@/api/types";
 export const STREAM_PLUGIN_MATRIX_SOURCE =
   "ferrum-edge docs/tcp_udp_proxy.md (Compatible Plugins) and " +
   "docs/plugin_execution_order.md (stream matrix), checked against each " +
-  "plugin's supported_protocols() at v0.9.15 (25b37395)";
+  "plugin's supported_protocols() at v0.9.20 (e4a606a0)";
 
 /** Backend schemes served by the L4 stream listener rather than the HTTP stack. */
 const STREAM_SCHEMES: ReadonlySet<BackendScheme> = new Set<BackendScheme>([
@@ -134,8 +134,8 @@ const UDP_ONLY_STREAM_PLUGINS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The proxy's effective backend scheme. The admin API omits the field on
- * older rows, where HTTP is the documented default.
+ * The proxy's effective backend scheme. The admin API may omit the field;
+ * `https` is the documented default.
  */
 function schemeOf(proxy: Pick<Proxy, "backend_scheme">): BackendScheme {
   return proxy.backend_scheme ?? "https";

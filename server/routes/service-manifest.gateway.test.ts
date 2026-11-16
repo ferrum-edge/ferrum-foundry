@@ -91,7 +91,7 @@ it.runIf(process.env.FERRUM_MANIFEST_GATEWAY_CONTRACT === 'true')(
         for (const key of [
           'listen_path', 'backend_scheme', 'backend_path', 'strip_listen_path',
           'backend_connect_timeout_ms', 'backend_read_timeout_ms', 'backend_write_timeout_ms',
-        ]) expect(proxy[key]).toEqual(desired.proxy[key]);
+        ] as const) expect(proxy[key]).toEqual(desired.proxy[key]);
         for (const reference of desired.proxy.plugins as object[]) {
           expect(proxy.plugins).toEqual(expect.arrayContaining([
             expect.objectContaining(reference),

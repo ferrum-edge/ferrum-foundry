@@ -117,19 +117,6 @@ export function usePluginConfig(id: string, enabled = true) {
   });
 }
 
-export function useCreatePluginConfig() {
-  const qc = useQueryClient();
-  const { scope } = useNamespace();
-  return useMutation({
-    // Discard submitted secret variables as soon as the form resets/unmounts.
-    gcTime: 0,
-    mutationFn: (data: PluginConfigCreate) => plugins.createConfig(scope, data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["pluginConfigs"] });
-    },
-  });
-}
-
 /**
  * A membership plan rewrites `plugins` on proxies (and Edge appends the
  * association itself on a proxy-scoped create), so the cached proxy detail is

@@ -9,6 +9,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Remove code nothing used, with its dependencies (#682): the `Tooltip`
+  component and `TooltipProvider` with `@radix-ui/react-tooltip`; the
+  `DataTable` component with `@tanstack/react-table` and
+  `@tanstack/react-virtual` (`docs/table-sorting.md` keeps the sorting
+  rules); the BFF's `@fastify/cors` registration, which granted nothing
+  (a server test now pins the absent CORS grant); and the test-only API
+  helpers `tls.updateManagedRecord`, `mesh.resetConfigRevision`,
+  `ops.batchCreate` and `buildMcpGatewayTemplate`.
+- The BFF's scoped namespace list requires the paginated envelope on every
+  upstream page and answers `502` for a bare array, as the SPA already does
+  (#681). The boot-time removal of the pre-v0.1.0
+  `localStorage["ferrum:bff-auth-token"]` key is gone.
+- The proxy, upstream, consumer and plugin lists and detail pages, Health,
+  and Metrics report a failed read through the shared read-state notice
+  (#680): a `403` reads "read not permitted for this session", an outage
+  "unavailable", and a failed refresh "could not refresh" with the last
+  successful observation, instead of a fixed "Failed to load …" line or a
+  transport error message.
+- `npm run lint` now lints the e2e suite and the root `*.config.ts` files,
+  and `npm run typecheck` type-checks the server tests
+  (`tsconfig.server.test.json`) (#675).
+- CI builds the production image once for the Deployment Starter and
+  Critical Journeys and hands it to both as an artifact, instead of
+  building it in each job (#685).
+- Prepare the unreleased Foundry v0.5.6 candidate against published Ferrum
+  Edge v0.9.20 (#686): source `e4a606a0`, index `sha256:32a0b057…`, platform
+  manifests, release binary hashes and raw OpenAPI identity. The starter's
+  demo gateway and the local-run command use the same digest, and package and
+  lockfile root versions are 0.5.6. Hosted qualification and Foundry
+  publication remain pending; v0.5.5 and earlier release records are
+  immutable. `ferrum-edge#6744` (`expected_proxy_ids`), which v0.9.20 enforces
+  and Foundry already sends, joins the recorded Edge dependencies. The
+  image's binaries were not byte-compared with the release assets for this
+  pin, and the record says so.
+- Re-vendor the same 18 scoped files from published `contracts-edge-0.9.20`
+  at `39da322083044c2e92617209e62983c92387f0ad` (#686). The two vocabularies'
+  Edge provenance and the canonical invalid expectations change;
+  `ai_token_metrics` moves from priority 4100 to 4070, and `PLUGIN_PRIORITY`
+  follows. All 82 plugin entries, the manifest schema and the fixtures are
+  unchanged.
+- Re-read the guided schemas, the plugin sensitivity source and
+  `McpGatewayConfig` at Edge v0.9.20 (#686). The guided `rate_limiting`
+  editor models `limit_by: service` and `max_state_entries`; the guided `cors`
+  editor models `allow_private_network` and bounds its method and header
+  lists at 128 entries; the guided `key_auth` editor hands an ordered list of
+  key locations to the JSON editor instead of flattening it. Four component
+  digests and `PLUGIN_SCHEMA_SPEC.ref` move to v0.9.20. The sensitivity table
+  marks `request_transformer` and `mesh_route_dispatch` rule values,
+  `response_mock` and `fault_injection` match values, `waf` exemption header
+  values and `ws_logging` `custom_headers` secret and `ldap_auth`
+  `failover_ldap_urls` an endpoint, so a failed write no longer echoes them.
+  `mcp_gateway` transparent mode also strips the prompt and resource policy
+  keys v0.9.19 added.
+- The `opa` template names an `https://` OPA host, because Edge v0.9.19+
+  refuses a cleartext `opa_host` off loopback (#686). The plugin-defaults
+  contract expects v0.9.20's `kafka_logging` egress refusal, which now names
+  `FERRUM_KAFKA_ALLOWED_BROKERS`; every other template keeps its v0.9.15
+  outcome. Demo seed API keys grow to 17 characters to meet v0.9.19+'s
+  16-character floor.
+
+- Drop three dependencies nothing imports: the production dependency
+  `@radix-ui/react-dropdown-menu` (with its `@radix-ui/react-menu`), and the
+  development dependencies `autoprefixer` and `postcss`, left from a Tailwind
+  v3 toolchain. Tailwind v4 runs through `@tailwindcss/vite`, and Vite keeps
+  its own `postcss`.
 - Restore is one explicit flow: while a restore runs, its confirmation
   dialogs refuse the close button, Escape and an outside click, and the file
   picker is disabled, so a late answer can no longer reopen the typed
@@ -69,9 +134,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unknown mode. A failed config read still shows the configuration error at
   once and discards the session answer, and never replaces a sign-in that
   completed meanwhile.
+- The Astra and Luna dispatch launchers send `service_tier="fast"` with
+  `features.fast_mode=true` for `--fast` instead of the `priority` tier, and
+  accept `--no-fast`; the Sol launcher no longer sends
+  `features.fast_mode=false` on a standard run. The launchers, their tests and
+  the skill wording match Ferrum Edge's again (#687).
 
 ### Security
 
+- The release workflow's publishing jobs (`docker`, `docker-manifest`,
+  `create-release`) run in the `release` environment, so its required
+  reviewers approve a release before anything is pushed (#684). A contract
+  test fails if one stops naming it.
+- The deployment starter's production nginx sets every forwarded header
+  oauth2-proxy reads (`X-Forwarded-For`, `-Host`, `-Proto`, `-Uri`,
+  `X-Real-IP`) from its own values on `/oauth2/` and on the `/oauth2/auth`
+  subrequest (GHSA-q866-mwp4-hgw3). The subrequest used to pass a client's
+  `X-Forwarded-For` and `X-Forwarded-Uri` through unchanged, and oauth2-proxy
+  runs with `--reverse-proxy`, so a deployment that added `--trusted-ip` or a
+  skip-auth route would have been open to oauth2-proxy's header-spoofing
+  bypasses.
+- The deployment starter runs oauth2-proxy v7.15.6
+  (`quay.io/oauth2-proxy/oauth2-proxy:v7.15.6@sha256:c3415e8660af553f5e18f5d90db050614c02493c0ac6260ac59442f6d9b12048`)
+  instead of v7.7.1, and nginx 1.31.8 mainline
+  (`nginx:1.31.8-alpine@sha256:fed7e14be83cbd2661a75cdc5b872d936cf155d46c327084d30b8df19ae88d72`)
+  instead of the closed 1.27 line (GHSA-q866-mwp4-hgw3). v7.7.1 predates ten
+  oauth2-proxy advisories, among them GHSA-hhqp-vx7f-5c6m (credentials logged
+  on a bad CSRF cookie, fixed in v7.15.5), which applied to the starter as
+  shipped. The starter's flags and `oauth2-proxy.env` settings are unchanged
+  across those releases. Third-party images are now written as
+  `name:tag@sha256:<digest>` rather than a digest with the tag in a comment,
+  and Dependabot watches `/deploy/starter` (`docker-compose`), so the pins
+  move with upstream releases; Ferrum's own images stay with the pairing
+  record. The critical-journey overlay `e2e/compose.e2e.yaml` runs the
+  starter's images and declares none of its own. Contract tests fail if a
+  third-party starter image loses its tag, or if a directory Dependabot
+  watches for `docker-compose` declares no image.
 - The BFF checks a namespace description's length without stalling on long
   whitespace. Its Unicode `White_Space` trim was a `\p{White_Space}+$`
   regex, which backtracks quadratically over a whitespace run inside the
@@ -205,6 +303,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A plugin save answered with the committed-but-not-live `503` is a save
+  (#674): the membership plan re-reads the plugin, finishes its association
+  steps, and the editor reseeds plugin, membership and baseline with a
+  "committed, not yet proven live" warning, instead of reporting a rollback
+  that never ran.
+- A committed-but-not-live create closes the proxy, upstream, consumer or
+  plugin create page (or the namespace create dialog) with a warning, so a
+  second click no longer sends a second `POST` (#674).
+- The `mcp_gateway` editor no longer rewrites the JSON under the cursor while
+  in Transparent mode (#679). Aggregate-only fields typed there stay as
+  written, are stripped on save, and merge over the stashed ones on a switch
+  back to Aggregate.
+- The Plugins list shows Ferrum Edge's built-in priorities again (#673). Its
+  hard-coded table had drifted: 17 values were wrong (`spec_expose` showed
+  9900 instead of 210, `ws_rate_limiting` 9750 instead of 2910) and 24
+  plugins, among them `waf`, `opa` and `mcp_gateway`, showed no priority. The
+  table (`PLUGIN_PRIORITY`) now lists every plugin in the vendored plugin
+  catalog, and the contracts test fails when it differs from the catalog.
+- A consumer's stored key-auth, JWT and HMAC credentials are listed as "Key
+  credential", "JWT credential" and "HMAC credential" (#676). The list masked
+  the gateway's `[REDACTED]` marker as if it were the secret and showed
+  `[RED****TED]` for every credential; a key-auth row without a key read "Key
+  (auto-generated)", which this gateway endpoint never does.
+- The Settings namespace field shown when the registry is unavailable or
+  lists nothing no longer switches the namespace on every keystroke (#677).
+  Each prefix of a typed name became the active namespace, refetching every
+  scoped read, and clearing the field left an empty scope that refused every
+  request. The typed name now switches only on Switch or Enter, and only once
+  it passes the gateway's namespace name rule; otherwise the field shows why.
+- The upstream form requires a service-discovery service name for every
+  provider, not only Consul, and sends it trimmed (#678); Ferrum Edge refuses
+  an empty name for DNS-SD, Kubernetes and mesh too. The proxy form checks
+  backend and listen ports as whole numbers from 1 to 65535, as the target
+  form does (which now also refuses a fractional port), instead of sending
+  `70000` or `80.5` to a gateway `400`.
+- The `mcp_gateway` editor no longer loses a stashed `policy.tools` map
+  (#679). Typing an aggregate-only field such as `policy.default_action` in
+  Transparent mode replaced the whole stashed `policy` object, so switching
+  back to Aggregate restored the typed field without the tool policies. The
+  stash now merges nested fields, as a mode switch does.
+- A namespace delete answered with the committed-but-not-live `503` is
+  reported as a delete (#674). It used to reject: the retired name's caches
+  stayed, an active scope stayed on the deleted namespace, and the dialog
+  stayed open offering a second `DELETE`. It now resolves through
+  `removeCommitted`, moves the scope to the default, closes the dialog and
+  warns that the delete is committed but not yet proven live.
+- The error dialog no longer shows a stray `0` beside "Outcome unknown" or
+  "API Error" when no HTTP answer arrived (a dropped connection or a client
+  timeout); the status badge appears only for a real HTTP status.
+- The plugin picker describes `rate_limiting` as limiting by client IP,
+  consumer, or SPIFFE identity, the keys Ferrum Edge accepts; it used to offer
+  a header key the gateway does not have.
+- The header of `deploy/starter/compose.yaml` runs the preflight with
+  `--env .env`, as the starter README does. Run from `deploy/starter/` without
+  it, the preflight read no file and reported every required secret as unset.
+- The starter preflight measures `FERRUM_JWT_SECRET` in UTF-8 bytes, as the
+  BFF and the admin JWT signer do, and reports "N bytes": a non-ASCII secret of
+  32 bytes but fewer than 32 characters no longer gets a false FAIL.
+  `FERRUM_TRUSTED_PROXY_SECRET` stays in characters, as its BFF check is
+  (#663).
+- `npm run check:plugin-schemas` also fails when `PLUGIN_SCHEMA_SPEC.ref` is
+  not the checked ref, even with every digest unchanged, and a unit test
+  requires it to equal `edge.source_commit`, as the plugin sensitivity check
+  already does for its recorded commit. A pin bump can no longer leave the
+  exported `reviewed_ref` naming a commit nobody re-read (#663).
+- The mock admin gateway trims a namespace description with Unicode
+  `White_Space` (NEXT LINE included, the BOM not), counts the 1024 limit after
+  trimming, and refuses a lone surrogate, as Ferrum Edge does (#663).
+- The dashboard and the metrics page format gateway uptime the same way
+  (`1d 0h 5m`); the metrics page used to drop a zero hour (`1d 5m`) (#663).
 - The browser session is one explicit state (`loading`, `configFailed`,
   `unauthenticated`, `authenticated` or `lockedOut`) driven by a reducer in
   `src/stores/auth.tsx` (#656). A failed authentication-config load no longer
@@ -369,6 +537,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read requires. A `200` HTML fallback page, an empty or `{}` body, or one
   without `ready` from a misrouted admin origin was reported ready; it is now
   `503` `unavailable`. A valid `degraded` snapshot is still ready.
+- `plugin-schema-drift.mjs`, `plugin-sensitivity-drift.mjs` and
+  `starter-preflight.mjs` ran nothing and exited 0 when started from a path
+  with a space or non-ASCII character or through a symlink, because they
+  compared `import.meta.url` with an unencoded, unresolved `argv[1]`. Every
+  script now compares it with `pathToFileURL(realpathSync(argv[1]))`, and a
+  contract test fails on any other form (#685).
+- The mock admin API (`scripts/mock-admin-gateway.mjs`) listens on
+  `127.0.0.1` instead of every interface, since it is writable and
+  unauthenticated; `MOCK_ADMIN_BIND` names another address, and the log line
+  prints the address it actually listens on (#685).
+- The demo seed's restore payload stamps `ferrum_version` with the Edge
+  source commit `docs/compatibility.json` pins instead of a fixed August
+  commit; the critical journeys fail at a refused setup write with its
+  status instead of a later UI timeout, and CI no longer sets the unused
+  `FERRUM_ADMIN_URL` for them (#685).
+- The namespace list no longer accepts a bare `string[]` from
+  `GET /namespaces` as a complete registry, a branch kept for development
+  gateways that predate the paginated envelope. Any list page without the
+  `{ data, pagination }` envelope is refused as inconsistent pagination
+  metadata instead of failing on a missing field (#681).
+- Metrics: load balancer, circuit breaker and health-check rows from a
+  namespace other than the selected one are labelled with it; the load
+  balancer panel compared with the literal `ferrum` instead, and the other
+  two never showed it. Unhealthy-target rows on Metrics and the dashboard are
+  keyed by namespace, check kind, upstream or proxy, and target, so repeated
+  targets no longer share a React key (#683).
+- Toasts are announced to screen readers (a polite live region), and their
+  dismiss button and the consumer ACL group remove button carry labels. The
+  error dialog's Copy Error reports a refused clipboard and asks for a manual
+  copy instead of failing silently (#683).
+- The proxy picker's "Searching the first N of M proxies" note follows the
+  results it describes. Managed TLS, ACME certificate and ACME order lists
+  say "No results on this page" after the last record on a later page is
+  deleted, as Inventory and Events do. The upstream list names the
+  configured health-check kinds ("Active", "Passive", "Active + passive")
+  instead of calling passive-only checks "Active" (#683).
+- The gateway metadata store no longer keeps the last response's `ETag`,
+  `Cache-Control` and `Content-Disposition`, which nothing read, and a read
+  publishes only when the cached-response notice changes, so the metadata
+  banner no longer re-renders on every API response (#683).
+- Coverage no longer counts the shared test helpers under `src/test/` toward
+  the source floors (#683).
+- Docs: the deployment guide's upload bullet named `proxy_read_timeout`, a
+  response-side timer, as one to keep at or below the upload budgets,
+  contradicting the deadlines section; it now names `proxy_send_timeout` and
+  points response timers at the deadlines. The deployment and authentication
+  guides say the image healthcheck probes `127.0.0.1`, so a
+  `FERRUM_BIND_ADDRESS` other than `0.0.0.0` or `127.0.0.1` needs it
+  overridden (#684).
 
 ### Changed
 

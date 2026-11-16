@@ -245,8 +245,7 @@ function witnessKey(name: string): string {
 // Each is remembered as a fixed-size digest (`witnessKey`), so the memory is
 // bounded by the page budget alone: at most `maxPages` × PAGE_SIZE entries of
 // constant size (a page is validated before its names are), however long the
-// names are; a single legacy array page is bounded by PAGE_BYTES instead. A digest collision reports a
-// repeat, which fails closed as the same retryable 503 and never omits a name.
+// names are. A digest collision reports a repeat, which fails closed as the same retryable 503 and never omits a name.
 //
 // Offset reads cannot prove more than that: a delete before the cursor plus a
 // later-sorting insert skips a name without repeating one, and stays
@@ -284,24 +283,24 @@ async function scanGrantedNames(
         body: { error: 'Namespace list unavailable' },
       };
     }
+    // Every page must be the paginated envelope; a bare array (or anything
+    // else) is malformed, never a complete registry.
     const page: unknown = await readPage(response);
-    const legacy = Array.isArray(page);
-    const envelope = page as { data?: unknown; pagination?: { offset?: unknown; total?: unknown } } | null;
-    const data = legacy ? page : envelope?.data;
+    const envelope = Array.isArray(page)
+      ? null
+      : page as { data?: unknown; pagination?: { offset?: unknown; total?: unknown } } | null;
+    const data = envelope?.data;
     if (!Array.isArray(data) || data.some((name) => !isNamespaceName(name))) {
       throw new Error('Invalid namespace list');
     }
-    let consistent = true;
-    if (!legacy) {
-      const total = envelope?.pagination?.total;
-      if (typeof total !== 'number' || !Number.isSafeInteger(total) || total < 0
-        || envelope?.pagination?.offset !== upstreamOffset || data.length > PAGE_SIZE) {
-        throw new Error('Invalid namespace pagination');
-      }
-      firstTotal ??= total;
-      upstreamOffset += data.length;
-      consistent = total === firstTotal && upstreamOffset <= firstTotal;
+    const total = envelope?.pagination?.total;
+    if (typeof total !== 'number' || !Number.isSafeInteger(total) || total < 0
+      || envelope?.pagination?.offset !== upstreamOffset || data.length > PAGE_SIZE) {
+      throw new Error('Invalid namespace pagination');
     }
+    firstTotal ??= total;
+    upstreamOffset += data.length;
+    let consistent = total === firstTotal && upstreamOffset <= firstTotal;
     for (const name of data as string[]) {
       const key = witnessKey(name);
       if (witnessed.has(key)) consistent = false;
@@ -319,7 +318,7 @@ async function scanGrantedNames(
         body: { error: 'Namespace list unavailable', code: 'FERRUM_BFF_NAMESPACE_SCAN_INCONSISTENT' },
       };
     }
-    if (legacy || upstreamOffset >= firstTotal!) break;
+    if (upstreamOffset >= firstTotal) break;
     if (data.length === 0) throw new Error('Namespace pagination made no progress');
   }
   return { names: [...found].sort() };

@@ -9,13 +9,14 @@ const catalog: Proxy[] = [
   { id: "orders-v2", name: "Orders v2", listen_path: "/orders/v2", backend_host: "orders.internal", backend_port: 8080 },
   { id: "mqtt", name: "MQTT Broker", listen_path: null, backend_scheme: "tcps", backend_host: "mqtt.internal", backend_port: 8883 },
 ] as unknown as Proxy[];
+let catalogComplete = true;
 
 vi.mock("@/hooks/useProxies", () => ({
   describeProxy: (proxy: Proxy) => proxy.name ?? proxy.id,
   useProxyCatalog: () => ({
     proxies: catalog,
-    total: catalog.length,
-    complete: true,
+    total: catalogComplete ? catalog.length : 10,
+    complete: catalogComplete,
     expanding: false,
     query: {
       data: { data: catalog }, isError: false, isLoading: false, isFetching: false,
@@ -43,6 +44,7 @@ function Harness() {
 
 beforeEach(async () => {
   submitted.mockClear();
+  catalogComplete = true;
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
@@ -96,5 +98,16 @@ describe("ProxySearchPicker", () => {
     await type("mqtt");
     expect(host.textContent).toContain("MQTT Broker");
     expect(host.textContent).not.toContain("null");
+  });
+
+  it("notes a partial search after the results it covers", async () => {
+    catalogComplete = false;
+    await act(async () => root.render(<Harness />));
+    await type("ord");
+    const note = [...host.querySelectorAll("p")].find((p) => p.textContent?.includes("Searching the first"));
+    const firstResult = [...host.querySelectorAll("button")].find((b) => b.textContent?.includes("Orders"));
+    expect(note).toBeTruthy();
+    expect(firstResult).toBeTruthy();
+    expect(firstResult!.compareDocumentPosition(note!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

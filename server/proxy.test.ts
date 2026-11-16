@@ -1,5 +1,6 @@
 import { Agent, createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http';
 import { once } from 'node:events';
+import { readFileSync } from 'node:fs';
 import type { AddressInfo, Socket } from 'node:net';
 import { gzipSync } from 'node:zlib';
 import type { FastifyInstance } from 'fastify';
@@ -7,6 +8,11 @@ import { decodeJwt } from 'jose';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 const BEARER_PATTERN = /^Bearer /;
+// Read independently of server/version.ts, so a release bump needs no edit here
+// and a version reported as 'unknown' still fails.
+const PACKAGE_VERSION = (
+  JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }
+).version;
 
 const BFF_TOKEN = 'proxy-test-bff-token-is-long-enough-123';
 const JWT_SECRET = 'proxy-test-jwt-secret-is-long-enough-123';
@@ -401,13 +407,13 @@ describe('streaming gateway proxy', () => {
   it('separates liveness from authenticated downstream readiness', async () => {
     const live = await app.inject({ method: 'GET', url: '/api/health/live', headers: sessionHeaders });
     expect(live.statusCode).toBe(200);
-    expect(live.json()).toMatchObject({ status: 'ok', version: '0.5.5' });
+    expect(live.json()).toMatchObject({ status: 'ok', version: PACKAGE_VERSION });
 
     const ready = await app.inject({ method: 'GET', url: '/api/health/ready', headers: sessionHeaders });
     expect(ready.statusCode).toBe(200);
     expect(ready.json()).toMatchObject({
       ready: true,
-      version: '0.5.5',
+      version: PACKAGE_VERSION,
       components: { bff: { status: 'ok' }, gateway: { status: 'ok', httpStatus: 200 } },
     });
     expect(observed.some(({ url }) => url === '/namespaces?offset=0&limit=1')).toBe(true);
@@ -503,33 +509,6 @@ describe('streaming gateway proxy', () => {
     expect(response.statusCode).toBe(200);
     expect(response.cacheControl).toBe('no-store');
     expect(observed.at(-1)?.url).toBe('/echo');
-  });
-
-  it('does not strand a keep-alive connection when the gateway is unreachable', async () => {
-    const path = '/api/proxy/proxies/unreachable';
-    const agent = new Agent({ keepAlive: true, maxSockets: 1 });
-    try {
-      const configModule = await import('./config.js');
-      const configSpy = vi.spyOn(configModule, 'loadConfig').mockReturnValue({
-        ...configModule.loadConfig(),
-        adminUrl: 'http://127.0.0.1:1',
-      });
-      let upload: KeepAliveOutcome;
-      try {
-        upload = await keepAliveRequest(agent, 'PUT', path, Buffer.alloc(1_900_000, 'a'));
-        expect(upload.status).toBe(502);
-      } finally {
-        configSpy?.mockRestore();
-      }
-      // The next request on the same agent must be answered, not queued
-      // behind an unread upload until the server's request timeout, and on
-      // the same connection, because the BFF discarded the unread remainder.
-      const followUp = await keepAliveRequest(agent, 'GET', '/api/auth/session');
-      expect(followUp.status).toBe(200);
-      expectSameConnection(upload, followUp);
-    } finally {
-      agent.destroy();
-    }
   });
 
   it('closes a sender that stalls after its upload was rejected unread', async () => {
@@ -1163,6 +1142,47 @@ describe('unread upload drains', () => {
         target,
       );
       expect(upload.status).toBe(400);
+      const followUp = await keepAliveRequest(agent, 'GET', '/api/auth/session', undefined, target);
+      expect(followUp.status).toBe(200);
+      expectSameConnection(upload, followUp);
+    } finally {
+      agent.destroy();
+    }
+  });
+
+  // Under the 100 ms FERRUM_WRITE_TIMEOUT of the suite above, the drain's
+  // budget (the request's remaining write budget) could run out before a
+  // loaded runner had read the 1.9 MB remainder, closing the connection the
+  // follow-up is asserted to reuse. Here only the drain's own bounds apply.
+  it('does not strand a keep-alive connection when the gateway is unreachable', async () => {
+    const agent = new Agent({ keepAlive: true, maxSockets: 1 });
+    const target = {
+      port: (lingering.server.address() as AddressInfo).port,
+      headers: lingeringHeaders,
+      timeoutMs: 30_000,
+    };
+    try {
+      const configModule = await import('./config.js');
+      const configSpy = vi.spyOn(configModule, 'loadConfig').mockReturnValue({
+        ...configModule.loadConfig(),
+        adminUrl: 'http://127.0.0.1:1',
+      });
+      let upload: KeepAliveOutcome;
+      try {
+        upload = await keepAliveRequest(
+          agent,
+          'PUT',
+          '/api/proxy/proxies/unreachable',
+          Buffer.alloc(1_900_000, 'a'),
+          target,
+        );
+        expect(upload.status).toBe(502);
+      } finally {
+        configSpy.mockRestore();
+      }
+      // The next request on the same agent must be answered, not queued
+      // behind an unread upload until the server's request timeout, and on
+      // the same connection, because the BFF discarded the unread remainder.
       const followUp = await keepAliveRequest(agent, 'GET', '/api/auth/session', undefined, target);
       expect(followUp.status).toBe(200);
       expectSameConnection(upload, followUp);

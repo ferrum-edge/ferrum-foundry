@@ -380,17 +380,19 @@ describe("per-tool policy write", () => {
     const gateway = stubPluginGateway(transparent);
     await expect(updateToolPolicy(scope, "mcp", "github.create", { action: "allow" }, null, "admin"))
       .rejects.toBeInstanceOf(McpToolPolicyError);
+    expect(gateway.wire.map((call) => call.method)).toEqual(["GET"]);
 
-    stubPluginGateway(mcpPlugin({ plugin_name: "rate_limiting" }));
+    const notMcp = stubPluginGateway(mcpPlugin({ plugin_name: "rate_limiting" }));
     await expect(updateToolPolicy(scope, "mcp", "github.create", { action: "allow" }, null, "admin"))
       .rejects.toThrow("not mcp_gateway");
+    expect(notMcp.wire.map((call) => call.method)).toEqual(["GET"]);
 
-    stubPluginGateway(mcpPlugin());
+    const denyGroups = stubPluginGateway(mcpPlugin());
     await expect(updateToolPolicy(scope, "mcp", "github.create", {
       action: "deny",
       allowed_groups: ["eng"],
     }, null, "admin")).rejects.toThrow("only to an allow entry");
-    expect(gateway.wire.map((call) => call.method)).toEqual(["GET"]);
+    expect(denyGroups.wire.map((call) => call.method)).toEqual(["GET"]);
   });
 });
 

@@ -10,7 +10,6 @@ const NAMESPACE_PATTERN = /namespace/i;
 
 export const FOUNDRY_URL = process.env.FOUNDRY_URL ?? "http://127.0.0.1:8088";
 export const DATA_PLANE_URL = process.env.FERRUM_DATA_PLANE_URL ?? "http://127.0.0.1:8000";
-export const ADMIN_URL = process.env.FERRUM_ADMIN_URL ?? "http://127.0.0.1:9000";
 export const FAULT_URL = process.env.FAULT_PROXY_URL ?? "http://127.0.0.1:9500";
 export const FAULT_TOKEN = process.env.FAULT_TOKEN ?? "e2e-fault-token";
 export const NAMESPACE = process.env.FERRUM_NAMESPACE ?? "ferrum-foundry-demo";

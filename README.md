@@ -49,9 +49,13 @@ works the same way against a live Ferrum Edge gateway.
 
 ## Supported Ferrum Edge version
 
-The published pairing is **Foundry v0.5.5 / Ferrum Edge v0.9.15**. Its
-qualification and publication evidence, and earlier pairings, are in the
-[pairing record](docs/compatibility.md).
+The **Foundry v0.5.6 candidate** pins published **Ferrum Edge v0.9.20** by
+digest in `docs/compatibility.json` (#686). Hosted pairing qualification and
+Foundry publication are pending; verified Edge distribution does not qualify
+Foundry. The latest published pairing is **Foundry v0.5.5 / Ferrum Edge
+v0.9.15**, preserved in its
+[immutable record](docs/release-notes/v0.5.5.compatibility.json); earlier
+pairings are in the [pairing record](docs/compatibility.md).
 
 The qualification envelope stays `database` mode on SQLite (writable and
 `FERRUM_ADMIN_READ_ONLY`), the trusted-proxy starter, Chromium, and
@@ -68,7 +72,7 @@ Foundry vendors the `plugin-catalog` and `provisioned-by` vocabularies with
 their vocabulary schemas, plus the implemented service-manifest schema, all
 its valid/invalid fixtures and the canonical invalid-expectations file, under
 [`contracts/ferrum-contracts/`](contracts/ferrum-contracts/), pinned to
-`contracts-edge-0.9.15` at `6fb64c5dc2e014204c17609fc717d976f3b4589e` in
+`contracts-edge-0.9.20` at `39da322083044c2e92617209e62983c92387f0ad` in
 [`contracts/ferrum-contracts/PIN`](contracts/ferrum-contracts/PIN). The vendored
 files, Foundry's local plugin names and provisioning markers, and the pin's tie
 to the paired Edge release are checked by
@@ -180,7 +184,7 @@ gateway or identity provider of your own.
 ```bash
 npm install
 
-export FERRUM_ADMIN_URL=http://localhost:9000         # Ferrum Admin API URL
+export FERRUM_ADMIN_URL=http://127.0.0.1:9000         # Ferrum Admin API URL
 export FERRUM_JWT_SECRET=$(openssl rand -hex 32)      # HS256 signing key, 32+ bytes; must match the gateway
 export FERRUM_BFF_AUTH_TOKEN=$(openssl rand -hex 32)  # development sign-in token
 export FERRUM_JWT_NAMESPACES='*'                      # namespace scope: exact names, or * for every namespace
@@ -243,7 +247,7 @@ surfaces (CRUD, TLS/ACME, audit, cluster, overload, chargeback, gateway trust
 bundles):
 
 ```bash
-node scripts/mock-admin-gateway.mjs   # listens on :9000 (MOCK_ADMIN_PORT)
+node scripts/mock-admin-gateway.mjs   # 127.0.0.1:9000 (MOCK_ADMIN_BIND, MOCK_ADMIN_PORT)
 ```
 
 `MOCK_GATEWAY_MODE=file` makes it a read-only gateway. Writes follow the live
@@ -259,7 +263,7 @@ Edge contract:
 - plugin config `PUT`/`DELETE` require `expected_proxy_ids` (an empty value
   expects none): the mock implements the newer Edge association precondition
   described in [plugin membership](docs/plugin-membership.md#scope-changes-and-proxy-scoped-plugins),
-  which the paired v0.9.15 ignores.
+  which the paired v0.9.20 enforces.
 
 `GET /mesh/service-graph` always returns sample data, and with
 `MOCK_GATEWAY_MODE=mesh` so does `GET /mesh/runtime-overlay`; other `/mesh/*`,
@@ -369,8 +373,8 @@ image with a different digest. See
 |---|---|
 | Frontend | React 19, TypeScript 6, Tailwind CSS v4 |
 | Routing | TanStack Router v1 |
-| Data | TanStack Query v5, TanStack Table v8, TanStack Virtual v3 |
-| UI | Radix UI primitives (Dialog, Dropdown Menu, Select, Tabs, Tooltip) |
+| Data | TanStack Query v5 |
+| UI | Radix UI primitives (Dialog, Select, Tabs) |
 | Backend | Node.js, Fastify 5 |
 | JWT | jose (HS256) |
 | Docker | Distroless Node.js 24 (Debian 13), non-root |
@@ -380,8 +384,7 @@ image with a different digest. See
 The BFF sends `X-Ferrum-Provisioned-By: ferrum-foundry` on every proxied admin
 request, and the demo seeder does the same. A gateway with resource-label
 support records it as `labels.provisioned-by` on newly created proxies,
-consumers, upstreams, and plugin configs, including batch creates and API-spec
-imports. Existing labels survive edits, and restore keeps recorded origins.
+consumers, upstreams, and plugin configs, including API-spec imports. Existing labels survive edits, and restore keeps recorded origins.
 Detail pages show all labels, including those set by other tools.
 
 Labels are informational. They do not affect authentication, ownership, or

@@ -13,11 +13,10 @@ test('the advertised Node.js range includes the locked jsdom toolchain minimums'
   assert.equal(manifest.engines.node, supportedNodeRange);
   assert.equal(lockfile.packages[''].engines.node, supportedNodeRange);
 
-  for (const packageName of [
-    'node_modules/jsdom',
-    'node_modules/@asamuzakjp/css-color',
-    'node_modules/@asamuzakjp/dom-selector',
-  ]) {
-    assert.equal(lockfile.packages[packageName].engines.node, supportedNodeRange, packageName);
+  // jsdom 31 dropped the @asamuzakjp/* CSS packages; w3c-xmlserializer is now the
+  // other locked jsdom dependency that sets the same Node.js floor.
+  for (const packageName of ['node_modules/jsdom', 'node_modules/w3c-xmlserializer']) {
+    assert.ok(lockfile.packages[packageName], `${packageName} is missing from package-lock.json`);
+    assert.equal(lockfile.packages[packageName].engines?.node, supportedNodeRange, packageName);
   }
 });

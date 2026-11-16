@@ -12,80 +12,19 @@ import { Badge } from "@/components/ui/Badge";
 import { SearchBar } from "@/components/shared/SearchBar";
 import { PaginationControls } from "@/components/shared/PaginationControls";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { ReadStateNotice } from "@/components/shared/ReadState";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { PlusIcon } from "@/components/ui/icons";
 import { WriteAction } from "@/components/shared/CapabilityGate";
 import { useCapabilities } from "@/stores/capabilities";
 import { SkeletonRow } from "@/components/ui/Skeleton";
-import { formatPluginName, getPluginMeta } from "@/lib/pluginConfigDefaults";
+import { PLUGIN_PRIORITY, formatPluginName, getPluginMeta } from "@/lib/pluginConfigDefaults";
 import { filterAndPage } from "@/lib/collectionSearch";
 import { EMPTY_VALUE, formatDateTime } from "@/lib/format";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
-
-/** Built-in plugin priorities from ferrum-edge (lower = runs first). */
-const DEFAULT_PLUGIN_PRIORITY: Record<string, number> = {
-  otel_tracing: 25,
-  correlation_id: 50,
-  cors: 100,
-  request_termination: 125,
-  ip_restriction: 150,
-  geo_restriction: 175,
-  bot_detection: 200,
-  sse: 250,
-  grpc_web: 260,
-  grpc_method_router: 275,
-  mtls_auth: 950,
-  jwks_auth: 1000,
-  jwt_auth: 1100,
-  key_auth: 1200,
-  ldap_auth: 1250,
-  basic_auth: 1300,
-  hmac_auth: 1400,
-  soap_ws_security: 1500,
-  access_control: 2000,
-  tcp_connection_throttle: 2050,
-  request_size_limiting: 2800,
-  graphql: 2850,
-  rate_limiting: 2900,
-  ai_prompt_shield: 2925,
-  body_validator: 2950,
-  ai_request_guard: 2975,
-  ai_federation: 2985,
-  request_transformer: 3000,
-  serverless_function: 3025,
-  response_mock: 3030,
-  grpc_deadline: 3050,
-  request_mirror: 3075,
-  response_caching: 3500,
-  response_transformer: 4000,
-  response_size_limiting: 4050,
-  ai_response_guard: 4075,
-  ai_token_metrics: 4100,
-  ai_rate_limiter: 4200,
-  ai_semantic_cache: 4300,
-  compression: 4500,
-  stdout_logging: 9000,
-  http_logging: 9100,
-  tcp_logging: 9125,
-  udp_logging: 9130,
-  kafka_logging: 9150,
-  loki_logging: 9175,
-  ws_logging: 9200,
-  statsd_logging: 9250,
-  prometheus_metrics: 9300,
-  api_chargeback: 9400,
-  transaction_debugger: 9500,
-  load_testing: 9600,
-  ws_frame_logging: 9700,
-  ws_rate_limiting: 9750,
-  ws_message_size_limiting: 9775,
-  udp_rate_limiting: 9800,
-  request_deduplication: 9850,
-  spec_expose: 9900,
-};
 
 function PriorityCell({ override, builtIn }: { override?: number | null; builtIn?: number }) {
   if (override != null) {
@@ -165,6 +104,7 @@ export default function PluginsPage() {
     : (pageQuery.data?.pagination?.total ?? 0);
   const isLoading = searching ? allQuery.isLoading : pageQuery.isLoading;
   const isError = searching ? allQuery.isError : pageQuery.isError;
+  const listQuery = searching ? allQuery : pageQuery;
   const { capabilities } = useCapabilities();
   const canWrite = capabilities.pluginConfigs;
 
@@ -203,11 +143,11 @@ export default function PluginsPage() {
         label="Plugins"
         emptyState={
           <>
+            {/* A refused read is a denial and an outage is unavailable. A failed
+                refetch says it could not refresh and when the rows were last
+                observed; stale rows are not shown as current (#298, #680). */}
             {!isLoading && isError && (
-              <EmptyState
-                title="Failed to load plugins"
-                description="An error occurred while fetching plugin configurations."
-              />
+              <ReadStateNotice query={listQuery} label="Plugins" />
             )}
 
             {!isLoading && !isError && configs.length === 0 && (
@@ -307,7 +247,7 @@ export default function PluginsPage() {
                     counts as absent, so a row never shows an empty override. */}
                 <PriorityCell
                   override={config.priority_override}
-                  builtIn={DEFAULT_PLUGIN_PRIORITY[config.plugin_name]}
+                  builtIn={PLUGIN_PRIORITY[config.plugin_name]}
                 />
 
                 {/* Created at */}

@@ -12,7 +12,7 @@
 import { expect, test, uniqueId, GatewayClient, NAMESPACE } from "../support/stack";
 
 const BACKEND_TIMEOUTS_PATTERN = /backend timeouts/i;
-const FAILED_TO_LOAD_PROXY_CONFIGURATION_PATTERN = /failed to load proxy configuration/i;
+const PROXY_CONFIGURATION_UNAVAILABLE_PATTERN = /proxy configuration unavailable/i;
 
 const PROXY_ID = uniqueId("e2e-lifecycle");
 const UPSTREAM_ID = uniqueId("e2e-lifecycle-up");
@@ -26,13 +26,14 @@ async function admin(): Promise<GatewayClient> {
 test.describe("resource lifecycle", () => {
   test.beforeAll(async () => {
     const gateway = await admin();
-    await gateway.send("POST", "/upstreams?apply=sync", {
+    const upstream = await gateway.send("POST", "/upstreams?apply=sync", {
       id: UPSTREAM_ID,
       name: UPSTREAM_ID,
       algorithm: "round_robin",
       targets: [{ host: "demo-backend", port: 8081, weight: 1 }],
     });
-    await gateway.send("POST", "/proxies?apply=sync", {
+    expect([200, 201], `creating ${UPSTREAM_ID}`).toContain(upstream.status);
+    const proxy = await gateway.send("POST", "/proxies?apply=sync", {
       id: PROXY_ID,
       name: PROXY_ID,
       listen_path: `/${PROXY_ID}`,
@@ -43,6 +44,7 @@ test.describe("resource lifecycle", () => {
       strip_listen_path: true,
       hosts: [],
     });
+    expect([200, 201], `creating ${PROXY_ID}`).toContain(proxy.status);
   });
 
   test.afterAll(async () => {
@@ -107,7 +109,7 @@ test.describe("resource lifecycle", () => {
 
   test("a deleted resource's detail page does not resurrect it", async ({ adminPage: page }) => {
     await page.goto(`/proxies/${PROXY_ID}`);
-    await expect(page.getByText(FAILED_TO_LOAD_PROXY_CONFIGURATION_PATTERN)).toBeVisible();
+    await expect(page.getByText(PROXY_CONFIGURATION_UNAVAILABLE_PATTERN)).toBeVisible();
     await expect(page.getByLabel("Listen Path", { exact: true })).toHaveCount(0);
   });
 });

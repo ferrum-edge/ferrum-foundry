@@ -72,13 +72,6 @@ describe("mesh API contracts", () => {
     expect(requests[0].headers.get("X-Ferrum-Namespace")).toBe("tenant-a");
   });
 
-  it("resets the configuration revision without inventing a request body", async () => {
-    expect(await mesh.resetConfigRevision(scope)).toEqual({ status: "reset", cleared_revision: null });
-    expect(requests[0].method).toBe("POST");
-    expect(requests[0].headers.get("X-Ferrum-Namespace")).toBe("tenant-a");
-    expect(await requests[0].text()).toBe("");
-  });
-
   it.each([404, 503])("keeps expected feature misses (%s) out of the global popup", async (status) => {
     vi.mocked(fetch).mockImplementation(async () => Response.json(
       { error: "Mesh mode is unavailable" }, { status, headers: { "retry-after": "0" } },

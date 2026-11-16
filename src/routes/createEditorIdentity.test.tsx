@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { NamespaceProvider, NAMESPACE_STORAGE_KEY, useNamespace } from "@/stores/namespace";
+import { markCommittedWrite } from "@/api/client";
 import ConsumerNewPage from "./consumers/new";
 import ProxyNewPage from "./proxies/new";
 import UpstreamNewPage from "./upstreams/new";
@@ -18,6 +19,8 @@ const toast = vi.fn();
 // When set, each create stays pending until its resolver in `held` is called,
 // standing in for a POST whose answer arrives after the operator moved on.
 let holdWrites = false;
+// When set, each create commits and answers with the committed `503`.
+let commitWrites = false;
 const held: (() => void)[] = [];
 const navigate = vi.fn();
 
@@ -48,6 +51,9 @@ function useScopedMutation() {
       writes.push({ namespace: scope.namespace, data });
       if (holdWrites) {
         await new Promise<void>((resolve) => held.push(resolve));
+      }
+      if (commitWrites) {
+        throw markCommittedWrite(new Error("HTTP 503"), { cursor: "1:2", reason: "reload_timeout" });
       }
       return { id: "created" };
     },
@@ -89,6 +95,12 @@ const cases: [string, ComponentType][] = [
   ["upstream", UpstreamNewPage],
   ["plugin", PluginNewPage],
 ];
+const collections: Record<string, string> = {
+  consumer: "/consumers",
+  proxy: "/proxies",
+  upstream: "/upstreams",
+  plugin: "/plugins",
+};
 
 describe.each(cases)("%s create editor namespace identity", (_kind, Page) => {
   let host: HTMLDivElement;
@@ -114,6 +126,7 @@ describe.each(cases)("%s create editor namespace identity", (_kind, Page) => {
   beforeEach(async () => {
     writes.length = 0;
     holdWrites = false;
+    commitWrites = false;
     held.length = 0;
     toast.mockClear();
     navigate.mockClear();
@@ -198,5 +211,20 @@ describe.each(cases)("%s create editor namespace identity", (_kind, Page) => {
     });
     await act(async () => { held.shift()!(); });
     expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("closes the form on a committed create instead of offering a second POST (#674)", async () => {
+    commitWrites = true;
+    await type("Draft name", "tenant-a-draft");
+    await act(async () => { host.querySelector("form")!.requestSubmit(); });
+
+    expect(writes).toHaveLength(1);
+    expect(toast).toHaveBeenCalledWith(
+      "warning",
+      expect.stringContaining("created: committed, not yet proven live"),
+    );
+    expect(toast).not.toHaveBeenCalledWith("error", expect.anything());
+    // The answer has no body, so the collection is where the new resource is.
+    expect(navigate).toHaveBeenCalledWith({ to: collections[_kind] });
   });
 });

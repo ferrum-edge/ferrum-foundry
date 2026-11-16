@@ -32,6 +32,20 @@ function toDate(value: DateInput): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+/**
+ * A gateway uptime to the minute, as the dashboard and the metrics page both
+ * show it: `1d 0h 5m`, `2h 3m`, `7m`. Once a larger unit is shown every smaller
+ * one is too, so `1d 0h 5m` never reads as `1d 5m`.
+ */
+export function formatUptime(seconds: number): string {
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h ${m}m`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
 /** A calendar date and time of day, e.g. "Sep 25, 2026, 08:40 PM". */
 export function formatDateTime(value: DateInput, fallback: string = EMPTY_VALUE): string {
   const date = toDate(value);

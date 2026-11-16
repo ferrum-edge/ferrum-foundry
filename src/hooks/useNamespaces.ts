@@ -12,6 +12,7 @@ import {
 import * as namespaces from "@/api/namespaces";
 import type { NamespaceCreate, NamespaceUpdate } from "@/api/namespaces";
 import { useNamespace } from "@/stores/namespace";
+import { removeCommitted } from "./retireDeletedDetail";
 
 /**
  * Reconcile the query cache after a namespace mutation.
@@ -118,9 +119,13 @@ export function useDeleteNamespace() {
   const qc = useQueryClient();
   const { scope } = useNamespace();
   return useMutation({
+    // A committed-but-not-live `503` is a durable delete: it resolves as one
+    // (with the commit, for the dialog's warning) so the retired name's
+    // caches go exactly as on success and the dialog never offers another
+    // DELETE for a namespace that is already gone.
     mutationFn: ({ name, confirm }: { name: string; confirm?: string }) =>
-      namespaces.remove(scope, name, { confirm }),
-    onSuccess: (_result, { name }) => {
+      removeCommitted(() => namespaces.remove(scope, name, { confirm })),
+    onSuccess: (_committed, { name }) => {
       reconcileNamespaceCache(qc, name, null);
     },
   });

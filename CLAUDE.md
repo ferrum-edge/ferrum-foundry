@@ -76,8 +76,9 @@ node scripts/demo-traffic-client.mjs mixed
 ### Running the gateway locally
 
 Run the Ferrum Edge image CI pins, by digest, so local results match CI. It is
-the published Ferrum Edge v0.9.15 security release qualified with published
-Foundry v0.5.5.
+the published Ferrum Edge v0.9.20 release selected for the Foundry v0.5.6
+candidate; hosted pairing qualification is pending. The published Foundry
+v0.5.5 / Edge v0.9.15 pairing and earlier pairings remain in history.
 `edge.image` in `docs/compatibility.json` is the single source: CI reads it
 (`node scripts/supported-pairing.mjs edge-image`), and
 `scripts/supported-pairing.test.mjs` fails if the starter, this command, or any
@@ -96,7 +97,7 @@ docker run --rm -d --name ferrum-edge \
   -e FERRUM_ADMIN_BIND_ADDRESS=0.0.0.0 \
   -e FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true \
   -p 127.0.0.1:9000:9000 -p 127.0.0.1:8000:8000 \
-  ferrumedge/ferrum-edge@sha256:29b468dfeea13b1ecaac8dfbc7e019f310e71e647611d43800a1dc64436eaca3 run -m database -v
+  ferrumedge/ferrum-edge@sha256:32a0b0574bb2ed105d315888fab12e33242e1cec3ae9f1ae34c1fb4d0c9a2689 run -m database -v
 ```
 
 The plaintext admin bind above is a local-development exception; Docker's port
@@ -201,10 +202,12 @@ Dark and light themes via CSS custom properties. Dark is the default.
     alongside the spec commit it was read at (`PLUGIN_SCHEMA_SPEC.ref`).
     `npm run check:plugin-schemas` (`scripts/plugin-schema-drift.mjs`) fetches
     the spec at `edge.source_commit` from `docs/compatibility.json` in the
-    Pinned Gateway Contract job and compares the digests;
-    `FERRUM_SPEC_REF=main` checks against the current upstream instead. Never
-    update a digest or `PLUGIN_SCHEMA_SPEC.ref` without re-reading the schema;
-    after re-review keep the ref equal to the checked commit.
+    Pinned Gateway Contract job and compares the digests. It also fails when
+    `PLUGIN_SCHEMA_SPEC.ref` is not the checked commit, even with every digest
+    unchanged; `FERRUM_SPEC_REF=main` checks against the current upstream
+    instead. Never update a digest or `PLUGIN_SCHEMA_SPEC.ref` without
+    re-reading the schema; after re-review keep the ref equal to the checked
+    commit.
   - Guided edits are lossless: unmodelled keys, key order, and omission/`null`
     semantics all survive. A shape the descriptors cannot model falls back to
     raw JSON with a stated reason rather than being rewritten.
@@ -300,6 +303,12 @@ See `docs/concurrent-edits.md`.
     keeping the form's fields.
   - A committed delete resolves as a delete (`removeCommitted`) so its detail
     cache is retired.
+  - A plugin save's membership plan treats a committed plugin `PUT` as the
+    write having happened: it re-reads the plugin, finishes the association
+    steps, then rethrows the commit, and the editor reseeds plugin,
+    membership and baseline.
+  - A committed create closes its form (or dialog) with a warning, as a
+    `201` does, so it is never sent twice.
 
 ### Secret redaction
 
@@ -309,9 +318,8 @@ See `docs/concurrent-edits.md`.
   `withRedactedFailure(secretValues(body), …)` (`src/api/secretRedaction.ts`).
   That covers consumer create and credential writes, plugin configurations,
   proxy writes (membership `replace` included) and upstreams (inline backend
-  TLS keys), TLS key material and ACME account credentials, batch create,
-  backup restore (`restoreSecrets`), and API spec import/replace
-  (`specDocumentSecrets`). **Add any new secret-bearing write to it.**
+  TLS keys), TLS key material and ACME account credentials, backup restore
+  (`restoreSecrets`), and API spec import/replace (`specDocumentSecrets`). **Add any new secret-bearing write to it.**
 - Its failure becomes a `RedactedWriteError`: every submitted secret is replaced
   by `[REDACTED]` in the message and parsed body (before any trim or
   truncation), with a bodiless response for the status and no `request`,
@@ -435,6 +443,9 @@ Namespaces are a full CRUD registry on the gateway, not just a header value.
   mutation reconciles the cache to the destination as on success, and the edit
   dialog follows the destination, closes, and reports the commit as a warning.
   Never re-observe or offer another Save against the retired name.
+- A delete answered with that `503` is a delete (`removeCommitted`): the
+  retired name's caches go as on success, the scope leaves it, and the dialog
+  closes with a warning instead of offering a second `DELETE`.
 - Delete is a two-stage, gateway-driven flow (`DeleteNamespaceDialog`), not a
   cascade checkbox. Stage 1 always sends the **unconfirmed** DELETE, so an empty
   namespace goes in one click. The gateway's `409` ("not empty") promotes stage
@@ -478,8 +489,8 @@ See `docs/authentication.md` → "Editor identity".
 ## Build & check
 
 ```bash
-npm run typecheck    # TypeScript: frontend, server, and e2e
+npm run typecheck    # TypeScript: frontend, server, server tests, and e2e
 npm run build        # Production build (Vite + server tsc)
-npm run lint         # ESLint
+npm run lint         # ESLint: src, server, scripts, shared, e2e, root *.config.ts
 npm test             # Vitest, then the node --test contract suites in scripts/
 ```

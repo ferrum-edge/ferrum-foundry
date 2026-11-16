@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/Badge";
 import { SearchBar } from "@/components/shared/SearchBar";
 import { PaginationControls } from "@/components/shared/PaginationControls";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { ReadStateNotice } from "@/components/shared/ReadState";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { PlusIcon } from "@/components/ui/icons";
 import { WriteAction } from "@/components/shared/CapabilityGate";
@@ -187,6 +188,7 @@ export default function ProxiesPage() {
     : (pageQuery.data?.pagination?.total ?? 0);
   const isLoading = searching ? allQuery.isLoading : pageQuery.isLoading;
   const isError = searching ? allQuery.isError : pageQuery.isError;
+  const listQuery = searching ? allQuery : pageQuery;
 
   /* --- Upstream names for the visible rows only --- */
   // Resolved from the rows on screen, not from the whole upstream collection:
@@ -251,11 +253,11 @@ export default function ProxiesPage() {
         label="Proxies"
         emptyState={
           <>
+            {/* A refused read is a denial and an outage is unavailable. A failed
+                refetch says it could not refresh and when the rows were last
+                observed; stale rows are not shown as current (#298, #680). */}
             {!isLoading && isError && (
-              <EmptyState
-                title="Failed to load proxies"
-                description="An error occurred while fetching proxy configurations."
-              />
+              <ReadStateNotice query={listQuery} label="Proxies" />
             )}
 
             {!isLoading && !isError && proxies.length === 0 && (

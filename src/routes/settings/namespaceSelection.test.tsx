@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import SettingsPage from "./index";
 import { BasedRequest, click, createHarness, settle, stubFetch } from "@/test/__tests__/harness";
+import { clearText, inputByLabel, typeText } from "@/test/fields";
 
 const NAMESPACES_PATTERN = /\/namespaces\/?$/;
 
@@ -73,5 +74,40 @@ describe("Settings namespace selection", () => {
     expect(harness.host.textContent).not.toContain("The registry is unavailable");
     expect(harness.host.textContent).toContain("No namespaces are currently listed");
     expect(setNamespace).not.toHaveBeenCalled();
+  });
+
+  it("switches to a typed namespace only on an explicit, valid Switch (#677)", async () => {
+    stubFetch((request) => {
+      const path = new URL(request.url).pathname;
+      return NAMESPACES_PATTERN.test(path)
+        ? Response.json({ data: [], pagination: { offset: 0, limit: 250, total: 0 } })
+        : Response.json({});
+    });
+
+    await harness.render(<SettingsPage />);
+    await settle(() => expect(harness.host.textContent).toContain("No namespaces are currently listed"));
+    const field = inputByLabel(harness.host, "Namespace");
+
+    // Clearing and typing a name keystroke by keystroke never retargets the
+    // session, and the field keeps what was typed.
+    await clearText(field);
+    await typeText(field, "tenant-b");
+    expect(field.value).toBe("tenant-b");
+    expect(setNamespace).not.toHaveBeenCalled();
+
+    await click("Switch", harness.host);
+    expect(setNamespace).toHaveBeenCalledTimes(1);
+    expect(setNamespace).toHaveBeenCalledWith("tenant-b");
+
+    // An empty or malformed name is refused inline and never published.
+    await clearText(field);
+    await click("Switch", harness.host);
+    expect(harness.host.textContent).toContain("Namespace name is required");
+    await typeText(field, "bad name");
+    expect(harness.host.textContent).not.toContain("Namespace name is required");
+    await click("Switch", harness.host);
+    expect(harness.host.textContent).toContain("Namespace name must start with a letter or digit");
+    expect(field.getAttribute("aria-invalid")).toBe("true");
+    expect(setNamespace).toHaveBeenCalledTimes(1);
   });
 });

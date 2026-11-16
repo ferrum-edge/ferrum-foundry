@@ -10,7 +10,7 @@ import { useToast } from "@/components/ui/Toast";
 import { Card } from "@/components/ui/Card";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { ConsumerForm } from "@/components/forms/ConsumerForm";
-import { getApiErrorMessage } from "@/api/client";
+import { committedWriteMessage, getApiErrorMessage, getCommittedWrite } from "@/api/client";
 import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
 import { useCapabilities } from "@/stores/capabilities";
 import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
@@ -28,7 +28,8 @@ export default function ConsumerNewPage() {
 function ConsumerCreateEditor({ session }: { session: EditorSession }) {
   const navigate = useNavigate();
   const createConsumer = useCreateConsumer();
-  const [receipt, setReceipt] = useState<{ id: string; secrets: SubmittedSecret[] } | null>(null);
+  // `id` is null after a committed create, whose answer carries no body.
+  const [receipt, setReceipt] = useState<{ id: string | null; secrets: SubmittedSecret[] } | null>(null);
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -54,6 +55,21 @@ function ConsumerCreateEditor({ session }: { session: EditorSession }) {
         params: { consumerId: created.id },
       });
     } catch (err: unknown) {
+      // A committed-but-not-live answer is a completed create (#674), as for
+      // a credential card: the submitted secrets are shown once and the form
+      // goes away, so a second click cannot POST it again. The answer has no
+      // body, so the new consumer is opened from the list.
+      const committed = getCommittedWrite(err);
+      if (committed) {
+        if (!mounted.current) return;
+        toast("warning", committedWriteMessage("Consumer created", committed));
+        if (secrets.length > 0) {
+          setReceipt({ id: null, secrets });
+          return;
+        }
+        navigate({ to: "/consumers" });
+        return;
+      }
       const message = await getApiErrorMessage(err, "Failed to create consumer");
       if (mounted.current) toast("error", message);
     } finally {
@@ -74,7 +90,8 @@ function ConsumerCreateEditor({ session }: { session: EditorSession }) {
           <CredentialCopyOnce secrets={receipt.secrets} onDone={() => {
             const id = receipt.id;
             setReceipt(null);
-            navigate({ to: "/consumers/$consumerId", params: { consumerId: id } });
+            if (id === null) navigate({ to: "/consumers" });
+            else navigate({ to: "/consumers/$consumerId", params: { consumerId: id } });
           }} />
         ) : (
           <ConsumerForm

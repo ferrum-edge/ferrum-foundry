@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -14,7 +15,6 @@ interface ToastItem {
   id: number;
   variant: ToastVariant;
   message: string;
-  createdAt: number;
 }
 
 interface ToastContextValue {
@@ -134,7 +134,9 @@ function ToastNotification({
           {item.message}
         </p>
         <button
+          type="button"
           onClick={handleDismiss}
+          aria-label="Dismiss notification"
           className="text-text-muted hover:text-text-primary shrink-0 cursor-pointer"
         >
           <svg
@@ -173,15 +175,24 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
   const toast = useCallback((variant: ToastVariant, message: string) => {
     const id = ++nextId;
-    setToasts((prev) => [...prev, { id, variant, message, createdAt: Date.now() }]);
+    setToasts((prev) => [...prev, { id, variant, message }]);
   }, []);
 
+  // `toast` is stable, so consumers re-render only when it would change.
+  const value = useMemo(() => ({ toast }), [toast]);
+
   return (
-    <ToastContext.Provider value={{ toast }}>
+    <ToastContext.Provider value={value}>
       {children}
       {/* Top-right so toasts never cover a page's primary save/cancel
-          actions, which live at the bottom of forms. */}
-      <div className="fixed top-[calc(var(--nav-height)+0.75rem)] right-4 z-[100] flex flex-col gap-2">
+          actions, which live at the bottom of forms. Several outcomes are
+          reported only here, so screen readers announce each new toast; it
+          is a live region rather than role="status" so the page's own status
+          notices stay the only status elements. */}
+      <div
+        aria-live="polite"
+        className="fixed top-[calc(var(--nav-height)+0.75rem)] right-4 z-[100] flex flex-col gap-2"
+      >
         {toasts.map((item) => (
           <ToastNotification key={item.id} item={item} onDismiss={dismiss} />
         ))}

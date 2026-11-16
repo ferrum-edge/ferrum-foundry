@@ -3,6 +3,7 @@ import {
   EMPTY_VALUE,
   formatDateTime,
   formatTime,
+  formatUptime,
   humanizeKey,
   isIsoTimestamp,
   isoDateTime,
@@ -60,5 +61,17 @@ describe("humanizeKey", () => {
     ["hbone", "HBONE"],
   ])("labels %s as %s", (key, label) => {
     expect(humanizeKey(key)).toBe(label);
+  });
+});
+
+// Issue #663: the dashboard and the metrics page used to format the same
+// uptime two ways (`1d 0h 5m` and `1d 5m`); both now call this.
+describe("uptime formatting", () => {
+  it("shows every unit below the largest one present", () => {
+    expect(formatUptime(86_700)).toBe("1d 0h 5m");
+    expect(formatUptime(3_600)).toBe("1h 0m");
+    expect(formatUptime(7_380)).toBe("2h 3m");
+    expect(formatUptime(59)).toBe("0m");
+    expect(formatUptime(172_800)).toBe("2d 0h 0m");
   });
 });

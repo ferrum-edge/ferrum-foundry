@@ -168,6 +168,6 @@ describe("gateway target binding", () => {
     release(answer({ id: "p-1" }, "target-a", { headers: { "X-Ferrum-Config-Cursor": "7:42" } }));
     await write;
     expect(getGatewayMetadataSnapshot().apply.state).toBe("idle");
-    expect(getGatewayMetadataSnapshot().etag).toBeNull();
+    expect(getGatewayMetadataSnapshot().cachedResponse).toBeNull();
   });
 });

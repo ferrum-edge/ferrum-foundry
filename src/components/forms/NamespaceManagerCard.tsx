@@ -15,7 +15,7 @@ import {
   DialogDescription,
 } from "@/components/ui/Dialog";
 import { useToast } from "@/components/ui/Toast";
-import { useNamespace } from "@/stores/namespace";
+import { DEFAULT_NAMESPACE, useNamespace } from "@/stores/namespace";
 import { useAuth } from "@/stores/auth";
 import { useCapabilities } from "@/stores/capabilities";
 import { CapabilityNotice } from "@/components/shared/CapabilityGate";
@@ -41,8 +41,7 @@ import {
   getApiErrorMessage,
   getCommittedWrite,
 } from "@/api/client";
-
-const DEFAULT_NAMESPACE = "ferrum";
+import type { CommittedWrite } from "@/api/gatewayMetadata";
 
 /* ================================================================== */
 /*  Create dialog                                                     */
@@ -90,6 +89,14 @@ function CreateNamespaceDialog({
       toast("success", `Namespace "${name.trim()}" created`);
       onOpenChange(false);
     } catch (err) {
+      // A committed-but-not-live answer is a completed create (#674): close
+      // the dialog with a warning so Create cannot be sent twice.
+      const committed = getCommittedWrite(err);
+      if (committed) {
+        toast("warning", committedWriteMessage(`Namespace "${name.trim()}" created`, committed));
+        onOpenChange(false);
+        return;
+      }
       toast("error", await getApiErrorMessage(err, "Failed to create namespace"));
     }
   }
@@ -343,21 +350,25 @@ function DeleteNamespaceDialog({
     }
   }, [target]);
 
-  function finish(name: string) {
+  function finish(name: string, committed: CommittedWrite | null) {
     // The deleted namespace can no longer be the active scope.
     replaceNamespaceIfCurrent(name, DEFAULT_NAMESPACE);
-    toast("success", `Namespace "${name}" deleted`);
+    if (committed) {
+      toast("warning", committedWriteMessage(`Namespace "${name}" deleted`, committed));
+    } else {
+      toast("success", `Namespace "${name}" deleted`);
+    }
     onOpenChange(false);
   }
 
   async function handleDelete(confirm: boolean) {
     if (!target) return;
     try {
-      await deleteNamespace.mutateAsync({
+      const committed = await deleteNamespace.mutateAsync({
         name: target,
         confirm: confirm ? typed.trim() : undefined,
       });
-      finish(target);
+      finish(target, committed);
     } catch (err) {
       const status =
         err instanceof Error && "response" in err

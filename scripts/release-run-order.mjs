@@ -1,3 +1,4 @@
+import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 export function blockingReleaseRuns(payload, currentRunNumber, currentRunId, workflowPath) {
@@ -50,7 +51,10 @@ async function main() {
   process.stdout.write(blockers.map((run) => `${run.runNumber}:${run.id}:${run.status}`).join(','));
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
+) {
   main().catch((error) => {
     console.error(error instanceof Error ? error.message : 'Release run ordering failed');
     process.exitCode = 1;

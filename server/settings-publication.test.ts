@@ -81,7 +81,7 @@ afterEach(async () => {
 });
 
 describe('settings publication and dispatcher retirement', () => {
-  it('answers signing and transport saves while an ordinary long poll exceeds the client deadline', async () => {
+  it('answers signing and transport saves while an ordinary long poll is still held', async () => {
     const { api } = await import('../src/api/client');
     const { loadConfig } = await import('./config.js');
     const { getDispatcher, closeDispatchers } = await import('./tls.js');
@@ -90,7 +90,9 @@ describe('settings publication and dispatcher retirement', () => {
     const poll = fetch(`${base}/api/proxy/config/apply-status`, { headers })
       .then(async (response) => { const body = await response.json(); pollComplete = true; return body; });
     await pollEntered;
-    const release = setTimeout(() => held?.end('{"state":"pending"}'), 11_000);
+    // The upstream holds the poll until this test releases it below. A save
+    // that waited for in-flight requests to drain would never be answered, so
+    // `api.put` would fail at its own client deadline (ky's 10 s default).
     try {
       const signing = await api.put('api/settings', { headers, json: { jwtIssuer: 'accepted-issuer' } }).json<{ jwtIssuer: string }>();
       expect(signing.jwtIssuer).toBe('accepted-issuer');
@@ -111,12 +113,13 @@ describe('settings publication and dispatcher retirement', () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
       expect(drained).toBe(false);
       expect(pollComplete).toBe(false);
+      // Only now release the poll: the retired dispatcher finishes it, then closes.
+      held?.end('{"state":"pending"}');
       expect(await poll).toEqual({ state: 'pending' });
       await drain;
       expect(original.closed).toBe(true);
       expect(next.closed).toBe(true);
     } finally {
-      clearTimeout(release);
       held?.end('{"state":"pending"}');
       await poll;
     }

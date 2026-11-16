@@ -88,8 +88,6 @@ export type AuthSession =
     signOutError: string | null;
   };
 
-export type AuthStatus = AuthSession["status"];
-
 interface AuthContextValue {
   session: AuthSession;
   /**
@@ -206,14 +204,6 @@ function authReducer(state: AuthState, event: AuthEvent): AuthState {
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
-
-function removeLegacyCredential(): void {
-  try {
-    localStorage.removeItem("ferrum:bff-auth-token");
-  } catch {
-    // Storage can be disabled. No credential is written by the new flow.
-  }
-}
 
 function responseStatus(error: unknown): number | undefined {
   if (!error || typeof error !== "object" || !("response" in error)) return undefined;
@@ -403,7 +393,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [applySessionRead, startSessionRead]);
 
   useEffect(() => {
-    removeLegacyCredential();
     boot();
   }, [boot]);
 

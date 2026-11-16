@@ -39,6 +39,18 @@ export function missingNumberError(value: NumberDraft | undefined, label: string
   return value === "" ? `${label} is required` : undefined;
 }
 
+/** The message for a port draft outside the TCP/UDP range. */
+export const PORT_RANGE_ERROR = "Valid port required (1-65535)";
+
+/**
+ * Whether a numeric draft is a usable TCP/UDP port: a whole number from 1 to
+ * 65535. Ferrum Edge stores ports as 16-bit integers and refuses anything
+ * else, so forms check this before submit instead of surfacing a `400`.
+ */
+export function isValidPort(value: NumberDraft | null | undefined): boolean {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 65535;
+}
+
 /** `D` with the empty-draft case removed from the fields `K`. */
 export type ResolvedNumberDrafts<D, K extends keyof D> = {
   [P in keyof D]: P extends K ? Exclude<D[P], ""> : D[P];

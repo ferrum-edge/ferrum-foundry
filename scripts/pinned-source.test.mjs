@@ -69,7 +69,7 @@ test("gives up after four transport failures without passing", async () => {
     { message: `Could not fetch ${URL_FOR_REF}: socket hang up` },
   );
   assert.equal(calls.length, 4);
-  assert.deepEqual(sleeps, [2_000, 4_000, 6_000, 8_000]);
+  assert.deepEqual(sleeps, [2_000, 4_000, 6_000], "no backoff after the last attempt");
 });
 
 test("an HTTP error is fatal on the first attempt", async () => {

@@ -17,8 +17,8 @@ switches clear the draft and result and abort an outstanding preview.
 ## Contract and provenance
 
 The canonical pin is `contracts/ferrum-contracts/PIN`: immutable tag
-[`contracts-edge-0.9.15`](https://github.com/ferrum-edge/ferrum-contracts/tree/6fb64c5dc2e014204c17609fc717d976f3b4589e)
-at `6fb64c5dc2e014204c17609fc717d976f3b4589e`. The adopted files are the existing
+[`contracts-edge-0.9.20`](https://github.com/ferrum-edge/ferrum-contracts/tree/39da322083044c2e92617209e62983c92387f0ad)
+at `39da322083044c2e92617209e62983c92387f0ad`. The adopted files are the existing
 plugin/provisioning vocabularies and schemas, plus the service-manifest schema
 and every shared valid/invalid manifest fixture, including agents, plus the
 canonical invalid-expectations file. Each exact published file has a SHA-256 in
@@ -109,11 +109,11 @@ evidence for the HTTP mapping, not TLS deployment qualification or a production
 apply path. Deployment Starter and Container Gate include the fixed vendored
 schema in the production image.
 
-[Alloy issue 27](https://github.com/ferrum-edge/ferrum-alloy/issues/27) continues to
-track coordinated adoption across Nexus, Anvil, Alloy and GitForgeOps. The
-canonical publication records their earlier qualified slices and the accepted
-shared status; this Foundry pin update does not qualify arbitrary newer consumer
-sources, close issues 27/28, or authorize Alloy crate publication. Root owns
-those decisions after the remaining adoption gates.
+[Alloy issue 27](https://github.com/ferrum-edge/ferrum-alloy/issues/27) tracked
+coordinated adoption across Nexus, Anvil, Alloy and GitForgeOps until it closed
+on 2026-10-06. The canonical publication records their earlier qualified slices
+and the accepted shared status; this Foundry pin update does not qualify
+arbitrary newer consumer sources or authorize Alloy crate publication. Root
+owns those decisions.
 The [presentation-boundary ADR](adr/0001-alloy-authenticated-presentation.md)
 separates this implemented preview from future diagnostic presentation.

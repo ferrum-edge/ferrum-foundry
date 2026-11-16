@@ -7,7 +7,10 @@ import globals from "globals";
 export default tseslint.config(
   { ignores: ["dist/", "dist-server/", "coverage/", "node_modules/"] },
   {
-    files: ["src/**/*.{ts,tsx}", "server/**/*.ts"],
+    // Every TypeScript file `npm run lint` names: a directory argument lints
+    // only files some block matches, so a path missing here is skipped
+    // silently (#675).
+    files: ["src/**/*.{ts,tsx}", "server/**/*.ts", "e2e/**/*.ts", "*.config.ts"],
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     languageOptions: {
       globals: { ...globals.browser, ...globals.node },
@@ -22,10 +25,18 @@ export default tseslint.config(
     },
   },
   {
-    files: ["scripts/**/*.mjs", "shared/**/*.js"],
+    files: ["scripts/**/*.mjs", "shared/**/*.js", "e2e/**/*.mjs"],
     extends: [js.configs.recommended],
     languageOptions: {
       globals: { ...globals.node },
+    },
+  },
+  {
+    // Playwright reads a fixture's dependencies from its destructured first
+    // parameter, so a fixture that needs none must declare `{}`.
+    files: ["e2e/**/*.ts"],
+    rules: {
+      "no-empty-pattern": ["error", { allowObjectPatternsAsParameters: true }],
     },
   },
   {

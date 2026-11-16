@@ -73,7 +73,7 @@ describe('health snapshots', () => {
       fetcher.mockResolvedValue(Response.json({ status, ready: false }, { status: 503 }));
       await renderUntil(status.toUpperCase());
       expect(host.textContent).toContain('Not Ready');
-      expect(host.textContent).not.toContain('Failed to fetch health status');
+      expect(host.textContent).not.toContain('Health status unavailable');
       expect(fetcher).toHaveBeenCalledTimes(1);
       expect(report).not.toHaveBeenCalled();
     },
@@ -87,7 +87,7 @@ describe('health snapshots', () => {
 
   it('renders the failure card for a transport failure', async () => {
     fetcher.mockRejectedValue(new TypeError('Failed to fetch'));
-    await renderUntil('Failed to fetch health status');
+    await renderUntil('Health status unavailable');
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(report).toHaveBeenCalledTimes(1);
   });

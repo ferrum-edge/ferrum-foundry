@@ -36,8 +36,8 @@
  * `GET /backup`, or a `POST /restore` without `?confirm=true` and with a body
  * that is not JSON. Each still passes through exactly the role check and the
  * admission gate the surface mirrors, because Edge applies both before it
- * looks the resource up (ferrum-edge v0.9.15, the pinned release, and every
- * earlier pinned release back to the b96cfaa build alike:
+ * looks the resource up (ferrum-edge v0.9.20, the pinned release, v0.9.15, and
+ * every earlier pinned release back to the b96cfaa build alike:
  * `crud::handle_delete`, `handle_restore`,
  * `tls_management::handle_delete_managed`).
  *
@@ -76,6 +76,7 @@
  */
 
 import assert from "node:assert/strict";
+import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import {
   CAPABILITY_SURFACES,
@@ -512,7 +513,10 @@ export function confirmWritableParityTarget(config, expectation) {
   if (expectation === "writable") confirmDestructiveTarget(config);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
+) {
   const config = readSeedConfig();
   const expectation = process.env.FERRUM_CAPABILITY_EXPECT?.trim();
   confirmWritableParityTarget(config, expectation);

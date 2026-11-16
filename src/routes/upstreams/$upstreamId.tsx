@@ -405,19 +405,16 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
       return null;
     }
     return (
-      <div className="max-w-2xl">
-        <Card>
-          <p className="text-text-secondary">
-            Failed to load upstream configuration.
-          </p>
-          <Button
-            variant="secondary"
-            className="mt-4"
-            onClick={() => navigate({ to: "/upstreams" })}
-          >
-            Back to Upstreams
-          </Button>
-        </Card>
+      <div className="max-w-2xl space-y-4">
+        {/* Denied, unavailable or gone: the shared notice says which, instead
+            of a fixed failure line (#680). */}
+        <ReadStateNotice query={resourceQuery} label="Upstream configuration" />
+        <Button
+          variant="secondary"
+          onClick={() => navigate({ to: "/upstreams" })}
+        >
+          Back to Upstreams
+        </Button>
       </div>
     );
   }

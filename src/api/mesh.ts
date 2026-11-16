@@ -209,15 +209,6 @@ export async function getConfigDrift(
     .json<MeshConfigDriftResponse>();
 }
 
-export async function resetConfigRevision(scope: NamespaceScope): Promise<{
-  status: string;
-  cleared_revision?: { authority: string; sequence: number } | null;
-}> {
-  return proxyApi
-    .post("mesh/config-revision/reset", scoped(scope))
-    .json<{ status: string; cleared_revision?: { authority: string; sequence: number } | null }>();
-}
-
 /* ---------- Slice drift (CP) ---------- */
 
 export interface MeshSliceVersionStamp {

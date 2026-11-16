@@ -13,25 +13,15 @@ import { Badge } from "@/components/ui/Badge";
 import { BffConnectionCard } from "@/components/shared/BffConnectionCard";
 import { StatCard } from "@/components/metrics/StatCard";
 import { CircuitStateBadge } from "@/components/metrics/CircuitBreakerPanel";
+import { unhealthyTargetKey } from "@/components/metrics/HealthCheckPanel";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { NavIcon, type NavIconName } from "@/components/ui/icons";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTime, formatUptime } from "@/lib/format";
 import { useNamespace } from "@/stores/namespace";
 import {
   getStoredMetricsRefreshInterval,
   setStoredMetricsRefreshInterval,
 } from '@/utils/metricsRefresh';
-
-/* ── Helpers ───────────────────────────────────────────────────────── */
-
-function formatUptime(seconds: number): string {
-  const d = Math.floor(seconds / 86400);
-  const h = Math.floor((seconds % 86400) / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  if (d > 0) return `${d}d ${h}h ${m}m`;
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
-}
 
 /* ── Navigation cards config ──────────────────────────────────────── */
 
@@ -238,7 +228,7 @@ export default function DashboardPage() {
               <div className="space-y-2">
                 {metrics.data.health_check.unhealthy_targets.map((t) => (
                   <div
-                    key={t.target}
+                    key={unhealthyTargetKey(t)}
                     className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-sm"
                   >
                     <span className="min-w-0 break-all text-text-primary font-mono text-xs">

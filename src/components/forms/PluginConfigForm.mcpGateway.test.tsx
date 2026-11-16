@@ -2,6 +2,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MCP_GATEWAY_AGGREGATE_ONLY_PATHS } from "@/lib/mcpGatewayConfig";
+import { fill } from "@/test/__tests__/harness";
 import { PluginConfigForm } from "./PluginConfigForm";
 import type { PluginConfigCreate } from "@/api/types";
 
@@ -108,7 +109,7 @@ describe("PluginConfigForm mcp_gateway", () => {
     }
   });
 
-  it("submits aggregate mode with policy and discovery defaults intact", async () => {
+  it("submits aggregate mode with policy defaults intact", async () => {
     await renderForm();
     await submitForm();
 
@@ -159,6 +160,44 @@ describe("PluginConfigForm mcp_gateway", () => {
     });
     expect(restored.policy).toEqual({
       default_action: "allow",
+      tools: {
+        "github.search_issues": { action: "allow" },
+        "github.create_issue": { action: "deny" },
+      },
+    });
+  });
+
+  it("keeps the stashed policy.tools when a policy field is typed in transparent mode (#679)", async () => {
+    await renderForm({
+      mode: "aggregate_router",
+      endpoint: { path: "/mcp", protocol_versions: ["2025-11-25"] },
+      policy: {
+        default_action: "allow",
+        tools: {
+          "github.search_issues": { action: "allow" },
+          "github.create_issue": { action: "deny" },
+        },
+      },
+    });
+
+    await chooseMode("Transparent proxy");
+    const transparent = JSON.parse(configTextarea().value) as Record<string, unknown>;
+    expect(transparent.policy).toBeUndefined();
+
+    // An edit made in transparent mode that names an aggregate-only field.
+    const typed = JSON.stringify({
+      ...transparent,
+      policy: { default_action: "deny" },
+    }, null, 2);
+    await fill(configTextarea(), typed);
+    // The editor does not rewrite the text under the operator's cursor.
+    expect(configTextarea().value).toBe(typed);
+
+    await chooseMode("Aggregate router");
+    const restored = JSON.parse(configTextarea().value) as Record<string, unknown>;
+    expect(restored.mode).toBe("aggregate_router");
+    expect(restored.policy).toEqual({
+      default_action: "deny",
       tools: {
         "github.search_issues": { action: "allow" },
         "github.create_issue": { action: "deny" },

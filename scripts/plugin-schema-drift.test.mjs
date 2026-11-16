@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import {
+  checkSchemaPins,
   compareProvenance,
   digestOf,
   extractSchemaBlock,
@@ -13,6 +14,7 @@ import {
   PLUGIN_SCHEMA_SPEC,
   getGuidedSchema,
 } from "../src/lib/pluginSchemas.ts";
+import { readSupportedPairing } from "./supported-pairing.mjs";
 
 const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/;
 const ID_SCHEMA_HASH_PATTERN = /id: schema-hash\n/;
@@ -100,6 +102,25 @@ test("an unchanged component compares equal", () => {
     { component: "KeyAuthConfig", sha256: digestOf(block) },
   ]);
   assert.equal(finding.status, "unchanged");
+});
+
+test("a reviewed ref other than the checked ref fails even when no digest changed", () => {
+  // Issue #663: digest equality alone cannot show that anybody re-read the
+  // schema at the checked commit.
+  const provenance = [
+    { component: "KeyAuthConfig", sha256: digestOf(extractSchemaBlock(SPEC, "KeyAuthConfig")) },
+  ];
+  const checked = "a".repeat(40);
+  const stale = checkSchemaPins(SPEC, checked, { provenance, reviewedRef: "b".repeat(40) });
+  assert.deepEqual(stale.drifted, []);
+  assert.equal(stale.refMatches, false);
+  const current = checkSchemaPins(SPEC, checked, { provenance, reviewedRef: checked });
+  assert.deepEqual(current.drifted, []);
+  assert.equal(current.refMatches, true);
+});
+
+test("the descriptors record the Edge source CI pins, so moving the pin means re-reading them", () => {
+  assert.equal(PLUGIN_SCHEMA_SPEC.ref, readSupportedPairing().edge.source_commit);
 });
 
 test("every guided plugin's schema components are pinned", () => {

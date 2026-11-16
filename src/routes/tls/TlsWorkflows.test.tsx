@@ -246,6 +246,43 @@ describe("TLS inventory and events", () => {
     expect(new URL(certificateReads[1].url).searchParams.get("offset")).toBe("20");
   });
 
+  // Issue #683: a page emptied by a delete says so instead of rendering blank.
+  it("says a managed page past the end has no results", async () => {
+    collections.certificates = Array.from({ length: 21 }, (_, index) => ({
+      ...record, id: `managed-${index}`, name: `Managed ${index}`,
+    }));
+    await mount("Certificates");
+    await settle(() => expect(panel().textContent).toContain("Managed 0"));
+    collections.certificates = collections.certificates.slice(0, 20);
+    await click("Next", panel());
+    await settle(() => expect(panel().textContent).toContain("No results on this page"));
+    expect(panel().textContent).not.toContain("No certificates yet");
+  });
+
+  it("says ACME certificate and order pages past the end have no results", async () => {
+    collections["acme/certificates"] = Array.from({ length: 21 }, (_, index) => ({
+      ...certificate, id: `acme-${index}`, domains: [`domain-${index}.example.test`],
+    }));
+    collections["acme/orders"] = Array.from({ length: 21 }, (_, index) => ({
+      ...order, id: `order-${index}`, status: "valid",
+    }));
+    await mount("ACME");
+    await settle(() => expect(panel().textContent).toContain("domain-0.example.test"));
+    collections["acme/certificates"] = collections["acme/certificates"].slice(0, 20);
+    collections["acme/orders"] = collections["acme/orders"].slice(0, 20);
+    const nextButtons = [...panel().querySelectorAll<HTMLButtonElement>("button")]
+      .filter((element) => element.textContent?.trim() === "Next");
+    expect(nextButtons).toHaveLength(2);
+    await act(async () => {
+      nextButtons[0].click();
+      nextButtons[1].click();
+    });
+    await settle(() =>
+      expect(panel().textContent?.split("No results on this page")).toHaveLength(3));
+    expect(panel().textContent).not.toContain("No ACME certificates");
+    expect(panel().textContent).not.toContain("No active orders");
+  });
+
   it("renders loaded, invalid, unavailable and expiring inventory with source and usage", async () => {
     const entries: TlsInventoryEntry[] = [
       { id: "loaded", material_kind: "certificate", state: "loaded", subject: "CN=api.example.test",

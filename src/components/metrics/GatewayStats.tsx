@@ -5,23 +5,12 @@
 import type { AdminMetrics } from "@/api/types";
 import { Badge } from "@/components/ui/Badge";
 import { StatCard } from "./StatCard";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTime, formatUptime } from "@/lib/format";
 import type { GatewayRequestStats } from "@/hooks/useGatewayRequestStats";
 
 interface GatewayStatsProps {
   metrics: AdminMetrics["gateway"];
   requestStats: GatewayRequestStats;
-}
-
-function formatUptime(seconds: number): string {
-  const d = Math.floor(seconds / 86400);
-  const h = Math.floor((seconds % 86400) / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const parts: string[] = [];
-  if (d > 0) parts.push(`${d}d`);
-  if (h > 0) parts.push(`${h}h`);
-  parts.push(`${m}m`);
-  return parts.join(" ");
 }
 
 function statusCodeVariant(code: string): "green" | "yellow" | "red" | "blue" {

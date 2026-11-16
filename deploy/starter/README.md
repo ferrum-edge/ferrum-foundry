@@ -14,13 +14,18 @@ request.
 For a walkthrough that ends in an authenticated request through the data
 plane, see [`docs/getting-started.md`](../../docs/getting-started.md).
 
-**Published pairing.** The demo profile pins published Edge v0.9.15 with
-published Foundry v0.5.5; the evidence is in the
-[pairing record](../../docs/compatibility.md). The default Foundry image is
-pinned to
+**Candidate pairing.** The demo profile pins published Edge v0.9.20 for the
+Foundry v0.5.6 candidate (#686). Hosted qualification and Foundry publication
+are pending in the [pairing record](../../docs/compatibility.md). Production
+must use a published pairing and its released Foundry digest. The latest is
+published Foundry v0.5.5 with Edge v0.9.15, preserved in the
+[v0.5.5 record](../../docs/release-notes/v0.5.5.compatibility.json). The
+default Foundry image stays pinned to that release,
 `ferrumedge/ferrum-foundry@sha256:5bdfa947adead6895e9dbdc4b4db5ed7e960bd7fc5ebb9872ac722ced86a8b0f`;
 set `FOUNDRY_IMAGE` to another released digest when selecting a different
-pairing.
+pairing. The demo profile therefore runs released Foundry v0.5.5 against Edge
+v0.9.20, outside the qualified envelope, until v0.5.6 is published; CI runs
+the starter with the candidate's own production image.
 
 ## Two profiles
 
@@ -42,7 +47,7 @@ config grows its own copy.
 
 | Path | What it is |
 | --- | --- |
-| `compose.yaml` | Both profiles. Third-party images are pinned by digest |
+| `compose.yaml` | Both profiles. Third-party images are pinned as `name:tag@sha256:<digest>` |
 | `.env.example` | Foundry and gateway inputs, with placeholders. No working secrets |
 | `oauth2-proxy.env.example` | Identity-provider settings, read by oauth2-proxy alone |
 | `bootstrap-demo.sh` | Generates throwaway demo secrets; refuses to overwrite an existing `.env` |
@@ -124,8 +129,11 @@ or `unmapped`). It is for a first run and for CI. Do not expose it.
   login, and by the empty `map` default, which asserts no role.
 - **`FERRUM_AUTH_MODE=trusted-proxy` with `NODE_ENV=production`.** The BFF
   refuses static-token auth in production.
-- **Third-party images are pinned by digest**, so a rebuild cannot silently
-  change what runs.
+- **Third-party images are pinned by tag and digest**
+  (`name:tag@sha256:<digest>`), so a rebuild cannot silently change what runs,
+  and Dependabot (`.github/dependabot.yml`) still proposes each new
+  oauth2-proxy and nginx release as a pull request. Move them in your own
+  copy too: a pin that never moves collects published advisories.
 
 ### Still yours to decide
 

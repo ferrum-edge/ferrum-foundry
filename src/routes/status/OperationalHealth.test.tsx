@@ -58,7 +58,7 @@ describe('authenticated operator health', () => {
     await settle(() => expect(harness.host.textContent).toContain('Collection disabled'));
     failed = true;
     await act(async () => { await harness.client.refetchQueries({ queryKey: ['health'] }); });
-    await settle(() => expect(harness.host.textContent).toContain('Failed to fetch health status'));
+    await settle(() => expect(harness.host.textContent).toContain('Health status could not refresh'));
     expect(harness.host.textContent).not.toContain('Collection disabled');
     expect(harness.host.textContent).not.toContain('Ready');
   });

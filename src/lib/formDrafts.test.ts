@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatCommaList,
+  isValidPort,
   missingNumberError,
   numberDraftFromInput,
   numberDraftText,
@@ -26,6 +27,13 @@ describe("numeric drafts", () => {
     expect(missingNumberError("", "Backend port")).toBe("Backend port is required");
     expect(missingNumberError(0, "Backend port")).toBeUndefined();
     expect(missingNumberError(undefined, "Backend port")).toBeUndefined();
+  });
+
+  it("accepts only whole-number ports from 1 to 65535 (#678)", () => {
+    for (const port of [1, 80, 65535]) expect(isValidPort(port)).toBe(true);
+    for (const port of ["", 0, -1, 65536, 70000, 80.5, Number.NaN, null, undefined] as const) {
+      expect(isValidPort(port)).toBe(false);
+    }
   });
 
   it("resolves validated drafts unchanged and refuses an empty one", () => {

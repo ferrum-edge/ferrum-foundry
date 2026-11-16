@@ -24,7 +24,7 @@ import { PluginConfigForm, type PluginFormSeed } from "@/components/forms/Plugin
 import { PluginMembershipRecovery } from "@/components/forms/PluginMembershipRecovery";
 import { MaskedSecretRefusal } from "@/components/shared/MaskedSecretRefusal";
 import { maskedPlaceholderRefusal } from "@/api/maskedSecrets";
-import { committedWriteMessage, getApiErrorMessage } from "@/api/client";
+import { committedWriteMessage, getApiErrorMessage, getCommittedWrite } from "@/api/client";
 import { formatPluginName } from "@/lib/pluginConfigDefaults";
 import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
 import {
@@ -146,6 +146,22 @@ function PluginEditor({ session }: { session: EditorSession }) {
           toast("warning", `${err.message} Reload the saved configuration before saving again.`);
           return;
         }
+        const committed = getCommittedWrite(err);
+        if (committed) {
+          // Saved and its membership plan converged, only not yet live
+          // (#674). Reseed form, membership and baseline from fresh reads, as
+          // every committed save does (`reseedAfterCommit`), so Save is not
+          // refused as a conflict with this very commit.
+          const reseeded = (await reloadFromGateway()) === true;
+          toast(
+            "warning",
+            committedWriteMessage("Plugin configuration saved", committed) +
+              (reseeded
+                ? ""
+                : " Foundry could not re-read the plugin; reload it before saving again."),
+          );
+          return;
+        }
         setMembershipError(err);
         const message = await getApiErrorMessage(
           err,
@@ -173,22 +189,33 @@ function PluginEditor({ session }: { session: EditorSession }) {
    * and the recovery report stay as they are.
    */
   const handleReloadSaved = async () => {
-    const refreshed = await resourceQuery.refetch();
-    if (refreshed.isError || refreshed.data === undefined) {
+    const reloaded = await reloadFromGateway();
+    if (reloaded === "plugin") {
       toast("error", "Could not re-read the plugin; your form was kept. Try again.");
       return;
     }
+    if (reloaded === "membership") {
+      toast("error", "Could not re-read the plugin's proxies; your form was kept. Try again.");
+      return;
+    }
+    setMembershipError(null);
+  };
+
+  /**
+   * Reseed the form, its membership and the baseline from fresh reads, or
+   * change nothing and name the read that failed.
+   */
+  async function reloadFromGateway(): Promise<true | "plugin" | "membership"> {
+    const refreshed = await resourceQuery.refetch();
+    if (refreshed.isError || refreshed.data === undefined) return "plugin";
     if (refreshed.data.scope === "proxy_group") {
       const members = await proxiesQuery.refetch();
-      if (members.isError || members.data === undefined) {
-        toast("error", "Could not re-read the plugin's proxies; your form was kept. Try again.");
-        return;
-      }
+      if (members.isError || members.data === undefined) return "membership";
     }
     baseline.adopt(refreshed.data);
     setFormGeneration((generation) => generation + 1);
-    setMembershipError(null);
-  };
+    return true;
+  }
 
   const handleDelete = session.bind(async () => {
     const seen = membershipSeen.current;
@@ -249,25 +276,21 @@ function PluginEditor({ session }: { session: EditorSession }) {
       return null;
     }
     return (
-      <div className="max-w-2xl">
+      <div className="max-w-2xl space-y-4">
         <PluginMembershipRecovery error={membershipError} />
-        <Card>
-          <p className="text-text-secondary">
-            {needsMembership && proxiesError
-              ? "Failed to load proxy group membership. Reload to try again."
-              : "Failed to load plugin configuration."}
-          </p>
-          {needsMembership && proxiesError && (
-            <ReadStateNotice query={proxiesQuery} label="Proxy group membership" />
-          )}
-          <Button
-            variant="secondary"
-            className="mt-4"
-            onClick={() => navigate({ to: "/plugins" })}
-          >
-            Back to Plugins
-          </Button>
-        </Card>
+        {/* Denied, unavailable or gone: the shared notice says which, instead
+            of a fixed failure line (#680). */}
+        {plugin ? (
+          <ReadStateNotice query={proxiesQuery} label="Proxy group membership" />
+        ) : (
+          <ReadStateNotice query={resourceQuery} label="Plugin configuration" />
+        )}
+        <Button
+          variant="secondary"
+          onClick={() => navigate({ to: "/plugins" })}
+        >
+          Back to Plugins
+        </Button>
       </div>
     );
   }

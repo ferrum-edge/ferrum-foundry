@@ -336,10 +336,12 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
           </div>
         )}
         {page.isError && <TlsReadNotice query={page} label={`Managed ${config.title}`} />}
-        {!isLoading && !page.isError && (data?.pagination.total ?? 0) === 0 && (
+        {!isLoading && !page.isError && records.length === 0 && (
           <EmptyState
-            title={config.emptyTitle}
-            description={`${config.emptyDescription} Reference it as managed://${config.collection}/{id}.`}
+            title={(data?.pagination.total ?? 0) > 0 ? "No results on this page" : config.emptyTitle}
+            description={(data?.pagination.total ?? 0) > 0
+              ? "Use Go to last page below to return to the available results."
+              : `${config.emptyDescription} Reference it as managed://${config.collection}/{id}.`}
           />
         )}
         {!isLoading && records.length > 0 && (
@@ -999,10 +1001,12 @@ function AcmeTab() {
           {certificatesQuery.isError && (
             <TlsReadNotice query={certificatesQuery} label="ACME certificates" />
           )}
-          {!certsLoading && !certificatesQuery.isError && (certs?.pagination.total ?? 0) === 0 && (
+          {!certsLoading && !certificatesQuery.isError && visibleCertificates.length === 0 && (
             <EmptyState
-              title="No ACME certificates"
-              description="Create an order to obtain a certificate, or import issued material."
+              title={(certs?.pagination.total ?? 0) > 0 ? "No results on this page" : "No ACME certificates"}
+              description={(certs?.pagination.total ?? 0) > 0
+                ? "Use Go to last page below to return to the available results."
+                : "Create an order to obtain a certificate, or import issued material."}
             />
           )}
           {visibleCertificates.map((cert) => (
@@ -1119,10 +1123,12 @@ function AcmeTab() {
           {ordersQuery.isError && (
             <TlsReadNotice query={ordersQuery} label="ACME orders" />
           )}
-          {!ordersLoading && !ordersQuery.isError && (orders?.pagination.total ?? 0) === 0 && (
+          {!ordersLoading && !ordersQuery.isError && visibleOrders.length === 0 && (
             <EmptyState
-              title="No active orders"
-              description="ACME orders and their pending challenges appear here."
+              title={(orders?.pagination.total ?? 0) > 0 ? "No results on this page" : "No active orders"}
+              description={(orders?.pagination.total ?? 0) > 0
+                ? "Use Go to last page below to return to the available results."
+                : "ACME orders and their pending challenges appear here."}
             />
           )}
           {visibleOrders.map((order) => (

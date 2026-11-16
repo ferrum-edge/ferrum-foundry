@@ -10,7 +10,24 @@ import ApiSpecsPage from '../api-specs';
 
 let namespace: string;
 let role: GatewayRole;
-vi.mock('@/stores/namespace', () => ({ useNamespace: () => ({ selectedNamespace: namespace, scope: { namespace } }) }));
+// A namespace switch reaches subscribers the way NamespaceProvider's context
+// does. Re-rendering the root is not enough: the router keeps route
+// components mounted without re-rendering them.
+const namespaceListeners = new Set<() => void>();
+const subscribeNamespace = (listener: () => void) => {
+  namespaceListeners.add(listener);
+  return () => { namespaceListeners.delete(listener); };
+};
+vi.mock('@/stores/namespace', async () => {
+  const { useSyncExternalStore } = await import('react');
+  return { useNamespace: () => {
+    const current = useSyncExternalStore(subscribeNamespace, () => namespace);
+    return { selectedNamespace: current, scope: { namespace: current } };
+  } };
+});
+async function switchNamespace(next: string) {
+  await act(async () => { namespace = next; namespaceListeners.forEach(listener => listener()); });
+}
 vi.mock('@/stores/auth', () => ({ useAuth: () => ({ principal: { role } }) }));
 let harness: ReturnType<typeof createHarness>;
 let requests: Request[];
@@ -131,11 +148,10 @@ describe('proxy bound-spec visibility', () => {
 
   it('does not render a late metadata response from the old namespace', async () => {
     pendingA = true;
-    const { render } = await mount();
+    await mount();
     await settle(() => expect(requests.some(r => new URL(r.url).pathname.endsWith('/api-specs'))).toBe(true));
     expect(harness.host.textContent).not.toContain('No API spec is bound');
-    namespace = 'tenant-b';
-    await render();
+    await switchNamespace('tenant-b');
     await settle(() => expect(harness.host.textContent).toContain('API tenant-b'));
     await act(async () => finishA(Response.json(bindings('tenant-a'))));
     await settle(() => expect(harness.client.getQueryData(['apiSpecs', 'tenant-a', 'byProxy', 'shared'])).toBeDefined());
@@ -144,12 +160,11 @@ describe('proxy bound-spec visibility', () => {
 
   it('retires the document view on an editor identity switch', async () => {
     pendingDocument = true;
-    const { render } = await mount();
+    await mount();
     await settle(() => expect(harness.host.textContent).toContain('View bound document'));
     await click('View bound document');
     await settle(() => expect(requests.some(r => r.url.includes('/by-proxy/'))).toBe(true));
-    namespace = 'tenant-b';
-    await render();
+    await switchNamespace('tenant-b');
     await settle(() => expect(harness.host.textContent).toContain('API tenant-b'));
     await act(async () => finishDocument(new Response('old namespace document', { headers: { 'content-type': 'application/yaml' } })));
     await settle(() => expect(harness.client.getQueryData(['apiSpecDocument', 'tenant-a', 'byProxy', 'shared'])).toBeDefined());

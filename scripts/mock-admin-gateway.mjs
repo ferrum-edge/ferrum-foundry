@@ -7,11 +7,12 @@
 /*  mesh observability, overload/runtime/chargeback metrics — so the  */
 /*  dashboard can be exercised without a running gateway.             */
 /*                                                                    */
-/*    node scripts/mock-admin-gateway.mjs        # listens on :9000   */
+/*    node scripts/mock-admin-gateway.mjs   # 127.0.0.1:9000          */
 /* ------------------------------------------------------------------ */
 
 import { createServer } from 'node:http';
 import { createHash, randomUUID } from 'node:crypto';
+import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 const YAML_TITLE_PATTERN = /^\s*title:\s*['"]?(.+?)['"]?\s*$/m;
@@ -33,6 +34,10 @@ const UPSTREAMS_PATH_PATTERN = /^\/upstreams(?:\/([^/]+))?$/;
 const CREDENTIAL_PATH_PATTERN = /^\/consumers\/([^/]+)\/credentials\/([^/]+)(?:\/(\d+))?$/;
 
 const PORT = Number(process.env.MOCK_ADMIN_PORT ?? 9000);
+// The admin API is writable and unauthenticated, so it listens on loopback
+// only unless MOCK_ADMIN_BIND names another address (for example 0.0.0.0 when
+// a container must reach it).
+const BIND_ADDRESS = process.env.MOCK_ADMIN_BIND?.trim() || '127.0.0.1';
 /**
  * Gateway operating mode the mock reports on `/health` and enforces on writes.
  *   MOCK_GATEWAY_MODE=file node scripts/mock-admin-gateway.mjs
@@ -331,11 +336,30 @@ function namespaceHasResources(name) {
     .some((r) => r.namespace === name);
 }
 
-function normalizeNamespaceDescription(description) {
-  return typeof description === 'string' ? description.trim() : '';
+// Written here rather than imported from `shared/namespace.js`, so the mock
+// stays an independent stand-in for Edge rather than an echo of the BFF.
+const NAMESPACE_DESCRIPTION_SPACE = /^\p{White_Space}$/u;
+
+/**
+ * Trim a description as Edge does (Rust `str::trim`): Unicode `White_Space`,
+ * so NEXT LINE (U+0085) is trimmed and the BOM (U+FEFF) is not. JS `trim()`
+ * differs on both. Every `White_Space` character is in the BMP.
+ */
+export function normalizeNamespaceDescription(description) {
+  if (typeof description !== 'string') return '';
+  let start = 0;
+  let end = description.length;
+  while (start < end && NAMESPACE_DESCRIPTION_SPACE.test(description[start])) start += 1;
+  while (end > start && NAMESPACE_DESCRIPTION_SPACE.test(description[end - 1])) end -= 1;
+  return description.slice(start, end);
 }
 
-function validateNamespaceBody(body, nameRequired) {
+/**
+ * Edge's namespace body rules. A description is limited to 1024 Unicode scalar
+ * values counted **after** trimming, and a lone surrogate is not a scalar
+ * value, so Edge refuses it.
+ */
+export function validateNamespaceBody(body, nameRequired) {
   const hasName = body.name !== undefined;
   if (nameRequired && !hasName) return 'name is required';
   if (hasName && (typeof body.name !== 'string' || body.name.length > 254 || !NAMESPACE_NAME_PATTERN.test(body.name))) {
@@ -343,7 +367,10 @@ function validateNamespaceBody(body, nameRequired) {
   }
   if (body.description !== undefined && body.description !== null) {
     if (typeof body.description !== 'string') return 'description must be a string or null';
-    if ([...body.description].length > 1024) return 'description must be at most 1024 characters';
+    if (!body.description.isWellFormed()) return 'description must be valid Unicode';
+    if ([...normalizeNamespaceDescription(body.description)].length > 1024) {
+      return 'description must be at most 1024 characters';
+    }
   }
   return null;
 }
@@ -1474,8 +1501,13 @@ export const server = createServer(async (req, res) => {
   send(404, { error: `mock: no handler for ${method} ${path}` });
 });
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  server.listen(PORT, () => {
-    console.log(`Mock Ferrum Edge admin API listening on http://127.0.0.1:${PORT}`);
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
+) {
+  server.listen(PORT, BIND_ADDRESS, () => {
+    const { address, port } = server.address();
+    const host = address.includes(':') ? `[${address}]` : address;
+    console.log(`Mock Ferrum Edge admin API listening on http://${host}:${port}`);
   });
 }

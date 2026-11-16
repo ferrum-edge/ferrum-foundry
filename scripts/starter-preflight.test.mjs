@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { test } from "node:test";
 import { mayCarrySecret as e2eMayCarrySecret } from "../e2e/support/may-carry-secret.mjs";
 import { isLoopbackAdminOrigin, mayCarrySecret } from "../shared/admin-origin.js";
@@ -20,6 +20,8 @@ import {
 } from "./starter-preflight.mjs";
 
 const PLACEHOLDER_PATTERN = /placeholder/;
+const SIXTEEN_CHARACTERS = /^16 characters;/;
+const THIRTY_ONE_BYTES = /^31 bytes;/;
 const DISPOSABLE_LOCAL_STACK_PATTERN = /disposable local stack/;
 const HTTPS_PATTERN = /https/;
 const FERRUM_ALLOW_INSECURE_ADMIN_HTTP_PATTERN = /FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true/;
@@ -59,6 +61,13 @@ const STOP_GRACE_PERIOD_PATTERN = /stop_grace_period:\s*(\d+)s/;
 const FERRUM_SHUTDOWN_TIMEOUT_PATTERN = /FERRUM_SHUTDOWN_TIMEOUT:\s*"?(\d+)"?/;
 const COMPOSE_IMAGE_PATTERN = /^\s+image:\s*(\S+)/gm;
 const SHA256_DIGEST_PATTERN = /@sha256:[0-9a-f]{64}/;
+// `registry/name:tag@sha256:<digest>`: the digest is what runs, and the tag is
+// what Dependabot reads to propose the next release.
+const TAG_AND_DIGEST_PATTERN = /^[a-z0-9./_-]+:[A-Za-z0-9_][A-Za-z0-9_.-]*@sha256:[0-9a-f]{64}$/;
+// A `docker-compose` entry in .github/dependabot.yml and the directory it watches.
+const DEPENDABOT_COMPOSE_DIRECTORY_PATTERN =
+  /package-ecosystem:\s*"docker-compose"\s*\n\s*directory:\s*"([^"]+)"/g;
+const COMPOSE_FILE_NAME_PATTERN = /^(?:docker-)?compose[\w.-]*\.ya?ml$/;
 const REQUIRED_VARIABLE_PATTERN = /\$\{([A-Z0-9_]+):\?/g;
 const OIDC_ISSUER_URL_PATTERN = /--oidc-issuer-url/;
 const REDIRECT_URL_PATTERN = /--redirect-url/;
@@ -137,6 +146,28 @@ test("a missing, short, or placeholder secret fails", () => {
   });
   assert.equal(placeholder.status, FAIL);
   assert.match(placeholder.detail, PLACEHOLDER_PATTERN);
+});
+
+test("the JWT secret is measured in UTF-8 bytes and the proxy secret in characters", () => {
+  // The BFF and the signer measure FERRUM_JWT_SECRET in UTF-8 bytes (#663):
+  // 16 × "é" is 32 bytes but only 16 characters.
+  const accented = "é".repeat(16);
+  const [jwt, proxy] = checkSecrets({
+    FERRUM_JWT_SECRET: accented,
+    FERRUM_TRUSTED_PROXY_SECRET: accented,
+  });
+  assert.equal(jwt.status, PASS);
+  assert.equal(jwt.detail, "32 bytes");
+  // The trusted-proxy proof stays in characters, as its BFF check does.
+  assert.equal(proxy.status, FAIL);
+  assert.match(proxy.detail, SIXTEEN_CHARACTERS);
+
+  const [ascii] = checkSecrets({
+    FERRUM_JWT_SECRET: "a".repeat(31),
+    FERRUM_TRUSTED_PROXY_SECRET: "b".repeat(48),
+  });
+  assert.equal(ascii.status, FAIL);
+  assert.match(ascii.detail, THIRTY_ONE_BYTES);
 });
 
 test("a secret is never echoed, only measured", () => {
@@ -551,6 +582,29 @@ test("the shared injection replaces every identity header a client could send", 
   }
 });
 
+test("the production proxy sets every forwarded header oauth2-proxy reads", async () => {
+  // oauth2-proxy runs with --reverse-proxy and trusts these headers; a value
+  // passed through from the client is what its header-spoofing bypasses use.
+  const production = await readFile(new URL("nginx/foundry.conf", STARTER), "utf8");
+  const expected = {
+    "X-Real-IP": "$remote_addr",
+    "X-Forwarded-For": "$remote_addr",
+    "X-Forwarded-Host": "$host",
+    "X-Forwarded-Proto": "$scheme",
+    "X-Forwarded-Uri": "$request_uri",
+  };
+  for (const location of ["location /oauth2/ {", "location = /oauth2/auth {"]) {
+    const start = production.indexOf(location);
+    assert.ok(start >= 0, `foundry.conf must define ${location}`);
+    const block = production.slice(start, production.indexOf("}", start));
+    for (const [header, value] of Object.entries(expected)) {
+      const set = [...block.matchAll(new RegExp(`proxy_set_header\\s+${header}\\s+(\\S+);`, "g"))]
+        .map((match) => match[1]);
+      assert.deepEqual(set, [value], `${location} must set ${header} to ${value}`);
+    }
+  }
+});
+
 test("an unmapped identity is denied by the shared policy's default", async () => {
   const policy = await readFile(new URL("nginx/identity/policy.conf", STARTER), "utf8");
   assert.match(policy, MAP_AUTH_GROUPS_FERRUM_ROLE_DEFAULT_PATTERN);
@@ -589,8 +643,14 @@ test("starter defaults select the published Foundry digest and stop grace exceed
   assert.match(journeyGuide, PUBLISHED_RELEASE_DIGEST_PATTERN);
   const compose = await readFile(new URL("compose.yaml", STARTER), "utf8");
   const foundry = compose.slice(compose.indexOf("  foundry:"), compose.indexOf("  oauth2-proxy:"));
-  const grace = Number(foundry.match(STOP_GRACE_PERIOD_PATTERN)?.[1] ?? 0);
-  const deadline = Number(foundry.match(FERRUM_SHUTDOWN_TIMEOUT_PATTERN)?.[1] ?? 0) / 1000;
+  const graceMatch = foundry.match(STOP_GRACE_PERIOD_PATTERN);
+  const deadlineMatch = foundry.match(FERRUM_SHUTDOWN_TIMEOUT_PATTERN);
+  assert.ok(
+    graceMatch && deadlineMatch,
+    "compose must state the stop grace and the BFF shutdown deadline literally",
+  );
+  const grace = Number(graceMatch[1]);
+  const deadline = Number(deadlineMatch[1]) / 1000;
   assert.ok(grace > deadline, `stop grace ${grace}s must exceed the BFF shutdown deadline ${deadline}s`);
 });
 
@@ -601,6 +661,41 @@ test("every third-party image in the starter is pinned by digest", async () => {
   for (const image of images) {
     if (image.startsWith("${FOUNDRY_IMAGE")) continue; // operator-selected release
     assert.match(image, SHA256_DIGEST_PATTERN, `${image} must be pinned by digest`);
+  }
+});
+
+test("third-party starter images carry their tag next to the digest", async () => {
+  // A tag kept only in a comment is invisible to Dependabot, so the pin would
+  // never move. Ferrum's own images are excluded: the pairing record in
+  // docs/compatibility.json moves them, by digest alone.
+  const compose = await readFile(new URL("compose.yaml", STARTER), "utf8");
+  const images = [...compose.matchAll(COMPOSE_IMAGE_PATTERN)]
+    .map((match) => match[1])
+    .filter((image) => !image.startsWith("${FOUNDRY_IMAGE") && !image.startsWith("ferrumedge/"));
+  assert.ok(images.length >= 3, "the starter runs oauth2-proxy and two nginx services");
+  for (const image of images) {
+    assert.match(image, TAG_AND_DIGEST_PATTERN, `${image} must be written as name:tag@sha256:<digest>`);
+  }
+});
+
+test("every docker-compose Dependabot directory declares an image to update", async () => {
+  // Dependabot reads docker-compose dependencies from `image:` keys only. A
+  // directory whose compose files declare none, such as an overlay that only
+  // adds volumes and environment, gives it nothing to move, and listing it
+  // would claim coverage that does not exist.
+  const config = await readFile(new URL("../.github/dependabot.yml", import.meta.url), "utf8");
+  const directories = [...config.matchAll(DEPENDABOT_COMPOSE_DIRECTORY_PATTERN)].map((match) => match[1]);
+  assert.ok(directories.includes("/deploy/starter"), "Dependabot watches the deployment starter");
+  for (const directory of directories) {
+    const base = new URL(`..${directory}/`, import.meta.url);
+    const files = (await readdir(base)).filter((name) => COMPOSE_FILE_NAME_PATTERN.test(name));
+    assert.ok(files.length > 0, `${directory} has no compose file`);
+    let images = 0;
+    for (const file of files) {
+      const compose = await readFile(new URL(file, base), "utf8");
+      images += [...compose.matchAll(COMPOSE_IMAGE_PATTERN)].length;
+    }
+    assert.ok(images > 0, `${directory} declares no image for Dependabot to update`);
   }
 });
 

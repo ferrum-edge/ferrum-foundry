@@ -1,8 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { createShutdownHandler, type ShutdownLogger } from './shutdown.js';
 
-function createLogger(): ShutdownLogger & { info: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> } {
-  return { info: vi.fn(), error: vi.fn() };
+type LogMethod = ShutdownLogger['info'];
+
+function createLogger(): { info: Mock<LogMethod>; error: Mock<LogMethod> } {
+  return { info: vi.fn<LogMethod>(), error: vi.fn<LogMethod>() };
 }
 
 describe('bounded graceful shutdown', () => {

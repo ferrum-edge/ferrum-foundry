@@ -13,9 +13,11 @@ import { FormValidationSummary } from "./FormValidationSummary";
 import { useCollapsibleFormValidation } from "@/lib/collapsedFormValidation";
 import { BACKEND_TLS_OPERATOR_SCOPE_NOTE } from "@/lib/backendTlsReferences";
 import {
+  isValidPort,
   missingNumberError,
   numberDraftFromInput,
   numberDraftText,
+  PORT_RANGE_ERROR,
   resolveNumberDrafts,
   type NumberDraft,
   type WithNumberDrafts,
@@ -522,15 +524,24 @@ export function ProxyForm({
     if (fields.listenPath && !listenPath.trim() && hosts.length === 0) {
       errs.listen_path = "Set a listen path or at least one host";
     }
-    if (isStream && (listenPort === "" || Number(listenPort) <= 0)) {
+    if (isStream && listenPort === "") {
       errs.listen_port = "Stream proxies must bind a listen port";
+    } else if (listenPort !== "" && !isValidPort(listenPort)) {
+      errs.listen_port = PORT_RANGE_ERROR;
     }
     const usingUpstream = upstreamId.trim().length > 0;
     if (!usingUpstream && !backendHost.trim()) {
       errs.backend_host = "Backend host is required (or link an upstream)";
     }
-    if (!usingUpstream && (!backendPort || backendPort <= 0)) {
+    if (!usingUpstream && backendPort === "") {
       errs.backend_port = "Backend port is required";
+    } else if (
+      // With an upstream linked the backend port is unused and may stay unset
+      // (sent as 0); any other value must still be a port Edge can store.
+      (!usingUpstream || (backendPort !== "" && backendPort !== 0)) &&
+      !isValidPort(backendPort)
+    ) {
+      errs.backend_port = PORT_RANGE_ERROR;
     }
     const requireNumber = (key: string, value: NumberDraft | undefined, label: string) => {
       const error = missingNumberError(value, label);

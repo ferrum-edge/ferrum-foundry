@@ -6,7 +6,13 @@ import { useState, type KeyboardEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
-import { numberDraftFromInput, numberDraftText, type NumberDraft } from "@/lib/formDrafts";
+import {
+  isValidPort,
+  numberDraftFromInput,
+  numberDraftText,
+  PORT_RANGE_ERROR,
+  type NumberDraft,
+} from "@/lib/formDrafts";
 import type { UpstreamTarget } from "@/api/types";
 
 /* ------------------------------------------------------------------ */
@@ -40,7 +46,7 @@ export function TargetForm({ initialData, onSubmit, onCancel }: TargetFormProps)
   const validate = (): boolean => {
     const errs: Record<string, string> = {};
     if (!host.trim()) errs.host = "Host is required";
-    if (!port || port <= 0 || port > 65535) errs.port = "Valid port required (1-65535)";
+    if (!isValidPort(port)) errs.port = PORT_RANGE_ERROR;
     if (weight === "") errs.weight = "Weight is required";
     else if (weight < 0) errs.weight = "Weight must be >= 0";
     setErrors(errs);

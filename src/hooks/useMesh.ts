@@ -10,7 +10,7 @@
 /* ------------------------------------------------------------------ */
 
 import { queryScope } from "@/api/client";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import * as mesh from "@/api/mesh";
 import { useNamespace } from "@/stores/namespace";
 
@@ -66,17 +66,6 @@ export function useConfigDrift() {
     queryKey: ["mesh", "configDrift"],
     queryFn: () => mesh.getConfigDrift(queryScope(scope)),
     ...MESH_QUERY_OPTS,
-  });
-}
-
-export function useResetConfigRevision() {
-  const qc = useQueryClient();
-  const { scope } = useNamespace();
-  return useMutation({
-    mutationFn: () => mesh.resetConfigRevision(scope),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["mesh", "configDrift"] });
-    },
   });
 }
 

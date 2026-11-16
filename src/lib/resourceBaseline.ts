@@ -167,14 +167,6 @@ export function baselineSnapshot(
   return snapshot;
 }
 
-/** Baseline fingerprint for a fetched resource. */
-export function baselineFingerprint(
-  resource: object,
-  omit: readonly string[],
-): string {
-  return resourceFingerprint(baselineSnapshot(resource, omit));
-}
-
 /**
  * Reduce a resource to named fields only.
  *

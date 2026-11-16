@@ -316,7 +316,9 @@ data. Every role must get real collections for the launch surfaces, and a read
 the gateway withholds from a role (TLS inventory and trust bundles below
 `operator`, the audit log below `admin`) must be an explicit `403` naming the
 role. `ReadStateNotice` and the TLS page show such a `403` as a denial
-(`ReadDeniedNotice`), never as an empty list or a missing feature. The TLS
+(`ReadDeniedNotice`), never as an empty list or a missing feature. The proxy,
+upstream, consumer and plugin lists and detail pages, Health, and Metrics
+render every failed read through `ReadStateNotice` (#680). The TLS
 inventory read is a fleet view, so a namespace-scoped principal never sends it.
 
 Not checked: `file`, `dp`, `mesh`, and `node_agent` modes (no such gateway

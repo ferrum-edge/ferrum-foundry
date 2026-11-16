@@ -524,13 +524,16 @@ export function UpstreamForm({
         "Default weight",
       );
       if (weightError) errs.sd_default_weight = weightError;
+      // Every provider requires a service name; Edge refuses an empty one.
+      if (!sdServiceName.trim()) {
+        errs.sd_service_name = sdProvider === "consul"
+          ? "Consul service name is required"
+          : "Service name is required";
+      }
     }
     if (sdEnabled && sdProvider === "consul") {
       if (!String(sdConfig.address ?? "").trim()) {
         errs.consul_address = "Consul address is required";
-      }
-      if (!sdServiceName.trim()) {
-        errs.sd_service_name = "Consul service name is required";
       }
       if (consulTokenMasked) {
         errs.consul_token = "Re-enter or clear the token before saving.";
@@ -612,14 +615,14 @@ export function UpstreamForm({
           ...(sdProvider === "dns_sd" && {
             dns_sd: {
               ...providerExtras,
-              service_name: sdServiceName,
+              service_name: sdServiceName.trim(),
               poll_interval_seconds: (sdConfig.poll_interval_seconds as number) ?? 30,
             },
           }),
           ...(sdProvider === "kubernetes" && {
             kubernetes: {
               ...providerExtras,
-              service_name: sdServiceName,
+              service_name: sdServiceName.trim(),
               namespace: (sdConfig.namespace as string) || undefined,
               address_type:
                 sdConfig.address_type === "IPv4" || sdConfig.address_type === "IPv6"
@@ -645,7 +648,7 @@ export function UpstreamForm({
           ...(sdProvider === "mesh" && {
             mesh: {
               ...providerExtras,
-              service_name: sdServiceName,
+              service_name: sdServiceName.trim(),
               namespace: (sdConfig.namespace as string) || undefined,
               port: (sdConfig.port as number) || undefined,
               poll_interval_seconds: (sdConfig.poll_interval_seconds as number) ?? 30,

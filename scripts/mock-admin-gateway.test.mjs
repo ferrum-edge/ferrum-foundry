@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   buildHealth,
   apiSpecByProxyResponse,
@@ -9,11 +12,13 @@ import {
   detachDeletedPluginConfig,
   evaluateIfMatch,
   ifMatchRouteRefusal,
+  normalizeNamespaceDescription,
   provisionerFromHeaders,
   resourceEtag,
   READ_ONLY_GATEWAY_MODES,
   readOnlyModeRefusal,
   stampProvisionedBy,
+  validateNamespaceBody,
   validatePluginConfigWrite,
   validateProxyWrite,
   validateUpstreamWrite,
@@ -27,6 +32,8 @@ const UNKNOWN_FIELD_NAME_PATTERN = /unknown field `name`/;
 const QUOTED_HEX_32_ETAG_PATTERN = /^"[0-9a-f]{32}"$/;
 const HTTP_PATH_PATTERN = /http_path/;
 const UDP_PROBE_PAYLOAD_PATTERN = /udp_probe_payload/;
+const LOOPBACK_LISTEN_LOG_PATTERN =
+  /^Mock Ferrum Edge admin API listening on http:\/\/127\.0\.0\.1:\d+\n/;
 
 const url = new URL("http://127.0.0.1/");
 const proxyDefaults = { plugins: [], auth_mode: "single" };
@@ -683,4 +690,56 @@ test("a plugin DELETE detaches its proxies, and a stale If-Match changes neither
   }
   // Another namespace's same-id association is untouched.
   assert.deepEqual(proxies.find((entry) => entry.id === "p3"), before[2]);
+});
+
+// Issue #663: the mock's namespace description rule matches Edge's, written
+// independently of shared/namespace.js.
+test("namespace descriptions are trimmed and counted as Edge does", () => {
+  // 1030 characters with 10 leading spaces is 1020 after trimming.
+  assert.equal(
+    validateNamespaceBody({ name: "team", description: `${" ".repeat(10)}${"d".repeat(1020)}` }, true),
+    null,
+  );
+  assert.equal(
+    validateNamespaceBody({ name: "team", description: "d".repeat(1025) }, true),
+    "description must be at most 1024 characters",
+  );
+  // Counted in scalar values, so an astral character is one, not two.
+  assert.equal(validateNamespaceBody({ name: "team", description: "😀".repeat(1024) }, true), null);
+  assert.equal(
+    validateNamespaceBody({ name: "team", description: "ok \ud800 not" }, true),
+    "description must be valid Unicode",
+  );
+  // NEXT LINE is Unicode White_Space and is trimmed; the BOM is not.
+  assert.equal(normalizeNamespaceDescription("\u0085 billing \u0085"), "billing");
+  assert.equal(normalizeNamespaceDescription("\ufeffbilling"), "\ufeffbilling");
+  assert.equal(normalizeNamespaceDescription(null), "");
+});
+
+// Issue #685: the mock admin API is writable and unauthenticated, so it binds
+// loopback unless MOCK_ADMIN_BIND says otherwise, and logs the address it
+// actually listens on.
+test("the mock admin API listens on loopback by default", async () => {
+  const env = { ...process.env, MOCK_ADMIN_PORT: "0" };
+  delete env.MOCK_ADMIN_BIND;
+  const child = spawn(
+    process.execPath,
+    [fileURLToPath(new URL("./mock-admin-gateway.mjs", import.meta.url))],
+    { env, stdio: ["ignore", "pipe", "pipe"] },
+  );
+  try {
+    let output = "";
+    child.stdout.setEncoding("utf8");
+    for await (const chunk of child.stdout) {
+      output += chunk;
+      if (output.includes("\n")) break;
+    }
+    assert.match(output, LOOPBACK_LISTEN_LOG_PATTERN);
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) {
+      const exited = once(child, "exit");
+      child.kill();
+      await exited;
+    }
+  }
 });

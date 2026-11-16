@@ -276,6 +276,13 @@ Things that are easy to get wrong:
   not set is forwarded from the client as-is. nginx drops a header whose value
   is empty, so an identity mapped to no namespaces arrives without the header
   rather than with an empty one.
+- **Set every `X-Forwarded-*` header oauth2-proxy reads from nginx's own
+  variables** on `/oauth2/` and on the `/oauth2/auth` subrequest
+  (`$remote_addr`, `$host`, `$scheme`, `$request_uri`). oauth2-proxy runs with
+  `--reverse-proxy` and believes them; a client's `X-Forwarded-For` or
+  `X-Forwarded-Uri` passed through is what its header-spoofing bypasses use.
+  If you add `--trusted-ip` or a skip-auth route, also set
+  `--trusted-proxy-ip` to the proxy's address.
 - **Deny by default.** The `map` default is empty, so an unmapped user gets no
   role and Foundry answers `401` with `x-ferrum-auth-layer: bff`. oauth2-proxy's
   `--allowed-group` also refuses such a user at login.
@@ -300,9 +307,11 @@ Things that are easy to get wrong:
 
 - **Size for large uploads.** Restores can reach 110 MiB and API-spec imports
   30 MiB, so set `client_max_body_size 110m`. With
-  `proxy_request_buffering off`, keep `client_body_timeout` and
-  `proxy_read_timeout` at or below Foundry's own budgets
-  (`FERRUM_UPLOAD_TIMEOUT`, and `FERRUM_WRITE_TIMEOUT` for ordinary routes).
+  `proxy_request_buffering off`, keep the request-side timers,
+  `client_body_timeout` and `proxy_send_timeout`, at or below Foundry's own
+  budgets (`FERRUM_UPLOAD_TIMEOUT`, and `FERRUM_WRITE_TIMEOUT` for ordinary
+  routes). `proxy_read_timeout` bounds the wait for the response instead; size
+  it from the [deadlines below](#live-apply-monitoring-and-acme-issuance-deadlines).
 - **Fleet-global surfaces are not namespace-scoped, and a scoped identity is
   bounded to namespace-scoped routes.** TLS inventory, managed TLS material,
   ACME, rotation, and validation ignore namespace grants, so a scoped identity
@@ -389,7 +398,8 @@ prove nothing was created.
 ## 4. Docker Compose example
 
 [`deploy/starter/compose.yaml`](../deploy/starter/compose.yaml) is the
-Compose version of this topology, with third-party images pinned by digest.
+Compose version of this topology, with third-party images pinned by tag and
+digest (`name:tag@sha256:<digest>`) so Dependabot can propose their updates.
 Its `production` profile runs Foundry, oauth2-proxy, and nginx against your
 own gateway; see the [starter README](../deploy/starter/README.md#production)
 for setup. What it gets right:
@@ -401,9 +411,13 @@ for setup. What it gets right:
   secret never reaches the BFF, and oauth2-proxy never sees the gateway key or
   the proof secret. Keep both files `chmod 600` and out of version control.
 
-The image's `HEALTHCHECK` requests `/api/health/live` on the container's
-`PORT`. It deliberately does not use readiness, so a gateway outage does not
-make Docker restart Foundry.
+The image's `HEALTHCHECK` requests `http://127.0.0.1:$PORT/api/health/live`.
+It deliberately does not use readiness, so a gateway outage does not make
+Docker restart Foundry. It reaches the BFF only when the BFF listens on
+`127.0.0.1`: the default `0.0.0.0`, or `127.0.0.1` itself. With any other
+`FERRUM_BIND_ADDRESS` (`::1`, `localhost` if it resolves to `::1`, or a private
+address), override the healthcheck to probe that address, or Docker marks a
+serving container unhealthy and `docker compose up --wait` fails.
 
 ## 5. Kubernetes example
 
@@ -767,9 +781,9 @@ SBOM attestations. See [Release and supply-chain gates](release-security.md).
       its own values for all four.
 - [ ] Group-to-role mapping denies by default, so an unmapped user gets no role.
 - [ ] Every non-admin identity receives an exact `X-Ferrum-Namespaces` list.
-- [ ] `FERRUM_JWT_SECRET` and `FERRUM_TRUSTED_PROXY_SECRET` are at least 32
-      characters, generated from a CSPRNG, kept in a secret store, and rotated
-      on a schedule.
+- [ ] `FERRUM_JWT_SECRET` is at least 32 UTF-8 bytes and
+      `FERRUM_TRUSTED_PROXY_SECRET` at least 32 characters, both generated from
+      a CSPRNG, kept in a secret store, and rotated on a schedule.
 - [ ] `FERRUM_JWT_SECRET` matches the gateway's `FERRUM_ADMIN_JWT_SECRET`.
 - [ ] `NODE_ENV=production` is set.
 - [ ] `FERRUM_AUTH_MODE=trusted-proxy` is set and

@@ -28,7 +28,7 @@ import {
   selectNamespace,
 } from "../support/stack";
 
-const FAILED_TO_LOAD_UPSTREAM_CONFIGURATION_PATTERN = /failed to load upstream configuration/i;
+const UPSTREAM_CONFIGURATION_UNAVAILABLE_PATTERN = /upstream configuration unavailable/i;
 
 const tenants = [
   { namespace: NAMESPACE, id: uniqueId("e2e-tenant-a"), backend: "tenant-a-backend.invalid" },
@@ -191,21 +191,24 @@ test.describe("namespace isolation", () => {
     // The premise is that tenant A's read is in flight when the switch
     // happens: wait until the proxy has taken it rather than racing it.
     await faults.waitUntilTaken();
+    const heldUntil = Date.now() + DELAY_MS + 1_000;
     await selectNamespace(page, NAMESPACE_B);
 
     // Tenant B does not hold this id. The page reaches that conclusion only
     // after the query layer's retry ladder, so wait for the terminal state
     // rather than racing it — as the suite's other terminal-state checks do.
-    await expect(page.getByText(FAILED_TO_LOAD_UPSTREAM_CONFIGURATION_PATTERN)).toBeVisible({
+    await expect(page.getByText(UPSTREAM_CONFIGURATION_UNAVAILABLE_PATTERN)).toBeVisible({
       timeout: 40_000,
     });
 
-    // Let tenant A's held response land, then look again.
-    await page.waitForTimeout(DELAY_MS + 1_000);
+    // Let tenant A's held response land, then look again. The hold started
+    // when the proxy took the read, so only the part not already spent here
+    // is left to wait out.
+    await page.waitForTimeout(Math.max(0, heldUntil - Date.now()));
     await faults.expectAllConsumed();
     await expect(page.getByText(`${tenants[0].backend}:8081`)).toHaveCount(0);
     await expect(page.getByLabel("Name", { exact: true })).toHaveCount(0);
-    await expect(page.getByText(FAILED_TO_LOAD_UPSTREAM_CONFIGURATION_PATTERN)).toBeVisible();
+    await expect(page.getByText(UPSTREAM_CONFIGURATION_UNAVAILABLE_PATTERN)).toBeVisible();
   });
 
   test("switching namespaces on an id both hold shows the new tenant's resource", async ({
@@ -245,11 +248,14 @@ test.describe("namespace isolation", () => {
     // The premise is that tenant A's read is in flight when the switch
     // happens: wait until the proxy has taken it rather than racing it.
     await faults.waitUntilTaken();
+    const heldUntil = Date.now() + DELAY_MS + 1_000;
     await selectNamespace(page, NAMESPACE_B);
     await expect(page.getByLabel("Name", { exact: true })).toHaveValue(sharedName(NAMESPACE_B));
 
-    // Let tenant A's held response land, then look again.
-    await page.waitForTimeout(DELAY_MS + 1_000);
+    // Let tenant A's held response land, then look again. The hold started
+    // when the proxy took the read, so only the part not already spent here
+    // is left to wait out.
+    await page.waitForTimeout(Math.max(0, heldUntil - Date.now()));
     await faults.expectAllConsumed();
     await expect(page.getByLabel("Name", { exact: true })).toHaveValue(sharedName(NAMESPACE_B));
     await expect(page.getByText(`${sharedBackend(NAMESPACE_B)}:8081`)).toBeVisible();

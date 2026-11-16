@@ -219,32 +219,21 @@ export function isCascadableDeleteError(status: number, body: string): boolean {
 
 export async function list(scope: NamespaceScope): Promise<string[]> {
   // GET /namespaces returns the standard { data, pagination } envelope of
-  // plain namespace name strings. Older gateways returned a bare array.
-  const first = await proxyApi
-    .get(
-      "namespaces",
-      scoped(scope, {
-        searchParams: { offset: "0", limit: String(ALL_PAGE_SIZE) },
-      }),
-    )
-    .json<PaginatedResponse<string> | string[]>();
-  if (Array.isArray(first)) return first;
-
-  return collectAllPages(async (offset, limit) => {
-    if (offset === 0 && limit === ALL_PAGE_SIZE) return first;
-    const page = await proxyApi
-      .get(
-        "namespaces",
-        scoped(scope, {
-          searchParams: { offset: String(offset), limit: String(limit) },
-        }),
-      )
-      .json<PaginatedResponse<string> | string[]>();
-    if (Array.isArray(page)) {
-      throw new Error("Gateway changed namespace pagination format mid-request");
-    }
-    return page;
-  }, ALL_PAGE_SIZE, undefined, (name) => name);
+  // plain namespace name strings, checked page by page like every other list.
+  return collectAllPages(
+    (offset, limit) =>
+      proxyApi
+        .get(
+          "namespaces",
+          scoped(scope, {
+            searchParams: { offset: String(offset), limit: String(limit) },
+          }),
+        )
+        .json<PaginatedResponse<string>>(),
+    ALL_PAGE_SIZE,
+    undefined,
+    (name) => name,
+  );
 }
 
 export async function get(

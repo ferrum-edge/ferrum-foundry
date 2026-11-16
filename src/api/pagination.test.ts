@@ -29,6 +29,16 @@ describe("collectAllPages", () => {
     }))).rejects.toThrow("inconsistent pagination");
   });
 
+  it("rejects a page without the paginated envelope", async () => {
+    await expect(collectAllPages(async () => ["a"] as never)).rejects.toThrow(
+      "inconsistent pagination",
+    );
+    await expect(collectAllPages(async () => ({
+      data: undefined as unknown as number[],
+      pagination: { offset: 0, limit: 10, total: 1 },
+    }))).rejects.toThrow("inconsistent pagination");
+  });
+
   it("rejects a total that changes between pages", async () => {
     await expect(
       collectAllPages(
@@ -152,15 +162,5 @@ describe("collectBoundedPages", () => {
         { pageSize: 1, budget: 100 },
       ),
     ).rejects.toThrow("changed pagination total");
-  });
-});
-
-describe("collectAllPages", () => {
-  it("is completeness on top of the bounded walk", async () => {
-    const fetchPage = vi.fn(async (offset: number, limit: number) => ({
-      data: Array.from({ length: Math.min(limit, 7 - offset) }, (_, i) => offset + i),
-      pagination: { offset, limit, total: 7 },
-    }));
-    await expect(collectAllPages(fetchPage, 3)).resolves.toEqual([0, 1, 2, 3, 4, 5, 6]);
   });
 });

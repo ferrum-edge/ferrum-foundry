@@ -72,8 +72,11 @@ identity proxy, strip every identity and proof header the client sends, inject
 the trusted values after authentication, and firewall the BFF so only that
 proxy can connect. When the proxy runs on the same host, set
 `FERRUM_BIND_ADDRESS` (default `0.0.0.0`) to a loopback or private address such
-as `127.0.0.1` or `::1`. Configure the proxy to revoke a user's session as soon
-as the identity provider disables the user.
+as `127.0.0.1` or `::1`. The container image's healthcheck probes
+`127.0.0.1`, so a bind to any other address needs that healthcheck overridden;
+see [Docker Compose example](deployment.md#4-docker-compose-example).
+Configure the proxy to revoke a user's session as soon as the identity provider
+disables the user.
 
 ### Failed-authentication lockout
 

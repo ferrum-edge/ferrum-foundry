@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { jwtVerify } from "jose";
 import {
   adminToken,
@@ -14,6 +16,7 @@ import {
   readSeedConfig,
   runSeed,
 } from "./seed-demo-gateway.mjs";
+import { readSupportedPairing } from "./supported-pairing.mjs";
 
 const FERRUM_JWT_SECRET_IS_REQUIRED_PATTERN = /FERRUM_JWT_SECRET is required/;
 const AT_LEAST_32_BYTES_PATTERN = /at least 32 bytes/;
@@ -23,7 +26,6 @@ const FERRUM_ADMIN_URL_HTTPS_UNLESS_LOOPBACK_PATTERN =
 const FERRUM_ADMIN_URL_MUST_USE_HTTPS_PATTERN = /FERRUM_ADMIN_URL must use https/;
 const MUST_EXACTLY_EQUAL_HTTPS_GATEWAY_PATTERN =
   /must exactly equal "https:\/\/gateway\.example#payments"/;
-const CONTRACT_PATTERN = /^contract-[0-9a-f]{40}$/;
 const PAYMENTS_PATTERN = /payments/;
 const FERRUM_DEMO_INCLUDE_BASIC_AUTH_TRUE_PATTERN = /FERRUM_DEMO_INCLUDE_BASIC_AUTH=true/;
 const FERRUM_BASIC_AUTH_HMAC_SECRET_PATTERN = /FERRUM_BASIC_AUTH_HMAC_SECRET/;
@@ -186,7 +188,7 @@ test("restore fixture uses current resource names and versioned API-spec semanti
   const payload = buildRestorePayload(timestamp);
 
   assert.equal(payload.version, "1");
-  assert.match(payload.ferrum_version, CONTRACT_PATTERN);
+  assert.equal(payload.ferrum_version, `contract-${readSupportedPairing().edge.source_commit}`);
   assert.deepEqual(payload.api_specs, { section_version: "2", items: [] });
   assert.equal(payload.exported_at, timestamp);
   assert.equal(payload.counts.consumers, payload.consumers.length);
@@ -429,43 +431,49 @@ test("missing HMAC secret aborts before restore when basic auth is opted in", as
 });
 
 test("runSeed posts restore only after preflight and omits a foreign prometheus owner", async () => {
-  const config = readSeedConfig({
-    FERRUM_JWT_SECRET: SIGNING_SECRET,
-    FERRUM_DEMO_CONFIRM_TARGET: "http://127.0.0.1:9000#ferrum-foundry-demo",
-    FERRUM_DEMO_MANIFEST: "/tmp/ferrum-foundry-demo-manifest-issue-324.json",
-  });
-  const admin = adminMemory({
-    namespaces: ["payments", "ferrum-foundry-demo"],
-    pluginsByNamespace: {
-      payments: [{
-        id: "payments-prometheus",
-        plugin_name: "prometheus_metrics",
-        scope: "global",
-        enabled: true,
-        namespace: "payments",
-      }],
-    },
-  });
+  // A private directory, so concurrent checkouts never share the manifest.
+  const dir = mkdtempSync(join(tmpdir(), "foundry-demo-manifest-"));
+  try {
+    const config = readSeedConfig({
+      FERRUM_JWT_SECRET: SIGNING_SECRET,
+      FERRUM_DEMO_CONFIRM_TARGET: "http://127.0.0.1:9000#ferrum-foundry-demo",
+      FERRUM_DEMO_MANIFEST: join(dir, "manifest.json"),
+    });
+    const admin = adminMemory({
+      namespaces: ["payments", "ferrum-foundry-demo"],
+      pluginsByNamespace: {
+        payments: [{
+          id: "payments-prometheus",
+          plugin_name: "prometheus_metrics",
+          scope: "global",
+          enabled: true,
+          namespace: "payments",
+        }],
+      },
+    });
 
-  const result = await runSeed(config, { request: admin.request, report: admin.report });
-  const restoreIndex = admin.calls.findIndex((call) => call.route === "/restore");
-  const namespaceIndex = admin.calls.findIndex((call) => call.route === "/namespaces");
-  assert.ok(namespaceIndex >= 0 && namespaceIndex < restoreIndex);
-  const restored = JSON.parse(admin.calls[restoreIndex].body);
-  assert.equal(
-    restored.plugin_configs.some((plugin) => plugin.plugin_name === "prometheus_metrics"),
-    false,
-  );
-  assert.equal(result.skipped.length, 2);
-  assert.match(result.skipped[0], PAYMENTS_PATTERN);
+    const result = await runSeed(config, { request: admin.request, report: admin.report });
+    const restoreIndex = admin.calls.findIndex((call) => call.route === "/restore");
+    const namespaceIndex = admin.calls.findIndex((call) => call.route === "/namespaces");
+    assert.ok(namespaceIndex >= 0 && namespaceIndex < restoreIndex);
+    const restored = JSON.parse(admin.calls[restoreIndex].body);
+    assert.equal(
+      restored.plugin_configs.some((plugin) => plugin.plugin_name === "prometheus_metrics"),
+      false,
+    );
+    assert.equal(result.skipped.length, 2);
+    assert.match(result.skipped[0], PAYMENTS_PATTERN);
 
-  const written = JSON.parse(readFileSync(config.manifestPath, "utf8"));
-  assert.equal(written.include_basic_auth, false);
-  assert.equal(written.omit_global_prometheus, true);
-  assert.deepEqual(written.counts, restored.counts);
-  assert.deepEqual(written.counts, result.counts);
-  assert.equal(written.basic_consumers.length, 0);
-  assert.equal(written.counts.consumers, 12);
+    const written = JSON.parse(readFileSync(config.manifestPath, "utf8"));
+    assert.equal(written.include_basic_auth, false);
+    assert.equal(written.omit_global_prometheus, true);
+    assert.deepEqual(written.counts, restored.counts);
+    assert.deepEqual(written.counts, result.counts);
+    assert.equal(written.basic_consumers.length, 0);
+    assert.equal(written.counts.consumers, 12);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("preflight keeps the demo prometheus owner when only the target namespace has it", async () => {

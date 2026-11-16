@@ -41,7 +41,7 @@ export async function fetchPinnedSource(
     } catch (error) {
       lastError = error;
       if (!TRANSPORT_FAILURE.test(String(error?.message ?? error))) throw error;
-      await sleep(attempt * BACKOFF_STEP_MS);
+      if (attempt < ATTEMPTS) await sleep(attempt * BACKOFF_STEP_MS);
     }
   }
   throw new Error(`Could not fetch ${url}: ${lastError?.message ?? "unknown error"}`);

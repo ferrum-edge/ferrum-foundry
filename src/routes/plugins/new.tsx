@@ -16,7 +16,7 @@ import { PluginConfigForm } from "@/components/forms/PluginConfigForm";
 import { PluginMembershipRecovery } from "@/components/forms/PluginMembershipRecovery";
 import { MaskedSecretRefusal } from "@/components/shared/MaskedSecretRefusal";
 import type { PluginFormDefaults } from "@/components/forms/PluginConfigForm";
-import { getApiErrorMessage } from "@/api/client";
+import { committedWriteMessage, getApiErrorMessage, getCommittedWrite } from "@/api/client";
 import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
 import { useCapabilities } from "@/stores/capabilities";
 import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
@@ -71,6 +71,20 @@ function PluginCreateEditor({ session, allowProxyDefault }: {
         params: { pluginId: created.id },
       });
     } catch (err: unknown) {
+      // A committed-but-not-live answer is a completed create (#674): close
+      // the form as a 2xx does, so a second click cannot POST it again. The
+      // answer has no body, so the new resource is opened from the list.
+      const committed = getCommittedWrite(err);
+      if (committed) {
+        // The plan stopped at the create, so a group's members were not
+        // attached: say so rather than imply the policy applies to them.
+        const unattached = data.scope === "proxy_group" && (proxyGroupIds ?? []).length > 0
+          ? " Its proxy group members were not attached: open it from the list and select them."
+          : "";
+        toast("warning", committedWriteMessage("Plugin configuration created", committed) + unattached);
+        if (session.isCurrent()) navigate({ to: "/plugins" });
+        return;
+      }
       const message = await getApiErrorMessage(
         err,
         "Failed to create plugin configuration",
