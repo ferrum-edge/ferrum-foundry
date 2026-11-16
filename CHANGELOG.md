@@ -139,6 +139,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   accept `--no-fast`; the Sol launcher no longer sends
   `features.fast_mode=false` on a standard run. The launchers, their tests and
   the skill wording match Ferrum Edge's again (#687).
+- The BFF's upload and long-read admission pools share one permit lifecycle
+  (`server/admission.ts`) instead of two hand-written copies (#660): per-pool
+  and per-subject counts, release exactly once on whichever of `onResponse`,
+  `onRequestAbort` or the raw response close comes first, and release of a
+  permit taken on a socket that had already closed. Limits, check order,
+  refusal bodies and release triggers are unchanged; uploads still report the
+  global pool before the subject's share, and long reads the share first.
 
 ### Security
 
