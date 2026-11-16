@@ -175,6 +175,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runs with `--reverse-proxy`, so a deployment that added `--trusted-ip` or a
   skip-auth route would have been open to oauth2-proxy's header-spoofing
   bypasses.
+- The deployment starter's production nginx sends its own `$request_id` as
+  `X-Request-Id` to oauth2-proxy and to Foundry (the demo proxy does the same
+  for Foundry). oauth2-proxy logs that header as the request ID, so a client
+  could choose the ID on its own log lines. nginx also clears
+  `X-Auth-Request-Redirect` on the `/oauth2/auth` subrequest, which had
+  inherited the client's value; it stays set to the request URI on the
+  `/oauth2/` sign-in routes, the only ones that read it. The production smoke
+  test fails if either reaches an upstream, and contract tests pin the
+  directives. The starter README now states that the actor Foundry receives
+  is the ID token's `sub` claim, and what that means when choosing an
+  identity provider.
 - The deployment starter runs oauth2-proxy v7.15.6
   (`quay.io/oauth2-proxy/oauth2-proxy:v7.15.6@sha256:c3415e8660af553f5e18f5d90db050614c02493c0ac6260ac59442f6d9b12048`)
   instead of v7.7.1, and nginx 1.31.8 mainline
