@@ -26,10 +26,19 @@ import {
   KAFKA_SAFE_PRODUCER_PROPERTIES,
   PLUGIN_SENSITIVITY,
 } from "../src/api/pluginSensitivity.ts";
+import { readSupportedPairing } from "./supported-pairing.mjs";
 
 const CONFIG_CURSOR_PATTERN = /^\d+:\d+$/;
 const STRONG_ETAG_PATTERN = /^"[\x21\x23-\x7e]+"$/;
 const IF_MATCH_UNSUPPORTED_PATTERN = /If-Match is only supported on/;
+/**
+ * Edge sources (`edge.source_commit`) that predate ferrum-edge#7054, which
+ * reserves the exact `[REDACTED]` in every string of a non-admin plugin-config
+ * write. Only v0.9.20, the current pin.
+ */
+const SOURCES_BEFORE_PLACEHOLDER_RESERVATION = new Set([
+  "e4a606a00352674daaef08636e3e359e6c48ba18",
+]);
 
 const config = readSeedConfig();
 confirmDestructiveTarget(config);
@@ -272,7 +281,22 @@ await request("/plugins/config?proxy_id=has%20space", { expected: [400] });
 // a placeholder in a sensitive field (`authorization`, a schema rule) and one
 // in an ordinary string (`service_name`). Edge must name exactly the sites the
 // replay predicts for an operator, and accept the same body from an admin.
+//
+// Edge main (ferrum-edge#7054, f7c1b322e, after v0.9.20) reserves the exact
+// placeholder in every string of a non-admin plugin-config write, as it does
+// for proxies and upstreams, so `service_name` is refused there too. The
+// replay models that newer rule. The pinned v0.9.20 refuses only
+// `authorization`, so against it the expected answer drops the reserved site.
+// `FERRUM_EDGE_IMAGE` is the image under test (CI exports it; unset means the
+// pinned one), and the legacy answer applies only to the pinned image of a
+// source that predates the reservation, so moving the pin retires it.
 {
+  const pairing = readSupportedPairing();
+  const image = process.env.FERRUM_EDGE_IMAGE?.trim() || pairing.edge.image;
+  const reservesPlaceholder = !(
+    image === pairing.edge.image &&
+    SOURCES_BEFORE_PLACEHOLDER_RESERVATION.has(pairing.edge.source_commit)
+  );
   const replayId = `contract-smoke-replay-${Date.now().toString(36)}`;
   const replayPath = `/plugins/config/${replayId}`;
   const created = {
@@ -294,12 +318,15 @@ await request("/plugins/config?proxy_id=has%20space", { expected: [400] });
       authorization: REDACTED_PLACEHOLDER,
     },
   };
-  const predicted = refusedPlaceholderSites(
+  const replay = (body) => refusedPlaceholderSites(
     PLUGIN_SENSITIVITY.get("otel_tracing"),
     KAFKA_SAFE_PRODUCER_PROPERTIES,
-    echoed.config,
+    body.config,
   );
-  assert.deepEqual(predicted, ["/config/authorization"]);
+  const predicted = replay(echoed);
+  assert.deepEqual(predicted, ["/config/authorization", "/config/service_name"]);
+  const ordinary = { ...echoed, config: { ...echoed.config, authorization: "Bearer rotated" } };
+  assert.deepEqual(replay(ordinary), ["/config/service_name"]);
 
   await request(`${replayPath}?apply=sync&expected_proxy_ids=`, { method: "DELETE", expected: [200, 204, 404] });
   await request("/plugins/config?apply=sync", { method: "POST", body: created });
@@ -312,16 +339,25 @@ await request("/plugins/config?proxy_id=has%20space", { expected: [400] });
     assert.equal(refused.status, 400, JSON.stringify(refused.body));
     assert.deepEqual(
       parseMaskedPlaceholderMessage(refused.body?.error ?? "")?.pointers,
-      predicted,
+      reservesPlaceholder ? predicted : ["/config/authorization"],
     );
 
-    // The ordinary string alone is not a masked site, so an operator may send it.
+    // The ordinary string alone is not a masked site. Edge main still refuses
+    // the reserved placeholder there; v0.9.20 lets an operator send it.
     const unmasked = await exchange(`${replayPath}?apply=sync&expected_proxy_ids=`, {
       method: "PUT",
-      body: { ...echoed, config: { ...echoed.config, authorization: "Bearer rotated" } },
+      body: ordinary,
       role: "operator",
     });
-    assert.equal(unmasked.status, 200, JSON.stringify(unmasked.body));
+    if (reservesPlaceholder) {
+      assert.equal(unmasked.status, 400, JSON.stringify(unmasked.body));
+      assert.deepEqual(
+        parseMaskedPlaceholderMessage(unmasked.body?.error ?? "")?.pointers,
+        replay(ordinary),
+      );
+    } else {
+      assert.equal(unmasked.status, 200, JSON.stringify(unmasked.body));
+    }
 
     // An admin's reads are raw, so an admin's write is never checked.
     await request(`${replayPath}?apply=sync&expected_proxy_ids=`, { method: "PUT", body: echoed });

@@ -448,6 +448,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Foundry handles the plugin-config projection Ferrum Edge `main` adds after
+  v0.9.20 (ferrum-edge#7054). The sensitivity drift parser accepts
+  `FieldSensitivity::CertificateSource`, `PrivateKeySource` and `EndpointPath`
+  instead of refusing them, so the Edge main drift check reports the table's
+  real differences. Failed-write redaction and the placeholder replay project
+  them as Edge does: a certificate source stays readable unless it carries a
+  private-key block, a private-key source only as a reference, and a
+  destination path only as `""` or `/`. They also model Edge main's
+  TLS-material layer: a private-key block in any config string is kept out of
+  a refusal, and a non-admin plugin save that still carries the exact
+  `[REDACTED]` in any string is blocked, as Edge main refuses it, while a
+  URL-shaped placeholder outside a masked field stays a warning. Against the
+  pinned v0.9.20 this also blocks a literal `[REDACTED]` in an ordinary
+  field. The pinned table is unchanged. The gateway contract smoke expects
+  Edge main to refuse an echoed `service_name` placeholder and v0.9.20 to
+  accept it, choosing by `FERRUM_EDGE_IMAGE`.
 - A plugin save answered with the committed-but-not-live `503` is a save
   (#674): the membership plan re-reads the plugin, finishes its association
   steps, and the editor reseeds plugin, membership and baseline with a
