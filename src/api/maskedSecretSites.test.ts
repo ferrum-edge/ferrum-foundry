@@ -65,11 +65,23 @@ describe("plugin config sites Edge refuses for a non-admin role", () => {
   });
 
   it("follows Kafka's safe list and a scalar where a container was expected", () => {
+    // A URL-shaped placeholder is a site only where a layer masks the field:
+    // `client.id` is on the safe list, `ssl.key.location` is not.
+    const masked = "https://kafka.example.com/[REDACTED_PATH]";
+    expect(
+      pluginConfigRefusedSites("kafka_logging", {
+        producer_config: { "client.id": masked, "ssl.key.location": masked },
+      }),
+    ).toEqual(["/config/producer_config/ssl.key.location"]);
+    // The exact placeholder is refused even on the safe list (ferrum-edge#7054).
     expect(
       pluginConfigRefusedSites("kafka_logging", {
         producer_config: { acks: "[REDACTED]", "ssl.key.location": "[REDACTED]" },
       }),
-    ).toEqual(["/config/producer_config/ssl.key.location"]);
+    ).toEqual([
+      "/config/producer_config/ssl.key.location",
+      "/config/producer_config/acks",
+    ]);
     expect(pluginConfigRefusedSites("opa", { headers: "[REDACTED]" })).toEqual([
       "/config/headers",
     ]);
