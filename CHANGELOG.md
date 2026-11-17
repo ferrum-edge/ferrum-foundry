@@ -174,6 +174,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   permit taken on a socket that had already closed. Limits, check order,
   refusal bodies and release triggers are unchanged; uploads still report the
   global pool before the subject's share, and long reads the share first.
+- The vendored contracts `PIN` (`contracts/ferrum-contracts/PIN`) uses the one
+  format ferrum-contracts `docs/consumer-pins.md` defines: `tag <tag>`, `commit
+  <sha>`, then `sha256sum`-style `<hash>  <path>` rows sorted by path byte for
+  byte. The tag, commit and digests are unchanged. `scripts/contracts-pin.mjs`
+  parses it strictly, so an unknown, repeated, misplaced, malformed, unsorted
+  or duplicate line now fails the contract test instead of being skipped. The
+  test also refuses a vendored entry that is neither a regular file nor a
+  directory, and `.gitattributes` marks the vendored directory `-text` (#705).
+- Plugin templates follow Ferrum Edge `main`'s closed plugin configs, which
+  refuse the removed compatibility spellings (ferrum-edge#7114) (#702):
+  `ip_restriction` has no `mode`, `jwks_auth` lists `audiences` instead of the
+  singular `audience` and points `jwks_uri` at the loopback IP literal
+  `127.0.0.1` (Edge refuses plain HTTP to the name `localhost`), and
+  `response_caching` drops `cache_key_include_query` and
+  `cache_key_include_consumer`. The pinned v0.9.20 admits the same shapes.
+- The plugin-defaults contract also submits the `load_testing` and `mtls_auth`
+  templates with only their documented operator field filled in (a generated
+  32-character `key`; a public self-signed "Ferrum Dev CA" certificate in
+  `scripts/fixtures/ferrum-dev-ca.pem`) and requires `201`, so a second blocker
+  behind the expected first refusal can no longer hide (#707).
+- `mcp_gateway` support drops the spellings Ferrum Edge `main` removed (#706).
+  The plugin editor removes `discovery.hide_denied_items` (refused by Edge
+  `main` in every mode, by v0.9.20 in transparent mode) from every mode switch
+  and every submitted configuration, and never stashes it;
+  `policy.hide_denied_tools` is the only switch (dropping the key can only hide
+  more tools on v0.9.20). The mock admin gateway refuses
+  `discovery.hide_denied_items`, the `allow_immediately` / `expose` aliases and
+  `startup`, and takes `hide_denied_tools` from `policy.hide_denied_tools`
+  alone. The MCP Tools panel still reads a stored `allow_immediately` /
+  `expose` as `allow`, as the gateways that accept them do.
 
 ### Security
 
@@ -394,6 +424,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   single `minimatch` copy to 11.0.9, still above the GHSA-g3hv-75wg-m249 fix.
   The `@typescript-eslint/typescript-estree` override stays: 8.72.2 still
   requires `minimatch` `^10.2.2`.
+- The BFF refuses to start when `FERRUM_JWT_SECRET`,
+  `FERRUM_TRUSTED_PROXY_SECRET` or `FERRUM_BFF_AUTH_TOKEN` still holds the
+  `replace-me-...` placeholder from `deploy/starter/.env.example`, in every
+  mode. Under `NODE_ENV=production` it also refuses the development example
+  values printed in the contributor instructions. Before this fix, these
+  secrets were checked only by length, so an unedited `.env` started a
+  production BFF that signed admin JWTs with a key published in the repository.
+  If that value was also copied into Edge's `FERRUM_ADMIN_JWT_SECRET`, anyone
+  who could reach the admin API could mint admin tokens. Only the optional
+  starter preflight refused it. The preflight and the BFF now share one rule
+  (`shared/published-secrets.js`), and there is no override
+  ([GHSA-hpqf-v945-35qp](https://github.com/ferrum-edge/ferrum-foundry/security/advisories/GHSA-hpqf-v945-35qp)).
+- Revoking a single consumer credential sends the consumer `ETag` of the list
+  the operator selected from as `If-Match`. If the credentials changed since
+  (another administrator, tab or automation), Ferrum Edge refuses with `412`,
+  nothing is deleted, and the card asks for a fresh selection; it is never
+  resent automatically. A read without a strong `ETag` refuses the revoke
+  before sending. On a Ferrum Edge release without ferrum-edge#7393 (the pinned
+  v0.9.20 included), Foundry recognises Edge's `If-Match` refusal and falls
+  back to re-reading the consumer, deleting only when it still carries the
+  selected tag (#703).
 
 ### Fixed
 
@@ -680,6 +731,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   guides say the image healthcheck probes `127.0.0.1`, so a
   `FERRUM_BIND_ADDRESS` other than `0.0.0.0` or `127.0.0.1` needs it
   overridden (#684).
+- An Admin API write that Ferrum Edge accepts into a namespace this gateway's
+  data plane does not route (`X-Ferrum-Namespace-Unserved: true`,
+  ferrum-edge#5447) is no longer reported as a plain success. Before this fix,
+  the BFF dropped the header and the live-apply banner said "Configuration
+  request succeeded" while the data plane answered `404`. The BFF now forwards
+  the header (only the value `true`), and the banner shows a warning that the
+  change is stored but will not be routed by this gateway. The warning names
+  only the namespace the write carried and stays until a later committed write
+  replaces it (#708).
+- The `load_testing` and `mtls_auth` templates no longer ship
+  `gateway_addresses: []` and `allowed_ca_fingerprints_sha256: []`, which
+  Ferrum Edge refuses even after the documented operator field is filled in
+  (#707).
+- Proxy and upstream editors recognise the inline backend TLS private keys that
+  Ferrum Edge `main` withholds from non-admin reads as `[REDACTED]`
+  (ferrum-edge#7060) (#704). A backend TLS certificate, key or CA field that
+  holds the placeholder shows "Hidden from your role" for a non-admin session,
+  and Save stays blocked until it is re-entered or cleared. A placeholder the
+  editor does not show refuses the save before it is sent, as does a masked
+  upstream subset TLS key that the editor's subset rebuild would otherwise
+  delete unseen, the proxy page now lists masked-placeholder refusals, and a
+  membership change never sends a proxy write that carries one.
+- The mock admin gateway listed no denied MCP tools even with
+  `policy.hide_denied_tools: false`, because it also ORed in
+  `discovery.hide_denied_items`, which defaults to true (#706).
 
 ### Changed
 
@@ -715,6 +791,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   model, and every probe it forwards must be admitted by the gateway as the
   model predicts, so the contract holds on Edge v0.9.15 and v0.9.16. The
   gateway contract smoke signs its TLS validation probes without a claim.
+
+### Removed
+
+- ProxyForm no longer offers "Max Requests per Connection", and no proxy save
+  (editor or membership change) sends `pool_max_requests_per_connection`, even
+  when a v0.9.20 read still returns it (#701). Ferrum Edge `main` removed the
+  field (ferrum-edge#7218) and refuses any proxy body that carries it, even as
+  `null`, so every proxy save from the detail page would have failed. The field
+  never had a runtime effect; a v0.9.20 proxy that stored it loses it on its
+  next save from Foundry.
 
 ## [0.5.5] - 2026-10-08
 
