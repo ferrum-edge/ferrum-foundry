@@ -9,6 +9,7 @@ import { PLUGIN_SENSITIVITY_SOURCE } from "../src/api/pluginSensitivity.ts";
 const KEY_AUTH_CHANGED_PATTERN = /component `KeyAuthConfig`: changed/;
 const RATE_LIMITING_MISSING_PATTERN = /component `RateLimitingConfig`: missing/;
 const CORS_MISSING_PATTERN = /entry `cors`: missing/;
+const CERTIFICATE_SOURCE_PATTERN = /unreadable \(FieldSensitivity::CertificateSource is not one Foundry implements/;
 const FORTY_HEX_PATTERN = /expected a 40-hex Edge commit/;
 const SCHEDULE_PATTERN = /\n {2}schedule:\n {4}- cron: "[0-9]+ [0-9]+ \* \* [0-6]"\n {2}workflow_dispatch:\n/;
 const ISSUES_WRITE_PATTERN = /issues: write/g;
@@ -110,6 +111,20 @@ test("a sensitivity table difference is drift", () => {
     [["cors", "missing"]],
   );
   assert.match(driftMarkdown(result), CORS_MISSING_PATTERN);
+});
+
+test("a projection table shape Foundry does not implement is drift, not a failed run", () => {
+  const projection = PROJECTION.replace(
+    "FieldSensitivity::Secret",
+    "FieldSensitivity::CertificateSource",
+  );
+  const result = edgeMainDrift(SPEC, projection, options);
+  assert.equal(result.drifted, true);
+  assert.deepEqual(
+    result.sensitivity.map(({ plugin, status }) => [plugin, status]),
+    [["PLUGIN_SENSITIVITY_SCHEMAS", "unreadable"]],
+  );
+  assert.match(driftMarkdown(result), CERTIFICATE_SOURCE_PATTERN);
 });
 
 test("fetches both Edge sources at the given commit and refuses anything else", async () => {

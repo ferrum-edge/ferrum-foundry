@@ -20,7 +20,9 @@
  *   node scripts/edge-main-drift.mjs <40-hex Edge commit>
  *
  * Exit status: 0 when nothing drifted, 1 when something did, 2 when the check
- * could not run (an unreadable source, a bad argument). With
+ * could not run (a source that could not be fetched, a bad argument). A
+ * fetched projection table the parser cannot read is drift: its parser fails
+ * closed on any shape Foundry has not transcribed. With
  * FERRUM_EDGE_MAIN_DETAILS_PATH set, a Markdown list of the findings is
  * written there for the workflow's tracking issue.
  */
@@ -53,13 +55,27 @@ export function edgeMainDrift(
   const schemas = compareProvenance(spec, provenance).filter(
     (finding) => finding.status !== "unchanged",
   );
-  const sensitivity = compareSensitivity(
-    {
-      schemas: parseSensitivitySchemas(projection),
-      kafka: parseKafkaSafeProperties(projection),
-    },
-    foundry,
-  );
+  let sensitivity;
+  try {
+    sensitivity = compareSensitivity(
+      {
+        schemas: parseSensitivitySchemas(projection),
+        kafka: parseKafkaSafeProperties(projection),
+      },
+      foundry,
+    );
+  } catch (error) {
+    // The parser refuses any shape Foundry has not transcribed (a new
+    // FieldSensitivity, rule constructor or literal form). Against a fetched
+    // Edge source that is a change Foundry must adopt, so it is a finding.
+    sensitivity = [
+      {
+        plugin: "PLUGIN_SENSITIVITY_SCHEMAS",
+        status: "unreadable",
+        reason: String(error?.message ?? error),
+      },
+    ];
+  }
   return { schemas, sensitivity, drifted: schemas.length > 0 || sensitivity.length > 0 };
 }
 
@@ -78,6 +94,7 @@ export function driftMarkdown({ schemas, sensitivity }) {
   for (const finding of sensitivity) {
     lines.push(
       `- \`${PLUGIN_SENSITIVITY_SOURCE.path}\` entry \`${finding.plugin}\`: ${finding.status}` +
+        (finding.reason ? ` (${finding.reason})` : "") +
         " (bring `src/api/pluginSensitivity.ts` in line)",
     );
   }
