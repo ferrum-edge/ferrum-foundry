@@ -50,9 +50,16 @@ What Foundry relies on:
   fallback (`X-Data-Source: cached`). A tag always comes from a fresh read.
 - **Comparison is strong.** A weak `W/"…"` tag never matches.
 - **`If-Match` on any other mutating route is `400`**, not ignored: `POST`
-  creates, `/batch`, `/restore`, trust bundles, API specs, and credential
-  sub-routes. Foundry sends it only on the resource `PUT`/`DELETE` paths the
-  guard covers.
+  creates, `/batch`, `/restore`, trust bundles, and API specs. Foundry sends
+  it only on the resource `PUT`/`DELETE` paths the guard covers, and on the
+  indexed credential delete (see
+  [Indexed credential deletes](#indexed-credential-deletes)).
+- **The consumer credential endpoints take the consumer's tag**
+  (ferrum-edge#7393, Edge releases after v0.9.20): `PUT`/`POST`/`DELETE`
+  `/consumers/{id}/credentials/{type}` and the indexed `DELETE
+  .../{type}/{index}` compare `If-Match` with the `ETag` of
+  `GET /consumers/{id}`, under the same lease. Earlier Edge releases answer
+  `400` to `If-Match` there.
 - **After a `412`, reapply the intended edit to the current resource.**
   Resending the same body with the new tag would revert the change that caused
   the refusal.
@@ -407,6 +414,42 @@ create page opens the collection rather than the new resource. A consumer
 create still shows its submitted secrets once first. A plugin create's
 membership plan stops at the create, so a proxy group's members are not
 attached; the warning says so.
+
+### Indexed credential deletes
+
+Credentials read back redacted, so the credential card can only address one by
+its position in the list it rendered (`DELETE
+/consumers/{id}/credentials/{type}/{index}`). A position names a credential
+only in that list: if another administrator, another tab, or automation
+appends or removes a credential first, the same index names a different one,
+and an unconditional delete would revoke it and report success — during
+incident response, leaving the compromised key live (ferrum-foundry#703).
+
+The delete is therefore conditional on the read the operator selected from:
+
+- The consumer query keeps its read's `ETag` on the object the page renders
+  (`shareTaggedRead` as the query's `structuralSharing`, so `validatorOf`
+  survives TanStack Query's structural sharing). The detail page passes
+  `validatorOf(consumer)` to each credential card as `consumerEtag`.
+- Selecting a credential captures that tag together with the index.
+  `consumers.deleteCredentialByIndex` sends it as `If-Match`. This is the one
+  place a tag deliberately comes from the rendered read rather than a fresh
+  one: the index is only meaningful in that read, and redacted entries give a
+  fresh read nothing to compare.
+- Edge answers `412` when anything about the consumer changed since that read.
+  That becomes `CredentialListChangedError`: nothing was deleted, the consumer
+  is re-read, the confirmation closes, and the operator selects again. Nothing
+  is resent automatically.
+- A read without a usable strong tag (an older gateway, a mode without a
+  database, the cached fallback) refuses the delete before sending, with
+  `CredentialSelectionUnverifiableError`.
+- The existing checks stay: a refetch between selection and confirmation still
+  asks for a fresh selection without sending anything.
+
+This needs an Edge release that includes ferrum-edge#7393. Against an earlier
+Edge (the v0.9.20 pin included), the gateway answers the conditional delete
+with `400` and nothing is deleted, so indexed credential revocation from the
+UI fails closed until the pin moves.
 
 ### Committed credential writes
 
