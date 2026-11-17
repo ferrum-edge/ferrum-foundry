@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Upstream } from "./types";
-import { mergeFormUpdatePayload, toUpdatePayload } from "./upstreams";
+import { mergeFormUpdatePayload, toUpdatePayload, writableSubset } from "./upstreams";
 
 function fullUpstream(): Upstream {
   return {
@@ -71,6 +71,48 @@ describe("upstream full-replacement builders", () => {
     expect(payload).not.toHaveProperty("port_overrides");
     expect(payload).not.toHaveProperty("source_locality");
     expect(payload.backend_tls_sni).toBe("payments.internal");
+  });
+
+  it("strips the server-owned subset traffic_policy fields and keeps every writable one", () => {
+    const read = {
+      ...fullUpstream(),
+      subsets: [
+        {
+          name: "v2",
+          labels: { version: "v2" },
+          traffic_policy: {
+            load_balancer_algorithm: "least_latency",
+            hash_on: "header:x-user",
+            future_policy_field: "kept",
+            tls: { mode: "simple", insecure_skip_verify: false, private_key: "[REDACTED]" },
+            connect_timeout_ms: 1500,
+            max_retries: 1,
+            passive_health_check: { unhealthy_threshold: 5 },
+          },
+        },
+        { name: "v3", labels: { version: "v3" }, traffic_policy: { http2_max_requests: 10 } },
+        { name: "v4", labels: { version: "v4" }, traffic_policy: null },
+        { name: "v5", labels: { version: "v5" } },
+      ],
+    } as unknown as Upstream;
+    expect(toUpdatePayload(read).subsets).toEqual([
+      {
+        name: "v2",
+        labels: { version: "v2" },
+        traffic_policy: {
+          load_balancer_algorithm: "least_latency",
+          hash_on: "header:x-user",
+          future_policy_field: "kept",
+        },
+      },
+      { name: "v3", labels: { version: "v3" } },
+      { name: "v4", labels: { version: "v4" }, traffic_policy: null },
+      { name: "v5", labels: { version: "v5" } },
+    ]);
+    // The read itself is not changed.
+    expect(read.subsets?.[0].traffic_policy?.tls).toBeDefined();
+    const kept = { name: "v5", labels: { version: "v5" } };
+    expect(writableSubset(kept)).toBe(kept);
   });
 
   it("preserves advanced nested policy during a reduced form edit", () => {

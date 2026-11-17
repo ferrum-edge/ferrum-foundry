@@ -749,23 +749,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (ferrum-edge#7060) (#704). A backend TLS certificate, key or CA field that
   holds the placeholder shows "Hidden from your role" for a non-admin session,
   and Save stays blocked until it is re-entered or cleared. A placeholder the
-  editor does not show refuses the save before it is sent, as does a masked
-  upstream subset TLS key that the editor's subset rebuild would otherwise
-  delete unseen, the proxy page now lists masked-placeholder refusals, and a
-  membership change never sends a proxy write that carries one.
+  editor does not show refuses the save before it is sent, the proxy page
+  now lists masked-placeholder refusals, and a membership change never sends
+  a proxy write that carries one.
 - The mock admin gateway listed no denied MCP tools even with
   `policy.hide_denied_tools: false`, because it also ORed in
   `discovery.hide_denied_items`, which defaults to true (#706).
-- An upstream settings save no longer deletes subset fields the editor does
-  not show. The form rebuilt each subset from its name, labels, algorithm and
-  hash key, so an admin's save silently dropped a stored
-  `subsets[].traffic_policy.tls` policy (key included) and every other
-  `traffic_policy` field. Each subset row now keeps the subset it was read
-  from and the save merges the edited fields onto it. Ferrum Edge refuses the
-  mesh-projected `traffic_policy` fields (`tls`, `connect_timeout_ms`, the
-  HTTP connection-pool caps, `passive_health_check`) on an operator write,
-  so a save of an upstream that carries one is now refused by Edge, naming
-  the field, instead of erasing it unseen.
+- Upstream saves keep every operator-writable subset field and leave out the
+  mesh-projected ones. The settings form rebuilt each subset from its name,
+  labels, algorithm and hash key, dropping any other subset field it read;
+  each row now keeps the subset it was read from and the save merges the
+  edited fields onto its writable part. The `subsets[].traffic_policy` fields
+  Ferrum Edge projects from a mesh DestinationRule and refuses on every
+  operator write (`tls`, `connect_timeout_ms`, `h2_upgrade_policy`,
+  `max_retries`, `http1_max_pending_requests`, `http_idle_timeout_ms`,
+  `http2_max_requests`, `h2_max_concurrent_streams`,
+  `passive_health_check`; `SUBSET_TRAFFIC_POLICY_SERVER_OWNED`) are omitted
+  from settings and targets saves alike, as `port_overrides` already was, so
+  a read that carries them saves instead of drawing a `400`. A masked key in
+  one of those fields therefore no longer blocks a non-admin save. The mock
+  admin gateway refuses those fields, and the other mesh-projected upstream
+  fields, like Edge.
 
 ### Changed
 

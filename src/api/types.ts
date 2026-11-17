@@ -379,9 +379,9 @@ export interface UpstreamTarget {
 export interface SubsetTrafficPolicy {
   load_balancer_algorithm?: LoadBalancerAlgorithm | null;
   hash_on?: string | null;
-  // Projected from a mesh DestinationRule; Edge refuses them on an operator
-  // write, but they can appear in a read. A settings save writes back each one
-  // it read, unchanged, rather than deleting it unseen.
+  // Projected from a mesh DestinationRule: a read can carry them, but Edge
+  // refuses them on an operator write, so saves omit them
+  // (`SUBSET_TRAFFIC_POLICY_SERVER_OWNED` in `src/api/upstreams.ts`).
   tls?: Record<string, unknown> | null;
   connect_timeout_ms?: number | null;
   h2_upgrade_policy?: string | null;

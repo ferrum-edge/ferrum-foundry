@@ -158,18 +158,18 @@ handles them as follows:
   `[REDACTED]` for a non-admin session the same way, and block Save until it
   is re-entered or cleared. A placeholder the editor does not show refuses
   the save before it is sent, naming the field; have an admin make that
-  change. That includes a masked `subsets[].traffic_policy.tls` key: the
-  form writes every subset field it does not edit back as read, so the key
-  is in the save, and a subset the save removes is checked against the read
-  the editor was seeded with. A port override's TLS key is mesh-projected
-  and never sent, so a save leaves it alone. A membership change
-  never sends a proxy write that carries one either: the step is refused
+  change. A masked key in a mesh-projected field (`port_overrides.<port>.tls`,
+  `subsets[].traffic_policy.tls`) never blocks a save: Ferrum Edge refuses
+  those fields on every operator write, so upstream saves leave them out
+  (`SUBSET_TRAFFIC_POLICY_SERVER_OWNED` in `src/api/upstreams.ts`) and keep
+  every writable subset field as read. A membership change never sends a
+  proxy write that carries a masked placeholder: the step is refused
   locally and the plan rolls back as for any failed step.
 - **Refused saves.** If Edge refuses a save anyway, the page lists the JSON
   pointers from Edge's error as written, never a value.
 - **Upstream targets.** A targets save resends every upstream setting from a
-  fresh read. When that read masks the Consul token or a TLS key (a non-admin
-  session),
+  fresh read. When that read masks the Consul token or a backend TLS key the
+  save sends (a non-admin session),
   Foundry refuses the save before sending it, and a token re-entered in an
   earlier save is masked again on that read. Have an admin make the change, or
   change the targets on the Configuration tab in the same save that re-enters

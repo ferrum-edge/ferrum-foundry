@@ -34,6 +34,7 @@ import {
   type WithNumberDrafts,
 } from "@/lib/formDrafts";
 import { ReadOnlySurface } from "@/components/shared/CapabilityGate";
+import { writableSubset } from "@/api/upstreams";
 import { isMaskedForRole, isRedactionPlaceholder, MASKED_FIELD_NOTICE } from "@/api/maskedSecrets";
 import type { CapabilityVerdict, GatewayRole } from "@/lib/capabilities";
 import type {
@@ -301,13 +302,14 @@ interface SubsetRow {
 
 /**
  * A subset as the settings save writes it. The save replaces `subsets`
- * wholesale, so the row's fields are merged onto the subset as read: the name,
- * selector, algorithm and hash key come from the form, and every other subset
- * and `traffic_policy` field (a mesh-projected `tls` policy, a connect
- * timeout) is written back exactly as read instead of being deleted unseen.
+ * wholesale, so the row's fields are merged onto the operator-writable part of
+ * the subset as read (`writableSubset`): the name, selector, algorithm and
+ * hash key come from the form, every other writable field is written back as
+ * read, and the mesh-projected `traffic_policy` fields Edge refuses on a write
+ * (`SUBSET_TRAFFIC_POLICY_SERVER_OWNED`) are left out.
  */
 function subsetForSubmit(row: SubsetRow): SubsetDefinition {
-  const source: Partial<SubsetDefinition> = row.source ?? {};
+  const source: Partial<SubsetDefinition> = row.source ? writableSubset(row.source) : {};
   const { traffic_policy: readPolicy, ...readSubset } = source;
   const readTrafficPolicy: SubsetTrafficPolicy = readPolicy ?? {};
   const {

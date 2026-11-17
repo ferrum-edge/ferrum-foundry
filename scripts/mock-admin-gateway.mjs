@@ -100,7 +100,17 @@ const upstreams = [
       { host: '10.0.2.12', port: 8443, weight: 1, tags: { version: 'v2', tier: 'canary' }, locality: 'us-east/az2', path: null },
     ],
     algorithm: 'weighted_round_robin', hash_on: null,
-    subsets: [{ name: 'canary', labels: { tier: 'canary' }, traffic_policy: null }],
+    // `traffic_policy` as a read shows mesh-projected subset policy: Foundry
+    // must leave it out of a save, which this mock refuses like Edge.
+    subsets: [{
+      name: 'canary', labels: { tier: 'canary' },
+      traffic_policy: {
+        load_balancer_algorithm: 'least_connections',
+        tls: { mode: 'simple', insecure_skip_verify: false, sni: 'orders-canary.internal' },
+        connect_timeout_ms: 2000,
+        http2_max_requests: 100,
+      },
+    }],
     health_checks: {
       active: { http_path: '/health', interval_seconds: 10, timeout_ms: 5000, healthy_threshold: 3, unhealthy_threshold: 3, healthy_status_codes: [200, 302], probe_type: 'http', use_tls: true },
       passive: { unhealthy_status_codes: [500, 502, 503, 504], unhealthy_threshold: 3, unhealthy_window_seconds: 30, healthy_after_seconds: 30, max_ejection_percent: 50 },
@@ -422,12 +432,50 @@ export function validateProxyWrite(body) {
 }
 
 /**
+ * The `subsets[].traffic_policy` fields Edge projects from a mesh
+ * DestinationRule and refuses on an operator write (v0.9.20 and `main`,
+ * `Upstream::validate_operator_provided_fields`; `readOnly` in the
+ * `SubsetTrafficPolicy` schema). Foundry's copy is
+ * `SUBSET_TRAFFIC_POLICY_SERVER_OWNED` in `src/api/upstreams.ts`.
+ */
+export const MESH_PROJECTED_SUBSET_POLICY_FIELDS = Object.freeze([
+  'tls', 'connect_timeout_ms', 'h2_upgrade_policy', 'max_retries',
+  'http1_max_pending_requests', 'http_idle_timeout_ms', 'http2_max_requests',
+  'h2_max_concurrent_streams', 'passive_health_check',
+]);
+
+/**
+ * The first mesh-projected field an upstream write sets, as Edge names it, or
+ * `null`. Like Edge, a field that is absent, `null` or empty is not set.
+ */
+function meshProjectedUpstreamField(body) {
+  if (!body || typeof body !== 'object') return null;
+  const nonEmpty = (value) => value != null && typeof value === 'object' && Object.keys(value).length > 0;
+  if (nonEmpty(body.port_overrides)) return 'port_overrides';
+  if (body.source_locality != null) return 'source_locality';
+  if (nonEmpty(body.source_labels)) return 'source_labels';
+  if (body.locality_lb_strict === true) return 'locality_lb_strict';
+  if (body.locality_lb_setting != null) return 'locality_lb_setting';
+  for (const [index, subset] of (Array.isArray(body.subsets) ? body.subsets : []).entries()) {
+    const policy = subset?.traffic_policy;
+    if (!policy || typeof policy !== 'object') continue;
+    const field = MESH_PROJECTED_SUBSET_POLICY_FIELDS.find((name) => policy[name] != null);
+    if (field) return `subsets[${index}].traffic_policy.${field}`;
+  }
+  return null;
+}
+
+/**
  * Edge v0.9.7 refuses an active health check whose `http_path` does not start
  * with `/` (a path such as `@169.254.169.254/` was spliced after `host:port`
  * and probed another host) and a `udp_probe_payload` that is not even-length
  * hex (ferrum-edge#5683, #5688).
  */
 export function validateUpstreamWrite(body) {
+  const projected = meshProjectedUpstreamField(body);
+  if (projected) {
+    return { error: `${projected} is projected from a mesh DestinationRule and cannot be set directly via the admin API` };
+  }
   const active = body?.health_checks?.active;
   if (!active || typeof active !== 'object') return null;
   if (active.http_path !== undefined

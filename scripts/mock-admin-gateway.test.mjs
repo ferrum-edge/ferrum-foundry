@@ -12,6 +12,7 @@ import {
   detachDeletedPluginConfig,
   evaluateIfMatch,
   ifMatchRouteRefusal,
+  MESH_PROJECTED_SUBSET_POLICY_FIELDS,
   credentialWrite,
   findConsumerInNamespace,
   normalizeNamespaceDescription,
@@ -34,6 +35,8 @@ const UNKNOWN_FIELD_NAME_PATTERN = /unknown field `name`/;
 const QUOTED_HEX_32_ETAG_PATTERN = /^"[0-9a-f]{32}"$/;
 const HTTP_PATH_PATTERN = /http_path/;
 const UDP_PROBE_PAYLOAD_PATTERN = /udp_probe_payload/;
+const SUBSET_TLS_PROJECTED_PATTERN = /^subsets\[1\]\.traffic_policy\.tls is projected from a mesh DestinationRule/;
+const PORT_OVERRIDES_PROJECTED_PATTERN = /^port_overrides is projected/;
 const MOCK_LISTEN_URL_PATTERN = /listening on (http:\/\/[^\s]+)/;
 const LOOPBACK_LISTEN_LOG_PATTERN =
   /^Mock Ferrum Edge admin API listening on http:\/\/127\.0\.0\.1:\d+\n/;
@@ -666,6 +669,55 @@ test("upstream health checks follow the Edge v0.9.7 path and payload rules", () 
   const [status] = crud(list, url, "POST", undefined, upstream({ http_path: "health" }), {}, "ferrum", validateUpstreamWrite);
   assert.equal(status, 400);
   assert.equal(list.length, 0);
+});
+
+test("upstream writes refuse mesh-projected fields like Edge and accept the read without them", () => {
+  const read = {
+    id: "orders", namespace: "ferrum", name: "Orders", algorithm: "round_robin", targets: [],
+    subsets: [
+      { name: "v1", labels: { version: "v1" }, traffic_policy: null },
+      {
+        name: "v2", labels: { version: "v2" },
+        traffic_policy: {
+          load_balancer_algorithm: "least_connections",
+          tls: { mode: "simple", insecure_skip_verify: false },
+          connect_timeout_ms: 1500,
+          passive_health_check: { unhealthy_threshold: 5 },
+        },
+      },
+    ],
+  };
+  // Echoing the read is refused, naming the first projected field.
+  assert.match(validateUpstreamWrite(read).error, SUBSET_TLS_PROJECTED_PATTERN);
+  for (const field of MESH_PROJECTED_SUBSET_POLICY_FIELDS) {
+    const body = { ...read, subsets: [{ name: "v1", labels: {}, traffic_policy: { [field]: 1 } }] };
+    assert.equal(
+      validateUpstreamWrite(body).error,
+      `subsets[0].traffic_policy.${field} is projected from a mesh DestinationRule and cannot be set directly via the admin API`,
+    );
+  }
+  assert.match(validateUpstreamWrite({ ...read, subsets: undefined, port_overrides: { 8443: {} } }).error,
+    PORT_OVERRIDES_PROJECTED_PATTERN);
+
+  // The same read with only the operator-writable fields is accepted; a
+  // `null` or empty projection is not a value.
+  const writable = {
+    ...read,
+    subsets: [read.subsets[0], {
+      name: "v2", labels: { version: "v2" },
+      traffic_policy: { load_balancer_algorithm: "least_connections", tls: null },
+    }],
+    port_overrides: {},
+    source_labels: {},
+    locality_lb_strict: false,
+  };
+  assert.equal(validateUpstreamWrite(writable), null);
+  const list = [structuredClone(read)];
+  const [refused] = crud(list, url, "PUT", "orders", read, {}, "ferrum", validateUpstreamWrite);
+  assert.equal(refused, 400);
+  const [status, saved] = crud(list, url, "PUT", "orders", writable, {}, "ferrum", validateUpstreamWrite);
+  assert.equal(status, 200);
+  assert.equal(saved.subsets[1].traffic_policy.load_balancer_algorithm, "least_connections");
 });
 
 test("a plugin DELETE detaches its proxies, and a stale If-Match changes neither collection", () => {
