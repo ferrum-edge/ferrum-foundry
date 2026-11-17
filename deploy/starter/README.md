@@ -86,7 +86,10 @@ or `unmapped`). It is for a first run and for CI. Do not expose it.
 1. `cp .env.example .env` and `cp oauth2-proxy.env.example oauth2-proxy.env`,
    fill both in, and `chmod 600` both. Generate secrets with
    `openssl rand -base64 48`. `FERRUM_JWT_SECRET` must equal the gateway's
-   `FERRUM_ADMIN_JWT_SECRET`.
+   `FERRUM_ADMIN_JWT_SECRET`. The BFF refuses to start while
+   `FERRUM_JWT_SECRET` or `FERRUM_TRUSTED_PROXY_SECRET` still holds the
+   `replace-me-...` placeholder from `.env.example`, or (in production) one of
+   the development example values printed in the contributor instructions.
 
    The files are separate on purpose. `.env` holds the gateway signing key and
    the proof secret; `oauth2-proxy.env` holds the `OAUTH2_PROXY_*` settings,

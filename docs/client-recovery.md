@@ -105,6 +105,15 @@ eight pending reads and leaves the cursor visible with "Monitoring ended".
 Authentication or grant changes clear the banner and invalidate older in-flight
 responses and polls.
 
+A `2xx` mutation that carries `X-Ferrum-Namespace-Unserved: true` was stored
+in a namespace this gateway's data plane does not route (a single-namespace
+`database`, `file`, `dp` or `mesh` gateway serving a different
+`FERRUM_NAMESPACE`; ferrum-edge#5447). The BFF forwards that header only with
+the value `true`. The banner shows a warning, not a success: the change is in
+the Admin API but this gateway will never serve it. It names only the namespace
+the write carried, never the one the gateway serves, and is kept like any other
+known commit until a later committed write replaces it. Nothing is polled.
+
 ## Credential copy panel
 
 Consumer creation, credential append, and basic credential replacement keep the
