@@ -37,6 +37,22 @@ function etagOf(upstream: Upstream): string {
   return `"${(hash >>> 0).toString(16)}"`;
 }
 
+/**
+ * The first subset `traffic_policy` field Edge refuses on an operator write
+ * (`Upstream::validate_operator_provided_fields`): every one but the
+ * load-balancing pair is mesh-projected.
+ */
+function edgeRefusedSubsetField(payload: UpstreamCreate): string | null {
+  for (const [index, subset] of (payload.subsets ?? []).entries()) {
+    for (const [key, value] of Object.entries(subset.traffic_policy ?? {})) {
+      if (value != null && key !== "load_balancer_algorithm" && key !== "hash_on") {
+        return `subsets[${index}].traffic_policy.${key}`;
+      }
+    }
+  }
+  return null;
+}
+
 /** The upstream as a read returns it. */
 function readShape(upstream: Upstream): Upstream {
   if (!omitEmptyOnRead) return upstream;
@@ -82,6 +98,13 @@ beforeEach(() => {
       return new Response(null, { status: 204 });
     }
     const payload = await request.clone().json() as UpstreamCreate;
+    const projected = edgeRefusedSubsetField(payload);
+    if (projected) {
+      return Response.json(
+        { error: `${projected} is projected from a mesh DestinationRule and cannot be set directly via the admin API` },
+        { status: 400 },
+      );
+    }
     current = { ...initial, ...payload, id: "orders" };
     const accepted = current;
     afterCommit?.();
@@ -197,24 +220,36 @@ describe("upstream target route integration", () => {
     expect(writes[1].method).toBe("DELETE");
   });
 
-  it("refuses a settings save that would drop a masked subset TLS key, sending nothing (#704)", async () => {
-    // A non-admin read withholds the stored key (ferrum-edge#7060); the form
-    // rebuilds subsets without traffic_policy.tls, so the save would delete it.
+  it("saves settings without the mesh-projected subset fields a read carries, masked or not", async () => {
+    // A non-admin read withholds the projected TLS key (ferrum-edge#7060).
+    // Edge refuses every projected field on a write (the stub does too), so the
+    // save leaves them out and keeps the writable subset fields.
     current = {
       ...initial,
       subsets: [{
         name: "v2",
         labels: { version: "v2" },
-        traffic_policy: { tls: { private_key: "[REDACTED]" } },
+        traffic_policy: {
+          hash_on: "ip",
+          tls: { mode: "mutual", insecure_skip_verify: false, private_key: "[REDACTED]" },
+          connect_timeout_ms: 1500,
+          http2_max_requests: 100,
+          passive_health_check: { unhealthy_threshold: 5 },
+        },
       }],
     } as unknown as Upstream;
     await mount();
     await settle(() => expect(panel().textContent).toContain("Update Upstream"));
     await fill(inputByLabel(panel(), "Name"), "Renamed upstream");
     await click("Update Upstream", panel());
-    await settle(() => expect(ui.host.textContent).toContain("Foundry did not send this save"));
-    expect(ui.host.textContent).toContain("/subsets/0/traffic_policy/tls/private_key");
-    expect(writes).toHaveLength(0);
+    await settle(() => expect(ui.host.querySelector("h1")?.textContent).toBe("Renamed upstream"));
+    expect(writes).toHaveLength(1);
+    const sent = await writes[0].json() as UpstreamCreate;
+    expect(sent.subsets).toEqual([
+      { name: "v2", labels: { version: "v2" }, traffic_policy: { hash_on: "ip" } },
+    ]);
+    expect(JSON.stringify(sent)).not.toContain("[REDACTED]");
+    expect(ui.host.textContent).not.toContain("Foundry did not send this save");
   });
 
   it("surfaces rejected configuration, target and delete writes without losing the resource", async () => {

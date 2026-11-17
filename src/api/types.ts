@@ -379,6 +379,18 @@ export interface UpstreamTarget {
 export interface SubsetTrafficPolicy {
   load_balancer_algorithm?: LoadBalancerAlgorithm | null;
   hash_on?: string | null;
+  // Projected from a mesh DestinationRule: a read can carry them, but Edge
+  // refuses them on an operator write, so saves omit them
+  // (`SUBSET_TRAFFIC_POLICY_SERVER_OWNED` in `src/api/upstreams.ts`).
+  tls?: Record<string, unknown> | null;
+  connect_timeout_ms?: number | null;
+  h2_upgrade_policy?: string | null;
+  max_retries?: number | null;
+  http1_max_pending_requests?: number | null;
+  http_idle_timeout_ms?: number | null;
+  http2_max_requests?: number | null;
+  h2_max_concurrent_streams?: number | null;
+  passive_health_check?: PassiveHealthCheck | null;
 }
 
 export interface SubsetDefinition {

@@ -1,9 +1,9 @@
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mergeFormUpdatePayload } from "@/api/upstreams";
+import { mergeFormUpdatePayload, SUBSET_TRAFFIC_POLICY_SERVER_OWNED } from "@/api/upstreams";
 import type { SubsetDefinition, Upstream, UpstreamCreate } from "@/api/types";
 import { inputByLabel } from "@/test/fields";
-import { click, createHarness, fill } from "@/test/__tests__/harness";
+import { click, createHarness, fill, selectOption } from "@/test/__tests__/harness";
 import { UpstreamForm } from "./UpstreamForm";
 
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn() }));
@@ -177,6 +177,86 @@ describe("subset selectors through the upstream form (#479)", () => {
     await save();
     expect(submit).toHaveBeenCalledOnce();
     expect(outgoingSubsets(data)).toEqual([{ name: "selected", labels: { tier: "a,b" } }]);
+  });
+
+  // Mesh-projected policy (ferrum-edge `SubsetTrafficPolicy`) as a read shows
+  // it. Edge refuses every one of these on an operator write.
+  const projected = {
+    tls: {
+      mode: "mutual",
+      insecure_skip_verify: false,
+      client_certificate: "/certs/v2.crt",
+      private_key: "/certs/v2.key",
+    },
+    connect_timeout_ms: 2500,
+    h2_upgrade_policy: null,
+    max_retries: 2,
+    http1_max_pending_requests: 10,
+    http_idle_timeout_ms: 30000,
+    http2_max_requests: 100,
+    h2_max_concurrent_streams: 50,
+    passive_health_check: { unhealthy_threshold: 5, unhealthy_status_codes: [503] },
+  };
+
+  it("names exactly the server-owned subset fields in one list", () => {
+    expect([...SUBSET_TRAFFIC_POLICY_SERVER_OWNED].sort()).toEqual(Object.keys(projected).sort());
+  });
+
+  it("keeps every writable subset field and omits the server-owned ones on an unrelated save", async () => {
+    const subsets = [
+      { name: "v1", labels: { version: "v1" }, traffic_policy: { ...projected } },
+      {
+        name: "v2",
+        labels: { version: "v2" },
+        traffic_policy: {
+          load_balancer_algorithm: "least_connections",
+          future_policy_field: "kept",
+          ...projected,
+        },
+        future_subset_field: { keep: true },
+      },
+    ] as unknown as SubsetDefinition[];
+    const data = upstream(subsets);
+    await mount(data);
+    await fill(inputByLabel(ui.host, "Name"), "Orders v2");
+    await save();
+    expect(outgoingSubsets(data)).toEqual([
+      // Nothing writable is left in v1's policy, so it is omitted.
+      { name: "v1", labels: { version: "v1" } },
+      {
+        name: "v2",
+        labels: { version: "v2" },
+        traffic_policy: { load_balancer_algorithm: "least_connections", future_policy_field: "kept" },
+        future_subset_field: { keep: true },
+      },
+    ]);
+  });
+
+  it("merges edited subset fields onto the writable part of the read", async () => {
+    const data = upstream([{
+      name: "v2",
+      labels: { version: "v2" },
+      traffic_policy: {
+        load_balancer_algorithm: "consistent_hashing",
+        hash_on: "header:x-user",
+        future_policy_field: "kept",
+        ...projected,
+      },
+    } as unknown as SubsetDefinition]);
+    await mount(data);
+    await openSubsets();
+    const group = subsetGroup("v2");
+    await fill(inputByLabel(group, "Subset Name"), "canary");
+    await fill(inputByLabel(group, "Subset Hash Key"), "");
+    await selectOption("Subset Algorithm", "Inherit upstream algorithm");
+    await save();
+    // The algorithm and hash key were cleared in the form, the projected
+    // fields are never sent, and the renamed subset keeps its writable rest.
+    expect(outgoingSubsets(data)).toEqual([{
+      name: "canary",
+      labels: { version: "v2" },
+      traffic_policy: { future_policy_field: "kept" },
+    }]);
   });
 
   it("creates a subset from key/value rows", async () => {

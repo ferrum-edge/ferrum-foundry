@@ -148,6 +148,46 @@ describe("upstream target writes", () => {
     });
   });
 
+  it("sends a non-admin target write whose read masks only fields the write omits", async () => {
+    // A subset's projected TLS key and a port override's are masked for a
+    // non-admin, but the write leaves both out (Edge refuses them on a write),
+    // so nothing it sends carries the placeholder.
+    const stored = {
+      id: "payments",
+      namespace: "tenant-a",
+      algorithm: "round_robin",
+      targets: settings.targets,
+      subsets: [{
+        name: "v2",
+        labels: { version: "v2" },
+        traffic_policy: {
+          hash_on: "ip",
+          tls: { mode: "mutual", insecure_skip_verify: false, private_key: "[REDACTED]" },
+          connect_timeout_ms: 1500,
+        },
+      }],
+      port_overrides: { "8443": { tls: { client_key_path: "[REDACTED]" } } },
+      created_at: "v0",
+      updated_at: "v0",
+    };
+    const bodies: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
+      if (request.method === "PUT") bodies.push(await request.json());
+      return Response.json(stored);
+    }));
+
+    await updateTargets(scope, "payments", targets, null, "operator");
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]).toMatchObject({
+      targets,
+      subsets: [{ name: "v2", labels: { version: "v2" }, traffic_policy: { hash_on: "ip" } }],
+    });
+    expect(JSON.stringify(bodies[0])).not.toContain("[REDACTED]");
+    expect(bodies[0]).not.toHaveProperty("port_overrides");
+    expect((bodies[0] as { subsets: { traffic_policy: object }[] }).subsets[0].traffic_policy)
+      .toEqual({ hash_on: "ip" });
+  });
+
   it("releases failed writes and keeps another namespace independent", async () => {
     const started = barrier();
     const finish = barrier();

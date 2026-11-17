@@ -24,7 +24,7 @@ import { UpstreamForm } from "@/components/forms/UpstreamForm";
 import { TargetForm } from "@/components/forms/TargetForm";
 import { committedWriteMessage, getApiErrorMessage, getCommittedWrite } from "@/api/client";
 import { MaskedSecretRefusal } from "@/components/shared/MaskedSecretRefusal";
-import { refuseMaskedUpstreamSettingsWrite } from "@/api/maskedSecretSites";
+import { refuseMaskedResourceWrite } from "@/api/maskedSecretSites";
 import * as upstreamsApi from "@/api/upstreams";
 import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
 import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
@@ -180,9 +180,8 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
     try {
       const payload = upstreamsApi.mergeFormUpdatePayload(upstream, data);
       // The form blocks a placeholder in a field it shows; this also refuses
-      // one it round-trips without showing, and a masked subset TLS key in the
-      // seeded read that the form's subset rebuild would silently delete.
-      refuseMaskedUpstreamSettingsWrite(upstreamId, upstream, payload, facts.role);
+      // one it round-trips without showing.
+      refuseMaskedResourceWrite("Upstream", upstreamId, payload, facts.role);
       const updated = await updateUpstream.mutateAsync({
         id: upstreamId,
         data: payload,

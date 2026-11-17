@@ -6,6 +6,8 @@ import { proxyApi, REDACT_ERRORS, scoped, SILENT_ERRORS, type NamespaceScope } f
 import type {
   PaginatedResponse,
   PaginationParams,
+  SubsetDefinition,
+  SubsetTrafficPolicy,
   Upstream,
   UpstreamCreate,
 } from "./types";
@@ -119,6 +121,46 @@ export async function getReference(
     .json<Upstream>();
 }
 
+/**
+ * The `subsets[].traffic_policy` fields Ferrum Edge projects from a mesh
+ * DestinationRule and refuses on every operator write (admin POST/PUT,
+ * import, restore, file config). A read can carry them; a write must omit
+ * them, or Edge answers `400`. Mirrors the `policy.<field>.is_some()` checks
+ * in `Upstream::validate_operator_provided_fields` and the `readOnly`
+ * properties of the `SubsetTrafficPolicy` schema in `openapi.yaml`, which
+ * list the same nine fields at v0.9.20 (`e4a606a`, `src/config/types.rs`) and
+ * on `main`. Every other subset field (`name`, `labels`,
+ * `load_balancer_algorithm`, `hash_on`, and any field Edge adds that it does
+ * not refuse) is operator-writable and carried through a save. Update this
+ * list when Edge changes that check.
+ */
+export const SUBSET_TRAFFIC_POLICY_SERVER_OWNED: readonly string[] = [
+  "tls",
+  "connect_timeout_ms",
+  "h2_upgrade_policy",
+  "max_retries",
+  "http1_max_pending_requests",
+  "http_idle_timeout_ms",
+  "http2_max_requests",
+  "h2_max_concurrent_streams",
+  "passive_health_check",
+];
+
+/**
+ * A subset as an operator write may carry it: every field of `subset` except
+ * the server-owned `traffic_policy` fields. A policy left with nothing
+ * writable is omitted, as Edge treats an absent and an empty policy alike.
+ */
+export function writableSubset(subset: SubsetDefinition): SubsetDefinition {
+  const { traffic_policy: policy, ...rest } = subset;
+  if (policy === undefined) return subset;
+  if (policy === null) return { ...rest, traffic_policy: null };
+  const writable = Object.fromEntries(
+    Object.entries(policy).filter(([key]) => !SUBSET_TRAFFIC_POLICY_SERVER_OWNED.includes(key)),
+  ) as SubsetTrafficPolicy;
+  return Object.keys(writable).length > 0 ? { ...rest, traffic_policy: writable } : rest;
+}
+
 /** Strip server- and mesh-owned fields from a fetched full-replace resource. */
 export function toUpdatePayload(upstream: Upstream): UpstreamCreate {
   const {
@@ -142,7 +184,8 @@ export function toUpdatePayload(upstream: Upstream): UpstreamCreate {
   void source_labels;
   void locality_lb_setting;
   void locality_lb_strict;
-  return rest;
+  if (!Array.isArray(rest.subsets)) return rest;
+  return { ...rest, subsets: rest.subsets.map(writableSubset) };
 }
 
 /**
@@ -287,7 +330,10 @@ export async function updateTargets(
 ): Promise<Upstream> {
   const path = `upstreams/${pathSegment(id)}`;
   const propose = (current: Upstream): UpstreamCreate => {
-    const masked = upstreamPlaceholderSites(current, role).blocking;
+    const body = withUpstreamId({ ...toUpdatePayload(current), targets }, id);
+    // Only what is sent can be refused: the mesh-projected fields the payload
+    // omits (`port_overrides`, a subset's projected `tls`) are not checked.
+    const masked = upstreamPlaceholderSites(body, role).blocking;
     if (masked.length > 0) {
       throw new MaskedSecretWriteError(
         `Targets were not saved: upstream ${id} has a value hidden from your role ` +
@@ -297,7 +343,7 @@ export async function updateTargets(
         [...masked],
       );
     }
-    return withUpstreamId({ ...toUpdatePayload(current), targets }, id);
+    return body;
   };
 
   return serializeWrite(scope, id, async () => {
