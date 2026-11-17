@@ -735,6 +735,18 @@ export function ifMatchRouteRefusal(method, path, header) {
  * instead of removing whatever moved into its place. Other credential writes
  * keep the mock's echo of the consumer. Returns `[status, body]`.
  */
+/** Edge reads and writes an item only in the request's namespace. */
+const inNamespace = (item, ns) => (item.namespace ?? 'ferrum') === ns;
+
+/**
+ * The consumer a credential route addresses: the id in the request's
+ * namespace only, so a revoke under another `X-Ferrum-Namespace` is a `404`
+ * and never touches this consumer (review sol F1 on #713).
+ */
+export function findConsumerInNamespace(list, id, ns) {
+  return list.find((consumer) => consumer.id === id && inNamespace(consumer, ns));
+}
+
 export function credentialWrite(consumer, method, credType, index, ifMatch) {
   const refusal = evaluateIfMatch(ifMatch, resourceEtag('consumers', consumer));
   if (refusal) return refusal;
@@ -769,7 +781,7 @@ export function crud(list, url, method, id, body, defaults = {}, ns = 'ferrum', 
     return [200, paginate(filtered.rows, url)];
   }
   if (method === 'GET') {
-    const item = list.find((x) => x.id === id);
+    const item = list.find((x) => x.id === id && inNamespace(x, ns));
     if (!item) return [404, { error: 'not found' }];
     return kind ? [200, item, { etag: resourceEtag(kind, item) }] : [200, item];
   }
@@ -784,7 +796,7 @@ export function crud(list, url, method, id, body, defaults = {}, ns = 'ferrum', 
       if (parsed.refusal) return parsed.refusal;
       expectedProxyIds = parsed.expected;
     }
-    const existing = list.find((x) => x.id === id);
+    const existing = list.find((x) => x.id === id && inNamespace(x, ns));
     if (!existing) return [404, { error: 'not found' }];
     const refusal = kind ? evaluateIfMatch(ifMatch, resourceEtag(kind, existing)) : null;
     if (refusal) return refusal;
@@ -810,7 +822,7 @@ export function crud(list, url, method, id, body, defaults = {}, ns = 'ferrum', 
     return [201, item];
   }
   if (method === 'PUT') {
-    const index = list.findIndex((x) => x.id === id);
+    const index = list.findIndex((x) => x.id === id && inNamespace(x, ns));
     if (index < 0) return [404, { error: 'not found' }];
     // Edge PUT does not stamp the header (`handle_update` passes provisioner None).
     // Absent `labels` preserves the stored map; a supplied map replaces it; `{}` clears.
@@ -818,7 +830,7 @@ export function crud(list, url, method, id, body, defaults = {}, ns = 'ferrum', 
     return [200, list[index]];
   }
   if (method === 'DELETE') {
-    const index = list.findIndex((x) => x.id === id);
+    const index = list.findIndex((x) => x.id === id && inNamespace(x, ns));
     if (index < 0) return [404, { error: 'not found' }];
     list.splice(index, 1);
     return [204, null];
@@ -1525,7 +1537,7 @@ export const server = createServer(async (req, res) => {
   /* consumer credential endpoints — return the consumer */
   const credMatch = path.match(CREDENTIAL_PATH_PATTERN);
   if (credMatch) {
-    const consumer = consumers.find((c) => c.id === credMatch[1]);
+    const consumer = findConsumerInNamespace(consumers, credMatch[1], ns);
     if (!consumer) return send(404, { error: 'not found' });
     const [status, payload] = credentialWrite(consumer, method, credMatch[2], credMatch[3], ifMatch);
     return send(status, payload);

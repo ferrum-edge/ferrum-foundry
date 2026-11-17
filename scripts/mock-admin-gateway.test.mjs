@@ -13,6 +13,7 @@ import {
   evaluateIfMatch,
   ifMatchRouteRefusal,
   credentialWrite,
+  findConsumerInNamespace,
   normalizeNamespaceDescription,
   provisionerFromHeaders,
   resourceEtag,
@@ -33,6 +34,7 @@ const UNKNOWN_FIELD_NAME_PATTERN = /unknown field `name`/;
 const QUOTED_HEX_32_ETAG_PATTERN = /^"[0-9a-f]{32}"$/;
 const HTTP_PATH_PATTERN = /http_path/;
 const UDP_PROBE_PAYLOAD_PATTERN = /udp_probe_payload/;
+const MOCK_LISTEN_URL_PATTERN = /listening on (http:\/\/[^\s]+)/;
 const LOOPBACK_LISTEN_LOG_PATTERN =
   /^Mock Ferrum Edge admin API listening on http:\/\/127\.0\.0\.1:\d+\n/;
 
@@ -764,6 +766,54 @@ test("the mock admin API listens on loopback by default", async () => {
       if (output.includes("\n")) break;
     }
     assert.match(output, LOOPBACK_LISTEN_LOG_PATTERN);
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) {
+      const exited = once(child, "exit");
+      child.kill();
+      await exited;
+    }
+  }
+});
+
+test("credential routes address the consumer in the request namespace only (#713 sol F1)", () => {
+  const list = [
+    { id: "alice", namespace: "ferrum", credentials: { keyauth: [{ key: "a" }] } },
+    { id: "alice", namespace: "tenant-b", credentials: { keyauth: [{ key: "b" }] } },
+  ];
+  assert.equal(findConsumerInNamespace(list, "alice", "tenant-b"), list[1]);
+  assert.equal(findConsumerInNamespace(list, "alice", "tenant-c"), undefined);
+});
+
+test("an indexed revoke under another namespace neither reads nor mutates the consumer over HTTP", async () => {
+  const env = { ...process.env, MOCK_ADMIN_PORT: "0" };
+  delete env.MOCK_ADMIN_BIND;
+  const child = spawn(
+    process.execPath,
+    [fileURLToPath(new URL("./mock-admin-gateway.mjs", import.meta.url))],
+    { env, stdio: ["ignore", "pipe", "pipe"] },
+  );
+  try {
+    let output = "";
+    child.stdout.setEncoding("utf8");
+    for await (const chunk of child.stdout) {
+      output += chunk;
+      if (output.includes("\n")) break;
+    }
+    const base = output.match(MOCK_LISTEN_URL_PATTERN)[1];
+    const call = (method, path, namespace, headers = {}) =>
+      fetch(`${base}${path}`, { method, headers: { "x-ferrum-namespace": namespace, ...headers } });
+
+    // tenant-a has no consumer-mobile-app: its detail read and its revoke are 404.
+    assert.equal((await call("GET", "/consumers/consumer-mobile-app", "tenant-a")).status, 404);
+    const own = await call("GET", "/consumers/consumer-mobile-app", "ferrum");
+    assert.equal(own.status, 200);
+    const tag = own.headers.get("etag");
+    const foreign = await call("DELETE", "/consumers/consumer-mobile-app/credentials/keyauth/0",
+      "tenant-a", { "if-match": tag });
+    assert.equal(foreign.status, 404);
+    const after = await (await call("GET", "/consumers/consumer-mobile-app", "ferrum")).json();
+    assert.equal(after.credentials.keyauth.length, 2, "the ferrum consumer is untouched");
+    assert.equal((await call("GET", "/consumers/consumer-mobile-app", "ferrum")).headers.get("etag"), tag);
   } finally {
     if (child.exitCode === null && child.signalCode === null) {
       const exited = once(child, "exit");
