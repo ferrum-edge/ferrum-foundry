@@ -1,0 +1,3 @@
+# Vendored Ferrum Contracts files are pinned by their exact bytes
+# (contracts/ferrum-contracts/PIN); never rewrite their line endings.
+contracts/ferrum-contracts/** -text

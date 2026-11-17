@@ -2,19 +2,15 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { test } from "node:test";
+import { parseContractsPin } from "./contracts-pin.mjs";
 import {
   DEFAULT_PLUGIN_CONFIGS,
   PLUGIN_METADATA,
   PLUGIN_PRIORITY,
 } from "../src/lib/pluginConfigDefaults.ts";
 
-const LINE_BREAK_PATTERN = /\r?\n/;
-const CHECKSUM_LINE_PATTERN = /^sha256\s+([a-f0-9]{64})\s+(.+)$/;
-const TAG_CONTRACTS_EDGE_R_PATTERN = /^tag=contracts-edge-[0-9.]+(?:-r[1-9][0-9]*)?$/m;
-const PIN_COMMIT_PATTERN = /^commit=[a-f0-9]{40}$/m;
-const PIN_TAG_CAPTURE_PATTERN = /^tag=(contracts-edge-[0-9.]+(?:-r[1-9][0-9]*)?)$/m;
-const PINNED_CONTRACTS_TAG_PATTERN = /^tag=contracts-edge-0\.9\.20$/m;
-const PINNED_CONTRACTS_COMMIT_PATTERN = /^commit=39da322083044c2e92617209e62983c92387f0ad$/m;
+const PIN_LINE_ERROR_PATTERN = /^PIN line \d+: /;
+const PIN_FORMAT_ERROR_PATTERN = /^PIN /;
 const EXISTING_SHARED_V1_PATTERN = /^EXISTING shared v1/;
 const COMPONENTS_SCHEMAS_PATTERN = /^#\/components\/schemas\/[A-Za-z0-9]+$/;
 const CONFIG_FROM_DEFAULT_PATTERN = /const config = getPluginConfigDefault\(name\);/;
@@ -32,13 +28,25 @@ const provisionedBy = JSON.parse(
   readFileSync(new URL("vocabularies/provisioned-by.json", contractRoot), "utf8"),
 );
 
+const pin = parseContractsPin(pinText);
+
 function pinnedFiles() {
-  const files = new Map();
-  for (const line of pinText.split(LINE_BREAK_PATTERN)) {
-    const match = CHECKSUM_LINE_PATTERN.exec(line);
-    if (match) files.set(match[2], match[1]);
+  return pin.files;
+}
+
+/**
+ * Every vendored path relative to the contracts root, refusing any entry that
+ * is neither a regular file nor a directory (consumer-pins.md check 4).
+ */
+function vendoredFiles() {
+  const files = [];
+  for (const entry of readdirSync(contractRoot, { recursive: true, withFileTypes: true })) {
+    const path = `${entry.parentPath}/${entry.name}`.slice(contractRoot.pathname.length);
+    if (entry.isDirectory()) continue;
+    assert.ok(entry.isFile(), `${path} is neither a regular file nor a directory`);
+    if (path !== "PIN") files.push(path);
   }
-  return files;
+  return files.sort();
 }
 
 // Which Ferrum Edge releases each contracts tag may back. An Edge release with
@@ -75,18 +83,10 @@ function describeSetDrift(actual, expected, label) {
 }
 
 test("vendored Ferrum Contracts files match their PIN digests", () => {
-  assert.match(pinText, TAG_CONTRACTS_EDGE_R_PATTERN);
-  assert.match(pinText, PIN_COMMIT_PATTERN);
   const files = pinnedFiles();
-  const actualFiles = readdirSync(contractRoot, { recursive: true, withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name !== "PIN")
-    .map((entry) => `${entry.parentPath}/${entry.name}`.slice(contractRoot.pathname.length))
-    .sort();
   assert.equal(files.size, 18,
     "PIN must include the reviewed vocabularies, schema, fixtures and invalid expectations");
-  assert.deepEqual([...files.keys()].sort(), actualFiles, "PIN must cover every vendored file");
-  assert.equal(pinText.split(LINE_BREAK_PATTERN).filter((line) => line.startsWith("sha256")).length,
-    files.size, "PIN must not contain duplicate entries");
+  assert.deepEqual([...files.keys()].sort(), vendoredFiles(), "PIN must cover every vendored file");
   for (const [path, expected] of files) {
     const contents = readFileSync(new URL(path, contractRoot));
     const actual = createHash("sha256").update(contents).digest("hex");
@@ -95,8 +95,7 @@ test("vendored Ferrum Contracts files match their PIN digests", () => {
 });
 
 test("the contracts pin tracks the qualified Ferrum Edge release", () => {
-  const tag = PIN_TAG_CAPTURE_PATTERN.exec(pinText)?.[1];
-  assert.ok(tag, "PIN must name a contracts-edge tag");
+  const { tag, edgeVersion: pinnedEdgeVersion } = pin;
   const compatibility = JSON.parse(
     readFileSync(new URL("../docs/compatibility.json", import.meta.url), "utf8"),
   );
@@ -113,11 +112,87 @@ test("the contracts pin tracks the qualified Ferrum Edge release", () => {
     `PIN tag ${tag} maps to ${allowed.join(", ")}, but docs/compatibility.json ` +
       `qualifies ${edgeVersion}`,
   );
+  if (pinnedEdgeVersion !== undefined) {
+    assert.equal(pinnedEdgeVersion, edgeVersion, "PIN edge_version must be the qualified Edge release");
+  }
+});
+
+/* ---------------- PIN format (ferrum-contracts docs/consumer-pins.md) ---------------- */
+
+const SAMPLE_HASH_A = "a".repeat(64);
+const SAMPLE_HASH_B = "b".repeat(64);
+const SAMPLE_HEADERS = [
+  "tag contracts-edge-0.9.20",
+  "commit 39da322083044c2e92617209e62983c92387f0ad",
+];
+
+function samplePin(lines) {
+  return `${lines.join("\n")}\n`;
+}
+
+test("the PIN parser accepts the canonical format, with or without edge_version", () => {
+  const rows = [`${SAMPLE_HASH_A}  a-b/x.json`, `${SAMPLE_HASH_B}  a/x.json`];
+  const parsed = parseContractsPin(samplePin([...SAMPLE_HEADERS, ...rows]));
+  assert.equal(parsed.tag, "contracts-edge-0.9.20");
+  assert.equal(parsed.commit, "39da322083044c2e92617209e62983c92387f0ad");
+  assert.equal(parsed.edgeVersion, undefined);
+  assert.deepEqual([...parsed.files], [["a-b/x.json", SAMPLE_HASH_A], ["a/x.json", SAMPLE_HASH_B]]);
+
+  const withEdge = parseContractsPin(samplePin([...SAMPLE_HEADERS, "edge_version v0.9.20", ...rows]));
+  assert.equal(withEdge.edgeVersion, "v0.9.20");
+  assert.equal(parseContractsPin(samplePin(["tag contracts-edge-0.9.9-r2", SAMPLE_HEADERS[1], rows[0]])).tag,
+    "contracts-edge-0.9.9-r2");
+});
+
+test("the PIN parser refuses every line that does not match its position", () => {
+  const row = `${SAMPLE_HASH_A}  vocabularies/a.json`;
+  const lineCases = {
+    "legacy tag= header": ["tag=contracts-edge-0.9.20", SAMPLE_HEADERS[1], row],
+    "legacy commit= header": [SAMPLE_HEADERS[0], "commit=39da322083044c2e92617209e62983c92387f0ad", row],
+    "headers out of order": [SAMPLE_HEADERS[1], SAMPLE_HEADERS[0], row],
+    "revision -r1": ["tag contracts-edge-0.9.20-r1", SAMPLE_HEADERS[1], row],
+    "short commit": [SAMPLE_HEADERS[0], "commit 39da3220", row],
+    "repeated tag": [...SAMPLE_HEADERS, "tag contracts-edge-0.9.20", row],
+    "repeated edge_version": [...SAMPLE_HEADERS, "edge_version v0.9.20", "edge_version v0.9.20", row],
+    "misplaced edge_version": [...SAMPLE_HEADERS, row, "edge_version v0.9.20"],
+    "legacy sha256 row prefix": [...SAMPLE_HEADERS, `sha256  ${SAMPLE_HASH_A}  vocabularies/a.json`],
+    "one space": [...SAMPLE_HEADERS, `${SAMPLE_HASH_A} vocabularies/a.json`],
+    "three spaces": [...SAMPLE_HEADERS, `${SAMPLE_HASH_A}   vocabularies/a.json`],
+    "uppercase hash": [...SAMPLE_HEADERS, `${"A".repeat(64)}  vocabularies/a.json`],
+    "short hash": [...SAMPLE_HEADERS, `${"a".repeat(63)}  vocabularies/a.json`],
+    "unknown key": [...SAMPLE_HEADERS, "source ferrum-contracts", row],
+    "comment": [...SAMPLE_HEADERS, "# vocabularies", row],
+    "blank line": [...SAMPLE_HEADERS, "", row],
+    "trailing space": [...SAMPLE_HEADERS, `${row} `],
+    "leading slash": [...SAMPLE_HEADERS, `${SAMPLE_HASH_A}  /vocabularies/a.json`],
+    "trailing slash": [...SAMPLE_HEADERS, `${SAMPLE_HASH_A}  vocabularies/`],
+    "empty segment": [...SAMPLE_HEADERS, `${SAMPLE_HASH_A}  vocabularies//a.json`],
+    "dot-dot segment": [...SAMPLE_HEADERS, `${SAMPLE_HASH_A}  vocabularies/../a.json`],
+    "dot segment": [...SAMPLE_HEADERS, `${SAMPLE_HASH_A}  ./a.json`],
+    "lists itself": [...SAMPLE_HEADERS, `${SAMPLE_HASH_A}  PIN`],
+    "unsorted rows": [...SAMPLE_HEADERS, `${SAMPLE_HASH_A}  vocabularies/b.json`, row],
+    "component-wise order": [...SAMPLE_HEADERS, `${SAMPLE_HASH_A}  a/x.json`, `${SAMPLE_HASH_B}  a-b/x.json`],
+    "duplicate row": [...SAMPLE_HEADERS, row, `${SAMPLE_HASH_B}  vocabularies/a.json`],
+  };
+  for (const [label, lines] of Object.entries(lineCases)) {
+    assert.throws(() => parseContractsPin(samplePin(lines)), PIN_LINE_ERROR_PATTERN, label);
+  }
+
+  const textCases = {
+    "no rows": samplePin(SAMPLE_HEADERS),
+    "empty": "",
+    "CRLF line endings": `${[...SAMPLE_HEADERS, row].join("\r\n")}\r\n`,
+    "no final newline": [...SAMPLE_HEADERS, row].join("\n"),
+    "byte order mark": `\uFEFF${samplePin([...SAMPLE_HEADERS, row])}`,
+  };
+  for (const [label, text] of Object.entries(textCases)) {
+    assert.throws(() => parseContractsPin(text), PIN_FORMAT_ERROR_PATTERN, label);
+  }
 });
 
 test("the published manifest pin retains owner status and complete canonical integrity", () => {
-  assert.match(pinText, PINNED_CONTRACTS_TAG_PATTERN);
-  assert.match(pinText, PINNED_CONTRACTS_COMMIT_PATTERN);
+  assert.equal(pin.tag, "contracts-edge-0.9.20");
+  assert.equal(pin.commit, "39da322083044c2e92617209e62983c92387f0ad");
   const schema = JSON.parse(readFileSync(
     new URL("schemas/service-manifest/v1.schema.json", contractRoot), "utf8",
   ));
