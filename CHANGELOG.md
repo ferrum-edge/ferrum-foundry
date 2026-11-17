@@ -388,6 +388,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with `.match()`, which minimatch 11 keeps. No release of these packages
   allows minimatch 11 yet. Drop each override only once every package under
   it does: the `eslint` entry also covers `@eslint/config-array`.
+- Drop the `eslint` `minimatch` override: `eslint` 10.15.0 and
+  `@eslint/config-array` 0.23.6 both require `minimatch` `^11.0.5`, which the
+  override's `^11.0.1` let resolve to 11.0.3. The lockfile now resolves the
+  single `minimatch` copy to 11.0.9, still above the GHSA-g3hv-75wg-m249 fix.
+  The `@typescript-eslint/typescript-estree` override stays: 8.72.2 still
+  requires `minimatch` `^10.2.2`.
 
 ### Fixed
 
