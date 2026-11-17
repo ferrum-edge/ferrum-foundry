@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
+import { join, relative, sep } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { parseContractsPin } from "./contracts-pin.mjs";
 import {
   DEFAULT_PLUGIN_CONFIGS,
@@ -29,6 +31,7 @@ const provisionedBy = JSON.parse(
 );
 
 const pin = parseContractsPin(pinText);
+const contractDir = fileURLToPath(contractRoot);
 
 function pinnedFiles() {
   return pin.files;
@@ -41,7 +44,7 @@ function pinnedFiles() {
 function vendoredFiles() {
   const files = [];
   for (const entry of readdirSync(contractRoot, { recursive: true, withFileTypes: true })) {
-    const path = `${entry.parentPath}/${entry.name}`.slice(contractRoot.pathname.length);
+    const path = relative(contractDir, join(entry.parentPath, entry.name)).split(sep).join("/");
     if (entry.isDirectory()) continue;
     assert.ok(entry.isFile(), `${path} is neither a regular file nor a directory`);
     if (path !== "PIN") files.push(path);
@@ -175,7 +178,7 @@ test("the PIN parser refuses every line that does not match its position", () =>
     "duplicate row": [...SAMPLE_HEADERS, row, `${SAMPLE_HASH_B}  vocabularies/a.json`],
   };
   for (const [label, lines] of Object.entries(lineCases)) {
-    assert.throws(() => parseContractsPin(samplePin(lines)), PIN_LINE_ERROR_PATTERN, label);
+    assert.throws(() => parseContractsPin(samplePin(lines)), { message: PIN_LINE_ERROR_PATTERN }, label);
   }
 
   const textCases = {
@@ -186,7 +189,7 @@ test("the PIN parser refuses every line that does not match its position", () =>
     "byte order mark": `\uFEFF${samplePin([...SAMPLE_HEADERS, row])}`,
   };
   for (const [label, text] of Object.entries(textCases)) {
-    assert.throws(() => parseContractsPin(text), PIN_FORMAT_ERROR_PATTERN, label);
+    assert.throws(() => parseContractsPin(text), { message: PIN_FORMAT_ERROR_PATTERN }, label);
   }
 });
 
