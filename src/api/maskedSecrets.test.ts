@@ -11,7 +11,11 @@ import {
   isMaskedForRole,
   pluginConfigPlaceholderPointers,
   proxyPlaceholderPointers,
+  containsInlinePrivateKey,
+  type ProjectionRule,
+  refusedPlaceholderSites,
   removeAtPointer,
+  tlsMaterialWithheld,
   upstreamPlaceholderPointers,
 } from "./maskedSecrets";
 import { RedactedWriteError } from "./secretRedaction";
@@ -229,5 +233,79 @@ describe("masked-placeholder refusals", () => {
       role: null,
       local: true,
     });
+  });
+});
+
+describe("Edge main's TLS-source and path classes (ferrum-edge#7054)", () => {
+  const KEY = "-----BEGIN ENCRYPTED PRIVATE KEY-----\nc3ludGhldGlj\n-----END ENCRYPTED PRIVATE KEY-----";
+  const CERT = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----";
+  const NO_KAFKA = new Set<string>();
+  const rule = (sensitivity: ProjectionRule["sensitivity"], ...path: string[]): ProjectionRule =>
+    ({ path, sensitivity });
+  // Edge main's `udp_logging` and `request_mirror` rules.
+  const UDP_LOGGING = [
+    rule("private-key", "dtls_key_path"),
+    rule("certificate", "dtls_cert_path"),
+    rule("certificate", "dtls_ca_cert_path"),
+  ];
+
+  it("matches a private-key banner of any label or case, and never a certificate", () => {
+    expect(containsInlinePrivateKey(KEY)).toBe(true);
+    expect(containsInlinePrivateKey("-----begin rsa private key-----\nAAAA")).toBe(true);
+    expect(containsInlinePrivateKey(`${CERT}\n${KEY}`)).toBe(true);
+    expect(containsInlinePrivateKey(CERT)).toBe(false);
+    expect(containsInlinePrivateKey("-----BEGIN PUBLIC KEY-----\nAAAA")).toBe(false);
+    expect(containsInlinePrivateKey("/etc/ferrum/private key.pem")).toBe(false);
+  });
+
+  it("classifies a TLS source the way Edge's tls_material_withheld does", () => {
+    expect(tlsMaterialWithheld(CERT, "public")).toBe(false);
+    expect(tlsMaterialWithheld(`${CERT}\n${KEY}`, "public")).toBe(true);
+    expect(tlsMaterialWithheld("[REDACTED]", "public")).toBe(true);
+    expect(tlsMaterialWithheld("[REDACTED]", null)).toBe(false);
+    expect(tlsMaterialWithheld("/etc/ferrum/dtls.key", "private-key")).toBe(false);
+    expect(tlsMaterialWithheld("vault://kv/dtls", "private-key")).toBe(false);
+    expect(tlsMaterialWithheld("-----BEGIN DAMAGED-----", "private-key")).toBe(true);
+    expect(tlsMaterialWithheld("/etc/ferrum/dtls\u0000.key", "private-key")).toBe(true);
+    expect(tlsMaterialWithheld("/etc/ferrum/dtls\u0000.key", "public")).toBe(false);
+  });
+
+  it("refuses an echoed placeholder at a certificate or private-key source", () => {
+    expect(refusedPlaceholderSites(UDP_LOGGING, NO_KAFKA, {
+      dtls_key_path: "[REDACTED]",
+      dtls_cert_path: "[REDACTED]",
+      dtls_ca_cert_path: "system://",
+      host: "logs.internal",
+    })).toEqual(["/config/dtls_key_path", "/config/dtls_cert_path"]);
+  });
+
+  it("leaves a URL-shaped placeholder at a TLS source alone, as Edge does", () => {
+    // Edge renders a reference at a TLS source only when it withholds it, so
+    // a value that only looks like a projected URL is not a site.
+    expect(refusedPlaceholderSites(UDP_LOGGING, NO_KAFKA, {
+      dtls_cert_path: "https://certs.example.com/[REDACTED_PATH]",
+    })).toEqual([]);
+  });
+
+  it("refuses an echoed destination path, but not an empty or root one", () => {
+    const rules = [rule("endpoint-path", "mirror_path")];
+    expect(refusedPlaceholderSites(rules, NO_KAFKA, { mirror_path: "[REDACTED]" }))
+      .toEqual(["/config/mirror_path"]);
+    expect(refusedPlaceholderSites(rules, NO_KAFKA, { mirror_path: "/" })).toEqual([]);
+  });
+
+  it("refuses the exact placeholder in any string, after the earlier layers' sites", () => {
+    expect(refusedPlaceholderSites([rule("secret", "authorization")], NO_KAFKA, {
+      service_name: "[REDACTED]",
+      authorization: "[REDACTED]",
+      tags: ["edge", "[REDACTED]"],
+      docs_url: "https://docs.example.com/[REDACTED_PATH]",
+    })).toEqual(["/config/authorization", "/config/service_name", "/config/tags/1"]);
+  });
+
+  it("counts a site only once when an earlier layer already rendered it", () => {
+    // The name floor withholds `credentials` whole; the TLS layer then sees its
+    // `[REDACTED]` rendering, not a placeholder the caller sent.
+    expect(refusedPlaceholderSites([], NO_KAFKA, { credentials: { x: "[REDACTED]" } })).toEqual([]);
   });
 });

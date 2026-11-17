@@ -37,16 +37,31 @@ describe("plugin config sites Edge refuses for a non-admin role", () => {
     ]);
   });
 
-  it("does not block a placeholder-shaped value the read shows verbatim", () => {
+  it("does not block a URL-shaped placeholder the read shows verbatim", () => {
+    const config = { docs_url: "https://docs.example.com/[REDACTED_PATH]" };
+    expect(pluginConfigRefusedSites("ai_prompt_shield", config)).toEqual([]);
+    expect(pluginConfigPlaceholderSites("ai_prompt_shield", config, "operator")).toEqual({
+      blocking: [],
+      other: ["/config/docs_url"],
+    });
+  });
+
+  it("blocks the exact placeholder in any string, as Edge main refuses it (ferrum-edge#7054)", () => {
     const config = {
       redaction_placeholder: "[REDACTED]",
       docs_url: "https://docs.example.com/[REDACTED_PATH]",
     };
-    expect(pluginConfigRefusedSites("ai_prompt_shield", config)).toEqual([]);
     expect(pluginConfigPlaceholderSites("ai_prompt_shield", config, "operator")).toEqual({
-      blocking: [],
-      other: ["/config/redaction_placeholder", "/config/docs_url"],
+      blocking: ["/config/redaction_placeholder"],
+      other: ["/config/docs_url"],
     });
+    // A certificate-plus-key bundle Edge main masks in `mtls_auth` reads as
+    // `[REDACTED]`, which the pinned table has no rule for: still blocked.
+    expect(
+      pluginConfigRefusedSites("mtls_auth", {
+        allowed_issuers: [{ ca_certificate_pem: "[REDACTED]" }],
+      }),
+    ).toEqual(["/config/allowed_issuers/0/ca_certificate_pem"]);
   });
 
   it("follows Kafka's safe list and a scalar where a container was expected", () => {

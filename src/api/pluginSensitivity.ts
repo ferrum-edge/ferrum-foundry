@@ -32,8 +32,31 @@ export const PLUGIN_SENSITIVITY_SOURCE = {
  * write must not echo: a `secret` wholesale, the credential-bearing parts of
  * an `endpoint` or `redis` URL (the whole value when it is not a URL), and
  * every `kafka` producer property off the safe list.
+ *
+ * Edge `main` (ferrum-edge#7054, after v0.9.20) adds three TLS and path
+ * classes, which Foundry implements ahead of the pin so its table can be
+ * re-synced when the pin moves:
+ *
+ * - `certificate` (`CertificateSource`): a certificate or CA source, inline
+ *   PEM or a reference. It stays visible unless it carries a PEM private-key
+ *   block (a certificate-plus-key bundle) or is not a string.
+ * - `private-key` (`PrivateKeySource`): a private-key source. A reference
+ *   stays visible; any PEM armour or control character, or a non-string, is
+ *   withheld.
+ * - `endpoint-path` (`EndpointPath`): an outbound path configured apart from
+ *   its host. `""` and `/` stay visible; anything else is withheld.
+ *
+ * Each is withheld as the exact `[REDACTED]`, which Edge also refuses when a
+ * non-admin write sends it back (`refusedPlaceholderSites`).
  */
-export type Sensitivity = "secret" | "endpoint" | "redis" | "kafka";
+export type Sensitivity =
+  | "secret"
+  | "endpoint"
+  | "redis"
+  | "kafka"
+  | "certificate"
+  | "private-key"
+  | "endpoint-path";
 
 export interface SensitivityRule {
   readonly path: readonly string[];

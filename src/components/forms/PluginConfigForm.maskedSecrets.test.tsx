@@ -218,13 +218,13 @@ describe("plugin configuration with masked secrets", () => {
   it("blocks an operator only where the read masks the field", async () => {
     const config = {
       action: "redact",
-      redaction_placeholder: "[REDACTED]",
+      docs_url: "https://docs.example.com/[REDACTED_PATH]",
       webhook_secret: "[REDACTED]",
     };
     await renderForm("ai_prompt_shield", config, "operator");
 
     expect(maskedList()).toEqual(["/config/webhook_secret"]);
-    expect(warnedList()).toEqual(["/config/redaction_placeholder"]);
+    expect(warnedList()).toEqual(["/config/docs_url"]);
     await submit();
     expect(onSubmit).not.toHaveBeenCalled();
 
@@ -234,8 +234,20 @@ describe("plugin configuration with masked secrets", () => {
     expect(onSubmit).toHaveBeenCalledOnce();
     expect(onSubmit.mock.calls[0]![0].config).toEqual({
       action: "redact",
-      redaction_placeholder: "[REDACTED]",
+      docs_url: "https://docs.example.com/[REDACTED_PATH]",
     });
+  });
+
+  it("blocks an operator's exact placeholder in an ordinary field (ferrum-edge#7054)", async () => {
+    await renderForm(
+      "ai_prompt_shield",
+      { action: "redact", redaction_placeholder: "[REDACTED]" },
+      "operator",
+    );
+    expect(maskedList()).toEqual(["/config/redaction_placeholder"]);
+    expect(warnedList()).toEqual([]);
+    await submit();
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it("keeps every placeholder blocking for a plugin it has no rules for", async () => {

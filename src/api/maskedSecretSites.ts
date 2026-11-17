@@ -8,7 +8,10 @@
 /*  This module replays that projection over a body to find those     */
 /*  sites, so an editor blocks exactly what Edge would refuse and     */
 /*  only warns about a placeholder-shaped value anywhere else. The    */
-/*  replay is `refusedPlaceholderSites` in `maskedSecrets.ts`.        */
+/*  replay is `refusedPlaceholderSites` in `maskedSecrets.ts`. Edge   */
+/*  main (ferrum-edge#7054) also refuses the exact `[REDACTED]` in    */
+/*  any string of a non-admin plugin-config write, so that always     */
+/*  blocks; only a URL-shaped placeholder can still be a warning.     */
 /* ------------------------------------------------------------------ */
 
 import type { GatewayRole } from "@/lib/capabilities";

@@ -363,10 +363,97 @@ export function maskedPlaceholderRefusal(error: unknown): MaskedPlaceholderRefus
 
 /* ---------- Where Edge refuses a placeholder ---------- */
 
-/** One rule of Edge's plugin sensitivity table (`SensitivityRule`). */
+/**
+ * One rule of Edge's plugin sensitivity table (`SensitivityRule`). The
+ * sensitivities are `Sensitivity` in `pluginSensitivity.ts`, repeated here so
+ * this module stays import-free.
+ */
 export interface ProjectionRule {
   readonly path: readonly string[];
-  readonly sensitivity: "secret" | "endpoint" | "redis" | "kafka";
+  readonly sensitivity:
+    | "secret"
+    | "endpoint"
+    | "redis"
+    | "kafka"
+    | "certificate"
+    | "private-key"
+    | "endpoint-path";
+}
+
+/* ---------- Edge's TLS-material classification ---------- */
+
+const PEM_BANNER = "-----BEGIN";
+
+/** Rust's `char::is_control`: Unicode category Cc (U+0000–U+001F, U+007F–U+009F). */
+function hasControlCharacter(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) return true;
+  }
+  return false;
+}
+
+/**
+ * Edge's `contains_inline_private_key`: a PEM opening line whose label names
+ * a private key (`PRIVATE KEY`, `RSA PRIVATE KEY`, `ENCRYPTED PRIVATE KEY`, …),
+ * compared case-insensitively. Certificates and public keys do not match.
+ */
+export function containsInlinePrivateKey(value: string): boolean {
+  const normalized = value.toUpperCase();
+  let start = normalized.indexOf(PEM_BANNER);
+  while (start !== -1) {
+    const after = normalized.slice(start + PEM_BANNER.length);
+    const end = after.indexOf("-----");
+    if ((end === -1 ? after : after.slice(0, end)).includes("PRIVATE KEY")) return true;
+    start = normalized.indexOf(PEM_BANNER, start + PEM_BANNER.length);
+  }
+  return false;
+}
+
+/** How a field name classifies the TLS source it holds (Edge's `TlsMaterialField`). */
+export type TlsMaterialField = "private-key" | "public";
+
+/**
+ * Edge's `tls_material_field`: the TLS slots reachable from a serialized
+ * proxy, upstream, or plugin config, matched by name wherever they occur.
+ */
+export function tlsMaterialField(name: string): TlsMaterialField | null {
+  switch (name) {
+    case "backend_tls_client_key_path":
+    case "client_key_path":
+    case "private_key":
+      return "private-key";
+    case "backend_tls_client_cert_path":
+    case "backend_tls_server_ca_cert_path":
+    case "client_cert_path":
+    case "server_ca_cert_path":
+    case "client_certificate":
+    case "ca_certificates":
+      return "public";
+    default:
+      return null;
+  }
+}
+
+/**
+ * Edge's `tls_material_withheld`: whether a non-admin read withholds a stored
+ * string as TLS private-key material. A PEM private-key block is withheld in
+ * any field. At a TLS field the exact `[REDACTED]` is reported too, so an
+ * echoed write is found; a certificate field is otherwise public, and a
+ * private-key field also withholds any PEM armour or control character, which
+ * no path or reference contains.
+ */
+export function tlsMaterialWithheld(value: string, field: TlsMaterialField | null): boolean {
+  if (containsInlinePrivateKey(value)) return true;
+  if (field === null) return false;
+  if (value === REDACTED_PLACEHOLDER) return true;
+  if (field === "public") return false;
+  return value.toUpperCase().includes(PEM_BANNER) || hasControlCharacter(value);
+}
+
+/** Edge's `tls_source_withheld`: a schema-declared TLS source; a non-string fails closed. */
+export function tlsSourceWithheld(value: unknown, field: TlsMaterialField): boolean {
+  return typeof value !== "string" || tlsMaterialWithheld(value, field);
 }
 
 type Container = Record<string, unknown> | unknown[];
@@ -399,9 +486,18 @@ function carriesUserinfo(value: string): boolean {
  * a later layer sees what an earlier one rendered: the plugin's schema
  * `rules`, then the name floor (`isEdgeSensitiveConfigKey`, without the
  * deployment's `FERRUM_LOG_REDACT_METADATA_KEYS` extras, which Foundry cannot
- * see), then the URL-userinfo sweep. Only a site's first visit counts. A
+ * see), then the URL-userinfo sweep, then Edge main's TLS-material layer
+ * (ferrum-edge#7054, after v0.9.20). Only a site's first visit counts. A
  * container a rule renders wholesale is a site of its own; what was inside it
  * is not.
+ *
+ * The TLS-material layer routes the exact `[REDACTED]` through the recorder at
+ * every string site, so Edge main refuses a non-admin plugin-config write that
+ * carries it anywhere, as it already does for proxies and upstreams
+ * (ferrum-edge#7060). The pinned v0.9.20 refuses it only where an earlier
+ * layer masks the field; replaying the newer rule there blocks a literal
+ * `[REDACTED]` the older gateway would have stored, which fails closed. A
+ * URL-shaped placeholder outside a masked field is still not a site.
  *
  * `rules` is `undefined` for a plugin the table does not name. That may be a
  * built-in added after Foundry's copy of the table, whose rules Foundry cannot
@@ -449,6 +545,11 @@ export function refusedPlaceholderSites(
       }
       return;
     }
+    // A TLS source Edge leaves visible is not rendered, so a later layer may
+    // still visit it; likewise a trivial destination path.
+    if (sensitivity === "certificate" && !tlsSourceWithheld(value, "public")) return;
+    if (sensitivity === "private-key" && !tlsSourceWithheld(value, "private-key")) return;
+    if (sensitivity === "endpoint-path" && (value === "" || value === "/")) return;
     render(holder, key, pointer);
   };
 
@@ -513,6 +614,29 @@ export function refusedPlaceholderSites(
     }
   };
 
+  // Edge main's last layer (`withhold_tls_material`): every string that is
+  // the exact placeholder, or that a read withholds as TLS private-key
+  // material (classified by its field name, which array entries inherit).
+  const tlsMaterial = (
+    holder: Container,
+    key: string | number,
+    pointer: string,
+    field: TlsMaterialField | null,
+  ) => {
+    const value = memberOf(holder, key);
+    if (typeof value === "string") {
+      if (value === REDACTED_PLACEHOLDER || tlsMaterialWithheld(value, field)) {
+        render(holder, key, pointer);
+      }
+    } else if (Array.isArray(value)) {
+      value.forEach((_, index) => tlsMaterial(value, index, `${pointer}/${index}`, field));
+    } else if (isObject(value)) {
+      for (const child of Object.keys(value)) {
+        tlsMaterial(value, child, `${pointer}/${pointerSegment(child)}`, tlsMaterialField(child));
+      }
+    }
+  };
+
   if (!isObject(root.config)) {
     // No built-in accepts a scalar or array config; Edge withholds it whole.
     render(root, "config", PLUGIN_CONFIG_POINTER);
@@ -523,5 +647,6 @@ export function refusedPlaceholderSites(
   }
   byName(root.config, PLUGIN_CONFIG_POINTER);
   sweep(root, "config", PLUGIN_CONFIG_POINTER);
+  tlsMaterial(root, "config", PLUGIN_CONFIG_POINTER, null);
   return sites;
 }

@@ -39,12 +39,21 @@ const RULE_SET_DECLARATION_PATTERN =
   /\bconst\s+([A-Z][A-Z0-9_]*)\s*:\s*&(?:'static\s+)?\[\s*SensitivityRule\s*\]\s*=/g;
 const KEY_SEPARATORS_PATTERN = /[-._]/g;
 
-/** Edge's `FieldSensitivity` variants, as Foundry names them. */
+/**
+ * Edge's `FieldSensitivity` variants, as Foundry names them. Each one listed
+ * here has a projection in `secretRedaction.ts` and in the placeholder replay
+ * (`refusedPlaceholderSites` in `maskedSecrets.ts`); a variant missing from it
+ * is refused, so the table is never re-synced with a class Foundry ignores.
+ */
 export const SENSITIVITY_VARIANTS = {
   Secret: "secret",
   EndpointUrl: "endpoint",
   RedisUrl: "redis",
   KafkaProducerProperties: "kafka",
+  // ferrum-edge#7054 (after v0.9.20).
+  CertificateSource: "certificate",
+  PrivateKeySource: "private-key",
+  EndpointPath: "endpoint-path",
 };
 
 const PUNCTUATION = new Set(["(", ")", "[", "]", "{", "}", ",", "&", ":", ";", "="]);

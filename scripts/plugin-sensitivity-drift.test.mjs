@@ -6,6 +6,7 @@ import {
   orderDependentRules,
   parseKafkaSafeProperties,
   parseSensitivitySchemas,
+  SENSITIVITY_VARIANTS,
 } from "./plugin-sensitivity-drift.mjs";
 import { readSupportedPairing } from "./supported-pairing.mjs";
 import { PLUGIN_SENSITIVITY_SOURCE } from "../src/api/pluginSensitivity.ts";
@@ -213,6 +214,83 @@ test("reports a built-in Foundry is missing, a changed rule, an extra plugin, an
       },
     ],
   );
+});
+
+test("reads Edge main's certificate, private-key, and destination-path classes (ferrum-edge#7054)", () => {
+  // Shaped like Edge main's constructors and rules for these classes.
+  const constructors = `
+const fn private_key_source(path: &'static [&'static str]) -> SensitivityRule {
+    SensitivityRule {
+        path,
+        sensitivity: FieldSensitivity::PrivateKeySource,
+    }
+}
+
+const fn endpoint_path(path: &'static [&'static str]) -> SensitivityRule {
+    SensitivityRule {
+        path,
+        sensitivity: FieldSensitivity::EndpointPath,
+    }
+}
+
+const fn certificate_source(path: &'static [&'static str]) -> SensitivityRule {
+    SensitivityRule {
+        path,
+        sensitivity: FieldSensitivity::CertificateSource,
+    }
+}
+`;
+  const rules = `
+    (
+        "mtls_auth",
+        // Inline CA certificates; a pasted certificate-plus-key bundle is
+        // withheld.
+        &[certificate_source(&[
+            "allowed_issuers",
+            "*",
+            "ca_certificate_pem",
+        ])],
+    ),
+    (
+        "request_mirror",
+        &[endpoint_path(&["mirror_path"])],
+    ),
+    (
+        "udp_logging",
+        &[
+            private_key_source(&["dtls_key_path"]),
+            certificate_source(&["dtls_cert_path"]),
+            certificate_source(&["dtls_ca_cert_path"]),
+        ],
+    ),
+    ("cors", NONE),`;
+  const source = SOURCE
+    .replace("const NONE: &[SensitivityRule] = &[];", `${constructors}\nconst NONE: &[SensitivityRule] = &[];`)
+    .replace('    ("cors", NONE),', rules);
+  const parsed = parseSensitivitySchemas(source);
+  assert.deepEqual(parsed.get("mtls_auth"), [
+    { path: ["allowed_issuers", "*", "ca_certificate_pem"], sensitivity: "certificate" },
+  ]);
+  assert.deepEqual(parsed.get("request_mirror"), [
+    { path: ["mirror_path"], sensitivity: "endpoint-path" },
+  ]);
+  assert.deepEqual(parsed.get("udp_logging"), [
+    { path: ["dtls_key_path"], sensitivity: "private-key" },
+    { path: ["dtls_cert_path"], sensitivity: "certificate" },
+    { path: ["dtls_ca_cert_path"], sensitivity: "certificate" },
+  ]);
+  // A struct literal names the variant directly.
+  const literal = SOURCE.replace(
+    "FieldSensitivity::KafkaProducerProperties,\n        }",
+    "FieldSensitivity::CertificateSource,\n        }",
+  );
+  assert.deepEqual(parseSensitivitySchemas(literal).get("kafka_logging"), [
+    { path: ["producer_config"], sensitivity: "certificate" },
+  ]);
+  // Every variant the parser accepts is one the replay and redaction handle.
+  assert.deepEqual(Object.values(SENSITIVITY_VARIANTS).sort(), [
+    "certificate", "endpoint", "endpoint-path", "kafka", "private-key", "redis", "secret",
+  ]);
 });
 
 test("fails loudly on a shape it cannot read rather than passing over it", () => {
