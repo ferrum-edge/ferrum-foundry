@@ -17,7 +17,9 @@ and [plugin documentation](https://github.com/ferrum-edge/ferrum-edge/blob/main/
 | `mesh_authz` | Native Edge `MeshPolicy` documents under `mesh_policies` (`name`, `namespace`, `scope`, `rules`, and a per-rule `action`), not a Kubernetes CRD envelope. The example denies `/admin/*` namespace-wide and allows one SPIFFE service account. The proxy `namespace` and `labels` drive `PolicyScope` filtering. Mesh mode is not required. |
 | `soap_ws_security` | Timestamp checking is on. UsernameToken (`username_token.credentials`), X.509 (`x509_signature.trusted_certs`), and SAML are off. Before enabling one, supply credentials or trust material and choose a replay scope. `nonce.max_cache_size` bounds the nonce cache; retention time is set by the gateway. |
 | `tcp_connection_throttle` | `max_connections_per_key: 100`, per consumer (falling back to client IP) per gateway process. Attach it to a TCP or TCP+TLS proxy, or to a global policy that covers a TCP listener. |
-| `response_caching` | Caches `GET`/`HEAD` responses with status 200, 301, or 404. |
+| `response_caching` | Caches `GET`/`HEAD` responses with status 200, 301, or 404. The query string and the caller partition are always part of the cache key; there is no `cache_key_include_*` switch. |
+| `ip_restriction` | `allow` and `deny` lists only. Deny always wins and a non-empty `allow` list rejects every other address, so there is no `mode`. |
+| `jwks_auth` | One provider with `jwks_uri` on the loopback IP literal `127.0.0.1` (HTTPS is required for any other host, including the name `localhost`) and `audiences` as a list. There is no singular `audience`. |
 | `compression` | Strong ETags are always preserved; there is no ETag switch. |
 | `loki_logging` | `include_proxy_id_label` labels streams by proxy. |
 | `transaction_debugger` | `redacted_headers` lists headers to redact (it is not a capture allowlist). Body capture is off. |
