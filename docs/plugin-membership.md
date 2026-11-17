@@ -123,8 +123,12 @@ and `subsets[].traffic_policy.tls.private_key`, and a private-key block in any
 other field (a certificate-plus-key bundle in a certificate field), each shown
 as `[REDACTED]`. Paths and `k8s://`, `vault://`, `system://` and other
 references stay visible. On those resources it refuses a non-admin write that
-carries the exact `[REDACTED]` in any string. `admin` reads of every resource
-are raw.
+carries the exact `[REDACTED]` in any string. Edge `main` (ferrum-edge#7054)
+extends both to plugin configurations: a private-key block in any config
+string, a certificate source carrying one, an inline private-key source, and a
+non-trivial destination path (`request_mirror`'s `mirror_path`) read as
+`[REDACTED]`, and the exact `[REDACTED]` in any config string is refused.
+`admin` reads of every resource are raw.
 
 Since v0.9.9, Edge refuses with `400` a `POST` or `PUT` of a plugin
 configuration or upstream that sends one of those placeholders back at a field
