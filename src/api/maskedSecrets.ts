@@ -1,9 +1,9 @@
 /* ------------------------------------------------------------------ */
 /*  Ferrum Foundry – masked secrets in role-projected reads           */
 /*                                                                    */
-/*  Non-admin reads of plugin configurations and upstreams put a      */
-/*  redaction placeholder where a stored secret is withheld. Ferrum   */
-/*  Edge v0.9.9 (ferrum-edge#5925) refuses with `400` a POST or PUT   */
+/*  Non-admin reads of plugin configurations, proxies and upstreams   */
+/*  put a redaction placeholder where a stored secret is withheld.    */
+/*  Ferrum Edge (ferrum-edge#5925) refuses with `400` a POST or PUT   */
 /*  that writes one of those placeholders back at a site the caller's */
 /*  own read masks, and names each site by JSON pointer. This module  */
 /*  recognises the placeholders exactly as Edge does, so an editor    */
@@ -25,7 +25,7 @@ export const REDACTED_QUERY_PLACEHOLDER = "[REDACTED_QUERY]";
 /** Edge's `REDACTED_FRAGMENT_PLACEHOLDER`, the whole fragment of a projected URL. */
 export const REDACTED_FRAGMENT_PLACEHOLDER = "[REDACTED_FRAGMENT]";
 
-/** The only upstream site an `operator` read masks (`UPSTREAM_CONSUL_TOKEN_POINTER`). */
+/** The upstream Consul ACL token an `operator` read masks (`UPSTREAM_CONSUL_TOKEN_POINTER`). */
 export const UPSTREAM_CONSUL_TOKEN_POINTER = "/service_discovery/consul/token";
 
 /** Every plugin configuration site Edge's projection masks lies under `config`. */
@@ -182,18 +182,66 @@ export function pluginConfigPlaceholderPointers(config: unknown): string[] {
   return placeholderPointers(config, PLUGIN_CONFIG_POINTER);
 }
 
-interface MaybeConsulUpstream {
-  service_discovery?: { consul?: { token?: unknown } | null } | null;
+/** `service_discovery.consul.token` of an upstream-shaped body, if any. */
+function consulToken(upstream: unknown): unknown {
+  const discovery = isObject(upstream) ? upstream.service_discovery : undefined;
+  const consul = isObject(discovery) ? discovery.consul : undefined;
+  return isObject(consul) ? consul.token : undefined;
 }
 
 /**
- * Placeholder sites in an upstream. An `operator` read masks one field, the
- * Consul ACL token; Edge checks no other upstream site.
+ * Placeholder sites in an upstream, in the order Edge reports them: the
+ * Consul ACL token (any placeholder form, since a non-admin read always masks
+ * a set token), then every other exact `[REDACTED]` string, which is where a
+ * non-admin read withholds stored TLS private-key material
+ * (`exactPlaceholderPointers`).
  */
-export function upstreamPlaceholderPointers(upstream: MaybeConsulUpstream): string[] {
-  return isRedactionPlaceholder(upstream.service_discovery?.consul?.token)
-    ? [UPSTREAM_CONSUL_TOKEN_POINTER]
-    : [];
+export function upstreamPlaceholderPointers(upstream: unknown): string[] {
+  const rest = exactPlaceholderPointers(upstream).filter(
+    (pointer) => pointer !== UPSTREAM_CONSUL_TOKEN_POINTER,
+  );
+  return isRedactionPlaceholder(consulToken(upstream))
+    ? [UPSTREAM_CONSUL_TOKEN_POINTER, ...rest]
+    : rest;
+}
+
+/** Whether `value` is the placeholder a field seeded from a read shows to `role`, and Edge refuses back. */
+export function isMaskedForRole(value: unknown, role: string | null | undefined): boolean {
+  return role !== "admin" && value === REDACTED_PLACEHOLDER;
+}
+
+/**
+ * The JSON pointer of every string under `value` that is exactly
+ * `[REDACTED]`, in document order, each prefixed with `base`.
+ *
+ * Edge main (ferrum-edge#7060) withholds stored backend TLS private-key
+ * material from every non-admin proxy and upstream read: inline PEM at
+ * `backend_tls_client_key_path`, `port_overrides.<port>.tls.client_key_path`,
+ * `subsets[].traffic_policy.tls.private_key`, and a private-key block in any
+ * other field. To find an echoed placeholder whatever field it was withheld
+ * from, its projection routes the exact `[REDACTED]` at every string site, so
+ * a non-admin write that carries it anywhere in the body is refused with 400.
+ */
+export function exactPlaceholderPointers(value: unknown, base = ""): string[] {
+  if (value === REDACTED_PLACEHOLDER) return [base];
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => exactPlaceholderPointers(item, `${base}/${index}`));
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>).flatMap(([key, item]) =>
+      exactPlaceholderPointers(item, `${base}/${pointerSegment(key)}`),
+    );
+  }
+  return [];
+}
+
+/**
+ * Placeholder sites in a proxy body: every exact `[REDACTED]` string
+ * (`exactPlaceholderPointers`), which a non-admin read shows in place of
+ * stored TLS private-key material.
+ */
+export function proxyPlaceholderPointers(proxy: unknown): string[] {
+  return exactPlaceholderPointers(proxy);
 }
 
 /**

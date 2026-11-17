@@ -7,7 +7,7 @@ import {
   type GuardedOperation,
   type WriteGuard,
 } from "@/api/conditionalWrite";
-import { pluginConfigPlaceholderSites } from "@/api/maskedSecretSites";
+import { pluginConfigPlaceholderSites, refuseMaskedResourceWrite } from "@/api/maskedSecretSites";
 import type { GatewayRole } from "@/lib/capabilities";
 import * as pluginsApi from "@/api/plugins";
 import * as proxiesApi from "@/api/proxies";
@@ -96,8 +96,15 @@ export function bindPluginMembership(
     // (`validatorOf`), which makes the comparison atomic. Layering the proxy
     // editor's baseline guard on top would compare a snapshot this plan never
     // took. See `docs/concurrent-edits.md`.
-    updateProxy: (id, data, basis) =>
-      proxiesApi.replace(scope, id, data, validatorOf(basis)),
+    //
+    // Each proxy body is rebuilt from a read, which for a non-admin role shows
+    // stored TLS private-key material as a placeholder (ferrum-edge#7060).
+    // Edge refuses such a write; it is refused here before it is sent, and the
+    // plan reports and rolls back as for any failed step.
+    updateProxy: async (id, data, basis) => {
+      refuseMaskedResourceWrite("Proxy", id, data, role);
+      return proxiesApi.replace(scope, id, data, validatorOf(basis));
+    },
     getPlugin: (id) => pluginsApi.getConfig(scope, id, true),
     createPlugin: (data) => pluginsApi.createConfig(scope, data),
     updatePlugin: (id, data, basis, expectedProxyIds) =>

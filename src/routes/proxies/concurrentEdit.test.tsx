@@ -27,6 +27,7 @@ vi.mock("@/components/shared/ProxyApiSpecsCard", () => ({
 vi.mock("@/stores/capabilities", () => ({
   useCapabilities: () => ({
     capabilities: { proxies: { allowed: true, reason: null } },
+    facts: { role: null },
   }),
 }));
 vi.mock("@/hooks/usePlugins", () => ({

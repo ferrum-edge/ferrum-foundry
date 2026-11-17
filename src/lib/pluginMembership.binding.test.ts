@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PluginConfig, Proxy, ProxyCreate } from "@/api/types";
 import { proxyFromWrite } from "@/test/proxyWrites";
 import { isStaleResourceError } from "@/api/conditionalWrite";
+import { MaskedSecretWriteError } from "@/api/maskedSecrets";
+import { toUpdatePayload as proxyUpdatePayload } from "@/api/proxies";
 import { setApiErrorHandler } from "@/api/client";
 import { pluginWriteGuard, toUpdatePayload } from "@/api/plugins";
 import {
@@ -179,6 +181,27 @@ describe("plugin membership plans bind every request to the starting namespace",
     ]);
     expect(captured.every((r) => r.namespace === "tenant-a")).toBe(true);
     expect(localStorage.getItem("ferrum:namespace")).toBe("tenant-b");
+  });
+
+  it("never sends a proxy write that echoes a masked TLS private key (#704)", async () => {
+    // A non-admin read shows the stored inline key as `[REDACTED]`
+    // (ferrum-edge#7060), and Edge refuses it written back.
+    const masked = proxyUpdatePayload({
+      ...makeProxy("p3", "v1"),
+      backend_tls_client_key_path: "[REDACTED]",
+    });
+    for (const role of ["operator", null] as const) {
+      const error = await bindPluginMembership({ namespace: "tenant-a" }, role)
+        .updateProxy("p3", masked, null)
+        .catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(MaskedSecretWriteError);
+      expect((error as MaskedSecretWriteError).pointers).toEqual(["/backend_tls_client_key_path"]);
+    }
+    expect(captured).toEqual([]);
+
+    // An admin's read is raw, so the same string is the stored value.
+    await bindPluginMembership({ namespace: "tenant-a" }, "admin").updateProxy("p3", masked, null);
+    expect(captured.map((r) => `${r.method} ${r.path}`)).toEqual(["PUT proxies/p3"]);
   });
 });
 

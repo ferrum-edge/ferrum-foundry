@@ -23,7 +23,8 @@ import {
   type WithNumberDrafts,
 } from "@/lib/formDrafts";
 import { ReadOnlySurface } from "@/components/shared/CapabilityGate";
-import type { CapabilityVerdict } from "@/lib/capabilities";
+import type { CapabilityVerdict, GatewayRole } from "@/lib/capabilities";
+import { isMaskedForRole, MASKED_FIELD_NOTICE } from "@/api/maskedSecrets";
 import type {
   BackendScheme,
   Proxy,
@@ -41,7 +42,10 @@ const PROXY_COLLAPSIBLE_SECTIONS = [
     id: "timeouts",
     errorKeys: ["connect_timeout", "read_timeout", "write_timeout"],
   },
-  { id: "tls", errorKeys: [] },
+  {
+    id: "tls",
+    errorKeys: ["backend_tls_client_cert", "backend_tls_client_key", "backend_tls_server_ca"],
+  },
   { id: "upstream", errorKeys: [] },
   { id: "dns", errorKeys: [] },
   {
@@ -87,6 +91,12 @@ export interface ProxyFormProps {
    * still enforces the same rule for anything the UI has not observed.
    */
   capability?: CapabilityVerdict;
+  /**
+   * The session's gateway role. A non-admin read shows stored backend TLS
+   * private-key material as a placeholder, so only then does one block Save.
+   * Unknown (`null` or omitted) is treated as a non-admin role.
+   */
+  role?: GatewayRole | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -368,6 +378,7 @@ export function ProxyForm({
   onSubmit,
   isLoading,
   capability,
+  role,
 }: ProxyFormProps) {
   const readOnly = capability !== undefined && !capability.allowed;
   const navigate = useNavigate();
@@ -511,10 +522,23 @@ export function ProxyForm({
   /* ---------- Scheme field set ---------- */
 
   const fields = proxySchemeFields(backendScheme, passthrough);
+
+  // A non-admin read withholds stored TLS private-key material (inline PEM,
+  // or a key block pasted into a certificate field) as `[REDACTED]`
+  // (ferrum-edge#7060). It cannot be written back: Save stays blocked until
+  // the field is re-entered or cleared. An admin's read is raw. A field that
+  // this scheme does not send blocks nothing.
+  const maskedTls = {
+    backend_tls_client_cert: fields.backendTls && isMaskedForRole(backendTlsCertPath, role),
+    backend_tls_client_key: fields.backendTls && isMaskedForRole(backendTlsKeyPath, role),
+    backend_tls_server_ca: fields.backendTls && isMaskedForRole(backendTlsCaPath, role),
+  };
   const isStream = SCHEME_FAMILY[backendScheme] !== "http";
 
   /* ---------- Validation ---------- */
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const clearError = (key: string) =>
+    setErrors(({ [key]: _cleared, ...rest }) => rest);
 
   const validate = (): boolean => {
     const errs: Record<string, string> = {};
@@ -566,6 +590,9 @@ export function ProxyForm({
     // restriction is a 400, not "allow nothing".
     if (fields.routing && restrictMethods && allowedMethods.length === 0) {
       errs.allowed_methods = "Select at least one method, or stop restricting methods";
+    }
+    for (const [key, masked] of Object.entries(maskedTls)) {
+      if (masked) errs[key] = "Re-enter or clear it before saving.";
     }
     setErrors(errs);
     const ok = Object.keys(errs).length === 0;
@@ -943,21 +970,42 @@ export function ProxyForm({
               <Input
                 label="Backend TLS Client Cert Path"
                 value={backendTlsCertPath}
-                onChange={(e) => setBackendTlsCertPath(e.target.value)}
+                onChange={(e) => {
+                  setBackendTlsCertPath(e.target.value);
+                  clearError("backend_tls_client_cert");
+                }}
                 placeholder="/path/to/cert.pem"
+                error={errors.backend_tls_client_cert}
               />
+              {maskedTls.backend_tls_client_cert && (
+                <p className="text-xs text-warning">{MASKED_FIELD_NOTICE}</p>
+              )}
               <Input
                 label="Backend TLS Client Key Path"
                 value={backendTlsKeyPath}
-                onChange={(e) => setBackendTlsKeyPath(e.target.value)}
+                onChange={(e) => {
+                  setBackendTlsKeyPath(e.target.value);
+                  clearError("backend_tls_client_key");
+                }}
                 placeholder="/path/to/key.pem"
+                error={errors.backend_tls_client_key}
               />
+              {maskedTls.backend_tls_client_key && (
+                <p className="text-xs text-warning">{MASKED_FIELD_NOTICE}</p>
+              )}
               <Input
                 label="Backend TLS Server CA Cert Path"
                 value={backendTlsCaPath}
-                onChange={(e) => setBackendTlsCaPath(e.target.value)}
+                onChange={(e) => {
+                  setBackendTlsCaPath(e.target.value);
+                  clearError("backend_tls_server_ca");
+                }}
                 placeholder="/path/to/ca.pem"
+                error={errors.backend_tls_server_ca}
               />
+              {maskedTls.backend_tls_server_ca && (
+                <p className="text-xs text-warning">{MASKED_FIELD_NOTICE}</p>
+              )}
             </>
           ) : (
             <p className="text-text-muted text-xs">

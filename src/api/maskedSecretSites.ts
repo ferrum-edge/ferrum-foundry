@@ -13,7 +13,9 @@
 
 import type { GatewayRole } from "@/lib/capabilities";
 import {
+  MaskedSecretWriteError,
   pluginConfigPlaceholderPointers,
+  proxyPlaceholderPointers,
   refusedPlaceholderSites,
   upstreamPlaceholderPointers,
 } from "./maskedSecrets";
@@ -72,8 +74,9 @@ export function pluginConfigPlaceholderSites(
 }
 
 /**
- * The upstream equivalent. An `operator` read masks only the Consul ACL token;
- * an `admin` read masks nothing.
+ * The upstream equivalent. A non-admin read masks the Consul ACL token and
+ * stored TLS private-key material (`upstreamPlaceholderPointers`); an `admin`
+ * read masks nothing.
  */
 export function upstreamPlaceholderSites(
   upstream: Parameters<typeof upstreamPlaceholderPointers>[0],
@@ -81,4 +84,41 @@ export function upstreamPlaceholderSites(
 ): PlaceholderSites {
   const all = upstreamPlaceholderPointers(upstream);
   return split(all, role === "admin" ? [] : all);
+}
+
+/**
+ * The proxy equivalent. A non-admin read masks stored TLS private-key
+ * material (`proxyPlaceholderPointers`); an `admin` read masks nothing.
+ */
+export function proxyPlaceholderSites(
+  proxy: unknown,
+  role: GatewayRole | null | undefined,
+): PlaceholderSites {
+  const all = proxyPlaceholderPointers(proxy);
+  return split(all, role === "admin" ? [] : all);
+}
+
+/**
+ * Refuse, before anything is sent, a proxy or upstream write whose body still
+ * carries a placeholder Edge refuses for `role`: one the editor does not show
+ * (an upstream subset's TLS key, say), or a read-derived write such as a
+ * membership plan's proxy update. Throws `MaskedSecretWriteError` naming the
+ * sites; no value is included.
+ */
+export function refuseMaskedResourceWrite(
+  resource: "Proxy" | "Upstream",
+  id: string,
+  body: unknown,
+  role: GatewayRole | null | undefined,
+): void {
+  const sites = resource === "Proxy" ? proxyPlaceholderSites : upstreamPlaceholderSites;
+  const blocking = sites(body, role).blocking;
+  if (blocking.length === 0) return;
+  throw new MaskedSecretWriteError(
+    `${resource} ${id} was not saved: ${blocking.join(", ")} still carry the placeholder ` +
+      "that reads for your role show in place of a stored secret, and Ferrum Edge refuses it. " +
+      "Re-enter or clear each value (clearing deletes the stored secret), or have an admin " +
+      "make the change.",
+    blocking,
+  );
 }

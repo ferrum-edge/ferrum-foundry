@@ -6,8 +6,11 @@ import { describe, expect, it } from "vitest";
 import {
   pluginConfigPlaceholderSites,
   pluginConfigRefusedSites,
+  proxyPlaceholderSites,
+  refuseMaskedResourceWrite,
   upstreamPlaceholderSites,
 } from "./maskedSecretSites";
+import { MaskedSecretWriteError } from "./maskedSecrets";
 
 describe("plugin config sites Edge refuses for a non-admin role", () => {
   it("blocks the schema's endpoint and header sites", () => {
@@ -107,6 +110,10 @@ describe("role", () => {
         "admin",
       ),
     ).toEqual({ blocking: [], other: ["/service_discovery/consul/token"] });
+    expect(proxyPlaceholderSites({ backend_tls_client_key_path: "[REDACTED]" }, "admin")).toEqual({
+      blocking: [],
+      other: ["/backend_tls_client_key_path"],
+    });
   });
 
   it.each(["operator", null, undefined] as const)("blocks for %s", (role) => {
@@ -117,5 +124,44 @@ describe("role", () => {
       upstreamPlaceholderSites({ service_discovery: { consul: { token: "[REDACTED]" } } }, role)
         .blocking,
     ).toEqual(["/service_discovery/consul/token"]);
+    expect(
+      upstreamPlaceholderSites({ backend_tls_client_key_path: "[REDACTED]" }, role).blocking,
+    ).toEqual(["/backend_tls_client_key_path"]);
+    expect(
+      proxyPlaceholderSites({ backend_tls_client_key_path: "[REDACTED]" }, role).blocking,
+    ).toEqual(["/backend_tls_client_key_path"]);
+  });
+});
+
+describe("a proxy or upstream write refused before it is sent (ferrum-edge#7060)", () => {
+  // A subset TLS key the upstream editor does not show, round-tripped from the read.
+  const upstream = {
+    name: "payments",
+    subsets: [{ name: "v2", traffic_policy: { tls: { private_key: "[REDACTED]" } } }],
+  };
+
+  it("refuses a non-admin write naming each masked site and no value", () => {
+    for (const role of ["operator", null, undefined] as const) {
+      let refused: unknown;
+      try {
+        refuseMaskedResourceWrite("Upstream", "payments", upstream, role);
+      } catch (error) {
+        refused = error;
+      }
+      expect(refused).toBeInstanceOf(MaskedSecretWriteError);
+      expect((refused as MaskedSecretWriteError).pointers).toEqual([
+        "/subsets/0/traffic_policy/tls/private_key",
+      ]);
+    }
+    expect(() =>
+      refuseMaskedResourceWrite("Proxy", "orders", { backend_tls_client_key_path: "[REDACTED]" }, "operator"),
+    ).toThrow(MaskedSecretWriteError);
+  });
+
+  it("lets an admin's write and a write without a placeholder through", () => {
+    expect(() => refuseMaskedResourceWrite("Upstream", "payments", upstream, "admin")).not.toThrow();
+    expect(() =>
+      refuseMaskedResourceWrite("Proxy", "orders", { backend_tls_client_key_path: "/k.pem" }, "operator"),
+    ).not.toThrow();
   });
 });

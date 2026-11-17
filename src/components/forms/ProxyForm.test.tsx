@@ -573,3 +573,61 @@ describe("ProxyForm per-scheme fields (#655)", () => {
     }
   });
 });
+
+describe("ProxyForm masked backend TLS key (ferrum-edge#7060)", () => {
+  const maskedProxy: Proxy = {
+    ...httpProxy,
+    backend_scheme: "https",
+    backend_tls_client_cert_path: "/certs/client.pem",
+    backend_tls_client_key_path: "[REDACTED]",
+  };
+
+  async function renderWithRole(initialData: Proxy, role?: "admin" | "operator") {
+    await act(async () => {
+      root.render(
+        <ProxyForm initialData={initialData} onSubmit={submit} isLoading={false} role={role} />,
+      );
+    });
+  }
+
+  it.each(["operator", undefined] as const)(
+    "blocks Save for %s while the key is the placeholder a non-admin read returns",
+    async (role) => {
+      await renderWithRole(maskedProxy, role);
+      // TLS Settings is collapsed; the refusal reopens it at the key.
+      await save();
+      expect(submit).not.toHaveBeenCalled();
+      expect(host.textContent).toContain(
+        "Hidden from your role: re-enter it, or clear it (clearing deletes the stored secret).",
+      );
+      expect(inputByLabel(host, "Backend TLS Client Key Path").getAttribute("aria-invalid"))
+        .toBe("true");
+      expect(inputByLabel(host, "Backend TLS Client Cert Path").getAttribute("aria-invalid"))
+        .not.toBe("true");
+    },
+  );
+
+  it("saves once the key is cleared, omitting it so the save deletes the stored key", async () => {
+    await renderWithRole(maskedProxy, "operator");
+    await save();
+    await clearText(inputByLabel(host, "Backend TLS Client Key Path"));
+    await save();
+    const payload = submitted();
+    expect(payload).not.toHaveProperty("backend_tls_client_key_path");
+    expect(payload.backend_tls_client_cert_path).toBe("/certs/client.pem");
+    expect(mergeFormUpdatePayload(maskedProxy, payload).backend_tls_client_key_path).toBeNull();
+  });
+
+  it("saves an admin's literal placeholder as written", async () => {
+    await renderWithRole(maskedProxy, "admin");
+    await save();
+    expect(submitted().backend_tls_client_key_path).toBe("[REDACTED]");
+    expect(host.textContent).not.toContain("Hidden from your role");
+  });
+
+  it("blocks nothing for a scheme that sends no backend TLS", async () => {
+    await renderWithRole({ ...maskedProxy, backend_scheme: "http" }, "operator");
+    await save();
+    expect(submitted()).not.toHaveProperty("backend_tls_client_key_path");
+  });
+});

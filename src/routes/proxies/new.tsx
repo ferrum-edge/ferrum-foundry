@@ -27,7 +27,7 @@ function ProxyCreateEditor({ session }: { session: EditorSession }) {
   const navigate = useNavigate();
   const createProxy = useCreateProxy();
   const { toast } = useToast();
-  const { capabilities } = useCapabilities();
+  const { capabilities, facts } = useCapabilities();
   const capability = capabilities.proxies;
 
   const handleSubmit = session.bind(async (data: ProxyCreate) => {
@@ -72,6 +72,7 @@ function ProxyCreateEditor({ session }: { session: EditorSession }) {
           onSubmit={handleSubmit}
           isLoading={createProxy.isPending}
           capability={capability}
+          role={facts.role}
         />
       </Card>
     </div>

@@ -24,6 +24,7 @@ import { UpstreamForm } from "@/components/forms/UpstreamForm";
 import { TargetForm } from "@/components/forms/TargetForm";
 import { committedWriteMessage, getApiErrorMessage, getCommittedWrite } from "@/api/client";
 import { MaskedSecretRefusal } from "@/components/shared/MaskedSecretRefusal";
+import { refuseMaskedResourceWrite } from "@/api/maskedSecretSites";
 import * as upstreamsApi from "@/api/upstreams";
 import { STALE_EDITOR_MESSAGE } from "@/lib/editorIdentity";
 import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
@@ -177,9 +178,13 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
     if (!upstream || !capability.allowed || refuseWhileSaving()) return;
     setSaveError(null);
     try {
+      const payload = upstreamsApi.mergeFormUpdatePayload(upstream, data);
+      // The form blocks a placeholder in a field it shows; this also covers
+      // one it round-trips without showing (a subset or port-override TLS key).
+      refuseMaskedResourceWrite("Upstream", upstreamId, payload, facts.role);
       const updated = await updateUpstream.mutateAsync({
         id: upstreamId,
-        data: upstreamsApi.mergeFormUpdatePayload(upstream, data),
+        data: payload,
         guard: baseline.current(),
       });
       baseline.adopt(updated);

@@ -567,3 +567,57 @@ describe("UpstreamForm Kubernetes discovery", () => {
     });
   });
 });
+
+describe("UpstreamForm masked backend TLS key (ferrum-edge#7060)", () => {
+  async function mountMaskedKey(role?: "admin" | "operator") {
+    const initialData: Upstream = {
+      id: "upstream-1",
+      name: "payments",
+      algorithm: "round_robin",
+      targets: [{ host: "backend", port: 8080, weight: 1 }],
+      created_at: "2026-11-17T00:00:00Z",
+      updated_at: "2026-11-17T00:00:00Z",
+      backend_tls_client_cert_path: "/certs/client.pem",
+      backend_tls_client_key_path: "[REDACTED]",
+    };
+    await act(async () => {
+      root.render(
+        <UpstreamForm initialData={initialData} onSubmit={submit} isLoading={false} role={role} />,
+      );
+    });
+  }
+
+  it.each(["operator", undefined] as const)(
+    "blocks Save for %s while the key is the placeholder a non-admin read returns",
+    async (role) => {
+      await mountMaskedKey(role);
+      // Backend TLS is collapsed; the refusal reopens it at the key.
+      await save();
+      expect(submit).not.toHaveBeenCalled();
+      expect(host.textContent).toContain(
+        "Hidden from your role: re-enter it, or clear it (clearing deletes the stored secret).",
+      );
+      expect(inputByLabel(host, "Client Key Path (mTLS)").getAttribute("aria-invalid")).toBe("true");
+      expect(inputByLabel(host, "Client Cert Path (mTLS)").getAttribute("aria-invalid")).not.toBe("true");
+    },
+  );
+
+  it("saves a re-entered key reference", async () => {
+    await mountMaskedKey("operator");
+    await save();
+    const key = inputByLabel(host, "Client Key Path (mTLS)");
+    await clearText(key);
+    await typeText(key, "/certs/client.key");
+    await save();
+    expect(submit).toHaveBeenCalledOnce();
+    expect(submit.mock.calls[0]?.[0].backend_tls_client_key_path).toBe("/certs/client.key");
+  });
+
+  it("saves an admin's literal placeholder as written", async () => {
+    await mountMaskedKey("admin");
+    await save();
+    expect(submit).toHaveBeenCalledOnce();
+    expect(submit.mock.calls[0]?.[0].backend_tls_client_key_path).toBe("[REDACTED]");
+    expect(host.textContent).not.toContain("Hidden from your role");
+  });
+});
