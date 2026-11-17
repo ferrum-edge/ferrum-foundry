@@ -103,16 +103,18 @@ export function defaultToolAction(config: unknown): "allow" | "deny" {
 }
 
 /**
- * Whether a tool with no `policy.tools` entry stays hidden: Edge v0.9.9
+ * Whether a tool with no `policy.tools` entry stays hidden: Edge
  * (`mcp_gateway.rs`, catalog construction) hides a tool new to a session's
  * catalog while `discovery.on_new_tool` is `hide_until_configured`, its
- * default, until `policy.tools` names it. `allow`, `allow_immediately`, and
- * `expose` let it through to `default_action`.
+ * default, until `policy.tools` names it. Only `allow` lets it through to
+ * `default_action`: Edge main (ferrum-edge#7114) accepts no other value, and
+ * refuses the retired `allow_immediately` and `expose` aliases, so this never
+ * reads them as letting a tool through.
  */
 export function hidesUnconfiguredTools(config: unknown): boolean {
   const discovery = isPlainObject(config) ? config.discovery : undefined;
   const onNewTool = isPlainObject(discovery) ? discovery.on_new_tool : undefined;
-  return onNewTool === undefined || onNewTool === null || onNewTool === "hide_until_configured";
+  return onNewTool !== "allow";
 }
 
 /** What removing an entry leaves the tool with, in words. */

@@ -495,18 +495,60 @@ export function validatePluginConfigWrite(body, method) {
 }
 
 const MCP_TOOL_ACTIONS = ['allow', 'deny', 'hide_from_discovery'];
+const MCP_DISCOVERY_BEHAVIORS = ['allow', 'hide_until_configured'];
+const MCP_INITIALIZE_STRATEGIES = ['lazy', 'passthrough'];
+
+function isObjectValue(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * The spellings Ferrum Edge main removed from `mcp_gateway` (ferrum-edge#7136,
+ * #7114): `discovery.hide_denied_items` is an unknown key
+ * (`policy.hide_denied_tools` is the only switch), `discovery.on_new_tool` /
+ * `on_schema_change` accept only `allow` or `hide_until_configured`, and
+ * `sessions.initialize_upstreams` / `servers.<id>.initialize_strategy` only
+ * `lazy` or `passthrough`. Edge's own wording is not reproduced; the status is.
+ */
+function retiredMcpGatewaySpelling(config) {
+  const discovery = config?.discovery;
+  if (isObjectValue(discovery)) {
+    if (Object.hasOwn(discovery, 'hide_denied_items')) return 'discovery: unknown key hide_denied_items';
+    for (const key of ['on_new_tool', 'on_schema_change']) {
+      if (discovery[key] != null && !MCP_DISCOVERY_BEHAVIORS.includes(discovery[key])) {
+        return `discovery.${key} must be allow or hide_until_configured`;
+      }
+    }
+  }
+  const initialize = config?.sessions?.initialize_upstreams;
+  if (initialize != null && !MCP_INITIALIZE_STRATEGIES.includes(initialize)) {
+    return 'sessions.initialize_upstreams must be lazy or passthrough';
+  }
+  if (isObjectValue(config?.servers)) {
+    for (const [id, server] of Object.entries(config.servers)) {
+      const strategy = server?.initialize_strategy;
+      if (strategy != null && !MCP_INITIALIZE_STRATEGIES.includes(strategy)) {
+        return `servers.${id}.initialize_strategy must be lazy or passthrough`;
+      }
+    }
+  }
+  return null;
+}
 
 /**
  * The `policy.tools` rules Ferrum Edge v0.9.9 applies to an `mcp_gateway`
  * configuration (`McpGatewayConfig` schema plus plugin load): a closed entry
  * with a known action, groups only on `allow`, never empty, never naming a
- * group in both lists, and catalog policy only in `aggregate_router`.
+ * group in both lists, and catalog policy only in `aggregate_router`. The
+ * spellings Edge main removed are refused first (`retiredMcpGatewaySpelling`).
  * Edge's own wording is not reproduced; the status is.
  */
 export function validateMcpGatewayPolicy(config) {
+  const refuse = (message) => ({ error: `Invalid mcp_gateway config: ${message}` });
+  const retired = retiredMcpGatewaySpelling(config);
+  if (retired) return refuse(retired);
   const tools = config?.policy?.tools;
   if (tools == null) return null;
-  const refuse = (message) => ({ error: `Invalid mcp_gateway config: ${message}` });
   if (config.mode !== 'aggregate_router') {
     return refuse('policy.tools requires mode aggregate_router');
   }
@@ -1049,7 +1091,7 @@ function mcpToolEntry(plugin, proxy, server, tool) {
   const action = entry?.action ?? policy.default_action ?? 'deny';
   const hideUntilConfigured = (discovery.on_new_tool ?? 'hide_until_configured') === 'hide_until_configured';
   const effective = !entry && hideUntilConfigured ? 'hidden_until_configured' : action;
-  const hideDenied = (policy.hide_denied_tools ?? true) || (discovery.hide_denied_items ?? true);
+  const hideDenied = policy.hide_denied_tools ?? true;
   let listed = effective === 'allow' || (effective === 'deny' && !hideDenied);
   let callable = effective === 'allow';
   if (tool.method && Array.isArray(proxy.allowed_methods) && !proxy.allowed_methods.includes(tool.method)) {
@@ -1110,7 +1152,7 @@ function servedCatalog(plugin, proxy, discovered) {
     },
     policy: {
       default_action: config.policy?.default_action ?? 'deny',
-      hide_denied_tools: (config.policy?.hide_denied_tools ?? true) || (config.discovery?.hide_denied_items ?? true),
+      hide_denied_tools: config.policy?.hide_denied_tools ?? true,
     },
     limits: { max_catalog_items_per_list: 10000, max_catalog_bytes_per_list: 8388608 },
   };

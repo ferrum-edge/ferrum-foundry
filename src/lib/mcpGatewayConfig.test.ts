@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { getPluginConfigDefault } from "./pluginConfigDefaults";
 import {
+  MCP_GATEWAY_AGGREGATE_ONLY_PATHS,
   mcpGatewayConfigHasAggregateOnlyFields,
   omitMcpGatewayAggregateOnlyFields,
+  pickMcpGatewayAggregateOnlyFields,
   sanitizeMcpGatewayConfigForSubmit,
   switchMcpGatewayMode,
 } from "./mcpGatewayConfig";
@@ -89,6 +91,21 @@ describe("mcpGatewayConfig", () => {
     expect(submitted.policy).toBeUndefined();
     expect(submitted.discovery).toBeUndefined();
     expect(mcpGatewayConfigHasAggregateOnlyFields(submitted)).toBe(false);
+  });
+
+  it("never stashes or restores the discovery.hide_denied_items key Edge removed", () => {
+    // Edge main (ferrum-edge#7136) refuses it as an unknown key in every mode;
+    // policy.hide_denied_tools is the only switch.
+    expect(MCP_GATEWAY_AGGREGATE_ONLY_PATHS).not.toContain("discovery.hide_denied_items");
+    const legacy = { discovery: { hide_denied_items: false } };
+    expect(mcpGatewayConfigHasAggregateOnlyFields(legacy)).toBe(false);
+    expect(pickMcpGatewayAggregateOnlyFields({
+      ...aggregateConfig,
+      discovery: { ...aggregateConfig.discovery, hide_denied_items: false },
+    })).toEqual({
+      discovery: { aggregate_tools: true },
+      policy: aggregateConfig.policy,
+    });
   });
 
   it("leaves aggregate-mode submissions unchanged", () => {

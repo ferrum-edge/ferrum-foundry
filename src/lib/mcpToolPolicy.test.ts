@@ -200,14 +200,20 @@ describe("a tool with no entry", () => {
   });
 
   it("gets the default action when new tools are let through", () => {
-    for (const onNewTool of ["allow", "allow_immediately", "expose"]) {
-      expect(hidesUnconfiguredTools({ discovery: { on_new_tool: onNewTool } })).toBe(false);
-    }
+    expect(hidesUnconfiguredTools({ discovery: { on_new_tool: "allow" } })).toBe(false);
     expect(unconfiguredToolSummary(gateway({ discovery: { on_new_tool: "allow" } })))
       .toBe("No entry (default: Deny)");
     expect(unconfiguredToolSummary({
-      discovery: { on_new_tool: "expose" },
+      discovery: { on_new_tool: "allow" },
       policy: { default_action: "allow" },
     })).toBe("No entry (default: Allow)");
+  });
+
+  it("never reads the retired on_new_tool aliases as letting a tool through", () => {
+    // Edge main (ferrum-edge#7114) accepts only `allow` and
+    // `hide_until_configured`; `allow_immediately` and `expose` are refused.
+    for (const onNewTool of ["allow_immediately", "expose"]) {
+      expect(hidesUnconfiguredTools({ discovery: { on_new_tool: onNewTool } })).toBe(true);
+    }
   });
 });

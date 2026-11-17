@@ -9,6 +9,11 @@ export type McpGatewayMode = "aggregate_router" | "transparent_proxy";
  * `forward_client_credentials` are refused there too; they sit under
  * operator-named `servers.*` keys, so they stay with the raw JSON editor and
  * Edge admission.
+ *
+ * `discovery.hide_denied_items` is not listed: Edge main (ferrum-edge#7136)
+ * removed it in favour of `policy.hide_denied_tools` and refuses it as an
+ * unknown key in every mode, so a mode switch must neither stash nor restore
+ * it.
  */
 export const MCP_GATEWAY_AGGREGATE_ONLY_PATHS = [
   "policy.default_action",
@@ -23,7 +28,6 @@ export const MCP_GATEWAY_AGGREGATE_ONLY_PATHS = [
   "discovery.aggregate_prompts",
   "discovery.namespace_separator",
   "discovery.cache_ttl_seconds",
-  "discovery.hide_denied_items",
   "discovery.on_new_tool",
   "discovery.on_schema_change",
 ] as const;
