@@ -471,7 +471,13 @@ describe("ProxyForm per-scheme fields (#655)", () => {
   });
 
   it("offers and sends no pool_max_requests_per_connection, which Edge removed (#701)", async () => {
-    await renderForm({ ...tunedHttpProxy, allowed_methods: null });
+    // A v0.9.20 read still returns a stored value.
+    const read = {
+      ...tunedHttpProxy,
+      allowed_methods: null,
+      pool_max_requests_per_connection: 1000,
+    } as Proxy;
+    await renderForm(read);
     await toggleSection("Connection Pool");
     expect(inputByLabel(host, "HTTP/2 Max Concurrent Streams").value).toBe("100");
     expect(inputByLabelOrNull(host, "Max Requests per Connection")).toBeNull();
@@ -479,7 +485,7 @@ describe("ProxyForm per-scheme fields (#655)", () => {
     const payload = submitted();
     expect(payload.pool_http2_max_concurrent_streams).toBe(100);
     expect(payload).not.toHaveProperty("pool_max_requests_per_connection");
-    expect(mergeFormUpdatePayload(tunedHttpProxy, payload))
+    expect(mergeFormUpdatePayload(read, payload))
       .not.toHaveProperty("pool_max_requests_per_connection");
   });
 

@@ -97,11 +97,15 @@ describe("proxy full-replacement builders", () => {
   it("never sends the pool_max_requests_per_connection field Edge removed", () => {
     // Ferrum Edge #7218 removed the field from the closed Proxy schema, so a
     // PUT that carries it at all, even as null, is refused as an unknown field.
-    const payload = mergeFormUpdatePayload(fullProxy(), {
+    // A v0.9.20 read still returns a stored value.
+    const read = { ...fullProxy(), pool_max_requests_per_connection: 900 } as Proxy;
+    expect(toUpdatePayload(read)).not.toHaveProperty("pool_max_requests_per_connection");
+    const payload = mergeFormUpdatePayload(read, {
       backend_host: "backend.example.com",
       backend_port: 443,
     });
     expect(payload).not.toHaveProperty("pool_max_requests_per_connection");
+    expect(read).toHaveProperty("pool_max_requests_per_connection", 900);
   });
 
   it("distinguishes explicit false from inherited null", () => {

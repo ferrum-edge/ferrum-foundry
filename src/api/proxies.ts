@@ -95,9 +95,17 @@ export async function getReference(
 }
 
 /**
+ * Fields Ferrum Edge removed from the closed `Proxy` schema, so a body that
+ * carries one is refused as an unknown field. A read from an older gateway can
+ * still return one (v0.9.20 serializes a stored
+ * `pool_max_requests_per_connection`, ferrum-edge#7218); it is never sent.
+ */
+const RETIRED_PROXY_FIELDS = ["pool_max_requests_per_connection"] as const;
+
+/**
  * Convert a fetched Proxy into a full-replace PUT payload. PUT is a full
  * replacement, so partial payloads would silently reset omitted fields.
- * Server-managed fields are stripped; everything else round-trips.
+ * Server-managed and retired fields are stripped; everything else round-trips.
  */
 export function toUpdatePayload(proxy: Proxy): ProxyCreate {
   const { created_at, updated_at, namespace, api_spec_id, ...rest } = proxy;
@@ -105,6 +113,9 @@ export function toUpdatePayload(proxy: Proxy): ProxyCreate {
   void updated_at;
   void namespace;
   void api_spec_id;
+  for (const field of RETIRED_PROXY_FIELDS) {
+    delete (rest as Record<string, unknown>)[field];
+  }
   return rest;
 }
 
