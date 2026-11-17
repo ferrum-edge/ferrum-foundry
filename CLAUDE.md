@@ -41,7 +41,9 @@ Shared org contracts are vendored under `contracts/ferrum-contracts/`; see
 ## Development
 
 ```bash
-# Required env vars for the BFF server
+# Required env vars for the BFF server. The two example secrets below are
+# published, so the BFF refuses them under NODE_ENV=production; the
+# deploy/starter/.env.example placeholder is refused in every mode.
 export FERRUM_ADMIN_URL=http://127.0.0.1:9000
 export FERRUM_JWT_SECRET=dev-secret-at-least-32-characters-long
 export FERRUM_BFF_AUTH_TOKEN=dev-bff-token-at-least-32-characters-long
