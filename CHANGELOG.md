@@ -756,6 +756,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The mock admin gateway listed no denied MCP tools even with
   `policy.hide_denied_tools: false`, because it also ORed in
   `discovery.hide_denied_items`, which defaults to true (#706).
+- An upstream settings save no longer deletes subset fields the editor does
+  not show. The form rebuilt each subset from its name, labels, algorithm and
+  hash key, so an admin's save silently dropped a stored
+  `subsets[].traffic_policy.tls` policy (key included) and every other
+  `traffic_policy` field. Each subset row now keeps the subset it was read
+  from and the save merges the edited fields onto it. Ferrum Edge refuses the
+  mesh-projected `traffic_policy` fields (`tls`, `connect_timeout_ms`, the
+  HTTP connection-pool caps, `passive_health_check`) on an operator write,
+  so a save of an upstream that carries one is now refused by Edge, naming
+  the field, instead of erasing it unseen.
 
 ### Changed
 
