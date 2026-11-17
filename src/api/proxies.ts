@@ -145,7 +145,6 @@ export function mergeFormUpdatePayload(
     "pool_http2_adaptive_window",
     "pool_http2_max_frame_size",
     "pool_http2_max_concurrent_streams",
-    "pool_max_requests_per_connection",
     "listen_port",
     "tcp_idle_timeout_seconds",
     "websocket_idle_timeout_seconds",

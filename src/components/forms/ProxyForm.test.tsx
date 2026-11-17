@@ -367,7 +367,6 @@ describe("ProxyForm per-scheme fields (#655)", () => {
     pool_tcp_keepalive_seconds: 60,
     pool_http2_keep_alive_interval_seconds: 10,
     pool_http2_max_concurrent_streams: 100,
-    pool_max_requests_per_connection: 1000,
   };
   const httpOnlyKeys = [
     "listen_path",
@@ -384,7 +383,6 @@ describe("ProxyForm per-scheme fields (#655)", () => {
     "pool_tcp_keepalive_seconds",
     "pool_http2_keep_alive_interval_seconds",
     "pool_http2_max_concurrent_streams",
-    "pool_max_requests_per_connection",
   ];
   const sectionButton = (title: string) =>
     Array.from(host.querySelectorAll("button")).find((button) =>
@@ -470,6 +468,19 @@ describe("ProxyForm per-scheme fields (#655)", () => {
     expectNoMatchers(update);
     expect(update.retry).toEqual(tcpRetry);
     expect(update.allowed_methods).toBeNull();
+  });
+
+  it("offers and sends no pool_max_requests_per_connection, which Edge removed (#701)", async () => {
+    await renderForm({ ...tunedHttpProxy, allowed_methods: null });
+    await toggleSection("Connection Pool");
+    expect(inputByLabel(host, "HTTP/2 Max Concurrent Streams").value).toBe("100");
+    expect(inputByLabelOrNull(host, "Max Requests per Connection")).toBeNull();
+    await save();
+    const payload = submitted();
+    expect(payload.pool_http2_max_concurrent_streams).toBe(100);
+    expect(payload).not.toHaveProperty("pool_max_requests_per_connection");
+    expect(mergeFormUpdatePayload(tunedHttpProxy, payload))
+      .not.toHaveProperty("pool_max_requests_per_connection");
   });
 
   it("keeps the HTTP matchers an HTTP proxy reads", async () => {

@@ -497,9 +497,6 @@ export function ProxyForm({
   const [poolH2MaxConcurrentStreams, setPoolH2MaxConcurrentStreams] = useState<number | "">(
     initialData?.pool_http2_max_concurrent_streams ?? "",
   );
-  const [poolMaxRequests, setPoolMaxRequests] = useState<number | "">(
-    initialData?.pool_max_requests_per_connection ?? "",
-  );
 
   /* ---------- Protocol-Specific ---------- */
   const [listenPort, setListenPort] = useState<number | "">(initialData?.listen_port ?? "");
@@ -677,9 +674,6 @@ export function ProxyForm({
         }),
         ...(poolH2MaxFrameSize !== "" && { pool_http2_max_frame_size: Number(poolH2MaxFrameSize) }),
         ...(poolH2MaxConcurrentStreams !== "" && { pool_http2_max_concurrent_streams: Number(poolH2MaxConcurrentStreams) }),
-        ...(poolMaxRequests !== "" && {
-          pool_max_requests_per_connection: Number(poolMaxRequests),
-        }),
       }),
       ...(fields.http3Pool && poolH3ConnsPerBackend !== "" && {
         pool_http3_connections_per_backend: Number(poolH3ConnsPerBackend),
@@ -1253,13 +1247,6 @@ export function ProxyForm({
               type="number"
               value={numVal(poolH2MaxConcurrentStreams)}
               onChange={setNum(setPoolH2MaxConcurrentStreams)}
-            />
-            <Input
-              label="Max Requests per Connection"
-              type="number"
-              value={numVal(poolMaxRequests)}
-              onChange={setNum(setPoolMaxRequests)}
-              helpText="Leave blank to inherit the gateway default."
             />
           </CollapsibleSection>
         )}

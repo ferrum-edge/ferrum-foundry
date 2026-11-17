@@ -34,7 +34,7 @@ function fullProxy(): Proxy {
     pool_enable_http_keep_alive: null,
     pool_enable_http2: null,
     pool_http2_adaptive_window: null,
-    pool_max_requests_per_connection: 900,
+    pool_http2_max_concurrent_streams: 900,
     api_spec_id: "spec-1",
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-02T00:00:00Z",
@@ -56,12 +56,12 @@ describe("proxy full-replacement builders", () => {
       backend_host: "backend.example.com",
       backend_port: 443,
       name: "after",
-      pool_max_requests_per_connection: 900,
+      pool_http2_max_concurrent_streams: 900,
     });
 
     expect(payload.name).toBe("after");
     expect(payload.stream_match).toEqual(fullProxy().stream_match);
-    expect(payload.pool_max_requests_per_connection).toBe(900);
+    expect(payload.pool_http2_max_concurrent_streams).toBe(900);
     expect(payload).not.toHaveProperty("plugins");
     expect(payload.pool_enable_http_keep_alive).toBeNull();
     expect(payload.pool_enable_http2).toBeNull();
@@ -92,6 +92,16 @@ describe("proxy full-replacement builders", () => {
     expect(snapshot.plugins).toEqual([{ plugin_config_id: "group-1" }]);
     expect(toUpdatePayload(snapshot).plugins).toEqual(snapshot.plugins);
     expect(toUpdatePayload({ ...snapshot, plugins: [] }).plugins).toEqual([]);
+  });
+
+  it("never sends the pool_max_requests_per_connection field Edge removed", () => {
+    // Ferrum Edge #7218 removed the field from the closed Proxy schema, so a
+    // PUT that carries it at all, even as null, is refused as an unknown field.
+    const payload = mergeFormUpdatePayload(fullProxy(), {
+      backend_host: "backend.example.com",
+      backend_port: 443,
+    });
+    expect(payload).not.toHaveProperty("pool_max_requests_per_connection");
   });
 
   it("distinguishes explicit false from inherited null", () => {
