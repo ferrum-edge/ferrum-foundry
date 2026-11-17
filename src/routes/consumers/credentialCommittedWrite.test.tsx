@@ -631,7 +631,8 @@ describe("basic credential and delete outcomes (#451)", () => {
     expect(writes).toHaveLength(1);
     expect(ifMatches).toHaveLength(1);
     expect(ifMatches[0]).not.toBe(tagOf(record("tenant-a")));
-    expect(document.body.textContent).toContain("The credential list changed on the gateway");
+    expect(document.body.textContent).toContain("The consumer changed on the gateway");
+    expect(document.body.textContent).toContain("can no longer be confirmed");
     expect(document.body.textContent).not.toContain("credential removed");
     // The list is re-read so the operator selects from the current state, and
     // nothing is resent on its own.

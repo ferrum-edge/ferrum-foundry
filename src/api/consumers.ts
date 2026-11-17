@@ -265,14 +265,17 @@ export async function deleteCredentials(
 /**
  * The consumer changed on the gateway after the operator selected a
  * credential by position, so the position may now name a different
- * credential. Nothing was deleted. Never retried automatically: the operator
+ * credential. The tag covers the whole consumer, so the change may be in any
+ * field, not necessarily the credential list; the message says only what the
+ * tag proves (review dsf F1 on #713). Nothing was deleted. Never retried automatically: the operator
  * must select again from a fresh read.
  */
 export class CredentialListChangedError extends Error {
   constructor() {
     super(
-      "The credential list changed on the gateway since you selected this credential. " +
-        "Nothing was deleted. Select the credential again from the refreshed list.",
+      "The consumer changed on the gateway since you selected this credential, so the " +
+        "entry at that position can no longer be confirmed. Nothing was deleted. Select " +
+        "the credential again from the refreshed list.",
     );
     this.name = "CredentialListChangedError";
   }
