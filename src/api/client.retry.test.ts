@@ -86,7 +86,7 @@ describe("configured client retry policy", () => {
     };
 
     await expect(
-      deleteCredentialByIndex(scope, "alice", "keyauth", 0),
+      deleteCredentialByIndex(scope, "alice", "keyauth", 0, '"selected-read"'),
     ).rejects.toMatchObject({ response: { status: 502 } });
 
     expect(captured).toHaveLength(1);

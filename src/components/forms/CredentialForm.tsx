@@ -18,6 +18,10 @@ import {
   useDeleteCredentials,
   useUpdateCredentials,
 } from "@/hooks/useConsumers";
+import {
+  CredentialSelectionUnverifiableError,
+  isCredentialListChangedError,
+} from "@/api/consumers";
 import { buildCredentialInput, CredentialInputError } from "@/lib/credentials";
 import type { EditorSession } from "@/hooks/useEditorIdentity";
 import { REDACTED, type BuiltInCredentialType } from "@/api/types";
@@ -36,6 +40,13 @@ export interface CredentialFormProps {
   session: EditorSession;
   credentialType: BuiltInCredentialType;
   existingCredentials?: unknown;
+  /**
+   * The strong `ETag` of the consumer read `existingCredentials` came from
+   * (`validatorOf` the rendered consumer), or `null` when that read carried
+   * none. A positional delete is sent conditional on it, so a list that
+   * changed after the operator selected an entry is refused (#703).
+   */
+  consumerEtag: string | null;
   revision: number;
   isRefreshing: boolean;
   /**
@@ -242,6 +253,7 @@ export function CredentialForm({
   session,
   credentialType,
   existingCredentials,
+  consumerEtag,
   revision,
   isRefreshing,
   capability,
@@ -278,8 +290,10 @@ export function CredentialForm({
     mounted.current = true;
     return () => { mounted.current = false; };
   }, []);
+  // `etag` pins the list the index was chosen from: the delete is sent with
+  // it as `If-Match`, so Edge refuses it if the consumer changed since.
   const [deleteSelection, setDeleteSelection] = useState<{
-    index: number; revision: number; snapshot: unknown;
+    index: number; revision: number; snapshot: unknown; etag: string | null;
   } | null>(null);
 
   const credentials = isBasic ? [] : normalizeCredentials(existingCredentials);
@@ -403,6 +417,7 @@ export function CredentialForm({
         consumerId,
         credType: credentialType,
         index: deleteSelection.index,
+        ifMatch: deleteSelection.etag,
       });
       if (!mounted.current) return;
       const summary = `${config.label} credential removed`;
@@ -417,6 +432,14 @@ export function CredentialForm({
         : current);
       setDeleteSelection(null);
     } catch (err: unknown) {
+      if (isCredentialListChangedError(err) || err instanceof CredentialSelectionUnverifiableError) {
+        // Nothing was deleted. The index may name another credential now, so
+        // the operator selects again from the re-read list; never resent.
+        if (!mounted.current) return;
+        setDeleteSelection(null);
+        toast(isCredentialListChangedError(err) ? "warning" : "error", err.message);
+        return;
+      }
       const message = await getApiErrorMessage(err, "Failed to delete credential");
       if (!mounted.current) return;
       // A lost answer may already have removed this index; confirming it again
@@ -532,7 +555,9 @@ export function CredentialForm({
                 size="sm"
                 variant="ghost"
                 aria-label={`Delete ${config.label} credential ${index + 1}`}
-                onClick={() => setDeleteSelection({ index, revision, snapshot: existingCredentials })}
+                onClick={() => setDeleteSelection({
+                  index, revision, snapshot: existingCredentials, etag: consumerEtag,
+                })}
                 disabled={isRefreshing || deleteCredentialByIndex.isPending}
               >
                 <svg

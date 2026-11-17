@@ -51,7 +51,7 @@ describe("consumer full-replace write coordination", () => {
     }));
     const rotation = operation === "append"
       ? appendCredential(scope, "alice", "keyauth", { key: "new-key" })
-      : deleteCredentialByIndex(scope, "alice", "keyauth", 0);
+      : deleteCredentialByIndex(scope, "alice", "keyauth", 0, '"selected-read"');
     await started.promise;
     const metadata = update(scope, "alice", {
       username: "alice", acl_groups: ["new-group"],
@@ -82,7 +82,7 @@ describe("consumer full-replace write coordination", () => {
       }
       return Response.json({ id: "alice", username: "alice", credentials: {} });
     }));
-    const failed = expect(deleteCredentialByIndex(scope, "alice", "keyauth", 0))
+    const failed = expect(deleteCredentialByIndex(scope, "alice", "keyauth", 0, '"selected-read"'))
       .rejects.toMatchObject({ response: { status: 502 } });
     await started.promise;
     const queued = update(scope, "alice", { username: "alice" }, null);

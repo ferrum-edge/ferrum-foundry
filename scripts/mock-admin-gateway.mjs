@@ -714,10 +714,43 @@ export const IF_MATCH_ROUTES = [
   /^\/plugins\/config\/[^/]+$/,
 ];
 
+// The consumer credential endpoints take the consumer's tag
+// (ferrum-edge#7393): `PUT`/`POST`/`DELETE` per type, and the indexed `DELETE`.
+const CREDENTIAL_TYPE_ROUTE = /^\/consumers\/[^/]+\/credentials\/[^/]+$/;
+const CREDENTIAL_INDEX_ROUTE = /^\/consumers\/[^/]+\/credentials\/[^/]+\/[^/]+$/;
+
 export function ifMatchRouteRefusal(method, path, header) {
   if (header === undefined || method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return null;
   if ((method === 'PUT' || method === 'DELETE') && IF_MATCH_ROUTES.some((route) => route.test(path))) return null;
+  if (['PUT', 'POST', 'DELETE'].includes(method) && CREDENTIAL_TYPE_ROUTE.test(path)) return null;
+  if (method === 'DELETE' && CREDENTIAL_INDEX_ROUTE.test(path)) return null;
   return [400, { error: `If-Match is not supported on ${method} ${path}` }];
+}
+
+/**
+ * A consumer credential endpoint write, as Edge evaluates it
+ * (ferrum-edge#7393): `If-Match` is compared with the consumer's own tag
+ * before anything changes, and an indexed `DELETE` removes exactly that
+ * position, so a selection made from an older read is refused with `412`
+ * instead of removing whatever moved into its place. Other credential writes
+ * keep the mock's echo of the consumer. Returns `[status, body]`.
+ */
+export function credentialWrite(consumer, method, credType, index, ifMatch) {
+  const refusal = evaluateIfMatch(ifMatch, resourceEtag('consumers', consumer));
+  if (refusal) return refusal;
+  if (method === 'DELETE' && index !== undefined) {
+    const entries = consumer.credentials?.[credType];
+    const position = Number(index);
+    if (!Array.isArray(entries) || position >= entries.length) {
+      return [404, { error: `Credential index ${position} out of range` }];
+    }
+    entries.splice(position, 1);
+    if (entries.length === 0) delete consumer.credentials[credType];
+    consumer.updated_at = now();
+    return [200, consumer];
+  }
+  if (method === 'DELETE') return [204, null];
+  return [200, consumer];
 }
 
 /**
@@ -1494,8 +1527,8 @@ export const server = createServer(async (req, res) => {
   if (credMatch) {
     const consumer = consumers.find((c) => c.id === credMatch[1]);
     if (!consumer) return send(404, { error: 'not found' });
-    if (method === 'DELETE') return credMatch[3] ? send(200, consumer) : send(204, null);
-    return send(200, consumer);
+    const [status, payload] = credentialWrite(consumer, method, credMatch[2], credMatch[3], ifMatch);
+    return send(status, payload);
   }
 
   send(404, { error: `mock: no handler for ${method} ${path}` });

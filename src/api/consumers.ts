@@ -19,8 +19,10 @@ import {
   conditionalPut,
   guardedRemove,
   guardedReplace,
+  isPreconditionFailed,
   readTagged,
   replaceFromRead,
+  strongEtag,
   type WriteGuard,
 } from "./conditionalWrite";
 import {
@@ -252,17 +254,75 @@ export async function deleteCredentials(
   });
 }
 
+/**
+ * The consumer changed on the gateway after the operator selected a
+ * credential by position, so the position may now name a different
+ * credential. Nothing was deleted. Never retried automatically: the operator
+ * must select again from a fresh read.
+ */
+export class CredentialListChangedError extends Error {
+  constructor() {
+    super(
+      "The credential list changed on the gateway since you selected this credential. " +
+        "Nothing was deleted. Select the credential again from the refreshed list.",
+    );
+    this.name = "CredentialListChangedError";
+  }
+}
+
+export function isCredentialListChangedError(error: unknown): error is CredentialListChangedError {
+  return error instanceof CredentialListChangedError;
+}
+
+/**
+ * The consumer read the operator selected from carried no usable strong
+ * `ETag` (an older gateway, a mode without a database, or the cached-config
+ * fallback), so a positional delete cannot be pinned to it. Nothing was sent.
+ */
+export class CredentialSelectionUnverifiableError extends Error {
+  constructor() {
+    super(
+      "This credential cannot be deleted safely: the consumer read it was selected from " +
+        "carried no strong ETag, so the gateway could not confirm the position still names " +
+        "it. Nothing was deleted. Reload the consumer from a gateway with a database and try again.",
+    );
+    this.name = "CredentialSelectionUnverifiableError";
+  }
+}
+
+/**
+ * Delete the credential at `index` (ferrum-foundry#703, ferrum-edge#7393).
+ *
+ * Credentials read back redacted, so a position is the only handle on one,
+ * and a position is only meaningful in the list it was read from: if another
+ * admin, tab, or automation appends or removes a credential first, the same
+ * index names a different credential. `ifMatch` is the consumer `ETag` of the
+ * read the operator selected from (`validatorOf` the rendered consumer, never
+ * a fresh read); Edge compares it under its admission lease and answers `412`
+ * if anything about the consumer changed, which becomes
+ * `CredentialListChangedError`. An absent tag refuses before sending.
+ */
 export async function deleteCredentialByIndex(
   scope: NamespaceScope,
   consumerId: string,
   credType: string,
   index: number,
+  ifMatch: string | null,
 ): Promise<void> {
+  const tag = strongEtag(ifMatch);
+  if (tag === null) throw new CredentialSelectionUnverifiableError();
   await serializeWrite(scope, consumerId, async () => {
-    await proxyApi.delete(
-      `consumers/${pathSegment(consumerId)}/credentials/${pathSegment(credType)}/` +
-        pathSegment(String(index)),
-      scoped(scope),
-    );
+    try {
+      await conditionalDelete(
+        scope,
+        `consumers/${pathSegment(consumerId)}/credentials/${pathSegment(credType)}/` +
+          pathSegment(String(index)),
+        tag,
+      );
+    } catch (error) {
+      // eslint-disable-next-line preserve-caught-error -- a 412 carries nothing the operator needs
+      if (isPreconditionFailed(error)) throw new CredentialListChangedError();
+      throw error;
+    }
   });
 }

@@ -38,7 +38,7 @@ import { ReadOnlySurface, WriteAction } from "@/components/shared/CapabilityGate
 import type { CapabilityVerdict } from "@/lib/capabilities";
 import type { ConsumerCreate, Consumer } from "@/api/types";
 import * as consumersApi from "@/api/consumers";
-import { isStaleResourceError, type StaleResourceDetail } from "@/api/conditionalWrite";
+import { isStaleResourceError, validatorOf, type StaleResourceDetail } from "@/api/conditionalWrite";
 import { StaleWriteDialog } from "@/components/shared/StaleWriteDialog";
 import { reseedAfterCommit, useEditBaseline } from "@/hooks/useEditBaseline";
 import { formatDateTime } from "@/lib/format";
@@ -302,6 +302,7 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
                     session={session}
                     credentialType={credType}
                     existingCredentials={consumer.credentials?.[credType]}
+                    consumerEtag={validatorOf(consumer)}
                     revision={dataUpdatedAt}
                     isRefreshing={isFetching}
                     capability={credentialCapability}

@@ -33,7 +33,7 @@ function Probe() {
 function AppendPage() {
   const session = useEditorIdentity("new-user");
   return <CredentialForm key={session.key} session={session} credentialType={type}
-    existingCredentials={existing} revision={1} isRefreshing={false} />;
+    existingCredentials={existing} consumerEtag={null} revision={1} isRefreshing={false} />;
 }
 
 const rootRoute = createRootRoute({ component: () => <Outlet /> });

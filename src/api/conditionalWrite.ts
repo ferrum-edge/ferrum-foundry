@@ -2,6 +2,7 @@
 /*  Ferrum Foundry – guarded full-replacement writes                   */
 /* ------------------------------------------------------------------ */
 
+import { replaceEqualDeep } from "@tanstack/react-query";
 import { isHTTPError } from "ky";
 import {
   HANDLED_STATUSES,
@@ -175,6 +176,31 @@ export function validatorOf(value: object | null | undefined): string | null {
   return value ? (validators.get(value) ?? null) : null;
 }
 
+/**
+ * TanStack Query `structuralSharing` for a query whose data is a tagged read
+ * (`readTagged(...).value`).
+ *
+ * Structural sharing hands the page either the previous data object (when the
+ * new read is deep-equal) or a fresh merged copy, never the object the read
+ * produced, so `validatorOf` on query data would lose the tag. This carries
+ * the new read's validator onto whatever object the page will render. The
+ * rendered value always shows the newest read's content, so that read's tag is
+ * the one that pins it; an untagged read leaves the rendered object untagged.
+ *
+ * Use it only where a write must be conditional on exactly what the operator
+ * selected from, such as an indexed credential delete. Editors still compare
+ * through `guardedReplace`/`guardedRemove`, which read fresh.
+ */
+export function shareTaggedRead(previous: unknown, next: unknown): unknown {
+  const shared = replaceEqualDeep(previous, next);
+  if (shared !== next && typeof shared === "object" && shared !== null) {
+    const tag = typeof next === "object" && next !== null ? validators.get(next) : undefined;
+    if (tag === undefined) validators.delete(shared);
+    else validators.set(shared, tag);
+  }
+  return shared;
+}
+
 /** `GET` one resource and keep the validator the gateway issued for it. */
 export async function readTagged<TResource>(
   scope: NamespaceScope,
@@ -212,8 +238,9 @@ function conditionalOptions(ifMatch: string | null) {
  * so it is kept out of the global error popup; every other failure is not.
  * `redactErrors` defers that report to `withRedactedFailure`, which raises it
  * with the secrets a secret-bearing body submitted removed.
- * `If-Match` is only ever sent to the resource paths whose `PUT` evaluates it
- * — Edge answers `400` to one on any other mutating route.
+ * `If-Match` is only ever sent to routes that evaluate it (the four resource
+ * item paths, and the consumer credential endpoints, which take the
+ * consumer's tag) — Edge answers `400` to one on any other mutating route.
  */
 export function conditionalPut<TResource>(
   scope: NamespaceScope,
