@@ -47,6 +47,11 @@ the reviewed ref as stale, as expected until the descriptors are re-read there:
 FERRUM_SPEC_REF=main npm run check:plugin-schemas
 ```
 
+The scheduled Edge Main Drift workflow does this for you against the signed
+Edge `main` image's commit, comparing content only, and files an
+`edge-main-drift` issue on a change (see
+[compatibility.md](compatibility.md#checking-against-edge-main)).
+
 **Do not update a digest without re-reading the schema.** A structured editor
 built from an older schema is how fields a newer gateway understands get
 stripped. When you re-review, update `PLUGIN_SCHEMA_SPEC.ref` and the digests

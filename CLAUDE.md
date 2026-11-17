@@ -210,6 +210,11 @@ Dark and light themes via CSS custom properties. Dark is the default.
     instead. Never update a digest or `PLUGIN_SCHEMA_SPEC.ref` without
     re-reading the schema; after re-review keep the ref equal to the checked
     commit.
+  - `.github/workflows/edge-main-drift.yml` runs the same comparisons
+    (`scripts/edge-main-drift.mjs`) and the Pinned Gateway Contract steps
+    weekly against the signed Edge `main` image, and opens or closes one
+    `edge-main-drift` issue. It is an early warning, never a required check;
+    see `docs/compatibility.md` "Checking against Edge main".
   - Guided edits are lossless: unmodelled keys, key order, and omission/`null`
     semantics all survive. A shape the descriptors cannot model falls back to
     raw JSON with a stated reason rather than being rewritten.

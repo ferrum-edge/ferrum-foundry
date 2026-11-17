@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A scheduled **Edge Main Drift** workflow
+  (`.github/workflows/edge-main-drift.yml`, weekly and on demand, never a
+  required check) checks Foundry against unreleased Ferrum Edge `main`
+  (ferrum-edge/ferrum-contracts#76). It resolves the Edge `latest` image,
+  which Edge's Main Latest Image workflow moves only to a `main` commit whose
+  CI passed, verifies its keyless Cosign signature against that workflow, and
+  reads the Edge commit from the signed image's revision label. Against that
+  commit it runs the guided plugin schema and plugin sensitivity comparisons
+  (`scripts/edge-main-drift.mjs`, content only: the recorded-ref checks of the
+  pinned job always fail against `main` and are not reported) and the Pinned
+  Gateway Contract job's gateway steps, copied verbatim
+  (`scripts/edge-main-drift.test.mjs` keeps them equal to `ci.yml`). The
+  report also names ferrum-contracts' `main_branch_delta` commit and whether
+  it covers the checked commit. A finding opens or updates one issue labelled
+  `edge-main-drift`, and a clean run closes it, using only the repository's
+  `GITHUB_TOKEN` with `issues: write` on that one job. Pull requests that
+  change the workflow or its script run the checks without touching the issue.
 - A **Starter Production Profile** CI job runs the deployment starter's
   production profile as shipped, TLS nginx and oauth2-proxy included, against
   a mock OIDC provider (`ghcr.io/navikt/mock-oauth2-server`, pinned by tag and
