@@ -320,7 +320,7 @@ export async function deleteCredentialByIndex(
         tag,
       );
     } catch (error) {
-      // eslint-disable-next-line preserve-caught-error -- a 412 carries nothing the operator needs
+      // A 412 carries nothing the operator needs beyond "select again".
       if (isPreconditionFailed(error)) throw new CredentialListChangedError();
       throw error;
     }
