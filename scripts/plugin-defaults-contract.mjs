@@ -170,6 +170,7 @@ async function verifyOperatorCompletion(name, exchange, results, failures) {
   const { field } = OPERATOR_COMPLETIONS[name];
   const id = `contract-completed-${name}`;
   const pluginPath = `/plugins/config/${id}`;
+  let isolated = true;
   try {
     const config = completeOperatorInput(name);
     assertOnlyOperatorCompletion(name, config);
@@ -191,10 +192,10 @@ async function verifyOperatorCompletion(name, exchange, results, failures) {
         [200, 204, 404], `${name} with ${field} supplied cleanup`);
     } catch (error) {
       failures.push(new Error(`${name} cleanup: ${error.message}`, { cause: error }));
-      return false;
+      isolated = false;
     }
   }
-  return true;
+  return isolated;
 }
 
 export async function verifyPluginDefaults(exchange, { report = console.log } = {}) {
