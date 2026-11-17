@@ -13,7 +13,8 @@ export type McpGatewayMode = "aggregate_router" | "transparent_proxy";
  * `discovery.hide_denied_items` is not listed: Edge main (ferrum-edge#7136)
  * removed it in favour of `policy.hide_denied_tools` and refuses it as an
  * unknown key in every mode, so a mode switch must neither stash nor restore
- * it.
+ * it. It is in `MCP_GATEWAY_RETIRED_PATHS` instead, which every mode switch
+ * and every submit strips.
  */
 export const MCP_GATEWAY_AGGREGATE_ONLY_PATHS = [
   "policy.default_action",
@@ -31,6 +32,15 @@ export const MCP_GATEWAY_AGGREGATE_ONLY_PATHS = [
   "discovery.on_new_tool",
   "discovery.on_schema_change",
 ] as const;
+
+/**
+ * Keys Edge main refuses as unknown in every mode (ferrum-edge#7136). A legacy
+ * configuration may still carry them; they are dropped from every mode switch
+ * and every submitted configuration, and never stashed. Dropping
+ * `discovery.hide_denied_items` can only hide more: Edge v0.9.20 listed a
+ * denied tool only when it and `policy.hide_denied_tools` were both `false`.
+ */
+export const MCP_GATEWAY_RETIRED_PATHS = ["discovery.hide_denied_items"] as const;
 
 export const MCP_GATEWAY_TRANSPARENT_NOTE =
   "Transparent proxy mode cannot include aggregate catalog policy or discovery controls. " +
@@ -141,6 +151,21 @@ export function pickMcpGatewayAggregateOnlyFields(config: unknown): JsonObject {
   return picked;
 }
 
+/**
+ * `config` without the retired keys. Only a section the removal leaves empty
+ * is dropped; every other empty object the operator wrote stays.
+ */
+function omitMcpGatewayRetiredFields(config: JsonObject): JsonObject {
+  const next = deepClone(config);
+  for (const path of MCP_GATEWAY_RETIRED_PATHS) {
+    if (deleteAtPath(next, path) === undefined) continue;
+    const section = path.split(".")[0];
+    const parent = next[section];
+    if (isPlainObject(parent) && Object.keys(parent).length === 0) delete next[section];
+  }
+  return next;
+}
+
 export function omitMcpGatewayAggregateOnlyFields(config: unknown): JsonObject {
   if (!isPlainObject(config)) return {};
   const next = deepClone(config);
@@ -175,10 +200,11 @@ export function applyMcpGatewayAggregateDefaults(
 
 export function sanitizeMcpGatewayConfigForSubmit(config: unknown): JsonObject {
   if (!isPlainObject(config)) return {};
-  if (readMcpGatewayMode(config) !== "transparent_proxy") {
-    return deepClone(config);
+  const current = omitMcpGatewayRetiredFields(config);
+  if (readMcpGatewayMode(current) !== "transparent_proxy") {
+    return current;
   }
-  const next = omitMcpGatewayAggregateOnlyFields(config);
+  const next = omitMcpGatewayAggregateOnlyFields(current);
   next.mode = "transparent_proxy";
   return next;
 }
@@ -195,7 +221,7 @@ export function switchMcpGatewayMode(
   nextMode: McpGatewayMode,
   stash: JsonObject | null = null,
 ): { config: JsonObject; stash: JsonObject | null } {
-  const base = isPlainObject(config) ? deepClone(config) : {};
+  const base = isPlainObject(config) ? omitMcpGatewayRetiredFields(config) : {};
   if (nextMode === "transparent_proxy") {
     const nextStash = mergeDefined(stash ?? {}, pickMcpGatewayAggregateOnlyFields(base));
     const stripped = omitMcpGatewayAggregateOnlyFields(base);
