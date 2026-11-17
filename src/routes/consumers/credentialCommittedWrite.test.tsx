@@ -8,6 +8,8 @@ import { setApiErrorHandler } from "@/api/client";
 import { CredentialForm } from "@/components/forms/CredentialForm";
 import { useEditorIdentity } from "@/hooks/useEditorIdentity";
 import { useConsumer } from "@/hooks/useConsumers";
+import { get as getConsumer } from "@/api/consumers";
+import { validatorOf } from "@/api/conditionalWrite";
 import type { BuiltInCredentialType, Consumer } from "@/api/types";
 
 vi.mock("@/stores/auth", () => ({ useAuth: () => ({ principal: null }) }));
@@ -25,6 +27,7 @@ function Page() {
   const query = useConsumer("first");
   return query.data ? <CredentialForm key={session.key} session={session}
     credentialType={type} existingCredentials={query.data.credentials[type]}
+    consumerEtag={validatorOf(query.data)}
     revision={query.dataUpdatedAt} isRefreshing={query.isFetching} /> : null;
 }
 
@@ -42,7 +45,14 @@ let grown: boolean;
 let shrinkOnDelete: boolean;
 // The body an "echo" answer returns in place of the default echo.
 let echoBody: unknown;
+// Another writer's change, applied to the gateway's consumer after the page
+// read it (#703): for example the first key credential removed and a new one
+// appended. Entries read back redacted, so the list looks the same; only the
+// stored record, and so its tag, differ.
+let concurrentChange: boolean;
 const writes: { method: string; path: string; body: unknown }[] = [];
+// The `If-Match` each write carried, in order (`null` when absent).
+const ifMatches: (string | null)[] = [];
 const reads: string[] = [];
 const settled: { status: string; data: unknown; error: unknown }[] = [];
 const secret = "synthetic credential secret 0123456789abcdef";
@@ -60,7 +70,13 @@ function record(namespace: string): Consumer {
     keyauth: [{ key: "[REDACTED]" }, { key: "[REDACTED]" }],
     jwt: [...(removed ? [] : [{ secret: "[REDACTED]" }]), ...added],
     hmac_auth: [{ secret: "[REDACTED]" }],
-  }, created_at: "v1", updated_at: "v1" } as Consumer;
+  }, created_at: "v1", updated_at: concurrentChange ? "v2" : "v1" } as Consumer;
+}
+/** The consumer's strong tag: changes whenever the stored record does. */
+function tagOf(consumer: Consumer): string {
+  let hash = 0;
+  for (const char of JSON.stringify(consumer)) hash = (hash * 31 + char.charCodeAt(0)) | 0;
+  return `"${(hash >>> 0).toString(16)}"`;
 }
 async function waitFor(check: () => void) {
   await act(async () => { await vi.waitFor(check); });
@@ -114,7 +130,7 @@ async function assertNoRetainedSecret() {
   expect(JSON.stringify({ ...localStorage, ...sessionStorage })).not.toContain(secret);
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   type = "jwt";
   answer = "ok";
   readStatus = 200;
@@ -122,7 +138,9 @@ beforeEach(() => {
   grown = false;
   shrinkOnDelete = false;
   echoBody = null;
+  concurrentChange = false;
   writes.length = 0;
+  ifMatches.length = 0;
   reads.length = 0;
   settled.length = 0;
   localStorage.setItem(NAMESPACE_STORAGE_KEY, "tenant-a");
@@ -131,6 +149,15 @@ beforeEach(() => {
     const path = new URL(request.url).pathname;
     const tenant = request.headers.get("x-ferrum-namespace")!;
     if (request.method !== "GET") {
+      // Edge evaluates If-Match against the consumer as stored now, before
+      // the write changes it.
+      const ifMatch = request.headers.get("If-Match");
+      const current = tagOf(record(tenant));
+      ifMatches.push(ifMatch);
+      if (ifMatch !== null && ifMatch !== current) {
+        writes.push({ method: request.method, path, body: undefined });
+        return Response.json({ error: "Consumer 'first' has changed since the supplied If-Match entity-tag was issued; re-read it and reapply your changes" }, { status: 412 });
+      }
       writes.push({ method: request.method, path,
         body: request.method === "DELETE" ? undefined : await request.json() });
       if (gate) await gate;
@@ -155,7 +182,7 @@ beforeEach(() => {
     }
     reads.push(path);
     if (readStatus !== 200) return Response.json({ error: "read refused" }, { status: readStatus });
-    return Response.json(record(tenant));
+    return Response.json(record(tenant), { headers: { ETag: tagOf(record(tenant)) } });
   }));
   qc = new QueryClient({ defaultOptions: {
     queries: { retry: false, staleTime: Infinity }, mutations: { retry: false },
@@ -166,9 +193,12 @@ beforeEach(() => {
       settled.push({ status: state.status, data: state.data, error: state.error });
     }
   });
-  // Seeded in the past, so any re-read is a new revision even within one millisecond.
-  qc.setQueryData(["consumer", "tenant-a", "first"], record("tenant-a"),
+  // Seeded from a tagged read in the past, so any re-read is a new revision
+  // even within one millisecond, and the seed carries its ETag.
+  qc.setQueryData(["consumer", "tenant-a", "first"],
+    await getConsumer({ namespace: "tenant-a" }, "first"),
     { updatedAt: Date.now() - 60_000 });
+  reads.length = 0;
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
@@ -570,5 +600,59 @@ describe("basic credential and delete outcomes (#451)", () => {
     expect(host.textContent).not.toContain("Failed to delete basic credentials");
     expect(writes).toHaveLength(1);
     expect(reads).toEqual(["/api/proxy/consumers/first"]);
+  });
+
+  it("sends the selected read's ETag as If-Match on an indexed delete (#703)", async () => {
+    type = "keyauth";
+    await mount();
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>('[aria-label="Delete Key Authentication credential 2"]')!.click();
+    });
+    await click("Delete Credential", dialog()!);
+    await waitFor(() => expect(dialog()).toBeNull());
+    expect(writes).toEqual([{ method: "DELETE",
+      path: "/api/proxy/consumers/first/credentials/keyauth/1", body: undefined }]);
+    expect(ifMatches).toEqual([tagOf(record("tenant-a"))]);
+  });
+
+  it("refuses a delete whose list changed after the selection and removes nothing (#703)", async () => {
+    type = "keyauth";
+    await mount();
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>('[aria-label="Delete Key Authentication credential 1"]')!.click();
+    });
+    await waitFor(() => expect(dialog()).not.toBeNull());
+    // Another writer changes the consumer between the operator's read and the
+    // confirmation. Without the precondition, index 0 would now remove a
+    // credential the operator never selected.
+    concurrentChange = true;
+    await click("Delete Credential", dialog()!);
+    await waitFor(() => expect(dialog()).toBeNull());
+    expect(writes).toHaveLength(1);
+    expect(ifMatches).toHaveLength(1);
+    expect(ifMatches[0]).not.toBe(tagOf(record("tenant-a")));
+    expect(document.body.textContent).toContain("The consumer changed on the gateway");
+    expect(document.body.textContent).toContain("can no longer be confirmed");
+    expect(document.body.textContent).not.toContain("credential removed");
+    // The list is re-read so the operator selects from the current state, and
+    // nothing is resent on its own.
+    await waitFor(() => expect(reads).toEqual(["/api/proxy/consumers/first"]));
+    expect(writes).toHaveLength(1);
+  });
+
+  it("refuses an indexed delete when the selected read carried no ETag (#703)", async () => {
+    type = "keyauth";
+    // An untagged read: an older gateway, no database, or the cached fallback.
+    qc.removeQueries({ queryKey: ["consumer", "tenant-a", "first"] });
+    qc.setQueryData(["consumer", "tenant-a", "first"], record("tenant-a"),
+      { updatedAt: Date.now() - 60_000 });
+    await mount();
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>('[aria-label="Delete Key Authentication credential 1"]')!.click();
+    });
+    await click("Delete Credential", dialog()!);
+    await waitFor(() => expect(dialog()).toBeNull());
+    expect(writes).toHaveLength(0);
+    expect(document.body.textContent).toContain("This credential cannot be deleted safely");
   });
 });

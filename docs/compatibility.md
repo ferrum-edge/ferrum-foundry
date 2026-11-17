@@ -245,9 +245,18 @@ From Edge's [upgrade guide](https://github.com/ferrum-edge/ferrum-edge/blob/v0.9
 - **`If-Match` is strict.** A malformed or empty `If-Match`, or one on a route
   that does not evaluate it (any `POST`, `/batch`,
   `/gateway-trust-bundles/{id}`), is `400`. Foundry sends `If-Match` only on
-  `PUT`/`DELETE` of the four resource item paths, and only with a strong tag
-  read from the gateway (`src/api/conditionalWrite.ts`). The mock admin gateway
-  refuses the same way, and the gateway contract asserts both `400`s.
+  `PUT`/`DELETE` of the four resource item paths and on the indexed credential
+  delete, and only with a strong tag read from the gateway
+  (`src/api/conditionalWrite.ts`). For the credential delete the tag is
+  deliberately the one from the read the operator selected the index from,
+  not a fresh read; Edge's `412` covers staleness (ferrum-edge#7393). An Edge
+  without that precondition (v0.9.20 included) refuses the header there with
+  its `If-Match is only supported on …` `400` before acting; Foundry detects
+  that answer and falls back to a verified re-read (see
+  [concurrent-edits.md](concurrent-edits.md#indexed-credential-deletes)).
+  The mock admin gateway refuses the same way on the other routes, and the
+  gateway contract asserts both `400`s and pins which answer the pinned Edge
+  gives to a conditional credential delete.
 - **`GET /plugins/config?proxy_id=`** (ferrum-edge#5726) lists the
   proxy-scoped configurations targeting one proxy, paginated over the filtered
   set. Foundry uses it for a proxy's Plugins tab

@@ -22,6 +22,7 @@ import {
   type QueryClient,
 } from "@tanstack/react-query";
 import * as consumers from "@/api/consumers";
+import { shareTaggedRead } from "@/api/conditionalWrite";
 import {
   redactedErrorDetail,
   redactionForms,
@@ -72,6 +73,9 @@ export function useConsumer(id: string, enabled = true) {
     queryKey: ["consumer", scope.namespace, id],
     queryFn: () => consumers.get(queryScope(scope), id),
     enabled: enabled && !!id,
+    // Keep the read's ETag on the rendered consumer, so an indexed credential
+    // delete is conditional on the list the operator selected from (#703).
+    structuralSharing: shareTaggedRead,
   });
 }
 
@@ -217,6 +221,16 @@ async function writeCredential(
   } catch (error) {
     const committed = getCommittedWrite(error);
     if (committed) return { namespace, consumerId, committed };
+    // A refused or unverifiable positional delete sent no secret and removed
+    // nothing; keep its type so the form can demand a fresh selection, and
+    // re-read so that selection is made from the current list.
+    if (
+      consumers.isCredentialListChangedError(error) ||
+      error instanceof consumers.CredentialSelectionUnverifiableError
+    ) {
+      await refreshConsumer(qc, namespace, consumerId);
+      throw error;
+    }
     if (isUnobservedWrite(error)) {
       const queryKey = ["consumer", namespace, consumerId];
       const revision = qc.getQueryState(queryKey)?.dataUpdatedAt ?? 0;
@@ -311,13 +325,16 @@ export function useDeleteCredentialByIndex() {
       consumerId,
       credType,
       index,
+      ifMatch,
     }: {
       consumerId: string;
       credType: string;
       index: number;
+      /** The consumer `ETag` of the read the index was selected from. */
+      ifMatch: string | null;
     }) =>
       writeCredential(qc, scope.namespace, consumerId, null, () =>
-        consumers.deleteCredentialByIndex(scope, consumerId, credType, index),
+        consumers.deleteCredentialByIndex(scope, consumerId, credType, index, ifMatch),
       ),
     onSuccess: ({ namespace, consumerId }) => refreshConsumer(qc, namespace, consumerId),
   });

@@ -12,6 +12,8 @@ import {
   detachDeletedPluginConfig,
   evaluateIfMatch,
   ifMatchRouteRefusal,
+  credentialWrite,
+  findConsumerInNamespace,
   normalizeNamespaceDescription,
   provisionerFromHeaders,
   resourceEtag,
@@ -32,6 +34,7 @@ const UNKNOWN_FIELD_NAME_PATTERN = /unknown field `name`/;
 const QUOTED_HEX_32_ETAG_PATTERN = /^"[0-9a-f]{32}"$/;
 const HTTP_PATH_PATTERN = /http_path/;
 const UDP_PROBE_PAYLOAD_PATTERN = /udp_probe_payload/;
+const MOCK_LISTEN_URL_PATTERN = /listening on (http:\/\/[^\s]+)/;
 const LOOPBACK_LISTEN_LOG_PATTERN =
   /^Mock Ferrum Edge admin API listening on http:\/\/127\.0\.0\.1:\d+\n/;
 
@@ -580,12 +583,40 @@ test("If-Match parsing follows Edge: *, lists, strong comparison, malformed is 4
 test("If-Match on a route that does not evaluate it is refused, not ignored", () => {
   assert.equal(ifMatchRouteRefusal("POST", "/proxies", '"x"')?.[0], 400);
   assert.equal(ifMatchRouteRefusal("POST", "/batch", '"x"')?.[0], 400);
-  assert.equal(ifMatchRouteRefusal("PUT", "/consumers/c/credentials/keyauth", '"x"')?.[0], 400);
+  assert.equal(ifMatchRouteRefusal("PATCH", "/consumers/c/credentials/keyauth", '"x"')?.[0], 400);
+  assert.equal(ifMatchRouteRefusal("POST", "/consumers/c/credentials/keyauth/0", '"x"')?.[0], 400);
   assert.equal(ifMatchRouteRefusal("PUT", "/gateway-trust-bundles/t", '"x"')?.[0], 400);
   assert.equal(ifMatchRouteRefusal("PUT", "/proxies/p", '"x"'), null);
   assert.equal(ifMatchRouteRefusal("DELETE", "/plugins/config/c", '"x"'), null);
+  // ferrum-edge#7393: the credential endpoints take the consumer's tag.
+  for (const method of ["PUT", "POST", "DELETE"]) {
+    assert.equal(ifMatchRouteRefusal(method, "/consumers/c/credentials/keyauth", '"x"'), null);
+  }
+  assert.equal(ifMatchRouteRefusal("DELETE", "/consumers/c/credentials/keyauth/0", '"x"'), null);
   assert.equal(ifMatchRouteRefusal("GET", "/proxies/p", '"x"'), null);
   assert.equal(ifMatchRouteRefusal("POST", "/proxies", undefined), null);
+});
+
+test("an indexed credential delete from a stale read removes nothing (ferrum-edge#7393)", () => {
+  const consumer = {
+    id: "c", namespace: "ferrum", username: "c", updated_at: "v1",
+    credentials: { keyauth: [{ key: "compromised" }, { key: "healthy" }] },
+  };
+  const selected = resourceEtag("consumers", consumer);
+  // Another writer removes the compromised key and appends a new one.
+  const [removed] = credentialWrite(consumer, "DELETE", "keyauth", "0", undefined);
+  assert.equal(removed, 200);
+  consumer.credentials.keyauth.push({ key: "appended" });
+  consumer.updated_at = "v2";
+  // The operator's delete of index 0, selected from the first read, is refused.
+  const [status] = credentialWrite(consumer, "DELETE", "keyauth", "0", selected);
+  assert.equal(status, 412);
+  assert.deepEqual(consumer.credentials.keyauth.map((entry) => entry.key), ["healthy", "appended"]);
+  // From a fresh read the same request removes exactly the selected entry.
+  const [current] = credentialWrite(consumer, "DELETE", "keyauth", "1", resourceEtag("consumers", consumer));
+  assert.equal(current, 200);
+  assert.deepEqual(consumer.credentials.keyauth.map((entry) => entry.key), ["healthy"]);
+  assert.equal(credentialWrite(consumer, "DELETE", "keyauth", "0", "unquoted")[0], 400);
 });
 
 test("GET /plugins/config?proxy_id= pages the filtered set in the request namespace", () => {
@@ -735,6 +766,54 @@ test("the mock admin API listens on loopback by default", async () => {
       if (output.includes("\n")) break;
     }
     assert.match(output, LOOPBACK_LISTEN_LOG_PATTERN);
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) {
+      const exited = once(child, "exit");
+      child.kill();
+      await exited;
+    }
+  }
+});
+
+test("credential routes address the consumer in the request namespace only (#713 sol F1)", () => {
+  const list = [
+    { id: "alice", namespace: "ferrum", credentials: { keyauth: [{ key: "a" }] } },
+    { id: "alice", namespace: "tenant-b", credentials: { keyauth: [{ key: "b" }] } },
+  ];
+  assert.equal(findConsumerInNamespace(list, "alice", "tenant-b"), list[1]);
+  assert.equal(findConsumerInNamespace(list, "alice", "tenant-c"), undefined);
+});
+
+test("an indexed revoke under another namespace neither reads nor mutates the consumer over HTTP", async () => {
+  const env = { ...process.env, MOCK_ADMIN_PORT: "0" };
+  delete env.MOCK_ADMIN_BIND;
+  const child = spawn(
+    process.execPath,
+    [fileURLToPath(new URL("./mock-admin-gateway.mjs", import.meta.url))],
+    { env, stdio: ["ignore", "pipe", "pipe"] },
+  );
+  try {
+    let output = "";
+    child.stdout.setEncoding("utf8");
+    for await (const chunk of child.stdout) {
+      output += chunk;
+      if (output.includes("\n")) break;
+    }
+    const base = output.match(MOCK_LISTEN_URL_PATTERN)[1];
+    const call = (method, path, namespace, headers = {}) =>
+      fetch(`${base}${path}`, { method, headers: { "x-ferrum-namespace": namespace, ...headers } });
+
+    // tenant-a has no consumer-mobile-app: its detail read and its revoke are 404.
+    assert.equal((await call("GET", "/consumers/consumer-mobile-app", "tenant-a")).status, 404);
+    const own = await call("GET", "/consumers/consumer-mobile-app", "ferrum");
+    assert.equal(own.status, 200);
+    const tag = own.headers.get("etag");
+    const foreign = await call("DELETE", "/consumers/consumer-mobile-app/credentials/keyauth/0",
+      "tenant-a", { "if-match": tag });
+    assert.equal(foreign.status, 404);
+    const after = await (await call("GET", "/consumers/consumer-mobile-app", "ferrum")).json();
+    assert.equal(after.credentials.keyauth.length, 2, "the ferrum consumer is untouched");
+    assert.equal((await call("GET", "/consumers/consumer-mobile-app", "ferrum")).headers.get("etag"), tag);
   } finally {
     if (child.exitCode === null && child.signalCode === null) {
       const exited = once(child, "exit");

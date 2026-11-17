@@ -28,6 +28,8 @@ import {
 } from "../src/api/pluginSensitivity.ts";
 
 const CONFIG_CURSOR_PATTERN = /^\d+:\d+$/;
+const STRONG_ETAG_PATTERN = /^"[\x21\x23-\x7e]+"$/;
+const IF_MATCH_UNSUPPORTED_PATTERN = /If-Match is only supported on/;
 
 const config = readSeedConfig();
 confirmDestructiveTarget(config);
@@ -173,10 +175,28 @@ const rotated = await request(`/consumers/${consumerId}/credentials/keyauth?appl
   body: { key: "contract-smoke-api-key-rotated" },
 });
 assert.equal(rotated.credentials.keyauth.length, 2);
-await request(`/consumers/${consumerId}/credentials/keyauth/1?apply=sync`, {
+// Foundry's indexed revoke sends the consumer ETag as If-Match (#703). Edge
+// with ferrum-edge#7393 evaluates it; an older Edge refuses the header with
+// its "only supported on" 400 before acting, which is what Foundry detects
+// before falling back to a verified re-read. Pin whichever the gateway does.
+const tagged = await exchange(`/consumers/${consumerId}`);
+assert.match(tagged.etag ?? "", STRONG_ETAG_PATTERN);
+const conditionalRevoke = await exchange(`/consumers/${consumerId}/credentials/keyauth/1?apply=sync`, {
   method: "DELETE",
-  expected: [200, 204],
+  headers: { "if-match": tagged.etag },
 });
+if (conditionalRevoke.status === 400) {
+  assert.match(String(conditionalRevoke.body?.error), IF_MATCH_UNSUPPORTED_PATTERN);
+  const unchanged = await request(`/consumers/${consumerId}`);
+  assert.equal(unchanged.credentials.keyauth.length, 2, "a refused If-Match deleted nothing");
+  await request(`/consumers/${consumerId}/credentials/keyauth/1?apply=sync`, {
+    method: "DELETE",
+    expected: [200, 204],
+  });
+} else {
+  assert.ok([200, 204].includes(conditionalRevoke.status),
+    `conditional revoke returned ${conditionalRevoke.status}: ${JSON.stringify(conditionalRevoke.body)}`);
+}
 
 await request("/proxies?apply=sync", { method: "POST", body: proxy });
 await request(`/proxies/${proxyId}?apply=sync`, {

@@ -2,7 +2,15 @@
 /*  Ferrum Foundry – Consumer API functions                           */
 /* ------------------------------------------------------------------ */
 
-import { proxyApi, REDACT_ERRORS, scoped, SILENT_ERRORS, type NamespaceScope } from "./client";
+import { isHTTPError } from "ky";
+import {
+  getApiErrorDetail,
+  proxyApi,
+  REDACT_ERRORS,
+  scoped,
+  SILENT_ERRORS,
+  type NamespaceScope,
+} from "./client";
 import type {
   BuiltInCredentialType,
   Consumer,
@@ -19,8 +27,10 @@ import {
   conditionalPut,
   guardedRemove,
   guardedReplace,
+  isPreconditionFailed,
   readTagged,
   replaceFromRead,
+  strongEtag,
   type WriteGuard,
 } from "./conditionalWrite";
 import {
@@ -252,17 +262,102 @@ export async function deleteCredentials(
   });
 }
 
+/**
+ * The consumer changed on the gateway after the operator selected a
+ * credential by position, so the position may now name a different
+ * credential. The tag covers the whole consumer, so the change may be in any
+ * field, not necessarily the credential list; the message says only what the
+ * tag proves (review dsf F1 on #713). Nothing was deleted. Never retried automatically: the operator
+ * must select again from a fresh read.
+ */
+export class CredentialListChangedError extends Error {
+  constructor() {
+    super(
+      "The consumer changed on the gateway since you selected this credential, so the " +
+        "entry at that position can no longer be confirmed. Nothing was deleted. Select " +
+        "the credential again from the refreshed list.",
+    );
+    this.name = "CredentialListChangedError";
+  }
+}
+
+export function isCredentialListChangedError(error: unknown): error is CredentialListChangedError {
+  return error instanceof CredentialListChangedError;
+}
+
+/**
+ * The consumer read the operator selected from carried no usable strong
+ * `ETag` (an older gateway, a mode without a database, or the cached-config
+ * fallback), so a positional delete cannot be pinned to it. Nothing was sent.
+ */
+export class CredentialSelectionUnverifiableError extends Error {
+  constructor() {
+    super(
+      "This credential cannot be deleted safely: the consumer read it was selected from " +
+        "carried no strong ETag, so the gateway could not confirm the position still names " +
+        "it. Nothing was deleted. Reload the consumer from a gateway with a database and try again.",
+    );
+    this.name = "CredentialSelectionUnverifiableError";
+  }
+}
+
+/**
+ * The `400` Ferrum Edge releases before ferrum-edge#7393 (v0.9.20 included)
+ * answer to `If-Match` on a credential route. Their router refuses the header
+ * before dispatch, so nothing was deleted.
+ */
+const IF_MATCH_UNSUPPORTED = "If-Match is only supported on";
+
+async function ifMatchUnsupported(error: unknown): Promise<boolean> {
+  if (!isHTTPError(error) || error.response.status !== 400) return false;
+  return (await getApiErrorDetail(error)).includes(IF_MATCH_UNSUPPORTED);
+}
+
+/**
+ * Delete the credential at `index` (ferrum-foundry#703, ferrum-edge#7393).
+ *
+ * Credentials read back redacted, so a position is the only handle on one,
+ * and a position is only meaningful in the list it was read from: if another
+ * admin, tab, or automation appends or removes a credential first, the same
+ * index names a different credential. `ifMatch` is the consumer `ETag` of the
+ * read the operator selected from (`validatorOf` the rendered consumer, never
+ * a fresh read). An absent tag refuses before sending.
+ *
+ * - An Edge with ferrum-edge#7393 compares the tag under its admission lease
+ *   and answers `412` if anything about the consumer changed:
+ *   `CredentialListChangedError`.
+ * - An older Edge (the v0.9.20 pin) refuses `If-Match` on this route with a
+ *   `400` before acting. The capability is detected from that answer, and the
+ *   delete falls back to a verified re-read: the consumer is read again, the
+ *   delete is refused unless that read carries the same tag, and only then is
+ *   it sent without `If-Match`. That narrows the race from "since the page
+ *   loaded" to the moment between the re-read and the delete; only the Edge
+ *   precondition closes it.
+ */
 export async function deleteCredentialByIndex(
   scope: NamespaceScope,
   consumerId: string,
   credType: string,
   index: number,
+  ifMatch: string | null,
 ): Promise<void> {
+  const tag = strongEtag(ifMatch);
+  if (tag === null) throw new CredentialSelectionUnverifiableError();
+  const path =
+    `consumers/${pathSegment(consumerId)}/credentials/${pathSegment(credType)}/` +
+    pathSegment(String(index));
   await serializeWrite(scope, consumerId, async () => {
-    await proxyApi.delete(
-      `consumers/${pathSegment(consumerId)}/credentials/${pathSegment(credType)}/` +
-        pathSegment(String(index)),
-      scoped(scope),
-    );
+    try {
+      // The form reports a 400 itself; keep a capability refusal out of the popup.
+      await conditionalDelete(scope, path, tag, { handled: [400] });
+      return;
+    } catch (error) {
+      // A 412 carries nothing the operator needs beyond "select again".
+      if (isPreconditionFailed(error)) throw new CredentialListChangedError();
+      if (!(await ifMatchUnsupported(error))) throw error;
+    }
+    const fresh = await readTagged<Consumer>(scope, `consumers/${pathSegment(consumerId)}`);
+    if (strongEtag(fresh.etag) !== tag) throw new CredentialListChangedError();
+    await conditionalDelete(scope, path, null);
   });
 }

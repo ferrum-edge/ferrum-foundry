@@ -274,8 +274,17 @@ See `docs/concurrent-edits.md`.
   plugin membership plans keep their semantics. Never use them to bypass a
   refused editor write. An untagged re-read after a `412` was already refused.
 - Send `If-Match` only on `PUT`/`DELETE` of the four resource item paths
-  (proxies, upstreams, consumers, plugin configs), and only a strong tag from a
-  read. Anywhere else, or a malformed or empty value, is a `400`.
+  (proxies, upstreams, consumers, plugin configs) and on the indexed
+  credential delete, and only a strong tag from a read. Anywhere else, or a
+  malformed or empty value, is a `400`.
+- The indexed credential delete (`consumers.deleteCredentialByIndex`) carries
+  the consumer `ETag` of the read the operator selected the index from
+  (`consumerEtag`, kept on the rendered consumer by `shareTaggedRead`). A
+  `412` is `CredentialListChangedError` (nothing deleted, select again); an
+  untagged read refuses before sending (#703, ferrum-edge#7393). Against an
+  Edge without that precondition (the v0.9.20 pin), its "If-Match is only
+  supported on" `400` triggers a verified re-read fallback: same tag, then an
+  unconditional delete; otherwise `CredentialListChangedError`.
 - `update()` and `remove()` on proxies, upstreams, and consumers take the guard
   as a required argument. Pass `null` only from a caller that provably cannot
   lose a concurrent change.

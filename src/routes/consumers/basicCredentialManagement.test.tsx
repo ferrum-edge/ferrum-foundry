@@ -28,7 +28,7 @@ function Page() {
   useEffect(() => { namespace = value; changeConsumer = setId; }, [value]);
   return query.data ? <div data-revision={query.dataUpdatedAt}><CredentialForm key={session.key} session={session}
     credentialType="basicauth" existingCredentials={query.data.credentials.basicauth}
-    revision={query.dataUpdatedAt} isRefreshing={query.isFetching} /></div> : null;
+    consumerEtag={null} revision={query.dataUpdatedAt} isRefreshing={query.isFetching} /></div> : null;
 }
 
 let root: Root;
