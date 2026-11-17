@@ -117,12 +117,13 @@ export function refuseMaskedResourceWrite(
 
 /**
  * The upstream editor's settings save. Besides the merged `payload`, it checks
- * the `subsets` of the read the editor was seeded with: the form rebuilds each
- * subset from the name, labels and load-balancing fields it shows, so a masked
- * `subsets[].traffic_policy.tls` key in the read never reaches the payload,
- * and sending it would delete the stored key without the operator having seen
- * it. Such a save is refused, naming the subset field, for an admin to make.
- * (`port_overrides` is mesh-owned and never sent, so a save leaves it alone.)
+ * the `subsets` of the read the editor was seeded with. The form writes every
+ * subset field it does not edit back as read, so a masked
+ * `subsets[].traffic_policy.tls` key on a kept subset is in the payload and
+ * refused there; the seed check also covers a subset the save removes, whose
+ * stored key the operator never saw. Such a save is refused, naming the subset
+ * field, for an admin to make. (`port_overrides` is mesh-projected, refused by
+ * Edge on a write and never sent, so a save leaves it alone.)
  */
 export function refuseMaskedUpstreamSettingsWrite(
   id: string,

@@ -45,6 +45,8 @@ import type {
   PassiveHealthCheck,
   HashOnCookieConfig,
   ServiceDiscoveryConfig,
+  SubsetDefinition,
+  SubsetTrafficPolicy,
 } from "@/api/types";
 
 const UNDERSCORES_PATTERN = /_/g;
@@ -287,6 +289,46 @@ function statusCodesForSubmit(draft: StatusCodeListDraft): number[] | undefined 
   return result.ok ? result.codes : draft.seedCodes;
 }
 
+/** One subset row. `source` is the subset as read, absent for a row added here. */
+interface SubsetRow {
+  id: number;
+  name: string;
+  labels: SubsetLabelsDraft;
+  algorithm: Upstream["algorithm"] | "";
+  hashOn: string;
+  source?: SubsetDefinition;
+}
+
+/**
+ * A subset as the settings save writes it. The save replaces `subsets`
+ * wholesale, so the row's fields are merged onto the subset as read: the name,
+ * selector, algorithm and hash key come from the form, and every other subset
+ * and `traffic_policy` field (a mesh-projected `tls` policy, a connect
+ * timeout) is written back exactly as read instead of being deleted unseen.
+ */
+function subsetForSubmit(row: SubsetRow): SubsetDefinition {
+  const source: Partial<SubsetDefinition> = row.source ?? {};
+  const { traffic_policy: readPolicy, ...readSubset } = source;
+  const readTrafficPolicy: SubsetTrafficPolicy = readPolicy ?? {};
+  const {
+    load_balancer_algorithm: _readAlgorithm,
+    hash_on: _readHashOn,
+    ...unmodelledPolicy
+  } = readTrafficPolicy;
+  const hashOn = row.hashOn.trim();
+  const trafficPolicy: SubsetTrafficPolicy = {
+    ...unmodelledPolicy,
+    ...(row.algorithm && { load_balancer_algorithm: row.algorithm }),
+    ...(hashOn && { hash_on: hashOn }),
+  };
+  return {
+    ...readSubset,
+    name: row.name.trim(),
+    labels: subsetLabelsForSubmit(row.labels),
+    ...(Object.keys(trafficPolicy).length > 0 && { traffic_policy: trafficPolicy }),
+  };
+}
+
 /* ------------------------------------------------------------------ */
 /*  Default builders                                                   */
 /* ------------------------------------------------------------------ */
@@ -393,22 +435,18 @@ export function UpstreamForm({
 
   /* ---------- Subsets ---------- */
   // Labels are key/value rows, and a selector left untouched is written back
-  // as the exact map that was read (#479).
+  // as the exact map that was read (#479). Each row keeps the subset it was
+  // read from, so the save keeps the fields the form does not edit.
   const nextSubsetRowId = useRef(0);
   const newSubsetRowId = () => nextSubsetRowId.current++;
-  const [subsets, setSubsets] = useState<Array<{
-    id: number;
-    name: string;
-    labels: SubsetLabelsDraft;
-    algorithm: Upstream["algorithm"] | "";
-    hashOn: string;
-  }>>(() =>
+  const [subsets, setSubsets] = useState<SubsetRow[]>(() =>
     (initialData?.subsets ?? []).map((s) => ({
       id: newSubsetRowId(),
       name: s.name,
       labels: subsetLabelsDraft(s.labels, newSubsetRowId),
       algorithm: s.traffic_policy?.load_balancer_algorithm ?? "",
       hashOn: s.traffic_policy?.hash_on ?? "",
+      source: s,
     })),
   );
   const [subsetLabelErrors, setSubsetLabelErrors] = useState<Record<number, SubsetLabelErrors>>({});
@@ -675,18 +713,7 @@ export function UpstreamForm({
         }
       : undefined;
 
-    const parsedSubsets = subsets
-      .filter((s) => s.name.trim())
-      .map((s) => ({
-        name: s.name.trim(),
-        labels: subsetLabelsForSubmit(s.labels),
-        ...((s.algorithm || s.hashOn.trim()) && {
-          traffic_policy: {
-            ...(s.algorithm && { load_balancer_algorithm: s.algorithm }),
-            ...(s.hashOn.trim() && { hash_on: s.hashOn.trim() }),
-          },
-        }),
-      }));
+    const parsedSubsets = subsets.filter((s) => s.name.trim()).map(subsetForSubmit);
 
     const sanList = tlsSanAllowList
       .split(",")

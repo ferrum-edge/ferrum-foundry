@@ -180,8 +180,8 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
     try {
       const payload = upstreamsApi.mergeFormUpdatePayload(upstream, data);
       // The form blocks a placeholder in a field it shows; this also refuses
-      // one it round-trips without showing, and a masked subset TLS key in the
-      // seeded read that the form's subset rebuild would silently delete.
+      // one it round-trips without showing (a kept subset's masked TLS key),
+      // and one in a seeded subset the save removes.
       refuseMaskedUpstreamSettingsWrite(upstreamId, upstream, payload, facts.role);
       const updated = await updateUpstream.mutateAsync({
         id: upstreamId,

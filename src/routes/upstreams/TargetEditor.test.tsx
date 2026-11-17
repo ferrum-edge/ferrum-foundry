@@ -197,9 +197,10 @@ describe("upstream target route integration", () => {
     expect(writes[1].method).toBe("DELETE");
   });
 
-  it("refuses a settings save that would drop a masked subset TLS key, sending nothing (#704)", async () => {
+  it("refuses a settings save that would carry a masked subset TLS key, sending nothing (#704)", async () => {
     // A non-admin read withholds the stored key (ferrum-edge#7060); the form
-    // rebuilds subsets without traffic_policy.tls, so the save would delete it.
+    // writes the subset's traffic_policy back as read, placeholder included,
+    // and Edge refuses that placeholder.
     current = {
       ...initial,
       subsets: [{

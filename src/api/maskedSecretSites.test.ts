@@ -173,8 +173,9 @@ describe("an upstream settings save checks the subsets of the read it was seeded
     subsets: [{ name: "v2", labels: {}, traffic_policy: { tls: { private_key: "[REDACTED]" } } }],
     port_overrides: { "8443": { tls: { client_key_path: "[REDACTED]" } } },
   };
-  // The form rebuilds subsets without traffic_policy.tls; port_overrides is never sent.
-  const payload = { name: "renamed", subsets: [{ name: "v2", labels: {} }] };
+  // A save that removed subset v2 (and renamed its replacement), so the masked
+  // key is only in the seed; port_overrides is never sent.
+  const payload = { name: "renamed", subsets: [{ name: "v3", labels: {} }] };
 
   const refusal = (role: "admin" | "operator" | null) => {
     try {
