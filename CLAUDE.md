@@ -279,7 +279,10 @@ See `docs/concurrent-edits.md`.
   the consumer `ETag` of the read the operator selected the index from
   (`consumerEtag`, kept on the rendered consumer by `shareTaggedRead`). A
   `412` is `CredentialListChangedError` (nothing deleted, select again); an
-  untagged read refuses before sending (#703, ferrum-edge#7393).
+  untagged read refuses before sending (#703, ferrum-edge#7393). Against an
+  Edge without that precondition (the v0.9.20 pin), its "If-Match is only
+  supported on" `400` triggers a verified re-read fallback: same tag, then an
+  unconditional delete; otherwise `CredentialListChangedError`.
 - `update()` and `remove()` on proxies, upstreams, and consumers take the guard
   as a required argument. Pass `null` only from a caller that provably cannot
   lose a concurrent change.

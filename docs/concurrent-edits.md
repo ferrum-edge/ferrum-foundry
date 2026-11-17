@@ -59,7 +59,8 @@ What Foundry relies on:
   `/consumers/{id}/credentials/{type}` and the indexed `DELETE
   .../{type}/{index}` compare `If-Match` with the `ETag` of
   `GET /consumers/{id}`, under the same lease. Earlier Edge releases answer
-  `400` to `If-Match` there.
+  `400` to `If-Match` there, before acting; Foundry's indexed delete detects
+  that and falls back to a verified re-read.
 - **After a `412`, reapply the intended edit to the current resource.**
   Resending the same body with the new tag would revert the change that caused
   the refusal.
@@ -446,10 +447,16 @@ The delete is therefore conditional on the read the operator selected from:
 - The existing checks stay: a refetch between selection and confirmation still
   asks for a fresh selection without sending anything.
 
-This needs an Edge release that includes ferrum-edge#7393. Against an earlier
-Edge (the v0.9.20 pin included), the gateway answers the conditional delete
-with `400` and nothing is deleted, so indexed credential revocation from the
-UI fails closed until the pin moves.
+An Edge release without ferrum-edge#7393 (the v0.9.20 pin included) refuses
+`If-Match` on this route with its `If-Match is only supported on …` `400`,
+from the router, before anything is deleted. Foundry detects that answer and
+falls back to a verified re-read: it reads the consumer again, refuses with
+`CredentialListChangedError` unless that read carries the same tag as the
+selection, and only then sends the delete without `If-Match`. The race then
+shrinks from "since the page loaded" to the moment between that re-read and
+the delete; only the Edge precondition closes it. Any other `400` is reported
+as is, never treated as a missing capability. `gateway-contract-smoke.mjs`
+pins which answer the pinned gateway gives.
 
 ### Committed credential writes
 
