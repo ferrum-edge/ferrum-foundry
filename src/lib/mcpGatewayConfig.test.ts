@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { getPluginConfigDefault } from "./pluginConfigDefaults";
 import {
+  MCP_GATEWAY_AGGREGATE_ONLY_PATHS,
+  MCP_GATEWAY_RETIRED_PATHS,
   mcpGatewayConfigHasAggregateOnlyFields,
   omitMcpGatewayAggregateOnlyFields,
   sanitizeMcpGatewayConfigForSubmit,
@@ -89,6 +91,46 @@ describe("mcpGatewayConfig", () => {
     expect(submitted.policy).toBeUndefined();
     expect(submitted.discovery).toBeUndefined();
     expect(mcpGatewayConfigHasAggregateOnlyFields(submitted)).toBe(false);
+  });
+
+  it("drops the discovery.hide_denied_items key Edge removed from every switch and submit", () => {
+    // Edge main (ferrum-edge#7136) refuses it as an unknown key in every mode,
+    // and v0.9.20 refuses it in transparent mode; policy.hide_denied_tools is
+    // the only switch. It is never stashed, so it never comes back.
+    expect(MCP_GATEWAY_AGGREGATE_ONLY_PATHS).not.toContain("discovery.hide_denied_items");
+    expect(MCP_GATEWAY_RETIRED_PATHS).toContain("discovery.hide_denied_items");
+    const legacy = {
+      ...aggregateConfig,
+      discovery: { ...aggregateConfig.discovery, hide_denied_items: false },
+    };
+    const hasRetiredKey = (config: Record<string, unknown>) =>
+      Object.hasOwn((config.discovery ?? {}) as object, "hide_denied_items");
+
+    expect(hasRetiredKey(sanitizeMcpGatewayConfigForSubmit(legacy))).toBe(false);
+    expect(sanitizeMcpGatewayConfigForSubmit(legacy)).toEqual(aggregateConfig);
+
+    const transparent = switchMcpGatewayMode(legacy, "transparent_proxy");
+    expect(hasRetiredKey(transparent.config)).toBe(false);
+    expect(transparent.stash).toEqual({
+      discovery: { aggregate_tools: true },
+      policy: aggregateConfig.policy,
+    });
+    expect(hasRetiredKey(sanitizeMcpGatewayConfigForSubmit(transparent.config))).toBe(false);
+    // Still present when typed in transparent mode: the submit drops it too.
+    const typed = { ...transparent.config, discovery: { hide_denied_items: true } };
+    expect(sanitizeMcpGatewayConfigForSubmit(typed)).toEqual(transparent.config);
+
+    const back = switchMcpGatewayMode(typed, "aggregate_router", transparent.stash);
+    expect(hasRetiredKey(back.config)).toBe(false);
+    expect(back.config).toEqual(aggregateConfig);
+    expect(hasRetiredKey(sanitizeMcpGatewayConfigForSubmit(back.config))).toBe(false);
+
+    // A section the removal empties goes; any other empty section stays.
+    expect(sanitizeMcpGatewayConfigForSubmit({
+      mode: "aggregate_router",
+      discovery: { hide_denied_items: true },
+      sessions: {},
+    })).toEqual({ mode: "aggregate_router", sessions: {} });
   });
 
   it("leaves aggregate-mode submissions unchanged", () => {

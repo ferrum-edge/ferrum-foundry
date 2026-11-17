@@ -11,6 +11,7 @@ export type ApplyState =
   | "outcome_unknown"
   | "pending"
   | "succeeded"
+  | "unserved_namespace"
   | "applied"
   | "rejected"
   | "unverifiable"
@@ -25,8 +26,10 @@ export type ApplyState =
  *
  * `unmonitored` is that same fact for a session that may not poll
  * `/config/apply-status` (or whose poll was refused), so it survives exactly
- * as `pending` does. `outcome_unknown` is not a known commit: it describes the
- * latest mutation only and is replaced by the next one.
+ * as `pending` does. `unserved_namespace` is a commit this gateway's data
+ * plane will never route (ferrum-edge#5447), so it survives too.
+ * `outcome_unknown` is not a known commit: it describes the latest mutation
+ * only and is replaced by the next one.
  */
 export function holdsKnownCommit(state: ApplyState): boolean {
   switch (state) {
@@ -34,6 +37,7 @@ export function holdsKnownCommit(state: ApplyState): boolean {
     case "rejected":
     case "unverifiable":
     case "unmonitored":
+    case "unserved_namespace":
       return true;
     case "idle":
     case "nothing_applied":
@@ -89,6 +93,17 @@ type ApplyStatusFetcher = (
 ) => Promise<ApplyStatusResponse>;
 
 const NAMESPACE_HEADER = "x-ferrum-namespace";
+const NAMESPACE_UNSERVED_HEADER = "x-ferrum-namespace-unserved";
+
+/**
+ * Whether Edge marked an accepted mutation as targeting a namespace this
+ * gateway's data plane does not route: `X-Ferrum-Namespace-Unserved: true`
+ * on a `2xx` (ferrum-edge#5447; the BFF forwards only the value `true`). The
+ * resource is stored, listed by the Admin API, and never served here.
+ */
+export function namespaceUnservedAnswer(response: Response): boolean {
+  return response.ok && response.headers.get(NAMESPACE_UNSERVED_HEADER) === "true";
+}
 
 const IDLE_APPLY: GatewayMetadataSnapshot["apply"] = {
   state: "idle",
@@ -464,6 +479,22 @@ export async function observeGatewayResponse(
         requestUrl: request.url,
         reason: null,
         retryAfter,
+        polling: false,
+      },
+    };
+  } else if (namespaceUnservedAnswer(response)) {
+    // Committed, but this gateway's data plane does not route the namespace,
+    // so there is no live state to monitor and nothing will ever serve it.
+    // The banner names only the namespace the mutation itself carried.
+    next = {
+      ...next,
+      apply: {
+        namespace,
+        state: "unserved_namespace",
+        cursor: null,
+        requestUrl: request.url,
+        reason: "namespace_unserved",
+        retryAfter: null,
         polling: false,
       },
     };

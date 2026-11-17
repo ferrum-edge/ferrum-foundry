@@ -24,6 +24,8 @@ import { ProxyForm } from "@/components/forms/ProxyForm";
 import { Badge } from "@/components/ui/Badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
 import { committedWriteMessage, getApiErrorMessage, getCommittedWrite } from "@/api/client";
+import { refuseMaskedResourceWrite } from "@/api/maskedSecretSites";
+import { MaskedSecretRefusal } from "@/components/shared/MaskedSecretRefusal";
 import * as proxiesApi from "@/api/proxies";
 import {
   analyzeProxyPolicy,
@@ -79,7 +81,7 @@ function ProxyEditor({ session }: { session: EditorSession }) {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const { capabilities } = useCapabilities();
+  const { capabilities, facts } = useCapabilities();
   const capability = capabilities.proxies;
   const updateProxy = useUpdateProxy();
   const deleteProxy = useDeleteProxy();
@@ -91,6 +93,7 @@ function ProxyEditor({ session }: { session: EditorSession }) {
 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [conflict, setConflict] = useState<StaleResourceDetail | null>(null);
+  const [saveError, setSaveError] = useState<unknown>(null);
   // Bumped only by an explicit "discard my draft and reload"; a background
   // refetch never remounts the form (see `src/lib/editorIdentity.ts`).
   const [formGeneration, setFormGeneration] = useState(0);
@@ -198,10 +201,15 @@ function ProxyEditor({ session }: { session: EditorSession }) {
 
   const handleSubmit = session.bind(async (data: ProxyCreate) => {
     if (!proxy || !capability.allowed) return;
+    setSaveError(null);
     try {
+      const payload = proxiesApi.mergeFormUpdatePayload(proxy, data);
+      // The form blocks a placeholder in a field it shows; this also covers
+      // one it round-trips without showing.
+      refuseMaskedResourceWrite("Proxy", proxyId, payload, facts.role);
       const updated = await updateProxy.mutateAsync({
         id: proxyId,
-        data: proxiesApi.mergeFormUpdatePayload(proxy, data),
+        data: payload,
         guard: baseline.current(),
       });
       // The accepted response is now what the gateway holds, so it becomes the
@@ -230,6 +238,7 @@ function ProxyEditor({ session }: { session: EditorSession }) {
         );
         return;
       }
+      setSaveError(err);
       const message = await getApiErrorMessage(err, "Failed to update proxy");
       toast("error", message);
     }
@@ -326,6 +335,8 @@ function ProxyEditor({ session }: { session: EditorSession }) {
       <ResourceLabels labels={proxy.labels} />
       <ProxyApiSpecsCard proxyId={proxyId} enabled={detailLive && !resourceQuery.isError} />
 
+      <MaskedSecretRefusal error={saveError} />
+
       {/* Tabs */}
       <Tabs defaultValue="config" onValueChange={openTab}>
         <TabsList>
@@ -357,6 +368,7 @@ function ProxyEditor({ session }: { session: EditorSession }) {
               onSubmit={handleSubmit}
               isLoading={updateProxy.isPending}
               capability={capability}
+              role={facts.role}
             />
           </Card>
         </TabsContent>

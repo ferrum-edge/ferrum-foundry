@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { jwtVerify } from 'jose';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -46,6 +47,18 @@ const MUST_NOT_REUSE_PATTERN = /must not reuse/;
 const DISABLED_PATTERN = /disabled/;
 const ALLOW_PATTERN = /allow/i;
 const READ_TIMEOUT_PATTERN = /readTimeout/;
+const STILL_THE_PLACEHOLDER_PATTERN = /is still the placeholder from deploy\/starter\/\.env\.example/;
+const PUBLISHED_DEVELOPMENT_EXAMPLE_PATTERN =
+  /is a published development example value and is refused in production/;
+const ENV_EXAMPLE_LINE_PATTERN = /^(FERRUM_JWT_SECRET|FERRUM_TRUSTED_PROXY_SECRET)=(.*)$/gm;
+
+/** The two BFF secrets exactly as deploy/starter/.env.example ships them. */
+function shippedStarterSecrets(): Record<string, string> {
+  const example = readFileSync(new URL('../deploy/starter/.env.example', import.meta.url), 'utf8');
+  const values: Record<string, string> = {};
+  for (const [, key, value] of example.matchAll(ENV_EXAMPLE_LINE_PATTERN)) values[key] = value;
+  return values;
+}
 
 const ENV_KEYS = [
   'NODE_ENV',
@@ -548,6 +561,71 @@ describe('config', () => {
     setValidEnv({ FERRUM_JWT_TTL: '3601', FERRUM_JWT_MAX_TTL: '3600' });
     const { loadConfig } = await loadModule();
     expect(() => loadConfig()).toThrow(MUST_NOT_EXCEED_PATTERN);
+  });
+
+  // GHSA-hpqf-v945-35qp: an unedited copy of the starter's .env.example must
+  // never start a BFF, in production or anywhere else.
+  it('refuses the .env.example placeholder secrets in every mode', async () => {
+    const shipped = shippedStarterSecrets();
+    expect(Object.keys(shipped).sort()).toEqual(['FERRUM_JWT_SECRET', 'FERRUM_TRUSTED_PROXY_SECRET']);
+
+    for (const [name, value] of Object.entries(shipped)) {
+      clearTestEnv();
+      setProductionEnv({ [name]: value });
+      let { loadConfig } = await loadModule();
+      expect(() => loadConfig()).toThrow(STILL_THE_PLACEHOLDER_PATTERN);
+      expect(() => loadConfig()).toThrow(new RegExp(name));
+
+      clearTestEnv();
+      setValidEnv({
+        FERRUM_AUTH_MODE: 'trusted-proxy',
+        FERRUM_BFF_AUTH_TOKEN: undefined,
+        FERRUM_TRUSTED_PROXY_SECRET: 'p'.repeat(40),
+        [name]: value,
+      });
+      ({ loadConfig } = await loadModule());
+      expect(() => loadConfig()).toThrow(STILL_THE_PLACEHOLDER_PATTERN);
+    }
+
+    // Any spelling of the placeholder, and the static token too.
+    for (const value of ['REPLACE_ME-0123456789abcdef0123456789abcdef', 'xx-replaceme-0123456789abcdef0123456789']) {
+      clearTestEnv();
+      setValidEnv({ FERRUM_BFF_AUTH_TOKEN: value });
+      const { loadConfig } = await loadModule();
+      expect(() => loadConfig()).toThrow(STILL_THE_PLACEHOLDER_PATTERN);
+    }
+  });
+
+  it('refuses the published development example secrets in production only', async () => {
+    const examples = {
+      FERRUM_JWT_SECRET: 'dev-secret-at-least-32-characters-long',
+      FERRUM_TRUSTED_PROXY_SECRET: 'dev-bff-token-at-least-32-characters-long',
+    };
+    for (const [name, value] of Object.entries(examples)) {
+      clearTestEnv();
+      setProductionEnv({ [name]: value });
+      const { loadConfig } = await loadModule();
+      expect(() => loadConfig()).toThrow(PUBLISHED_DEVELOPMENT_EXAMPLE_PATTERN);
+    }
+
+    // Static auth under the production override is still production.
+    clearTestEnv();
+    setValidEnv({
+      NODE_ENV: 'production',
+      FERRUM_ALLOW_INSECURE_STATIC_AUTH: 'true',
+      FERRUM_BFF_AUTH_TOKEN: 'dev-bff-token-at-least-32-characters-long',
+    });
+    let { loadConfig } = await loadModule();
+    expect(() => loadConfig()).toThrow(PUBLISHED_DEVELOPMENT_EXAMPLE_PATTERN);
+
+    // The local development instructions keep working.
+    clearTestEnv();
+    setValidEnv({
+      FERRUM_JWT_SECRET: 'dev-secret-at-least-32-characters-long',
+      FERRUM_BFF_AUTH_TOKEN: 'dev-bff-token-at-least-32-characters-long',
+    });
+    ({ loadConfig } = await loadModule());
+    expect(loadConfig().authMode).toBe('static');
   });
 
   it('fails closed on static authentication in production', async () => {

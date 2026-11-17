@@ -3,9 +3,12 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { DEFAULT_PLUGIN_CONFIGS, getPluginConfigDefault } from "../src/lib/pluginConfigDefaults.ts";
 import {
+  OPERATOR_COMPLETIONS,
   OPERATOR_INPUT_REQUIRED,
   OPERATOR_INPUT_REJECTIONS,
+  assertOnlyOperatorCompletion,
   assertOnlyRequiredOperatorInputs,
+  completeOperatorInput,
   verifyPluginDefaults,
 } from "./plugin-defaults-contract.mjs";
 
@@ -24,6 +27,15 @@ const KAFKA_LOGGING_REJECTION_REASON_DRIFT_PATTERN = /kafka_logging: rejection r
 const CLEANUP_EXPECTED_200_204_404_PATTERN = /cleanup:.*expected 200\/204\/404, received 503/;
 const EXPECTED_201_RECEIVED_400_PATTERN = /expected 201, received 400/;
 const CLEANUP_TRANSPORT_FAILED_PATTERN = /cleanup transport failed/;
+const COMPLETED_LOAD_TESTING_REFUSED_PATTERN =
+  /load_testing: load_testing with key supplied: expected 201, received 400/;
+const ONLY_CA_PEM_MAY_DIFFER_PATTERN =
+  /only allowed_issuers\.0\.ca_certificate_pem may differ from Foundry's defaults/;
+const PEM_CERTIFICATE_PATTERN = /^-----BEGIN CERTIFICATE-----\n[\s\S]+\n-----END CERTIFICATE-----\n$/;
+const COMPLETED_PREFIX = "contract-completed-";
+const WRITES = 81 + Object.keys(OPERATOR_COMPLETIONS).length;
+
+const isCompleted = (body) => body.id.startsWith(COMPLETED_PREFIX);
 
 // This transport double tests the gate's failure behavior. Real validation is
 // exclusively the existing Pinned Gateway Contract job's enabled submissions.
@@ -42,7 +54,7 @@ function transport(override = () => undefined) {
       // Every previous plugin must have been removed before admitting another.
       assert.equal(plugins.size, 0);
       writes.push(structuredClone(body));
-      const expected = OPERATOR_INPUT_REJECTIONS[body.plugin_name];
+      const expected = isCompleted(body) ? undefined : OPERATOR_INPUT_REJECTIONS[body.plugin_name];
       const response = override(body) ?? (expected
         ? { status: expected.status, body: { error: expected.error } }
         : { status: 201, body });
@@ -80,15 +92,20 @@ test("hosted lifecycle admits the catalog before seeding the process-wide metric
 test("submits enabled defaults with a generated OIDC key", async () => {
   const fixture = transport();
   assert.deepEqual(await verifyPluginDefaults(fixture.exchange, quiet), {
-    templates: 81, accepted: 74, operatorInput: 8,
+    templates: 81, accepted: 74, operatorInput: 8, operatorCompleted: 2,
   });
-  assert.equal(fixture.writes.length, 81);
+  assert.equal(fixture.writes.length, WRITES);
   assert.ok(OPERATOR_INPUT_REQUIRED.oidc_relying_party);
   const oidcWrite = fixture.writes.find((write) => write.plugin_name === "oidc_relying_party");
   assert.ok(oidcWrite);
   assert.equal(oidcWrite.enabled, true);
   assert.ok(Buffer.from(oidcWrite.config.session.encryption_secret, "base64").length >= 32);
   for (const write of fixture.writes) {
+    if (isCompleted(write)) {
+      assertOnlyOperatorCompletion(write.plugin_name, write.config);
+      assert.equal(write.scope, "global");
+      continue;
+    }
     assertOnlyRequiredOperatorInputs(write.plugin_name, write.config);
     assert.equal(write.enabled, true);
     const needsProxy = ["openapi_validator", "tcp_connection_throttle"].includes(write.plugin_name);
@@ -97,6 +114,47 @@ test("submits enabled defaults with a generated OIDC key", async () => {
   }
   assert.equal(fixture.plugins.size, 0);
   assert.equal(fixture.proxies.size, 0);
+});
+
+test("templates rejected as shipped are admitted once the documented field is supplied (#707)", async () => {
+  const fixture = transport();
+  await verifyPluginDefaults(fixture.exchange, quiet);
+  const completed = fixture.writes.filter(isCompleted);
+  assert.deepEqual(completed.map((write) => write.plugin_name).sort(), ["load_testing", "mtls_auth"]);
+  for (const write of completed) {
+    assert.equal(write.enabled, true);
+    assert.equal(write.scope, "global");
+    assert.ok(OPERATOR_INPUT_REJECTIONS[write.plugin_name]);
+  }
+  const loadTesting = completed.find((write) => write.plugin_name === "load_testing").config;
+  assert.equal(loadTesting.key.length, 32);
+  assert.ok(!("gateway_addresses" in loadTesting));
+  const mtls = completed.find((write) => write.plugin_name === "mtls_auth").config;
+  assert.match(mtls.allowed_issuers[0].ca_certificate_pem, PEM_CERTIFICATE_PATTERN);
+  assert.equal(mtls.allowed_issuers[0].cn, "Ferrum Dev CA");
+  assert.ok(!("allowed_ca_fingerprints_sha256" in mtls));
+  assert.equal(fixture.plugins.size, 0);
+});
+
+test("an operator-completed template that is still refused fails the gate", async () => {
+  const fixture = transport((body) => isCompleted(body) && body.plugin_name === "load_testing"
+    ? { status: 400, body: { error: "Invalid plugin config: load_testing: `gateway_addresses` must not be empty when provided" } }
+    : undefined);
+  await assert.rejects(verifyPluginDefaults(fixture.exchange, quiet), (error) => {
+    assert.equal(error.errors.length, 1);
+    assert.match(error.message, COMPLETED_LOAD_TESTING_REFUSED_PATTERN);
+    return true;
+  });
+  assert.equal(fixture.writes.length, WRITES);
+  assert.equal(fixture.plugins.size, 0);
+});
+
+test("operator completion permits only the documented field", () => {
+  const config = completeOperatorInput("mtls_auth");
+  assertOnlyOperatorCompletion("mtls_auth", config);
+  const withEmptyAllowlist = structuredClone(config);
+  withEmptyAllowlist.allowed_ca_fingerprints_sha256 = [];
+  assert.throws(() => assertOnlyOperatorCompletion("mtls_auth", withEmptyAllowlist), ONLY_CA_PEM_MAY_DIFFER_PATTERN);
 });
 
 test("operator-input admission permits only the declared generated secret", () => {
@@ -153,13 +211,13 @@ for (const name of Object.keys(OPERATOR_INPUT_REJECTIONS)) {
       ? { status: 400, body: { error: `${OPERATOR_INPUT_REJECTIONS[name].error}; unknown config key 'drift'` } }
       : undefined);
     await assert.rejects(verifyPluginDefaults(fixture.exchange, quiet), REJECTION_REASON_DRIFT_PATTERN);
-    assert.equal(fixture.writes.length, 81, "continue through all templates after a failure");
+    assert.equal(fixture.writes.length, WRITES, "continue through all templates after a failure");
   });
 
   test(`${name}: unexpected acceptance fails and is cleaned up`, async () => {
     const fixture = transport((body) => body.plugin_name === name ? { status: 201, body } : undefined);
     await assert.rejects(verifyPluginDefaults(fixture.exchange, quiet), EXPECTED_400_RECEIVED_201_PATTERN);
-    assert.equal(fixture.writes.length, 81);
+    assert.equal(fixture.writes.length, WRITES);
     assert.equal(fixture.plugins.size, 0);
     assert.equal(fixture.proxies.size, 0);
   });
@@ -168,7 +226,9 @@ for (const name of Object.keys(OPERATOR_INPUT_REJECTIONS)) {
 test("an accepted control's rejection and an exemption's wrong status both fail", async () => {
   const fixture = transport((body) => {
     if (body.plugin_name === "correlation_id") return { status: 400, body: { error: "new required key" } };
-    if (body.plugin_name === "mtls_auth") return { status: 503, body: { error: OPERATOR_INPUT_REJECTIONS.mtls_auth.error } };
+    if (body.plugin_name === "mtls_auth" && !isCompleted(body)) {
+      return { status: 503, body: { error: OPERATOR_INPUT_REJECTIONS.mtls_auth.error } };
+    }
   });
   await assert.rejects(verifyPluginDefaults(fixture.exchange, quiet), (error) => {
     assert.equal(error.errors.length, 2);
@@ -176,7 +236,7 @@ test("an accepted control's rejection and an exemption's wrong status both fail"
     assert.match(error.message, MTLS_AUTH_EXPECTED_400_RECEIVED_503_PATTERN);
     return true;
   });
-  assert.equal(fixture.writes.length, 81);
+  assert.equal(fixture.writes.length, WRITES);
 });
 
 test("gateway catalog drift fails before any submission", async () => {
@@ -192,7 +252,7 @@ test("a Prometheus registry conflict fails rather than exempting the template", 
     ? { status: 409, body: { error: "prometheus_metrics permits at most one enabled global instance; another config already owns the process registry" } }
     : undefined);
   await assert.rejects(verifyPluginDefaults(fixture.exchange, quiet), PROMETHEUS_METRICS_EXPECTED_201_RECEIVED_PATTERN);
-  assert.equal(fixture.writes.length, 81);
+  assert.equal(fixture.writes.length, WRITES);
 });
 
 test("Kafka's constructor-error prefix cannot substitute for the egress field-validation error", async () => {
@@ -200,7 +260,7 @@ test("Kafka's constructor-error prefix cannot substitute for the egress field-va
     ? { status: 400, body: { error: OPERATOR_INPUT_REJECTIONS.kafka_logging.error.replace("Invalid plugin config fields:", "Invalid plugin config:") } }
     : undefined);
   await assert.rejects(verifyPluginDefaults(fixture.exchange, quiet), KAFKA_LOGGING_REJECTION_REASON_DRIFT_PATTERN);
-  assert.equal(fixture.writes.length, 81);
+  assert.equal(fixture.writes.length, WRITES);
 });
 
 test("cleanup failure fails the gate and stops potentially contaminated submissions", async () => {

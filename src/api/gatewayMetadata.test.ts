@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   beginGatewayRequest,
   getGatewayMetadataSnapshot,
+  holdsKnownCommit,
   observeGatewayResponse,
   parseConfigCursor,
   resetGatewayMetadata,
@@ -352,6 +353,65 @@ describe("observeGatewayResponse", () => {
     await Promise.resolve();
 
     expect(getGatewayMetadataSnapshot().apply.state).toBe("succeeded");
+  });
+
+  describe("X-Ferrum-Namespace-Unserved (#708)", () => {
+    function unservedResponse(status = 201, value = "true"): Response {
+      return new Response(status === 204 ? null : "{}", {
+        status,
+        headers: { "content-type": "application/json", "x-ferrum-namespace-unserved": value },
+      });
+    }
+
+    it("reports a committed write to an unserved namespace, not a plain success", async () => {
+      await observeGatewayResponse(mutationRequest("tenant-b"), unservedResponse());
+      expect(getGatewayMetadataSnapshot().apply).toEqual({
+        namespace: "tenant-b",
+        state: "unserved_namespace",
+        cursor: null,
+        requestUrl: "http://localhost/api/proxy/proxies/p-1",
+        reason: "namespace_unserved",
+        retryAfter: null,
+        polling: false,
+      });
+      expect(holdsKnownCommit("unserved_namespace")).toBe(true);
+    });
+
+    it("never polls, even if a cursor rode along", async () => {
+      const fetchStatus = vi.fn();
+      setApplyStatusFetcher(fetchStatus);
+      await observeGatewayResponse(
+        mutationRequest("tenant-b"),
+        new Response("{}", {
+          status: 200,
+          headers: { "x-ferrum-namespace-unserved": "true", "x-ferrum-config-cursor": "3:4" },
+        }),
+      );
+      expect(getGatewayMetadataSnapshot().apply).toMatchObject({ state: "unserved_namespace", polling: false });
+      await Promise.resolve();
+      expect(fetchStatus).not.toHaveBeenCalled();
+    });
+
+    it("keeps the warning through a later failure and retires it on a later commit", async () => {
+      await observeGatewayResponse(mutationRequest("tenant-b"), unservedResponse(204));
+      await observeGatewayResponse(
+        mutationRequest("tenant-b"),
+        new Response(JSON.stringify({ error: "invalid" }), { status: 400 }),
+      );
+      expect(getGatewayMetadataSnapshot().apply.state).toBe("unserved_namespace");
+
+      await observeGatewayResponse(mutationRequest("tenant-a"), new Response(null, { status: 204 }));
+      expect(getGatewayMetadataSnapshot().apply).toMatchObject({ state: "succeeded", namespace: "tenant-a" });
+    });
+
+    it.each([
+      { status: 201, value: "false", state: "succeeded" },
+      { status: 201, value: "TRUE", state: "succeeded" },
+      { status: 400, value: "true", state: "idle" },
+    ])("ignores the marker on $status with $value", async ({ status, value, state }) => {
+      await observeGatewayResponse(mutationRequest("tenant-b"), unservedResponse(status, value));
+      expect(getGatewayMetadataSnapshot().apply.state).toBe(state);
+    });
   });
 
   it("stops at once, unmonitored, when the poll is refused after grants changed", async () => {

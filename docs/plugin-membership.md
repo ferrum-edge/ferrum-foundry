@@ -115,8 +115,16 @@ secrets. Ferrum Edge replaces each one with a placeholder:
   `redacted@`, `?[REDACTED_QUERY]`, and `#[REDACTED_FRAGMENT]` markers.
 
 Upstreams work the same way for one field: an `operator` read shows the Consul
-ACL token (`service_discovery.consul.token`) as `[REDACTED]`. `admin` reads of
-both resources are raw.
+ACL token (`service_discovery.consul.token`) as `[REDACTED]`. Ferrum Edge main
+(ferrum-edge#7060, after v0.9.20) also withholds stored backend TLS
+private-key material from every non-admin proxy and upstream read: inline PEM
+at `backend_tls_client_key_path`, `port_overrides.<port>.tls.client_key_path`
+and `subsets[].traffic_policy.tls.private_key`, and a private-key block in any
+other field (a certificate-plus-key bundle in a certificate field), each shown
+as `[REDACTED]`. Paths and `k8s://`, `vault://`, `system://` and other
+references stay visible. On those resources it refuses a non-admin write that
+carries the exact `[REDACTED]` in any string. `admin` reads of every resource
+are raw.
 
 Since v0.9.9, Edge refuses with `400` a `POST` or `PUT` of a plugin
 configuration or upstream that sends one of those placeholders back at a field
@@ -145,10 +153,22 @@ handles them as follows:
   A plugin Foundry has no rules for (a custom plugin, or a built-in newer than
   Foundry's copy of the rules) has every placeholder in its `config` treated
   as masked. An unknown session role is treated as a non-admin one.
+- **Proxy and upstream TLS fields.** The proxy and upstream editors mark a
+  backend TLS client certificate, key or server CA field that holds
+  `[REDACTED]` for a non-admin session the same way, and block Save until it
+  is re-entered or cleared. A placeholder the editor does not show refuses
+  the save before it is sent, naming the field; have an admin make that
+  change. That includes a masked `subsets[].traffic_policy.tls` key in the
+  read the editor was seeded with: the form rebuilds subsets from the fields
+  it shows, so the save would otherwise delete the key unseen. A port
+  override's TLS key is mesh-owned and never sent, so a save leaves it alone. A membership change
+  never sends a proxy write that carries one either: the step is refused
+  locally and the plan rolls back as for any failed step.
 - **Refused saves.** If Edge refuses a save anyway, the page lists the JSON
   pointers from Edge's error as written, never a value.
 - **Upstream targets.** A targets save resends every upstream setting from a
-  fresh read. When that read masks the Consul token (a non-admin session),
+  fresh read. When that read masks the Consul token or a TLS key (a non-admin
+  session),
   Foundry refuses the save before sending it, and a token re-entered in an
   earlier save is masked again on that read. Have an admin make the change, or
   change the targets on the Configuration tab in the same save that re-enters

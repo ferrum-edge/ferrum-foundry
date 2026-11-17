@@ -28,8 +28,8 @@ import { resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { signAdminJwt } from "../shared/admin-jwt.js";
 import { mayCarrySecret } from "../shared/admin-origin.js";
+import { isPlaceholderSecret, isPublishedDevelopmentSecret } from "../shared/published-secrets.js";
 
-const PLACEHOLDER_SECRET_PATTERN = /replace[-_]?me/i;
 const TLS_ERROR_CODE_PATTERN = /CERT|SELF_SIGNED|UNABLE_TO_VERIFY|altnames/i;
 
 export const PASS = "pass";
@@ -108,9 +108,20 @@ export function checkSecrets(env) {
           `Replace ${key} with a longer random value.`,
         ),
       );
-    } else if (PLACEHOLDER_SECRET_PATTERN.test(value)) {
+    } else if (isPlaceholderSecret(value)) {
+      // The BFF refuses to start with it (server/config.ts).
       results.push(
         check(key, FAIL, "still the placeholder from .env.example", `Generate a real ${key}.`),
+      );
+    } else if (isPublishedDevelopmentSecret(value)) {
+      // The production BFF refuses to start with it (server/config.ts).
+      results.push(
+        check(
+          key,
+          FAIL,
+          "a published development example value, refused in production",
+          `Generate a real ${key}.`,
+        ),
       );
     } else {
       results.push(check(key, PASS, `${length} ${unit}`));

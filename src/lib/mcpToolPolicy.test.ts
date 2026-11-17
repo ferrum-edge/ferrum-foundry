@@ -200,14 +200,21 @@ describe("a tool with no entry", () => {
   });
 
   it("gets the default action when new tools are let through", () => {
-    for (const onNewTool of ["allow", "allow_immediately", "expose"]) {
-      expect(hidesUnconfiguredTools({ discovery: { on_new_tool: onNewTool } })).toBe(false);
-    }
+    expect(hidesUnconfiguredTools({ discovery: { on_new_tool: "allow" } })).toBe(false);
     expect(unconfiguredToolSummary(gateway({ discovery: { on_new_tool: "allow" } })))
       .toBe("No entry (default: Deny)");
     expect(unconfiguredToolSummary({
-      discovery: { on_new_tool: "expose" },
+      discovery: { on_new_tool: "allow" },
       policy: { default_action: "allow" },
     })).toBe("No entry (default: Allow)");
+  });
+
+  it("reads a retired on_new_tool alias the way the gateway that stored it does", () => {
+    // Only a gateway that still accepts `allow_immediately` / `expose` (the
+    // paired v0.9.20) can hold one, and it treats both as `allow`. Edge main
+    // (ferrum-edge#7114) refuses them, and Foundry never writes them.
+    for (const onNewTool of ["allow_immediately", "expose"]) {
+      expect(hidesUnconfiguredTools({ discovery: { on_new_tool: onNewTool } })).toBe(false);
+    }
   });
 });

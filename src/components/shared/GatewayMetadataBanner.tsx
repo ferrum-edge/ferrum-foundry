@@ -39,6 +39,7 @@ export function GatewayMetadataBanner() {
               ? "border-success/40 bg-success/10"
               : apply.state === "nothing_applied" ||
                   apply.state === "outcome_unknown" ||
+                  apply.state === "unserved_namespace" ||
                   (apply.state === "unmonitored" && apply.reason)
                 ? "border-warning/40 bg-warning/10"
                 : apply.state === "pending" || apply.state === "unmonitored"
@@ -83,6 +84,20 @@ export function GatewayMetadataBanner() {
             <>
               <strong className="text-success">Configuration request succeeded.</strong>{" "}
               The gateway emitted no live-apply cursor for this mode or namespace.
+            </>
+          )}
+          {/* Edge's X-Ferrum-Namespace-Unserved (ferrum-edge#5447). Only the
+              namespace the write itself carried is named, never the one the
+              gateway serves, which a scoped session may not be granted. */}
+          {apply.state === "unserved_namespace" && (
+            <>
+              <strong className="text-warning">
+                Saved, but this gateway does not route namespace {apply.namespace ?? "(none)"}.
+              </strong>{" "}
+              The change is stored in the Admin API, but this gateway&apos;s data plane serves a
+              different namespace, so it will never apply it: requests that depend on it will
+              not be routed here. Check the gateway&apos;s FERRUM_NAMESPACE, or switch to the
+              namespace it serves.
             </>
           )}
           {apply.state === "rejected" && (

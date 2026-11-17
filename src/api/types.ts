@@ -139,7 +139,6 @@ export interface Proxy {
   pool_http2_max_frame_size?: number | null;
   pool_http2_max_concurrent_streams?: number | null;
   pool_http3_connections_per_backend?: number | null;
-  pool_max_requests_per_connection?: number | null;
   api_spec_id?: string | null;
   created_at: string;
   updated_at: string;

@@ -34,7 +34,7 @@ import {
   type WithNumberDrafts,
 } from "@/lib/formDrafts";
 import { ReadOnlySurface } from "@/components/shared/CapabilityGate";
-import { isRedactionPlaceholder, MASKED_FIELD_NOTICE } from "@/api/maskedSecrets";
+import { isMaskedForRole, isRedactionPlaceholder, MASKED_FIELD_NOTICE } from "@/api/maskedSecrets";
 import type { CapabilityVerdict, GatewayRole } from "@/lib/capabilities";
 import type {
   Upstream,
@@ -80,7 +80,7 @@ const UPSTREAM_COLLAPSIBLE_SECTIONS = [
     ],
   },
   { id: "subsets", errorKeys: ["subset_labels"] },
-  { id: "backend-tls", errorKeys: [] },
+  { id: "backend-tls", errorKeys: ["tls_cert_path", "tls_key_path", "tls_ca_path"] },
 ] as const;
 
 /* ------------------------------------------------------------------ */
@@ -98,9 +98,10 @@ export interface UpstreamFormProps {
    */
   capability?: CapabilityVerdict;
   /**
-   * The session's gateway role. Only a non-admin read masks the Consul token,
-   * so only then does a placeholder there block Save. Unknown (`null` or
-   * omitted) is treated as a non-admin role.
+   * The session's gateway role. Only a non-admin read masks the Consul token
+   * and stored backend TLS private-key material, so only then does a
+   * placeholder there block Save. Unknown (`null` or omitted) is treated as a
+   * non-admin role.
    */
   role?: GatewayRole | null;
 }
@@ -469,6 +470,14 @@ export function UpstreamForm({
   const consulTokenIsPlaceholder =
     sdEnabled && sdProvider === "consul" && isRedactionPlaceholder(sdConfig.token);
   const consulTokenMasked = consulTokenIsPlaceholder && role !== "admin";
+  // Likewise stored TLS private-key material (inline PEM, or a key block in a
+  // certificate field), which a non-admin read shows as `[REDACTED]`
+  // (ferrum-edge#7060).
+  const maskedTls = {
+    tls_cert_path: isMaskedForRole(tlsCertPath, role),
+    tls_key_path: isMaskedForRole(tlsKeyPath, role),
+    tls_ca_path: isMaskedForRole(tlsCaPath, role),
+  };
 
   /* ---------- Validation ---------- */
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -538,6 +547,9 @@ export function UpstreamForm({
       if (consulTokenMasked) {
         errs.consul_token = "Re-enter or clear the token before saving.";
       }
+    }
+    for (const [key, masked] of Object.entries(maskedTls)) {
+      if (masked) errs[key] = "Re-enter or clear it before saving.";
     }
     // A subset with a blank name is dropped on save, so only named subsets
     // have selectors to check. Each problem is shown on its own row; the
@@ -1533,15 +1545,29 @@ export function UpstreamForm({
           <Input
             label="Client Cert Path (mTLS)"
             value={tlsCertPath}
-            onChange={(e) => setTlsCertPath(e.target.value)}
+            onChange={(e) => {
+              setTlsCertPath(e.target.value);
+              setErrors(({ tls_cert_path: _cleared, ...rest }) => rest);
+            }}
             placeholder="/path/to/cert.pem"
+            error={errors.tls_cert_path}
           />
+          {maskedTls.tls_cert_path && (
+            <p className="text-xs text-warning">{MASKED_FIELD_NOTICE}</p>
+          )}
           <Input
             label="Client Key Path (mTLS)"
             value={tlsKeyPath}
-            onChange={(e) => setTlsKeyPath(e.target.value)}
+            onChange={(e) => {
+              setTlsKeyPath(e.target.value);
+              setErrors(({ tls_key_path: _cleared, ...rest }) => rest);
+            }}
             placeholder="/path/to/key.pem"
+            error={errors.tls_key_path}
           />
+          {maskedTls.tls_key_path && (
+            <p className="text-xs text-warning">{MASKED_FIELD_NOTICE}</p>
+          )}
           <Checkbox
             label="Verify backend server certificate"
             checked={tlsVerify}
@@ -1550,9 +1576,16 @@ export function UpstreamForm({
           <Input
             label="Server CA Cert Path"
             value={tlsCaPath}
-            onChange={(e) => setTlsCaPath(e.target.value)}
+            onChange={(e) => {
+              setTlsCaPath(e.target.value);
+              setErrors(({ tls_ca_path: _cleared, ...rest }) => rest);
+            }}
             placeholder="/path/to/ca.pem or system://"
+            error={errors.tls_ca_path}
           />
+          {maskedTls.tls_ca_path && (
+            <p className="text-xs text-warning">{MASKED_FIELD_NOTICE}</p>
+          )}
           <Input
             label="SNI Override"
             value={tlsSni}

@@ -5,6 +5,7 @@ import { parseCidr } from './cidr.js';
 import { GATEWAY_TARGET_HEADER } from './gateway-target.js';
 import { isLoopbackAdminOrigin, mayCarrySecret } from '../shared/admin-origin.js';
 import { isNamespaceName } from '../shared/namespace.js';
+import { isPlaceholderSecret, isPublishedDevelopmentSecret } from '../shared/published-secrets.js';
 import {
   DEFAULT_RESPONSE_TIMEOUT,
   DEFAULT_UPLOAD_TIMEOUT,
@@ -349,6 +350,31 @@ function validateSecret(value: string, name: string): string {
   return value;
 }
 
+/**
+ * Refuse a secret Foundry itself published (GHSA-hpqf-v945-35qp). The
+ * `.env.example` placeholder is refused in every mode: no workflow needs it,
+ * and an unedited copy that reaches Ferrum Edge as `FERRUM_ADMIN_JWT_SECRET`
+ * lets anyone mint admin tokens. The development example values printed in
+ * the contributor instructions are refused under `NODE_ENV=production`, the
+ * same boundary that refuses static auth and plaintext admin origins. The
+ * message never includes the value.
+ */
+function refusePublishedSecret(value: string, name: string, isProduction: boolean): string {
+  if (isPlaceholderSecret(value)) {
+    throw new Error(
+      `${name} is still the placeholder from deploy/starter/.env.example; `
+      + 'generate a real secret (openssl rand -base64 48)',
+    );
+  }
+  if (isProduction && isPublishedDevelopmentSecret(value)) {
+    throw new Error(
+      `${name} is a published development example value and is refused in production; `
+      + 'generate a real secret (openssl rand -base64 48)',
+    );
+  }
+  return value;
+}
+
 function validateHeaderName(value: string, name: string): string {
   const normalized = value.toLowerCase();
   if (!HEADER_NAME_PATTERN.test(normalized)) throw new Error(`${name} is not a valid HTTP header name`);
@@ -425,7 +451,11 @@ function parseBaseConfig(): Config {
     'FERRUM_ADMIN_URL',
     requireSecure,
   );
-  const jwtSecret = validateSigningKey(requireExactEnv('FERRUM_JWT_SECRET'), 'FERRUM_JWT_SECRET');
+  const jwtSecret = refusePublishedSecret(
+    validateSigningKey(requireExactEnv('FERRUM_JWT_SECRET'), 'FERRUM_JWT_SECRET'),
+    'FERRUM_JWT_SECRET',
+    isProduction,
+  );
   const jwtMaxTtl = parseInteger('FERRUM_JWT_MAX_TTL', 3600, 0, 86_400);
   const jwtTtl = parseInteger('FERRUM_JWT_TTL', 900, 1, 86_400);
   if (jwtMaxTtl !== 0 && jwtTtl > jwtMaxTtl) {
@@ -444,10 +474,18 @@ function parseBaseConfig(): Config {
   }
 
   const bffAuthToken = authMode === 'static'
-    ? validateSecret(requireEnv('FERRUM_BFF_AUTH_TOKEN'), 'FERRUM_BFF_AUTH_TOKEN')
+    ? refusePublishedSecret(
+      validateSecret(requireEnv('FERRUM_BFF_AUTH_TOKEN'), 'FERRUM_BFF_AUTH_TOKEN'),
+      'FERRUM_BFF_AUTH_TOKEN',
+      isProduction,
+    )
     : undefined;
   const trustedProxySecret = authMode === 'trusted-proxy'
-    ? validateSecret(requireEnv('FERRUM_TRUSTED_PROXY_SECRET'), 'FERRUM_TRUSTED_PROXY_SECRET')
+    ? refusePublishedSecret(
+      validateSecret(requireEnv('FERRUM_TRUSTED_PROXY_SECRET'), 'FERRUM_TRUSTED_PROXY_SECRET'),
+      'FERRUM_TRUSTED_PROXY_SECRET',
+      isProduction,
+    )
     : undefined;
 
   const tlsCaPath = optionalEnv('FERRUM_TLS_CA_PATH');
