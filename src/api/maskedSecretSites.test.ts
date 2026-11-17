@@ -8,6 +8,7 @@ import {
   pluginConfigRefusedSites,
   proxyPlaceholderSites,
   refuseMaskedResourceWrite,
+  refuseMaskedUpstreamSettingsWrite,
   upstreamPlaceholderSites,
 } from "./maskedSecretSites";
 import { MaskedSecretWriteError } from "./maskedSecrets";
@@ -162,6 +163,50 @@ describe("a proxy or upstream write refused before it is sent (ferrum-edge#7060)
     expect(() => refuseMaskedResourceWrite("Upstream", "payments", upstream, "admin")).not.toThrow();
     expect(() =>
       refuseMaskedResourceWrite("Proxy", "orders", { backend_tls_client_key_path: "/k.pem" }, "operator"),
+    ).not.toThrow();
+  });
+});
+
+describe("an upstream settings save checks the subsets of the read it was seeded from", () => {
+  const seed = {
+    name: "payments",
+    subsets: [{ name: "v2", labels: {}, traffic_policy: { tls: { private_key: "[REDACTED]" } } }],
+    port_overrides: { "8443": { tls: { client_key_path: "[REDACTED]" } } },
+  };
+  // The form rebuilds subsets without traffic_policy.tls; port_overrides is never sent.
+  const payload = { name: "renamed", subsets: [{ name: "v2", labels: {} }] };
+
+  const refusal = (role: "admin" | "operator" | null) => {
+    try {
+      refuseMaskedUpstreamSettingsWrite("payments", seed, payload, role);
+    } catch (error) {
+      return error;
+    }
+    return undefined;
+  };
+
+  it("refuses a non-admin save that would silently drop a masked subset key", () => {
+    for (const role of ["operator", null] as const) {
+      const error = refusal(role);
+      expect(error).toBeInstanceOf(MaskedSecretWriteError);
+      expect((error as MaskedSecretWriteError).pointers).toEqual([
+        "/subsets/0/traffic_policy/tls/private_key",
+      ]);
+    }
+  });
+
+  it("lets an admin save, and checks the payload as well", () => {
+    expect(refusal("admin")).toBeUndefined();
+    expect(() =>
+      refuseMaskedUpstreamSettingsWrite(
+        "payments",
+        { name: "payments" },
+        { backend_tls_client_key_path: "[REDACTED]" },
+        "operator",
+      ),
+    ).toThrow(MaskedSecretWriteError);
+    expect(() =>
+      refuseMaskedUpstreamSettingsWrite("payments", { name: "payments" }, payload, "operator"),
     ).not.toThrow();
   });
 });

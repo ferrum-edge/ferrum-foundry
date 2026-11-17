@@ -197,6 +197,26 @@ describe("upstream target route integration", () => {
     expect(writes[1].method).toBe("DELETE");
   });
 
+  it("refuses a settings save that would drop a masked subset TLS key, sending nothing (#704)", async () => {
+    // A non-admin read withholds the stored key (ferrum-edge#7060); the form
+    // rebuilds subsets without traffic_policy.tls, so the save would delete it.
+    current = {
+      ...initial,
+      subsets: [{
+        name: "v2",
+        labels: { version: "v2" },
+        traffic_policy: { tls: { private_key: "[REDACTED]" } },
+      }],
+    } as Upstream;
+    await mount();
+    await settle(() => expect(panel().textContent).toContain("Update Upstream"));
+    await fill(inputByLabel(panel(), "Name"), "Renamed upstream");
+    await click("Update Upstream", panel());
+    await settle(() => expect(ui.host.textContent).toContain("Foundry did not send this save"));
+    expect(ui.host.textContent).toContain("/subsets/0/traffic_policy/tls/private_key");
+    expect(writes).toHaveLength(0);
+  });
+
   it("surfaces rejected configuration, target and delete writes without losing the resource", async () => {
     failure = true;
     await mount();

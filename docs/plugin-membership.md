@@ -156,9 +156,12 @@ handles them as follows:
 - **Proxy and upstream TLS fields.** The proxy and upstream editors mark a
   backend TLS client certificate, key or server CA field that holds
   `[REDACTED]` for a non-admin session the same way, and block Save until it
-  is re-entered or cleared. A placeholder the editor does not show (an
-  upstream subset's or port override's TLS key) refuses the save before it is
-  sent, naming the field; have an admin make that change. A membership change
+  is re-entered or cleared. A placeholder the editor does not show refuses
+  the save before it is sent, naming the field; have an admin make that
+  change. That includes a masked `subsets[].traffic_policy.tls` key in the
+  read the editor was seeded with: the form rebuilds subsets from the fields
+  it shows, so the save would otherwise delete the key unseen. A port
+  override's TLS key is mesh-owned and never sent, so a save leaves it alone. A membership change
   never sends a proxy write that carries one either: the step is refused
   locally and the plan rolls back as for any failed step.
 - **Refused saves.** If Edge refuses a save anyway, the page lists the JSON
