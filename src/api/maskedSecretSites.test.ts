@@ -42,6 +42,8 @@ describe("plugin config sites Edge refuses for a non-admin role", () => {
     expect(pluginConfigRefusedSites("ai_prompt_shield", config)).toEqual([]);
     expect(pluginConfigPlaceholderSites("ai_prompt_shield", config, "operator")).toEqual({
       blocking: [],
+      sources: [],
+      reserved: [],
       other: ["/config/docs_url"],
     });
   });
@@ -53,6 +55,8 @@ describe("plugin config sites Edge refuses for a non-admin role", () => {
     };
     expect(pluginConfigPlaceholderSites("ai_prompt_shield", config, "operator")).toEqual({
       blocking: ["/config/redaction_placeholder"],
+      sources: [],
+      reserved: ["/config/redaction_placeholder"],
       other: ["/config/docs_url"],
     });
     // A certificate-plus-key bundle Edge main masks in `mtls_auth` reads as
@@ -62,6 +66,31 @@ describe("plugin config sites Edge refuses for a non-admin role", () => {
         allowed_issuers: [{ ca_certificate_pem: "[REDACTED]" }],
       }),
     ).toEqual(["/config/allowed_issuers/0/ca_certificate_pem"]);
+  });
+
+  it("tells a masked secret from a TLS source and a reserved literal", () => {
+    // `mesh_route_dispatch` has a secret rule and a route-local TLS key slot
+    // the TLS-material layer classifies by name.
+    const sites = pluginConfigPlaceholderSites(
+      "mesh_route_dispatch",
+      {
+        rules: [
+          {
+            request_transform: [{ operation: "set", value: "[REDACTED]" }],
+            destination: { backend_tls: { client_key_path: "[REDACTED]" } },
+            note: "[REDACTED]",
+          },
+        ],
+      },
+      "operator",
+    );
+    expect(sites.blocking).toEqual([
+      "/config/rules/0/request_transform/0/value",
+      "/config/rules/0/destination/backend_tls/client_key_path",
+      "/config/rules/0/note",
+    ]);
+    expect(sites.sources).toEqual(["/config/rules/0/destination/backend_tls/client_key_path"]);
+    expect(sites.reserved).toEqual(["/config/rules/0/note"]);
   });
 
   it("follows Kafka's safe list and a scalar where a container was expected", () => {
@@ -94,12 +123,16 @@ describe("plugin config sites Edge refuses for a non-admin role", () => {
     expect(pluginConfigRefusedSites("ai_prompt_shield", nested)).toEqual([]);
     expect(pluginConfigPlaceholderSites("ai_prompt_shield", nested, "operator")).toEqual({
       blocking: [],
+      sources: [],
+      reserved: [],
       other: ["/config/credentials/x"],
     });
     // The same key holding the placeholder itself is the site, and is refused.
     const whole = { credentials: "[REDACTED]" };
     expect(pluginConfigPlaceholderSites("ai_prompt_shield", whole, "operator")).toEqual({
       blocking: ["/config/credentials"],
+      sources: [],
+      reserved: [],
       other: [],
     });
   });
@@ -129,6 +162,8 @@ describe("role", () => {
   it("never blocks an admin, whose reads are raw", () => {
     expect(pluginConfigPlaceholderSites("http_logging", config, "admin")).toEqual({
       blocking: [],
+      sources: [],
+      reserved: [],
       other: ["/config/endpoint_url"],
     });
     expect(
@@ -136,9 +171,16 @@ describe("role", () => {
         { service_discovery: { consul: { token: "[REDACTED]" } } },
         "admin",
       ),
-    ).toEqual({ blocking: [], other: ["/service_discovery/consul/token"] });
+    ).toEqual({
+      blocking: [],
+      sources: [],
+      reserved: [],
+      other: ["/service_discovery/consul/token"],
+    });
     expect(proxyPlaceholderSites({ backend_tls_client_key_path: "[REDACTED]" }, "admin")).toEqual({
       blocking: [],
+      sources: [],
+      reserved: [],
       other: ["/backend_tls_client_key_path"],
     });
   });

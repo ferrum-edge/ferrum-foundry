@@ -506,26 +506,71 @@ function carriesUserinfo(value: string): boolean {
  * The application passes Foundry's CI-checked table
  * (`pluginConfigRefusedSites` in `maskedSecretSites.ts`); the gateway contract
  * loads this import-free module directly to compare it with Edge's answer.
+ * `refusedPlaceholderSiteKinds` returns the same sites, each with the kind of
+ * layer that recorded it.
  */
 export function refusedPlaceholderSites(
   rules: readonly ProjectionRule[] | undefined,
   kafkaSafeProperties: ReadonlySet<string>,
   config: unknown,
 ): string[] {
-  if (!rules) return pluginConfigPlaceholderPointers(config);
+  return refusedPlaceholderSiteKinds(rules, kafkaSafeProperties, config).map(
+    (site) => site.pointer,
+  );
+}
+
+/**
+ * Why Edge refuses a placeholder at a site, which decides what an editor may
+ * offer for it:
+ *
+ * - `masked`: the read withholds the field as a secret (a schema rule, the name
+ *   floor, the URL-userinfo sweep, or a plugin Foundry has no rules for).
+ *   Clearing it deletes that secret, which the operator may choose.
+ * - `tls-source`: a certificate or private-key source the gateway loads its
+ *   TLS material from (a `certificate` / `private-key` rule, or a TLS field by
+ *   name). The read withholds it because it carries key material; leaving it
+ *   out of a full-replacement save would remove the source the gateway uses,
+ *   so it is re-entered, not cleared.
+ * - `reserved`: only Edge main's reservation of the exact `[REDACTED]`
+ *   (ferrum-edge#7054). The value is that literal, or key material the read
+ *   withheld by content in an ordinary field; either way it is re-entered.
+ */
+export type RefusedSiteKind = "masked" | "tls-source" | "reserved";
+
+export interface RefusedSite {
+  readonly pointer: string;
+  readonly kind: RefusedSiteKind;
+}
+
+/** `refusedPlaceholderSites` with the kind of each site, in the same order. */
+export function refusedPlaceholderSiteKinds(
+  rules: readonly ProjectionRule[] | undefined,
+  kafkaSafeProperties: ReadonlySet<string>,
+  config: unknown,
+): RefusedSite[] {
+  if (!rules) {
+    return pluginConfigPlaceholderPointers(config).map(
+      (pointer): RefusedSite => ({ pointer, kind: "masked" }),
+    );
+  }
   if (config === null || config === undefined) return [];
 
-  const sites: string[] = [];
+  const sites: RefusedSite[] = [];
   const visited = new Set<string>();
   const root: Record<string, unknown> = {
     config: JSON.parse(JSON.stringify(config)) as unknown,
   };
 
   // Every rendered form is a string, so no later layer descends below a site.
-  const render = (holder: Container, key: string | number, pointer: string) => {
+  const render = (
+    holder: Container,
+    key: string | number,
+    pointer: string,
+    kind: RefusedSiteKind = "masked",
+  ) => {
     if (!visited.has(pointer)) {
       visited.add(pointer);
-      if (isRedactionPlaceholder(memberOf(holder, key))) sites.push(pointer);
+      if (isRedactionPlaceholder(memberOf(holder, key))) sites.push({ pointer, kind });
     }
     (holder as Record<string | number, unknown>)[key] = REDACTED_PLACEHOLDER;
   };
@@ -550,7 +595,8 @@ export function refusedPlaceholderSites(
     if (sensitivity === "certificate" && !tlsSourceWithheld(value, "public")) return;
     if (sensitivity === "private-key" && !tlsSourceWithheld(value, "private-key")) return;
     if (sensitivity === "endpoint-path" && (value === "" || value === "/")) return;
-    render(holder, key, pointer);
+    const tlsSource = sensitivity === "certificate" || sensitivity === "private-key";
+    render(holder, key, pointer, tlsSource ? "tls-source" : "masked");
   };
 
   const applyRule = (
@@ -626,7 +672,7 @@ export function refusedPlaceholderSites(
     const value = memberOf(holder, key);
     if (typeof value === "string") {
       if (value === REDACTED_PLACEHOLDER || tlsMaterialWithheld(value, field)) {
-        render(holder, key, pointer);
+        render(holder, key, pointer, field === null ? "reserved" : "tls-source");
       }
     } else if (Array.isArray(value)) {
       value.forEach((_, index) => tlsMaterial(value, index, `${pointer}/${index}`, field));

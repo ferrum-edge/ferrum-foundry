@@ -19,7 +19,8 @@ import {
   MaskedSecretWriteError,
   pluginConfigPlaceholderPointers,
   proxyPlaceholderPointers,
-  refusedPlaceholderSites,
+  type RefusedSite,
+  refusedPlaceholderSiteKinds,
   upstreamPlaceholderPointers,
 } from "./maskedSecrets";
 import { KAFKA_SAFE_PRODUCER_PROPERTIES, PLUGIN_SENSITIVITY } from "./pluginSensitivity";
@@ -27,11 +28,25 @@ import { KAFKA_SAFE_PRODUCER_PROPERTIES, PLUGIN_SENSITIVITY } from "./pluginSens
 /** Placeholder-shaped values in a body, split by what Edge does with them. */
 export interface PlaceholderSites {
   /**
-   * Sites Edge refuses for this role: the caller's read masks the field, so
-   * the value is the marker it was shown. Save is blocked until each is
-   * re-entered or cleared.
+   * Every site Edge refuses for this role. Save is blocked until each is
+   * resolved. Most are masked secrets (the value is the marker the read
+   * showed), which may be re-entered or cleared; `sources` and `reserved`
+   * name the ones that may only be re-entered.
    */
   readonly blocking: readonly string[];
+  /**
+   * The blocking sites that are certificate or private-key sources the
+   * gateway loads TLS material from (`tls-source`). Each must be re-entered;
+   * leaving one out of a full-replacement save would remove the source.
+   */
+  readonly sources: readonly string[];
+  /**
+   * The blocking sites Edge refuses only because it reserves the exact
+   * `[REDACTED]` in a non-admin plugin-config write (`reserved`,
+   * ferrum-edge#7054): the read may show the field verbatim. Each must be
+   * re-entered with a real value, never cleared.
+   */
+  readonly reserved: readonly string[];
   /**
    * Values that match a placeholder but sit where this role's read shows the
    * stored value verbatim. Edge stores them as written; a warning, not a block.
@@ -45,19 +60,31 @@ export interface PlaceholderSites {
  * `config` Edge refuses for a non-admin role.
  */
 export function pluginConfigRefusedSites(pluginName: string, config: unknown): string[] {
-  return refusedPlaceholderSites(
+  return pluginConfigRefusedSiteKinds(pluginName, config).map((site) => site.pointer);
+}
+
+function pluginConfigRefusedSiteKinds(pluginName: string, config: unknown): RefusedSite[] {
+  return refusedPlaceholderSiteKinds(
     PLUGIN_SENSITIVITY.get(pluginName),
     KAFKA_SAFE_PRODUCER_PROPERTIES,
     config,
   );
 }
 
-function split(all: readonly string[], refused: readonly string[]): PlaceholderSites {
-  const blocking = new Set(refused);
+/** Proxy and upstream sites are all `masked`. */
+function split(all: readonly string[], refused: readonly RefusedSite[]): PlaceholderSites {
+  const kinds = new Map(refused.map((site) => [site.pointer, site.kind]));
+  const blocking = all.filter((pointer) => kinds.has(pointer));
   return {
-    blocking: all.filter((pointer) => blocking.has(pointer)),
-    other: all.filter((pointer) => !blocking.has(pointer)),
+    blocking,
+    sources: blocking.filter((pointer) => kinds.get(pointer) === "tls-source"),
+    reserved: blocking.filter((pointer) => kinds.get(pointer) === "reserved"),
+    other: all.filter((pointer) => !kinds.has(pointer)),
   };
+}
+
+function masked(pointers: readonly string[]): RefusedSite[] {
+  return pointers.map((pointer): RefusedSite => ({ pointer, kind: "masked" }));
 }
 
 /**
@@ -72,8 +99,8 @@ export function pluginConfigPlaceholderSites(
   role: GatewayRole | null | undefined,
 ): PlaceholderSites {
   const all = pluginConfigPlaceholderPointers(config);
-  if (all.length === 0) return { blocking: [], other: [] };
-  return split(all, role === "admin" ? [] : pluginConfigRefusedSites(pluginName, config));
+  if (all.length === 0) return { blocking: [], sources: [], reserved: [], other: [] };
+  return split(all, role === "admin" ? [] : pluginConfigRefusedSiteKinds(pluginName, config));
 }
 
 /**
@@ -86,7 +113,7 @@ export function upstreamPlaceholderSites(
   role: GatewayRole | null | undefined,
 ): PlaceholderSites {
   const all = upstreamPlaceholderPointers(upstream);
-  return split(all, role === "admin" ? [] : all);
+  return split(all, role === "admin" ? [] : masked(all));
 }
 
 /**
@@ -98,7 +125,7 @@ export function proxyPlaceholderSites(
   role: GatewayRole | null | undefined,
 ): PlaceholderSites {
   const all = proxyPlaceholderPointers(proxy);
-  return split(all, role === "admin" ? [] : all);
+  return split(all, role === "admin" ? [] : masked(all));
 }
 
 /**

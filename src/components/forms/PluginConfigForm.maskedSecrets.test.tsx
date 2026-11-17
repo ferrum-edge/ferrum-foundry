@@ -91,6 +91,20 @@ function warnedList(): string[] {
   return codesIn("Values that look like placeholders");
 }
 
+function sourceList(): string[] {
+  return codesIn("TLS sources held by the gateway");
+}
+
+function reservedList(): string[] {
+  return codesIn("Reserved placeholder values");
+}
+
+function clearButton(pointer: string): HTMLButtonElement | undefined {
+  return [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+    (entry) => entry.getAttribute("aria-label") === `Clear ${pointer}`,
+  );
+}
+
 async function clear(pointer: string) {
   const button = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
     (entry) => entry.getAttribute("aria-label") === `Clear ${pointer}`,
@@ -238,14 +252,52 @@ describe("plugin configuration with masked secrets", () => {
     });
   });
 
-  it("blocks an operator's exact placeholder in an ordinary field (ferrum-edge#7054)", async () => {
+  it("blocks a reserved literal without calling it a secret or offering Clear (ferrum-edge#7054)", async () => {
     await renderForm(
       "ai_prompt_shield",
       { action: "redact", redaction_placeholder: "[REDACTED]" },
       "operator",
     );
-    expect(maskedList()).toEqual(["/config/redaction_placeholder"]);
+    expect(reservedList()).toEqual(["/config/redaction_placeholder"]);
+    expect(maskedList()).toEqual([]);
     expect(warnedList()).toEqual([]);
+    expect(clearButton("/config/redaction_placeholder")).toBeUndefined();
+    expect(host.textContent).not.toContain("Hidden from your role");
+    await submit();
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(host.textContent).toContain(
+      "1 field carries the [REDACTED] placeholder, which Ferrum Edge refuses from your role",
+    );
+
+    // A real value unblocks the save and keeps the setting.
+    await editJson({ action: "redact", redaction_placeholder: "[PII]" });
+    expect(reservedList()).toEqual([]);
+    await submit();
+    expect(onSubmit).toHaveBeenCalledOnce();
+    expect(onSubmit.mock.calls[0]![0].config).toEqual({
+      action: "redact",
+      redaction_placeholder: "[PII]",
+    });
+  });
+
+  it("asks for a gateway-held TLS source again instead of offering Clear", async () => {
+    await renderForm(
+      "mesh_route_dispatch",
+      {
+        rules: [
+          {
+            request_transform: [{ operation: "set", value: "[REDACTED]" }],
+            destination: { backend_tls: { client_key_path: "[REDACTED]" } },
+          },
+        ],
+      },
+      "operator",
+    );
+    expect(maskedList()).toEqual(["/config/rules/0/request_transform/0/value"]);
+    expect(sourceList()).toEqual(["/config/rules/0/destination/backend_tls/client_key_path"]);
+    expect(clearButton("/config/rules/0/request_transform/0/value")).toBeTruthy();
+    expect(clearButton("/config/rules/0/destination/backend_tls/client_key_path")).toBeUndefined();
+    expect(host.textContent).toContain("certificate or private-key source the gateway");
     await submit();
     expect(onSubmit).not.toHaveBeenCalled();
   });

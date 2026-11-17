@@ -13,6 +13,7 @@ import {
   proxyPlaceholderPointers,
   containsInlinePrivateKey,
   type ProjectionRule,
+  refusedPlaceholderSiteKinds,
   refusedPlaceholderSites,
   removeAtPointer,
   tlsMaterialWithheld,
@@ -277,6 +278,24 @@ describe("Edge main's TLS-source and path classes (ferrum-edge#7054)", () => {
       dtls_ca_cert_path: "system://",
       host: "logs.internal",
     })).toEqual(["/config/dtls_key_path", "/config/dtls_cert_path"]);
+  });
+
+  it("names the kind of each site so an editor offers Clear only for a masked secret", () => {
+    expect(refusedPlaceholderSiteKinds([...UDP_LOGGING, rule("secret", "token")], NO_KAFKA, {
+      dtls_key_path: "[REDACTED]",
+      dtls_cert_path: "[REDACTED]",
+      token: "[REDACTED]",
+      host: "[REDACTED]",
+    })).toEqual([
+      { pointer: "/config/dtls_key_path", kind: "tls-source" },
+      { pointer: "/config/dtls_cert_path", kind: "tls-source" },
+      { pointer: "/config/token", kind: "masked" },
+      { pointer: "/config/host", kind: "reserved" },
+    ]);
+    // A plugin with no rules has every placeholder treated as a masked secret.
+    expect(refusedPlaceholderSiteKinds(undefined, NO_KAFKA, { host: "[REDACTED]" })).toEqual([
+      { pointer: "/config/host", kind: "masked" },
+    ]);
   });
 
   it("leaves a URL-shaped placeholder at a TLS source alone, as Edge does", () => {
