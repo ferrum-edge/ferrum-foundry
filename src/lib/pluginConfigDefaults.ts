@@ -771,7 +771,6 @@ export const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
     request_timeout_ms: 30000,
     gateway_tls: false,
     gateway_port: 8000,
-    gateway_addresses: [],
   },
   loki_logging: {
     endpoint_url: "http://127.0.0.1:3100/loki/api/v1/push",
@@ -871,7 +870,6 @@ export const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
         cn: "Ferrum Dev CA",
       },
     ],
-    allowed_ca_fingerprints_sha256: [],
   },
   oauth2_introspection: {
     providers: [

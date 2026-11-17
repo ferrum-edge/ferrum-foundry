@@ -41,9 +41,9 @@ expects admission, so it is never counted as an unmodified-template admission.
 | Template | What to supply |
 | --- | --- |
 | `hmac_auth` | A `replay_scope` for `ferrum-hmac-v2` that matches your replica topology. |
-| `mtls_auth` | `allowed_issuers[0].ca_certificate_pem`; an issuer name alone cannot pin trust. |
+| `mtls_auth` | `allowed_issuers[0].ca_certificate_pem`: a currently valid CA certificate (CA:TRUE, keyUsage keyCertSign) whose subject CN matches `cn`; an issuer name alone cannot pin trust. The template sets no `allowed_ca_fingerprints_sha256`; add it only with at least one fingerprint, since Edge refuses an empty list. |
 | `ai_stream_router` | Provider API keys in the gateway environment (the template references `${FERRUM_PLUGIN_SECRET_OPENAI_API_KEY}` first). |
-| `load_testing` | A trigger `key` of at least 32 characters. |
+| `load_testing` | A trigger `key` of at least 32 characters. The template sets no `gateway_addresses`; add it only with at least one address, since Edge refuses an empty list. |
 | `proxy_alerts` | `FERRUM_PLUGIN_SECRET_ALERTS_SLACK_WEBHOOK` in the gateway environment. |
 | `kafka_logging` | Under the default restrictive backend egress policy, either every broker of a trusted cluster listed in `FERRUM_KAFKA_ALLOWED_BROKERS` on every node that admits or runs the plugin (Edge v0.9.19+), or an unrestricted egress policy. Otherwise the gateway refuses librdkafka during field validation (the error starts with `Invalid plugin config fields: kafka_logging:`), before contacting a broker. Use another log sink if egress must stay restricted. |
 | `openapi_validator` | Proxy scope, on a proxy with an attached API spec. |
@@ -67,13 +67,20 @@ templates and:
    HTTP proxy fixture; every other template is global;
 3. expects 74 `201` admissions (each read back as enabled) — 73 unmodified
    templates plus `oidc_relying_party` with its supplied secret — and the
-   seven exact rejections above.
+   seven exact rejections above;
+4. for `load_testing` and `mtls_auth`, whose rejection is only the missing
+   operator field, submits the template again with just that field supplied
+   (`OPERATOR_COMPLETIONS`: a generated 32-character `key`, and the public
+   self-signed "Ferrum Dev CA" certificate in
+   `scripts/fixtures/ferrum-dev-ca.pem`) and expects a `201`, so a second
+   problem behind the first refusal cannot hide.
 
 It runs before the demo seeds, because the seeded `prometheus_metrics` plugin
 owns a process-wide registry that a separate namespace cannot isolate.
 
 The gate fails on an unexpected success, a changed error body or status, a
-missing or extra catalog member, or a failed cleanup. Admission failures are
+refused operator-completed template, a missing or extra catalog member, or a
+failed cleanup. Admission failures are
 collected across the catalog; a cleanup failure stops further submissions,
 because isolation is no longer assured. `scripts/plugin-defaults-contract.test.mjs`
 covers these failure paths.

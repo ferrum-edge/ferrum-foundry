@@ -111,6 +111,17 @@ describe("canonical plugin defaults", () => {
     expect(caching).not.toHaveProperty("cache_key_include_consumer");
   });
 
+  it("omits optional allowlists Edge refuses when present and empty (#707)", () => {
+    // `gateway_addresses` and `allowed_ca_fingerprints_sha256` are optional,
+    // but an empty array is refused, so filling in the documented operator
+    // field alone must yield an admissible config.
+    expect(getPluginConfigDefault("load_testing")).not.toHaveProperty("gateway_addresses");
+    expect(getPluginConfigDefault("mtls_auth")).toEqual({
+      cert_field: "subject_cn",
+      allowed_issuers: [{ cn: "Ferrum Dev CA" }],
+    });
+  });
+
   it("references only FERRUM_PLUGIN_SECRET_<NAME> environment variables", () => {
     // Edge v0.9.15 (ferrum-edge#6089) refuses any other plugin-config env reference with 400.
     const at = (plugin: string, path: string): unknown =>
