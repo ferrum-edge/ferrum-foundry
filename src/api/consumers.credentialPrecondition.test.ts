@@ -57,6 +57,55 @@ describe("indexed credential delete precondition", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
+  describe("against an Edge without the credential precondition (v0.9.20)", () => {
+    // What Edge before ferrum-edge#7393 answers to If-Match on this route,
+    // from its router, before anything is deleted.
+    const unsupported = () => Response.json({
+      error: "If-Match is only supported on PUT and DELETE of /proxies/{id}, /upstreams/{id}, " +
+        "/consumers/{id}, /plugins/config/{id}, and POST /restore",
+    }, { status: 400 });
+
+    function oldGateway(currentTag: string) {
+      const seen: { method: string; path: string; ifMatch: string | null }[] = [];
+      vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
+        const ifMatch = request.headers.get("If-Match");
+        seen.push({ method: request.method, path: new URL(request.url).pathname, ifMatch });
+        if (request.method === "GET") {
+          return Response.json({ id: "alice", credentials: {} }, { headers: { ETag: currentTag } });
+        }
+        if (ifMatch !== null) return unsupported();
+        return Response.json({ id: "alice", credentials: {} });
+      }));
+      return seen;
+    }
+
+    it("re-reads, and deletes without If-Match only when the read is unchanged", async () => {
+      const seen = oldGateway('"selected"');
+      await deleteCredentialByIndex(scope, "alice", "keyauth", 0, '"selected"');
+      expect(seen).toEqual([
+        { method: "DELETE", path: DELETE_PATH, ifMatch: '"selected"' },
+        { method: "GET", path: "/api/proxy/consumers/alice", ifMatch: null },
+        { method: "DELETE", path: DELETE_PATH, ifMatch: null },
+      ]);
+    });
+
+    it("refuses when the consumer changed since the selection, deleting nothing", async () => {
+      const seen = oldGateway('"changed"');
+      await expect(deleteCredentialByIndex(scope, "alice", "keyauth", 0, '"selected"'))
+        .rejects.toBeInstanceOf(CredentialListChangedError);
+      expect(seen.map((request) => request.method)).toEqual(["DELETE", "GET"]);
+    });
+
+    it("does not treat another 400 as a missing capability", async () => {
+      const fetcher = vi.fn(async () =>
+        Response.json({ error: "Invalid credential index" }, { status: 400 }));
+      vi.stubGlobal("fetch", fetcher);
+      await expect(deleteCredentialByIndex(scope, "alice", "keyauth", 0, '"selected"'))
+        .rejects.toMatchObject({ response: { status: 400 } });
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it.each([null, "", 'W/"weak"', "unquoted", "*"])(
     "refuses before sending when the selected read has no usable tag (%s)",
     async (tag) => {

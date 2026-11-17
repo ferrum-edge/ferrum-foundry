@@ -2,7 +2,15 @@
 /*  Ferrum Foundry – Consumer API functions                           */
 /* ------------------------------------------------------------------ */
 
-import { proxyApi, REDACT_ERRORS, scoped, SILENT_ERRORS, type NamespaceScope } from "./client";
+import { isHTTPError } from "ky";
+import {
+  getApiErrorDetail,
+  proxyApi,
+  REDACT_ERRORS,
+  scoped,
+  SILENT_ERRORS,
+  type NamespaceScope,
+} from "./client";
 import type {
   BuiltInCredentialType,
   Consumer,
@@ -291,6 +299,18 @@ export class CredentialSelectionUnverifiableError extends Error {
 }
 
 /**
+ * The `400` Ferrum Edge releases before ferrum-edge#7393 (v0.9.20 included)
+ * answer to `If-Match` on a credential route. Their router refuses the header
+ * before dispatch, so nothing was deleted.
+ */
+const IF_MATCH_UNSUPPORTED = "If-Match is only supported on";
+
+async function ifMatchUnsupported(error: unknown): Promise<boolean> {
+  if (!isHTTPError(error) || error.response.status !== 400) return false;
+  return (await getApiErrorDetail(error)).includes(IF_MATCH_UNSUPPORTED);
+}
+
+/**
  * Delete the credential at `index` (ferrum-foundry#703, ferrum-edge#7393).
  *
  * Credentials read back redacted, so a position is the only handle on one,
@@ -298,9 +318,18 @@ export class CredentialSelectionUnverifiableError extends Error {
  * admin, tab, or automation appends or removes a credential first, the same
  * index names a different credential. `ifMatch` is the consumer `ETag` of the
  * read the operator selected from (`validatorOf` the rendered consumer, never
- * a fresh read); Edge compares it under its admission lease and answers `412`
- * if anything about the consumer changed, which becomes
- * `CredentialListChangedError`. An absent tag refuses before sending.
+ * a fresh read). An absent tag refuses before sending.
+ *
+ * - An Edge with ferrum-edge#7393 compares the tag under its admission lease
+ *   and answers `412` if anything about the consumer changed:
+ *   `CredentialListChangedError`.
+ * - An older Edge (the v0.9.20 pin) refuses `If-Match` on this route with a
+ *   `400` before acting. The capability is detected from that answer, and the
+ *   delete falls back to a verified re-read: the consumer is read again, the
+ *   delete is refused unless that read carries the same tag, and only then is
+ *   it sent without `If-Match`. That narrows the race from "since the page
+ *   loaded" to the moment between the re-read and the delete; only the Edge
+ *   precondition closes it.
  */
 export async function deleteCredentialByIndex(
   scope: NamespaceScope,
@@ -311,18 +340,21 @@ export async function deleteCredentialByIndex(
 ): Promise<void> {
   const tag = strongEtag(ifMatch);
   if (tag === null) throw new CredentialSelectionUnverifiableError();
+  const path =
+    `consumers/${pathSegment(consumerId)}/credentials/${pathSegment(credType)}/` +
+    pathSegment(String(index));
   await serializeWrite(scope, consumerId, async () => {
     try {
-      await conditionalDelete(
-        scope,
-        `consumers/${pathSegment(consumerId)}/credentials/${pathSegment(credType)}/` +
-          pathSegment(String(index)),
-        tag,
-      );
+      // The form reports a 400 itself; keep a capability refusal out of the popup.
+      await conditionalDelete(scope, path, tag, { handled: [400] });
+      return;
     } catch (error) {
       // A 412 carries nothing the operator needs beyond "select again".
       if (isPreconditionFailed(error)) throw new CredentialListChangedError();
-      throw error;
+      if (!(await ifMatchUnsupported(error))) throw error;
     }
+    const fresh = await readTagged<Consumer>(scope, `consumers/${pathSegment(consumerId)}`);
+    if (strongEtag(fresh.etag) !== tag) throw new CredentialListChangedError();
+    await conditionalDelete(scope, path, null);
   });
 }
