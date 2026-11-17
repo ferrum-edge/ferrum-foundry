@@ -20,6 +20,7 @@ import {
 } from "./starter-preflight.mjs";
 
 const PLACEHOLDER_PATTERN = /placeholder/;
+const DEVELOPMENT_EXAMPLE_PATTERN = /published development example/;
 const SIXTEEN_CHARACTERS = /^16 characters;/;
 const THIRTY_ONE_BYTES = /^31 bytes;/;
 const DISPOSABLE_LOCAL_STACK_PATTERN = /disposable local stack/;
@@ -154,6 +155,17 @@ test("a missing, short, or placeholder secret fails", () => {
   });
   assert.equal(placeholder.status, FAIL);
   assert.match(placeholder.detail, PLACEHOLDER_PATTERN);
+
+  // The development example values the contributor instructions print are as
+  // public as the placeholder; the production BFF refuses them too.
+  const [jwtExample, proxyExample] = checkSecrets({
+    FERRUM_JWT_SECRET: "dev-secret-at-least-32-characters-long",
+    FERRUM_TRUSTED_PROXY_SECRET: "dev-bff-token-at-least-32-characters-long",
+  });
+  assert.equal(jwtExample.status, FAIL);
+  assert.match(jwtExample.detail, DEVELOPMENT_EXAMPLE_PATTERN);
+  assert.equal(proxyExample.status, FAIL);
+  assert.match(proxyExample.detail, DEVELOPMENT_EXAMPLE_PATTERN);
 });
 
 test("the JWT secret is measured in UTF-8 bytes and the proxy secret in characters", () => {

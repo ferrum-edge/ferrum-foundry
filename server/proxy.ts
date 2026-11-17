@@ -62,6 +62,9 @@ const RESPONSE_HEADER_ALLOWLIST = [
   'retry-after',
   'x-data-source',
   'x-ferrum-config-cursor',
+  // Edge marks an accepted mutation to a namespace this gateway's data plane
+  // does not route (ferrum-edge#5447). Closed value set: only `true` passes.
+  'x-ferrum-namespace-unserved',
 ] as const;
 
 // A namespace-scoped principal receives only the health summary fields
@@ -314,6 +317,7 @@ function applyApiResponseBoundary(
 }
 
 function safeResponseHeader(name: string, value: string, upstream: URL): string | undefined {
+  if (name === 'x-ferrum-namespace-unserved') return value === 'true' ? value : undefined;
   if (name !== 'location') return value;
   try {
     const location = new URL(value, upstream);

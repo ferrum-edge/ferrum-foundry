@@ -71,6 +71,14 @@ function gatewayHandler(request: IncomingMessage, response: ServerResponse): voi
       }, 250);
       return;
     }
+    if (request.url?.startsWith('/namespace-unserved/')) {
+      // The closed marker Edge sets on an accepted mutation to a namespace
+      // its data plane does not route, or a malformed value to be dropped.
+      response.setHeader('content-type', 'application/json');
+      response.setHeader('x-ferrum-namespace-unserved', request.url.slice('/namespace-unserved/'.length));
+      response.end('{"ok":true}');
+      return;
+    }
     if (request.url?.startsWith('/unauthorized')) {
       response.statusCode = 401;
       response.end('{"error":"bad gateway jwt"}');
@@ -728,6 +736,24 @@ describe('streaming gateway proxy', () => {
     expect(response.headers['x-data-source']).toBe('cached');
     expect(response.headers.location).toBe('/api/proxy/resources/fixture');
     expect(response.headers['set-cookie']).toBeUndefined();
+  });
+
+  it('forwards the unserved-namespace marker only with its closed value (#708)', async () => {
+    const send = (value: string) => app.inject({
+      method: 'POST',
+      url: `/api/proxy/namespace-unserved/${value}`,
+      headers: { ...sessionHeaders, 'content-type': 'application/json' },
+      payload: '{}',
+    });
+    const marked = await send('true');
+    expect(marked.statusCode).toBe(200);
+    expect(marked.headers['x-ferrum-namespace-unserved']).toBe('true');
+
+    for (const value of ['false', 'TRUE', 'yes', '1']) {
+      const response = await send(value);
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['x-ferrum-namespace-unserved']).toBeUndefined();
+    }
   });
 
   it('cannot serve upstream active content in the console origin', async () => {

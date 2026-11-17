@@ -131,3 +131,14 @@ vocabulary and schema files from that tag into the same paths, resolve the tag
 to its commit SHA, and update `PIN` with the new commit and each file's SHA-256.
 Then update this document if the adopted file set changes and run CI; the
 contract test fails if a vendored file or local copy drifts.
+
+`PIN` uses the one format ferrum-contracts defines for every consumer
+([`docs/consumer-pins.md`](https://github.com/ferrum-edge/ferrum-contracts/blob/main/docs/consumer-pins.md)):
+a `tag <tag>` line, a `commit <sha>` line, an optional `edge_version <version>`
+line, then one `sha256sum`-style `<hash>  <path>` row per vendored file, sorted
+by path byte for byte. `scripts/contracts-pin.mjs` parses it strictly: an
+unknown, repeated, misplaced, malformed or unsorted line fails the test rather
+than being skipped. From `contracts/ferrum-contracts/`,
+`grep -E '^[0-9a-f]{64}  ' PIN | shasum -a 256 -c` checks the digests by hand.
+`.gitattributes` marks the directory `-text`, so no checkout rewrites its line
+endings.

@@ -98,17 +98,30 @@ Durations are integers.
 | Variable | Required | Default | Range or format | Meaning |
 |---|---|---|---|---|
 | `FERRUM_ADMIN_URL` | Yes | - | `http`/`https` origin, no path, query, fragment, or credentials. With `NODE_ENV=production`, `https` unless the host is loopback | Ferrum Edge admin API origin. See [Admin API transport](#admin-api-transport) |
-| `FERRUM_JWT_SECRET` | Yes | - | 32 UTF-8 bytes or more, not blank | HS256 key for downstream admin JWTs. Must equal the gateway's `FERRUM_ADMIN_JWT_SECRET`. Used verbatim, like the gateway: surrounding whitespace is part of the key |
+| `FERRUM_JWT_SECRET` | Yes | - | 32 UTF-8 bytes or more, not blank, not a published placeholder (see below) | HS256 key for downstream admin JWTs. Must equal the gateway's `FERRUM_ADMIN_JWT_SECRET`. Used verbatim, like the gateway: surrounding whitespace is part of the key |
 | `PORT` | No | `3001` (`8080` in the image) | 1-65535 | BFF listen port |
-| `NODE_ENV` | No | unset (`production` in the image) | any string | `production` turns on production logging, static SPA serving, secure cookies, one-hop proxy trust, the static-auth refusal, and the plaintext admin URL refusal |
+| `NODE_ENV` | No | unset (`production` in the image) | any string | `production` turns on production logging, static SPA serving, secure cookies, one-hop proxy trust, the static-auth refusal, the published development secret refusal, and the plaintext admin URL refusal |
 | `FERRUM_BIND_ADDRESS` | No | `0.0.0.0` | literal IPv4/IPv6 address or `localhost` | Interface the BFF listens on |
+
+Published placeholder secrets. The BFF refuses to start when
+`FERRUM_JWT_SECRET`, `FERRUM_TRUSTED_PROXY_SECRET`, or `FERRUM_BFF_AUTH_TOKEN`
+holds a value Foundry itself publishes:
+
+- the `replace-me-...` placeholder from `deploy/starter/.env.example` (any value
+  matching `replace-me`, `replace_me`, or `replaceme`, case-insensitive), in
+  every mode;
+- under `NODE_ENV=production`, the development example values printed in the
+  contributor instructions (`dev-secret-at-least-32-characters-long`,
+  `dev-bff-token-at-least-32-characters-long`).
+
+There is no override. Generate each secret with `openssl rand -base64 48`.
 
 ### Authentication
 
 | Variable | Required | Default | Range or format | Meaning |
 |---|---|---|---|---|
 | `FERRUM_AUTH_MODE` | No | `static` | `static` or `trusted-proxy` | Browser authentication mode. `static` is refused when `NODE_ENV=production` |
-| `FERRUM_TRUSTED_PROXY_SECRET` | In `trusted-proxy` | - | 32 characters or more | Value the proxy sends in `X-Ferrum-Auth-Secret` |
+| `FERRUM_TRUSTED_PROXY_SECRET` | In `trusted-proxy` | - | 32 characters or more, not a published placeholder (see below) | Value the proxy sends in `X-Ferrum-Auth-Secret` |
 | `FERRUM_TRUSTED_PROXY_USER_HEADER` | No | `x-forwarded-user` | valid, unreserved HTTP header name, distinct from the other identity headers | Header carrying the actor |
 | `FERRUM_TRUSTED_PROXY_ROLE_HEADER` | No | `x-ferrum-role` | valid, unreserved HTTP header name, distinct from the other identity headers | Header carrying the role |
 | `FERRUM_TRUSTED_PROXY_NAMESPACES_HEADER` | No | `x-ferrum-namespaces` | valid, unreserved HTTP header name, distinct from the other identity headers | Header carrying namespace grants |
@@ -118,7 +131,7 @@ Durations are integers.
 | `FERRUM_AUTH_MAX_FAILURES` | No | `10` | 0-1000 | Failed proxy proofs or static logins from one address, within 15 minutes, that lock it out. `0` disables the lockout. See [Failed-authentication lockout](authentication.md#failed-authentication-lockout) |
 | `FERRUM_AUTH_LOCKOUT_SECONDS` | No | `60` | 1-3600 seconds | First lockout; each further one doubles, up to one hour |
 | `FERRUM_SECURE_COOKIES` | No | `true` when `NODE_ENV=production`, else `false` | `true`/`false` | Sets `Secure` and the `__Host-` cookie name prefix |
-| `FERRUM_BFF_AUTH_TOKEN` | In `static` | - | 32 characters or more | Development-only token exchanged once at `POST /api/auth/login` |
+| `FERRUM_BFF_AUTH_TOKEN` | In `static` | - | 32 characters or more, not a published placeholder (see below) | Development-only token exchanged once at `POST /api/auth/login` |
 | `FERRUM_ALLOW_INSECURE_STATIC_AUTH` | No | `false` | `true`/`false` | Allows static auth under `NODE_ENV=production`. Do not use it |
 
 ### Downstream JWT claims
