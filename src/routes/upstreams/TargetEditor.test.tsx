@@ -207,7 +207,7 @@ describe("upstream target route integration", () => {
         labels: { version: "v2" },
         traffic_policy: { tls: { private_key: "[REDACTED]" } },
       }],
-    } as Upstream;
+    } as unknown as Upstream;
     await mount();
     await settle(() => expect(panel().textContent).toContain("Update Upstream"));
     await fill(inputByLabel(panel(), "Name"), "Renamed upstream");

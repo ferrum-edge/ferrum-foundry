@@ -137,7 +137,11 @@ export function refuseMaskedUpstreamSettingsWrite(
   refuseMaskedSites("Upstream", id, [...new Set([...sent, ...unshown])]);
 }
 
-function refuseMaskedSites(resource: "Proxy" | "Upstream", id: string, blocking: string[]): void {
+function refuseMaskedSites(
+  resource: "Proxy" | "Upstream",
+  id: string,
+  blocking: readonly string[],
+): void {
   if (blocking.length === 0) return;
   throw new MaskedSecretWriteError(
     `${resource} ${id} was not saved: ${blocking.join(", ")} still carry the placeholder ` +
