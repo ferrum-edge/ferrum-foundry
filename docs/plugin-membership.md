@@ -138,22 +138,33 @@ stands in for the stored value. `PUT` stays a full replace: omitting the field
 clears the stored secret rather than keeping it.
 
 Edge applies the check only where it would apply: never to an `admin`, and
-for other roles only at a field the caller's read masks. A placeholder-shaped
-value anywhere else (`ai_prompt_shield`'s `redaction_placeholder: "[REDACTED]"`,
-say) is saved as written.
+for other roles only at a field the caller's read masks. A URL-shaped
+placeholder anywhere else (`https://docs.example.com/[REDACTED_PATH]` in an
+ordinary field, say) is saved as written. The exact `[REDACTED]` is different
+in a plugin configuration: Edge `main` (ferrum-edge#7054) refuses it from a
+non-admin role in any string, and Foundry blocks it on every gateway, the
+pinned v0.9.20 included (which would have stored it). So a non-admin cannot
+save `ai_prompt_shield`'s `redaction_placeholder: "[REDACTED]"`; an admin can.
 
 Foundry recognises the placeholders exactly as Edge does
 (`src/api/maskedSecrets.ts`), finds the masked fields by replaying Edge's
 projection (`src/api/maskedSecretSites.ts`: the CI-checked schema rules in
-`pluginSensitivity.ts`, Edge's name floor, and its URL-userinfo sweep), and
-handles them as follows:
+`pluginSensitivity.ts`, Edge's name floor, its URL-userinfo sweep, and Edge
+`main`'s TLS-material layer), and handles them as follows:
 
 - **Plugin and upstream editors.** For a non-admin session, each masked field
   that still holds a placeholder is marked "Hidden from your role: re-enter it,
   or clear it (clearing deletes the stored secret)". Save stays blocked until
   every one is re-entered with the real value or cleared with its **Clear**
-  action, which omits the field. A placeholder-shaped value anywhere else, and
-  every one in an admin's editor, is listed as a warning and saved as written.
+  action, which omits the field. In a plugin configuration two other kinds of
+  site also block Save but offer no **Clear**: a certificate or private-key
+  source the gateway loads TLS material from (listed under "TLS sources held
+  by the gateway", to be entered again as a path, reference or PEM), and the
+  exact `[REDACTED]` in a field the read does not mask (listed under "Reserved
+  placeholder values", to be replaced with a real value). Clearing either would
+  drop a source or an ordinary setting from the full-replacement save. A
+  URL-shaped placeholder anywhere else, and every placeholder in an admin's
+  editor, is listed as a warning and saved as written.
   A plugin Foundry has no rules for (a custom plugin, or a built-in newer than
   Foundry's copy of the rules) has every placeholder in its `config` treated
   as masked. An unknown session role is treated as a non-admin one.

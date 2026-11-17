@@ -229,8 +229,10 @@ The replay models both already, so against v0.9.20 it also blocks a literal
 and upstream editors mark each masked field that still holds a placeholder,
 block Save until it is re-entered or cleared (clearing omits it, which deletes
 the stored secret, because `PUT` is a full replace), only point out a
-placeholder-shaped value anywhere else, and show Edge's `400` field list when a
-save is refused anyway. A non-admin targets save on an upstream whose Consul
+URL-shaped placeholder anywhere else, and show Edge's `400` field list when a
+save is refused anyway. In a plugin configuration the exact `[REDACTED]` in an
+unmasked field, and a placeholder at a certificate or private-key source,
+block Save without a Clear action: each must be entered again. A non-admin targets save on an upstream whose Consul
 token is masked, and a plugin rollback whose earlier read was masked for the
 session's role, are refused locally and reported instead of being sent. The Pinned Gateway
 Contract checks that an `operator` read-modify-write of a plugin configuration
