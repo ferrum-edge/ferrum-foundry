@@ -721,16 +721,15 @@ export const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
     },
   },
   ip_restriction: {
-    mode: "allow_first",
     allow: ["127.0.0.1/32", "::1/128"],
     deny: [],
   },
   jwks_auth: {
     providers: [
       {
-        issuer: "http://localhost:8080/realms/dev",
-        jwks_uri: "http://localhost:8080/realms/dev/protocol/openid-connect/certs",
-        audience: "ferrum-edge",
+        issuer: "http://127.0.0.1:8080/realms/dev",
+        jwks_uri: "http://127.0.0.1:8080/realms/dev/protocol/openid-connect/certs",
+        audiences: ["ferrum-edge"],
         required_scopes: [],
         required_roles: [],
         consumer_identity_claim: "sub",
@@ -772,7 +771,6 @@ export const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
     request_timeout_ms: 30000,
     gateway_tls: false,
     gateway_port: 8000,
-    gateway_addresses: [],
   },
   loki_logging: {
     endpoint_url: "http://127.0.0.1:3100/loki/api/v1/push",
@@ -872,7 +870,6 @@ export const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
         cn: "Ferrum Dev CA",
       },
     ],
-    allowed_ca_fingerprints_sha256: [],
   },
   oauth2_introspection: {
     providers: [
@@ -1057,8 +1054,6 @@ export const DEFAULT_PLUGIN_CONFIGS: Record<string, PluginConfigDefault> = {
     cacheable_status_codes: [200, 301, 404],
     respect_cache_control: true,
     respect_no_cache: true,
-    cache_key_include_query: true,
-    cache_key_include_consumer: false,
     add_cache_status_header: true,
     vary_by_headers: ["accept"],
   },

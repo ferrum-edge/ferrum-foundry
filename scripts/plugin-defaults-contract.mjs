@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import {
   DEFAULT_PLUGIN_CONFIGS,
   PLUGIN_METADATA,
@@ -71,6 +72,21 @@ export const OPERATOR_INPUT_REJECTIONS = {
   },
 };
 
+// A rejection above is the template as shipped. For a template whose only
+// missing piece is the field docs/plugin-defaults.md tells the operator to
+// supply, the contract also fills that field with a valid synthetic value and
+// expects admission, so a second blocker behind the first refusal (an empty
+// optional array, #707) cannot hide. The CA is a public, self-signed
+// "Ferrum Dev CA" certificate (CA:TRUE, keyCertSign, valid 2026-2126) whose
+// private key was discarded.
+const FERRUM_DEV_CA_PEM = readFileSync(new URL("./fixtures/ferrum-dev-ca.pem", import.meta.url), "utf8");
+
+export const OPERATOR_COMPLETIONS = {
+  // 24 random bytes are 32 base64url characters: Edge's minimum trigger key.
+  load_testing: { field: "key", value: () => randomBytes(24).toString("base64url") },
+  mtls_auth: { field: "allowed_issuers.0.ca_certificate_pem", value: () => FERRUM_DEV_CA_PEM },
+};
+
 function assertStatus(response, expected, context) {
   assert.ok(expected.includes(response.status),
     `${context}: expected ${expected.join("/")}, received ${response.status}: ${JSON.stringify(response.body)}`);
@@ -85,6 +101,37 @@ function setValueAtPath(value, path, nextValue) {
   const parent = keys.slice(0, -1).reduce((current, key) => current?.[key], value);
   assert.ok(parent && typeof parent === "object", `${path} must have an object parent`);
   parent[keys.at(-1)] = nextValue;
+}
+
+/**
+ * The operator-completed form of `name`'s template: the shipped template with
+ * only its `OPERATOR_COMPLETIONS` field set.
+ */
+export function completeOperatorInput(name) {
+  const completion = OPERATOR_COMPLETIONS[name];
+  assert.ok(completion, `${name} has no operator completion`);
+  const config = getPluginConfigDefault(name);
+  setValueAtPath(config, completion.field, completion.value());
+  return config;
+}
+
+export function assertOnlyOperatorCompletion(name, config) {
+  const { field } = OPERATOR_COMPLETIONS[name];
+  const defaults = getPluginConfigDefault(name);
+  const submitted = valueAtPath(config, field);
+  assert.equal(typeof submitted, "string", `${name}: ${field} must be a string`);
+  assert.notEqual(submitted, valueAtPath(defaults, field),
+    `${name}: ${field} must differ from Foundry's default`);
+  const restored = structuredClone(config);
+  const defaultValue = valueAtPath(defaults, field);
+  if (defaultValue === undefined) {
+    const keys = field.split(".");
+    delete keys.slice(0, -1).reduce((current, key) => current[key], restored)[keys.at(-1)];
+  } else {
+    setValueAtPath(restored, field, defaultValue);
+  }
+  assert.equal(JSON.stringify(restored), JSON.stringify(defaults),
+    `${name}: only ${field} may differ from Foundry's defaults`);
 }
 
 export function assertOnlyRequiredOperatorInputs(name, config) {
@@ -115,6 +162,42 @@ export function assertOnlyRequiredOperatorInputs(name, config) {
     `${name}: config must preserve Foundry's exact serialized defaults`);
 }
 
+/**
+ * Submit `name`'s operator-completed template globally and expect `201`, then
+ * delete it. Returns false when cleanup failed and isolation is lost.
+ */
+async function verifyOperatorCompletion(name, exchange, results, failures) {
+  const { field } = OPERATOR_COMPLETIONS[name];
+  const id = `contract-completed-${name}`;
+  const pluginPath = `/plugins/config/${id}`;
+  let isolated = true;
+  try {
+    const config = completeOperatorInput(name);
+    assertOnlyOperatorCompletion(name, config);
+    const response = await exchange("/plugins/config?apply=sync", {
+      method: "POST",
+      body: { id, plugin_name: name, scope: "global", enabled: true, config },
+    });
+    results.push({ name, scope: "global", status: response.status, completed: field, error: response.body?.error });
+    assertStatus(response, [201], `${name} with ${field} supplied`);
+    const persisted = await exchange(pluginPath);
+    assertStatus(persisted, [200], `${name} with ${field} supplied readback`);
+    assert.equal(persisted.body.plugin_name, name);
+    assert.equal(persisted.body.enabled, true);
+  } catch (error) {
+    failures.push(new Error(`${name}: ${error.message}`, { cause: error }));
+  } finally {
+    try {
+      assertStatus(await exchange(`${pluginPath}?apply=sync&expected_proxy_ids=`, { method: "DELETE" }),
+        [200, 204, 404], `${name} with ${field} supplied cleanup`);
+    } catch (error) {
+      failures.push(new Error(`${name} cleanup: ${error.message}`, { cause: error }));
+      isolated = false;
+    }
+  }
+  return isolated;
+}
+
 export async function verifyPluginDefaults(exchange, { report = console.log } = {}) {
   const names = Object.keys(DEFAULT_PLUGIN_CONFIGS).sort();
   assert.deepEqual(names, Object.keys(PLUGIN_METADATA).filter((name) => !isInternalPlugin(name)).sort());
@@ -125,6 +208,9 @@ export async function verifyPluginDefaults(exchange, { report = console.log } = 
   ].sort();
   assert.equal(new Set(expectedNames).size, 81, "review catalog membership when changing the 81-template baseline");
   assert.deepEqual(names, expectedNames, "every real template needs an explicit admission expectation");
+  for (const name of Object.keys(OPERATOR_COMPLETIONS)) {
+    assert.ok(OPERATOR_INPUT_REJECTIONS[name], `${name}: an operator completion needs a shipped-template rejection`);
+  }
   const catalog = await exchange("/plugins");
   assertStatus(catalog, [200], "gateway plugin catalog");
   assert.ok(Array.isArray(catalog.body));
@@ -223,6 +309,9 @@ export async function verifyPluginDefaults(exchange, { report = console.log } = 
       }
     }
     if (isolationLost) break;
+    if (OPERATOR_COMPLETIONS[name]) {
+      if (!(await verifyOperatorCompletion(name, exchange, results, failures))) break;
+    }
   }
   report(JSON.stringify({ pluginDefaults: results }));
   if (failures.length) throw new AggregateError(failures, failures.map((error) => error.message).join("\n"));
@@ -232,5 +321,6 @@ export async function verifyPluginDefaults(exchange, { report = console.log } = 
     templates: names.length,
     accepted: ACCEPTED_PLUGIN_DEFAULTS.length,
     operatorInput,
+    operatorCompleted: Object.keys(OPERATOR_COMPLETIONS).length,
   };
 }

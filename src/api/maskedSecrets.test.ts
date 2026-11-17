@@ -8,7 +8,9 @@ import {
   maskedPlaceholderRefusal,
   MaskedSecretWriteError,
   parseMaskedPlaceholderMessage,
+  isMaskedForRole,
   pluginConfigPlaceholderPointers,
+  proxyPlaceholderPointers,
   removeAtPointer,
   upstreamPlaceholderPointers,
 } from "./maskedSecrets";
@@ -86,7 +88,52 @@ describe("placeholder sites", () => {
     expect(pluginConfigPlaceholderPointers("[REDACTED]")).toEqual(["/config"]);
   });
 
-  it("checks only the Consul token on an upstream, the one site an operator read masks", () => {
+  it("finds the backend TLS private keys Edge withholds from a non-admin upstream read", () => {
+    // ferrum-edge#7060: inline key material in every TLS slot reads as
+    // `[REDACTED]`, and an exact placeholder anywhere in the body is refused.
+    expect(
+      upstreamPlaceholderPointers({
+        backend_tls_client_cert_path: "/certs/client.pem",
+        backend_tls_client_key_path: "[REDACTED]",
+        port_overrides: { "8443": { tls: { client_key_path: "[REDACTED]" } } },
+        subsets: [
+          { name: "v1", traffic_policy: { tls: { private_key: "/keys/v1.key" } } },
+          { name: "v2", traffic_policy: { tls: { private_key: "[REDACTED]" } } },
+        ],
+        service_discovery: { consul: { token: "[REDACTED]" } },
+      }),
+    ).toEqual([
+      "/service_discovery/consul/token",
+      "/backend_tls_client_key_path",
+      "/port_overrides/8443/tls/client_key_path",
+      "/subsets/1/traffic_policy/tls/private_key",
+    ]);
+    // A URL-shaped placeholder is a Consul-token site only.
+    expect(
+      upstreamPlaceholderPointers({ backend_tls_client_key_path: "https://redacted@vault.example.com/k" }),
+    ).toEqual([]);
+  });
+
+  it("finds the backend TLS private key Edge withholds from a non-admin proxy read", () => {
+    expect(
+      proxyPlaceholderPointers({
+        backend_tls_client_cert_path: "[REDACTED]",
+        backend_tls_client_key_path: "[REDACTED]",
+        backend_tls_server_ca_cert_path: "system://",
+        hosts: ["api.example.com"],
+      }),
+    ).toEqual(["/backend_tls_client_cert_path", "/backend_tls_client_key_path"]);
+    expect(proxyPlaceholderPointers({ backend_tls_client_key_path: "/certs/client.key" })).toEqual([]);
+  });
+
+  it("treats a field as masked only for a role whose reads are projected", () => {
+    expect(isMaskedForRole("[REDACTED]", "operator")).toBe(true);
+    expect(isMaskedForRole("[REDACTED]", null)).toBe(true);
+    expect(isMaskedForRole("[REDACTED]", "admin")).toBe(false);
+    expect(isMaskedForRole("/certs/client.key", "operator")).toBe(false);
+  });
+
+  it("checks the Consul token on an upstream in any placeholder form", () => {
     expect(
       upstreamPlaceholderPointers({
         service_discovery: { consul: { token: "[REDACTED]" } },

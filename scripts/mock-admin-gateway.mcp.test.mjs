@@ -303,3 +303,46 @@ test("the mock refuses the policy.tools shapes Edge refuses", () => {
     assert.match(validateMcpGatewayPolicy(refused).error, INVALID_MCP_GATEWAY_CONFIG_PATTERN);
   }
 });
+
+test("policy.hide_denied_tools alone decides whether a denied tool is listed", () => {
+  // Edge main (ferrum-edge#7136) removed the duplicate discovery.hide_denied_items.
+  const plugin = {
+    ...fixturePlugin,
+    config: {
+      ...fixturePlugin.config,
+      servers: { api: { namespace: "api", openapi: { operations: [{ name: "list", method: "GET", path: "/x" }] } } },
+      discovery: { on_new_tool: "allow" },
+      policy: { default_action: "deny", hide_denied_tools: false },
+    },
+  };
+  const [, body] = mcpToolCatalogResponse({
+    proxies: [fixtureProxy], pluginConfigs: [plugin], mode: "database",
+    namespace: "ferrum", proxyId: "agents", url,
+  });
+  assert.deepEqual(body.catalogs[0].policy, { default_action: "deny", hide_denied_tools: false });
+  assert.deepEqual(body.data[0].policy, {
+    action: "deny", configured: false, effective: "deny", listed: true, callable: false,
+  });
+});
+
+test("the mock refuses the mcp_gateway spellings Edge main removed", () => {
+  const aggregate = { mode: "aggregate_router", endpoint: { path: "/mcp" } };
+  for (const accepted of [
+    { ...aggregate, discovery: { on_new_tool: "allow", on_schema_change: "hide_until_configured" } },
+    { ...aggregate, sessions: { initialize_upstreams: "passthrough" } },
+    { ...aggregate, servers: { github: { namespace: "github", initialize_strategy: "lazy" } } },
+    { ...aggregate, policy: { hide_denied_tools: false } },
+  ]) {
+    assert.equal(validateMcpGatewayPolicy(accepted), null);
+  }
+  for (const refused of [
+    { ...aggregate, discovery: { hide_denied_items: false } },
+    { ...aggregate, discovery: { on_new_tool: "allow_immediately" } },
+    { ...aggregate, discovery: { on_new_tool: "expose" } },
+    { ...aggregate, discovery: { on_schema_change: "expose" } },
+    { ...aggregate, sessions: { initialize_upstreams: "startup" } },
+    { ...aggregate, servers: { github: { namespace: "github", initialize_strategy: "startup" } } },
+  ]) {
+    assert.match(validateMcpGatewayPolicy(refused).error, INVALID_MCP_GATEWAY_CONFIG_PATTERN);
+  }
+});
