@@ -663,8 +663,9 @@ an early warning (ferrum-edge/ferrum-contracts#76). It runs weekly and on
   commit is the signed image's `org.opencontainers.image.revision` label,
   which must be on `main`'s history. The image can trail `main` by the
   commits not yet built; the report says how many.
-- **What runs.** The guided plugin schema and plugin sensitivity comparisons
-  against the Edge sources at that commit (`scripts/edge-main-drift.mjs`;
+- **What runs.** The guided plugin schema, plugin sensitivity and server-owned
+  subset `traffic_policy` field comparisons against the Edge sources at that
+  commit (`scripts/edge-main-drift.mjs`;
   only content is compared, since the recorded refs never name a `main`
   commit), then the Pinned Gateway Contract job's gateway steps with
   `FERRUM_EDGE_IMAGE` set to the Edge `main` image, then the editors'
@@ -709,7 +710,13 @@ Moving the Edge pin is a re-qualification, not a tag edit:
    for masked secrets and add endpoint or authorization probes for new admin routes.
    `scripts/plugin-sensitivity-drift.test.mjs` fails until the recorded commit
    is the pinned one, and `npm run check:plugin-sensitivity` (Pinned Gateway
-   Contract) fails while the table differs from Edge's.
+   Contract) fails while the table differs from Edge's. Likewise re-read the
+   `readOnly` properties of `SubsetTrafficPolicy` in `openapi.yaml` (and
+   `Upstream::validate_operator_provided_fields`), bring
+   `SUBSET_TRAFFIC_POLICY_SERVER_OWNED` in `src/api/subsetTrafficPolicy.ts` in
+   line and record the commit in `SUBSET_TRAFFIC_POLICY_SOURCE`:
+   `scripts/subset-traffic-policy-drift.test.mjs` fails until it is the pinned
+   one, and `npm run check:subset-traffic-policy` fails while the list differs.
 4. Review the actual hosted schema producer artifact before changing schema
    refs/digests, and adopt only a qualified, published canonical contract tag.
    Record pending qualification until every existing gate passes.

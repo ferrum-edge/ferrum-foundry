@@ -258,6 +258,13 @@ Dark and light themes via CSS custom properties. Dark is the default.
 - Consumer credentials are maps of rotation ARRAYS per type (`keyauth`, `basicauth`, `jwt`, `hmac_auth`, `mtls_auth`). Ordinary consumer responses redact secrets as the literal `[REDACTED]`; consumer writes preserve hidden credentials and use dedicated rotation endpoints
 - Proxy PUT is full-replace: build update payloads with `proxies.toUpdatePayload(proxy)` and override fields. Never send partial bodies
 - Health check enablement is controlled by presence/absence, not an `enabled` field
+- Upstream saves omit the subset `traffic_policy` fields Edge refuses on a
+  write: `SUBSET_TRAFFIC_POLICY_SERVER_OWNED` in
+  `src/api/subsetTrafficPolicy.ts`, which the mock gateway also reads.
+  `npm run check:subset-traffic-policy` (Pinned Gateway Contract) derives
+  Edge's set from the `readOnly` properties of `SubsetTrafficPolicy` in the
+  pinned `openapi.yaml` and fails on a mismatch or a stale
+  `SUBSET_TRAFFIC_POLICY_SOURCE.commit`
 - `ServiceDiscoveryConfig` uses nested provider-specific objects (`dns_sd`, `kubernetes`, `consul`, `mesh`)
 
 ### Concurrent edits (write guard)

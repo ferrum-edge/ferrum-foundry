@@ -11,6 +11,10 @@ const RATE_LIMITING_MISSING_PATTERN = /component `RateLimitingConfig`: missing/;
 const CORS_MISSING_PATTERN = /entry `cors`: missing/;
 const UNKNOWN_SENSITIVITY_PATTERN = /unreadable \(FieldSensitivity::QuantumSealed is not one Foundry implements/;
 const FORTY_HEX_PATTERN = /expected a 40-hex Edge commit/;
+const SUBSET_MISSING_PATTERN =
+  /component `SubsetTrafficPolicy` readOnly fields: missing `max_retries`/;
+const SUBSET_UNREADABLE_PATTERN =
+  /component `SubsetTrafficPolicy` readOnly fields: unreadable \(`SubsetTrafficPolicy` not found/;
 const SCHEDULE_PATTERN = /\n {2}schedule:\n {4}- cron: "[0-9]+ [0-9]+ \* \* [0-6]"\n {2}workflow_dispatch:\n/;
 const ISSUES_WRITE_PATTERN = /issues: write/g;
 const WRITE_PERMISSION_PATTERN = /: write/;
@@ -36,6 +40,15 @@ const SPEC = [
   "",
   "    RateLimitingConfig:",
   "      type: object",
+  "",
+  "    SubsetTrafficPolicy:",
+  "      type: object",
+  "      properties:",
+  "        hash_on:",
+  "          type: string",
+  "        tls:",
+  "          type: object",
+  "          readOnly: true",
   "",
 ].join("\n");
 
@@ -76,11 +89,11 @@ const FOUNDRY = {
   kafka: new Set(["acks"]),
 };
 
-const options = { provenance: PROVENANCE, foundry: FOUNDRY };
+const options = { provenance: PROVENANCE, foundry: FOUNDRY, serverOwned: ["tls"] };
 
 test("matching content is clean, though no recorded ref names the Edge main commit", () => {
   const result = edgeMainDrift(SPEC, PROJECTION, options);
-  assert.deepEqual(result, { schemas: [], sensitivity: [], drifted: false });
+  assert.deepEqual(result, { schemas: [], sensitivity: [], subset: [], drifted: false });
   assert.match(driftMarkdown(result), MATCH_PATTERN);
 });
 
@@ -127,6 +140,25 @@ test("a projection table shape Foundry does not implement is drift, not a failed
     [["PLUGIN_SENSITIVITY_SCHEMAS", "unreadable"]],
   );
   assert.match(driftMarkdown(result), UNKNOWN_SENSITIVITY_PATTERN);
+});
+
+test("a server-owned subset field Edge adds, or a SubsetTrafficPolicy it removes, is drift", () => {
+  const added = SPEC.replace(
+    "          readOnly: true\n",
+    "          readOnly: true\n        max_retries:\n          type: integer\n          readOnly: true\n",
+  );
+  const result = edgeMainDrift(added, PROJECTION, options);
+  assert.equal(result.drifted, true);
+  assert.deepEqual(result.schemas, []);
+  assert.deepEqual(result.sensitivity, []);
+  assert.deepEqual(result.subset, [{ status: "missing", fields: ["max_retries"] }]);
+  assert.match(driftMarkdown(result), SUBSET_MISSING_PATTERN);
+
+  const removed = SPEC.replace("    SubsetTrafficPolicy:\n", "    SubsetPolicy:\n");
+  const unreadable = edgeMainDrift(removed, PROJECTION, options);
+  assert.equal(unreadable.drifted, true);
+  assert.deepEqual(unreadable.subset.map(({ status }) => status), ["unreadable"]);
+  assert.match(driftMarkdown(unreadable), SUBSET_UNREADABLE_PATTERN);
 });
 
 test("fetches both Edge sources at the given commit and refuses anything else", async () => {
@@ -180,6 +212,7 @@ const REPLACED = new Set([
   "Hash the hosted schema producer export",
   "Upload the hosted schema producer export",
   "Verify the plugin sensitivity table against the pinned Edge source",
+  "Verify the server-owned subset traffic_policy fields against the pinned Edge spec",
   "Resolve the pinned Ferrum Edge image",
 ]);
 const USES_ONLY = new Set(["Setup Node.js"]);

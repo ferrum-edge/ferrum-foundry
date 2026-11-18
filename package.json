@@ -20,6 +20,7 @@
     "test:contracts": "node --test scripts/*.test.mjs",
     "check:plugin-schemas": "node scripts/plugin-schema-drift.mjs",
     "check:plugin-sensitivity": "node scripts/plugin-sensitivity-drift.mjs",
+    "check:subset-traffic-policy": "node scripts/subset-traffic-policy-drift.mjs",
     "test:gateway-contract": "node scripts/gateway-contract-smoke.mjs && node scripts/seed-demo-gateway.mjs && node scripts/seed-demo-gateway.mjs && node scripts/verify-demo-gateway.mjs && node scripts/demo-route-smoke.mjs",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage && npm run test:contracts",

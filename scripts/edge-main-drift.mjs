@@ -6,31 +6,39 @@
 /**
  * The Pinned Gateway Contract job compares Foundry's transcriptions of Edge
  * sources with the pinned Edge release: the guided plugin schema components
- * of `openapi.yaml` (`plugin-schema-drift.mjs`) and the plugin configuration
- * projection table (`plugin-sensitivity-drift.mjs`). The scheduled Edge Main
+ * of `openapi.yaml` (`plugin-schema-drift.mjs`), the plugin configuration
+ * projection table (`plugin-sensitivity-drift.mjs`) and the server-owned
+ * subset `traffic_policy` fields, the `readOnly` properties of
+ * `SubsetTrafficPolicy` in `openapi.yaml`
+ * (`subset-traffic-policy-drift.mjs`). The scheduled Edge Main
  * Drift workflow (`.github/workflows/edge-main-drift.yml`) runs the same
  * comparisons against an Edge `main` commit, so a change that has landed on
  * Edge `main` but is not released yet shows up before Foundry re-pins.
  *
  * Only the content comparisons apply here. The pinned checks also fail when
- * the recorded ref (`PLUGIN_SCHEMA_SPEC.ref`, `PLUGIN_SENSITIVITY_SOURCE.commit`)
- * is not the checked commit; against `main` that is always the case and says
- * nothing about compatibility, so it is not reported.
+ * the recorded ref (`PLUGIN_SCHEMA_SPEC.ref`, `PLUGIN_SENSITIVITY_SOURCE.commit`,
+ * `SUBSET_TRAFFIC_POLICY_SOURCE.commit`) is not the checked commit; against
+ * `main` that is always the case and says nothing about compatibility, so it
+ * is not reported.
  *
  *   node scripts/edge-main-drift.mjs <40-hex Edge commit>
  *
  * Exit status: 0 when nothing drifted, 1 when something did, 2 when the check
  * could not run (a source that could not be fetched, a bad argument). A
- * fetched projection table the parser cannot read is drift: its parser fails
- * closed on any shape Foundry has not transcribed. With
- * FERRUM_EDGE_MAIN_DETAILS_PATH set, a Markdown list of the findings is
- * written there for the workflow's tracking issue.
+ * fetched projection table or `SubsetTrafficPolicy` schema the parser cannot
+ * read is drift: both parsers fail closed on any shape Foundry has not
+ * transcribed. With FERRUM_EDGE_MAIN_DETAILS_PATH set, a Markdown list of the
+ * findings is written there for the workflow's tracking issue.
  */
 
 import { realpathSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { PLUGIN_SCHEMA_PROVENANCE, PLUGIN_SCHEMA_SPEC } from "../src/lib/pluginSchemas.ts";
 import { PLUGIN_SENSITIVITY_SOURCE } from "../src/api/pluginSensitivity.ts";
+import {
+  SUBSET_TRAFFIC_POLICY_SERVER_OWNED,
+  SUBSET_TRAFFIC_POLICY_SOURCE,
+} from "../src/api/subsetTrafficPolicy.ts";
 import { compareProvenance } from "./plugin-schema-drift.mjs";
 import {
   compareSensitivity,
@@ -39,6 +47,10 @@ import {
   parseSensitivitySchemas,
 } from "./plugin-sensitivity-drift.mjs";
 import { fetchPinnedSource } from "./pinned-source.mjs";
+import {
+  compareServerOwned,
+  parseServerOwnedSubsetFields,
+} from "./subset-traffic-policy-drift.mjs";
 
 const COMMIT_PATTERN = /^[0-9a-f]{40}$/;
 
@@ -50,7 +62,11 @@ const COMMIT_PATTERN = /^[0-9a-f]{40}$/;
 export function edgeMainDrift(
   spec,
   projection,
-  { provenance = PLUGIN_SCHEMA_PROVENANCE, foundry = foundryTables() } = {},
+  {
+    provenance = PLUGIN_SCHEMA_PROVENANCE,
+    foundry = foundryTables(),
+    serverOwned = SUBSET_TRAFFIC_POLICY_SERVER_OWNED,
+  } = {},
 ) {
   const schemas = compareProvenance(spec, provenance).filter(
     (finding) => finding.status !== "unchanged",
@@ -76,13 +92,28 @@ export function edgeMainDrift(
       },
     ];
   }
-  return { schemas, sensitivity, drifted: schemas.length > 0 || sensitivity.length > 0 };
+  let subset;
+  try {
+    subset = compareServerOwned(parseServerOwnedSubsetFields(spec), serverOwned);
+  } catch (error) {
+    // As above: a SubsetTrafficPolicy shape the parser refuses is a change.
+    subset = [{ status: "unreadable", fields: [], reason: String(error?.message ?? error) }];
+  }
+  return {
+    schemas,
+    sensitivity,
+    subset,
+    drifted: schemas.length > 0 || sensitivity.length > 0 || subset.length > 0,
+  };
 }
 
 /** The findings as a Markdown list, or a single line saying there are none. */
-export function driftMarkdown({ schemas, sensitivity }) {
-  if (schemas.length === 0 && sensitivity.length === 0) {
-    return "- Guided plugin schemas and the plugin sensitivity table match.\n";
+export function driftMarkdown({ schemas, sensitivity, subset }) {
+  if (schemas.length === 0 && sensitivity.length === 0 && subset.length === 0) {
+    return (
+      "- Guided plugin schemas, the plugin sensitivity table and the server-owned " +
+      "subset traffic_policy fields match.\n"
+    );
   }
   const lines = [];
   for (const finding of schemas) {
@@ -96,6 +127,15 @@ export function driftMarkdown({ schemas, sensitivity }) {
       `- \`${PLUGIN_SENSITIVITY_SOURCE.path}\` entry \`${finding.plugin}\`: ${finding.status}` +
         (finding.reason ? ` (${finding.reason})` : "") +
         " (bring `src/api/pluginSensitivity.ts` in line)",
+    );
+  }
+  for (const finding of subset) {
+    lines.push(
+      `- \`${SUBSET_TRAFFIC_POLICY_SOURCE.path}\` component ` +
+        `\`${SUBSET_TRAFFIC_POLICY_SOURCE.component}\` readOnly fields: ${finding.status}` +
+        (finding.fields.length > 0 ? ` \`${finding.fields.join("`, `")}\`` : "") +
+        (finding.reason ? ` (${finding.reason})` : "") +
+        " (bring `SUBSET_TRAFFIC_POLICY_SERVER_OWNED` in `src/api/subsetTrafficPolicy.ts` in line)",
     );
   }
   return `${lines.join("\n")}\n`;
@@ -125,8 +165,8 @@ if (
     console.error(`The Edge main static checks could not run: ${error?.message ?? error}`);
     process.exit(2);
   }
-  const { schemas, sensitivity, drifted } = result;
-  console.log(JSON.stringify({ ref, schemas, sensitivity }, null, 2));
+  const { schemas, sensitivity, subset, drifted } = result;
+  console.log(JSON.stringify({ ref, schemas, sensitivity, subset }, null, 2));
   const detailsPath = process.env.FERRUM_EDGE_MAIN_DETAILS_PATH;
   if (detailsPath) writeFileSync(detailsPath, driftMarkdown(result));
   if (drifted) {
