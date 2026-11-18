@@ -648,6 +648,47 @@ initial unconditional fallback on older gateways, modes without a database, and
 cached reads (`X-Data-Source: cached`), including cached reads from the paired
 release. See [the precise scope](concurrent-edits.md#without-a-tag).
 
+## Checking against Edge main
+
+The pin binds every gate above to a published Edge release, so none of them
+sees a breaking change that has landed only on Edge `main`. The **Edge Main
+Drift** workflow (`.github/workflows/edge-main-drift.yml`) fills that gap as
+an early warning (ferrum-edge/ferrum-contracts#76). It runs weekly and on
+`workflow_dispatch`, and is never a required check.
+
+- **Which Edge.** The `latest` tag of `ghcr.io/ferrum-edge/ferrum-edge`, which
+  Edge's Main Latest Image workflow moves only to a `main` commit whose push
+  CI passed. The tag is resolved to its digest once; the digest must carry
+  that workflow's keyless Cosign signature on `refs/heads/main`, and the Edge
+  commit is the signed image's `org.opencontainers.image.revision` label,
+  which must be on `main`'s history. The image can trail `main` by the
+  commits not yet built; the report says how many.
+- **What runs.** The guided plugin schema and plugin sensitivity comparisons
+  against the Edge sources at that commit (`scripts/edge-main-drift.mjs`;
+  only content is compared, since the recorded refs never name a `main`
+  commit), then the Pinned Gateway Contract job's gateway steps with
+  `FERRUM_EDGE_IMAGE` set to the Edge `main` image, then the editors'
+  unchanged proxy and upstream saves over the seeded namespace
+  (`src/api/editorSave.gateway.test.ts`: `mergeFormUpdatePayload` output, as
+  the detail editors send it, with `If-Match`). The editor saves catch a field
+  the payload builders add that Edge no longer accepts (#701); the contract
+  smoke writes fixture spreads and cannot. `scripts/edge-main-drift.test.mjs`
+  derives the gateway step list from `ci.yml`, so a step added to or removed
+  from the Pinned Gateway Contract job fails it until this workflow follows,
+  and fails when a copied step's script differs.
+- **What it reports.** One issue labelled `edge-main-drift` whose body starts
+  with `<!-- edge-main-drift -->`, opened or updated on a finding, and also
+  when the check could not run (an unresolvable or unsigned image, a failed
+  install, a run that stopped early), and closed only by the next clean run.
+  An issue without that marker is never edited or closed. It names the Edge
+  commit, the image digest, how far `main` has moved past it, and the commit
+  of ferrum-contracts' `main_branch_delta` (the contracts record of what Edge
+  `main` changes) with whether it covers the checked commit. Only the issue
+  job holds `issues: write`, with the repository's own `GITHUB_TOKEN`.
+
+A finding is not a qualification result. It is time to ship a compatible
+Foundry release before Edge releases the change.
+
 ## Changing the pairing
 
 Moving the Edge pin is a re-qualification, not a tag edit:

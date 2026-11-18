@@ -1,0 +1,487 @@
+name: Edge Main Drift
+
+# Early warning for changes that have landed on Ferrum Edge `main` but are not
+# released yet (ferrum-edge/ferrum-contracts#76, docs/consumer-pins.md
+# "Checking against Edge main" in ferrum-contracts). The Pinned Gateway
+# Contract job in ci.yml qualifies Foundry against the pinned Edge release;
+# this workflow runs the same checks against the newest Edge `main` image:
+#
+#   * the guided plugin schema and plugin sensitivity comparisons, read at the
+#     image's Edge commit (scripts/edge-main-drift.mjs);
+#   * the gateway contract steps of the Pinned Gateway Contract job, copied
+#     verbatim (scripts/edge-main-drift.test.mjs keeps the copies equal), with
+#     FERRUM_EDGE_IMAGE set to the Edge `main` image.
+#
+# It is never a required check. A finding opens or updates one issue labelled
+# `edge-main-drift`, and a clean run closes it. Only the `issue` job can write
+# issues, and only with this repository's GITHUB_TOKEN; the job that runs the
+# Edge image and the npm tree holds `contents: read`. Pull requests that change
+# this workflow or its script run the checks without touching the issue.
+on:
+  schedule:
+    - cron: "37 5 * * 1"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/edge-main-drift.yml
+      - scripts/edge-main-drift.mjs
+
+permissions:
+  contents: read
+
+concurrency:
+  group: edge-main-drift-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    name: Edge Main Drift Check
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    outputs:
+      outcome: ${{ steps.report.outputs.outcome }}
+      edge-commit: ${{ steps.edge.outputs.commit }}
+      report: ${{ steps.report.outputs.report }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        id: checkout
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        id: node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install locked dependencies
+        id: install
+        run: npm ci
+
+      - name: Install Cosign
+        id: cosign
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+
+      # Edge's Main Latest Image workflow moves `latest` only to a main commit
+      # whose push CI passed, and signs the image keylessly. The tag is
+      # mutable: the digest is resolved once, its signature is verified
+      # against that workflow on `main`, and everything below uses the digest.
+      # The Edge commit is the image's revision label, which is part of the
+      # signed image, and it must be on Edge main's history.
+      - name: Resolve the Ferrum Edge main image
+        id: edge
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repository=ghcr.io/ferrum-edge/ferrum-edge
+          token=$(curl -fsS "https://ghcr.io/token?scope=repository:ferrum-edge/ferrum-edge:pull" | jq -er .token)
+          digest=$(curl -fsS --head -o /dev/null -D - \
+            -H "Authorization: Bearer $token" \
+            -H "Accept: application/vnd.oci.image.index.v1+json" \
+            -H "Accept: application/vnd.docker.distribution.manifest.list.v2+json" \
+            "https://ghcr.io/v2/ferrum-edge/ferrum-edge/manifests/latest" \
+            | tr -d '\r' | awk -F': ' 'tolower($1) == "docker-content-digest" { print $2 }')
+          if ! [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::Unexpected digest for $repository:latest: $digest"
+            exit 1
+          fi
+          image="$repository@$digest"
+          if ! cosign verify "$image" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity https://github.com/ferrum-edge/ferrum-edge/.github/workflows/main-latest-image.yml@refs/heads/main \
+            --certificate-github-workflow-repository ferrum-edge/ferrum-edge \
+            --certificate-github-workflow-ref refs/heads/main \
+            --certificate-github-workflow-trigger workflow_run \
+            > "$RUNNER_TEMP/cosign-verify.json"; then
+            echo "::error::$image has no valid signature from Edge's Main Latest Image workflow"
+            exit 1
+          fi
+          docker pull --quiet "$image"
+          commit=$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image")
+          if ! [[ "$commit" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::$image carries no readable revision label: $commit"
+            exit 1
+          fi
+          # Read main only now: the image can move to a newer commit between an
+          # earlier read and the label, which would look like "behind".
+          main_head=$(git ls-remote https://github.com/ferrum-edge/ferrum-edge refs/heads/main | cut -f1)
+          if ! [[ "$main_head" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Could not resolve Ferrum Edge main: $main_head"
+            exit 1
+          fi
+          compare=$(gh api "repos/ferrum-edge/ferrum-edge/compare/$commit...$main_head" \
+            --jq '"\(.status) \(.ahead_by)"')
+          read -r on_main behind <<< "$compare"
+          case "$on_main" in
+            ahead | identical) ;;
+            *)
+              echo "::error::$image names $commit, which is not on Ferrum Edge main's history ($on_main)"
+              exit 1
+              ;;
+          esac
+
+          # ferrum-contracts records what Edge main changes in each
+          # vocabulary's main_branch_delta; its commit is the anchor.
+          contracts=$(git ls-remote https://github.com/ferrum-edge/ferrum-contracts refs/heads/main | cut -f1)
+          if ! [[ "$contracts" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Could not resolve ferrum-contracts main: $contracts"
+            exit 1
+          fi
+          # A missing or unreadable vocabulary, or a failed compare call, is one
+          # report row, never an abort or a claim about history.
+          vocabulary="https://raw.githubusercontent.com/ferrum-edge/ferrum-contracts/$contracts/vocabularies/plugin-catalog.json"
+          if catalog=$(curl -fsS "$vocabulary" 2>/dev/null) &&
+            delta=$(jq -r '.main_branch_delta.commit // ""' <<< "$catalog" 2>/dev/null); then
+            if [[ "$delta" =~ ^[0-9a-f]{40}$ ]]; then
+              status=$(gh api "repos/ferrum-edge/ferrum-edge/compare/$delta...$commit" --jq .status 2>/dev/null || true)
+              case "$status" in
+                identical) delta_note="read at this commit" ;;
+                ahead) delta_note="read at an older commit; changes after it may not be recorded yet" ;;
+                behind) delta_note="read at a newer commit than this image" ;;
+                diverged) delta_note="not on this commit's history" ;;
+                *) delta_note="could not be compared with this commit (the compare API call failed)" ;;
+              esac
+            else
+              delta="none"
+              delta_note="ferrum-contracts main records no main_branch_delta"
+            fi
+          else
+            delta="none"
+            delta_note="vocabularies/plugin-catalog.json could not be read from ferrum-contracts main"
+          fi
+
+          echo "FERRUM_EDGE_IMAGE=$image" >> "$GITHUB_ENV"
+          {
+            echo "image=$image"
+            echo "commit=$commit"
+            echo "main-head=$main_head"
+            echo "behind=$behind"
+            echo "contracts=$contracts"
+            echo "delta=$delta"
+            echo "delta-note=$delta_note"
+          } >> "$GITHUB_OUTPUT"
+          echo "Checking Ferrum Edge main at $commit ($image), $behind commit(s) behind main $main_head."
+
+      - name: Compare the plugin schemas and sensitivity table with Edge main
+        id: static
+        env:
+          EDGE_COMMIT: ${{ steps.edge.outputs.commit }}
+          FERRUM_EDGE_MAIN_DETAILS_PATH: ${{ runner.temp }}/static-details.md
+        run: |
+          set +e
+          node scripts/edge-main-drift.mjs "$EDGE_COMMIT"
+          status=$?
+          set -e
+          case "$status" in
+            0) echo "result=pass" >> "$GITHUB_OUTPUT" ;;
+            1) echo "result=fail" >> "$GITHUB_OUTPUT" ;;
+            *) exit "$status" ;;
+          esac
+
+      - name: Start demo backends
+        id: backends
+        run: |
+          FERRUM_DEMO_BACKEND_BIND=0.0.0.0 node scripts/demo-backend.mjs >/tmp/ferrum-demo-backend.log 2>&1 &
+          echo $! >/tmp/ferrum-demo-backend.pid
+          for port in 9101 9102 9103 9104 9105; do
+            for _attempt in $(seq 1 30); do
+              if curl --fail --silent --show-error "http://127.0.0.1:${port}/health" >/dev/null; then
+                break
+              fi
+              sleep 1
+            done
+            curl --fail --silent --show-error "http://127.0.0.1:${port}/health" >/dev/null
+          done
+
+      - name: Start Ferrum Edge main gateway
+        id: start
+        run: |
+          docker run --detach --name ferrum-edge-contract \
+            --publish 127.0.0.1:9000:9000 \
+            --publish 127.0.0.1:8000:8000 \
+            --add-host host.docker.internal:host-gateway \
+            --env FERRUM_MODE=database \
+            --env FERRUM_NAMESPACE=ferrum-foundry-demo \
+            --env FERRUM_DB_TYPE=sqlite \
+            --env 'FERRUM_DB_URL=sqlite:////tmp/ferrum-contract.db?mode=rwc' \
+            --env FERRUM_PROXY_BIND_ADDRESS=0.0.0.0 \
+            --env FERRUM_ADMIN_BIND_ADDRESS=0.0.0.0 \
+            --env FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true \
+            --env FERRUM_ADMIN_JWT_SECRET=contract-admin-signing-secret-at-least-32-characters \
+            --env FERRUM_ADMIN_JWT_AUDIENCE=ferrum-admin \
+            --env FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM=true \
+            --env FERRUM_BASIC_AUTH_HMAC_SECRET=contract-basic-auth-hmac-secret-at-least-32-characters \
+            "$FERRUM_EDGE_IMAGE"
+
+      - name: Start the same gateway with its admin API read-only
+        id: start-read-only
+        run: |
+          docker run --detach --name ferrum-edge-read-only \
+            --publish 127.0.0.1:9010:9000 \
+            --env FERRUM_MODE=database \
+            --env FERRUM_NAMESPACE=ferrum-foundry-demo \
+            --env FERRUM_DB_TYPE=sqlite \
+            --env 'FERRUM_DB_URL=sqlite:////tmp/ferrum-read-only.db?mode=rwc' \
+            --env FERRUM_ADMIN_BIND_ADDRESS=0.0.0.0 \
+            --env FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true \
+            --env FERRUM_ADMIN_JWT_SECRET=contract-admin-signing-secret-at-least-32-characters \
+            --env FERRUM_ADMIN_JWT_AUDIENCE=ferrum-admin \
+            --env FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM=true \
+            --env FERRUM_ADMIN_READ_ONLY=true \
+            "$FERRUM_EDGE_IMAGE"
+
+      - name: Wait for gateway readiness
+        # A gateway that does not start with the environment Foundry documents
+        # is a finding, not an infrastructure failure.
+        id: ready
+        continue-on-error: true
+        run: |
+          for port in 9000 9010; do
+            for _attempt in $(seq 1 60); do
+              if curl --fail --silent --show-error "http://127.0.0.1:${port}/health" >/dev/null; then
+                continue 2
+              fi
+              sleep 2
+            done
+            docker logs ferrum-edge-contract
+            docker logs ferrum-edge-read-only
+            exit 1
+          done
+
+      - name: Verify Alloy preview and explicit HTTP resource mapping
+        id: manifest
+        if: steps.ready.outcome == 'success'
+        continue-on-error: true
+        env:
+          FERRUM_MANIFEST_GATEWAY_CONTRACT: 'true'
+          FERRUM_ADMIN_URL: http://127.0.0.1:9000
+          FERRUM_JWT_SECRET: contract-admin-signing-secret-at-least-32-characters
+          FERRUM_JWT_AUDIENCE: ferrum-admin
+        run: npm exec -- vitest run --project server server/routes/service-manifest.gateway.test.ts
+
+      - name: Seed twice and verify canonical backup state
+        id: seed
+        if: steps.ready.outcome == 'success'
+        continue-on-error: true
+        env:
+          FERRUM_ADMIN_URL: http://127.0.0.1:9000
+          FERRUM_JWT_SECRET: contract-admin-signing-secret-at-least-32-characters
+          FERRUM_JWT_AUDIENCE: ferrum-admin
+          FERRUM_NAMESPACE: ferrum-foundry-demo
+          FERRUM_DEMO_CONFIRM_TARGET: 'http://127.0.0.1:9000#ferrum-foundry-demo'
+          FERRUM_DEMO_BACKEND_HOST: host.docker.internal
+          FERRUM_DEMO_PROXY_URL: http://127.0.0.1:8000
+          FERRUM_DEMO_INCLUDE_BASIC_AUTH: "true"
+        run: npm run test:gateway-contract
+
+      - name: Verify role and read-only capability parity
+        id: parity
+        if: steps.ready.outcome == 'success'
+        continue-on-error: true
+        env:
+          FERRUM_ADMIN_URL: http://127.0.0.1:9010
+          FERRUM_JWT_SECRET: contract-admin-signing-secret-at-least-32-characters
+          FERRUM_JWT_AUDIENCE: ferrum-admin
+          FERRUM_NAMESPACE: ferrum-foundry-demo
+          FERRUM_CAPABILITY_EXPECT: read-only
+        run: node scripts/capability-parity-contract.mjs
+
+      - name: Verify the editors' save payloads against the gateway
+        # Foundry's own builders, not fixture spreads: the editors' unchanged
+        # proxy and upstream saves, as they reach the gateway, over the seeded
+        # demo namespace. Not part of the Pinned Gateway Contract job.
+        id: editor-save
+        if: steps.ready.outcome == 'success'
+        continue-on-error: true
+        env:
+          FERRUM_EDITOR_SAVE_GATEWAY_CONTRACT: 'true'
+          FERRUM_ADMIN_URL: http://127.0.0.1:9000
+          FERRUM_JWT_SECRET: contract-admin-signing-secret-at-least-32-characters
+          FERRUM_JWT_AUDIENCE: ferrum-admin
+          FERRUM_NAMESPACE: ferrum-foundry-demo
+        run: npm exec -- vitest run --project frontend src/api/editorSave.gateway.test.ts
+
+      - name: Show gateway logs on failure
+        if: failure() || steps.ready.outcome == 'failure' || steps.manifest.outcome == 'failure' || steps.seed.outcome == 'failure' || steps.parity.outcome == 'failure' || steps.editor-save.outcome == 'failure'
+        run: |
+          docker logs ferrum-edge-contract
+          docker logs ferrum-edge-read-only
+          cat /tmp/ferrum-demo-backend.log
+
+      - name: Write the report
+        # Always, so a run that could not check anything still reaches the
+        # tracking issue as `error` instead of going silent.
+        id: report
+        if: ${{ !cancelled() }}
+        env:
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          IMAGE: ${{ steps.edge.outputs.image }}
+          EDGE_COMMIT: ${{ steps.edge.outputs.commit }}
+          MAIN_HEAD: ${{ steps.edge.outputs.main-head }}
+          BEHIND: ${{ steps.edge.outputs.behind }}
+          CONTRACTS: ${{ steps.edge.outputs.contracts }}
+          DELTA: ${{ steps.edge.outputs.delta }}
+          DELTA_NOTE: ${{ steps.edge.outputs.delta-note }}
+          DETAILS: ${{ runner.temp }}/static-details.md
+          STATIC: ${{ steps.static.outputs.result }}
+          READY: ${{ steps.ready.outcome }}
+          MANIFEST: ${{ steps.manifest.outcome }}
+          SEED: ${{ steps.seed.outcome }}
+          PARITY: ${{ steps.parity.outcome }}
+          EDITOR_SAVE: ${{ steps.editor-save.outcome }}
+          SETUP: >-
+            checkout=${{ steps.checkout.outcome }}
+            setup-node=${{ steps.node.outcome }}
+            npm-ci=${{ steps.install.outcome }}
+            install-cosign=${{ steps.cosign.outcome }}
+            resolve-edge-main-image=${{ steps.edge.outcome }}
+            static-checks=${{ steps.static.outcome }}
+            demo-backends=${{ steps.backends.outcome }}
+            start-gateway=${{ steps.start.outcome }}
+            start-read-only-gateway=${{ steps.start-read-only.outcome }}
+        run: |
+          set -euo pipefail
+          verdict() {
+            case "$1" in
+              pass | success) echo "pass" ;;
+              skipped) echo "not run (the gateway did not become ready)" ;;
+              *) echo "**FAIL**" ;;
+            esac
+          }
+          # A setup step that did not succeed means nothing was compared.
+          failed_setup=""
+          for entry in $SETUP; do
+            [ "${entry#*=}" = success ] || failed_setup="$failed_setup ${entry%%=*}"
+          done
+          outcome=clean
+          for result in "$STATIC" "$READY" "$MANIFEST" "$SEED" "$PARITY" "$EDITOR_SAVE"; do
+            case "$result" in
+              pass | success) ;;
+              *) outcome=drift ;;
+            esac
+          done
+          [ -z "$failed_setup" ] || outcome=error
+          report="$RUNNER_TEMP/edge-main-drift.md"
+          {
+            echo "<!-- edge-main-drift -->"
+            if [ "$outcome" = error ]; then
+              echo "The Edge main drift check could not run: \`${failed_setup# }\` did not succeed, so the checks below did not compare \`$REPOSITORY\` against Ferrum Edge \`main\`. See the run log; a clean scheduled run closes this issue."
+            elif [ "$outcome" = drift ]; then
+              echo "\`$REPOSITORY\` fails checks against Ferrum Edge \`main\`. This is an early warning: the change is on Edge \`main\` and not released yet, so there is time to ship a compatible Foundry release before Edge releases it."
+            else
+              echo "\`$REPOSITORY\` passes its checks against Ferrum Edge \`main\`."
+            fi
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Edge commit checked | [\`${EDGE_COMMIT:0:12}\`](https://github.com/ferrum-edge/ferrum-edge/commit/$EDGE_COMMIT), image \`$IMAGE\` (signed by Edge's Main Latest Image workflow) |"
+            echo "| Edge \`main\` | \`${MAIN_HEAD:0:12}\`, $BEHIND commit(s) after the checked commit |"
+            echo "| ferrum-contracts \`main_branch_delta\` | \`${DELTA:0:12}\` at contracts \`${CONTRACTS:0:12}\`: $DELTA_NOTE |"
+            echo "| Run | $RUN_URL |"
+            echo
+            echo "| Check | Result |"
+            echo "|---|---|"
+            echo "| Guided plugin schemas and plugin sensitivity table at the Edge commit | $(verdict "$STATIC") |"
+            echo "| Gateway starts with Foundry's contract environment | $(verdict "$READY") |"
+            echo "| Alloy preview and explicit HTTP resource mapping | $(verdict "$MANIFEST") |"
+            echo "| Seed twice and verify canonical backup state (\`npm run test:gateway-contract\`) | $(verdict "$SEED") |"
+            echo "| Role and read-only capability parity | $(verdict "$PARITY") |"
+            echo "| Unchanged proxy and upstream editor saves (\`mergeFormUpdatePayload\`) | $(verdict "$EDITOR_SAVE") |"
+            echo
+            echo "Static findings:"
+            echo
+            if [ -s "$DETAILS" ]; then cat "$DETAILS"; else echo "- (none recorded)"; fi
+            echo
+            echo "The gateway checks are the Pinned Gateway Contract job's plus the editor saves, run by \`.github/workflows/edge-main-drift.yml\`; see the run log for each failure. A clean scheduled run closes this issue."
+          } > "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "outcome=$outcome"
+            echo "report=$(base64 -w0 "$report")"
+          } >> "$GITHUB_OUTPUT"
+
+  # Runs whenever the check job ran (so a check that could not run is filed
+  # as `error`), never for pull requests or a dispatch from another branch.
+  # Only a clean run closes the issue.
+  issue:
+    name: Edge Main Drift Issue
+    needs: check
+    if: >-
+      !cancelled() && needs.check.result != 'cancelled' && needs.check.result != 'skipped' &&
+      github.event_name != 'pull_request' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Open, update or close the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHECK_RESULT: ${{ needs.check.result }}
+          OUTCOME: ${{ needs.check.outputs.outcome }}
+          EDGE_COMMIT: ${{ needs.check.outputs.edge-commit }}
+          REPORT: ${{ needs.check.outputs.report }}
+        run: |
+          set -euo pipefail
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          label=edge-main-drift
+          marker='<!-- edge-main-drift -->'
+          title="Edge main drift: Foundry fails its checks against Ferrum Edge main"
+          report="$RUNNER_TEMP/report.md"
+          case "$OUTCOME" in
+            clean | drift | error) base64 -d <<< "$REPORT" > "$report" ;;
+            *)
+              # The check job stopped before its report step (a timeout, a
+              # runner loss): nothing was compared, and that is a finding too.
+              OUTCOME=error
+              {
+                echo "$marker"
+                echo "The Edge main drift check did not finish (check job: \`$CHECK_RESULT\`), so it compared nothing against Ferrum Edge \`main\` this run. A clean scheduled run closes this issue."
+                echo
+                echo "Run: $run_url"
+              } > "$report"
+              ;;
+          esac
+          # Only an issue this workflow wrote (its body starts with the marker)
+          # is edited or closed; a human-labelled issue is left alone.
+          number=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues?state=open&labels=$label&per_page=100" \
+            --jq '.[] | select(.pull_request == null and ((.body // "") | startswith("<!-- edge-main-drift -->"))) | .number' \
+            | sort -n | sed -n 1p)
+          case "$OUTCOME" in
+            drift | error)
+              if [ "$OUTCOME" = drift ]; then
+                note="Still failing against Ferrum Edge main at \`${EDGE_COMMIT:0:12}\`: $run_url"
+                summary="Foundry fails checks against Ferrum Edge main at ${EDGE_COMMIT:-an unknown commit}"
+              else
+                note="The Edge main drift check could not run: $run_url"
+                summary="The Edge main drift check could not run"
+              fi
+              gh label create "$label" --repo "$GITHUB_REPOSITORY" --color B60205 \
+                --description "Fails its checks against unreleased Ferrum Edge main" --force
+              if [ -n "$number" ]; then
+                gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --body-file "$report"
+                gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body "$note"
+                echo "::notice::Updated tracking issue #$number."
+              else
+                gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --label "$label" \
+                  --body-file "$report"
+                echo "::notice::Opened a tracking issue."
+              fi
+              echo "::error::$summary; see the tracking issue."
+              exit 1
+              ;;
+            clean)
+              if [ -n "$number" ]; then
+                gh issue close "$number" --repo "$GITHUB_REPOSITORY" \
+                  --comment "Clean against Ferrum Edge main at \`${EDGE_COMMIT:0:12}\`: $run_url"
+                echo "::notice::Closed tracking issue #$number."
+              fi
+              ;;
+          esac
