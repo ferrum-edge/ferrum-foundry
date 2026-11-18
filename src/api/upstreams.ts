@@ -16,6 +16,7 @@ import { pathSegment } from "./pathSegment";
 import { secretValues, withRedactedFailure } from "./secretRedaction";
 import { MaskedSecretWriteError } from "./maskedSecrets";
 import { upstreamPlaceholderSites } from "./maskedSecretSites";
+import { SUBSET_TRAFFIC_POLICY_SERVER_OWNED } from "./subsetTrafficPolicy";
 import type { GatewayRole } from "@/lib/capabilities";
 import {
   conditionalDelete,
@@ -122,29 +123,12 @@ export async function getReference(
 }
 
 /**
- * The `subsets[].traffic_policy` fields Ferrum Edge projects from a mesh
- * DestinationRule and refuses on every operator write (admin POST/PUT,
- * import, restore, file config). A read can carry them; a write must omit
- * them, or Edge answers `400`. Mirrors the `policy.<field>.is_some()` checks
- * in `Upstream::validate_operator_provided_fields` and the `readOnly`
- * properties of the `SubsetTrafficPolicy` schema in `openapi.yaml`, which
- * list the same nine fields at v0.9.20 (`e4a606a`, `src/config/types.rs`) and
- * on `main`. Every other subset field (`name`, `labels`,
- * `load_balancer_algorithm`, `hash_on`, and any field Edge adds that it does
- * not refuse) is operator-writable and carried through a save. Update this
- * list when Edge changes that check.
+ * The server-owned `subsets[].traffic_policy` fields an operator write must
+ * omit. The list lives in `./subsetTrafficPolicy`, which the mock gateway
+ * reads too and `scripts/subset-traffic-policy-drift.mjs` checks against the
+ * pinned Edge `openapi.yaml`.
  */
-export const SUBSET_TRAFFIC_POLICY_SERVER_OWNED: readonly string[] = [
-  "tls",
-  "connect_timeout_ms",
-  "h2_upgrade_policy",
-  "max_retries",
-  "http1_max_pending_requests",
-  "http_idle_timeout_ms",
-  "http2_max_requests",
-  "h2_max_concurrent_streams",
-  "passive_health_check",
-];
+export { SUBSET_TRAFFIC_POLICY_SERVER_OWNED };
 
 /**
  * A subset as an operator write may carry it: every field of `subset` except

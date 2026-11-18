@@ -14,6 +14,7 @@ import { createServer } from 'node:http';
 import { createHash, randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { SUBSET_TRAFFIC_POLICY_SERVER_OWNED } from '../src/api/subsetTrafficPolicy.ts';
 
 const YAML_TITLE_PATTERN = /^\s*title:\s*['"]?(.+?)['"]?\s*$/m;
 const HEX_BYTES_PATTERN = /^(?:[0-9a-fA-F]{2})*$/;
@@ -433,16 +434,13 @@ export function validateProxyWrite(body) {
 
 /**
  * The `subsets[].traffic_policy` fields Edge projects from a mesh
- * DestinationRule and refuses on an operator write (v0.9.20 and `main`,
- * `Upstream::validate_operator_provided_fields`; `readOnly` in the
- * `SubsetTrafficPolicy` schema). Foundry's copy is
- * `SUBSET_TRAFFIC_POLICY_SERVER_OWNED` in `src/api/upstreams.ts`.
+ * DestinationRule and refuses on an operator write. The mock reads Foundry's
+ * own list (`src/api/subsetTrafficPolicy.ts`), which
+ * `scripts/subset-traffic-policy-drift.mjs` checks against the `readOnly`
+ * properties of `SubsetTrafficPolicy` in the pinned Edge `openapi.yaml`, so
+ * the mock and the editor cannot disagree.
  */
-export const MESH_PROJECTED_SUBSET_POLICY_FIELDS = Object.freeze([
-  'tls', 'connect_timeout_ms', 'h2_upgrade_policy', 'max_retries',
-  'http1_max_pending_requests', 'http_idle_timeout_ms', 'http2_max_requests',
-  'h2_max_concurrent_streams', 'passive_health_check',
-]);
+export const MESH_PROJECTED_SUBSET_POLICY_FIELDS = SUBSET_TRAFFIC_POLICY_SERVER_OWNED;
 
 /**
  * The first mesh-projected field an upstream write sets, as Edge names it, or
