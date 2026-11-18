@@ -667,11 +667,20 @@ an early warning (ferrum-edge/ferrum-contracts#76). It runs weekly and on
   against the Edge sources at that commit (`scripts/edge-main-drift.mjs`;
   only content is compared, since the recorded refs never name a `main`
   commit), then the Pinned Gateway Contract job's gateway steps with
-  `FERRUM_EDGE_IMAGE` set to the Edge `main` image.
-  `scripts/edge-main-drift.test.mjs` fails when those steps differ from
-  `ci.yml`'s.
-- **What it reports.** One issue labelled `edge-main-drift`, opened or
-  updated on a finding and closed by the next clean run. It names the Edge
+  `FERRUM_EDGE_IMAGE` set to the Edge `main` image, then the editors'
+  unchanged proxy and upstream saves over the seeded namespace
+  (`src/api/editorSave.gateway.test.ts`: `mergeFormUpdatePayload` output, as
+  the detail editors send it, with `If-Match`). The editor saves catch a field
+  the payload builders add that Edge no longer accepts (#701); the contract
+  smoke writes fixture spreads and cannot. `scripts/edge-main-drift.test.mjs`
+  derives the gateway step list from `ci.yml`, so a step added to or removed
+  from the Pinned Gateway Contract job fails it until this workflow follows,
+  and fails when a copied step's script differs.
+- **What it reports.** One issue labelled `edge-main-drift` whose body starts
+  with `<!-- edge-main-drift -->`, opened or updated on a finding, and also
+  when the check could not run (an unresolvable or unsigned image, a failed
+  install, a run that stopped early), and closed only by the next clean run.
+  An issue without that marker is never edited or closed. It names the Edge
   commit, the image digest, how far `main` has moved past it, and the commit
   of ferrum-contracts' `main_branch_delta` (the contracts record of what Edge
   `main` changes) with whether it covers the checked commit. Only the issue

@@ -20,11 +20,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`scripts/edge-main-drift.mjs`, content only: the recorded-ref checks of the
   pinned job always fail against `main` and are not reported) and the Pinned
   Gateway Contract job's gateway steps, copied verbatim
-  (`scripts/edge-main-drift.test.mjs` keeps them equal to `ci.yml`). The
-  report also names ferrum-contracts' `main_branch_delta` commit and whether
-  it covers the checked commit. A finding opens or updates one issue labelled
-  `edge-main-drift`, and a clean run closes it, using only the repository's
-  `GITHUB_TOKEN` with `issues: write` on that one job. Pull requests that
+  (`scripts/edge-main-drift.test.mjs` derives the step list from `ci.yml` and
+  keeps the scripts equal), and the editors' unchanged proxy and upstream
+  saves (`src/api/editorSave.gateway.test.ts`, the `mergeFormUpdatePayload`
+  bodies the detail editors send, which catch a builder field Edge no longer
+  accepts, as in #701). The report also names ferrum-contracts'
+  `main_branch_delta` commit and whether it covers the checked commit. A
+  finding, or a check that could not run, opens or updates the one issue
+  labelled `edge-main-drift` whose body carries the workflow's marker; only a
+  clean run closes it. Only that job holds `issues: write`, with the
+  repository's own `GITHUB_TOKEN`. Pull requests that
   change the workflow or its script run the checks without touching the issue.
 - A **Starter Production Profile** CI job runs the deployment starter's
   production profile as shipped, TLS nginx and oauth2-proxy included, against

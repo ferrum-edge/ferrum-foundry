@@ -22,6 +22,8 @@ const SECRETS_PATTERN = /secrets\./;
 const MATCH_PATTERN = /match/;
 const STEP_END_PATTERN = /\n {6}- |\n\n {2}[a-z-]+:\n/;
 const STEP_BODY_PATTERN = /\n {8}(?:env|run):/;
+const JOB_START_PATTERN = /\n {2}[a-z][a-z0-9-]*:\n/;
+const STEP_NAME_PATTERN = /^ {6}- name: (.+)$/gm;
 
 const SPEC = [
   "components:",
@@ -159,18 +161,52 @@ function stepBody(workflow, name) {
 const ci = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
 const drift = readFileSync(new URL("../.github/workflows/edge-main-drift.yml", import.meta.url), "utf8");
 
-test("the Edge main workflow runs the Pinned Gateway Contract steps verbatim", () => {
-  for (const [pinned, main] of [
-    ["Start demo backends", "Start demo backends"],
-    ["Start pinned Ferrum Edge gateway", "Start Ferrum Edge main gateway"],
-    ["Start the same gateway with its admin API read-only", "Start the same gateway with its admin API read-only"],
-    ["Wait for gateway readiness", "Wait for gateway readiness"],
-    ["Verify Alloy preview and explicit HTTP resource mapping", "Verify Alloy preview and explicit HTTP resource mapping"],
-    ["Seed twice and verify canonical backup state", "Seed twice and verify canonical backup state"],
-    ["Verify role and read-only capability parity", "Verify role and read-only capability parity"],
-    ["Show gateway logs on failure", "Show gateway logs on failure"],
-  ]) {
-    assert.equal(stepBody(drift, main), stepBody(ci, pinned), `${main} differs from ci.yml's ${pinned}`);
+/** The text of job `id`, up to the next job of the workflow. */
+function jobText(workflow, id) {
+  const start = workflow.indexOf(`\n  ${id}:\n`);
+  assert.ok(start >= 0, `no job ${id}`);
+  const rest = workflow.slice(start + 1);
+  const next = rest.slice(1).search(JOB_START_PATTERN);
+  return next < 0 ? rest : rest.slice(0, next + 1);
+}
+
+function stepNames(job) {
+  return [...job.matchAll(STEP_NAME_PATTERN)].map(([, name]) => name);
+}
+
+/** Pinned Gateway Contract steps the Edge main check replaces with its own. */
+const REPLACED = new Set([
+  "Verify guided plugin schemas against the upstream spec",
+  "Hash the hosted schema producer export",
+  "Upload the hosted schema producer export",
+  "Verify the plugin sensitivity table against the pinned Edge source",
+  "Resolve the pinned Ferrum Edge image",
+]);
+const USES_ONLY = new Set(["Setup Node.js"]);
+const RENAMED = new Map([["Start pinned Ferrum Edge gateway", "Start Ferrum Edge main gateway"]]);
+/** Steps only the Edge main check has. */
+const OWN = [
+  "Install Cosign",
+  "Resolve the Ferrum Edge main image",
+  "Compare the plugin schemas and sensitivity table with Edge main",
+  "Verify the editors' save payloads against the gateway",
+  "Write the report",
+];
+
+test("the Edge main check runs every Pinned Gateway Contract step, verbatim, and nothing else", () => {
+  // Derived from ci.yml, so adding or removing a gateway step there fails
+  // here until the Edge main check follows in the same change.
+  const pinned = stepNames(jobText(ci, "gateway-contract")).filter((name) => !REPLACED.has(name));
+  const copied = pinned.map((name) => [name, RENAMED.get(name) ?? name]);
+  assert.ok(copied.length >= 8, "the gateway-contract job was found");
+  assert.deepEqual(
+    stepNames(jobText(drift, "check")).sort(),
+    [...copied.map(([, main]) => main), ...OWN].sort(),
+  );
+  for (const [ciName, mainName] of copied) {
+    // A `uses:`-only step is compared by name above.
+    if (USES_ONLY.has(ciName)) continue;
+    assert.equal(stepBody(drift, mainName), stepBody(ci, ciName), `${mainName} differs from ci.yml's ${ciName}`);
   }
 });
 
