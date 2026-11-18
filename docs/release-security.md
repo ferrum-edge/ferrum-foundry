@@ -10,8 +10,12 @@ workflow (`.github/workflows/ci.yml`) has passed:
    audit report that includes dev dependencies, and a production build.
 2. **Pinned Gateway Contract**: runs against the Ferrum Edge image pinned as
    `edge.image` in `docs/compatibility.json`, with admin JWT audience and
-   namespace-claim enforcement on. It checks the guided plugin schemas and the
-   plugin sensitivity table against their pinned sources, admits every
+   namespace-claim enforcement on. It checks the guided plugin schemas, the
+   plugin sensitivity table and the server-owned subset `traffic_policy` fields
+   (`npm run check:subset-traffic-policy`, the `readOnly` properties of
+   `SubsetTrafficPolicy` in Edge's `openapi.yaml`) against their pinned
+   sources (moving the pin re-reads all three; see
+   [Changing the pairing](compatibility.md#changing-the-pairing)), admits every
    [plugin template](plugin-defaults.md), seeds the same destructive demo
    payload twice, verifies the exported backup state, and sends live public,
    anonymous (must be rejected), key, basic, JWT, multi-auth, and response-mock
