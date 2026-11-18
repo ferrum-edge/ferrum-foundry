@@ -167,7 +167,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "Checking Ferrum Edge main at $commit ($image), $behind commit(s) behind main $main_head."
 
-      - name: Compare the plugin schemas and sensitivity table with Edge main
+      - name: Compare the plugin schemas, sensitivity table and server-owned subset fields with Edge main
         id: static
         env:
           EDGE_COMMIT: ${{ steps.edge.outputs.commit }}

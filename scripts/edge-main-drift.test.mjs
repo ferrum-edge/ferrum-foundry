@@ -221,7 +221,7 @@ const RENAMED = new Map([["Start pinned Ferrum Edge gateway", "Start Ferrum Edge
 const OWN = [
   "Install Cosign",
   "Resolve the Ferrum Edge main image",
-  "Compare the plugin schemas and sensitivity table with Edge main",
+  "Compare the plugin schemas, sensitivity table and server-owned subset fields with Edge main",
   "Verify the editors' save payloads against the gateway",
   "Write the report",
 ];
