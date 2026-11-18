@@ -214,8 +214,9 @@ Dark and light themes via CSS custom properties. Dark is the default.
     (`scripts/edge-main-drift.mjs`), the Pinned Gateway Contract steps and
     the editors' save payloads (`src/api/editorSave.gateway.test.ts`) weekly
     against the signed Edge `main` image, and opens or closes one
-    `edge-main-drift` issue (also opened when the check cannot run). It is an early warning, never a required check;
-    see `docs/compatibility.md` "Checking against Edge main".
+    `edge-main-drift` issue (also opened when the check cannot run). It is
+    an early warning, never a required check; see `docs/compatibility.md`
+    "Checking against Edge main".
   - Guided edits are lossless: unmodelled keys, key order, and omission/`null`
     semantics all survive. A shape the descriptors cannot model falls back to
     raw JSON with a stated reason rather than being rewritten.
