@@ -218,19 +218,29 @@ sites where Edge applies it (`src/api/maskedSecretSites.ts`): nowhere for an
 `admin`, whose reads are raw; for other roles, only where the read projection
 masks the field, replayed from the CI-checked copy of Edge's schema rules
 (`pluginSensitivity.ts`), its name floor, and its URL-userinfo sweep. A plugin
-Foundry has no rules for has every placeholder treated as masked. The plugin
+Foundry has no rules for has every placeholder treated as masked. Edge `main`
+(ferrum-edge#7054, after v0.9.20) adds a TLS-material layer that refuses the
+exact `[REDACTED]` in any string of a non-admin plugin-config write, as #7060
+does for proxies and upstreams, and three field classes: certificate sources
+(visible unless they carry a private-key block), private-key sources (visible
+only as a reference), and destination paths (visible only as `""` or `/`).
+The replay models both already, so against v0.9.20 it also blocks a literal
+`[REDACTED]` in an ordinary field, which fails closed. The plugin
 and upstream editors mark each masked field that still holds a placeholder,
 block Save until it is re-entered or cleared (clearing omits it, which deletes
 the stored secret, because `PUT` is a full replace), only point out a
-placeholder-shaped value anywhere else, and show Edge's `400` field list when a
-save is refused anyway. A non-admin targets save on an upstream whose Consul
+URL-shaped placeholder anywhere else, and show Edge's `400` field list when a
+save is refused anyway. In a plugin configuration the exact `[REDACTED]` in an
+unmasked field, and a placeholder at a certificate or private-key source,
+block Save without a Clear action: each must be entered again. A non-admin targets save on an upstream whose Consul
 token is masked, and a plugin rollback whose earlier read was masked for the
 session's role, are refused locally and reported instead of being sent. The Pinned Gateway
 Contract checks that an `operator` read-modify-write of a plugin configuration
 with a masked endpoint path is refused, that the fields Edge refuses for an
 `operator` are exactly the ones Foundry's replay predicts (a placeholder in
-`otel_tracing`'s `authorization` is refused, one in its `service_name` is not),
-and that an `admin` may write a placeholder. `npm run check:plugin-sensitivity`
+`otel_tracing`'s `authorization` is refused; one in its `service_name` is
+refused by Edge `main` and, as the one expected difference, accepted by the
+pinned v0.9.20), and that an `admin` may write a placeholder. `npm run check:plugin-sensitivity`
 also fails if Edge's table ever gains rules whose order would change the sites
 the replay finds.
 

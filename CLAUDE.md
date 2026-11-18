@@ -361,7 +361,10 @@ See `docs/concurrent-edits.md`.
   `plugin_config_projection.rs` at `edge.source_commit`.
   `scripts/plugin-sensitivity-drift.mjs` diffs it against that source in the
   Pinned Gateway Contract job, and its test fails when
-  `PLUGIN_SENSITIVITY_SOURCE.commit` is not the pinned commit.
+  `PLUGIN_SENSITIVITY_SOURCE.commit` is not the pinned commit. Every
+  `FieldSensitivity` the parser accepts (`SENSITIVITY_VARIANTS`) needs a
+  projection in both `secretRedaction.ts` and the placeholder replay
+  (`refusedPlaceholderSites` in `maskedSecrets.ts`).
 - A plugin the table does not name is secret throughout, as is every scalar of
   a YAML spec document Foundry cannot parse. Such an *unclassified* value
   shorter than 8 characters is redacted only as a whole token of a string, so

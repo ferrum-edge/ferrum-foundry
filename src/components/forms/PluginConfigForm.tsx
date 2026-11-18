@@ -92,7 +92,7 @@ export interface PluginConfigFormProps {
   onSeeded?: (seed: PluginFormSeed | null) => void;
 }
 
-const NO_PLACEHOLDERS: PlaceholderSites = { blocking: [], other: [] };
+const NO_PLACEHOLDERS: PlaceholderSites = { blocking: [], sources: [], reserved: [], other: [] };
 
 const ADMIN_PLACEHOLDER_NOTE =
   "These values are exactly a redaction placeholder. Your reads are not masked, " +
@@ -252,12 +252,14 @@ function PluginConfigFormFields({
     }
     // A placeholder from a masked read cannot be written back: Edge refuses it
     // (ferrum-edge#5925), and an older gateway would store it as the secret.
-    if (!errs.config && maskedSites.length > 0) {
-      errs.config = `${maskedSites.length} field${
-        maskedSites.length === 1 ? " is" : "s are"
-      } hidden from your role. Re-enter or clear ${
-        maskedSites.length === 1 ? "it" : "each"
-      } before this can be saved.`;
+    if (!errs.config && blockingSites.length > 0) {
+      const count = blockingSites.length;
+      errs.config = maskedSites.length === count
+        ? `${count} field${count === 1 ? " is" : "s are"} hidden from your role. Re-enter or ` +
+          `clear ${count === 1 ? "it" : "each"} before this can be saved.`
+        : `${count} field${count === 1 ? " carries" : "s carry"} the [REDACTED] placeholder, ` +
+          "which Ferrum Edge refuses from your role. Enter a real value for each (or clear " +
+          "a hidden secret where offered) before this can be saved.";
     }
     if (triggerEnabled) {
       try {
@@ -364,8 +366,12 @@ function PluginConfigFormFields({
   /* ---------- Masked secrets (ferrum-edge#5925) ---------- */
   // A non-admin read puts a placeholder where a stored secret is withheld, and
   // the editors are seeded from that read. A placeholder at a site Edge would
-  // refuse for this role blocks Save until it is re-entered or cleared; one
-  // anywhere else is only pointed out, since Edge stores it as written.
+  // refuse for this role blocks Save. A masked secret may be re-entered or
+  // cleared. A TLS source the gateway loads material from, and the exact
+  // `[REDACTED]` Edge main reserves in any string (ferrum-edge#7054), can only
+  // be re-entered: clearing would drop a source, or a value that was never a
+  // secret, from the full-replacement save. A URL-shaped placeholder anywhere
+  // else is only pointed out, since Edge stores it as written.
   const placeholderSites = useMemo(() => {
     try {
       return pluginConfigPlaceholderSites(pluginName, JSON.parse(configJson) as unknown, role);
@@ -373,7 +379,12 @@ function PluginConfigFormFields({
       return NO_PLACEHOLDERS;
     }
   }, [configJson, pluginName, role]);
-  const maskedSites = placeholderSites.blocking;
+  const blockingSites = placeholderSites.blocking;
+  const sourceSites = placeholderSites.sources;
+  const reservedSites = placeholderSites.reserved;
+  const maskedSites = blockingSites.filter(
+    (pointer) => !sourceSites.includes(pointer) && !reservedSites.includes(pointer),
+  );
 
   // PUT is a full replace, so omitting the field deletes the stored secret.
   const clearMaskedSite = (pointer: string) => {
@@ -621,6 +632,57 @@ function PluginConfigFormFields({
                         Clear
                       </Button>
                     )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {sourceSites.length > 0 && (
+            <div
+              role="status"
+              aria-label="TLS sources held by the gateway"
+              className="mb-4 space-y-2 rounded-lg border border-warning/30 p-3"
+            >
+              <p className="text-xs text-warning">
+                Each field below is a certificate or private-key source the gateway
+                loads its TLS material from. Your role&apos;s read withholds it because
+                it carries private-key material, so it shows a placeholder. Saving is
+                blocked until you enter the source again: a file path, a reference
+                such as k8s:// or vault://, or the PEM. It cannot be cleared here,
+                because a save replaces the whole configuration and leaving it out
+                would remove the source the gateway uses. Or have an admin make the
+                change.
+              </p>
+              <ul className="space-y-2">
+                {sourceSites.map((pointer) => (
+                  <li key={pointer} className="text-xs">
+                    <code className="font-mono text-text-primary">{pointer}</code>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {reservedSites.length > 0 && (
+            <div
+              role="status"
+              aria-label="Reserved placeholder values"
+              className="mb-4 space-y-2 rounded-lg border border-warning/30 p-3"
+            >
+              <p className="text-xs text-warning">
+                Ferrum Edge refuses the literal &quot;[REDACTED]&quot; anywhere in a
+                plugin configuration saved by your role. Each field below holds it:
+                either the stored value is that literal, or your read withheld
+                private-key material there. Saving is blocked until each one holds a
+                real value. It cannot be cleared here, since the field may be an
+                ordinary setting the save would otherwise drop; an admin can save the
+                literal.
+              </p>
+              <ul className="space-y-2">
+                {reservedSites.map((pointer) => (
+                  <li key={pointer} className="text-xs">
+                    <code className="font-mono text-text-primary">{pointer}</code>
                   </li>
                 ))}
               </ul>

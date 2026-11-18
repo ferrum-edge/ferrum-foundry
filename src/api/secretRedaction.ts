@@ -27,7 +27,12 @@ import {
   PLUGIN_SENSITIVITY,
   type Sensitivity,
 } from "./pluginSensitivity";
-import { isEdgeSensitiveConfigKey, normalizeConfigKey } from "./maskedSecrets";
+import {
+  containsInlinePrivateKey,
+  isEdgeSensitiveConfigKey,
+  normalizeConfigKey,
+  tlsMaterialWithheld,
+} from "./maskedSecrets";
 
 const DOUBLE_QUOTED_ESCAPE_PATTERN = /\\(x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|[\s\S])/g;
 const WHITESPACE_PATTERN = /\s/;
@@ -155,6 +160,16 @@ function projectedSecrets(value: unknown, sensitivity: Sensitivity): string[] {
         ? []
         : submittedValues(setting));
   }
+  if (sensitivity === "certificate" || sensitivity === "private-key") {
+    // A reference, or certificate-only PEM, stays readable, as it does in a
+    // non-admin read; key material, and a non-string, does not.
+    if (typeof value !== "string") return submittedValues(value);
+    const field = sensitivity === "certificate" ? "public" : "private-key";
+    return value !== REDACTION_MARKER && tlsMaterialWithheld(value, field) ? [value] : [];
+  }
+  if (sensitivity === "endpoint-path") {
+    return value === "" || value === "/" ? [] : submittedValues(value);
+  }
   return submittedValues(value);
 }
 
@@ -182,13 +197,15 @@ function ruleSecrets(value: unknown, path: readonly string[], sensitivity: Sensi
 }
 
 /**
- * Edge's floor beneath the schema (`redact_sensitive_plugin_config_fields`
- * and the URL sweep), widened by Foundry's own field-name heuristic and by
- * inline PEM in a `*_path` field (`isInlineMaterial`), which a known plugin's
- * rules may not name: `mesh_route_dispatch`'s `backend_tls.client_key_path`.
+ * Edge's floor beneath the schema (`redact_sensitive_plugin_config_fields`,
+ * the URL sweep, and Edge main's TLS-material layer, which withholds a PEM
+ * private-key block in any string), widened by Foundry's own field-name
+ * heuristic and by inline PEM in a `*_path` field (`isInlineMaterial`), which
+ * a known plugin's rules may not name: `mesh_route_dispatch`'s
+ * `backend_tls.client_key_path`.
  */
 function configFloorSecrets(data: unknown): string[] {
-  if (typeof data === "string") return urlSecrets(data);
+  if (typeof data === "string") return containsInlinePrivateKey(data) ? [data] : urlSecrets(data);
   if (Array.isArray(data)) return data.flatMap(configFloorSecrets);
   if (data && typeof data === "object") {
     return Object.entries(data).flatMap(([field, value]) => {
