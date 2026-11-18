@@ -47,6 +47,11 @@ const LIVE_PROXY: Proxy = {
   backend_tls_verify_server_cert: true,
   auth_mode: "single",
   plugins: [{ plugin_config_id: "auth" }],
+  frontend_tls: false,
+  passthrough: false,
+  udp_idle_timeout_seconds: 60,
+  allowed_ws_origins: [],
+  response_body_mode: "stream",
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-02T00:00:00Z",
 };
@@ -76,20 +81,24 @@ describe("unchanged editor saves", () => {
   });
 });
 
-const GATEWAY = process.env.FERRUM_EDITOR_SAVE_GATEWAY_CONTRACT === "true";
+// The frontend project's TypeScript config has no Node types; this file runs
+// under Node (see the environment pragma) and reads its environment directly.
+const env =
+  (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env ?? {};
+const GATEWAY = env.FERRUM_EDITOR_SAVE_GATEWAY_CONTRACT === "true";
 
 it.runIf(GATEWAY)(
   "the gateway accepts every unchanged proxy and upstream editor save",
   async () => {
-    const adminUrl = process.env.FERRUM_ADMIN_URL!;
-    const namespace = process.env.FERRUM_NAMESPACE!;
+    const adminUrl = env.FERRUM_ADMIN_URL!;
+    const namespace = env.FERRUM_NAMESPACE!;
     const token = await signAdminJwt({
-      secret: process.env.FERRUM_JWT_SECRET!,
-      issuer: process.env.FERRUM_JWT_ISSUER ?? "ferrum-edge",
+      secret: env.FERRUM_JWT_SECRET!,
+      issuer: env.FERRUM_JWT_ISSUER ?? "ferrum-edge",
       subject: "foundry-editor-save-contract",
       role: "admin",
       namespaces: [namespace],
-      audience: process.env.FERRUM_JWT_AUDIENCE,
+      audience: env.FERRUM_JWT_AUDIENCE,
       ttlSeconds: 600,
     });
     async function exchange(path: string, init: { method?: string; body?: unknown; etag?: string } = {}) {
