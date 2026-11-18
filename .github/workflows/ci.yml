@@ -177,6 +177,15 @@ jobs:
         # know is redacted wholesale, and a rule it lacks can echo a secret.
         run: npm run check:plugin-sensitivity
 
+      - name: Verify the server-owned subset traffic_policy fields against the pinned Edge spec
+        # Upstream saves leave out, and the mock gateway refuses, the subset
+        # traffic_policy fields listed in src/api/subsetTrafficPolicy.ts. This
+        # derives Edge's set from the readOnly properties of
+        # SubsetTrafficPolicy in openapi.yaml at edge.source_commit and fails
+        # when the list differs or records another commit: a field Edge adds
+        # makes every upstream save that read it fail with 400.
+        run: npm run check:subset-traffic-policy
+
       - name: Resolve the pinned Ferrum Edge image
         # edge.image in docs/compatibility.json is the single source for the
         # gateway Foundry is qualified against; the starter and docs are

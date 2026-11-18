@@ -6,8 +6,9 @@ name: Edge Main Drift
 # Contract job in ci.yml qualifies Foundry against the pinned Edge release;
 # this workflow runs the same checks against the newest Edge `main` image:
 #
-#   * the guided plugin schema and plugin sensitivity comparisons, read at the
-#     image's Edge commit (scripts/edge-main-drift.mjs);
+#   * the guided plugin schema, plugin sensitivity and server-owned subset
+#     traffic_policy field comparisons, read at the image's Edge commit
+#     (scripts/edge-main-drift.mjs);
 #   * the gateway contract steps of the Pinned Gateway Contract job, copied
 #     verbatim (scripts/edge-main-drift.test.mjs keeps the copies equal), with
 #     FERRUM_EDGE_IMAGE set to the Edge `main` image.
@@ -166,7 +167,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "Checking Ferrum Edge main at $commit ($image), $behind commit(s) behind main $main_head."
 
-      - name: Compare the plugin schemas and sensitivity table with Edge main
+      - name: Compare the plugin schemas, sensitivity table and server-owned subset fields with Edge main
         id: static
         env:
           EDGE_COMMIT: ${{ steps.edge.outputs.commit }}
@@ -386,7 +387,7 @@ jobs:
             echo
             echo "| Check | Result |"
             echo "|---|---|"
-            echo "| Guided plugin schemas and plugin sensitivity table at the Edge commit | $(verdict "$STATIC") |"
+            echo "| Guided plugin schemas, plugin sensitivity table and server-owned subset fields at the Edge commit | $(verdict "$STATIC") |"
             echo "| Gateway starts with Foundry's contract environment | $(verdict "$READY") |"
             echo "| Alloy preview and explicit HTTP resource mapping | $(verdict "$MANIFEST") |"
             echo "| Seed twice and verify canonical backup state (\`npm run test:gateway-contract\`) | $(verdict "$SEED") |"

@@ -176,8 +176,10 @@ projection (`src/api/maskedSecretSites.ts`: the CI-checked schema rules in
   change. A masked key in a mesh-projected field (`port_overrides.<port>.tls`,
   `subsets[].traffic_policy.tls`) never blocks a save: Ferrum Edge refuses
   those fields on every operator write, so upstream saves leave them out
-  (`SUBSET_TRAFFIC_POLICY_SERVER_OWNED` in `src/api/upstreams.ts`) and keep
-  every writable subset field as read. A membership change never sends a
+  (`SUBSET_TRAFFIC_POLICY_SERVER_OWNED` in `src/api/subsetTrafficPolicy.ts`,
+  which the mock gateway reads too; `npm run check:subset-traffic-policy`
+  checks it against the `readOnly` properties of `SubsetTrafficPolicy` in the
+  pinned Edge `openapi.yaml`) and keep every writable subset field as read. A membership change never sends a
   proxy write that carries a masked placeholder: the step is refused
   locally and the plan rolls back as for any failed step.
 - **Refused saves.** If Edge refuses a save anyway, the page lists the JSON

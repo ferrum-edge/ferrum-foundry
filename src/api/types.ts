@@ -381,7 +381,7 @@ export interface SubsetTrafficPolicy {
   hash_on?: string | null;
   // Projected from a mesh DestinationRule: a read can carry them, but Edge
   // refuses them on an operator write, so saves omit them
-  // (`SUBSET_TRAFFIC_POLICY_SERVER_OWNED` in `src/api/upstreams.ts`).
+  // (`SUBSET_TRAFFIC_POLICY_SERVER_OWNED` in `src/api/subsetTrafficPolicy.ts`).
   tls?: Record<string, unknown> | null;
   connect_timeout_ms?: number | null;
   h2_upgrade_policy?: string | null;

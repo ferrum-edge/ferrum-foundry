@@ -49,6 +49,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ci.yml` also accepts `workflow_dispatch`: pull requests run `main`'s copy of
   the workflow (the required-workflow ruleset), so a change to it is proved by
   dispatching the branch's copy.
+- A drift check for the server-owned subset `traffic_policy` fields (#717).
+  The list upstream saves leave out, `SUBSET_TRAFFIC_POLICY_SERVER_OWNED`, now
+  lives in `src/api/subsetTrafficPolicy.ts` with the Edge commit it was
+  checked against (`SUBSET_TRAFFIC_POLICY_SOURCE`), and the mock gateway reads
+  it instead of keeping its own copy. `npm run check:subset-traffic-policy`
+  (`scripts/subset-traffic-policy-drift.mjs`, a new Pinned Gateway Contract
+  step) fetches Edge's `openapi.yaml` at `edge.source_commit`, derives the
+  `readOnly` properties of `SubsetTrafficPolicy`, and fails when the list
+  differs, when the recorded commit is not the pinned one, or when the schema
+  takes a shape its parser does not read. Before, a field Edge added to that
+  set made every upstream settings save that read it fail with `400` until
+  someone noticed. The Edge Main Drift workflow runs the same comparison
+  against Edge `main`.
 
 ### Changed
 
