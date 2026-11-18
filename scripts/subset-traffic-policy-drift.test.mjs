@@ -21,6 +21,12 @@ const QUOTED_READ_ONLY_PATTERN = /unrecognised `"readOnly": true`/;
 const FLOW_PROPERTY_PATTERN = /unrecognised property `max_retries: \{ type: integer \}`/;
 const TWICE_PATTERN = /`tls` appears twice/;
 const NO_PROPERTIES_PATTERN = /declares no `properties`/;
+const MULTILINE_FLOW_PATTERN =
+  /unrecognised `\{ type: integer, readOnly: true \}` in `new_projected_field`/;
+const BRANCH_FLOW_MAPPING_PATTERN = /flow mapping `\{ type: string, readOnly: true \}` in `hash_on`/;
+const KEYWORD_FLOW_MAPPING_PATTERN = /flow mapping `\{ readOnly: true \}` in `connect_timeout_ms`/;
+const FLOW_SEQUENCE_PATTERN = /flow sequence `\[integer, \{ readOnly: true \}\]` in `connect_timeout_ms`/;
+const UNEXPECTED_INDENTATION_PATTERN = /line \d+: unexpected indentation/;
 
 /** Shaped like Edge's `openapi.yaml` around `SubsetTrafficPolicy`. */
 const SPEC = [
@@ -128,6 +134,46 @@ test("a shape the parser does not understand fails instead of yielding a smaller
   assert.throws(
     () => parseServerOwnedSubsetFields("components:\n  schemas:\n    SubsetTrafficPolicy:\n      type: object\n"),
     NO_PROPERTIES_PATTERN,
+  );
+});
+
+test("a flow collection that could hide readOnly fails instead of reading the property as writable", () => {
+  // sol F1: a flow mapping on the line after the property name is valid YAML
+  // that the line parser cannot read, so it must not default to writable.
+  assert.throws(
+    () =>
+      parseServerOwnedSubsetFields(
+        SPEC.replace(
+          "\n\n    TargetDefinition:",
+          "\n        new_projected_field:\n          { type: integer, readOnly: true }\n\n    TargetDefinition:",
+        ),
+      ),
+    MULTILINE_FLOW_PATTERN,
+  );
+  // A flow mapping inside a composition branch.
+  assert.throws(
+    () =>
+      parseServerOwnedSubsetFields(
+        SPEC.replace("            - type: string", "            - { type: string, readOnly: true }"),
+      ),
+    BRANCH_FLOW_MAPPING_PATTERN,
+  );
+  // A flow mapping as a keyword's value, and a flow sequence holding one.
+  assert.throws(
+    () => parseServerOwnedSubsetFields(SPEC.replace("          format: uint64", "          format: { readOnly: true }")),
+    KEYWORD_FLOW_MAPPING_PATTERN,
+  );
+  assert.throws(
+    () =>
+      parseServerOwnedSubsetFields(
+        SPEC.replace('          type: [integer, "null"]\n          format: uint64', "          type: [integer, { readOnly: true }]\n          format: uint64"),
+      ),
+    FLOW_SEQUENCE_PATTERN,
+  );
+  // A line between property and keyword indentation.
+  assert.throws(
+    () => parseServerOwnedSubsetFields(SPEC.replace("          format: uint64", "         format: uint64")),
+    UNEXPECTED_INDENTATION_PATTERN,
   );
 });
 

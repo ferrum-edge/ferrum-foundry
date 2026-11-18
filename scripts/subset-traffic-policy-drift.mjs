@@ -39,6 +39,9 @@ const PROPERTY_FIELD_PATTERN = /^ {10}([A-Za-z$][A-Za-z0-9_$-]*):\s*(.*?)\s*$/;
 const READ_ONLY_PATTERN = /^\s*(?:-\s+)?["']?readOnly["']?\s*:/;
 const BLOCK_SCALAR_PATTERN = /:\s*[|>][-+0-9]*\s*$/;
 const INDENT_PATTERN = /^ */;
+const SEQUENCE_ENTRY_PATTERN = /^(?:-\s+)+/;
+const NESTED_KEY_PATTERN = /^["']?[A-Za-z0-9_$-]+["']?\s*:(?:\s+(.*))?$/;
+const FLOW_SEQUENCE_STRUCTURE_PATTERN = /[{}:]/;
 
 /**
  * The keys a `SubsetTrafficPolicy` schema may carry at its top level. Any
@@ -59,15 +62,48 @@ function indentOf(line) {
 }
 
 /**
+ * The value a line inside a property schema carries: after any `- ` sequence
+ * markers and a `key:`, or the whole line when it is a bare item or a
+ * continuation.
+ */
+function nestedValue(line) {
+  const text = line.trim().replace(SEQUENCE_ENTRY_PATTERN, "");
+  const keyed = NESTED_KEY_PATTERN.exec(text);
+  return keyed ? (keyed[1] ?? "") : text;
+}
+
+/**
+ * Refuse a flow mapping anywhere in a property schema, and a flow sequence
+ * that is not a single-line list of scalars (`type: [integer, "null"]`). A
+ * flow collection can carry `readOnly: true` where the line-based parser
+ * would not see it, so it is a shape the check does not understand.
+ */
+function refuseFlowCollection(value, where, property) {
+  const text = value.trim();
+  if (text.startsWith("{")) {
+    throw new Error(`${where}: flow mapping \`${text}\` in \`${property}\``);
+  }
+  if (
+    text.startsWith("[") &&
+    (!text.endsWith("]") || FLOW_SEQUENCE_STRUCTURE_PATTERN.test(text))
+  ) {
+    throw new Error(`${where}: flow sequence \`${text}\` in \`${property}\``);
+  }
+}
+
+/**
  * The names of the `readOnly: true` properties of `SubsetTrafficPolicy` in
  * `spec` (Edge's `openapi.yaml`), in declaration order.
  *
  * Edge writes the component in block style: properties at eight spaces, each
- * with its keywords at ten. A `readOnly` anywhere else (on the object, inside
- * a `oneOf` branch, deeper in a property), a value other than `true` or
- * `false`, a property written in flow style, a repeated property, or a
- * top-level key outside `COMPONENT_KEYS` throws, so the check fails rather
- * than derive a set from a shape it does not understand. Block-scalar text
+ * with its keywords at ten as `key: scalar` lines. A `readOnly` anywhere else
+ * (on the object, inside a `oneOf` branch, deeper in a property), a value
+ * other than `true` or `false`, a line at keyword indentation that is not a
+ * recognised keyword, a flow mapping anywhere in a property (or a flow
+ * sequence other than a one-line list of scalars), any other indentation, a
+ * repeated property, or a top-level key outside `COMPONENT_KEYS` throws, so
+ * the check fails rather than derive a set from a shape it does not
+ * understand. Block-scalar text
  * (`description: >-`) is skipped, so prose cannot be read as a keyword.
  */
 export function parseServerOwnedSubsetFields(
@@ -124,20 +160,26 @@ export function parseServerOwnedSubsetFields(
       if (properties.has(key[1])) throw new Error(`${where}: \`${key[1]}\` appears twice`);
       property = key[1];
       properties.set(property, false);
-    } else if (indent === 10 && property !== null) {
+    } else if (property === null || indent < 10) {
+      throw new Error(`${where}: unexpected indentation`);
+    } else if (indent === 10) {
+      // A property keyword: only `key: scalar` is understood. Anything else
+      // (a flow mapping on its own line, a quoted key) could hide `readOnly`.
       const field = PROPERTY_FIELD_PATTERN.exec(line);
-      if (field?.[1] === "readOnly") {
+      if (!field) throw new Error(`${where}: unrecognised \`${line.trim()}\` in \`${property}\``);
+      refuseFlowCollection(field[2], where, property);
+      if (field[1] === "readOnly") {
         if (field[2] !== "true" && field[2] !== "false") {
           throw new Error(`${where}: \`${property}\` has readOnly \`${field[2]}\``);
         }
         properties.set(property, field[2] === "true");
-      } else if (READ_ONLY_PATTERN.test(line)) {
-        throw new Error(`${where}: unrecognised \`${line.trim()}\``);
       }
-    } else if (READ_ONLY_PATTERN.test(line)) {
-      throw new Error(`${where}: \`readOnly\` nested inside \`${property ?? component}\``);
-    } else if (indent === 10 || property === null) {
-      throw new Error(`${where}: unexpected indentation`);
+    } else {
+      // Inside a keyword (`oneOf` branches, a nested schema).
+      if (READ_ONLY_PATTERN.test(line)) {
+        throw new Error(`${where}: \`readOnly\` nested inside \`${property}\``);
+      }
+      refuseFlowCollection(nestedValue(line), where, property);
     }
 
     if (BLOCK_SCALAR_PATTERN.test(line)) scalarIndent = indent;
