@@ -1,4 +1,4 @@
-# Ferrum Foundry opencode continuation brief
+# Ferrum Foundry Antigravity Neon continuation brief
 
 Resume the existing worktree and branch named in the dispatch prompt. Follow every rule in
 `agent-brief.md`, especially isolation, direct implementation, the
@@ -17,7 +17,8 @@ Complete the assigned continuation work and validation yourself in this session.
 partial work or hand unfinished implementation back to the controller. Perform commit, push, PR,
 review handling, and CI repair actions only when the dispatch prompt assigns them. Do not invoke
 any agent-dispatch skill or script: any `.agents/skills/*-agents` skill, any
-`.agents/skills/*/scripts/dispatch-agent.sh`, Codex CLI workers, or Claude CLI workers. Do not spawn nested workers. The orchestrator selected this model deliberately.
+`.agents/skills/*/scripts/dispatch-agent.sh`, Codex CLI workers, or Claude CLI workers. Do not spawn
+nested workers. The orchestrator selected this model deliberately.
 
 ## Reconstruct state before editing
 

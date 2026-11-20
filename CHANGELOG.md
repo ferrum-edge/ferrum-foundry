@@ -239,6 +239,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `startup`, and takes `hide_denied_tools` from `policy.hide_denied_tools`
   alone. The MCP Tools panel still reads a stored `allow_immediately` /
   `expose` as `allow`, as the gateways that accept them do.
+- Agent-dispatch skills: the `composer-agents`, `deepseek-pro-agents`,
+  `fable-5-1-agents`, `grok-agents`, `luna-agents` and `opencode-laguna-agents`
+  skills are removed, and the new `antigravity-neon-agents` skill dispatches
+  Gemini 4 Neon workers through the standalone Google Antigravity `agy` CLI
+  (`--effort low|medium|high|xhigh`, default `high`, no fast tier). The
+  remaining skills' briefs and guards no longer name the removed skills.
 
 ### Security
 
