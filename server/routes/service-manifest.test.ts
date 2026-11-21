@@ -2,7 +2,13 @@ import { readFileSync, readdirSync } from 'node:fs';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fetch as upstreamFetch } from 'undici';
-import { MANIFEST_BODY_LIMIT, TLS_PATH_REDACTION } from '../service-manifest.js';
+import {
+  admittedOtelEndpoint,
+  edgeOtelEndpoint,
+  MANIFEST_BODY_LIMIT,
+  MANIFEST_RESPONSE_LIMIT,
+  TLS_PATH_REDACTION,
+} from '../service-manifest.js';
 import { serviceManifestSchema } from '../service-manifest-schema.js';
 
 const manifestValidator = serviceManifestSchema().validator;
@@ -37,6 +43,20 @@ const repairs: Record<string, { path: string[]; keyword: string; value?: unknown
   'unknown-field.json': { path: ['upstream'], keyword: 'additionalProperties' },
   'unsupported-major.json': { path: ['schema_version'], keyword: 'pattern', value: '1.0' },
 };
+// The pinned contracts-edge-0.9.20 fixtures still use a cleartext OTLP
+// endpoint to a non-loopback name, which Edge's otel_tracing drops at runtime
+// and current Alloy refuses (#723, ferrum-contracts#82). The schema accepts
+// it; the preview refuses it, and accepts the same manifest over https.
+const CLEARTEXT_OTLP_ENDPOINT = 'http://otel-collector:4318/v1/traces';
+const TLS_OTLP_ENDPOINT = 'https://otel-collector:4318/v1/traces';
+function usesCleartextOtlp(body: any): boolean {
+  return body.gateway?.otel_endpoint === CLEARTEXT_OTLP_ENDPOINT;
+}
+function withTlsOtlp<T>(body: T): T {
+  const fixed: any = structuredClone(body);
+  if (usesCleartextOtlp(fixed)) fixed.gateway.otel_endpoint = TLS_OTLP_ENDPOINT;
+  return fixed;
+}
 const secret = 'preview-credential-canary-123456789';
 const unknownKey = 'unreviewed-secret-field';
 let app: FastifyInstance;
@@ -153,12 +173,31 @@ describe('authenticated service manifest preview through the registered BFF rout
     else if (name === 'unknown-field.json') delete fixed.upstream.backend_scheme;
     else fixed.upstream.gateway_client_key_path = '/etc/ferrum/edge-client.key';
     expect(manifestValidator.safeParse(fixed).success).toBe(true);
-    const response = await preview(fixed, fixed.gateway?.namespace ?? 'ferrum');
+    if (usesCleartextOtlp(fixed)) {
+      expect((await preview(fixed, fixed.gateway.namespace)).statusCode).toBe(400);
+    }
+    const response = await preview(withTlsOtlp(fixed), fixed.gateway?.namespace ?? 'ferrum');
     expect(response.statusCode).toBe(200);
     expect(upstreamFetch).not.toHaveBeenCalled();
   });
 
-  it.each(valid)('consumes shared valid fixture $name without side effects', async ({ body }) => {
+  it('refuses a schema-valid fixture whose OTLP endpoint Edge would drop, until it uses https', async () => {
+    const refused = valid.filter(({ body }) => usesCleartextOtlp(body)).map(({ name }) => name);
+    expect(refused).toEqual(['orders-api.json']);
+    const { body } = valid.find(({ name }) => name === 'orders-api.json')!;
+    expect(manifestValidator.safeParse(body).success).toBe(true);
+    const response = await preview(body);
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({
+      error: 'Manifest does not match the supported v1 schema or preview normalization',
+      code: 'FERRUM_BFF_MANIFEST_INVALID',
+    });
+    expect((await preview(withTlsOtlp(body))).statusCode).toBe(200);
+    expect(upstreamFetch).not.toHaveBeenCalled();
+  });
+
+  it.each(valid)('consumes shared valid fixture $name without side effects', async ({ body: raw }) => {
+    const body = withTlsOtlp(raw);
     const response = await preview(body, body.gateway?.namespace ?? 'ferrum');
     expect(response.statusCode).toBe(200);
     expect(response.headers['cache-control']).toBe('no-store');
@@ -241,18 +280,28 @@ describe('authenticated service manifest preview through the registered BFF rout
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
       summary: {
-        protocols: ['http1', 'http2'], authMode: 'unspecified',
+        protocols: ['http1', 'http2'], authMode: 'unspecified', traceExporter: 'none',
         agents: { enabled: false, endpointPath: '/mcp', namespace: 'orders-api' },
       },
       desired: {
         proxy: {
           strip_listen_path: true, backend_connect_timeout_ms: 2000,
           backend_read_timeout_ms: 30000, backend_write_timeout_ms: 30000,
+          plugins: [{ plugin_config_id: 'orders-api-otel-tracing' }],
         },
-        plugin_configs: [], upstream: null,
+        upstream: null,
       },
     });
-    expect(response.json().desired.proxy).not.toHaveProperty('plugins');
+    // No exporter is configured, yet Alloy still generates and attaches the
+    // trace plugin, propagation-only, so callers cannot inject trace context.
+    expect(response.json().desired.plugin_configs).toEqual([{
+      id: 'orders-api-otel-tracing', plugin_name: 'otel_tracing', namespace: 'ferrum',
+      scope: 'proxy', proxy_id: 'orders-api', enabled: true,
+      config: {
+        service_name: 'ferrum-edge-ferrum', trace_context_trust: 'untrusted',
+        generate_trace_id: false, include_url_path: false,
+      },
+    }]);
     body.upstream.port = '8080';
     expect((await preview(body)).statusCode).toBe(400);
   });
@@ -415,10 +464,16 @@ describe('authenticated service manifest preview through the registered BFF rout
 
   it('bounds the serialized response in UTF-8 rather than returning oversized desired data', async () => {
     const body = structuredClone(valid[0].body);
-    const path = `/${'界'.repeat(2000)}`;
+    // Paths must be ASCII pchars; the host and the OTLP path may carry
+    // multi-byte characters that are counted in UTF-8.
+    const path = `/${'p'.repeat(2000)}`;
     body.api.public_path = path;
     body.api.service_base_path = `${path}/`;
     body.agents.endpoint_path = `${path}/mcp`;
+    body.upstream.host = '界'.repeat(2000);
+    body.gateway = { otel_endpoint: `https://otel.test/${'界'.repeat(2000)}` };
+    expect(JSON.stringify(body).length).toBeLessThan(MANIFEST_RESPONSE_LIMIT);
+    expect(Buffer.byteLength(JSON.stringify(body))).toBeGreaterThan(MANIFEST_RESPONSE_LIMIT);
     const response = await preview(body);
     expect(response.statusCode).toBe(400);
     expect(response.json()).toEqual({ error: 'Desired configuration exceeds the preview budget' });
@@ -477,17 +532,177 @@ describe('authenticated service manifest preview through the registered BFF rout
         },
       }],
     });
+    expect(response.json().summary.traceExporter).toBe('otlp');
     const agents = (await preview(valid[0].body)).json();
     expect(agents.summary.agents).toEqual({
       enabled: true, endpointPath: '/shop/mcp', namespace: 'orders',
     });
+    expect(agents.summary.traceExporter).toBe('none');
     expect(agents.desired.proxy).not.toHaveProperty('backend_protocol');
-    expect(agents.desired.plugin_configs).toHaveLength(1);
+    expect(agents.desired.proxy.plugins).toEqual([
+      { plugin_config_id: 'orders-api-correlation-id' },
+      { plugin_config_id: 'orders-api-otel-tracing' },
+    ]);
+    expect(agents.desired.plugin_configs.map((plugin: any) => plugin.config)).toEqual([
+      { header_name: 'x-request-id', echo_downstream: true },
+      {
+        service_name: 'ferrum-edge-ferrum', trace_context_trust: 'untrusted',
+        generate_trace_id: false, include_url_path: false,
+      },
+    ]);
+  });
+
+  it('ignores the sampling ratio without an exporter, as Alloy does', async () => {
+    const body = structuredClone(valid.find((fixture) => fixture.name === 'plain-http.json')!.body);
+    delete body.gateway.otel_endpoint;
+    const response = await preview(body, 'retail');
+    expect(response.statusCode).toBe(200);
+    expect(response.json().summary.traceExporter).toBe('none');
+    expect(response.json().desired.plugin_configs[1]).toEqual({
+      id: 'catalog-otel-tracing', plugin_name: 'otel_tracing', namespace: 'retail',
+      scope: 'proxy', proxy_id: 'catalog', enabled: true,
+      config: {
+        service_name: 'ferrum-edge-retail', trace_context_trust: 'untrusted',
+        generate_trace_id: false, include_url_path: false,
+      },
+    });
+  });
+
+  // Alloy main: the -otel-tracing plugin is always generated, so with no
+  // health check and no correlation a 241-character proxy ID derives a
+  // 254-character plugin ID (accepted) and 242 derives 255 (refused).
+  it.each([
+    ['without an exporter', undefined],
+    ['with an exporter', 'https://otel.test/v1/traces'],
+  ])('bounds the proxy ID by the always-generated trace plugin %s', async (_label, endpoint) => {
+    for (const [length, status] of [[8, 200], [241, 200], [242, 400]] as const) {
+      const body = structuredClone(valid.find((fixture) => fixture.name === 'plain-http.json')!.body);
+      body.gateway = {
+        namespace: 'retail', proxy_id: 'a'.repeat(length), correlation_id: false,
+        ...(endpoint ? { otel_endpoint: endpoint } : {}),
+      };
+      const response = await preview(body, 'retail');
+      expect(response.statusCode, `${length}`).toBe(status);
+      if (status !== 200) continue;
+      const { desired } = response.json();
+      const id = `${'a'.repeat(length)}-otel-tracing`;
+      expect(desired.plugin_configs.map((plugin: any) => plugin.id)).toEqual([id]);
+      expect(desired.proxy.plugins).toEqual([{ plugin_config_id: id }]);
+      expect(desired.plugin_configs[0].config.generate_trace_id).toBe(endpoint ? undefined : false);
+    }
+  });
+
+  it('bounds the proxy ID by its longest derived ID with correlation enabled', async () => {
+    for (const [length, status] of [[239, 200], [240, 400]] as const) {
+      const body = structuredClone(valid.find((fixture) => fixture.name === 'plain-http.json')!.body);
+      delete body.gateway.otel_endpoint;
+      body.gateway.proxy_id = 'a'.repeat(length);
+      expect((await preview(body, 'retail')).statusCode, `${length}`).toBe(status);
+    }
+  });
+
+  it('derives every resource ID from the service name when proxy_id is omitted', async () => {
+    const body = structuredClone(valid.find((fixture) => fixture.name === 'plain-http.json')!.body);
+    body.service.name = `s${'a'.repeat(62)}`;
+    body.gateway = { namespace: 'retail', correlation_id: false };
+    const response = await preview(body, 'retail');
+    expect(response.statusCode).toBe(200);
+    const { desired } = response.json();
+    expect(desired.proxy.id).toBe(body.service.name);
+    expect(desired.plugin_configs.map((plugin: any) => plugin.id))
+      .toEqual([`${body.service.name}-otel-tracing`]);
+  });
+
+  it.each([
+    'https://otel-collector:4318/v1/traces',
+    'https://10.0.0.5/v1/traces',
+    'http://127.0.0.1:4318/v1/traces',
+    'http://127.8.9.10/v1/traces',
+    'http://127.0.0.1/v1/traces',
+    'http://[::1]:4318/v1/traces',
+    'http://[::1]/v1/traces',
+    // Edge's spelling rule admits 1-3 digit octets; WHATWG parsing (Edge's url
+    // crate) reads them as loopback. Alloy's IpAddr parse refuses this one.
+    'http://127.001.0.1:4318/v1/traces',
+  ])('accepts OTLP endpoint %s, which Edge exports to without allow_plaintext', async (endpoint) => {
+    const body = structuredClone(valid[0].body);
+    body.gateway = { otel_endpoint: endpoint };
+    const response = await preview(body);
+    expect(response.statusCode).toBe(200);
+    expect(response.json().desired.plugin_configs[1].config.endpoint).toBe(endpoint);
+  });
+
+  // Edge trims the configured endpoint (Rust str::trim) before screening it;
+  // the desired config keeps the value as Alloy writes it.
+  it.each([
+    'http://127.0.0.1:4318 ',
+    'http://[::1]:4318\u3000',
+    'http://127.0.0.1:4318/v1/traces\u00a0',
+    'https://otel.test/v1/traces ',
+  ])('accepts %j, judged trimmed as Edge does', async (endpoint) => {
+    const body = structuredClone(valid[0].body);
+    body.gateway = { otel_endpoint: endpoint };
+    const response = await preview(body);
+    expect(response.statusCode).toBe(200);
+    expect(response.json().desired.plugin_configs[1].config.endpoint).toBe(endpoint);
+  });
+
+  it.each([
+    'http://otel-collector:4318 ',
+    'http://10.0.0.5:4318\u3000',
+    // Rust's trim excludes U+FEFF, so it stays in the port and Edge refuses it.
+    'http://127.0.0.1:4318\ufeff',
+    // The schema pattern refuses leading whitespace; control characters such
+    // as a tab are refused anywhere.
+    ' http://127.0.0.1:4318',
+    'http://127.0.0.1:4318\t',
+  ])('refuses %j with surrounding whitespace', async (endpoint) => {
+    const body = structuredClone(valid[0].body);
+    body.gateway = { otel_endpoint: endpoint };
+    expect((await preview(body)).statusCode).toBe(400);
+  });
+
+  it('applies the cleartext rule after trimming either end, with Rust trim semantics', () => {
+    expect(admittedOtelEndpoint('\u3000\u0085http://127.0.0.1:4318\u2028 ')).toBe(true);
+    expect(admittedOtelEndpoint('\u3000http://otel-collector:4318')).toBe(false);
+    expect(admittedOtelEndpoint('\ufeffhttp://127.0.0.1:4318')).toBe(false);
+    expect(admittedOtelEndpoint('http://127.0.0.1:4318\u180e')).toBe(false);
+  });
+
+  it('trims long whitespace runs in linear time', () => {
+    const tabs = '\t'.repeat(200_000);
+    const started = performance.now();
+    expect(edgeOtelEndpoint(`${tabs}http://127.0.0.1:4318${tabs}`)).toBe('http://127.0.0.1:4318');
+    expect(edgeOtelEndpoint(`${tabs}x${tabs}x`)).toBe(`x${tabs}x`);
+    expect(edgeOtelEndpoint(tabs)).toBe('');
+    expect(admittedOtelEndpoint(`http://127.0.0.1:4318${tabs}!`)).toBe(false);
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+
+  it.each([
+    'http://otel-collector:4318/v1/traces',
+    'http://localhost:4318/v1/traces',
+    'http://10.0.0.5:4318/v1/traces',
+    'http://[::2]:4318/v1/traces',
+    'http://[::1/v1/traces',
+    'http://127.1:4318/v1/traces',
+    'http://[::ffff:127.0.0.1]:4318/v1/traces',
+    // Alloy's IpAddr parse admits the uncompressed form; Edge's spelling rule
+    // (followed here) refuses it.
+    'http://[0:0:0:0:0:0:0:1]:4318/v1/traces',
+    'http://127.0.0.1.nip.io/v1/traces',
+  ])('rejects cleartext OTLP endpoint %s, which Edge drops', async (endpoint) => {
+    const body = structuredClone(valid[0].body);
+    body.gateway = { otel_endpoint: endpoint };
+    const response = await preview(body);
+    expect(response.statusCode).toBe(400);
+    expect(response.body).not.toContain(endpoint);
+    expect(upstreamFetch).not.toHaveBeenCalled();
   });
 
   it('maps health and TLS to the upstream, redacts paths and never reads them', async () => {
     const body = valid.find((fixture) => fixture.name === 'orders-api.json')!.body;
-    const orders = structuredClone(body);
+    const orders = withTlsOtlp(body);
     orders.upstream.gateway_client_key_path = `/nonexistent/${secret}.key`;
     orders.service.description = secret;
     orders.api.openapi = `/nonexistent/${secret}.json`;
@@ -531,6 +746,12 @@ describe('authenticated service manifest preview through the registered BFF rout
       body.gateway = { otel_endpoint: `https://user:${secret}@otel.test/v1/traces` };
     }],
     ['field size budget', (body: any) => { body.service.description = 'x'.repeat(2049); }],
+    ['string safety cap', (body: any) => { body[unknownKey] = 'x'.repeat(4097); }],
+    ['gateway auth, which Alloy export refuses', (body: any) => { body.auth = { mode: 'gateway' }; }],
+    ['non-ASCII path', (body: any) => { body.api.service_base_path = '/ordérs/'; }],
+    ['pipe path', (body: any) => { body.api.service_base_path = '/orders|items/'; }],
+    ['quote path', (body: any) => { body.api.service_base_path = '/orders"items/'; }],
+    ['non-pchar health path', (body: any) => { body.health = { path: '/ready^z' }; }],
   ])('rejects %s without side effects', async (_label, mutate) => {
     const body = structuredClone(valid[0].body);
     mutate(body);
