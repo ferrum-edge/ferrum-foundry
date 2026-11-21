@@ -12,12 +12,14 @@ import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { BffConnectionCard } from "@/components/shared/BffConnectionCard";
 import { StatCard } from "@/components/metrics/StatCard";
+import { ProxyRuntimeNotice } from "@/components/metrics/ProxyRuntimeNotice";
 import { CircuitStateBadge } from "@/components/metrics/CircuitBreakerPanel";
 import { unhealthyTargetKey } from "@/components/metrics/HealthCheckPanel";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { NavIcon, type NavIconName } from "@/components/ui/icons";
 import { formatDateTime, formatUptime } from "@/lib/format";
 import { useNamespace } from "@/stores/namespace";
+import { adminMetricsReporting, configSourceLabel } from "@/lib/adminMetricsReporting";
 import {
   getStoredMetricsRefreshInterval,
   setStoredMetricsRefreshInterval,
@@ -70,6 +72,10 @@ export default function DashboardPage() {
     metrics.data?.gateway,
     metrics.dataUpdatedAt,
   );
+  const reporting = metrics.data ? adminMetricsReporting(metrics.data.gateway.mode) : undefined;
+  // Proxy-backed values only from a mode that measures them; a control plane
+  // or node agent sends them as zero placeholders.
+  const proxyMetrics = reporting?.reportsProxyRuntime ? metrics.data : undefined;
 
   /* ── Render ─────────────────────────────────────────────────────── */
 
@@ -141,34 +147,54 @@ export default function DashboardPage() {
       </div>
 
       <ReadState queries={[metrics]} label="Admin metrics">
+        {/* ── Process identity when proxy runtime is not reported ───── */}
+        {metrics.data && reporting && !reporting.reportsProxyRuntime && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <StatCard
+                label="Mode"
+                value={reporting.modeLabel}
+                subtitle={`gateway.mode: ${reporting.mode}`}
+              />
+              <StatCard label="Ferrum Version" value={metrics.data.gateway.ferrum_version} />
+              <StatCard
+                label="Config Source"
+                value={configSourceLabel(metrics.data.gateway.config_source_status)}
+                variant={metrics.data.gateway.config_source_status === "offline" ? "warning" : "default"}
+              />
+            </div>
+            <ProxyRuntimeNotice reporting={reporting} />
+          </div>
+        )}
+
         {/* ── Resource counts ────────────────────────────────────────── */}
-        {metrics.data ? (
+        {proxyMetrics ? (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <StatCard
               label="Proxies"
-              value={metrics.data.gateway.proxy_count}
+              value={proxyMetrics.gateway.proxy_count}
               icon={<NavIcon name="proxies" className="w-4 h-4" />}
             />
             <StatCard
               label="Consumers"
-              value={metrics.data.gateway.consumer_count}
+              value={proxyMetrics.gateway.consumer_count}
               icon={<NavIcon name="consumers" className="w-4 h-4" />}
             />
             <StatCard
               label="Upstreams"
-              value={metrics.data.gateway.upstream_count}
+              value={proxyMetrics.gateway.upstream_count}
               icon={<NavIcon name="upstreams" className="w-4 h-4" />}
             />
             <StatCard
               label="Plugins"
-              value={metrics.data.gateway.plugin_config_count}
+              value={proxyMetrics.gateway.plugin_config_count}
               icon={<NavIcon name="plugins" className="w-4 h-4" />}
             />
           </div>
         ) : null}
 
         {/* ── Traffic and process ────────────────────────────────────── */}
-        {metrics.data && (
+        {proxyMetrics && (
           <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
             <StatCard
               label="Requests / sec"
@@ -177,25 +203,25 @@ export default function DashboardPage() {
             />
             <StatCard
               label="Uptime"
-              value={formatUptime(metrics.data.gateway.uptime_seconds)}
+              value={formatUptime(proxyMetrics.gateway.uptime_seconds)}
             />
             <StatCard
               label="Ferrum Version"
-              value={metrics.data.gateway.ferrum_version}
+              value={proxyMetrics.gateway.ferrum_version}
               className="col-span-2 lg:col-span-1"
             />
           </div>
         )}
 
         {/* ── Circuit breaker alerts ─────────────────────────────────── */}
-        {metrics.data &&
-          metrics.data.circuit_breakers.some((cb) => cb.state !== "closed") && (
+        {proxyMetrics &&
+          proxyMetrics.circuit_breakers.some((cb) => cb.state !== "closed") && (
             <Card className="border-warning/30">
               <h2 className="text-sm font-semibold text-warning mb-3">
                 Circuit Breaker Alerts
               </h2>
               <div className="space-y-2">
-                {metrics.data.circuit_breakers
+                {proxyMetrics.circuit_breakers
                   .filter((cb) => cb.state !== "closed")
                   .map((cb) => (
                     <div
@@ -219,14 +245,14 @@ export default function DashboardPage() {
           )}
 
         {/* ── Unhealthy targets ──────────────────────────────────────── */}
-        {metrics.data &&
-          metrics.data.health_check.unhealthy_targets.length > 0 && (
+        {proxyMetrics &&
+          proxyMetrics.health_check.unhealthy_targets.length > 0 && (
             <Card className="border-danger/30">
               <h2 className="text-sm font-semibold text-danger mb-3">
                 Unhealthy Targets
               </h2>
               <div className="space-y-2">
-                {metrics.data.health_check.unhealthy_targets.map((t) => (
+                {proxyMetrics.health_check.unhealthy_targets.map((t) => (
                   <div
                     key={unhealthyTargetKey(t)}
                     className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-sm"

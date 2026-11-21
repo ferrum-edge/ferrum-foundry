@@ -24,7 +24,10 @@ export function useAdminMetrics(refreshInterval: number = FIVE_MINUTES) {
   const { scope } = useNamespace();
   return useQuery({
     queryKey: ["adminMetrics", scope.namespace],
-    queryFn: () => metrics.getAdminMetrics(queryScope(scope)),
+    queryFn: ({ signal }) => metrics.getAdminMetrics(queryScope(scope), signal),
+    // Each response keeps its own objects, so its recorded request-start
+    // time (`adminMetricsRequestStart`) stays attached to it.
+    structuralSharing: false,
     refetchInterval: refreshInterval > 0 ? refreshInterval : false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: refreshInterval > 0,

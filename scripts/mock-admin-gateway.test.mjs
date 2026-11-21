@@ -3,7 +3,11 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { calculateRequestRates } from "../src/lib/requestRate.ts";
 import {
+  adminMetricsPayload,
+  buildAdminMetrics,
+  mockUptimeSeconds,
   buildHealth,
   apiSpecByProxyResponse,
   apiSpecListResponse,
@@ -430,6 +434,96 @@ test("database mode reports writable admin health and refuses nothing", () => {
   assert.ok(health.database);
   assert.equal(readOnlyModeRefusal("database", "POST", "/proxies"), null);
 });
+
+for (const [mode, source] of [["cp", "online"], ["node_agent", "n/a"]]) {
+  test(`${mode} /admin/metrics is Edge's no-proxy-state skeleton`, () => {
+    const metrics = buildAdminMetrics(mode);
+    assert.equal(metrics.gateway.mode, mode);
+    assert.equal(typeof metrics.gateway.ferrum_version, "string");
+    assert.equal(metrics.gateway.config_source_status, source);
+    assert.equal(metrics.gateway.config_last_updated_at, null);
+    for (const field of [
+      "uptime_seconds", "total_requests", "requests_per_second", "metrics_window_seconds",
+      "proxy_count", "consumer_count", "upstream_count", "plugin_config_count",
+    ]) {
+      assert.equal(metrics.gateway[field], 0, field);
+    }
+    assert.deepEqual(metrics.gateway.status_codes_total, {});
+    assert.deepEqual(metrics.connection_pools, {});
+    assert.deepEqual(metrics.caches, {});
+    assert.deepEqual(metrics.circuit_breakers, []);
+    assert.deepEqual(metrics.health_check, { unhealthy_target_count: 0, unhealthy_targets: [] });
+    assert.deepEqual(metrics.load_balancers, { active_connections: [] });
+    assert.deepEqual(metrics.consumer_index, {
+      total_consumers: 0, key_auth_credentials: 0, basic_auth_credentials: 0, mtls_credentials: 0,
+      jwt_credentials: 0, hmac_credentials: 0, identity_credentials: 0,
+    });
+    assert.deepEqual(metrics.rate_limiting, { tracked_key_count: 0 });
+    assert.deepEqual(metrics.adaptive_concurrency, {
+      policy_count: 0, tracked_target_count: 0, limit_total: 0, in_flight_total: 0,
+    });
+    assert.deepEqual(metrics.tcp_connection_throttle, {
+      enforcement_scope: "process_local",
+      replica_limit_behavior: "configured_limit_per_replica",
+      active_connections: 0,
+    });
+    // Exactly Edge's top-level keys; `database_polling` is optional.
+    assert.deepEqual(Object.keys(metrics).sort(), [
+      "adaptive_concurrency", "caches", "circuit_breakers", "connection_pools", "consumer_index",
+      "gateway", "health_check", "load_balancers", "rate_limiting", "tcp_connection_throttle",
+    ]);
+    assert.deepEqual(Object.keys(metrics.gateway).sort(), [
+      "config_last_updated_at", "config_source_status", "consumer_count", "ferrum_version",
+      "metrics_window_seconds", "mode", "plugin_config_count", "proxy_count", "requests_per_second",
+      "status_codes_per_second", "status_codes_total", "total_requests", "upstream_count", "uptime_seconds",
+    ]);
+  });
+}
+
+for (const [mode, source] of [["database", "online"], ["file", "n/a"], ["dp", "n/a"], ["mesh", "n/a"]]) {
+  test(`${mode} /admin/metrics serves the proxy-backed payload`, () => {
+    const metrics = buildAdminMetrics(mode);
+    assert.equal(metrics.gateway.mode, mode);
+    assert.equal(metrics.gateway.config_source_status, source);
+    assert.ok(metrics.gateway.uptime_seconds > 0);
+    assert.ok(metrics.gateway.proxy_count > 0);
+    assert.equal(typeof metrics.gateway.config_last_updated_at, "string");
+    assert.ok(metrics.connection_pools.http);
+    assert.ok(metrics.caches.router);
+    assert.deepEqual(Object.keys(metrics.adaptive_concurrency).sort(), [
+      "in_flight_total", "limit_total", "policy_count", "tracked_target_count",
+    ]);
+    assert.equal(typeof metrics.tcp_connection_throttle.active_connections, "number");
+  });
+}
+
+test("the mock's proxy-mode uptime advances with elapsed time", () => {
+  assert.equal(mockUptimeSeconds(0), 86423);
+  assert.equal(mockUptimeSeconds(59_999), 86423 + 59);
+  assert.equal(mockUptimeSeconds(60_000), 86423 + 60);
+  assert.ok(buildAdminMetrics("dp").gateway.uptime_seconds >= 86423);
+  for (const mode of ["cp", "node_agent"]) {
+    assert.equal(buildAdminMetrics(mode, adminMetricsPayload(600_000)).gateway.uptime_seconds, 0);
+  }
+});
+
+for (const mode of ["database", "file", "dp", "mesh"]) {
+  test(`two ${mode} mock samples with constant totals give a zero rate`, () => {
+    for (const gapMs of [10_000, 300_000]) {
+      const sample = (elapsedMs) => {
+        const { gateway } = buildAdminMetrics(mode, adminMetricsPayload(elapsedMs));
+        return {
+          target: "mock", mode: gateway.mode, timestamp: 1_000_000 + elapsedMs,
+          uptimeSeconds: gateway.uptime_seconds, totalRequests: gateway.total_requests,
+          statusCodeTotals: gateway.status_codes_total,
+        };
+      };
+      const rates = calculateRequestRates(sample(gapMs), sample(0));
+      assert.equal(rates.requestsPerSecond, 0, `${gapMs} ms`);
+      assert.ok(Object.values(rates.statusCodesPerSecond).every((rate) => rate === 0));
+    }
+  });
+}
 
 test("file mode reports a read-only admin API with no configured database", () => {
   const health = buildHealth("file");
