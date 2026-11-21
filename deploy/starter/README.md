@@ -69,7 +69,8 @@ FOUNDRY_PREFLIGHT_URL=http://127.0.0.1:8088 \
 node ../../scripts/starter-preflight.mjs --env .env
 ```
 
-The stack needs only Docker with Compose. The preflight runs on the host: it
+Run these from `deploy/starter`. `bootstrap-demo.sh` needs `openssl`; the
+stack itself needs only Docker with Compose. The preflight runs on the host: it
 needs Node.js in the `engines` range of [`package.json`](../../package.json)
 (22 from 22.22.2, 24 from 24.15.0, or 26 and later) and the repository's npm
 dependencies, which `npm ci` installs at the repository root.
@@ -144,16 +145,20 @@ or `unmapped`). It is for a first run and for CI. Do not expose it.
 
    ```bash
    docker compose --profile production up -d
+   (cd ../.. && npm ci)   # once per checkout: the dependencies the preflight imports
    FOUNDRY_PREFLIGHT_URL=https://foundry.example.com \
    node ../../scripts/starter-preflight.mjs --env .env
    ```
 
    Set `FOUNDRY_PREFLIGHT_URL` to the public URL browsers use. The preflight
-   needs Node.js and the repository's npm dependencies (see [Demo](#demo)),
-   and it probes the gateway at `.env`'s `FERRUM_ADMIN_URL` from this host, so
-   run it where that name resolves. If `.env` sets `FERRUM_TLS_CA_PATH` (a
-   path inside the container), the preflight reads that same path on this
-   host, so run it where the path resolves too. See
+   needs Node.js (see [Demo](#demo)), and it probes the gateway at `.env`'s
+   `FERRUM_ADMIN_URL` from this host, so run it where that name resolves.
+   With a private gateway CA (step 3), `.env`'s `FERRUM_TLS_CA_ROOT` and
+   `FERRUM_TLS_CA_PATH` are paths inside the container, which the preflight
+   would read on this host. Point both at this directory's `ca/` for the
+   preflight alone by adding them to its command line, for example
+   `FERRUM_TLS_CA_ROOT="$PWD/ca" FERRUM_TLS_CA_PATH="$PWD/ca/gateway.pem"`.
+   See
    [`docs/getting-started.md`](../../docs/getting-started.md#2-run-the-preflight)
    for what it checks and why `UNKNOWN` is not a pass.
 

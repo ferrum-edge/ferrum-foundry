@@ -20,6 +20,7 @@ this walkthrough, the build fails.
   from 22.22.2, 24 from 24.15.0, or 26 and later. The preflight in step 2
   runs on your host and imports the repository's npm dependencies, which
   step 2 installs with `npm ci`.
+- `openssl`, which `bootstrap-demo.sh` uses to generate the demo secrets.
 - `curl` and `python3` for the requests from step 3 on.
 - Either your own Ferrum Edge gateway (the release named in
   [compatibility.md](compatibility.md)) and an OIDC provider, or nothing else:
@@ -48,6 +49,10 @@ FERRUM_ADMIN_URL=http://127.0.0.1:9000 \
 FOUNDRY_PREFLIGHT_URL=http://127.0.0.1:8088 \
 node ../../scripts/starter-preflight.mjs --env .env
 ```
+
+These are the demo stack's URLs. For your own gateway, run the preflight as
+the [starter README's production steps](../deploy/starter/README.md#production)
+show.
 
 The preflight checks:
 
