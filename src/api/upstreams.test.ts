@@ -296,4 +296,16 @@ describe("upstream baselines (#725)", () => {
       { name: "d", labels: {} },
     ]);
   });
+
+  it("compares an empty subset hash key as the client-IP key it means", () => {
+    const withKey = (hash_on: string) => ({
+      ...fullUpstream(),
+      subsets: [{ name: "a", labels: {}, traffic_policy: { hash_on } }],
+    }) as Upstream;
+    expect(toBaseline(withKey("")).subsets).toEqual([
+      { name: "a", labels: {}, traffic_policy: { hash_on: "ip" } },
+    ]);
+    expect(toBaseline(withKey(""))).toEqual(toBaseline(withKey("ip")));
+    expect(toBaseline(withKey(""))).not.toEqual(toBaseline({ ...withKey(""), subsets: [{ name: "a", labels: {} }] }));
+  });
 });

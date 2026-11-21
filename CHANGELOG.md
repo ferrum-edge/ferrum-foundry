@@ -499,9 +499,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   writable gateway returns mesh-projected subset policy on a tagged read; it
   is verified against tagged fixtures, since Edge's mesh mode itself is
   read-only and its reads carry no tag. A malformed subset entry or policy is
-  compared verbatim rather than failing the guard. The retired proxy
-  `pool_max_requests_per_connection` stays compared on save: Edge v0.9.20
-  stores `None` when a save omits it, so the save does clear it.
+  compared verbatim rather than failing the guard. A subset's empty hash key,
+  which Edge reads as an explicit client-IP override, is now seeded in the
+  settings form as `ip` and submitted that way, and the baseline compares
+  `""` and `"ip"` alike. Before, the form showed it blank and a name-only save
+  dropped the override, so the subset fell back to the parent's hash key. The
+  retired proxy `pool_max_requests_per_connection` stays compared on save:
+  Edge v0.9.20 stores `None` when a save omits it, so the save does clear it.
 - Foundry handles the plugin-config projection Ferrum Edge `main` adds after
   v0.9.20 (ferrum-edge#7054). The sensitivity drift parser accepts
   `FieldSensitivity::CertificateSource`, `PrivateKeySource` and `EndpointPath`

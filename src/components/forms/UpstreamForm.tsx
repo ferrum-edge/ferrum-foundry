@@ -447,7 +447,9 @@ export function UpstreamForm({
       name: s.name,
       labels: subsetLabelsDraft(s.labels, newSubsetRowId),
       algorithm: s.traffic_policy?.load_balancer_algorithm ?? "",
-      hashOn: s.traffic_policy?.hash_on ?? "",
+      // A stored empty hash key is an explicit client-IP override (Edge parses
+      // "" and "ip" alike), not inheritance: seed it as "ip" so a save keeps it.
+      hashOn: s.traffic_policy?.hash_on === "" ? "ip" : s.traffic_policy?.hash_on ?? "",
       source: s,
     })),
   );

@@ -273,6 +273,57 @@ describe("subset selectors through the upstream form (#479)", () => {
     expect(fields).toEqual(["algorithm", "name"]);
   });
 
+  describe("an explicit client-IP subset hash key (#725)", () => {
+    // A header-hashing parent; subset v2 overrides it with Edge's empty hash
+    // key, which hashes on the client IP.
+    function ipOverride(): Upstream {
+      return {
+        ...upstream([{
+          name: "v2",
+          labels: { version: "v2" },
+          traffic_policy: { load_balancer_algorithm: "consistent_hashing", hash_on: "" },
+        }]),
+        algorithm: "consistent_hashing",
+        hash_on: "header:x-user",
+        backend_tls_san_allow_list: [],
+        backend_tls_verify_server_cert: true,
+      } as Upstream;
+    }
+
+    function conflictFields(data: Upstream, call = 0) {
+      const proposed = toBaseline(mergeFormUpdatePayload(data, submit.mock.calls[call][0]));
+      const current = toBaseline({ ...data, targets: [] });
+      return compareBaselines(toBaseline(data), current, proposed).map(({ field }) => field).sort();
+    }
+
+    it("keeps the override through a name-only save and shows no local subset edit", async () => {
+      const data = ipOverride();
+      await mount(data);
+      await openSubsets();
+      expect(inputByLabel(subsetGroup("v2"), "Subset Hash Key").value).toBe("ip");
+      await fill(inputByLabel(ui.host, "Name"), "Orders v2");
+      await save();
+      expect(outgoingSubsets(data)).toEqual([{
+        name: "v2",
+        labels: { version: "v2" },
+        traffic_policy: { load_balancer_algorithm: "consistent_hashing", hash_on: "ip" },
+      }]);
+      expect(conflictFields(data)).toEqual(["name", "targets"]);
+    });
+
+    it.each([
+      ["inherit", ""],
+      ["a header", "header:x-tenant"],
+    ])("still compares a change from the IP override to %s", async (_label, next) => {
+      const data = ipOverride();
+      await mount(data);
+      await openSubsets();
+      await fill(inputByLabel(subsetGroup("v2"), "Subset Hash Key"), next);
+      await save();
+      expect(conflictFields(data)).toEqual(["subsets", "targets"]);
+    });
+  });
+
   it("merges edited subset fields onto the writable part of the read", async () => {
     const data = upstream([{
       name: "v2",

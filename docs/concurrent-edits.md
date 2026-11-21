@@ -199,8 +199,11 @@ writes which race nothing are not refused:
   `subsets` as changed locally because of them (#725). Unset is spelled one
   way, as the settings form submits it: an explicit `traffic_policy: null`, or
   a `null` algorithm or hash key inside it, counts as omitted, and a policy
-  left empty is dropped. A malformed subset entry or policy is compared
-  verbatim. (Edge's mesh mode is itself read-only with untagged reads, so no
+  left empty is dropped. An empty subset hash key is not unset: Edge hashes
+  on the client IP for it, as for `"ip"`. The settings form seeds it as `ip`
+  and submits it that way, so a save keeps the override, and the baseline
+  compares both spellings as `"ip"`. A malformed subset entry or policy is
+  compared verbatim. (Edge's mesh mode is itself read-only with untagged reads, so no
   guarded write runs there; this applies when a writable gateway returns
   mesh-projected subset policy.)
 
