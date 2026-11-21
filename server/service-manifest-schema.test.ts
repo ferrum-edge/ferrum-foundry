@@ -227,11 +227,49 @@ describe('maxLength outside a plain string node', () => {
         if: { pattern: '^/v1/' }, then: { maxLength: 10 },
       });
     }],
+    ['typeless array items in an allOf clause', (schema: any) => {
+      schema.properties.upstream.properties.protocols.allOf = [{ items: { maxLength: 4 } }];
+    }],
+    ['typeless array items in an allOf clause, above the cap', (schema: any) => {
+      schema.properties.upstream.properties.protocols.allOf = [{ items: { maxLength: 4097 } }];
+    }],
   ])('refuses to compile a maxLength in %s', async (_label, place) => {
     const schema = vendoredSchema();
     place(schema);
     const { serviceManifestSchema } = await load(schema);
     expect(() => serviceManifestSchema()).toThrow('could not be loaded or compiled');
+  });
+});
+
+describe('schema structure the compiler would not process', () => {
+  it.each([
+    ['items without type array', (schema: any) => {
+      schema.properties.upstream.properties.protocols.allOf = [{ items: { enum: ['http1'] } }];
+    }],
+    ['items beside an enum', (schema: any) => {
+      Object.assign(schema.properties.auth.properties.mode, { items: { type: 'string' } });
+    }],
+    ['properties beside a const', (schema: any) => {
+      Object.assign(schema.properties.schema, { properties: { x: { type: 'string' } } });
+    }],
+    ['then without if', (schema: any) => {
+      schema.properties.api.properties.service_base_path.then = { pattern: '^/v1/' };
+    }],
+  ])('refuses %s', async (_label, place) => {
+    const schema = vendoredSchema();
+    place(schema);
+    const { serviceManifestSchema } = await load(schema);
+    expect(() => serviceManifestSchema()).toThrow('could not be loaded or compiled');
+  });
+
+  it('compiles the vendored schema and a typed array clause without a bound', async () => {
+    const schema = vendoredSchema();
+    schema.properties.upstream.properties.protocols.allOf = [{
+      type: 'array', items: { enum: ['http1', 'http2'] },
+    }];
+    const { serviceManifestSchema, validatedManifest } = await load(schema);
+    expect(() => serviceManifestSchema()).not.toThrow();
+    expect(validatedManifest(manifest())).not.toBeNull();
   });
 });
 

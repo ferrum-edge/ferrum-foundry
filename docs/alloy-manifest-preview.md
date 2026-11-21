@@ -98,22 +98,29 @@ Edge bounds (ferrum-contracts#74, Alloy `validate()`), as of this pin:
 
 - Already enforced. `api.service_base_path` and `health.path` declare no
   `maxLength` in the pinned schema, so they get the 2,048 default. Paths are
-  ASCII-only, so that is 2,048 bytes, matching Alloy `main` for both. Control
-  characters are refused in every string, including `upstream.host` and
-  `agents.endpoint_path`, and the literal path rule refuses `;`, `%`, `\` and
-  dot segments.
+  ASCII-only, so that is 2,048 bytes, matching Alloy `main` for both. The
+  precheck refuses C0 control characters (U+0000-U+001F) and DEL (U+007F) in
+  every string, including `upstream.host` and `agents.endpoint_path`, and the
+  literal path rule refuses `;`, `%`, `\` and dot segments.
 - Changing with the re-vendor. Contracts `main` keeps 2,048 for `health.path`
   and declares 2,049 for `service_base_path` (the slash the export strips
   leaves a backend path of at most 2,048). Once re-vendored, the preview
   allows a 2,049-character base path, which Alloy `main` (2,048 including the
   slash) still refuses.
-- Not enforced until the re-vendor. `api.public_path` at most 500,
-  `upstream.host` at most 255 (it gets the 2,048 default today) and without
-  non-ASCII whitespace or control characters such as U+00A0 or U+0085,
+- Not enforced until the re-vendor, then enforced by the next schema:
+  `api.public_path` at most 500 characters (bytes, as paths are ASCII-only),
+  `upstream.host` at most 255 code points (it gets the 2,048 default today;
+  the schema's host rule also excludes ASCII space, `/`, `@` and the C0
+  controls other than tab, LF and CR, which the precheck already refuses),
   `health.interval_seconds` at most 3,600, and `health.timeout_ms` and
   `timeouts.*` at most 86,400,000. A manifest outside these can still preview.
   They arrive with the next `contracts-edge` release, which Foundry will
   re-vendor (#723).
+- Not enforced, and not added by the re-vendor alone. Alloy also refuses an
+  `upstream.host` containing any Unicode whitespace or control character (for
+  example U+00A0 or U+0085, which neither the next schema nor the C0/DEL
+  precheck refuses), and bounds the host at 255 UTF-8 bytes, so a non-ASCII
+  host of 255 or fewer code points can still exceed Alloy's limit.
 
 Local presentation limits are 32 KiB raw UTF-8 JSON, eight nesting levels before
 JSON parsing, 32 array items, and 16 KiB serialized output. `maxLength` is

@@ -157,8 +157,43 @@ export interface ServiceManifestSchema {
 let loaded: ServiceManifestSchema | undefined;
 let loadFailure: ServiceManifestSchemaError | undefined;
 
+// An independent structural pass over every subschema, whether or not the
+// compiler's validator selection would visit it. It refuses a maxLength
+// outside a field's own node (the root, a `properties` entry or `items`, none
+// reached through allOf/anyOf/if/then) or above the safety cap, and any
+// subschema keyword placed where compile() would not process it.
+function checkSchemaStructure(node: SchemaNode, inClause = false): void {
+  if (node === null || typeof node !== 'object' || Array.isArray(node)) {
+    throw new Error('Unsupported service manifest subschema');
+  }
+  if (node.maxLength !== undefined) {
+    if (inClause) throw new Error('Unsupported service manifest maxLength placement');
+    declaredMaxLength(node);
+  }
+  const chosen = node.const !== undefined || node.enum !== undefined;
+  // compile() reads properties only when no const/enum is present, and items
+  // only on a plain array node.
+  if (node.properties && chosen) throw new Error('Unsupported service manifest properties placement');
+  if (node.items && (chosen || node.type !== 'array' || node.properties || node.required)) {
+    throw new Error('Unsupported service manifest items placement');
+  }
+  if ((node.if === undefined) !== (node.then === undefined)) {
+    throw new Error('Unsupported service manifest conditional schema');
+  }
+  for (const property of Object.values(node.properties ?? {})) {
+    checkSchemaStructure(property, inClause);
+  }
+  if (node.items) checkSchemaStructure(node.items, inClause);
+  for (const clause of [...(node.allOf ?? []), ...(node.anyOf ?? [])]) {
+    checkSchemaStructure(clause, true);
+  }
+  if (node.if) checkSchemaStructure(node.if, true);
+  if (node.then) checkSchemaStructure(node.then, true);
+}
+
 function readAndCompile(): ServiceManifestSchema {
   const schema = JSON.parse(readFileSync(SCHEMA_URL, 'utf8')) as SchemaNode;
+  checkSchemaStructure(schema);
   return { schema, validator: compile(schema) };
 }
 
