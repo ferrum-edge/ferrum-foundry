@@ -2,9 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { AdminMetrics } from "@/api/types";
+import { adminMetricsSnapshot } from "@/test/__tests__/adminMetricsFixtures";
 import MetricsPage from "@/routes/metrics/index";
 import { ConnectionPoolPanel } from "./ConnectionPoolPanel";
 import { CachePanel } from "./CachePanel";
+import { GatewayStats } from "./GatewayStats";
 
 vi.mock("@/stores/namespace", () => ({
   useNamespace: () => ({ scope: { namespace: "ferrum" }, selectedNamespace: "ferrum" }),
@@ -21,42 +23,79 @@ const caches: AdminMetrics["caches"] = {
   dns: { cache_entries: 9 },
 };
 
-function snapshot(mode: string): AdminMetrics {
-  return {
-    gateway: {
-      mode, ferrum_version: "0.9.0", uptime_seconds: 10, total_requests: 0,
-      requests_per_second: 0, status_codes_total: {}, status_codes_per_second: {},
-      config_source_status: "online", proxy_count: 0, consumer_count: 0,
-      upstream_count: 0, plugin_config_count: 0,
-    },
-    connection_pools: {},
-    caches: {},
-    circuit_breakers: [],
-    health_check: { unhealthy_target_count: 0, unhealthy_targets: [] },
-    load_balancers: { active_connections: [] },
-    consumer_index: {
-      total_consumers: 0, key_auth_credentials: 0, basic_auth_credentials: 0,
-      mtls_credentials: 0, jwt_credentials: 0, hmac_credentials: 0, identity_credentials: 0,
-    },
-    rate_limiting: { tracked_key_count: 0 },
-  };
+const snapshot = adminMetricsSnapshot;
+
+const requestStats = { totalRequests: 0, requestsPerSecond: 0 };
+
+function renderMetricsPage(mode: string): string {
+  const client = new QueryClient();
+  try {
+    client.setQueryData(["adminMetrics", "ferrum"], snapshot(mode));
+    return renderToStaticMarkup(
+      <QueryClientProvider client={client}><MetricsPage /></QueryClientProvider>,
+    );
+  } finally {
+    client.clear();
+  }
 }
 
+const PROXY_RUNTIME_CARDS = [">Uptime<", ">Requests/sec<", ">Total Requests<", ">Proxies<", ">Consumers<", ">Upstreams<", ">Plugin Configs<"];
+const PROXY_PANELS = [">Circuit Breakers<", ">Connection Pools<", ">Health Checks<", ">Load Balancers<", ">Caches<", ">Rate Limiting<", ">Consumer Index<"];
+
 describe("metrics mode shapes", () => {
-  it.each(["cp", "node_agent"])("renders the full route for %s with empty pools and caches", (mode) => {
-    const client = new QueryClient();
-    try {
-      client.setQueryData(["adminMetrics", "ferrum"], snapshot(mode));
-      const html = renderToStaticMarkup(
-        <QueryClientProvider client={client}><MetricsPage /></QueryClientProvider>,
-      );
-      expect(html).toContain(">Metrics</h1>");
-      expect(html).toContain("Connection pool metrics are not reported");
-      expect(html).toContain("Cache metrics are not reported");
-      expect(html).not.toContain("HTTP Pools");
-    } finally {
-      client.clear();
-    }
+  it.each([
+    ["cp", "Control plane", "Online", "Not reported by a control plane"],
+    ["node_agent", "Node agent", "Not applicable", "Not reported by a node agent"],
+  ])("shows %s mode, version and source but no placeholder runtime values", (mode, label, source, unavailable) => {
+    const html = renderToStaticMarkup(<GatewayStats metrics={snapshot(mode).gateway} requestStats={requestStats} />);
+    expect(html).toContain(`>${label}</p>`);
+    expect(html).toContain(`gateway.mode: ${mode}`);
+    expect(html).toContain(">0.9.20</p>");
+    expect(html).toContain(`>${source}</p>`);
+    expect(html).toContain(unavailable);
+    expect(html).toContain("holds no proxy state");
+    for (const card of PROXY_RUNTIME_CARDS) expect(html).not.toContain(card);
+    expect(html).not.toContain(">0m</p>");
+    expect(html).not.toContain(">0</p>");
+    expect(html).not.toContain("Last update not reported");
+  });
+
+  it("warns on an offline control-plane config source", () => {
+    const gateway = { ...snapshot("cp").gateway, config_source_status: "offline" as const };
+    const html = renderToStaticMarkup(<GatewayStats metrics={gateway} requestStats={requestStats} />);
+    expect(html).toContain("text-warning");
+    expect(html).toContain(">Offline</p>");
+  });
+
+  it.each(["database", "file", "dp", "mesh", "constructor"])("keeps genuine measured zeros visible in %s mode", (mode) => {
+    const html = renderToStaticMarkup(<GatewayStats metrics={snapshot(mode).gateway} requestStats={requestStats} />);
+    for (const card of PROXY_RUNTIME_CARDS) expect(html).toContain(card);
+    expect(html).toContain(">0m</p>");
+    expect(html).toContain(">0</p>");
+    expect(html).toContain(`gateway.mode: ${mode}`);
+    expect(html).not.toContain("Not reported by");
+    expect(html).not.toContain("holds no proxy state");
+  });
+
+  it.each(["cp", "node_agent"])("renders the full route for %s without placeholder proxy panels", (mode) => {
+    const html = renderMetricsPage(mode);
+    expect(html).toContain(">Metrics</h1>");
+    expect(html).toContain("holds no proxy state");
+    // Overload, host runtime and chargeback read their own endpoints.
+    expect(html).toContain(">Overload Protection<");
+    expect(html).toContain(">Host Runtime<");
+    expect(html).toContain(">API Chargeback<");
+    for (const panel of PROXY_PANELS) expect(html).not.toContain(panel);
+    for (const card of PROXY_RUNTIME_CARDS) expect(html).not.toContain(card);
+  });
+
+  it.each(["database", "dp", "mesh"])("renders every proxy panel with measured zeros for %s", (mode) => {
+    const html = renderMetricsPage(mode);
+    for (const panel of PROXY_PANELS) expect(html).toContain(panel);
+    expect(html).toContain(">Total consumers<");
+    expect(html).toContain(">Tracked Keys<");
+    expect(html).toContain("gRPC Connections");
+    expect(html).not.toContain("holds no proxy state");
   });
 
   it("keeps empty facilities distinct from measured zero values", () => {

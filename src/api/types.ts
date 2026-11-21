@@ -671,9 +671,16 @@ export interface AdminMetrics {
     identity_credentials: number;
   };
   rate_limiting: { tracked_key_count: number };
+  adaptive_concurrency?: {
+    policy_count: number;
+    tracked_target_count: number;
+    limit_total: number;
+    in_flight_total: number;
+  };
   tcp_connection_throttle?: {
     enforcement_scope: string;
     replica_limit_behavior: string;
+    active_connections: number;
   };
   database_polling?: Record<string, unknown>;
 }

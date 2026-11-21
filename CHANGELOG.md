@@ -517,6 +517,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Metrics page and the Dashboard no longer show a control plane's or node
+  agent's `/admin/metrics` placeholders as measurements (#720). Ferrum Edge
+  builds those modes without proxy state and zeroes uptime, request counters
+  and rates, the metrics window and every resource count, sends empty pools
+  and caches, and a `null` config snapshot time. Both surfaces now take the
+  per-mode decision from one helper (`src/lib/adminMetricsReporting.ts`): in
+  `cp` and `node_agent` they show the mode, the Ferrum Edge version and the
+  config source (`online`/`offline` on a control plane, not applicable on a
+  node agent), state that uptime, traffic and resource counts are "Not
+  reported by a control plane" (or node agent), and leave out the proxy-backed
+  panels (circuit breakers, connection pools, health checks, load balancers,
+  caches, rate limiting, consumer index) and the Dashboard's breaker and
+  unhealthy-target alerts. A measured zero in `database`, `file`, `dp` or
+  `mesh` mode is still shown. The request-rate sampler neither diffs nor
+  stores a `cp` or `node_agent` reading and drops its in-memory baseline when
+  it sees one. A gateway target names the admin URL, not the Edge process, so
+  two samples are diffed only when the gateway's uptime advanced with the wall
+  clock between their requests (allowing 12 seconds or 20% of the gap,
+  whichever is larger, for Edge's 5-second process-wide metrics cache,
+  whole-second uptime and response timing): a restarted or replaced process
+  starts collecting afresh. The tab also remembers, in memory and in
+  `sessionStorage`, when it last saw a placeholder at each gateway target
+  (`/admin/metrics` is process-wide, so under any namespace) and never bridges
+  from a baseline for that target whose request was sent at or before then
+  (the request-start time, since a slow response can resolve after a later
+  one; the admin metrics query now also forwards its abort signal), whichever
+  namespace it was stored under, so a data plane that later answers at the
+  same gateway target starts collecting afresh even across a remount or a
+  reload (a marker later than the current clock, left by a backward clock
+  correction, is clamped to the current time); stored samples now carry a
+  version and their mode, and are only diffed within one mode. The total
+  request count comes from the reading being rendered, and a rate is shown
+  only while the reading has the mode, namespace and gateway target it was
+  computed for. The mock admin gateway's `/admin/metrics` now follows
+  `MOCK_GATEWAY_MODE`, returning Edge's skeleton for `cp` and `node_agent`
+  (including the zeroed `adaptive_concurrency` counters and
+  `tcp_connection_throttle.active_connections`), and its proxy-mode uptime
+  advances with elapsed time, so its unchanged counters show a rate of 0
+  instead of staying at Collecting.
 - Upstream edit baselines reduce subsets exactly as saves submit them
   (#725). `upstreams.toBaseline()` now strips the server-owned
   `subsets[].traffic_policy` fields (`writableSubset`), and spells an unset

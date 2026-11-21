@@ -5,7 +5,9 @@
 import type { AdminMetrics } from "@/api/types";
 import { Badge } from "@/components/ui/Badge";
 import { StatCard } from "./StatCard";
+import { ProxyRuntimeNotice } from "./ProxyRuntimeNotice";
 import { formatDateTime, formatUptime } from "@/lib/format";
+import { adminMetricsReporting, configSourceLabel } from "@/lib/adminMetricsReporting";
 import type { GatewayRequestStats } from "@/hooks/useGatewayRequestStats";
 
 interface GatewayStatsProps {
@@ -21,29 +23,62 @@ function statusCodeVariant(code: string): "green" | "yellow" | "red" | "blue" {
   return "blue";
 }
 
-const CONFIG_SOURCE_LABELS: Record<string, string> = {
-  online: "Online",
-  offline: "Offline",
-  "n/a": "Not applicable",
-};
-
 function formatRate(rate?: number): string {
   if (rate === undefined) return "Collecting";
   return rate >= 10 ? rate.toFixed(0) : rate.toFixed(1);
 }
 
 export function GatewayStats({ metrics, requestStats }: GatewayStatsProps) {
+  const reporting = adminMetricsReporting(metrics.mode);
   const hasStatusRates = requestStats.statusCodesPerSecond !== undefined;
-  const statusCodes = Object.entries(metrics.status_codes_total)
-    .filter(([, count]) => count > 0)
-    .sort(([a], [b]) => a.localeCompare(b));
+  const statusCodes = reporting.reportsProxyRuntime
+    ? Object.entries(metrics.status_codes_total)
+        .filter(([, count]) => count > 0)
+        .sort(([a], [b]) => a.localeCompare(b))
+    : [];
+
+  const versionCard = <StatCard label="Version" value={metrics.ferrum_version} />;
+  const modeCard = (
+    <StatCard label="Mode" value={reporting.modeLabel} subtitle={`gateway.mode: ${metrics.mode}`} />
+  );
+  // Source status and last update describe one thing, so they share a card.
+  // Only an offline source is coloured: that is a warning.
+  const configSourceCard = (
+    <StatCard
+      label="Config Source"
+      value={configSourceLabel(metrics.config_source_status)}
+      variant={metrics.config_source_status === "offline" ? "warning" : "default"}
+      subtitle={
+        !reporting.reportsProxyRuntime
+          ? `Config snapshot time: ${reporting.unavailableLabel?.toLowerCase()}`
+          : metrics.config_last_updated_at
+            ? `Updated ${formatDateTime(metrics.config_last_updated_at)}`
+            : "Last update not reported"
+      }
+    />
+  );
+
+  // A control plane or node agent reports only what describes the process;
+  // its proxy-runtime zeros are placeholders, not measurements.
+  if (!reporting.reportsProxyRuntime) {
+    return (
+      <div className="space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {versionCard}
+          {modeCard}
+          {configSourceCard}
+        </div>
+        <ProxyRuntimeNotice reporting={reporting} />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
       {/* Ten cards: two full rows of five on wide screens, pairs below. */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-        <StatCard label="Version" value={metrics.ferrum_version} />
-        <StatCard label="Mode" value={metrics.mode} />
+        {versionCard}
+        {modeCard}
         <StatCard
           label="Uptime"
           value={formatUptime(metrics.uptime_seconds)}
@@ -65,18 +100,7 @@ export function GatewayStats({ metrics, requestStats }: GatewayStatsProps) {
         <StatCard label="Consumers" value={metrics.consumer_count} />
         <StatCard label="Upstreams" value={metrics.upstream_count} />
         <StatCard label="Plugin Configs" value={metrics.plugin_config_count} />
-        {/* Source status and last update describe one thing, so they share a
-            card. Only an offline source is coloured: that is a warning. */}
-        <StatCard
-          label="Config Source"
-          value={CONFIG_SOURCE_LABELS[metrics.config_source_status] ?? metrics.config_source_status}
-          variant={metrics.config_source_status === "offline" ? "warning" : "default"}
-          subtitle={
-            metrics.config_last_updated_at
-              ? `Updated ${formatDateTime(metrics.config_last_updated_at)}`
-              : "Last update not reported"
-          }
-        />
+        {configSourceCard}
       </div>
 
       {statusCodes.length > 0 && (
