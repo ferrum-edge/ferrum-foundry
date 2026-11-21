@@ -153,9 +153,13 @@ export async function getConfig(
   scope: NamespaceScope,
   id: string,
   silentErrors = false,
+  signal?: AbortSignal,
 ): Promise<PluginConfig> {
   return (
-    await readTagged<PluginConfig>(scope, `plugins/config/${pathSegment(id)}`, { silentErrors })
+    await readTagged<PluginConfig>(scope, `plugins/config/${pathSegment(id)}`, {
+      silentErrors,
+      signal,
+    })
   ).value;
 }
 

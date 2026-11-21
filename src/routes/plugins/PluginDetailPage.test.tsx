@@ -4,8 +4,16 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PluginConfig, Proxy } from "@/api/types";
 import { PluginConfigForm } from "@/components/forms/PluginConfigForm";
-import { markCommittedWrite } from "@/api/client";
-import { pluginWriteGuard } from "@/api/plugins";
+import {
+  DEFER_QUERY_ERRORS,
+  markCommittedWrite,
+  reportRequestError,
+  SILENT_ERRORS,
+} from "@/api/client";
+import { ErrorPopupProvider } from "@/stores/error";
+import { PluginMembershipChangedError } from "@/lib/pluginMembership";
+import { pluginWriteGuard, toBaseline } from "@/api/plugins";
+import { StaleResourceError } from "@/api/conditionalWrite";
 import PluginDetailPage from "./$pluginId";
 
 const { get, updatePlan, deletePlan, toast } = vi.hoisted(() => ({
@@ -582,5 +590,1019 @@ describe("a plugin save that committed but is not yet live (#674)", () => {
     expect(updatePlan).toHaveBeenCalledTimes(2);
     expect(updatePlan.mock.calls[1]![4]).toEqual(pluginWriteGuard(saved));
     expect(updatePlan.mock.calls[1]![5]).toEqual(["source"]);
+  });
+});
+
+describe("discarding a draft after a refused write (#726)", () => {
+  async function submit() {
+    await act(async () => {
+      host.querySelector("form")!.dispatchEvent(
+        new Event("submit", { bubbles: true, cancelable: true }),
+      );
+    });
+    await settle();
+  }
+
+  function stale(current: PluginConfig): StaleResourceError {
+    return new StaleResourceError({
+      resource: "plugin configuration",
+      operation: "save",
+      id: plugin.id,
+      namespace: "default",
+      original: toBaseline(plugin),
+      current: toBaseline(current),
+      proposed: toBaseline(plugin),
+    });
+  }
+
+  function dialogButton(label: string) {
+    return [...document.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.trim() === label);
+  }
+
+  async function click(label: string) {
+    const button = dialogButton(label);
+    expect(button).toBeTruthy();
+    await act(async () => button!.click());
+    await settle();
+  }
+
+  function reads(path: string) {
+    return get.mock.calls.filter(([called]) => called === path).length;
+  }
+
+  /** Open a group plugin, remove a member, and have the save refused. */
+  async function refusedGroupDraft(current: PluginConfig) {
+    await render();
+    pluginResponse.resolve(plugin);
+    firstPage.resolve(page([member("source"), member("destination")]));
+    await settle();
+    await act(async () => {
+      host
+        .querySelector<HTMLButtonElement>("button[aria-label='Remove /destination']")
+        ?.click();
+    });
+    updatePlan.mockRejectedValueOnce(stale(current));
+    await submit();
+    expect(dialogButton("Discard my draft and reload")).toBeTruthy();
+    expect(selectedIds()).toEqual(["Remove /source"]);
+  }
+
+  it("re-reads the plugin and its membership before remounting the form", async () => {
+    const current: PluginConfig = { ...plugin, config: { requests: 9 }, updated_at: "2026-09-06T00:00:00Z" };
+    await refusedGroupDraft(current);
+    const draftForm = host.querySelector("form");
+    const pluginReads = reads("plugins/config/group-1");
+    const proxyReads = reads("proxies");
+
+    // Another operator also attached `late` since the page loaded.
+    pluginResponse = deferred<PluginConfig>();
+    firstPage = deferred<ReturnType<typeof page>>();
+    await click("Discard my draft and reload");
+    pluginResponse.resolve(current);
+    await settle();
+    // The plugin is read, but nothing is remounted while its membership loads.
+    expect(reads("plugins/config/group-1")).toBe(pluginReads + 1);
+    expect(reads("proxies")).toBe(proxyReads + 1);
+    expect(host.querySelector("form")).toBe(draftForm);
+    expect(selectedIds()).toEqual(["Remove /source"]);
+
+    firstPage.resolve(page([member("source"), member("destination"), member("late")]));
+    await settle();
+    expect(host.querySelector("form")).not.toBe(draftForm);
+    // `late` is selected; its label resolves from the picker's own catalog.
+    expect(selectedIds()).toEqual([
+      "Remove /source",
+      "Remove /destination",
+      expect.stringContaining("late"),
+    ]);
+    expect(dialogButton("Discard my draft and reload")).toBeUndefined();
+    expect(toast).not.toHaveBeenCalledWith("error", expect.anything());
+
+    // The next save is judged against the fresh plugin and expects the
+    // membership the remounted form shows.
+    updatePlan.mockResolvedValueOnce(current);
+    await submit();
+    expect(updatePlan).toHaveBeenCalledTimes(2);
+    expect(updatePlan.mock.calls[1]![4]).toEqual(pluginWriteGuard(current));
+    expect(updatePlan.mock.calls[1]![5]).toEqual(["source", "destination", "late"]);
+  });
+
+  /**
+   * Open a global plugin and have its save refused because another operator
+   * made it a group. The gateway already answers with the group, so the
+   * save's settle invalidation refetches it and the page learns the new scope
+   * while the draft and the dialog are on screen.
+   */
+  async function refusedScopeChange(current: PluginConfig) {
+    await render();
+    pluginResponse.resolve({ ...plugin, scope: "global" });
+    await settle();
+    await settle();
+    const draftForm = host.querySelector("form");
+    expect(draftForm).not.toBeNull();
+    expect(get).not.toHaveBeenCalledWith("proxies", expect.anything());
+
+    pluginResponse = deferred<PluginConfig>();
+    pluginResponse.resolve(current);
+    updatePlan.mockRejectedValueOnce(stale(current));
+    await submit();
+    await settle();
+    // The refetch saw the group. Neither the skeleton nor the membership
+    // error replaced the form, and the background membership traversal did
+    // not start: the mounted form cannot show it, and only an explicit
+    // reload reads it.
+    expect(client.getQueryData(["pluginConfig", "default", "group-1"])).toEqual(current);
+    expect(get).not.toHaveBeenCalledWith("proxies", expect.anything());
+    expect(host.querySelector("form")).toBe(draftForm);
+    expect(dialogButton("Discard my draft and reload")).toBeTruthy();
+    return draftForm;
+  }
+
+  it("reads the membership of a plugin whose scope changed to proxy_group", async () => {
+    const current: PluginConfig = { ...plugin, updated_at: "2026-09-06T00:00:00Z" };
+    firstPage = deferred<ReturnType<typeof page>>();
+    const draftForm = await refusedScopeChange(current);
+
+    await click("Discard my draft and reload");
+    expect(host.querySelector("form")).toBe(draftForm);
+    expect(dialogButton("Discard my draft and reload")).toBeTruthy();
+
+    firstPage.resolve(page([member("source")]));
+    await settle();
+    expect(host.querySelector("form")).not.toBe(draftForm);
+    expect(selectedIds()).toEqual(["Remove /source"]);
+    expect(dialogButton("Discard my draft and reload")).toBeUndefined();
+
+    updatePlan.mockResolvedValueOnce(current);
+    await submit();
+    expect(updatePlan.mock.calls[1]![4]).toEqual(pluginWriteGuard(current));
+    expect(updatePlan.mock.calls[1]![5]).toEqual(["source"]);
+  });
+
+  it("keeps the draft of a plugin whose scope changed when its membership cannot be read", async () => {
+    // Exercise the real reporting path: requests report failures as the ky
+    // client does (silent, deferred to the Query, or at once), and the
+    // global popup provider is mounted.
+    const failing = vi.fn();
+    get.mockImplementation((path, options) => ({
+      headers: new Headers(),
+      json: () => {
+        if (path === "plugins") return catalog;
+        if (path === "plugins/config/group-1") return pluginResponse.promise;
+        if (path === "proxies") {
+          failing();
+          const error = new Error("HTTP 503");
+          const context = options.context ?? {};
+          if (!context[SILENT_ERRORS]) {
+            reportRequestError(
+              error,
+              { statusCode: 503, body: "unavailable", url: "/api/proxy/proxies" },
+              Boolean(context[DEFER_QUERY_ERRORS]),
+            );
+          }
+          return Promise.reject(error);
+        }
+        throw new Error(`Unexpected request: ${path}`);
+      },
+    }));
+    const current: PluginConfig = { ...plugin, updated_at: "2026-09-06T00:00:00Z" };
+    await render(
+      <ErrorPopupProvider>
+        <PluginDetailPage />
+      </ErrorPopupProvider>,
+    );
+    pluginResponse.resolve({ ...plugin, scope: "global" });
+    await settle();
+    await settle();
+    const draftForm = host.querySelector("form");
+    expect(draftForm).not.toBeNull();
+    pluginResponse = deferred<PluginConfig>();
+    pluginResponse.resolve(current);
+    updatePlan.mockRejectedValueOnce(stale(current));
+    await submit();
+    await settle();
+    expect(failing).not.toHaveBeenCalled();
+
+    await click("Discard my draft and reload");
+    expect(failing).toHaveBeenCalledTimes(1);
+    expect(toast).toHaveBeenCalledWith(
+      "error",
+      "Could not re-read the plugin's proxies; your form was kept. Try again.",
+    );
+    // Only the toast: no API Error popup over the conflict dialog.
+    expect(document.body.textContent).not.toContain("API Error");
+    expect(host.querySelector("form")).toBe(draftForm);
+    expect(dialogButton("Discard my draft and reload")).toBeTruthy();
+  });
+
+  it("shows only the reload toast when a mounted group's membership refresh fails too", async () => {
+    // Real reporting path, as above. The group loads (two proxy pages); then
+    // its second page starts failing for the save's settle refresh and for
+    // the explicit reload alike.
+    let laterPagesFail = false;
+    get.mockImplementation((path, options) => ({
+      headers: new Headers(),
+      json: () => {
+        if (path === "plugins") return catalog;
+        if (path === "plugins/config/group-1") return pluginResponse.promise;
+        if (path === "proxies") {
+          if (options.searchParams.offset === "0") {
+            return Promise.resolve(page([member("source")], 0, 2));
+          }
+          if (!laterPagesFail) return Promise.resolve(page([member("destination")], 1, 2));
+          const error = new Error("HTTP 503");
+          const context = options.context ?? {};
+          if (!context[SILENT_ERRORS]) {
+            reportRequestError(
+              error,
+              { statusCode: 503, body: "unavailable", url: "/api/proxy/proxies" },
+              Boolean(context[DEFER_QUERY_ERRORS]),
+            );
+          }
+          return Promise.reject(error);
+        }
+        throw new Error(`Unexpected request: ${path}`);
+      },
+    }));
+    await render(
+      <ErrorPopupProvider>
+        <PluginDetailPage />
+      </ErrorPopupProvider>,
+    );
+    pluginResponse.resolve(plugin);
+    await settle();
+    await settle();
+    expect(selectedIds()).toEqual(["Remove /source", "Remove /destination"]);
+    const draftForm = host.querySelector("form");
+
+    laterPagesFail = true;
+    const current: PluginConfig = { ...plugin, config: { requests: 9 } };
+    pluginResponse = deferred<PluginConfig>();
+    pluginResponse.resolve(current);
+    updatePlan.mockRejectedValueOnce(stale(current));
+    await submit();
+    await click("Discard my draft and reload");
+    await settle();
+
+    expect(toast).toHaveBeenCalledWith(
+      "error",
+      "Could not re-read the plugin's proxies; your form was kept. Try again.",
+    );
+    // The settle refresh failed as well, but reports inline, not as a popup.
+    expect(client.getQueryState(["proxies", "default", "all"])?.status).toBe("error");
+    expect(document.body.textContent).not.toContain("API Error");
+    expect(host.querySelector("form")).toBe(draftForm);
+    expect(dialogButton("Discard my draft and reload")).toBeTruthy();
+  });
+
+  it("lets a retry reseed the form once the proxies of a now-group plugin can be read", async () => {
+    const current: PluginConfig = { ...plugin, updated_at: "2026-09-06T00:00:00Z" };
+    firstPage = deferred<ReturnType<typeof page>>();
+    firstPage.reject(new Error("HTTP 503"));
+    const draftForm = await refusedScopeChange(current);
+
+    await click("Discard my draft and reload");
+    expect(toast).toHaveBeenCalledWith(
+      "error",
+      "Could not re-read the plugin's proxies; your form was kept. Try again.",
+    );
+    expect(host.querySelector("form")).toBe(draftForm);
+
+    firstPage = deferred<ReturnType<typeof page>>();
+    firstPage.resolve(page([member("source")]));
+    await click("Discard my draft and reload");
+    expect(host.querySelector("form")).not.toBe(draftForm);
+    expect(selectedIds()).toEqual(["Remove /source"]);
+    expect(dialogButton("Discard my draft and reload")).toBeUndefined();
+  });
+
+  it("does not publish its read over a revision the cache took during the reload", async () => {
+    const staged: PluginConfig = { ...plugin, config: { requests: 9 }, updated_at: "2026-09-06T00:00:00Z" };
+    await refusedGroupDraft(staged);
+    const draftForm = host.querySelector("form");
+    pluginResponse = deferred<PluginConfig>();
+    pluginResponse.resolve(staged);
+    firstPage = deferred<ReturnType<typeof page>>();
+
+    await click("Discard my draft and reload");
+    // While the membership is still loading, a background read publishes C.
+    const newer: PluginConfig = { ...plugin, config: { requests: 20 }, updated_at: "2026-09-07T00:00:00Z" };
+    await act(async () => {
+      client.setQueryData(["pluginConfig", "default", "group-1"], newer);
+    });
+    firstPage.resolve(page([member("source"), member("destination")]));
+    await settle();
+
+    expect(client.getQueryData(["pluginConfig", "default", "group-1"])).toEqual(newer);
+    expect(toast).toHaveBeenCalledWith(
+      "error",
+      "The plugin changed while it was being reloaded; your form was kept. Try again.",
+    );
+    expect(host.querySelector("form")).toBe(draftForm);
+    expect(dialogButton("Discard my draft and reload")).toBeTruthy();
+    // Nothing staged was adopted: a save is still judged against the opened plugin.
+    await click("Keep my draft");
+    updatePlan.mockResolvedValueOnce(plugin);
+    await submit();
+    expect(updatePlan.mock.calls.at(-1)![4]).toEqual(pluginWriteGuard(plugin));
+  });
+
+  describe("does not publish over anything the caches learned during the reload", () => {
+    const staged: PluginConfig = { ...plugin, config: { requests: 9 }, updated_at: "2026-09-06T00:00:00Z" };
+    const detailKey = ["pluginConfig", "default", "group-1"];
+
+    /** Start a discard whose plugin read is done and membership read held. */
+    async function holdMembership() {
+      await refusedGroupDraft(staged);
+      const draftForm = host.querySelector("form");
+      pluginResponse = deferred<PluginConfig>();
+      pluginResponse.resolve(staged);
+      firstPage = deferred<ReturnType<typeof page>>();
+      await click("Discard my draft and reload");
+      return draftForm;
+    }
+
+    async function release(draftForm: Element | null) {
+      firstPage.resolve(page([member("source"), member("destination")]));
+      await settle();
+      expect(toast).toHaveBeenCalledWith(
+        "error",
+        "The plugin changed while it was being reloaded; your form was kept. Try again.",
+      );
+      expect(host.querySelector("form")).toBe(draftForm);
+      expect(dialogButton("Discard my draft and reload")).toBeTruthy();
+    }
+
+    it("a different membership from a background traversal", async () => {
+      const draftForm = await holdMembership();
+      // Another operator detached destination; a background traversal saw it.
+      await act(async () => {
+        client.setQueryData(["proxies", "default", "all"], [member("source")]);
+      });
+      await release(draftForm);
+      expect(client.getQueryData(["proxies", "default", "all"])).toEqual([member("source")]);
+    });
+
+    it("a 404 the detail query recorded", async () => {
+      const draftForm = await holdMembership();
+      // The plugin was deleted; the page's own detail read learns it.
+      pluginResponse = deferred<PluginConfig>();
+      pluginResponse.reject(Object.assign(new Error("HTTP 404"), { response: { status: 404 } }));
+      await act(async () => {
+        await client.refetchQueries({ queryKey: detailKey, exact: true });
+      });
+      expect(client.getQueryState(detailKey)?.status).toBe("error");
+      await release(draftForm);
+      expect(client.getQueryState(detailKey)?.status).toBe("error");
+      expect(client.getQueryData(detailKey)).not.toEqual(staged);
+    });
+
+    it("the detail entry being retired", async () => {
+      await holdMembership();
+      // A cascade retires the detail (the page then reads it again itself).
+      pluginResponse = deferred<PluginConfig>();
+      await act(async () => {
+        client.removeQueries({ queryKey: detailKey, exact: true });
+      });
+      firstPage.resolve(page([member("source"), member("destination")]));
+      await settle();
+      expect(toast).toHaveBeenCalledWith(
+        "error",
+        "The plugin changed while it was being reloaded; your form was kept. Try again.",
+      );
+      // The staged read did not rebuild the retired entry.
+      expect(client.getQueryData(detailKey)).toBeUndefined();
+    });
+  });
+
+  it("keeps the draft and the conflict when the plugin cannot be re-read", async () => {
+    await refusedGroupDraft({ ...plugin, config: { requests: 9 } });
+    const draftForm = host.querySelector("form");
+    pluginResponse = deferred<PluginConfig>();
+    pluginResponse.reject(new Error("HTTP 503"));
+    const proxyReads = reads("proxies");
+
+    await click("Discard my draft and reload");
+
+    expect(toast).toHaveBeenCalledWith(
+      "error",
+      "Could not re-read the plugin; your form was kept. Try again.",
+    );
+    expect(reads("proxies")).toBe(proxyReads);
+    expect(host.querySelector("form")).toBe(draftForm);
+    expect(selectedIds()).toEqual(["Remove /source"]);
+    expect(dialogButton("Discard my draft and reload")).toBeTruthy();
+
+    // The operator can still go back to the draft, as it was.
+    await click("Keep my draft");
+    expect(dialogButton("Discard my draft and reload")).toBeUndefined();
+    expect(host.querySelector("form")).toBe(draftForm);
+    expect(selectedIds()).toEqual(["Remove /source"]);
+  });
+
+  it("keeps the draft and the conflict when the membership cannot be re-read", async () => {
+    const current: PluginConfig = { ...plugin, config: { requests: 9 } };
+    await refusedGroupDraft(current);
+    const draftForm = host.querySelector("form");
+    pluginResponse = deferred<PluginConfig>();
+    pluginResponse.resolve(current);
+    firstPage = deferred<ReturnType<typeof page>>();
+    firstPage.reject(new Error("HTTP 503"));
+
+    await click("Discard my draft and reload");
+
+    expect(toast).toHaveBeenCalledWith(
+      "error",
+      "Could not re-read the plugin's proxies; your form was kept. Try again.",
+    );
+    expect(host.querySelector("form")).toBe(draftForm);
+    expect(selectedIds()).toEqual(["Remove /source"]);
+    expect(dialogButton("Discard my draft and reload")).toBeTruthy();
+
+    // Not adopted either: a save from the kept draft is still judged
+    // against the plugin the editor opened.
+    await click("Keep my draft");
+    updatePlan.mockResolvedValueOnce(plugin);
+    await submit();
+    expect(updatePlan.mock.calls[1]![4]).toEqual(pluginWriteGuard(plugin));
+    expect(updatePlan.mock.calls[1]![5]).toEqual(["source", "destination"]);
+  });
+
+  it("reads silently, since the page reports a failed reload itself", async () => {
+    const current: PluginConfig = { ...plugin, config: { requests: 9 } };
+    await refusedGroupDraft(current);
+    const before = get.mock.calls.length;
+    pluginResponse = deferred<PluginConfig>();
+    pluginResponse.resolve(current);
+    firstPage = deferred<ReturnType<typeof page>>();
+    firstPage.resolve(page([member("source")]));
+
+    await click("Discard my draft and reload");
+
+    const reloadReads = get.mock.calls.slice(before);
+    expect(reloadReads.map(([path]) => path)).toEqual(["plugins/config/group-1", "proxies"]);
+    for (const [, options] of reloadReads) {
+      expect(options.context[SILENT_ERRORS]).toBe(true);
+    }
+  });
+
+  it("runs one reload at a time, and Keep my draft abandons it", async () => {
+    await refusedGroupDraft({ ...plugin, config: { requests: 9 } });
+    const draftForm = host.querySelector("form");
+    const pluginReads = reads("plugins/config/group-1");
+    pluginResponse = deferred<PluginConfig>();
+
+    await click("Discard my draft and reload");
+    // Busy while pending: a second click starts nothing.
+    expect(dialogButton("Discard my draft and reload")?.disabled).toBe(true);
+    await act(async () => dialogButton("Discard my draft and reload")!.click());
+    await settle();
+    expect(reads("plugins/config/group-1")).toBe(pluginReads + 1);
+
+    await click("Keep my draft");
+    expect(dialogButton("Discard my draft and reload")).toBeUndefined();
+    const changed: PluginConfig = { ...plugin, config: { requests: 9 }, updated_at: "2026-09-07T00:00:00Z" };
+    firstPage = deferred<ReturnType<typeof page>>();
+    firstPage.resolve(page([member("source")]));
+    pluginResponse.resolve(changed);
+    await settle();
+    await settle();
+
+    // The abandoned reload neither remounts, adopts, nor reports.
+    expect(host.querySelector("form")).toBe(draftForm);
+    expect(selectedIds()).toEqual(["Remove /source"]);
+    expect(toast).not.toHaveBeenCalledWith("error", expect.anything());
+    expect(client.getQueryData(["pluginConfig", "default", "group-1"])).toEqual(plugin);
+    updatePlan.mockResolvedValueOnce(plugin);
+    await submit();
+    expect(updatePlan.mock.calls[1]![4]).toEqual(pluginWriteGuard(plugin));
+    expect(updatePlan.mock.calls[1]![5]).toEqual(["source", "destination"]);
+  });
+
+  it("applies and reports nothing once the editor has gone", async () => {
+    await refusedGroupDraft({ ...plugin, config: { requests: 9 } });
+    pluginResponse = deferred<PluginConfig>();
+    await click("Discard my draft and reload");
+
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    const proxyReads = reads("proxies");
+    pluginResponse.resolve({ ...plugin, config: { requests: 9 }, updated_at: "2026-09-07T00:00:00Z" });
+    await settle();
+
+    // Not even the abandoned namespace's membership traversal starts.
+    expect(reads("proxies")).toBe(proxyReads);
+    expect(toast).not.toHaveBeenCalledWith("error", expect.anything());
+    expect(client.getQueryData(["pluginConfig", "default", "group-1"])).toEqual(plugin);
+  });
+
+  it("does not report a failed read once the editor has gone", async () => {
+    await refusedGroupDraft({ ...plugin, config: { requests: 9 } });
+    pluginResponse = deferred<PluginConfig>();
+    await click("Discard my draft and reload");
+
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    pluginResponse.reject(new Error("HTTP 503"));
+    await settle();
+
+    expect(toast).not.toHaveBeenCalledWith("error", expect.anything());
+  });
+});
+
+describe("a pending reload locks the form and excludes delete (#726)", () => {
+  async function submit() {
+    await act(async () => {
+      host.querySelector("form")!.dispatchEvent(
+        new Event("submit", { bubbles: true, cancelable: true }),
+      );
+    });
+    await settle();
+  }
+
+  function button(label: string) {
+    return [...document.querySelectorAll<HTMLButtonElement>("button")]
+      .find((entry) => entry.textContent?.trim() === label);
+  }
+
+  async function open() {
+    await render();
+    pluginResponse.resolve(plugin);
+    firstPage.resolve(page([member("source")]));
+    await settle();
+    expect(selectedIds()).toEqual(["Remove /source"]);
+  }
+
+  function locked() {
+    return host.querySelector("form fieldset[aria-busy='true']") !== null;
+  }
+
+  function stale(current: PluginConfig): StaleResourceError {
+    return new StaleResourceError({
+      resource: "plugin configuration",
+      operation: "save",
+      id: plugin.id,
+      namespace: "default",
+      original: toBaseline(plugin),
+      current: toBaseline(current),
+      proposed: toBaseline(plugin),
+    });
+  }
+
+  /** Try to edit (remove the member) and save the mounted form. */
+  async function tryEditAndSave() {
+    const remove = host.querySelector<HTMLButtonElement>("button[aria-label='Remove /source']")!;
+    expect(remove.matches(":disabled")).toBe(true);
+    await act(async () => remove.click());
+    await settle();
+    expect(selectedIds()).toEqual(["Remove /source"]);
+    const calls = updatePlan.mock.calls.length;
+    await submit();
+    expect(updatePlan.mock.calls.length).toBe(calls);
+  }
+
+  /** Have a save refused because `late` joined the group, offering the recovery reload. */
+  async function refuseForMembership() {
+    updatePlan.mockRejectedValueOnce(new PluginMembershipChangedError(plugin.id, "save", ["late"]));
+    await submit();
+    expect(button("Reload current membership (discards your draft)")).toBeTruthy();
+    pluginResponse = deferred<PluginConfig>();
+    pluginResponse.resolve(plugin);
+    firstPage = deferred<ReturnType<typeof page>>();
+  }
+
+  it("locks every field and Save while a recovery reload runs", async () => {
+    await open();
+    await refuseForMembership();
+    const before = host.querySelector("form");
+
+    await act(async () => button("Reload current membership (discards your draft)")!.click());
+    await settle();
+    expect(locked()).toBe(true);
+    await tryEditAndSave();
+
+    firstPage.resolve(page([member("source"), member("late")]));
+    await settle();
+    expect(host.querySelector("form")).not.toBe(before);
+    expect(locked()).toBe(false);
+    expect(selectedIds()).toEqual(["Remove /source", expect.stringContaining("late")]);
+  });
+
+  it("locks every field and Save while a committed save reseeds", async () => {
+    await open();
+    pluginResponse = deferred<PluginConfig>();
+    firstPage = deferred<ReturnType<typeof page>>();
+    updatePlan.mockRejectedValueOnce(
+      markCommittedWrite(new Error("HTTP 503"), { cursor: "1:2", reason: "reload_timeout" }),
+    );
+    await submit();
+    expect(locked()).toBe(true);
+    await tryEditAndSave();
+
+    pluginResponse.resolve(plugin);
+    firstPage.resolve(page([member("source")]));
+    await settle();
+    expect(locked()).toBe(false);
+    expect(toast).toHaveBeenCalledWith(
+      "warning",
+      expect.stringContaining("Plugin configuration saved: committed, not yet proven live"),
+    );
+  });
+
+  it("blocks Delete during a reload and asks again against the reloaded membership", async () => {
+    deletePlan.mockResolvedValue(undefined);
+    await open();
+    await refuseForMembership();
+
+    await act(async () => button("Reload current membership (discards your draft)")!.click());
+    await settle();
+    const del = button("Delete")!;
+    expect(del.disabled).toBe(true);
+    await act(async () => del.click());
+    await settle();
+    expect(button("Delete Plugin")).toBeUndefined();
+
+    firstPage.resolve(page([member("source"), member("late")]));
+    await settle();
+    expect(button("Delete")!.disabled).toBe(false);
+    await act(async () => button("Delete")!.click());
+    await settle();
+    await act(async () => button("Delete Plugin")!.click());
+    await settle();
+    // The confirmation was given with the reloaded membership on screen.
+    expect(deletePlan).toHaveBeenCalledTimes(1);
+    expect(deletePlan.mock.calls[0]![3]).toEqual(["source", "late"]);
+  });
+
+  it("closes an open delete confirmation when a reload starts", async () => {
+    deletePlan.mockResolvedValue(undefined);
+    await open();
+    // The confirmation is opened first; the save that follows commits.
+    await act(async () => button("Delete")!.click());
+    await settle();
+    expect(button("Delete Plugin")).toBeTruthy();
+    const save = deferred<PluginConfig>();
+    updatePlan.mockReturnValueOnce(save.promise);
+    await submit();
+
+    pluginResponse = deferred<PluginConfig>();
+    firstPage = deferred<ReturnType<typeof page>>();
+    await act(async () => {
+      save.reject(
+        markCommittedWrite(new Error("HTTP 503"), { cursor: "1:2", reason: "reload_timeout" }),
+      );
+    });
+    await settle();
+    expect(button("Delete Plugin")).toBeUndefined();
+    expect(button("Delete")!.disabled).toBe(true);
+
+    pluginResponse.resolve(plugin);
+    firstPage.resolve(page([member("source"), member("late")]));
+    await settle();
+    expect(deletePlan).not.toHaveBeenCalled();
+    await act(async () => button("Delete")!.click());
+    await settle();
+    expect(button("Delete Plugin")).toBeTruthy();
+  });
+
+  it("keeps Delete unavailable while a save and its committed reseed can still run", async () => {
+    deletePlan.mockResolvedValue({ committed: null });
+    await open();
+    const save = deferred<PluginConfig>();
+    updatePlan.mockReturnValueOnce(save.promise);
+    await submit();
+    expect(button("Delete")!.disabled).toBe(true);
+    await act(async () => button("Delete")!.click());
+    await settle();
+    expect(button("Delete Plugin")).toBeUndefined();
+
+    pluginResponse = deferred<PluginConfig>();
+    firstPage = deferred<ReturnType<typeof page>>();
+    await act(async () => {
+      save.reject(
+        markCommittedWrite(new Error("HTTP 503"), { cursor: "1:2", reason: "reload_timeout" }),
+      );
+    });
+    await settle();
+    expect(button("Delete")!.disabled).toBe(true);
+    pluginResponse.resolve(plugin);
+    firstPage.resolve(page([member("source")]));
+    await settle();
+
+    // Only now can the delete be confirmed, and once it succeeds nothing
+    // recreates the detail entry it retired.
+    await act(async () => button("Delete")!.click());
+    await settle();
+    await act(async () => button("Delete Plugin")!.click());
+    await settle();
+    await settle();
+    expect(deletePlan).toHaveBeenCalledTimes(1);
+    expect(client.getQueryData(["pluginConfig", "default", "group-1"])).toBeUndefined();
+  });
+
+  it("refuses a save while a confirmed delete is in flight", async () => {
+    const removal = deferred<unknown>();
+    deletePlan.mockReturnValueOnce(removal.promise);
+    await open();
+    await act(async () => button("Delete")!.click());
+    await settle();
+    await act(async () => button("Delete Plugin")!.click());
+    await settle();
+    expect(deletePlan).toHaveBeenCalledTimes(1);
+
+    await submit();
+    expect(updatePlan).not.toHaveBeenCalled();
+    await act(async () => removal.resolve({ committed: null }));
+    await settle();
+    expect(client.getQueryData(["pluginConfig", "default", "group-1"])).toBeUndefined();
+  });
+
+  it("closes an open Scope menu and ignores a choice while a save and its reseed run", async () => {
+    await open();
+    const trigger = [...host.querySelectorAll<HTMLElement>('[role="combobox"]')].find((entry) =>
+      document.getElementById(entry.getAttribute("aria-labelledby") ?? "")?.textContent === "Scope",
+    )!;
+    await act(async () => {
+      trigger.focus();
+      trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    await settle();
+    const globalOption = [...document.querySelectorAll<HTMLElement>('[role="option"]')]
+      .find((entry) => entry.textContent === "Global");
+    expect(globalOption).toBeTruthy();
+
+    // The save locks the form as soon as it is pending.
+    const save = deferred<PluginConfig>();
+    updatePlan.mockReturnValueOnce(save.promise);
+    await submit();
+    expect(locked()).toBe(true);
+    expect(document.querySelectorAll('[role="option"]')).toHaveLength(0);
+
+    pluginResponse = deferred<PluginConfig>();
+    firstPage = deferred<ReturnType<typeof page>>();
+    await act(async () => {
+      save.reject(
+        markCommittedWrite(new Error("HTTP 503"), { cursor: "1:2", reason: "reload_timeout" }),
+      );
+    });
+    await settle();
+    expect(locked()).toBe(true);
+    // A choice made through the element still in hand changes nothing.
+    await act(async () => {
+      globalOption!.focus();
+      globalOption!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      globalOption!.click();
+    });
+    await settle();
+    expect(trigger.textContent).toContain("Proxy Group");
+    expect(selectedIds()).toEqual(["Remove /source"]);
+
+    pluginResponse.resolve(plugin);
+    firstPage.resolve(page([member("source")]));
+    await settle();
+    expect(locked()).toBe(false);
+  });
+
+  it("starts one save for two submits delivered before the pending state renders", async () => {
+    await open();
+    const save = deferred<PluginConfig>();
+    updatePlan.mockReturnValue(save.promise);
+    const form = host.querySelector("form")!;
+    await act(async () => {
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    await settle();
+    expect(updatePlan).toHaveBeenCalledTimes(1);
+    await act(async () => save.resolve(plugin));
+    await settle();
+    updatePlan.mockReset();
+  });
+
+  it("locks edits while a save is pending, then shows what the committed save stored", async () => {
+    await open();
+    const save = deferred<PluginConfig>();
+    updatePlan.mockReturnValueOnce(save.promise);
+    await submit();
+    expect(locked()).toBe(true);
+    await tryEditAndSave();
+
+    pluginResponse = deferred<PluginConfig>();
+    pluginResponse.resolve(plugin);
+    firstPage = deferred<ReturnType<typeof page>>();
+    firstPage.resolve(page([member("source"), member("late")]));
+    await act(async () => {
+      save.reject(
+        markCommittedWrite(new Error("HTTP 503"), { cursor: "1:2", reason: "reload_timeout" }),
+      );
+    });
+    await settle();
+    expect(locked()).toBe(false);
+    expect(selectedIds()).toEqual(["Remove /source", expect.stringContaining("late")]);
+  });
+
+  it("names the membership read when a committed save's reseed cannot read the proxies", async () => {
+    await open();
+    pluginResponse = deferred<PluginConfig>();
+    pluginResponse.resolve(plugin);
+    firstPage = deferred<ReturnType<typeof page>>();
+    firstPage.reject(new Error("HTTP 503"));
+    updatePlan.mockRejectedValueOnce(
+      markCommittedWrite(new Error("HTTP 503"), { cursor: "1:2", reason: "reload_timeout" }),
+    );
+    await submit();
+    await settle();
+    expect(toast).toHaveBeenCalledWith(
+      "warning",
+      expect.stringContaining("Foundry could not re-read the plugin's proxies; reload it before saving again."),
+    );
+    expect(selectedIds()).toEqual(["Remove /source"]);
+  });
+
+  it("starts no read when a save commits after the editor has gone", async () => {
+    await open();
+    const save = deferred<PluginConfig>();
+    updatePlan.mockReturnValueOnce(save.promise);
+    await submit();
+    const pluginReads = () => get.mock.calls.filter(([path]) => path === "plugins/config/group-1").length;
+    const before = pluginReads();
+
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    await act(async () => {
+      save.reject(
+        markCommittedWrite(new Error("HTTP 503"), { cursor: "1:2", reason: "reload_timeout" }),
+      );
+    });
+    await settle();
+
+    expect(pluginReads()).toBe(before);
+    // The commit itself is still reported, with nothing about a re-read.
+    expect(toast).toHaveBeenCalledWith(
+      "warning",
+      expect.not.stringContaining("could not re-read"),
+    );
+  });
+
+  it("aborts the reload's plugin read when the operator keeps the draft", async () => {
+    await open();
+    updatePlan.mockRejectedValueOnce(stale({ ...plugin, config: { requests: 9 } }));
+    await submit();
+    pluginResponse = deferred<PluginConfig>();
+    await act(async () => button("Discard my draft and reload")!.click());
+    await settle();
+    const read = get.mock.calls.filter(([path]) => path === "plugins/config/group-1").at(-1)!;
+    const signal = read[1].signal as AbortSignal;
+    expect(signal.aborted).toBe(false);
+
+    await act(async () => button("Keep my draft")!.click());
+    await settle();
+    expect(signal.aborted).toBe(true);
+  });
+
+  it("stops the membership traversal once a group is saved to another scope", async () => {
+    await open();
+    const allKey = ["proxies", "default", "all"];
+    expect(client.getQueryCache().find({ queryKey: allKey, exact: true })?.isActive()).toBe(true);
+
+    await chooseScope("Global");
+    updatePlan.mockResolvedValueOnce({ ...plugin, scope: "global" });
+    await submit();
+    expect(updatePlan.mock.calls[0]![1]).toMatchObject({ scope: "global" });
+    await settle();
+
+    expect(client.getQueryCache().find({ queryKey: allKey, exact: true })?.isActive()).toBe(false);
+    const before = get.mock.calls.filter(([path]) => path === "proxies").length;
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: ["proxies"] });
+    });
+    await settle();
+    expect(get.mock.calls.filter(([path]) => path === "proxies").length).toBe(before);
+  });
+});
+
+describe("a mounted editor reports its background reads inline (#726)", () => {
+  async function submit() {
+    await act(async () => {
+      host.querySelector("form")!.dispatchEvent(
+        new Event("submit", { bubbles: true, cancelable: true }),
+      );
+    });
+    await settle();
+  }
+
+  function dialogButton(label: string) {
+    return [...document.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.trim() === label);
+  }
+
+  function stale(current: PluginConfig): StaleResourceError {
+    return new StaleResourceError({
+      resource: "plugin configuration",
+      operation: "save",
+      id: plugin.id,
+      namespace: "default",
+      original: toBaseline(plugin),
+      current: toBaseline(current),
+      proposed: toBaseline(plugin),
+    });
+  }
+
+  /** Fail as the ky client does: silent, deferred to the Query, or at once. */
+  function failing(path: string, options: { context?: Record<string, unknown> }) {
+    const error = new Error("HTTP 503");
+    const context = options.context ?? {};
+    if (!context[SILENT_ERRORS]) {
+      reportRequestError(
+        error,
+        { statusCode: 503, body: "unavailable", url: `/api/proxy/${path}` },
+        Boolean(context[DEFER_QUERY_ERRORS]),
+      );
+    }
+    return Promise.reject(error);
+  }
+
+  /**
+   * A gateway that serves the group and two proxy pages until `fail` names a
+   * read, after which that read fails for every request.
+   */
+  function gateway() {
+    const state = {
+      plugin: plugin as PluginConfig,
+      fail: new Set<"plugin" | "firstPage" | "laterPage">(),
+    };
+    get.mockImplementation((path, options) => ({
+      headers: new Headers(),
+      json: () => {
+        if (path === "plugins") return catalog;
+        if (path === "plugins/config/group-1") {
+          return state.fail.has("plugin") ? failing(path, options) : Promise.resolve(state.plugin);
+        }
+        if (path === "proxies") {
+          const first = options.searchParams.offset === "0";
+          if (state.fail.has(first ? "firstPage" : "laterPage")) return failing(path, options);
+          return Promise.resolve(
+            first ? page([member("source")], 0, 2) : page([member("destination")], 1, 2),
+          );
+        }
+        throw new Error(`Unexpected request: ${path}`);
+      },
+    }));
+    return state;
+  }
+
+  async function mountGroup() {
+    await render(
+      <ErrorPopupProvider>
+        <PluginDetailPage />
+      </ErrorPopupProvider>,
+    );
+    await settle();
+    await settle();
+    expect(selectedIds()).toEqual(["Remove /source", "Remove /destination"]);
+    return host.querySelector("form");
+  }
+
+  it.each([
+    ["the plugin read", "plugin", "Could not re-read the plugin; your form was kept. Try again."],
+    ["the first proxy page", "firstPage", "Could not re-read the plugin's proxies; your form was kept. Try again."],
+  ] as const)("shows only the reload toast when %s fails for the settle refresh and the reload", async (_label, read, message) => {
+    const state = gateway();
+    const draftForm = await mountGroup();
+
+    state.fail.add(read);
+    updatePlan.mockRejectedValueOnce(stale({ ...plugin, config: { requests: 9 } }));
+    await submit();
+    await settle();
+    await act(async () => dialogButton("Discard my draft and reload")!.click());
+    await settle();
+    await settle();
+
+    expect(toast).toHaveBeenCalledWith("error", message);
+    expect(document.body.textContent).not.toContain("API Error");
+    expect(host.querySelector("form")).toBe(draftForm);
+    expect(dialogButton("Discard my draft and reload")).toBeTruthy();
+  });
+
+  it("keeps the membership notice for the displayed group when a refetch says Global", async () => {
+    const state = gateway();
+    const draftForm = await mountGroup();
+
+    // Another operator made the plugin global; this draft still shows the group.
+    state.plugin = { ...plugin, scope: "global" };
+    state.fail.add("laterPage");
+    updatePlan.mockRejectedValueOnce(stale(state.plugin));
+    await submit();
+    await settle();
+    await act(async () => dialogButton("Keep my draft")!.click());
+    await settle();
+
+    expect(client.getQueryData(["pluginConfig", "default", "group-1"])).toEqual(state.plugin);
+    expect(host.querySelector("form")).toBe(draftForm);
+    // Still selected (its label now resolves from the picker's first page only).
+    expect(selectedIds()).toEqual(["Remove /source", expect.stringContaining("destination")]);
+    expect(host.querySelector("button[aria-label='Retry Proxy group membership']")).not.toBeNull();
+    expect(document.body.textContent).not.toContain("API Error");
   });
 });

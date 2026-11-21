@@ -562,6 +562,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tcp_connection_throttle.active_connections`), and its proxy-mode uptime
   advances with elapsed time, so its unchanged counters show a rate of 0
   instead of staying at Collecting.
+- "Discard my draft and reload" on the plugin detail page reloads as the
+  page's other reload paths do (#726). It re-reads the plugin and, for a
+  `proxy_group` configuration (including one whose scope just changed to
+  `proxy_group`), its complete proxy membership before remounting the form.
+  Before, it re-read only the plugin, so the remounted form kept stale group
+  membership and the next save expected it and was refused again. It also
+  discarded the draft and closed the dialog when the re-read failed. Now a
+  failed read keeps the draft and the conflict dialog and shows an error
+  toast (only the toast: the reload's reads are silent). Once a form is on the
+  page, a refetch that turns the plugin into a group no longer swaps the form
+  and dialog for the membership skeleton or error; only a successful reload
+  remounts it, and such a refetch no longer starts a background membership
+  traversal of its own. Reloads run one at a time, and "Keep my draft" or
+  leaving the editor abandons a pending one, so it cannot remount the form or
+  toast late; its reads are aborted, and an editor that has gone starts none.
+  A committed save's warning names the read its reseed could not make. A
+  reload never publishes over anything its caches learned meanwhile (a
+  different plugin revision or membership, a `404`, a retired entry; it asks
+  for another try), and a second submit before the
+  pending state renders starts no second save. While
+  a save is pending or a reload runs the form's fields are disabled, nothing
+  submits (an open select menu closes), and Delete is unavailable while a
+  save or reload can still replace the form (a reload also closes an open
+  delete confirmation, and a confirmed delete stops any later save or
+  reload), so neither a new edit nor a delete confirmation can be overtaken
+  by the reloaded seed. A mounted form's background reads (the plugin, the
+  proxy picker's first page, the membership) report a failure inline rather
+  than as the global error popup, the membership notice follows the scope the
+  form displays, and a group saved to another scope stops its membership
+  traversal.
 - Upstream edit baselines reduce subsets exactly as saves submit them
   (#725). `upstreams.toBaseline()` now strips the server-owned
   `subsets[].traffic_policy` fields (`writableSubset`), and spells an unset
