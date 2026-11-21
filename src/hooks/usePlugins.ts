@@ -9,6 +9,7 @@
 /* ------------------------------------------------------------------ */
 
 import { queryScope } from "@/api/client";
+import { isInlineReported } from "./inlineReportedReads";
 import {
   type QueryClient,
   useMutation,
@@ -115,9 +116,11 @@ export function pluginConfigKey(namespace: string, id: string) {
 
 export function usePluginConfig(id: string, enabled = true) {
   const { scope } = useNamespace();
+  const queryKey = pluginConfigKey(scope.namespace, id);
   return useQuery({
-    queryKey: pluginConfigKey(scope.namespace, id),
-    queryFn: () => plugins.getConfig(queryScope(scope), id),
+    queryKey,
+    // Silent while a mounted page reports this read inline (`useInlineReportedReads`).
+    queryFn: () => plugins.getConfig(queryScope(scope), id, isInlineReported(queryKey)),
     enabled: enabled && !!id,
   });
 }

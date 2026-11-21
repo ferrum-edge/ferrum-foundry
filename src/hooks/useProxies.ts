@@ -17,6 +17,7 @@ import {
   type UseQueryResult,
 } from "@tanstack/react-query";
 import { ALL_PAGE_SIZE } from "@/api/pagination";
+import { isInlineReported } from "./inlineReportedReads";
 import * as proxies from "@/api/proxies";
 import type { WriteGuard } from "@/api/conditionalWrite";
 import type { PaginationParams, Proxy, ProxyCreate } from "@/api/types";
@@ -62,40 +63,24 @@ export function useProxies(params: PaginationParams = {}, enabled = true) {
  * search term, or leaving the page abandons the remaining pages instead of
  * paying for results nobody will read.
  */
+/** The cache key of a proxy picker's bounded first page (`useProxyCatalog`). */
+export function proxyFirstPageKey(namespace: string) {
+  return ["proxies", namespace, "firstPage", ALL_PAGE_SIZE] as const;
+}
+
 /** The cache key of a namespace's complete proxy collection (`useAllProxies`). */
 export function allProxiesKey(namespace: string) {
   return ["proxies", namespace, "all"] as const;
 }
 
-/**
- * Namespaces whose complete proxy list a mounted page reports inline. Every
- * observer of that one query shares it, and a refetch runs whichever
- * observer's queryFn the query last stored, so the choice is made per
- * namespace at fetch time rather than per observer.
- */
-const inlineReportedFullLists = new Map<string, number>();
-
-/**
- * `silentErrors` keeps this query's failures out of the global error popup
- * while the observer is mounted, for a page that reports the query's error
- * state inline itself.
- */
-export function useAllProxies(enabled = true, { silentErrors = false } = {}) {
+export function useAllProxies(enabled = true) {
   const { scope } = useNamespace();
-  const namespace = scope.namespace;
-  useEffect(() => {
-    if (!silentErrors) return;
-    inlineReportedFullLists.set(namespace, (inlineReportedFullLists.get(namespace) ?? 0) + 1);
-    return () => {
-      const remaining = (inlineReportedFullLists.get(namespace) ?? 1) - 1;
-      if (remaining > 0) inlineReportedFullLists.set(namespace, remaining);
-      else inlineReportedFullLists.delete(namespace);
-    };
-  }, [silentErrors, namespace]);
+  const queryKey = allProxiesKey(scope.namespace);
   return useQuery({
-    queryKey: allProxiesKey(namespace),
+    queryKey,
+    // Silent while a mounted page reports this list inline (`useInlineReportedReads`).
     queryFn: ({ signal }) =>
-      proxies.listAll(queryScope(scope), signal, inlineReportedFullLists.has(scope.namespace)),
+      proxies.listAll(queryScope(scope), signal, isInlineReported(queryKey)),
     enabled,
   });
 }
@@ -142,10 +127,16 @@ export interface ProxyCatalog {
 export function useProxyCatalog(expanded: boolean): ProxyCatalog {
   const qc = useQueryClient();
   const { scope } = useNamespace();
+  const firstPageKey = proxyFirstPageKey(scope.namespace);
   const firstPage = useQuery({
-    queryKey: ["proxies", scope.namespace, "firstPage", ALL_PAGE_SIZE],
+    queryKey: firstPageKey,
     queryFn: ({ signal }) =>
-      proxies.list(queryScope(scope), { offset: 0, limit: ALL_PAGE_SIZE }, signal),
+      proxies.list(
+        queryScope(scope),
+        { offset: 0, limit: ALL_PAGE_SIZE },
+        signal,
+        isInlineReported(firstPageKey),
+      ),
   });
   const page = firstPage.data;
   const firstPageIsWholeCollection =

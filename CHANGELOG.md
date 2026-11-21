@@ -508,9 +508,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   save or reload can still replace the form (a reload also closes an open
   delete confirmation, and a confirmed delete stops any later save or
   reload), so neither a new edit nor a delete confirmation can be overtaken
-  by the reloaded seed. A mounted form's background membership refresh
-  reports a failure inline rather than as the global error popup, and a group
-  saved to another scope stops its membership traversal.
+  by the reloaded seed. A mounted form's background reads (the plugin, the
+  proxy picker's first page, the membership) report a failure inline rather
+  than as the global error popup, the membership notice follows the scope the
+  form displays, and a group saved to another scope stops its membership
+  traversal.
 - The Settings page's connection test recognizes Ferrum Edge's structured
   `503` `/health` answer for a gateway that is starting, degraded, unavailable
   or draining (#724). `GET /api/settings/status` reports it `reachable: true`

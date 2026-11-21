@@ -1271,3 +1271,128 @@ describe("a pending reload locks the form and excludes delete (#726)", () => {
     expect(get.mock.calls.filter(([path]) => path === "proxies").length).toBe(before);
   });
 });
+
+describe("a mounted editor reports its background reads inline (#726)", () => {
+  async function submit() {
+    await act(async () => {
+      host.querySelector("form")!.dispatchEvent(
+        new Event("submit", { bubbles: true, cancelable: true }),
+      );
+    });
+    await settle();
+  }
+
+  function dialogButton(label: string) {
+    return [...document.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.trim() === label);
+  }
+
+  function stale(current: PluginConfig): StaleResourceError {
+    return new StaleResourceError({
+      resource: "plugin configuration",
+      operation: "save",
+      id: plugin.id,
+      namespace: "default",
+      original: toBaseline(plugin),
+      current: toBaseline(current),
+      proposed: toBaseline(plugin),
+    });
+  }
+
+  /** Fail as the ky client does: silent, deferred to the Query, or at once. */
+  function failing(path: string, options: { context?: Record<string, unknown> }) {
+    const error = new Error("HTTP 503");
+    const context = options.context ?? {};
+    if (!context[SILENT_ERRORS]) {
+      reportRequestError(
+        error,
+        { statusCode: 503, body: "unavailable", url: `/api/proxy/${path}` },
+        Boolean(context[DEFER_QUERY_ERRORS]),
+      );
+    }
+    return Promise.reject(error);
+  }
+
+  /**
+   * A gateway that serves the group and two proxy pages until `fail` names a
+   * read, after which that read fails for every request.
+   */
+  function gateway() {
+    const state = {
+      plugin: plugin as PluginConfig,
+      fail: new Set<"plugin" | "firstPage" | "laterPage">(),
+    };
+    get.mockImplementation((path, options) => ({
+      headers: new Headers(),
+      json: () => {
+        if (path === "plugins") return catalog;
+        if (path === "plugins/config/group-1") {
+          return state.fail.has("plugin") ? failing(path, options) : Promise.resolve(state.plugin);
+        }
+        if (path === "proxies") {
+          const first = options.searchParams.offset === "0";
+          if (state.fail.has(first ? "firstPage" : "laterPage")) return failing(path, options);
+          return Promise.resolve(
+            first ? page([member("source")], 0, 2) : page([member("destination")], 1, 2),
+          );
+        }
+        throw new Error(`Unexpected request: ${path}`);
+      },
+    }));
+    return state;
+  }
+
+  async function mountGroup() {
+    await render(
+      <ErrorPopupProvider>
+        <PluginDetailPage />
+      </ErrorPopupProvider>,
+    );
+    await settle();
+    await settle();
+    expect(selectedIds()).toEqual(["Remove /source", "Remove /destination"]);
+    return host.querySelector("form");
+  }
+
+  it.each([
+    ["the plugin read", "plugin", "Could not re-read the plugin; your form was kept. Try again."],
+    ["the first proxy page", "firstPage", "Could not re-read the plugin's proxies; your form was kept. Try again."],
+  ] as const)("shows only the reload toast when %s fails for the settle refresh and the reload", async (_label, read, message) => {
+    const state = gateway();
+    const draftForm = await mountGroup();
+
+    state.fail.add(read);
+    updatePlan.mockRejectedValueOnce(stale({ ...plugin, config: { requests: 9 } }));
+    await submit();
+    await settle();
+    await act(async () => dialogButton("Discard my draft and reload")!.click());
+    await settle();
+    await settle();
+
+    expect(toast).toHaveBeenCalledWith("error", message);
+    expect(document.body.textContent).not.toContain("API Error");
+    expect(host.querySelector("form")).toBe(draftForm);
+    expect(dialogButton("Discard my draft and reload")).toBeTruthy();
+  });
+
+  it("keeps the membership notice for the displayed group when a refetch says Global", async () => {
+    const state = gateway();
+    const draftForm = await mountGroup();
+
+    // Another operator made the plugin global; this draft still shows the group.
+    state.plugin = { ...plugin, scope: "global" };
+    state.fail.add("laterPage");
+    updatePlan.mockRejectedValueOnce(stale(state.plugin));
+    await submit();
+    await settle();
+    await act(async () => dialogButton("Keep my draft")!.click());
+    await settle();
+
+    expect(client.getQueryData(["pluginConfig", "default", "group-1"])).toEqual(state.plugin);
+    expect(host.querySelector("form")).toBe(draftForm);
+    // Still selected (its label now resolves from the picker's first page only).
+    expect(selectedIds()).toEqual(["Remove /source", expect.stringContaining("destination")]);
+    expect(host.querySelector("button[aria-label='Retry Proxy group membership']")).not.toBeNull();
+    expect(document.body.textContent).not.toContain("API Error");
+  });
+});

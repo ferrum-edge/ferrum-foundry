@@ -378,11 +378,15 @@ The page withholds the form only until its first seed is complete (a group's
 whole membership included). After that, a background refetch never takes the
 form or the conflict dialog off the page, not even the save's own settle
 refetch finding that the plugin became a group. The background membership
-traversal follows the scope of the mounted form's seed (or of a save that
-left the group), so that refetch does not start one; the explicit reload
-reads the membership itself, and only its success remounts the form. While a
-form is mounted, a failed background membership refresh is reported inline,
-never as the global error popup over the form or a reload's toast.
+traversal follows the scope the mounted form displays (its seed, or a save
+that left the group), so that refetch does not start one; the explicit
+reload reads the membership itself, and only its success remounts the form.
+The same displayed scope decides the membership notice. While a form is
+mounted, every background read the page reports inline (the plugin, the
+proxy picker's first page, the membership) is silent
+(`useInlineReportedReads`, chosen per query key at fetch time), so a failure
+shows its notice beside the form, never the global error popup over it or
+over a reload's toast.
 
 The two single-field editors take their guard from the list they were computed
 from rather than the settings form's seed. The update hooks refresh the

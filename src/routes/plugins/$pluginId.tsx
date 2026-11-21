@@ -13,7 +13,8 @@ import {
   useDeletePluginWithMembership,
   useAvailablePlugins,
 } from "@/hooks/usePlugins";
-import { allProxiesKey, useAllProxies } from "@/hooks/useProxies";
+import { allProxiesKey, proxyFirstPageKey, useAllProxies } from "@/hooks/useProxies";
+import { useInlineReportedReads } from "@/hooks/inlineReportedReads";
 import { useNamespace } from "@/stores/namespace";
 import { ReadStateNotice } from '@/components/shared/ReadState';
 import { useToast } from "@/components/ui/Toast";
@@ -86,15 +87,27 @@ function PluginEditor({ session }: { session: EditorSession }) {
   const formSeeded = seededScope !== null;
   // Only a proxy-group plugin's membership needs the whole proxy collection;
   // global and proxy-scoped plugins must not pay for that traversal. Once a
-  // form is mounted, its own seed decides: a refetch that turns the plugin
-  // into a group does not start the background traversal, because the form
-  // cannot show that membership anyway; an explicit reload reads it itself.
-  // A mounted form's background refreshes are also silent: their failure is
-  // reported inline (the membership notice), never as a global popup over
-  // the form, a conflict dialog, or a reload's own toast.
-  const proxiesQuery = useAllProxies(
-    formSeeded ? seededScope === "proxy_group" : plugin?.scope === "proxy_group",
-    { silentErrors: formSeeded },
+  // form is mounted, the scope it displays decides: a refetch that turns the
+  // plugin into a group does not start the background traversal, because the
+  // form cannot show that membership anyway (an explicit reload reads it
+  // itself), and one that turns it away from a group keeps the membership
+  // the form shows refreshed. The one predicate also decides the membership
+  // notice, so a failed refresh is always reported beside the form.
+  const membershipDisplayed = formSeeded
+    ? seededScope === "proxy_group"
+    : plugin?.scope === "proxy_group";
+  const proxiesQuery = useAllProxies(membershipDisplayed);
+  // Once a form is mounted, every background read this page reports inline
+  // (the plugin, the picker's first page, the group's membership) stays out
+  // of the global error popup, so no popup stacks over the form, a conflict
+  // dialog, or a reload's own toast.
+  useInlineReportedReads(
+    [
+      pluginConfigKey(scope.namespace, pluginId),
+      proxyFirstPageKey(scope.namespace),
+      allProxiesKey(scope.namespace),
+    ],
+    formSeeded,
   );
   const {
     data: allProxies,
@@ -392,7 +405,7 @@ function PluginEditor({ session }: { session: EditorSession }) {
 
   /* ---------- Loading / Error states ---------- */
 
-  const needsMembership = plugin?.scope === "proxy_group";
+  const needsMembership = membershipDisplayed;
 
   // listAll resolves only after every page succeeds; partial membership must
   // never become the initial selection for a full membership replacement.
