@@ -319,10 +319,41 @@ choices it made.
 
 ### Production Build
 
+For a complete, supported production walkthrough (Foundry, an identity proxy,
+and a gateway), use the [deployment starter](deploy/starter/README.md) and
+[Getting started](docs/getting-started.md).
+
+`npm run build` compiles the UI into `dist/` and the BFF into `dist-server/`.
+`npm start` serves the compiled UI only when `NODE_ENV=production`. Without it,
+as with the local development variables above, `npm start` runs the BFF API
+alone and `GET /` answers a JSON `404`; that mode only backs the Vite dev
+server (`npm run dev`).
+
+Production mode refuses static-token authentication and the published
+development secrets, so the built UI runs behind a trusted identity proxy:
+
 ```bash
 npm run build
+
+export NODE_ENV=production
+export FERRUM_AUTH_MODE=trusted-proxy
+export FERRUM_TRUSTED_PROXY_SECRET="$(openssl rand -hex 32)" # the proxy sends it
+export FERRUM_ADMIN_URL=https://ferrum-admin.internal:9000   # https unless loopback
+export FERRUM_JWT_SECRET="$(openssl rand -hex 32)"           # also configure this on Ferrum Edge
+export FERRUM_AUTH_LOGIN_URL=/oauth2/start
+export FERRUM_AUTH_LOGOUT_URL=/oauth2/sign_out
+export FERRUM_BIND_ADDRESS=127.0.0.1 # reachable only through the proxy
+export PORT=3001
 npm start
 ```
+
+The BFF now serves the built UI at `/`, but open it through the identity
+proxy: the proxy runs the sign-in flow and injects the identity headers on
+every request, and API requests that reach the BFF without them are refused.
+[Production authentication](docs/authentication.md#production-trusted-identity-proxy)
+lists the headers the proxy must strip and inject, and
+[Deployment](docs/deployment.md#3-reverse-proxy-example-nginx-and-oauth2-proxy)
+has an nginx and oauth2-proxy configuration.
 
 ### Docker
 
