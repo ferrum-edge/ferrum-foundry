@@ -233,17 +233,39 @@ export async function create(
  * the top-level fields in `UPSTREAM_BASELINE_OMIT`. Keeping them would refuse
  * a save (or delete) when the control plane rewrote one, and would show
  * `subsets` as changed locally in a real conflict, since the proposed payload
- * never carries them (#725).
+ * never carries them (#725). See `baselineSubset` for the shapes it leaves
+ * alone.
  */
 export function toBaseline(
   upstream: Upstream | UpstreamCreate,
 ): BaselineSnapshot {
   const snapshot = baselineSnapshot(upstream, UPSTREAM_BASELINE_OMIT);
   if (!Array.isArray(snapshot.subsets)) return snapshot;
-  return {
-    ...snapshot,
-    subsets: (snapshot.subsets as SubsetDefinition[]).map(writableSubset),
-  };
+  return { ...snapshot, subsets: snapshot.subsets.map(baselineSubset) };
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * One subset as a baseline compares it. Only a well-formed subset is
+ * projected: any other entry (a `null`, say), or a subset whose
+ * `traffic_policy` is not an object, is kept verbatim, so the guard compares
+ * it and refuses a change instead of failing to reduce the read. An explicit
+ * `traffic_policy: null` counts as an omitted one, as Edge treats them alike
+ * and the settings form submits no key.
+ */
+function baselineSubset(subset: unknown): unknown {
+  if (!isPlainObject(subset)) return subset;
+  const policy = subset.traffic_policy;
+  if (policy === null) {
+    const { traffic_policy, ...rest } = subset;
+    void traffic_policy;
+    return rest;
+  }
+  if (policy !== undefined && !isPlainObject(policy)) return subset;
+  return writableSubset(subset as unknown as SubsetDefinition);
 }
 
 /**

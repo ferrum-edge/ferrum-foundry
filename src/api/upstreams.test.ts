@@ -249,4 +249,32 @@ describe("upstream baselines (#725)", () => {
     const current = toBaseline(meshUpstream({ load_balancer_algorithm: "round_robin" }));
     expect(current).not.toEqual(original);
   });
+
+  it("keeps malformed subset entries and policies verbatim", () => {
+    const read = {
+      ...fullUpstream(),
+      subsets: [null, "v1", { name: "v2", labels: {}, traffic_policy: "broken" }, ["v3"]],
+    } as unknown as Upstream;
+    expect(toBaseline(read).subsets).toEqual(read.subsets);
+  });
+
+  it("treats an explicit null subset policy as an omitted one", () => {
+    const read = {
+      ...fullUpstream(),
+      subsets: [{ name: "v2", labels: { version: "v2" }, traffic_policy: null }],
+    } as Upstream;
+    expect(toBaseline(read).subsets).toEqual([{ name: "v2", labels: { version: "v2" } }]);
+    // The settings form submits no policy key for it, renamed or not.
+    const original = toBaseline(read);
+    const current = toBaseline({ ...read, algorithm: "least_connections" });
+    const proposed = toBaseline(
+      mergeFormUpdatePayload(read, {
+        ...toUpdatePayload(read),
+        name: "payments-v2",
+        subsets: [{ name: "v2", labels: { version: "v2" } }],
+      }),
+    );
+    expect(compareBaselines(original, current, proposed).map(({ field }) => field).sort())
+      .toEqual(["algorithm", "name"]);
+  });
 });

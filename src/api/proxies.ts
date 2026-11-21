@@ -224,14 +224,13 @@ export async function create(
 /**
  * Reduce a proxy — or a proxy write payload — to the content a full-replace
  * save overwrites. The editor captures this when it opens and the guard
- * compares it against a fresh read just before the `PUT`. Retired fields are
- * left out as `toUpdatePayload` leaves them out: a save never sends one, so a
- * change to it is not something the draft is racing, and keeping it would
- * show it as changed locally in every conflict on a read that carries it.
- * The delete guard still compares them (`proxyDeleteGuard`).
+ * compares it against a fresh read just before the `PUT`. A retired field
+ * stays in: the save never sends it, but Edge v0.9.20 stores `None` for the
+ * omitted key, so the save clears it and a concurrent change to it is
+ * something this draft would revert (#725).
  */
 export function toBaseline(proxy: Proxy | ProxyCreate): BaselineSnapshot {
-  return baselineSnapshot(proxy, [...PROXY_BASELINE_OMIT, ...RETIRED_PROXY_FIELDS]);
+  return baselineSnapshot(proxy, PROXY_BASELINE_OMIT);
 }
 
 /** The guard shape a proxy editor builds from the resource it was seeded with. */
@@ -241,9 +240,8 @@ export function proxyWriteGuard(seed: Proxy): WriteGuard<Proxy | ProxyCreate> {
 
 /**
  * The guard a proxy detail page's delete builds from the proxy it displays.
- * Unlike a save, it compares `plugins` and any retired field a read carries:
- * deleting the proxy destroys them too, and both are operator-written, not
- * owned by the gateway (see `DELETE_BASELINE_OMIT`).
+ * Unlike a save, it compares `plugins`: deleting the proxy destroys its
+ * associations too (see `DELETE_BASELINE_OMIT`).
  */
 export function proxyDeleteGuard(seed: Proxy): WriteGuard<Proxy | ProxyCreate> {
   const select = (value: Proxy | ProxyCreate): BaselineSnapshot => {

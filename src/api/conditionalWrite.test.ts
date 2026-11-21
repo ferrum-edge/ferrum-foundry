@@ -323,6 +323,27 @@ describe("guarded proxy saves on a gateway that honours If-Match", () => {
     expect(gateway.read().backend_read_timeout_ms).toBe(30_000);
   });
 
+  it("refuses a draft opened before another writer changed the retired pool field (#725)", async () => {
+    // Edge v0.9.20 stores None for an omitted pool_max_requests_per_connection,
+    // so this save, which never sends it, would clear the other writer's value.
+    const seed = { ...proxyFixture(), pool_max_requests_per_connection: 900 } as Proxy;
+    const gateway = stubGateway({ ...seed, pool_max_requests_per_connection: 50 } as Proxy);
+
+    const refused = await settle(
+      proxies.update(
+        scope,
+        "checkout",
+        formDraft(seed, { backend_read_timeout_ms: 30_000 }),
+        proxies.proxyWriteGuard(seed),
+      ),
+    );
+
+    if (!isStaleResourceError(refused)) throw new Error("expected a stale write");
+    expect(refused.detail.current.pool_max_requests_per_connection).toBe(50);
+    expect(gateway.wire).toEqual(["GET"]);
+    expect(gateway.read()).toHaveProperty("pool_max_requests_per_connection", 50);
+  });
+
   it("refuses a draft when another writer commits between the verification read and the PUT", async () => {
     // This is the window the verification read alone could not close: the
     // read matches the baseline, then administrator 1 commits, then
@@ -759,6 +780,60 @@ describe("guarded upstream saves on a gateway that honours If-Match", () => {
 
       expect(gateway.wire).toEqual(["GET", 'DELETE if-match "r0"']);
       expect(gateway.exists()).toBe(false);
+    });
+
+    it.each([
+      ["a null subset entry", [null]],
+      ["a non-object subset policy", [{ name: "v2", labels: { version: "v2" }, traffic_policy: "broken" }]],
+    ])("refuses, sending nothing, when a tagged re-read holds %s", async (_shape, subsets) => {
+      const gateway = stubGateway({ ...meshSeed, subsets } as unknown as Upstream);
+
+      const saved = await settle(
+        upstreams.update(
+          scope,
+          "payments",
+          { ...upstreams.toUpdatePayload(meshSeed), name: "renamed" },
+          upstreams.upstreamWriteGuard(meshSeed),
+        ),
+      );
+      const deleted = await settle(
+        upstreams.remove(scope, "payments", upstreams.upstreamWriteGuard(meshSeed)),
+      );
+
+      if (!isStaleResourceError(saved)) throw new Error("expected a stale save");
+      expect(saved.detail.current.subsets).toEqual(subsets);
+      expect(isStaleResourceError(deleted)).toBe(true);
+      expect(gateway.wire).toEqual(["GET", "GET"]);
+      expect(gateway.exists()).toBe(true);
+    });
+
+    it("does not show a null subset policy as changed locally by the form's save", async () => {
+      const seed = {
+        ...upstreamSeed,
+        backend_tls_san_allow_list: [],
+        subsets: [{ name: "v2", labels: { version: "v2" }, traffic_policy: null }],
+      } as Upstream;
+      const gateway = stubGateway({ ...seed, algorithm: "least_connections" } as Upstream);
+
+      // What UpstreamForm submits for that subset: no policy key at all.
+      const refused = await settle(
+        upstreams.update(
+          scope,
+          "payments",
+          upstreams.mergeFormUpdatePayload(seed, {
+            ...upstreams.toUpdatePayload(seed),
+            name: "renamed",
+            subsets: [{ name: "v2", labels: { version: "v2" } }],
+          }),
+          upstreams.upstreamWriteGuard(seed),
+        ),
+      );
+
+      if (!isStaleResourceError(refused)) throw new Error("expected a stale save");
+      const { original, current, proposed } = refused.detail;
+      expect(compareBaselines(original, current, proposed).map(({ field }) => field).sort())
+        .toEqual(["algorithm", "name"]);
+      expect(gateway.wire).toEqual(["GET"]);
     });
 
     it("still refuses a delete when a writable subset field changed", async () => {
