@@ -273,6 +273,35 @@ describe("subset selectors through the upstream form (#479)", () => {
     expect(fields).toEqual(["algorithm", "name"]);
   });
 
+  it("writes an untouched subset name back exactly, surrounding space included (#725)", async () => {
+    const data = {
+      ...upstream([
+        { name: "blue ", labels: { version: "blue" } },
+        { name: " green", labels: { version: "green" } },
+      ]),
+      backend_tls_san_allow_list: [],
+      backend_tls_verify_server_cert: true,
+    } as Upstream;
+    await mount(data);
+    await fill(inputByLabel(ui.host, "Name"), "Orders v2");
+    await save();
+    expect(outgoingSubsets(data)?.map((subset) => subset.name)).toEqual(["blue ", " green"]);
+
+    const proposed = toBaseline(mergeFormUpdatePayload(data, submit.mock.calls[0][0]));
+    const current = toBaseline({ ...data, algorithm: "least_connections" });
+    expect(compareBaselines(toBaseline(data), current, proposed).map(({ field }) => field).sort())
+      .toEqual(["algorithm", "name"]);
+  });
+
+  it("still trims a subset name the operator edited", async () => {
+    const data = upstream([{ name: "blue ", labels: { version: "blue" } }]);
+    await mount(data);
+    await openSubsets();
+    await fill(inputByLabel(subsetGroup("blue"), "Subset Name"), " canary ");
+    await save();
+    expect(outgoingSubsets(data)?.map((subset) => subset.name)).toEqual(["canary"]);
+  });
+
   describe("an explicit client-IP subset hash key (#725)", () => {
     // A header-hashing parent; subset v2 overrides it with Edge's empty hash
     // key, which hashes on the client IP.

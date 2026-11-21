@@ -325,7 +325,10 @@ function subsetForSubmit(row: SubsetRow): SubsetDefinition {
   };
   return {
     ...readSubset,
-    name: row.name.trim(),
+    // Edge matches subset names exactly (a proxy's `upstream_subset` too), so
+    // an untouched name is written back as read; only a new or edited one is
+    // trimmed.
+    name: row.source && row.name === row.source.name ? row.name : row.name.trim(),
     labels: subsetLabelsForSubmit(row.labels),
     ...(Object.keys(trafficPolicy).length > 0 && { traffic_policy: trafficPolicy }),
   };

@@ -503,8 +503,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which Edge reads as an explicit client-IP override, is now seeded in the
   settings form as `ip` and submitted that way, and the baseline compares
   `""` and `"ip"` alike. Before, the form showed it blank and a name-only save
-  dropped the override, so the subset fell back to the parent's hash key. The
-  retired proxy `pool_max_requests_per_connection` stays compared on save:
+  dropped the override, so the subset fell back to the parent's hash key. An
+  untouched subset name is also written back exactly as read (Edge matches
+  names exactly, a proxy's `upstream_subset` included); only a new or edited
+  name is trimmed. The retired proxy `pool_max_requests_per_connection` stays compared on save:
   Edge v0.9.20 stores `None` when a save omits it, so the save does clear it.
 - The Settings page's connection test recognizes Ferrum Edge's structured
   `503` `/health` answer for a gateway that is starting, degraded, unavailable
