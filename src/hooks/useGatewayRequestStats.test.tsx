@@ -6,6 +6,7 @@ import { GatewayTargetGate } from "@/components/auth/GatewayTargetGate";
 import { createHarness } from "@/test/__tests__/harness";
 import {
   STORED_SAMPLE_MAX_AGE_MS,
+  STORED_SAMPLE_VERSION,
   useGatewayRequestStats,
   type GatewayRequestStats,
 } from "./useGatewayRequestStats";
@@ -19,8 +20,9 @@ const now = Date.parse("2026-09-24T12:00:00Z");
 let ui: ReturnType<typeof createHarness>;
 let stats: GatewayRequestStats | undefined;
 
-function gateway(totalRequests: number, uptimeSeconds: number): AdminMetrics["gateway"] {
+function gateway(totalRequests: number, uptimeSeconds: number, mode: string): AdminMetrics["gateway"] {
   return {
+    mode,
     uptime_seconds: uptimeSeconds,
     total_requests: totalRequests,
     status_codes_total: { "200": totalRequests },
@@ -31,21 +33,29 @@ function Probe({
   total,
   at,
   uptime = 86_400 * 2,
+  mode = "database",
 }: {
   total: number;
   at: number;
   uptime?: number;
+  mode?: string;
 }) {
   // A stable object per reading, as a query result is.
-  const reading = useMemo(() => gateway(total, uptime), [total, uptime]);
+  const reading = useMemo(() => gateway(total, uptime, mode), [total, uptime, mode]);
   stats = useGatewayRequestStats(reading, at);
   return null;
 }
 
-function storeSample(timestamp: number, totalRequests: number, target?: string) {
+function storeSample(
+  timestamp: number,
+  totalRequests: number,
+  target?: string,
+  fields: Record<string, unknown> = { version: STORED_SAMPLE_VERSION, mode: "database" },
+) {
   localStorage.setItem(
     STORAGE_KEY,
     JSON.stringify({
+      ...fields,
       ...(target === undefined ? {} : { target }),
       timestamp,
       uptimeSeconds: 86_400,
@@ -64,7 +74,7 @@ async function openPage(target: string) {
   ui = createHarness();
 }
 
-async function show(reading: { total: number; at: number; uptime?: number }) {
+async function show(reading: { total: number; at: number; uptime?: number; mode?: string }) {
   await ui.render(
     <GatewayTargetGate onReload={() => undefined}>
       <Probe {...reading} />
@@ -159,5 +169,65 @@ describe("gateway request rate", () => {
     await show({ total: 1_300, at: now + 60_000 });
     expect(stats?.requestsPerSecond).toBe(20);
     expect(stats?.statusCodesPerSecond).toEqual({ "200": 20 });
+  });
+  it.each(["cp", "node_agent"])("neither diffs nor stores %s placeholder zeros", async (mode) => {
+    await show({ total: 0, at: now, uptime: 0, mode });
+    expect(stats).toEqual({ totalRequests: 0 });
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+    await show({ total: 0, at: now + 30_000, uptime: 0, mode });
+    expect(stats).toEqual({ totalRequests: 0 });
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+  });
+
+  it("drops the baseline when a placeholder reading is observed", async () => {
+    await show({ total: 100, at: now });
+    expect(localStorage.getItem(STORAGE_KEY)).not.toBeNull();
+    await show({ total: 0, at: now + 30_000, uptime: 0, mode: "cp" });
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+    // A proxy reading after the placeholder is not diffed against the one before it.
+    await show({ total: 1_300, at: now + 60_000 });
+    expect(stats?.requestsPerSecond).toBeUndefined();
+  });
+
+  it("starts collecting afresh when a control plane is replaced by a data plane at the same target", async () => {
+    await show({ total: 0, at: now, uptime: 0, mode: "cp" });
+
+    // A data plane answers at the same admin URL, so the target is unchanged.
+    await show({ total: 600, at: now + 60_000, uptime: 5, mode: "dp" });
+    expect(stats?.totalRequests).toBe(600);
+    expect(stats?.requestsPerSecond).toBeUndefined();
+    expect(stats?.statusCodesPerSecond).toBeUndefined();
+
+    await show({ total: 1_200, at: now + 90_000, uptime: 35, mode: "dp" });
+    expect(stats?.requestsPerSecond).toBe(20);
+    expect(stats?.statusCodesPerSecond).toEqual({ "200": 20 });
+
+    // And across a remount, from the stored data-plane sample.
+    await openPage("target-a");
+    await show({ total: 1_800, at: now + 120_000, uptime: 65, mode: "dp" });
+    expect(stats?.requestsPerSecond).toBe(20);
+  });
+
+  it("does not diff readings from different modes", async () => {
+    await show({ total: 100, at: now, mode: "database" });
+    await show({ total: 1_300, at: now + 60_000, mode: "dp" });
+    expect(stats?.requestsPerSecond).toBeUndefined();
+  });
+
+  it("ignores a stored sample written before samples carried their mode", async () => {
+    // A pre-#720 sample may be a control plane's placeholder zeros.
+    storeSample(now - 60_000, 0, "target-a", {});
+    await show({ total: 6_000, at: now, mode: "dp" });
+    expect(stats?.requestsPerSecond).toBeUndefined();
+  });
+
+  it.each([
+    ["a placeholder mode", { version: STORED_SAMPLE_VERSION, mode: "cp" }],
+    ["another mode", { version: STORED_SAMPLE_VERSION, mode: "file" }],
+    ["another version", { version: 1, mode: "database" }],
+  ])("ignores a stored sample from %s", async (_label, fields) => {
+    storeSample(now - 60_000, 0, "target-a", fields);
+    await show({ total: 6_000, at: now });
+    expect(stats?.requestsPerSecond).toBeUndefined();
   });
 });

@@ -67,7 +67,7 @@ describe("metrics mode shapes", () => {
     expect(html).toContain(">Offline</p>");
   });
 
-  it.each(["database", "file", "dp", "mesh"])("keeps genuine measured zeros visible in %s mode", (mode) => {
+  it.each(["database", "file", "dp", "mesh", "constructor"])("keeps genuine measured zeros visible in %s mode", (mode) => {
     const html = renderToStaticMarkup(<GatewayStats metrics={snapshot(mode).gateway} requestStats={requestStats} />);
     for (const card of PROXY_RUNTIME_CARDS) expect(html).toContain(card);
     expect(html).toContain(">0m</p>");

@@ -20,13 +20,18 @@ describe("adminMetricsReporting", () => {
     expect(adminMetricsReporting(mode)).toEqual({ mode, modeLabel, reportsProxyRuntime: true });
   });
 
-  it("keeps an unknown mode's raw name and its values", () => {
-    expect(adminMetricsReporting("future")).toEqual({ mode: "future", modeLabel: "future", reportsProxyRuntime: true });
-  });
+  it.each(["future", "constructor", "toString", "__proto__", "hasOwnProperty"])(
+    "keeps the unknown mode %s's raw name and its values",
+    (mode) => {
+      expect(adminMetricsReporting(mode)).toEqual({ mode, modeLabel: mode, reportsProxyRuntime: true });
+    },
+  );
 
   it("labels every config source status", () => {
     expect(configSourceLabel("online")).toBe("Online");
     expect(configSourceLabel("offline")).toBe("Offline");
     expect(configSourceLabel("n/a")).toBe("Not applicable");
+    // An unexpected value is shown raw, inherited names included.
+    expect(configSourceLabel("constructor" as never)).toBe("constructor");
   });
 });

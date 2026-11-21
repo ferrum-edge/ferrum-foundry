@@ -451,8 +451,29 @@ for (const [mode, source] of [["cp", "online"], ["node_agent", "n/a"]]) {
     assert.deepEqual(metrics.circuit_breakers, []);
     assert.deepEqual(metrics.health_check, { unhealthy_target_count: 0, unhealthy_targets: [] });
     assert.deepEqual(metrics.load_balancers, { active_connections: [] });
-    assert.equal(metrics.consumer_index.total_consumers, 0);
-    assert.equal(metrics.rate_limiting.tracked_key_count, 0);
+    assert.deepEqual(metrics.consumer_index, {
+      total_consumers: 0, key_auth_credentials: 0, basic_auth_credentials: 0, mtls_credentials: 0,
+      jwt_credentials: 0, hmac_credentials: 0, identity_credentials: 0,
+    });
+    assert.deepEqual(metrics.rate_limiting, { tracked_key_count: 0 });
+    assert.deepEqual(metrics.adaptive_concurrency, {
+      policy_count: 0, tracked_target_count: 0, limit_total: 0, in_flight_total: 0,
+    });
+    assert.deepEqual(metrics.tcp_connection_throttle, {
+      enforcement_scope: "process_local",
+      replica_limit_behavior: "configured_limit_per_replica",
+      active_connections: 0,
+    });
+    // Exactly Edge's top-level keys; `database_polling` is optional.
+    assert.deepEqual(Object.keys(metrics).sort(), [
+      "adaptive_concurrency", "caches", "circuit_breakers", "connection_pools", "consumer_index",
+      "gateway", "health_check", "load_balancers", "rate_limiting", "tcp_connection_throttle",
+    ]);
+    assert.deepEqual(Object.keys(metrics.gateway).sort(), [
+      "config_last_updated_at", "config_source_status", "consumer_count", "ferrum_version",
+      "metrics_window_seconds", "mode", "plugin_config_count", "proxy_count", "requests_per_second",
+      "status_codes_per_second", "status_codes_total", "total_requests", "upstream_count", "uptime_seconds",
+    ]);
   });
 }
 
@@ -466,6 +487,10 @@ for (const [mode, source] of [["database", "online"], ["file", "n/a"], ["dp", "n
     assert.equal(typeof metrics.gateway.config_last_updated_at, "string");
     assert.ok(metrics.connection_pools.http);
     assert.ok(metrics.caches.router);
+    assert.deepEqual(Object.keys(metrics.adaptive_concurrency).sort(), [
+      "in_flight_total", "limit_total", "policy_count", "tracked_target_count",
+    ]);
+    assert.equal(typeof metrics.tcp_connection_throttle.active_connections, "number");
   });
 }
 

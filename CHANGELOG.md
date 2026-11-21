@@ -502,9 +502,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   panels (circuit breakers, connection pools, health checks, load balancers,
   caches, rate limiting, consumer index) and the Dashboard's breaker and
   unhealthy-target alerts. A measured zero in `database`, `file`, `dp` or
-  `mesh` mode is still shown. The mock admin gateway's `/admin/metrics` now
-  follows `MOCK_GATEWAY_MODE`, returning Edge's skeleton for `cp` and
-  `node_agent`.
+  `mesh` mode is still shown. The request-rate sampler neither diffs nor
+  stores a `cp` or `node_agent` reading and drops its baseline when it sees
+  one, so a data plane that later answers at the same gateway target starts
+  collecting afresh; stored samples now carry a version and their mode, and
+  are only diffed within one mode. The mock admin gateway's `/admin/metrics`
+  now follows `MOCK_GATEWAY_MODE`, returning Edge's skeleton for `cp` and
+  `node_agent` (including the zeroed `adaptive_concurrency` counters and
+  `tcp_connection_throttle.active_connections`).
 - Foundry handles the plugin-config projection Ferrum Edge `main` adds after
   v0.9.20 (ferrum-edge#7054). The sensitivity drift parser accepts
   `FieldSensitivity::CertificateSource`, `PrivateKeySource` and `EndpointPath`

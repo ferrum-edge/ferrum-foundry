@@ -29,5 +29,11 @@ export function adminMetricsSnapshot(mode: string): AdminMetrics {
       mtls_credentials: 0, jwt_credentials: 0, hmac_credentials: 0, identity_credentials: 0,
     },
     rate_limiting: { tracked_key_count: 0 },
+    adaptive_concurrency: { policy_count: 0, tracked_target_count: 0, limit_total: 0, in_flight_total: 0 },
+    tcp_connection_throttle: {
+      enforcement_scope: "process_local",
+      replica_limit_behavior: "configured_limit_per_replica",
+      active_connections: 0,
+    },
   };
 }

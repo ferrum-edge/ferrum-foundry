@@ -60,7 +60,7 @@ describe("dashboard mode shapes", () => {
     expect(html).toContain("text-warning");
   });
 
-  it.each(["database", "file", "dp", "mesh"])("keeps genuine measured zeros visible in %s mode", (mode) => {
+  it.each(["database", "file", "dp", "mesh", "constructor"])("keeps genuine measured zeros visible in %s mode", (mode) => {
     const html = renderDashboard(mode);
     for (const card of RESOURCE_AND_TRAFFIC) expect(html).toContain(card);
     expect(html).toContain(">0m</p>");

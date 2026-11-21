@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { boundGatewayTarget, isGatewayTargetRetired } from "@/api/gatewayTarget";
 import type { AdminMetrics } from "@/api/types";
+import { adminMetricsReporting } from "@/lib/adminMetricsReporting";
 import { useNamespace } from "@/stores/namespace";
 
 const REQUEST_SAMPLE_STORAGE_KEY = "ferrum:metricsRequestSample";
@@ -13,6 +14,13 @@ const REQUEST_SAMPLE_STORAGE_KEY = "ferrum:metricsRequestSample";
 export const STORED_SAMPLE_MAX_AGE_MS = 15 * 60_000;
 
 /**
+ * Shape version of a stored sample. A sample without it was written before
+ * samples carried their mode and may hold a control plane's placeholder zeros,
+ * so it is never diffed against.
+ */
+export const STORED_SAMPLE_VERSION = 2;
+
+/**
  * Counters are only comparable within one gateway, and the namespace does not
  * identify one (`src/api/gatewayTarget.ts`). So the stored sample names the
  * gateway target it was observed on, and a sample for any other target — or
@@ -22,7 +30,14 @@ export const STORED_SAMPLE_MAX_AGE_MS = 15 * 60_000;
  * a reading taken before the switch.
  */
 interface RequestSample {
+  version: typeof STORED_SAMPLE_VERSION;
   target: string;
+  /**
+   * The `gateway.mode` the counters were read in. Only a mode that reports
+   * proxy runtime is ever sampled, and counters are only diffed within one
+   * mode.
+   */
+  mode: string;
   timestamp: number;
   uptimeSeconds: number;
   totalRequests: number;
@@ -39,7 +54,11 @@ function storageKey(namespace: string): string {
   return `${REQUEST_SAMPLE_STORAGE_KEY}:${namespace}`;
 }
 
-function readStoredSample(namespace: string, target: string): RequestSample | undefined {
+function readStoredSample(
+  namespace: string,
+  target: string,
+  mode: string,
+): RequestSample | undefined {
   try {
     const stored = localStorage.getItem(storageKey(namespace));
     if (!stored) return undefined;
@@ -48,8 +67,12 @@ function readStoredSample(namespace: string, target: string): RequestSample | un
     if (
       !parsed ||
       typeof parsed !== "object" ||
+      parsed.version !== STORED_SAMPLE_VERSION ||
       typeof parsed.target !== "string" ||
       parsed.target !== target ||
+      typeof parsed.mode !== "string" ||
+      parsed.mode !== mode ||
+      !adminMetricsReporting(parsed.mode).reportsProxyRuntime ||
       !Number.isFinite(parsed.timestamp) ||
       !Number.isFinite(parsed.uptimeSeconds) ||
       !Number.isFinite(parsed.totalRequests)
@@ -71,13 +94,23 @@ function writeStoredSample(namespace: string, sample: RequestSample): void {
   }
 }
 
+function clearStoredSample(namespace: string): void {
+  try {
+    localStorage.removeItem(storageKey(namespace));
+  } catch {
+    // Ignore storage failures; a stale sample is also refused by mode.
+  }
+}
+
 function toSample(
   gateway: AdminMetrics["gateway"],
   timestamp: number,
   target: string,
 ): RequestSample {
   return {
+    version: STORED_SAMPLE_VERSION,
     target,
+    mode: gateway.mode,
     timestamp,
     uptimeSeconds: gateway.uptime_seconds,
     totalRequests: gateway.total_requests,
@@ -92,6 +125,7 @@ function calculateStats(
   if (
     !previous ||
     previous.target !== current.target ||
+    previous.mode !== current.mode ||
     current.timestamp <= previous.timestamp ||
     current.uptimeSeconds < previous.uptimeSeconds ||
     current.totalRequests < previous.totalRequests
@@ -139,6 +173,17 @@ export function useGatewayRequestStats(
 
     if (!gateway || !dataUpdatedAt) return;
 
+    // A control plane or node agent sends zero placeholders, not counters.
+    // Neither diff nor keep them, and drop the baseline: a later proxy
+    // reading at the same target must start collecting afresh rather than
+    // be diffed against a counter from before the placeholder.
+    if (!adminMetricsReporting(gateway.mode).reportsProxyRuntime) {
+      previousSampleRef.current = undefined;
+      clearStoredSample(selectedNamespace);
+      setStats({ totalRequests: 0 });
+      return;
+    }
+
     // A reading with no bound target, or on a retired page, cannot be
     // attributed to a gateway: show the total but neither diff nor keep it.
     const target = boundGatewayTarget();
@@ -151,7 +196,7 @@ export function useGatewayRequestStats(
     const currentSample = toSample(gateway, dataUpdatedAt, target);
     const storedSample = previousSampleRef.current
       ? undefined
-      : readStoredSample(selectedNamespace, target);
+      : readStoredSample(selectedNamespace, target, gateway.mode);
     const previousSample =
       previousSampleRef.current ??
       (storedSample && currentSample.timestamp - storedSample.timestamp <= STORED_SAMPLE_MAX_AGE_MS

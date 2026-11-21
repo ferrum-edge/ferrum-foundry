@@ -1039,7 +1039,8 @@ const adminMetricsPayload = () => ({
   },
   consumer_index: { total_consumers: 1, key_auth_credentials: 2, basic_auth_credentials: 0, mtls_credentials: 1, jwt_credentials: 1, hmac_credentials: 0, identity_credentials: 3 },
   rate_limiting: { tracked_key_count: 412 },
-  tcp_connection_throttle: { enforcement_scope: 'process_local', replica_limit_behavior: 'configured_limit_per_replica' },
+  adaptive_concurrency: { policy_count: 1, tracked_target_count: 2, limit_total: 64, in_flight_total: 5 },
+  tcp_connection_throttle: { enforcement_scope: 'process_local', replica_limit_behavior: 'configured_limit_per_replica', active_connections: 12 },
 });
 
 /** Modes Edge builds without proxy state (`empty_proxy_metrics`). */
@@ -1074,7 +1075,10 @@ export function buildAdminMetrics(mode, base = adminMetricsPayload()) {
     caches: {},
     consumer_index: { total_consumers: 0, key_auth_credentials: 0, basic_auth_credentials: 0, mtls_credentials: 0, jwt_credentials: 0, hmac_credentials: 0, identity_credentials: 0 },
     rate_limiting: { tracked_key_count: 0 },
-    tcp_connection_throttle: { ...base.tcp_connection_throttle },
+    // `AdminMetricsAdaptiveConcurrency::empty()` and
+    // `AdminMetricsTcpConnectionThrottle::process_local(0)`.
+    adaptive_concurrency: { policy_count: 0, tracked_target_count: 0, limit_total: 0, in_flight_total: 0 },
+    tcp_connection_throttle: { enforcement_scope: 'process_local', replica_limit_behavior: 'configured_limit_per_replica', active_connections: 0 },
   };
 }
 

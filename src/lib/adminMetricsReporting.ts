@@ -44,24 +44,26 @@ export interface AdminMetricsReporting {
   unavailableDetail?: string;
 }
 
-const MODE_LABELS: Record<string, string> = {
-  database: "Database",
-  file: "File",
-  cp: "Control plane",
-  dp: "Data plane",
-  mesh: "Mesh",
-  node_agent: "Node agent",
-};
+// Maps, not object literals: a mode string such as "constructor" must not
+// resolve to an inherited Object.prototype member.
+const MODE_LABELS: ReadonlyMap<string, string> = new Map([
+  ["database", "Database"],
+  ["file", "File"],
+  ["cp", "Control plane"],
+  ["dp", "Data plane"],
+  ["mesh", "Mesh"],
+  ["node_agent", "Node agent"],
+]);
 
 /** Modes whose AdminState has no proxy state, by the role named in labels. */
-const NO_PROXY_STATE_ROLES: Record<string, string> = {
-  cp: "a control plane",
-  node_agent: "a node agent",
-};
+const NO_PROXY_STATE_ROLES: ReadonlyMap<string, string> = new Map([
+  ["cp", "a control plane"],
+  ["node_agent", "a node agent"],
+]);
 
 export function adminMetricsReporting(mode: string): AdminMetricsReporting {
-  const modeLabel = MODE_LABELS[mode] ?? mode;
-  const role = NO_PROXY_STATE_ROLES[mode];
+  const modeLabel = MODE_LABELS.get(mode) ?? mode;
+  const role = NO_PROXY_STATE_ROLES.get(mode);
   if (role === undefined) return { mode, modeLabel, reportsProxyRuntime: true };
   return {
     mode,
@@ -75,13 +77,13 @@ export function adminMetricsReporting(mode: string): AdminMetricsReporting {
   };
 }
 
-const CONFIG_SOURCE_LABELS: Record<string, string> = {
-  online: "Online",
-  offline: "Offline",
-  "n/a": "Not applicable",
-};
+const CONFIG_SOURCE_LABELS: ReadonlyMap<string, string> = new Map([
+  ["online", "Online"],
+  ["offline", "Offline"],
+  ["n/a", "Not applicable"],
+]);
 
 /** Readable `config_source_status`; reported in every mode. */
 export function configSourceLabel(status: AdminMetrics["gateway"]["config_source_status"]): string {
-  return CONFIG_SOURCE_LABELS[status] ?? status;
+  return CONFIG_SOURCE_LABELS.get(status) ?? status;
 }
