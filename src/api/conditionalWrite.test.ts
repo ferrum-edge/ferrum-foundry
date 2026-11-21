@@ -30,7 +30,7 @@ import {
   type TaggedRead,
 } from "./conditionalWrite";
 import { setApiErrorHandler } from "./client";
-import { formatBaselineValue } from "@/lib/resourceBaseline";
+import { compareBaselines, formatBaselineValue } from "@/lib/resourceBaseline";
 import { resetGatewayMetadata } from "./gatewayMetadata";
 import * as consumers from "./consumers";
 import * as proxies from "./proxies";
@@ -321,6 +321,27 @@ describe("guarded proxy saves on a gateway that honours If-Match", () => {
 
     expect(gateway.wire).toEqual(["GET", 'PUT if-match "r0"']);
     expect(gateway.read().backend_read_timeout_ms).toBe(30_000);
+  });
+
+  it("refuses a draft opened before another writer changed the retired pool field (#725)", async () => {
+    // Edge v0.9.20 stores None for an omitted pool_max_requests_per_connection,
+    // so this save, which never sends it, would clear the other writer's value.
+    const seed = { ...proxyFixture(), pool_max_requests_per_connection: 900 } as Proxy;
+    const gateway = stubGateway({ ...seed, pool_max_requests_per_connection: 50 } as Proxy);
+
+    const refused = await settle(
+      proxies.update(
+        scope,
+        "checkout",
+        formDraft(seed, { backend_read_timeout_ms: 30_000 }),
+        proxies.proxyWriteGuard(seed),
+      ),
+    );
+
+    if (!isStaleResourceError(refused)) throw new Error("expected a stale write");
+    expect(refused.detail.current.pool_max_requests_per_connection).toBe(50);
+    expect(gateway.wire).toEqual(["GET"]);
+    expect(gateway.read()).toHaveProperty("pool_max_requests_per_connection", 50);
   });
 
   it("refuses a draft when another writer commits between the verification read and the PUT", async () => {
@@ -663,6 +684,220 @@ describe("guarded upstream saves on a gateway that honours If-Match", () => {
     ]);
     expect(gateway.read().algorithm).toBe("least_connections");
     expect(gateway.read().targets.map((target) => target.host)).toEqual(["two.internal"]);
+  });
+
+  describe("server-owned subset traffic_policy fields (#725)", () => {
+    // Edge projects these from a mesh DestinationRule and refuses them on an
+    // operator write, so a save never carries them and cannot revert them.
+    const meshSeed = {
+      ...upstreamSeed,
+      subsets: [{
+        name: "v2",
+        labels: { version: "v2" },
+        traffic_policy: {
+          load_balancer_algorithm: "least_latency",
+          connect_timeout_ms: 1_000,
+          tls: { mode: "simple" },
+        },
+      }],
+    } as Upstream;
+    const rotated = (stored: Record<string, unknown>) => ({
+      ...stored,
+      subsets: [{
+        name: "v2",
+        labels: { version: "v2" },
+        traffic_policy: {
+          load_balancer_algorithm: "least_latency",
+          connect_timeout_ms: 2_500,
+          tls: { mode: "mutual" },
+          max_retries: 3,
+        },
+      }],
+    });
+
+    it("saves over a control-plane rewrite made since the editor opened", async () => {
+      const gateway = stubGateway(rotated({ ...meshSeed }) as unknown as Upstream);
+
+      await upstreams.update(
+        scope,
+        "payments",
+        { ...upstreams.toUpdatePayload(meshSeed), name: "renamed" },
+        upstreams.upstreamWriteGuard(meshSeed),
+      );
+
+      expect(gateway.wire).toEqual(["GET", 'PUT if-match "r0"']);
+      expect(gateway.read().name).toBe("renamed");
+    });
+
+    it("re-sends after a 412 caused only by a control-plane rewrite", async () => {
+      const gateway = stubGateway(meshSeed, { interleave: rotated });
+
+      await upstreams.update(
+        scope,
+        "payments",
+        { ...upstreams.toUpdatePayload(meshSeed), name: "renamed" },
+        upstreams.upstreamWriteGuard(meshSeed),
+      );
+
+      expect(gateway.wire).toEqual([
+        "GET",
+        'PUT if-match "r0"',
+        "GET",
+        'PUT if-match "r1"',
+      ]);
+      expect(gateway.read().name).toBe("renamed");
+    });
+
+    it("does not show subsets as changed locally in a real conflict", async () => {
+      const gateway = stubGateway({
+        ...rotated({ ...meshSeed }),
+        algorithm: "least_connections",
+      } as unknown as Upstream);
+
+      const refused = await settle(
+        upstreams.update(
+          scope,
+          "payments",
+          { ...upstreams.toUpdatePayload(meshSeed), name: "renamed" },
+          upstreams.upstreamWriteGuard(meshSeed),
+        ),
+      );
+
+      if (!isStaleResourceError(refused)) throw new Error("expected a stale save");
+      const { original, current, proposed } = refused.detail;
+      const fields = compareBaselines(original, current, proposed);
+      expect(fields.map(({ field }) => field).sort()).toEqual(["algorithm", "name"]);
+      expect(fields.find(({ field }) => field === "algorithm")).toMatchObject({
+        changedLocally: false,
+      });
+      expect(gateway.wire).toEqual(["GET"]);
+    });
+
+    it("deletes over a control-plane rewrite made since the page loaded", async () => {
+      const gateway = stubGateway(rotated({ ...meshSeed }) as unknown as Upstream);
+
+      await upstreams.remove(scope, "payments", upstreams.upstreamWriteGuard(meshSeed));
+
+      expect(gateway.wire).toEqual(["GET", 'DELETE if-match "r0"']);
+      expect(gateway.exists()).toBe(false);
+    });
+
+    it.each([
+      ["a null subset entry", [null]],
+      ["a non-object subset policy", [{ name: "v2", labels: { version: "v2" }, traffic_policy: "broken" }]],
+    ])("refuses, sending nothing, when a tagged re-read holds %s", async (_shape, subsets) => {
+      const gateway = stubGateway({ ...meshSeed, subsets } as unknown as Upstream);
+
+      const saved = await settle(
+        upstreams.update(
+          scope,
+          "payments",
+          { ...upstreams.toUpdatePayload(meshSeed), name: "renamed" },
+          upstreams.upstreamWriteGuard(meshSeed),
+        ),
+      );
+      const deleted = await settle(
+        upstreams.remove(scope, "payments", upstreams.upstreamWriteGuard(meshSeed)),
+      );
+
+      if (!isStaleResourceError(saved)) throw new Error("expected a stale save");
+      expect(saved.detail.current.subsets).toEqual(subsets);
+      expect(isStaleResourceError(deleted)).toBe(true);
+      expect(gateway.wire).toEqual(["GET", "GET"]);
+      expect(gateway.exists()).toBe(true);
+    });
+
+    it("does not show a null subset policy as changed locally by the form's save", async () => {
+      const seed = {
+        ...upstreamSeed,
+        backend_tls_san_allow_list: [],
+        subsets: [{ name: "v2", labels: { version: "v2" }, traffic_policy: null }],
+      } as Upstream;
+      const gateway = stubGateway({ ...seed, algorithm: "least_connections" } as Upstream);
+
+      // What UpstreamForm submits for that subset: no policy key at all.
+      const refused = await settle(
+        upstreams.update(
+          scope,
+          "payments",
+          upstreams.mergeFormUpdatePayload(seed, {
+            ...upstreams.toUpdatePayload(seed),
+            name: "renamed",
+            subsets: [{ name: "v2", labels: { version: "v2" } }],
+          }),
+          upstreams.upstreamWriteGuard(seed),
+        ),
+      );
+
+      if (!isStaleResourceError(refused)) throw new Error("expected a stale save");
+      const { original, current, proposed } = refused.detail;
+      expect(compareBaselines(original, current, proposed).map(({ field }) => field).sort())
+        .toEqual(["algorithm", "name"]);
+      expect(gateway.wire).toEqual(["GET"]);
+    });
+
+    it("refuses, sending nothing, a save built from a malformed cached read", async () => {
+      // A background refetch cached `subsets: [null]` while the form held a
+      // valid draft. Building the payload must not throw; the guard decides.
+      const cached = { ...meshSeed, subsets: [null] } as unknown as Upstream;
+      const gateway = stubGateway(cached);
+
+      const refused = await settle(
+        upstreams.update(
+          scope,
+          "payments",
+          upstreams.mergeFormUpdatePayload(cached, {
+            ...upstreams.toUpdatePayload(meshSeed),
+            name: "renamed",
+          }),
+          upstreams.upstreamWriteGuard(meshSeed),
+        ),
+      );
+
+      expect(isStaleResourceError(refused)).toBe(true);
+      expect(gateway.wire).toEqual(["GET"]);
+    });
+
+    it("refuses a save when a `__proto__` subset label changed, and shows the subset", async () => {
+      // A valid label key that bracket assignment would silently drop.
+      const labels = (value: string) =>
+        JSON.parse(`{"release":"blue","__proto__":"${value}"}`) as Record<string, string>;
+      const seed = { ...upstreamSeed, subsets: [{ name: "blue", labels: labels("v1") }] } as Upstream;
+      const gateway = stubGateway({ ...seed, subsets: [{ name: "blue", labels: labels("v2") }] } as Upstream);
+
+      const refused = await settle(
+        upstreams.update(
+          scope,
+          "payments",
+          { ...upstreams.toUpdatePayload(seed), name: "renamed" },
+          upstreams.upstreamWriteGuard(seed),
+        ),
+      );
+      const deleted = await settle(
+        upstreams.remove(scope, "payments", upstreams.upstreamWriteGuard(seed)),
+      );
+
+      if (!isStaleResourceError(refused)) throw new Error("expected a stale save");
+      const { original, current, proposed } = refused.detail;
+      expect(compareBaselines(original, current, proposed).map(({ field }) => field)).toContain("subsets");
+      expect(isStaleResourceError(deleted)).toBe(true);
+      expect(gateway.wire).toEqual(["GET", "GET"]);
+      expect(gateway.exists()).toBe(true);
+    });
+
+    it("still refuses a delete when a writable subset field changed", async () => {
+      const gateway = stubGateway({
+        ...meshSeed,
+        subsets: [{ name: "v2", labels: { version: "v3" }, traffic_policy: meshSeed.subsets?.[0].traffic_policy }],
+      } as Upstream);
+
+      const refused = await settle(
+        upstreams.remove(scope, "payments", upstreams.upstreamWriteGuard(meshSeed)),
+      );
+
+      expect(isStaleResourceError(refused)).toBe(true);
+      expect(gateway.exists()).toBe(true);
+    });
   });
 });
 

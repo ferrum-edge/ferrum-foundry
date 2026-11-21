@@ -9,6 +9,10 @@ export type HealthField = readonly [string, string | number | boolean | null | u
 function displayValue(value: HealthField[1]) {
   if (value == null) return 'Not reported';
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  // Health snapshots are only shape-checked at the top level, so a malformed
+  // nested field (an object or array where a scalar belongs) must not reach
+  // React as a child and take the whole page down with it.
+  if (typeof value !== 'string' && typeof value !== 'number') return 'Not reported';
   // Timestamps arrive as ISO strings; show them like every other date.
   if (isIsoTimestamp(value)) return formatDateTime(value);
   return value;

@@ -37,7 +37,11 @@ import { PluginGuidedConfig } from "@/components/forms/PluginGuidedConfig";
 import { getGuidedSchema } from "@/lib/pluginSchemas";
 import { unmodelledEnumSpelling, type FieldIssue, type JsonObject } from "@/lib/pluginGuidedConfig";
 import { MASKED_FIELD_NOTICE, PLUGIN_CONFIG_POINTER, removeAtPointer } from "@/api/maskedSecrets";
-import { pluginConfigPlaceholderSites, type PlaceholderSites } from "@/api/maskedSecretSites";
+import {
+  pluginConfigPlaceholderSites,
+  pluginTriggerPlaceholderSites,
+  type PlaceholderSites,
+} from "@/api/maskedSecretSites";
 import type { GatewayRole } from "@/lib/capabilities";
 
 /* ------------------------------------------------------------------ */
@@ -82,7 +86,8 @@ export interface PluginConfigFormProps {
   locked?: boolean;
   /**
    * The session's gateway role, which decides where a masked-secret
-   * placeholder blocks Save (`pluginConfigPlaceholderSites`). Unknown (`null`
+   * placeholder blocks Save (`pluginConfigPlaceholderSites`,
+   * `pluginTriggerPlaceholderSites`). Unknown (`null`
    * or omitted) is treated as a non-admin role.
    */
   role?: GatewayRole | null;
@@ -279,6 +284,15 @@ function PluginConfigFormFields({
       } catch {
         errs.trigger = "Invalid JSON";
       }
+      // A trigger operand masked by the read (Edge main withholds header,
+      // query and cookie values from non-admin roles) cannot be written back.
+      if (!errs.trigger && triggerBlockingSites.length > 0) {
+        const count = triggerBlockingSites.length;
+        errs.trigger =
+          `${count} trigger value${count === 1 ? " is" : "s are"} hidden from your role. ` +
+          `Re-enter ${count === 1 ? "it" : "each"}, or turn the trigger off, before this ` +
+          "can be saved.";
+      }
     }
     setErrors(errs);
     const ok = Object.keys(errs).length === 0;
@@ -389,6 +403,18 @@ function PluginConfigFormFields({
     }
   }, [configJson, pluginName, role]);
   const blockingSites = placeholderSites.blocking;
+  // The trigger's header, query and cookie operands, which Edge main masks
+  // for a non-admin role. Only re-entered: an `exact` or `prefix` entry left
+  // out is not a predicate Edge accepts. Turning the trigger off removes it.
+  const triggerPlaceholderSites = useMemo(() => {
+    if (!triggerEnabled) return NO_PLACEHOLDERS;
+    try {
+      return pluginTriggerPlaceholderSites(JSON.parse(triggerJson) as unknown, role);
+    } catch {
+      return NO_PLACEHOLDERS;
+    }
+  }, [triggerEnabled, triggerJson, role]);
+  const triggerBlockingSites = triggerPlaceholderSites.blocking;
   const sourceSites = placeholderSites.sources;
   const reservedSites = placeholderSites.reserved;
   const maskedSites = blockingSites.filter(
@@ -805,6 +831,46 @@ function PluginConfigFormFields({
             leaves on method, path, host, SNI, header, query, cookie, protocol,
             source CIDR, consumer, and more.
           </p>
+          {triggerBlockingSites.length > 0 && (
+            <div
+              role="status"
+              aria-label="Trigger values hidden from your role"
+              className="mb-3 space-y-2 rounded-lg border border-warning/30 p-3"
+            >
+              <p className="text-xs text-warning">
+                Your role&apos;s read of this trigger shows a placeholder in place of
+                each header, query or cookie value below. Saving is blocked until
+                every one is re-entered in the trigger JSON, or the trigger is turned
+                off, which removes it. Or have an admin make the change.
+              </p>
+              <ul className="space-y-2">
+                {triggerBlockingSites.map((pointer) => (
+                  <li key={pointer} className="text-xs">
+                    <code className="font-mono text-text-primary">{pointer}</code>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {triggerPlaceholderSites.other.length > 0 && (
+            <div
+              role="note"
+              aria-label="Trigger values that look like placeholders"
+              className="mb-3 space-y-2 rounded-lg border border-border p-3"
+            >
+              <p className="text-xs text-text-secondary">
+                {role === "admin" ? ADMIN_PLACEHOLDER_NOTE : UNMASKED_PLACEHOLDER_NOTE}{" "}
+                If one was copied from a masked read, replace it with the real value.
+              </p>
+              <ul className="space-y-1">
+                {triggerPlaceholderSites.other.map((pointer) => (
+                  <li key={pointer} className="text-xs">
+                    <code className="font-mono text-text-primary">{pointer}</code>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {triggerEnabled && (
             <div className="flex flex-col gap-1.5">
               <textarea

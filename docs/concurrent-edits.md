@@ -191,7 +191,28 @@ writes which race nothing are not refused:
 - **Fields the write never replaces.** A proxy save omits `plugins`, and Edge
   keeps the live associations when the key is omitted, so a membership change
   from the plugin pages cannot be lost by a proxy save and is not a conflict.
-  Upstreams also exclude the mesh-projected fields the control plane owns.
+  Upstreams also exclude the mesh-projected fields the control plane owns:
+  the top-level ones and the server-owned `subsets[].traffic_policy` fields
+  Edge projects from a `DestinationRule` (`SUBSET_TRAFFIC_POLICY_SERVER_OWNED`),
+  which a save strips through `writableSubset`. The upstream baseline reduces
+  subsets exactly as the save payload does, so a real conflict never shows
+  `subsets` as changed locally because of them (#725). Unset is spelled one
+  way, as the settings form submits it: an explicit `traffic_policy: null`, or
+  a `null` algorithm or hash key inside it, counts as omitted, and a policy
+  left empty is dropped. An empty subset hash key is not unset: Edge hashes
+  on the client IP for it, as for `"ip"`. The settings form seeds it as `ip`
+  and submits it that way, so a save keeps the override, and the baseline
+  compares both spellings as `"ip"`. A malformed subset entry or policy is
+  compared verbatim. (Edge's mesh mode is itself read-only with untagged reads, so no
+  guarded write runs there; this applies when a writable gateway returns
+  mesh-projected subset policy.)
+
+A field a save omits but Edge does **not** preserve is still compared. A
+proxy save never sends the retired `pool_max_requests_per_connection`, but
+Edge v0.9.20 stores `None` for the omitted key, so the save clears the stored
+value: a concurrent change to it refuses the save, and the conflict shows the
+draft clearing it. Edge `main` no longer has the field, so comparing it costs
+nothing there.
 
 The upstream **targets** editor replaces only `targets`, so its guard compares
 only `targets`. `upstreams.updateTargets` is designed to compose with a
@@ -204,7 +225,7 @@ which is the only thing that write can lose.
 | Write | Compared against | Conditional on |
 | --- | --- | --- |
 | Proxy settings save | the editor's seed, every field except `plugins` (never sent) | the verification read |
-| Upstream settings save | the editor's seed, minus mesh-projected fields | the verification read |
+| Upstream settings save | the editor's seed, minus mesh-projected fields (top-level and server-owned subset `traffic_policy`) | the verification read |
 | Upstream targets save | the `targets` the add/edit form was opened against (for a row removal, the list on screen when it was clicked) | the read its settings are rebuilt from |
 | Consumer Details save | the editor's seed, minus `credentials` and `labels` (never sent) | the read its credentials are taken from |
 | Consumer ACL add/remove | the consumer the group list was computed from | the read its credentials are taken from |
@@ -286,8 +307,9 @@ reads redact credential values, so the comparison sees only what the read
 shows: each returned credential type's entries and their count. A same-count
 rotation is not visible, and neither is any change to a credential type the
 read omits entirely (Edge's projection leaves out `basicauth` and custom
-types). Upstream deletes still leave out the mesh-projected fields, which the
-control plane rewrites without any competing editor.
+types). Upstream deletes still leave out the mesh-projected fields, top-level
+and server-owned subset `traffic_policy` alike, which the control plane
+rewrites without any competing editor.
 
 A plugin delete is one `DELETE`, conditional on the read the baseline was
 compared with. Edge removes the configuration from every proxy that lists it
@@ -585,6 +607,32 @@ a built-in newer than the paired release) has no rules, so every string in its
 `config` is treated as secret. Edge's operator-configured
 `FERRUM_LOG_REDACT_METADATA_KEYS` are not visible to Foundry.
 
+**Plugin `trigger`.** A plugin configuration's execution `trigger` is
+classified the way Ferrum Edge `main` projects it for a non-admin read
+(`project_plugin_trigger_with`, ferrum-edge#7054): every comparison operand of
+a `header`, `query` or `cookie` predicate (each `exact` and `prefix` entry,
+`regex`) is secret, and so is anything in a shape a `PluginTrigger` cannot
+have (a trigger without `when`, an unknown node or predicate key, a non-object
+`value`). Field names, `presence`, `multi_value`, `case_insensitive`, the tree,
+and the routing and identity predicates (`path`, `method`, `host`, `consumer`,
+`external_identity`, `external_identity_authority`, and the rest of Edge's
+`TRIGGER_VISIBLE_PREDICATES`) stay readable, but only with the type Edge's
+`PluginTriggerMatch` declares: an editor draft is unvalidated, so an object
+pasted under a field `name` or a number in a `method` list is withheld too,
+and any object in the trigger carrying a key its schema does not define
+(even one set to `null`) is withheld whole.
+The trigger is classified by this walk alone, not by the field-name and URL
+rules above, which would hide a whole `cookie` predicate and a `spiffe_id`.
+A number or boolean operand is withheld as well: its text is redacted like an
+unclassified value (anywhere when 8 characters or longer, as a whole token
+when shorter), and the equal typed value in a structured error body is
+replaced, except in the fixed-vocabulary fields. A `[REDACTED]` marker the
+gateway already wrote is never split by a shorter match inside it. The pinned v0.9.20 does not mask
+a trigger at all, but the operands are the same shared values there, so
+Foundry applies this on every gateway (`pluginTriggerWithheldSites` in
+`src/lib/resourceBaseline.ts`). `scripts/edge-main-drift.mjs` compares
+Foundry's two predicate lists with Edge main's.
+
 The table lives in `src/api/pluginSensitivity.ts`, with the Edge commit it was
 checked against in `PLUGIN_SENSITIVITY_SOURCE`. The Pinned Gateway Contract job
 runs `scripts/plugin-sensitivity-drift.mjs`, which fetches
@@ -595,10 +643,23 @@ when the recorded commit is not the pinned one.
 
 **Restore and API specs.** `restoreSecrets()` is `secretValues()` over the
 backup plus each API spec document it holds (gzip-compressed, base64-encoded,
-and taken whole). For an API spec import or replacement, `specDocumentSecrets()`
+and taken whole), and the `trigger` of every `plugin_configs` entry, whatever
+its `plugin_name`. For an API spec import or replacement, `specDocumentSecrets()`
 classifies a JSON document by position: each `x-ferrum-plugins` entry by its
 plugin's rules, anything else by field name and URL. An entry that is not a
-plugin configuration is unclassified throughout. Foundry has no YAML parser, so
+plugin configuration is unclassified throughout, and its `trigger`, if it has
+one, is also classified as a plugin's is. Edge parses the document text
+again and can quote a value in a spelling Foundry cannot reconstruct (an
+integer beyond 2^53, which `JSON.parse` rounds, or a YAML `0x` integer
+reported in decimal), so in a spec write's failure every serde diagnostic
+that quotes a value (``invalid type: integer `N` ``, `floating point`,
+`boolean`, `character`, `string "…"`, the same after `invalid value:`,
+``unknown variant `V` ``, ``unknown field `F` ``) is withheld from the value's
+opening delimiter to the end of the text, whatever the value is: where it
+ends cannot be told reliably. The category before it is kept. The keys of an
+object the trigger walk withholds are collected as secrets along with its
+values, since a deserializer quotes an object's key as a variant or an
+unknown field. Foundry has no YAML parser, so
 a YAML (or malformed JSON) document is unclassified throughout: every scalar is
 found line by line without parsing, including `key: value` values, sequence
 entries, flow elements, quoted scalars (unquoted and unescaped), several pairs
@@ -697,7 +758,9 @@ explanation [above](#without-a-tag), leaving the form mounted. For a conflict:
    which shows credential-shaped values as `[redacted]` while still showing
    that the field changed. A `*_path` field is shown, since a path or
    `system://`/`k8s://` reference to material is not the material, unless its
-   value is inline PEM, which is redacted. Nothing from the comparison is written to browser
+   value is inline PEM, which is redacted. A plugin `trigger` shows its
+   structure and visible predicates, with each `header`, `query` and `cookie`
+   operand as `[redacted]`. Nothing from the comparison is written to browser
    storage, telemetry, or logs.
 
 ### The writer can be this operator
@@ -731,6 +794,7 @@ so the next successful read seeds a fresh baseline.
 | --- | --- |
 | Reduction, fingerprint, three-way comparison, redaction | `src/lib/resourceBaseline.test.ts` |
 | Two-session regression, unguarded baseline, re-seeded save, plugin-association non-conflict, targets scope | `src/api/writeGuard.test.ts` |
+| Server-owned subset `traffic_policy` fields left out of upstream save and delete baselines, never shown as changed locally; null policy normalized, malformed subsets compared verbatim; the retired proxy pool field still compared on save | `src/api/upstreams.test.ts`, `src/api/proxies.test.ts`, `src/api/conditionalWrite.test.ts` |
 | `If-Match` from the verified read, a writer in the gap refused, re-send after a `412` on unowned fields, bounded retries, initial unusable-validator refusal, post-412 untagged refusal, explicit unguarded fallback, popup opt-out | `src/api/conditionalWrite.test.ts` |
 | Initial untagged refusal preserves mounted settings/targets/consumer drafts and detail caches through real hooks; MCP policy refuses before PUT | `src/routes/upstreams/TargetEditor.test.tsx`, `src/routes/consumers/consumerEditorIdentity.test.tsx`, `src/api/mcpTools.test.ts` |
 | Draft preserved, no reapply control, keep/discard behavior | `src/routes/proxies/concurrentEdit.test.tsx` |

@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Proxy } from "./types";
-import { listAll, mergeFormUpdatePayload, remove, toUpdatePayload } from "./proxies";
+import {
+  listAll,
+  mergeFormUpdatePayload,
+  remove,
+  toBaseline,
+  toUpdatePayload,
+} from "./proxies";
 
 const URL_SCHEME_PATTERN = /^[a-z][a-z0-9+.-]*:/i;
 
@@ -106,6 +112,17 @@ describe("proxy full-replacement builders", () => {
     });
     expect(payload).not.toHaveProperty("pool_max_requests_per_connection");
     expect(read).toHaveProperty("pool_max_requests_per_connection", 900);
+  });
+
+  it("keeps the retired field in the save baseline, since the save clears it (#725)", () => {
+    // Edge v0.9.20 does not preserve an omitted pool_max_requests_per_connection:
+    // the PUT stores None. The save therefore replaces the field, so a
+    // concurrent change to it is something the draft would revert.
+    const read = { ...fullProxy(), pool_max_requests_per_connection: 900 } as Proxy;
+    expect(toBaseline(read)).toHaveProperty("pool_max_requests_per_connection", 900);
+    expect(
+      toBaseline({ ...read, pool_max_requests_per_connection: 50 } as Proxy),
+    ).not.toEqual(toBaseline(read));
   });
 
   it("distinguishes explicit false from inherited null", () => {

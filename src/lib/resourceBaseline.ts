@@ -34,17 +34,20 @@ export type BaselineSnapshot = Readonly<Record<string, unknown>>;
  * Recursively order object keys so two structurally equal resources serialize
  * identically. Arrays keep their order — element order is meaningful in every
  * resource field Foundry replaces (targets, hosts, allowed methods).
+ *
+ * Objects here are built from entries (`Object.fromEntries`), never by
+ * assignment: assigning a `__proto__` key, which a subset label map may
+ * carry, would call the inherited setter and drop the value, so two
+ * different resources would fingerprint alike.
  */
 export function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);
   if (value === null || typeof value !== "object") return value;
 
   const record = value as Record<string, unknown>;
-  const ordered: Record<string, unknown> = {};
-  for (const key of Object.keys(record).sort()) {
-    ordered[key] = canonicalize(record[key]);
-  }
-  return ordered;
+  return Object.fromEntries(
+    Object.keys(record).sort().map((key) => [key, canonicalize(record[key])]),
+  );
 }
 
 /**
@@ -91,7 +94,8 @@ export const PROXY_BASELINE_OMIT: readonly string[] = [
  * Upstream fields excluded on top of the server-managed set. These mirror the
  * mesh-owned fields `upstreams.toUpdatePayload` strips: the control plane
  * writes them, an operator save never carries them, and they change without
- * any competing editor.
+ * any competing editor. `upstreams.toBaseline` also strips the server-owned
+ * `subsets[].traffic_policy` fields, for the same reason.
  */
 export const UPSTREAM_BASELINE_OMIT: readonly string[] = [
   ...SERVER_MANAGED_FIELDS,
@@ -146,7 +150,8 @@ export const PLUGIN_BASELINE_OMIT: readonly string[] = [
  * same-count rotation nor a change to a type the read omits (`basicauth`,
  * custom types) is visible.
  *
- * Upstreams keep `UPSTREAM_BASELINE_OMIT` for deletes: their omitted fields
+ * Upstreams keep their save projection for deletes (`UPSTREAM_BASELINE_OMIT`
+ * plus the server-owned subset `traffic_policy` fields): their omitted fields
  * are written by the mesh control plane, not by a competing operator, and
  * change without one.
  */
@@ -159,12 +164,10 @@ export function baselineSnapshot(
 ): BaselineSnapshot {
   const record = resource as Record<string, unknown>;
   const excluded = new Set(omit);
-  const snapshot: Record<string, unknown> = {};
-  for (const key of Object.keys(record)) {
-    if (excluded.has(key)) continue;
-    snapshot[key] = record[key];
-  }
-  return snapshot;
+  // Built from entries, as in `canonicalize`, so a `__proto__` key is kept.
+  return Object.fromEntries(
+    Object.keys(record).filter((key) => !excluded.has(key)).map((key) => [key, record[key]]),
+  );
 }
 
 /**
@@ -181,9 +184,7 @@ export function pickSnapshot(
   fields: readonly string[],
 ): BaselineSnapshot {
   const record = resource as Record<string, unknown>;
-  const snapshot: Record<string, unknown> = {};
-  for (const field of fields) snapshot[field] = record[field];
-  return snapshot;
+  return Object.fromEntries(fields.map((field) => [field, record[field]]));
 }
 
 /* ------------------------------------------------------------------ */
@@ -326,14 +327,301 @@ function redactFieldValue(field: string, value: unknown): unknown {
  */
 export function formatBaselineValue(field: string, value: unknown): string {
   if (value === undefined) return "—";
-  if (isRedactedValue(field, value)) {
+  // A plugin `trigger` is classified by Edge main's trigger projection alone
+  // (`redactPluginTrigger`), as a plugin `config` is by its own rules: the
+  // name rules below would hide a whole `cookie` predicate, field name and
+  // match kind included, which Edge keeps readable.
+  if (field === "trigger") {
     if (value === null) return "null";
-    if (typeof value === "string" && value.length === 0) return '""';
+    const shown = redactPluginTrigger(value, REDACTED_PLACEHOLDER);
+    if (typeof shown === "string") return shown.length === 0 ? '""' : shown;
+    return JSON.stringify(shown);
+  }
+  const shown = value;
+  if (isRedactedValue(field, shown)) {
+    if (shown === null) return "null";
+    if (typeof shown === "string" && shown.length === 0) return '""';
     return REDACTED_PLACEHOLDER;
   }
-  if (value === null) return "null";
-  if (typeof value === "string") return value.length === 0 ? '""' : value;
-  return JSON.stringify(value, (nestedField, nestedValue) =>
+  if (shown === null) return "null";
+  if (typeof shown === "string") return shown.length === 0 ? '""' : shown;
+  return JSON.stringify(shown, (nestedField, nestedValue) =>
     nestedField === "" ? nestedValue : redactFieldValue(nestedField, nestedValue),
   );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Plugin execution triggers: Ferrum Edge main's projection           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Trigger leaf predicates whose comparison operands are values a client
+ * presents (`TRIGGER_CLIENT_FIELD_PREDICATES` in Edge main's
+ * `src/admin/plugin_config_projection.rs`, ferrum-edge#7054, after v0.9.20).
+ * Whoever knows one can make a plugin instance's trigger fire or not, so a
+ * non-admin Edge main read withholds them, and Foundry treats them as secret
+ * on every gateway: the pinned v0.9.20 shows a trigger verbatim, but the
+ * operands are no less a shared secret there. `scripts/edge-main-drift.mjs`
+ * compares this list, and `TRIGGER_VISIBLE_PREDICATES`, with Edge main.
+ */
+export const TRIGGER_CLIENT_FIELD_PREDICATES: readonly string[] = ["header", "query", "cookie"];
+
+/**
+ * Trigger leaf predicates that compare routing facts or authenticated
+ * identity and stay readable (`TRIGGER_VISIBLE_PREDICATES` in Edge main;
+ * `external_identity` and `external_identity_authority` from ferrum-edge#7417). A
+ * leaf key in neither list is not a `PluginTriggerMatch` field, so its value
+ * is withheld.
+ */
+export const TRIGGER_VISIBLE_PREDICATES: readonly string[] = [
+  "method",
+  "path",
+  "host",
+  "sni",
+  "protocol",
+  "source_cidr",
+  "namespace",
+  "proxy_id",
+  "listen_port",
+  "consumer",
+  "external_identity",
+  "external_identity_authority",
+  "auth_method",
+  "spiffe_id",
+];
+
+/** The JSON pointer of a plugin configuration's `trigger`, a sibling of `config`. */
+export const PLUGIN_TRIGGER_POINTER = "/trigger";
+
+/** A site of a trigger Edge main's projection withholds wholesale, and what it holds. */
+export interface TriggerWithheldSite {
+  /** JSON pointer into the plugin body (`/trigger/when/match/header/value/exact/0`). */
+  readonly pointer: string;
+  readonly value: unknown;
+}
+
+function triggerSegment(key: string): string {
+  return key.replaceAll("~", "~0").replaceAll("/", "~1");
+}
+
+function isTriggerObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/** Whether `value` is an object whose every key is one of `keys`, even one set to `null`. */
+function isDeclaredObject(
+  value: unknown,
+  keys: readonly string[],
+): value is Record<string, unknown> {
+  return isTriggerObject(value) && Object.keys(value).every((key) => keys.includes(key));
+}
+
+const TRIGGER_KEYS = ["when"];
+const TRIGGER_NODE_KEYS = ["all", "any", "not", "match"];
+const TRIGGER_LEAF_KEYS = [...TRIGGER_CLIENT_FIELD_PREDICATES, ...TRIGGER_VISIBLE_PREDICATES];
+const TRIGGER_FIELD_KEYS = ["name", "presence", "value", "multi_value"];
+const TRIGGER_STRING_MATCH_KEYS = ["exact", "prefix", "regex", "case_insensitive"];
+const TRIGGER_IDENTITY_KEYS = ["presence", "value"];
+
+/** `PluginTriggerProtocol`, as Edge main's `plugin_trigger.rs` spells it. */
+const TRIGGER_PROTOCOLS: readonly string[] = [
+  "http1",
+  "http2",
+  "http3",
+  "grpc",
+  "grpc_web",
+  "websocket",
+  "tcp",
+  "udp",
+  "dtls",
+];
+const TRIGGER_PRESENCE: readonly string[] = ["present", "absent"];
+const TRIGGER_MULTI_VALUE: readonly string[] = ["any", "all"];
+const TRIGGER_AUTHORITY_PATTERN = /^[0-9A-Fa-f]{64}$/;
+
+/**
+ * Every site of a plugin `trigger` that Edge main's non-admin projection
+ * (`project_plugin_trigger_with`) withholds, in the order it visits them:
+ * each `exact[]` and `prefix[]` entry, `regex`, and any other operand of a
+ * `header`, `query` or `cookie` predicate's `value`. Field names, `presence`,
+ * `multi_value`, a boolean `case_insensitive`, the tree structure, and every
+ * `TRIGGER_VISIBLE_PREDICATES` leaf stay readable.
+ *
+ * The walk fails closed as Edge's does: a shape a `PluginTrigger` cannot have
+ * (a non-object trigger or one without `when`, a key beside `when`, a
+ * non-object node or leaf, a non-array `all` / `any`, a key the schema does
+ * not define, a non-object `value`) is one site, withheld whole. A `null` is
+ * not a site, since it discloses nothing.
+ *
+ * Edge projects only triggers it has already validated, so it can keep a
+ * visible key's content by name alone. Foundry also walks unvalidated drafts,
+ * so the content Edge keeps readable must also have the type Edge's
+ * `PluginTriggerMatch` declares for it: a field predicate's `name` a string,
+ * `presence` and `multi_value` one of their enum spellings, `method` and the
+ * other list predicates a list of strings (`protocol` of its enum,
+ * `listen_port` of ports, `external_identity_authority` of 64-hex digests),
+ * `path` / `host` / `sni` a string match, and `consumer` / `external_identity`
+ * / `spiffe_id` an identity match. Anything else there is withheld as the
+ * smallest ill-typed site. A stored trigger always has these types, so this
+ * changes nothing for one Edge has accepted.
+ *
+ * Any object in the tree that carries a key its schema does not define (the
+ * trigger, a node, a `match` leaf, a field predicate, a comparison, an
+ * identity match), even one set to `null`, is withheld whole at its own
+ * pointer, its declared names and flags included: a deserializer quotes an
+ * unknown key ("unknown field `K`"), so a key there can be the content. Edge
+ * withholds only the unknown member of a stored trigger it has validated,
+ * which never has one.
+ */
+export function pluginTriggerWithheldSites(trigger: unknown): TriggerWithheldSite[] {
+  const sites: TriggerWithheldSite[] = [];
+  const withhold = (value: unknown, pointer: string) => {
+    if (value !== null && value !== undefined) sites.push({ pointer, value });
+  };
+  const child = (pointer: string, key: string | number) =>
+    `${pointer}/${typeof key === "number" ? key : triggerSegment(key)}`;
+
+  // Visible content, kept only while it has the type Edge declares.
+  const scalarOf = (accept: (value: unknown) => boolean) => (value: unknown, pointer: string) => {
+    if (value !== null && !accept(value)) withhold(value, pointer);
+  };
+  const listOf = (accept: (value: unknown) => boolean) => (value: unknown, pointer: string) => {
+    if (value === null) return;
+    if (!Array.isArray(value)) return withhold(value, pointer);
+    value.forEach((item, index) => {
+      if (!accept(item)) withhold(item, child(pointer, index));
+    });
+  };
+  const isString = (value: unknown) => typeof value === "string";
+  const oneOf = (allowed: readonly string[]) => (value: unknown) =>
+    typeof value === "string" && allowed.includes(value);
+  const stringList = listOf(isString);
+  const stringMatch = (value: unknown, pointer: string) => {
+    if (value === null) return;
+    if (!isDeclaredObject(value, TRIGGER_STRING_MATCH_KEYS)) return withhold(value, pointer);
+    for (const [key, operand] of Object.entries(value)) {
+      const at = child(pointer, key);
+      if (key === "exact" || key === "prefix") stringList(operand, at);
+      else if (key === "regex") scalarOf(isString)(operand, at);
+      else scalarOf((flag) => typeof flag === "boolean")(operand, at);
+    }
+  };
+  const identityMatch = (value: unknown, pointer: string) => {
+    if (value === null) return;
+    if (!isDeclaredObject(value, TRIGGER_IDENTITY_KEYS)) return withhold(value, pointer);
+    for (const [key, item] of Object.entries(value)) {
+      const at = child(pointer, key);
+      if (key === "presence") scalarOf(oneOf(TRIGGER_PRESENCE))(item, at);
+      else stringMatch(item, at);
+    }
+  };
+  const visible: Readonly<Record<string, (value: unknown, pointer: string) => void>> = {
+    method: stringList,
+    path: stringMatch,
+    host: stringMatch,
+    sni: stringMatch,
+    protocol: listOf(oneOf(TRIGGER_PROTOCOLS)),
+    source_cidr: stringList,
+    namespace: stringList,
+    proxy_id: stringList,
+    listen_port: listOf((port) => Number.isInteger(port) && (port as number) >= 0 &&
+      (port as number) <= 65535),
+    consumer: identityMatch,
+    external_identity: identityMatch,
+    external_identity_authority: listOf((digest) =>
+      typeof digest === "string" && TRIGGER_AUTHORITY_PATTERN.test(digest)),
+    auth_method: stringList,
+    spiffe_id: identityMatch,
+  };
+
+  // Withheld content: the comparison operands of a client-presented field.
+  const operands = (value: unknown, pointer: string) => {
+    if (!isDeclaredObject(value, TRIGGER_STRING_MATCH_KEYS)) return withhold(value, pointer);
+    for (const [key, operand] of Object.entries(value)) {
+      if (key === "case_insensitive" && typeof operand === "boolean") continue;
+      const at = child(pointer, key);
+      if (Array.isArray(operand)) {
+        operand.forEach((item, index) => withhold(item, child(at, index)));
+      } else {
+        withhold(operand, at);
+      }
+    }
+  };
+  const fieldPredicate = (value: unknown, pointer: string) => {
+    if (!isDeclaredObject(value, TRIGGER_FIELD_KEYS)) return withhold(value, pointer);
+    for (const [key, item] of Object.entries(value)) {
+      const at = child(pointer, key);
+      if (key === "name") scalarOf(isString)(item, at);
+      else if (key === "presence") scalarOf(oneOf(TRIGGER_PRESENCE))(item, at);
+      else if (key === "multi_value") scalarOf(oneOf(TRIGGER_MULTI_VALUE))(item, at);
+      else operands(item, at);
+    }
+  };
+  const leaf = (value: unknown, pointer: string) => {
+    if (!isDeclaredObject(value, TRIGGER_LEAF_KEYS)) return withhold(value, pointer);
+    for (const [key, predicate] of Object.entries(value)) {
+      const at = child(pointer, key);
+      if (TRIGGER_CLIENT_FIELD_PREDICATES.includes(key)) {
+        fieldPredicate(predicate, at);
+      } else {
+        // A visible predicate Foundry has no declared type for is withheld.
+        const validate = Object.hasOwn(visible, key) ? visible[key] : undefined;
+        if (validate) validate(predicate, at);
+        else withhold(predicate, at);
+      }
+    }
+  };
+  const node = (value: unknown, pointer: string) => {
+    if (!isDeclaredObject(value, TRIGGER_NODE_KEYS)) return withhold(value, pointer);
+    for (const [key, item] of Object.entries(value)) {
+      const at = child(pointer, key);
+      if (key === "all" || key === "any") {
+        if (Array.isArray(item)) item.forEach((entry, index) => node(entry, child(at, index)));
+        else withhold(item, at);
+      } else if (key === "not") {
+        node(item, at);
+      } else {
+        leaf(item, at);
+      }
+    }
+  };
+
+  if (trigger === null || trigger === undefined) return sites;
+  if (!isDeclaredObject(trigger, TRIGGER_KEYS) || !("when" in trigger)) {
+    withhold(trigger, PLUGIN_TRIGGER_POINTER);
+    return sites;
+  }
+  node(trigger.when, child(PLUGIN_TRIGGER_POINTER, "when"));
+  return sites;
+}
+
+/** Replace the value at `pointer` (rooted at `/trigger`) inside `root`. */
+function replaceAtTriggerPointer(root: { trigger: unknown }, pointer: string, replacement: unknown) {
+  const segments = pointer
+    .slice(1)
+    .split("/")
+    .map((segment) => segment.replaceAll("~1", "/").replaceAll("~0", "~"));
+  let holder: unknown = root;
+  for (const segment of segments.slice(0, -1)) {
+    holder = (holder as Record<string, unknown>)[segment];
+  }
+  (holder as Record<string, unknown>)[segments[segments.length - 1]] = replacement;
+}
+
+/**
+ * `trigger` with every site `pluginTriggerWithheldSites` finds replaced by
+ * `marker` (an empty string stays visible, as in any redacted field), the
+ * rest as it is. The conflict comparison passes its display marker,
+ * `[redacted]`. Text an operator may copy back into an editor passes Edge's
+ * own `[REDACTED]`, which the editor's placeholder guard recognizes, so a
+ * pasted marker blocks Save instead of being stored as the operand.
+ */
+export function redactPluginTrigger(trigger: unknown, marker: string): unknown {
+  const sites = pluginTriggerWithheldSites(trigger);
+  if (sites.length === 0) return trigger;
+  const root = { trigger: JSON.parse(JSON.stringify(trigger)) as unknown };
+  for (const site of sites) {
+    if (site.value !== "") replaceAtTriggerPointer(root, site.pointer, marker);
+  }
+  return root.trigger;
 }
