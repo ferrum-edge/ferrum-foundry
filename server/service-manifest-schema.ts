@@ -27,6 +27,13 @@ const SCHEMA_URL = new URL(
   '../contracts/ferrum-contracts/schemas/service-manifest/v1.schema.json', import.meta.url,
 );
 
+// A string with no declared maxLength gets the default presentation budget. A
+// declared bound is honored as written, up to the safety cap; a bound above the
+// cap is refused at compile time (the route reports unavailable) rather than
+// silently clamped, so a re-vendored contract can never be narrowed unnoticed.
+export const MANIFEST_STRING_DEFAULT_MAX_LENGTH = 2048;
+export const MANIFEST_STRING_SAFETY_CAP = 4096;
+
 const KEYWORDS = new Set([
   '$schema', '$id', 'title', 'description', 'x-contract', 'type', 'const', 'enum',
   'properties', 'required', 'additionalProperties', 'items', 'pattern', 'maxLength',
@@ -56,8 +63,11 @@ function compile(node: SchemaNode): z.ZodType {
     if (!node.items) throw new Error('Missing service manifest item schema');
     validator = z.array(compile(node.items)).min(node.minItems ?? 0).max(32);
   } else if (node.type === 'string') {
-    // Local presentation budget; not a change to the shared wire contract.
-    validator = z.string().max(Math.min(node.maxLength ?? 2048, 2048));
+    const maxLength = node.maxLength ?? MANIFEST_STRING_DEFAULT_MAX_LENGTH;
+    if (!Number.isSafeInteger(maxLength) || maxLength < 0 || maxLength > MANIFEST_STRING_SAFETY_CAP) {
+      throw new Error('Unsupported service manifest string bound');
+    }
+    validator = z.string().max(maxLength);
   } else if (node.type === 'integer' || node.type === 'number') {
     let numeric = node.type === 'integer' ? z.number().int() : z.number();
     if (node.minimum !== undefined) numeric = numeric.min(node.minimum);

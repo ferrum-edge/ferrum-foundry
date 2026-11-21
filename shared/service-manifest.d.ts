@@ -22,6 +22,8 @@ export interface ServiceManifestOtelPluginPreview {
   scope: 'proxy';
   proxy_id: string;
   enabled: true;
+  // With gateway.otel_endpoint the plugin exports to it; without one Alloy
+  // still generates it, propagation-only, to remove caller trace context.
   config: {
     endpoint: string;
     service_name: string;
@@ -29,6 +31,11 @@ export interface ServiceManifestOtelPluginPreview {
     include_url_path: false;
     root_sampling?: 'ratio';
     root_sampling_ratio?: number;
+  } | {
+    service_name: string;
+    trace_context_trust: 'untrusted';
+    generate_trace_id: false;
+    include_url_path: false;
   };
 }
 
@@ -48,7 +55,7 @@ export interface ServiceManifestProxyPreview extends ServiceManifestTlsPreview {
   backend_read_timeout_ms: number;
   backend_write_timeout_ms: number;
   labels: { 'generated-by': 'ferrum-alloy' };
-  plugins?: { plugin_config_id: string }[];
+  plugins: { plugin_config_id: string }[];
   upstream_id?: string;
   backend_host?: string;
   backend_port?: number;
@@ -79,7 +86,11 @@ export interface ServiceManifestPreview {
     service: string;
     namespace: string;
     protocols: string[];
-    authMode: 'none' | 'gateway' | 'service' | 'unspecified';
+    // Alloy's export refuses auth.mode "gateway", so the preview does too.
+    authMode: 'none' | 'service' | 'unspecified';
+    // Whether gateway.otel_endpoint configures an exporter. The otel_tracing
+    // plugin is generated either way; 'none' means propagation-only.
+    traceExporter: 'otlp' | 'none';
     openapiDeclared: boolean;
     agents: {
       enabled: boolean;
