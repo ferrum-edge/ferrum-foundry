@@ -908,6 +908,74 @@ describe("discarding a draft after a refused write (#726)", () => {
     expect(updatePlan.mock.calls.at(-1)![4]).toEqual(pluginWriteGuard(plugin));
   });
 
+  describe("does not publish over anything the caches learned during the reload", () => {
+    const staged: PluginConfig = { ...plugin, config: { requests: 9 }, updated_at: "2026-09-06T00:00:00Z" };
+    const detailKey = ["pluginConfig", "default", "group-1"];
+
+    /** Start a discard whose plugin read is done and membership read held. */
+    async function holdMembership() {
+      await refusedGroupDraft(staged);
+      const draftForm = host.querySelector("form");
+      pluginResponse = deferred<PluginConfig>();
+      pluginResponse.resolve(staged);
+      firstPage = deferred<ReturnType<typeof page>>();
+      await click("Discard my draft and reload");
+      return draftForm;
+    }
+
+    async function release(draftForm: Element | null) {
+      firstPage.resolve(page([member("source"), member("destination")]));
+      await settle();
+      expect(toast).toHaveBeenCalledWith(
+        "error",
+        "The plugin changed while it was being reloaded; your form was kept. Try again.",
+      );
+      expect(host.querySelector("form")).toBe(draftForm);
+      expect(dialogButton("Discard my draft and reload")).toBeTruthy();
+    }
+
+    it("a different membership from a background traversal", async () => {
+      const draftForm = await holdMembership();
+      // Another operator detached destination; a background traversal saw it.
+      await act(async () => {
+        client.setQueryData(["proxies", "default", "all"], [member("source")]);
+      });
+      await release(draftForm);
+      expect(client.getQueryData(["proxies", "default", "all"])).toEqual([member("source")]);
+    });
+
+    it("a 404 the detail query recorded", async () => {
+      const draftForm = await holdMembership();
+      // The plugin was deleted; the page's own detail read learns it.
+      pluginResponse = deferred<PluginConfig>();
+      pluginResponse.reject(Object.assign(new Error("HTTP 404"), { response: { status: 404 } }));
+      await act(async () => {
+        await client.refetchQueries({ queryKey: detailKey, exact: true });
+      });
+      expect(client.getQueryState(detailKey)?.status).toBe("error");
+      await release(draftForm);
+      expect(client.getQueryState(detailKey)?.status).toBe("error");
+      expect(client.getQueryData(detailKey)).not.toEqual(staged);
+    });
+
+    it("the detail entry being retired", async () => {
+      await holdMembership();
+      // A cascade retires the detail (the page then reads it again itself).
+      pluginResponse = deferred<PluginConfig>();
+      await act(async () => {
+        client.removeQueries({ queryKey: detailKey, exact: true });
+      });
+      firstPage.resolve(page([member("source"), member("destination")]));
+      await settle();
+      expect(toast).toHaveBeenCalledWith(
+        "error",
+        "The plugin changed while it was being reloaded; your form was kept. Try again.",
+      );
+      // The staged read did not rebuild the retired entry.
+      expect(client.getQueryData(detailKey)).toBeUndefined();
+    });
+  });
+
   it("keeps the draft and the conflict when the plugin cannot be re-read", async () => {
     await refusedGroupDraft({ ...plugin, config: { requests: 9 } });
     const draftForm = host.querySelector("form");

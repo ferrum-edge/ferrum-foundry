@@ -362,10 +362,11 @@ Both reads are the reload's own and silent (the page reports a failure
 itself), and they are published to the cache together, after cancelling any
 refetch of the same keys, only once both have loaded. If either read fails,
 nothing moves: the form keeps the draft, a conflict dialog stays open, and a
-toast names the read that failed. If the plugin's cached detail took a
-different revision while the reload ran (a background refetch), the reload
-publishes nothing either, since it cannot tell which read is newer, and asks
-for another try. One reload runs at a time and its action
+toast names the read that failed. If a cache the reload writes (the plugin
+detail, or a group's proxy list) learned anything while it ran (a different
+revision or membership from a background read, an error such as a `404`, or
+the entry being retired), the reload publishes nothing either, since it
+cannot tell which observation is newer, and asks for another try. One reload runs at a time and its action
 shows busy; "Keep my draft" (or closing the dialog) abandons it, and so does
 an editor that moved on, so a late completion neither remounts the form nor
 reports anything; both of its reads are aborted, and an editor that is no

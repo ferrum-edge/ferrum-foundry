@@ -5,7 +5,7 @@ import { ResourceLabels } from "@/components/shared/ResourceLabels";
 
 import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type QueryKey } from "@tanstack/react-query";
 import {
   pluginConfigKey,
   usePluginConfig,
@@ -295,6 +295,47 @@ function PluginEditor({ session }: { session: EditorSession }) {
     );
   }
 
+  /** A cache entry's identity and observations, to detect any change since. */
+  function markCache(key: QueryKey) {
+    const query = queryClient.getQueryCache().find({ queryKey: key, exact: true });
+    return query
+      ? {
+          query,
+          dataUpdatedAt: query.state.dataUpdatedAt,
+          errorUpdatedAt: query.state.errorUpdatedAt,
+          status: query.state.status,
+        }
+      : null;
+  }
+
+  /**
+   * Whether the cache entry at `key` learned something since `mark` that a
+   * reload must not paper over: it was removed or replaced (a retirement), it
+   * recorded an error (a `404`, say), or it took data that is not what the
+   * reload is about to publish (`same` decides). Re-reading the same content
+   * is not a change.
+   */
+  function cacheChangedSince(
+    mark: ReturnType<typeof markCache>,
+    key: QueryKey,
+    same: (cached: unknown) => boolean,
+  ): boolean {
+    const query = queryClient.getQueryCache().find({ queryKey: key, exact: true });
+    if (mark === null) {
+      if (!query) return false;
+      if (query.state.errorUpdatedAt > 0) return true;
+      return query.state.dataUpdatedAt > 0 && !same(query.state.data);
+    }
+    if (query !== mark.query) return true;
+    if (query.state.errorUpdatedAt !== mark.errorUpdatedAt) return true;
+    if (query.state.status !== mark.status && query.state.status !== "success") return true;
+    return query.state.dataUpdatedAt !== mark.dataUpdatedAt && !same(query.state.data);
+  }
+
+  function sameRevision(a: unknown, b: unknown): boolean {
+    return resourceFingerprint({ value: a }) === resourceFingerprint({ value: b });
+  }
+
   function abandonReload() {
     activeReload.current?.abort.abort();
     activeReload.current = null;
@@ -318,10 +359,11 @@ function PluginEditor({ session }: { session: EditorSession }) {
    * on top of them. Membership is read whenever the fresh plugin is a group,
    * whatever scope the page showed, since the form seeds it once.
    *
-   * `"changed"`: while the reload ran, the detail cache took a different
-   * revision (a background refetch, say). Which read is newer cannot be told,
-   * so nothing is published and the caller asks for another try, rather than
-   * replacing what may be the newer revision with the staged one.
+   * `"changed"`: while the reload ran, a cache it writes (the plugin detail,
+   * or the proxy list for a group) learned something: a different revision
+   * or membership, an error such as a `404`, or the entry was retired. Which
+   * observation is newer cannot be told, so nothing is published and the
+   * caller asks for another try (`cacheChangedSince`).
    */
   async function reloadFromGateway(): Promise<
     true | "plugin" | "membership" | "changed" | "abandoned"
@@ -339,7 +381,10 @@ function PluginEditor({ session }: { session: EditorSession }) {
     const live = () =>
       activeReload.current?.token === reload.token && session.isCurrent() && !deleting.current;
     const detailKey = pluginConfigKey(scope.namespace, pluginId);
-    const observedAt = queryClient.getQueryState(detailKey)?.dataUpdatedAt ?? 0;
+    const membersKey = allProxiesKey(scope.namespace);
+    // What each cache this reload writes held when it started.
+    const detailMark = markCache(detailKey);
+    const membersMark = markCache(membersKey);
     const finish = <T,>(result: T): T => {
       if (activeReload.current?.token === reload.token) {
         activeReload.current = null;
@@ -366,19 +411,18 @@ function PluginEditor({ session }: { session: EditorSession }) {
       if (!live()) return finish("abandoned");
     }
 
-    const membersKey = allProxiesKey(scope.namespace);
     await Promise.all([
       queryClient.cancelQueries({ queryKey: detailKey, exact: true }),
       members && queryClient.cancelQueries({ queryKey: membersKey, exact: true }),
     ]);
     if (!live()) return finish("abandoned");
 
-    const observed = queryClient.getQueryState<PluginConfig>(detailKey);
     if (
-      observed?.data !== undefined &&
-      observed.dataUpdatedAt !== observedAt &&
-      resourceFingerprint(pluginsApi.toBaseline(observed.data)) !==
-        resourceFingerprint(pluginsApi.toBaseline(fresh))
+      cacheChangedSince(detailMark, detailKey, (cached) =>
+        sameRevision(pluginsApi.toBaseline(cached as PluginConfig), pluginsApi.toBaseline(fresh)),
+      ) ||
+      (members !== undefined &&
+        cacheChangedSince(membersMark, membersKey, (cached) => sameRevision(cached, members)))
     ) {
       return finish("changed");
     }
