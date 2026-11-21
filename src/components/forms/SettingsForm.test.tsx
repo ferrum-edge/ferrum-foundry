@@ -598,6 +598,16 @@ describe("SettingsForm connection test", () => {
     expect(badge().className).toContain("text-danger");
   });
 
+  it("never renders an unvalidated envelope field", async () => {
+    await renderForm();
+    answer(503, { reachable: false, status: 503, error: { message: "x" } });
+    await testConnection();
+
+    expect(inputByLabel("Admin URL")).toBeDefined();
+    expect(badge().textContent).toBe("Not reachable (HTTP 503)");
+    expect(badge().className).toContain("text-danger");
+  });
+
   it("reports a 200 whose envelope names another status as a failed test", async () => {
     await renderForm();
     answer(200, { reachable: true });

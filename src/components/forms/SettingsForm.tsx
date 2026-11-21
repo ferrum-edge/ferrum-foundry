@@ -109,14 +109,16 @@ interface StatusResult {
  * `httpStatus`, or `null` when the JSON is not one: the envelope names the
  * status it was sent with, and a `503` claims `reachable` only with the
  * gateway's health snapshot as its body. Anything else at this path (an
- * intermediary's JSON, for one) is a failed test, never a green badge.
+ * intermediary's JSON, for one) is a failed test, never a green badge. The
+ * result carries only the validated fields, so nothing unchecked (an object
+ * `error`, say) is ever rendered.
  */
 function statusEnvelope(value: unknown, httpStatus: number): StatusResult | null {
   if (typeof value !== "object" || value === null) return null;
-  const envelope = value as StatusResult;
-  if (typeof envelope.reachable !== "boolean" || envelope.status !== httpStatus) return null;
-  if (httpStatus === 503 && envelope.reachable && !isGatewayHealthSnapshot(envelope.body)) return null;
-  return envelope;
+  const { reachable, status, body } = value as Record<string, unknown>;
+  if (typeof reachable !== "boolean" || status !== httpStatus) return null;
+  if (httpStatus === 503 && reachable && !isGatewayHealthSnapshot(body)) return null;
+  return { reachable, status: httpStatus, body };
 }
 
 /**
