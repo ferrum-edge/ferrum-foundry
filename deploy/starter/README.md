@@ -84,8 +84,12 @@ or `unmapped`). It is for a first run and for CI. Do not expose it.
 ## Production
 
 1. `cp .env.example .env` and `cp oauth2-proxy.env.example oauth2-proxy.env`,
-   fill both in, and `chmod 600` both. Generate secrets with
-   `openssl rand -base64 48`. `FERRUM_JWT_SECRET` must equal the gateway's
+   fill both in, and `chmod 600` both. Generate `FERRUM_JWT_SECRET` and
+   `FERRUM_TRUSTED_PROXY_SECRET` with `openssl rand -base64 48`. Generate
+   `OAUTH2_PROXY_COOKIE_SECRET` separately, because oauth2-proxy accepts only a
+   16-, 24- or 32-byte key: `openssl rand -base64 32 | tr -- '+/' '-_'`. The
+   OIDC client secret is the one your identity provider issues.
+   `FERRUM_JWT_SECRET` must equal the gateway's
    `FERRUM_ADMIN_JWT_SECRET`. The BFF refuses to start while
    `FERRUM_JWT_SECRET` or `FERRUM_TRUSTED_PROXY_SECRET` still holds the
    `replace-me-...` placeholder from `.env.example`, or (in production) one of
@@ -118,6 +122,9 @@ or `unmapped`). It is for a first run and for CI. Do not expose it.
    `FERRUM_TLS_CA_ROOT=/etc/ferrum/ca` and `FERRUM_TLS_CA_PATH` in `.env`.
 4. Edit `nginx/foundry.conf` for your `server_name` and certificate paths, and
    `nginx/identity/policy.conf` for your IdP's group names and your namespaces.
+   If you rename the groups, change oauth2-proxy's `--allowed-group` entries in
+   `compose.yaml` to the same names: oauth2-proxy refuses a sign-in (HTTP 403
+   on `/oauth2/callback`) before nginx applies the role map.
 5. Pin `FOUNDRY_IMAGE` to a released digest, and run the Ferrum Edge release
    named in that published pairing's immutable record linked from
    [`docs/compatibility.md`](../../docs/compatibility.md).
