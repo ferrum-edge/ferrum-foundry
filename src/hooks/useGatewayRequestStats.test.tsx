@@ -133,6 +133,7 @@ afterEach(async () => {
   resetGatewayTarget();
   localStorage.clear();
   sessionStorage.clear();
+  vi.useRealTimers();
 });
 
 describe("gateway request rate", () => {
@@ -445,5 +446,19 @@ describe("gateway request rate", () => {
     storeSample(now - 60_000, 0, "target-a", { version: 2, mode: "database" });
     await show({ total: 6_000, at: now });
     expect(stats?.requestsPerSecond).toBeUndefined();
+  });
+  it("drops a placeholder marker left in the future by a backward clock correction", async () => {
+    // The clock ran five minutes fast when the node agent answered ...
+    vi.useFakeTimers({ toFake: ["Date"], now: now + 300_000 });
+    await show({ total: 0, at: now + 300_000, uptime: 0, mode: "node_agent" });
+    expect(sessionStorage.getItem("ferrum:metricsPlaceholderSeenAt")).not.toBeNull();
+
+    // ... and was then corrected; a data plane answers at the same target.
+    vi.setSystemTime(now + 10_000);
+    await show({ total: 100, at: now + 10_000, uptime: 100, mode: "dp" });
+    expect(stats).toEqual({ totalRequests: 100 });
+    await show({ total: 700, at: now + 40_000, uptime: 130, mode: "dp" });
+    expect(stats?.requestsPerSecond).toBe(20);
+    expect(sessionStorage.getItem("ferrum:metricsPlaceholderSeenAt")).toBe("{}");
   });
 });

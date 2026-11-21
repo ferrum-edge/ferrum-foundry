@@ -82,11 +82,30 @@ function readStoredPlaceholders(): Map<string, number> {
   }
 }
 
+function forgetPlaceholder(target: string): void {
+  placeholderSeenAt.delete(target);
+  try {
+    const stored = readStoredPlaceholders();
+    if (stored.delete(target)) {
+      sessionStorage.setItem(PLACEHOLDER_STORAGE_KEY, JSON.stringify(Object.fromEntries(stored)));
+    }
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
 function placeholderSeenAtFor(target: string): number | undefined {
   const inMemory = placeholderSeenAt.get(target);
   const stored = readStoredPlaceholders().get(target);
-  if (inMemory === undefined) return stored;
-  return stored === undefined ? inMemory : Math.max(inMemory, stored);
+  const seenAt =
+    inMemory === undefined ? stored : stored === undefined ? inMemory : Math.max(inMemory, stored);
+  // A marker later than now means the clock moved backward since; keeping it
+  // would refuse every new baseline until the clock caught up, so drop it.
+  if (seenAt !== undefined && seenAt > Date.now()) {
+    forgetPlaceholder(target);
+    return undefined;
+  }
+  return seenAt;
 }
 
 function notePlaceholder(target: string, timestamp: number): void {

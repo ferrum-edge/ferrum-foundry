@@ -25,11 +25,13 @@ export interface RequestRates {
 
 /**
  * Slack allowed between a sample pair's wall-clock gap and the gateway's
- * uptime advance: Edge reports whole seconds, and each timestamp is when the
- * response arrived, not when Edge read its clock.
+ * uptime advance. Edge serves `/admin/metrics` from a process-wide cache of
+ * up to 5 s, so either snapshot can be that stale (5 s each), uptime is
+ * whole seconds (1 s), and each timestamp is when the response arrived, not
+ * when Edge read its clock (transport jitter): 12 s, or 20% of a long gap.
  */
-const UPTIME_TOLERANCE_MIN_SECONDS = 5;
-const UPTIME_TOLERANCE_RATIO = 0.1;
+const UPTIME_TOLERANCE_MIN_SECONDS = 12;
+const UPTIME_TOLERANCE_RATIO = 0.2;
 
 /**
  * Rates between `previous` and `current`, or the total alone when the two

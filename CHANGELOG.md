@@ -506,22 +506,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stores a `cp` or `node_agent` reading and drops its in-memory baseline when
   it sees one. A gateway target names the admin URL, not the Edge process, so
   two samples are diffed only when the gateway's uptime advanced with the wall
-  clock between them (allowing 5 seconds or 10% of the gap, whichever is
-  larger): a restarted or replaced process starts collecting afresh. The tab
-  also remembers, in memory and in `sessionStorage`, when it last saw a
-  placeholder at each gateway target (`/admin/metrics` is process-wide, so
-  under any namespace) and never bridges from a baseline for that target whose
-  request was sent at or before then (the request-start time, since a slow
-  response can resolve after a later one; the admin metrics query now also
-  forwards its abort signal), whichever namespace it was stored under, so a
-  data plane that later answers at the same gateway target starts collecting
-  afresh even across a remount or a reload; stored samples now carry a version
-  and their mode, and are only diffed within one mode. The total request count
-  comes from the reading being rendered, and a rate is shown only while the
-  reading has the mode, namespace and gateway target it was computed for. The
-  mock admin gateway's `/admin/metrics` now follows `MOCK_GATEWAY_MODE`,
-  returning Edge's skeleton for `cp` and `node_agent` (including the zeroed
-  `adaptive_concurrency` counters and
+  clock between them (allowing 12 seconds or 20% of the gap, whichever is
+  larger, for Edge's 5-second process-wide metrics cache, whole-second uptime
+  and response timing): a restarted or replaced process starts collecting
+  afresh. The tab also remembers, in memory and in `sessionStorage`, when it
+  last saw a placeholder at each gateway target (`/admin/metrics` is
+  process-wide, so under any namespace) and never bridges from a baseline for
+  that target whose request was sent at or before then (the request-start
+  time, since a slow response can resolve after a later one; the admin metrics
+  query now also forwards its abort signal), whichever namespace it was stored
+  under, so a data plane that later answers at the same gateway target starts
+  collecting afresh even across a remount or a reload (a marker later than the
+  current clock, left by a backward clock correction, is dropped); stored
+  samples now carry a version and their mode, and are only diffed within one
+  mode. The total request count comes from the reading being rendered, and a
+  rate is shown only while the reading has the mode, namespace and gateway
+  target it was computed for. The mock admin gateway's `/admin/metrics` now
+  follows `MOCK_GATEWAY_MODE`, returning Edge's skeleton for `cp` and
+  `node_agent` (including the zeroed `adaptive_concurrency` counters and
   `tcp_connection_throttle.active_connections`), and its proxy-mode uptime
   advances with elapsed time, so its unchanged counters show a rate of 0
   instead of staying at Collecting.
