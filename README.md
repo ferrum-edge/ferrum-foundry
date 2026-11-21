@@ -367,8 +367,13 @@ request without the proxy's identity assertion; for example,
   lists the headers the proxy must strip and inject.
 - [Deployment](docs/deployment.md#3-reverse-proxy-example-nginx-and-oauth2-proxy)
   has an nginx and oauth2-proxy configuration written for the starter's
-  `foundry:8080` container; point its upstream at `http://127.0.0.1:3001` and
-  its oauth2-proxy settings at your own identity provider for a source build.
+  Compose network, where nginx reaches `foundry:8080` and `oauth2-proxy:4180`
+  by service name. For a source build behind nginx on the same host, point
+  Foundry's `location /` upstream at `http://127.0.0.1:3001`, point both
+  `/oauth2/` locations (including the internal `/oauth2/auth` subrequest) at
+  your oauth2-proxy listener, such as `http://127.0.0.1:4180`, configure
+  oauth2-proxy for your identity provider, and set its trusted proxy range to
+  the nginx peer address in that topology.
 - [Gateway transport](docs/deployment.md#gateway-transport) covers the admin
   API TLS settings, and the
   [downstream JWT claims](docs/deployment.md#downstream-jwt-claims) table covers
