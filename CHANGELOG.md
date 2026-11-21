@@ -489,6 +489,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Upstream and proxy edit baselines are reduced exactly as their saves are
+  (#725). `upstreams.toBaseline()` now strips the server-owned
+  `subsets[].traffic_policy` fields (`writableSubset`), and
+  `proxies.toBaseline()` the retired `pool_max_requests_per_connection`.
+  Before, a mesh control plane rewriting a `DestinationRule`-projected subset
+  policy (a TLS rotation, a new `connect_timeout_ms`) refused the open
+  upstream page's settings save and delete with a false conflict, and any
+  real conflict showed `subsets` (or the retired proxy field) as changed
+  locally in the comparison. Proxy deletes still compare a retired field,
+  which is operator-written on the gateways that store it.
 - Foundry handles the plugin-config projection Ferrum Edge `main` adds after
   v0.9.20 (ferrum-edge#7054). The sensitivity drift parser accepts
   `FieldSensitivity::CertificateSource`, `PrivateKeySource` and `EndpointPath`

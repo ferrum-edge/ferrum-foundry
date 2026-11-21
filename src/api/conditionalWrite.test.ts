@@ -30,7 +30,7 @@ import {
   type TaggedRead,
 } from "./conditionalWrite";
 import { setApiErrorHandler } from "./client";
-import { formatBaselineValue } from "@/lib/resourceBaseline";
+import { compareBaselines, formatBaselineValue } from "@/lib/resourceBaseline";
 import { resetGatewayMetadata } from "./gatewayMetadata";
 import * as consumers from "./consumers";
 import * as proxies from "./proxies";
@@ -663,6 +663,117 @@ describe("guarded upstream saves on a gateway that honours If-Match", () => {
     ]);
     expect(gateway.read().algorithm).toBe("least_connections");
     expect(gateway.read().targets.map((target) => target.host)).toEqual(["two.internal"]);
+  });
+
+  describe("server-owned subset traffic_policy fields (#725)", () => {
+    // Edge projects these from a mesh DestinationRule and refuses them on an
+    // operator write, so a save never carries them and cannot revert them.
+    const meshSeed = {
+      ...upstreamSeed,
+      subsets: [{
+        name: "v2",
+        labels: { version: "v2" },
+        traffic_policy: {
+          load_balancer_algorithm: "least_latency",
+          connect_timeout_ms: 1_000,
+          tls: { mode: "simple" },
+        },
+      }],
+    } as Upstream;
+    const rotated = (stored: Record<string, unknown>) => ({
+      ...stored,
+      subsets: [{
+        name: "v2",
+        labels: { version: "v2" },
+        traffic_policy: {
+          load_balancer_algorithm: "least_latency",
+          connect_timeout_ms: 2_500,
+          tls: { mode: "mutual" },
+          max_retries: 3,
+        },
+      }],
+    });
+
+    it("saves over a control-plane rewrite made since the editor opened", async () => {
+      const gateway = stubGateway(rotated({ ...meshSeed }) as unknown as Upstream);
+
+      await upstreams.update(
+        scope,
+        "payments",
+        { ...upstreams.toUpdatePayload(meshSeed), name: "renamed" },
+        upstreams.upstreamWriteGuard(meshSeed),
+      );
+
+      expect(gateway.wire).toEqual(["GET", 'PUT if-match "r0"']);
+      expect(gateway.read().name).toBe("renamed");
+    });
+
+    it("re-sends after a 412 caused only by a control-plane rewrite", async () => {
+      const gateway = stubGateway(meshSeed, { interleave: rotated });
+
+      await upstreams.update(
+        scope,
+        "payments",
+        { ...upstreams.toUpdatePayload(meshSeed), name: "renamed" },
+        upstreams.upstreamWriteGuard(meshSeed),
+      );
+
+      expect(gateway.wire).toEqual([
+        "GET",
+        'PUT if-match "r0"',
+        "GET",
+        'PUT if-match "r1"',
+      ]);
+      expect(gateway.read().name).toBe("renamed");
+    });
+
+    it("does not show subsets as changed locally in a real conflict", async () => {
+      const gateway = stubGateway({
+        ...rotated({ ...meshSeed }),
+        algorithm: "least_connections",
+      } as unknown as Upstream);
+
+      const refused = await settle(
+        upstreams.update(
+          scope,
+          "payments",
+          { ...upstreams.toUpdatePayload(meshSeed), name: "renamed" },
+          upstreams.upstreamWriteGuard(meshSeed),
+        ),
+      );
+
+      if (!isStaleResourceError(refused)) throw new Error("expected a stale save");
+      const { original, current, proposed } = refused.detail;
+      const fields = compareBaselines(original, current, proposed);
+      expect(fields.map(({ field }) => field).sort()).toEqual(["algorithm", "name"]);
+      expect(fields.find(({ field }) => field === "algorithm")).toMatchObject({
+        changedLocally: false,
+      });
+      expect(gateway.wire).toEqual(["GET"]);
+    });
+
+    it("deletes over a control-plane rewrite made since the page loaded", async () => {
+      const gateway = stubGateway(rotated({ ...meshSeed }) as unknown as Upstream);
+
+      await upstreams.remove(scope, "payments", upstreams.upstreamWriteGuard(meshSeed));
+
+      expect(gateway.wire).toEqual(["GET", 'DELETE if-match "r0"']);
+      expect(gateway.exists()).toBe(false);
+    });
+
+    it("still refuses a delete when a writable subset field changed", async () => {
+      const gateway = stubGateway({
+        ...meshSeed,
+        subsets: [{ name: "v2", labels: { version: "v3" }, traffic_policy: meshSeed.subsets?.[0].traffic_policy }],
+      } as Upstream);
+
+      const refused = await settle(
+        upstreams.remove(scope, "payments", upstreams.upstreamWriteGuard(meshSeed)),
+      );
+
+      expect(isStaleResourceError(refused)).toBe(true);
+      expect(gateway.exists()).toBe(true);
+    });
   });
 });
 

@@ -91,7 +91,8 @@ export const PROXY_BASELINE_OMIT: readonly string[] = [
  * Upstream fields excluded on top of the server-managed set. These mirror the
  * mesh-owned fields `upstreams.toUpdatePayload` strips: the control plane
  * writes them, an operator save never carries them, and they change without
- * any competing editor.
+ * any competing editor. `upstreams.toBaseline` also strips the server-owned
+ * `subsets[].traffic_policy` fields, for the same reason.
  */
 export const UPSTREAM_BASELINE_OMIT: readonly string[] = [
   ...SERVER_MANAGED_FIELDS,
@@ -146,7 +147,8 @@ export const PLUGIN_BASELINE_OMIT: readonly string[] = [
  * same-count rotation nor a change to a type the read omits (`basicauth`,
  * custom types) is visible.
  *
- * Upstreams keep `UPSTREAM_BASELINE_OMIT` for deletes: their omitted fields
+ * Upstreams keep their save projection for deletes (`UPSTREAM_BASELINE_OMIT`
+ * plus the server-owned subset `traffic_policy` fields): their omitted fields
  * are written by the mesh control plane, not by a competing operator, and
  * change without one.
  */

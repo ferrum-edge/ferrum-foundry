@@ -224,14 +224,32 @@ export async function create(
   );
 }
 
-/** Reduce an upstream, or an upstream payload, to the content a save replaces. */
+/**
+ * Reduce an upstream, or an upstream payload, to the content a save replaces.
+ *
+ * Subsets go through `writableSubset`, as they do in every save payload: the
+ * server-owned `traffic_policy` fields are projected from a mesh
+ * DestinationRule, never sent, and change without any competing editor, like
+ * the top-level fields in `UPSTREAM_BASELINE_OMIT`. Keeping them would refuse
+ * a save (or delete) when the control plane rewrote one, and would show
+ * `subsets` as changed locally in a real conflict, since the proposed payload
+ * never carries them (#725).
+ */
 export function toBaseline(
   upstream: Upstream | UpstreamCreate,
 ): BaselineSnapshot {
-  return baselineSnapshot(upstream, UPSTREAM_BASELINE_OMIT);
+  const snapshot = baselineSnapshot(upstream, UPSTREAM_BASELINE_OMIT);
+  if (!Array.isArray(snapshot.subsets)) return snapshot;
+  return {
+    ...snapshot,
+    subsets: (snapshot.subsets as SubsetDefinition[]).map(writableSubset),
+  };
 }
 
-/** Guard for the whole-resource settings form. */
+/**
+ * Guard for the whole-resource settings form, and for the detail page's
+ * delete: both leave out the mesh-owned fields (see `toBaseline`).
+ */
 export function upstreamWriteGuard(
   seed: Upstream,
 ): WriteGuard<Upstream | UpstreamCreate> {

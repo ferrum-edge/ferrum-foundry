@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Proxy } from "./types";
-import { listAll, mergeFormUpdatePayload, remove, toUpdatePayload } from "./proxies";
+import { compareBaselines } from "@/lib/resourceBaseline";
+import {
+  listAll,
+  mergeFormUpdatePayload,
+  proxyDeleteGuard,
+  remove,
+  toBaseline,
+  toUpdatePayload,
+} from "./proxies";
 
 const URL_SCHEME_PATTERN = /^[a-z][a-z0-9+.-]*:/i;
 
@@ -106,6 +114,35 @@ describe("proxy full-replacement builders", () => {
     });
     expect(payload).not.toHaveProperty("pool_max_requests_per_connection");
     expect(read).toHaveProperty("pool_max_requests_per_connection", 900);
+  });
+
+  it("leaves the retired fields out of the save baseline, as the payload does (#725)", () => {
+    const read = { ...fullProxy(), pool_max_requests_per_connection: 900 } as Proxy;
+    const original = toBaseline(read);
+    expect(original).not.toHaveProperty("pool_max_requests_per_connection");
+    // A v0.9.20 writer changing the retired field is not a conflict for a save
+    // that never sends it.
+    const current = toBaseline({ ...read, pool_max_requests_per_connection: 50 } as Proxy);
+    expect(current).toEqual(original);
+    // In a real conflict, the field is not shown as changed by this draft.
+    const proposed = toBaseline(
+      mergeFormUpdatePayload(read, { backend_host: "backend.example.com", backend_port: 443 }),
+    );
+    const fields = compareBaselines(
+      original,
+      toBaseline({ ...read, name: "renamed", pool_max_requests_per_connection: 50 } as Proxy),
+      proposed,
+    ).map(({ field }) => field);
+    expect(fields).not.toContain("pool_max_requests_per_connection");
+  });
+
+  it("still compares a retired field on delete, which destroys the stored value", () => {
+    const read = { ...fullProxy(), pool_max_requests_per_connection: 900 } as Proxy;
+    const guard = proxyDeleteGuard(read);
+    expect(guard.baseline).toHaveProperty("pool_max_requests_per_connection", 900);
+    expect(
+      guard.select({ ...read, pool_max_requests_per_connection: 50 } as Proxy),
+    ).not.toEqual(guard.baseline);
   });
 
   it("distinguishes explicit false from inherited null", () => {
