@@ -362,12 +362,17 @@ Both reads are the reload's own and silent (the page reports a failure
 itself), and they are published to the cache together, after cancelling any
 refetch of the same keys, only once both have loaded. If either read fails,
 nothing moves: the form keeps the draft, a conflict dialog stays open, and a
-toast names the read that failed. One reload runs at a time and its action
+toast names the read that failed. If the plugin's cached detail took a
+different revision while the reload ran (a background refetch), the reload
+publishes nothing either, since it cannot tell which read is newer, and asks
+for another try. One reload runs at a time and its action
 shows busy; "Keep my draft" (or closing the dialog) abandons it, and so does
 an editor that moved on, so a late completion neither remounts the form nor
 reports anything; both of its reads are aborted, and an editor that is no
 longer on screen (a committed save answered after a route or namespace
-change) starts none. While a save is pending or a reload runs, every field
+change) starts none. A save holds a synchronous guard from Submit through
+any committed reseed, so a second submit before the pending state renders
+starts nothing. While a save is pending or a reload runs, every field
 of the form is disabled and nothing submits, so no edit is made that a
 remount would erase; a select
 whose menu was open closes it and accepts no choice. Delete and reload

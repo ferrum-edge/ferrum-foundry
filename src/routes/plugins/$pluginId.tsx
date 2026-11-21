@@ -45,6 +45,7 @@ import * as proxiesApi from "@/api/proxies";
 import { isStaleResourceError, type StaleResourceDetail } from "@/api/conditionalWrite";
 import { StaleWriteDialog } from "@/components/shared/StaleWriteDialog";
 import { useEditBaseline } from "@/hooks/useEditBaseline";
+import { resourceFingerprint } from "@/lib/resourceBaseline";
 
 /**
  * The route component survives a namespace switch; `PluginEditor` is keyed on
@@ -130,6 +131,10 @@ function PluginEditor({ session }: { session: EditorSession }) {
   // no reload starts or publishes while a delete runs or after it succeeded,
   // so nothing can recreate the detail entry the delete retired.
   const deleting = useRef(false);
+  // Set synchronously for a save's whole run (its committed reseed included):
+  // a second submit before the pending state renders is refused, and so are
+  // a delete or an explicit reload.
+  const saving = useRef(false);
 
   // The configuration this editor opened against, advanced only by an
   // accepted response. The membership plan refuses a save or delete whose
@@ -166,7 +171,11 @@ function PluginEditor({ session }: { session: EditorSession }) {
       const seen = membershipSeen.current;
       // A reload in flight is about to replace this form; a delete is
       // removing it.
-      if (!capability.allowed || !seen || activeReload.current || deleting.current) return;
+      if (
+        !capability.allowed || !seen ||
+        activeReload.current || deleting.current || saving.current
+      ) return;
+      saving.current = true;
       setMembershipError(null);
       const proxyIds = data.scope === "proxy_group" ? proxyGroupIds ?? [] : [];
       try {
@@ -213,7 +222,9 @@ function PluginEditor({ session }: { session: EditorSession }) {
               ? " Foundry could not re-read the plugin; reload it before saving again."
               : reloaded === "membership"
                 ? " Foundry could not re-read the plugin's proxies; reload it before saving again."
-                : "";
+                : reloaded === "changed"
+                  ? " The plugin changed again while Foundry re-read it; reload it before saving again."
+                  : "";
           toast("warning", committedWriteMessage("Plugin configuration saved", committed) + unread);
           return;
         }
@@ -223,6 +234,8 @@ function PluginEditor({ session }: { session: EditorSession }) {
           "Failed to update plugin configuration",
         );
         toast("error", message);
+      } finally {
+        saving.current = false;
       }
     },
   );
@@ -236,7 +249,7 @@ function PluginEditor({ session }: { session: EditorSession }) {
    * operator can try again or keep editing.
    */
   const handleDiscardAndReload = session.bind(async () => {
-    if (activeReload.current || deleting.current) return;
+    if (activeReload.current || deleting.current || saving.current) return;
     const reloaded = await reloadFromGateway();
     if (reloaded === "abandoned") return;
     if (reloaded !== true) {
@@ -261,7 +274,7 @@ function PluginEditor({ session }: { session: EditorSession }) {
    * and the recovery report stay as they are.
    */
   const handleReloadSaved = session.bind(async () => {
-    if (activeReload.current || deleting.current) return;
+    if (activeReload.current || deleting.current || saving.current) return;
     const reloaded = await reloadFromGateway();
     if (reloaded === "abandoned") return;
     if (reloaded !== true) {
@@ -271,12 +284,14 @@ function PluginEditor({ session }: { session: EditorSession }) {
     setMembershipError(null);
   });
 
-  function reportReloadFailure(failed: "plugin" | "membership") {
+  function reportReloadFailure(failed: "plugin" | "membership" | "changed") {
     toast(
       "error",
       failed === "plugin"
         ? "Could not re-read the plugin; your form was kept. Try again."
-        : "Could not re-read the plugin's proxies; your form was kept. Try again.",
+        : failed === "membership"
+          ? "Could not re-read the plugin's proxies; your form was kept. Try again."
+          : "The plugin changed while it was being reloaded; your form was kept. Try again.",
     );
   }
 
@@ -302,8 +317,15 @@ function PluginEditor({ session }: { session: EditorSession }) {
    * of the same keys (the save's settle invalidation, say) that could land
    * on top of them. Membership is read whenever the fresh plugin is a group,
    * whatever scope the page showed, since the form seeds it once.
+   *
+   * `"changed"`: while the reload ran, the detail cache took a different
+   * revision (a background refetch, say). Which read is newer cannot be told,
+   * so nothing is published and the caller asks for another try, rather than
+   * replacing what may be the newer revision with the staged one.
    */
-  async function reloadFromGateway(): Promise<true | "plugin" | "membership" | "abandoned"> {
+  async function reloadFromGateway(): Promise<
+    true | "plugin" | "membership" | "changed" | "abandoned"
+  > {
     // An editor that is deleting, or no longer on screen (a committed save
     // answered after a route or namespace change), starts no read at all.
     if (deleting.current || !session.isCurrent()) return "abandoned";
@@ -316,6 +338,8 @@ function PluginEditor({ session }: { session: EditorSession }) {
     setDeleteOpen(false);
     const live = () =>
       activeReload.current?.token === reload.token && session.isCurrent() && !deleting.current;
+    const detailKey = pluginConfigKey(scope.namespace, pluginId);
+    const observedAt = queryClient.getQueryState(detailKey)?.dataUpdatedAt ?? 0;
     const finish = <T,>(result: T): T => {
       if (activeReload.current?.token === reload.token) {
         activeReload.current = null;
@@ -342,13 +366,22 @@ function PluginEditor({ session }: { session: EditorSession }) {
       if (!live()) return finish("abandoned");
     }
 
-    const detailKey = pluginConfigKey(scope.namespace, pluginId);
     const membersKey = allProxiesKey(scope.namespace);
     await Promise.all([
       queryClient.cancelQueries({ queryKey: detailKey, exact: true }),
       members && queryClient.cancelQueries({ queryKey: membersKey, exact: true }),
     ]);
     if (!live()) return finish("abandoned");
+
+    const observed = queryClient.getQueryState<PluginConfig>(detailKey);
+    if (
+      observed?.data !== undefined &&
+      observed.dataUpdatedAt !== observedAt &&
+      resourceFingerprint(pluginsApi.toBaseline(observed.data)) !==
+        resourceFingerprint(pluginsApi.toBaseline(fresh))
+    ) {
+      return finish("changed");
+    }
 
     setDeleteOpen(false);
     if (members) queryClient.setQueryData<Proxy[]>(membersKey, members);
@@ -364,7 +397,7 @@ function PluginEditor({ session }: { session: EditorSession }) {
     // still replace the form this confirmation was given against.
     if (
       !plugin || !capability.allowed || !seen ||
-      activeReload.current || updatePlugin.isPending || deleting.current
+      activeReload.current || updatePlugin.isPending || saving.current || deleting.current
     ) return;
     deleting.current = true;
     setMembershipError(null);
@@ -468,7 +501,9 @@ function PluginEditor({ session }: { session: EditorSession }) {
               variant="danger"
               disabled={reloading || updatePlugin.isPending}
               onClick={() => {
-                if (!activeReload.current && !deleting.current) setDeleteOpen(true);
+                if (!activeReload.current && !deleting.current && !saving.current) {
+                  setDeleteOpen(true);
+                }
               }}
             >
               <TrashIcon />

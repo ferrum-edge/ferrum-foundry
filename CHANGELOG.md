@@ -504,7 +504,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   traversal of its own. Reloads run one at a time, and "Keep my draft" or
   leaving the editor abandons a pending one, so it cannot remount the form or
   toast late; its reads are aborted, and an editor that has gone starts none.
-  A committed save's warning names the read its reseed could not make. While
+  A committed save's warning names the read its reseed could not make. A
+  reload never publishes its read over a different revision the cache took
+  meanwhile (it asks for another try), and a second submit before the
+  pending state renders starts no second save. While
   a save is pending or a reload runs the form's fields are disabled, nothing
   submits (an open select menu closes), and Delete is unavailable while a
   save or reload can still replace the form (a reload also closes an open

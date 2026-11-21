@@ -877,6 +877,37 @@ describe("discarding a draft after a refused write (#726)", () => {
     expect(dialogButton("Discard my draft and reload")).toBeUndefined();
   });
 
+  it("does not publish its read over a revision the cache took during the reload", async () => {
+    const staged: PluginConfig = { ...plugin, config: { requests: 9 }, updated_at: "2026-09-06T00:00:00Z" };
+    await refusedGroupDraft(staged);
+    const draftForm = host.querySelector("form");
+    pluginResponse = deferred<PluginConfig>();
+    pluginResponse.resolve(staged);
+    firstPage = deferred<ReturnType<typeof page>>();
+
+    await click("Discard my draft and reload");
+    // While the membership is still loading, a background read publishes C.
+    const newer: PluginConfig = { ...plugin, config: { requests: 20 }, updated_at: "2026-09-07T00:00:00Z" };
+    await act(async () => {
+      client.setQueryData(["pluginConfig", "default", "group-1"], newer);
+    });
+    firstPage.resolve(page([member("source"), member("destination")]));
+    await settle();
+
+    expect(client.getQueryData(["pluginConfig", "default", "group-1"])).toEqual(newer);
+    expect(toast).toHaveBeenCalledWith(
+      "error",
+      "The plugin changed while it was being reloaded; your form was kept. Try again.",
+    );
+    expect(host.querySelector("form")).toBe(draftForm);
+    expect(dialogButton("Discard my draft and reload")).toBeTruthy();
+    // Nothing staged was adopted: a save is still judged against the opened plugin.
+    await click("Keep my draft");
+    updatePlan.mockResolvedValueOnce(plugin);
+    await submit();
+    expect(updatePlan.mock.calls.at(-1)![4]).toEqual(pluginWriteGuard(plugin));
+  });
+
   it("keeps the draft and the conflict when the plugin cannot be re-read", async () => {
     await refusedGroupDraft({ ...plugin, config: { requests: 9 } });
     const draftForm = host.querySelector("form");
@@ -1263,6 +1294,22 @@ describe("a pending reload locks the form and excludes delete (#726)", () => {
     firstPage.resolve(page([member("source")]));
     await settle();
     expect(locked()).toBe(false);
+  });
+
+  it("starts one save for two submits delivered before the pending state renders", async () => {
+    await open();
+    const save = deferred<PluginConfig>();
+    updatePlan.mockReturnValue(save.promise);
+    const form = host.querySelector("form")!;
+    await act(async () => {
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    await settle();
+    expect(updatePlan).toHaveBeenCalledTimes(1);
+    await act(async () => save.resolve(plugin));
+    await settle();
+    updatePlan.mockReset();
   });
 
   it("locks edits while a save is pending, then shows what the committed save stored", async () => {
