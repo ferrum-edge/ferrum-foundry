@@ -101,6 +101,60 @@ describe('service manifest string bounds', () => {
   });
 });
 
+describe('service manifest string bounds in code points', () => {
+  it('counts supplementary-plane characters once, in the safety cap and declared bounds', async () => {
+    const schema = vendoredSchema();
+    schema.properties.service.properties.description.maxLength = 2049;
+    const { validatedManifest, MANIFEST_STRING_SAFETY_CAP } = await load(schema);
+    const body = manifest();
+    // 2,049 code points, 4,098 UTF-16 code units: above the cap in UTF-16.
+    body.service.description = '\u{1F600}'.repeat(2049);
+    expect(body.service.description.length).toBeGreaterThan(MANIFEST_STRING_SAFETY_CAP);
+    expect(validatedManifest(body)).not.toBeNull();
+    body.service.description = '\u{1F600}'.repeat(2050);
+    expect(validatedManifest(body)).toBeNull();
+  });
+
+  it('applies the safety cap to unknown keys in code points', async () => {
+    const { validatedManifest, MANIFEST_STRING_SAFETY_CAP } = await load(vendoredSchema());
+    const body = manifest();
+    body.unknown = '\u{1F600}'.repeat(MANIFEST_STRING_SAFETY_CAP + 1);
+    expect(validatedManifest(body)).toBeNull();
+  });
+});
+
+describe('maxLength outside a plain string node', () => {
+  it('constrains enum values and refuses to compile an enum bound above the cap', async () => {
+    const schema = vendoredSchema();
+    schema.properties.auth.properties.mode.maxLength = 4;
+    const { validatedManifest, MANIFEST_STRING_SAFETY_CAP } = await load(schema);
+    const body = manifest();
+    body.auth = { mode: 'none' };
+    expect(validatedManifest(body)).not.toBeNull();
+    body.auth = { mode: 'service' };
+    expect(validatedManifest(body)).toBeNull();
+
+    schema.properties.auth.properties.mode.maxLength = MANIFEST_STRING_SAFETY_CAP + 1;
+    const aboveCap = await load(schema);
+    expect(() => aboveCap.serviceManifestSchema()).toThrow('could not be loaded or compiled');
+  });
+
+  it('constrains strings through a typeless allOf clause', async () => {
+    const schema = vendoredSchema();
+    schema.properties.api.properties.service_base_path.allOf.push({ maxLength: 4 });
+    const { validatedManifest } = await load(schema);
+    const body = manifest();
+    body.api.service_base_path = '/v1/';
+    expect(validatedManifest(body)).not.toBeNull();
+    body.api.service_base_path = '/v12/';
+    expect(validatedManifest(body)).toBeNull();
+
+    schema.properties.api.properties.service_base_path.allOf[2].maxLength = 4097;
+    const aboveCap = await load(schema);
+    expect(() => aboveCap.serviceManifestSchema()).toThrow('could not be loaded or compiled');
+  });
+});
+
 describe('derived resource IDs', () => {
   it('bounds an ID defaulted from the service name by the always-generated trace plugin', async () => {
     // The schema caps service.name at 63 characters, so the 241/242 boundary

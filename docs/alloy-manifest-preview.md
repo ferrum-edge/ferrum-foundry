@@ -64,9 +64,10 @@ The reviewed producer adds stricter rules, checked after validation:
   backslash either).
 - Every derived resource ID is at most 254 characters. The
   `<id>-otel-tracing` plugin is always generated, so with correlation disabled
-  and no health check a 241-character proxy ID (or service name, when
-  `proxy_id` is omitted) is accepted and 242 is refused; `-correlation-id`
-  binds at 239/240 when correlation is on.
+  and no health check an explicit 241-character `gateway.proxy_id` is accepted
+  and 242 is refused; `-correlation-id` binds at 239/240 when correlation is
+  on. An ID defaulted from `service.name` is bounded first by that field's
+  63-character limit (as in Alloy), so it never reaches the derived-ID limit.
 - An agents endpoint below the public prefix.
 - `auth.mode: "gateway"` is refused.
 - `gateway.otel_endpoint` must be `https://`, or `http://` to a loopback IP
@@ -99,10 +100,12 @@ re-vendor (#723). Until then a manifest outside those bounds can still preview.
 Local presentation limits are 32 KiB raw UTF-8 JSON, eight nesting levels before
 JSON parsing, 32 array items, and 16 KiB serialized output. Each string field
 gets the schema's declared `maxLength`, or 2,048 characters where the schema
-declares none; no declared bound is clamped. Every string, including unknown
-keys refused by the closed schema, is capped at 4,096 characters before
-validation, and a schema declaring a `maxLength` above that cap does not
-compile (the route answers `503`) rather than being silently narrowed.
+declares none; no declared bound is clamped. A `maxLength` beside an `enum`
+or `const`, or in a typeless `allOf` clause, constrains string values too.
+Every string, including unknown keys refused by the closed schema, is capped
+at 4,096 characters before validation, and a schema declaring any `maxLength`
+above that cap does not compile (the route answers `503`) rather than being
+silently narrowed. Lengths count Unicode code points, as JSON Schema does.
 Integers must be safe JavaScript integers. Control characters and OTLP URLs
 with credentials, a query or fragment are refused. These are a narrower
 preview envelope, not edits to the shared schema. Errors are fixed, bounded

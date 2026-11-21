@@ -1,4 +1,5 @@
 import {
+  codePointLength,
   MANIFEST_STRING_SAFETY_CAP,
   manifestDefaults,
   serviceManifestSchema,
@@ -134,8 +135,11 @@ export function admittedOtelEndpoint(endpoint: string): boolean {
 function safeStrings(value: unknown): boolean {
   if (typeof value === 'string') {
     // A safety cap before schema validation (which applies each field's own
-    // maxLength), and no control characters anywhere.
-    return value.length <= MANIFEST_STRING_SAFETY_CAP && !CONTROL_CHARACTER_PATTERN.test(value);
+    // maxLength), and no control characters anywhere. Both count code points;
+    // a UTF-16 length within the cap is a fast path.
+    return (value.length <= MANIFEST_STRING_SAFETY_CAP
+      || codePointLength(value) <= MANIFEST_STRING_SAFETY_CAP)
+      && !CONTROL_CHARACTER_PATTERN.test(value);
   }
   if (Array.isArray(value)) return value.every(safeStrings);
   if (value && typeof value === 'object') return Object.values(value).every(safeStrings);

@@ -31,8 +31,24 @@ const SCHEMA_URL = new URL(
 // declared bound is honored as written, up to the safety cap; a bound above the
 // cap is refused at compile time (the route reports unavailable) rather than
 // silently clamped, so a re-vendored contract can never be narrowed unnoticed.
+// Lengths count Unicode code points, as JSON Schema and Zod's max() do.
 export const MANIFEST_STRING_DEFAULT_MAX_LENGTH = 2048;
 export const MANIFEST_STRING_SAFETY_CAP = 4096;
+
+export function codePointLength(value: string): number {
+  let length = 0;
+  for (const _codePoint of value) length += 1;
+  return length;
+}
+
+function declaredMaxLength(node: SchemaNode): number | undefined {
+  const { maxLength } = node;
+  if (maxLength === undefined) return undefined;
+  if (!Number.isSafeInteger(maxLength) || maxLength < 0 || maxLength > MANIFEST_STRING_SAFETY_CAP) {
+    throw new Error('Unsupported service manifest string bound');
+  }
+  return maxLength;
+}
 
 const KEYWORDS = new Set([
   '$schema', '$id', 'title', 'description', 'x-contract', 'type', 'const', 'enum',
@@ -47,6 +63,8 @@ function compile(node: SchemaNode): z.ZodType {
   if (Object.keys(node).some((key) => !KEYWORDS.has(key))) {
     throw new Error('Unsupported service manifest schema keyword');
   }
+  // Checked for every node, whichever branch builds its validator.
+  const maxLength = declaredMaxLength(node);
   let validator: z.ZodType = z.unknown();
   if (node.const !== undefined) validator = z.literal(node.const);
   else if (node.enum) validator = z.enum(node.enum);
@@ -63,11 +81,7 @@ function compile(node: SchemaNode): z.ZodType {
     if (!node.items) throw new Error('Missing service manifest item schema');
     validator = z.array(compile(node.items)).min(node.minItems ?? 0).max(32);
   } else if (node.type === 'string') {
-    const maxLength = node.maxLength ?? MANIFEST_STRING_DEFAULT_MAX_LENGTH;
-    if (!Number.isSafeInteger(maxLength) || maxLength < 0 || maxLength > MANIFEST_STRING_SAFETY_CAP) {
-      throw new Error('Unsupported service manifest string bound');
-    }
-    validator = z.string().max(maxLength);
+    validator = z.string().max(maxLength ?? MANIFEST_STRING_DEFAULT_MAX_LENGTH);
   } else if (node.type === 'integer' || node.type === 'number') {
     let numeric = node.type === 'integer' ? z.number().int() : z.number();
     if (node.minimum !== undefined) numeric = numeric.min(node.minimum);
@@ -76,6 +90,13 @@ function compile(node: SchemaNode): z.ZodType {
   } else if (node.type === 'boolean') validator = z.boolean();
   else if (node.type !== undefined) throw new Error('Unsupported service manifest schema type');
 
+  if (maxLength !== undefined && node.type !== 'string') {
+    // maxLength beside const/enum, or in a typeless clause, constrains only
+    // string values (JSON Schema), never narrowing or widening other types.
+    const bound = maxLength;
+    validator = validator.refine((value) =>
+      typeof value !== 'string' || codePointLength(value) <= bound);
+  }
   if (node.required) {
     const required = node.required;
     validator = validator.refine((value) => Boolean(value && typeof value === 'object'
