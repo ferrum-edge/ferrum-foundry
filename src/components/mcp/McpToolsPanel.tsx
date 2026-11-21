@@ -17,7 +17,7 @@ import {
   type WriteGuard,
 } from "@/api/conditionalWrite";
 import { maskedPlaceholderRefusal } from "@/api/maskedSecrets";
-import { pluginConfigPlaceholderSites } from "@/api/maskedSecretSites";
+import { pluginPlaceholderSites } from "@/api/maskedSecretSites";
 import {
   maskedToolPolicyAdvice,
   McpToolPolicyError,
@@ -472,9 +472,7 @@ function McpGatewayInstance({
   const rows = useMemo(() => mcpToolRows(tools, config), [tools, config]);
   const masked = useMemo(
     () =>
-      plugin
-        ? pluginConfigPlaceholderSites(plugin.plugin_name, plugin.config, role).blocking
-        : [],
+      plugin ? pluginPlaceholderSites(plugin, role).blocking : [],
     [plugin, role],
   );
   const aggregate = config !== undefined && mcpGatewayMode(config) === "aggregate_router";

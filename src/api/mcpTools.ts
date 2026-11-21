@@ -31,13 +31,13 @@ import {
   type WriteGuard,
 } from "./conditionalWrite";
 import { MaskedSecretWriteError } from "./maskedSecrets";
-import { pluginConfigPlaceholderSites } from "./maskedSecretSites";
+import { pluginPlaceholderSites } from "./maskedSecretSites";
 import * as pluginsApi from "./plugins";
 import * as proxiesApi from "./proxies";
 import { pathSegment } from "./pathSegment";
 import type { PluginConfig, PluginConfigCreate } from "./types";
 import type { GatewayRole } from "@/lib/capabilities";
-import type { BaselineSnapshot } from "@/lib/resourceBaseline";
+import { PLUGIN_TRIGGER_POINTER, type BaselineSnapshot } from "@/lib/resourceBaseline";
 import {
   rawToolPolicy,
   validateToolPolicy,
@@ -281,21 +281,31 @@ export async function getToolCatalog(
  * same save that re-enters (or clears) the masked values. A server's
  * `upstream_url` is required (Edge refuses a server without `upstream_url` or
  * `openapi`) and is not a secret, so it cannot be cleared: it has to be
- * re-entered. Any other masked value may be re-entered or cleared.
+ * re-entered. A trigger operand (`/trigger/...`) is re-entered too, since a
+ * trigger predicate without it is not one Edge accepts. Any other masked value
+ * may be re-entered or cleared.
  */
 export function maskedToolPolicyAdvice(pointers: readonly string[]): string {
   const isUrl = (pointer: string) => pointer.endsWith("/upstream_url");
+  const isTrigger = (pointer: string) => pointer.startsWith(`${PLUGIN_TRIGGER_POINTER}/`) ||
+    pointer === PLUGIN_TRIGGER_POINTER;
+  const reenterOnly = (pointer: string) => isUrl(pointer) || isTrigger(pointer);
   if (pointers.length > 0 && pointers.every(isUrl)) {
     return (
       "Have an admin make the change, or change policy.tools on the plugin page in the " +
       "same save that re-enters the URL."
     );
   }
-  if (pointers.some(isUrl)) {
+  if (pointers.some(reenterOnly)) {
+    const which = pointers.some(isUrl)
+      ? pointers.some(isTrigger) ? "a server URL and a trigger value" : "a server URL"
+      : "a trigger value";
+    const rest = pointers.every(reenterOnly)
+      ? ""
+      : "; other values may instead be cleared, which deletes the stored secret";
     return (
       "Have an admin make the change, or change policy.tools on the plugin page in the " +
-      "same save that re-enters them (a server URL must be re-entered; other values may " +
-      "instead be cleared, which deletes the stored secret)."
+      `same save that re-enters them (${which} must be re-entered${rest}).`
     );
   }
   return (
@@ -371,7 +381,7 @@ export async function updateToolPolicy(
     }
     const problems = validateToolPolicy(current.config, toolName, entry);
     if (problems.length > 0) throw new McpToolPolicyError(problems.join(" "));
-    const masked = pluginConfigPlaceholderSites(current.plugin_name, current.config, role).blocking;
+    const masked = pluginPlaceholderSites(current, role).blocking;
     if (masked.length > 0) {
       throw new MaskedSecretWriteError(
         `Tool policy was not saved: plugin configuration ${pluginId} has values hidden from ` +

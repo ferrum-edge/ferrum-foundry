@@ -8,6 +8,13 @@
 //   minimal `status` and `ready` probe body.
 // Each tier reduces to the same summary, which the capability model reads; a
 // field the gateway did not send is simply absent.
+//
+// The summary is an allowlist, so the whole `database` block stays out of it:
+// pool sizes, `failover_topology` (its redacted active URL), and Edge main's
+// `mtls_dns_admission_fence`, whose `namespaces` names every fenced tenant in
+// the process. Edge itself sends both only in the detailed tier. Reducing the
+// fence to the granted namespaces would still disclose fleet-wide counts
+// (`retained_fences`) and operational state, so it is dropped, like the rest.
 const SCOPED_HEALTH_FIELDS = ['status', 'timestamp', 'mode', 'admin_writes_enabled', 'ready'] as const;
 const NAMESPACE_BLOCK_FIELDS = ['active', 'serving_scope', 'data_plane_single_namespace'] as const;
 
