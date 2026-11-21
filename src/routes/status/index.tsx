@@ -35,29 +35,38 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
+const FENCE_RUNBOOK = 'https://github.com/ferrum-edge/ferrum-edge/blob/main/docs/mongodb.md#retained-mtls-dns-admission-fences';
+
 /**
- * A retained MongoDB mTLS DNS admission fence. Edge keeps `status`, `ready`
- * and `database.status` healthy while it holds one, so this is the only place
- * the fail-closed admissions show.
+ * A retained MongoDB mTLS DNS admission fence, rendered only for a literal
+ * `fenced: true` (as `healthFindings()` reports it). Edge keeps `status`,
+ * `ready` and `database.status` healthy while it holds one, so this is the
+ * only place the fail-closed admissions show. Each detail is shown only when
+ * it has the type Edge documents; anything else reads "Not reported" and
+ * never reaches React as an object.
  */
 function MtlsDnsAdmissionFence({ fence }: { fence: DatabaseMtlsDnsAdmissionFence }) {
-  const namespaces = Array.isArray(fence.namespaces) ? fence.namespaces : [];
+  const retained = Number.isSafeInteger(fence.retained_fences) && fence.retained_fences >= 0
+    ? fence.retained_fences : undefined;
+  const oldest = Number.isFinite(fence.oldest_retained_since_unix_ms)
+    ? formatDateTime(fence.oldest_retained_since_unix_ms as number) : undefined;
+  const namespaces = Array.isArray(fence.namespaces)
+    ? fence.namespaces.filter((name): name is string => typeof name === 'string') : [];
   return (
     <div role="region" aria-label="mTLS DNS admission fence" className="border-t border-border pt-3 space-y-2">
-      <h3 className={`text-sm font-medium ${fence.fenced ? 'text-warning' : 'text-text-primary'}`}>mTLS DNS admission fence</h3>
-      {fence.fenced && (
-        <p className="text-warning text-sm">
-          A config-store write inside an mTLS DNS admission has an uncertain outcome. mTLS DNS admissions for the
-          namespaces below fail closed with HTTP 503 in this gateway process until the write is verified and its
-          admission lock is removed. Other namespaces, reconnect and failover are unaffected; other replicas report
-          their own fences.
-        </p>
-      )}
+      <h3 className="text-sm font-medium text-warning">mTLS DNS admission fence</h3>
+      <p className="text-warning text-sm">
+        This gateway process retains an mTLS DNS admission fence. mTLS DNS admissions for the namespaces below fail
+        closed with HTTP 503 here; other namespaces, reconnect and failover are unaffected, and other replicas
+        report their own fences. A fence clears only when a later admission for the namespace verifies, on the
+        original database topology, that its admission lock is gone. See{' '}
+        <a className="underline" href={FENCE_RUNBOOK} target="_blank" rel="noreferrer">
+          Ferrum Edge&apos;s retained mTLS DNS admission fence runbook
+        </a>.
+      </p>
       <HealthFields fields={[
-        ['Retained fences', fence.retained_fences],
-        // Absent when Edge did not record it: "Not reported", never a date.
-        ['Oldest retained since', typeof fence.oldest_retained_since_unix_ms === 'number'
-          ? formatDateTime(fence.oldest_retained_since_unix_ms) : undefined],
+        ['Retained fences', retained],
+        ['Oldest retained since', oldest],
         ['Namespaces', namespaces.length > 0 ? namespaces.join(', ') : undefined],
       ]} />
     </div>
@@ -198,7 +207,7 @@ export default function StatusPage() {
                 </Row>
               )}
               {health.database.failover_topology && <HealthFields fields={namedFields(health.database.failover_topology, ['primary_active', 'allow_writes', 'opt_in_writes_enabled_during_window', 'primary_failback_fenced', 'active_url_redacted', 'failover_since_unix_ms'])} />}
-              {health.database.mtls_dns_admission_fence && <MtlsDnsAdmissionFence fence={health.database.mtls_dns_admission_fence} />}
+              {health.database.mtls_dns_admission_fence?.fenced === true && <MtlsDnsAdmissionFence fence={health.database.mtls_dns_admission_fence} />}
               {health.database.pool?.read_replica && <HealthFields fields={[
                 ['Read replica active', health.database.pool.read_replica.active],
                 ['Read replica idle', health.database.pool.read_replica.idle],

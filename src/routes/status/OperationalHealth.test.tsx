@@ -97,6 +97,9 @@ describe('database mTLS DNS admission fence', () => {
     const databaseCard = [...harness.host.querySelectorAll('h2')].find((h) => h.textContent === 'Database')?.parentElement;
     expect(databaseCard?.contains(fence ?? null)).toBe(true);
     expect(fence?.textContent).toContain('fail closed with HTTP 503');
+    expect(fence?.textContent).not.toContain('uncertain');
+    expect(fence?.querySelector('a')?.getAttribute('href'))
+      .toBe('https://github.com/ferrum-edge/ferrum-edge/blob/main/docs/mongodb.md#retained-mtls-dns-admission-fences');
     const fields = Object.fromEntries([...(fence?.querySelectorAll('dl > div') ?? [])]
       .map((row) => [row.querySelector('dt')?.textContent, row.querySelector('dd')?.textContent]));
     expect(fields).toEqual({
@@ -113,6 +116,35 @@ describe('database mTLS DNS admission fence', () => {
     await settle(() => expect(region('mTLS DNS admission fence')).not.toBeNull());
     expect(region('mTLS DNS admission fence')?.textContent).toContain('Oldest retained sinceNot reported');
   });
+
+  it('keeps the alert but reports malformed details as not reported', async () => {
+    const malformed = { fenced: true, retained_fences: { count: 2 }, namespaces: ['tenant-a', { name: 'tenant-b' }, 7],
+      oldest_retained_since_unix_ms: 'yesterday' };
+    stubFetch(() => Response.json({ ...fenced, database: { ...fenced.database, mtls_dns_admission_fence: malformed } }));
+    await harness.render(<StatusPage />);
+    await settle(() => expect(region('mTLS DNS admission fence')).not.toBeNull());
+    expect(harness.host.querySelector('[role="status"]')?.textContent).toContain('Database mTLS DNS admission fenced');
+    const fields = Object.fromEntries([...(region('mTLS DNS admission fence')?.querySelectorAll('dl > div') ?? [])]
+      .map((row) => [row.querySelector('dt')?.textContent, row.querySelector('dd')?.textContent]));
+    expect(fields).toEqual({
+      'Retained fences': 'Not reported',
+      'Oldest retained since': 'Not reported',
+      Namespaces: 'tenant-a',
+    });
+  });
+
+  it.each([['the string "false"', 'false'], ['the string "true"', 'true'], ['false', false]])(
+    'shows no fence and no finding for a fenced flag of %s', async (_label, flag) => {
+      const body = { ...fenced, database: { ...fenced.database,
+        mtls_dns_admission_fence: { ...fenced.database!.mtls_dns_admission_fence, fenced: flag } } };
+      expect(healthFindings(body as HealthResponse)).toEqual([]);
+      stubFetch(() => Response.json(body));
+      await harness.render(<StatusPage />);
+      await settle(() => expect(harness.host.textContent).toContain('mongodb'));
+      expect(region('mTLS DNS admission fence')).toBeNull();
+      expect(harness.host.textContent).not.toContain('Operational diagnostics need attention');
+    },
+  );
 
   it('renders nothing for a gateway that omits the fence (Edge v0.9.20)', async () => {
     stubFetch(() => Response.json({ ...detailedHealth, database: { status: 'connected', type: 'sqlite' } }));

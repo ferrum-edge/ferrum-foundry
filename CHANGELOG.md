@@ -64,11 +64,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   against Edge `main`.
 - The Status page surfaces Ferrum Edge `main`'s MongoDB mTLS DNS admission
   fence (#727, `database.mtls_dns_admission_fence`, absent on v0.9.20). While
-  a config-store write inside an mTLS DNS admission has an uncertain outcome,
-  Edge fails those namespaces' admissions closed with `503` but keeps `status`,
-  `ready` and `database.status` healthy. `healthFindings()` now reports
-  "Database mTLS DNS admission fenced", and the Database card shows the
-  retained fence count, the oldest retained time and the fenced namespaces. A
+  Edge retains one (after a config-store write or admission-lock cleanup with
+  an uncertain outcome), it fails those namespaces' mTLS DNS admissions closed
+  with `503` but keeps `status`, `ready` and `database.status` healthy.
+  `healthFindings()` now reports "Database mTLS DNS admission fenced" for a
+  literal `fenced: true`, and the Database card shows the retained fence
+  count, the oldest retained time and the fenced namespaces (a detail of the
+  wrong type reads "Not reported"), with a link to Edge's runbook. A
   namespace-scoped session's health summary still drops the whole `database`
   block, so the fence's list of other tenants never reaches it.
 
