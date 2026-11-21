@@ -497,9 +497,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   membership and the next save expected it and was refused again. It also
   discarded the draft and closed the dialog when the re-read failed. Now a
   failed read keeps the draft and the conflict dialog and shows an error
-  toast. The plugin read is published only once the membership has loaded, so
-  a scope change no longer swaps the form for the membership skeleton
-  mid-reload.
+  toast (only the toast: the reload's reads are silent). Once a form is on the
+  page, a refetch that turns the plugin into a group no longer swaps the form
+  and dialog for the membership skeleton or error; only a successful reload
+  remounts it. Reloads run one at a time, and "Keep my draft" or leaving the
+  editor abandons a pending one, so it cannot remount the form or toast late.
 - Foundry handles the plugin-config projection Ferrum Edge `main` adds after
   v0.9.20 (ferrum-edge#7054). The sensitivity drift parser accepts
   `FieldSensitivity::CertificateSource`, `PrivateKeySource` and `EndpointPath`

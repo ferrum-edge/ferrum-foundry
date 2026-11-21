@@ -41,13 +41,21 @@ export async function list(
   scope: NamespaceScope,
   params: PaginationParams = {},
   signal?: AbortSignal,
+  silentErrors = false,
 ): Promise<PaginatedResponse<Proxy>> {
   const searchParams: Record<string, string> = {};
   if (params.offset !== undefined) searchParams.offset = String(params.offset);
   if (params.limit !== undefined) searchParams.limit = String(params.limit);
 
   return proxyApi
-    .get("proxies", scoped(scope, { searchParams, signal }))
+    .get(
+      "proxies",
+      scoped(scope, {
+        searchParams,
+        signal,
+        ...(silentErrors && { context: { [SILENT_ERRORS]: true } }),
+      }),
+    )
     .json<PaginatedResponse<Proxy>>();
 }
 
@@ -55,14 +63,16 @@ export async function list(
  * Every page is fetched under `scope`, however long the collection takes.
  * `signal` lets the caller abandon the traversal — a namespace switch, a new
  * search term, or an unmounted page — instead of paying for pages nobody will
- * read.
+ * read. `silentErrors` keeps a failed page out of the global error popup, for
+ * a caller that reports the failure itself.
  */
 export async function listAll(
   scope: NamespaceScope,
   signal?: AbortSignal,
+  silentErrors = false,
 ): Promise<Proxy[]> {
   return collectAllPages(
-    (offset, limit, pageSignal) => list(scope, { offset, limit }, pageSignal),
+    (offset, limit, pageSignal) => list(scope, { offset, limit }, pageSignal, silentErrors),
     undefined,
     signal,
     (proxy) => proxy.id,

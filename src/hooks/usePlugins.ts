@@ -108,10 +108,15 @@ export function useProxyPluginConfigs(proxyId: string, enabled = true) {
   });
 }
 
+/** The cache key of one plugin configuration's detail read (`usePluginConfig`). */
+export function pluginConfigKey(namespace: string, id: string) {
+  return ["pluginConfig", namespace, id] as const;
+}
+
 export function usePluginConfig(id: string, enabled = true) {
   const { scope } = useNamespace();
   return useQuery({
-    queryKey: ["pluginConfig", scope.namespace, id],
+    queryKey: pluginConfigKey(scope.namespace, id),
     queryFn: () => plugins.getConfig(queryScope(scope), id),
     enabled: enabled && !!id,
   });

@@ -3,16 +3,17 @@ import { ResourceLabels } from "@/components/shared/ResourceLabels";
 /*  Ferrum Foundry – Plugin Config detail / edit page                  */
 /* ------------------------------------------------------------------ */
 
-import { useState, useMemo, useRef, useCallback } from "react";
+import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  pluginConfigKey,
   usePluginConfig,
   useUpdatePluginWithMembership,
   useDeletePluginWithMembership,
   useAvailablePlugins,
 } from "@/hooks/usePlugins";
-import { useAllProxies } from "@/hooks/useProxies";
+import { allProxiesKey, useAllProxies } from "@/hooks/useProxies";
 import { useNamespace } from "@/stores/namespace";
 import { ReadStateNotice } from '@/components/shared/ReadState';
 import { useToast } from "@/components/ui/Toast";
@@ -37,8 +38,9 @@ import {
 import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
 import { useCapabilities } from "@/stores/capabilities";
 import { WriteAction } from "@/components/shared/CapabilityGate";
-import type { PluginConfig, PluginConfigCreate } from "@/api/types";
+import type { PluginConfig, PluginConfigCreate, Proxy } from "@/api/types";
 import * as pluginsApi from "@/api/plugins";
+import * as proxiesApi from "@/api/proxies";
 import { isStaleResourceError, type StaleResourceDetail } from "@/api/conditionalWrite";
 import { StaleWriteDialog } from "@/components/shared/StaleWriteDialog";
 import { useEditBaseline } from "@/hooks/useEditBaseline";
@@ -88,6 +90,18 @@ function PluginEditor({ session }: { session: EditorSession }) {
   const [conflict, setConflict] = useState<StaleResourceDetail | null>(null);
   // Bumped only by an explicit "discard my draft and reload".
   const [formGeneration, setFormGeneration] = useState(0);
+  // Whether a form has mounted with a seed. Before that, the page waits for
+  // everything the form seeds from (a group's complete membership included).
+  // After it, a background refetch never takes the form or the conflict
+  // dialog off the page, even one that turns the plugin into a group whose
+  // membership has not loaded: only a successful explicit reload remounts it.
+  const [formSeeded, setFormSeeded] = useState(false);
+  // At most one explicit reload at a time. `activeReload` holds the token of
+  // the reload in flight; abandoning it (Keep my draft, a newer reload, an
+  // editor that moved on) makes its completion apply and report nothing.
+  const [reloading, setReloading] = useState(false);
+  const reloadCounter = useRef(0);
+  const activeReload = useRef<{ token: number; abort: AbortController } | null>(null);
 
   // The configuration this editor opened against, advanced only by an
   // accepted response. The membership plan refuses a save or delete whose
@@ -114,6 +128,7 @@ function PluginEditor({ session }: { session: EditorSession }) {
   const membershipSeen = useRef<readonly string[] | null>(null);
   const handleSeeded = useCallback((seed: PluginFormSeed | null) => {
     membershipSeen.current = seed ? observedMembership(seed.plugin, seed.proxyGroupIds) : null;
+    if (seed) setFormSeeded(true);
   }, []);
 
   /* ---------- Handlers ---------- */
@@ -156,13 +171,16 @@ function PluginEditor({ session }: { session: EditorSession }) {
           // (#674). Reseed form, membership and baseline from fresh reads, as
           // every committed save does (`reseedAfterCommit`), so Save is not
           // refused as a conflict with this very commit.
-          const reseeded = (await reloadFromGateway()) === true;
+          const reloaded = await reloadFromGateway();
+          // A reload abandoned because this editor moved on reports nothing
+          // more than the commit itself.
+          const unread = reloaded === "plugin" || reloaded === "membership";
           toast(
             "warning",
             committedWriteMessage("Plugin configuration saved", committed) +
-              (reseeded
-                ? ""
-                : " Foundry could not re-read the plugin; reload it before saving again."),
+              (unread
+                ? " Foundry could not re-read the plugin; reload it before saving again."
+                : ""),
           );
           return;
         }
@@ -184,12 +202,20 @@ function PluginEditor({ session }: { session: EditorSession }) {
    * either read fails, the draft and the conflict dialog stay, so the
    * operator can try again or keep editing.
    */
-  const handleDiscardAndReload = async () => {
+  const handleDiscardAndReload = session.bind(async () => {
+    if (activeReload.current) return;
     const reloaded = await reloadFromGateway();
+    if (reloaded === "abandoned") return;
     if (reloaded !== true) {
       reportReloadFailure(reloaded);
       return;
     }
+    setConflict(null);
+  });
+
+  /** "Keep my draft": close the dialog and abandon a reload still in flight. */
+  const handleKeepEditing = () => {
+    abandonReload();
     setConflict(null);
   };
 
@@ -201,14 +227,16 @@ function PluginEditor({ session }: { session: EditorSession }) {
    * membership, which the form seeds once. If either read fails, the draft
    * and the recovery report stay as they are.
    */
-  const handleReloadSaved = async () => {
+  const handleReloadSaved = session.bind(async () => {
+    if (activeReload.current) return;
     const reloaded = await reloadFromGateway();
+    if (reloaded === "abandoned") return;
     if (reloaded !== true) {
       reportReloadFailure(reloaded);
       return;
     }
     setMembershipError(null);
-  };
+  });
 
   function reportReloadFailure(failed: "plugin" | "membership") {
     toast(
@@ -219,33 +247,73 @@ function PluginEditor({ session }: { session: EditorSession }) {
     );
   }
 
+  function abandonReload() {
+    activeReload.current?.abort.abort();
+    activeReload.current = null;
+    setReloading(false);
+  }
+
+  // An editor that unmounts (a route or namespace change) abandons its reload.
+  useEffect(() => () => activeReload.current?.abort.abort(), []);
+
   /**
    * Reseed the form, its membership and the baseline from fresh reads, or
-   * change nothing and name the read that failed.
+   * change nothing and name the read that failed. `"abandoned"` means the
+   * reload was superseded or dismissed, or this editor is no longer on
+   * screen: nothing was applied, and the caller reports nothing.
    *
-   * The plugin is read outside its Query and published only once everything
-   * the form needs has loaded. A configuration whose scope became
-   * `proxy_group` would otherwise reach the page before its membership: the
-   * page would show the membership skeleton, unmounting the form (and the
-   * draft a failed reload must keep) while the proxies load. Membership is
-   * read whenever the fresh plugin is a group, whatever scope the page
-   * showed, since the form seeds it once.
+   * Both reads are the caller's own, outside their Queries, and silent:
+   * every caller reports a failure itself. Their results are published only
+   * once everything the form needs has loaded, after cancelling any refetch
+   * of the same keys (the save's settle invalidation, say) that could land
+   * on top of them. Membership is read whenever the fresh plugin is a group,
+   * whatever scope the page showed, since the form seeds it once.
    */
-  async function reloadFromGateway(): Promise<true | "plugin" | "membership"> {
+  async function reloadFromGateway(): Promise<true | "plugin" | "membership" | "abandoned"> {
+    abandonReload();
+    const reload = { token: ++reloadCounter.current, abort: new AbortController() };
+    activeReload.current = reload;
+    setReloading(true);
+    const live = () => activeReload.current?.token === reload.token && session.isCurrent();
+    const finish = <T,>(result: T): T => {
+      if (activeReload.current?.token === reload.token) {
+        activeReload.current = null;
+        setReloading(false);
+      }
+      return result;
+    };
+
     let fresh: PluginConfig;
     try {
-      fresh = await pluginsApi.getConfig(scope, pluginId);
+      fresh = await pluginsApi.getConfig(scope, pluginId, true);
     } catch {
-      return "plugin";
+      return finish(live() ? "plugin" : "abandoned");
     }
+    if (!live()) return finish("abandoned");
+
+    let members: Proxy[] | undefined;
     if (fresh.scope === "proxy_group") {
-      const members = await proxiesQuery.refetch();
-      if (members.isError || members.data === undefined) return "membership";
+      try {
+        members = await proxiesApi.listAll(scope, reload.abort.signal, true);
+      } catch {
+        return finish(live() ? "membership" : "abandoned");
+      }
+      if (!live()) return finish("abandoned");
     }
-    queryClient.setQueryData<PluginConfig>(["pluginConfig", scope.namespace, pluginId], fresh);
+
+    const detailKey = pluginConfigKey(scope.namespace, pluginId);
+    const membersKey = allProxiesKey(scope.namespace);
+    await Promise.all([
+      queryClient.cancelQueries({ queryKey: detailKey, exact: true }),
+      members && queryClient.cancelQueries({ queryKey: membersKey, exact: true }),
+    ]);
+    if (!live()) return finish("abandoned");
+
+    if (members) queryClient.setQueryData<Proxy[]>(membersKey, members);
+    queryClient.setQueryData<PluginConfig>(detailKey, fresh);
     baseline.adopt(fresh);
     setFormGeneration((generation) => generation + 1);
-    return true;
+    return finish(true);
   }
 
   const handleDelete = session.bind(async () => {
@@ -293,7 +361,11 @@ function PluginEditor({ session }: { session: EditorSession }) {
 
   // listAll resolves only after every page succeeds; partial membership must
   // never become the initial selection for a full membership replacement.
-  if (isLoading || pluginsLoading || (needsMembership && !allProxies && proxiesPending)) {
+  // Gates that withhold the form until its seed is complete. Once a form has
+  // mounted (`formSeeded`), membership that is pending or failed is reported
+  // beside it instead, so the draft and any conflict dialog stay.
+  const membershipMissing = !formSeeded && needsMembership && !allProxies;
+  if (isLoading || pluginsLoading || (membershipMissing && proxiesPending)) {
     return (
       <div className="space-y-6 max-w-3xl">
         <SkeletonCard />
@@ -302,7 +374,7 @@ function PluginEditor({ session }: { session: EditorSession }) {
     );
   }
 
-  if (!plugin || (needsMembership && !allProxies)) {
+  if (!plugin || membershipMissing) {
     if (deletePlugin.isPending || deletePlugin.isSuccess) {
       return null;
     }
@@ -365,6 +437,7 @@ function PluginEditor({ session }: { session: EditorSession }) {
       {membershipError instanceof PluginSavedUnverifiedError && (
         <Button
           variant="secondary"
+          loading={reloading}
           onClick={() => void handleReloadSaved()}
         >
           Reload saved configuration
@@ -373,6 +446,7 @@ function PluginEditor({ session }: { session: EditorSession }) {
       {membershipError instanceof PluginMembershipChangedError && (
         <Button
           variant="secondary"
+          loading={reloading}
           onClick={() => void handleReloadSaved()}
         >
           Reload current membership (discards your draft)
@@ -384,12 +458,14 @@ function PluginEditor({ session }: { session: EditorSession }) {
           key={formGeneration}
           initialData={plugin}
           onSubmit={handleSubmit}
-          isLoading={updatePlugin.isPending}
+          isLoading={updatePlugin.isPending || reloading}
           capability={capability}
           role={facts.role}
           availablePlugins={availablePlugins ?? []}
           initialProxyGroupIds={initialProxyGroupIds}
-          initialProxyGroupIdsLoaded={!needsMembership || allProxies !== undefined}
+          // A mounted form keeps the seed it was given: a refetch that makes
+          // the plugin a group must not remount it as "membership loading".
+          initialProxyGroupIdsLoaded={formSeeded || !needsMembership || allProxies !== undefined}
           onSeeded={handleSeeded}
         />
       </Card>
@@ -397,8 +473,9 @@ function PluginEditor({ session }: { session: EditorSession }) {
       {/* Refused concurrent-edit save or delete */}
       <StaleWriteDialog
         conflict={conflict}
-        onKeepEditing={() => setConflict(null)}
-        onDiscardAndReload={handleDiscardAndReload}
+        onKeepEditing={handleKeepEditing}
+        onDiscardAndReload={() => void handleDiscardAndReload()}
+        reloading={reloading}
       />
 
       {/* Delete confirmation */}

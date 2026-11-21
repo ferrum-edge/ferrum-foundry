@@ -62,10 +62,15 @@ export function useProxies(params: PaginationParams = {}, enabled = true) {
  * search term, or leaving the page abandons the remaining pages instead of
  * paying for results nobody will read.
  */
+/** The cache key of a namespace's complete proxy collection (`useAllProxies`). */
+export function allProxiesKey(namespace: string) {
+  return ["proxies", namespace, "all"] as const;
+}
+
 export function useAllProxies(enabled = true) {
   const { scope } = useNamespace();
   return useQuery({
-    queryKey: ["proxies", scope.namespace, "all"],
+    queryKey: allProxiesKey(scope.namespace),
     queryFn: ({ signal }) => proxies.listAll(queryScope(scope), signal),
     enabled,
   });
