@@ -505,15 +505,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mesh` mode is still shown. The request-rate sampler neither diffs nor
   stores a `cp` or `node_agent` reading and drops its in-memory baseline when
   it sees one. The tab also remembers when it last saw a placeholder at each
-  gateway target and namespace, and never bridges from a baseline sampled at
-  or before then, so a data plane that later answers at the same gateway
-  target starts collecting afresh even across a remount; stored samples now
-  carry a version and their mode, and are only diffed within one mode. The total request count comes
-  from the reading being rendered, and a rate is shown only while the reading
-  has the mode, namespace and gateway target it was computed for. The mock admin gateway's `/admin/metrics`
-  now follows `MOCK_GATEWAY_MODE`, returning Edge's skeleton for `cp` and
-  `node_agent` (including the zeroed `adaptive_concurrency` counters and
-  `tcp_connection_throttle.active_connections`).
+  gateway target (`/admin/metrics` is process-wide, so under any namespace)
+  and never bridges from a baseline for that target sampled at or before then,
+  whichever namespace it was stored under, so a data plane that later answers
+  at the same gateway target starts collecting afresh even across a remount;
+  stored samples now carry a version and their mode, and are only diffed
+  within one mode. The total request count comes from the reading being
+  rendered, and a rate is shown only while the reading has the mode, namespace
+  and gateway target it was computed for. The mock admin gateway's
+  `/admin/metrics` now follows `MOCK_GATEWAY_MODE`, returning Edge's skeleton
+  for `cp` and `node_agent` (including the zeroed `adaptive_concurrency`
+  counters and `tcp_connection_throttle.active_connections`).
 - The Settings page's connection test recognizes Ferrum Edge's structured
   `503` `/health` answer for a gateway that is starting, degraded, unavailable
   or draining (#724). `GET /api/settings/status` reports it `reachable: true`

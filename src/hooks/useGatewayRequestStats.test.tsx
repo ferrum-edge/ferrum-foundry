@@ -12,8 +12,9 @@ import {
   type GatewayRequestStats,
 } from "./useGatewayRequestStats";
 
+const { selected } = vi.hoisted(() => ({ selected: { namespace: "tenant-a" } }));
 vi.mock("@/stores/namespace", () => ({
-  useNamespace: () => ({ selectedNamespace: "tenant-a", scope: { namespace: "tenant-a" } }),
+  useNamespace: () => ({ selectedNamespace: selected.namespace, scope: { namespace: selected.namespace } }),
 }));
 
 const STORAGE_KEY = "ferrum:metricsRequestSample:tenant-a";
@@ -92,6 +93,7 @@ function firstRender(mode: string, total: number): GatewayRequestStats | undefin
 }
 
 beforeEach(() => {
+  selected.namespace = "tenant-a";
   renders = [];
   resetPlaceholderObservations();
   resetGatewayTarget();
@@ -304,4 +306,21 @@ describe("gateway request rate", () => {
     await show({ total: 1_000, at: now });
     expect(stats?.requestsPerSecond).toBe(10);
   });
+  it.each(["cp", "node_agent"])(
+    "refuses a baseline from before a %s placeholder seen under another namespace",
+    async (mode) => {
+      await show({ total: 100, at: now, uptime: 5, mode: "dp" });
+      // /admin/metrics is process-wide: the placeholder read with tenant-b
+      // selected retires tenant-a's older baseline at the same target too.
+      selected.namespace = "tenant-b";
+      await show({ total: 0, at: now + 30_000, uptime: 0, mode });
+      selected.namespace = "tenant-a";
+      await show({ total: 1_300, at: now + 60_000, uptime: 20, mode: "dp" });
+      expect(stats).toEqual({ totalRequests: 1_300 });
+
+      await show({ total: 1_900, at: now + 90_000, uptime: 50, mode: "dp" });
+      expect(stats?.requestsPerSecond).toBe(20);
+      expect(stats?.statusCodesPerSecond).toEqual({ "200": 20 });
+    },
+  );
 });

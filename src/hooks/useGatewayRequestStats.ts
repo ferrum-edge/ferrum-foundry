@@ -52,7 +52,9 @@ export interface GatewayRequestStats {
 
 /**
  * Latest placeholder (`cp` or `node_agent`) reading this tab observed, per
- * gateway target and namespace. The target names the configured admin URL,
+ * gateway target. `/admin/metrics` describes the whole process, whichever
+ * namespace was selected, so one placeholder retires every older baseline
+ * at that target, under any namespace. The target names the configured admin URL,
  * not the Edge process behind it, so a data plane that replaces a control
  * plane there looks like the same gateway; a baseline sampled at or before a
  * placeholder may belong to an earlier process and is never bridged from.
@@ -61,18 +63,13 @@ export interface GatewayRequestStats {
  */
 const placeholderSeenAt = new Map<string, number>();
 
-function placeholderKey(target: string, namespace: string): string {
-  return JSON.stringify([target, namespace]);
-}
-
-function notePlaceholder(target: string, namespace: string, timestamp: number): void {
-  const key = placeholderKey(target, namespace);
-  placeholderSeenAt.set(key, Math.max(placeholderSeenAt.get(key) ?? timestamp, timestamp));
+function notePlaceholder(target: string, timestamp: number): void {
+  placeholderSeenAt.set(target, Math.max(placeholderSeenAt.get(target) ?? timestamp, timestamp));
 }
 
 /** Whether `sample` predates (or is) a placeholder this tab saw at its target. */
-function predatesPlaceholder(sample: RequestSample, namespace: string): boolean {
-  const seenAt = placeholderSeenAt.get(placeholderKey(sample.target, namespace));
+function predatesPlaceholder(sample: RequestSample): boolean {
+  const seenAt = placeholderSeenAt.get(sample.target);
   return seenAt !== undefined && sample.timestamp <= seenAt;
 }
 
@@ -220,7 +217,7 @@ export function useGatewayRequestStats(
       // proxy reading from a baseline sampled before it.
       const placeholderTarget = boundGatewayTarget();
       if (placeholderTarget && !isGatewayTargetRetired()) {
-        notePlaceholder(placeholderTarget, selectedNamespace, dataUpdatedAt);
+        notePlaceholder(placeholderTarget, dataUpdatedAt);
       }
       return;
     }
@@ -244,7 +241,7 @@ export function useGatewayRequestStats(
         ? storedSample
         : undefined);
     const previousSample =
-      candidate && !predatesPlaceholder(candidate, selectedNamespace) ? candidate : undefined;
+      candidate && !predatesPlaceholder(candidate) ? candidate : undefined;
 
     const { requestsPerSecond, statusCodesPerSecond } = calculateStats(currentSample, previousSample);
     setRates({ mode: gateway.mode, namespace: selectedNamespace, target, requestsPerSecond, statusCodesPerSecond });
