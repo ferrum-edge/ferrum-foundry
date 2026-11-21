@@ -70,6 +70,39 @@ describe("PluginMembershipRecovery", () => {
     expect(html).not.toContain("Committed configuration");
   });
 
+  it("shows the snapshot's trigger with its operands withheld, and says to re-enter them", () => {
+    const trigger = {
+      when: {
+        all: [
+          { not: { match: { header: { name: "x-skip", value: { exact: ["synthetic-real-operand"] } } } } },
+          { match: { path: { prefix: ["/api/"] } } },
+        ],
+      },
+    };
+    const error = new PluginMembershipError(
+      "Plugin update did not converge",
+      [],
+      undefined,
+      { id: "p1", plugin_name: "waf", scope: "global", config: {}, enabled: true, trigger },
+    );
+    const html = renderToStaticMarkup(<PluginMembershipRecovery error={error} />);
+    expect(html).not.toContain("synthetic-real-operand");
+    expect(html).toContain("[redacted]");
+    expect(html).toContain("x-skip");
+    expect(html).toContain("/api/");
+    expect(html).toContain("Re-enter them before reusing this configuration");
+    // The error keeps the original snapshot for the plan's own use.
+    expect(JSON.stringify(error.lastKnownConfig)).toContain("synthetic-real-operand");
+
+    const plain = renderToStaticMarkup(<PluginMembershipRecovery error={new PluginMembershipError(
+      "Plugin update did not converge",
+      [],
+      undefined,
+      { id: "p1", plugin_name: "waf", scope: "global", config: {}, enabled: true, trigger: null },
+    )} />);
+    expect(plain).not.toContain("Re-enter them");
+  });
+
   it("does not render for an unrelated error", () => {
     expect(
       renderToStaticMarkup(

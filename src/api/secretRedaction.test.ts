@@ -1270,6 +1270,30 @@ describe("backup restore (#485)", () => {
     expect(JSON.parse(sent[0].body).consumers[0].credentials.keyauth[0].key).toBe(LONG);
   });
 
+  it("keeps a malformed comparison key out of a restore failure, whatever the entry's plugin_name", async () => {
+    const key = "synthetic-restore-operand-as-key";
+    respond = () => Response.json({
+      error: `restore import failed: plugin_configs[0]: unknown field \`${key}\`, expected one of \`exact\``,
+      rollback: "completed",
+    }, { status: 500 });
+    for (const pluginName of [undefined, 42, "waf"]) {
+      const entry = {
+        id: "p1",
+        scope: "global",
+        config: {},
+        ...(pluginName === undefined ? {} : { plugin_name: pluginName }),
+        trigger: { when: { match: { header: { name: "x-skip", value: { [key]: null } } } } },
+      };
+      const failure = await ops.restore(scope, { version: "1", plugin_configs: [entry] })
+        .catch((e: unknown) => e);
+      expectDetached(failure);
+      expect(await exposure(failure)).not.toContain(key);
+      expect(ops.getRestoreFailure(failure)?.error).toBe(
+        "restore import failed: plugin_configs[0]: unknown field `[REDACTED]`, expected one of `exact`",
+      );
+    }
+  });
+
   it("still recognizes the API spec deletion confirmation and an unobserved outcome", async () => {
     respond = () => Response.json({
       error: "restore would delete API specs",

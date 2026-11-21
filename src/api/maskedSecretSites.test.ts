@@ -276,16 +276,40 @@ describe("plugin trigger placeholders (Edge main masks header, query and cookie 
     });
   });
 
-  it("blocks a placeholder anywhere inside a malformed trigger shape", () => {
+  it("blocks a placeholder anywhere inside a malformed trigger shape, named by the withheld site", () => {
     expect(
       pluginTriggerPlaceholderSites(
         { when: { match: { header: { name: "x", value: { exact: [{ nested: "[REDACTED]" }] } } } } },
         "operator",
       ).blocking,
-    ).toEqual(["/trigger/when/match/header/value/exact/0/nested"]);
+    ).toEqual(["/trigger/when/match/header/value/exact/0"]);
     expect(pluginTriggerPlaceholderSites({ if: ["[REDACTED]"] }, "operator").blocking).toEqual([
-      "/trigger/if/0",
+      "/trigger",
     ]);
+    // A key inside withheld content may be the secret: the notice names the
+    // withheld object once, never the key, for every role.
+    const keyed = {
+      when: {
+        match: {
+          header: {
+            name: "x",
+            value: { "synthetic-operand-as-key": "[REDACTED]", other: ["[REDACTED]"] },
+          },
+        },
+      },
+    };
+    expect(pluginTriggerPlaceholderSites(keyed, "operator")).toEqual({
+      blocking: ["/trigger/when/match/header/value"],
+      sources: [],
+      reserved: [],
+      other: [],
+    });
+    expect(pluginTriggerPlaceholderSites(keyed, "admin")).toEqual({
+      blocking: [],
+      sources: [],
+      reserved: [],
+      other: ["/trigger/when/match/header/value"],
+    });
     // Ill-typed content under a visible key is withheld, so a placeholder in
     // it blocks rather than only warning.
     expect(
@@ -294,7 +318,7 @@ describe("plugin trigger placeholders (Edge main masks header, query and cookie 
         "operator",
       ),
     ).toEqual({
-      blocking: ["/trigger/when/match/header/name/pasted"],
+      blocking: ["/trigger/when/match/header/name"],
       sources: [],
       reserved: [],
       other: [],
@@ -302,7 +326,7 @@ describe("plugin trigger placeholders (Edge main masks header, query and cookie 
     expect(
       pluginTriggerPlaceholderSites({ when: { match: { path: { exact: [["[REDACTED]"]] } } } }, "operator")
         .blocking,
-    ).toEqual(["/trigger/when/match/path/exact/0/0"]);
+    ).toEqual(["/trigger/when/match/path/exact/0"]);
     // A well-typed visible value is shown as stored: a warning only.
     expect(
       pluginTriggerPlaceholderSites({ when: { match: { header: { name: "[REDACTED]" } } } }, "operator"),

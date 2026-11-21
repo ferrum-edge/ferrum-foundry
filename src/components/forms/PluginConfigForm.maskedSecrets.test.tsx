@@ -395,7 +395,11 @@ describe("plugin trigger with masked operands", () => {
     await renderForm("cors", {}, "operator", {
       when: { match: { header: { name: { pasted: "[REDACTED]" } } } },
     } as unknown as PluginTrigger);
-    expect(triggerList()).toEqual(["/trigger/when/match/header/name/pasted"]);
+    // Named by the withheld site, never by a key inside it.
+    expect(triggerList()).toEqual(["/trigger/when/match/header/name"]);
+    expect(
+      host.querySelector('[aria-label="Trigger values hidden from your role"]')?.textContent,
+    ).not.toContain("pasted");
     await submit();
     expect(onSubmit).not.toHaveBeenCalled();
   });

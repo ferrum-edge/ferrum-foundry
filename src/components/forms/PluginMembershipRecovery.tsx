@@ -1,4 +1,5 @@
 import { PluginMembershipError, PluginSavedUnverifiedError } from "@/lib/pluginMembership";
+import { redactPluginTrigger } from "@/lib/resourceBaseline";
 
 export function PluginMembershipRecovery({ error }: { error: unknown }) {
   if (!(error instanceof PluginMembershipError)) return null;
@@ -6,6 +7,15 @@ export function PluginMembershipRecovery({ error }: { error: unknown }) {
   // warning, and its snapshot is what the gateway holds now.
   const saved = error instanceof PluginSavedUnverifiedError;
   const observed = saved && error.savedFromLaterRead;
+  // Shown with its trigger as Edge main projects it: the header, query and
+  // cookie operands are shared values, and this is page text. The membership
+  // plan keeps the original snapshot for its own rollback.
+  const snapshot = error.lastKnownConfig;
+  const shown = snapshot && snapshot.trigger !== undefined && snapshot.trigger !== null
+    ? { ...snapshot, trigger: redactPluginTrigger(snapshot.trigger) }
+    : snapshot;
+  const triggerRedacted =
+    shown !== snapshot && JSON.stringify(shown?.trigger) !== JSON.stringify(snapshot?.trigger);
 
   return (
     <div
@@ -34,8 +44,14 @@ export function PluginMembershipRecovery({ error }: { error: unknown }) {
                 "configuration). If the plugin is missing, recreate it before restoring its proxy " +
                 "memberships. Review any redacted values first."}
           </p>
+          {triggerRedacted && (
+            <p className="mb-2 text-xs text-warning">
+              Trigger values shown as [redacted] are withheld from this page. Re-enter them
+              before reusing this configuration.
+            </p>
+          )}
           <pre className="max-h-96 overflow-auto rounded bg-code-bg p-3 text-xs text-text-primary">
-            {JSON.stringify(error.lastKnownConfig, null, 2)}
+            {JSON.stringify(shown, null, 2)}
           </pre>
         </details>
       )}

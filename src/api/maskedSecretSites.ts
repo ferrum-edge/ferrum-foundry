@@ -116,18 +116,23 @@ export function pluginConfigPlaceholderSites(
  * field name, which every read shows as stored, is only a warning. All
  * blocking trigger sites are `masked`, but no editor offers to clear one: an
  * `exact` or `prefix` entry is re-entered, or the trigger removed as a whole.
+ *
+ * A placeholder inside a site withheld whole (malformed content, whose keys
+ * may themselves be the secret) is reported at that site's pointer, once,
+ * for every role, so a notice never prints a key the redaction withholds.
+ * An ordinary operand site is its own pointer.
  */
 export function pluginTriggerPlaceholderSites(
   trigger: unknown,
   role: GatewayRole | null | undefined,
 ): PlaceholderSites {
-  const all = placeholderPointers(trigger ?? null, PLUGIN_TRIGGER_POINTER);
-  if (all.length === 0) return { blocking: [], sources: [], reserved: [], other: [] };
-  const withheld = role === "admin"
-    ? []
-    : pluginTriggerWithheldSites(trigger).map((site) => site.pointer);
-  const refused = all.filter((pointer) =>
-    withheld.some((site) => pointer === site || pointer.startsWith(`${site}/`)));
+  const found = placeholderPointers(trigger ?? null, PLUGIN_TRIGGER_POINTER);
+  if (found.length === 0) return { blocking: [], sources: [], reserved: [], other: [] };
+  const withheld = pluginTriggerWithheldSites(trigger).map((site) => site.pointer);
+  const shown = (pointer: string) =>
+    withheld.find((site) => pointer.startsWith(`${site}/`)) ?? pointer;
+  const all = [...new Set(found.map(shown))];
+  const refused = role === "admin" ? [] : all.filter((pointer) => withheld.includes(pointer));
   return split(all, masked(refused));
 }
 

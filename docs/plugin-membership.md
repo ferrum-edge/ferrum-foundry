@@ -176,7 +176,8 @@ projection (`src/api/maskedSecretSites.ts`: the CI-checked schema rules in
   it is re-entered or the trigger is turned off; it offers no **Clear**,
   because a predicate missing its operand is not one Edge accepts. So does a
   placeholder inside content a visible key cannot hold (an object under a
-  field `name`, say). A placeholder in a well-typed visible predicate or
+  field `name`, say); it is listed by the pointer of the withheld content,
+  never by a key inside it. A placeholder in a well-typed visible predicate or
   field name is a warning.
   A plugin Foundry has no rules for (a custom plugin, or a built-in newer than
   Foundry's copy of the rules) has every placeholder in its `config` treated
@@ -210,7 +211,9 @@ projection (`src/api/maskedSecretSites.ts`: the CI-checked schema rules in
   attempted: the
   recovery report names the fields that could not be restored, and the previous
   configuration must be restored manually, with the real values, or by an
-  admin.
+  admin. The recovery panel shows that configuration with its trigger's
+  `header`, `query` and `cookie` operands as `[redacted]`, to be re-entered
+  before it is reused; the plan keeps the original for its own rollback.
 
 ## Deleting a plugin
 

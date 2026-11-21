@@ -575,7 +575,8 @@ when the recorded commit is not the pinned one.
 
 **Restore and API specs.** `restoreSecrets()` is `secretValues()` over the
 backup plus each API spec document it holds (gzip-compressed, base64-encoded,
-and taken whole). For an API spec import or replacement, `specDocumentSecrets()`
+and taken whole), and the `trigger` of every `plugin_configs` entry, whatever
+its `plugin_name`. For an API spec import or replacement, `specDocumentSecrets()`
 classifies a JSON document by position: each `x-ferrum-plugins` entry by its
 plugin's rules, anything else by field name and URL. An entry that is not a
 plugin configuration is unclassified throughout, and its `trigger`, if it has

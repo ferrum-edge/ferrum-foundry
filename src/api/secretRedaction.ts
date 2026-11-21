@@ -382,7 +382,15 @@ export function restoreSecrets(backup: unknown): Secrets {
     ? [item.spec_content_base64, item.external_ref_snapshot_base64]
       .filter((value): value is string => typeof value === "string" && value !== "")
     : []);
-  return mergeSecrets([secretValues(backup), classified(documents)]);
+  // Every plugin entry's `trigger` is classified by its position, whatever
+  // its `plugin_name`: Edge reads the trigger before it notices a name that
+  // is missing or not a string, and can quote it.
+  const plugins = isRecord(backup) && Array.isArray(backup.plugin_configs)
+    ? backup.plugin_configs
+    : [];
+  const triggers = plugins.flatMap((entry) =>
+    isRecord(entry) && "trigger" in entry ? [pluginTriggerSecrets(entry.trigger)] : []);
+  return mergeSecrets([secretValues(backup), classified(documents), ...triggers]);
 }
 
 /**
