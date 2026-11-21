@@ -85,9 +85,10 @@ function MtlsDnsAdmissionFence({ fence }: { fence: DatabaseMtlsDnsAdmissionFence
       </p>
       <p className="text-sm text-text-secondary">
         Normally a fence clears in this process when a later admission for the namespace verifies, on the original
-        database topology, that its admission lock is gone. When that verification is unavailable (the original
-        topology is gone, or the deployment rejects majority read concern), reconcile the write and restart the
-        process. See{' '}
+        database topology, that its admission lock is gone. To clear it, verify the write's outcome and remove the
+        exact owner-qualified admission lock from the database; the next admission then confirms it is gone. When
+        that verification is unavailable (the original topology is gone, or the deployment rejects majority read
+        concern), reconcile the write, remove any remaining lock, and restart the process. See{' '}
         <a className="underline" href={FENCE_RUNBOOK} target="_blank" rel="noreferrer">
           Ferrum Edge&apos;s retained mTLS DNS admission fence runbook
         </a>.

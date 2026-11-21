@@ -102,6 +102,8 @@ describe('database mTLS DNS admission fence', () => {
     expect(fence?.textContent).toContain('other namespaces are unaffected');
     expect(fence?.textContent).toContain('Normally a fence clears');
     expect(fence?.textContent).toContain('restart the process');
+    expect(fence?.textContent).toContain('remove the exact owner-qualified admission lock');
+    expect(fence?.textContent).toContain('remove any remaining lock, and restart the process');
     expect(fence?.querySelector('a')?.getAttribute('href'))
       .toBe('https://github.com/ferrum-edge/ferrum-edge/blob/main/docs/mongodb.md#retained-mtls-dns-admission-fences');
     const fields = Object.fromEntries([...(fence?.querySelectorAll('dl > div') ?? [])]
