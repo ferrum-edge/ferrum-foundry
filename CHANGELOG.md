@@ -506,6 +506,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dropped the override, so the subset fell back to the parent's hash key. The
   retired proxy `pool_max_requests_per_connection` stays compared on save:
   Edge v0.9.20 stores `None` when a save omits it, so the save does clear it.
+- The Settings page's connection test recognizes Ferrum Edge's structured
+  `503` `/health` answer for a gateway that is starting, degraded, unavailable
+  or draining (#724). `GET /api/settings/status` reports it `reachable: true`
+  with the gateway's `503` status and its (still namespace-reduced) body, and
+  the form reads that answer instead of letting the client throw it, showing
+  a warning that names the reported `status` when `ready` is `false`. A `503`
+  whose body is not a health snapshot (proxy text or HTML, `{ "error": ... }`)
+  stays unreachable. The BFF readiness probe, `getHealth()` and the status
+  route share one recognition check, `shared/health-snapshot.js`.
 - Foundry handles the plugin-config projection Ferrum Edge `main` adds after
   v0.9.20 (ferrum-edge#7054). The sensitivity drift parser accepts
   `FieldSensitivity::CertificateSource`, `PrivateKeySource` and `EndpointPath`
