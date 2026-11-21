@@ -27,6 +27,29 @@ const SCHEMA_URL = new URL(
   '../contracts/ferrum-contracts/schemas/service-manifest/v1.schema.json', import.meta.url,
 );
 
+// A string with no declared maxLength gets the default presentation budget. A
+// declared bound is honored as written, up to the safety cap; a bound above the
+// cap is refused at compile time (the route reports unavailable) rather than
+// silently clamped, so a re-vendored contract can never be narrowed unnoticed.
+// Lengths count Unicode code points, as JSON Schema and Zod's max() do.
+export const MANIFEST_STRING_DEFAULT_MAX_LENGTH = 2048;
+export const MANIFEST_STRING_SAFETY_CAP = 4096;
+
+export function codePointLength(value: string): number {
+  let length = 0;
+  for (const _codePoint of value) length += 1;
+  return length;
+}
+
+function declaredMaxLength(node: SchemaNode): number | undefined {
+  const { maxLength } = node;
+  if (maxLength === undefined) return undefined;
+  if (!Number.isSafeInteger(maxLength) || maxLength < 0 || maxLength > MANIFEST_STRING_SAFETY_CAP) {
+    throw new Error('Unsupported service manifest string bound');
+  }
+  return maxLength;
+}
+
 const KEYWORDS = new Set([
   '$schema', '$id', 'title', 'description', 'x-contract', 'type', 'const', 'enum',
   'properties', 'required', 'additionalProperties', 'items', 'pattern', 'maxLength',
@@ -36,17 +59,28 @@ const KEYWORDS = new Set([
 // Compile only the subset used by this closed contract with our existing Zod
 // dependency. Refuse new keywords rather than silently ignoring drift. No
 // coercion, key removal, or implicit default insertion during validation.
-function compile(node: SchemaNode): z.ZodType {
+//
+// String bounds are supported only on a field's own schema node (the root, a
+// `properties` entry or `items`), beside type/enum/const/pattern. `inClause`
+// marks anything reached through allOf/anyOf/if/then, including properties of
+// an object-level clause; a maxLength there is refused like an unsupported
+// keyword. Each field node then applies exactly one bound to string values:
+// its declared maxLength, or the 2048 default. Clauses add none.
+function compile(node: SchemaNode, inClause = false): z.ZodType {
   if (Object.keys(node).some((key) => !KEYWORDS.has(key))) {
     throw new Error('Unsupported service manifest schema keyword');
   }
+  if (inClause && node.maxLength !== undefined) {
+    throw new Error('Unsupported service manifest maxLength placement');
+  }
+  const maxLength = declaredMaxLength(node);
   let validator: z.ZodType = z.unknown();
   if (node.const !== undefined) validator = z.literal(node.const);
   else if (node.enum) validator = z.enum(node.enum);
   else if (node.type === 'object' || node.properties || node.required) {
     const shape: Record<string, z.ZodType> = {};
     for (const [key, property] of Object.entries(node.properties ?? {})) {
-      const field = compile(property);
+      const field = compile(property, inClause);
       shape[key] = node.required?.includes(key) ? field : field.optional();
     }
     validator = node.additionalProperties === false
@@ -54,10 +88,9 @@ function compile(node: SchemaNode): z.ZodType {
       : z.object(shape).passthrough();
   } else if (node.type === 'array') {
     if (!node.items) throw new Error('Missing service manifest item schema');
-    validator = z.array(compile(node.items)).min(node.minItems ?? 0).max(32);
+    validator = z.array(compile(node.items, inClause)).min(node.minItems ?? 0).max(32);
   } else if (node.type === 'string') {
-    // Local presentation budget; not a change to the shared wire contract.
-    validator = z.string().max(Math.min(node.maxLength ?? 2048, 2048));
+    validator = z.string();
   } else if (node.type === 'integer' || node.type === 'number') {
     let numeric = node.type === 'integer' ? z.number().int() : z.number();
     if (node.minimum !== undefined) numeric = numeric.min(node.minimum);
@@ -66,6 +99,14 @@ function compile(node: SchemaNode): z.ZodType {
   } else if (node.type === 'boolean') validator = z.boolean();
   else if (node.type !== undefined) throw new Error('Unsupported service manifest schema type');
 
+  if (!inClause) {
+    // One bound per field node, whichever branch built the validator (string,
+    // const or enum). It constrains only string values (JSON Schema), never
+    // narrowing or widening other types.
+    const bound = maxLength ?? MANIFEST_STRING_DEFAULT_MAX_LENGTH;
+    validator = validator.refine((value) =>
+      typeof value !== 'string' || codePointLength(value) <= bound);
+  }
   if (node.required) {
     const required = node.required;
     validator = validator.refine((value) => Boolean(value && typeof value === 'object'
@@ -76,12 +117,12 @@ function compile(node: SchemaNode): z.ZodType {
     validator = validator.refine((value) => typeof value !== 'string' || pattern.test(value));
   }
   if (node.allOf) {
-    const validators = node.allOf.map(compile);
+    const validators = node.allOf.map((clause) => compile(clause, true));
     validator = validator.refine((value) =>
       validators.every((item) => item.safeParse(value).success));
   }
   if (node.anyOf) {
-    const validators = node.anyOf.map(compile);
+    const validators = node.anyOf.map((clause) => compile(clause, true));
     validator = validator.refine((value) =>
       validators.some((item) => item.safeParse(value).success));
   }
@@ -93,8 +134,8 @@ function compile(node: SchemaNode): z.ZodType {
   }
   if (node.if) {
     if (!node.then) throw new Error('Missing service manifest conditional schema');
-    const condition = compile(node.if);
-    const consequent = compile(node.then);
+    const condition = compile(node.if, true);
+    const consequent = compile(node.then, true);
     validator = validator.refine((value) => !condition.safeParse(value).success
       || consequent.safeParse(value).success);
   }
@@ -116,8 +157,43 @@ export interface ServiceManifestSchema {
 let loaded: ServiceManifestSchema | undefined;
 let loadFailure: ServiceManifestSchemaError | undefined;
 
+// An independent structural pass over every subschema, whether or not the
+// compiler's validator selection would visit it. It refuses a maxLength
+// outside a field's own node (the root, a `properties` entry or `items`, none
+// reached through allOf/anyOf/if/then) or above the safety cap, and any
+// subschema keyword placed where compile() would not process it.
+function checkSchemaStructure(node: SchemaNode, inClause = false): void {
+  if (node === null || typeof node !== 'object' || Array.isArray(node)) {
+    throw new Error('Unsupported service manifest subschema');
+  }
+  if (node.maxLength !== undefined) {
+    if (inClause) throw new Error('Unsupported service manifest maxLength placement');
+    declaredMaxLength(node);
+  }
+  const chosen = node.const !== undefined || node.enum !== undefined;
+  // compile() reads properties only when no const/enum is present, and items
+  // only on a plain array node.
+  if (node.properties && chosen) throw new Error('Unsupported service manifest properties placement');
+  if (node.items && (chosen || node.type !== 'array' || node.properties || node.required)) {
+    throw new Error('Unsupported service manifest items placement');
+  }
+  if ((node.if === undefined) !== (node.then === undefined)) {
+    throw new Error('Unsupported service manifest conditional schema');
+  }
+  for (const property of Object.values(node.properties ?? {})) {
+    checkSchemaStructure(property, inClause);
+  }
+  if (node.items) checkSchemaStructure(node.items, inClause);
+  for (const clause of [...(node.allOf ?? []), ...(node.anyOf ?? [])]) {
+    checkSchemaStructure(clause, true);
+  }
+  if (node.if) checkSchemaStructure(node.if, true);
+  if (node.then) checkSchemaStructure(node.then, true);
+}
+
 function readAndCompile(): ServiceManifestSchema {
   const schema = JSON.parse(readFileSync(SCHEMA_URL, 'utf8')) as SchemaNode;
+  checkSchemaStructure(schema);
   return { schema, validator: compile(schema) };
 }
 
