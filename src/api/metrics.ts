@@ -11,6 +11,7 @@ import {
   type NamespaceScope,
 } from './client';
 import type { AdminMetrics, HealthResponse } from "./types";
+import { noteAdminMetricsRequestStart } from "./adminMetricsTiming";
 import { isGatewayHealthAnswer } from "../../shared/health-snapshot.js";
 
 export async function getHealth(scope: NamespaceScope): Promise<HealthResponse> {
@@ -48,10 +49,23 @@ export async function getHealth(scope: NamespaceScope): Promise<HealthResponse> 
   }
 }
 
+/**
+ * `signal` (the Query's) aborts the read when its namespace is abandoned, so
+ * a late answer is not cached there. The request-start time is recorded for
+ * the request-rate sampler (`adminMetricsRequestStart`).
+ */
 export async function getAdminMetrics(
   scope: NamespaceScope,
+  signal?: AbortSignal,
 ): Promise<AdminMetrics> {
-  return proxyApi.get("admin/metrics", scoped(scope)).json<AdminMetrics>();
+  const startedAt = Date.now();
+  const metrics = await proxyApi
+    .get("admin/metrics", scoped(scope, { signal }))
+    .json<AdminMetrics>();
+  if (metrics && typeof metrics.gateway === "object" && metrics.gateway !== null) {
+    noteAdminMetricsRequestStart(metrics.gateway, startedAt);
+  }
+  return metrics;
 }
 
 export async function getPrometheusMetrics(

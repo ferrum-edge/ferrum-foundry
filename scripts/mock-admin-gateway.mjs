@@ -1005,9 +1005,24 @@ export function buildHealth(mode, base = health) {
 
 const modeHealth = buildHealth(GATEWAY_MODE);
 
-const adminMetrics = () => ({
+/** Demo uptime the mock reports at startup. */
+const MOCK_UPTIME_OFFSET_SECONDS = 86423;
+const MOCK_STARTED_AT_MS = performance.now();
+
+/**
+ * Process uptime as Edge reports it: whole seconds that advance with the
+ * monotonic clock. Foundry's request-rate sampler refuses a pair of samples
+ * whose uptime did not advance with the time between them (a replaced
+ * process), so a constant uptime would keep every rate at "Collecting".
+ */
+export function mockUptimeSeconds(elapsedMs = performance.now() - MOCK_STARTED_AT_MS) {
+  return MOCK_UPTIME_OFFSET_SECONDS + Math.floor(elapsedMs / 1000);
+}
+
+/** The proxy-backed `/admin/metrics` payload, `elapsedMs` after mock startup. */
+export const adminMetricsPayload = (elapsedMs) => ({
   gateway: {
-    mode: 'database', ferrum_version: '1.4.2', uptime_seconds: 86423,
+    mode: 'database', ferrum_version: '1.4.2', uptime_seconds: mockUptimeSeconds(elapsedMs),
     total_requests: 1523401, requests_per_second: 118,
     status_codes_total: { 200: 1420031, 201: 52011, 404: 21892, 429: 3312, 500: 1204, 502: 240 },
     status_codes_per_second: { 200: 104, 201: 6, 404: 5, 429: 2, 500: 1 },
@@ -1039,8 +1054,48 @@ const adminMetrics = () => ({
   },
   consumer_index: { total_consumers: 1, key_auth_credentials: 2, basic_auth_credentials: 0, mtls_credentials: 1, jwt_credentials: 1, hmac_credentials: 0, identity_credentials: 3 },
   rate_limiting: { tracked_key_count: 412 },
-  tcp_connection_throttle: { enforcement_scope: 'process_local', replica_limit_behavior: 'configured_limit_per_replica' },
+  adaptive_concurrency: { policy_count: 1, tracked_target_count: 2, limit_total: 64, in_flight_total: 5 },
+  tcp_connection_throttle: { enforcement_scope: 'process_local', replica_limit_behavior: 'configured_limit_per_replica', active_connections: 12 },
 });
+
+/** Modes Edge builds without proxy state (`empty_proxy_metrics`). */
+const NO_PROXY_STATE_MODES = new Set(['cp', 'node_agent']);
+
+/**
+ * `/admin/metrics` for `mode`, shaped as Edge serves it. A control plane or a
+ * node agent has no proxy state: Edge zeroes every runtime counter (uptime and
+ * the metrics window included), returns empty pools and caches, sets
+ * `config_last_updated_at` to `null`, and still reports `mode`,
+ * `ferrum_version` and `config_source_status` (`online`/`offline` on a CP,
+ * `n/a` on a node agent). Other modes serve the full proxy-backed payload;
+ * only a DB-backed source reports `online`.
+ */
+export function buildAdminMetrics(mode, base = adminMetricsPayload()) {
+  const configSourceStatus = ['database', 'cp'].includes(mode) ? 'online' : 'n/a';
+  if (!NO_PROXY_STATE_MODES.has(mode)) {
+    return { ...base, gateway: { ...base.gateway, mode, config_source_status: configSourceStatus } };
+  }
+  return {
+    gateway: {
+      mode, ferrum_version: base.gateway.ferrum_version, uptime_seconds: 0,
+      total_requests: 0, status_codes_total: {}, requests_per_second: 0,
+      status_codes_per_second: {}, metrics_window_seconds: 0,
+      config_last_updated_at: null, config_source_status: configSourceStatus,
+      proxy_count: 0, consumer_count: 0, upstream_count: 0, plugin_config_count: 0,
+    },
+    connection_pools: {},
+    circuit_breakers: [],
+    health_check: { unhealthy_target_count: 0, unhealthy_targets: [] },
+    load_balancers: { active_connections: [] },
+    caches: {},
+    consumer_index: { total_consumers: 0, key_auth_credentials: 0, basic_auth_credentials: 0, mtls_credentials: 0, jwt_credentials: 0, hmac_credentials: 0, identity_credentials: 0 },
+    rate_limiting: { tracked_key_count: 0 },
+    // `AdminMetricsAdaptiveConcurrency::empty()` and
+    // `AdminMetricsTcpConnectionThrottle::process_local(0)`.
+    adaptive_concurrency: { policy_count: 0, tracked_target_count: 0, limit_total: 0, in_flight_total: 0 },
+    tcp_connection_throttle: { enforcement_scope: 'process_local', replica_limit_behavior: 'configured_limit_per_replica', active_connections: 0 },
+  };
+}
 
 const overload = {
   level: 'normal', draining: false, active_connections: 342, active_requests: 57,
@@ -1055,7 +1110,7 @@ const overload = {
 };
 
 const runtimeMetrics = () => ({
-  timestamp: now(), uptime_seconds: 86423, mode: 'database', ferrum_version: '1.4.2',
+  timestamp: now(), uptime_seconds: mockUptimeSeconds(), mode: 'database', ferrum_version: '1.4.2',
   system: {
     sampled_at_unix_ms: Date.now(), platform: 'linux',
     cpu: { process_percent: 8.4, system_percent: 22.1, cpu_count: 8 },
@@ -1344,7 +1399,7 @@ export const server = createServer(async (req, res) => {
 
   /* health & metrics */
   if (path === '/health' || path === '/status') return send(200, modeHealth);
-  if (path === '/admin/metrics') return send(200, adminMetrics());
+  if (path === '/admin/metrics') return send(200, buildAdminMetrics(GATEWAY_MODE));
   if (path === '/metrics') {
     // Edge's prometheus_metrics exposition: `proxy_id` first, `status_code`,
     // millisecond histograms, and `namespace` appended last. The Metrics
