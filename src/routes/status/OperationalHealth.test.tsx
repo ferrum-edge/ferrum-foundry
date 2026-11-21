@@ -98,6 +98,9 @@ describe('database mTLS DNS admission fence', () => {
     expect(databaseCard?.contains(fence ?? null)).toBe(true);
     expect(fence?.textContent).toContain('fail closed with HTTP 503');
     expect(fence?.textContent).not.toContain('uncertain');
+    expect(fence?.textContent).toContain('other namespaces are unaffected');
+    expect(fence?.textContent).toContain('Normally a fence clears');
+    expect(fence?.textContent).toContain('restart the process');
     expect(fence?.querySelector('a')?.getAttribute('href'))
       .toBe('https://github.com/ferrum-edge/ferrum-edge/blob/main/docs/mongodb.md#retained-mtls-dns-admission-fences');
     const fields = Object.fromEntries([...(fence?.querySelectorAll('dl > div') ?? [])]
@@ -117,6 +120,9 @@ describe('database mTLS DNS admission fence', () => {
     expect(region('mTLS DNS admission fence')?.textContent).toContain('Oldest retained sinceNot reported');
   });
 
+  const fenceFields = () => Object.fromEntries([...(region('mTLS DNS admission fence')?.querySelectorAll('dl > div') ?? [])]
+    .map((row) => [row.querySelector('dt')?.textContent, row.querySelector('dd')?.textContent]));
+
   it('keeps the alert but reports malformed details as not reported', async () => {
     const malformed = { fenced: true, retained_fences: { count: 2 }, namespaces: ['tenant-a', { name: 'tenant-b' }, 7],
       oldest_retained_since_unix_ms: 'yesterday' };
@@ -124,13 +130,33 @@ describe('database mTLS DNS admission fence', () => {
     await harness.render(<StatusPage />);
     await settle(() => expect(region('mTLS DNS admission fence')).not.toBeNull());
     expect(harness.host.querySelector('[role="status"]')?.textContent).toContain('Database mTLS DNS admission fenced');
-    const fields = Object.fromEntries([...(region('mTLS DNS admission fence')?.querySelectorAll('dl > div') ?? [])]
-      .map((row) => [row.querySelector('dt')?.textContent, row.querySelector('dd')?.textContent]));
-    expect(fields).toEqual({
+    expect(fenceFields()).toEqual({
       'Retained fences': 'Not reported',
       'Oldest retained since': 'Not reported',
-      Namespaces: 'tenant-a',
+      Namespaces: 'Not reported',
     });
+    // Without a usable list, no namespace is called unaffected.
+    const text = region('mTLS DNS admission fence')?.textContent;
+    expect(text).toContain('mTLS DNS admissions for the affected namespaces fail closed with HTTP 503');
+    expect(text).not.toContain('other namespaces are unaffected');
+    expect(text).not.toContain('tenant-a');
+  });
+
+  it.each([
+    ['a zero count', { retained_fences: 0 }, 'Retained fences'],
+    ['a negative count', { retained_fences: -1 }, 'Retained fences'],
+    ['a fractional count', { retained_fences: 1.5 }, 'Retained fences'],
+    ['a negative timestamp', { oldest_retained_since_unix_ms: -1 }, 'Oldest retained since'],
+    ['a fractional timestamp', { oldest_retained_since_unix_ms: 1.5 }, 'Oldest retained since'],
+    ['a timestamp past the Date range', { oldest_retained_since_unix_ms: 8.64e15 + 1 }, 'Oldest retained since'],
+    ['an empty namespace list', { namespaces: [] }, 'Namespaces'],
+  ])('reports %s as not reported and keeps the alert', async (_label, override, field) => {
+    stubFetch(() => Response.json({ ...fenced, database: { ...fenced.database,
+      mtls_dns_admission_fence: { ...fenced.database!.mtls_dns_admission_fence, ...override } } }));
+    await harness.render(<StatusPage />);
+    await settle(() => expect(region('mTLS DNS admission fence')).not.toBeNull());
+    expect(fenceFields()[field]).toBe('Not reported');
+    expect(harness.host.querySelector('[role="status"]')?.textContent).toContain('Database mTLS DNS admission fenced');
   });
 
   it.each([['the string "false"', 'false'], ['the string "true"', 'true'], ['false', false]])(
