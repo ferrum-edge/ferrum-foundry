@@ -505,8 +505,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (#723). The pinned fixture `orders-api.json` uses one and is now refused
   until ferrum-contracts#82 updates it. String fields get the schema's declared
   `maxLength` instead of a silent 2,048 clamp (2,048 remains the default, with
-  a 4,096 safety cap that refuses to compile a larger bound). The
-  ferrum-contracts#74 bounds wait for the next `contracts-edge` release.
+  a 4,096 safety cap that refuses to compile a larger bound). `maxLength` is
+  supported only on a field's own schema node; one inside a composition
+  clause fails compilation. The ferrum-contracts#74 bounds wait for the next
+  `contracts-edge` release.
+- The Settings page's connection test recognizes Ferrum Edge's structured
+  `503` `/health` answer for a gateway that is starting, degraded, unavailable
+  or draining (#724). `GET /api/settings/status` reports it `reachable: true`
+  with the gateway's `503` status and its (still namespace-reduced) body, and
+  the form reads that answer instead of letting the client throw it, showing
+  a warning that names the reported `status` when `ready` is `false`. A `503`
+  whose body is not a health snapshot (proxy text or HTML, `{ "error": ... }`)
+  stays unreachable. The BFF readiness probe, `getHealth()` and the status
+  route share one recognition check, `shared/health-snapshot.js`.
 - Foundry handles the plugin-config projection Ferrum Edge `main` adds after
   v0.9.20 (ferrum-edge#7054). The sensitivity drift parser accepts
   `FieldSensitivity::CertificateSource`, `PrivateKeySource` and `EndpointPath`

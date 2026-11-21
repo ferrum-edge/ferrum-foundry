@@ -345,6 +345,16 @@ Edge answers the status probe's `ns`-claim JWT with, to the same summary as
 not a JSON object, including raw text, and keeps `reachable` and `status`. An
 unrestricted admin still receives the full body.
 
+`status` is the gateway's HTTP status. `reachable` is `true` for a `2xx`, and
+for a `503` whose body is an Edge health snapshot (a recognized `status` and a
+boolean `ready`): Edge answers a gateway that is starting, degraded,
+unavailable or draining that way, so the connection works. The snapshot is
+recognized on the gateway's own body, before any reduction, by the same check
+the readiness probe and the Status page use (`shared/health-snapshot.js`). A
+`503` with any other body (proxy text or HTML, `{ "error": ... }`) stays
+`reachable: false`. The Settings page's connection test shows a reachable
+gateway reporting `ready: false` as a warning that names its `status`.
+
 `GET /api/settings` includes the active `authMode`. In `trusted-proxy` mode:
 
 - The Settings page disables the role and namespace defaults and leaves them
