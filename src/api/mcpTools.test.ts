@@ -361,6 +361,29 @@ describe("per-tool policy write", () => {
     expect(gateway.wire.map((call) => call.method)).toEqual(["GET"]);
   });
 
+  it("refuses an operator save whose read masks a trigger operand, before anything is sent", async () => {
+    const masked = mcpPlugin({
+      trigger: {
+        when: { not: { match: { header: { name: "x-skip", value: { exact: ["[REDACTED]"] } } } } },
+      },
+    });
+    const gateway = stubPluginGateway(masked);
+    const refused = await updateToolPolicy(scope, "mcp", "github.create", { action: "allow" },
+      toolPolicyWriteGuard(masked, "github.create"), "operator").catch((error: unknown) => error);
+    expect(refused).toBeInstanceOf(MaskedSecretWriteError);
+    expect((refused as MaskedSecretWriteError).pointers).toEqual([
+      "/trigger/when/not/match/header/value/exact/0",
+    ]);
+    expect((refused as Error).message).toContain("a trigger value must be re-entered");
+    expect(gateway.wire.map((call) => call.method)).toEqual(["GET"]);
+
+    // An admin's read is raw, so the same trigger is saved as read.
+    const admin = stubPluginGateway(masked);
+    await updateToolPolicy(scope, "mcp", "github.create", { action: "allow" },
+      toolPolicyWriteGuard(masked, "github.create"), "admin");
+    expect(admin.wire.map((call) => call.method)).toEqual(["GET", "GET", "PUT"]);
+  });
+
   it("lets an admin, whose reads are raw, save the same configuration", async () => {
     const masked = mcpPlugin();
     masked.config = {
@@ -410,6 +433,16 @@ describe("masked-value advice", () => {
     expect(mixed).toContain("a server URL must be re-entered");
     expect(maskedToolPolicyAdvice(["/config/servers/github/headers/authorization"]))
       .toContain("clearing deletes the stored secret");
+  });
+
+  it("never suggests clearing a trigger operand", () => {
+    const trigger = "/trigger/when/match/query/value/prefix/0";
+    expect(maskedToolPolicyAdvice([trigger])).toContain("a trigger value must be re-entered)");
+    expect(maskedToolPolicyAdvice([trigger])).not.toContain("cleared");
+    expect(maskedToolPolicyAdvice([trigger, "/config/servers/github/upstream_url"]))
+      .toContain("a server URL and a trigger value must be re-entered)");
+    expect(maskedToolPolicyAdvice([trigger, "/config/servers/github/headers/authorization"]))
+      .toContain("a trigger value must be re-entered; other values may instead be cleared");
   });
 
   it("never suggests a separate save first, which the policy save's re-read masks again", () => {

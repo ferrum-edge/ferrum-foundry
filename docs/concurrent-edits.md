@@ -539,6 +539,21 @@ a built-in newer than the paired release) has no rules, so every string in its
 `config` is treated as secret. Edge's operator-configured
 `FERRUM_LOG_REDACT_METADATA_KEYS` are not visible to Foundry.
 
+**Plugin `trigger`.** A plugin configuration's execution `trigger` is
+classified the way Ferrum Edge `main` projects it for a non-admin read
+(`project_plugin_trigger_with`, ferrum-edge#7054): every comparison operand of
+a `header`, `query` or `cookie` predicate (each `exact` and `prefix` entry,
+`regex`) is secret, and so is anything in a shape a `PluginTrigger` cannot
+have (a trigger without `when`, an unknown node or predicate key, a non-object
+`value`). Field names, `presence`, `multi_value`, `case_insensitive`, the tree,
+and the routing and identity predicates (`path`, `method`, `host`, `consumer`,
+`external_identity`, `external_identity_authority`, and the rest of Edge's
+`TRIGGER_VISIBLE_PREDICATES`) stay readable. The pinned v0.9.20 does not mask
+a trigger at all, but the operands are the same shared values there, so
+Foundry applies this on every gateway (`pluginTriggerWithheldSites` in
+`src/lib/resourceBaseline.ts`). `scripts/edge-main-drift.mjs` compares
+Foundry's two predicate lists with Edge main's.
+
 The table lives in `src/api/pluginSensitivity.ts`, with the Edge commit it was
 checked against in `PLUGIN_SENSITIVITY_SOURCE`. The Pinned Gateway Contract job
 runs `scripts/plugin-sensitivity-drift.mjs`, which fetches
@@ -651,7 +666,9 @@ explanation [above](#without-a-tag), leaving the form mounted. For a conflict:
    which shows credential-shaped values as `[redacted]` while still showing
    that the field changed. A `*_path` field is shown, since a path or
    `system://`/`k8s://` reference to material is not the material, unless its
-   value is inline PEM, which is redacted. Nothing from the comparison is written to browser
+   value is inline PEM, which is redacted. A plugin `trigger` shows its
+   structure and visible predicates, with each `header`, `query` and `cookie`
+   operand as `[redacted]`. Nothing from the comparison is written to browser
    storage, telemetry, or logs.
 
 ### The writer can be this operator

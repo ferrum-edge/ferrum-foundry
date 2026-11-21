@@ -274,10 +274,18 @@ export function parseSensitivitySchemas(source) {
   return table;
 }
 
+/**
+ * A `&[&str]` constant of the Rust source (`const NAME: &[&str] = &["a", …];`),
+ * as its strings in order. Any other literal shape throws.
+ */
+export function parseStringSliceConstant(source, name) {
+  const tokens = new TokenStream(source, constantLiteral(source, name));
+  return tokens.slice(() => tokens.string());
+}
+
 /** Edge's `KAFKA_SAFE_PRODUCER_PROPERTIES`, parsed from the Rust source. */
 export function parseKafkaSafeProperties(source) {
-  const tokens = new TokenStream(source, constantLiteral(source, "KAFKA_SAFE_PRODUCER_PROPERTIES"));
-  return new Set(tokens.slice(() => tokens.string()));
+  return new Set(parseStringSliceConstant(source, "KAFKA_SAFE_PRODUCER_PROPERTIES"));
 }
 
 function ruleKey(rule) {

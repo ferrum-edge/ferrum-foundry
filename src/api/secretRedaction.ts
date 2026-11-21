@@ -10,7 +10,11 @@
 /*  submitted secret removed, and nothing else from the request.      */
 /* ------------------------------------------------------------------ */
 
-import { isInlineMaterial, isRedactedField } from "@/lib/resourceBaseline";
+import {
+  isInlineMaterial,
+  isRedactedField,
+  pluginTriggerWithheldSites,
+} from "@/lib/resourceBaseline";
 import type { ApiError } from "./types";
 import {
   extractApiErrorData,
@@ -246,6 +250,22 @@ export function pluginConfigSecrets(pluginName: string, config: unknown): Secret
 }
 
 /**
+ * The secrets a plugin `trigger` carries, as Ferrum Edge main's projection
+ * decides them for a non-admin read (`project_plugin_trigger_with`): every
+ * comparison operand of a `header`, `query` or `cookie` predicate, and
+ * anything in a shape a `PluginTrigger` cannot have
+ * (`pluginTriggerWithheldSites`). The visible predicates (`path`, `method`,
+ * `consumer`, `external_identity`, …) stay readable. Classified on every
+ * gateway, the pinned v0.9.20 included, whose reads show a trigger verbatim:
+ * an operand is the same shared secret there, and a refusal must not echo it.
+ */
+export function pluginTriggerSecrets(trigger: unknown): Secrets {
+  return classified([
+    ...new Set(pluginTriggerWithheldSites(trigger).flatMap((site) => submittedValues(site.value))),
+  ]);
+}
+
+/**
  * The secrets a structured write payload carries, found by position rather
  * than by type of write: every string under a credential-shaped field name,
  * at any depth, inline PEM in a material-location field (`*_path`, which
@@ -253,9 +273,10 @@ export function pluginConfigSecrets(pluginName: string, config: unknown): Secret
  * credential-bearing parts of any URL elsewhere. Fails
  * closed on a whole subtree — `credentials`, `headers`, a `*_secret` object —
  * rather than trying to recognise which of its leaves is sensitive. A plugin
- * configuration (`plugin_name` beside `config`) at any depth — a plugin write,
- * or one entry of a larger payload — has its `config` classified by
- * `pluginConfigSecrets`.
+ * configuration (`plugin_name` beside `config` or `trigger`) at any depth — a
+ * plugin write, or one entry of a larger payload — has its `config` classified
+ * by `pluginConfigSecrets` and its `trigger` by `pluginTriggerSecrets`, on top
+ * of the positional rules, which still walk the trigger.
  */
 export function secretValues(data: unknown): Secrets {
   if (typeof data === "string") return classified(urlSecrets(data));
@@ -263,9 +284,14 @@ export function secretValues(data: unknown): Secrets {
   if (data && typeof data === "object") {
     const record = data as Record<string, unknown>;
     const pluginName = record.plugin_name;
-    if (typeof pluginName === "string" && "config" in record) {
-      const { config, ...rest } = record;
-      return mergeSecrets([pluginConfigSecrets(pluginName, config), secretValues(rest)]);
+    if (typeof pluginName === "string" && ("config" in record || "trigger" in record)) {
+      const { config, trigger, ...rest } = record;
+      return mergeSecrets([
+        pluginConfigSecrets(pluginName, config),
+        pluginTriggerSecrets(trigger),
+        secretValues(trigger),
+        secretValues(rest),
+      ]);
     }
     return mergeSecrets(Object.entries(record).map(([field, value]) =>
       isSecretField(field) || isInlineMaterial(field, value)

@@ -40,6 +40,7 @@ import * as tls from "./tls";
 import * as upstreams from "./upstreams";
 import {
   pluginConfigSecrets,
+  pluginTriggerSecrets,
   redactionForms,
   RedactedWriteError,
   redactWriteFailure,
@@ -498,6 +499,130 @@ describe("plugin configuration writes (#478)", () => {
     expect(isPreconditionFailed(refused)).toBe(true);
     expect(sent.at(-1)?.method).toBe("PUT");
     expect(reported).toEqual([]);
+  });
+});
+
+describe("plugin triggers follow Ferrum Edge main's projection", () => {
+  const HEADER_TOKEN = "synthetic-skip-waf-header-token";
+  const QUERY_PREFIX = "synthetic-query-bypass-prefix";
+  const COOKIE_PATTERN = "synthetic-cookie-(alpha|beta)";
+  const VISIBLE = {
+    all: [
+      { match: { path: { prefix: ["/orders/internal"] } } },
+      { match: { method: ["POST", "DELETE"] } },
+      { match: { host: { exact: ["api.example.com"] } } },
+      { match: { consumer: { value: { exact: ["service-account-orders"] } } } },
+      { match: { external_identity: { value: { prefix: ["spiffe-ish-subject"] } } } },
+      { match: { external_identity_authority: ["a".repeat(64)] } },
+      { match: { source_cidr: ["10.20.0.0/16"] } },
+      { match: { auth_method: ["jwt_auth"] } },
+    ],
+  };
+  const trigger = {
+    when: {
+      any: [
+        { not: { match: { header: { name: "x-skip-waf", value: { exact: [HEADER_TOKEN] } } } } },
+        {
+          match: {
+            query: {
+              name: "debug_mode",
+              presence: "present",
+              multi_value: "all",
+              value: { prefix: [QUERY_PREFIX], case_insensitive: true },
+            },
+          },
+        },
+        { match: { cookie: { name: "canary_group", value: { regex: COOKIE_PATTERN } } } },
+        VISIBLE,
+      ],
+    },
+  };
+
+  it("takes every header, query and cookie operand and leaves the visible predicates", () => {
+    const secrets = classifiedValues(pluginTriggerSecrets(trigger));
+    expect(secrets).toEqual([COOKIE_PATTERN, HEADER_TOKEN, QUERY_PREFIX].sort());
+    // Field names and the routing and identity predicates stay readable.
+    for (const visible of [
+      "x-skip-waf",
+      "debug_mode",
+      "canary_group",
+      "/orders/internal",
+      "POST",
+      "api.example.com",
+      "service-account-orders",
+      "spiffe-ish-subject",
+      "a".repeat(64),
+      "10.20.0.0/16",
+      "jwt_auth",
+    ]) {
+      expect(secrets).not.toContain(visible);
+    }
+  });
+
+  it("is applied to a plugin write's trigger beside its config", () => {
+    const write = {
+      plugin_name: "waf",
+      scope: "global",
+      config: {},
+      trigger,
+    };
+    const { values } = secretValues(write);
+    expect(values).toEqual(expect.arrayContaining([HEADER_TOKEN, QUERY_PREFIX, COOKIE_PATTERN]));
+    for (const visible of ["x-skip-waf", "/orders/internal", "service-account-orders"]) {
+      expect(values).not.toContain(visible);
+    }
+    // And to a plugin entry nested in a larger payload, such as a restore.
+    expect(secretValues({ plugin_configs: { items: [write] } }).values).toEqual(
+      expect.arrayContaining([HEADER_TOKEN, QUERY_PREFIX, COOKIE_PATTERN]),
+    );
+  });
+
+  it("fails closed on a shape a PluginTrigger cannot have", () => {
+    const weird = "synthetic-malformed-content";
+    for (const malformed of [
+      weird,
+      [weird],
+      { if: { match: { header: { name: "x", value: { exact: [weird] } } } } },
+      { when: { match: { path: { exact: ["/ok"] } } }, extra: weird },
+      { when: weird },
+      { when: { all: { match: { header: { name: "x" } } }, nested: weird } },
+      { when: { match: weird } },
+      { when: { match: { header_value: weird } } },
+      { when: { match: { header: weird } } },
+      { when: { match: { header: { name: "x", value: weird } } } },
+      { when: { match: { header: { name: "x", value: { exact: [{ deep: weird }] } } } } },
+      { when: { match: { header: { name: "x", operand: weird } } } },
+      { when: { match: { query: { name: "x", value: { case_insensitive: weird } } } } },
+      { when: { all: { not: { match: { cookie: { name: "x", value: { exact: [weird] } } } } } } },
+    ]) {
+      // Withheld whole, so a field name inside the malformed part goes too.
+      expect(classifiedValues(pluginTriggerSecrets(malformed))).toContain(weird);
+    }
+    expect(pluginTriggerSecrets(null)).toEqual({ values: [], tokens: [] });
+    expect(pluginTriggerSecrets(undefined)).toEqual({ values: [], tokens: [] });
+    // A malformed visible predicate stays visible, as in Edge's projection.
+    expect(pluginTriggerSecrets({ when: { match: { path: "/whatever" } } }).values).toEqual([]);
+  });
+
+  it("keeps no operand in a refused plugin write's error or popup, on any gateway", async () => {
+    respond = () => Response.json({
+      error: `trigger rejected: header x-skip-waf exact ${HEADER_TOKEN}; query ${QUERY_PREFIX}`,
+    }, { status: 400 });
+    const failure = await plugins.createConfig(scope, {
+      plugin_name: "waf",
+      scope: "global",
+      config: {},
+      trigger: trigger as PluginConfigCreate["trigger"],
+    }).catch((e: unknown) => e);
+
+    expectDetached(failure);
+    const text = await exposure(failure);
+    expect(text).toContain("header x-skip-waf exact [REDACTED]; query [REDACTED]");
+    expect(text).not.toContain(HEADER_TOKEN);
+    expect(text).not.toContain(QUERY_PREFIX);
+    expect(reported).toHaveLength(1);
+    expect(reported[0].body).not.toContain(HEADER_TOKEN);
+    expect(reported[0].body).not.toContain(QUERY_PREFIX);
   });
 });
 

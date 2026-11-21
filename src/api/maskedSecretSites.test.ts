@@ -6,6 +6,8 @@ import { describe, expect, it } from "vitest";
 import {
   pluginConfigPlaceholderSites,
   pluginConfigRefusedSites,
+  pluginPlaceholderSites,
+  pluginTriggerPlaceholderSites,
   proxyPlaceholderSites,
   refuseMaskedResourceWrite,
   upstreamPlaceholderSites,
@@ -232,5 +234,77 @@ describe("a proxy or upstream write refused before it is sent (ferrum-edge#7060)
     expect(() =>
       refuseMaskedResourceWrite("Proxy", "orders", { backend_tls_client_key_path: "/k.pem" }, "operator"),
     ).not.toThrow();
+  });
+});
+
+describe("plugin trigger placeholders (Edge main masks header, query and cookie operands)", () => {
+  const masked = {
+    when: {
+      any: [
+        { not: { match: { header: { name: "x-skip-waf", value: { exact: ["[REDACTED]", "[REDACTED]"] } } } } },
+        { match: { query: { name: "debug", value: { regex: "[REDACTED]" } } } },
+        { match: { cookie: { name: "canary", value: { prefix: ["[REDACTED]"] } } } },
+        { match: { path: { exact: ["[REDACTED]"] } } },
+      ],
+    },
+  };
+  const operandSites = [
+    "/trigger/when/any/0/not/match/header/value/exact/0",
+    "/trigger/when/any/0/not/match/header/value/exact/1",
+    "/trigger/when/any/1/match/query/value/regex",
+    "/trigger/when/any/2/match/cookie/value/prefix/0",
+  ];
+
+  it("blocks a placeholder at each operand for a non-admin or unknown role", () => {
+    for (const role of ["operator", "viewer", null, undefined] as const) {
+      expect(pluginTriggerPlaceholderSites(masked, role)).toEqual({
+        blocking: operandSites,
+        sources: [],
+        reserved: [],
+        // A visible predicate is shown as stored, so it is only a warning.
+        other: ["/trigger/when/any/3/match/path/exact/0"],
+      });
+    }
+  });
+
+  it("blocks nothing for an admin, whose reads are raw", () => {
+    expect(pluginTriggerPlaceholderSites(masked, "admin")).toEqual({
+      blocking: [],
+      sources: [],
+      reserved: [],
+      other: [...operandSites, "/trigger/when/any/3/match/path/exact/0"],
+    });
+  });
+
+  it("blocks a placeholder anywhere inside a malformed trigger shape", () => {
+    expect(
+      pluginTriggerPlaceholderSites(
+        { when: { match: { header: { name: "x", value: { exact: [{ nested: "[REDACTED]" }] } } } } },
+        "operator",
+      ).blocking,
+    ).toEqual(["/trigger/when/match/header/value/exact/0/nested"]);
+    expect(pluginTriggerPlaceholderSites({ if: ["[REDACTED]"] }, "operator").blocking).toEqual([
+      "/trigger/if/0",
+    ]);
+    expect(pluginTriggerPlaceholderSites("[REDACTED]", "operator").blocking).toEqual(["/trigger"]);
+    expect(pluginTriggerPlaceholderSites(null, "operator").blocking).toEqual([]);
+    expect(pluginTriggerPlaceholderSites(undefined, "operator").blocking).toEqual([]);
+  });
+
+  it("names config and trigger sites together for a write that resends a plugin read", () => {
+    const sites = pluginPlaceholderSites(
+      {
+        plugin_name: "http_logging",
+        config: { custom_headers: { "x-api-key": "[REDACTED]" } },
+        trigger: masked,
+      },
+      "operator",
+    );
+    expect(sites.blocking).toEqual(["/config/custom_headers/x-api-key", ...operandSites]);
+    expect(sites.other).toEqual(["/trigger/when/any/3/match/path/exact/0"]);
+    expect(
+      pluginPlaceholderSites({ plugin_name: "http_logging", config: {}, trigger: masked }, "admin")
+        .blocking,
+    ).toEqual([]);
   });
 });

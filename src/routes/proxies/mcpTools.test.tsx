@@ -346,6 +346,22 @@ describe("MCP Tools tab", () => {
     expect(button("Edit policy for github.search").disabled).toBe(true);
   });
 
+  it("blocks an operator whose read masks a trigger operand the save would resend", async () => {
+    role = "operator";
+    stored = {
+      ...mcpPlugin("https://mcp.example.com/mcp"),
+      trigger: { when: { match: { cookie: { name: "agent", value: { exact: ["[REDACTED]"] } } } } },
+    };
+    pluginList = [stored, toolCallLimit];
+    await openTools();
+    await settle(() =>
+      expect(panel().textContent).toContain("Tool policy cannot be saved by your role"));
+    expect(panel().textContent).toContain("/trigger/when/match/cookie/value/exact/0");
+    expect(panel().textContent).toContain("a trigger value must be re-entered");
+    expect(button("Edit policy for github.search").disabled).toBe(true);
+    expect(puts).toHaveLength(0);
+  });
+
   it("gives the same-save advice when the save's own read masks a value the page did not", async () => {
     role = "operator";
     await openTools();

@@ -15,8 +15,10 @@
 /* ------------------------------------------------------------------ */
 
 import type { GatewayRole } from "@/lib/capabilities";
+import { PLUGIN_TRIGGER_POINTER, pluginTriggerWithheldSites } from "@/lib/resourceBaseline";
 import {
   MaskedSecretWriteError,
+  placeholderPointers,
   pluginConfigPlaceholderPointers,
   proxyPlaceholderPointers,
   type RefusedSite,
@@ -101,6 +103,52 @@ export function pluginConfigPlaceholderSites(
   const all = pluginConfigPlaceholderPointers(config);
   if (all.length === 0) return { blocking: [], sources: [], reserved: [], other: [] };
   return split(all, role === "admin" ? [] : pluginConfigRefusedSiteKinds(pluginName, config));
+}
+
+/**
+ * Every placeholder in a plugin `trigger`, split the same way. Edge main
+ * (ferrum-edge#7054) withholds a trigger's `header`, `query` and `cookie`
+ * operands from a non-admin read and refuses a placeholder sent back at one
+ * of them; the pinned v0.9.20 shows a trigger verbatim and would store it as
+ * the operand. Either way it blocks: a placeholder at or inside any site
+ * Edge main's projection withholds (`pluginTriggerWithheldSites`, which takes
+ * a malformed shape whole) is blocking, and one in a visible predicate or a
+ * field name, which every read shows as stored, is only a warning. All
+ * blocking trigger sites are `masked`, but no editor offers to clear one: an
+ * `exact` or `prefix` entry is re-entered, or the trigger removed as a whole.
+ */
+export function pluginTriggerPlaceholderSites(
+  trigger: unknown,
+  role: GatewayRole | null | undefined,
+): PlaceholderSites {
+  const all = placeholderPointers(trigger ?? null, PLUGIN_TRIGGER_POINTER);
+  if (all.length === 0) return { blocking: [], sources: [], reserved: [], other: [] };
+  const withheld = role === "admin"
+    ? []
+    : pluginTriggerWithheldSites(trigger).map((site) => site.pointer);
+  const refused = all.filter((pointer) =>
+    withheld.some((site) => pointer === site || pointer.startsWith(`${site}/`)));
+  return split(all, masked(refused));
+}
+
+/**
+ * Every placeholder Edge refuses (or Foundry blocks) in a whole plugin
+ * configuration body for `role`: its `config` (`pluginConfigPlaceholderSites`)
+ * and its `trigger` (`pluginTriggerPlaceholderSites`). Use this for any write
+ * that resends a plugin read: a tool-policy save or a membership rollback.
+ */
+export function pluginPlaceholderSites(
+  plugin: { readonly plugin_name: string; readonly config?: unknown; readonly trigger?: unknown },
+  role: GatewayRole | null | undefined,
+): PlaceholderSites {
+  const config = pluginConfigPlaceholderSites(plugin.plugin_name, plugin.config, role);
+  const trigger = pluginTriggerPlaceholderSites(plugin.trigger, role);
+  return {
+    blocking: [...config.blocking, ...trigger.blocking],
+    sources: [...config.sources, ...trigger.sources],
+    reserved: [...config.reserved, ...trigger.reserved],
+    other: [...config.other, ...trigger.other],
+  };
 }
 
 /**
