@@ -584,7 +584,11 @@ reported in decimal), so in a spec write's failure the value of every serde
 type diagnostic (``invalid type: integer `N` ``, `floating point`, `boolean`,
 `character`, `string "…"`, `invalid value: …`, ``unknown variant `V` ``) is
 replaced whatever it is, keeping the category, the expected type and the
-location. Foundry has no YAML parser, so
+location. The diagnostics and the exact matches are found in the original
+text and replaced together. When a value's end is uncertain (its closing
+delimiter is missing, is not followed by serde's `, expected`, or an exact
+match crosses it, as with a variant containing a backtick), everything from
+its opening delimiter to the end of the line is withheld. Foundry has no YAML parser, so
 a YAML (or malformed JSON) document is unclassified throughout: every scalar is
 found line by line without parsing, including `key: value` values, sequence
 entries, flow elements, quoted scalars (unquoted and unescaped), several pairs

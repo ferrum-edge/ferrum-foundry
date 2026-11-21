@@ -916,30 +916,71 @@ function replaceSpans(text: string, found: [number, number][]): string {
 }
 
 /**
- * The values serde quotes in a type or value diagnostic: "invalid type:
+ * Where a serde type or value diagnostic quotes a value: "invalid type:
  * integer `N`", "floating point `N`", "boolean `B`", "character `C`",
  * "string \"S\"" (escaped as Rust's `Debug` writes it), and "unknown variant
- * `V`". The category before the value and what follows it ("expected a
- * string at line 1 column 80") are kept.
+ * `V`". Each match ends at the value's opening delimiter.
  */
-const DIAGNOSTIC_BACKTICK_VALUE_PATTERN =
-  /\b((?:invalid (?:type|value): (?:integer|floating point|boolean|character)|unknown variant) )`[^`]*`/g;
-const DIAGNOSTIC_STRING_VALUE_PATTERN = /\b(invalid (?:type|value): string )"(?:[^"\\]|\\.)*"/g;
+const DIAGNOSTIC_VALUE_START_PATTERN =
+  /\b(?:invalid (?:type|value): (?:(?:integer|floating point|boolean|character) `|string ")|unknown variant `)/g;
+/** What serde writes right after the quoted value. */
+const DIAGNOSTIC_CONTINUATIONS = [", expected ", ", there are no variants"];
 
-/** `text` with the value of every deserializer diagnostic replaced by `[REDACTED]`. */
-function redactDiagnostics(text: string): string {
-  return text
-    .replace(DIAGNOSTIC_BACKTICK_VALUE_PATTERN, `$1\`${REDACTION_MARKER}\``)
-    .replace(DIAGNOSTIC_STRING_VALUE_PATTERN, `$1"${REDACTION_MARKER}"`);
+/** The index of the `"` closing a `Debug`-escaped string that opens before `from`, or -1. */
+function closingQuote(text: string, from: number): number {
+  for (let index = from; index < text.length; index += 1) {
+    if (text[index] === "\\") index += 1;
+    else if (text[index] === '"') return index;
+  }
+  return -1;
 }
 
-/** `text` with every form of every submitted value replaced by `[REDACTED]`. */
+/**
+ * The spans of `text` holding the value of each deserializer diagnostic,
+ * found in the original text alongside the exact matches `exact`, so neither
+ * pass can hide a value from the other. A value whose end is certain — its
+ * closing delimiter followed by serde's own continuation, with no exact match
+ * crossing either delimiter — is replaced alone, keeping the category, the
+ * expected type and the location. Otherwise the value may hold the delimiter
+ * itself (an unknown variant with a backtick in it), so everything from its
+ * opening delimiter to the end of the line is withheld rather than guessed.
+ */
+function diagnosticSpans(text: string, exact: readonly [number, number][]): [number, number][] {
+  const spans: [number, number][] = [];
+  for (const match of text.matchAll(DIAGNOSTIC_VALUE_START_PATTERN)) {
+    const open = match.index + match[0].length - 1;
+    const valueStart = open + 1;
+    const close = text[open] === '"'
+      ? closingQuote(text, valueStart)
+      : text.indexOf("`", valueStart);
+    const crossed = close !== -1 && exact.some(([start, end]) =>
+      start < close + 1 && end > open && (start < valueStart || end > close));
+    if (
+      close !== -1 &&
+      !crossed &&
+      DIAGNOSTIC_CONTINUATIONS.some((continuation) => text.startsWith(continuation, close + 1))
+    ) {
+      spans.push([valueStart, close]);
+    } else {
+      const lineEnd = text.slice(open).search(LINE_BREAK_CHARACTER_PATTERN);
+      spans.push([open, lineEnd === -1 ? text.length : open + lineEnd]);
+    }
+  }
+  return spans;
+}
+
+/**
+ * `text` with every form of every submitted value replaced by `[REDACTED]`,
+ * and, for a spec document (`RedactionForms.diagnostics`), the value of every
+ * deserializer diagnostic. Every span is found in the original text and all
+ * are replaced in one pass.
+ */
 export function redactSubmitted(text: string, forms: RedactionForms): string {
-  const source = forms.diagnostics ? redactDiagnostics(text) : text;
-  return replaceSpans(source, [
-    ...occurrences(source, forms.substrings, false),
-    ...occurrences(source, forms.tokens, true),
-  ]);
+  const exact = [
+    ...occurrences(text, forms.substrings, false),
+    ...occurrences(text, forms.tokens, true),
+  ];
+  return replaceSpans(text, forms.diagnostics ? [...exact, ...diagnosticSpans(text, exact)] : exact);
 }
 
 /**

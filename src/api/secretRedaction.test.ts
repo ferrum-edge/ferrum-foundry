@@ -813,6 +813,53 @@ describe("trigger scalars and existing markers in a refusal", () => {
       .toBe("invalid type: integer `5`, expected a string");
   });
 
+  it("never leaves part of a withheld value whose diagnostic quote it breaks, on import and replacement", async () => {
+    const malformed = "pre`sent-synthetic-suffix";
+    const document = JSON.stringify({
+      openapi: "3.1.0",
+      info: { title: "Orders", version: "1" },
+      "x-ferrum-plugins": [{
+        plugin_name: "waf",
+        config: {},
+        trigger: { when: { match: { header: { name: "x-skip", presence: malformed } } } },
+      }],
+    });
+    respond = () => Response.json({
+      error: "Spec parse failed",
+      code: "malformed_extension",
+      details: `x-ferrum-plugins: unknown variant \`${malformed}\`, expected \`present\` or ` +
+        "`absent` at line 1 column 140",
+    }, { status: 400 });
+    for (const write of [
+      () => apiSpecs.create(scope, document),
+      () => apiSpecs.update(scope, "orders-spec", document),
+    ]) {
+      reported.length = 0;
+      const failure = await write().catch((e: unknown) => e);
+      expectDetached(failure);
+      const details = (failure as { data: Record<string, unknown> }).data.details as string;
+      for (const shown of [details, await exposure(failure), await getApiErrorDetail(failure)]) {
+        expect(shown).not.toContain("sent-synthetic-suffix");
+        expect(shown).not.toContain("pre`");
+      }
+      // The value's end is uncertain, so the rest of the clause is withheld.
+      expect(details).toBe("x-ferrum-plugins: unknown variant [REDACTED]");
+    }
+  });
+
+  it("withholds the rest of a diagnostic whose quoted value does not end where serde's would", () => {
+    const forms = redactionForms(specDocumentSecrets("openapi: 3.1.0\n"));
+    expect(redactSubmitted(
+      "unknown variant `a`b`, expected `x`\nnext line kept",
+      forms,
+    )).toBe("unknown variant [REDACTED]\nnext line kept");
+    expect(redactSubmitted('invalid type: string "unterminated', forms))
+      .toBe("invalid type: string [REDACTED]");
+    // A Debug-escaped quote stays inside the string's span.
+    expect(redactSubmitted('invalid value: string "a\\"b", expected one of `x`', forms))
+      .toBe('invalid value: string "[REDACTED]", expected one of `x`');
+  });
+
   it("classifies the trigger of a spec plugin entry that has no plugin_name", async () => {
     respond = () => Response.json({
       error: "Spec parse failed",
