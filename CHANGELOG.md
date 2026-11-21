@@ -66,7 +66,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fence (#727, `database.mtls_dns_admission_fence`, absent on v0.9.20). While
   Edge retains one (after a config-store write or admission-lock cleanup with
   an uncertain outcome), it fails those namespaces' mTLS DNS admissions closed
-  with `503` but keeps `status`, `ready` and `database.status` healthy.
+  with `503`. The fence itself changes neither `status`, `ready` nor
+  `database.status`, so a fenced snapshot can still report them healthy.
   `healthFindings()` now reports "Database mTLS DNS admission fenced" for a
   literal `fenced: true`, and the Database card shows the retained fence
   count, the oldest retained time and the fenced namespaces (a detail of the

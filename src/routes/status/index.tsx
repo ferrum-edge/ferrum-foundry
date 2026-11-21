@@ -15,6 +15,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { ReadStateNotice } from "@/components/shared/ReadState";
 import { formatDateTime } from "@/lib/format";
 import type { DatabaseMtlsDnsAdmissionFence } from "@/api/types";
+import { isNamespaceName } from "../../../shared/namespace.js";
 
 function statusVariant(
   status: string,
@@ -41,12 +42,13 @@ const MAX_DATE_MS = 8.64e15;
 
 /**
  * A retained MongoDB mTLS DNS admission fence, rendered only for a literal
- * `fenced: true` (as `healthFindings()` reports it). Edge keeps `status`,
- * `ready` and `database.status` healthy while it holds one, so this is the
- * only place the fail-closed admissions show. Each detail is shown only when
- * it has the shape Edge documents (a count of at least 1, epoch milliseconds,
- * a list of names); anything else reads "Not reported" and never reaches
- * React as an object.
+ * `fenced: true` (as `healthFindings()` reports it). The fence itself changes
+ * neither `status`, `ready` nor `database.status`, so a fenced snapshot can
+ * still report healthy values there and this is the only place the
+ * fail-closed admissions show. Each detail is shown only when it has the
+ * shape Edge documents (a count of at least 1, epoch milliseconds, a list of
+ * valid namespace names); anything else reads "Not reported" and never
+ * reaches React as an object.
  */
 function MtlsDnsAdmissionFence({ fence }: { fence: DatabaseMtlsDnsAdmissionFence }) {
   const count: unknown = fence.retained_fences;
@@ -55,9 +57,10 @@ function MtlsDnsAdmissionFence({ fence }: { fence: DatabaseMtlsDnsAdmissionFence
   const retained = Number.isSafeInteger(count) && (count as number) >= 1 ? count as number : undefined;
   const oldest = Number.isSafeInteger(since) && (since as number) >= 0 && (since as number) <= MAX_DATE_MS
     ? formatDateTime(since as number) : undefined;
-  // A list with any entry that is not a name is not reported at all, and the
+  // A list with any entry that is not a valid namespace name is not reported
+  // at all, and the
   // copy then names no namespace as unaffected.
-  const namespaces = Array.isArray(names) && names.length > 0 && names.every((name) => typeof name === 'string')
+  const namespaces = Array.isArray(names) && names.length > 0 && names.every(isNamespaceName)
     ? names as string[] : null;
   return (
     <div role="region" aria-label="mTLS DNS admission fence" className="border-t border-border pt-3 space-y-2">

@@ -524,8 +524,9 @@ export type UpstreamCreate = Partial<
  * `database.mtls_dns_admission_fence` (Edge `main` after v0.9.20, absent on
  * v0.9.20): detailed tier only, present only while this gateway process
  * retains a MongoDB mTLS DNS admission fence. mTLS DNS admissions for
- * `namespaces` then fail closed with `503`, while top-level `status`/`ready`
- * and `database.status` stay healthy.
+ * `namespaces` then fail closed with `503`. The fence itself changes neither
+ * top-level `status`/`ready` nor `database.status`, so a fenced snapshot can
+ * still report healthy values there.
  */
 export interface DatabaseMtlsDnsAdmissionFence {
   /** Always `true` when the object is present. */

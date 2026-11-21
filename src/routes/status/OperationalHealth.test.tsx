@@ -69,7 +69,8 @@ describe('authenticated operator health', () => {
 
 describe('database mTLS DNS admission fence', () => {
   const OLDEST = 1_763_683_200_000;
-  // Edge keeps the coarse verdict and the database status healthy while fenced.
+  // The fence changes neither the coarse verdict nor the database status, so
+  // a fenced snapshot can still report both healthy.
   const fenced: HealthResponse = {
     ...detailedHealth,
     database: {
@@ -150,12 +151,19 @@ describe('database mTLS DNS admission fence', () => {
     ['a fractional timestamp', { oldest_retained_since_unix_ms: 1.5 }, 'Oldest retained since'],
     ['a timestamp past the Date range', { oldest_retained_since_unix_ms: 8.64e15 + 1 }, 'Oldest retained since'],
     ['an empty namespace list', { namespaces: [] }, 'Namespaces'],
+    ['an empty namespace name', { namespaces: [''] }, 'Namespaces'],
+    ['a list with an empty namespace name', { namespaces: ['tenant-a', ''] }, 'Namespaces'],
+    ['an invalid namespace name', { namespaces: ['tenant-a', 'tenant b'] }, 'Namespaces'],
   ])('reports %s as not reported and keeps the alert', async (_label, override, field) => {
     stubFetch(() => Response.json({ ...fenced, database: { ...fenced.database,
       mtls_dns_admission_fence: { ...fenced.database!.mtls_dns_admission_fence, ...override } } }));
     await harness.render(<StatusPage />);
     await settle(() => expect(region('mTLS DNS admission fence')).not.toBeNull());
     expect(fenceFields()[field]).toBe('Not reported');
+    if (field === 'Namespaces') {
+      expect(region('mTLS DNS admission fence')?.textContent).toContain('mTLS DNS admissions for the affected namespaces');
+      expect(region('mTLS DNS admission fence')?.textContent).not.toContain('other namespaces are unaffected');
+    }
     expect(harness.host.querySelector('[role="status"]')?.textContent).toContain('Database mTLS DNS admission fenced');
   });
 
