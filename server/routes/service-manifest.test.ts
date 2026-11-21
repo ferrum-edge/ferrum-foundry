@@ -4,10 +4,13 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { fetch as upstreamFetch } from 'undici';
 import {
   admittedOtelEndpoint,
+  createManifestPreview,
   edgeOtelEndpoint,
   MANIFEST_BODY_LIMIT,
   MANIFEST_RESPONSE_LIMIT,
   TLS_PATH_REDACTION,
+  validatedManifest,
+  withoutTrailingSlashes,
 } from '../service-manifest.js';
 import { serviceManifestSchema } from '../service-manifest-schema.js';
 
@@ -677,6 +680,40 @@ describe('authenticated service manifest preview through the registered BFF rout
     expect(edgeOtelEndpoint(tabs)).toBe('');
     expect(admittedOtelEndpoint(`http://127.0.0.1:4318${tabs}!`)).toBe(false);
     expect(performance.now() - started).toBeLessThan(1000);
+  });
+
+  it.each([
+    '', '/', '//', '///', 'a', 'a/', 'a//', '/a', '/a/', '/a//', '/a/b', '/a/b/', '/a//b/',
+    '/v1/', '//v1//', 'x/y/z///', '/\u754c/', '/a/\\/', '/a /',
+  ])('strips trailing slashes from %j exactly as /\\/+$/ did', (value) => {
+    expect(withoutTrailingSlashes(value)).toBe(value.replace(/\/+$/, ''));
+  });
+
+  it('strips trailing slashes in linear time on long slash runs', () => {
+    const slashes = '/'.repeat(200_000);
+    const started = performance.now();
+    expect(withoutTrailingSlashes(`${slashes}x`)).toBe(`${slashes}x`);
+    expect(withoutTrailingSlashes(`x${slashes}`)).toBe('x');
+    expect(withoutTrailingSlashes(`${slashes}x${slashes}`)).toBe(`${slashes}x`);
+    expect(withoutTrailingSlashes(slashes)).toBe('');
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+
+  it('derives the backend path and default agents path in linear time', () => {
+    const manifest = validatedManifest(withTlsOtlp(valid[0].body))!;
+    expect(manifest).not.toBeNull();
+    const slashes = '/'.repeat(200_000);
+    manifest.api = { ...manifest.api, public_path: `${slashes}x`, service_base_path: `${slashes}y` };
+    manifest.agents = { enabled: true };
+    const started = performance.now();
+    const preview = createManifestPreview(manifest);
+    expect(performance.now() - started).toBeLessThan(1000);
+    expect(preview.desired.proxy.backend_path).toBe(`${slashes}y`);
+    expect(preview.summary.agents?.endpointPath).toBe(`${slashes}x/mcp`);
+    manifest.api = { ...manifest.api, public_path: `/shop${slashes}`, service_base_path: `/v1${slashes}` };
+    const trailing = createManifestPreview(manifest);
+    expect(trailing.desired.proxy.backend_path).toBe('/v1');
+    expect(trailing.summary.agents?.endpointPath).toBe('/shop/mcp');
   });
 
   it.each([
