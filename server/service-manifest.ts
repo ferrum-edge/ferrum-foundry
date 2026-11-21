@@ -19,7 +19,6 @@ export type { ServiceManifestPreview } from '../shared/service-manifest.js';
 const LITERAL_PATH_PATTERN = /^\/[A-Za-z0-9\-._!$&'()+,=:@/]*$/;
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/;
-const TRAILING_SLASHES_PATTERN = /\/+$/;
 const LOOPBACK_IPV4_SPELLING_PATTERN = /^127(?:\.[0-9]{1,3}){3}$/;
 const PARSED_LOOPBACK_IPV4_PATTERN = /^127\.[0-9]+\.[0-9]+\.[0-9]+$/;
 const PORT_DIGITS_PATTERN = /^[0-9]*$/;
@@ -46,6 +45,15 @@ export function edgeOtelEndpoint(endpoint: string): string {
   while (start < end && RUST_WHITESPACE.has(endpoint.charCodeAt(start))) start += 1;
   while (end > start && RUST_WHITESPACE.has(endpoint.charCodeAt(end - 1))) end -= 1;
   return endpoint.slice(start, end);
+}
+
+// Every trailing `/` removed (what `value.replace(/\/+$/, '')` returns). A
+// linear scan from the end: that regular expression retries at every `/` in
+// a long run that does not end the string, which is quadratic.
+export function withoutTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 0x2f) end -= 1;
+  return value.slice(0, end);
 }
 
 // Edge's resource ID limit (Alloy EDGE_RESOURCE_ID_MAX_LENGTH).
@@ -195,7 +203,7 @@ export function validatedManifest(body: unknown): NormalizedManifest | null {
   if (!literalPath(api.public_path) || !literalPath(api.service_base_path)
     || (health && !literalPath(health.path))) return null;
   if (agents?.endpoint_path) {
-    const prefix = `${api.public_path.replace(TRAILING_SLASHES_PATTERN, '')}/`;
+    const prefix = `${withoutTrailingSlashes(api.public_path)}/`;
     if (!literalPath(agents.endpoint_path) || !agents.endpoint_path.startsWith(prefix)
       || agents.endpoint_path.length === prefix.length) return null;
   }
@@ -263,7 +271,7 @@ export function createManifestPreview(manifest: NormalizedManifest): ServiceMani
     id, name: service.name, namespace, listen_path: api.public_path,
     backend_scheme: upstream.scheme, strip_listen_path: api.strip_public_path,
     ...(api.service_base_path !== '/' ? {
-      backend_path: api.service_base_path.replace(TRAILING_SLASHES_PATTERN, ''),
+      backend_path: withoutTrailingSlashes(api.service_base_path),
     } : {}),
     backend_connect_timeout_ms: timeouts.connect_ms,
     backend_read_timeout_ms: timeouts.read_ms,
@@ -299,7 +307,7 @@ export function createManifestPreview(manifest: NormalizedManifest): ServiceMani
       openapiDeclared: api.openapi !== undefined,
       agents: agents ? {
         enabled: agents.enabled,
-        endpointPath: agents.endpoint_path ?? `${api.public_path.replace(TRAILING_SLASHES_PATTERN, '')}/mcp`,
+        endpointPath: agents.endpoint_path ?? `${withoutTrailingSlashes(api.public_path)}/mcp`,
         namespace: agents.namespace ?? service.name,
       } : null,
       tlsPathFields,
