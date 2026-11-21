@@ -57,12 +57,16 @@ it.runIf(process.env.FERRUM_MANIFEST_GATEWAY_CONTRACT === 'true')(
       await exchange('/namespaces', 'POST', { name: namespace }, [201]);
       const collections = ['proxies', 'upstreams', 'plugins/config'];
       const before = await Promise.all(collections.map((path) => exchange(`/${path}?limit=100`)));
-      for (const health of [false, true]) {
+      // Direct, active-health, and direct without an OTLP exporter (Alloy
+      // still generates otel_tracing there, propagation-only).
+      for (const [variant, health, exporter] of [
+        ['direct', false, true], ['health', true, true], ['propagation', false, false],
+      ] as const) {
         const input = JSON.parse(readFileSync(new URL(
           '../../contracts/ferrum-contracts/fixtures/service-manifest/valid/plain-http.json',
           import.meta.url,
         ), 'utf8'));
-        const id = `manifest-contract-${health ? 'health' : 'direct'}`;
+        const id = `manifest-contract-${variant}`;
         input.service.name = id;
         input.api.public_path = `/${id}`;
         input.upstream.host = 'host.docker.internal';
@@ -70,6 +74,7 @@ it.runIf(process.env.FERRUM_MANIFEST_GATEWAY_CONTRACT === 'true')(
         input.gateway.namespace = namespace;
         input.gateway.proxy_id = id;
         if (health) input.health = { path: '/health' };
+        if (!exporter) delete input.gateway.otel_endpoint;
         const response = await app.inject({
           method: 'POST', url: '/api/service-manifest/preview', headers,
           payload: JSON.stringify(input),

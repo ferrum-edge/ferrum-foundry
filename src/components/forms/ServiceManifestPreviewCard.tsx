@@ -110,6 +110,11 @@ function ManifestPreview({ session }: { session: EditorSession }) {
               ))}
             </ul>
             <p className="text-sm text-text-secondary">
+              {preview.summary.traceExporter === 'otlp'
+                ? 'Trace export: otel_tracing exports to the configured OTLP endpoint, which this preview does not contact.'
+                : 'Trace export: no OTLP endpoint is configured. The otel_tracing plugin is still generated, propagation-only: it removes caller trace context and exports nothing.'}
+            </p>
+            <p className="text-sm text-text-secondary">
               Compare these fields in Proxies, Upstreams and Plugins before using their ordinary
               save flows. Auth and MCP declarations require separate policy review.
             </p>
