@@ -504,18 +504,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unhealthy-target alerts. A measured zero in `database`, `file`, `dp` or
   `mesh` mode is still shown. The request-rate sampler neither diffs nor
   stores a `cp` or `node_agent` reading and drops its in-memory baseline when
-  it sees one. The tab also remembers when it last saw a placeholder at each
-  gateway target (`/admin/metrics` is process-wide, so under any namespace)
-  and never bridges from a baseline for that target sampled at or before then,
-  whichever namespace it was stored under, so a data plane that later answers
-  at the same gateway target starts collecting afresh even across a remount;
-  stored samples now carry a version and their mode, and are only diffed
-  within one mode. The total request count comes from the reading being
-  rendered, and a rate is shown only while the reading has the mode, namespace
-  and gateway target it was computed for. The mock admin gateway's
-  `/admin/metrics` now follows `MOCK_GATEWAY_MODE`, returning Edge's skeleton
-  for `cp` and `node_agent` (including the zeroed `adaptive_concurrency`
-  counters and `tcp_connection_throttle.active_connections`).
+  it sees one. A gateway target names the admin URL, not the Edge process, so
+  two samples are diffed only when the gateway's uptime advanced with the wall
+  clock between them (allowing 5 seconds or 10% of the gap, whichever is
+  larger): a restarted or replaced process starts collecting afresh. The tab
+  also remembers, in memory and in `sessionStorage`, when it last saw a
+  placeholder at each gateway target (`/admin/metrics` is process-wide, so
+  under any namespace) and never bridges from a baseline for that target
+  sampled at or before then, whichever namespace it was stored under, so a
+  data plane that later answers at the same gateway target starts collecting
+  afresh even across a remount or a reload; stored samples now carry a version
+  and their mode, and are only diffed within one mode. The total request count
+  comes from the reading being rendered, and a rate is shown only while the
+  reading has the mode, namespace and gateway target it was computed for. The
+  mock admin gateway's `/admin/metrics` now follows `MOCK_GATEWAY_MODE`,
+  returning Edge's skeleton for `cp` and `node_agent` (including the zeroed
+  `adaptive_concurrency` counters and
+  `tcp_connection_throttle.active_connections`).
 - The Alloy service-manifest preview is requalified against Alloy `main`
   (`0e8a96a2`, #719). Every preview now includes the `<id>-otel-tracing`
   plugin and its proxy reference, as Alloy always generates it: with

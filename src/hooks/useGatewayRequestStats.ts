@@ -53,30 +53,73 @@ export interface GatewayRequestStats {
 /**
  * Latest placeholder (`cp` or `node_agent`) reading this tab observed, per
  * gateway target. `/admin/metrics` describes the whole process, whichever
- * namespace was selected, so one placeholder retires every older baseline
- * at that target, under any namespace. The target names the configured admin URL,
- * not the Edge process behind it, so a data plane that replaces a control
- * plane there looks like the same gateway; a baseline sampled at or before a
- * placeholder may belong to an earlier process and is never bridged from.
- * Module scope, so it survives a route remount; never persisted, so it cannot
- * erase another tab's baseline.
+ * namespace was selected, so one placeholder retires every older baseline at
+ * that target, under any namespace. The target names the configured admin
+ * URL, not the Edge process behind it, so a data plane that replaces a
+ * control plane there looks like the same gateway; a baseline sampled at or
+ * before a placeholder may belong to an earlier process and is never bridged
+ * from. Kept in module scope (a route remount) and in `sessionStorage` (a
+ * reload of this tab); never in `localStorage`, so it cannot erase another
+ * tab's baseline. The uptime check in `calculateStats` catches a replaced
+ * process whether or not a placeholder was seen.
  */
+const PLACEHOLDER_STORAGE_KEY = "ferrum:metricsPlaceholderSeenAt";
 const placeholderSeenAt = new Map<string, number>();
 
+function readStoredPlaceholders(): Map<string, number> {
+  try {
+    const parsed: unknown = JSON.parse(sessionStorage.getItem(PLACEHOLDER_STORAGE_KEY) ?? "{}");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return new Map();
+    return new Map(
+      Object.entries(parsed).filter((entry): entry is [string, number] => Number.isFinite(entry[1])),
+    );
+  } catch {
+    return new Map();
+  }
+}
+
+function placeholderSeenAtFor(target: string): number | undefined {
+  const inMemory = placeholderSeenAt.get(target);
+  const stored = readStoredPlaceholders().get(target);
+  if (inMemory === undefined) return stored;
+  return stored === undefined ? inMemory : Math.max(inMemory, stored);
+}
+
 function notePlaceholder(target: string, timestamp: number): void {
-  placeholderSeenAt.set(target, Math.max(placeholderSeenAt.get(target) ?? timestamp, timestamp));
+  const seenAt = Math.max(placeholderSeenAtFor(target) ?? timestamp, timestamp);
+  placeholderSeenAt.set(target, seenAt);
+  try {
+    const stored = readStoredPlaceholders();
+    stored.set(target, seenAt);
+    sessionStorage.setItem(PLACEHOLDER_STORAGE_KEY, JSON.stringify(Object.fromEntries(stored)));
+  } catch {
+    // Ignore storage failures; the in-memory marker and the uptime check remain.
+  }
 }
 
 /** Whether `sample` predates (or is) a placeholder this tab saw at its target. */
 function predatesPlaceholder(sample: RequestSample): boolean {
-  const seenAt = placeholderSeenAt.get(sample.target);
+  const seenAt = placeholderSeenAtFor(sample.target);
   return seenAt !== undefined && sample.timestamp <= seenAt;
 }
 
 /** Test-only reset of the tab's placeholder observations. */
 export function resetPlaceholderObservations(): void {
   placeholderSeenAt.clear();
+  try {
+    sessionStorage.removeItem(PLACEHOLDER_STORAGE_KEY);
+  } catch {
+    // Nothing stored.
+  }
 }
+
+/**
+ * Slack allowed between a sample pair's wall-clock gap and the gateway's
+ * uptime advance: Edge reports whole seconds, and each timestamp is when the
+ * response arrived, not when Edge read its clock.
+ */
+const UPTIME_TOLERANCE_MIN_SECONDS = 5;
+const UPTIME_TOLERANCE_RATIO = 0.1;
 
 function storageKey(namespace: string): string {
   return `${REQUEST_SAMPLE_STORAGE_KEY}:${namespace}`;
@@ -155,6 +198,16 @@ function calculateStats(
 
   const elapsedSeconds = (current.timestamp - previous.timestamp) / 1000;
   if (elapsedSeconds <= 0) {
+    return { totalRequests: current.totalRequests };
+  }
+
+  // One process's uptime advances with the wall clock. When it does not, the
+  // two samples came from different processes at the same target (a restart,
+  // or a replacement behind the same admin URL), whose counters are not
+  // comparable, even if the newer process has run longer or served more.
+  const uptimeDrift = Math.abs(current.uptimeSeconds - previous.uptimeSeconds - elapsedSeconds);
+  const tolerance = Math.max(UPTIME_TOLERANCE_MIN_SECONDS, elapsedSeconds * UPTIME_TOLERANCE_RATIO);
+  if (uptimeDrift > tolerance) {
     return { totalRequests: current.totalRequests };
   }
 

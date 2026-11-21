@@ -19,6 +19,11 @@ vi.mock("@/stores/namespace", () => ({
 
 const STORAGE_KEY = "ferrum:metricsRequestSample:tenant-a";
 const now = Date.parse("2026-09-24T12:00:00Z");
+/** Uptime at `now`; by default a reading's uptime advances with its time. */
+const BASE_UPTIME = 86_400 * 2;
+const uptimeAt = (at: number) => BASE_UPTIME + (at - now) / 1000;
+/** The hook under test; a reload swaps in a fresh module instance. */
+let hook = useGatewayRequestStats;
 let ui: ReturnType<typeof createHarness>;
 let stats: GatewayRequestStats | undefined;
 /** Every render's result, so a test can check the first commit of a reading. */
@@ -36,7 +41,7 @@ function gateway(totalRequests: number, uptimeSeconds: number, mode: string): Ad
 function Probe({
   total,
   at,
-  uptime = 86_400 * 2,
+  uptime = uptimeAt(at),
   mode = "database",
 }: {
   total: number;
@@ -46,7 +51,7 @@ function Probe({
 }) {
   // A stable object per reading, as a query result is.
   const reading = useMemo(() => gateway(total, uptime, mode), [total, uptime, mode]);
-  stats = useGatewayRequestStats(reading, at);
+  stats = hook(reading, at);
   renders.push({ mode, total, stats });
   return null;
 }
@@ -63,7 +68,7 @@ function storeSample(
       ...fields,
       ...(target === undefined ? {} : { target }),
       timestamp,
-      uptimeSeconds: 86_400,
+      uptimeSeconds: uptimeAt(timestamp),
       totalRequests,
       statusCodeTotals: { "200": totalRequests },
     }),
@@ -92,7 +97,21 @@ function firstRender(mode: string, total: number): GatewayRequestStats | undefin
   return renders.find((r) => r.mode === mode && r.total === total)?.stats;
 }
 
+/**
+ * A browser reload of the tab bound to `target`: module state is lost (a
+ * fresh hook module) while localStorage and sessionStorage are kept.
+ */
+async function reloadTab(target: string) {
+  await ui.dispose();
+  vi.resetModules();
+  (await import("@/api/gatewayTarget")).observeGatewayTarget(target);
+  hook = (await import("./useGatewayRequestStats")).useGatewayRequestStats;
+  stats = undefined;
+  ui = createHarness();
+}
+
 beforeEach(() => {
+  hook = useGatewayRequestStats;
   selected.namespace = "tenant-a";
   renders = [];
   resetPlaceholderObservations();
@@ -105,6 +124,7 @@ afterEach(async () => {
   await ui.dispose();
   resetGatewayTarget();
   localStorage.clear();
+  sessionStorage.clear();
 });
 
 describe("gateway request rate", () => {
@@ -272,12 +292,13 @@ describe("gateway request rate", () => {
     async (mode) => {
       await show({ total: 100, at: now, uptime: 5, mode: "dp" });
       await show({ total: 0, at: now + 30_000, uptime: 0, mode });
-      // A different data plane process answers at the same admin URL, with a
-      // higher uptime and counter than the stored sample.
-      await show({ total: 1_300, at: now + 60_000, uptime: 20, mode: "dp" });
+      // A different data plane process answers at the same admin URL. Its
+      // uptime happens to match the elapsed time, so only the placeholder
+      // marker tells the processes apart.
+      await show({ total: 1_300, at: now + 60_000, uptime: 65, mode: "dp" });
       expect(stats).toEqual({ totalRequests: 1_300 });
 
-      await show({ total: 1_900, at: now + 90_000, uptime: 50, mode: "dp" });
+      await show({ total: 1_900, at: now + 90_000, uptime: 95, mode: "dp" });
       expect(stats?.requestsPerSecond).toBe(20);
       expect(stats?.statusCodesPerSecond).toEqual({ "200": 20 });
     },
@@ -287,7 +308,7 @@ describe("gateway request rate", () => {
     await show({ total: 100, at: now, uptime: 5, mode: "dp" });
     await show({ total: 0, at: now + 30_000, uptime: 0, mode });
     await openPage("target-a");
-    await show({ total: 1_300, at: now + 60_000, uptime: 20, mode: "dp" });
+    await show({ total: 1_300, at: now + 60_000, uptime: 65, mode: "dp" });
     expect(stats).toEqual({ totalRequests: 1_300 });
   });
 
@@ -315,12 +336,76 @@ describe("gateway request rate", () => {
       selected.namespace = "tenant-b";
       await show({ total: 0, at: now + 30_000, uptime: 0, mode });
       selected.namespace = "tenant-a";
+      await show({ total: 1_300, at: now + 60_000, uptime: 65, mode: "dp" });
+      expect(stats).toEqual({ totalRequests: 1_300 });
+
+      await show({ total: 1_900, at: now + 90_000, uptime: 95, mode: "dp" });
+      expect(stats?.requestsPerSecond).toBe(20);
+      expect(stats?.statusCodesPerSecond).toEqual({ "200": 20 });
+    },
+  );
+  it.each(["cp", "node_agent"])(
+    "refuses a pre-%s baseline after a browser reload of the tab",
+    async (mode) => {
+      await show({ total: 100, at: now, uptime: 5, mode: "dp" });
+      selected.namespace = "tenant-b";
+      await show({ total: 0, at: now + 30_000, uptime: 0, mode });
+
+      await reloadTab("target-a");
+      selected.namespace = "tenant-a";
+      // DP B's uptime matches the elapsed time; the marker survives the reload
+      // in sessionStorage.
+      await show({ total: 1_300, at: now + 60_000, uptime: 65, mode: "dp" });
+      expect(stats).toEqual({ totalRequests: 1_300 });
+
+      await show({ total: 1_900, at: now + 90_000, uptime: 95, mode: "dp" });
+      expect(stats?.requestsPerSecond).toBe(20);
+      expect(stats?.statusCodesPerSecond).toEqual({ "200": 20 });
+    },
+  );
+
+  it("still bridges a reload from a baseline with no placeholder in between", async () => {
+    await show({ total: 100, at: now, uptime: 5, mode: "dp" });
+    await reloadTab("target-a");
+    await show({ total: 1_300, at: now + 60_000, uptime: 65, mode: "dp" });
+    expect(stats?.requestsPerSecond).toBe(20);
+  });
+
+  describe("uptime against elapsed time", () => {
+    it("diffs a same-process pair whose uptime advanced with the clock", async () => {
+      await show({ total: 100, at: now, uptime: 100, mode: "dp" });
+      await show({ total: 1_300, at: now + 60_000, uptime: 160, mode: "dp" });
+      expect(stats?.requestsPerSecond).toBe(20);
+    });
+
+    it("allows whole-second and latency slack", async () => {
+      await show({ total: 100, at: now, uptime: 100, mode: "dp" });
+      await show({ total: 1_300, at: now + 60_000, uptime: 155, mode: "dp" });
+      expect(stats?.requestsPerSecond).toBe(20);
+    });
+
+    it("refuses a pair whose uptime advanced much less than the elapsed time", async () => {
+      // A replacement process that started 15 s before its first reading.
+      await show({ total: 100, at: now, uptime: 5, mode: "dp" });
       await show({ total: 1_300, at: now + 60_000, uptime: 20, mode: "dp" });
       expect(stats).toEqual({ totalRequests: 1_300 });
 
       await show({ total: 1_900, at: now + 90_000, uptime: 50, mode: "dp" });
       expect(stats?.requestsPerSecond).toBe(20);
-      expect(stats?.statusCodesPerSecond).toEqual({ "200": 20 });
-    },
-  );
+    });
+
+    it("refuses a pair whose uptime advanced much more than the elapsed time", async () => {
+      // A replacement process that has run longer than the one it replaced.
+      await show({ total: 100, at: now, uptime: 5, mode: "dp" });
+      await show({ total: 1_300, at: now + 60_000, uptime: 86_400, mode: "dp" });
+      expect(stats).toEqual({ totalRequests: 1_300 });
+    });
+
+    it("refuses a stored baseline from another process across a reload", async () => {
+      await show({ total: 100, at: now, uptime: 5, mode: "dp" });
+      await reloadTab("target-a");
+      await show({ total: 1_300, at: now + 60_000, uptime: 20, mode: "dp" });
+      expect(stats).toEqual({ totalRequests: 1_300 });
+    });
+  });
 });
