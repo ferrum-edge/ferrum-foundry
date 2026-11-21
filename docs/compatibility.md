@@ -152,7 +152,11 @@ qualifies only if:
    Contract (including capability parity, writable and read-only), Deployment
    Starter, Starter Production Profile, Critical Journeys, and Container Gate.
    `QUALIFICATION_JOBS` in `scripts/hosted-qualification.mjs` is that list;
-   release readiness refuses a run in which any of them did not succeed.
+   release readiness refuses a run in which any of them did not succeed. The
+   release evidence recorded in `qualification` is a successful hosted run of
+   `ci.yml` itself: a `main` push run of the candidate source. Pull-request
+   runs come from the required-workflow ruleset under another workflow id,
+   which release readiness refuses, so they are required checks only.
 
 `node scripts/supported-pairing.mjs release-ready` verifies this through hosted
 GitHub Actions with `actions: read` and `contents: read`. The release workflow
@@ -451,7 +455,7 @@ table is unchanged and `PLUGIN_SENSITIVITY_SOURCE` now names 25b37395. The
 ### Admin API changes in v0.9.16 through v0.9.20
 
 Edge published v0.9.17 (2026-10-10), v0.9.19 (2026-10-27) and v0.9.20
-(2026-11-02); v0.9.16 and v0.9.18 were tagged but not published. Most of the
+(2026-11-03 UTC); v0.9.16 and v0.9.18 were tagged but not published. Most of the
 changes are data-plane, mesh, Gateway API and per-plugin runtime hardening.
 The changes on surfaces Foundry writes or reads are:
 
