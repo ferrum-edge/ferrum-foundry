@@ -7,6 +7,7 @@ import { createHarness } from "@/test/__tests__/harness";
 import {
   STORED_SAMPLE_MAX_AGE_MS,
   STORED_SAMPLE_VERSION,
+  resetPlaceholderObservations,
   useGatewayRequestStats,
   type GatewayRequestStats,
 } from "./useGatewayRequestStats";
@@ -92,6 +93,7 @@ function firstRender(mode: string, total: number): GatewayRequestStats | undefin
 
 beforeEach(() => {
   renders = [];
+  resetPlaceholderObservations();
   resetGatewayTarget();
   observeGatewayTarget("target-a");
   stats = undefined;
@@ -262,5 +264,44 @@ describe("gateway request rate", () => {
     storeSample(now - 60_000, 0, "target-a", fields);
     await show({ total: 6_000, at: now });
     expect(stats?.requestsPerSecond).toBeUndefined();
+  });
+  it.each(["cp", "node_agent"])(
+    "does not bridge a replacement data plane from a sample stored before a %s placeholder",
+    async (mode) => {
+      await show({ total: 100, at: now, uptime: 5, mode: "dp" });
+      await show({ total: 0, at: now + 30_000, uptime: 0, mode });
+      // A different data plane process answers at the same admin URL, with a
+      // higher uptime and counter than the stored sample.
+      await show({ total: 1_300, at: now + 60_000, uptime: 20, mode: "dp" });
+      expect(stats).toEqual({ totalRequests: 1_300 });
+
+      await show({ total: 1_900, at: now + 90_000, uptime: 50, mode: "dp" });
+      expect(stats?.requestsPerSecond).toBe(20);
+      expect(stats?.statusCodesPerSecond).toEqual({ "200": 20 });
+    },
+  );
+
+  it.each(["cp", "node_agent"])("refuses the pre-%s sample after a remount too", async (mode) => {
+    await show({ total: 100, at: now, uptime: 5, mode: "dp" });
+    await show({ total: 0, at: now + 30_000, uptime: 0, mode });
+    await openPage("target-a");
+    await show({ total: 1_300, at: now + 60_000, uptime: 20, mode: "dp" });
+    expect(stats).toEqual({ totalRequests: 1_300 });
+  });
+
+  it("bridges a remount from a baseline sampled after the placeholder", async () => {
+    await show({ total: 0, at: now, uptime: 0, mode: "cp" });
+    await show({ total: 100, at: now + 30_000, uptime: 5, mode: "dp" });
+    await openPage("target-a");
+    await show({ total: 700, at: now + 60_000, uptime: 35, mode: "dp" });
+    expect(stats?.requestsPerSecond).toBe(20);
+  });
+
+  it("does not let a placeholder at one target refuse another target's baseline", async () => {
+    await show({ total: 0, at: now, uptime: 0, mode: "cp" });
+    storeSample(now - 30_000, 700, "target-b");
+    await openPage("target-b");
+    await show({ total: 1_000, at: now });
+    expect(stats?.requestsPerSecond).toBe(10);
   });
 });

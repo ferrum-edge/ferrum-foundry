@@ -504,9 +504,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unhealthy-target alerts. A measured zero in `database`, `file`, `dp` or
   `mesh` mode is still shown. The request-rate sampler neither diffs nor
   stores a `cp` or `node_agent` reading and drops its in-memory baseline when
-  it sees one, so a data plane that later answers at the same gateway target
-  starts collecting afresh; stored samples now carry a version and their
-  mode, and are only diffed within one mode. The total request count comes
+  it sees one. The tab also remembers when it last saw a placeholder at each
+  gateway target and namespace, and never bridges from a baseline sampled at
+  or before then, so a data plane that later answers at the same gateway
+  target starts collecting afresh even across a remount; stored samples now
+  carry a version and their mode, and are only diffed within one mode. The total request count comes
   from the reading being rendered, and a rate is shown only while the reading
   has the mode, namespace and gateway target it was computed for. The mock admin gateway's `/admin/metrics`
   now follows `MOCK_GATEWAY_MODE`, returning Edge's skeleton for `cp` and

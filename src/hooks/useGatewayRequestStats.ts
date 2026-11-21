@@ -50,6 +50,37 @@ export interface GatewayRequestStats {
   statusCodesPerSecond?: Record<string, number>;
 }
 
+/**
+ * Latest placeholder (`cp` or `node_agent`) reading this tab observed, per
+ * gateway target and namespace. The target names the configured admin URL,
+ * not the Edge process behind it, so a data plane that replaces a control
+ * plane there looks like the same gateway; a baseline sampled at or before a
+ * placeholder may belong to an earlier process and is never bridged from.
+ * Module scope, so it survives a route remount; never persisted, so it cannot
+ * erase another tab's baseline.
+ */
+const placeholderSeenAt = new Map<string, number>();
+
+function placeholderKey(target: string, namespace: string): string {
+  return JSON.stringify([target, namespace]);
+}
+
+function notePlaceholder(target: string, namespace: string, timestamp: number): void {
+  const key = placeholderKey(target, namespace);
+  placeholderSeenAt.set(key, Math.max(placeholderSeenAt.get(key) ?? timestamp, timestamp));
+}
+
+/** Whether `sample` predates (or is) a placeholder this tab saw at its target. */
+function predatesPlaceholder(sample: RequestSample, namespace: string): boolean {
+  const seenAt = placeholderSeenAt.get(placeholderKey(sample.target, namespace));
+  return seenAt !== undefined && sample.timestamp <= seenAt;
+}
+
+/** Test-only reset of the tab's placeholder observations. */
+export function resetPlaceholderObservations(): void {
+  placeholderSeenAt.clear();
+}
+
 function storageKey(namespace: string): string {
   return `${REQUEST_SAMPLE_STORAGE_KEY}:${namespace}`;
 }
@@ -185,6 +216,12 @@ export function useGatewayRequestStats(
     if (!adminMetricsReporting(gateway.mode).reportsProxyRuntime) {
       previousSampleRef.current = undefined;
       setRates(undefined);
+      // Remember it, so neither this nor a remounted view bridges a later
+      // proxy reading from a baseline sampled before it.
+      const placeholderTarget = boundGatewayTarget();
+      if (placeholderTarget && !isGatewayTargetRetired()) {
+        notePlaceholder(placeholderTarget, selectedNamespace, dataUpdatedAt);
+      }
       return;
     }
 
@@ -201,11 +238,13 @@ export function useGatewayRequestStats(
     const storedSample = previousSampleRef.current
       ? undefined
       : readStoredSample(selectedNamespace, target, gateway.mode);
-    const previousSample =
+    const candidate =
       previousSampleRef.current ??
       (storedSample && currentSample.timestamp - storedSample.timestamp <= STORED_SAMPLE_MAX_AGE_MS
         ? storedSample
         : undefined);
+    const previousSample =
+      candidate && !predatesPlaceholder(candidate, selectedNamespace) ? candidate : undefined;
 
     const { requestsPerSecond, statusCodesPerSecond } = calculateStats(currentSample, previousSample);
     setRates({ mode: gateway.mode, namespace: selectedNamespace, target, requestsPerSecond, statusCodesPerSecond });
