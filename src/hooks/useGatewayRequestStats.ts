@@ -94,14 +94,6 @@ function writeStoredSample(namespace: string, sample: RequestSample): void {
   }
 }
 
-function clearStoredSample(namespace: string): void {
-  try {
-    localStorage.removeItem(storageKey(namespace));
-  } catch {
-    // Ignore storage failures; a stale sample is also refused by mode.
-  }
-}
-
 function toSample(
   gateway: AdminMetrics["gateway"],
   timestamp: number,
@@ -152,6 +144,20 @@ function calculateStats(
   };
 }
 
+/**
+ * Rates derived from one sample, tagged with what that sample was read from.
+ * They are shown only while the current reading has the same mode, namespace
+ * and gateway target, so a render that already holds a new gateway's reading
+ * (before the effect has sampled it) never shows the previous gateway's rate.
+ */
+interface SampledRates {
+  mode: string;
+  namespace: string;
+  target: string;
+  requestsPerSecond?: number;
+  statusCodesPerSecond?: Record<string, number>;
+}
+
 export function useGatewayRequestStats(
   gateway?: AdminMetrics["gateway"],
   dataUpdatedAt?: number,
@@ -159,9 +165,7 @@ export function useGatewayRequestStats(
   const { selectedNamespace } = useNamespace();
   const previousSampleRef = useRef<RequestSample | undefined>(undefined);
   const lastNamespaceRef = useRef(selectedNamespace);
-  const [stats, setStats] = useState<GatewayRequestStats>(() => ({
-    totalRequests: gateway?.total_requests ?? 0,
-  }));
+  const [rates, setRates] = useState<SampledRates | undefined>(undefined);
 
   useEffect(() => {
     // Reset the in-memory sample when the namespace changes so we don't
@@ -174,13 +178,13 @@ export function useGatewayRequestStats(
     if (!gateway || !dataUpdatedAt) return;
 
     // A control plane or node agent sends zero placeholders, not counters.
-    // Neither diff nor keep them, and drop the baseline: a later proxy
-    // reading at the same target must start collecting afresh rather than
-    // be diffed against a counter from before the placeholder.
+    // Neither diff nor keep them, and drop the in-memory baseline so a later
+    // proxy reading starts collecting afresh. The stored sample is left
+    // alone: it may be another tab's or target's valid baseline, and it is
+    // only ever diffed within its own (proxy) mode and target.
     if (!adminMetricsReporting(gateway.mode).reportsProxyRuntime) {
       previousSampleRef.current = undefined;
-      clearStoredSample(selectedNamespace);
-      setStats({ totalRequests: 0 });
+      setRates(undefined);
       return;
     }
 
@@ -189,7 +193,7 @@ export function useGatewayRequestStats(
     const target = boundGatewayTarget();
     if (!target || isGatewayTargetRetired()) {
       previousSampleRef.current = undefined;
-      setStats({ totalRequests: gateway.total_requests });
+      setRates(undefined);
       return;
     }
 
@@ -203,10 +207,30 @@ export function useGatewayRequestStats(
         ? storedSample
         : undefined);
 
-    setStats(calculateStats(currentSample, previousSample));
+    const { requestsPerSecond, statusCodesPerSecond } = calculateStats(currentSample, previousSample);
+    setRates({ mode: gateway.mode, namespace: selectedNamespace, target, requestsPerSecond, statusCodesPerSecond });
     previousSampleRef.current = currentSample;
     writeStoredSample(selectedNamespace, currentSample);
   }, [gateway, dataUpdatedAt, selectedNamespace]);
 
+  // The total always comes from the reading being rendered, never from an
+  // earlier render's state; a placeholder mode reports none.
+  const measured = gateway !== undefined && adminMetricsReporting(gateway.mode).reportsProxyRuntime;
+  const totalRequests = measured ? gateway.total_requests : 0;
+  const target = boundGatewayTarget();
+  const current =
+    measured &&
+    rates !== undefined &&
+    rates.mode === gateway.mode &&
+    rates.namespace === selectedNamespace &&
+    target !== null &&
+    rates.target === target &&
+    !isGatewayTargetRetired()
+      ? rates
+      : undefined;
+
+  const stats: GatewayRequestStats = { totalRequests };
+  if (current?.requestsPerSecond !== undefined) stats.requestsPerSecond = current.requestsPerSecond;
+  if (current?.statusCodesPerSecond !== undefined) stats.statusCodesPerSecond = current.statusCodesPerSecond;
   return stats;
 }

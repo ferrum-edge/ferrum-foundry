@@ -19,6 +19,8 @@ const STORAGE_KEY = "ferrum:metricsRequestSample:tenant-a";
 const now = Date.parse("2026-09-24T12:00:00Z");
 let ui: ReturnType<typeof createHarness>;
 let stats: GatewayRequestStats | undefined;
+/** Every render's result, so a test can check the first commit of a reading. */
+let renders: { mode: string; total: number; stats: GatewayRequestStats }[] = [];
 
 function gateway(totalRequests: number, uptimeSeconds: number, mode: string): AdminMetrics["gateway"] {
   return {
@@ -43,6 +45,7 @@ function Probe({
   // A stable object per reading, as a query result is.
   const reading = useMemo(() => gateway(total, uptime, mode), [total, uptime, mode]);
   stats = useGatewayRequestStats(reading, at);
+  renders.push({ mode, total, stats });
   return null;
 }
 
@@ -82,7 +85,13 @@ async function show(reading: { total: number; at: number; uptime?: number; mode?
   );
 }
 
+/** What the first render holding this reading returned. */
+function firstRender(mode: string, total: number): GatewayRequestStats | undefined {
+  return renders.find((r) => r.mode === mode && r.total === total)?.stats;
+}
+
 beforeEach(() => {
+  renders = [];
   resetGatewayTarget();
   observeGatewayTarget("target-a");
   stats = undefined;
@@ -179,14 +188,23 @@ describe("gateway request rate", () => {
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
   });
 
-  it("drops the baseline when a placeholder reading is observed", async () => {
+  it("leaves another target's stored baseline intact when a cached placeholder renders", async () => {
+    storeSample(now - 30_000, 700, "target-b");
+    const stored = localStorage.getItem(STORAGE_KEY);
+    await show({ total: 0, at: now, uptime: 0, mode: "cp" });
+    expect(localStorage.getItem(STORAGE_KEY)).toBe(stored);
+
+    // Target B's tab still bridges from its own baseline.
+    await openPage("target-b");
+    await show({ total: 1_000, at: now });
+    expect(stats?.requestsPerSecond).toBe(10);
+  });
+
+  it("leaves the same target's stored baseline intact when a placeholder renders", async () => {
     await show({ total: 100, at: now });
-    expect(localStorage.getItem(STORAGE_KEY)).not.toBeNull();
+    const stored = localStorage.getItem(STORAGE_KEY);
     await show({ total: 0, at: now + 30_000, uptime: 0, mode: "cp" });
-    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
-    // A proxy reading after the placeholder is not diffed against the one before it.
-    await show({ total: 1_300, at: now + 60_000 });
-    expect(stats?.requestsPerSecond).toBeUndefined();
+    expect(localStorage.getItem(STORAGE_KEY)).toBe(stored);
   });
 
   it("starts collecting afresh when a control plane is replaced by a data plane at the same target", async () => {
@@ -194,6 +212,9 @@ describe("gateway request rate", () => {
 
     // A data plane answers at the same admin URL, so the target is unchanged.
     await show({ total: 600, at: now + 60_000, uptime: 5, mode: "dp" });
+    // Its first commit, before the effect samples it, already shows its own
+    // total and no rate.
+    expect(firstRender("dp", 600)).toEqual({ totalRequests: 600 });
     expect(stats?.totalRequests).toBe(600);
     expect(stats?.requestsPerSecond).toBeUndefined();
     expect(stats?.statusCodesPerSecond).toBeUndefined();
@@ -210,8 +231,20 @@ describe("gateway request rate", () => {
 
   it("does not diff readings from different modes", async () => {
     await show({ total: 100, at: now, mode: "database" });
-    await show({ total: 1_300, at: now + 60_000, mode: "dp" });
-    expect(stats?.requestsPerSecond).toBeUndefined();
+    await show({ total: 1_300, at: now + 60_000, mode: "database" });
+    expect(stats?.requestsPerSecond).toBe(20);
+
+    // The first commit holding a dp reading does not show the database rate.
+    await show({ total: 1_900, at: now + 90_000, mode: "dp" });
+    expect(firstRender("dp", 1_900)).toEqual({ totalRequests: 1_900 });
+    expect(stats).toEqual({ totalRequests: 1_900 });
+  });
+
+  it("shows a placeholder reading's total as zero from its first commit", async () => {
+    await show({ total: 100, at: now });
+    await show({ total: 1_300, at: now + 60_000 });
+    await show({ total: 0, at: now + 90_000, uptime: 0, mode: "node_agent" });
+    expect(firstRender("node_agent", 0)).toEqual({ totalRequests: 0 });
   });
 
   it("ignores a stored sample written before samples carried their mode", async () => {
