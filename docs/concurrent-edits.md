@@ -373,6 +373,52 @@ not yet proven live". If the plan cannot re-read the committed plugin it
 reports "saved, but … could not re-read it" and rolls nothing back, and
 **Reload saved configuration** reseeds the form.
 
+Every plugin-page reload (the committed reseed, **Reload saved
+configuration**, **Reload current membership**, and "Discard my draft and
+reload" from the conflict dialog) goes through the same `reloadFromGateway()`
+(#726). It reads the plugin and, when that read is a `proxy_group` (including
+a scope that just changed to one), the complete proxy membership, before it
+remounts the form and adopts the baseline. So the next write expects the
+membership the operator now sees, not the one the conflicting save expected.
+Both reads are the reload's own and silent (the page reports a failure
+itself), and they are published to the cache together, after cancelling any
+refetch of the same keys, only once both have loaded. If either read fails,
+nothing moves: the form keeps the draft, a conflict dialog stays open, and a
+toast names the read that failed. If a cache the reload writes (the plugin
+detail, or a group's proxy list) learned anything while it ran (a different
+revision or membership from a background read, an error such as a `404`, or
+the entry being retired), the reload publishes nothing either, since it
+cannot tell which observation is newer, and asks for another try. One reload runs at a time and its action
+shows busy; "Keep my draft" (or closing the dialog) abandons it, and so does
+an editor that moved on, so a late completion neither remounts the form nor
+reports anything; both of its reads are aborted, and an editor that is no
+longer on screen (a committed save answered after a route or namespace
+change) starts none. A save holds a synchronous guard from Submit through
+any committed reseed, so a second submit before the pending state renders
+starts nothing. While a save is pending or a reload runs, every field
+of the form is disabled and nothing submits, so no edit is made that a
+remount would erase; a select
+whose menu was open closes it and accepts no choice. Delete and reload
+exclude each other: Delete is unavailable while a save (and the reseed a
+committed save runs) or a reload is in flight, a reload closes an open
+delete confirmation before it starts, and once a delete is confirmed no save
+or reload starts or publishes, so nothing recreates the detail entry the
+delete retired.
+
+The page withholds the form only until its first seed is complete (a group's
+whole membership included). After that, a background refetch never takes the
+form or the conflict dialog off the page, not even the save's own settle
+refetch finding that the plugin became a group. The background membership
+traversal follows the scope the mounted form displays (its seed, or a save
+that left the group), so that refetch does not start one; the explicit
+reload reads the membership itself, and only its success remounts the form.
+The same displayed scope decides the membership notice. While a form is
+mounted, every background read the page reports inline (the plugin, the
+proxy picker's first page, the membership) is silent
+(`useInlineReportedReads`, chosen per query key at fetch time), so a failure
+shows its notice beside the form, never the global error popup over it or
+over a reload's toast.
+
 The two single-field editors take their guard from the list they were computed
 from rather than the settings form's seed. The update hooks refresh the
 resource before the rejection reaches them, so an upstream **targets** save or
@@ -757,6 +803,7 @@ so the next successful read seeds a fresh baseline.
 | Restore retires the restored namespace's detail caches and inactive lists | `src/hooks/restoreDetailCache.test.tsx`, `src/components/forms/BackupRestoreCard.recovery.test.tsx` |
 | Guarded deletes, consumer saves and rotation re-send, nested redaction of plugin `config` | `src/api/conditionalWrite.test.ts`, `src/lib/resourceBaseline.test.ts` |
 | Plugin editor baseline, membership writes conditional on their reads | `src/lib/pluginMembership.test.ts`, `src/lib/pluginMembership.binding.test.ts` |
+| Plugin "Discard my draft and reload" re-reads the plugin and group membership (silently) before remounting; a failed read keeps the draft and the dialog; a refetch that makes the plugin a group never unmounts the form; single-flight, abandoned by Keep my draft or an editor that moved on; the form is locked and Delete excluded while a reload runs; no global popup on a reload failure | `src/routes/plugins/PluginDetailPage.test.tsx` |
 | Refused delete dialog | `src/routes/proxies/concurrentEdit.test.tsx` |
 | Echoed secrets redacted on consumer create, plugin, upstream, and TLS writes, in the error and in the popup; plugin `config` classified by Edge's projection; no request retained; status, `412`, and outcome markers kept | `src/api/secretRedaction.test.ts`, `src/routes/consumers/createSecretEcho.test.tsx` |
 | Committed-but-not-live classification, popup suppression, cache refresh, save-twice regression | `src/api/committedWrite.test.ts`, `src/lib/queryClient.test.ts` |
