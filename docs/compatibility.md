@@ -10,7 +10,7 @@ selects published Edge v0.9.20, the latest Edge release, and canonical
 `contracts-edge-0.9.20` (#686). Foundry source, image and publication CI
 fields are null until the release step. The `qualification` object in the
 record holds the hosted pairing qualification: pending, with null identity
-fields, until the release pull request's run passes, and then that run's
+fields, until a hosted CI run of the candidate passes, and then that run's
 identity. The candidate is not a release.
 The latest published pairing remains Foundry v0.5.5 / Edge v0.9.15, preserved
 byte-for-byte in [its immutable record](release-notes/v0.5.5.compatibility.json).
@@ -111,9 +111,9 @@ Its `info.version: 0.2.0` is schema metadata, not either product's version.
    table follows rule for rule and `PLUGIN_SENSITIVITY_SOURCE` names
    e4a606a0. Edge's name heuristic for config keys narrowed to its listed
    rules; Foundry's name floor is unchanged and stays the broader of the two.
-4. **Hosted pairing qualification.** The release pull request runs every
-   gateway-backed gate against the new image; the run that qualifies the
-   tagged source is recorded in `qualification` before the tag.
+4. **Hosted pairing qualification.** A hosted CI run of the candidate source
+   runs every gateway-backed gate against the new image; that run is recorded
+   in `qualification` before the tag.
 5. **Foundry publication pending** (*release step*).
 
 The database profiles, Node floors and `viewer` / `operator` / `admin` tiers are

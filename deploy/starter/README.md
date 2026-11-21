@@ -15,8 +15,8 @@ For a walkthrough that ends in an authenticated request through the data
 plane, see [`docs/getting-started.md`](../../docs/getting-started.md).
 
 **Candidate pairing.** The demo profile pins published Edge v0.9.20 for the
-Foundry v0.5.6 candidate (#686). Hosted qualification and Foundry publication
-are pending in the [pairing record](../../docs/compatibility.md). Production
+Foundry v0.5.6 candidate (#686). The [pairing record](../../docs/compatibility.md)
+holds its hosted qualification; Foundry publication is pending. Production
 must use a published pairing and its released Foundry digest. The latest is
 published Foundry v0.5.5 with Edge v0.9.15, preserved in the
 [v0.5.5 record](../../docs/release-notes/v0.5.5.compatibility.json). The

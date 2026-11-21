@@ -596,8 +596,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   loopback IP literal (`http://127.d.d.d`, `http://[::1]`), following Ferrum
   Edge `main`'s `otel_tracing` rule, which drops such an exporter at runtime
   (#723). The pinned fixture `orders-api.json` uses one and is now refused
-  until Foundry adopts a contracts release with ferrum-contracts#82's fix. String fields get the schema's declared
-  `maxLength` instead of a silent 2,048 clamp (2,048 remains the default, with
+  until Foundry adopts a contracts release with ferrum-contracts#82's fix.
+  String fields get the schema's declared `maxLength` instead of a silent 2,048 clamp (2,048 remains the default, with
   a 4,096 safety cap that refuses to compile a larger bound). `maxLength` is
   supported only on a field's own schema node; one inside a composition
   clause fails compilation. The ferrum-contracts#74 bounds wait for the next

@@ -79,7 +79,8 @@ node scripts/demo-traffic-client.mjs mixed
 
 Run the Ferrum Edge image CI pins, by digest, so local results match CI. It is
 the published Ferrum Edge v0.9.20 release selected for the Foundry v0.5.6
-candidate; hosted pairing qualification is pending. The published Foundry
+candidate; the record's `qualification` object holds its hosted pairing
+qualification. The published Foundry
 v0.5.5 / Edge v0.9.15 pairing and earlier pairings remain in history.
 `edge.image` in `docs/compatibility.json` is the single source: CI reads it
 (`node scripts/supported-pairing.mjs edge-image`), and
