@@ -103,7 +103,7 @@
     "auth_mode": "trusted-proxy",
     "deployment": "deploy/starter: Compose, nginx identity proxy with the shared group-to-role policy, production image",
     "browsers": [
-      "Chromium bundled with @playwright/test 1.63.0 (Desktop Chrome profile)"
+      "Chromium bundled with @playwright/test 1.65.1 (Desktop Chrome profile)"
     ],
     "container_platforms": [
       "linux/amd64",
