@@ -205,12 +205,13 @@ export function shareTaggedRead(previous: unknown, next: unknown): unknown {
 export async function readTagged<TResource>(
   scope: NamespaceScope,
   path: string,
-  options: { readonly silentErrors?: boolean } = {},
+  options: { readonly silentErrors?: boolean; readonly signal?: AbortSignal } = {},
 ): Promise<TaggedRead<TResource>> {
   const response = await proxyApi.get(
     path,
     scoped(scope, {
       headers: { Accept: "application/json" },
+      ...(options.signal && { signal: options.signal }),
       ...(options.silentErrors && { context: { [SILENT_ERRORS]: true } }),
     }),
   );
