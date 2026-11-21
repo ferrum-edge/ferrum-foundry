@@ -500,8 +500,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   toast (only the toast: the reload's reads are silent). Once a form is on the
   page, a refetch that turns the plugin into a group no longer swaps the form
   and dialog for the membership skeleton or error; only a successful reload
-  remounts it. Reloads run one at a time, and "Keep my draft" or leaving the
-  editor abandons a pending one, so it cannot remount the form or toast late.
+  remounts it, and such a refetch no longer starts a background membership
+  traversal of its own. Reloads run one at a time, and "Keep my draft" or
+  leaving the editor abandons a pending one, so it cannot remount the form or
+  toast late. While a reload runs the form's fields are disabled, nothing
+  submits, and Delete is unavailable (a reload also closes an open delete
+  confirmation), so neither a new edit nor a delete confirmation can be
+  overtaken by the reloaded seed.
 - Foundry handles the plugin-config projection Ferrum Edge `main` adds after
   v0.9.20 (ferrum-edge#7054). The sensitivity drift parser accepts
   `FieldSensitivity::CertificateSource`, `PrivateKeySource` and `EndpointPath`

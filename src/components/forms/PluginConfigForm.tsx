@@ -75,6 +75,12 @@ export interface PluginConfigFormProps {
    */
   capability?: CapabilityVerdict;
   /**
+   * The page is replacing this form (a reload is in flight): every field is
+   * disabled and nothing submits, so no edit is made that the reload's remount
+   * would silently erase.
+   */
+  locked?: boolean;
+  /**
    * The session's gateway role, which decides where a masked-secret
    * placeholder blocks Save (`pluginConfigPlaceholderSites`). Unknown (`null`
    * or omitted) is treated as a non-admin role.
@@ -153,10 +159,13 @@ function PluginConfigFormFields({
   availablePlugins,
   initialProxyGroupIds,
   capability,
+  locked = false,
   role,
   onSeeded,
 }: PluginConfigFormProps) {
-  const readOnly = capability !== undefined && !capability.allowed;
+  const denied = capability !== undefined && !capability.allowed;
+  // Denied or locked: no handler may change a field or submit.
+  const readOnly = denied || locked;
   const navigate = useNavigate();
   const isEdit = !!initialData;
   const formRef = useRef<HTMLFormElement>(null);
@@ -463,6 +472,7 @@ function PluginConfigFormFields({
   return (
     <form ref={formRef} onSubmit={handleSubmit} className="space-y-0">
       <ReadOnlySurface verdict={capability}>
+        <fieldset disabled={locked} aria-busy={locked || undefined} className="contents">
         {/* ── Basic Fields ── */}
         <div className="border-b border-border/50 py-4">
           <h3 className="text-sm font-semibold text-text-primary mb-4">Plugin Configuration</h3>
@@ -621,7 +631,7 @@ function PluginConfigFormFields({
                   <li key={pointer} className="flex flex-wrap items-center gap-2 text-xs">
                     <code className="font-mono text-text-primary">{pointer}</code>
                     <span className="text-text-secondary">{MASKED_FIELD_NOTICE}</span>
-                    {!readOnly && (
+                    {!denied && (
                       <Button
                         type="button"
                         variant="secondary"
@@ -814,6 +824,7 @@ function PluginConfigFormFields({
             </div>
           )}
         </div>
+        </fieldset>
       </ReadOnlySurface>
 
       {/* ── Actions ── */}
