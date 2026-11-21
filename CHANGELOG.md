@@ -517,6 +517,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Upstream edit baselines reduce subsets exactly as saves submit them
+  (#725). `upstreams.toBaseline()` now strips the server-owned
+  `subsets[].traffic_policy` fields (`writableSubset`), and spells an unset
+  policy, algorithm or hash key one way (an explicit `null` counts as
+  omitted, as the settings form submits it). The guard therefore no longer
+  counts a change to those server-owned fields as a conflict, and a real
+  conflict no longer shows `subsets` as changed locally. This matters when a
+  writable gateway returns mesh-projected subset policy on a tagged read; it
+  is verified against tagged fixtures, since Edge's mesh mode itself is
+  read-only and its reads carry no tag. A malformed subset entry or policy is
+  compared verbatim rather than failing the guard. A subset's empty hash key,
+  which Edge reads as an explicit client-IP override, is now seeded in the
+  settings form as `ip` and submitted that way, and the baseline compares
+  `""` and `"ip"` alike. Before, the form showed it blank and a name-only save
+  dropped the override, so the subset fell back to the parent's hash key. An
+  untouched subset name is also written back exactly as read (Edge matches
+  names exactly, a proxy's `upstream_subset` included), and decides whether
+  the row is saved at all, so a name JavaScript trims to nothing (U+FEFF) is
+  no longer dropped; only a new or edited name is trimmed. Baselines and
+  fingerprints build objects from entries, and the upstream detail query no
+  longer shares structure across refetches, so a `__proto__` key (a valid
+  subset label) is compared instead of silently dropped. A malformed cached
+  subset no longer breaks building the save payload; the guard refuses it. The retired proxy
+  `pool_max_requests_per_connection` stays compared on save: Edge v0.9.20
+  stores `None` when a save omits it, so the save does clear it.
 - The Alloy service-manifest preview is requalified against Alloy `main`
   (`0e8a96a2`, #719). Every preview now includes the `<id>-otel-tracing`
   plugin and its proxy reference, as Alloy always generates it: with

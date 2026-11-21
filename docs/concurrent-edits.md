@@ -191,7 +191,28 @@ writes which race nothing are not refused:
 - **Fields the write never replaces.** A proxy save omits `plugins`, and Edge
   keeps the live associations when the key is omitted, so a membership change
   from the plugin pages cannot be lost by a proxy save and is not a conflict.
-  Upstreams also exclude the mesh-projected fields the control plane owns.
+  Upstreams also exclude the mesh-projected fields the control plane owns:
+  the top-level ones and the server-owned `subsets[].traffic_policy` fields
+  Edge projects from a `DestinationRule` (`SUBSET_TRAFFIC_POLICY_SERVER_OWNED`),
+  which a save strips through `writableSubset`. The upstream baseline reduces
+  subsets exactly as the save payload does, so a real conflict never shows
+  `subsets` as changed locally because of them (#725). Unset is spelled one
+  way, as the settings form submits it: an explicit `traffic_policy: null`, or
+  a `null` algorithm or hash key inside it, counts as omitted, and a policy
+  left empty is dropped. An empty subset hash key is not unset: Edge hashes
+  on the client IP for it, as for `"ip"`. The settings form seeds it as `ip`
+  and submits it that way, so a save keeps the override, and the baseline
+  compares both spellings as `"ip"`. A malformed subset entry or policy is
+  compared verbatim. (Edge's mesh mode is itself read-only with untagged reads, so no
+  guarded write runs there; this applies when a writable gateway returns
+  mesh-projected subset policy.)
+
+A field a save omits but Edge does **not** preserve is still compared. A
+proxy save never sends the retired `pool_max_requests_per_connection`, but
+Edge v0.9.20 stores `None` for the omitted key, so the save clears the stored
+value: a concurrent change to it refuses the save, and the conflict shows the
+draft clearing it. Edge `main` no longer has the field, so comparing it costs
+nothing there.
 
 The upstream **targets** editor replaces only `targets`, so its guard compares
 only `targets`. `upstreams.updateTargets` is designed to compose with a
@@ -204,7 +225,7 @@ which is the only thing that write can lose.
 | Write | Compared against | Conditional on |
 | --- | --- | --- |
 | Proxy settings save | the editor's seed, every field except `plugins` (never sent) | the verification read |
-| Upstream settings save | the editor's seed, minus mesh-projected fields | the verification read |
+| Upstream settings save | the editor's seed, minus mesh-projected fields (top-level and server-owned subset `traffic_policy`) | the verification read |
 | Upstream targets save | the `targets` the add/edit form was opened against (for a row removal, the list on screen when it was clicked) | the read its settings are rebuilt from |
 | Consumer Details save | the editor's seed, minus `credentials` and `labels` (never sent) | the read its credentials are taken from |
 | Consumer ACL add/remove | the consumer the group list was computed from | the read its credentials are taken from |
@@ -286,8 +307,9 @@ reads redact credential values, so the comparison sees only what the read
 shows: each returned credential type's entries and their count. A same-count
 rotation is not visible, and neither is any change to a credential type the
 read omits entirely (Edge's projection leaves out `basicauth` and custom
-types). Upstream deletes still leave out the mesh-projected fields, which the
-control plane rewrites without any competing editor.
+types). Upstream deletes still leave out the mesh-projected fields, top-level
+and server-owned subset `traffic_policy` alike, which the control plane
+rewrites without any competing editor.
 
 A plugin delete is one `DELETE`, conditional on the read the baseline was
 compared with. Edge removes the configuration from every proxy that lists it
@@ -726,6 +748,7 @@ so the next successful read seeds a fresh baseline.
 | --- | --- |
 | Reduction, fingerprint, three-way comparison, redaction | `src/lib/resourceBaseline.test.ts` |
 | Two-session regression, unguarded baseline, re-seeded save, plugin-association non-conflict, targets scope | `src/api/writeGuard.test.ts` |
+| Server-owned subset `traffic_policy` fields left out of upstream save and delete baselines, never shown as changed locally; null policy normalized, malformed subsets compared verbatim; the retired proxy pool field still compared on save | `src/api/upstreams.test.ts`, `src/api/proxies.test.ts`, `src/api/conditionalWrite.test.ts` |
 | `If-Match` from the verified read, a writer in the gap refused, re-send after a `412` on unowned fields, bounded retries, initial unusable-validator refusal, post-412 untagged refusal, explicit unguarded fallback, popup opt-out | `src/api/conditionalWrite.test.ts` |
 | Initial untagged refusal preserves mounted settings/targets/consumer drafts and detail caches through real hooks; MCP policy refuses before PUT | `src/routes/upstreams/TargetEditor.test.tsx`, `src/routes/consumers/consumerEditorIdentity.test.tsx`, `src/api/mcpTools.test.ts` |
 | Draft preserved, no reapply control, keep/discard behavior | `src/routes/proxies/concurrentEdit.test.tsx` |
