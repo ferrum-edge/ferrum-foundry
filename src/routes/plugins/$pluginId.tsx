@@ -206,16 +206,15 @@ function PluginEditor({ session }: { session: EditorSession }) {
           // every committed save does (`reseedAfterCommit`), so Save is not
           // refused as a conflict with this very commit.
           const reloaded = await reloadFromGateway();
-          // A reload abandoned because this editor moved on reports nothing
-          // more than the commit itself.
-          const unread = reloaded === "plugin" || reloaded === "membership";
-          toast(
-            "warning",
-            committedWriteMessage("Plugin configuration saved", committed) +
-              (unread
-                ? " Foundry could not re-read the plugin; reload it before saving again."
-                : ""),
-          );
+          // A reload abandoned because this editor moved on (it does not even
+          // start then) reports nothing more than the commit itself.
+          const unread =
+            reloaded === "plugin"
+              ? " Foundry could not re-read the plugin; reload it before saving again."
+              : reloaded === "membership"
+                ? " Foundry could not re-read the plugin's proxies; reload it before saving again."
+                : "";
+          toast("warning", committedWriteMessage("Plugin configuration saved", committed) + unread);
           return;
         }
         setMembershipError(err);
@@ -296,7 +295,8 @@ function PluginEditor({ session }: { session: EditorSession }) {
    * reload was superseded or dismissed, or this editor is no longer on
    * screen: nothing was applied, and the caller reports nothing.
    *
-   * Both reads are the caller's own, outside their Queries, and silent:
+   * Both reads are the caller's own, outside their Queries, silent, and
+   * aborted when the reload is abandoned:
    * every caller reports a failure itself. Their results are published only
    * once everything the form needs has loaded, after cancelling any refetch
    * of the same keys (the save's settle invalidation, say) that could land
@@ -304,7 +304,9 @@ function PluginEditor({ session }: { session: EditorSession }) {
    * whatever scope the page showed, since the form seeds it once.
    */
   async function reloadFromGateway(): Promise<true | "plugin" | "membership" | "abandoned"> {
-    if (deleting.current) return "abandoned";
+    // An editor that is deleting, or no longer on screen (a committed save
+    // answered after a route or namespace change), starts no read at all.
+    if (deleting.current || !session.isCurrent()) return "abandoned";
     abandonReload();
     const reload = { token: ++reloadCounter.current, abort: new AbortController() };
     activeReload.current = reload;
@@ -324,7 +326,7 @@ function PluginEditor({ session }: { session: EditorSession }) {
 
     let fresh: PluginConfig;
     try {
-      fresh = await pluginsApi.getConfig(scope, pluginId, true);
+      fresh = await pluginsApi.getConfig(scope, pluginId, true, reload.abort.signal);
     } catch {
       return finish(live() ? "plugin" : "abandoned");
     }
@@ -513,7 +515,9 @@ function PluginEditor({ session }: { session: EditorSession }) {
           initialData={plugin}
           onSubmit={handleSubmit}
           isLoading={updatePlugin.isPending}
-          locked={reloading}
+          // A pending save locks the form too: a committed answer reseeds it,
+          // which would erase an edit made in the meantime.
+          locked={reloading || updatePlugin.isPending}
           capability={capability}
           role={facts.role}
           availablePlugins={availablePlugins ?? []}

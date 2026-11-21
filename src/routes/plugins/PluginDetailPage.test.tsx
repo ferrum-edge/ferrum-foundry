@@ -1039,6 +1039,18 @@ describe("a pending reload locks the form and excludes delete (#726)", () => {
     return host.querySelector("form fieldset[aria-busy='true']") !== null;
   }
 
+  function stale(current: PluginConfig): StaleResourceError {
+    return new StaleResourceError({
+      resource: "plugin configuration",
+      operation: "save",
+      id: plugin.id,
+      namespace: "default",
+      original: toBaseline(plugin),
+      current: toBaseline(current),
+      proposed: toBaseline(plugin),
+    });
+  }
+
   /** Try to edit (remove the member) and save the mounted form. */
   async function tryEditAndSave() {
     const remove = host.querySelector<HTMLButtonElement>("button[aria-label='Remove /source']")!;
@@ -1207,11 +1219,8 @@ describe("a pending reload locks the form and excludes delete (#726)", () => {
     expect(client.getQueryData(["pluginConfig", "default", "group-1"])).toBeUndefined();
   });
 
-  it("closes an open Scope menu and ignores a choice while a committed save reseeds", async () => {
+  it("closes an open Scope menu and ignores a choice while a save and its reseed run", async () => {
     await open();
-    const save = deferred<PluginConfig>();
-    updatePlan.mockReturnValueOnce(save.promise);
-    await submit();
     const trigger = [...host.querySelectorAll<HTMLElement>('[role="combobox"]')].find((entry) =>
       document.getElementById(entry.getAttribute("aria-labelledby") ?? "")?.textContent === "Scope",
     )!;
@@ -1224,6 +1233,13 @@ describe("a pending reload locks the form and excludes delete (#726)", () => {
       .find((entry) => entry.textContent === "Global");
     expect(globalOption).toBeTruthy();
 
+    // The save locks the form as soon as it is pending.
+    const save = deferred<PluginConfig>();
+    updatePlan.mockReturnValueOnce(save.promise);
+    await submit();
+    expect(locked()).toBe(true);
+    expect(document.querySelectorAll('[role="option"]')).toHaveLength(0);
+
     pluginResponse = deferred<PluginConfig>();
     firstPage = deferred<ReturnType<typeof page>>();
     await act(async () => {
@@ -1233,9 +1249,7 @@ describe("a pending reload locks the form and excludes delete (#726)", () => {
     });
     await settle();
     expect(locked()).toBe(true);
-    // The menu closed when the lock began, and a choice made through the
-    // element still in hand changes nothing.
-    expect(document.querySelectorAll('[role="option"]')).toHaveLength(0);
+    // A choice made through the element still in hand changes nothing.
     await act(async () => {
       globalOption!.focus();
       globalOption!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
@@ -1249,6 +1263,87 @@ describe("a pending reload locks the form and excludes delete (#726)", () => {
     firstPage.resolve(page([member("source")]));
     await settle();
     expect(locked()).toBe(false);
+  });
+
+  it("locks edits while a save is pending, then shows what the committed save stored", async () => {
+    await open();
+    const save = deferred<PluginConfig>();
+    updatePlan.mockReturnValueOnce(save.promise);
+    await submit();
+    expect(locked()).toBe(true);
+    await tryEditAndSave();
+
+    pluginResponse = deferred<PluginConfig>();
+    pluginResponse.resolve(plugin);
+    firstPage = deferred<ReturnType<typeof page>>();
+    firstPage.resolve(page([member("source"), member("late")]));
+    await act(async () => {
+      save.reject(
+        markCommittedWrite(new Error("HTTP 503"), { cursor: "1:2", reason: "reload_timeout" }),
+      );
+    });
+    await settle();
+    expect(locked()).toBe(false);
+    expect(selectedIds()).toEqual(["Remove /source", expect.stringContaining("late")]);
+  });
+
+  it("names the membership read when a committed save's reseed cannot read the proxies", async () => {
+    await open();
+    pluginResponse = deferred<PluginConfig>();
+    pluginResponse.resolve(plugin);
+    firstPage = deferred<ReturnType<typeof page>>();
+    firstPage.reject(new Error("HTTP 503"));
+    updatePlan.mockRejectedValueOnce(
+      markCommittedWrite(new Error("HTTP 503"), { cursor: "1:2", reason: "reload_timeout" }),
+    );
+    await submit();
+    await settle();
+    expect(toast).toHaveBeenCalledWith(
+      "warning",
+      expect.stringContaining("Foundry could not re-read the plugin's proxies; reload it before saving again."),
+    );
+    expect(selectedIds()).toEqual(["Remove /source"]);
+  });
+
+  it("starts no read when a save commits after the editor has gone", async () => {
+    await open();
+    const save = deferred<PluginConfig>();
+    updatePlan.mockReturnValueOnce(save.promise);
+    await submit();
+    const pluginReads = () => get.mock.calls.filter(([path]) => path === "plugins/config/group-1").length;
+    const before = pluginReads();
+
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    await act(async () => {
+      save.reject(
+        markCommittedWrite(new Error("HTTP 503"), { cursor: "1:2", reason: "reload_timeout" }),
+      );
+    });
+    await settle();
+
+    expect(pluginReads()).toBe(before);
+    // The commit itself is still reported, with nothing about a re-read.
+    expect(toast).toHaveBeenCalledWith(
+      "warning",
+      expect.not.stringContaining("could not re-read"),
+    );
+  });
+
+  it("aborts the reload's plugin read when the operator keeps the draft", async () => {
+    await open();
+    updatePlan.mockRejectedValueOnce(stale({ ...plugin, config: { requests: 9 } }));
+    await submit();
+    pluginResponse = deferred<PluginConfig>();
+    await act(async () => button("Discard my draft and reload")!.click());
+    await settle();
+    const read = get.mock.calls.filter(([path]) => path === "plugins/config/group-1").at(-1)!;
+    const signal = read[1].signal as AbortSignal;
+    expect(signal.aborted).toBe(false);
+
+    await act(async () => button("Keep my draft")!.click());
+    await settle();
+    expect(signal.aborted).toBe(true);
   });
 
   it("stops the membership traversal once a group is saved to another scope", async () => {

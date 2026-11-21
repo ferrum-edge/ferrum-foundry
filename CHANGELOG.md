@@ -503,7 +503,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   remounts it, and such a refetch no longer starts a background membership
   traversal of its own. Reloads run one at a time, and "Keep my draft" or
   leaving the editor abandons a pending one, so it cannot remount the form or
-  toast late. While a reload runs the form's fields are disabled, nothing
+  toast late; its reads are aborted, and an editor that has gone starts none.
+  A committed save's warning names the read its reseed could not make. While
+  a save is pending or a reload runs the form's fields are disabled, nothing
   submits (an open select menu closes), and Delete is unavailable while a
   save or reload can still replace the form (a reload also closes an open
   delete confirmation, and a confirmed delete stops any later save or

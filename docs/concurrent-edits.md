@@ -365,8 +365,11 @@ nothing moves: the form keeps the draft, a conflict dialog stays open, and a
 toast names the read that failed. One reload runs at a time and its action
 shows busy; "Keep my draft" (or closing the dialog) abandons it, and so does
 an editor that moved on, so a late completion neither remounts the form nor
-reports anything. While it runs, every field of the form is disabled and
-nothing submits, so no edit is made that the remount would erase; a select
+reports anything; both of its reads are aborted, and an editor that is no
+longer on screen (a committed save answered after a route or namespace
+change) starts none. While a save is pending or a reload runs, every field
+of the form is disabled and nothing submits, so no edit is made that a
+remount would erase; a select
 whose menu was open closes it and accepts no choice. Delete and reload
 exclude each other: Delete is unavailable while a save (and the reseed a
 committed save runs) or a reload is in flight, a reload closes an open
