@@ -284,11 +284,30 @@ export function pluginConfigSecrets(pluginName: string, config: unknown): Secret
 export function pluginTriggerSecrets(trigger: unknown): Secrets {
   const sites = pluginTriggerWithheldSites(trigger);
   return {
-    values: [...new Set(sites.flatMap((site) => submittedValues(site.value)))],
+    values: [...new Set(sites.flatMap((site) => [
+      ...submittedValues(site.value),
+      ...submittedKeys(site.value),
+    ]))],
     tokens: [],
     scalars: [...new Set(sites.flatMap((site) => submittedScalars(site.value)))],
     diagnostics: false,
   };
+}
+
+/**
+ * Every object key `data` holds, at any depth. Under a withheld site a key is
+ * content too: a deserializer reads the one key of an object given where an
+ * enum belongs as the variant and quotes it ("unknown variant `K`").
+ */
+function submittedKeys(data: unknown): string[] {
+  if (Array.isArray(data)) return data.flatMap(submittedKeys);
+  if (data && typeof data === "object") {
+    return Object.entries(data).flatMap(([key, value]) => [
+      ...(key ? [key] : []),
+      ...submittedKeys(value),
+    ]);
+  }
+  return [];
 }
 
 /**
@@ -942,8 +961,9 @@ function closingQuote(text: string, from: number): number {
  * closing delimiter followed by serde's own continuation, with no exact match
  * crossing either delimiter — is replaced alone, keeping the category, the
  * expected type and the location. Otherwise the value may hold the delimiter
- * itself (an unknown variant with a backtick in it), so everything from its
- * opening delimiter to the end of the line is withheld rather than guessed.
+ * itself (an unknown variant with a backtick in it) or a line break, so
+ * everything from its opening delimiter to the end of the text is withheld
+ * rather than guessed.
  */
 function diagnosticSpans(text: string, exact: readonly [number, number][]): [number, number][] {
   const spans: [number, number][] = [];
@@ -962,8 +982,7 @@ function diagnosticSpans(text: string, exact: readonly [number, number][]): [num
     ) {
       spans.push([valueStart, close]);
     } else {
-      const lineEnd = text.slice(open).search(LINE_BREAK_CHARACTER_PATTERN);
-      spans.push([open, lineEnd === -1 ? text.length : open + lineEnd]);
+      spans.push([open, text.length]);
     }
   }
   return spans;

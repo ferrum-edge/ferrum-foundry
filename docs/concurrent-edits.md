@@ -588,7 +588,10 @@ location. The diagnostics and the exact matches are found in the original
 text and replaced together. When a value's end is uncertain (its closing
 delimiter is missing, is not followed by serde's `, expected`, or an exact
 match crosses it, as with a variant containing a backtick), everything from
-its opening delimiter to the end of the line is withheld. Foundry has no YAML parser, so
+its opening delimiter to the end of the text is withheld, later lines
+included. The keys of an object the trigger walk withholds are collected as
+secrets along with its values, since a deserializer quotes the one key of an
+object given where an enum belongs as the variant. Foundry has no YAML parser, so
 a YAML (or malformed JSON) document is unclassified throughout: every scalar is
 found line by line without parsing, including `key: value` values, sequence
 entries, flow elements, quoted scalars (unquoted and unescaped), several pairs

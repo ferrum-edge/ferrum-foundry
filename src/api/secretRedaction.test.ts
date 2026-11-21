@@ -622,7 +622,8 @@ describe("plugin triggers follow Ferrum Edge main's projection", () => {
       { when: { match: { cookie: { name: "c", presence: weird } } } },
       { when: { match: { query: { name: "q", multi_value: [weird] } } } },
     ]) {
-      expect(classifiedValues(pluginTriggerSecrets(draft)), JSON.stringify(draft)).toEqual([weird]);
+      // Keys inside the withheld content (`nested`) count as content too.
+      expect(classifiedValues(pluginTriggerSecrets(draft)), JSON.stringify(draft)).toContain(weird);
     }
   });
 
@@ -668,7 +669,8 @@ describe("plugin triggers follow Ferrum Edge main's projection", () => {
         ],
       },
     })).toEqual({
-      values: ["text-operand-1"],
+      // The keys inside the withheld unknown node are content as well.
+      values: ["text-operand-1", "case_insensitive", "port"],
       tokens: [],
       // A nested `case_insensitive` inside a withheld subtree is an ordinary
       // value there; only the comparison flag itself is exempt, in the walk.
@@ -847,12 +849,53 @@ describe("trigger scalars and existing markers in a refusal", () => {
     }
   });
 
+  it("withholds a malformed enum object's key, backtick and line break included, on import and replacement", async () => {
+    const key = "pre`sent\nsynthetic-key-tail";
+    const document = JSON.stringify({
+      openapi: "3.1.0",
+      info: { title: "Orders", version: "1" },
+      "x-ferrum-plugins": [{
+        plugin_name: "waf",
+        config: {},
+        trigger: { when: { match: { header: { name: "x-skip", presence: { [key]: null } } } } },
+      }],
+    });
+    // serde reads the object's one key as the variant and quotes it as is.
+    respond = () => Response.json({
+      error: "Spec parse failed",
+      code: "malformed_extension",
+      details: `x-ferrum-plugins: unknown variant \`${key}\`, expected \`present\` or \`absent\``,
+    }, { status: 400 });
+    expect(specDocumentSecrets(document).values).toContain(key);
+    for (const write of [
+      () => apiSpecs.create(scope, document),
+      () => apiSpecs.update(scope, "orders-spec", document),
+    ]) {
+      reported.length = 0;
+      const failure = await write().catch((e: unknown) => e);
+      expectDetached(failure);
+      const details = (failure as { data: Record<string, unknown> }).data.details as string;
+      for (const shown of [details, await exposure(failure), await getApiErrorDetail(failure)]) {
+        expect(shown).not.toContain("synthetic-key-tail");
+        expect(shown).not.toContain("pre`");
+      }
+      expect(JSON.stringify(reported)).not.toContain("synthetic-key-tail");
+      expect(details).toBe("x-ferrum-plugins: unknown variant [REDACTED]");
+    }
+  });
+
   it("withholds the rest of a diagnostic whose quoted value does not end where serde's would", () => {
     const forms = redactionForms(specDocumentSecrets("openapi: 3.1.0\n"));
     expect(redactSubmitted(
-      "unknown variant `a`b`, expected `x`\nnext line kept",
+      "unknown variant `a`b`, expected `x`\nnext line withheld too",
       forms,
-    )).toBe("unknown variant [REDACTED]\nnext line kept");
+    )).toBe("unknown variant [REDACTED]");
+    // With no exact match to rely on, a line break inside the value cannot
+    // end the withheld span.
+    expect(redactSubmitted(
+      "x: unknown variant `pre`sent\nsynthetic-tail`, expected `present` or `absent`",
+      forms,
+    )).toBe("x: unknown variant [REDACTED]");
     expect(redactSubmitted('invalid type: string "unterminated', forms))
       .toBe("invalid type: string [REDACTED]");
     // A Debug-escaped quote stays inside the string's span.
