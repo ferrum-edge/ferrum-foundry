@@ -4,6 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { fetch as upstreamFetch } from 'undici';
 import {
   admittedOtelEndpoint,
+  edgeOtelEndpoint,
   MANIFEST_BODY_LIMIT,
   MANIFEST_RESPONSE_LIMIT,
   TLS_PATH_REDACTION,
@@ -666,6 +667,16 @@ describe('authenticated service manifest preview through the registered BFF rout
     expect(admittedOtelEndpoint('\u3000http://otel-collector:4318')).toBe(false);
     expect(admittedOtelEndpoint('\ufeffhttp://127.0.0.1:4318')).toBe(false);
     expect(admittedOtelEndpoint('http://127.0.0.1:4318\u180e')).toBe(false);
+  });
+
+  it('trims long whitespace runs in linear time', () => {
+    const tabs = '\t'.repeat(200_000);
+    const started = performance.now();
+    expect(edgeOtelEndpoint(`${tabs}http://127.0.0.1:4318${tabs}`)).toBe('http://127.0.0.1:4318');
+    expect(edgeOtelEndpoint(`${tabs}x${tabs}x`)).toBe(`x${tabs}x`);
+    expect(edgeOtelEndpoint(tabs)).toBe('');
+    expect(admittedOtelEndpoint(`http://127.0.0.1:4318${tabs}!`)).toBe(false);
+    expect(performance.now() - started).toBeLessThan(1000);
   });
 
   it.each([

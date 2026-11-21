@@ -28,14 +28,24 @@ const AUTHORITY_END_PATTERN = /[/?#]/;
 // Rust's str::trim: Unicode White_Space at either end (Edge trims the
 // configured endpoint before screening it). Unlike String.prototype.trim it
 // includes U+0085 and excludes U+FEFF.
-const RUST_TRIM_PATTERN =
-  /^[\t\n\v\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+|[\t\n\v\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+$/g;
+const RUST_WHITESPACE = new Set([
+  0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20, 0x85, 0xa0, 0x1680,
+  0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009, 0x200a,
+  0x2028, 0x2029, 0x202f, 0x205f, 0x3000,
+]);
 
 // The endpoint Edge's otel_tracing screens and dials: the configured value
 // trimmed (`optional_string_config`). The desired config keeps the value as
 // Alloy writes it.
 export function edgeOtelEndpoint(endpoint: string): string {
-  return endpoint.replace(RUST_TRIM_PATTERN, '');
+  // A linear scan from both ends (no regular expression, so no backtracking
+  // on long whitespace runs). Every character in the set is in the BMP, so
+  // UTF-16 code units suffice.
+  let start = 0;
+  let end = endpoint.length;
+  while (start < end && RUST_WHITESPACE.has(endpoint.charCodeAt(start))) start += 1;
+  while (end > start && RUST_WHITESPACE.has(endpoint.charCodeAt(end - 1))) end -= 1;
+  return endpoint.slice(start, end);
 }
 
 // Edge's resource ID limit (Alloy EDGE_RESOURCE_ID_MAX_LENGTH).
