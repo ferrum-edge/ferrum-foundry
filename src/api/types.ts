@@ -312,6 +312,10 @@ export interface PluginTriggerMatch {
   proxy_id?: string[];
   listen_port?: number[];
   consumer?: PluginTriggerIdentityMatch;
+  /** Unmapped external identity, present only when no Consumer is mapped. */
+  external_identity?: PluginTriggerIdentityMatch;
+  /** Verifying-authority digests (64 hex characters) of the external identity; an OR. */
+  external_identity_authority?: string[];
   auth_method?: string[];
   spiffe_id?: PluginTriggerIdentityMatch;
 }

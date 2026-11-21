@@ -539,6 +539,32 @@ a built-in newer than the paired release) has no rules, so every string in its
 `config` is treated as secret. Edge's operator-configured
 `FERRUM_LOG_REDACT_METADATA_KEYS` are not visible to Foundry.
 
+**Plugin `trigger`.** A plugin configuration's execution `trigger` is
+classified the way Ferrum Edge `main` projects it for a non-admin read
+(`project_plugin_trigger_with`, ferrum-edge#7054): every comparison operand of
+a `header`, `query` or `cookie` predicate (each `exact` and `prefix` entry,
+`regex`) is secret, and so is anything in a shape a `PluginTrigger` cannot
+have (a trigger without `when`, an unknown node or predicate key, a non-object
+`value`). Field names, `presence`, `multi_value`, `case_insensitive`, the tree,
+and the routing and identity predicates (`path`, `method`, `host`, `consumer`,
+`external_identity`, `external_identity_authority`, and the rest of Edge's
+`TRIGGER_VISIBLE_PREDICATES`) stay readable, but only with the type Edge's
+`PluginTriggerMatch` declares: an editor draft is unvalidated, so an object
+pasted under a field `name` or a number in a `method` list is withheld too,
+and any object in the trigger carrying a key its schema does not define
+(even one set to `null`) is withheld whole.
+The trigger is classified by this walk alone, not by the field-name and URL
+rules above, which would hide a whole `cookie` predicate and a `spiffe_id`.
+A number or boolean operand is withheld as well: its text is redacted like an
+unclassified value (anywhere when 8 characters or longer, as a whole token
+when shorter), and the equal typed value in a structured error body is
+replaced, except in the fixed-vocabulary fields. A `[REDACTED]` marker the
+gateway already wrote is never split by a shorter match inside it. The pinned v0.9.20 does not mask
+a trigger at all, but the operands are the same shared values there, so
+Foundry applies this on every gateway (`pluginTriggerWithheldSites` in
+`src/lib/resourceBaseline.ts`). `scripts/edge-main-drift.mjs` compares
+Foundry's two predicate lists with Edge main's.
+
 The table lives in `src/api/pluginSensitivity.ts`, with the Edge commit it was
 checked against in `PLUGIN_SENSITIVITY_SOURCE`. The Pinned Gateway Contract job
 runs `scripts/plugin-sensitivity-drift.mjs`, which fetches
@@ -549,10 +575,23 @@ when the recorded commit is not the pinned one.
 
 **Restore and API specs.** `restoreSecrets()` is `secretValues()` over the
 backup plus each API spec document it holds (gzip-compressed, base64-encoded,
-and taken whole). For an API spec import or replacement, `specDocumentSecrets()`
+and taken whole), and the `trigger` of every `plugin_configs` entry, whatever
+its `plugin_name`. For an API spec import or replacement, `specDocumentSecrets()`
 classifies a JSON document by position: each `x-ferrum-plugins` entry by its
 plugin's rules, anything else by field name and URL. An entry that is not a
-plugin configuration is unclassified throughout. Foundry has no YAML parser, so
+plugin configuration is unclassified throughout, and its `trigger`, if it has
+one, is also classified as a plugin's is. Edge parses the document text
+again and can quote a value in a spelling Foundry cannot reconstruct (an
+integer beyond 2^53, which `JSON.parse` rounds, or a YAML `0x` integer
+reported in decimal), so in a spec write's failure every serde diagnostic
+that quotes a value (``invalid type: integer `N` ``, `floating point`,
+`boolean`, `character`, `string "…"`, the same after `invalid value:`,
+``unknown variant `V` ``, ``unknown field `F` ``) is withheld from the value's
+opening delimiter to the end of the text, whatever the value is: where it
+ends cannot be told reliably. The category before it is kept. The keys of an
+object the trigger walk withholds are collected as secrets along with its
+values, since a deserializer quotes an object's key as a variant or an
+unknown field. Foundry has no YAML parser, so
 a YAML (or malformed JSON) document is unclassified throughout: every scalar is
 found line by line without parsing, including `key: value` values, sequence
 entries, flow elements, quoted scalars (unquoted and unescaped), several pairs
@@ -651,7 +690,9 @@ explanation [above](#without-a-tag), leaving the form mounted. For a conflict:
    which shows credential-shaped values as `[redacted]` while still showing
    that the field changed. A `*_path` field is shown, since a path or
    `system://`/`k8s://` reference to material is not the material, unless its
-   value is inline PEM, which is redacted. Nothing from the comparison is written to browser
+   value is inline PEM, which is redacted. A plugin `trigger` shows its
+   structure and visible predicates, with each `header`, `query` and `cookie`
+   operand as `[redacted]`. Nothing from the comparison is written to browser
    storage, telemetry, or logs.
 
 ### The writer can be this operator

@@ -277,7 +277,7 @@ function PluginEditor({ session }: { session: EditorSession }) {
     }
     return (
       <div className="max-w-2xl space-y-4">
-        <PluginMembershipRecovery error={membershipError} />
+        <PluginMembershipRecovery error={membershipError} role={facts.role} />
         {/* Denied, unavailable or gone: the shared notice says which, instead
             of a fixed failure line (#680). */}
         {plugin ? (
@@ -329,7 +329,7 @@ function PluginEditor({ session }: { session: EditorSession }) {
       {maskedPlaceholderRefusal(membershipError) ? (
         <MaskedSecretRefusal error={membershipError} />
       ) : (
-        <PluginMembershipRecovery error={membershipError} />
+        <PluginMembershipRecovery error={membershipError} role={facts.role} />
       )}
       {membershipError instanceof PluginSavedUnverifiedError && (
         <Button

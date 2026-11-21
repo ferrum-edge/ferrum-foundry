@@ -110,7 +110,7 @@ function PluginCreateEditor({ session, allowProxyDefault }: {
       />
 
       <MaskedSecretRefusal error={createPlugin.error} />
-      <PluginMembershipRecovery error={createPlugin.error} />
+      <PluginMembershipRecovery error={createPlugin.error} role={facts.role} />
       <Card>
         <PluginConfigForm
           onSubmit={handleSubmit}

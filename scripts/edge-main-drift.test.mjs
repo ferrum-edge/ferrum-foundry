@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { driftMarkdown, edgeMainDrift, edgeMainDriftAt } from "./edge-main-drift.mjs";
+import {
+  driftMarkdown,
+  edgeMainDrift,
+  edgeMainDriftAt,
+  FOUNDRY_TRIGGER_PREDICATES,
+} from "./edge-main-drift.mjs";
+import {
+  TRIGGER_CLIENT_FIELD_PREDICATES,
+  TRIGGER_VISIBLE_PREDICATES,
+} from "../src/lib/resourceBaseline.ts";
 import { digestOf, extractSchemaBlock } from "./plugin-schema-drift.mjs";
 import { PLUGIN_SCHEMA_SPEC } from "../src/lib/pluginSchemas.ts";
 import { PLUGIN_SENSITIVITY_SOURCE } from "../src/api/pluginSensitivity.ts";
@@ -13,6 +22,10 @@ const UNKNOWN_SENSITIVITY_PATTERN = /unreadable \(FieldSensitivity::QuantumSeale
 const FORTY_HEX_PATTERN = /expected a 40-hex Edge commit/;
 const SUBSET_MISSING_PATTERN =
   /component `SubsetTrafficPolicy` readOnly fields: missing `max_retries`/;
+const TRIGGER_MISSING_PATTERN =
+  /constant `TRIGGER_VISIBLE_PREDICATES`: missing `device_posture`/;
+const TRIGGER_UNREADABLE_PATTERN =
+  /constant `TRIGGER_CLIENT_FIELD_PREDICATES`: unreadable \(`TRIGGER_CLIENT_FIELD_PREDICATES` not found/;
 const SUBSET_UNREADABLE_PATTERN =
   /component `SubsetTrafficPolicy` readOnly fields: unreadable \(`SubsetTrafficPolicy` not found/;
 const SCHEDULE_PATTERN = /\n {2}schedule:\n {4}- cron: "[0-9]+ [0-9]+ \* \* [0-6]"\n {2}workflow_dispatch:\n/;
@@ -79,6 +92,15 @@ pub const PLUGIN_SENSITIVITY_SCHEMAS: &[(&str, &[SensitivityRule])] = &[
 pub const KAFKA_SAFE_PRODUCER_PROPERTIES: &[&str] = &[
     "acks",
 ];
+
+/// See [\`TRIGGER_VISIBLE_PREDICATES\`].
+pub const TRIGGER_CLIENT_FIELD_PREDICATES: &[&str] = &["header", "query", "cookie"];
+
+const TRIGGER_VISIBLE_PREDICATES: &[&str] = &[
+    "method",
+    // a comment between entries
+    "path",
+];
 `;
 
 const FOUNDRY = {
@@ -89,11 +111,27 @@ const FOUNDRY = {
   kafka: new Set(["acks"]),
 };
 
-const options = { provenance: PROVENANCE, foundry: FOUNDRY, serverOwned: ["tls"] };
+const TRIGGER_PREDICATES = {
+  TRIGGER_CLIENT_FIELD_PREDICATES: ["header", "query", "cookie"],
+  TRIGGER_VISIBLE_PREDICATES: ["path", "method"],
+};
+
+const options = {
+  provenance: PROVENANCE,
+  foundry: FOUNDRY,
+  serverOwned: ["tls"],
+  triggerPredicates: TRIGGER_PREDICATES,
+};
 
 test("matching content is clean, though no recorded ref names the Edge main commit", () => {
   const result = edgeMainDrift(SPEC, PROJECTION, options);
-  assert.deepEqual(result, { schemas: [], sensitivity: [], subset: [], drifted: false });
+  assert.deepEqual(result, {
+    schemas: [],
+    sensitivity: [],
+    subset: [],
+    trigger: [],
+    drifted: false,
+  });
   assert.match(driftMarkdown(result), MATCH_PATTERN);
 });
 
@@ -159,6 +197,84 @@ test("a server-owned subset field Edge adds, or a SubsetTrafficPolicy it removes
   assert.equal(unreadable.drifted, true);
   assert.deepEqual(unreadable.subset.map(({ status }) => status), ["unreadable"]);
   assert.match(driftMarkdown(unreadable), SUBSET_UNREADABLE_PATTERN);
+});
+
+test("a trigger predicate Edge adds, drops, or stops declaring as a list is drift", () => {
+  const added = PROJECTION.replace('    "path",\n', '    "path",\n    "device_posture",\n');
+  const result = edgeMainDrift(SPEC, added, options);
+  assert.equal(result.drifted, true);
+  assert.deepEqual(result.trigger, [
+    { constant: "TRIGGER_VISIBLE_PREDICATES", status: "missing", predicates: ["device_posture"] },
+  ]);
+  assert.match(driftMarkdown(result), TRIGGER_MISSING_PATTERN);
+
+  const dropped = PROJECTION.replace('&["header", "query", "cookie"]', '&["header", "query"]');
+  assert.deepEqual(edgeMainDrift(SPEC, dropped, options).trigger, [
+    { constant: "TRIGGER_CLIENT_FIELD_PREDICATES", status: "extra", predicates: ["cookie"] },
+  ]);
+
+  const renamed = PROJECTION.replace(
+    "pub const TRIGGER_CLIENT_FIELD_PREDICATES",
+    "pub const TRIGGER_CLIENT_FIELDS",
+  );
+  const unreadable = edgeMainDrift(SPEC, renamed, options);
+  assert.deepEqual(
+    unreadable.trigger.map(({ constant, status }) => [constant, status]),
+    [["TRIGGER_CLIENT_FIELD_PREDICATES", "unreadable"]],
+  );
+  assert.match(driftMarkdown(unreadable), TRIGGER_UNREADABLE_PATTERN);
+
+  // A stale declaration left in a comment above the active one is not read.
+  const stale = PROJECTION.replace(
+    "const TRIGGER_VISIBLE_PREDICATES: &[&str] = &[",
+    '// const TRIGGER_VISIBLE_PREDICATES: &[&str] = &["method", "path"];\n' +
+      "/* const TRIGGER_VISIBLE_PREDICATES: &[&str] = &[\"method\", \"path\"]; */\n" +
+      'const TRIGGER_VISIBLE_PREDICATES: &[&str] = &[\n    "device_posture",',
+  );
+  assert.deepEqual(edgeMainDrift(SPEC, stale, options).trigger, [
+    { constant: "TRIGGER_VISIBLE_PREDICATES", status: "missing", predicates: ["device_posture"] },
+  ]);
+
+  // The literal must end at its declaration's semicolon.
+  const extended = PROJECTION.replace(
+    '&["header", "query", "cookie"];',
+    '&["header", "query", "cookie"] + EXTRA;',
+  );
+  assert.deepEqual(
+    edgeMainDrift(SPEC, extended, options).trigger.map(({ constant, status }) => [constant, status]),
+    [["TRIGGER_CLIENT_FIELD_PREDICATES", "unreadable"]],
+  );
+
+  // An escaped literal is refused rather than read with its backslash
+  // dropped: Rust compiles `"heade\r"` to a carriage return, which dropping
+  // the backslash would read as the unchanged `header`.
+  const escaped = PROJECTION.replace('&["header",', '&["heade\\r",');
+  assert.ok(escaped.includes('"heade\\r"'));
+  assert.deepEqual(
+    edgeMainDrift(SPEC, escaped, options).trigger.map(({ constant, status, reason }) =>
+      [constant, status, reason.includes("has an escape")]),
+    [["TRIGGER_CLIENT_FIELD_PREDICATES", "unreadable", true]],
+  );
+
+  const notAList = PROJECTION.replace(
+    '&["header", "query", "cookie"]',
+    "CLIENT_FIELDS",
+  );
+  assert.deepEqual(
+    edgeMainDrift(SPEC, notAList, options).trigger.map(({ status }) => status),
+    ["unreadable"],
+  );
+});
+
+test("Foundry's trigger predicate lists are the disjoint ones its redaction uses", () => {
+  assert.deepEqual(FOUNDRY_TRIGGER_PREDICATES, {
+    TRIGGER_CLIENT_FIELD_PREDICATES,
+    TRIGGER_VISIBLE_PREDICATES,
+  });
+  assert.deepEqual(
+    TRIGGER_CLIENT_FIELD_PREDICATES.filter((key) => TRIGGER_VISIBLE_PREDICATES.includes(key)),
+    [],
+  );
 });
 
 test("fetches both Edge sources at the given commit and refuses anything else", async () => {
