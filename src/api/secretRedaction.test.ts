@@ -627,6 +627,27 @@ describe("plugin triggers follow Ferrum Edge main's projection", () => {
     }
   });
 
+  it("keeps an unknown comparison key set to null out of a refused plugin write", async () => {
+    const key = "synthetic-operand-written-as-key";
+    respond = () => Response.json({
+      error: `invalid trigger: unknown field \`${key}\`, expected one of \`exact\`, \`prefix\``,
+    }, { status: 400 });
+    const trigger = { when: { match: { header: { name: "x-skip", value: { [key]: null } } } } };
+    expect(pluginTriggerSecrets(trigger).values).toEqual([key]);
+    const failure = await plugins.createConfig(scope, {
+      plugin_name: "waf",
+      scope: "global",
+      config: {},
+      trigger: trigger as unknown as PluginConfigCreate["trigger"],
+    }).catch((e: unknown) => e);
+    expectDetached(failure);
+    const text = await exposure(failure);
+    expect(text).not.toContain(key);
+    expect(text).toContain("invalid trigger: unknown field `[REDACTED]`, expected one of `exact`");
+    expect(reported).toHaveLength(1);
+    expect(reported[0].body).not.toContain(key);
+  });
+
   it("keeps a cookie predicate's metadata and identity values readable through secretValues", () => {
     const write = {
       plugin_name: "waf",
@@ -670,7 +691,7 @@ describe("plugin triggers follow Ferrum Edge main's projection", () => {
       },
     })).toEqual({
       // The keys inside the withheld unknown node are content as well.
-      values: ["text-operand-1", "case_insensitive", "port"],
+      values: ["text-operand-1", "if", "case_insensitive", "port"],
       tokens: [],
       // A nested `case_insensitive` inside a withheld subtree is an ordinary
       // value there; only the comparison flag itself is exempt, in the walk.
@@ -738,7 +759,8 @@ describe("trigger scalars and existing markers in a refusal", () => {
     expectDetached(failure);
     const text = await exposure(failure);
     expect(text).not.toContain("48213907");
-    expect(text).toContain("invalid type: integer `[REDACTED]`, expected a string");
+    // Everything from the diagnostic's quoted value on is withheld.
+    expect(text).toContain("x-ferrum-plugins: invalid type: integer [REDACTED]");
     const data = (failure as { data: Record<string, unknown> }).data;
     // Typed scalars are matched exactly in the structured body; the code and
     // an unrelated flag keep their values.
@@ -746,8 +768,7 @@ describe("trigger scalars and existing markers in a refusal", () => {
     expect(data.port).toBe("[REDACTED]");
     expect(data.retryable).toBe(false);
     expect(data.code).toBe("malformed_extension");
-    // A short one is matched only as a whole token, so `column 80` survives.
-    expect(data.details).toContain("line 1 column 80");
+    expect(data.details).toBe("x-ferrum-plugins: invalid type: integer [REDACTED]");
   });
 
   const unsafeJson = (operand: string) => `{"openapi":"3.1.0","info":{"title":"Orders","version":"1"},` +
@@ -787,29 +808,29 @@ describe("trigger scalars and existing markers in a refusal", () => {
       const failure = await write().catch((e: unknown) => e);
       expectDetached(failure);
       expect(await exposure(failure)).not.toContain(echoed);
-      // The category, expected type and location stay (a YAML document's
-      // every scalar is unclassified, so its short `1` is also withheld).
-      expect(await getApiErrorDetail(failure)).toContain(
-        "x-ferrum-plugins: invalid type: integer `[REDACTED]`, expected a string at line ",
-      );
-      expect(await getApiErrorDetail(failure)).toContain(" column 157");
+      // The category stays; everything from the quoted value on goes.
+      expect(await getApiErrorDetail(failure))
+        .toBe("malformed_extension: x-ferrum-plugins: invalid type: integer [REDACTED]");
     }
   });
 
-  it("removes the value of every serde type diagnostic from a spec refusal, and only there", () => {
+  it("withholds every serde diagnostic's value and the rest of the text from a spec refusal, and only there", () => {
     const forms = redactionForms(specDocumentSecrets("openapi: 3.1.0\n"));
-    expect(redactSubmitted(
-      "invalid type: floating point `1.5e300`, expected a string; " +
-        'invalid value: string "se\\"cret", expected one of `present`, `absent`; ' +
-        "invalid type: boolean `true`, expected a string; unknown variant `maybe`, expected `any` or `all`; " +
-        "invalid length 3, expected fewer elements; unknown field `when2`",
-      forms,
-    )).toBe(
-      "invalid type: floating point `[REDACTED]`, expected a string; " +
-        'invalid value: string "[REDACTED]", expected one of `present`, `absent`; ' +
-        "invalid type: boolean `[REDACTED]`, expected a string; unknown variant `[REDACTED]`, expected `any` or `all`; " +
-        "invalid length 3, expected fewer elements; unknown field `when2`",
-    );
+    for (const [diagnostic, kept] of [
+      ["invalid type: integer `5`, expected a string", "invalid type: integer "],
+      ["invalid type: floating point `1.5e300`, expected a string", "invalid type: floating point "],
+      ['invalid value: string "se\\"cret", expected one of `present`', "invalid value: string "],
+      ["invalid type: boolean `true`, expected a string", "invalid type: boolean "],
+      ["invalid type: character `c`, expected a string", "invalid type: character "],
+      ["unknown variant `maybe`, expected `any` or `all`", "unknown variant "],
+      ["unknown field `synthetic-key`, expected one of `exact`", "unknown field "],
+    ] as const) {
+      expect(redactSubmitted(`plugin 1: ${diagnostic}\nsecond line`, forms))
+        .toBe(`plugin 1: ${kept}[REDACTED]`);
+    }
+    // A diagnostic that quotes no value is kept.
+    expect(redactSubmitted("invalid length 3, expected fewer elements", forms))
+      .toBe("invalid length 3, expected fewer elements");
     // An ordinary write keeps a diagnostic's value unless it was submitted.
     expect(redactSubmitted("invalid type: integer `5`, expected a string", redactionForms([])))
       .toBe("invalid type: integer `5`, expected a string");
@@ -884,6 +905,45 @@ describe("trigger scalars and existing markers in a refusal", () => {
     }
   });
 
+  it("withholds a folded single-quoted YAML trigger value Edge quotes, on import and replacement", async () => {
+    // The continuation starts with a double quote, which Foundry's line
+    // scanner cannot fold as Edge does; Edge quotes the folded value.
+    const document = [
+      "openapi: 3.1.0",
+      "info: {title: Orders, version: '1'}",
+      "x-ferrum-plugins:",
+      "  - plugin_name: waf",
+      "    config: {}",
+      "    trigger:",
+      "      when:",
+      "        match:",
+      "          header:",
+      "            name: x-skip",
+      "            presence: 'pre`, expected x",
+      '              "synthetic-folded-tail\'',
+      "",
+    ].join("\n");
+    respond = () => Response.json({
+      error: "Spec parse failed",
+      code: "malformed_extension",
+      details: 'x-ferrum-plugins: unknown variant `pre`, expected x "synthetic-folded-tail`, ' +
+        "expected `present` or `absent`",
+    }, { status: 400 });
+    for (const write of [
+      () => apiSpecs.create(scope, document),
+      () => apiSpecs.update(scope, "orders-spec", document),
+    ]) {
+      const failure = await write().catch((e: unknown) => e);
+      expectDetached(failure);
+      const details = (failure as { data: Record<string, unknown> }).data.details as string;
+      for (const shown of [details, await exposure(failure), await getApiErrorDetail(failure)]) {
+        expect(shown).not.toContain("synthetic-folded-tail");
+        expect(shown).not.toContain("pre`");
+      }
+      expect(details).toBe("x-ferrum-plugins: unknown variant [REDACTED]");
+    }
+  });
+
   it("withholds the rest of a diagnostic whose quoted value does not end where serde's would", () => {
     const forms = redactionForms(specDocumentSecrets("openapi: 3.1.0\n"));
     expect(redactSubmitted(
@@ -898,9 +958,6 @@ describe("trigger scalars and existing markers in a refusal", () => {
     )).toBe("x: unknown variant [REDACTED]");
     expect(redactSubmitted('invalid type: string "unterminated', forms))
       .toBe("invalid type: string [REDACTED]");
-    // A Debug-escaped quote stays inside the string's span.
-    expect(redactSubmitted('invalid value: string "a\\"b", expected one of `x`', forms))
-      .toBe('invalid value: string "[REDACTED]", expected one of `x`');
   });
 
   it("classifies the trigger of a spec plugin entry that has no plugin_name", async () => {

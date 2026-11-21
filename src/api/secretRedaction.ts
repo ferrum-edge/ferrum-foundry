@@ -88,9 +88,10 @@ export interface Secrets {
    */
   readonly scalars: readonly (number | boolean)[];
   /**
-   * Whether the value a deserializer quotes in a type diagnostic ("invalid
-   * type: integer `N`, expected a string") is removed whatever it is, keeping
-   * the category, the expected type and the location. Set for an API spec
+   * Whether the value a deserializer quotes in a diagnostic ("invalid type:
+   * integer `N`, expected a string", "unknown variant `V`") is removed
+   * whatever it is, with the rest of the text after it, keeping the category
+   * before it (`diagnosticSpans`). Set for an API spec
    * document, which Ferrum Edge re-parses itself: it can quote a value in a
    * spelling Foundry cannot reconstruct from the text it sent (an integer
    * beyond 2^53 that `JSON.parse` rounds, a YAML `0x` or `0o` integer it
@@ -935,57 +936,24 @@ function replaceSpans(text: string, found: [number, number][]): string {
 }
 
 /**
- * Where a serde type or value diagnostic quotes a value: "invalid type:
- * integer `N`", "floating point `N`", "boolean `B`", "character `C`",
- * "string \"S\"" (escaped as Rust's `Debug` writes it), and "unknown variant
- * `V`". Each match ends at the value's opening delimiter.
+ * Where a serde diagnostic quotes a submitted value: "invalid type: integer
+ * `N`", "floating point `N`", "boolean `B`", "character `C`", "string \"S\""
+ * (and the same after "invalid value:"), "unknown variant `V`" and "unknown
+ * field `F`". Each match ends at the value's opening delimiter.
  */
 const DIAGNOSTIC_VALUE_START_PATTERN =
-  /\b(?:invalid (?:type|value): (?:(?:integer|floating point|boolean|character) `|string ")|unknown variant `)/g;
-/** What serde writes right after the quoted value. */
-const DIAGNOSTIC_CONTINUATIONS = [", expected ", ", there are no variants"];
-
-/** The index of the `"` closing a `Debug`-escaped string that opens before `from`, or -1. */
-function closingQuote(text: string, from: number): number {
-  for (let index = from; index < text.length; index += 1) {
-    if (text[index] === "\\") index += 1;
-    else if (text[index] === '"') return index;
-  }
-  return -1;
-}
+  /\b(?:invalid (?:type|value): (?:(?:integer|floating point|boolean|character) `|string ")|unknown (?:variant|field) `)/;
 
 /**
- * The spans of `text` holding the value of each deserializer diagnostic,
- * found in the original text alongside the exact matches `exact`, so neither
- * pass can hide a value from the other. A value whose end is certain — its
- * closing delimiter followed by serde's own continuation, with no exact match
- * crossing either delimiter — is replaced alone, keeping the category, the
- * expected type and the location. Otherwise the value may hold the delimiter
- * itself (an unknown variant with a backtick in it) or a line break, so
- * everything from its opening delimiter to the end of the text is withheld
- * rather than guessed.
+ * The span of `text` a deserializer diagnostic's quoted value may occupy:
+ * from the opening delimiter of the first one to the end of the text. Where
+ * that value ends cannot be told reliably (it may hold the delimiter, serde's
+ * own continuation, or a line break, in a spelling Foundry cannot
+ * reconstruct), so nothing after it is kept. The category before it is.
  */
-function diagnosticSpans(text: string, exact: readonly [number, number][]): [number, number][] {
-  const spans: [number, number][] = [];
-  for (const match of text.matchAll(DIAGNOSTIC_VALUE_START_PATTERN)) {
-    const open = match.index + match[0].length - 1;
-    const valueStart = open + 1;
-    const close = text[open] === '"'
-      ? closingQuote(text, valueStart)
-      : text.indexOf("`", valueStart);
-    const crossed = close !== -1 && exact.some(([start, end]) =>
-      start < close + 1 && end > open && (start < valueStart || end > close));
-    if (
-      close !== -1 &&
-      !crossed &&
-      DIAGNOSTIC_CONTINUATIONS.some((continuation) => text.startsWith(continuation, close + 1))
-    ) {
-      spans.push([valueStart, close]);
-    } else {
-      spans.push([open, text.length]);
-    }
-  }
-  return spans;
+function diagnosticSpans(text: string): [number, number][] {
+  const match = DIAGNOSTIC_VALUE_START_PATTERN.exec(text);
+  return match ? [[match.index + match[0].length - 1, text.length]] : [];
 }
 
 /**
@@ -999,7 +967,7 @@ export function redactSubmitted(text: string, forms: RedactionForms): string {
     ...occurrences(text, forms.substrings, false),
     ...occurrences(text, forms.tokens, true),
   ];
-  return replaceSpans(text, forms.diagnostics ? [...exact, ...diagnosticSpans(text, exact)] : exact);
+  return replaceSpans(text, forms.diagnostics ? [...exact, ...diagnosticSpans(text)] : exact);
 }
 
 /**

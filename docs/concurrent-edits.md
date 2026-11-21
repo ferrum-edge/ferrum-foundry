@@ -550,7 +550,9 @@ and the routing and identity predicates (`path`, `method`, `host`, `consumer`,
 `external_identity`, `external_identity_authority`, and the rest of Edge's
 `TRIGGER_VISIBLE_PREDICATES`) stay readable, but only with the type Edge's
 `PluginTriggerMatch` declares: an editor draft is unvalidated, so an object
-pasted under a field `name` or a number in a `method` list is withheld too.
+pasted under a field `name` or a number in a `method` list is withheld too,
+and any object in the trigger carrying a key its schema does not define
+(even one set to `null`) is withheld whole.
 The trigger is classified by this walk alone, not by the field-name and URL
 rules above, which would hide a whole `cookie` predicate and a `spiffe_id`.
 A number or boolean operand is withheld as well: its text is redacted like an
@@ -580,18 +582,15 @@ plugin configuration is unclassified throughout, and its `trigger`, if it has
 one, is also classified as a plugin's is. Edge parses the document text
 again and can quote a value in a spelling Foundry cannot reconstruct (an
 integer beyond 2^53, which `JSON.parse` rounds, or a YAML `0x` integer
-reported in decimal), so in a spec write's failure the value of every serde
-type diagnostic (``invalid type: integer `N` ``, `floating point`, `boolean`,
-`character`, `string "…"`, `invalid value: …`, ``unknown variant `V` ``) is
-replaced whatever it is, keeping the category, the expected type and the
-location. The diagnostics and the exact matches are found in the original
-text and replaced together. When a value's end is uncertain (its closing
-delimiter is missing, is not followed by serde's `, expected`, or an exact
-match crosses it, as with a variant containing a backtick), everything from
-its opening delimiter to the end of the text is withheld, later lines
-included. The keys of an object the trigger walk withholds are collected as
-secrets along with its values, since a deserializer quotes the one key of an
-object given where an enum belongs as the variant. Foundry has no YAML parser, so
+reported in decimal), so in a spec write's failure every serde diagnostic
+that quotes a value (``invalid type: integer `N` ``, `floating point`,
+`boolean`, `character`, `string "…"`, the same after `invalid value:`,
+``unknown variant `V` ``, ``unknown field `F` ``) is withheld from the value's
+opening delimiter to the end of the text, whatever the value is: where it
+ends cannot be told reliably. The category before it is kept. The keys of an
+object the trigger walk withholds are collected as secrets along with its
+values, since a deserializer quotes an object's key as a variant or an
+unknown field. Foundry has no YAML parser, so
 a YAML (or malformed JSON) document is unclassified throughout: every scalar is
 found line by line without parsing, including `key: value` values, sequence
 entries, flow elements, quoted scalars (unquoted and unescaped), several pairs

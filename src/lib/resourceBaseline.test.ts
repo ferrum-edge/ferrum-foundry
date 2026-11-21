@@ -326,17 +326,26 @@ describe("plugin trigger redaction (Edge main's trigger projection)", () => {
     expect(pointers(null)).toEqual([]);
     expect(pointers("anything")).toEqual(["/trigger"]);
     expect(pointers({ match: {} })).toEqual(["/trigger"]);
+    // An object with a key its schema does not define is withheld whole.
     expect(pointers({ when: { match: { path: { exact: ["/"] } } }, extra: 1 })).toEqual([
-      "/trigger/extra",
+      "/trigger",
     ]);
     expect(pointers({ when: [] })).toEqual(["/trigger/when"]);
     expect(pointers({ when: { any: {} } })).toEqual(["/trigger/when/any"]);
-    expect(pointers({ when: { match: { "head/er~": "x" } } })).toEqual([
-      "/trigger/when/match/head~1er~0",
-    ]);
+    expect(pointers({ when: { match: { "head/er~": "x" } } })).toEqual(["/trigger/when/match"]);
+    expect(pointers({ when: { all: [{ match: { path: { exact: ["/"] } } }], "x/y": null } }))
+      .toEqual(["/trigger/when"]);
     expect(pointers({ when: { match: { header: { name: "x", value: "v", extra: "e" } } } })).toEqual([
-      "/trigger/when/match/header/value",
-      "/trigger/when/match/header/extra",
+      "/trigger/when/match/header",
+    ]);
+    // Even an unknown key set to null: the key itself can be the content.
+    expect(pointers({ when: { match: { header: { name: "x", value: { "synthetic-key": null } } } } }))
+      .toEqual(["/trigger/when/match/header/value"]);
+    expect(pointers({ when: { not: { match: { path: { "/a": null } } } } }))
+      .toEqual(["/trigger/when/not/match/path"]);
+    // A key out of place is unknown there too.
+    expect(pointers({ when: { match: { header: { name: "x" } }, name: "y" } })).toEqual([
+      "/trigger/when",
     ]);
     expect(pointers({ when: { match: { query: { name: "q", value: { case_insensitive: "yes" } } } } }))
       .toEqual(["/trigger/when/match/query/value/case_insensitive"]);
@@ -350,6 +359,7 @@ describe("plugin trigger redaction (Edge main's trigger projection)", () => {
         all: [
           { match: { path: "raw" } },
           { match: { host: { exact: ["ok", 5], regex: ["no"], weird: 1 } } },
+          { match: { sni: { exact: ["ok", 5], regex: ["no"] } } },
           { match: { method: ["GET", { x: 1 }] } },
           { match: { protocol: ["http2", "gopher"] } },
           { match: { listen_port: [443, 70000, "80"] } },
@@ -360,17 +370,16 @@ describe("plugin trigger redaction (Edge main's trigger projection)", () => {
       },
     })).toEqual([
       "/trigger/when/all/0/match/path",
-      "/trigger/when/all/1/match/host/exact/1",
-      "/trigger/when/all/1/match/host/regex",
-      "/trigger/when/all/1/match/host/weird",
-      "/trigger/when/all/2/match/method/1",
-      "/trigger/when/all/3/match/protocol/1",
-      "/trigger/when/all/4/match/listen_port/1",
-      "/trigger/when/all/4/match/listen_port/2",
-      "/trigger/when/all/5/match/external_identity_authority/1",
-      "/trigger/when/all/6/match/consumer/value/prefix/0",
-      "/trigger/when/all/6/match/consumer/extra",
-      "/trigger/when/all/7/match/spiffe_id",
+      "/trigger/when/all/1/match/host",
+      "/trigger/when/all/2/match/sni/exact/1",
+      "/trigger/when/all/2/match/sni/regex",
+      "/trigger/when/all/3/match/method/1",
+      "/trigger/when/all/4/match/protocol/1",
+      "/trigger/when/all/5/match/listen_port/1",
+      "/trigger/when/all/5/match/listen_port/2",
+      "/trigger/when/all/6/match/external_identity_authority/1",
+      "/trigger/when/all/7/match/consumer",
+      "/trigger/when/all/8/match/spiffe_id",
     ]);
     // An explicit null discloses nothing and is not a site.
     expect(pointers({ when: { match: { header: { name: "x", value: { regex: null } } } } })).toEqual([]);
@@ -418,6 +427,11 @@ describe("plugin trigger redaction (Edge main's trigger projection)", () => {
         when: { match: { header: { name: { pasted: "synthetic-raw-name-secret" } } } },
       }),
     ).toBe('{"when":{"match":{"header":{"name":"[redacted]"}}}}');
+    // An unknown comparison key set to null is withheld with its object.
+    const unknownKey = formatBaselineValue("trigger", {
+      when: { match: { header: { name: "x-skip", value: { "synthetic-operand-as-key": null } } } },
+    });
+    expect(unknownKey).toBe('{"when":{"match":{"header":{"name":"x-skip","value":"[redacted]"}}}}');
     expect(formatBaselineValue("trigger", null)).toBe("null");
     expect(formatBaselineValue("trigger", undefined)).toBe("—");
   });

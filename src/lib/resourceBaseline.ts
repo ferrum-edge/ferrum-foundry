@@ -407,6 +407,21 @@ function isTriggerObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+/** Whether `value` is an object whose every key is one of `keys`, even one set to `null`. */
+function isDeclaredObject(
+  value: unknown,
+  keys: readonly string[],
+): value is Record<string, unknown> {
+  return isTriggerObject(value) && Object.keys(value).every((key) => keys.includes(key));
+}
+
+const TRIGGER_KEYS = ["when"];
+const TRIGGER_NODE_KEYS = ["all", "any", "not", "match"];
+const TRIGGER_LEAF_KEYS = [...TRIGGER_CLIENT_FIELD_PREDICATES, ...TRIGGER_VISIBLE_PREDICATES];
+const TRIGGER_FIELD_KEYS = ["name", "presence", "value", "multi_value"];
+const TRIGGER_STRING_MATCH_KEYS = ["exact", "prefix", "regex", "case_insensitive"];
+const TRIGGER_IDENTITY_KEYS = ["presence", "value"];
+
 /** `PluginTriggerProtocol`, as Edge main's `plugin_trigger.rs` spells it. */
 const TRIGGER_PROTOCOLS: readonly string[] = [
   "http1",
@@ -448,6 +463,14 @@ const TRIGGER_AUTHORITY_PATTERN = /^[0-9A-Fa-f]{64}$/;
  * / `spiffe_id` an identity match. Anything else there is withheld as the
  * smallest ill-typed site. A stored trigger always has these types, so this
  * changes nothing for one Edge has accepted.
+ *
+ * Any object in the tree that carries a key its schema does not define (the
+ * trigger, a node, a `match` leaf, a field predicate, a comparison, an
+ * identity match), even one set to `null`, is withheld whole at its own
+ * pointer, its declared names and flags included: a deserializer quotes an
+ * unknown key ("unknown field `K`"), so a key there can be the content. Edge
+ * withholds only the unknown member of a stored trigger it has validated,
+ * which never has one.
  */
 export function pluginTriggerWithheldSites(trigger: unknown): TriggerWithheldSite[] {
   const sites: TriggerWithheldSite[] = [];
@@ -474,23 +497,21 @@ export function pluginTriggerWithheldSites(trigger: unknown): TriggerWithheldSit
   const stringList = listOf(isString);
   const stringMatch = (value: unknown, pointer: string) => {
     if (value === null) return;
-    if (!isTriggerObject(value)) return withhold(value, pointer);
+    if (!isDeclaredObject(value, TRIGGER_STRING_MATCH_KEYS)) return withhold(value, pointer);
     for (const [key, operand] of Object.entries(value)) {
       const at = child(pointer, key);
       if (key === "exact" || key === "prefix") stringList(operand, at);
       else if (key === "regex") scalarOf(isString)(operand, at);
-      else if (key === "case_insensitive") scalarOf((flag) => typeof flag === "boolean")(operand, at);
-      else withhold(operand, at);
+      else scalarOf((flag) => typeof flag === "boolean")(operand, at);
     }
   };
   const identityMatch = (value: unknown, pointer: string) => {
     if (value === null) return;
-    if (!isTriggerObject(value)) return withhold(value, pointer);
+    if (!isDeclaredObject(value, TRIGGER_IDENTITY_KEYS)) return withhold(value, pointer);
     for (const [key, item] of Object.entries(value)) {
       const at = child(pointer, key);
       if (key === "presence") scalarOf(oneOf(TRIGGER_PRESENCE))(item, at);
-      else if (key === "value") stringMatch(item, at);
-      else withhold(item, at);
+      else stringMatch(item, at);
     }
   };
   const visible: Readonly<Record<string, (value: unknown, pointer: string) => void>> = {
@@ -514,7 +535,7 @@ export function pluginTriggerWithheldSites(trigger: unknown): TriggerWithheldSit
 
   // Withheld content: the comparison operands of a client-presented field.
   const operands = (value: unknown, pointer: string) => {
-    if (!isTriggerObject(value)) return withhold(value, pointer);
+    if (!isDeclaredObject(value, TRIGGER_STRING_MATCH_KEYS)) return withhold(value, pointer);
     for (const [key, operand] of Object.entries(value)) {
       if (key === "case_insensitive" && typeof operand === "boolean") continue;
       const at = child(pointer, key);
@@ -526,58 +547,50 @@ export function pluginTriggerWithheldSites(trigger: unknown): TriggerWithheldSit
     }
   };
   const fieldPredicate = (value: unknown, pointer: string) => {
-    if (!isTriggerObject(value)) return withhold(value, pointer);
+    if (!isDeclaredObject(value, TRIGGER_FIELD_KEYS)) return withhold(value, pointer);
     for (const [key, item] of Object.entries(value)) {
       const at = child(pointer, key);
       if (key === "name") scalarOf(isString)(item, at);
       else if (key === "presence") scalarOf(oneOf(TRIGGER_PRESENCE))(item, at);
       else if (key === "multi_value") scalarOf(oneOf(TRIGGER_MULTI_VALUE))(item, at);
-      else if (key === "value") operands(item, at);
-      else withhold(item, at);
+      else operands(item, at);
     }
   };
   const leaf = (value: unknown, pointer: string) => {
-    if (!isTriggerObject(value)) return withhold(value, pointer);
+    if (!isDeclaredObject(value, TRIGGER_LEAF_KEYS)) return withhold(value, pointer);
     for (const [key, predicate] of Object.entries(value)) {
       const at = child(pointer, key);
-      if (TRIGGER_VISIBLE_PREDICATES.includes(key)) {
+      if (TRIGGER_CLIENT_FIELD_PREDICATES.includes(key)) {
+        fieldPredicate(predicate, at);
+      } else {
         // A visible predicate Foundry has no declared type for is withheld.
         const validate = Object.hasOwn(visible, key) ? visible[key] : undefined;
         if (validate) validate(predicate, at);
         else withhold(predicate, at);
-      } else if (TRIGGER_CLIENT_FIELD_PREDICATES.includes(key)) {
-        fieldPredicate(predicate, at);
-      } else {
-        withhold(predicate, at);
       }
     }
   };
   const node = (value: unknown, pointer: string) => {
-    if (!isTriggerObject(value)) return withhold(value, pointer);
+    if (!isDeclaredObject(value, TRIGGER_NODE_KEYS)) return withhold(value, pointer);
     for (const [key, item] of Object.entries(value)) {
       const at = child(pointer, key);
-      if ((key === "all" || key === "any") && Array.isArray(item)) {
-        item.forEach((entry, index) => node(entry, child(at, index)));
+      if (key === "all" || key === "any") {
+        if (Array.isArray(item)) item.forEach((entry, index) => node(entry, child(at, index)));
+        else withhold(item, at);
       } else if (key === "not") {
         node(item, at);
-      } else if (key === "match") {
-        leaf(item, at);
       } else {
-        withhold(item, at);
+        leaf(item, at);
       }
     }
   };
 
   if (trigger === null || trigger === undefined) return sites;
-  if (!isTriggerObject(trigger) || !("when" in trigger)) {
+  if (!isDeclaredObject(trigger, TRIGGER_KEYS) || !("when" in trigger)) {
     withhold(trigger, PLUGIN_TRIGGER_POINTER);
     return sites;
   }
-  for (const [key, item] of Object.entries(trigger)) {
-    const at = child(PLUGIN_TRIGGER_POINTER, key);
-    if (key === "when") node(item, at);
-    else withhold(item, at);
-  }
+  node(trigger.when, child(PLUGIN_TRIGGER_POINTER, "when"));
   return sites;
 }
 
