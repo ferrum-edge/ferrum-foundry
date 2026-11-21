@@ -17,6 +17,17 @@ import { formatDateTime } from "@/lib/format";
 import type { DatabaseMtlsDnsAdmissionFence } from "@/api/types";
 import { isNamespaceName } from "../../../shared/namespace.js";
 
+/**
+ * A health field rendered as text. Edge sends strings and numbers here; any
+ * other shape (a malformed snapshot) reads as `fallback` instead of reaching
+ * React as an object child, so one bad field never hides the rest of Status.
+ */
+function displayScalar(value: unknown, fallback = "Not reported"): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return fallback;
+}
+
 function statusVariant(
   status: string,
 ): "green" | "yellow" | "red" {
@@ -212,15 +223,15 @@ export default function StatusPage() {
                 <Badge
                   variant={health.database.status === "connected" ? "green" : "red"}
                 >
-                  {health.database.status}
+                  {displayScalar(health.database.status)}
                 </Badge>
               </Row>
-              {health.database.type && <Row label="Type">{health.database.type}</Row>}
+              {health.database.type && <Row label="Type">{displayScalar(health.database.type)}</Row>}
               {health.database.pool && (
                 <Row label="Pool">
-                  {health.database.pool.active ?? "unknown"} active /{" "}
-                  {health.database.pool.idle ?? "unknown"} idle /{" "}
-                  {health.database.pool.size ?? "unknown"} total
+                  {displayScalar(health.database.pool.active, "unknown")} active /{" "}
+                  {displayScalar(health.database.pool.idle, "unknown")} idle /{" "}
+                  {displayScalar(health.database.pool.size, "unknown")} total
                 </Row>
               )}
               {health.database.failover_topology && <HealthFields fields={namedFields(health.database.failover_topology, ['primary_active', 'allow_writes', 'opt_in_writes_enabled_during_window', 'primary_failback_fenced', 'active_url_redacted', 'failover_since_unix_ms'])} />}
@@ -232,7 +243,7 @@ export default function StatusPage() {
               ]} />}
               {health.database.error && (
                 <div className="mt-2 bg-danger/5 border border-danger/20 rounded-lg p-3">
-                  <p className="text-danger text-sm">{health.database.error}</p>
+                  <p className="text-danger text-sm">{displayScalar(health.database.error)}</p>
                 </div>
               )}
             </div>

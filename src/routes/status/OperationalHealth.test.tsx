@@ -143,6 +143,24 @@ describe('database mTLS DNS admission fence', () => {
     expect(text).not.toContain('tenant-a');
   });
 
+  it('keeps the fence alert and details when other database fields are malformed', async () => {
+    stubFetch(() => Response.json({
+      ...fenced,
+      database: {
+        ...fenced.database,
+        status: { value: 'connected' },
+        type: ['mongodb'],
+        pool: { active: { n: 1 }, idle: 2, size: null },
+        error: { message: 'x' },
+      },
+    }));
+    await harness.render(<StatusPage />);
+    await settle(() => expect(region('mTLS DNS admission fence')).not.toBeNull());
+    expect(harness.host.querySelector('[role="status"]')?.textContent).toContain('Database mTLS DNS admission fenced');
+    expect(harness.host.textContent).toContain('StatusNot reported');
+    expect(harness.host.textContent).toContain('unknown active / 2 idle / unknown total');
+  });
+
   it.each([
     ['a zero count', { retained_fences: 0 }, 'Retained fences'],
     ['a negative count', { retained_fences: -1 }, 'Retained fences'],
