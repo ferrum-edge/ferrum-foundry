@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import ky, { type Options } from "ky";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { blurField, clearText, typeText } from "@/test/fields";
 import { SettingsForm } from "./SettingsForm";
@@ -485,30 +486,55 @@ describe("SettingsForm failed reads", () => {
 });
 
 describe("SettingsForm connection test", () => {
-  // The BFF relays the gateway's HTTP status with a `{ reachable, status, body }`
-  // envelope. ky throws a failing status unless `throwHttpErrors` says not to.
-  function answerStatus(status: number, envelope: unknown) {
-    get.mockImplementation((path: string, options?: { throwHttpErrors?: (code: number) => boolean }) => {
+  // A real ky instance with the app client's GET retry policy (no delay), so
+  // the form's own options (status predicate, response hook, body timeout)
+  // run as they do in the browser. The BFF relays the gateway's HTTP status
+  // with a `{ reachable, status, body }` envelope.
+  let fetched: number;
+  let settled: Promise<unknown>;
+
+  function serve(respond: () => Response, timeout = 1000) {
+    fetched = 0;
+    settled = Promise.resolve();
+    const client = ky.create({
+      prefix: "http://bff.test/",
+      timeout,
+      retry: { limit: 2, methods: ["get"], statusCodes: [502, 503, 504], delay: () => 0 },
+      fetch: async () => {
+        fetched += 1;
+        return respond();
+      },
+    });
+    get.mockImplementation((path: string, options?: Options) => {
       if (path !== "api/settings/status") return { json: async () => currentSettings };
-      if (status >= 400 && options?.throwHttpErrors?.(status) !== false) {
-        return Promise.reject(new Error(`Request failed with status code ${status}`));
-      }
-      return {
-        status,
-        json: async () => {
-          if (typeof envelope === "string") throw new SyntaxError("Unexpected token <");
-          return envelope;
-        },
-      };
+      const pending = client.get(path, options);
+      const json = pending.json.bind(pending);
+      pending.json = (() => {
+        const read = json();
+        settled = read.catch(() => undefined);
+        return read;
+      }) as typeof pending.json;
+      return pending;
     });
   }
 
-  async function testConnection() {
+  function answer(status: number, body: unknown) {
+    serve(() => new Response(typeof body === "string" ? body : JSON.stringify(body), { status }));
+  }
+
+  function testButton(): HTMLButtonElement {
     const button = Array.from(host.querySelectorAll("button")).find(
       (element) => element.textContent?.trim() === "Test Connection",
     );
     if (!button) throw new Error("Missing Test Connection button");
-    await act(async () => button.click());
+    return button;
+  }
+
+  async function testConnection() {
+    await act(async () => {
+      testButton().click();
+      await settled;
+    });
   }
 
   function badge(): HTMLElement {
@@ -522,20 +548,16 @@ describe("SettingsForm connection test", () => {
 
   it("reports a ready gateway as connected", async () => {
     await renderForm();
-    answerStatus(200, { reachable: true, status: 200, body: { status: "ok", ready: true } });
+    answer(200, { reachable: true, status: 200, body: { status: "ok", ready: true } });
     await testConnection();
 
-    expect(get).toHaveBeenCalledWith(
-      "api/settings/status",
-      expect.objectContaining({ throwHttpErrors: expect.any(Function) }),
-    );
     expect(badge().textContent).toBe("Connected (HTTP 200)");
     expect(badge().className).toContain("text-success");
   });
 
   it("reports a gateway answering 503 with its health snapshot as connected but not ready", async () => {
     await renderForm();
-    answerStatus(503, {
+    answer(503, {
       reachable: true,
       status: 503,
       body: { status: "unavailable", ready: false, mode: "database" },
@@ -544,6 +566,8 @@ describe("SettingsForm connection test", () => {
 
     expect(badge().textContent).toBe("Connected (HTTP 503), gateway not ready: unavailable");
     expect(badge().className).toContain("text-warning");
+    // A 503 is an answer: never retried.
+    expect(fetched).toBe(1);
   });
 
   it.each([
@@ -551,28 +575,58 @@ describe("SettingsForm connection test", () => {
     ["a text page", "<html>503 Service Unavailable</html>"],
   ])("keeps a non-health 503 carrying %s unreachable", async (_label, body) => {
     await renderForm();
-    answerStatus(503, { reachable: false, status: 503, body });
+    answer(503, { reachable: false, status: 503, body });
     await testConnection();
 
     expect(badge().textContent).toBe("Not reachable (HTTP 503)");
     expect(badge().className).toContain("text-danger");
   });
 
-  it("reports a 503 without the BFF's envelope as a failed test", async () => {
+  it.each([
+    ["no envelope", "<html>503</html>"],
+    ["an empty body", ""],
+    ["a bare reachable claim", { reachable: true }],
+    ["a reachable claim without a health snapshot", { reachable: true, status: 503 }],
+    ["a reachable claim with an error body", { reachable: true, status: 503, body: { error: "down" } }],
+    ["an envelope naming another status", { reachable: true, status: 200, body: { status: "ok", ready: true } }],
+  ])("reports a 503 with %s as a failed test", async (_label, body) => {
     await renderForm();
-    answerStatus(503, "<html>503</html>");
+    answer(503, body);
     await testConnection();
 
     expect(badge().textContent).toBe("Connection test failed (HTTP 503)");
     expect(badge().className).toContain("text-danger");
   });
 
-  it("still throws any other failing status", async () => {
+  it("reports a 200 whose envelope names another status as a failed test", async () => {
     await renderForm();
-    answerStatus(502, { reachable: false, code: "FERRUM_BFF_UPSTREAM_FAILURE" });
+    answer(200, { reachable: true });
     await testConnection();
 
-    expect(badge().textContent).toBe("Request failed with status code 502");
+    expect(badge().textContent).toBe("Connection test failed (HTTP 200)");
+  });
+
+  it("still retries and throws any other failing status", async () => {
+    await renderForm();
+    answer(502, { reachable: false, code: "FERRUM_BFF_UPSTREAM_FAILURE" });
+    await testConnection();
+
+    expect(fetched).toBe(3);
+    expect(badge().textContent).toContain("502");
+    expect(badge().className).toContain("text-danger");
+  });
+
+  it.each([200, 503])("bounds a %s answer whose body never completes", async (status) => {
+    await renderForm();
+    serve(() => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"reachable":'));
+      },
+    }), { status }), 50);
+    await testConnection();
+
+    expect(testButton().disabled).toBe(false);
+    expect(badge().textContent).toContain("timed out");
     expect(badge().className).toContain("text-danger");
   });
 });

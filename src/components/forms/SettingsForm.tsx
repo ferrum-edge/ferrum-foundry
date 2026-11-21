@@ -104,9 +104,19 @@ interface StatusResult {
   error?: string;
 }
 
-function isStatusResult(value: unknown): value is StatusResult {
-  return typeof value === "object" && value !== null &&
-    typeof (value as { reachable?: unknown }).reachable === "boolean";
+/**
+ * The BFF's `{ reachable, status, body }` envelope for an answer with HTTP
+ * `httpStatus`, or `null` when the JSON is not one: the envelope names the
+ * status it was sent with, and a `503` claims `reachable` only with the
+ * gateway's health snapshot as its body. Anything else at this path (an
+ * intermediary's JSON, for one) is a failed test, never a green badge.
+ */
+function statusEnvelope(value: unknown, httpStatus: number): StatusResult | null {
+  if (typeof value !== "object" || value === null) return null;
+  const envelope = value as StatusResult;
+  if (typeof envelope.reachable !== "boolean" || envelope.status !== httpStatus) return null;
+  if (httpStatus === 503 && envelope.reachable && !isGatewayHealthSnapshot(envelope.body)) return null;
+  return envelope;
 }
 
 /**
@@ -245,25 +255,42 @@ export function SettingsForm() {
   async function handleTest() {
     setTesting(true);
     setStatus(null);
+    // The status of the answer whose body is being read, for the badge.
+    let httpStatus: number | undefined;
+    const failed = (code: number): StatusResult => ({
+      reachable: false,
+      status: code,
+      error: `Connection test failed (HTTP ${code})`,
+    });
     try {
       // The BFF relays the gateway's HTTP status. A `503` is still an answer
       // to classify from its envelope (Edge reports a reachable gateway that
       // is not ready that way), so it is neither retried nor thrown; every
-      // other failure keeps the client's retry and error handling.
-      const response = await api.get("api/settings/status", {
-        throwHttpErrors: (code) => code !== 503,
-      });
-      const result: unknown = await response.json().catch(() => null);
-      setStatus(
-        isStatusResult(result)
-          ? result
-          : { reachable: false, status: response.status, error: `Connection test failed (HTTP ${response.status})` },
-      );
+      // other failure keeps the client's retry and error handling. The body
+      // is read through ky, so its timeout bounds a stalled body as well.
+      const result = await api
+        .get("api/settings/status", {
+          throwHttpErrors: (code) => code !== 503,
+          hooks: {
+            afterResponse: [
+              ({ response }) => {
+                httpStatus = response.status;
+              },
+            ],
+          },
+        })
+        .json<unknown>();
+      const code = httpStatus ?? 0;
+      setStatus(statusEnvelope(result, code) ?? failed(code));
     } catch (err) {
-      setStatus({
-        reachable: false,
-        error: err instanceof Error ? err.message : "Connection test failed",
-      });
+      setStatus(
+        err instanceof SyntaxError && httpStatus !== undefined
+          ? failed(httpStatus)
+          : {
+              reachable: false,
+              error: err instanceof Error ? err.message : "Connection test failed",
+            },
+      );
     } finally {
       setTesting(false);
     }
