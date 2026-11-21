@@ -139,6 +139,35 @@ describe('maxLength outside a plain string node', () => {
     expect(() => aboveCap.serviceManifestSchema()).toThrow('could not be loaded or compiled');
   });
 
+  it('constrains typed string enum and const members that exceed the bound', async () => {
+    const schema = vendoredSchema();
+    Object.assign(schema.properties.auth.properties.mode, { type: 'string', maxLength: 4 });
+    expect(schema.properties.schema.const).toBe('ferrum.service_manifest');
+    Object.assign(schema.properties.schema, { type: 'string', maxLength: 3 });
+    const { validatedManifest } = await load(schema);
+    const body = manifest();
+    body.auth = { mode: 'none' };
+    // The const member itself exceeds its bound, so nothing can satisfy it.
+    expect(validatedManifest(body)).toBeNull();
+    schema.properties.schema.maxLength = 64;
+    const typedEnum = await load(schema);
+    expect(typedEnum.validatedManifest(body)).not.toBeNull();
+    body.auth = { mode: 'service' };
+    expect(typedEnum.validatedManifest(body)).toBeNull();
+  });
+
+  it('honors an allOf clause bound above the default without clipping it', async () => {
+    const schema = vendoredSchema();
+    schema.properties.api.properties.service_base_path.allOf.push({ maxLength: 2049 });
+    const { validatedManifest } = await load(schema);
+    const body = manifest();
+    body.api.service_base_path = `/${'a'.repeat(2047)}/`;
+    expect(body.api.service_base_path).toHaveLength(2049);
+    expect(validatedManifest(body)).not.toBeNull();
+    body.api.service_base_path = `/${'a'.repeat(2048)}/`;
+    expect(validatedManifest(body)).toBeNull();
+  });
+
   it('constrains strings through a typeless allOf clause', async () => {
     const schema = vendoredSchema();
     schema.properties.api.properties.service_base_path.allOf.push({ maxLength: 4 });

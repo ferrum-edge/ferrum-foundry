@@ -81,7 +81,11 @@ function compile(node: SchemaNode): z.ZodType {
     if (!node.items) throw new Error('Missing service manifest item schema');
     validator = z.array(compile(node.items)).min(node.minItems ?? 0).max(32);
   } else if (node.type === 'string') {
-    validator = z.string().max(maxLength ?? MANIFEST_STRING_DEFAULT_MAX_LENGTH);
+    // The default applies only when neither this node nor one of its allOf
+    // clauses declares a bound; a declared bound is applied below.
+    const declared = maxLength !== undefined
+      || (node.allOf ?? []).some((clause) => clause.maxLength !== undefined);
+    validator = declared ? z.string() : z.string().max(MANIFEST_STRING_DEFAULT_MAX_LENGTH);
   } else if (node.type === 'integer' || node.type === 'number') {
     let numeric = node.type === 'integer' ? z.number().int() : z.number();
     if (node.minimum !== undefined) numeric = numeric.min(node.minimum);
@@ -90,8 +94,9 @@ function compile(node: SchemaNode): z.ZodType {
   } else if (node.type === 'boolean') validator = z.boolean();
   else if (node.type !== undefined) throw new Error('Unsupported service manifest schema type');
 
-  if (maxLength !== undefined && node.type !== 'string') {
-    // maxLength beside const/enum, or in a typeless clause, constrains only
+  if (maxLength !== undefined) {
+    // One code path for every declared bound, whichever branch built the
+    // validator (string, const, enum or a typeless clause). It constrains only
     // string values (JSON Schema), never narrowing or widening other types.
     const bound = maxLength;
     validator = validator.refine((value) =>

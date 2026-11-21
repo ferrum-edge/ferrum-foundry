@@ -100,8 +100,9 @@ re-vendor (#723). Until then a manifest outside those bounds can still preview.
 Local presentation limits are 32 KiB raw UTF-8 JSON, eight nesting levels before
 JSON parsing, 32 array items, and 16 KiB serialized output. Each string field
 gets the schema's declared `maxLength`, or 2,048 characters where the schema
-declares none; no declared bound is clamped. A `maxLength` beside an `enum`
-or `const`, or in a typeless `allOf` clause, constrains string values too.
+declares none (on the field or any of its `allOf` clauses); no declared bound
+is clamped. A `maxLength` beside an `enum` or `const`, typed or not, or in a
+typeless `allOf` clause, constrains string values too.
 Every string, including unknown keys refused by the closed schema, is capped
 at 4,096 characters before validation, and a schema declaring any `maxLength`
 above that cap does not compile (the route answers `503`) rather than being
