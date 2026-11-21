@@ -77,18 +77,29 @@ export interface Secrets {
    * only where they stand as a whole token (`MIN_DISTINCTIVE`).
    */
   readonly tokens: readonly string[];
+  /**
+   * Numbers and booleans submitted where only a string belongs (a trigger
+   * operand typed without quotes), which a parser quotes back as text
+   * ("invalid type: integer `N`, expected a string") or a body may repeat as
+   * the same typed value. Replaced where a structured body holds the equal
+   * value outside its fixed vocabulary, and redacted in text like an
+   * unclassified value: wherever it occurs when `MIN_DISTINCTIVE` long, as a
+   * whole token when shorter.
+   */
+  readonly scalars: readonly (number | boolean)[];
 }
 
-const NO_SECRETS: Secrets = { values: [], tokens: [] };
+const NO_SECRETS: Secrets = { values: [], tokens: [], scalars: [] };
 
 function classified(values: readonly string[]): Secrets {
-  return { values, tokens: [] };
+  return { values, tokens: [], scalars: [] };
 }
 
 function mergeSecrets(sets: readonly Secrets[]): Secrets {
   return {
     values: sets.flatMap((set) => set.values),
     tokens: sets.flatMap((set) => set.tokens),
+    scalars: sets.flatMap((set) => set.scalars),
   };
 }
 
@@ -113,7 +124,7 @@ export function unclassified(values: readonly string[]): Secrets {
   for (const value of values) {
     (value.trim().length < MIN_DISTINCTIVE ? short : long).push(value);
   }
-  return { values: long, tokens: short };
+  return { values: long, tokens: short, scalars: [] };
 }
 
 /**
@@ -260,9 +271,29 @@ export function pluginConfigSecrets(pluginName: string, config: unknown): Secret
  * an operand is the same shared secret there, and a refusal must not echo it.
  */
 export function pluginTriggerSecrets(trigger: unknown): Secrets {
-  return classified([
-    ...new Set(pluginTriggerWithheldSites(trigger).flatMap((site) => submittedValues(site.value))),
-  ]);
+  const sites = pluginTriggerWithheldSites(trigger);
+  return {
+    values: [...new Set(sites.flatMap((site) => submittedValues(site.value)))],
+    tokens: [],
+    scalars: [...new Set(sites.flatMap((site) => submittedScalars(site.value)))],
+  };
+}
+
+/**
+ * Every number and boolean `data` holds, other than a boolean
+ * `case_insensitive` flag, which says how a comparison is made and is never
+ * an operand.
+ */
+function submittedScalars(data: unknown): (number | boolean)[] {
+  if ((typeof data === "number" && Number.isFinite(data)) || typeof data === "boolean") {
+    return [data];
+  }
+  if (Array.isArray(data)) return data.flatMap(submittedScalars);
+  if (data && typeof data === "object") {
+    return Object.entries(data).flatMap(([key, value]) =>
+      key === "case_insensitive" && typeof value === "boolean" ? [] : submittedScalars(value));
+  }
+  return [];
 }
 
 /**
@@ -275,8 +306,9 @@ export function pluginTriggerSecrets(trigger: unknown): Secrets {
  * rather than trying to recognise which of its leaves is sensitive. A plugin
  * configuration (`plugin_name` beside `config` or `trigger`) at any depth — a
  * plugin write, or one entry of a larger payload — has its `config` classified
- * by `pluginConfigSecrets` and its `trigger` by `pluginTriggerSecrets`, on top
- * of the positional rules, which still walk the trigger.
+ * by `pluginConfigSecrets` and its `trigger` by `pluginTriggerSecrets`, each
+ * by those rules alone: the positional rules would take a whole `cookie`
+ * predicate, and the path of a `spiffe_id`, which Edge keeps readable.
  */
 export function secretValues(data: unknown): Secrets {
   if (typeof data === "string") return classified(urlSecrets(data));
@@ -289,7 +321,6 @@ export function secretValues(data: unknown): Secrets {
       return mergeSecrets([
         pluginConfigSecrets(pluginName, config),
         pluginTriggerSecrets(trigger),
-        secretValues(trigger),
         secretValues(rest),
       ]);
     }
@@ -724,6 +755,8 @@ export interface RedactionForms {
    * were each redacted already. Longest first.
    */
   readonly structural: readonly string[];
+  /** Typed values replaced where a structured body holds an equal one (`Secrets.scalars`). */
+  readonly scalars: readonly (number | boolean)[];
 }
 
 /**
@@ -746,17 +779,23 @@ function addForms(value: string, forms: Set<string>): void {
  * occurs, as the classified one must be.
  */
 export function redactionForms(secrets: Secrets | readonly string[]): RedactionForms {
-  const { values, tokens } = "tokens" in secrets ? secrets : classified(secrets);
+  const { values, tokens, scalars } = "tokens" in secrets ? secrets : classified(secrets);
   const substrings = new Set<string>();
   for (const value of values) addForms(value, substrings);
   const whole = new Set<string>();
   for (const value of tokens) addForms(value, whole);
+  // A scalar's text is matched as an unclassified value's would be.
+  for (const value of scalars) {
+    const text = String(value);
+    (text.length < MIN_DISTINCTIVE ? whole : substrings).add(text);
+  }
   const longestFirst = (a: string, b: string) => b.length - a.length;
   const sorted = [...substrings].sort(longestFirst);
   return {
     substrings: sorted,
     tokens: [...whole].filter((form) => form.trim() && !substrings.has(form)).sort(longestFirst),
     structural: sorted.filter((form) => form.trim().length >= MIN_DISTINCTIVE),
+    scalars: [...new Set(scalars)],
   };
 }
 
@@ -784,13 +823,44 @@ function occurrences(
 }
 
 /**
+ * `spans` widened so none ends or starts inside a `[REDACTED]` marker already
+ * in `text`: a span that overlaps one covers all of it. A short classified
+ * value (`RED`, `ACT`) found inside a marker the gateway wrote would
+ * otherwise split it into text no reader recognizes; widened, the marker is
+ * replaced by itself, and a secret running into one merges with it.
+ */
+function wholeMarkers(text: string, spans: [number, number][]): [number, number][] {
+  const markers: [number, number][] = [];
+  for (
+    let at = text.indexOf(REDACTION_MARKER);
+    at !== -1;
+    at = text.indexOf(REDACTION_MARKER, at + REDACTION_MARKER.length)
+  ) {
+    markers.push([at, at + REDACTION_MARKER.length]);
+  }
+  if (markers.length === 0) return spans;
+  return spans.map(([spanStart, spanEnd]): [number, number] => {
+    let start = spanStart;
+    let end = spanEnd;
+    for (const [markerStart, markerEnd] of markers) {
+      if (markerStart < end && start < markerEnd) {
+        start = Math.min(start, markerStart);
+        end = Math.max(end, markerEnd);
+      }
+    }
+    return [start, end];
+  });
+}
+
+/**
  * `text` with each span replaced by `[REDACTED]`, overlapping spans as one.
  * Every span is found in the original text and replaced in one pass, so every
  * occurrence of every form is covered whatever their lengths and overlaps, and
  * a marker already written is never matched and split by a later form.
  */
-function replaceSpans(text: string, spans: [number, number][]): string {
-  if (spans.length === 0) return text;
+function replaceSpans(text: string, found: [number, number][]): string {
+  if (found.length === 0) return text;
+  const spans = wholeMarkers(text, found);
   spans.sort(([a], [b]) => a - b);
   let redacted = "";
   let cursor = 0;
@@ -844,6 +914,9 @@ const FIXED_VOCABULARY_FIELDS = new Set([
 /** `value` with every string in it redacted, and its keys against the structural forms. */
 function redactValue(value: unknown, forms: RedactionForms): unknown {
   if (typeof value === "string") return redactSubmitted(value, forms);
+  if ((typeof value === "number" || typeof value === "boolean") && forms.scalars.includes(value)) {
+    return REDACTION_MARKER;
+  }
   if (Array.isArray(value)) return value.map((item) => redactValue(item, forms));
   if (value && typeof value === "object") {
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [
@@ -864,9 +937,15 @@ export function redactBody(value: unknown, forms: RedactionForms): unknown {
   if (!isRecord(value)) return redactValue(value, forms);
   return Object.fromEntries(Object.entries(value).map(([key, item]) => [
     redactStructure(key, forms),
-    typeof item === "string" && FIXED_VOCABULARY_FIELDS.has(key)
-      ? redactStructure(item, forms)
-      : redactValue(item, forms),
+    !FIXED_VOCABULARY_FIELDS.has(key)
+      ? redactValue(item, forms)
+      : typeof item === "string"
+        ? redactStructure(item, forms)
+        // A fixed-vocabulary flag (`confirmation_required: true`) is the
+        // gateway's own, never a submitted scalar.
+        : typeof item === "number" || typeof item === "boolean"
+          ? item
+          : redactValue(item, forms),
   ]));
 }
 

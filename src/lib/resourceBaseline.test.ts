@@ -340,6 +340,38 @@ describe("plugin trigger redaction (Edge main's trigger projection)", () => {
     ]);
     expect(pointers({ when: { match: { query: { name: "q", value: { case_insensitive: "yes" } } } } }))
       .toEqual(["/trigger/when/match/query/value/case_insensitive"]);
+    // Content under a visible key must have the type Edge declares for it.
+    expect(pointers({ when: { match: { header: { name: { a: "b" }, presence: "maybe" } } } })).toEqual([
+      "/trigger/when/match/header/name",
+      "/trigger/when/match/header/presence",
+    ]);
+    expect(pointers({
+      when: {
+        all: [
+          { match: { path: "raw" } },
+          { match: { host: { exact: ["ok", 5], regex: ["no"], weird: 1 } } },
+          { match: { method: ["GET", { x: 1 }] } },
+          { match: { protocol: ["http2", "gopher"] } },
+          { match: { listen_port: [443, 70000, "80"] } },
+          { match: { external_identity_authority: ["ab".repeat(32), "short"] } },
+          { match: { consumer: { presence: "present", value: { prefix: [1] }, extra: "x" } } },
+          { match: { spiffe_id: "spiffe://raw" } },
+        ],
+      },
+    })).toEqual([
+      "/trigger/when/all/0/match/path",
+      "/trigger/when/all/1/match/host/exact/1",
+      "/trigger/when/all/1/match/host/regex",
+      "/trigger/when/all/1/match/host/weird",
+      "/trigger/when/all/2/match/method/1",
+      "/trigger/when/all/3/match/protocol/1",
+      "/trigger/when/all/4/match/listen_port/1",
+      "/trigger/when/all/4/match/listen_port/2",
+      "/trigger/when/all/5/match/external_identity_authority/1",
+      "/trigger/when/all/6/match/consumer/value/prefix/0",
+      "/trigger/when/all/6/match/consumer/extra",
+      "/trigger/when/all/7/match/spiffe_id",
+    ]);
     // An explicit null discloses nothing and is not a site.
     expect(pointers({ when: { match: { header: { name: "x", value: { regex: null } } } } })).toEqual([]);
   });
@@ -353,6 +385,21 @@ describe("plugin trigger redaction (Edge main's trigger projection)", () => {
     for (const visible of ["x-skip-waf", "debug", "/internal", "POST", "orders-svc", "ab".repeat(32)]) {
       expect(shown).toContain(visible);
     }
+    // The cookie predicate is classified by the trigger walk alone: its name,
+    // match kind and flags stay readable, only the operand is withheld.
+    expect(shown).toContain(
+      '"cookie":{"name":"canary","value":{"regex":"[redacted]","case_insensitive":true}}',
+    );
+    const identity = formatBaselineValue("trigger", {
+      when: {
+        all: [
+          { match: { cookie: { name: "hint", presence: "absent", multi_value: "all" } } },
+          { match: { spiffe_id: { value: { prefix: ["spiffe://cluster.local/ns/"] } } } },
+        ],
+      },
+    });
+    expect(identity).toContain('"cookie":{"name":"hint","presence":"absent","multi_value":"all"}');
+    expect(identity).toContain("spiffe://cluster.local/ns/");
     // A header operand change still shows as a change, without its value.
     const changed = structuredClone(trigger);
     changed.when.all[0].not!.match.header!.value.exact[0] = "synthetic-replacement-token";
@@ -366,6 +413,11 @@ describe("plugin trigger redaction (Edge main's trigger projection)", () => {
     expect(formatBaselineValue("trigger", { if: { header: "synthetic-raw" } })).not.toContain(
       "synthetic-raw",
     );
+    expect(
+      formatBaselineValue("trigger", {
+        when: { match: { header: { name: { pasted: "synthetic-raw-name-secret" } } } },
+      }),
+    ).toBe('{"when":{"match":{"header":{"name":"[redacted]"}}}}');
     expect(formatBaselineValue("trigger", null)).toBe("null");
     expect(formatBaselineValue("trigger", undefined)).toBe("—");
   });

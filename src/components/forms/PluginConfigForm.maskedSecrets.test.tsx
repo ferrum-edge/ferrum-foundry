@@ -391,6 +391,15 @@ describe("plugin trigger with masked operands", () => {
     expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 
+  it("blocks a placeholder inside ill-typed content under a visible key", async () => {
+    await renderForm("cors", {}, "operator", {
+      when: { match: { header: { name: { pasted: "[REDACTED]" } } } },
+    } as unknown as PluginTrigger);
+    expect(triggerList()).toEqual(["/trigger/when/match/header/name/pasted"]);
+    await submit();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   it("only warns about a placeholder in a visible predicate", async () => {
     await renderForm("cors", {}, "operator", {
       when: { match: { path: { exact: ["[REDACTED]"] } } },

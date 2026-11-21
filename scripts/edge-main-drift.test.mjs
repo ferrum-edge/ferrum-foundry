@@ -224,6 +224,27 @@ test("a trigger predicate Edge adds, drops, or stops declaring as a list is drif
   );
   assert.match(driftMarkdown(unreadable), TRIGGER_UNREADABLE_PATTERN);
 
+  // A stale declaration left in a comment above the active one is not read.
+  const stale = PROJECTION.replace(
+    "const TRIGGER_VISIBLE_PREDICATES: &[&str] = &[",
+    '// const TRIGGER_VISIBLE_PREDICATES: &[&str] = &["method", "path"];\n' +
+      "/* const TRIGGER_VISIBLE_PREDICATES: &[&str] = &[\"method\", \"path\"]; */\n" +
+      'const TRIGGER_VISIBLE_PREDICATES: &[&str] = &[\n    "device_posture",',
+  );
+  assert.deepEqual(edgeMainDrift(SPEC, stale, options).trigger, [
+    { constant: "TRIGGER_VISIBLE_PREDICATES", status: "missing", predicates: ["device_posture"] },
+  ]);
+
+  // The literal must end at its declaration's semicolon.
+  const extended = PROJECTION.replace(
+    '&["header", "query", "cookie"];',
+    '&["header", "query", "cookie"] + EXTRA;',
+  );
+  assert.deepEqual(
+    edgeMainDrift(SPEC, extended, options).trigger.map(({ constant, status }) => [constant, status]),
+    [["TRIGGER_CLIENT_FIELD_PREDICATES", "unreadable"]],
+  );
+
   const notAList = PROJECTION.replace(
     '&["header", "query", "cookie"]',
     "CLIENT_FIELDS",

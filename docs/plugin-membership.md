@@ -174,8 +174,10 @@ projection (`src/api/maskedSecretSites.ts`: the CI-checked schema rules in
   anywhere in a malformed trigger shape) blocks Save for a non-admin session
   on every gateway, listed under "Trigger values hidden from your role", until
   it is re-entered or the trigger is turned off; it offers no **Clear**,
-  because a predicate missing its operand is not one Edge accepts. A
-  placeholder in a visible predicate or a field name is a warning.
+  because a predicate missing its operand is not one Edge accepts. So does a
+  placeholder inside content a visible key cannot hold (an object under a
+  field `name`, say). A placeholder in a well-typed visible predicate or
+  field name is a warning.
   A plugin Foundry has no rules for (a custom plugin, or a built-in newer than
   Foundry's copy of the rules) has every placeholder in its `config` treated
   as masked. An unknown session role is treated as a non-admin one.

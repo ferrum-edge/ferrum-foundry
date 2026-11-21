@@ -38,6 +38,11 @@ const RULE_CONSTRUCTOR_PATTERN =
 const RULE_SET_DECLARATION_PATTERN =
   /\bconst\s+([A-Z][A-Z0-9_]*)\s*:\s*&(?:'static\s+)?\[\s*SensitivityRule\s*\]\s*=/g;
 const KEY_SEPARATORS_PATTERN = /[-._]/g;
+// A char literal: `'x'`, `'\n'`, `'\''`, `'\x41'`, `'\u{1F600}'`. A `'` that
+// does not open one starts a lifetime (`'static`).
+const CHAR_LITERAL_PATTERN = /^'(?:\\(?:x[0-9a-fA-F]{2}|u\{[0-9a-fA-F]{1,6}\}|.)|[^\\'\n])'/u;
+// A raw (byte) string's opening: `r"`, `r#"`, `br##"`.
+const RAW_STRING_PATTERN = /^b?r(#*)"/;
 
 /**
  * Edge's `FieldSensitivity` variants, as Foundry names them. Each one listed
@@ -60,24 +65,54 @@ const PUNCTUATION = new Set(["(", ")", "[", "]", "{", "}", ",", "&", ":", ";", "
 
 /**
  * Rust tokens from `source` onward: identifiers, string literals, `::` and
- * single punctuation, with comments and whitespace dropped. Only the table
- * literals are ever tokenized, so char literals and lifetimes (`'static`)
- * elsewhere in the file never reach it; a `'` that does is a token the parser
- * refuses.
+ * single punctuation, with comments (nested block comments included) and
+ * whitespace dropped. Char literals and raw strings are consumed whole, so a
+ * quote or `//` inside one cannot put the scan out of step when a whole file
+ * is tokenized; a char literal is a `char` token and a lifetime's `'` an
+ * `other` one, both of which the parsers refuse inside a literal.
  */
 function* rustTokens(source, start = 0) {
   let index = start;
   while (index < source.length) {
     const character = source[index];
+    const raw = character === "r" || character === "b"
+      ? RAW_STRING_PATTERN.exec(source.slice(index, index + 260))
+      : null;
     if (WHITESPACE_PATTERN.test(character)) {
       index += 1;
     } else if (source.startsWith("//", index)) {
       const end = source.indexOf("\n", index);
       index = end === -1 ? source.length : end;
     } else if (source.startsWith("/*", index)) {
-      const end = source.indexOf("*/", index + 2);
-      if (end === -1) throw new Error("unterminated block comment");
-      index = end + 2;
+      let depth = 1;
+      index += 2;
+      while (depth > 0) {
+        if (index >= source.length) throw new Error("unterminated block comment");
+        if (source.startsWith("/*", index)) {
+          depth += 1;
+          index += 2;
+        } else if (source.startsWith("*/", index)) {
+          depth -= 1;
+          index += 2;
+        } else {
+          index += 1;
+        }
+      }
+    } else if (raw) {
+      const close = `"${raw[1]}`;
+      const end = source.indexOf(close, index + raw[0].length);
+      if (end === -1) throw new Error("unterminated raw string literal");
+      yield { type: "string", value: source.slice(index + raw[0].length, end) };
+      index = end + close.length;
+    } else if (character === "'") {
+      const literal = CHAR_LITERAL_PATTERN.exec(source.slice(index, index + 16));
+      if (literal) {
+        index += literal[0].length;
+        yield { type: "char", value: literal[0] };
+      } else {
+        index += 1;
+        yield { type: "other", value: character };
+      }
     } else if (character === '"') {
       let value = "";
       index += 1;
@@ -276,11 +311,35 @@ export function parseSensitivitySchemas(source) {
 
 /**
  * A `&[&str]` constant of the Rust source (`const NAME: &[&str] = &["a", …];`),
- * as its strings in order. Any other literal shape throws.
+ * as its strings in order. The declaration is found in the token stream of
+ * the whole file, so one inside a comment (a stale copy left above the
+ * active one) is never read, and the literal must run to the declaration's
+ * `;`. A missing declaration, a second one, or any other literal shape throws.
  */
 export function parseStringSliceConstant(source, name) {
-  const tokens = new TokenStream(source, constantLiteral(source, name));
-  return tokens.slice(() => tokens.string());
+  const tokens = new TokenStream(source, 0);
+  let values;
+  let previous = null;
+  while (tokens.peek().type !== "end") {
+    const token = tokens.next();
+    if (previous?.type === "ident" && previous.value === "const" &&
+        token.type === "ident" && token.value === name) {
+      if (values) throw new Error(`\`${name}\` is declared more than once`);
+      tokens.expect(":");
+      while (tokens.peek().value !== "=") {
+        if (tokens.peek().type === "end") throw new Error(`\`${name}\` has no initializer`);
+        tokens.next();
+      }
+      tokens.next();
+      values = tokens.slice(() => tokens.string());
+      tokens.expect(";");
+      previous = null;
+      continue;
+    }
+    previous = token;
+  }
+  if (!values) throw new Error(`\`${name}\` not found`);
+  return values;
 }
 
 /** Edge's `KAFKA_SAFE_PRODUCER_PROPERTIES`, parsed from the Rust source. */

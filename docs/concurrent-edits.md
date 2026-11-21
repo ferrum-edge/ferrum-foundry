@@ -548,7 +548,16 @@ have (a trigger without `when`, an unknown node or predicate key, a non-object
 `value`). Field names, `presence`, `multi_value`, `case_insensitive`, the tree,
 and the routing and identity predicates (`path`, `method`, `host`, `consumer`,
 `external_identity`, `external_identity_authority`, and the rest of Edge's
-`TRIGGER_VISIBLE_PREDICATES`) stay readable. The pinned v0.9.20 does not mask
+`TRIGGER_VISIBLE_PREDICATES`) stay readable, but only with the type Edge's
+`PluginTriggerMatch` declares: an editor draft is unvalidated, so an object
+pasted under a field `name` or a number in a `method` list is withheld too.
+The trigger is classified by this walk alone, not by the field-name and URL
+rules above, which would hide a whole `cookie` predicate and a `spiffe_id`.
+A number or boolean operand is withheld as well: its text is redacted like an
+unclassified value (anywhere when 8 characters or longer, as a whole token
+when shorter), and the equal typed value in a structured error body is
+replaced, except in the fixed-vocabulary fields. A `[REDACTED]` marker the
+gateway already wrote is never split by a shorter match inside it. The pinned v0.9.20 does not mask
 a trigger at all, but the operands are the same shared values there, so
 Foundry applies this on every gateway (`pluginTriggerWithheldSites` in
 `src/lib/resourceBaseline.ts`). `scripts/edge-main-drift.mjs` compares

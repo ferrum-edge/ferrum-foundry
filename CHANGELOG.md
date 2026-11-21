@@ -250,8 +250,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A plugin configuration's execution `trigger` is redacted like its
   `config`. Every `header`, `query` and `cookie` comparison operand (each
-  `exact` and `prefix` entry, `regex`), and any shape a `PluginTrigger` cannot
-  have, is treated as secret by failed-write redaction (`secretValues`) and
+  `exact` and `prefix` entry, `regex`, numbers included), and any shape a
+  `PluginTrigger` cannot have (in a draft, also content under a visible key
+  without the type Edge declares), is treated as secret by failed-write
+  redaction (`secretValues`) and
   shown as `[redacted]` in the conflict dialog, following Ferrum Edge main's
   trigger projection (ferrum-edge#7054) on every gateway, the pinned v0.9.20
   included; the routing and identity predicates (`path`, `method`, `host`,

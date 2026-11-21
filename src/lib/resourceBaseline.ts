@@ -326,9 +326,17 @@ function redactFieldValue(field: string, value: unknown): unknown {
  */
 export function formatBaselineValue(field: string, value: unknown): string {
   if (value === undefined) return "—";
-  // A plugin `trigger` is redacted as Edge main projects it, then shown with
-  // the same nested name rules as any other field.
-  const shown = field === "trigger" ? redactPluginTrigger(value) : value;
+  // A plugin `trigger` is classified by Edge main's trigger projection alone
+  // (`redactPluginTrigger`), as a plugin `config` is by its own rules: the
+  // name rules below would hide a whole `cookie` predicate, field name and
+  // match kind included, which Edge keeps readable.
+  if (field === "trigger") {
+    if (value === null) return "null";
+    const shown = redactPluginTrigger(value);
+    if (typeof shown === "string") return shown.length === 0 ? '""' : shown;
+    return JSON.stringify(shown);
+  }
+  const shown = value;
   if (isRedactedValue(field, shown)) {
     if (shown === null) return "null";
     if (typeof shown === "string" && shown.length === 0) return '""';
@@ -399,6 +407,22 @@ function isTriggerObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+/** `PluginTriggerProtocol`, as Edge main's `plugin_trigger.rs` spells it. */
+const TRIGGER_PROTOCOLS: readonly string[] = [
+  "http1",
+  "http2",
+  "http3",
+  "grpc",
+  "grpc_web",
+  "websocket",
+  "tcp",
+  "udp",
+  "dtls",
+];
+const TRIGGER_PRESENCE: readonly string[] = ["present", "absent"];
+const TRIGGER_MULTI_VALUE: readonly string[] = ["any", "all"];
+const TRIGGER_AUTHORITY_PATTERN = /^[0-9A-Fa-f]{64}$/;
+
 /**
  * Every site of a plugin `trigger` that Edge main's non-admin projection
  * (`project_plugin_trigger_with`) withholds, in the order it visits them:
@@ -412,19 +436,90 @@ function isTriggerObject(value: unknown): value is Record<string, unknown> {
  * non-object node or leaf, a non-array `all` / `any`, a key the schema does
  * not define, a non-object `value`) is one site, withheld whole. A `null` is
  * not a site, since it discloses nothing.
+ *
+ * Edge projects only triggers it has already validated, so it can keep a
+ * visible key's content by name alone. Foundry also walks unvalidated drafts,
+ * so the content Edge keeps readable must also have the type Edge's
+ * `PluginTriggerMatch` declares for it: a field predicate's `name` a string,
+ * `presence` and `multi_value` one of their enum spellings, `method` and the
+ * other list predicates a list of strings (`protocol` of its enum,
+ * `listen_port` of ports, `external_identity_authority` of 64-hex digests),
+ * `path` / `host` / `sni` a string match, and `consumer` / `external_identity`
+ * / `spiffe_id` an identity match. Anything else there is withheld as the
+ * smallest ill-typed site. A stored trigger always has these types, so this
+ * changes nothing for one Edge has accepted.
  */
 export function pluginTriggerWithheldSites(trigger: unknown): TriggerWithheldSite[] {
   const sites: TriggerWithheldSite[] = [];
   const withhold = (value: unknown, pointer: string) => {
     if (value !== null && value !== undefined) sites.push({ pointer, value });
   };
+  const child = (pointer: string, key: string | number) =>
+    `${pointer}/${typeof key === "number" ? key : triggerSegment(key)}`;
+
+  // Visible content, kept only while it has the type Edge declares.
+  const scalarOf = (accept: (value: unknown) => boolean) => (value: unknown, pointer: string) => {
+    if (value !== null && !accept(value)) withhold(value, pointer);
+  };
+  const listOf = (accept: (value: unknown) => boolean) => (value: unknown, pointer: string) => {
+    if (value === null) return;
+    if (!Array.isArray(value)) return withhold(value, pointer);
+    value.forEach((item, index) => {
+      if (!accept(item)) withhold(item, child(pointer, index));
+    });
+  };
+  const isString = (value: unknown) => typeof value === "string";
+  const oneOf = (allowed: readonly string[]) => (value: unknown) =>
+    typeof value === "string" && allowed.includes(value);
+  const stringList = listOf(isString);
+  const stringMatch = (value: unknown, pointer: string) => {
+    if (value === null) return;
+    if (!isTriggerObject(value)) return withhold(value, pointer);
+    for (const [key, operand] of Object.entries(value)) {
+      const at = child(pointer, key);
+      if (key === "exact" || key === "prefix") stringList(operand, at);
+      else if (key === "regex") scalarOf(isString)(operand, at);
+      else if (key === "case_insensitive") scalarOf((flag) => typeof flag === "boolean")(operand, at);
+      else withhold(operand, at);
+    }
+  };
+  const identityMatch = (value: unknown, pointer: string) => {
+    if (value === null) return;
+    if (!isTriggerObject(value)) return withhold(value, pointer);
+    for (const [key, item] of Object.entries(value)) {
+      const at = child(pointer, key);
+      if (key === "presence") scalarOf(oneOf(TRIGGER_PRESENCE))(item, at);
+      else if (key === "value") stringMatch(item, at);
+      else withhold(item, at);
+    }
+  };
+  const visible: Readonly<Record<string, (value: unknown, pointer: string) => void>> = {
+    method: stringList,
+    path: stringMatch,
+    host: stringMatch,
+    sni: stringMatch,
+    protocol: listOf(oneOf(TRIGGER_PROTOCOLS)),
+    source_cidr: stringList,
+    namespace: stringList,
+    proxy_id: stringList,
+    listen_port: listOf((port) => Number.isInteger(port) && (port as number) >= 0 &&
+      (port as number) <= 65535),
+    consumer: identityMatch,
+    external_identity: identityMatch,
+    external_identity_authority: listOf((digest) =>
+      typeof digest === "string" && TRIGGER_AUTHORITY_PATTERN.test(digest)),
+    auth_method: stringList,
+    spiffe_id: identityMatch,
+  };
+
+  // Withheld content: the comparison operands of a client-presented field.
   const operands = (value: unknown, pointer: string) => {
     if (!isTriggerObject(value)) return withhold(value, pointer);
     for (const [key, operand] of Object.entries(value)) {
       if (key === "case_insensitive" && typeof operand === "boolean") continue;
-      const at = `${pointer}/${triggerSegment(key)}`;
+      const at = child(pointer, key);
       if (Array.isArray(operand)) {
-        operand.forEach((item, index) => withhold(item, `${at}/${index}`));
+        operand.forEach((item, index) => withhold(item, child(at, index)));
       } else {
         withhold(operand, at);
       }
@@ -432,34 +527,43 @@ export function pluginTriggerWithheldSites(trigger: unknown): TriggerWithheldSit
   };
   const fieldPredicate = (value: unknown, pointer: string) => {
     if (!isTriggerObject(value)) return withhold(value, pointer);
-    for (const [key, child] of Object.entries(value)) {
-      const at = `${pointer}/${triggerSegment(key)}`;
-      if (key === "name" || key === "presence" || key === "multi_value") continue;
-      if (key === "value") operands(child, at);
-      else withhold(child, at);
+    for (const [key, item] of Object.entries(value)) {
+      const at = child(pointer, key);
+      if (key === "name") scalarOf(isString)(item, at);
+      else if (key === "presence") scalarOf(oneOf(TRIGGER_PRESENCE))(item, at);
+      else if (key === "multi_value") scalarOf(oneOf(TRIGGER_MULTI_VALUE))(item, at);
+      else if (key === "value") operands(item, at);
+      else withhold(item, at);
     }
   };
   const leaf = (value: unknown, pointer: string) => {
     if (!isTriggerObject(value)) return withhold(value, pointer);
     for (const [key, predicate] of Object.entries(value)) {
-      if (TRIGGER_VISIBLE_PREDICATES.includes(key)) continue;
-      const at = `${pointer}/${triggerSegment(key)}`;
-      if (TRIGGER_CLIENT_FIELD_PREDICATES.includes(key)) fieldPredicate(predicate, at);
-      else withhold(predicate, at);
+      const at = child(pointer, key);
+      if (TRIGGER_VISIBLE_PREDICATES.includes(key)) {
+        // A visible predicate Foundry has no declared type for is withheld.
+        const validate = Object.hasOwn(visible, key) ? visible[key] : undefined;
+        if (validate) validate(predicate, at);
+        else withhold(predicate, at);
+      } else if (TRIGGER_CLIENT_FIELD_PREDICATES.includes(key)) {
+        fieldPredicate(predicate, at);
+      } else {
+        withhold(predicate, at);
+      }
     }
   };
   const node = (value: unknown, pointer: string) => {
     if (!isTriggerObject(value)) return withhold(value, pointer);
-    for (const [key, child] of Object.entries(value)) {
-      const at = `${pointer}/${triggerSegment(key)}`;
-      if ((key === "all" || key === "any") && Array.isArray(child)) {
-        child.forEach((item, index) => node(item, `${at}/${index}`));
+    for (const [key, item] of Object.entries(value)) {
+      const at = child(pointer, key);
+      if ((key === "all" || key === "any") && Array.isArray(item)) {
+        item.forEach((entry, index) => node(entry, child(at, index)));
       } else if (key === "not") {
-        node(child, at);
+        node(item, at);
       } else if (key === "match") {
-        leaf(child, at);
+        leaf(item, at);
       } else {
-        withhold(child, at);
+        withhold(item, at);
       }
     }
   };
@@ -469,10 +573,10 @@ export function pluginTriggerWithheldSites(trigger: unknown): TriggerWithheldSit
     withhold(trigger, PLUGIN_TRIGGER_POINTER);
     return sites;
   }
-  for (const [key, child] of Object.entries(trigger)) {
-    const at = `${PLUGIN_TRIGGER_POINTER}/${triggerSegment(key)}`;
-    if (key === "when") node(child, at);
-    else withhold(child, at);
+  for (const [key, item] of Object.entries(trigger)) {
+    const at = child(PLUGIN_TRIGGER_POINTER, key);
+    if (key === "when") node(item, at);
+    else withhold(item, at);
   }
   return sites;
 }

@@ -598,10 +598,73 @@ describe("plugin triggers follow Ferrum Edge main's projection", () => {
       // Withheld whole, so a field name inside the malformed part goes too.
       expect(classifiedValues(pluginTriggerSecrets(malformed))).toContain(weird);
     }
-    expect(pluginTriggerSecrets(null)).toEqual({ values: [], tokens: [] });
-    expect(pluginTriggerSecrets(undefined)).toEqual({ values: [], tokens: [] });
-    // A malformed visible predicate stays visible, as in Edge's projection.
-    expect(pluginTriggerSecrets({ when: { match: { path: "/whatever" } } }).values).toEqual([]);
+    expect(pluginTriggerSecrets(null)).toEqual({ values: [], tokens: [], scalars: [] });
+    expect(pluginTriggerSecrets(undefined)).toEqual({ values: [], tokens: [], scalars: [] });
+  });
+
+  it("withholds ill-typed content beneath a visible key, which only a draft can hold", () => {
+    const weird = "synthetic-ill-typed-content";
+    for (const draft of [
+      { when: { match: { path: weird } } },
+      { when: { match: { path: { exact: [{ nested: weird }] } } } },
+      { when: { match: { path: { exact: ["/ok"], extra: weird } } } },
+      { when: { match: { method: weird } } },
+      { when: { match: { method: [{ nested: weird }] } } },
+      { when: { match: { protocol: [weird] } } },
+      { when: { match: { listen_port: [weird] } } },
+      { when: { match: { external_identity_authority: [weird] } } },
+      { when: { match: { consumer: { value: weird } } } },
+      { when: { match: { spiffe_id: { presence: weird } } } },
+      { when: { match: { header: { name: { nested: weird } } } } },
+      { when: { match: { cookie: { name: "c", presence: weird } } } },
+      { when: { match: { query: { name: "q", multi_value: [weird] } } } },
+    ]) {
+      expect(classifiedValues(pluginTriggerSecrets(draft)), JSON.stringify(draft)).toEqual([weird]);
+    }
+  });
+
+  it("keeps a cookie predicate's metadata and identity values readable through secretValues", () => {
+    const write = {
+      plugin_name: "waf",
+      scope: "global",
+      config: {},
+      trigger: {
+        when: {
+          all: [
+            {
+              match: {
+                cookie: {
+                  name: "canary_group",
+                  presence: "present",
+                  multi_value: "all",
+                  value: { exact: [COOKIE_PATTERN], case_insensitive: true },
+                },
+              },
+            },
+            { match: { cookie: { name: "session_hint", presence: "absent" } } },
+            { match: { spiffe_id: { value: { prefix: ["spiffe://cluster.local/ns/"] } } } },
+            { match: { external_identity: { value: { exact: ["https://idp.example.com/users/42"] } } } },
+          ],
+        },
+      },
+    };
+    const { values, tokens, scalars } = secretValues(write);
+    expect(values).toEqual([COOKIE_PATTERN]);
+    expect(tokens).toEqual([]);
+    expect(scalars).toEqual([]);
+  });
+
+  it("takes numbers and booleans at withheld sites, but not a case_insensitive flag", () => {
+    expect(pluginTriggerSecrets({
+      when: {
+        all: [
+          { match: { header: { name: "x-a", value: { exact: [48213, "text-operand-1"] } } } },
+          { match: { query: { name: "q", value: { regex: 7 } } } },
+          { match: { cookie: { name: "c", value: { prefix: [true], case_insensitive: true } } } },
+          { if: { case_insensitive: false, port: 9000 } },
+        ],
+      },
+    })).toEqual({ values: ["text-operand-1"], tokens: [], scalars: [48213, 7, true, 9000] });
   });
 
   it("keeps no operand in a refused plugin write's error or popup, on any gateway", async () => {
@@ -623,6 +686,73 @@ describe("plugin triggers follow Ferrum Edge main's projection", () => {
     expect(reported).toHaveLength(1);
     expect(reported[0].body).not.toContain(HEADER_TOKEN);
     expect(reported[0].body).not.toContain(QUERY_PREFIX);
+  });
+});
+
+describe("trigger scalars and existing markers in a refusal", () => {
+  it("keeps a numeric trigger operand out of an API spec import's parse error", async () => {
+    // Edge's extractor deserializes each entry with serde and returns its
+    // message as `details`, quoting a number given where a string belongs.
+    respond = () => Response.json({
+      error: "Spec parse failed",
+      code: "malformed_extension",
+      details:
+        "x-ferrum-plugins: invalid type: integer `48213907`, expected a string at line 1 column 80",
+      offending: 48213907,
+      port: 7,
+      retryable: false,
+    }, { status: 400 });
+    const document = JSON.stringify({
+      openapi: "3.1.0",
+      info: { title: "Orders", version: "1" },
+      "x-ferrum-plugins": [{
+        plugin_name: "waf",
+        config: {},
+        trigger: {
+          when: {
+            all: [
+              { not: { match: { header: { name: "x-skip", value: { exact: [48213907] } } } } },
+              { match: { query: { name: "q", value: { exact: [7] } } } },
+            ],
+          },
+        },
+      }],
+    });
+    const failure = await apiSpecs.create(scope, document).catch((e: unknown) => e);
+
+    expectDetached(failure);
+    const text = await exposure(failure);
+    expect(text).not.toContain("48213907");
+    expect(text).toContain("invalid type: integer `[REDACTED]`, expected a string");
+    const data = (failure as { data: Record<string, unknown> }).data;
+    // Typed scalars are matched exactly in the structured body; the code and
+    // an unrelated flag keep their values.
+    expect(data.offending).toBe("[REDACTED]");
+    expect(data.port).toBe("[REDACTED]");
+    expect(data.retryable).toBe(false);
+    expect(data.code).toBe("malformed_extension");
+    // A short one is matched only as a whole token, so `column 80` survives.
+    expect(data.details).toContain("line 1 column 80");
+  });
+
+  it("never splits a marker the gateway already wrote with a short classified operand", async () => {
+    respond = () => Response.json({
+      error: "invalid trigger field name `[REDACTED]`; operand ACT rejected",
+    }, { status: 400 });
+    const failure = await plugins.createConfig(scope, {
+      plugin_name: "waf",
+      scope: "global",
+      config: {},
+      trigger: {
+        when: { match: { header: { name: "[REDACTED]", value: { exact: ["ACT"] } } } },
+      },
+    }).catch((e: unknown) => e);
+
+    expectDetached(failure);
+    expect(await getApiErrorDetail(failure)).toBe(
+      "invalid trigger field name `[REDACTED]`; operand [REDACTED] rejected",
+    );
+    expect(reported[0].body).toContain("`[REDACTED]`; operand [REDACTED] rejected");
   });
 });
 

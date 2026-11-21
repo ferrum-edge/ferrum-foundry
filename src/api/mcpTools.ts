@@ -296,20 +296,16 @@ export function maskedToolPolicyAdvice(pointers: readonly string[]): string {
       "same save that re-enters the URL."
     );
   }
-  if (pointers.length > 0 && pointers.every(reenterOnly)) {
-    return (
-      "Have an admin make the change, or change policy.tools on the plugin page in the " +
-      "same save that re-enters them (a server URL and a trigger value must be re-entered)."
-    );
-  }
   if (pointers.some(reenterOnly)) {
     const which = pointers.some(isUrl)
       ? pointers.some(isTrigger) ? "a server URL and a trigger value" : "a server URL"
       : "a trigger value";
+    const rest = pointers.every(reenterOnly)
+      ? ""
+      : "; other values may instead be cleared, which deletes the stored secret";
     return (
       "Have an admin make the change, or change policy.tools on the plugin page in the " +
-      `same save that re-enters them (${which} must be re-entered; other values may ` +
-      "instead be cleared, which deletes the stored secret)."
+      `same save that re-enters them (${which} must be re-entered${rest}).`
     );
   }
   return (

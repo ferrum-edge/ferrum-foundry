@@ -378,8 +378,12 @@ See `docs/concurrent-edits.md`.
   trigger projection (`pluginTriggerWithheldSites` in
   `src/lib/resourceBaseline.ts`, ferrum-edge#7054), on every gateway, the
   pinned v0.9.20 included: every `header` / `query` / `cookie` comparison
-  operand is secret, as is any shape a `PluginTrigger` cannot have; the other
-  predicates (`TRIGGER_VISIBLE_PREDICATES`) stay readable. The same walk drives
+  operand is secret (numbers and booleans too, as `Secrets.scalars`), as is
+  any shape a `PluginTrigger` cannot have, including content under a visible
+  key without the type Edge declares for it (a draft is unvalidated); the
+  other predicates (`TRIGGER_VISIBLE_PREDICATES`) and field names stay
+  readable. The trigger is classified by this walk alone, never by the
+  positional name and URL rules. The same walk drives
   the conflict dialog (`formatBaselineValue("trigger", …)`) and the trigger's
   placeholder sites (`pluginTriggerPlaceholderSites`); a write that resends a
   plugin read checks both halves with `pluginPlaceholderSites`.

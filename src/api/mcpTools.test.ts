@@ -374,7 +374,8 @@ describe("per-tool policy write", () => {
     expect((refused as MaskedSecretWriteError).pointers).toEqual([
       "/trigger/when/not/match/header/value/exact/0",
     ]);
-    expect((refused as Error).message).toContain("a trigger value must be re-entered");
+    expect((refused as Error).message).toContain("(a trigger value must be re-entered)");
+    expect((refused as Error).message).not.toContain("server URL");
     expect(gateway.wire.map((call) => call.method)).toEqual(["GET"]);
 
     // An admin's read is raw, so the same trigger is saved as read.
@@ -437,7 +438,8 @@ describe("masked-value advice", () => {
 
   it("never suggests clearing a trigger operand", () => {
     const trigger = "/trigger/when/match/query/value/prefix/0";
-    expect(maskedToolPolicyAdvice([trigger])).toContain("a trigger value must be re-entered)");
+    expect(maskedToolPolicyAdvice([trigger])).toContain("(a trigger value must be re-entered)");
+    expect(maskedToolPolicyAdvice([trigger])).not.toContain("server URL");
     expect(maskedToolPolicyAdvice([trigger])).not.toContain("cleared");
     expect(maskedToolPolicyAdvice([trigger, "/config/servers/github/upstream_url"]))
       .toContain("a server URL and a trigger value must be re-entered)");

@@ -357,7 +357,8 @@ describe("MCP Tools tab", () => {
     await settle(() =>
       expect(panel().textContent).toContain("Tool policy cannot be saved by your role"));
     expect(panel().textContent).toContain("/trigger/when/match/cookie/value/exact/0");
-    expect(panel().textContent).toContain("a trigger value must be re-entered");
+    expect(panel().textContent).toContain("(a trigger value must be re-entered)");
+    expect(panel().textContent).not.toContain("server URL");
     expect(button("Edit policy for github.search").disabled).toBe(true);
     expect(puts).toHaveLength(0);
   });

@@ -286,6 +286,32 @@ describe("plugin trigger placeholders (Edge main masks header, query and cookie 
     expect(pluginTriggerPlaceholderSites({ if: ["[REDACTED]"] }, "operator").blocking).toEqual([
       "/trigger/if/0",
     ]);
+    // Ill-typed content under a visible key is withheld, so a placeholder in
+    // it blocks rather than only warning.
+    expect(
+      pluginTriggerPlaceholderSites(
+        { when: { match: { header: { name: { pasted: "[REDACTED]" } } } } },
+        "operator",
+      ),
+    ).toEqual({
+      blocking: ["/trigger/when/match/header/name/pasted"],
+      sources: [],
+      reserved: [],
+      other: [],
+    });
+    expect(
+      pluginTriggerPlaceholderSites({ when: { match: { path: { exact: [["[REDACTED]"]] } } } }, "operator")
+        .blocking,
+    ).toEqual(["/trigger/when/match/path/exact/0/0"]);
+    // A well-typed visible value is shown as stored: a warning only.
+    expect(
+      pluginTriggerPlaceholderSites({ when: { match: { header: { name: "[REDACTED]" } } } }, "operator"),
+    ).toEqual({
+      blocking: [],
+      sources: [],
+      reserved: [],
+      other: ["/trigger/when/match/header/name"],
+    });
     expect(pluginTriggerPlaceholderSites("[REDACTED]", "operator").blocking).toEqual(["/trigger"]);
     expect(pluginTriggerPlaceholderSites(null, "operator").blocking).toEqual([]);
     expect(pluginTriggerPlaceholderSites(undefined, "operator").blocking).toEqual([]);
