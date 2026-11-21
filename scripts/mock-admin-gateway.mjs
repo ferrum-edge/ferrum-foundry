@@ -1005,9 +1005,24 @@ export function buildHealth(mode, base = health) {
 
 const modeHealth = buildHealth(GATEWAY_MODE);
 
-const adminMetricsPayload = () => ({
+/** Demo uptime the mock reports at startup. */
+const MOCK_UPTIME_OFFSET_SECONDS = 86423;
+const MOCK_STARTED_AT_MS = performance.now();
+
+/**
+ * Process uptime as Edge reports it: whole seconds that advance with the
+ * monotonic clock. Foundry's request-rate sampler refuses a pair of samples
+ * whose uptime did not advance with the time between them (a replaced
+ * process), so a constant uptime would keep every rate at "Collecting".
+ */
+export function mockUptimeSeconds(elapsedMs = performance.now() - MOCK_STARTED_AT_MS) {
+  return MOCK_UPTIME_OFFSET_SECONDS + Math.floor(elapsedMs / 1000);
+}
+
+/** The proxy-backed `/admin/metrics` payload, `elapsedMs` after mock startup. */
+export const adminMetricsPayload = (elapsedMs) => ({
   gateway: {
-    mode: 'database', ferrum_version: '1.4.2', uptime_seconds: 86423,
+    mode: 'database', ferrum_version: '1.4.2', uptime_seconds: mockUptimeSeconds(elapsedMs),
     total_requests: 1523401, requests_per_second: 118,
     status_codes_total: { 200: 1420031, 201: 52011, 404: 21892, 429: 3312, 500: 1204, 502: 240 },
     status_codes_per_second: { 200: 104, 201: 6, 404: 5, 429: 2, 500: 1 },
@@ -1095,7 +1110,7 @@ const overload = {
 };
 
 const runtimeMetrics = () => ({
-  timestamp: now(), uptime_seconds: 86423, mode: 'database', ferrum_version: '1.4.2',
+  timestamp: now(), uptime_seconds: mockUptimeSeconds(), mode: 'database', ferrum_version: '1.4.2',
   system: {
     sampled_at_unix_ms: Date.now(), platform: 'linux',
     cpu: { process_percent: 8.4, system_percent: 22.1, cpu_count: 8 },

@@ -3,8 +3,11 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { calculateRequestRates } from "../src/lib/requestRate.ts";
 import {
+  adminMetricsPayload,
   buildAdminMetrics,
+  mockUptimeSeconds,
   buildHealth,
   apiSpecByProxyResponse,
   apiSpecListResponse,
@@ -491,6 +494,34 @@ for (const [mode, source] of [["database", "online"], ["file", "n/a"], ["dp", "n
       "in_flight_total", "limit_total", "policy_count", "tracked_target_count",
     ]);
     assert.equal(typeof metrics.tcp_connection_throttle.active_connections, "number");
+  });
+}
+
+test("the mock's proxy-mode uptime advances with elapsed time", () => {
+  assert.equal(mockUptimeSeconds(0), 86423);
+  assert.equal(mockUptimeSeconds(59_999), 86423 + 59);
+  assert.equal(mockUptimeSeconds(60_000), 86423 + 60);
+  assert.ok(buildAdminMetrics("dp").gateway.uptime_seconds >= 86423);
+  for (const mode of ["cp", "node_agent"]) {
+    assert.equal(buildAdminMetrics(mode, adminMetricsPayload(600_000)).gateway.uptime_seconds, 0);
+  }
+});
+
+for (const mode of ["database", "file", "dp", "mesh"]) {
+  test(`two ${mode} mock samples with constant totals give a zero rate`, () => {
+    for (const gapMs of [10_000, 300_000]) {
+      const sample = (elapsedMs) => {
+        const { gateway } = buildAdminMetrics(mode, adminMetricsPayload(elapsedMs));
+        return {
+          target: "mock", mode: gateway.mode, timestamp: 1_000_000 + elapsedMs,
+          uptimeSeconds: gateway.uptime_seconds, totalRequests: gateway.total_requests,
+          statusCodeTotals: gateway.status_codes_total,
+        };
+      };
+      const rates = calculateRequestRates(sample(gapMs), sample(0));
+      assert.equal(rates.requestsPerSecond, 0, `${gapMs} ms`);
+      assert.ok(Object.values(rates.statusCodesPerSecond).every((rate) => rate === 0));
+    }
   });
 }
 

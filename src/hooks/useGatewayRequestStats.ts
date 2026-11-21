@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { boundGatewayTarget, isGatewayTargetRetired } from "@/api/gatewayTarget";
+import { adminMetricsRequestStart } from "@/api/adminMetricsTiming";
 import type { AdminMetrics } from "@/api/types";
 import { adminMetricsReporting } from "@/lib/adminMetricsReporting";
+import { calculateRequestRates, type RequestRates } from "@/lib/requestRate";
 import { useNamespace } from "@/stores/namespace";
 
 const REQUEST_SAMPLE_STORAGE_KEY = "ferrum:metricsRequestSample";
@@ -14,11 +16,11 @@ const REQUEST_SAMPLE_STORAGE_KEY = "ferrum:metricsRequestSample";
 export const STORED_SAMPLE_MAX_AGE_MS = 15 * 60_000;
 
 /**
- * Shape version of a stored sample. A sample without it was written before
- * samples carried their mode and may hold a control plane's placeholder zeros,
- * so it is never diffed against.
+ * Shape version of a stored sample. An older sample lacks its mode (and may
+ * hold a control plane's placeholder zeros) or its request time, so it is
+ * never diffed against.
  */
-export const STORED_SAMPLE_VERSION = 2;
+export const STORED_SAMPLE_VERSION = 3;
 
 /**
  * Counters are only comparable within one gateway, and the namespace does not
@@ -38,17 +40,19 @@ interface RequestSample {
    * mode.
    */
   mode: string;
+  /** When the response arrived; rates are computed over these. */
   timestamp: number;
+  /**
+   * When its request was sent. A response can resolve after a later one, so
+   * whether a baseline predates a placeholder is judged by this.
+   */
+  requestedAt: number;
   uptimeSeconds: number;
   totalRequests: number;
   statusCodeTotals: Record<string, number>;
 }
 
-export interface GatewayRequestStats {
-  totalRequests: number;
-  requestsPerSecond?: number;
-  statusCodesPerSecond?: Record<string, number>;
-}
+export type GatewayRequestStats = RequestRates;
 
 /**
  * Latest placeholder (`cp` or `node_agent`) reading this tab observed, per
@@ -97,10 +101,14 @@ function notePlaceholder(target: string, timestamp: number): void {
   }
 }
 
-/** Whether `sample` predates (or is) a placeholder this tab saw at its target. */
+/**
+ * Whether `sample` may predate a placeholder this tab saw at its target: its
+ * request was sent at or before that placeholder arrived, so the process that
+ * answered it may be the one the control plane replaced.
+ */
 function predatesPlaceholder(sample: RequestSample): boolean {
   const seenAt = placeholderSeenAtFor(sample.target);
-  return seenAt !== undefined && sample.timestamp <= seenAt;
+  return seenAt !== undefined && sample.requestedAt <= seenAt;
 }
 
 /** Test-only reset of the tab's placeholder observations. */
@@ -112,14 +120,6 @@ export function resetPlaceholderObservations(): void {
     // Nothing stored.
   }
 }
-
-/**
- * Slack allowed between a sample pair's wall-clock gap and the gateway's
- * uptime advance: Edge reports whole seconds, and each timestamp is when the
- * response arrived, not when Edge read its clock.
- */
-const UPTIME_TOLERANCE_MIN_SECONDS = 5;
-const UPTIME_TOLERANCE_RATIO = 0.1;
 
 function storageKey(namespace: string): string {
   return `${REQUEST_SAMPLE_STORAGE_KEY}:${namespace}`;
@@ -145,6 +145,7 @@ function readStoredSample(
       parsed.mode !== mode ||
       !adminMetricsReporting(parsed.mode).reportsProxyRuntime ||
       !Number.isFinite(parsed.timestamp) ||
+      !Number.isFinite(parsed.requestedAt) ||
       !Number.isFinite(parsed.uptimeSeconds) ||
       !Number.isFinite(parsed.totalRequests)
     ) {
@@ -175,53 +176,12 @@ function toSample(
     target,
     mode: gateway.mode,
     timestamp,
+    // A reading not fetched by `getAdminMetrics` (seeded into the cache) has
+    // no recorded start; its arrival is the latest it can have been sent.
+    requestedAt: Math.min(adminMetricsRequestStart(gateway) ?? timestamp, timestamp),
     uptimeSeconds: gateway.uptime_seconds,
     totalRequests: gateway.total_requests,
     statusCodeTotals: gateway.status_codes_total,
-  };
-}
-
-function calculateStats(
-  current: RequestSample,
-  previous?: RequestSample,
-): GatewayRequestStats {
-  if (
-    !previous ||
-    previous.target !== current.target ||
-    previous.mode !== current.mode ||
-    current.timestamp <= previous.timestamp ||
-    current.uptimeSeconds < previous.uptimeSeconds ||
-    current.totalRequests < previous.totalRequests
-  ) {
-    return { totalRequests: current.totalRequests };
-  }
-
-  const elapsedSeconds = (current.timestamp - previous.timestamp) / 1000;
-  if (elapsedSeconds <= 0) {
-    return { totalRequests: current.totalRequests };
-  }
-
-  // One process's uptime advances with the wall clock. When it does not, the
-  // two samples came from different processes at the same target (a restart,
-  // or a replacement behind the same admin URL), whose counters are not
-  // comparable, even if the newer process has run longer or served more.
-  const uptimeDrift = Math.abs(current.uptimeSeconds - previous.uptimeSeconds - elapsedSeconds);
-  const tolerance = Math.max(UPTIME_TOLERANCE_MIN_SECONDS, elapsedSeconds * UPTIME_TOLERANCE_RATIO);
-  if (uptimeDrift > tolerance) {
-    return { totalRequests: current.totalRequests };
-  }
-
-  const statusCodesPerSecond: Record<string, number> = {};
-  for (const [code, total] of Object.entries(current.statusCodeTotals)) {
-    const previousTotal = previous.statusCodeTotals[code] ?? 0;
-    statusCodesPerSecond[code] = Math.max(0, total - previousTotal) / elapsedSeconds;
-  }
-
-  return {
-    totalRequests: current.totalRequests,
-    requestsPerSecond:
-      (current.totalRequests - previous.totalRequests) / elapsedSeconds,
-    statusCodesPerSecond,
   };
 }
 
@@ -296,7 +256,7 @@ export function useGatewayRequestStats(
     const previousSample =
       candidate && !predatesPlaceholder(candidate) ? candidate : undefined;
 
-    const { requestsPerSecond, statusCodesPerSecond } = calculateStats(currentSample, previousSample);
+    const { requestsPerSecond, statusCodesPerSecond } = calculateRequestRates(currentSample, previousSample);
     setRates({ mode: gateway.mode, namespace: selectedNamespace, target, requestsPerSecond, statusCodesPerSecond });
     previousSampleRef.current = currentSample;
     writeStoredSample(selectedNamespace, currentSample);

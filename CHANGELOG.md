@@ -510,8 +510,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   larger): a restarted or replaced process starts collecting afresh. The tab
   also remembers, in memory and in `sessionStorage`, when it last saw a
   placeholder at each gateway target (`/admin/metrics` is process-wide, so
-  under any namespace) and never bridges from a baseline for that target
-  sampled at or before then, whichever namespace it was stored under, so a
+  under any namespace) and never bridges from a baseline for that target whose
+  request was sent at or before then (the request-start time, since a slow
+  response can resolve after a later one; the admin metrics query now also
+  forwards its abort signal), whichever namespace it was stored under, so a
   data plane that later answers at the same gateway target starts collecting
   afresh even across a remount or a reload; stored samples now carry a version
   and their mode, and are only diffed within one mode. The total request count
@@ -520,7 +522,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mock admin gateway's `/admin/metrics` now follows `MOCK_GATEWAY_MODE`,
   returning Edge's skeleton for `cp` and `node_agent` (including the zeroed
   `adaptive_concurrency` counters and
-  `tcp_connection_throttle.active_connections`).
+  `tcp_connection_throttle.active_connections`), and its proxy-mode uptime
+  advances with elapsed time, so its unchanged counters show a rate of 0
+  instead of staying at Collecting.
 - The Alloy service-manifest preview is requalified against Alloy `main`
   (`0e8a96a2`, #719). Every preview now includes the `<id>-otel-tracing`
   plugin and its proxy reference, as Alloy always generates it: with

@@ -1,5 +1,6 @@
 import { act, useMemo } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { noteAdminMetricsRequestStart } from "@/api/adminMetricsTiming";
 import { observeGatewayTarget, resetGatewayTarget } from "@/api/gatewayTarget";
 import type { AdminMetrics } from "@/api/types";
 import { GatewayTargetGate } from "@/components/auth/GatewayTargetGate";
@@ -43,14 +44,21 @@ function Probe({
   at,
   uptime = uptimeAt(at),
   mode = "database",
+  requestedAt,
 }: {
   total: number;
   at: number;
   uptime?: number;
   mode?: string;
+  /** When the request was sent, if earlier than its arrival `at`. */
+  requestedAt?: number;
 }) {
   // A stable object per reading, as a query result is.
-  const reading = useMemo(() => gateway(total, uptime, mode), [total, uptime, mode]);
+  const reading = useMemo(() => {
+    const read = gateway(total, uptime, mode);
+    if (requestedAt !== undefined) noteAdminMetricsRequestStart(read, requestedAt);
+    return read;
+  }, [total, uptime, mode, requestedAt]);
   stats = hook(reading, at);
   renders.push({ mode, total, stats });
   return null;
@@ -60,7 +68,7 @@ function storeSample(
   timestamp: number,
   totalRequests: number,
   target?: string,
-  fields: Record<string, unknown> = { version: STORED_SAMPLE_VERSION, mode: "database" },
+  fields: Record<string, unknown> = { version: STORED_SAMPLE_VERSION, mode: "database", requestedAt: timestamp },
 ) {
   localStorage.setItem(
     STORAGE_KEY,
@@ -84,7 +92,7 @@ async function openPage(target: string) {
   ui = createHarness();
 }
 
-async function show(reading: { total: number; at: number; uptime?: number; mode?: string }) {
+async function show(reading: { total: number; at: number; uptime?: number; mode?: string; requestedAt?: number }) {
   await ui.render(
     <GatewayTargetGate onReload={() => undefined}>
       <Probe {...reading} />
@@ -407,5 +415,35 @@ describe("gateway request rate", () => {
       await show({ total: 1_300, at: now + 60_000, uptime: 20, mode: "dp" });
       expect(stats).toEqual({ totalRequests: 1_300 });
     });
+  });
+  it.each(["cp", "node_agent"])(
+    "refuses a response requested before a %s placeholder that arrived after it",
+    async (mode) => {
+      // The placeholder arrives under tenant-b at +2 s ...
+      selected.namespace = "tenant-b";
+      await show({ total: 0, at: now + 2_000, uptime: 0, mode });
+      // ... and DP A's slow response, requested at +0 s, only at +3 s.
+      selected.namespace = "tenant-a";
+      await show({ total: 100, at: now + 3_000, uptime: 100, mode: "dp", requestedAt: now });
+      // DP B replaces it; its uptime happens to match the elapsed time.
+      await show({ total: 1_000, at: now + 6_000, uptime: 103, mode: "dp" });
+      expect(stats).toEqual({ totalRequests: 1_000 });
+
+      await show({ total: 1_600, at: now + 36_000, uptime: 133, mode: "dp" });
+      expect(stats?.requestsPerSecond).toBe(20);
+    },
+  );
+
+  it("bridges from a response requested after the placeholder arrived", async () => {
+    await show({ total: 0, at: now, uptime: 0, mode: "cp" });
+    await show({ total: 100, at: now + 3_000, uptime: 100, mode: "dp", requestedAt: now + 1_000 });
+    await show({ total: 700, at: now + 33_000, uptime: 130, mode: "dp" });
+    expect(stats?.requestsPerSecond).toBe(20);
+  });
+
+  it("ignores a stored sample without a request time", async () => {
+    storeSample(now - 60_000, 0, "target-a", { version: 2, mode: "database" });
+    await show({ total: 6_000, at: now });
+    expect(stats?.requestsPerSecond).toBeUndefined();
   });
 });
