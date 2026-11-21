@@ -9,6 +9,7 @@
 /* ------------------------------------------------------------------ */
 
 import { queryScope } from "@/api/client";
+import { isInlineReported } from "./inlineReportedReads";
 import {
   type QueryClient,
   useMutation,
@@ -108,11 +109,18 @@ export function useProxyPluginConfigs(proxyId: string, enabled = true) {
   });
 }
 
+/** The cache key of one plugin configuration's detail read (`usePluginConfig`). */
+export function pluginConfigKey(namespace: string, id: string) {
+  return ["pluginConfig", namespace, id] as const;
+}
+
 export function usePluginConfig(id: string, enabled = true) {
   const { scope } = useNamespace();
+  const queryKey = pluginConfigKey(scope.namespace, id);
   return useQuery({
-    queryKey: ["pluginConfig", scope.namespace, id],
-    queryFn: () => plugins.getConfig(queryScope(scope), id),
+    queryKey,
+    // Silent while a mounted page reports this read inline (`useInlineReportedReads`).
+    queryFn: () => plugins.getConfig(queryScope(scope), id, isInlineReported(queryKey)),
     enabled: enabled && !!id,
   });
 }

@@ -12,7 +12,10 @@ import { compareBaselines, formatBaselineValue } from "@/lib/resourceBaseline";
 export interface StaleWriteDialogProps {
   /** The refused write, or null when there is no conflict to resolve. */
   conflict: StaleResourceDetail | null;
-  /** Dismiss and go back to the untouched draft. */
+  /**
+   * Dismiss and go back to the untouched draft. While a reload is pending this
+   * also abandons it: the caller must not apply its result.
+   */
   onKeepEditing: () => void;
   /**
    * Discard the local draft and reseed the editor from the gateway. The caller
@@ -20,6 +23,8 @@ export interface StaleWriteDialogProps {
    * than a rebase of dirty fields onto newer data.
    */
   onDiscardAndReload: () => void;
+  /** A reload is in flight: the reload action shows busy and cannot restart it. */
+  reloading?: boolean;
 }
 
 /**
@@ -43,6 +48,7 @@ export function StaleWriteDialog({
   conflict,
   onKeepEditing,
   onDiscardAndReload,
+  reloading = false,
 }: StaleWriteDialogProps) {
   const differences = useMemo(
     () =>
@@ -162,7 +168,7 @@ export function StaleWriteDialog({
         )}
 
         <div className="flex justify-end gap-3 mt-6">
-          <Button variant="danger" onClick={onDiscardAndReload}>
+          <Button variant="danger" onClick={onDiscardAndReload} loading={reloading}>
             {isDelete ? "Reload current version" : "Discard my draft and reload"}
           </Button>
           <Button onClick={onKeepEditing}>{isDelete ? "Close" : "Keep my draft"}</Button>
