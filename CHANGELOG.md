@@ -489,6 +489,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Alloy service-manifest preview is requalified against Alloy `main`
+  (`0e8a96a2`, #719). Every preview now includes the `<id>-otel-tracing`
+  plugin and its proxy reference, as Alloy always generates it: with
+  `gateway.otel_endpoint` it exports there, and without one it is
+  propagation-only (`generate_trace_id: false`, no endpoint, sampling ratio
+  ignored). `summary.traceExporter` and the card tell "no configured
+  exporter" apart from "no plugin". Because that plugin ID always exists, a
+  241-character proxy ID is the longest accepted with no health check or
+  correlation. The preview also refuses `auth.mode: "gateway"` (Alloy's export
+  refuses it) and paths outside Alloy's ASCII `pchar` rule.
+- The preview refuses a cleartext `gateway.otel_endpoint` to anything but a
+  loopback IP literal (`http://127.d.d.d`, `http://[::1]`), following Ferrum
+  Edge `main`'s `otel_tracing` rule, which drops such an exporter at runtime
+  (#723). The pinned fixture `orders-api.json` uses one and is now refused
+  until ferrum-contracts#82 updates it. String fields get the schema's declared
+  `maxLength` instead of a silent 2,048 clamp (2,048 remains the default, with
+  a 4,096 safety cap that refuses to compile a larger bound). `maxLength` is
+  supported only on a field's own schema node; one inside a composition
+  clause fails compilation. The ferrum-contracts#74 bounds wait for the next
+  `contracts-edge` release.
 - The Settings page's connection test recognizes Ferrum Edge's structured
   `503` `/health` answer for a gateway that is starting, degraded, unavailable
   or draining (#724). `GET /api/settings/status` reports it `reachable: true`

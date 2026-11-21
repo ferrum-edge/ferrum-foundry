@@ -12,8 +12,21 @@ vi.mock('@/stores/namespace', () => ({
 
 const result = {
   readOnly: true,
-  summary: { service: 'orders', namespace: 'tenant-a', authMode: 'gateway' },
-  desired: { proxy: { id: 'orders', backend_scheme: 'http' }, upstream: null, plugin_configs: [] },
+  summary: { service: 'orders', namespace: 'tenant-a', authMode: 'service', traceExporter: 'none' },
+  desired: {
+    proxy: {
+      id: 'orders', backend_scheme: 'http', plugins: [{ plugin_config_id: 'orders-otel-tracing' }],
+    },
+    upstream: null,
+    plugin_configs: [{
+      id: 'orders-otel-tracing', plugin_name: 'otel_tracing', namespace: 'tenant-a',
+      scope: 'proxy', proxy_id: 'orders', enabled: true,
+      config: {
+        service_name: 'ferrum-edge-tenant-a', trace_context_trust: 'untrusted',
+        generate_trace_id: false, include_url_path: false,
+      },
+    }],
+  },
   warnings: ['Preview only. No policy is installed.', 'TLS paths are metadata, never read.'],
 };
 let host: HTMLDivElement;
@@ -77,6 +90,23 @@ it('provides a labelled preview input and a readable result without an apply act
   expect(input.value).toBe('');
   expect(Array.from(host.querySelectorAll('button')).map((button) => button.textContent))
     .toEqual(['Preview manifest', 'Clear preview']);
+});
+
+it('distinguishes a configured exporter from the always-generated trace plugin', async () => {
+  await render();
+  await fill('{}');
+  await submit();
+  expect(host.textContent).toContain('no OTLP endpoint is configured');
+  expect(host.textContent).toContain('still generated, propagation-only');
+  expect(host.querySelector('pre')?.textContent).toContain('orders-otel-tracing');
+  preview.mockResolvedValue({
+    ...result,
+    summary: { ...result.summary, traceExporter: 'otlp' },
+  });
+  await fill('{"gateway":{}}');
+  await submit();
+  expect(host.textContent).toContain('exports to the configured OTLP endpoint');
+  expect(host.textContent).not.toContain('no OTLP endpoint is configured');
 });
 
 it('reports refusal accessibly and removes an old preview when the input changes', async () => {
