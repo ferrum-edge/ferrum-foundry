@@ -6,6 +6,7 @@ import { loadConfig, registerRuntimeConfigListener } from '../config.js';
 import { generateToken } from '../jwt.js';
 import { getProbeDispatcher } from '../tls.js';
 import { APP_VERSION } from '../version.js';
+import { isGatewayHealthSnapshot } from '../../shared/health-snapshot.js';
 
 interface ReadinessResult {
   httpStatus: number;
@@ -58,21 +59,6 @@ async function boundedJson(response: Awaited<ReturnType<typeof fetch>>): Promise
   }
 }
 
-// The statuses a gateway health snapshot reports, as `getHealth`
-// (src/api/metrics.ts) accepts them.
-const GATEWAY_HEALTH_STATUSES: ReadonlySet<unknown> = new Set(['ok', 'degraded', 'starting', 'unavailable', 'draining']);
-
-/**
- * The gateway's own verdict, or `undefined` when the body is not a health
- * snapshot at all: absent, unparseable, oversized, `{}`, or a fallback page
- * from whatever else answers at the admin origin. Only a recognized status
- * with a boolean `ready` is an observation of the gateway.
- */
-function healthSnapshot(body: Record<string, unknown> | undefined): { status: string; ready: boolean } | undefined {
-  if (!body || !GATEWAY_HEALTH_STATUSES.has(body.status) || typeof body.ready !== 'boolean') return undefined;
-  return { status: body.status as string, ready: body.ready };
-}
-
 async function probeReadiness(): Promise<ReadinessResult> {
   const config = loadConfig();
   const controller = new AbortController();
@@ -95,7 +81,10 @@ async function probeReadiness(): Promise<ReadinessResult> {
       dispatcher: getProbeDispatcher(config),
       redirect: 'error',
     });
-    const snapshot = healthSnapshot(await boundedJson(response));
+    // Absent, unparseable, oversized, `{}`, or a fallback page from whatever
+    // else answers at the admin origin is no observation of the gateway.
+    const body = await boundedJson(response);
+    const snapshot = isGatewayHealthSnapshot(body) ? body : undefined;
     // A 2xx without a valid snapshot proves only that something answered, not
     // that the gateway is ready, so it is never a positive verdict.
     const healthReady = response.ok && snapshot?.ready === true;

@@ -103,6 +103,62 @@ describe("settings status publication", () => {
     expect(upstream).toHaveBeenCalledOnce();
   });
 
+  it.each(["starting", "degraded", "unavailable", "draining"] as const)(
+    "reports a gateway answering 503 with a %s health snapshot as reachable",
+    async (status) => {
+      const server = await setup();
+      const snapshot = { status, ready: false, mode: "database", database: { status: "connected" } };
+      upstream.mockResolvedValue(Response.json(snapshot, { status: 503 }));
+      const response = await server.inject({ method: "GET", url: "/api/settings/status", headers });
+      expect(response.statusCode).toBe(503);
+      expect(response.json()).toEqual({ reachable: true, status: 503, body: snapshot });
+      expect(upstream).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each([
+    ["an error object", JSON.stringify({ error: "upstream connect error" }), { error: "upstream connect error" }],
+    ["an HTML page", "<html><body>503 Service Unavailable</body></html>", "<html><body>503 Service Unavailable</body></html>"],
+    ["an unknown status", JSON.stringify({ status: "broken", ready: false }), { status: "broken", ready: false }],
+    ["a non-boolean ready", JSON.stringify({ status: "unavailable", ready: "false" }), { status: "unavailable", ready: "false" }],
+    ["an empty object", "{}", {}],
+  ] as const)("keeps a 503 carrying %s unreachable", async (_label, body, expected) => {
+    const server = await setup();
+    upstream.mockResolvedValue(new Response(body, { status: 503 }));
+    const response = await server.inject({ method: "GET", url: "/api/settings/status", headers });
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({ reachable: false, status: 503, body: expected });
+  });
+
+  it("does not treat a health snapshot on another failing status as reachable", async () => {
+    const server = await setup();
+    upstream.mockResolvedValue(Response.json({ status: "unavailable", ready: false }, { status: 500 }));
+    const response = await server.inject({ method: "GET", url: "/api/settings/status", headers });
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toEqual({ reachable: false, status: 500, body: { status: "unavailable", ready: false } });
+  });
+
+  it("classifies a 503 health snapshot before reducing it for a namespace-scoped admin", async () => {
+    vi.stubEnv("FERRUM_JWT_NAMESPACES", "tenant-a");
+    const server = await setup();
+    upstream.mockResolvedValue(Response.json({
+      status: "unavailable", ready: false, mode: "database", admin_writes_enabled: true,
+      timestamp: "2026-11-21T00:00:00Z", listeners: [{ port: 8443 }], database: { status: "disconnected" },
+      namespace: { active: "tenant-b", serving_scope: "single-namespace-data-plane", data_plane_single_namespace: true },
+    }, { status: 503 }));
+    const response = await server.inject({ method: "GET", url: "/api/settings/status", headers });
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({
+      reachable: true, status: 503,
+      body: {
+        status: "unavailable", ready: false, mode: "database", admin_writes_enabled: true,
+        timestamp: "2026-11-21T00:00:00Z",
+      },
+    });
+    expect(response.body).not.toContain("listeners");
+    expect(response.body).not.toContain("tenant-b");
+  });
+
   it("relays the detailed health body to an unrestricted admin", async () => {
     const server = await setup();
     const detailed = {

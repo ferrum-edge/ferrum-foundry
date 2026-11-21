@@ -7,6 +7,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import { api, getApiErrorMessage, HANDLED_STATUSES } from "@/api/client";
 import { isGatewayTargetRetired } from "@/api/gatewayTarget";
 import { validateNamespaceName } from "@/api/namespaces";
+import {
+  isGatewayHealthSnapshot,
+  type GatewayHealthSnapshot,
+} from "../../../shared/health-snapshot.js";
 import { Card } from "@/components/ui/Card";
 import { Input, READ_ONLY_CLASSES } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
@@ -98,6 +102,53 @@ interface StatusResult {
   status?: number;
   body?: unknown;
   error?: string;
+}
+
+/**
+ * The BFF's `{ reachable, status, body }` envelope for an answer with HTTP
+ * `httpStatus`, or `null` when the JSON is not one: the envelope names the
+ * status it was sent with, and a `503` claims `reachable` only with the
+ * gateway's health snapshot as its body. Anything else at this path (an
+ * intermediary's JSON, for one) is a failed test, never a green badge. The
+ * result carries only the validated fields, so nothing unchecked (an object
+ * `error`, say) is ever rendered.
+ */
+function statusEnvelope(value: unknown, httpStatus: number): StatusResult | null {
+  if (typeof value !== "object" || value === null) return null;
+  const { reachable, status, body } = value as Record<string, unknown>;
+  if (typeof reachable !== "boolean" || status !== httpStatus) return null;
+  if (httpStatus === 503 && reachable && !isGatewayHealthSnapshot(body)) return null;
+  return { reachable, status: httpStatus, body };
+}
+
+/**
+ * The gateway's own health verdict from a test result, when the probe reached
+ * it and its (possibly namespace-projected) body still carries one.
+ */
+function reportedHealth(result: StatusResult): GatewayHealthSnapshot | null {
+  return result.reachable && isGatewayHealthSnapshot(result.body) ? result.body : null;
+}
+
+function StatusBadge({ result }: { result: StatusResult }) {
+  if (!result.reachable) {
+    return (
+      <Badge variant="red">
+        {result.error ||
+          (result.status ? `Not reachable (HTTP ${result.status})` : "Not reachable")}
+      </Badge>
+    );
+  }
+  const health = reportedHealth(result);
+  // Edge answers a reachable gateway that is not ready with `503` and its
+  // snapshot: the connection works, but the gateway says it is not serving.
+  if (health && !health.ready) {
+    return (
+      <Badge variant="yellow">
+        {`Connected (HTTP ${result.status}), gateway not ready: ${health.status}`}
+      </Badge>
+    );
+  }
+  return <Badge variant="green">{`Connected (HTTP ${result.status})`}</Badge>;
 }
 
 /* ================================================================== */
@@ -206,14 +257,42 @@ export function SettingsForm() {
   async function handleTest() {
     setTesting(true);
     setStatus(null);
+    // The status of the answer whose body is being read, for the badge.
+    let httpStatus: number | undefined;
+    const failed = (code: number): StatusResult => ({
+      reachable: false,
+      status: code,
+      error: `Connection test failed (HTTP ${code})`,
+    });
     try {
-      const res = await api.get("api/settings/status").json<StatusResult>();
-      setStatus(res);
+      // The BFF relays the gateway's HTTP status. A `503` is still an answer
+      // to classify from its envelope (Edge reports a reachable gateway that
+      // is not ready that way), so it is neither retried nor thrown; every
+      // other failure keeps the client's retry and error handling. The body
+      // is read through ky, so its timeout bounds a stalled body as well.
+      const result = await api
+        .get("api/settings/status", {
+          throwHttpErrors: (code) => code !== 503,
+          hooks: {
+            afterResponse: [
+              ({ response }) => {
+                httpStatus = response.status;
+              },
+            ],
+          },
+        })
+        .json<unknown>();
+      const code = httpStatus ?? 0;
+      setStatus(statusEnvelope(result, code) ?? failed(code));
     } catch (err) {
-      setStatus({
-        reachable: false,
-        error: err instanceof Error ? err.message : "Connection test failed",
-      });
+      setStatus(
+        err instanceof SyntaxError && httpStatus !== undefined
+          ? failed(httpStatus)
+          : {
+              reachable: false,
+              error: err instanceof Error ? err.message : "Connection test failed",
+            },
+      );
     } finally {
       setTesting(false);
     }
@@ -524,13 +603,7 @@ export function SettingsForm() {
             Test Connection
           </Button>
 
-          {status && (
-            <Badge variant={status.reachable ? "green" : "red"}>
-              {status.reachable
-                ? `Connected (HTTP ${status.status})`
-                : status.error || "Not reachable"}
-            </Badge>
-          )}
+          {status && <StatusBadge result={status} />}
         </div>
       </Card>
 
