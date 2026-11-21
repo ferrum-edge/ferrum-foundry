@@ -5,7 +5,10 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { renderToStaticMarkup } from "react-dom/server";
 import { PluginConfigForm } from "./PluginConfigForm";
+import { PluginMembershipRecovery } from "./PluginMembershipRecovery";
+import { PluginMembershipError } from "@/lib/pluginMembership";
 import type { PluginConfig, PluginConfigCreate, PluginTrigger } from "@/api/types";
 import { MASKED_FIELD_NOTICE } from "@/api/maskedSecrets";
 import type { GatewayRole } from "@/lib/capabilities";
@@ -381,6 +384,32 @@ describe("plugin trigger with masked operands", () => {
     await submit();
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(onSubmit.mock.calls[0][0].trigger).toBeNull();
+  });
+
+  it("blocks Save for a trigger pasted from the recovery panel until its operand is re-entered", async () => {
+    const original: PluginTrigger = {
+      when: { match: { header: { name: "x-skip", value: { exact: ["synthetic-real-operand"] } } } },
+    };
+    const html = renderToStaticMarkup(<PluginMembershipRecovery error={new PluginMembershipError(
+      "Plugin update did not converge",
+      [],
+      undefined,
+      { id: "cors-1", plugin_name: "cors", scope: "global", config: {}, enabled: true, trigger: original },
+    )} />);
+    const panel = new DOMParser().parseFromString(html, "text/html");
+    const copied = JSON.parse(panel.querySelector("pre")!.textContent!) as { trigger: PluginTrigger };
+    expect(JSON.stringify(copied)).not.toContain("synthetic-real-operand");
+
+    await renderForm("cors", {}, "operator", copied.trigger);
+    expect(triggerList()).toEqual(["/trigger/when/match/header/value/exact/0"]);
+    await submit();
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    await editTrigger(original);
+    expect(triggerList()).toEqual([]);
+    await submit();
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0][0].trigger).toEqual(original);
   });
 
   it("lets an admin save the trigger as read, with a warning", async () => {

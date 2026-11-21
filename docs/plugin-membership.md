@@ -212,7 +212,8 @@ projection (`src/api/maskedSecretSites.ts`: the CI-checked schema rules in
   recovery report names the fields that could not be restored, and the previous
   configuration must be restored manually, with the real values, or by an
   admin. The recovery panel shows that configuration with its trigger's
-  `header`, `query` and `cookie` operands as `[redacted]`, to be re-entered
+  `header`, `query` and `cookie` operands as `[REDACTED]` (which the editor's
+  placeholder guard blocks if pasted back), to be re-entered
   before it is reused; the plan keeps the original for its own rollback.
 
 ## Deleting a plugin

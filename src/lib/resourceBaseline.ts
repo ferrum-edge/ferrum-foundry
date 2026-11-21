@@ -332,7 +332,7 @@ export function formatBaselineValue(field: string, value: unknown): string {
   // match kind included, which Edge keeps readable.
   if (field === "trigger") {
     if (value === null) return "null";
-    const shown = redactPluginTrigger(value);
+    const shown = redactPluginTrigger(value, REDACTED_PLACEHOLDER);
     if (typeof shown === "string") return shown.length === 0 ? '""' : shown;
     return JSON.stringify(shown);
   }
@@ -608,16 +608,19 @@ function replaceAtTriggerPointer(root: { trigger: unknown }, pointer: string, re
 }
 
 /**
- * `trigger` as a conflict comparison may show it: every site
- * `pluginTriggerWithheldSites` finds replaced by the display marker (an empty
- * string stays visible, as in any redacted field), the rest as it is.
+ * `trigger` with every site `pluginTriggerWithheldSites` finds replaced by
+ * `marker` (an empty string stays visible, as in any redacted field), the
+ * rest as it is. The conflict comparison passes its display marker,
+ * `[redacted]`. Text an operator may copy back into an editor passes Edge's
+ * own `[REDACTED]`, which the editor's placeholder guard recognizes, so a
+ * pasted marker blocks Save instead of being stored as the operand.
  */
-export function redactPluginTrigger(trigger: unknown): unknown {
+export function redactPluginTrigger(trigger: unknown, marker: string): unknown {
   const sites = pluginTriggerWithheldSites(trigger);
   if (sites.length === 0) return trigger;
   const root = { trigger: JSON.parse(JSON.stringify(trigger)) as unknown };
   for (const site of sites) {
-    if (site.value !== "") replaceAtTriggerPointer(root, site.pointer, REDACTED_PLACEHOLDER);
+    if (site.value !== "") replaceAtTriggerPointer(root, site.pointer, marker);
   }
   return root.trigger;
 }

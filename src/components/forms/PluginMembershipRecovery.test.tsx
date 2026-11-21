@@ -87,7 +87,9 @@ describe("PluginMembershipRecovery", () => {
     );
     const html = renderToStaticMarkup(<PluginMembershipRecovery error={error} />);
     expect(html).not.toContain("synthetic-real-operand");
-    expect(html).toContain("[redacted]");
+    // Edge's own marker, which the editor's placeholder guard recognizes.
+    expect(html).toContain("[REDACTED]");
+    expect(html).not.toContain("[redacted]");
     expect(html).toContain("x-skip");
     expect(html).toContain("/api/");
     expect(html).toContain("Re-enter them before reusing this configuration");
@@ -101,6 +103,20 @@ describe("PluginMembershipRecovery", () => {
       { id: "p1", plugin_name: "waf", scope: "global", config: {}, enabled: true, trigger: null },
     )} />);
     expect(plain).not.toContain("Re-enter them");
+
+    // A snapshot already holding the gateway's marker keeps it as is, and says so.
+    const masked = renderToStaticMarkup(<PluginMembershipRecovery error={new PluginMembershipError(
+      "Plugin update did not converge",
+      [],
+      undefined,
+      {
+        id: "p1", plugin_name: "waf", scope: "global", config: {}, enabled: true,
+        trigger: { when: { match: { query: { name: "q", value: { exact: ["[REDACTED]"] } } } } },
+      },
+    )} />);
+    expect(masked).toContain("[REDACTED]");
+    expect(masked).not.toContain("[redacted]");
+    expect(masked).toContain("Re-enter them");
   });
 
   it("does not render for an unrelated error", () => {

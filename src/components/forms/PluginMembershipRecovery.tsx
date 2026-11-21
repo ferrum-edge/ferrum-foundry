@@ -1,5 +1,6 @@
 import { PluginMembershipError, PluginSavedUnverifiedError } from "@/lib/pluginMembership";
-import { redactPluginTrigger } from "@/lib/resourceBaseline";
+import { REDACTED_PLACEHOLDER } from "@/api/maskedSecrets";
+import { pluginTriggerWithheldSites, redactPluginTrigger } from "@/lib/resourceBaseline";
 
 export function PluginMembershipRecovery({ error }: { error: unknown }) {
   if (!(error instanceof PluginMembershipError)) return null;
@@ -8,14 +9,17 @@ export function PluginMembershipRecovery({ error }: { error: unknown }) {
   const saved = error instanceof PluginSavedUnverifiedError;
   const observed = saved && error.savedFromLaterRead;
   // Shown with its trigger as Edge main projects it: the header, query and
-  // cookie operands are shared values, and this is page text. The membership
-  // plan keeps the original snapshot for its own rollback.
+  // cookie operands are shared values, and this is page text. The marker is
+  // Edge's own `[REDACTED]`, so this JSON pasted back into an editor is
+  // blocked by its placeholder guard rather than saved with the marker as an
+  // operand. The membership plan keeps the original snapshot for rollback.
   const snapshot = error.lastKnownConfig;
   const shown = snapshot && snapshot.trigger !== undefined && snapshot.trigger !== null
-    ? { ...snapshot, trigger: redactPluginTrigger(snapshot.trigger) }
+    ? { ...snapshot, trigger: redactPluginTrigger(snapshot.trigger, REDACTED_PLACEHOLDER) }
     : snapshot;
-  const triggerRedacted =
-    shown !== snapshot && JSON.stringify(shown?.trigger) !== JSON.stringify(snapshot?.trigger);
+  // Said whenever a site is withheld, a gateway's own `[REDACTED]` included.
+  const triggerRedacted = pluginTriggerWithheldSites(snapshot?.trigger ?? null)
+    .some((site) => site.value !== "");
 
   return (
     <div
@@ -46,7 +50,7 @@ export function PluginMembershipRecovery({ error }: { error: unknown }) {
           </p>
           {triggerRedacted && (
             <p className="mb-2 text-xs text-warning">
-              Trigger values shown as [redacted] are withheld from this page. Re-enter them
+              Trigger values shown as [REDACTED] are withheld from this page. Re-enter them
               before reusing this configuration.
             </p>
           )}
