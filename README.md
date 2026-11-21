@@ -373,9 +373,10 @@ request without the proxy's identity assertion; for example,
   `/oauth2/` locations (including the internal `/oauth2/auth` subrequest) at
   your oauth2-proxy listener, such as `http://127.0.0.1:4180`, configure
   oauth2-proxy for your identity provider, and set its trusted proxy range to
-  the nginx peer address in that topology. The example as written needs
-  nginx 1.25.1 or newer (for `http2 on;`) with the `auth_request` module; on
-  an older nginx, remove `http2 on;` and keep the rest.
+  the nginx peer address in that topology. The example needs nginx with TLS
+  and the `auth_request` module; keeping its `http2 on;` line also needs
+  nginx 1.25.1 or newer built with the HTTP/2 module. On any nginx without
+  that, remove `http2 on;` and keep the rest.
 - [Gateway transport](docs/deployment.md#gateway-transport) covers the admin
   API TLS settings, and the
   [downstream JWT claims](docs/deployment.md#downstream-jwt-claims) table covers
