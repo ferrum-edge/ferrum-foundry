@@ -576,7 +576,15 @@ backup plus each API spec document it holds (gzip-compressed, base64-encoded,
 and taken whole). For an API spec import or replacement, `specDocumentSecrets()`
 classifies a JSON document by position: each `x-ferrum-plugins` entry by its
 plugin's rules, anything else by field name and URL. An entry that is not a
-plugin configuration is unclassified throughout. Foundry has no YAML parser, so
+plugin configuration is unclassified throughout, and its `trigger`, if it has
+one, is also classified as a plugin's is. Edge parses the document text
+again and can quote a value in a spelling Foundry cannot reconstruct (an
+integer beyond 2^53, which `JSON.parse` rounds, or a YAML `0x` integer
+reported in decimal), so in a spec write's failure the value of every serde
+type diagnostic (``invalid type: integer `N` ``, `floating point`, `boolean`,
+`character`, `string "…"`, `invalid value: …`, ``unknown variant `V` ``) is
+replaced whatever it is, keeping the category, the expected type and the
+location. Foundry has no YAML parser, so
 a YAML (or malformed JSON) document is unclassified throughout: every scalar is
 found line by line without parsing, including `key: value` values, sequence
 entries, flow elements, quoted scalars (unquoted and unescaped), several pairs

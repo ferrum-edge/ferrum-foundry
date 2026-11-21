@@ -43,9 +43,11 @@ import {
   pluginTriggerSecrets,
   redactionForms,
   RedactedWriteError,
+  redactSubmitted,
   redactWriteFailure,
   secretValues,
   type Secrets,
+  specDocumentSecrets,
   yamlScalars,
 } from "./secretRedaction";
 
@@ -598,8 +600,9 @@ describe("plugin triggers follow Ferrum Edge main's projection", () => {
       // Withheld whole, so a field name inside the malformed part goes too.
       expect(classifiedValues(pluginTriggerSecrets(malformed))).toContain(weird);
     }
-    expect(pluginTriggerSecrets(null)).toEqual({ values: [], tokens: [], scalars: [] });
-    expect(pluginTriggerSecrets(undefined)).toEqual({ values: [], tokens: [], scalars: [] });
+    const none = { values: [], tokens: [], scalars: [], diagnostics: false };
+    expect(pluginTriggerSecrets(null)).toEqual(none);
+    expect(pluginTriggerSecrets(undefined)).toEqual(none);
   });
 
   it("withholds ill-typed content beneath a visible key, which only a draft can hold", () => {
@@ -664,7 +667,17 @@ describe("plugin triggers follow Ferrum Edge main's projection", () => {
           { if: { case_insensitive: false, port: 9000 } },
         ],
       },
-    })).toEqual({ values: ["text-operand-1"], tokens: [], scalars: [48213, 7, true, 9000] });
+    })).toEqual({
+      values: ["text-operand-1"],
+      tokens: [],
+      // A nested `case_insensitive` inside a withheld subtree is an ordinary
+      // value there; only the comparison flag itself is exempt, in the walk.
+      scalars: [48213, 7, true, false, 9000],
+      diagnostics: false,
+    });
+    expect(pluginTriggerSecrets({
+      when: { match: { header: { name: "x", value: { exact: [{ case_insensitive: true }] } } } },
+    }).scalars).toEqual([true]);
   });
 
   it("keeps no operand in a refused plugin write's error or popup, on any gateway", async () => {
@@ -733,6 +746,110 @@ describe("trigger scalars and existing markers in a refusal", () => {
     expect(data.code).toBe("malformed_extension");
     // A short one is matched only as a whole token, so `column 80` survives.
     expect(data.details).toContain("line 1 column 80");
+  });
+
+  const unsafeJson = (operand: string) => `{"openapi":"3.1.0","info":{"title":"Orders","version":"1"},` +
+    `"x-ferrum-plugins":[{"plugin_name":"waf","config":{},"trigger":{"when":{"match":` +
+    `{"header":{"name":"x-skip","value":{"exact":[${operand}]}}}}}}]}`;
+  const hexYaml = [
+    "openapi: 3.1.0",
+    "info: {title: Orders, version: '1'}",
+    "x-ferrum-plugins:",
+    "  - plugin_name: waf",
+    "    config: {}",
+    "    trigger:",
+    "      when:",
+    "        match:",
+    "          header:",
+    "            name: x-skip",
+    "            value:",
+    "              exact: [0xBEEF5EED]",
+    "",
+  ].join("\n");
+
+  it.each([
+    // 2^53 + 1: `JSON.parse` rounds it, Edge keeps every digit.
+    ["an unsafe-width JSON integer", unsafeJson("9007199254740993"), "9007199254740993"],
+    // Edge reads a YAML `0x` integer and reports it in decimal.
+    ["a YAML hex integer", hexYaml, String(0xBEEF5EED)],
+  ])("removes %s Edge quotes in a diagnostic, on import and replacement", async (_, document, echoed) => {
+    respond = () => Response.json({
+      error: "Spec parse failed",
+      code: "malformed_extension",
+      details: `x-ferrum-plugins: invalid type: integer \`${echoed}\`, expected a string at line 1 column 157`,
+    }, { status: 400 });
+    for (const write of [
+      () => apiSpecs.create(scope, document),
+      () => apiSpecs.update(scope, "orders-spec", document),
+    ]) {
+      const failure = await write().catch((e: unknown) => e);
+      expectDetached(failure);
+      expect(await exposure(failure)).not.toContain(echoed);
+      // The category, expected type and location stay (a YAML document's
+      // every scalar is unclassified, so its short `1` is also withheld).
+      expect(await getApiErrorDetail(failure)).toContain(
+        "x-ferrum-plugins: invalid type: integer `[REDACTED]`, expected a string at line ",
+      );
+      expect(await getApiErrorDetail(failure)).toContain(" column 157");
+    }
+  });
+
+  it("removes the value of every serde type diagnostic from a spec refusal, and only there", () => {
+    const forms = redactionForms(specDocumentSecrets("openapi: 3.1.0\n"));
+    expect(redactSubmitted(
+      "invalid type: floating point `1.5e300`, expected a string; " +
+        'invalid value: string "se\\"cret", expected one of `present`, `absent`; ' +
+        "invalid type: boolean `true`, expected a string; unknown variant `maybe`, expected `any` or `all`; " +
+        "invalid length 3, expected fewer elements; unknown field `when2`",
+      forms,
+    )).toBe(
+      "invalid type: floating point `[REDACTED]`, expected a string; " +
+        'invalid value: string "[REDACTED]", expected one of `present`, `absent`; ' +
+        "invalid type: boolean `[REDACTED]`, expected a string; unknown variant `[REDACTED]`, expected `any` or `all`; " +
+        "invalid length 3, expected fewer elements; unknown field `when2`",
+    );
+    // An ordinary write keeps a diagnostic's value unless it was submitted.
+    expect(redactSubmitted("invalid type: integer `5`, expected a string", redactionForms([])))
+      .toBe("invalid type: integer `5`, expected a string");
+  });
+
+  it("classifies the trigger of a spec plugin entry that has no plugin_name", async () => {
+    respond = () => Response.json({
+      error: "Spec parse failed",
+      code: "malformed_extension",
+      details: "x-ferrum-plugins: invalid type: integer `48213907`, expected a string",
+      offending: 48213907,
+    }, { status: 400 });
+    const document = JSON.stringify({
+      openapi: "3.1.0",
+      info: { title: "Orders", version: "1" },
+      "x-ferrum-plugins": [{
+        config: {},
+        trigger: { when: { match: { header: { name: "x-skip", value: { exact: [48213907, "ACT"] } } } } },
+      }],
+    });
+    const secrets = specDocumentSecrets(document);
+    expect(secrets.scalars).toEqual([48213907]);
+    // The short operand is classified, not only a whole token.
+    expect(secrets.values).toContain("ACT");
+    const failure = await apiSpecs.create(scope, document).catch((e: unknown) => e);
+    expectDetached(failure);
+    expect(await exposure(failure)).not.toContain("48213907");
+    expect((failure as { data: Record<string, unknown> }).data.offending).toBe("[REDACTED]");
+  });
+
+  it("keeps every existing marker whole in linear time", () => {
+    const count = 50_000;
+    const text = Array.from({ length: count }, (_, index) => `[REDACTED] e${index};`).join(" ");
+    const started = performance.now();
+    const redacted = redactSubmitted(text, redactionForms(["ACT"]));
+    const elapsed = performance.now() - started;
+    expect(redacted).toBe(text);
+    expect(redactSubmitted("ACT [REDACTED]ACTED ACT", redactionForms(["ACT"])))
+      .toBe("[REDACTED] [REDACTED][REDACTED]ED [REDACTED]");
+    // Quadratic marker scanning took tens of seconds here; linear is well
+    // under a second even on a loaded machine.
+    expect(elapsed).toBeLessThan(5000);
   });
 
   it("never splits a marker the gateway already wrote with a short classified operand", async () => {

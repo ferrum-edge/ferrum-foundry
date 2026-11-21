@@ -245,6 +245,17 @@ test("a trigger predicate Edge adds, drops, or stops declaring as a list is drif
     [["TRIGGER_CLIENT_FIELD_PREDICATES", "unreadable"]],
   );
 
+  // An escaped literal is refused rather than read with its backslash
+  // dropped: Rust compiles `"heade\r"` to a carriage return, which dropping
+  // the backslash would read as the unchanged `header`.
+  const escaped = PROJECTION.replace('&["header",', '&["heade\\r",');
+  assert.ok(escaped.includes('"heade\\r"'));
+  assert.deepEqual(
+    edgeMainDrift(SPEC, escaped, options).trigger.map(({ constant, status, reason }) =>
+      [constant, status, reason.includes("has an escape")]),
+    [["TRIGGER_CLIENT_FIELD_PREDICATES", "unreadable", true]],
+  );
+
   const notAList = PROJECTION.replace(
     '&["header", "query", "cookie"]',
     "CLIENT_FIELDS",

@@ -87,12 +87,22 @@ export interface Secrets {
    * whole token when shorter.
    */
   readonly scalars: readonly (number | boolean)[];
+  /**
+   * Whether the value a deserializer quotes in a type diagnostic ("invalid
+   * type: integer `N`, expected a string") is removed whatever it is, keeping
+   * the category, the expected type and the location. Set for an API spec
+   * document, which Ferrum Edge re-parses itself: it can quote a value in a
+   * spelling Foundry cannot reconstruct from the text it sent (an integer
+   * beyond 2^53 that `JSON.parse` rounds, a YAML `0x` or `0o` integer it
+   * reports in decimal), so exact matching alone cannot be relied on there.
+   */
+  readonly diagnostics: boolean;
 }
 
-const NO_SECRETS: Secrets = { values: [], tokens: [], scalars: [] };
+const NO_SECRETS: Secrets = { values: [], tokens: [], scalars: [], diagnostics: false };
 
 function classified(values: readonly string[]): Secrets {
-  return { values, tokens: [], scalars: [] };
+  return { values, tokens: [], scalars: [], diagnostics: false };
 }
 
 function mergeSecrets(sets: readonly Secrets[]): Secrets {
@@ -100,6 +110,7 @@ function mergeSecrets(sets: readonly Secrets[]): Secrets {
     values: sets.flatMap((set) => set.values),
     tokens: sets.flatMap((set) => set.tokens),
     scalars: sets.flatMap((set) => set.scalars),
+    diagnostics: sets.some((set) => set.diagnostics),
   };
 }
 
@@ -124,7 +135,7 @@ export function unclassified(values: readonly string[]): Secrets {
   for (const value of values) {
     (value.trim().length < MIN_DISTINCTIVE ? short : long).push(value);
   }
-  return { values: long, tokens: short, scalars: [] };
+  return { values: long, tokens: short, scalars: [], diagnostics: false };
 }
 
 /**
@@ -276,23 +287,21 @@ export function pluginTriggerSecrets(trigger: unknown): Secrets {
     values: [...new Set(sites.flatMap((site) => submittedValues(site.value)))],
     tokens: [],
     scalars: [...new Set(sites.flatMap((site) => submittedScalars(site.value)))],
+    diagnostics: false,
   };
 }
 
 /**
- * Every number and boolean `data` holds, other than a boolean
- * `case_insensitive` flag, which says how a comparison is made and is never
- * an operand.
+ * Every number and boolean `data` holds. Under a withheld site every one
+ * counts, a nested `case_insensitive` included: the walk exempts that flag
+ * only where it qualifies a comparison, and never reports it as a site.
  */
 function submittedScalars(data: unknown): (number | boolean)[] {
   if ((typeof data === "number" && Number.isFinite(data)) || typeof data === "boolean") {
     return [data];
   }
   if (Array.isArray(data)) return data.flatMap(submittedScalars);
-  if (data && typeof data === "object") {
-    return Object.entries(data).flatMap(([key, value]) =>
-      key === "case_insensitive" && typeof value === "boolean" ? [] : submittedScalars(value));
-  }
+  if (data && typeof data === "object") return Object.values(data).flatMap(submittedScalars);
   return [];
 }
 
@@ -368,8 +377,18 @@ export function restoreSecrets(backup: unknown): Secrets {
  * configuration is unclassified throughout. A document Foundry cannot parse —
  * YAML, for which it has no parser, or malformed JSON — cannot be classified,
  * so every scalar it could hold is unclassified (`yamlScalars`).
+ *
+ * An entry without a string `plugin_name` is unclassified throughout, and its
+ * `trigger`, which Edge deserializes whatever the rest holds, is also
+ * classified by `pluginTriggerSecrets`, numbers and booleans included.
+ * Every document sets `diagnostics`, since Edge parses the text again and can
+ * quote a value in a spelling Foundry cannot reconstruct.
  */
 export function specDocumentSecrets(document: string): Secrets {
+  return { ...specDocumentClassification(document), diagnostics: true };
+}
+
+function specDocumentClassification(document: string): Secrets {
   let parsed: unknown;
   try {
     parsed = JSON.parse(document);
@@ -381,9 +400,13 @@ export function specDocumentSecrets(document: string): Secrets {
   const entries: unknown[] = Array.isArray(plugins) ? plugins : plugins === undefined ? [] : [plugins];
   return mergeSecrets([
     secretValues(rest),
-    ...entries.map((entry) => isRecord(entry) && typeof entry.plugin_name === "string"
-      ? secretValues(entry)
-      : unclassified(submittedValues(entry))),
+    ...entries.map((entry) => {
+      if (isRecord(entry) && typeof entry.plugin_name === "string") return secretValues(entry);
+      const loose = unclassified(submittedValues(entry));
+      return isRecord(entry) && "trigger" in entry
+        ? mergeSecrets([loose, pluginTriggerSecrets(entry.trigger)])
+        : loose;
+    }),
   ]);
 }
 
@@ -757,6 +780,8 @@ export interface RedactionForms {
   readonly structural: readonly string[];
   /** Typed values replaced where a structured body holds an equal one (`Secrets.scalars`). */
   readonly scalars: readonly (number | boolean)[];
+  /** Whether a deserializer's quoted value is removed from every string (`Secrets.diagnostics`). */
+  readonly diagnostics: boolean;
 }
 
 /**
@@ -779,7 +804,9 @@ function addForms(value: string, forms: Set<string>): void {
  * occurs, as the classified one must be.
  */
 export function redactionForms(secrets: Secrets | readonly string[]): RedactionForms {
-  const { values, tokens, scalars } = "tokens" in secrets ? secrets : classified(secrets);
+  const { values, tokens, scalars, diagnostics } = "tokens" in secrets
+    ? secrets
+    : classified(secrets);
   const substrings = new Set<string>();
   for (const value of values) addForms(value, substrings);
   const whole = new Set<string>();
@@ -796,6 +823,7 @@ export function redactionForms(secrets: Secrets | readonly string[]): RedactionF
     tokens: [...whole].filter((form) => form.trim() && !substrings.has(form)).sort(longestFirst),
     structural: sorted.filter((form) => form.trim().length >= MIN_DISTINCTIVE),
     scalars: [...new Set(scalars)],
+    diagnostics,
   };
 }
 
@@ -839,14 +867,24 @@ function wholeMarkers(text: string, spans: [number, number][]): [number, number]
     markers.push([at, at + REDACTION_MARKER.length]);
   }
   if (markers.length === 0) return spans;
-  return spans.map(([spanStart, spanEnd]): [number, number] => {
+  // Markers are found in order and never overlap; merge the spans the same
+  // way, then walk both lists once.
+  const merged: [number, number][] = [];
+  for (const [start, end] of [...spans].sort(([a], [b]) => a - b)) {
+    const last = merged.at(-1);
+    if (last && start < last[1]) last[1] = Math.max(last[1], end);
+    else merged.push([start, end]);
+  }
+  let next = 0;
+  return merged.map(([spanStart, spanEnd]): [number, number] => {
     let start = spanStart;
     let end = spanEnd;
-    for (const [markerStart, markerEnd] of markers) {
-      if (markerStart < end && start < markerEnd) {
-        start = Math.min(start, markerStart);
-        end = Math.max(end, markerEnd);
-      }
+    while (next < markers.length && markers[next][1] <= start) next += 1;
+    // A marker that also reaches the next span is left for it; the widened
+    // spans overlap, and `replaceSpans` merges them.
+    for (let index = next; index < markers.length && markers[index][0] < end; index += 1) {
+      start = Math.min(start, markers[index][0]);
+      end = Math.max(end, markers[index][1]);
     }
     return [start, end];
   });
@@ -877,11 +915,30 @@ function replaceSpans(text: string, found: [number, number][]): string {
   return redacted + text.slice(cursor, start) + REDACTION_MARKER + text.slice(end);
 }
 
+/**
+ * The values serde quotes in a type or value diagnostic: "invalid type:
+ * integer `N`", "floating point `N`", "boolean `B`", "character `C`",
+ * "string \"S\"" (escaped as Rust's `Debug` writes it), and "unknown variant
+ * `V`". The category before the value and what follows it ("expected a
+ * string at line 1 column 80") are kept.
+ */
+const DIAGNOSTIC_BACKTICK_VALUE_PATTERN =
+  /\b((?:invalid (?:type|value): (?:integer|floating point|boolean|character)|unknown variant) )`[^`]*`/g;
+const DIAGNOSTIC_STRING_VALUE_PATTERN = /\b(invalid (?:type|value): string )"(?:[^"\\]|\\.)*"/g;
+
+/** `text` with the value of every deserializer diagnostic replaced by `[REDACTED]`. */
+function redactDiagnostics(text: string): string {
+  return text
+    .replace(DIAGNOSTIC_BACKTICK_VALUE_PATTERN, `$1\`${REDACTION_MARKER}\``)
+    .replace(DIAGNOSTIC_STRING_VALUE_PATTERN, `$1"${REDACTION_MARKER}"`);
+}
+
 /** `text` with every form of every submitted value replaced by `[REDACTED]`. */
 export function redactSubmitted(text: string, forms: RedactionForms): string {
-  return replaceSpans(text, [
-    ...occurrences(text, forms.substrings, false),
-    ...occurrences(text, forms.tokens, true),
+  const source = forms.diagnostics ? redactDiagnostics(text) : text;
+  return replaceSpans(source, [
+    ...occurrences(source, forms.substrings, false),
+    ...occurrences(source, forms.tokens, true),
   ]);
 }
 

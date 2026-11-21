@@ -115,10 +115,14 @@ function* rustTokens(source, start = 0) {
       }
     } else if (character === '"') {
       let value = "";
+      let escaped = false;
       index += 1;
       while (source[index] !== '"') {
         if (index >= source.length) throw new Error("unterminated string literal");
         if (source[index] === "\\") {
+          // Kept only to find the literal's end: an escaped literal is not
+          // decoded, and `string()` refuses it (see there).
+          escaped = true;
           value += source[index + 1];
           index += 2;
         } else {
@@ -127,7 +131,7 @@ function* rustTokens(source, start = 0) {
         }
       }
       index += 1;
-      yield { type: "string", value };
+      yield { type: "string", value, escaped };
     } else if (source.startsWith("::", index)) {
       index += 2;
       yield { type: "punct", value: "::" };
@@ -175,9 +179,17 @@ class TokenStream {
     return token;
   }
 
+  /**
+   * A plain string literal's text. A literal with an escape (`"\r"`, `"\u{..}"`)
+   * is refused rather than decoded: no table entry needs one, and copying the
+   * escaped character as written would read `"heade\r"` as `header`.
+   */
   string() {
     const token = this.next();
     if (token.type !== "string") throw new Error(`expected a string, found \`${token.value}\``);
+    if (token.escaped) {
+      throw new Error(`string literal \`${token.value}\` has an escape, which Foundry does not decode`);
+    }
     return token.value;
   }
 
