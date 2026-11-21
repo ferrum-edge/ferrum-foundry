@@ -92,6 +92,9 @@ const NAME_RELEASE_PLANNED_DIGESTS_PATH_PATTERN =
 const ECHO_INDEX_RELEASE_DIGEST_PLATFORM_PATTERN =
   /echo "index=\$RELEASE_DIGEST"\n[\s\S]*?echo "platform=sha256:\$digest"\n\s+done\n\s+\} > \/tmp\/release-plan\.txt/;
 const FERRUM_EDGE_RELEASE_STEP_PATTERN = /\| Ferrum Edge \| \*release step\*/;
+const PLAYWRIGHT_VERSION_PATTERN = /@playwright\/test \d+\.\d+\.\d+/g;
+const RANGE_PREFIX_PATTERN = /^[\^~]/;
+const BROWSER_ROW_PATTERN = /^\| Browser \|.*$/m;
 
 const record = readSupportedPairing();
 const qualifiedFixture = hostedQualificationFixture(record);
@@ -115,6 +118,15 @@ function withRejected(base) {
 
 function repoFile(path) {
   return readFileSync(join(REPO_ROOT, path), "utf8");
+}
+
+/**
+ * The tested envelope with the Playwright version masked: the Critical
+ * Journeys browser follows the locked @playwright/test, which may move
+ * between releases without changing any other tested dimension.
+ */
+function envelopeWithoutPlaywrightVersion(tested) {
+  return JSON.parse(JSON.stringify(tested).replace(PLAYWRIGHT_VERSION_PATTERN, "@playwright/test X.Y.Z"));
 }
 
 describe("the supported pairing record", () => {
@@ -256,6 +268,26 @@ describe("the supported pairing record", () => {
     assert.deepEqual(record.foundry.platforms, ["linux/amd64", "linux/arm64"]);
   });
 
+  it("names the locked @playwright/test version as the tested browser", () => {
+    const pkg = JSON.parse(repoFile("package.json"));
+    const lock = JSON.parse(repoFile("package-lock.json"));
+    const locked = lock.packages["node_modules/@playwright/test"]?.version;
+    assert.ok(locked, "@playwright/test is locked in package-lock.json");
+    assert.equal(
+      pkg.devDependencies["@playwright/test"].replace(RANGE_PREFIX_PATTERN, ""),
+      locked,
+      "package.json declares the locked @playwright/test version",
+    );
+    assert.deepEqual(record.tested.browsers, [
+      `Chromium bundled with @playwright/test ${locked} (Desktop Chrome profile)`,
+    ]);
+    const browserRow = BROWSER_ROW_PATTERN.exec(repoFile("docs/compatibility.md"))?.[0] ?? "";
+    assert.ok(
+      browserRow.includes(`Chromium bundled with \`@playwright/test\` ${locked},`),
+      `compatibility.md's Browser row names @playwright/test ${locked}`,
+    );
+  });
+
   it("preserves immutable release bytes and never reuses prior qualification for a moved pin", () => {
     for (const [version, digest] of [
       ["0.4.0", "937d06bd98cb3338358f3afa8697eafb17154b423d65da5a8335ee26e70ff9a6"],
@@ -331,7 +363,7 @@ describe("the supported pairing record", () => {
     const v050 = JSON.parse(repoFile("docs/release-notes/v0.5.0.compatibility.json"));
     assert.equal(v050.foundry.source_commit, "7ab9ddb732ebd890fb02928d6e4b22470ceab3f7");
     assert.equal(v050.edge.release.version, "v0.9.11");
-    assert.deepEqual(record.tested, previous.tested);
+    assert.deepEqual(envelopeWithoutPlaywrightVersion(record.tested), envelopeWithoutPlaywrightVersion(previous.tested));
     assert.deepEqual(record.best_effort, previous.best_effort);
 
     // Published upstream distribution cannot make a pending Foundry source releasable.
@@ -365,7 +397,7 @@ describe("the supported pairing record", () => {
     );
     assert.equal(previous.edge.release.version, "v0.9.10");
     assert.notEqual(previous.edge.image, record.edge.image);
-    assert.deepEqual(record.tested, previous.tested);
+    assert.deepEqual(envelopeWithoutPlaywrightVersion(record.tested), envelopeWithoutPlaywrightVersion(previous.tested));
     assert.deepEqual(record.best_effort, previous.best_effort);
   });
 
