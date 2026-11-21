@@ -90,7 +90,9 @@ or `unmapped`). It is for a first run and for CI. Do not expose it.
    16-, 24- or 32-byte key: `openssl rand -base64 32 | tr -- '+/' '-_'`. The
    OIDC client secret is the one your identity provider issues.
    `FERRUM_JWT_SECRET` must equal the gateway's
-   `FERRUM_ADMIN_JWT_SECRET`. The BFF refuses to start while
+   `FERRUM_ADMIN_JWT_SECRET`, and the BFF always sends the audience in
+   `FERRUM_JWT_AUDIENCE` (default `ferrum-admin`), so set the gateway's
+   `FERRUM_ADMIN_JWT_AUDIENCE` to the same value. The BFF refuses to start while
    `FERRUM_JWT_SECRET` or `FERRUM_TRUSTED_PROXY_SECRET` still holds the
    `replace-me-...` placeholder from `.env.example`, or (in production) one of
    the development example values printed in the contributor instructions.
@@ -128,7 +130,9 @@ or `unmapped`). It is for a first run and for CI. Do not expose it.
 5. Pin `FOUNDRY_IMAGE` to a released digest, and run the Ferrum Edge release
    named in that published pairing's immutable record linked from
    [`docs/compatibility.md`](../../docs/compatibility.md).
-6. `docker compose --profile production up -d`, then run the preflight.
+6. `docker compose --profile production up -d`, then run the preflight. Run
+   it from a shell without the contributor `FERRUM_*` exports: Compose prefers
+   variables already set in the shell over `.env`.
 
 ### What the stack gets right
 
