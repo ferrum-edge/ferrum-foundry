@@ -248,6 +248,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- A plugin configuration's execution `trigger` is redacted like its
+  `config`. Every `header`, `query` and `cookie` comparison operand (each
+  `exact` and `prefix` entry, `regex`, numbers included), and any shape a
+  `PluginTrigger` cannot have (in a draft, also content under a visible key
+  without the type Edge declares), is treated as secret by failed-write
+  redaction (`secretValues`) and
+  shown as `[redacted]` in the conflict dialog, following Ferrum Edge main's
+  trigger projection (ferrum-edge#7054) on every gateway, the pinned v0.9.20
+  included; the routing and identity predicates (`path`, `method`, `host`,
+  `consumer`, `external_identity`, `external_identity_authority`, …) stay
+  readable. A non-admin session's placeholder at a masked trigger operand now
+  blocks the plugin editor's Save, an MCP tool-policy save, and a membership
+  rollback before anything is sent, as a masked `config` value already did.
+  The Edge Main Drift check compares Foundry's trigger predicate lists with
+  Edge main's, and `PluginTriggerMatch` gains `external_identity` and
+  `external_identity_authority` (ferrum-edge#7417, #728).
 - The deployment starter's oauth2-proxy uses PKCE:
   `oauth2-proxy.env.example` sets `OAUTH2_PROXY_CODE_CHALLENGE_METHOD=S256`,
   so each login sends an S256 `code_challenge` and redeems the code with its

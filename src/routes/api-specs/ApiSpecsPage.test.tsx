@@ -201,7 +201,11 @@ describe("API spec dialog generations", () => {
     );
 
     await settle(() => expect(document.body.textContent).toContain("MalformedExtension"));
-    expect(document.body.textContent).toContain(details);
+    // A spec failure keeps a diagnostic's category, but not the value it
+    // quotes or anything after it: Edge can quote a value Foundry cannot
+    // recognize as submitted (`specDocumentSecrets`).
+    expect(document.body.textContent).toContain("x-ferrum-proxy: unknown field [REDACTED]");
+    expect(document.body.textContent).not.toContain("backend_protocol");
   });
 
   it("keeps a newer view paired with its own document", async () => {

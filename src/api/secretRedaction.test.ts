@@ -40,11 +40,14 @@ import * as tls from "./tls";
 import * as upstreams from "./upstreams";
 import {
   pluginConfigSecrets,
+  pluginTriggerSecrets,
   redactionForms,
   RedactedWriteError,
+  redactSubmitted,
   redactWriteFailure,
   secretValues,
   type Secrets,
+  specDocumentSecrets,
   yamlScalars,
 } from "./secretRedaction";
 
@@ -501,6 +504,522 @@ describe("plugin configuration writes (#478)", () => {
   });
 });
 
+describe("plugin triggers follow Ferrum Edge main's projection", () => {
+  const HEADER_TOKEN = "synthetic-skip-waf-header-token";
+  const QUERY_PREFIX = "synthetic-query-bypass-prefix";
+  const COOKIE_PATTERN = "synthetic-cookie-(alpha|beta)";
+  const VISIBLE = {
+    all: [
+      { match: { path: { prefix: ["/orders/internal"] } } },
+      { match: { method: ["POST", "DELETE"] } },
+      { match: { host: { exact: ["api.example.com"] } } },
+      { match: { consumer: { value: { exact: ["service-account-orders"] } } } },
+      { match: { external_identity: { value: { prefix: ["spiffe-ish-subject"] } } } },
+      { match: { external_identity_authority: ["a".repeat(64)] } },
+      { match: { source_cidr: ["10.20.0.0/16"] } },
+      { match: { auth_method: ["jwt_auth"] } },
+    ],
+  };
+  const trigger = {
+    when: {
+      any: [
+        { not: { match: { header: { name: "x-skip-waf", value: { exact: [HEADER_TOKEN] } } } } },
+        {
+          match: {
+            query: {
+              name: "debug_mode",
+              presence: "present",
+              multi_value: "all",
+              value: { prefix: [QUERY_PREFIX], case_insensitive: true },
+            },
+          },
+        },
+        { match: { cookie: { name: "canary_group", value: { regex: COOKIE_PATTERN } } } },
+        VISIBLE,
+      ],
+    },
+  };
+
+  it("takes every header, query and cookie operand and leaves the visible predicates", () => {
+    const secrets = classifiedValues(pluginTriggerSecrets(trigger));
+    expect(secrets).toEqual([COOKIE_PATTERN, HEADER_TOKEN, QUERY_PREFIX].sort());
+    // Field names and the routing and identity predicates stay readable.
+    for (const visible of [
+      "x-skip-waf",
+      "debug_mode",
+      "canary_group",
+      "/orders/internal",
+      "POST",
+      "api.example.com",
+      "service-account-orders",
+      "spiffe-ish-subject",
+      "a".repeat(64),
+      "10.20.0.0/16",
+      "jwt_auth",
+    ]) {
+      expect(secrets).not.toContain(visible);
+    }
+  });
+
+  it("is applied to a plugin write's trigger beside its config", () => {
+    const write = {
+      plugin_name: "waf",
+      scope: "global",
+      config: {},
+      trigger,
+    };
+    const { values } = secretValues(write);
+    expect(values).toEqual(expect.arrayContaining([HEADER_TOKEN, QUERY_PREFIX, COOKIE_PATTERN]));
+    for (const visible of ["x-skip-waf", "/orders/internal", "service-account-orders"]) {
+      expect(values).not.toContain(visible);
+    }
+    // And to a plugin entry nested in a larger payload, such as a restore.
+    expect(secretValues({ plugin_configs: { items: [write] } }).values).toEqual(
+      expect.arrayContaining([HEADER_TOKEN, QUERY_PREFIX, COOKIE_PATTERN]),
+    );
+  });
+
+  it("fails closed on a shape a PluginTrigger cannot have", () => {
+    const weird = "synthetic-malformed-content";
+    for (const malformed of [
+      weird,
+      [weird],
+      { if: { match: { header: { name: "x", value: { exact: [weird] } } } } },
+      { when: { match: { path: { exact: ["/ok"] } } }, extra: weird },
+      { when: weird },
+      { when: { all: { match: { header: { name: "x" } } }, nested: weird } },
+      { when: { match: weird } },
+      { when: { match: { header_value: weird } } },
+      { when: { match: { header: weird } } },
+      { when: { match: { header: { name: "x", value: weird } } } },
+      { when: { match: { header: { name: "x", value: { exact: [{ deep: weird }] } } } } },
+      { when: { match: { header: { name: "x", operand: weird } } } },
+      { when: { match: { query: { name: "x", value: { case_insensitive: weird } } } } },
+      { when: { all: { not: { match: { cookie: { name: "x", value: { exact: [weird] } } } } } } },
+    ]) {
+      // Withheld whole, so a field name inside the malformed part goes too.
+      expect(classifiedValues(pluginTriggerSecrets(malformed))).toContain(weird);
+    }
+    const none = { values: [], tokens: [], scalars: [], diagnostics: false };
+    expect(pluginTriggerSecrets(null)).toEqual(none);
+    expect(pluginTriggerSecrets(undefined)).toEqual(none);
+  });
+
+  it("withholds ill-typed content beneath a visible key, which only a draft can hold", () => {
+    const weird = "synthetic-ill-typed-content";
+    for (const draft of [
+      { when: { match: { path: weird } } },
+      { when: { match: { path: { exact: [{ nested: weird }] } } } },
+      { when: { match: { path: { exact: ["/ok"], extra: weird } } } },
+      { when: { match: { method: weird } } },
+      { when: { match: { method: [{ nested: weird }] } } },
+      { when: { match: { protocol: [weird] } } },
+      { when: { match: { listen_port: [weird] } } },
+      { when: { match: { external_identity_authority: [weird] } } },
+      { when: { match: { consumer: { value: weird } } } },
+      { when: { match: { spiffe_id: { presence: weird } } } },
+      { when: { match: { header: { name: { nested: weird } } } } },
+      { when: { match: { cookie: { name: "c", presence: weird } } } },
+      { when: { match: { query: { name: "q", multi_value: [weird] } } } },
+    ]) {
+      // Keys inside the withheld content (`nested`) count as content too.
+      expect(classifiedValues(pluginTriggerSecrets(draft)), JSON.stringify(draft)).toContain(weird);
+    }
+  });
+
+  it("keeps an unknown comparison key set to null out of a refused plugin write", async () => {
+    const key = "synthetic-operand-written-as-key";
+    respond = () => Response.json({
+      error: `invalid trigger: unknown field \`${key}\`, expected one of \`exact\`, \`prefix\``,
+    }, { status: 400 });
+    const trigger = { when: { match: { header: { name: "x-skip", value: { [key]: null } } } } };
+    expect(pluginTriggerSecrets(trigger).values).toEqual([key]);
+    const failure = await plugins.createConfig(scope, {
+      plugin_name: "waf",
+      scope: "global",
+      config: {},
+      trigger: trigger as unknown as PluginConfigCreate["trigger"],
+    }).catch((e: unknown) => e);
+    expectDetached(failure);
+    const text = await exposure(failure);
+    expect(text).not.toContain(key);
+    expect(text).toContain("invalid trigger: unknown field `[REDACTED]`, expected one of `exact`");
+    expect(reported).toHaveLength(1);
+    expect(reported[0].body).not.toContain(key);
+  });
+
+  it("keeps a cookie predicate's metadata and identity values readable through secretValues", () => {
+    const write = {
+      plugin_name: "waf",
+      scope: "global",
+      config: {},
+      trigger: {
+        when: {
+          all: [
+            {
+              match: {
+                cookie: {
+                  name: "canary_group",
+                  presence: "present",
+                  multi_value: "all",
+                  value: { exact: [COOKIE_PATTERN], case_insensitive: true },
+                },
+              },
+            },
+            { match: { cookie: { name: "session_hint", presence: "absent" } } },
+            { match: { spiffe_id: { value: { prefix: ["spiffe://cluster.local/ns/"] } } } },
+            { match: { external_identity: { value: { exact: ["https://idp.example.com/users/42"] } } } },
+          ],
+        },
+      },
+    };
+    const { values, tokens, scalars } = secretValues(write);
+    expect(values).toEqual([COOKIE_PATTERN]);
+    expect(tokens).toEqual([]);
+    expect(scalars).toEqual([]);
+  });
+
+  it("takes numbers and booleans at withheld sites, but not a case_insensitive flag", () => {
+    expect(pluginTriggerSecrets({
+      when: {
+        all: [
+          { match: { header: { name: "x-a", value: { exact: [48213, "text-operand-1"] } } } },
+          { match: { query: { name: "q", value: { regex: 7 } } } },
+          { match: { cookie: { name: "c", value: { prefix: [true], case_insensitive: true } } } },
+          { if: { case_insensitive: false, port: 9000 } },
+        ],
+      },
+    })).toEqual({
+      // The keys inside the withheld unknown node are content as well.
+      values: ["text-operand-1", "if", "case_insensitive", "port"],
+      tokens: [],
+      // A nested `case_insensitive` inside a withheld subtree is an ordinary
+      // value there; only the comparison flag itself is exempt, in the walk.
+      scalars: [48213, 7, true, false, 9000],
+      diagnostics: false,
+    });
+    expect(pluginTriggerSecrets({
+      when: { match: { header: { name: "x", value: { exact: [{ case_insensitive: true }] } } } },
+    }).scalars).toEqual([true]);
+  });
+
+  it("keeps no operand in a refused plugin write's error or popup, on any gateway", async () => {
+    respond = () => Response.json({
+      error: `trigger rejected: header x-skip-waf exact ${HEADER_TOKEN}; query ${QUERY_PREFIX}`,
+    }, { status: 400 });
+    const failure = await plugins.createConfig(scope, {
+      plugin_name: "waf",
+      scope: "global",
+      config: {},
+      trigger: trigger as PluginConfigCreate["trigger"],
+    }).catch((e: unknown) => e);
+
+    expectDetached(failure);
+    const text = await exposure(failure);
+    expect(text).toContain("header x-skip-waf exact [REDACTED]; query [REDACTED]");
+    expect(text).not.toContain(HEADER_TOKEN);
+    expect(text).not.toContain(QUERY_PREFIX);
+    expect(reported).toHaveLength(1);
+    expect(reported[0].body).not.toContain(HEADER_TOKEN);
+    expect(reported[0].body).not.toContain(QUERY_PREFIX);
+  });
+});
+
+describe("trigger scalars and existing markers in a refusal", () => {
+  it("keeps a numeric trigger operand out of an API spec import's parse error", async () => {
+    // Edge's extractor deserializes each entry with serde and returns its
+    // message as `details`, quoting a number given where a string belongs.
+    respond = () => Response.json({
+      error: "Spec parse failed",
+      code: "malformed_extension",
+      details:
+        "x-ferrum-plugins: invalid type: integer `48213907`, expected a string at line 1 column 80",
+      offending: 48213907,
+      port: 7,
+      retryable: false,
+    }, { status: 400 });
+    const document = JSON.stringify({
+      openapi: "3.1.0",
+      info: { title: "Orders", version: "1" },
+      "x-ferrum-plugins": [{
+        plugin_name: "waf",
+        config: {},
+        trigger: {
+          when: {
+            all: [
+              { not: { match: { header: { name: "x-skip", value: { exact: [48213907] } } } } },
+              { match: { query: { name: "q", value: { exact: [7] } } } },
+            ],
+          },
+        },
+      }],
+    });
+    const failure = await apiSpecs.create(scope, document).catch((e: unknown) => e);
+
+    expectDetached(failure);
+    const text = await exposure(failure);
+    expect(text).not.toContain("48213907");
+    // Everything from the diagnostic's quoted value on is withheld.
+    expect(text).toContain("x-ferrum-plugins: invalid type: integer [REDACTED]");
+    const data = (failure as { data: Record<string, unknown> }).data;
+    // Typed scalars are matched exactly in the structured body; the code and
+    // an unrelated flag keep their values.
+    expect(data.offending).toBe("[REDACTED]");
+    expect(data.port).toBe("[REDACTED]");
+    expect(data.retryable).toBe(false);
+    expect(data.code).toBe("malformed_extension");
+    expect(data.details).toBe("x-ferrum-plugins: invalid type: integer [REDACTED]");
+  });
+
+  const unsafeJson = (operand: string) => `{"openapi":"3.1.0","info":{"title":"Orders","version":"1"},` +
+    `"x-ferrum-plugins":[{"plugin_name":"waf","config":{},"trigger":{"when":{"match":` +
+    `{"header":{"name":"x-skip","value":{"exact":[${operand}]}}}}}}]}`;
+  const hexYaml = [
+    "openapi: 3.1.0",
+    "info: {title: Orders, version: '1'}",
+    "x-ferrum-plugins:",
+    "  - plugin_name: waf",
+    "    config: {}",
+    "    trigger:",
+    "      when:",
+    "        match:",
+    "          header:",
+    "            name: x-skip",
+    "            value:",
+    "              exact: [0xBEEF5EED]",
+    "",
+  ].join("\n");
+
+  it.each([
+    // 2^53 + 1: `JSON.parse` rounds it, Edge keeps every digit.
+    ["an unsafe-width JSON integer", unsafeJson("9007199254740993"), "9007199254740993"],
+    // Edge reads a YAML `0x` integer and reports it in decimal.
+    ["a YAML hex integer", hexYaml, String(0xBEEF5EED)],
+  ])("removes %s Edge quotes in a diagnostic, on import and replacement", async (_, document, echoed) => {
+    respond = () => Response.json({
+      error: "Spec parse failed",
+      code: "malformed_extension",
+      details: `x-ferrum-plugins: invalid type: integer \`${echoed}\`, expected a string at line 1 column 157`,
+    }, { status: 400 });
+    for (const write of [
+      () => apiSpecs.create(scope, document),
+      () => apiSpecs.update(scope, "orders-spec", document),
+    ]) {
+      const failure = await write().catch((e: unknown) => e);
+      expectDetached(failure);
+      expect(await exposure(failure)).not.toContain(echoed);
+      // The category stays; everything from the quoted value on goes.
+      expect(await getApiErrorDetail(failure))
+        .toBe("malformed_extension: x-ferrum-plugins: invalid type: integer [REDACTED]");
+    }
+  });
+
+  it("withholds every serde diagnostic's value and the rest of the text from a spec refusal, and only there", () => {
+    const forms = redactionForms(specDocumentSecrets("openapi: 3.1.0\n"));
+    for (const [diagnostic, kept] of [
+      ["invalid type: integer `5`, expected a string", "invalid type: integer "],
+      ["invalid type: floating point `1.5e300`, expected a string", "invalid type: floating point "],
+      ['invalid value: string "se\\"cret", expected one of `present`', "invalid value: string "],
+      ["invalid type: boolean `true`, expected a string", "invalid type: boolean "],
+      ["invalid type: character `c`, expected a string", "invalid type: character "],
+      ["unknown variant `maybe`, expected `any` or `all`", "unknown variant "],
+      ["unknown field `synthetic-key`, expected one of `exact`", "unknown field "],
+    ] as const) {
+      expect(redactSubmitted(`plugin 1: ${diagnostic}\nsecond line`, forms))
+        .toBe(`plugin 1: ${kept}[REDACTED]`);
+    }
+    // A diagnostic that quotes no value is kept.
+    expect(redactSubmitted("invalid length 3, expected fewer elements", forms))
+      .toBe("invalid length 3, expected fewer elements");
+    // An ordinary write keeps a diagnostic's value unless it was submitted.
+    expect(redactSubmitted("invalid type: integer `5`, expected a string", redactionForms([])))
+      .toBe("invalid type: integer `5`, expected a string");
+  });
+
+  it("never leaves part of a withheld value whose diagnostic quote it breaks, on import and replacement", async () => {
+    const malformed = "pre`sent-synthetic-suffix";
+    const document = JSON.stringify({
+      openapi: "3.1.0",
+      info: { title: "Orders", version: "1" },
+      "x-ferrum-plugins": [{
+        plugin_name: "waf",
+        config: {},
+        trigger: { when: { match: { header: { name: "x-skip", presence: malformed } } } },
+      }],
+    });
+    respond = () => Response.json({
+      error: "Spec parse failed",
+      code: "malformed_extension",
+      details: `x-ferrum-plugins: unknown variant \`${malformed}\`, expected \`present\` or ` +
+        "`absent` at line 1 column 140",
+    }, { status: 400 });
+    for (const write of [
+      () => apiSpecs.create(scope, document),
+      () => apiSpecs.update(scope, "orders-spec", document),
+    ]) {
+      reported.length = 0;
+      const failure = await write().catch((e: unknown) => e);
+      expectDetached(failure);
+      const details = (failure as { data: Record<string, unknown> }).data.details as string;
+      for (const shown of [details, await exposure(failure), await getApiErrorDetail(failure)]) {
+        expect(shown).not.toContain("sent-synthetic-suffix");
+        expect(shown).not.toContain("pre`");
+      }
+      // The value's end is uncertain, so the rest of the clause is withheld.
+      expect(details).toBe("x-ferrum-plugins: unknown variant [REDACTED]");
+    }
+  });
+
+  it("withholds a malformed enum object's key, backtick and line break included, on import and replacement", async () => {
+    const key = "pre`sent\nsynthetic-key-tail";
+    const document = JSON.stringify({
+      openapi: "3.1.0",
+      info: { title: "Orders", version: "1" },
+      "x-ferrum-plugins": [{
+        plugin_name: "waf",
+        config: {},
+        trigger: { when: { match: { header: { name: "x-skip", presence: { [key]: null } } } } },
+      }],
+    });
+    // serde reads the object's one key as the variant and quotes it as is.
+    respond = () => Response.json({
+      error: "Spec parse failed",
+      code: "malformed_extension",
+      details: `x-ferrum-plugins: unknown variant \`${key}\`, expected \`present\` or \`absent\``,
+    }, { status: 400 });
+    expect(specDocumentSecrets(document).values).toContain(key);
+    for (const write of [
+      () => apiSpecs.create(scope, document),
+      () => apiSpecs.update(scope, "orders-spec", document),
+    ]) {
+      reported.length = 0;
+      const failure = await write().catch((e: unknown) => e);
+      expectDetached(failure);
+      const details = (failure as { data: Record<string, unknown> }).data.details as string;
+      for (const shown of [details, await exposure(failure), await getApiErrorDetail(failure)]) {
+        expect(shown).not.toContain("synthetic-key-tail");
+        expect(shown).not.toContain("pre`");
+      }
+      expect(JSON.stringify(reported)).not.toContain("synthetic-key-tail");
+      expect(details).toBe("x-ferrum-plugins: unknown variant [REDACTED]");
+    }
+  });
+
+  it("withholds a folded single-quoted YAML trigger value Edge quotes, on import and replacement", async () => {
+    // The continuation starts with a double quote, which Foundry's line
+    // scanner cannot fold as Edge does; Edge quotes the folded value.
+    const document = [
+      "openapi: 3.1.0",
+      "info: {title: Orders, version: '1'}",
+      "x-ferrum-plugins:",
+      "  - plugin_name: waf",
+      "    config: {}",
+      "    trigger:",
+      "      when:",
+      "        match:",
+      "          header:",
+      "            name: x-skip",
+      "            presence: 'pre`, expected x",
+      '              "synthetic-folded-tail\'',
+      "",
+    ].join("\n");
+    respond = () => Response.json({
+      error: "Spec parse failed",
+      code: "malformed_extension",
+      details: 'x-ferrum-plugins: unknown variant `pre`, expected x "synthetic-folded-tail`, ' +
+        "expected `present` or `absent`",
+    }, { status: 400 });
+    for (const write of [
+      () => apiSpecs.create(scope, document),
+      () => apiSpecs.update(scope, "orders-spec", document),
+    ]) {
+      const failure = await write().catch((e: unknown) => e);
+      expectDetached(failure);
+      const details = (failure as { data: Record<string, unknown> }).data.details as string;
+      for (const shown of [details, await exposure(failure), await getApiErrorDetail(failure)]) {
+        expect(shown).not.toContain("synthetic-folded-tail");
+        expect(shown).not.toContain("pre`");
+      }
+      expect(details).toBe("x-ferrum-plugins: unknown variant [REDACTED]");
+    }
+  });
+
+  it("withholds the rest of a diagnostic whose quoted value does not end where serde's would", () => {
+    const forms = redactionForms(specDocumentSecrets("openapi: 3.1.0\n"));
+    expect(redactSubmitted(
+      "unknown variant `a`b`, expected `x`\nnext line withheld too",
+      forms,
+    )).toBe("unknown variant [REDACTED]");
+    // With no exact match to rely on, a line break inside the value cannot
+    // end the withheld span.
+    expect(redactSubmitted(
+      "x: unknown variant `pre`sent\nsynthetic-tail`, expected `present` or `absent`",
+      forms,
+    )).toBe("x: unknown variant [REDACTED]");
+    expect(redactSubmitted('invalid type: string "unterminated', forms))
+      .toBe("invalid type: string [REDACTED]");
+  });
+
+  it("classifies the trigger of a spec plugin entry that has no plugin_name", async () => {
+    respond = () => Response.json({
+      error: "Spec parse failed",
+      code: "malformed_extension",
+      details: "x-ferrum-plugins: invalid type: integer `48213907`, expected a string",
+      offending: 48213907,
+    }, { status: 400 });
+    const document = JSON.stringify({
+      openapi: "3.1.0",
+      info: { title: "Orders", version: "1" },
+      "x-ferrum-plugins": [{
+        config: {},
+        trigger: { when: { match: { header: { name: "x-skip", value: { exact: [48213907, "ACT"] } } } } },
+      }],
+    });
+    const secrets = specDocumentSecrets(document);
+    expect(secrets.scalars).toEqual([48213907]);
+    // The short operand is classified, not only a whole token.
+    expect(secrets.values).toContain("ACT");
+    const failure = await apiSpecs.create(scope, document).catch((e: unknown) => e);
+    expectDetached(failure);
+    expect(await exposure(failure)).not.toContain("48213907");
+    expect((failure as { data: Record<string, unknown> }).data.offending).toBe("[REDACTED]");
+  });
+
+  it("keeps every existing marker whole in linear time", () => {
+    const count = 50_000;
+    const text = Array.from({ length: count }, (_, index) => `[REDACTED] e${index};`).join(" ");
+    const started = performance.now();
+    const redacted = redactSubmitted(text, redactionForms(["ACT"]));
+    const elapsed = performance.now() - started;
+    expect(redacted).toBe(text);
+    expect(redactSubmitted("ACT [REDACTED]ACTED ACT", redactionForms(["ACT"])))
+      .toBe("[REDACTED] [REDACTED][REDACTED]ED [REDACTED]");
+    // Quadratic marker scanning took tens of seconds here; linear is well
+    // under a second even on a loaded machine.
+    expect(elapsed).toBeLessThan(5000);
+  });
+
+  it("never splits a marker the gateway already wrote with a short classified operand", async () => {
+    respond = () => Response.json({
+      error: "invalid trigger field name `[REDACTED]`; operand ACT rejected",
+    }, { status: 400 });
+    const failure = await plugins.createConfig(scope, {
+      plugin_name: "waf",
+      scope: "global",
+      config: {},
+      trigger: {
+        when: { match: { header: { name: "[REDACTED]", value: { exact: ["ACT"] } } } },
+      },
+    }).catch((e: unknown) => e);
+
+    expectDetached(failure);
+    expect(await getApiErrorDetail(failure)).toBe(
+      "invalid trigger field name `[REDACTED]`; operand [REDACTED] rejected",
+    );
+    expect(reported[0].body).toContain("`[REDACTED]`; operand [REDACTED] rejected");
+  });
+});
+
 describe("upstream writes (#478)", () => {
   const upstream = (token: string): UpstreamCreate => ({
     name: "orders",
@@ -749,6 +1268,30 @@ describe("backup restore (#485)", () => {
     expect(reported).toEqual([]);
     expect(sent).toHaveLength(1);
     expect(JSON.parse(sent[0].body).consumers[0].credentials.keyauth[0].key).toBe(LONG);
+  });
+
+  it("keeps a malformed comparison key out of a restore failure, whatever the entry's plugin_name", async () => {
+    const key = "synthetic-restore-operand-as-key";
+    respond = () => Response.json({
+      error: `restore import failed: plugin_configs[0]: unknown field \`${key}\`, expected one of \`exact\``,
+      rollback: "completed",
+    }, { status: 500 });
+    for (const pluginName of [undefined, 42, "waf"]) {
+      const entry = {
+        id: "p1",
+        scope: "global",
+        config: {},
+        ...(pluginName === undefined ? {} : { plugin_name: pluginName }),
+        trigger: { when: { match: { header: { name: "x-skip", value: { [key]: null } } } } },
+      };
+      const failure = await ops.restore(scope, { version: "1", plugin_configs: [entry] })
+        .catch((e: unknown) => e);
+      expectDetached(failure);
+      expect(await exposure(failure)).not.toContain(key);
+      expect(ops.getRestoreFailure(failure)?.error).toBe(
+        "restore import failed: plugin_configs[0]: unknown field `[REDACTED]`, expected one of `exact`",
+      );
+    }
   });
 
   it("still recognizes the API spec deletion confirmation and an unobserved outcome", async () => {
