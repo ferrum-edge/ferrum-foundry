@@ -252,21 +252,29 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * One subset as a baseline compares it. Only a well-formed subset is
  * projected: any other entry (a `null`, say), or a subset whose
  * `traffic_policy` is not an object, is kept verbatim, so the guard compares
- * it and refuses a change instead of failing to reduce the read. An explicit
- * `traffic_policy: null` counts as an omitted one, as Edge treats them alike
- * and the settings form submits no key.
+ * it and refuses a change instead of failing to reduce the read.
+ *
+ * Unset is spelled one way, as the settings form submits it: an explicit
+ * `traffic_policy: null`, or a `null` algorithm or hash key inside it, counts
+ * as omitted (Edge treats them alike), and a policy left empty is dropped.
+ * Non-null settings and fields the form does not model are kept.
  */
 function baselineSubset(subset: unknown): unknown {
   if (!isPlainObject(subset)) return subset;
   const policy = subset.traffic_policy;
-  if (policy === null) {
-    const { traffic_policy, ...rest } = subset;
-    void traffic_policy;
-    return rest;
-  }
-  if (policy !== undefined && !isPlainObject(policy)) return subset;
-  return writableSubset(subset as unknown as SubsetDefinition);
+  if (policy !== undefined && policy !== null && !isPlainObject(policy)) return subset;
+  const { traffic_policy, ...rest } = writableSubset(subset as unknown as SubsetDefinition);
+  if (!isPlainObject(traffic_policy)) return rest;
+  const set = Object.fromEntries(
+    Object.entries(traffic_policy).filter(
+      ([key, value]) => !(value === null && FORM_MODELLED_POLICY_FIELDS.includes(key)),
+    ),
+  );
+  return Object.keys(set).length > 0 ? { ...rest, traffic_policy: set } : rest;
 }
+
+/** The subset policy fields the settings form edits, and submits only when set. */
+const FORM_MODELLED_POLICY_FIELDS: readonly string[] = ["load_balancer_algorithm", "hash_on"];
 
 /**
  * Guard for the whole-resource settings form, and for the detail page's

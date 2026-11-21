@@ -489,15 +489,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Upstream edit baselines reduce subsets exactly as saves do (#725).
-  `upstreams.toBaseline()` now strips the server-owned
-  `subsets[].traffic_policy` fields (`writableSubset`) and treats an explicit
-  `traffic_policy: null` as omitted. Before, a mesh control plane rewriting a
-  `DestinationRule`-projected subset policy (a TLS rotation, a new
-  `connect_timeout_ms`) refused the open upstream page's settings save and
-  delete with a false conflict, and any real conflict showed `subsets` as
-  changed locally. A malformed subset entry or policy is compared verbatim
-  rather than failing the guard. The retired proxy
+- Upstream edit baselines reduce subsets exactly as saves submit them
+  (#725). `upstreams.toBaseline()` now strips the server-owned
+  `subsets[].traffic_policy` fields (`writableSubset`), and spells an unset
+  policy, algorithm or hash key one way (an explicit `null` counts as
+  omitted, as the settings form submits it). The guard therefore no longer
+  counts a change to those server-owned fields as a conflict, and a real
+  conflict no longer shows `subsets` as changed locally. This matters when a
+  writable gateway returns mesh-projected subset policy on a tagged read; it
+  is verified against tagged fixtures, since Edge's mesh mode itself is
+  read-only and its reads carry no tag. A malformed subset entry or policy is
+  compared verbatim rather than failing the guard. The retired proxy
   `pool_max_requests_per_connection` stays compared on save: Edge v0.9.20
   stores `None` when a save omits it, so the save does clear it.
 - Foundry handles the plugin-config projection Ferrum Edge `main` adds after

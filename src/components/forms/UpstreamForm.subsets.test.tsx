@@ -1,6 +1,11 @@
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mergeFormUpdatePayload, SUBSET_TRAFFIC_POLICY_SERVER_OWNED } from "@/api/upstreams";
+import {
+  mergeFormUpdatePayload,
+  SUBSET_TRAFFIC_POLICY_SERVER_OWNED,
+  toBaseline,
+} from "@/api/upstreams";
+import { compareBaselines } from "@/lib/resourceBaseline";
 import type { SubsetDefinition, Upstream, UpstreamCreate } from "@/api/types";
 import { inputByLabel } from "@/test/fields";
 import { click, createHarness, fill, selectOption } from "@/test/__tests__/harness";
@@ -230,6 +235,42 @@ describe("subset selectors through the upstream form (#479)", () => {
         future_subset_field: { keep: true },
       },
     ]);
+  });
+
+  it("shows no local subset edit in a conflict after a name-only save (#725)", async () => {
+    // Every way a read can spell an unset subset policy, next to set and
+    // server-owned fields. What the form submits must reduce to the same
+    // baseline as the read it was seeded from.
+    const data = upstream([
+      { name: "v1", labels: { version: "v1" }, traffic_policy: null },
+      {
+        name: "v2",
+        labels: { version: "v2" },
+        traffic_policy: { load_balancer_algorithm: null, hash_on: null },
+      },
+      {
+        name: "v3",
+        labels: { version: "v3" },
+        traffic_policy: { load_balancer_algorithm: null, hash_on: "header:x-user", ...projected },
+      },
+      {
+        name: "v4",
+        labels: { version: "v4" },
+        traffic_policy: { load_balancer_algorithm: "least_connections", hash_on: null, future_policy_field: "kept" },
+      },
+    ] as unknown as SubsetDefinition[]);
+    // The backend TLS defaults an Edge read carries, which the form submits.
+    Object.assign(data, { backend_tls_san_allow_list: [], backend_tls_verify_server_cert: true });
+    await mount(data);
+    await fill(inputByLabel(ui.host, "Name"), "Orders v2");
+    await save();
+
+    const proposed = toBaseline(mergeFormUpdatePayload(data, submit.mock.calls[0][0]));
+    const current = toBaseline({ ...data, algorithm: "least_connections" });
+    const fields = compareBaselines(toBaseline(data), current, proposed)
+      .map(({ field }) => field)
+      .sort();
+    expect(fields).toEqual(["algorithm", "name"]);
   });
 
   it("merges edited subset fields onto the writable part of the read", async () => {

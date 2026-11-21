@@ -277,4 +277,23 @@ describe("upstream baselines (#725)", () => {
     expect(compareBaselines(original, current, proposed).map(({ field }) => field).sort())
       .toEqual(["algorithm", "name"]);
   });
+
+  it("treats a null algorithm or hash key inside a subset policy as unset", () => {
+    const read = {
+      ...fullUpstream(),
+      subsets: [
+        { name: "a", labels: {}, traffic_policy: { load_balancer_algorithm: null, hash_on: null } },
+        { name: "b", labels: {}, traffic_policy: { load_balancer_algorithm: null, hash_on: "header:x" } },
+        { name: "c", labels: {}, traffic_policy: { hash_on: null, future_policy_field: null } },
+        { name: "d", labels: {}, traffic_policy: { hash_on: null, connect_timeout_ms: 5 } },
+      ],
+    } as unknown as Upstream;
+    expect(toBaseline(read).subsets).toEqual([
+      { name: "a", labels: {} },
+      { name: "b", labels: {}, traffic_policy: { hash_on: "header:x" } },
+      // A field the form does not model keeps its explicit null.
+      { name: "c", labels: {}, traffic_policy: { future_policy_field: null } },
+      { name: "d", labels: {} },
+    ]);
+  });
 });

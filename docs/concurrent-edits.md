@@ -196,9 +196,13 @@ writes which race nothing are not refused:
   Edge projects from a `DestinationRule` (`SUBSET_TRAFFIC_POLICY_SERVER_OWNED`),
   which a save strips through `writableSubset`. The upstream baseline reduces
   subsets exactly as the save payload does, so a real conflict never shows
-  `subsets` as changed locally because of them (#725). An explicit
-  `traffic_policy: null` counts as an omitted one, as the settings form
-  submits it; a malformed subset entry or policy is compared verbatim.
+  `subsets` as changed locally because of them (#725). Unset is spelled one
+  way, as the settings form submits it: an explicit `traffic_policy: null`, or
+  a `null` algorithm or hash key inside it, counts as omitted, and a policy
+  left empty is dropped. A malformed subset entry or policy is compared
+  verbatim. (Edge's mesh mode is itself read-only with untagged reads, so no
+  guarded write runs there; this applies when a writable gateway returns
+  mesh-projected subset policy.)
 
 A field a save omits but Edge does **not** preserve is still compared. A
 proxy save never sends the retired `pool_max_requests_per_connection`, but
