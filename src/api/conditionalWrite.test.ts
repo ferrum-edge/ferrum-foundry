@@ -836,6 +836,33 @@ describe("guarded upstream saves on a gateway that honours If-Match", () => {
       expect(gateway.wire).toEqual(["GET"]);
     });
 
+    it("refuses a save when a `__proto__` subset label changed, and shows the subset", async () => {
+      // A valid label key that bracket assignment would silently drop.
+      const labels = (value: string) =>
+        JSON.parse(`{"release":"blue","__proto__":"${value}"}`) as Record<string, string>;
+      const seed = { ...upstreamSeed, subsets: [{ name: "blue", labels: labels("v1") }] } as Upstream;
+      const gateway = stubGateway({ ...seed, subsets: [{ name: "blue", labels: labels("v2") }] } as Upstream);
+
+      const refused = await settle(
+        upstreams.update(
+          scope,
+          "payments",
+          { ...upstreams.toUpdatePayload(seed), name: "renamed" },
+          upstreams.upstreamWriteGuard(seed),
+        ),
+      );
+      const deleted = await settle(
+        upstreams.remove(scope, "payments", upstreams.upstreamWriteGuard(seed)),
+      );
+
+      if (!isStaleResourceError(refused)) throw new Error("expected a stale save");
+      const { original, current, proposed } = refused.detail;
+      expect(compareBaselines(original, current, proposed).map(({ field }) => field)).toContain("subsets");
+      expect(isStaleResourceError(deleted)).toBe(true);
+      expect(gateway.wire).toEqual(["GET", "GET"]);
+      expect(gateway.exists()).toBe(true);
+    });
+
     it("still refuses a delete when a writable subset field changed", async () => {
       const gateway = stubGateway({
         ...meshSeed,

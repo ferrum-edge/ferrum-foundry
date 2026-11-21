@@ -293,6 +293,15 @@ describe("subset selectors through the upstream form (#479)", () => {
       .toEqual(["algorithm", "name"]);
   });
 
+  it("keeps an untouched subset name JavaScript would trim to nothing (#725)", async () => {
+    // U+FEFF is not Unicode White_Space, so Edge accepts it as a name.
+    const data = upstream([{ name: "\uFEFF", labels: { version: "bom" } }]);
+    await mount(data);
+    await fill(inputByLabel(ui.host, "Name"), "Orders v2");
+    await save();
+    expect(outgoingSubsets(data)).toEqual([{ name: "\uFEFF", labels: { version: "bom" } }]);
+  });
+
   it("still trims a subset name the operator edited", async () => {
     const data = upstream([{ name: "blue ", labels: { version: "blue" } }]);
     await mount(data);

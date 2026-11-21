@@ -247,7 +247,12 @@ type HashOnCookieConfigDraft = WithNumberDrafts<HashOnCookieConfig, "ttl_seconds
 function upstreamHashSettings(
   algorithm: Upstream["algorithm"],
   hashOn: string,
-  subsets: readonly { name: string; algorithm: Upstream["algorithm"] | ""; hashOn: string }[],
+  subsets: readonly {
+    name: string;
+    source?: SubsetDefinition;
+    algorithm: Upstream["algorithm"] | "";
+    hashOn: string;
+  }[],
   portOverrides: Upstream["port_overrides"],
 ): { hashKey: boolean; cookie: boolean } {
   const hashing = "consistent_hashing";
@@ -256,7 +261,7 @@ function upstreamHashSettings(
   if (algorithm === hashing) laneKeys.push(null);
   let subsetHashes = false;
   for (const subset of subsets) {
-    if (subset.name.trim() && (subset.algorithm || algorithm) === hashing) {
+    if (submittedSubsetName(subset) && (subset.algorithm || algorithm) === hashing) {
       subsetHashes = true;
       laneKeys.push(subset.hashOn.trim() || null);
     }
@@ -301,6 +306,18 @@ interface SubsetRow {
 }
 
 /**
+ * The name a subset row is saved with, and whether it is saved at all (an
+ * empty result drops the row). Edge matches subset names exactly (a proxy's
+ * `upstream_subset` too), and its notion of blank is not JavaScript's
+ * `trim()`, so an untouched name is written back exactly as read; only a new
+ * or edited name is trimmed. Every decision about a row (whether it is saved,
+ * its labels validated, its hash lane counted) uses this one value.
+ */
+function submittedSubsetName(row: { name: string; source?: SubsetDefinition }): string {
+  return row.source && row.name === row.source.name ? row.name : row.name.trim();
+}
+
+/**
  * A subset as the settings save writes it. The save replaces `subsets`
  * wholesale, so the row's fields are merged onto the operator-writable part of
  * the subset as read (`writableSubset`): the name, selector, algorithm and
@@ -325,10 +342,7 @@ function subsetForSubmit(row: SubsetRow): SubsetDefinition {
   };
   return {
     ...readSubset,
-    // Edge matches subset names exactly (a proxy's `upstream_subset` too), so
-    // an untouched name is written back as read; only a new or edited one is
-    // trimmed.
-    name: row.source && row.name === row.source.name ? row.name : row.name.trim(),
+    name: submittedSubsetName(row),
     labels: subsetLabelsForSubmit(row.labels),
     ...(Object.keys(trafficPolicy).length > 0 && { traffic_policy: trafficPolicy }),
   };
@@ -601,7 +615,7 @@ export function UpstreamForm({
     // summary counts them as one.
     const labelErrs: Record<number, SubsetLabelErrors> = {};
     for (const subset of subsets) {
-      if (!subset.name.trim()) continue;
+      if (!submittedSubsetName(subset)) continue;
       const result = validateSubsetLabels(subset.labels);
       if (result) labelErrs[subset.id] = result;
     }
@@ -720,7 +734,7 @@ export function UpstreamForm({
         }
       : undefined;
 
-    const parsedSubsets = subsets.filter((s) => s.name.trim()).map(subsetForSubmit);
+    const parsedSubsets = subsets.filter((s) => submittedSubsetName(s)).map(subsetForSubmit);
 
     const sanList = tlsSanAllowList
       .split(",")
