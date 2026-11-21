@@ -331,9 +331,10 @@ as with the local development variables above, `npm start` runs the BFF API
 alone and `GET /` answers a JSON `404`; that mode only backs the Vite dev
 server (`npm run dev`).
 
-Production mode refuses static-token authentication and the published
-development secrets, so the built UI runs behind a trusted identity proxy on
-the same host:
+Production mode refuses static-token authentication by default (see
+`FERRUM_ALLOW_INSECURE_STATIC_AUTH`, which you should not set) and the
+published development secrets, so the built UI runs behind a trusted identity
+proxy on the same host:
 
 ```bash
 npm run build
