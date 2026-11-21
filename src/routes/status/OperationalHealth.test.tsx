@@ -150,7 +150,7 @@ describe('database mTLS DNS admission fence', () => {
         ...fenced.database,
         status: { value: 'connected' },
         type: ['mongodb'],
-        pool: { active: { n: 1 }, idle: 2, size: null },
+        pool: { active: { n: 1 }, idle: 2, size: null, read_replica: { active: { count: 1 }, idle: 3, size: [4] } },
         error: { message: 'x' },
       },
     }));
@@ -159,6 +159,9 @@ describe('database mTLS DNS admission fence', () => {
     expect(harness.host.querySelector('[role="status"]')?.textContent).toContain('Database mTLS DNS admission fenced');
     expect(harness.host.textContent).toContain('StatusNot reported');
     expect(harness.host.textContent).toContain('unknown active / 2 idle / unknown total');
+    expect(harness.host.textContent).toContain('Read replica activeNot reported');
+    expect(harness.host.textContent).toContain('Read replica idle3');
+    expect(harness.host.textContent).toContain('Read replica sizeNot reported');
   });
 
   it.each([
