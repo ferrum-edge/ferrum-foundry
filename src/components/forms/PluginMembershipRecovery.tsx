@@ -1,24 +1,40 @@
 import { PluginMembershipError, PluginSavedUnverifiedError } from "@/lib/pluginMembership";
 import { REDACTED_PLACEHOLDER } from "@/api/maskedSecrets";
+import type { GatewayRole } from "@/lib/capabilities";
 import { pluginTriggerWithheldSites, redactPluginTrigger } from "@/lib/resourceBaseline";
 
-export function PluginMembershipRecovery({ error }: { error: unknown }) {
+/**
+ * `role` is the session's gateway role, the one the editor's placeholder
+ * guard uses. The snapshot's trigger is shown as that role's Edge read shows
+ * it: verbatim to an `admin`, whose reads are raw (so a pasted snapshot
+ * round-trips), and to any other or unknown role with each withheld operand
+ * as Edge's `[REDACTED]`, which that role's guard blocks if pasted back.
+ */
+export function PluginMembershipRecovery({
+  error,
+  role,
+}: {
+  error: unknown;
+  role: GatewayRole | null | undefined;
+}) {
   if (!(error instanceof PluginMembershipError)) return null;
   // A committed save whose attachment could not be verified (#610) is a
   // warning, and its snapshot is what the gateway holds now.
   const saved = error instanceof PluginSavedUnverifiedError;
   const observed = saved && error.savedFromLaterRead;
-  // Shown with its trigger as Edge main projects it: the header, query and
-  // cookie operands are shared values, and this is page text. The marker is
-  // Edge's own `[REDACTED]`, so this JSON pasted back into an editor is
-  // blocked by its placeholder guard rather than saved with the marker as an
-  // operand. The membership plan keeps the original snapshot for rollback.
+  // For a non-admin role the trigger is shown as Edge main projects it for
+  // that role: the header, query and cookie operands are shared values, and
+  // this is page text. The marker is Edge's own `[REDACTED]`, so this JSON
+  // pasted back into an editor is blocked by its placeholder guard rather
+  // than saved with the marker as an operand. The membership plan keeps the
+  // original snapshot for rollback.
   const snapshot = error.lastKnownConfig;
-  const shown = snapshot && snapshot.trigger !== undefined && snapshot.trigger !== null
+  const redact = role !== "admin" && snapshot?.trigger !== undefined && snapshot.trigger !== null;
+  const shown = redact && snapshot
     ? { ...snapshot, trigger: redactPluginTrigger(snapshot.trigger, REDACTED_PLACEHOLDER) }
     : snapshot;
   // Said whenever a site is withheld, a gateway's own `[REDACTED]` included.
-  const triggerRedacted = pluginTriggerWithheldSites(snapshot?.trigger ?? null)
+  const triggerRedacted = redact && pluginTriggerWithheldSites(snapshot?.trigger ?? null)
     .some((site) => site.value !== "");
 
   return (

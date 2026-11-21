@@ -211,10 +211,12 @@ projection (`src/api/maskedSecretSites.ts`: the CI-checked schema rules in
   attempted: the
   recovery report names the fields that could not be restored, and the previous
   configuration must be restored manually, with the real values, or by an
-  admin. The recovery panel shows that configuration with its trigger's
-  `header`, `query` and `cookie` operands as `[REDACTED]` (which the editor's
-  placeholder guard blocks if pasted back), to be re-entered
-  before it is reused; the plan keeps the original for its own rollback.
+  admin. The recovery panel shows that configuration's trigger as the
+  session's Edge read would: verbatim to an `admin`, so a pasted snapshot
+  saves unchanged, and to any other or unknown role with its `header`,
+  `query` and `cookie` operands as `[REDACTED]` (which that role's
+  placeholder guard blocks if pasted back), to be re-entered before it is
+  reused. The plan keeps the original snapshot for its own rollback.
 
 ## Deleting a plugin
 

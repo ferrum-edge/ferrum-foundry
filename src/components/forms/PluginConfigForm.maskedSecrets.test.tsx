@@ -395,10 +395,11 @@ describe("plugin trigger with masked operands", () => {
       [],
       undefined,
       { id: "cors-1", plugin_name: "cors", scope: "global", config: {}, enabled: true, trigger: original },
-    )} />);
+    )} role="operator" />);
     const panel = new DOMParser().parseFromString(html, "text/html");
     const copied = JSON.parse(panel.querySelector("pre")!.textContent!) as { trigger: PluginTrigger };
     expect(JSON.stringify(copied)).not.toContain("synthetic-real-operand");
+    expect(JSON.stringify(copied)).toContain("[REDACTED]");
 
     await renderForm("cors", {}, "operator", copied.trigger);
     expect(triggerList()).toEqual(["/trigger/when/match/header/value/exact/0"]);
@@ -407,6 +408,28 @@ describe("plugin trigger with masked operands", () => {
 
     await editTrigger(original);
     expect(triggerList()).toEqual([]);
+    await submit();
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0][0].trigger).toEqual(original);
+  });
+
+  it("saves an admin's pasted recovery snapshot unchanged, since an admin's panel shows it in clear", async () => {
+    const original: PluginTrigger = {
+      when: { match: { header: { name: "x-skip", value: { exact: ["synthetic-real-operand"] } } } },
+    };
+    const html = renderToStaticMarkup(<PluginMembershipRecovery error={new PluginMembershipError(
+      "Plugin update did not converge",
+      [],
+      undefined,
+      { id: "cors-1", plugin_name: "cors", scope: "global", config: {}, enabled: true, trigger: original },
+    )} role="admin" />);
+    const panel = new DOMParser().parseFromString(html, "text/html");
+    const copied = JSON.parse(panel.querySelector("pre")!.textContent!) as { trigger: PluginTrigger };
+    expect(copied.trigger).toEqual(original);
+
+    await renderForm("cors", {}, "admin", copied.trigger);
+    expect(triggerList()).toEqual([]);
+    expect(codesIn("Trigger values that look like placeholders")).toEqual([]);
     await submit();
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(onSubmit.mock.calls[0][0].trigger).toEqual(original);

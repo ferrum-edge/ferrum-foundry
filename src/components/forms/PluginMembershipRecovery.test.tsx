@@ -17,7 +17,7 @@ describe("PluginMembershipRecovery", () => {
         enabled: false,
       },
     );
-    const html = renderToStaticMarkup(<PluginMembershipRecovery error={error} />);
+    const html = renderToStaticMarkup(<PluginMembershipRecovery error={error} role="operator" />);
     expect(html).toContain('role="alert"');
     expect(html).toContain("plugin group-1 is missing");
     expect(html).toContain("remaining proxy references: none");
@@ -43,7 +43,7 @@ describe("PluginMembershipRecovery", () => {
         updated_at: "v1",
       },
     );
-    const html = renderToStaticMarkup(<PluginMembershipRecovery error={error} />);
+    const html = renderToStaticMarkup(<PluginMembershipRecovery error={error} role="operator" />);
     expect(html).toContain("members were: p1, p2");
     expect(html).toContain("Committed configuration");
     expect(html).toContain("Nothing was rolled back");
@@ -64,7 +64,7 @@ describe("PluginMembershipRecovery", () => {
       },
       true,
     );
-    const html = renderToStaticMarkup(<PluginMembershipRecovery error={error} />);
+    const html = renderToStaticMarkup(<PluginMembershipRecovery error={error} role="operator" />);
     expect(html).toContain("Configuration read after this save");
     expect(html).toContain("another operator");
     expect(html).not.toContain("Committed configuration");
@@ -85,7 +85,7 @@ describe("PluginMembershipRecovery", () => {
       undefined,
       { id: "p1", plugin_name: "waf", scope: "global", config: {}, enabled: true, trigger },
     );
-    const html = renderToStaticMarkup(<PluginMembershipRecovery error={error} />);
+    const html = renderToStaticMarkup(<PluginMembershipRecovery error={error} role="operator" />);
     expect(html).not.toContain("synthetic-real-operand");
     // Edge's own marker, which the editor's placeholder guard recognizes.
     expect(html).toContain("[REDACTED]");
@@ -101,7 +101,7 @@ describe("PluginMembershipRecovery", () => {
       [],
       undefined,
       { id: "p1", plugin_name: "waf", scope: "global", config: {}, enabled: true, trigger: null },
-    )} />);
+    )} role="operator" />);
     expect(plain).not.toContain("Re-enter them");
 
     // A snapshot already holding the gateway's marker keeps it as is, and says so.
@@ -113,16 +113,38 @@ describe("PluginMembershipRecovery", () => {
         id: "p1", plugin_name: "waf", scope: "global", config: {}, enabled: true,
         trigger: { when: { match: { query: { name: "q", value: { exact: ["[REDACTED]"] } } } } },
       },
-    )} />);
+    )} role="operator" />);
     expect(masked).toContain("[REDACTED]");
     expect(masked).not.toContain("[redacted]");
     expect(masked).toContain("Re-enter them");
   });
 
+  it("redacts the trigger for an unknown role, and shows it verbatim to an admin", () => {
+    const error = new PluginMembershipError(
+      "Plugin update did not converge",
+      [],
+      undefined,
+      {
+        id: "p1", plugin_name: "waf", scope: "global", config: {}, enabled: true,
+        trigger: { when: { match: { cookie: { name: "c", value: { exact: ["synthetic-real-operand"] } } } } },
+      },
+    );
+    for (const role of [null, undefined, "viewer"] as const) {
+      const html = renderToStaticMarkup(<PluginMembershipRecovery error={error} role={role} />);
+      expect(html).not.toContain("synthetic-real-operand");
+      expect(html).toContain("Re-enter them");
+    }
+    // An admin's Edge read shows the operand in clear, so the snapshot does too.
+    const admin = renderToStaticMarkup(<PluginMembershipRecovery error={error} role="admin" />);
+    expect(admin).toContain("synthetic-real-operand");
+    expect(admin).not.toContain("[REDACTED]");
+    expect(admin).not.toContain("Re-enter them");
+  });
+
   it("does not render for an unrelated error", () => {
     expect(
       renderToStaticMarkup(
-        <PluginMembershipRecovery error={new Error("unrelated")} />,
+        <PluginMembershipRecovery error={new Error("unrelated")} role="operator" />,
       ),
     ).toBe("");
   });
