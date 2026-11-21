@@ -2,6 +2,9 @@ import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHarness, settle, stubFetch } from '@/test/__tests__/harness';
 import { adverseHealth, detailedHealth, logSink } from '@/test/__tests__/healthFixtures';
+import { formatDateTime } from '@/lib/format';
+import { healthFindings } from '@/components/health/OperationalHealthCards';
+import type { HealthResponse } from '@/api/types';
 import StatusPage from './index';
 
 vi.mock('@/stores/namespace', () => ({ useNamespace: () => ({ scope: { namespace: 'tenant-a' } }) }));
@@ -61,5 +64,61 @@ describe('authenticated operator health', () => {
     await settle(() => expect(harness.host.textContent).toContain('Health status could not refresh'));
     expect(harness.host.textContent).not.toContain('Collection disabled');
     expect(harness.host.textContent).not.toContain('Ready');
+  });
+});
+
+describe('database mTLS DNS admission fence', () => {
+  const OLDEST = 1_763_683_200_000;
+  // Edge keeps the coarse verdict and the database status healthy while fenced.
+  const fenced: HealthResponse = {
+    ...detailedHealth,
+    database: {
+      status: 'connected', type: 'mongodb',
+      mtls_dns_admission_fence: {
+        fenced: true, retained_fences: 2, namespaces: ['tenant-a', 'tenant-b'], oldest_retained_since_unix_ms: OLDEST,
+      },
+    },
+  };
+
+  it('is an operational finding only while fenced', () => {
+    expect(healthFindings(fenced)).toContain('Database mTLS DNS admission fenced');
+    expect(healthFindings({ ...detailedHealth, database: { status: 'connected' } })).toEqual([]);
+    expect(healthFindings(detailedHealth)).toEqual([]);
+  });
+
+  it('alerts and renders the fence under the Database card despite a coarse OK', async () => {
+    stubFetch(() => Response.json(fenced));
+    await harness.render(<StatusPage />);
+    await settle(() => expect(harness.host.textContent).toContain('Operational diagnostics need attention'));
+    const findings = harness.host.querySelector('[role="status"]');
+    expect(findings?.textContent).toContain('Database mTLS DNS admission fenced');
+    const fence = region('mTLS DNS admission fence');
+    expect(fence).not.toBeNull();
+    const databaseCard = [...harness.host.querySelectorAll('h2')].find((h) => h.textContent === 'Database')?.parentElement;
+    expect(databaseCard?.contains(fence ?? null)).toBe(true);
+    expect(fence?.textContent).toContain('fail closed with HTTP 503');
+    const fields = Object.fromEntries([...(fence?.querySelectorAll('dl > div') ?? [])]
+      .map((row) => [row.querySelector('dt')?.textContent, row.querySelector('dd')?.textContent]));
+    expect(fields).toEqual({
+      'Retained fences': '2',
+      'Oldest retained since': formatDateTime(OLDEST),
+      Namespaces: 'tenant-a, tenant-b',
+    });
+  });
+
+  it('reports an absent oldest timestamp as not reported', async () => {
+    const { oldest_retained_since_unix_ms: _omitted, ...fence } = fenced.database!.mtls_dns_admission_fence!;
+    stubFetch(() => Response.json({ ...fenced, database: { ...fenced.database, mtls_dns_admission_fence: fence } }));
+    await harness.render(<StatusPage />);
+    await settle(() => expect(region('mTLS DNS admission fence')).not.toBeNull());
+    expect(region('mTLS DNS admission fence')?.textContent).toContain('Oldest retained sinceNot reported');
+  });
+
+  it('renders nothing for a gateway that omits the fence (Edge v0.9.20)', async () => {
+    stubFetch(() => Response.json({ ...detailedHealth, database: { status: 'connected', type: 'sqlite' } }));
+    await harness.render(<StatusPage />);
+    await settle(() => expect(harness.host.textContent).toContain('sqlite'));
+    expect(region('mTLS DNS admission fence')).toBeNull();
+    expect(harness.host.textContent).not.toContain('Operational diagnostics need attention');
   });
 });

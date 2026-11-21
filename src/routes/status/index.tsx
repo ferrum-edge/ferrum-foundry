@@ -14,6 +14,7 @@ import { BffConnectionCard } from "@/components/shared/BffConnectionCard";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { ReadStateNotice } from "@/components/shared/ReadState";
 import { formatDateTime } from "@/lib/format";
+import type { DatabaseMtlsDnsAdmissionFence } from "@/api/types";
 
 function statusVariant(
   status: string,
@@ -30,6 +31,35 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
       <span className="text-text-primary text-sm font-medium text-right break-words">
         {children}
       </span>
+    </div>
+  );
+}
+
+/**
+ * A retained MongoDB mTLS DNS admission fence. Edge keeps `status`, `ready`
+ * and `database.status` healthy while it holds one, so this is the only place
+ * the fail-closed admissions show.
+ */
+function MtlsDnsAdmissionFence({ fence }: { fence: DatabaseMtlsDnsAdmissionFence }) {
+  const namespaces = Array.isArray(fence.namespaces) ? fence.namespaces : [];
+  return (
+    <div role="region" aria-label="mTLS DNS admission fence" className="border-t border-border pt-3 space-y-2">
+      <h3 className={`text-sm font-medium ${fence.fenced ? 'text-warning' : 'text-text-primary'}`}>mTLS DNS admission fence</h3>
+      {fence.fenced && (
+        <p className="text-warning text-sm">
+          A config-store write inside an mTLS DNS admission has an uncertain outcome. mTLS DNS admissions for the
+          namespaces below fail closed with HTTP 503 in this gateway process until the write is verified and its
+          admission lock is removed. Other namespaces, reconnect and failover are unaffected; other replicas report
+          their own fences.
+        </p>
+      )}
+      <HealthFields fields={[
+        ['Retained fences', fence.retained_fences],
+        // Absent when Edge did not record it: "Not reported", never a date.
+        ['Oldest retained since', typeof fence.oldest_retained_since_unix_ms === 'number'
+          ? formatDateTime(fence.oldest_retained_since_unix_ms) : undefined],
+        ['Namespaces', namespaces.length > 0 ? namespaces.join(', ') : undefined],
+      ]} />
     </div>
   );
 }
@@ -168,6 +198,7 @@ export default function StatusPage() {
                 </Row>
               )}
               {health.database.failover_topology && <HealthFields fields={namedFields(health.database.failover_topology, ['primary_active', 'allow_writes', 'opt_in_writes_enabled_during_window', 'primary_failback_fenced', 'active_url_redacted', 'failover_since_unix_ms'])} />}
+              {health.database.mtls_dns_admission_fence && <MtlsDnsAdmissionFence fence={health.database.mtls_dns_admission_fence} />}
               {health.database.pool?.read_replica && <HealthFields fields={[
                 ['Read replica active', health.database.pool.read_replica.active],
                 ['Read replica idle', health.database.pool.read_replica.idle],
