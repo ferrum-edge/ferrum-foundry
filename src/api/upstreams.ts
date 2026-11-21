@@ -134,11 +134,16 @@ export { SUBSET_TRAFFIC_POLICY_SERVER_OWNED };
  * A subset as an operator write may carry it: every field of `subset` except
  * the server-owned `traffic_policy` fields. A policy left with nothing
  * writable is omitted, as Edge treats an absent and an empty policy alike.
+ * A malformed entry (not an object) or policy (not an object) is returned
+ * unchanged, so building a payload from such a read never throws and the
+ * write guard compares it instead.
  */
 export function writableSubset(subset: SubsetDefinition): SubsetDefinition {
+  if (!isPlainObject(subset)) return subset;
   const { traffic_policy: policy, ...rest } = subset;
   if (policy === undefined) return subset;
   if (policy === null) return { ...rest, traffic_policy: null };
+  if (!isPlainObject(policy)) return subset;
   const writable = Object.fromEntries(
     Object.entries(policy).filter(([key]) => !SUBSET_TRAFFIC_POLICY_SERVER_OWNED.includes(key)),
   ) as SubsetTrafficPolicy;
@@ -224,14 +229,64 @@ export async function create(
   );
 }
 
-/** Reduce an upstream, or an upstream payload, to the content a save replaces. */
+/**
+ * Reduce an upstream, or an upstream payload, to the content a save replaces.
+ *
+ * Subsets go through `writableSubset`, as they do in every save payload: the
+ * server-owned `traffic_policy` fields are projected from a mesh
+ * DestinationRule, never sent, and change without any competing editor, like
+ * the top-level fields in `UPSTREAM_BASELINE_OMIT`. Keeping them would refuse
+ * a save (or delete) when the control plane rewrote one, and would show
+ * `subsets` as changed locally in a real conflict, since the proposed payload
+ * never carries them (#725). See `baselineSubset` for the shapes it leaves
+ * alone.
+ */
 export function toBaseline(
   upstream: Upstream | UpstreamCreate,
 ): BaselineSnapshot {
-  return baselineSnapshot(upstream, UPSTREAM_BASELINE_OMIT);
+  const snapshot = baselineSnapshot(upstream, UPSTREAM_BASELINE_OMIT);
+  if (!Array.isArray(snapshot.subsets)) return snapshot;
+  return { ...snapshot, subsets: snapshot.subsets.map(baselineSubset) };
 }
 
-/** Guard for the whole-resource settings form. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * One subset as a baseline compares it. Only a well-formed subset is
+ * projected: any other entry (a `null`, say), or a subset whose
+ * `traffic_policy` is not an object, is kept verbatim, so the guard compares
+ * it and refuses a change instead of failing to reduce the read.
+ *
+ * Unset is spelled one way, as the settings form submits it: an explicit
+ * `traffic_policy: null`, or a `null` algorithm or hash key inside it, counts
+ * as omitted (Edge treats them alike), and a policy left empty is dropped.
+ * Non-null settings and fields the form does not model are kept. An empty
+ * hash key is not unset: Edge hashes on the client IP for it, exactly as for
+ * `"ip"`, which is how the form submits it, so both compare as `"ip"`.
+ */
+function baselineSubset(subset: unknown): unknown {
+  if (!isPlainObject(subset)) return subset;
+  const policy = subset.traffic_policy;
+  if (policy !== undefined && policy !== null && !isPlainObject(policy)) return subset;
+  const { traffic_policy, ...rest } = writableSubset(subset as unknown as SubsetDefinition);
+  if (!isPlainObject(traffic_policy)) return rest;
+  const set = Object.fromEntries(
+    Object.entries(traffic_policy)
+      .filter(([key, value]) => !(value === null && FORM_MODELLED_POLICY_FIELDS.includes(key)))
+      .map(([key, value]) => [key, key === "hash_on" && value === "" ? "ip" : value]),
+  );
+  return Object.keys(set).length > 0 ? { ...rest, traffic_policy: set } : rest;
+}
+
+/** The subset policy fields the settings form edits, and submits only when set. */
+const FORM_MODELLED_POLICY_FIELDS: readonly string[] = ["load_balancer_algorithm", "hash_on"];
+
+/**
+ * Guard for the whole-resource settings form, and for the detail page's
+ * delete: both leave out the mesh-owned fields (see `toBaseline`).
+ */
 export function upstreamWriteGuard(
   seed: Upstream,
 ): WriteGuard<Upstream | UpstreamCreate> {

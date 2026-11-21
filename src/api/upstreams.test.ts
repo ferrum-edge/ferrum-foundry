@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { Upstream } from "./types";
-import { mergeFormUpdatePayload, toUpdatePayload, writableSubset } from "./upstreams";
+import { compareBaselines } from "@/lib/resourceBaseline";
+import {
+  mergeFormUpdatePayload,
+  toBaseline,
+  toUpdatePayload,
+  writableSubset,
+} from "./upstreams";
 
 function fullUpstream(): Upstream {
   return {
@@ -188,5 +194,125 @@ describe("upstream full-replacement builders", () => {
     });
     expect(payload.targets).toEqual([]);
     expect(payload.subsets).toEqual([]);
+  });
+});
+
+describe("upstream baselines (#725)", () => {
+  function meshUpstream(policy: Record<string, unknown>): Upstream {
+    return {
+      ...fullUpstream(),
+      subsets: [
+        {
+          name: "v2",
+          labels: { version: "v2" },
+          traffic_policy: { load_balancer_algorithm: "least_latency", ...policy },
+        },
+        { name: "v3", labels: { version: "v3" }, traffic_policy: { connect_timeout_ms: 1 } },
+      ],
+    } as Upstream;
+  }
+
+  it("leaves the server-owned subset traffic_policy fields out, as the payload does", () => {
+    const read = meshUpstream({ tls: { mode: "simple" }, connect_timeout_ms: 1_000 });
+    expect(toBaseline(read).subsets).toEqual([
+      { name: "v2", labels: { version: "v2" }, traffic_policy: { load_balancer_algorithm: "least_latency" } },
+      { name: "v3", labels: { version: "v3" } },
+    ]);
+    expect(toBaseline(read)).toEqual(toBaseline(toUpdatePayload(read)));
+    // The read itself is not changed.
+    expect(read.subsets?.[0].traffic_policy?.tls).toEqual({ mode: "simple" });
+  });
+
+  it("is unchanged by a control-plane rewrite of a server-owned field", () => {
+    const original = toBaseline(meshUpstream({ tls: { mode: "simple" }, connect_timeout_ms: 1_000 }));
+    const current = toBaseline(
+      meshUpstream({ tls: { mode: "mutual" }, connect_timeout_ms: 2_500, max_retries: 3 }),
+    );
+    expect(current).toEqual(original);
+  });
+
+  it("does not mark subsets changed locally in a conflict on another field", () => {
+    const read = meshUpstream({ tls: { mode: "simple" }, connect_timeout_ms: 1_000 });
+    const original = toBaseline(read);
+    const current = toBaseline({
+      ...meshUpstream({ tls: { mode: "mutual" } }),
+      algorithm: "least_connections",
+    });
+    const proposed = toBaseline(mergeFormUpdatePayload(read, toUpdatePayload(read)));
+    expect(compareBaselines(original, current, proposed)).toEqual([
+      expect.objectContaining({ field: "algorithm", changedLocally: false }),
+    ]);
+  });
+
+  it("keeps a writable subset change", () => {
+    const original = toBaseline(meshUpstream({}));
+    const current = toBaseline(meshUpstream({ load_balancer_algorithm: "round_robin" }));
+    expect(current).not.toEqual(original);
+  });
+
+  it("keeps malformed subset entries and policies verbatim", () => {
+    const read = {
+      ...fullUpstream(),
+      subsets: [null, "v1", { name: "v2", labels: {}, traffic_policy: "broken" }, ["v3"]],
+    } as unknown as Upstream;
+    expect(toBaseline(read).subsets).toEqual(read.subsets);
+  });
+
+  it("treats an explicit null subset policy as an omitted one", () => {
+    const read = {
+      ...fullUpstream(),
+      subsets: [{ name: "v2", labels: { version: "v2" }, traffic_policy: null }],
+    } as Upstream;
+    expect(toBaseline(read).subsets).toEqual([{ name: "v2", labels: { version: "v2" } }]);
+    // The settings form submits no policy key for it, renamed or not.
+    const original = toBaseline(read);
+    const current = toBaseline({ ...read, algorithm: "least_connections" });
+    const proposed = toBaseline(
+      mergeFormUpdatePayload(read, {
+        ...toUpdatePayload(read),
+        name: "payments-v2",
+        subsets: [{ name: "v2", labels: { version: "v2" } }],
+      }),
+    );
+    expect(compareBaselines(original, current, proposed).map(({ field }) => field).sort())
+      .toEqual(["algorithm", "name"]);
+  });
+
+  it("treats a null algorithm or hash key inside a subset policy as unset", () => {
+    const read = {
+      ...fullUpstream(),
+      subsets: [
+        { name: "a", labels: {}, traffic_policy: { load_balancer_algorithm: null, hash_on: null } },
+        { name: "b", labels: {}, traffic_policy: { load_balancer_algorithm: null, hash_on: "header:x" } },
+        { name: "c", labels: {}, traffic_policy: { hash_on: null, future_policy_field: null } },
+        { name: "d", labels: {}, traffic_policy: { hash_on: null, connect_timeout_ms: 5 } },
+      ],
+    } as unknown as Upstream;
+    expect(toBaseline(read).subsets).toEqual([
+      { name: "a", labels: {} },
+      { name: "b", labels: {}, traffic_policy: { hash_on: "header:x" } },
+      // A field the form does not model keeps its explicit null.
+      { name: "c", labels: {}, traffic_policy: { future_policy_field: null } },
+      { name: "d", labels: {} },
+    ]);
+  });
+
+  it("compares an empty subset hash key as the client-IP key it means", () => {
+    const withKey = (hash_on: string) => ({
+      ...fullUpstream(),
+      subsets: [{ name: "a", labels: {}, traffic_policy: { hash_on } }],
+    }) as Upstream;
+    expect(toBaseline(withKey("")).subsets).toEqual([
+      { name: "a", labels: {}, traffic_policy: { hash_on: "ip" } },
+    ]);
+    expect(toBaseline(withKey(""))).toEqual(toBaseline(withKey("ip")));
+    expect(toBaseline(withKey(""))).not.toEqual(toBaseline({ ...withKey(""), subsets: [{ name: "a", labels: {} }] }));
+  });
+
+  it("builds a payload from a read with malformed subsets without throwing", () => {
+    const subsets = [null, "v1", { name: "v2", labels: {}, traffic_policy: "broken" }];
+    const read = { ...fullUpstream(), subsets } as unknown as Upstream;
+    expect(toUpdatePayload(read).subsets).toEqual(subsets);
+    expect(() => mergeFormUpdatePayload(read, { ...toUpdatePayload(fullUpstream()) })).not.toThrow();
   });
 });

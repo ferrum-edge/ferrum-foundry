@@ -36,6 +36,18 @@ describe("canonicalization", () => {
     expect(resourceFingerprint({ name: undefined })).toBe(resourceFingerprint({}));
   });
 
+  it("keeps a `__proto__` key, at the top level and nested", () => {
+    const parse = (json: string) => JSON.parse(json) as Record<string, unknown>;
+    const v1 = parse('{"labels":{"__proto__":"v1"}}');
+    const v2 = parse('{"labels":{"__proto__":"v2"}}');
+    expect(resourceFingerprint(v1)).not.toBe(resourceFingerprint(v2));
+    expect(compareBaselines(v1, v2, v1).map(({ field }) => field)).toEqual(["labels"]);
+    const top = parse('{"__proto__":"x","name":"a"}');
+    expect(baselineSnapshot(top, [])).toHaveProperty("__proto__", "x");
+    expect(pickSnapshot(top, ["__proto__"])).toHaveProperty("__proto__", "x");
+    expect(resourceFingerprint(top)).not.toBe(resourceFingerprint(parse('{"name":"a"}')));
+  });
+
   it("leaves primitives and null alone", () => {
     expect(canonicalize(null)).toBeNull();
     expect(canonicalize(7)).toBe(7);
