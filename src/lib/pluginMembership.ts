@@ -7,7 +7,7 @@ import {
   type GuardedOperation,
   type WriteGuard,
 } from "@/api/conditionalWrite";
-import { pluginConfigPlaceholderSites, refuseMaskedResourceWrite } from "@/api/maskedSecretSites";
+import { pluginPlaceholderSites, refuseMaskedResourceWrite } from "@/api/maskedSecretSites";
 import type { GatewayRole } from "@/lib/capabilities";
 import * as pluginsApi from "@/api/plugins";
 import * as proxiesApi from "@/api/proxies";
@@ -580,8 +580,7 @@ async function rollbackPlugin(
   deps: PluginMembershipDependencies,
   fence: readonly string[],
 ): Promise<string[]> {
-  const masked = pluginConfigPlaceholderSites(before.plugin_name, before.config, deps.role)
-    .blocking;
+  const masked = pluginPlaceholderSites(before, deps.role).blocking;
   if (masked.length > 0) {
     return [
       `plugin ${before.id} was not restored: its previous configuration was read with ` +

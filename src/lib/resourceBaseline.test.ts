@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { PluginTriggerMatch } from "@/api/types";
 import {
   baselineSnapshot,
   canonicalize,
@@ -6,7 +7,10 @@ import {
   formatBaselineValue,
   isRedactedField,
   pickSnapshot,
+  pluginTriggerWithheldSites,
   PROXY_BASELINE_OMIT,
+  TRIGGER_CLIENT_FIELD_PREDICATES,
+  TRIGGER_VISIBLE_PREDICATES,
   resourceFingerprint,
   UPSTREAM_BASELINE_OMIT,
 } from "./resourceBaseline";
@@ -30,6 +34,18 @@ describe("canonicalization", () => {
 
   it("treats an undefined value and an absent key as the same request bytes", () => {
     expect(resourceFingerprint({ name: undefined })).toBe(resourceFingerprint({}));
+  });
+
+  it("keeps a `__proto__` key, at the top level and nested", () => {
+    const parse = (json: string) => JSON.parse(json) as Record<string, unknown>;
+    const v1 = parse('{"labels":{"__proto__":"v1"}}');
+    const v2 = parse('{"labels":{"__proto__":"v2"}}');
+    expect(resourceFingerprint(v1)).not.toBe(resourceFingerprint(v2));
+    expect(compareBaselines(v1, v2, v1).map(({ field }) => field)).toEqual(["labels"]);
+    const top = parse('{"__proto__":"x","name":"a"}');
+    expect(baselineSnapshot(top, [])).toHaveProperty("__proto__", "x");
+    expect(pickSnapshot(top, ["__proto__"])).toHaveProperty("__proto__", "x");
+    expect(resourceFingerprint(top)).not.toBe(resourceFingerprint(parse('{"name":"a"}')));
   });
 
   it("leaves primitives and null alone", () => {
@@ -259,5 +275,176 @@ describe("redaction", () => {
     expect(formatBaselineValue("backend_host", "a.internal")).toBe("a.internal");
     expect(formatBaselineValue("hosts", ["a", "b"])).toBe('["a","b"]');
     expect(formatBaselineValue("name", "")).toBe('""');
+  });
+});
+
+describe("plugin trigger redaction (Edge main's trigger projection)", () => {
+  const HEADER_TOKEN = "synthetic-header-bypass-token";
+  const QUERY_PREFIX = "synthetic-query-prefix";
+  const COOKIE_PATTERN = "synthetic-cookie-[a-z]+";
+  const trigger = {
+    when: {
+      all: [
+        { not: { match: { header: { name: "x-skip-waf", value: { exact: [HEADER_TOKEN, "second"] } } } } },
+        { match: { query: { name: "debug", multi_value: "any", value: { prefix: [QUERY_PREFIX] } } } },
+        { match: { cookie: { name: "canary", value: { regex: COOKIE_PATTERN, case_insensitive: true } } } },
+        { match: { path: { prefix: ["/internal"] } } },
+        { match: { method: ["POST"] } },
+        { match: { consumer: { value: { exact: ["orders-svc"] } } } },
+        { match: { external_identity: { presence: "present" } } },
+        { match: { external_identity_authority: ["ab".repeat(32)] } },
+      ],
+    },
+  };
+
+  it("classifies every PluginTriggerMatch field as client-presented or visible, and nothing else", () => {
+    // A field added to the type without a classification would be withheld
+    // wholesale by the walk; one dropped from it would leave a stale entry.
+    const fields: Record<keyof PluginTriggerMatch, true> = {
+      method: true,
+      path: true,
+      host: true,
+      sni: true,
+      header: true,
+      query: true,
+      cookie: true,
+      protocol: true,
+      source_cidr: true,
+      namespace: true,
+      proxy_id: true,
+      listen_port: true,
+      consumer: true,
+      external_identity: true,
+      external_identity_authority: true,
+      auth_method: true,
+      spiffe_id: true,
+    };
+    expect([...TRIGGER_CLIENT_FIELD_PREDICATES, ...TRIGGER_VISIBLE_PREDICATES].sort()).toEqual(
+      Object.keys(fields).sort(),
+    );
+  });
+
+  it("withholds each header, query and cookie operand, by JSON pointer", () => {
+    expect(pluginTriggerWithheldSites(trigger)).toEqual([
+      { pointer: "/trigger/when/all/0/not/match/header/value/exact/0", value: HEADER_TOKEN },
+      { pointer: "/trigger/when/all/0/not/match/header/value/exact/1", value: "second" },
+      { pointer: "/trigger/when/all/1/match/query/value/prefix/0", value: QUERY_PREFIX },
+      { pointer: "/trigger/when/all/2/match/cookie/value/regex", value: COOKIE_PATTERN },
+    ]);
+  });
+
+  it("fails closed on shapes a PluginTrigger cannot have", () => {
+    const pointers = (value: unknown) => pluginTriggerWithheldSites(value).map((site) => site.pointer);
+    expect(pointers(null)).toEqual([]);
+    expect(pointers("anything")).toEqual(["/trigger"]);
+    expect(pointers({ match: {} })).toEqual(["/trigger"]);
+    // An object with a key its schema does not define is withheld whole.
+    expect(pointers({ when: { match: { path: { exact: ["/"] } } }, extra: 1 })).toEqual([
+      "/trigger",
+    ]);
+    expect(pointers({ when: [] })).toEqual(["/trigger/when"]);
+    expect(pointers({ when: { any: {} } })).toEqual(["/trigger/when/any"]);
+    expect(pointers({ when: { match: { "head/er~": "x" } } })).toEqual(["/trigger/when/match"]);
+    expect(pointers({ when: { all: [{ match: { path: { exact: ["/"] } } }], "x/y": null } }))
+      .toEqual(["/trigger/when"]);
+    expect(pointers({ when: { match: { header: { name: "x", value: "v", extra: "e" } } } })).toEqual([
+      "/trigger/when/match/header",
+    ]);
+    // Even an unknown key set to null: the key itself can be the content.
+    expect(pointers({ when: { match: { header: { name: "x", value: { "synthetic-key": null } } } } }))
+      .toEqual(["/trigger/when/match/header/value"]);
+    expect(pointers({ when: { not: { match: { path: { "/a": null } } } } }))
+      .toEqual(["/trigger/when/not/match/path"]);
+    // A key out of place is unknown there too.
+    expect(pointers({ when: { match: { header: { name: "x" } }, name: "y" } })).toEqual([
+      "/trigger/when",
+    ]);
+    expect(pointers({ when: { match: { query: { name: "q", value: { case_insensitive: "yes" } } } } }))
+      .toEqual(["/trigger/when/match/query/value/case_insensitive"]);
+    // Content under a visible key must have the type Edge declares for it.
+    expect(pointers({ when: { match: { header: { name: { a: "b" }, presence: "maybe" } } } })).toEqual([
+      "/trigger/when/match/header/name",
+      "/trigger/when/match/header/presence",
+    ]);
+    expect(pointers({
+      when: {
+        all: [
+          { match: { path: "raw" } },
+          { match: { host: { exact: ["ok", 5], regex: ["no"], weird: 1 } } },
+          { match: { sni: { exact: ["ok", 5], regex: ["no"] } } },
+          { match: { method: ["GET", { x: 1 }] } },
+          { match: { protocol: ["http2", "gopher"] } },
+          { match: { listen_port: [443, 70000, "80"] } },
+          { match: { external_identity_authority: ["ab".repeat(32), "short"] } },
+          { match: { consumer: { presence: "present", value: { prefix: [1] }, extra: "x" } } },
+          { match: { spiffe_id: "spiffe://raw" } },
+        ],
+      },
+    })).toEqual([
+      "/trigger/when/all/0/match/path",
+      "/trigger/when/all/1/match/host",
+      "/trigger/when/all/2/match/sni/exact/1",
+      "/trigger/when/all/2/match/sni/regex",
+      "/trigger/when/all/3/match/method/1",
+      "/trigger/when/all/4/match/protocol/1",
+      "/trigger/when/all/5/match/listen_port/1",
+      "/trigger/when/all/5/match/listen_port/2",
+      "/trigger/when/all/6/match/external_identity_authority/1",
+      "/trigger/when/all/7/match/consumer",
+      "/trigger/when/all/8/match/spiffe_id",
+    ]);
+    // An explicit null discloses nothing and is not a site.
+    expect(pointers({ when: { match: { header: { name: "x", value: { regex: null } } } } })).toEqual([]);
+  });
+
+  it("formatBaselineValue shows the trigger's shape and visible predicates, never an operand", () => {
+    const shown = formatBaselineValue("trigger", trigger);
+    for (const operand of [HEADER_TOKEN, "second", QUERY_PREFIX, COOKIE_PATTERN]) {
+      expect(shown).not.toContain(operand);
+    }
+    expect(shown).toContain("[redacted]");
+    for (const visible of ["x-skip-waf", "debug", "/internal", "POST", "orders-svc", "ab".repeat(32)]) {
+      expect(shown).toContain(visible);
+    }
+    // The cookie predicate is classified by the trigger walk alone: its name,
+    // match kind and flags stay readable, only the operand is withheld.
+    expect(shown).toContain(
+      '"cookie":{"name":"canary","value":{"regex":"[redacted]","case_insensitive":true}}',
+    );
+    const identity = formatBaselineValue("trigger", {
+      when: {
+        all: [
+          { match: { cookie: { name: "hint", presence: "absent", multi_value: "all" } } },
+          { match: { spiffe_id: { value: { prefix: ["spiffe://cluster.local/ns/"] } } } },
+        ],
+      },
+    });
+    expect(identity).toContain('"cookie":{"name":"hint","presence":"absent","multi_value":"all"}');
+    expect(identity).toContain("spiffe://cluster.local/ns/");
+    // A header operand change still shows as a change, without its value.
+    const changed = structuredClone(trigger);
+    changed.when.all[0].not!.match.header!.value.exact[0] = "synthetic-replacement-token";
+    const differences = compareBaselines({ trigger }, { trigger: changed }, { trigger });
+    expect(differences.map((difference) => difference.field)).toEqual(["trigger"]);
+    expect(formatBaselineValue("trigger", changed)).not.toContain("synthetic-replacement-token");
+  });
+
+  it("formatBaselineValue withholds a malformed trigger whole and keeps null distinct", () => {
+    expect(formatBaselineValue("trigger", "synthetic-raw-string")).toBe("[redacted]");
+    expect(formatBaselineValue("trigger", { if: { header: "synthetic-raw" } })).not.toContain(
+      "synthetic-raw",
+    );
+    expect(
+      formatBaselineValue("trigger", {
+        when: { match: { header: { name: { pasted: "synthetic-raw-name-secret" } } } },
+      }),
+    ).toBe('{"when":{"match":{"header":{"name":"[redacted]"}}}}');
+    // An unknown comparison key set to null is withheld with its object.
+    const unknownKey = formatBaselineValue("trigger", {
+      when: { match: { header: { name: "x-skip", value: { "synthetic-operand-as-key": null } } } },
+    });
+    expect(unknownKey).toBe('{"when":{"match":{"header":{"name":"x-skip","value":"[redacted]"}}}}');
+    expect(formatBaselineValue("trigger", null)).toBe("null");
+    expect(formatBaselineValue("trigger", undefined)).toBe("—");
   });
 });

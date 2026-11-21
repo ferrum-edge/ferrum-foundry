@@ -1,6 +1,11 @@
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mergeFormUpdatePayload, SUBSET_TRAFFIC_POLICY_SERVER_OWNED } from "@/api/upstreams";
+import {
+  mergeFormUpdatePayload,
+  SUBSET_TRAFFIC_POLICY_SERVER_OWNED,
+  toBaseline,
+} from "@/api/upstreams";
+import { compareBaselines } from "@/lib/resourceBaseline";
 import type { SubsetDefinition, Upstream, UpstreamCreate } from "@/api/types";
 import { inputByLabel } from "@/test/fields";
 import { click, createHarness, fill, selectOption } from "@/test/__tests__/harness";
@@ -230,6 +235,131 @@ describe("subset selectors through the upstream form (#479)", () => {
         future_subset_field: { keep: true },
       },
     ]);
+  });
+
+  it("shows no local subset edit in a conflict after a name-only save (#725)", async () => {
+    // Every way a read can spell an unset subset policy, next to set and
+    // server-owned fields. What the form submits must reduce to the same
+    // baseline as the read it was seeded from.
+    const data = upstream([
+      { name: "v1", labels: { version: "v1" }, traffic_policy: null },
+      {
+        name: "v2",
+        labels: { version: "v2" },
+        traffic_policy: { load_balancer_algorithm: null, hash_on: null },
+      },
+      {
+        name: "v3",
+        labels: { version: "v3" },
+        traffic_policy: { load_balancer_algorithm: null, hash_on: "header:x-user", ...projected },
+      },
+      {
+        name: "v4",
+        labels: { version: "v4" },
+        traffic_policy: { load_balancer_algorithm: "least_connections", hash_on: null, future_policy_field: "kept" },
+      },
+    ] as unknown as SubsetDefinition[]);
+    // The backend TLS defaults an Edge read carries, which the form submits.
+    Object.assign(data, { backend_tls_san_allow_list: [], backend_tls_verify_server_cert: true });
+    await mount(data);
+    await fill(inputByLabel(ui.host, "Name"), "Orders v2");
+    await save();
+
+    const proposed = toBaseline(mergeFormUpdatePayload(data, submit.mock.calls[0][0]));
+    const current = toBaseline({ ...data, algorithm: "least_connections" });
+    const fields = compareBaselines(toBaseline(data), current, proposed)
+      .map(({ field }) => field)
+      .sort();
+    expect(fields).toEqual(["algorithm", "name"]);
+  });
+
+  it("writes an untouched subset name back exactly, surrounding space included (#725)", async () => {
+    const data = {
+      ...upstream([
+        { name: "blue ", labels: { version: "blue" } },
+        { name: " green", labels: { version: "green" } },
+      ]),
+      backend_tls_san_allow_list: [],
+      backend_tls_verify_server_cert: true,
+    } as Upstream;
+    await mount(data);
+    await fill(inputByLabel(ui.host, "Name"), "Orders v2");
+    await save();
+    expect(outgoingSubsets(data)?.map((subset) => subset.name)).toEqual(["blue ", " green"]);
+
+    const proposed = toBaseline(mergeFormUpdatePayload(data, submit.mock.calls[0][0]));
+    const current = toBaseline({ ...data, algorithm: "least_connections" });
+    expect(compareBaselines(toBaseline(data), current, proposed).map(({ field }) => field).sort())
+      .toEqual(["algorithm", "name"]);
+  });
+
+  it("keeps an untouched subset name JavaScript would trim to nothing (#725)", async () => {
+    // U+FEFF is not Unicode White_Space, so Edge accepts it as a name.
+    const data = upstream([{ name: "\uFEFF", labels: { version: "bom" } }]);
+    await mount(data);
+    await fill(inputByLabel(ui.host, "Name"), "Orders v2");
+    await save();
+    expect(outgoingSubsets(data)).toEqual([{ name: "\uFEFF", labels: { version: "bom" } }]);
+  });
+
+  it("still trims a subset name the operator edited", async () => {
+    const data = upstream([{ name: "blue ", labels: { version: "blue" } }]);
+    await mount(data);
+    await openSubsets();
+    await fill(inputByLabel(subsetGroup("blue"), "Subset Name"), " canary ");
+    await save();
+    expect(outgoingSubsets(data)?.map((subset) => subset.name)).toEqual(["canary"]);
+  });
+
+  describe("an explicit client-IP subset hash key (#725)", () => {
+    // A header-hashing parent; subset v2 overrides it with Edge's empty hash
+    // key, which hashes on the client IP.
+    function ipOverride(): Upstream {
+      return {
+        ...upstream([{
+          name: "v2",
+          labels: { version: "v2" },
+          traffic_policy: { load_balancer_algorithm: "consistent_hashing", hash_on: "" },
+        }]),
+        algorithm: "consistent_hashing",
+        hash_on: "header:x-user",
+        backend_tls_san_allow_list: [],
+        backend_tls_verify_server_cert: true,
+      } as Upstream;
+    }
+
+    function conflictFields(data: Upstream, call = 0) {
+      const proposed = toBaseline(mergeFormUpdatePayload(data, submit.mock.calls[call][0]));
+      const current = toBaseline({ ...data, targets: [] });
+      return compareBaselines(toBaseline(data), current, proposed).map(({ field }) => field).sort();
+    }
+
+    it("keeps the override through a name-only save and shows no local subset edit", async () => {
+      const data = ipOverride();
+      await mount(data);
+      await openSubsets();
+      expect(inputByLabel(subsetGroup("v2"), "Subset Hash Key").value).toBe("ip");
+      await fill(inputByLabel(ui.host, "Name"), "Orders v2");
+      await save();
+      expect(outgoingSubsets(data)).toEqual([{
+        name: "v2",
+        labels: { version: "v2" },
+        traffic_policy: { load_balancer_algorithm: "consistent_hashing", hash_on: "ip" },
+      }]);
+      expect(conflictFields(data)).toEqual(["name", "targets"]);
+    });
+
+    it.each([
+      ["inherit", ""],
+      ["a header", "header:x-tenant"],
+    ])("still compares a change from the IP override to %s", async (_label, next) => {
+      const data = ipOverride();
+      await mount(data);
+      await openSubsets();
+      await fill(inputByLabel(subsetGroup("v2"), "Subset Hash Key"), next);
+      await save();
+      expect(conflictFields(data)).toEqual(["subsets", "targets"]);
+    });
   });
 
   it("merges edited subset fields onto the writable part of the read", async () => {

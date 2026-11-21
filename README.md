@@ -324,10 +324,75 @@ choices it made.
 
 ### Production Build
 
+For a complete, supported production deployment (Foundry, a TLS-terminating
+identity proxy, and the gateway connection), use the starter's
+[production profile](deploy/starter/README.md#production).
+[Getting started](docs/getting-started.md) walks through its disposable demo
+profile.
+
+`npm run build` compiles the UI into `dist/` and the BFF into `dist-server/`.
+`npm start` serves the compiled UI only when `NODE_ENV=production`. Without it,
+as with the local development variables above, `npm start` runs the BFF API
+alone and `GET /` answers a JSON `404`; that mode only backs the Vite dev
+server (`npm run dev`).
+
+Production mode refuses static-token authentication by default (see
+`FERRUM_ALLOW_INSECURE_STATIC_AUTH`, which you should not set) and the
+published development secrets, so the built UI runs behind a trusted identity
+proxy on the same host:
+
 ```bash
 npm run build
+
+export NODE_ENV=production
+export FERRUM_AUTH_MODE=trusted-proxy
+export FERRUM_TRUSTED_PROXY_SECRET="$(openssl rand -hex 32)" # the proxy sends it
+export FERRUM_ADMIN_URL=https://ferrum-admin.internal:9000   # https unless loopback
+export FERRUM_JWT_SECRET="$(openssl rand -hex 32)"           # also configure this on Ferrum Edge
+export FERRUM_AUTH_LOGIN_URL=/oauth2/start
+export FERRUM_AUTH_LOGOUT_URL=/oauth2/sign_out
+export FERRUM_BIND_ADDRESS=127.0.0.1 # reachable only through the proxy
+export PORT=3001
+# If the gateway sets FERRUM_ADMIN_JWT_AUDIENCE, send the same value:
+# export FERRUM_JWT_AUDIENCE=ferrum-admin
+# If the admin API certificate is issued by a private CA, keep TLS
+# verification on and trust that CA:
+# export FERRUM_TLS_CA_PATH=/etc/ferrum/admin-ca.pem
 npm start
 ```
+
+The BFF now serves the built UI at `/`, but browsers reach it only through the
+identity proxy's public HTTPS URL. The proxy terminates TLS, runs the sign-in
+flow, injects the identity headers on every request, and forwards to
+`http://127.0.0.1:3001`. Production defaults to `Secure` cookies and HSTS, so behind a
+plain-HTTP browser URL on a non-loopback host the browser drops the CSRF
+cookie and every save fails. Protected endpoints refuse a
+request without the proxy's identity assertion; for example,
+`GET /api/auth/session` answers `401`.
+
+- [Production authentication](docs/authentication.md#production-trusted-identity-proxy)
+  lists the headers the proxy must strip and inject.
+- [Deployment](docs/deployment.md#3-reverse-proxy-example-nginx-and-oauth2-proxy)
+  has an nginx and oauth2-proxy configuration written for the starter's
+  Compose network, where nginx reaches `foundry:8080` and `oauth2-proxy:4180`
+  by service name. For a source build behind nginx on the same host, point
+  Foundry's `location /` upstream at `http://127.0.0.1:3001`, point both
+  `/oauth2/` locations (including the internal `/oauth2/auth` subrequest) at
+  your oauth2-proxy listener, such as `http://127.0.0.1:4180`, configure
+  oauth2-proxy for your identity provider, and set its trusted proxy range to
+  the nginx peer address in that topology. Install (or repoint) the files the
+  starter supplies through Compose mounts: `nginx/identity/policy.conf` and
+  `nginx/identity/inject.conf` at the absolute paths `foundry.conf` includes,
+  and the proof include `/etc/nginx/secrets/ferrum-proxy-secret.conf` rendered
+  with the BFF's exact `FERRUM_TRUSTED_PROXY_SECRET`, as described in the
+  [starter's production steps](deploy/starter/README.md#production). The
+  example needs nginx with TLS and the `auth_request` module; keeping its `http2 on;` line also needs
+  nginx 1.25.1 or newer built with the HTTP/2 module. On any nginx without
+  that, remove `http2 on;` and keep the rest.
+- [Gateway transport](docs/deployment.md#gateway-transport) covers the admin
+  API TLS settings, and the
+  [downstream JWT claims](docs/deployment.md#downstream-jwt-claims) table covers
+  the audience.
 
 ### Docker
 

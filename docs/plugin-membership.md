@@ -128,6 +128,11 @@ extends both to plugin configurations: a private-key block in any config
 string, a certificate source carrying one, an inline private-key source, and a
 non-trivial destination path (`request_mirror`'s `mirror_path`) read as
 `[REDACTED]`, and the exact `[REDACTED]` in any config string is refused.
+Edge `main` (ferrum-edge#7054) also withholds a plugin `trigger`'s `header`,
+`query` and `cookie` comparison operands (each `exact` and `prefix` entry,
+`regex`) as `[REDACTED]`, keeping field names and the other predicates, and
+refuses a placeholder sent back at one. The pinned v0.9.20 shows a trigger
+verbatim.
 `admin` reads of every resource are raw.
 
 Since v0.9.9, Edge refuses with `400` a `POST` or `PUT` of a plugin
@@ -165,6 +170,15 @@ projection (`src/api/maskedSecretSites.ts`: the CI-checked schema rules in
   drop a source or an ordinary setting from the full-replacement save. A
   URL-shaped placeholder anywhere else, and every placeholder in an admin's
   editor, is listed as a warning and saved as written.
+  In the trigger, a placeholder at a `header`, `query` or `cookie` operand (or
+  anywhere in a malformed trigger shape) blocks Save for a non-admin session
+  on every gateway, listed under "Trigger values hidden from your role", until
+  it is re-entered or the trigger is turned off; it offers no **Clear**,
+  because a predicate missing its operand is not one Edge accepts. So does a
+  placeholder inside content a visible key cannot hold (an object under a
+  field `name`, say); it is listed by the pointer of the withheld content,
+  never by a key inside it. A placeholder in a well-typed visible predicate or
+  field name is a warning.
   A plugin Foundry has no rules for (a custom plugin, or a built-in newer than
   Foundry's copy of the rules) has every placeholder in its `config` treated
   as masked. An unknown session role is treated as a non-admin one.
@@ -193,10 +207,16 @@ projection (`src/api/maskedSecretSites.ts`: the CI-checked schema rules in
   or clears the token.
 - **Rollback.** A failed membership change restores the plugin configuration it
   read first. When that read has a placeholder at a field masked for the
-  session's role, the restore is not attempted: the
+  session's role, in its `config` or its `trigger`, the restore is not
+  attempted: the
   recovery report names the fields that could not be restored, and the previous
   configuration must be restored manually, with the real values, or by an
-  admin.
+  admin. The recovery panel shows that configuration's trigger as the
+  session's Edge read would: verbatim to an `admin`, so a pasted snapshot
+  saves unchanged, and to any other or unknown role with its `header`,
+  `query` and `cookie` operands as `[REDACTED]` (which that role's
+  placeholder guard blocks if pasted back), to be re-entered before it is
+  reused. The plan keeps the original snapshot for its own rollback.
 
 ## Deleting a plugin
 

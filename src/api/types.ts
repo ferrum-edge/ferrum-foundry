@@ -312,6 +312,10 @@ export interface PluginTriggerMatch {
   proxy_id?: string[];
   listen_port?: number[];
   consumer?: PluginTriggerIdentityMatch;
+  /** Unmapped external identity, present only when no Consumer is mapped. */
+  external_identity?: PluginTriggerIdentityMatch;
+  /** Verifying-authority digests (64 hex characters) of the external identity; an OR. */
+  external_identity_authority?: string[];
   auth_method?: string[];
   spiffe_id?: PluginTriggerIdentityMatch;
 }
@@ -520,6 +524,24 @@ export type UpstreamCreate = Partial<
 
 // ── Health / Metrics ──────────────────────────────────────────────
 
+/**
+ * `database.mtls_dns_admission_fence` (Edge `main` after v0.9.20, absent on
+ * v0.9.20): detailed tier only, present only while this gateway process
+ * retains a MongoDB mTLS DNS admission fence. mTLS DNS admissions for
+ * `namespaces` then fail closed with `503`. The fence itself changes neither
+ * top-level `status`/`ready` nor `database.status`, so a fenced snapshot can
+ * still report healthy values there.
+ */
+export interface DatabaseMtlsDnsAdmissionFence {
+  /** Always `true` when the object is present. */
+  fenced: boolean;
+  /** Retained fence entries, one per uncertain guard owner. */
+  retained_fences: number;
+  /** Sorted, de-duplicated fenced namespaces. */
+  namespaces: string[];
+  oldest_retained_since_unix_ms?: number;
+}
+
 export interface HealthResponse extends DetailedHealthSections {
   status: 'ok' | 'degraded' | 'starting' | 'unavailable' | 'draining';
   ready: boolean;
@@ -547,6 +569,7 @@ export interface HealthResponse extends DetailedHealthSections {
       active_url_redacted?: string;
       failover_since_unix_ms?: number;
     };
+    mtls_dns_admission_fence?: DatabaseMtlsDnsAdmissionFence;
   };
   fips?: {
     mode: "off" | "enforce";

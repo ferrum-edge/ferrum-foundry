@@ -224,7 +224,10 @@ export async function create(
 /**
  * Reduce a proxy — or a proxy write payload — to the content a full-replace
  * save overwrites. The editor captures this when it opens and the guard
- * compares it against a fresh read just before the `PUT`.
+ * compares it against a fresh read just before the `PUT`. A retired field
+ * stays in: the save never sends it, but Edge v0.9.20 stores `None` for the
+ * omitted key, so the save clears it and a concurrent change to it is
+ * something this draft would revert (#725).
  */
 export function toBaseline(proxy: Proxy | ProxyCreate): BaselineSnapshot {
   return baselineSnapshot(proxy, PROXY_BASELINE_OMIT);

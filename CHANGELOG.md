@@ -62,6 +62,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   set made every upstream settings save that read it fail with `400` until
   someone noticed. The Edge Main Drift workflow runs the same comparison
   against Edge `main`.
+- The Status page surfaces Ferrum Edge `main`'s MongoDB mTLS DNS admission
+  fence (#727, `database.mtls_dns_admission_fence`, absent on v0.9.20). While
+  Edge retains one (after a config-store write or admission-lock cleanup with
+  an uncertain outcome), it fails those namespaces' mTLS DNS admissions closed
+  with `503`. The fence itself changes neither `status`, `ready` nor
+  `database.status`, so a fenced snapshot can still report them healthy.
+  `healthFindings()` now reports "Database mTLS DNS admission fenced" for a
+  literal `fenced: true`, and the Database card shows the retained fence
+  count, the oldest retained time and the fenced namespaces (a detail of the
+  wrong type reads "Not reported"), with a link to Edge's runbook. A
+  namespace-scoped session's health summary still drops the whole `database`
+  block, so the fence's list of other tenants never reaches it.
 
 ### Changed
 
@@ -248,6 +260,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- A plugin configuration's execution `trigger` is redacted like its
+  `config`. Every `header`, `query` and `cookie` comparison operand (each
+  `exact` and `prefix` entry, `regex`, numbers included), and any shape a
+  `PluginTrigger` cannot have (in a draft, also content under a visible key
+  without the type Edge declares), is treated as secret by failed-write
+  redaction (`secretValues`) and
+  shown as `[redacted]` in the conflict dialog, following Ferrum Edge main's
+  trigger projection (ferrum-edge#7054) on every gateway, the pinned v0.9.20
+  included; the routing and identity predicates (`path`, `method`, `host`,
+  `consumer`, `external_identity`, `external_identity_authority`, …) stay
+  readable. A non-admin session's placeholder at a masked trigger operand now
+  blocks the plugin editor's Save, an MCP tool-policy save, and a membership
+  rollback before anything is sent, as a masked `config` value already did.
+  The Edge Main Drift check compares Foundry's trigger predicate lists with
+  Edge main's, and `PluginTriggerMatch` gains `external_identity` and
+  `external_identity_authority` (ferrum-edge#7417, #728).
 - The deployment starter's oauth2-proxy uses PKCE:
   `oauth2-proxy.env.example` sets `OAUTH2_PROXY_CODE_CHALLENGE_METHOD=S256`,
   so each login sends an S256 `code_challenge` and redeems the code with its
@@ -528,6 +556,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tcp_connection_throttle.active_connections`), and its proxy-mode uptime
   advances with elapsed time, so its unchanged counters show a rate of 0
   instead of staying at Collecting.
+- Upstream edit baselines reduce subsets exactly as saves submit them
+  (#725). `upstreams.toBaseline()` now strips the server-owned
+  `subsets[].traffic_policy` fields (`writableSubset`), and spells an unset
+  policy, algorithm or hash key one way (an explicit `null` counts as
+  omitted, as the settings form submits it). The guard therefore no longer
+  counts a change to those server-owned fields as a conflict, and a real
+  conflict no longer shows `subsets` as changed locally. This matters when a
+  writable gateway returns mesh-projected subset policy on a tagged read; it
+  is verified against tagged fixtures, since Edge's mesh mode itself is
+  read-only and its reads carry no tag. A malformed subset entry or policy is
+  compared verbatim rather than failing the guard. A subset's empty hash key,
+  which Edge reads as an explicit client-IP override, is now seeded in the
+  settings form as `ip` and submitted that way, and the baseline compares
+  `""` and `"ip"` alike. Before, the form showed it blank and a name-only save
+  dropped the override, so the subset fell back to the parent's hash key. An
+  untouched subset name is also written back exactly as read (Edge matches
+  names exactly, a proxy's `upstream_subset` included), and decides whether
+  the row is saved at all, so a name JavaScript trims to nothing (U+FEFF) is
+  no longer dropped; only a new or edited name is trimmed. Baselines and
+  fingerprints build objects from entries, and the upstream detail query no
+  longer shares structure across refetches, so a `__proto__` key (a valid
+  subset label) is compared instead of silently dropped. A malformed cached
+  subset no longer breaks building the save payload; the guard refuses it. The retired proxy
+  `pool_max_requests_per_connection` stays compared on save: Edge v0.9.20
+  stores `None` when a save omits it, so the save does clear it.
 - The Alloy service-manifest preview is requalified against Alloy `main`
   (`0e8a96a2`, #719). Every preview now includes the `<id>-otel-tracing`
   plugin and its proxy reference, as Alloy always generates it: with

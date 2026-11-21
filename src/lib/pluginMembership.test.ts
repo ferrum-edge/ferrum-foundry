@@ -910,6 +910,62 @@ describe("proxy-group membership reconciliation", () => {
     expect(state.plugins.get("plugin-1")?.config).toEqual(groupInput().config);
   });
 
+  it("skips restoring a configuration whose trigger was read with masked operands", async () => {
+    const masked: PluginConfig = {
+      ...makePlugin("plugin-1", "global"),
+      config: { requests: 10 },
+      trigger: {
+        when: {
+          all: [
+            { not: { match: { header: { name: "x-skip", value: { exact: ["[REDACTED]"] } } } } },
+            { match: { path: { prefix: ["/api/"] } } },
+          ],
+        },
+      },
+    };
+    const state = harness(
+      [makeProxy("p1"), makeProxy("p2"), makeProxy("p3")],
+      [masked],
+      { failProxyOnce: "p3" },
+    );
+    const failure = await updatePluginWithMembership(
+      "plugin-1",
+      groupInput(),
+      ["p2", "p3"],
+      state.deps,
+      null,
+      seen(state, "plugin-1"),
+    ).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(PluginMembershipError);
+    const recovery = (failure as PluginMembershipError).recovery;
+    const skipped = recovery.find((entry) => entry.includes("was not restored"));
+    expect(skipped).toContain("/trigger/when/all/0/not/match/header/value/exact/0");
+    expect(skipped).toContain("Manual recovery is needed");
+    expect(skipped).not.toContain("[REDACTED]");
+    // Only the forward write: the masked trigger was never PUT back.
+    expect(state.counts().updatePluginCalls).toBe(1);
+
+    // An admin's snapshot was read raw, so the same trigger is restored.
+    const admin = harness(
+      [makeProxy("p1"), makeProxy("p2"), makeProxy("p3")],
+      [masked],
+      { failProxyOnce: "p3" },
+    );
+    await expect(
+      updatePluginWithMembership(
+        "plugin-1",
+        groupInput(),
+        ["p2", "p3"],
+        { ...admin.deps, role: "admin" },
+        null,
+        seen(admin, "plugin-1"),
+      ),
+    ).rejects.toThrow("rollback was attempted");
+    expect(admin.counts().updatePluginCalls).toBe(2);
+    expect(admin.plugins.get("plugin-1")?.trigger).toEqual(masked.trigger);
+  });
+
   it("restores an admin's snapshot, which was read raw", async () => {
     const literal: PluginConfig = {
       ...makePlugin("plugin-1", "global"),

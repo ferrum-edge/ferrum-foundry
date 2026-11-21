@@ -378,6 +378,20 @@ See `docs/concurrent-edits.md`.
   `FieldSensitivity` the parser accepts (`SENSITIVITY_VARIANTS`) needs a
   projection in both `secretRedaction.ts` and the placeholder replay
   (`refusedPlaceholderSites` in `maskedSecrets.ts`).
+- A plugin `trigger` (a sibling of `config`) is classified by Edge main's
+  trigger projection (`pluginTriggerWithheldSites` in
+  `src/lib/resourceBaseline.ts`, ferrum-edge#7054), on every gateway, the
+  pinned v0.9.20 included: every `header` / `query` / `cookie` comparison
+  operand is secret (numbers and booleans too, as `Secrets.scalars`), as is
+  any shape a `PluginTrigger` cannot have, including content under a visible
+  key without the type Edge declares for it (a draft is unvalidated); the
+  other predicates (`TRIGGER_VISIBLE_PREDICATES`) and field names stay
+  readable. The trigger is classified by this walk alone, never by the
+  positional name and URL rules. The same walk drives
+  the conflict dialog (`formatBaselineValue("trigger", …)`) and the trigger's
+  placeholder sites (`pluginTriggerPlaceholderSites`); a write that resends a
+  plugin read checks both halves with `pluginPlaceholderSites`.
+  `scripts/edge-main-drift.mjs` compares the two predicate lists with Edge main.
 - A plugin the table does not name is secret throughout, as is every scalar of
   a YAML spec document Foundry cannot parse. Such an *unclassified* value
   shorter than 8 characters is redacted only as a whole token of a string, so
