@@ -82,34 +82,7 @@ function readStoredPlaceholders(): Map<string, number> {
   }
 }
 
-function forgetPlaceholder(target: string): void {
-  placeholderSeenAt.delete(target);
-  try {
-    const stored = readStoredPlaceholders();
-    if (stored.delete(target)) {
-      sessionStorage.setItem(PLACEHOLDER_STORAGE_KEY, JSON.stringify(Object.fromEntries(stored)));
-    }
-  } catch {
-    // Ignore storage failures.
-  }
-}
-
-function placeholderSeenAtFor(target: string): number | undefined {
-  const inMemory = placeholderSeenAt.get(target);
-  const stored = readStoredPlaceholders().get(target);
-  const seenAt =
-    inMemory === undefined ? stored : stored === undefined ? inMemory : Math.max(inMemory, stored);
-  // A marker later than now means the clock moved backward since; keeping it
-  // would refuse every new baseline until the clock caught up, so drop it.
-  if (seenAt !== undefined && seenAt > Date.now()) {
-    forgetPlaceholder(target);
-    return undefined;
-  }
-  return seenAt;
-}
-
-function notePlaceholder(target: string, timestamp: number): void {
-  const seenAt = Math.max(placeholderSeenAtFor(target) ?? timestamp, timestamp);
+function setPlaceholder(target: string, seenAt: number): void {
   placeholderSeenAt.set(target, seenAt);
   try {
     const stored = readStoredPlaceholders();
@@ -120,13 +93,32 @@ function notePlaceholder(target: string, timestamp: number): void {
   }
 }
 
+function placeholderSeenAtFor(target: string): number | undefined {
+  const inMemory = placeholderSeenAt.get(target);
+  const stored = readStoredPlaceholders().get(target);
+  const seenAt =
+    inMemory === undefined ? stored : stored === undefined ? inMemory : Math.max(inMemory, stored);
+  // A marker later than now means the clock moved backward since. Clamp it to
+  // now: every baseline requested before this moment stays refused, and one
+  // requested from now on can bridge without waiting for the clock to catch up.
+  const clock = Date.now();
+  if (seenAt !== undefined && seenAt > clock) {
+    setPlaceholder(target, clock);
+    return clock;
+  }
+  return seenAt;
+}
+
+function notePlaceholder(target: string, timestamp: number): void {
+  setPlaceholder(target, Math.max(placeholderSeenAtFor(target) ?? timestamp, timestamp));
+}
+
 /**
  * Whether `sample` may predate a placeholder this tab saw at its target: its
  * request was sent at or before that placeholder arrived, so the process that
  * answered it may be the one the control plane replaced.
  */
-function predatesPlaceholder(sample: RequestSample): boolean {
-  const seenAt = placeholderSeenAtFor(sample.target);
+function predatesPlaceholder(sample: RequestSample, seenAt: number | undefined): boolean {
   return seenAt !== undefined && sample.requestedAt <= seenAt;
 }
 
@@ -263,6 +255,9 @@ export function useGatewayRequestStats(
       return;
     }
 
+    // Read (and, after a backward clock correction, clamp) the marker on
+    // every proxy reading, so the clamp happens as soon as it is observable.
+    const placeholderAt = placeholderSeenAtFor(target);
     const currentSample = toSample(gateway, dataUpdatedAt, target);
     const storedSample = previousSampleRef.current
       ? undefined
@@ -273,7 +268,7 @@ export function useGatewayRequestStats(
         ? storedSample
         : undefined);
     const previousSample =
-      candidate && !predatesPlaceholder(candidate) ? candidate : undefined;
+      candidate && !predatesPlaceholder(candidate, placeholderAt) ? candidate : undefined;
 
     const { requestsPerSecond, statusCodesPerSecond } = calculateRequestRates(currentSample, previousSample);
     setRates({ mode: gateway.mode, namespace: selectedNamespace, target, requestsPerSecond, statusCodesPerSecond });

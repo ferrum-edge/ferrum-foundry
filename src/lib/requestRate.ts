@@ -10,8 +10,13 @@ export interface CounterSample {
   target: string;
   /** Its `gateway.mode`. */
   mode: string;
-  /** When the response arrived (ms). */
+  /** When the response arrived (ms). Rates are computed over these. */
   timestamp: number;
+  /**
+   * When its request was sent (ms), if known. The uptime check measures the
+   * gap between requests, so a slow delivery cannot widen it.
+   */
+  requestedAt?: number;
   uptimeSeconds: number;
   totalRequests: number;
   statusCodeTotals: Record<string, number>;
@@ -58,8 +63,11 @@ export function calculateRequestRates(current: CounterSample, previous?: Counter
   // two samples came from different processes at the same target (a restart,
   // or a replacement behind the same admin URL), whose counters are not
   // comparable, even if the newer process has run longer or served more.
-  const uptimeDrift = Math.abs(current.uptimeSeconds - previous.uptimeSeconds - elapsedSeconds);
-  const tolerance = Math.max(UPTIME_TOLERANCE_MIN_SECONDS, elapsedSeconds * UPTIME_TOLERANCE_RATIO);
+  // Measured between the requests, which is when Edge was asked.
+  const requestGapSeconds =
+    ((current.requestedAt ?? current.timestamp) - (previous.requestedAt ?? previous.timestamp)) / 1000;
+  const uptimeDrift = Math.abs(current.uptimeSeconds - previous.uptimeSeconds - requestGapSeconds);
+  const tolerance = Math.max(UPTIME_TOLERANCE_MIN_SECONDS, requestGapSeconds * UPTIME_TOLERANCE_RATIO);
   if (uptimeDrift > tolerance) {
     return { totalRequests: current.totalRequests };
   }

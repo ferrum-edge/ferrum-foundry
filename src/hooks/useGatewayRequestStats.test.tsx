@@ -447,18 +447,49 @@ describe("gateway request rate", () => {
     await show({ total: 6_000, at: now });
     expect(stats?.requestsPerSecond).toBeUndefined();
   });
-  it("drops a placeholder marker left in the future by a backward clock correction", async () => {
+  it("clamps a placeholder marker left in the future by a backward clock correction", async () => {
     // The clock ran five minutes fast when the node agent answered ...
     vi.useFakeTimers({ toFake: ["Date"], now: now + 300_000 });
     await show({ total: 0, at: now + 300_000, uptime: 0, mode: "node_agent" });
-    expect(sessionStorage.getItem("ferrum:metricsPlaceholderSeenAt")).not.toBeNull();
 
     // ... and was then corrected; a data plane answers at the same target.
+    // The marker is clamped to the corrected now rather than dropped.
     vi.setSystemTime(now + 10_000);
     await show({ total: 100, at: now + 10_000, uptime: 100, mode: "dp" });
     expect(stats).toEqual({ totalRequests: 100 });
+    expect(JSON.parse(sessionStorage.getItem("ferrum:metricsPlaceholderSeenAt")!)).toEqual({
+      "target-a": now + 10_000,
+    });
+
+    // A reading requested by the clamp moment is not a baseline; one after it is.
+    vi.setSystemTime(now + 40_000);
     await show({ total: 700, at: now + 40_000, uptime: 130, mode: "dp" });
+    expect(stats).toEqual({ totalRequests: 700 });
+    vi.setSystemTime(now + 70_000);
+    await show({ total: 1_300, at: now + 70_000, uptime: 160, mode: "dp" });
     expect(stats?.requestsPerSecond).toBe(20);
-    expect(sessionStorage.getItem("ferrum:metricsPlaceholderSeenAt")).toBe("{}");
+  });
+
+  it("keeps a stored pre-placeholder sample refused across a backward clock correction and reload", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now });
+    await show({ total: 100, at: now, uptime: 100, mode: "dp" });
+    selected.namespace = "tenant-b";
+    vi.setSystemTime(now + 30_000);
+    await show({ total: 0, at: now + 30_000, uptime: 0, mode: "cp" });
+
+    // The clock is set back 25 s, the tab reloads, and DP B answers with an
+    // uptime and counters that would pass against DP A's stored sample.
+    vi.setSystemTime(now + 10_000);
+    await reloadTab("target-a");
+    selected.namespace = "tenant-a";
+    await show({ total: 1_100, at: now + 10_000, uptime: 110, mode: "dp" });
+    expect(stats).toEqual({ totalRequests: 1_100 });
+
+    vi.setSystemTime(now + 20_000);
+    await show({ total: 1_100, at: now + 20_000, uptime: 120, mode: "dp" });
+    expect(stats).toEqual({ totalRequests: 1_100 });
+    vi.setSystemTime(now + 30_000);
+    await show({ total: 1_100, at: now + 30_000, uptime: 130, mode: "dp" });
+    expect(stats?.requestsPerSecond).toBe(0);
   });
 });
