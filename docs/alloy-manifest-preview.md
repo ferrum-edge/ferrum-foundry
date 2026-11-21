@@ -92,26 +92,40 @@ The pinned `contracts-edge-0.9.20` fixtures predate the cleartext rule: the
 schema-valid `orders-api.json` (and the repaired `client-cert-without-key.json`)
 use `http://otel-collector:4318/v1/traces`, which the preview refuses. Tests
 assert that refusal and accept the same manifest over `https://` until
-ferrum-contracts#82 updates the fixtures. Alloy's Edge upper bounds
-(`api.public_path` at most 500 bytes, `service_base_path` and `health.path` at
-most 2,048, `upstream.host` at most 255 without control or whitespace
-characters, `health.interval_seconds` at most 3,600, timeouts at most
-86,400,000 ms) are not enforced yet: they arrive with the ferrum-contracts#74
-schema bounds in the next `contracts-edge` release, which Foundry will
-re-vendor (#723). Until then a manifest outside those bounds can still preview.
+ferrum-contracts#82 updates the fixtures.
+
+Edge bounds (ferrum-contracts#74, Alloy `validate()`), as of this pin:
+
+- Already enforced. `api.service_base_path` and `health.path` declare no
+  `maxLength` in the pinned schema, so they get the 2,048 default. Paths are
+  ASCII-only, so that is 2,048 bytes, matching Alloy `main` for both. Control
+  characters are refused in every string, including `upstream.host` and
+  `agents.endpoint_path`, and the literal path rule refuses `;`, `%`, `\` and
+  dot segments.
+- Changing with the re-vendor. Contracts `main` keeps 2,048 for `health.path`
+  and declares 2,049 for `service_base_path` (the slash the export strips
+  leaves a backend path of at most 2,048). Once re-vendored, the preview
+  allows a 2,049-character base path, which Alloy `main` (2,048 including the
+  slash) still refuses.
+- Not enforced until the re-vendor. `api.public_path` at most 500,
+  `upstream.host` at most 255 (it gets the 2,048 default today) and without
+  non-ASCII whitespace or control characters such as U+00A0 or U+0085,
+  `health.interval_seconds` at most 3,600, and `health.timeout_ms` and
+  `timeouts.*` at most 86,400,000. A manifest outside these can still preview.
+  They arrive with the next `contracts-edge` release, which Foundry will
+  re-vendor (#723).
 
 Local presentation limits are 32 KiB raw UTF-8 JSON, eight nesting levels before
-JSON parsing, 32 array items, and 16 KiB serialized output. Each string field
-gets the schema's declared `maxLength`, or 2,048 characters where the schema
-declares none on the field or in any of its `allOf` clauses, at any depth. The
-default is decided once per value and never added inside a clause, so no
-declared bound is clamped, and every declared bound is still enforced. A
-`maxLength` beside an `enum` or `const`, typed or not, or in a typeless
-`allOf` clause, constrains string values too. Every string value and property
-name, including unknown keys refused by the closed schema, is capped at 4,096
-characters before validation, and a schema declaring any `maxLength`
-above that cap does not compile (the route answers `503`) rather than being
-silently narrowed. Lengths count Unicode code points, as JSON Schema does.
+JSON parsing, 32 array items, and 16 KiB serialized output. `maxLength` is
+supported only on a field's own schema node (the root, a `properties` entry or
+`items`, beside `type`, `enum`, `const` or `pattern`). Each such node applies
+one bound to string values: its declared `maxLength`, or 2,048 characters when
+it declares none. Composition clauses (`allOf`, `anyOf`, `if`/`then`, and
+properties declared inside them) add no bound or default; a `maxLength` there,
+or one above 4,096, does not compile, so the route answers `503` rather than
+silently clamping a bound. Every string value and property name, including
+unknown keys refused by the closed schema, is capped at 4,096 characters
+before validation. Lengths count Unicode code points, as JSON Schema does.
 Integers must be safe JavaScript integers. Control characters and OTLP URLs
 with credentials, a query or fragment are refused. These are a narrower
 preview envelope, not edits to the shared schema. Errors are fixed, bounded

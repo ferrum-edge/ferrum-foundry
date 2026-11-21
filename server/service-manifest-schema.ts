@@ -56,25 +56,23 @@ const KEYWORDS = new Set([
   'minItems', 'minimum', 'maximum', 'allOf', 'anyOf', 'dependentRequired', 'if', 'then', 'default',
 ]);
 
-// Whether a node or any allOf clause it contains, at any depth, declares a
-// string bound. Those clauses all constrain the same value.
-function declaresMaxLength(node: SchemaNode): boolean {
-  return node.maxLength !== undefined || (node.allOf ?? []).some(declaresMaxLength);
-}
-
 // Compile only the subset used by this closed contract with our existing Zod
 // dependency. Refuse new keywords rather than silently ignoring drift. No
 // coercion, key removal, or implicit default insertion during validation.
 //
-// `sameValue` marks a subschema (allOf, anyOf, if/then) that validates the
-// value its parent already validates. The parent owns the 2048 default for that
-// value, decided once: it applies only when neither the parent nor any nested
-// allOf clause declares a bound. Subschemas never install their own default.
-function compile(node: SchemaNode, sameValue = false): z.ZodType {
+// String bounds are supported only on a field's own schema node (the root, a
+// `properties` entry or `items`), beside type/enum/const/pattern. `inClause`
+// marks anything reached through allOf/anyOf/if/then, including properties of
+// an object-level clause; a maxLength there is refused like an unsupported
+// keyword. Each field node then applies exactly one bound to string values:
+// its declared maxLength, or the 2048 default. Clauses add none.
+function compile(node: SchemaNode, inClause = false): z.ZodType {
   if (Object.keys(node).some((key) => !KEYWORDS.has(key))) {
     throw new Error('Unsupported service manifest schema keyword');
   }
-  // Checked for every node, whichever branch builds its validator.
+  if (inClause && node.maxLength !== undefined) {
+    throw new Error('Unsupported service manifest maxLength placement');
+  }
   const maxLength = declaredMaxLength(node);
   let validator: z.ZodType = z.unknown();
   if (node.const !== undefined) validator = z.literal(node.const);
@@ -82,7 +80,7 @@ function compile(node: SchemaNode, sameValue = false): z.ZodType {
   else if (node.type === 'object' || node.properties || node.required) {
     const shape: Record<string, z.ZodType> = {};
     for (const [key, property] of Object.entries(node.properties ?? {})) {
-      const field = compile(property);
+      const field = compile(property, inClause);
       shape[key] = node.required?.includes(key) ? field : field.optional();
     }
     validator = node.additionalProperties === false
@@ -90,7 +88,7 @@ function compile(node: SchemaNode, sameValue = false): z.ZodType {
       : z.object(shape).passthrough();
   } else if (node.type === 'array') {
     if (!node.items) throw new Error('Missing service manifest item schema');
-    validator = z.array(compile(node.items)).min(node.minItems ?? 0).max(32);
+    validator = z.array(compile(node.items, inClause)).min(node.minItems ?? 0).max(32);
   } else if (node.type === 'string') {
     validator = z.string();
   } else if (node.type === 'integer' || node.type === 'number') {
@@ -101,17 +99,13 @@ function compile(node: SchemaNode, sameValue = false): z.ZodType {
   } else if (node.type === 'boolean') validator = z.boolean();
   else if (node.type !== undefined) throw new Error('Unsupported service manifest schema type');
 
-  if (maxLength !== undefined) {
-    // One code path for every declared bound, whichever branch built the
-    // validator (string, const, enum or a typeless clause). It constrains only
-    // string values (JSON Schema), never narrowing or widening other types.
-    const bound = maxLength;
+  if (!inClause) {
+    // One bound per field node, whichever branch built the validator (string,
+    // const or enum). It constrains only string values (JSON Schema), never
+    // narrowing or widening other types.
+    const bound = maxLength ?? MANIFEST_STRING_DEFAULT_MAX_LENGTH;
     validator = validator.refine((value) =>
       typeof value !== 'string' || codePointLength(value) <= bound);
-  }
-  if (!sameValue && !declaresMaxLength(node)) {
-    validator = validator.refine((value) => typeof value !== 'string'
-      || codePointLength(value) <= MANIFEST_STRING_DEFAULT_MAX_LENGTH);
   }
   if (node.required) {
     const required = node.required;

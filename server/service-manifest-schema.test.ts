@@ -184,36 +184,12 @@ describe('maxLength outside a plain string node', () => {
     expect(typedEnum.validatedManifest(body)).toBeNull();
   });
 
-  it('honors an allOf clause bound above the default without clipping it', async () => {
-    const schema = vendoredSchema();
-    schema.properties.api.properties.service_base_path.allOf.push({ maxLength: 2049 });
-    const { validatedManifest } = await load(schema);
-    const body = manifest();
-    body.api.service_base_path = `/${'a'.repeat(2047)}/`;
-    expect(body.api.service_base_path).toHaveLength(2049);
-    expect(validatedManifest(body)).not.toBeNull();
-    body.api.service_base_path = `/${'a'.repeat(2048)}/`;
-    expect(validatedManifest(body)).toBeNull();
-  });
-
-  it('honors a bound in a nested allOf clause without a default anywhere for the value', async () => {
-    const schema = vendoredSchema();
-    schema.properties.api.properties.service_base_path.allOf.push({
-      allOf: [{ maxLength: 2049 }],
-    });
-    const { validatedManifest } = await load(schema);
-    const body = manifest();
-    body.api.service_base_path = `/${'a'.repeat(2047)}/`;
-    expect(validatedManifest(body)).not.toBeNull();
-    body.api.service_base_path = `/${'a'.repeat(2048)}/`;
-    expect(validatedManifest(body)).toBeNull();
-  });
-
-  it('installs no default in a typed string allOf clause beside a field-level bound', async () => {
+  it('adds no default from composition clauses that also constrain the field', async () => {
     const schema = vendoredSchema();
     const field = schema.properties.api.properties.service_base_path;
     field.maxLength = 2049;
     field.allOf[1].type = 'string';
+    schema.properties.api.allOf = [{ properties: { service_base_path: { pattern: '/$' } } }];
     const { validatedManifest } = await load(schema);
     const body = manifest();
     body.api.service_base_path = `/${'a'.repeat(2047)}/`;
@@ -222,32 +198,40 @@ describe('maxLength outside a plain string node', () => {
     expect(validatedManifest(body)).toBeNull();
   });
 
-  it('still enforces each declared bound across conjunctive clauses', async () => {
-    const schema = vendoredSchema();
-    const field = schema.properties.api.properties.service_base_path;
-    field.maxLength = 2049;
-    field.allOf.push({ allOf: [{ maxLength: 6 }] });
-    const { validatedManifest } = await load(schema);
+  it('applies the 2048 default to a field node with clauses but no bound', async () => {
+    const { validatedManifest } = await load(vendoredSchema());
     const body = manifest();
-    body.api.service_base_path = '/abcd/';
+    body.api.service_base_path = `/${'a'.repeat(2046)}/`;
     expect(validatedManifest(body)).not.toBeNull();
-    body.api.service_base_path = '/abcde/';
+    body.api.service_base_path = `/${'a'.repeat(2047)}/`;
     expect(validatedManifest(body)).toBeNull();
   });
 
-  it('constrains strings through a typeless allOf clause', async () => {
+  it.each([
+    ['an allOf clause', (schema: any) => {
+      schema.properties.api.properties.service_base_path.allOf.push({ maxLength: 2049 });
+    }],
+    ['a nested allOf clause', (schema: any) => {
+      schema.properties.api.properties.service_base_path.allOf.push({
+        allOf: [{ maxLength: 2049 }],
+      });
+    }],
+    ['a property of an object-level allOf clause', (schema: any) => {
+      schema.properties.api.allOf = [{ properties: { service_base_path: { maxLength: 2049 } } }];
+    }],
+    ['an anyOf branch', (schema: any) => {
+      schema.properties.api.properties.service_base_path.anyOf = [{ maxLength: 2049 }];
+    }],
+    ['an if/then clause', (schema: any) => {
+      Object.assign(schema.properties.api.properties.service_base_path, {
+        if: { pattern: '^/v1/' }, then: { maxLength: 10 },
+      });
+    }],
+  ])('refuses to compile a maxLength in %s', async (_label, place) => {
     const schema = vendoredSchema();
-    schema.properties.api.properties.service_base_path.allOf.push({ maxLength: 4 });
-    const { validatedManifest } = await load(schema);
-    const body = manifest();
-    body.api.service_base_path = '/v1/';
-    expect(validatedManifest(body)).not.toBeNull();
-    body.api.service_base_path = '/v12/';
-    expect(validatedManifest(body)).toBeNull();
-
-    schema.properties.api.properties.service_base_path.allOf[2].maxLength = 4097;
-    const aboveCap = await load(schema);
-    expect(() => aboveCap.serviceManifestSchema()).toThrow('could not be loaded or compiled');
+    place(schema);
+    const { serviceManifestSchema } = await load(schema);
+    expect(() => serviceManifestSchema()).toThrow('could not be loaded or compiled');
   });
 });
 
