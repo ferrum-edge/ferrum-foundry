@@ -489,6 +489,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Metrics page and the Dashboard no longer show a control plane's or node
+  agent's `/admin/metrics` placeholders as measurements (#720). Ferrum Edge
+  builds those modes without proxy state and zeroes uptime, request counters
+  and rates, the metrics window and every resource count, sends empty pools
+  and caches, and a `null` config snapshot time. Both surfaces now take the
+  per-mode decision from one helper (`src/lib/adminMetricsReporting.ts`): in
+  `cp` and `node_agent` they show the mode, the Ferrum Edge version and the
+  config source (`online`/`offline` on a control plane, not applicable on a
+  node agent), state that uptime, traffic and resource counts are "Not
+  reported by a control plane" (or node agent), and leave out the proxy-backed
+  panels (circuit breakers, connection pools, health checks, load balancers,
+  caches, rate limiting, consumer index) and the Dashboard's breaker and
+  unhealthy-target alerts. A measured zero in `database`, `file`, `dp` or
+  `mesh` mode is still shown. The mock admin gateway's `/admin/metrics` now
+  follows `MOCK_GATEWAY_MODE`, returning Edge's skeleton for `cp` and
+  `node_agent`.
 - Foundry handles the plugin-config projection Ferrum Edge `main` adds after
   v0.9.20 (ferrum-edge#7054). The sensitivity drift parser accepts
   `FieldSensitivity::CertificateSource`, `PrivateKeySource` and `EndpointPath`

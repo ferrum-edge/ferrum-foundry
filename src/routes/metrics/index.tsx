@@ -33,6 +33,7 @@ import {
 } from "@/utils/metricsRefresh";
 import { FleetViewGate } from "@/components/shared/FleetViewGate";
 import { useNamespace } from "@/stores/namespace";
+import { adminMetricsReporting } from "@/lib/adminMetricsReporting";
 
 /* ================================================================== */
 /*  MetricsPage                                                        */
@@ -79,6 +80,13 @@ function MetricsWorkspace() {
   } = usePrometheusMetrics(refreshInterval);
 
   const requestStats = useGatewayRequestStats(metrics?.gateway, dataUpdatedAt);
+  // A control plane or node agent sends these panels only as empty or zeroed
+  // placeholders; GatewayStats says so once instead of seven panels showing
+  // "no breakers", "0 tracked keys" and the like as measurements.
+  const proxyPanels =
+    metrics && adminMetricsReporting(metrics.gateway.mode).reportsProxyRuntime
+      ? metrics
+      : undefined;
 
   const handleIntervalChange = (intervalMs: number) => {
     setRefreshInterval(intervalMs);
@@ -186,77 +194,77 @@ function MetricsWorkspace() {
           <RuntimePanel refetchInterval={opsInterval} />
         </Card>
 
-        {metrics && (
+        {proxyPanels && (
           <Card>
             <h3 className="text-sm font-semibold text-text-primary mb-3">
               Circuit Breakers
             </h3>
             <CircuitBreakerPanel
-              breakers={metrics.circuit_breakers}
+              breakers={proxyPanels.circuit_breakers}
               selectedNamespace={selectedNamespace}
             />
           </Card>
         )}
 
-        {metrics && (
+        {proxyPanels && (
           <Card>
             <h3 className="text-sm font-semibold text-text-primary mb-3">
               Connection Pools
             </h3>
-            <ConnectionPoolPanel pools={metrics.connection_pools} />
+            <ConnectionPoolPanel pools={proxyPanels.connection_pools} />
           </Card>
         )}
 
-        {metrics && (
+        {proxyPanels && (
           <Card>
             <h3 className="text-sm font-semibold text-text-primary mb-3">
               Health Checks
             </h3>
             <HealthCheckPanel
-              healthCheck={metrics.health_check}
+              healthCheck={proxyPanels.health_check}
               selectedNamespace={selectedNamespace}
             />
           </Card>
         )}
 
-        {metrics && (
+        {proxyPanels && (
           <Card>
             <h3 className="text-sm font-semibold text-text-primary mb-3">
               Load Balancers
             </h3>
             <LoadBalancerPanel
-              loadBalancers={metrics.load_balancers}
+              loadBalancers={proxyPanels.load_balancers}
               selectedNamespace={selectedNamespace}
             />
           </Card>
         )}
 
-        {metrics && (
+        {proxyPanels && (
           <Card>
             <h3 className="text-sm font-semibold text-text-primary mb-3">
               Caches
             </h3>
-            <CachePanel caches={metrics.caches} />
+            <CachePanel caches={proxyPanels.caches} />
           </Card>
         )}
 
-        {metrics && (
+        {proxyPanels && (
           <Card>
             <h3 className="text-sm font-semibold text-text-primary mb-3">
               Rate Limiting
             </h3>
-            <RateLimitPanel rateLimiting={metrics.rate_limiting} />
+            <RateLimitPanel rateLimiting={proxyPanels.rate_limiting} />
           </Card>
         )}
 
-        {metrics && (
+        {proxyPanels && (
           <Card>
             <h3 className="text-sm font-semibold text-text-primary mb-3">
               Consumer Index
             </h3>
             <div className="grid grid-cols-2 gap-3">
-              <StatCard label="Total consumers" value={metrics.consumer_index.total_consumers} />
-              {(Object.entries(metrics.consumer_index) as [string, number][])
+              <StatCard label="Total consumers" value={proxyPanels.consumer_index.total_consumers} />
+              {(Object.entries(proxyPanels.consumer_index) as [string, number][])
                 .filter(([key, val]) => key !== "total_consumers" && val > 0)
                 .map(([key, val]) => (
                   <StatCard key={key} label={humanizeKey(key)} value={val} />

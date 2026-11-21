@@ -4,6 +4,7 @@ import { once } from "node:events";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  buildAdminMetrics,
   buildHealth,
   apiSpecByProxyResponse,
   apiSpecListResponse,
@@ -430,6 +431,43 @@ test("database mode reports writable admin health and refuses nothing", () => {
   assert.ok(health.database);
   assert.equal(readOnlyModeRefusal("database", "POST", "/proxies"), null);
 });
+
+for (const [mode, source] of [["cp", "online"], ["node_agent", "n/a"]]) {
+  test(`${mode} /admin/metrics is Edge's no-proxy-state skeleton`, () => {
+    const metrics = buildAdminMetrics(mode);
+    assert.equal(metrics.gateway.mode, mode);
+    assert.equal(typeof metrics.gateway.ferrum_version, "string");
+    assert.equal(metrics.gateway.config_source_status, source);
+    assert.equal(metrics.gateway.config_last_updated_at, null);
+    for (const field of [
+      "uptime_seconds", "total_requests", "requests_per_second", "metrics_window_seconds",
+      "proxy_count", "consumer_count", "upstream_count", "plugin_config_count",
+    ]) {
+      assert.equal(metrics.gateway[field], 0, field);
+    }
+    assert.deepEqual(metrics.gateway.status_codes_total, {});
+    assert.deepEqual(metrics.connection_pools, {});
+    assert.deepEqual(metrics.caches, {});
+    assert.deepEqual(metrics.circuit_breakers, []);
+    assert.deepEqual(metrics.health_check, { unhealthy_target_count: 0, unhealthy_targets: [] });
+    assert.deepEqual(metrics.load_balancers, { active_connections: [] });
+    assert.equal(metrics.consumer_index.total_consumers, 0);
+    assert.equal(metrics.rate_limiting.tracked_key_count, 0);
+  });
+}
+
+for (const [mode, source] of [["database", "online"], ["file", "n/a"], ["dp", "n/a"], ["mesh", "n/a"]]) {
+  test(`${mode} /admin/metrics serves the proxy-backed payload`, () => {
+    const metrics = buildAdminMetrics(mode);
+    assert.equal(metrics.gateway.mode, mode);
+    assert.equal(metrics.gateway.config_source_status, source);
+    assert.ok(metrics.gateway.uptime_seconds > 0);
+    assert.ok(metrics.gateway.proxy_count > 0);
+    assert.equal(typeof metrics.gateway.config_last_updated_at, "string");
+    assert.ok(metrics.connection_pools.http);
+    assert.ok(metrics.caches.router);
+  });
+}
 
 test("file mode reports a read-only admin API with no configured database", () => {
   const health = buildHealth("file");

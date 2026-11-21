@@ -265,6 +265,11 @@ Edge contract:
   described in [plugin membership](docs/plugin-membership.md#scope-changes-and-proxy-scoped-plugins),
   which the paired v0.9.20 enforces.
 
+`GET /admin/metrics` follows `MOCK_GATEWAY_MODE` too: with `cp` or
+`node_agent` it returns Ferrum Edge's no-proxy-state skeleton (zeroed runtime
+counters, empty pools and caches, `config_last_updated_at: null`), which the
+Metrics page and Dashboard show as not reported rather than as measured zeros.
+
 `GET /mesh/service-graph` always returns sample data, and with
 `MOCK_GATEWAY_MODE=mesh` so does `GET /mesh/runtime-overlay`; other `/mesh/*`,
 `/node-waypoint/*`, and `/service-waypoint/*` routes answer `404`, and the UI

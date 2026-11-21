@@ -1005,7 +1005,7 @@ export function buildHealth(mode, base = health) {
 
 const modeHealth = buildHealth(GATEWAY_MODE);
 
-const adminMetrics = () => ({
+const adminMetricsPayload = () => ({
   gateway: {
     mode: 'database', ferrum_version: '1.4.2', uptime_seconds: 86423,
     total_requests: 1523401, requests_per_second: 118,
@@ -1041,6 +1041,42 @@ const adminMetrics = () => ({
   rate_limiting: { tracked_key_count: 412 },
   tcp_connection_throttle: { enforcement_scope: 'process_local', replica_limit_behavior: 'configured_limit_per_replica' },
 });
+
+/** Modes Edge builds without proxy state (`empty_proxy_metrics`). */
+const NO_PROXY_STATE_MODES = new Set(['cp', 'node_agent']);
+
+/**
+ * `/admin/metrics` for `mode`, shaped as Edge serves it. A control plane or a
+ * node agent has no proxy state: Edge zeroes every runtime counter (uptime and
+ * the metrics window included), returns empty pools and caches, sets
+ * `config_last_updated_at` to `null`, and still reports `mode`,
+ * `ferrum_version` and `config_source_status` (`online`/`offline` on a CP,
+ * `n/a` on a node agent). Other modes serve the full proxy-backed payload;
+ * only a DB-backed source reports `online`.
+ */
+export function buildAdminMetrics(mode, base = adminMetricsPayload()) {
+  const configSourceStatus = ['database', 'cp'].includes(mode) ? 'online' : 'n/a';
+  if (!NO_PROXY_STATE_MODES.has(mode)) {
+    return { ...base, gateway: { ...base.gateway, mode, config_source_status: configSourceStatus } };
+  }
+  return {
+    gateway: {
+      mode, ferrum_version: base.gateway.ferrum_version, uptime_seconds: 0,
+      total_requests: 0, status_codes_total: {}, requests_per_second: 0,
+      status_codes_per_second: {}, metrics_window_seconds: 0,
+      config_last_updated_at: null, config_source_status: configSourceStatus,
+      proxy_count: 0, consumer_count: 0, upstream_count: 0, plugin_config_count: 0,
+    },
+    connection_pools: {},
+    circuit_breakers: [],
+    health_check: { unhealthy_target_count: 0, unhealthy_targets: [] },
+    load_balancers: { active_connections: [] },
+    caches: {},
+    consumer_index: { total_consumers: 0, key_auth_credentials: 0, basic_auth_credentials: 0, mtls_credentials: 0, jwt_credentials: 0, hmac_credentials: 0, identity_credentials: 0 },
+    rate_limiting: { tracked_key_count: 0 },
+    tcp_connection_throttle: { ...base.tcp_connection_throttle },
+  };
+}
 
 const overload = {
   level: 'normal', draining: false, active_connections: 342, active_requests: 57,
@@ -1344,7 +1380,7 @@ export const server = createServer(async (req, res) => {
 
   /* health & metrics */
   if (path === '/health' || path === '/status') return send(200, modeHealth);
-  if (path === '/admin/metrics') return send(200, adminMetrics());
+  if (path === '/admin/metrics') return send(200, buildAdminMetrics(GATEWAY_MODE));
   if (path === '/metrics') {
     // Edge's prometheus_metrics exposition: `proxy_id` first, `status_code`,
     // millisecond histograms, and `namespace` appended last. The Metrics
