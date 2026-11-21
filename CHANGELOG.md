@@ -260,6 +260,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- The service manifest preview strips trailing slashes from the public and
+  service base paths with a linear scan instead of a `/\/+$/` regex, which
+  backtracks quadratically over a run of slashes that does not end the
+  string (CodeQL `js/polynomial-redos`, code scanning alerts #20 and #21).
+  Validated manifest paths cannot contain `//`, so no accepted request
+  reached the slow case; the result is unchanged.
 - A plugin configuration's execution `trigger` is redacted like its
   `config`. Every `header`, `query` and `cookie` comparison operand (each
   `exact` and `prefix` entry, `regex`, numbers included), and any shape a
