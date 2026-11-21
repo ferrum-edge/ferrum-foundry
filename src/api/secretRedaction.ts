@@ -10,7 +10,11 @@
 /*  submitted secret removed, and nothing else from the request.      */
 /* ------------------------------------------------------------------ */
 
-import { isInlineMaterial, isRedactedField } from "@/lib/resourceBaseline";
+import {
+  isInlineMaterial,
+  isRedactedField,
+  pluginTriggerWithheldSites,
+} from "@/lib/resourceBaseline";
 import type { ApiError } from "./types";
 import {
   extractApiErrorData,
@@ -73,18 +77,41 @@ export interface Secrets {
    * only where they stand as a whole token (`MIN_DISTINCTIVE`).
    */
   readonly tokens: readonly string[];
+  /**
+   * Numbers and booleans submitted where only a string belongs (a trigger
+   * operand typed without quotes), which a parser quotes back as text
+   * ("invalid type: integer `N`, expected a string") or a body may repeat as
+   * the same typed value. Replaced where a structured body holds the equal
+   * value outside its fixed vocabulary, and redacted in text like an
+   * unclassified value: wherever it occurs when `MIN_DISTINCTIVE` long, as a
+   * whole token when shorter.
+   */
+  readonly scalars: readonly (number | boolean)[];
+  /**
+   * Whether the value a deserializer quotes in a diagnostic ("invalid type:
+   * integer `N`, expected a string", "unknown variant `V`") is removed
+   * whatever it is, with the rest of the text after it, keeping the category
+   * before it (`diagnosticSpans`). Set for an API spec
+   * document, which Ferrum Edge re-parses itself: it can quote a value in a
+   * spelling Foundry cannot reconstruct from the text it sent (an integer
+   * beyond 2^53 that `JSON.parse` rounds, a YAML `0x` or `0o` integer it
+   * reports in decimal), so exact matching alone cannot be relied on there.
+   */
+  readonly diagnostics: boolean;
 }
 
-const NO_SECRETS: Secrets = { values: [], tokens: [] };
+const NO_SECRETS: Secrets = { values: [], tokens: [], scalars: [], diagnostics: false };
 
 function classified(values: readonly string[]): Secrets {
-  return { values, tokens: [] };
+  return { values, tokens: [], scalars: [], diagnostics: false };
 }
 
 function mergeSecrets(sets: readonly Secrets[]): Secrets {
   return {
     values: sets.flatMap((set) => set.values),
     tokens: sets.flatMap((set) => set.tokens),
+    scalars: sets.flatMap((set) => set.scalars),
+    diagnostics: sets.some((set) => set.diagnostics),
   };
 }
 
@@ -109,7 +136,7 @@ export function unclassified(values: readonly string[]): Secrets {
   for (const value of values) {
     (value.trim().length < MIN_DISTINCTIVE ? short : long).push(value);
   }
-  return { values: long, tokens: short };
+  return { values: long, tokens: short, scalars: [], diagnostics: false };
 }
 
 /**
@@ -246,6 +273,59 @@ export function pluginConfigSecrets(pluginName: string, config: unknown): Secret
 }
 
 /**
+ * The secrets a plugin `trigger` carries, as Ferrum Edge main's projection
+ * decides them for a non-admin read (`project_plugin_trigger_with`): every
+ * comparison operand of a `header`, `query` or `cookie` predicate, and
+ * anything in a shape a `PluginTrigger` cannot have
+ * (`pluginTriggerWithheldSites`). The visible predicates (`path`, `method`,
+ * `consumer`, `external_identity`, …) stay readable. Classified on every
+ * gateway, the pinned v0.9.20 included, whose reads show a trigger verbatim:
+ * an operand is the same shared secret there, and a refusal must not echo it.
+ */
+export function pluginTriggerSecrets(trigger: unknown): Secrets {
+  const sites = pluginTriggerWithheldSites(trigger);
+  return {
+    values: [...new Set(sites.flatMap((site) => [
+      ...submittedValues(site.value),
+      ...submittedKeys(site.value),
+    ]))],
+    tokens: [],
+    scalars: [...new Set(sites.flatMap((site) => submittedScalars(site.value)))],
+    diagnostics: false,
+  };
+}
+
+/**
+ * Every object key `data` holds, at any depth. Under a withheld site a key is
+ * content too: a deserializer reads the one key of an object given where an
+ * enum belongs as the variant and quotes it ("unknown variant `K`").
+ */
+function submittedKeys(data: unknown): string[] {
+  if (Array.isArray(data)) return data.flatMap(submittedKeys);
+  if (data && typeof data === "object") {
+    return Object.entries(data).flatMap(([key, value]) => [
+      ...(key ? [key] : []),
+      ...submittedKeys(value),
+    ]);
+  }
+  return [];
+}
+
+/**
+ * Every number and boolean `data` holds. Under a withheld site every one
+ * counts, a nested `case_insensitive` included: the walk exempts that flag
+ * only where it qualifies a comparison, and never reports it as a site.
+ */
+function submittedScalars(data: unknown): (number | boolean)[] {
+  if ((typeof data === "number" && Number.isFinite(data)) || typeof data === "boolean") {
+    return [data];
+  }
+  if (Array.isArray(data)) return data.flatMap(submittedScalars);
+  if (data && typeof data === "object") return Object.values(data).flatMap(submittedScalars);
+  return [];
+}
+
+/**
  * The secrets a structured write payload carries, found by position rather
  * than by type of write: every string under a credential-shaped field name,
  * at any depth, inline PEM in a material-location field (`*_path`, which
@@ -253,9 +333,11 @@ export function pluginConfigSecrets(pluginName: string, config: unknown): Secret
  * credential-bearing parts of any URL elsewhere. Fails
  * closed on a whole subtree — `credentials`, `headers`, a `*_secret` object —
  * rather than trying to recognise which of its leaves is sensitive. A plugin
- * configuration (`plugin_name` beside `config`) at any depth — a plugin write,
- * or one entry of a larger payload — has its `config` classified by
- * `pluginConfigSecrets`.
+ * configuration (`plugin_name` beside `config` or `trigger`) at any depth — a
+ * plugin write, or one entry of a larger payload — has its `config` classified
+ * by `pluginConfigSecrets` and its `trigger` by `pluginTriggerSecrets`, each
+ * by those rules alone: the positional rules would take a whole `cookie`
+ * predicate, and the path of a `spiffe_id`, which Edge keeps readable.
  */
 export function secretValues(data: unknown): Secrets {
   if (typeof data === "string") return classified(urlSecrets(data));
@@ -263,9 +345,13 @@ export function secretValues(data: unknown): Secrets {
   if (data && typeof data === "object") {
     const record = data as Record<string, unknown>;
     const pluginName = record.plugin_name;
-    if (typeof pluginName === "string" && "config" in record) {
-      const { config, ...rest } = record;
-      return mergeSecrets([pluginConfigSecrets(pluginName, config), secretValues(rest)]);
+    if (typeof pluginName === "string" && ("config" in record || "trigger" in record)) {
+      const { config, trigger, ...rest } = record;
+      return mergeSecrets([
+        pluginConfigSecrets(pluginName, config),
+        pluginTriggerSecrets(trigger),
+        secretValues(rest),
+      ]);
     }
     return mergeSecrets(Object.entries(record).map(([field, value]) =>
       isSecretField(field) || isInlineMaterial(field, value)
@@ -296,7 +382,15 @@ export function restoreSecrets(backup: unknown): Secrets {
     ? [item.spec_content_base64, item.external_ref_snapshot_base64]
       .filter((value): value is string => typeof value === "string" && value !== "")
     : []);
-  return mergeSecrets([secretValues(backup), classified(documents)]);
+  // Every plugin entry's `trigger` is classified by its position, whatever
+  // its `plugin_name`: Edge reads the trigger before it notices a name that
+  // is missing or not a string, and can quote it.
+  const plugins = isRecord(backup) && Array.isArray(backup.plugin_configs)
+    ? backup.plugin_configs
+    : [];
+  const triggers = plugins.flatMap((entry) =>
+    isRecord(entry) && "trigger" in entry ? [pluginTriggerSecrets(entry.trigger)] : []);
+  return mergeSecrets([secretValues(backup), classified(documents), ...triggers]);
 }
 
 /**
@@ -311,8 +405,18 @@ export function restoreSecrets(backup: unknown): Secrets {
  * configuration is unclassified throughout. A document Foundry cannot parse —
  * YAML, for which it has no parser, or malformed JSON — cannot be classified,
  * so every scalar it could hold is unclassified (`yamlScalars`).
+ *
+ * An entry without a string `plugin_name` is unclassified throughout, and its
+ * `trigger`, which Edge deserializes whatever the rest holds, is also
+ * classified by `pluginTriggerSecrets`, numbers and booleans included.
+ * Every document sets `diagnostics`, since Edge parses the text again and can
+ * quote a value in a spelling Foundry cannot reconstruct.
  */
 export function specDocumentSecrets(document: string): Secrets {
+  return { ...specDocumentClassification(document), diagnostics: true };
+}
+
+function specDocumentClassification(document: string): Secrets {
   let parsed: unknown;
   try {
     parsed = JSON.parse(document);
@@ -324,9 +428,13 @@ export function specDocumentSecrets(document: string): Secrets {
   const entries: unknown[] = Array.isArray(plugins) ? plugins : plugins === undefined ? [] : [plugins];
   return mergeSecrets([
     secretValues(rest),
-    ...entries.map((entry) => isRecord(entry) && typeof entry.plugin_name === "string"
-      ? secretValues(entry)
-      : unclassified(submittedValues(entry))),
+    ...entries.map((entry) => {
+      if (isRecord(entry) && typeof entry.plugin_name === "string") return secretValues(entry);
+      const loose = unclassified(submittedValues(entry));
+      return isRecord(entry) && "trigger" in entry
+        ? mergeSecrets([loose, pluginTriggerSecrets(entry.trigger)])
+        : loose;
+    }),
   ]);
 }
 
@@ -698,6 +806,10 @@ export interface RedactionForms {
    * were each redacted already. Longest first.
    */
   readonly structural: readonly string[];
+  /** Typed values replaced where a structured body holds an equal one (`Secrets.scalars`). */
+  readonly scalars: readonly (number | boolean)[];
+  /** Whether a deserializer's quoted value is removed from every string (`Secrets.diagnostics`). */
+  readonly diagnostics: boolean;
 }
 
 /**
@@ -720,17 +832,26 @@ function addForms(value: string, forms: Set<string>): void {
  * occurs, as the classified one must be.
  */
 export function redactionForms(secrets: Secrets | readonly string[]): RedactionForms {
-  const { values, tokens } = "tokens" in secrets ? secrets : classified(secrets);
+  const { values, tokens, scalars, diagnostics } = "tokens" in secrets
+    ? secrets
+    : classified(secrets);
   const substrings = new Set<string>();
   for (const value of values) addForms(value, substrings);
   const whole = new Set<string>();
   for (const value of tokens) addForms(value, whole);
+  // A scalar's text is matched as an unclassified value's would be.
+  for (const value of scalars) {
+    const text = String(value);
+    (text.length < MIN_DISTINCTIVE ? whole : substrings).add(text);
+  }
   const longestFirst = (a: string, b: string) => b.length - a.length;
   const sorted = [...substrings].sort(longestFirst);
   return {
     substrings: sorted,
     tokens: [...whole].filter((form) => form.trim() && !substrings.has(form)).sort(longestFirst),
     structural: sorted.filter((form) => form.trim().length >= MIN_DISTINCTIVE),
+    scalars: [...new Set(scalars)],
+    diagnostics,
   };
 }
 
@@ -758,13 +879,54 @@ function occurrences(
 }
 
 /**
+ * `spans` widened so none ends or starts inside a `[REDACTED]` marker already
+ * in `text`: a span that overlaps one covers all of it. A short classified
+ * value (`RED`, `ACT`) found inside a marker the gateway wrote would
+ * otherwise split it into text no reader recognizes; widened, the marker is
+ * replaced by itself, and a secret running into one merges with it.
+ */
+function wholeMarkers(text: string, spans: [number, number][]): [number, number][] {
+  const markers: [number, number][] = [];
+  for (
+    let at = text.indexOf(REDACTION_MARKER);
+    at !== -1;
+    at = text.indexOf(REDACTION_MARKER, at + REDACTION_MARKER.length)
+  ) {
+    markers.push([at, at + REDACTION_MARKER.length]);
+  }
+  if (markers.length === 0) return spans;
+  // Markers are found in order and never overlap; merge the spans the same
+  // way, then walk both lists once.
+  const merged: [number, number][] = [];
+  for (const [start, end] of [...spans].sort(([a], [b]) => a - b)) {
+    const last = merged.at(-1);
+    if (last && start < last[1]) last[1] = Math.max(last[1], end);
+    else merged.push([start, end]);
+  }
+  let next = 0;
+  return merged.map(([spanStart, spanEnd]): [number, number] => {
+    let start = spanStart;
+    let end = spanEnd;
+    while (next < markers.length && markers[next][1] <= start) next += 1;
+    // A marker that also reaches the next span is left for it; the widened
+    // spans overlap, and `replaceSpans` merges them.
+    for (let index = next; index < markers.length && markers[index][0] < end; index += 1) {
+      start = Math.min(start, markers[index][0]);
+      end = Math.max(end, markers[index][1]);
+    }
+    return [start, end];
+  });
+}
+
+/**
  * `text` with each span replaced by `[REDACTED]`, overlapping spans as one.
  * Every span is found in the original text and replaced in one pass, so every
  * occurrence of every form is covered whatever their lengths and overlaps, and
  * a marker already written is never matched and split by a later form.
  */
-function replaceSpans(text: string, spans: [number, number][]): string {
-  if (spans.length === 0) return text;
+function replaceSpans(text: string, found: [number, number][]): string {
+  if (found.length === 0) return text;
+  const spans = wholeMarkers(text, found);
   spans.sort(([a], [b]) => a - b);
   let redacted = "";
   let cursor = 0;
@@ -781,12 +943,39 @@ function replaceSpans(text: string, spans: [number, number][]): string {
   return redacted + text.slice(cursor, start) + REDACTION_MARKER + text.slice(end);
 }
 
-/** `text` with every form of every submitted value replaced by `[REDACTED]`. */
+/**
+ * Where a serde diagnostic quotes a submitted value: "invalid type: integer
+ * `N`", "floating point `N`", "boolean `B`", "character `C`", "string \"S\""
+ * (and the same after "invalid value:"), "unknown variant `V`" and "unknown
+ * field `F`". Each match ends at the value's opening delimiter.
+ */
+const DIAGNOSTIC_VALUE_START_PATTERN =
+  /\b(?:invalid (?:type|value): (?:(?:integer|floating point|boolean|character) `|string ")|unknown (?:variant|field) `)/;
+
+/**
+ * The span of `text` a deserializer diagnostic's quoted value may occupy:
+ * from the opening delimiter of the first one to the end of the text. Where
+ * that value ends cannot be told reliably (it may hold the delimiter, serde's
+ * own continuation, or a line break, in a spelling Foundry cannot
+ * reconstruct), so nothing after it is kept. The category before it is.
+ */
+function diagnosticSpans(text: string): [number, number][] {
+  const match = DIAGNOSTIC_VALUE_START_PATTERN.exec(text);
+  return match ? [[match.index + match[0].length - 1, text.length]] : [];
+}
+
+/**
+ * `text` with every form of every submitted value replaced by `[REDACTED]`,
+ * and, for a spec document (`RedactionForms.diagnostics`), the value of every
+ * deserializer diagnostic. Every span is found in the original text and all
+ * are replaced in one pass.
+ */
 export function redactSubmitted(text: string, forms: RedactionForms): string {
-  return replaceSpans(text, [
+  const exact = [
     ...occurrences(text, forms.substrings, false),
     ...occurrences(text, forms.tokens, true),
-  ]);
+  ];
+  return replaceSpans(text, forms.diagnostics ? [...exact, ...diagnosticSpans(text)] : exact);
 }
 
 /**
@@ -818,6 +1007,9 @@ const FIXED_VOCABULARY_FIELDS = new Set([
 /** `value` with every string in it redacted, and its keys against the structural forms. */
 function redactValue(value: unknown, forms: RedactionForms): unknown {
   if (typeof value === "string") return redactSubmitted(value, forms);
+  if ((typeof value === "number" || typeof value === "boolean") && forms.scalars.includes(value)) {
+    return REDACTION_MARKER;
+  }
   if (Array.isArray(value)) return value.map((item) => redactValue(item, forms));
   if (value && typeof value === "object") {
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [
@@ -838,9 +1030,15 @@ export function redactBody(value: unknown, forms: RedactionForms): unknown {
   if (!isRecord(value)) return redactValue(value, forms);
   return Object.fromEntries(Object.entries(value).map(([key, item]) => [
     redactStructure(key, forms),
-    typeof item === "string" && FIXED_VOCABULARY_FIELDS.has(key)
-      ? redactStructure(item, forms)
-      : redactValue(item, forms),
+    !FIXED_VOCABULARY_FIELDS.has(key)
+      ? redactValue(item, forms)
+      : typeof item === "string"
+        ? redactStructure(item, forms)
+        // A fixed-vocabulary flag (`confirmation_required: true`) is the
+        // gateway's own, never a submitted scalar.
+        : typeof item === "number" || typeof item === "boolean"
+          ? item
+          : redactValue(item, forms),
   ]));
 }
 

@@ -13,6 +13,7 @@ export function healthFindings(h: HealthResponse): string[] {
   const findings: string[] = [];
   if (h.database?.status === 'disconnected') findings.push('Database disconnected');
   if (h.database?.failover_topology?.primary_active === false) findings.push('Database failover topology active');
+  if (h.database?.mtls_dns_admission_fence?.fenced === true) findings.push('Database mTLS DNS admission fenced');
   if (h.config_rejected) findings.push('Configuration rejected');
   if (h.fips?.enforcing && (!h.fips.module_self_test_passed || !h.fips.provider_algorithms_approved)) findings.push('FIPS enforcement checks failed');
   const l = h.gateway_listeners;

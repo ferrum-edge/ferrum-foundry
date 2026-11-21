@@ -77,6 +77,26 @@ describe('scoped health summary', () => {
     }
   });
 
+  it('drops database detail, including the fence that names other tenants', () => {
+    // Edge v0.9.15 and earlier answer an `ns`-claim JWT with the detailed tier;
+    // Edge main's fence lists every fenced namespace in the process.
+    const summary = projectHealthSummary({
+      status: 'ok',
+      ready: true,
+      database: {
+        status: 'connected',
+        failover_topology: { primary_active: false, active_url_redacted: 'mongodb://replica-2' },
+        mtls_dns_admission_fence: {
+          fenced: true, retained_fences: 2, namespaces: ['tenant-a', 'tenant-b'], oldest_retained_since_unix_ms: 1,
+        },
+      },
+      namespace: SERVING_TENANT_A,
+    }, GRANTS);
+    expect(summary).toEqual({ status: 'ok', ready: true, namespace: SERVING_TENANT_A });
+    expect(JSON.stringify(summary)).not.toContain('tenant-b');
+    expect(JSON.stringify(summary)).not.toContain('fence');
+  });
+
   it('keeps only the scalar fields of a granted namespace block', () => {
     expect(projectHealthSummary({
       namespace: { ...SERVING_TENANT_A, routes: { count: 3 }, listeners: [8443] },

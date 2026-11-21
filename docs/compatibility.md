@@ -665,7 +665,10 @@ an early warning (ferrum-edge/ferrum-contracts#76). It runs weekly and on
   commits not yet built; the report says how many.
 - **What runs.** The guided plugin schema, plugin sensitivity and server-owned
   subset `traffic_policy` field comparisons against the Edge sources at that
-  commit (`scripts/edge-main-drift.mjs`;
+  commit, plus the plugin trigger predicate lists Foundry redacts by
+  (`TRIGGER_CLIENT_FIELD_PREDICATES` and `TRIGGER_VISIBLE_PREDICATES`, which
+  have no pinned counterpart: v0.9.20 does not project triggers)
+  (`scripts/edge-main-drift.mjs`;
   only content is compared, since the recorded refs never name a `main`
   commit), then the Pinned Gateway Contract job's gateway steps with
   `FERRUM_EDGE_IMAGE` set to the Edge `main` image, then the editors'
