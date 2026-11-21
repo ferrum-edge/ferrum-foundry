@@ -308,4 +308,11 @@ describe("upstream baselines (#725)", () => {
     expect(toBaseline(withKey(""))).toEqual(toBaseline(withKey("ip")));
     expect(toBaseline(withKey(""))).not.toEqual(toBaseline({ ...withKey(""), subsets: [{ name: "a", labels: {} }] }));
   });
+
+  it("builds a payload from a read with malformed subsets without throwing", () => {
+    const subsets = [null, "v1", { name: "v2", labels: {}, traffic_policy: "broken" }];
+    const read = { ...fullUpstream(), subsets } as unknown as Upstream;
+    expect(toUpdatePayload(read).subsets).toEqual(subsets);
+    expect(() => mergeFormUpdatePayload(read, { ...toUpdatePayload(fullUpstream()) })).not.toThrow();
+  });
 });

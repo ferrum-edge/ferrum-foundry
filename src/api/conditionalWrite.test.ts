@@ -836,6 +836,28 @@ describe("guarded upstream saves on a gateway that honours If-Match", () => {
       expect(gateway.wire).toEqual(["GET"]);
     });
 
+    it("refuses, sending nothing, a save built from a malformed cached read", async () => {
+      // A background refetch cached `subsets: [null]` while the form held a
+      // valid draft. Building the payload must not throw; the guard decides.
+      const cached = { ...meshSeed, subsets: [null] } as unknown as Upstream;
+      const gateway = stubGateway(cached);
+
+      const refused = await settle(
+        upstreams.update(
+          scope,
+          "payments",
+          upstreams.mergeFormUpdatePayload(cached, {
+            ...upstreams.toUpdatePayload(meshSeed),
+            name: "renamed",
+          }),
+          upstreams.upstreamWriteGuard(meshSeed),
+        ),
+      );
+
+      expect(isStaleResourceError(refused)).toBe(true);
+      expect(gateway.wire).toEqual(["GET"]);
+    });
+
     it("refuses a save when a `__proto__` subset label changed, and shows the subset", async () => {
       // A valid label key that bracket assignment would silently drop.
       const labels = (value: string) =>

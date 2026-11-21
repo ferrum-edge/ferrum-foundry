@@ -508,8 +508,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   names exactly, a proxy's `upstream_subset` included), and decides whether
   the row is saved at all, so a name JavaScript trims to nothing (U+FEFF) is
   no longer dropped; only a new or edited name is trimmed. Baselines and
-  fingerprints build objects from entries, so a `__proto__` key (a valid
-  subset label) is compared instead of silently dropped. The retired proxy
+  fingerprints build objects from entries, and the upstream detail query no
+  longer shares structure across refetches, so a `__proto__` key (a valid
+  subset label) is compared instead of silently dropped. A malformed cached
+  subset no longer breaks building the save payload; the guard refuses it. The retired proxy
   `pool_max_requests_per_connection` stays compared on save: Edge v0.9.20
   stores `None` when a save omits it, so the save does clear it.
 - The Alloy service-manifest preview is requalified against Alloy `main`

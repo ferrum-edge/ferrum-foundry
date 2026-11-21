@@ -154,6 +154,12 @@ export function useUpstream(id: string, enabled = true) {
     queryKey: ["upstream", scope.namespace, id],
     queryFn: () => upstreams.get(queryScope(scope), id),
     enabled: enabled && !!id,
+    // This read seeds the editor's form and its write-guard baseline, so it
+    // is kept exactly as the gateway sent it. Structural sharing rebuilds a
+    // changed object by assignment, which drops an own `__proto__` key (a
+    // valid subset label), and the baseline would then never match a fresh
+    // read of the same resource.
+    structuralSharing: false,
   });
 }
 

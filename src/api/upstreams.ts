@@ -134,11 +134,16 @@ export { SUBSET_TRAFFIC_POLICY_SERVER_OWNED };
  * A subset as an operator write may carry it: every field of `subset` except
  * the server-owned `traffic_policy` fields. A policy left with nothing
  * writable is omitted, as Edge treats an absent and an empty policy alike.
+ * A malformed entry (not an object) or policy (not an object) is returned
+ * unchanged, so building a payload from such a read never throws and the
+ * write guard compares it instead.
  */
 export function writableSubset(subset: SubsetDefinition): SubsetDefinition {
+  if (!isPlainObject(subset)) return subset;
   const { traffic_policy: policy, ...rest } = subset;
   if (policy === undefined) return subset;
   if (policy === null) return { ...rest, traffic_policy: null };
+  if (!isPlainObject(policy)) return subset;
   const writable = Object.fromEntries(
     Object.entries(policy).filter(([key]) => !SUBSET_TRAFFIC_POLICY_SERVER_OWNED.includes(key)),
   ) as SubsetTrafficPolicy;
