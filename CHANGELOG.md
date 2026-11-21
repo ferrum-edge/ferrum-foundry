@@ -489,6 +489,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- "Discard my draft and reload" on the plugin detail page reloads as the
+  page's other reload paths do (#726). It re-reads the plugin and, for a
+  `proxy_group` configuration (including one whose scope just changed to
+  `proxy_group`), its complete proxy membership before remounting the form.
+  Before, it re-read only the plugin, so the remounted form kept stale group
+  membership and the next save expected it and was refused again. It also
+  discarded the draft and closed the dialog when the re-read failed. Now a
+  failed read keeps the draft and the conflict dialog and shows an error
+  toast. The plugin read is published only once the membership has loaded, so
+  a scope change no longer swaps the form for the membership skeleton
+  mid-reload.
 - Foundry handles the plugin-config projection Ferrum Edge `main` adds after
   v0.9.20 (ferrum-edge#7054). The sensitivity drift parser accepts
   `FieldSensitivity::CertificateSource`, `PrivateKeySource` and `EndpointPath`

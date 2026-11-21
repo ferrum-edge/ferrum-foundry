@@ -5,6 +5,7 @@ import { ResourceLabels } from "@/components/shared/ResourceLabels";
 
 import { useState, useMemo, useRef, useCallback } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   usePluginConfig,
   useUpdatePluginWithMembership,
@@ -12,6 +13,7 @@ import {
   useAvailablePlugins,
 } from "@/hooks/usePlugins";
 import { useAllProxies } from "@/hooks/useProxies";
+import { useNamespace } from "@/stores/namespace";
 import { ReadStateNotice } from '@/components/shared/ReadState';
 import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
@@ -35,7 +37,7 @@ import {
 import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity";
 import { useCapabilities } from "@/stores/capabilities";
 import { WriteAction } from "@/components/shared/CapabilityGate";
-import type { PluginConfigCreate } from "@/api/types";
+import type { PluginConfig, PluginConfigCreate } from "@/api/types";
 import * as pluginsApi from "@/api/plugins";
 import { isStaleResourceError, type StaleResourceDetail } from "@/api/conditionalWrite";
 import { StaleWriteDialog } from "@/components/shared/StaleWriteDialog";
@@ -61,6 +63,8 @@ function PluginEditor({ session }: { session: EditorSession }) {
   const pluginId = session.identity.resourceId;
   const navigate = useNavigate();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const { scope } = useNamespace();
 
   const { capabilities, facts } = useCapabilities();
   const capability = capabilities.pluginConfigs;
@@ -172,12 +176,21 @@ function PluginEditor({ session }: { session: EditorSession }) {
     },
   );
 
-  /** Deliberate restart: drop the draft and reseed the form from the gateway. */
+  /**
+   * Deliberate restart after a refused save or delete: drop the draft and
+   * reseed the form from the gateway (#726). It reloads as the other reload
+   * paths do, so a group's membership is re-read before the form remounts,
+   * and the next write expects the membership the operator now sees. If
+   * either read fails, the draft and the conflict dialog stay, so the
+   * operator can try again or keep editing.
+   */
   const handleDiscardAndReload = async () => {
+    const reloaded = await reloadFromGateway();
+    if (reloaded !== true) {
+      reportReloadFailure(reloaded);
+      return;
+    }
     setConflict(null);
-    const refreshed = await resourceQuery.refetch();
-    if (refreshed.data) baseline.adopt(refreshed.data);
-    setFormGeneration((generation) => generation + 1);
   };
 
   /**
@@ -190,29 +203,47 @@ function PluginEditor({ session }: { session: EditorSession }) {
    */
   const handleReloadSaved = async () => {
     const reloaded = await reloadFromGateway();
-    if (reloaded === "plugin") {
-      toast("error", "Could not re-read the plugin; your form was kept. Try again.");
-      return;
-    }
-    if (reloaded === "membership") {
-      toast("error", "Could not re-read the plugin's proxies; your form was kept. Try again.");
+    if (reloaded !== true) {
+      reportReloadFailure(reloaded);
       return;
     }
     setMembershipError(null);
   };
 
+  function reportReloadFailure(failed: "plugin" | "membership") {
+    toast(
+      "error",
+      failed === "plugin"
+        ? "Could not re-read the plugin; your form was kept. Try again."
+        : "Could not re-read the plugin's proxies; your form was kept. Try again.",
+    );
+  }
+
   /**
    * Reseed the form, its membership and the baseline from fresh reads, or
    * change nothing and name the read that failed.
+   *
+   * The plugin is read outside its Query and published only once everything
+   * the form needs has loaded. A configuration whose scope became
+   * `proxy_group` would otherwise reach the page before its membership: the
+   * page would show the membership skeleton, unmounting the form (and the
+   * draft a failed reload must keep) while the proxies load. Membership is
+   * read whenever the fresh plugin is a group, whatever scope the page
+   * showed, since the form seeds it once.
    */
   async function reloadFromGateway(): Promise<true | "plugin" | "membership"> {
-    const refreshed = await resourceQuery.refetch();
-    if (refreshed.isError || refreshed.data === undefined) return "plugin";
-    if (refreshed.data.scope === "proxy_group") {
+    let fresh: PluginConfig;
+    try {
+      fresh = await pluginsApi.getConfig(scope, pluginId);
+    } catch {
+      return "plugin";
+    }
+    if (fresh.scope === "proxy_group") {
       const members = await proxiesQuery.refetch();
       if (members.isError || members.data === undefined) return "membership";
     }
-    baseline.adopt(refreshed.data);
+    queryClient.setQueryData<PluginConfig>(["pluginConfig", scope.namespace, pluginId], fresh);
+    baseline.adopt(fresh);
     setFormGeneration((generation) => generation + 1);
     return true;
   }
