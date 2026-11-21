@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.6] - 2026-11-21
+
 ### Added
 
 - A scheduled **Edge Main Drift** workflow
@@ -108,12 +110,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI builds the production image once for the Deployment Starter and
   Critical Journeys and hands it to both as an artifact, instead of
   building it in each job (#685).
-- Prepare the unreleased Foundry v0.5.6 candidate against published Ferrum
-  Edge v0.9.20 (#686): source `e4a606a0`, index `sha256:32a0b057…`, platform
-  manifests, release binary hashes and raw OpenAPI identity. The starter's
-  demo gateway and the local-run command use the same digest, and package and
-  lockfile root versions are 0.5.6. Hosted qualification and Foundry
-  publication remain pending; v0.5.5 and earlier release records are
+- Pair Foundry v0.5.6 with published Ferrum Edge v0.9.20 (#686): source
+  `e4a606a0`, index `sha256:32a0b057…`, platform manifests, release binary
+  hashes and raw OpenAPI identity. The starter's demo gateway and the
+  local-run command use the same digest, and package and lockfile root
+  versions are 0.5.6. The hosted qualification is recorded in
+  `docs/compatibility.json`; v0.5.5 and earlier release records are
   immutable. `ferrum-edge#6744` (`expected_proxy_ids`), which v0.9.20 enforces
   and Foundry already sends, joins the recorded Edge dependencies. The
   image's binaries were not byte-compared with the release assets for this
@@ -257,6 +259,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Gemini 4 Neon workers through the standalone Google Antigravity `agy` CLI
   (`--effort low|medium|high|xhigh`, default `high`, no fast tier). The
   remaining skills' briefs and guards no longer name the removed skills.
+- Add the session's namespace grants to the client capability model. A session
+  holding grants is denied fleet TLS material, rotation, and validation with a
+  `namespace-scope` reason instead of controls the BFF refuses with `403`. TLS
+  rotation is its own `tlsRotation` surface, probed by the capability parity
+  contract with an unsupported surface name (#565).
+- Split the Cluster page's backend-capability refresh and the Mesh page's
+  egress dry-run into a fleet-wide `fleetOperations` surface. A session
+  holding namespace grants sees them disabled with the `namespace-scope`
+  reason instead of controls the BFF refuses with `403`. The capability parity
+  contract probes the new surface with a mesh egress dry-run (#565).
+- A session holding namespace grants lands on Proxies instead of the
+  fleet-wide Dashboard (#565).
+- Withhold the fleet-wide Metrics, TLS, and Cluster views from a session
+  holding namespace grants. The navigation hides them, and opening one by URL
+  shows the page title and the `namespace-scope` reason without sending any of
+  its reads (`FleetViewGate`). Mesh stays in the navigation for its
+  namespace-scoped Trust tab (gateway trust bundles) and shows the reason in
+  place of its fleet tabs, whose reads are not sent. TLS validation
+  (`operationalActions`) is now a fleet-wide surface too (ferrum-edge#6095).
+- The live-apply monitor no longer polls `/config/apply-status` for a session
+  holding namespace grants, because the route is fleet-global. Its committed
+  writes show a neutral notice that live-apply verification is a fleet-level
+  view not available to a namespace-scoped session, or a warning when the
+  gateway answered that the write is committed but not yet live. A poll
+  refused with `403` ends the same way instead of being retried.
+- The capability parity contract now runs every check as an unrestricted and
+  as a namespace-scoped principal. Unrestricted fleet-global probes and
+  `/health` are signed without an `ns` claim, as the BFF signs them; scoped
+  probes the BFF ceiling refuses are not sent and must be withheld by the
+  model, and every probe it forwards must be admitted by the gateway as the
+  model predicts, so the contract holds on Edge v0.9.15 and v0.9.16. The
+  gateway contract smoke signs its TLS validation probes without a claim.
 
 ### Security
 
@@ -915,41 +949,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one of those fields therefore no longer blocks a non-admin save. The mock
   admin gateway refuses those fields, and the other mesh-projected upstream
   fields, like Edge.
-
-### Changed
-
-- Add the session's namespace grants to the client capability model. A session
-  holding grants is denied fleet TLS material, rotation, and validation with a
-  `namespace-scope` reason instead of controls the BFF refuses with `403`. TLS
-  rotation is its own `tlsRotation` surface, probed by the capability parity
-  contract with an unsupported surface name (#565).
-- Split the Cluster page's backend-capability refresh and the Mesh page's
-  egress dry-run into a fleet-wide `fleetOperations` surface. A session
-  holding namespace grants sees them disabled with the `namespace-scope`
-  reason instead of controls the BFF refuses with `403`. The capability parity
-  contract probes the new surface with a mesh egress dry-run (#565).
-- A session holding namespace grants lands on Proxies instead of the
-  fleet-wide Dashboard (#565).
-- Withhold the fleet-wide Metrics, TLS, and Cluster views from a session
-  holding namespace grants. The navigation hides them, and opening one by URL
-  shows the page title and the `namespace-scope` reason without sending any of
-  its reads (`FleetViewGate`). Mesh stays in the navigation for its
-  namespace-scoped Trust tab (gateway trust bundles) and shows the reason in
-  place of its fleet tabs, whose reads are not sent. TLS validation
-  (`operationalActions`) is now a fleet-wide surface too (ferrum-edge#6095).
-- The live-apply monitor no longer polls `/config/apply-status` for a session
-  holding namespace grants, because the route is fleet-global. Its committed
-  writes show a neutral notice that live-apply verification is a fleet-level
-  view not available to a namespace-scoped session, or a warning when the
-  gateway answered that the write is committed but not yet live. A poll
-  refused with `403` ends the same way instead of being retried.
-- The capability parity contract now runs every check as an unrestricted and
-  as a namespace-scoped principal. Unrestricted fleet-global probes and
-  `/health` are signed without an `ns` claim, as the BFF signs them; scoped
-  probes the BFF ceiling refuses are not sent and must be withheld by the
-  model, and every probe it forwards must be admitted by the gateway as the
-  model predicts, so the contract holds on Edge v0.9.15 and v0.9.16. The
-  gateway contract smoke signs its TLS validation probes without a claim.
 
 ### Removed
 
@@ -1655,7 +1654,8 @@ First public release of Ferrum Foundry.
 - Release channels are monotonic: tags are validated and ancestry-checked before registry access, prereleases never advance stable tags, and promotion runs through a fail-closed FIFO queue (#155).
 - Scheduled live branch deletion replaced with dry-run planning plus a separately approved, exact-SHA-revalidated deletion path (#155).
 
-[Unreleased]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.5.5...HEAD
+[Unreleased]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.5.6...HEAD
+[0.5.6]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.5.5...v0.5.6
 [0.5.5]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.5.4...v0.5.5
 [0.5.4]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.5.2...v0.5.3
