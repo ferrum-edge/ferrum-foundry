@@ -63,10 +63,16 @@ config grows its own copy.
 ./bootstrap-demo.sh
 docker compose --profile demo up -d
 
+(cd ../.. && npm ci)   # once per checkout: the dependencies the preflight imports
 FERRUM_ADMIN_URL=http://127.0.0.1:9000 \
 FOUNDRY_PREFLIGHT_URL=http://127.0.0.1:8088 \
 node ../../scripts/starter-preflight.mjs --env .env
 ```
+
+The stack needs only Docker with Compose. The preflight runs on the host: it
+needs Node.js in the `engines` range of [`package.json`](../../package.json)
+(22 from 22.22.2, 24 from 24.15.0, or 26 and later) and the repository's npm
+dependencies, which `npm ci` installs at the repository root.
 
 Then open <http://127.0.0.1:8088> and follow
 [`docs/getting-started.md`](../../docs/getting-started.md).
@@ -92,10 +98,12 @@ or `unmapped`). It is for a first run and for CI. Do not expose it.
    `FERRUM_JWT_SECRET` must equal the gateway's
    `FERRUM_ADMIN_JWT_SECRET`, and the BFF always sends the audience in
    `FERRUM_JWT_AUDIENCE` (default `ferrum-admin`), so set the gateway's
-   `FERRUM_ADMIN_JWT_AUDIENCE` to the same value. The BFF refuses to start while
-   `FERRUM_JWT_SECRET` or `FERRUM_TRUSTED_PROXY_SECRET` still holds the
-   `replace-me-...` placeholder from `.env.example`, or (in production) one of
-   the development example values printed in the contributor instructions.
+   `FERRUM_ADMIN_JWT_AUDIENCE` to the same value. Foundry v0.5.6 and later
+   refuse to start while `FERRUM_JWT_SECRET` or `FERRUM_TRUSTED_PROXY_SECRET`
+   still holds the `replace-me-...` placeholder from `.env.example`, or (in
+   production) one of the development example values printed in the
+   contributor instructions. The default v0.5.5 image starts with either, so
+   do not rely on it to catch them; the preflight (step 6) fails on both.
 
    The files are separate on purpose. `.env` holds the gateway signing key and
    the proof secret; `oauth2-proxy.env` holds the `OAUTH2_PROXY_*` settings,
@@ -130,9 +138,24 @@ or `unmapped`). It is for a first run and for CI. Do not expose it.
 5. Pin `FOUNDRY_IMAGE` to a released digest, and run the Ferrum Edge release
    named in that published pairing's immutable record linked from
    [`docs/compatibility.md`](../../docs/compatibility.md).
-6. `docker compose --profile production up -d`, then run the preflight. Run
-   it from a shell without the contributor `FERRUM_*` exports: Compose prefers
-   variables already set in the shell over `.env`.
+6. Start the stack, then run the preflight from this directory. Use a shell
+   without the contributor `FERRUM_*` exports: Compose, and the preflight,
+   prefer variables already set in the shell over `.env`.
+
+   ```bash
+   docker compose --profile production up -d
+   FOUNDRY_PREFLIGHT_URL=https://foundry.example.com \
+   node ../../scripts/starter-preflight.mjs --env .env
+   ```
+
+   Set `FOUNDRY_PREFLIGHT_URL` to the public URL browsers use. The preflight
+   needs Node.js and the repository's npm dependencies (see [Demo](#demo)),
+   and it probes the gateway at `.env`'s `FERRUM_ADMIN_URL` from this host, so
+   run it where that name resolves. If `.env` sets `FERRUM_TLS_CA_PATH` (a
+   path inside the container), the preflight reads that same path on this
+   host, so run it where the path resolves too. See
+   [`docs/getting-started.md`](../../docs/getting-started.md#2-run-the-preflight)
+   for what it checks and why `UNKNOWN` is not a pass.
 
 ### What the stack gets right
 
