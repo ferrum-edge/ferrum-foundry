@@ -76,7 +76,10 @@ The reviewed producer adds stricter rules, checked after validation:
   Edge `main`'s `otel_tracing` rule (`screen_cleartext_endpoint` and
   `is_loopback_ip_literal_endpoint`, unchanged since v0.9.20): the parsed host
   must be loopback and the written authority `127.d.d.d` (1-3 digit octets) or
-  `[::1]`, with an optional all-digit port. `localhost`, `127.1`,
+  `[::1]`, with an optional all-digit port. As in Edge, the value is judged
+  after trimming Unicode whitespace from both ends (Rust `str::trim`), so
+  `http://127.0.0.1:4318 ` is accepted; the desired configuration keeps the
+  value as Alloy writes it. `localhost`, `127.1`,
   `[::ffff:127.0.0.1]` and the uncompressed `[0:0:0:0:0:0:0:1]` are refused.
   Alloy's own check parses the host as an IP address instead, so it accepts
   `[0:0:0:0:0:0:0:1]` and refuses leading-zero octets such as `127.001.0.1`;
@@ -100,11 +103,13 @@ re-vendor (#723). Until then a manifest outside those bounds can still preview.
 Local presentation limits are 32 KiB raw UTF-8 JSON, eight nesting levels before
 JSON parsing, 32 array items, and 16 KiB serialized output. Each string field
 gets the schema's declared `maxLength`, or 2,048 characters where the schema
-declares none (on the field or any of its `allOf` clauses); no declared bound
-is clamped. A `maxLength` beside an `enum` or `const`, typed or not, or in a
-typeless `allOf` clause, constrains string values too.
-Every string, including unknown keys refused by the closed schema, is capped
-at 4,096 characters before validation, and a schema declaring any `maxLength`
+declares none on the field or in any of its `allOf` clauses, at any depth. The
+default is decided once per value and never added inside a clause, so no
+declared bound is clamped, and every declared bound is still enforced. A
+`maxLength` beside an `enum` or `const`, typed or not, or in a typeless
+`allOf` clause, constrains string values too. Every string value and property
+name, including unknown keys refused by the closed schema, is capped at 4,096
+characters before validation, and a schema declaring any `maxLength`
 above that cap does not compile (the route answers `503`) rather than being
 silently narrowed. Lengths count Unicode code points, as JSON Schema does.
 Integers must be safe JavaScript integers. Control characters and OTLP URLs

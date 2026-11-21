@@ -25,6 +25,18 @@ const PARSED_LOOPBACK_IPV4_PATTERN = /^127\.[0-9]+\.[0-9]+\.[0-9]+$/;
 const PORT_DIGITS_PATTERN = /^[0-9]*$/;
 const CLEARTEXT_SCHEME_PATTERN = /^http:\/\//i;
 const AUTHORITY_END_PATTERN = /[/?#]/;
+// Rust's str::trim: Unicode White_Space at either end (Edge trims the
+// configured endpoint before screening it). Unlike String.prototype.trim it
+// includes U+0085 and excludes U+FEFF.
+const RUST_TRIM_PATTERN =
+  /^[\t\n\v\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+|[\t\n\v\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+$/g;
+
+// The endpoint Edge's otel_tracing screens and dials: the configured value
+// trimmed (`optional_string_config`). The desired config keeps the value as
+// Alloy writes it.
+export function edgeOtelEndpoint(endpoint: string): string {
+  return endpoint.replace(RUST_TRIM_PATTERN, '');
+}
 
 // Edge's resource ID limit (Alloy EDGE_RESOURCE_ID_MAX_LENGTH).
 export const EDGE_RESOURCE_ID_MAX_LENGTH = 254;
@@ -106,8 +118,10 @@ export function derivedResourceIds(manifest: NormalizedManifest): string[] {
 // `http://` exporter is admitted without `allow_plaintext` (which Alloy never
 // writes) only when the parsed host is a loopback IP and the configured
 // authority is spelled `127.d.d.d` (1-3 digit octets) or `[::1]`, with an
-// optional all-digit port. Names such as `localhost` never qualify.
-export function admittedOtelEndpoint(endpoint: string): boolean {
+// optional all-digit port. Names such as `localhost` never qualify. Judged on
+// the trimmed value, as Edge judges it.
+export function admittedOtelEndpoint(configured: string): boolean {
+  const endpoint = edgeOtelEndpoint(configured);
   let url: URL;
   try {
     url = new URL(endpoint);
@@ -142,7 +156,10 @@ function safeStrings(value: unknown): boolean {
       && !CONTROL_CHARACTER_PATTERN.test(value);
   }
   if (Array.isArray(value)) return value.every(safeStrings);
-  if (value && typeof value === 'object') return Object.values(value).every(safeStrings);
+  // Property names too: an unknown key is refused here, before validation.
+  if (value && typeof value === 'object') {
+    return Object.entries(value).every(([key, item]) => safeStrings(key) && safeStrings(item));
+  }
   return true;
 }
 
@@ -177,7 +194,7 @@ export function validatedManifest(body: unknown): NormalizedManifest | null {
   // one Edge would export to: https://, or cleartext to a loopback IP literal.
   if (gateway.otel_endpoint !== undefined) {
     if (!admittedOtelEndpoint(gateway.otel_endpoint)) return null;
-    const endpoint = new URL(gateway.otel_endpoint);
+    const endpoint = new URL(edgeOtelEndpoint(gateway.otel_endpoint));
     if (endpoint.username || endpoint.password || endpoint.search || endpoint.hash) return null;
   }
   // schema_version is a contract field, never an invented schemaMajor field.

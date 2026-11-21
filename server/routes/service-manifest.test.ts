@@ -2,7 +2,12 @@ import { readFileSync, readdirSync } from 'node:fs';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fetch as upstreamFetch } from 'undici';
-import { MANIFEST_BODY_LIMIT, MANIFEST_RESPONSE_LIMIT, TLS_PATH_REDACTION } from '../service-manifest.js';
+import {
+  admittedOtelEndpoint,
+  MANIFEST_BODY_LIMIT,
+  MANIFEST_RESPONSE_LIMIT,
+  TLS_PATH_REDACTION,
+} from '../service-manifest.js';
 import { serviceManifestSchema } from '../service-manifest-schema.js';
 
 const manifestValidator = serviceManifestSchema().validator;
@@ -624,6 +629,43 @@ describe('authenticated service manifest preview through the registered BFF rout
     const response = await preview(body);
     expect(response.statusCode).toBe(200);
     expect(response.json().desired.plugin_configs[1].config.endpoint).toBe(endpoint);
+  });
+
+  // Edge trims the configured endpoint (Rust str::trim) before screening it;
+  // the desired config keeps the value as Alloy writes it.
+  it.each([
+    'http://127.0.0.1:4318 ',
+    'http://[::1]:4318\u3000',
+    'http://127.0.0.1:4318/v1/traces\u00a0',
+    'https://otel.test/v1/traces ',
+  ])('accepts %j, judged trimmed as Edge does', async (endpoint) => {
+    const body = structuredClone(valid[0].body);
+    body.gateway = { otel_endpoint: endpoint };
+    const response = await preview(body);
+    expect(response.statusCode).toBe(200);
+    expect(response.json().desired.plugin_configs[1].config.endpoint).toBe(endpoint);
+  });
+
+  it.each([
+    'http://otel-collector:4318 ',
+    'http://10.0.0.5:4318\u3000',
+    // Rust's trim excludes U+FEFF, so it stays in the port and Edge refuses it.
+    'http://127.0.0.1:4318\ufeff',
+    // The schema pattern refuses leading whitespace; control characters such
+    // as a tab are refused anywhere.
+    ' http://127.0.0.1:4318',
+    'http://127.0.0.1:4318\t',
+  ])('refuses %j with surrounding whitespace', async (endpoint) => {
+    const body = structuredClone(valid[0].body);
+    body.gateway = { otel_endpoint: endpoint };
+    expect((await preview(body)).statusCode).toBe(400);
+  });
+
+  it('applies the cleartext rule after trimming either end, with Rust trim semantics', () => {
+    expect(admittedOtelEndpoint('\u3000\u0085http://127.0.0.1:4318\u2028 ')).toBe(true);
+    expect(admittedOtelEndpoint('\u3000http://otel-collector:4318')).toBe(false);
+    expect(admittedOtelEndpoint('\ufeffhttp://127.0.0.1:4318')).toBe(false);
+    expect(admittedOtelEndpoint('http://127.0.0.1:4318\u180e')).toBe(false);
   });
 
   it.each([

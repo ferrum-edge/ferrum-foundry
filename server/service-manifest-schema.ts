@@ -56,10 +56,21 @@ const KEYWORDS = new Set([
   'minItems', 'minimum', 'maximum', 'allOf', 'anyOf', 'dependentRequired', 'if', 'then', 'default',
 ]);
 
+// Whether a node or any allOf clause it contains, at any depth, declares a
+// string bound. Those clauses all constrain the same value.
+function declaresMaxLength(node: SchemaNode): boolean {
+  return node.maxLength !== undefined || (node.allOf ?? []).some(declaresMaxLength);
+}
+
 // Compile only the subset used by this closed contract with our existing Zod
 // dependency. Refuse new keywords rather than silently ignoring drift. No
 // coercion, key removal, or implicit default insertion during validation.
-function compile(node: SchemaNode): z.ZodType {
+//
+// `sameValue` marks a subschema (allOf, anyOf, if/then) that validates the
+// value its parent already validates. The parent owns the 2048 default for that
+// value, decided once: it applies only when neither the parent nor any nested
+// allOf clause declares a bound. Subschemas never install their own default.
+function compile(node: SchemaNode, sameValue = false): z.ZodType {
   if (Object.keys(node).some((key) => !KEYWORDS.has(key))) {
     throw new Error('Unsupported service manifest schema keyword');
   }
@@ -81,11 +92,7 @@ function compile(node: SchemaNode): z.ZodType {
     if (!node.items) throw new Error('Missing service manifest item schema');
     validator = z.array(compile(node.items)).min(node.minItems ?? 0).max(32);
   } else if (node.type === 'string') {
-    // The default applies only when neither this node nor one of its allOf
-    // clauses declares a bound; a declared bound is applied below.
-    const declared = maxLength !== undefined
-      || (node.allOf ?? []).some((clause) => clause.maxLength !== undefined);
-    validator = declared ? z.string() : z.string().max(MANIFEST_STRING_DEFAULT_MAX_LENGTH);
+    validator = z.string();
   } else if (node.type === 'integer' || node.type === 'number') {
     let numeric = node.type === 'integer' ? z.number().int() : z.number();
     if (node.minimum !== undefined) numeric = numeric.min(node.minimum);
@@ -102,6 +109,10 @@ function compile(node: SchemaNode): z.ZodType {
     validator = validator.refine((value) =>
       typeof value !== 'string' || codePointLength(value) <= bound);
   }
+  if (!sameValue && !declaresMaxLength(node)) {
+    validator = validator.refine((value) => typeof value !== 'string'
+      || codePointLength(value) <= MANIFEST_STRING_DEFAULT_MAX_LENGTH);
+  }
   if (node.required) {
     const required = node.required;
     validator = validator.refine((value) => Boolean(value && typeof value === 'object'
@@ -112,12 +123,12 @@ function compile(node: SchemaNode): z.ZodType {
     validator = validator.refine((value) => typeof value !== 'string' || pattern.test(value));
   }
   if (node.allOf) {
-    const validators = node.allOf.map(compile);
+    const validators = node.allOf.map((clause) => compile(clause, true));
     validator = validator.refine((value) =>
       validators.every((item) => item.safeParse(value).success));
   }
   if (node.anyOf) {
-    const validators = node.anyOf.map(compile);
+    const validators = node.anyOf.map((clause) => compile(clause, true));
     validator = validator.refine((value) =>
       validators.some((item) => item.safeParse(value).success));
   }
@@ -129,8 +140,8 @@ function compile(node: SchemaNode): z.ZodType {
   }
   if (node.if) {
     if (!node.then) throw new Error('Missing service manifest conditional schema');
-    const condition = compile(node.if);
-    const consequent = compile(node.then);
+    const condition = compile(node.if, true);
+    const consequent = compile(node.then, true);
     validator = validator.refine((value) => !condition.safeParse(value).success
       || consequent.safeParse(value).success);
   }

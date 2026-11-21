@@ -123,6 +123,34 @@ describe('service manifest string bounds in code points', () => {
   });
 });
 
+describe('property names in the safety precheck', () => {
+  it.each([
+    ['an oversized name', 'k'.repeat(4097)],
+    ['a control character', 'unknown\u0007key'],
+  ])('refuses %s before schema validation', async (_label, key) => {
+    const { validatedManifest, serviceManifestSchema } = await load(vendoredSchema());
+    const parse = vi.spyOn(serviceManifestSchema().validator, 'safeParse');
+    const body = manifest();
+    body[key] = 'v';
+    expect(validatedManifest(body)).toBeNull();
+    expect(parse).not.toHaveBeenCalled();
+    delete body[key];
+    expect(validatedManifest(body)).not.toBeNull();
+    expect(parse).toHaveBeenCalledTimes(1);
+  });
+
+  it('counts property names in code points', async () => {
+    const { validatedManifest, serviceManifestSchema } = await load(vendoredSchema());
+    const parse = vi.spyOn(serviceManifestSchema().validator, 'safeParse');
+    const body = manifest();
+    // 4,096 code points, 8,192 UTF-16 units: within the cap, so the closed
+    // schema (not the precheck) refuses the unknown key.
+    body['\u{1F600}'.repeat(4096)] = 'v';
+    expect(validatedManifest(body)).toBeNull();
+    expect(parse).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('maxLength outside a plain string node', () => {
   it('constrains enum values and refuses to compile an enum bound above the cap', async () => {
     const schema = vendoredSchema();
@@ -165,6 +193,45 @@ describe('maxLength outside a plain string node', () => {
     expect(body.api.service_base_path).toHaveLength(2049);
     expect(validatedManifest(body)).not.toBeNull();
     body.api.service_base_path = `/${'a'.repeat(2048)}/`;
+    expect(validatedManifest(body)).toBeNull();
+  });
+
+  it('honors a bound in a nested allOf clause without a default anywhere for the value', async () => {
+    const schema = vendoredSchema();
+    schema.properties.api.properties.service_base_path.allOf.push({
+      allOf: [{ maxLength: 2049 }],
+    });
+    const { validatedManifest } = await load(schema);
+    const body = manifest();
+    body.api.service_base_path = `/${'a'.repeat(2047)}/`;
+    expect(validatedManifest(body)).not.toBeNull();
+    body.api.service_base_path = `/${'a'.repeat(2048)}/`;
+    expect(validatedManifest(body)).toBeNull();
+  });
+
+  it('installs no default in a typed string allOf clause beside a field-level bound', async () => {
+    const schema = vendoredSchema();
+    const field = schema.properties.api.properties.service_base_path;
+    field.maxLength = 2049;
+    field.allOf[1].type = 'string';
+    const { validatedManifest } = await load(schema);
+    const body = manifest();
+    body.api.service_base_path = `/${'a'.repeat(2047)}/`;
+    expect(validatedManifest(body)).not.toBeNull();
+    body.api.service_base_path = `/${'a'.repeat(2048)}/`;
+    expect(validatedManifest(body)).toBeNull();
+  });
+
+  it('still enforces each declared bound across conjunctive clauses', async () => {
+    const schema = vendoredSchema();
+    const field = schema.properties.api.properties.service_base_path;
+    field.maxLength = 2049;
+    field.allOf.push({ allOf: [{ maxLength: 6 }] });
+    const { validatedManifest } = await load(schema);
+    const body = manifest();
+    body.api.service_base_path = '/abcd/';
+    expect(validatedManifest(body)).not.toBeNull();
+    body.api.service_base_path = '/abcde/';
     expect(validatedManifest(body)).toBeNull();
   });
 
