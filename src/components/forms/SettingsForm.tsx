@@ -7,6 +7,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import { api, getApiErrorMessage, HANDLED_STATUSES } from "@/api/client";
 import { isGatewayTargetRetired } from "@/api/gatewayTarget";
 import { validateNamespaceName } from "@/api/namespaces";
+import {
+  isGatewayHealthSnapshot,
+  type GatewayHealthSnapshot,
+} from "../../../shared/health-snapshot.js";
 import { Card } from "@/components/ui/Card";
 import { Input, READ_ONLY_CLASSES } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
@@ -98,6 +102,41 @@ interface StatusResult {
   status?: number;
   body?: unknown;
   error?: string;
+}
+
+function isStatusResult(value: unknown): value is StatusResult {
+  return typeof value === "object" && value !== null &&
+    typeof (value as { reachable?: unknown }).reachable === "boolean";
+}
+
+/**
+ * The gateway's own health verdict from a test result, when the probe reached
+ * it and its (possibly namespace-projected) body still carries one.
+ */
+function reportedHealth(result: StatusResult): GatewayHealthSnapshot | null {
+  return result.reachable && isGatewayHealthSnapshot(result.body) ? result.body : null;
+}
+
+function StatusBadge({ result }: { result: StatusResult }) {
+  if (!result.reachable) {
+    return (
+      <Badge variant="red">
+        {result.error ||
+          (result.status ? `Not reachable (HTTP ${result.status})` : "Not reachable")}
+      </Badge>
+    );
+  }
+  const health = reportedHealth(result);
+  // Edge answers a reachable gateway that is not ready with `503` and its
+  // snapshot: the connection works, but the gateway says it is not serving.
+  if (health && !health.ready) {
+    return (
+      <Badge variant="yellow">
+        {`Connected (HTTP ${result.status}), gateway not ready: ${health.status}`}
+      </Badge>
+    );
+  }
+  return <Badge variant="green">{`Connected (HTTP ${result.status})`}</Badge>;
 }
 
 /* ================================================================== */
@@ -207,8 +246,19 @@ export function SettingsForm() {
     setTesting(true);
     setStatus(null);
     try {
-      const res = await api.get("api/settings/status").json<StatusResult>();
-      setStatus(res);
+      // The BFF relays the gateway's HTTP status. A `503` is still an answer
+      // to classify from its envelope (Edge reports a reachable gateway that
+      // is not ready that way), so it is neither retried nor thrown; every
+      // other failure keeps the client's retry and error handling.
+      const response = await api.get("api/settings/status", {
+        throwHttpErrors: (code) => code !== 503,
+      });
+      const result: unknown = await response.json().catch(() => null);
+      setStatus(
+        isStatusResult(result)
+          ? result
+          : { reachable: false, status: response.status, error: `Connection test failed (HTTP ${response.status})` },
+      );
     } catch (err) {
       setStatus({
         reachable: false,
@@ -524,13 +574,7 @@ export function SettingsForm() {
             Test Connection
           </Button>
 
-          {status && (
-            <Badge variant={status.reachable ? "green" : "red"}>
-              {status.reachable
-                ? `Connected (HTTP ${status.status})`
-                : status.error || "Not reachable"}
-            </Badge>
-          )}
+          {status && <StatusBadge result={status} />}
         </div>
       </Card>
 

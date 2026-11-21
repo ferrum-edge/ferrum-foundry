@@ -11,6 +11,7 @@ import {
   type NamespaceScope,
 } from './client';
 import type { AdminMetrics, HealthResponse } from "./types";
+import { isGatewayHealthAnswer } from "../../shared/health-snapshot.js";
 
 export async function getHealth(scope: NamespaceScope): Promise<HealthResponse> {
   let response: Response | undefined;
@@ -25,16 +26,7 @@ export async function getHealth(scope: NamespaceScope): Promise<HealthResponse> 
       }),
     );
     const body: unknown = await response.clone().json().catch(() => null);
-    if (
-      (response.status === 200 || response.status === 503) &&
-      body !== null &&
-      typeof body === 'object' &&
-      'status' in body &&
-      typeof body.status === 'string' &&
-      ['ok', 'degraded', 'starting', 'unavailable', 'draining'].includes(body.status) &&
-      'ready' in body &&
-      typeof body.ready === 'boolean'
-    ) {
+    if (isGatewayHealthAnswer(response.status, body)) {
       return body as HealthResponse;
     }
     throw new Error(`Health endpoint returned ${response.status} without a valid snapshot`);

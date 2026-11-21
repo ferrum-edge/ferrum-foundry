@@ -483,3 +483,96 @@ describe("SettingsForm failed reads", () => {
     expect(findButton("Retry")).toBeUndefined();
   });
 });
+
+describe("SettingsForm connection test", () => {
+  // The BFF relays the gateway's HTTP status with a `{ reachable, status, body }`
+  // envelope. ky throws a failing status unless `throwHttpErrors` says not to.
+  function answerStatus(status: number, envelope: unknown) {
+    get.mockImplementation((path: string, options?: { throwHttpErrors?: (code: number) => boolean }) => {
+      if (path !== "api/settings/status") return { json: async () => currentSettings };
+      if (status >= 400 && options?.throwHttpErrors?.(status) !== false) {
+        return Promise.reject(new Error(`Request failed with status code ${status}`));
+      }
+      return {
+        status,
+        json: async () => {
+          if (typeof envelope === "string") throw new SyntaxError("Unexpected token <");
+          return envelope;
+        },
+      };
+    });
+  }
+
+  async function testConnection() {
+    const button = Array.from(host.querySelectorAll("button")).find(
+      (element) => element.textContent?.trim() === "Test Connection",
+    );
+    if (!button) throw new Error("Missing Test Connection button");
+    await act(async () => button.click());
+  }
+
+  function badge(): HTMLElement {
+    const card = Array.from(host.querySelectorAll("h2")).find(
+      (heading) => heading.textContent?.trim() === "Connection Test",
+    )?.parentElement;
+    const element = card?.querySelector<HTMLElement>(":scope > div > span");
+    if (!element) throw new Error("Missing connection test badge");
+    return element;
+  }
+
+  it("reports a ready gateway as connected", async () => {
+    await renderForm();
+    answerStatus(200, { reachable: true, status: 200, body: { status: "ok", ready: true } });
+    await testConnection();
+
+    expect(get).toHaveBeenCalledWith(
+      "api/settings/status",
+      expect.objectContaining({ throwHttpErrors: expect.any(Function) }),
+    );
+    expect(badge().textContent).toBe("Connected (HTTP 200)");
+    expect(badge().className).toContain("text-success");
+  });
+
+  it("reports a gateway answering 503 with its health snapshot as connected but not ready", async () => {
+    await renderForm();
+    answerStatus(503, {
+      reachable: true,
+      status: 503,
+      body: { status: "unavailable", ready: false, mode: "database" },
+    });
+    await testConnection();
+
+    expect(badge().textContent).toBe("Connected (HTTP 503), gateway not ready: unavailable");
+    expect(badge().className).toContain("text-warning");
+  });
+
+  it.each([
+    ["an error object", { error: "upstream connect error" }],
+    ["a text page", "<html>503 Service Unavailable</html>"],
+  ])("keeps a non-health 503 carrying %s unreachable", async (_label, body) => {
+    await renderForm();
+    answerStatus(503, { reachable: false, status: 503, body });
+    await testConnection();
+
+    expect(badge().textContent).toBe("Not reachable (HTTP 503)");
+    expect(badge().className).toContain("text-danger");
+  });
+
+  it("reports a 503 without the BFF's envelope as a failed test", async () => {
+    await renderForm();
+    answerStatus(503, "<html>503</html>");
+    await testConnection();
+
+    expect(badge().textContent).toBe("Connection test failed (HTTP 503)");
+    expect(badge().className).toContain("text-danger");
+  });
+
+  it("still throws any other failing status", async () => {
+    await renderForm();
+    answerStatus(502, { reachable: false, code: "FERRUM_BFF_UPSTREAM_FAILURE" });
+    await testConnection();
+
+    expect(badge().textContent).toBe("Request failed with status code 502");
+    expect(badge().className).toContain("text-danger");
+  });
+});
