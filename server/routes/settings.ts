@@ -16,6 +16,7 @@ import {
 import { projectHealthSummary } from '../health-summary.js';
 import { generateToken } from '../jwt.js';
 import { getDispatcher } from '../tls.js';
+import { isGatewayHealthSnapshot } from '../../shared/health-snapshot.js';
 
 const ALLOWED_UPDATE_FIELDS = new Set<keyof RuntimeConfig>([
   'adminUrl',
@@ -164,6 +165,12 @@ const settingsPlugin: FastifyPluginAsync = async (fastify) => {
       } catch {
         // The gateway may return text for a proxy/intermediary failure.
       }
+      // Edge answers a reachable gateway that is not ready (`starting`,
+      // `degraded`, `unavailable`, `draining`) with a `503` carrying its health
+      // snapshot. That is an observation of the gateway, so the connection
+      // works; a `503` from anything else (proxy text, `{ error }`) is not.
+      // Classified on the gateway's own body, before any projection.
+      const reachable = response.ok || (response.status === 503 && isGatewayHealthSnapshot(body));
       // Edge v0.9.15 and earlier return the detailed health view to an
       // `ns`-claim JWT; v0.9.16+ return the tenant or minimal tier. Either way
       // a namespace-scoped session receives only the summary fields
@@ -172,7 +179,7 @@ const settingsPlugin: FastifyPluginAsync = async (fastify) => {
         body = typeof body === 'string' ? undefined : projectHealthSummary(body, principal.namespaces);
       }
       return reply.status(response.status).send({
-        reachable: response.ok,
+        reachable,
         status: response.status,
         body,
       });
