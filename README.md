@@ -375,8 +375,13 @@ request without the proxy's identity assertion; for example,
   `/oauth2/` locations (including the internal `/oauth2/auth` subrequest) at
   your oauth2-proxy listener, such as `http://127.0.0.1:4180`, configure
   oauth2-proxy for your identity provider, and set its trusted proxy range to
-  the nginx peer address in that topology. The example needs nginx with TLS
-  and the `auth_request` module; keeping its `http2 on;` line also needs
+  the nginx peer address in that topology. Install (or repoint) the files the
+  starter supplies through Compose mounts: `nginx/identity/policy.conf` and
+  `nginx/identity/inject.conf` at the absolute paths `foundry.conf` includes,
+  and the proof include `/etc/nginx/secrets/ferrum-proxy-secret.conf` rendered
+  with the BFF's exact `FERRUM_TRUSTED_PROXY_SECRET`, as described in the
+  [starter's production steps](deploy/starter/README.md#production). The
+  example needs nginx with TLS and the `auth_request` module; keeping its `http2 on;` line also needs
   nginx 1.25.1 or newer built with the HTTP/2 module. On any nginx without
   that, remove `http2 on;` and keep the rest.
 - [Gateway transport](docs/deployment.md#gateway-transport) covers the admin
