@@ -94,7 +94,7 @@ const ECHO_INDEX_RELEASE_DIGEST_PLATFORM_PATTERN =
 const FERRUM_EDGE_RELEASE_STEP_PATTERN = /\| Ferrum Edge \| \*release step\*/;
 const PLAYWRIGHT_VERSION_PATTERN = /@playwright\/test \d+\.\d+\.\d+/g;
 const RANGE_PREFIX_PATTERN = /^[\^~]/;
-const BROWSER_ROW_PATTERN = /^\| Browser \|.*$/m;
+const BROWSER_ROW_PATTERN = /^\|\s*Browser\s*\|.*$/m;
 
 const record = readSupportedPairing();
 const qualifiedFixture = hostedQualificationFixture(record);
@@ -281,10 +281,15 @@ describe("the supported pairing record", () => {
     assert.deepEqual(record.tested.browsers, [
       `Chromium bundled with @playwright/test ${locked} (Desktop Chrome profile)`,
     ]);
-    const browserRow = BROWSER_ROW_PATTERN.exec(repoFile("docs/compatibility.md"))?.[0] ?? "";
-    assert.ok(
-      browserRow.includes(`Chromium bundled with \`@playwright/test\` ${locked},`),
-      `compatibility.md's Browser row names @playwright/test ${locked}`,
+    // The Qualification target cell of the Tested support table's Browser row.
+    const doc = repoFile("docs/compatibility.md");
+    const testedSupport = doc.slice(doc.indexOf("## Tested support"));
+    const browserRow = BROWSER_ROW_PATTERN.exec(testedSupport)?.[0] ?? "";
+    const [, , target] = browserRow.split("|").map((cell) => cell.trim());
+    assert.equal(
+      target,
+      `Chromium bundled with \`@playwright/test\` ${locked}, Desktop Chrome profile`,
+      `compatibility.md's tested Browser target names @playwright/test ${locked}`,
     );
   });
 
