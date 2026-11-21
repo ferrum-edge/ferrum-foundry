@@ -67,11 +67,35 @@ export function allProxiesKey(namespace: string) {
   return ["proxies", namespace, "all"] as const;
 }
 
-export function useAllProxies(enabled = true) {
+/**
+ * Namespaces whose complete proxy list a mounted page reports inline. Every
+ * observer of that one query shares it, and a refetch runs whichever
+ * observer's queryFn the query last stored, so the choice is made per
+ * namespace at fetch time rather than per observer.
+ */
+const inlineReportedFullLists = new Map<string, number>();
+
+/**
+ * `silentErrors` keeps this query's failures out of the global error popup
+ * while the observer is mounted, for a page that reports the query's error
+ * state inline itself.
+ */
+export function useAllProxies(enabled = true, { silentErrors = false } = {}) {
   const { scope } = useNamespace();
+  const namespace = scope.namespace;
+  useEffect(() => {
+    if (!silentErrors) return;
+    inlineReportedFullLists.set(namespace, (inlineReportedFullLists.get(namespace) ?? 0) + 1);
+    return () => {
+      const remaining = (inlineReportedFullLists.get(namespace) ?? 1) - 1;
+      if (remaining > 0) inlineReportedFullLists.set(namespace, remaining);
+      else inlineReportedFullLists.delete(namespace);
+    };
+  }, [silentErrors, namespace]);
   return useQuery({
-    queryKey: allProxiesKey(scope.namespace),
-    queryFn: ({ signal }) => proxies.listAll(queryScope(scope), signal),
+    queryKey: allProxiesKey(namespace),
+    queryFn: ({ signal }) =>
+      proxies.listAll(queryScope(scope), signal, inlineReportedFullLists.has(scope.namespace)),
     enabled,
   });
 }

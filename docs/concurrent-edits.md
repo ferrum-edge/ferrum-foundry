@@ -366,19 +366,23 @@ toast names the read that failed. One reload runs at a time and its action
 shows busy; "Keep my draft" (or closing the dialog) abandons it, and so does
 an editor that moved on, so a late completion neither remounts the form nor
 reports anything. While it runs, every field of the form is disabled and
-nothing submits, so no edit is made that the remount would erase. Delete and
-reload exclude each other: Delete is disabled during a reload, and a reload
-closes an open delete confirmation before it starts, so a confirmation never
-authorizes a membership the operator did not see.
+nothing submits, so no edit is made that the remount would erase; a select
+whose menu was open closes it and accepts no choice. Delete and reload
+exclude each other: Delete is unavailable while a save (and the reseed a
+committed save runs) or a reload is in flight, a reload closes an open
+delete confirmation before it starts, and once a delete is confirmed no save
+or reload starts or publishes, so nothing recreates the detail entry the
+delete retired.
 
 The page withholds the form only until its first seed is complete (a group's
 whole membership included). After that, a background refetch never takes the
 form or the conflict dialog off the page, not even the save's own settle
 refetch finding that the plugin became a group. The background membership
-traversal follows the scope of the mounted form's seed, so that refetch does
-not start one (whose failure would open the global error popup); the
-explicit reload reads the membership itself, and only its success remounts
-the form.
+traversal follows the scope of the mounted form's seed (or of a save that
+left the group), so that refetch does not start one; the explicit reload
+reads the membership itself, and only its success remounts the form. While a
+form is mounted, a failed background membership refresh is reported inline,
+never as the global error popup over the form or a reload's toast.
 
 The two single-field editors take their guard from the list they were computed
 from rather than the settings form's seed. The update hooks refresh the

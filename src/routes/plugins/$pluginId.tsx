@@ -87,11 +87,14 @@ function PluginEditor({ session }: { session: EditorSession }) {
   // Only a proxy-group plugin's membership needs the whole proxy collection;
   // global and proxy-scoped plugins must not pay for that traversal. Once a
   // form is mounted, its own seed decides: a refetch that turns the plugin
-  // into a group does not start the background traversal (whose failure
-  // would open the global error popup over the page), because the form
-  // cannot show that membership anyway. An explicit reload reads it itself.
+  // into a group does not start the background traversal, because the form
+  // cannot show that membership anyway; an explicit reload reads it itself.
+  // A mounted form's background refreshes are also silent: their failure is
+  // reported inline (the membership notice), never as a global popup over
+  // the form, a conflict dialog, or a reload's own toast.
   const proxiesQuery = useAllProxies(
     formSeeded ? seededScope === "proxy_group" : plugin?.scope === "proxy_group",
+    { silentErrors: formSeeded },
   );
   const {
     data: allProxies,
@@ -110,6 +113,10 @@ function PluginEditor({ session }: { session: EditorSession }) {
   const [reloading, setReloading] = useState(false);
   const reloadCounter = useRef(0);
   const activeReload = useRef<{ token: number; abort: AbortController } | null>(null);
+  // Set synchronously when a delete is confirmed, cleared only if it fails:
+  // no reload starts or publishes while a delete runs or after it succeeded,
+  // so nothing can recreate the detail entry the delete retired.
+  const deleting = useRef(false);
 
   // The configuration this editor opened against, advanced only by an
   // accepted response. The membership plan refuses a save or delete whose
@@ -144,8 +151,9 @@ function PluginEditor({ session }: { session: EditorSession }) {
   const handleSubmit = session.bind(
     async (data: PluginConfigCreate, proxyGroupIds?: string[]) => {
       const seen = membershipSeen.current;
-      // A reload in flight is about to replace this form.
-      if (!capability.allowed || !seen || activeReload.current) return;
+      // A reload in flight is about to replace this form; a delete is
+      // removing it.
+      if (!capability.allowed || !seen || activeReload.current || deleting.current) return;
       setMembershipError(null);
       const proxyIds = data.scope === "proxy_group" ? proxyGroupIds ?? [] : [];
       try {
@@ -159,6 +167,10 @@ function PluginEditor({ session }: { session: EditorSession }) {
         baseline.adopt(updated);
         // The form now shows the membership this save established.
         membershipSeen.current = observedMembership(updated, proxyIds);
+        // A group saved to another scope no longer needs its membership
+        // traversal. A save into a group leaves it off until an explicit
+        // reload remounts the form with the complete membership.
+        if (updated.scope !== "proxy_group") setSeededScope(updated.scope);
 
         toast("success", "Plugin configuration updated successfully");
       } catch (err: unknown) {
@@ -212,7 +224,7 @@ function PluginEditor({ session }: { session: EditorSession }) {
    * operator can try again or keep editing.
    */
   const handleDiscardAndReload = session.bind(async () => {
-    if (activeReload.current || deletePlugin.isPending) return;
+    if (activeReload.current || deleting.current) return;
     const reloaded = await reloadFromGateway();
     if (reloaded === "abandoned") return;
     if (reloaded !== true) {
@@ -237,7 +249,7 @@ function PluginEditor({ session }: { session: EditorSession }) {
    * and the recovery report stay as they are.
    */
   const handleReloadSaved = session.bind(async () => {
-    if (activeReload.current || deletePlugin.isPending) return;
+    if (activeReload.current || deleting.current) return;
     const reloaded = await reloadFromGateway();
     if (reloaded === "abandoned") return;
     if (reloaded !== true) {
@@ -279,6 +291,7 @@ function PluginEditor({ session }: { session: EditorSession }) {
    * whatever scope the page showed, since the form seeds it once.
    */
   async function reloadFromGateway(): Promise<true | "plugin" | "membership" | "abandoned"> {
+    if (deleting.current) return "abandoned";
     abandonReload();
     const reload = { token: ++reloadCounter.current, abort: new AbortController() };
     activeReload.current = reload;
@@ -286,7 +299,8 @@ function PluginEditor({ session }: { session: EditorSession }) {
     // Delete and reload exclude each other: a confirmation opened against
     // this form must not authorize the membership a remount would show.
     setDeleteOpen(false);
-    const live = () => activeReload.current?.token === reload.token && session.isCurrent();
+    const live = () =>
+      activeReload.current?.token === reload.token && session.isCurrent() && !deleting.current;
     const finish = <T,>(result: T): T => {
       if (activeReload.current?.token === reload.token) {
         activeReload.current = null;
@@ -331,7 +345,13 @@ function PluginEditor({ session }: { session: EditorSession }) {
 
   const handleDelete = session.bind(async () => {
     const seen = membershipSeen.current;
-    if (!plugin || !capability.allowed || !seen || activeReload.current) return;
+    // Not while a save (and the reseed a committed save runs) or a reload can
+    // still replace the form this confirmation was given against.
+    if (
+      !plugin || !capability.allowed || !seen ||
+      activeReload.current || updatePlugin.isPending || deleting.current
+    ) return;
+    deleting.current = true;
     setMembershipError(null);
     try {
       // Judged against the configuration this page is displaying — see the
@@ -353,6 +373,8 @@ function PluginEditor({ session }: { session: EditorSession }) {
       // editor still on screen may leave for the collection.
       if (session.isCurrent()) navigate({ to: "/plugins" });
     } catch (err: unknown) {
+      // Nothing was deleted: the editor is live again.
+      deleting.current = false;
       if (isStaleResourceError(err)) {
         setDeleteOpen(false);
         setConflict(err.detail);
@@ -429,9 +451,9 @@ function PluginEditor({ session }: { session: EditorSession }) {
           <WriteAction verdict={capability}>
             <Button
               variant="danger"
-              disabled={reloading}
+              disabled={reloading || updatePlugin.isPending}
               onClick={() => {
-                if (!activeReload.current) setDeleteOpen(true);
+                if (!activeReload.current && !deleting.current) setDeleteOpen(true);
               }}
             >
               <TrashIcon />

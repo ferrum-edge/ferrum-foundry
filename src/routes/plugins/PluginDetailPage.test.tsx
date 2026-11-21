@@ -796,6 +796,66 @@ describe("discarding a draft after a refused write (#726)", () => {
     expect(dialogButton("Discard my draft and reload")).toBeTruthy();
   });
 
+  it("shows only the reload toast when a mounted group's membership refresh fails too", async () => {
+    // Real reporting path, as above. The group loads (two proxy pages); then
+    // its second page starts failing for the save's settle refresh and for
+    // the explicit reload alike.
+    let laterPagesFail = false;
+    get.mockImplementation((path, options) => ({
+      headers: new Headers(),
+      json: () => {
+        if (path === "plugins") return catalog;
+        if (path === "plugins/config/group-1") return pluginResponse.promise;
+        if (path === "proxies") {
+          if (options.searchParams.offset === "0") {
+            return Promise.resolve(page([member("source")], 0, 2));
+          }
+          if (!laterPagesFail) return Promise.resolve(page([member("destination")], 1, 2));
+          const error = new Error("HTTP 503");
+          const context = options.context ?? {};
+          if (!context[SILENT_ERRORS]) {
+            reportRequestError(
+              error,
+              { statusCode: 503, body: "unavailable", url: "/api/proxy/proxies" },
+              Boolean(context[DEFER_QUERY_ERRORS]),
+            );
+          }
+          return Promise.reject(error);
+        }
+        throw new Error(`Unexpected request: ${path}`);
+      },
+    }));
+    await render(
+      <ErrorPopupProvider>
+        <PluginDetailPage />
+      </ErrorPopupProvider>,
+    );
+    pluginResponse.resolve(plugin);
+    await settle();
+    await settle();
+    expect(selectedIds()).toEqual(["Remove /source", "Remove /destination"]);
+    const draftForm = host.querySelector("form");
+
+    laterPagesFail = true;
+    const current: PluginConfig = { ...plugin, config: { requests: 9 } };
+    pluginResponse = deferred<PluginConfig>();
+    pluginResponse.resolve(current);
+    updatePlan.mockRejectedValueOnce(stale(current));
+    await submit();
+    await click("Discard my draft and reload");
+    await settle();
+
+    expect(toast).toHaveBeenCalledWith(
+      "error",
+      "Could not re-read the plugin's proxies; your form was kept. Try again.",
+    );
+    // The settle refresh failed as well, but reports inline, not as a popup.
+    expect(client.getQueryState(["proxies", "default", "all"])?.status).toBe("error");
+    expect(document.body.textContent).not.toContain("API Error");
+    expect(host.querySelector("form")).toBe(draftForm);
+    expect(dialogButton("Discard my draft and reload")).toBeTruthy();
+  });
+
   it("lets a retry reseed the form once the proxies of a now-group plugin can be read", async () => {
     const current: PluginConfig = { ...plugin, updated_at: "2026-09-06T00:00:00Z" };
     firstPage = deferred<ReturnType<typeof page>>();
@@ -1067,15 +1127,14 @@ describe("a pending reload locks the form and excludes delete (#726)", () => {
   it("closes an open delete confirmation when a reload starts", async () => {
     deletePlan.mockResolvedValue(undefined);
     await open();
-    const save = deferred<PluginConfig>();
-    updatePlan.mockReturnValueOnce(save.promise);
-    await submit();
+    // The confirmation is opened first; the save that follows commits.
     await act(async () => button("Delete")!.click());
     await settle();
     expect(button("Delete Plugin")).toBeTruthy();
+    const save = deferred<PluginConfig>();
+    updatePlan.mockReturnValueOnce(save.promise);
+    await submit();
 
-    // The save commits but is not live: the reseed starts and takes the
-    // confirmation down with it, before anything is replaced.
     pluginResponse = deferred<PluginConfig>();
     firstPage = deferred<ReturnType<typeof page>>();
     await act(async () => {
@@ -1094,5 +1153,121 @@ describe("a pending reload locks the form and excludes delete (#726)", () => {
     await act(async () => button("Delete")!.click());
     await settle();
     expect(button("Delete Plugin")).toBeTruthy();
+  });
+
+  it("keeps Delete unavailable while a save and its committed reseed can still run", async () => {
+    deletePlan.mockResolvedValue({ committed: null });
+    await open();
+    const save = deferred<PluginConfig>();
+    updatePlan.mockReturnValueOnce(save.promise);
+    await submit();
+    expect(button("Delete")!.disabled).toBe(true);
+    await act(async () => button("Delete")!.click());
+    await settle();
+    expect(button("Delete Plugin")).toBeUndefined();
+
+    pluginResponse = deferred<PluginConfig>();
+    firstPage = deferred<ReturnType<typeof page>>();
+    await act(async () => {
+      save.reject(
+        markCommittedWrite(new Error("HTTP 503"), { cursor: "1:2", reason: "reload_timeout" }),
+      );
+    });
+    await settle();
+    expect(button("Delete")!.disabled).toBe(true);
+    pluginResponse.resolve(plugin);
+    firstPage.resolve(page([member("source")]));
+    await settle();
+
+    // Only now can the delete be confirmed, and once it succeeds nothing
+    // recreates the detail entry it retired.
+    await act(async () => button("Delete")!.click());
+    await settle();
+    await act(async () => button("Delete Plugin")!.click());
+    await settle();
+    await settle();
+    expect(deletePlan).toHaveBeenCalledTimes(1);
+    expect(client.getQueryData(["pluginConfig", "default", "group-1"])).toBeUndefined();
+  });
+
+  it("refuses a save while a confirmed delete is in flight", async () => {
+    const removal = deferred<unknown>();
+    deletePlan.mockReturnValueOnce(removal.promise);
+    await open();
+    await act(async () => button("Delete")!.click());
+    await settle();
+    await act(async () => button("Delete Plugin")!.click());
+    await settle();
+    expect(deletePlan).toHaveBeenCalledTimes(1);
+
+    await submit();
+    expect(updatePlan).not.toHaveBeenCalled();
+    await act(async () => removal.resolve({ committed: null }));
+    await settle();
+    expect(client.getQueryData(["pluginConfig", "default", "group-1"])).toBeUndefined();
+  });
+
+  it("closes an open Scope menu and ignores a choice while a committed save reseeds", async () => {
+    await open();
+    const save = deferred<PluginConfig>();
+    updatePlan.mockReturnValueOnce(save.promise);
+    await submit();
+    const trigger = [...host.querySelectorAll<HTMLElement>('[role="combobox"]')].find((entry) =>
+      document.getElementById(entry.getAttribute("aria-labelledby") ?? "")?.textContent === "Scope",
+    )!;
+    await act(async () => {
+      trigger.focus();
+      trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    await settle();
+    const globalOption = [...document.querySelectorAll<HTMLElement>('[role="option"]')]
+      .find((entry) => entry.textContent === "Global");
+    expect(globalOption).toBeTruthy();
+
+    pluginResponse = deferred<PluginConfig>();
+    firstPage = deferred<ReturnType<typeof page>>();
+    await act(async () => {
+      save.reject(
+        markCommittedWrite(new Error("HTTP 503"), { cursor: "1:2", reason: "reload_timeout" }),
+      );
+    });
+    await settle();
+    expect(locked()).toBe(true);
+    // The menu closed when the lock began, and a choice made through the
+    // element still in hand changes nothing.
+    expect(document.querySelectorAll('[role="option"]')).toHaveLength(0);
+    await act(async () => {
+      globalOption!.focus();
+      globalOption!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      globalOption!.click();
+    });
+    await settle();
+    expect(trigger.textContent).toContain("Proxy Group");
+    expect(selectedIds()).toEqual(["Remove /source"]);
+
+    pluginResponse.resolve(plugin);
+    firstPage.resolve(page([member("source")]));
+    await settle();
+    expect(locked()).toBe(false);
+  });
+
+  it("stops the membership traversal once a group is saved to another scope", async () => {
+    await open();
+    const allKey = ["proxies", "default", "all"];
+    expect(client.getQueryCache().find({ queryKey: allKey, exact: true })?.isActive()).toBe(true);
+
+    await chooseScope("Global");
+    updatePlan.mockResolvedValueOnce({ ...plugin, scope: "global" });
+    await submit();
+    expect(updatePlan.mock.calls[0]![1]).toMatchObject({ scope: "global" });
+    await settle();
+
+    expect(client.getQueryCache().find({ queryKey: allKey, exact: true })?.isActive()).toBe(false);
+    const before = get.mock.calls.filter(([path]) => path === "proxies").length;
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: ["proxies"] });
+    });
+    await settle();
+    expect(get.mock.calls.filter(([path]) => path === "proxies").length).toBe(before);
   });
 });

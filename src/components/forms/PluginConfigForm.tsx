@@ -491,7 +491,9 @@ function PluginConfigFormFields({
             <Select
               label="Scope"
               value={scope}
+              disabled={readOnly}
               onValueChange={(v) => {
+                if (readOnly) return;
                 const next = v as PluginScope;
                 setScope(next);
                 // Editing another scope must not discard the existing draft.
@@ -554,7 +556,10 @@ function PluginConfigFormFields({
               <Select
                 label="Mode"
                 value={mcpGatewayMode}
-                onValueChange={(value) => handleMcpGatewayModeChange(value as McpGatewayMode)}
+                disabled={readOnly}
+                onValueChange={(value) => {
+                  if (!readOnly) handleMcpGatewayModeChange(value as McpGatewayMode);
+                }}
                 options={[
                   { value: "aggregate_router", label: "Aggregate router" },
                   { value: "transparent_proxy", label: "Transparent proxy" },

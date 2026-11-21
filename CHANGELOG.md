@@ -504,9 +504,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   traversal of its own. Reloads run one at a time, and "Keep my draft" or
   leaving the editor abandons a pending one, so it cannot remount the form or
   toast late. While a reload runs the form's fields are disabled, nothing
-  submits, and Delete is unavailable (a reload also closes an open delete
-  confirmation), so neither a new edit nor a delete confirmation can be
-  overtaken by the reloaded seed.
+  submits (an open select menu closes), and Delete is unavailable while a
+  save or reload can still replace the form (a reload also closes an open
+  delete confirmation, and a confirmed delete stops any later save or
+  reload), so neither a new edit nor a delete confirmation can be overtaken
+  by the reloaded seed. A mounted form's background membership refresh
+  reports a failure inline rather than as the global error popup, and a group
+  saved to another scope stops its membership traversal.
 - Foundry handles the plugin-config projection Ferrum Edge `main` adds after
   v0.9.20 (ferrum-edge#7054). The sensitivity drift parser accepts
   `FieldSensitivity::CertificateSource`, `PrivateKeySource` and `EndpointPath`

@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useId, useState } from "react";
 import * as SelectPrimitive from "@radix-ui/react-select";
 import { cspNonce } from "@/lib/cspNonce";
 import { READ_ONLY_CLASSES } from "./Input";
@@ -51,6 +51,11 @@ export function Select({
   "aria-labelledby": ariaLabelledBy,
 }: SelectProps) {
   const id = useId();
+  // The menu renders in a portal, outside any disabled fieldset, so a select
+  // that becomes disabled while open closes its menu and accepts no value.
+  const inactive = Boolean(disabled || readOnly);
+  const [open, setOpen] = useState(false);
+  if (inactive && open) setOpen(false);
   const labelId = `${id}-label`;
   const descriptionId = `${id}-description`;
   const selectedLabel = (groups?.flatMap((group) => group.options) ?? options)?.find(
@@ -79,8 +84,10 @@ export function Select({
       )}
       <SelectPrimitive.Root
         value={value}
-        onValueChange={onValueChange}
-        disabled={disabled || readOnly}
+        onValueChange={inactive ? undefined : onValueChange}
+        disabled={inactive}
+        open={open && !inactive}
+        onOpenChange={(next) => setOpen(next && !inactive)}
       >
         <SelectPrimitive.Trigger
           aria-labelledby={label ? labelId : ariaLabelledBy}
