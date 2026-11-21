@@ -62,6 +62,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   set made every upstream settings save that read it fail with `400` until
   someone noticed. The Edge Main Drift workflow runs the same comparison
   against Edge `main`.
+- The Status page surfaces Ferrum Edge `main`'s MongoDB mTLS DNS admission
+  fence (#727, `database.mtls_dns_admission_fence`, absent on v0.9.20). While
+  Edge retains one (after a config-store write or admission-lock cleanup with
+  an uncertain outcome), it fails those namespaces' mTLS DNS admissions closed
+  with `503`. The fence itself changes neither `status`, `ready` nor
+  `database.status`, so a fenced snapshot can still report them healthy.
+  `healthFindings()` now reports "Database mTLS DNS admission fenced" for a
+  literal `fenced: true`, and the Database card shows the retained fence
+  count, the oldest retained time and the fenced namespaces (a detail of the
+  wrong type reads "Not reported"), with a link to Edge's runbook. A
+  namespace-scoped session's health summary still drops the whole `database`
+  block, so the fence's list of other tenants never reaches it.
 
 ### Changed
 

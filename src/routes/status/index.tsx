@@ -14,6 +14,19 @@ import { BffConnectionCard } from "@/components/shared/BffConnectionCard";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { ReadStateNotice } from "@/components/shared/ReadState";
 import { formatDateTime } from "@/lib/format";
+import type { DatabaseMtlsDnsAdmissionFence } from "@/api/types";
+import { isNamespaceName } from "../../../shared/namespace.js";
+
+/**
+ * A health field rendered as text. Edge sends strings and numbers here; any
+ * other shape (a malformed snapshot) reads as `fallback` instead of reaching
+ * React as an object child, so one bad field never hides the rest of Status.
+ */
+function displayScalar(value: unknown, fallback = "Not reported"): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return fallback;
+}
 
 function statusVariant(
   status: string,
@@ -30,6 +43,61 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
       <span className="text-text-primary text-sm font-medium text-right break-words">
         {children}
       </span>
+    </div>
+  );
+}
+
+const FENCE_RUNBOOK = 'https://github.com/ferrum-edge/ferrum-edge/blob/main/docs/mongodb.md#retained-mtls-dns-admission-fences';
+/** The largest epoch-millisecond value a JavaScript `Date` represents. */
+const MAX_DATE_MS = 8.64e15;
+
+/**
+ * A retained MongoDB mTLS DNS admission fence, rendered only for a literal
+ * `fenced: true` (as `healthFindings()` reports it). The fence itself changes
+ * neither `status`, `ready` nor `database.status`, so a fenced snapshot can
+ * still report healthy values there and this is the only place the
+ * fail-closed admissions show. Each detail is shown only when it has the
+ * shape Edge documents (a count of at least 1, epoch milliseconds, a list of
+ * valid namespace names); anything else reads "Not reported" and never
+ * reaches React as an object.
+ */
+function MtlsDnsAdmissionFence({ fence }: { fence: DatabaseMtlsDnsAdmissionFence }) {
+  const count: unknown = fence.retained_fences;
+  const since: unknown = fence.oldest_retained_since_unix_ms;
+  const names: unknown = fence.namespaces;
+  const retained = Number.isSafeInteger(count) && (count as number) >= 1 ? count as number : undefined;
+  const oldest = Number.isSafeInteger(since) && (since as number) >= 0 && (since as number) <= MAX_DATE_MS
+    ? formatDateTime(since as number) : undefined;
+  // A list with any entry that is not a valid namespace name is not reported
+  // at all, and the
+  // copy then names no namespace as unaffected.
+  const namespaces = Array.isArray(names) && names.length > 0 && names.every(isNamespaceName)
+    ? names as string[] : null;
+  return (
+    <div role="region" aria-label="mTLS DNS admission fence" className="border-t border-border pt-3 space-y-2">
+      <h3 className="text-sm font-medium text-warning">mTLS DNS admission fence</h3>
+      <p className="text-warning text-sm">
+        This gateway process retains an mTLS DNS admission fence.{' '}
+        {namespaces
+          ? 'mTLS DNS admissions for the namespaces below fail closed with HTTP 503 here; other namespaces are unaffected.'
+          : 'mTLS DNS admissions for the affected namespaces fail closed with HTTP 503 here.'}
+        {' '}Reconnect and failover are unaffected, and other replicas report their own fences.
+      </p>
+      <p className="text-sm text-text-secondary">
+        Normally a fence clears in this process when a later admission for the namespace verifies, on the original
+        database topology, that its admission lock is gone. To clear it, verify the write's outcome and remove the
+        exact owner-qualified admission lock from the database; the next admission then confirms it is gone. When
+        that verification is unavailable (the original topology is gone, or the deployment rejects majority read
+        concern), reconcile the write, remove any remaining lock, and restart the process. See{' '}
+        <a className="underline" href={FENCE_RUNBOOK} target="_blank" rel="noreferrer">
+          Ferrum Edge&apos;s retained mTLS DNS admission fence runbook
+        </a>.
+      </p>
+      <HealthFields fields={[
+        ['Retained fences', retained],
+        ['Oldest retained since', oldest],
+        ['Namespaces', namespaces ? namespaces.join(', ') : undefined],
+      ]} />
     </div>
   );
 }
@@ -156,18 +224,19 @@ export default function StatusPage() {
                 <Badge
                   variant={health.database.status === "connected" ? "green" : "red"}
                 >
-                  {health.database.status}
+                  {displayScalar(health.database.status)}
                 </Badge>
               </Row>
-              {health.database.type && <Row label="Type">{health.database.type}</Row>}
+              {health.database.type && <Row label="Type">{displayScalar(health.database.type)}</Row>}
               {health.database.pool && (
                 <Row label="Pool">
-                  {health.database.pool.active ?? "unknown"} active /{" "}
-                  {health.database.pool.idle ?? "unknown"} idle /{" "}
-                  {health.database.pool.size ?? "unknown"} total
+                  {displayScalar(health.database.pool.active, "unknown")} active /{" "}
+                  {displayScalar(health.database.pool.idle, "unknown")} idle /{" "}
+                  {displayScalar(health.database.pool.size, "unknown")} total
                 </Row>
               )}
               {health.database.failover_topology && <HealthFields fields={namedFields(health.database.failover_topology, ['primary_active', 'allow_writes', 'opt_in_writes_enabled_during_window', 'primary_failback_fenced', 'active_url_redacted', 'failover_since_unix_ms'])} />}
+              {health.database.mtls_dns_admission_fence?.fenced === true && <MtlsDnsAdmissionFence fence={health.database.mtls_dns_admission_fence} />}
               {health.database.pool?.read_replica && <HealthFields fields={[
                 ['Read replica active', health.database.pool.read_replica.active],
                 ['Read replica idle', health.database.pool.read_replica.idle],
@@ -175,7 +244,7 @@ export default function StatusPage() {
               ]} />}
               {health.database.error && (
                 <div className="mt-2 bg-danger/5 border border-danger/20 rounded-lg p-3">
-                  <p className="text-danger text-sm">{health.database.error}</p>
+                  <p className="text-danger text-sm">{displayScalar(health.database.error)}</p>
                 </div>
               )}
             </div>
