@@ -358,8 +358,9 @@ npm start
 The BFF now serves the built UI at `/`, but browsers reach it only through the
 identity proxy's public HTTPS URL. The proxy terminates TLS, runs the sign-in
 flow, injects the identity headers on every request, and forwards to
-`http://127.0.0.1:3001`. Production sets `Secure` cookies and HSTS, so behind a
-plain-HTTP browser URL the browser drops the CSRF cookie and every save fails. Protected endpoints refuse a
+`http://127.0.0.1:3001`. Production defaults to `Secure` cookies and HSTS, so behind a
+plain-HTTP browser URL on a non-loopback host the browser drops the CSRF
+cookie and every save fails. Protected endpoints refuse a
 request without the proxy's identity assertion; for example,
 `GET /api/auth/session` answers `401`.
 
