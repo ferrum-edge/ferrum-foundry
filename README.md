@@ -319,9 +319,11 @@ choices it made.
 
 ### Production Build
 
-For a complete, supported production walkthrough (Foundry, an identity proxy,
-and a gateway), use the [deployment starter](deploy/starter/README.md) and
-[Getting started](docs/getting-started.md).
+For a complete, supported production deployment (Foundry, a TLS-terminating
+identity proxy, and the gateway connection), use the starter's
+[production profile](deploy/starter/README.md#production).
+[Getting started](docs/getting-started.md) walks through its disposable demo
+profile.
 
 `npm run build` compiles the UI into `dist/` and the BFF into `dist-server/`.
 `npm start` serves the compiled UI only when `NODE_ENV=production`. Without it,
@@ -330,7 +332,8 @@ alone and `GET /` answers a JSON `404`; that mode only backs the Vite dev
 server (`npm run dev`).
 
 Production mode refuses static-token authentication and the published
-development secrets, so the built UI runs behind a trusted identity proxy:
+development secrets, so the built UI runs behind a trusted identity proxy on
+the same host:
 
 ```bash
 npm run build
@@ -344,16 +347,32 @@ export FERRUM_AUTH_LOGIN_URL=/oauth2/start
 export FERRUM_AUTH_LOGOUT_URL=/oauth2/sign_out
 export FERRUM_BIND_ADDRESS=127.0.0.1 # reachable only through the proxy
 export PORT=3001
+# If the gateway sets FERRUM_ADMIN_JWT_AUDIENCE, send the same value:
+# export FERRUM_JWT_AUDIENCE=ferrum-admin
+# If the admin API certificate is issued by a private CA, keep TLS
+# verification on and trust that CA:
+# export FERRUM_TLS_CA_PATH=/etc/ferrum/admin-ca.pem
 npm start
 ```
 
-The BFF now serves the built UI at `/`, but open it through the identity
-proxy: the proxy runs the sign-in flow and injects the identity headers on
-every request, and API requests that reach the BFF without them are refused.
-[Production authentication](docs/authentication.md#production-trusted-identity-proxy)
-lists the headers the proxy must strip and inject, and
-[Deployment](docs/deployment.md#3-reverse-proxy-example-nginx-and-oauth2-proxy)
-has an nginx and oauth2-proxy configuration.
+The BFF now serves the built UI at `/`, but browsers reach it only through the
+identity proxy's public HTTPS URL. The proxy terminates TLS, runs the sign-in
+flow, injects the identity headers on every request, and forwards to
+`http://127.0.0.1:3001`. Production sets `Secure` cookies and HSTS, so behind a
+plain-HTTP browser URL the browser drops the CSRF cookie and every save fails. Protected endpoints refuse a
+request without the proxy's identity assertion; for example,
+`GET /api/auth/session` answers `401`.
+
+- [Production authentication](docs/authentication.md#production-trusted-identity-proxy)
+  lists the headers the proxy must strip and inject.
+- [Deployment](docs/deployment.md#3-reverse-proxy-example-nginx-and-oauth2-proxy)
+  has an nginx and oauth2-proxy configuration written for the starter's
+  `foundry:8080` container; point its upstream at `http://127.0.0.1:3001` and
+  its oauth2-proxy settings at your own identity provider for a source build.
+- [Gateway transport](docs/deployment.md#gateway-transport) covers the admin
+  API TLS settings, and the
+  [downstream JWT claims](docs/deployment.md#downstream-jwt-claims) table covers
+  the audience.
 
 ### Docker
 
