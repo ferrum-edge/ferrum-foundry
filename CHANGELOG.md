@@ -26,10 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unreleased Foundry v0.5.7 candidate (#728). Package and lockfile root
   versions move to `0.5.7`, the starter Compose `demo-gateway` and local-run
   instructions use the new digest, and the published v0.5.6 / Edge v0.9.20
-  record stays immutable. Vendored contracts stay at `contracts-edge-0.9.20`
-  (`39da3220`) pending publication of `contracts-edge-0.9.21`; Edge v0.9.21
-  retains the same 82 plugins, priorities, stream protocol matrix, and
-  `provisioned-by` attribution.
+  record stays immutable. Edge v0.9.21 retains the same 82 plugins, priorities,
+  stream protocol matrix, and `provisioned-by` attribution, backed by
+  re-vendored `contracts-edge-0.9.21` (#723).
 - Sync `PLUGIN_SENSITIVITY` and `PLUGIN_SENSITIVITY_SOURCE` to Ferrum Edge
   v0.9.21 (`f9915358`, #728): add the 14 plugin deltas named in #728
   (`request_termination`, `transaction_debugger`, `ai_semantic_firewall`,
@@ -43,6 +42,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `RateLimitingConfig` / `RateLimitingRuleConfig` digests) and
   `SubsetTrafficPolicy` (`SUBSET_TRAFFIC_POLICY_SOURCE`) at Edge v0.9.21
   (`f9915358`); no guided descriptor or server-owned subset field list changed.
+
+### Fixed
+
+- Re-vendor `contracts/ferrum-contracts/` from the SSH-signed
+  `contracts-edge-0.9.21` tag (`92d8da5be93ea1ece9f47729b1f7aa10ae8a7c3f`, 37
+  scoped files) so `POST /api/service-manifest/preview` enforces the canonical
+  `ferrum-contracts#74` and `ferrum-contracts#82` `service-manifest` v1 schema
+  rules directly: `api.public_path` ≤ 500, `api.service_base_path` ≤ 2,049,
+  `upstream.host` ≤ 255 code points, `health.path` ≤ 2,048,
+  `health.interval_seconds` ≤ 3,600, `health.timeout_ms` and `timeouts.*`
+  ≤ 86,400,000, control-character rules on paths and `upstream.host`, and the
+  `gateway.otel_endpoint` cleartext loopback IP-literal rule (#723). Remove the
+  temporary cleartext-OTLP fixture rewrite overlay #735 carried for the older
+  `contracts-edge-0.9.20` fixtures and cover all 31 shared manifest fixtures
+  (5 valid, 26 invalid) with single-defect repairs through the registered BFF
+  route.
 
 ## [0.5.6] - 2026-11-21
 

@@ -47,10 +47,9 @@ workflow (`.github/workflows/ci.yml`) has passed:
 ## Supported Edge image
 
 Passing these gates qualifies Foundry with that one Ferrum Edge image and no
-other build. The current v0.5.7 candidate pins published Edge v0.9.21
-(qualification pending, retaining `contracts-edge-0.9.20` pending
-`contracts-edge-0.9.21`); the latest published pairing remains Foundry v0.5.6 /
-Edge v0.9.20, recorded in
+other build. The current v0.5.7 candidate pins published Edge v0.9.21 and
+`contracts-edge-0.9.21` (qualification pending); the latest published pairing
+remains Foundry v0.5.6 / Edge v0.9.20, recorded in
 [the immutable v0.5.6 record](release-notes/v0.5.6.compatibility.json), and
 earlier pairings in its [history](compatibility.md#history).
 

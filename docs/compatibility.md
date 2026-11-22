@@ -7,12 +7,11 @@ pairing record, and CI reads the gateway image from it.
 
 **Record version 2, status: candidate; qualification: pending.** The unreleased
 Foundry v0.5.7 candidate pins published Edge v0.9.21, the latest Edge release
-(#728), while retaining canonical `contracts-edge-0.9.20` pending publication
-of `contracts-edge-0.9.21`. The latest published pairing remains Foundry v0.5.6
-/ Edge v0.9.20, whose source, image, qualification and publication evidence are
-preserved byte-for-byte in the immutable
-[v0.5.6 record](release-notes/v0.5.6.compatibility.json). Earlier pairings and
-their immutable records are in [History](#history).
+(#728), and vendors canonical `contracts-edge-0.9.21` (#723). The latest
+published pairing remains Foundry v0.5.6 / Edge v0.9.20, whose source, image,
+qualification and publication evidence are preserved byte-for-byte in the
+immutable [v0.5.6 record](release-notes/v0.5.6.compatibility.json). Earlier
+pairings and their immutable records are in [History](#history).
 
 ## The candidate pairing
 
@@ -66,19 +65,18 @@ Its `info.version: 0.2.0` is schema metadata, not either product's version.
 
 ## Qualification evidence
 
-1. **Canonical contracts retained pending `contracts-edge-0.9.21`.** Published
-   [contracts-edge-0.9.20](https://github.com/ferrum-edge/ferrum-contracts/releases/tag/contracts-edge-0.9.20)
-   (`39da322083044c2e92617209e62983c92387f0ad`, release `432497834`) remains
-   pinned until `contracts-edge-0.9.21` is published in
-   `ferrum-edge/ferrum-contracts`. Comparing `src/plugins/builtin_parity.rs`
-   between v0.9.20 and v0.9.21 confirms all 82 plugins, priorities
-   (`PLUGIN_PRIORITY`), and stream protocols (`src/lib/pluginProtocols.ts`) are
-   unchanged (only `active_phases` on `request_transformer`,
-   `response_transformer`, and five logging sinks, plus `zstd` in `compression`
-   rationale, changed). Provisioning attribution, the manifest schema, and all
-   12 fixtures remain unchanged; `scripts/ferrum-contracts.test.mjs` maps
-   `contracts-edge-0.9.20` to `["v0.9.20", "v0.9.21"]` until
-   `contracts-edge-0.9.21` is cut and re-vendored.
+1. **Canonical contracts re-vendored (`contracts-edge-0.9.21`, #723).**
+   Signed tag
+   [contracts-edge-0.9.21](https://github.com/ferrum-edge/ferrum-contracts/tree/92d8da5be93ea1ece9f47729b1f7aa10ae8a7c3f)
+   (`92d8da5be93ea1ece9f47729b1f7aa10ae8a7c3f`, 37 scoped files) is vendored
+   byte-exact in `contracts/ferrum-contracts/PIN`. Edge v0.9.21 retains all
+   82 plugins, priorities (`PLUGIN_PRIORITY`), stream protocols
+   (`src/lib/pluginProtocols.ts`), and `provisioned-by` attribution while
+   binding vocabulary provenance to Edge v0.9.21 (`f9915358`) and shipping
+   the `ferrum-contracts#74`/`#82` `service-manifest` v1 schema rules and all
+   31 shared manifest fixtures (5 valid, 26 invalid).
+   `scripts/ferrum-contracts.test.mjs` maps `contracts-edge-0.9.21` to
+   `["v0.9.21"]` and binds the vocabularies directly to `docs/compatibility.json`.
 2. **Guided schema static review complete.** At
    `f9915358c8032214f4034a17c28cdf72d14006c3`, `KeyAuthConfig`, `CorsConfig`,
    and `PrometheusMetricsConfig` are byte-identical to `e4a606a0`.
