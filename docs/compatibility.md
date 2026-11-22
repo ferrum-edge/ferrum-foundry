@@ -560,9 +560,10 @@ rejected digest may appear only in history files (`CHANGELOG.md`, this page,
 | [Foundry v0.5.6](https://github.com/ferrum-edge/ferrum-foundry/releases/tag/v0.5.6) | Published v0.9.20, `ferrumedge/ferrum-edge@sha256:32a0b0574bb2ed105d315888fab12e33242e1cec3ae9f1ae34c1fb4d0c9a2689` | Qualified and published; full evidence in the [immutable v0.5.6 record](release-notes/v0.5.6.compatibility.json) |
 
 Source commits, platform digests, release runs and Foundry image digests for
-the rows above are preserved in the
-[v0.5.5 tagged copy of this page](https://github.com/ferrum-edge/ferrum-foundry/blob/v0.5.5/docs/compatibility.md#history)
-and the immutable records.
+the rows above are preserved in the immutable records; for v0.5.5 and earlier
+also in the
+[v0.5.5 tagged copy of this page](https://github.com/ferrum-edge/ferrum-foundry/blob/v0.5.5/docs/compatibility.md#history),
+and for v0.5.6 in [The published pairing](#the-published-pairing).
 
 ## Tested support
 
