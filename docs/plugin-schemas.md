@@ -123,7 +123,7 @@ See the [v0.5.5 tagged copy](https://github.com/ferrum-edge/ferrum-foundry/blob/
 
 See the [v0.5.5 tagged copy](https://github.com/ferrum-edge/ferrum-foundry/blob/v0.5.5/docs/plugin-schemas.md#v051-hosted-schema-adoption).
 
-#### v0.5.6 candidate review at Edge v0.9.20
+#### v0.5.6 review at Edge v0.9.20
 
 Re-read at `e4a606a00352674daaef08636e3e359e6c48ba18` (#686), against the
 v0.9.15 blocks at `25b37395ff61bfea0f3ffd189d9011c4984fa755`:
@@ -138,7 +138,7 @@ v0.9.15 blocks at `25b37395ff61bfea0f3ffd189d9011c4984fa755`:
 
 The descriptor changes are listed under
 [Current schema notes](#current-schema-notes). The hosted producer export of
-the candidate's Pinned Gateway Contract run reports every component
+v0.5.6's Pinned Gateway Contract runs reports every component
 `unchanged` at the new digests.
 
 ## What guided editing does to a configuration

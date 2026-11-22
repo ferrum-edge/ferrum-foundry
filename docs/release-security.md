@@ -47,9 +47,8 @@ workflow (`.github/workflows/ci.yml`) has passed:
 ## Supported Edge image
 
 Passing these gates qualifies Foundry with that one Ferrum Edge image and no
-other build. Published Foundry v0.5.5 pairs with Edge v0.9.15, and the
-unreleased v0.5.6 candidate pins Edge v0.9.20; their qualification and
-publication are recorded in
+other build. Published Foundry v0.5.6 pairs with Edge v0.9.20 and published
+`contracts-edge-0.9.20`; its qualification and publication are recorded in
 [the compatibility record](compatibility.md#qualification-evidence), and
 earlier pairings in its [history](compatibility.md#history).
 
@@ -87,7 +86,17 @@ Every third-party GitHub Action is pinned to a full commit SHA.
 ## Publishing
 
 Each release's publication evidence is in its immutable record and the
-[compatibility record](compatibility.md). That evidence does not establish
+[compatibility record](compatibility.md). For v0.5.6, release PR #742 merged
+as `618a75f619a1d1beb44d97852c9795bd19551b8f`, which main push run
+`44967080032`, attempt 1, qualified (pull-request runs come from the
+required-workflow ruleset under another workflow id, which `release-ready`
+refuses). Qualification PR #745 then merged as protected commit
+`05df8c6cee1718fdd54fc923f2b2d7cf33490398`, whose second parent is
+`ac272d630519790909eaea63b12740f9f554808b`; that commit is the `v0.5.6` tag
+target. Release run `44968397446` succeeded; GitHub release `454098852` was
+published at 2026-11-22 00:57:56 UTC with index
+`sha256:1dbe6878b6833bb56805c6de5f5162f1f4970b7a50d71d8921ea2f6bdd46010e`
+([v0.5.6 record](release-notes/v0.5.6.compatibility.json)). That evidence does not establish
 anonymous GHCR access, independent cryptographic attestation verification or
 account-level registry immutability.
 

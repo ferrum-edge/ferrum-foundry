@@ -14,20 +14,17 @@ request.
 For a walkthrough that ends in an authenticated request through the data
 plane, see [`docs/getting-started.md`](../../docs/getting-started.md).
 
-**Candidate pairing.** The demo profile pins published Edge v0.9.20 for the
-Foundry v0.5.6 candidate (#686). The [pairing record](../../docs/compatibility.md)
-holds its hosted qualification; Foundry publication is pending. Production
-must use a published pairing and its released Foundry digest. The latest is
-published Foundry v0.5.5 with Edge v0.9.15, preserved in the
-[v0.5.5 record](../../docs/release-notes/v0.5.5.compatibility.json). The
-default Foundry image stays pinned to that release,
-`ferrumedge/ferrum-foundry@sha256:5bdfa947adead6895e9dbdc4b4db5ed7e960bd7fc5ebb9872ac722ced86a8b0f`;
-set `FOUNDRY_IMAGE` to another released digest when selecting a different
-pairing. Unless `FOUNDRY_IMAGE` is set, the demo profile therefore runs
-released Foundry v0.5.5 against Edge v0.9.20, outside the qualified envelope,
-until the release step moves this default to the published v0.5.6 digest; at
-the `v0.5.6` tag, set `FOUNDRY_IMAGE=ferrumedge/ferrum-foundry@sha256:<digest>`
-with the index digest its GitHub release lists. CI runs the starter with the candidate's own production image.
+**Published pairing.** The demo profile pins published Edge v0.9.20 with
+published Foundry v0.5.6. The [v0.5.6 record](../../docs/release-notes/v0.5.6.compatibility.json)
+preserves source `05df8c6cee1718fdd54fc923f2b2d7cf33490398`, hosted
+[qualification run 44967080032](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/44967080032)
+(source and tested commit `618a75f6`), and
+[publication run 44968397446](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/44968397446)
+(published 2026-11-22 at 00:57:56 UTC). The default Foundry image is pinned to
+`ferrumedge/ferrum-foundry@sha256:1dbe6878b6833bb56805c6de5f5162f1f4970b7a50d71d8921ea2f6bdd46010e`;
+set `FOUNDRY_IMAGE` to another released digest
+(`FOUNDRY_IMAGE=ferrumedge/ferrum-foundry@sha256:<digest>`) when selecting a
+different pairing. CI runs the starter with the image under test.
 
 ## Two profiles
 
@@ -105,8 +102,9 @@ or `unmapped`). It is for a first run and for CI. Do not expose it.
    refuse to start while `FERRUM_JWT_SECRET` or `FERRUM_TRUSTED_PROXY_SECRET`
    still holds the `replace-me-...` placeholder from `.env.example`, or (in
    production) one of the development example values printed in the
-   contributor instructions. The default v0.5.5 image starts with either, so
-   do not rely on it to catch them; the preflight (step 6) fails on both.
+   contributor instructions. An older Foundry image set through `FOUNDRY_IMAGE`
+   starts with either, so do not rely on it to catch them; the preflight
+   (step 6) fails on both.
 
    The files are separate on purpose. `.env` holds the gateway signing key and
    the proof secret; `oauth2-proxy.env` holds the `OAUTH2_PROXY_*` settings,
