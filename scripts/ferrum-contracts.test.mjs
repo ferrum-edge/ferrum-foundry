@@ -71,6 +71,11 @@ const CONTRACTS_TAG_EDGE_VERSIONS = {
   // Foundry moved from v0.9.15 straight to v0.9.20 (#686) and never vendored
   // contracts-edge-0.9.17 or contracts-edge-0.9.19.
   "contracts-edge-0.9.20": ["v0.9.20"],
+  // contracts-edge-0.9.21 keeps the same 82 plugins, priorities, and
+  // provisioned-by values as v0.9.20 while shipping the service-manifest v1
+  // #74/#82 updates (#723); allow v0.9.20 until the Edge v0.9.21 pin (#748)
+  // lands.
+  "contracts-edge-0.9.21": ["v0.9.20", "v0.9.21"],
 };
 
 function describeSetDrift(actual, expected, label) {
@@ -87,7 +92,7 @@ function describeSetDrift(actual, expected, label) {
 
 test("vendored Ferrum Contracts files match their PIN digests", () => {
   const files = pinnedFiles();
-  assert.equal(files.size, 18,
+  assert.equal(files.size, 37,
     "PIN must include the reviewed vocabularies, schema, fixtures and invalid expectations");
   assert.deepEqual([...files.keys()].sort(), vendoredFiles(), "PIN must cover every vendored file");
   for (const [path, expected] of files) {
@@ -194,8 +199,8 @@ test("the PIN parser refuses every line that does not match its position", () =>
 });
 
 test("the published manifest pin retains owner status and complete canonical integrity", () => {
-  assert.equal(pin.tag, "contracts-edge-0.9.20");
-  assert.equal(pin.commit, "39da322083044c2e92617209e62983c92387f0ad");
+  assert.equal(pin.tag, "contracts-edge-0.9.21");
+  assert.equal(pin.commit, "92d8da5be93ea1ece9f47729b1f7aa10ae8a7c3f");
   const schema = JSON.parse(readFileSync(
     new URL("schemas/service-manifest/v1.schema.json", contractRoot), "utf8",
   ));
@@ -208,30 +213,45 @@ test("the published manifest pin retains owner status and complete canonical int
   assert.equal(schema["x-contract"].coordinated_release.qualified_owner_commit,
     "81cbb410d34ff5fba1f3d54cfd2e7ebccaed397e");
   assert.equal(pinnedFiles().get("schemas/service-manifest/v1.schema.json"),
-    "3d086aec773345df3547adf6e026ad466168b27bf98163614d44171b7862b5dc");
+    "21f83f6c3572dde3b5406b63ea74952ca564b37aa1fcf2ee4742e8a9e94e46e6");
   assert.equal(pinnedFiles().get("vocabularies/plugin-catalog.json"),
-    "6263b10e8f327286d796dcea62cea59bb758458b5e1ce50069fcd5773fcf083a");
+    "0b5890162e0510f8eb6e7968fa584278e8f58ffe5695f61420f7ff4b992ea8e1");
   assert.equal(pinnedFiles().get("vocabularies/provisioned-by.json"),
-    "9f1b2ede95dd0e760662c285c3ac6d9f57e443a6847de935119cfa514a35613f");
+    "2640f3b8bb26632a55b8414dd7f73d3e38cf124addb8aad6c3d9620a9648f53e");
   assert.equal(pinnedFiles().get("fixtures/invalid-expectations.json"),
-    "01a73757e6c76d9a3de2c7ac42296726be443406fec53270a67422a2de5c76a3");
+    "38310950957a208c4f4986d1d3f8c4a7ff80ccdfd66950dcb0cefdcb882721aa");
 });
 
 test("the vocabularies bind the published Edge source without changing attribution semantics", () => {
   const compatibility = JSON.parse(
     readFileSync(new URL("../docs/compatibility.json", import.meta.url), "utf8"),
   );
+  // While docs/compatibility.json still pins v0.9.20 ahead of #748, the
+  // re-vendored contracts-edge-0.9.21 vocabularies bind published Edge v0.9.21;
+  // once compatibility.edge.release.version matches, bind it directly.
+  const contractsEdgeSource =
+    pluginCatalog.edge_release === compatibility.edge.release.version
+      ? {
+          version: compatibility.edge.release.version,
+          commit: compatibility.edge.source_commit,
+          openapiSha256: compatibility.edge.release.openapi.sha256,
+        }
+      : {
+          version: "v0.9.21",
+          commit: "f9915358c8032214f4034a17c28cdf72d14006c3",
+          openapiSha256: "13c21d12d3028c8044ad2f467cbca6425d9bd2f3fce787d6fe7ae78316c21bee",
+        };
   for (const vocabulary of [pluginCatalog, provisionedBy]) {
-    assert.equal(vocabulary.edge_release, compatibility.edge.release.version);
+    assert.equal(vocabulary.edge_release, contractsEdgeSource.version);
     for (const source of vocabulary.provenance) {
       assert.equal(source.repo, "ferrum-edge/ferrum-edge");
-      assert.equal(source.ref, compatibility.edge.release.version);
-      assert.equal(source.commit, compatibility.edge.source_commit);
+      assert.equal(source.ref, contractsEdgeSource.version);
+      assert.equal(source.commit, contractsEdgeSource.commit);
     }
     assert.equal(Object.hasOwn(vocabulary, "main_branch_delta"), false);
   }
-  assert.equal(pluginCatalog.config_schema_document.commit, compatibility.edge.source_commit);
-  assert.equal(pluginCatalog.config_schema_document.sha256, compatibility.edge.release.openapi.sha256);
+  assert.equal(pluginCatalog.config_schema_document.commit, contractsEdgeSource.commit);
+  assert.equal(pluginCatalog.config_schema_document.sha256, contractsEdgeSource.openapiSha256);
   assert.equal(provisionedBy.label.key, "provisioned-by");
   assert.equal(provisionedBy.label.available_since, "v0.9.5");
   assert.equal(provisionedBy.header.name, "X-Ferrum-Provisioned-By");

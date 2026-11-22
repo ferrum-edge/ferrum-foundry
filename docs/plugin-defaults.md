@@ -97,13 +97,13 @@ the org's central contract store, in
 [`contracts/ferrum-contracts/PIN`](../contracts/ferrum-contracts/PIN).
 The pinned files and the local plugin names and provisioning markers are checked
 by `scripts/ferrum-contracts.test.mjs` in the normal contract test suite.
-The canonical pin is published `contracts-edge-0.9.20` at
-`39da322083044c2e92617209e62983c92387f0ad`, mapped to Edge v0.9.20. Besides the
-plugin catalog, the provisioning vocabulary and their vocabulary schemas, the
-pin includes the implemented service-manifest schema, every shared manifest
-fixture and the canonical invalid-expectations file for the
+The canonical pin is published `contracts-edge-0.9.21` at
+`92d8da5be93ea1ece9f47729b1f7aa10ae8a7c3f`, mapped to Edge v0.9.20 and v0.9.21.
+Besides the plugin catalog, the provisioning vocabulary and their vocabulary
+schemas, the pin includes the implemented service-manifest schema, every shared
+manifest fixture and the canonical invalid-expectations file for the
 [Alloy preview consumer](alloy-manifest-preview.md). Every adopted file is
-byte-identical to the canonical commit. Foundry's 18-file scope includes no
+byte-identical to the canonical commit. Foundry's 37-file scope includes no
 deployment, egress-policy, diagnostic or header schemas or profile
 implementation. Release and qualification evidence is in
 [the compatibility record](compatibility.md).

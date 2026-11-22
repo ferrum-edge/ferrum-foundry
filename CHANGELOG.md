@@ -19,6 +19,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   if any of those four headers reaches oauth2-proxy on `/oauth2/` or
   `/oauth2/auth`, rather than logging it as a note.
 
+### Fixed
+
+- Re-vendor `contracts/ferrum-contracts/` from the SSH-signed
+  `contracts-edge-0.9.21` tag (`92d8da5be93ea1ece9f47729b1f7aa10ae8a7c3f`, 37
+  scoped files) so `POST /api/service-manifest/preview` enforces the canonical
+  `ferrum-contracts#74` and `ferrum-contracts#82` `service-manifest` v1 schema
+  rules directly: `api.public_path` ≤ 500, `api.service_base_path` ≤ 2,049,
+  `upstream.host` ≤ 255 code points, `health.path` ≤ 2,048,
+  `health.interval_seconds` ≤ 3,600, `health.timeout_ms` and `timeouts.*`
+  ≤ 86,400,000, control-character rules on paths and `upstream.host`, and the
+  `gateway.otel_endpoint` cleartext loopback IP-literal rule (#723). Remove the
+  temporary cleartext-OTLP fixture rewrite overlay #735 carried for the older
+  `contracts-edge-0.9.20` fixtures and cover all 31 shared manifest fixtures
+  (5 valid, 26 invalid) with single-defect repairs through the registered BFF
+  route.
+
 ## [0.5.6] - 2026-11-21
 
 ### Added

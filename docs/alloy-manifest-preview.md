@@ -17,8 +17,8 @@ switches clear the draft and result and abort an outstanding preview.
 ## Contract and provenance
 
 The canonical pin is `contracts/ferrum-contracts/PIN`: immutable tag
-[`contracts-edge-0.9.20`](https://github.com/ferrum-edge/ferrum-contracts/tree/39da322083044c2e92617209e62983c92387f0ad)
-at `39da322083044c2e92617209e62983c92387f0ad`. The adopted files are the existing
+[`contracts-edge-0.9.21`](https://github.com/ferrum-edge/ferrum-contracts/tree/92d8da5be93ea1ece9f47729b1f7aa10ae8a7c3f)
+at `92d8da5be93ea1ece9f47729b1f7aa10ae8a7c3f`. The adopted files are the existing
 plugin/provisioning vocabularies and schemas, plus the service-manifest schema
 and every shared valid/invalid manifest fixture, including agents, plus the
 canonical invalid-expectations file. Each exact published file has a SHA-256 in
@@ -88,39 +88,29 @@ The reviewed producer adds stricter rules, checked after validation:
 Unknown `schemaMajor` is rejected; the version field is `schema_version` and
 only major 1 is supported.
 
-The pinned `contracts-edge-0.9.20` fixtures predate the cleartext rule: the
-schema-valid `orders-api.json` (and the repaired `client-cert-without-key.json`)
-use `http://otel-collector:4318/v1/traces`, which the preview refuses. Tests
-assert that refusal and accept the same manifest over `https://` until
-ferrum-contracts#82 updates the fixtures.
+The pinned `contracts-edge-0.9.21` schema and fixtures include the cleartext
+rule (ferrum-contracts#82): `orders-api.json` and the repaired
+`client-cert-without-key.json` use `https://otel-collector:4318/v1/traces`, and
+`otel-endpoint-cleartext-non-loopback.json` covers the refused cleartext case.
 
 Edge bounds (ferrum-contracts#74, Alloy `validate()`), as of this pin:
 
-- Already enforced. `api.service_base_path` and `health.path` declare no
-  `maxLength` in the pinned schema, so they get the 2,048 default. Paths are
-  ASCII-only, so that is 2,048 bytes, matching Alloy `main` for both. The
-  precheck refuses C0 control characters (U+0000-U+001F) and DEL (U+007F) in
-  every string, including `upstream.host` and `agents.endpoint_path`, and the
-  literal path rule refuses `;`, `%`, `\` and dot segments.
-- Changing with the re-vendor. Contracts `main` keeps 2,048 for `health.path`
-  and declares 2,049 for `service_base_path` (the slash the export strips
-  leaves a backend path of at most 2,048). Once re-vendored, the preview
-  allows a 2,049-character base path, which Alloy `main` (2,048 including the
-  slash) still refuses.
-- Not enforced until the re-vendor, then enforced by the next schema:
-  `api.public_path` at most 500 characters (bytes, as paths are ASCII-only),
-  `upstream.host` at most 255 code points (it gets the 2,048 default today;
-  the schema's host rule also excludes ASCII space, `/`, `@` and the C0
-  controls other than tab, LF and CR, which the precheck already refuses),
-  `health.interval_seconds` at most 3,600, and `health.timeout_ms` and
-  `timeouts.*` at most 86,400,000. A manifest outside these can still preview.
-  They arrive with the next `contracts-edge` release, which Foundry will
-  re-vendor (#723).
-- Not enforced, and not added by the re-vendor alone. Alloy also refuses an
+- Enforced by the vendored schema and preview: `api.public_path` at most 500
+  characters (bytes, as paths are ASCII-only), `api.service_base_path` at most
+  2,049 characters (its stripped trailing `/` leaves a `backend_path` of at most
+  2,048 bytes, matching Edge; Alloy `main` currently refuses more than 2,048
+  including the slash), `upstream.host` at most 255 code points (excluding ASCII
+  space, `/`, `@` and C0 control characters), `health.path` at most 2,048
+  characters, `health.interval_seconds` at most 3,600, and `health.timeout_ms`
+  and `timeouts.*` at most 86,400,000. The precheck and schema refuse C0 control
+  characters (U+0000-U+001F) and DEL (U+007F) in every string, including
+  `upstream.host` and `agents.endpoint_path`, and the literal path rule refuses
+  `;`, `%`, `\`, `*`, `~` and dot segments.
+- Not enforced by the schema or preview alone: Alloy also refuses an
   `upstream.host` containing any Unicode whitespace or control character (for
-  example U+00A0 or U+0085, which neither the next schema nor the C0/DEL
-  precheck refuses), and bounds the host at 255 UTF-8 bytes, so a non-ASCII
-  host of 255 or fewer code points can still exceed Alloy's limit.
+  example U+00A0 or U+0085, which neither the schema nor the C0/DEL precheck
+  refuses), and bounds the host at 255 UTF-8 bytes, so a non-ASCII host of 255
+  or fewer code points can still exceed Alloy's limit.
 
 Local presentation limits are 32 KiB raw UTF-8 JSON, eight nesting levels before
 JSON parsing, 32 array items, and 16 KiB serialized output. `maxLength` is
@@ -162,8 +152,8 @@ unavailable, never an unknown gateway write.
 
 ## Hosted evidence and remaining consumers
 
-Quality Gate (including Node 24) runs all 12 shared fixtures through the actual
-registered BFF route (with the cleartext-OTLP exception above), plus authentication, CSRF, namespace/agents denial,
+Quality Gate (including Node 24) runs all 31 shared fixtures (5 valid, 26 invalid)
+through the actual registered BFF route, plus authentication, CSRF, namespace/agents denial,
 unknown-key/major, normalization, redaction, bounded input, literal mapping and
 accessible UI/cancellation tests. No upstream request is allowed in those
 route tests. Canonical invalid expectations cover every negative fixture;

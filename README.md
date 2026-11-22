@@ -71,12 +71,12 @@ Foundry vendors the `plugin-catalog` and `provisioned-by` vocabularies with
 their vocabulary schemas, plus the implemented service-manifest schema, all
 its valid/invalid fixtures and the canonical invalid-expectations file, under
 [`contracts/ferrum-contracts/`](contracts/ferrum-contracts/), pinned to
-`contracts-edge-0.9.20` at `39da322083044c2e92617209e62983c92387f0ad` in
+`contracts-edge-0.9.21` at `92d8da5be93ea1ece9f47729b1f7aa10ae8a7c3f` in
 [`contracts/ferrum-contracts/PIN`](contracts/ferrum-contracts/PIN). The vendored
 files, Foundry's local plugin names and provisioning markers, and the pin's tie
 to the paired Edge release are checked by
 [Plugin configuration templates](docs/plugin-defaults.md#shared-plugin-catalog-contract).
-Foundry adopts only the 18 files listed in its pin: it does not vendor the
+Foundry adopts only the 37 files listed in its pin: it does not vendor the
 deployment-snapshot or backend-egress-policy schemas or adopt the native
 deployment profile, and diagnostic import remains future work. The pin's
 release and qualification evidence are in the

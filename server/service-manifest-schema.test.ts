@@ -48,9 +48,9 @@ afterEach(() => {
 
 describe('service manifest string bounds', () => {
   it('honors a declared maxLength above the 2048 default without clamping', async () => {
-    // ferrum-contracts main declares api.service_base_path maxLength 2049.
+    // The vendored v1 schema declares api.service_base_path maxLength 2049.
     const schema = vendoredSchema();
-    schema.properties.api.properties.service_base_path.maxLength = 2049;
+    expect(schema.properties.api.properties.service_base_path.maxLength).toBe(2049);
     const { validatedManifest, createManifestPreview } = await load(schema);
     const body = manifest();
     body.api.service_base_path = `/${'a'.repeat(2047)}/`;
@@ -187,7 +187,7 @@ describe('maxLength outside a plain string node', () => {
   it('adds no default from composition clauses that also constrain the field', async () => {
     const schema = vendoredSchema();
     const field = schema.properties.api.properties.service_base_path;
-    field.maxLength = 2049;
+    expect(field.maxLength).toBe(2049);
     field.allOf[1].type = 'string';
     schema.properties.api.allOf = [{ properties: { service_base_path: { pattern: '/$' } } }];
     const { validatedManifest } = await load(schema);
@@ -199,11 +199,15 @@ describe('maxLength outside a plain string node', () => {
   });
 
   it('applies the 2048 default to a field node with clauses but no bound', async () => {
-    const { validatedManifest } = await load(vendoredSchema());
+    const schema = vendoredSchema();
+    expect(schema.properties.gateway.properties.otel_endpoint.allOf).toBeDefined();
+    expect(schema.properties.gateway.properties.otel_endpoint.maxLength).toBeUndefined();
+    const { validatedManifest } = await load(schema);
     const body = manifest();
-    body.api.service_base_path = `/${'a'.repeat(2046)}/`;
+    const prefix = 'https://otel.test/';
+    body.gateway.otel_endpoint = `${prefix}${'a'.repeat(2048 - prefix.length)}`;
     expect(validatedManifest(body)).not.toBeNull();
-    body.api.service_base_path = `/${'a'.repeat(2047)}/`;
+    body.gateway.otel_endpoint = `${prefix}${'a'.repeat(2049 - prefix.length)}`;
     expect(validatedManifest(body)).toBeNull();
   });
 

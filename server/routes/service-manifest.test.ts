@@ -36,30 +36,66 @@ const invalidExpectations: Record<string, { instance_path: string; keyword: stri
 const repairs: Record<string, { path: string[]; keyword: string; value?: unknown }> = {
   'agents-bad-namespace.json': { path: ['agents', 'namespace'], keyword: 'pattern', value: 'orders' },
   'agents-enabled-not-boolean.json': { path: ['agents', 'enabled'], keyword: 'type', value: true },
+  'agents-endpoint-control-character.json': {
+    path: ['agents', 'endpoint_path'], keyword: 'pattern', value: '/shop/mcp',
+  },
   'agents-unknown-key.json': { path: ['agents'], keyword: 'additionalProperties' },
+  'base-path-over-edge-max.json': {
+    path: ['api', 'service_base_path'], keyword: 'maxLength', value: `/${'v'.repeat(2047)}/`,
+  },
   'base-path-without-trailing-slash.json': {
     path: ['api', 'service_base_path'], keyword: 'pattern', value: '/v1/',
   },
   'client-cert-without-key.json': { path: ['upstream'], keyword: 'dependentRequired' },
+  'health-interval-over-edge-max.json': {
+    path: ['health', 'interval_seconds'], keyword: 'maximum', value: 3600,
+  },
+  'health-path-dot-segment.json': { path: ['health', 'path'], keyword: 'pattern', value: '/readyz' },
+  'health-path-over-edge-max.json': {
+    path: ['health', 'path'], keyword: 'maxLength', value: `/${'r'.repeat(2047)}`,
+  },
+  'health-timeout-over-edge-max.json': {
+    path: ['health', 'timeout_ms'], keyword: 'maximum', value: 86400000,
+  },
   'http3-protocol.json': { path: ['upstream', 'protocols', '1'], keyword: 'enum', value: 'http2' },
+  'otel-endpoint-cleartext-non-loopback.json': {
+    path: ['gateway', 'otel_endpoint'], keyword: 'pattern',
+    value: 'https://otel-collector:4318/v1/traces',
+  },
+  'public-path-control-character.json': {
+    path: ['api', 'public_path'], keyword: 'pattern', value: '/catalog',
+  },
+  'public-path-over-edge-max.json': {
+    path: ['api', 'public_path'], keyword: 'maxLength', value: `/${'c'.repeat(499)}`,
+  },
+  'public-path-semicolon.json': {
+    path: ['api', 'public_path'], keyword: 'pattern', value: '/catalog',
+  },
+  'public-path-star.json': {
+    path: ['api', 'public_path'], keyword: 'pattern', value: '/catalog',
+  },
+  'public-path-tilde.json': {
+    path: ['api', 'public_path'], keyword: 'pattern', value: '/catalog/staff',
+  },
+  'timeout-connect-over-edge-max.json': {
+    path: ['timeouts', 'connect_ms'], keyword: 'maximum', value: 86400000,
+  },
+  'timeout-read-over-edge-max.json': {
+    path: ['timeouts', 'read_ms'], keyword: 'maximum', value: 86400000,
+  },
+  'timeout-write-over-edge-max.json': {
+    path: ['timeouts', 'write_ms'], keyword: 'maximum', value: 86400000,
+  },
   'tls-path-with-http-scheme.json': { path: ['upstream', 'scheme'], keyword: 'const', value: 'https' },
   'unknown-field.json': { path: ['upstream'], keyword: 'additionalProperties' },
   'unsupported-major.json': { path: ['schema_version'], keyword: 'pattern', value: '1.0' },
+  'upstream-host-control-character.json': {
+    path: ['upstream', 'host'], keyword: 'pattern', value: 'orders.internal',
+  },
+  'upstream-host-over-edge-max.json': {
+    path: ['upstream', 'host'], keyword: 'maxLength', value: `${'h'.repeat(251)}.net`,
+  },
 };
-// The pinned contracts-edge-0.9.20 fixtures still use a cleartext OTLP
-// endpoint to a non-loopback name, which Edge's otel_tracing drops at runtime
-// and current Alloy refuses (#723, ferrum-contracts#82). The schema accepts
-// it; the preview refuses it, and accepts the same manifest over https.
-const CLEARTEXT_OTLP_ENDPOINT = 'http://otel-collector:4318/v1/traces';
-const TLS_OTLP_ENDPOINT = 'https://otel-collector:4318/v1/traces';
-function usesCleartextOtlp(body: any): boolean {
-  return body.gateway?.otel_endpoint === CLEARTEXT_OTLP_ENDPOINT;
-}
-function withTlsOtlp<T>(body: T): T {
-  const fixed: any = structuredClone(body);
-  if (usesCleartextOtlp(fixed)) fixed.gateway.otel_endpoint = TLS_OTLP_ENDPOINT;
-  return fixed;
-}
 const secret = 'preview-credential-canary-123456789';
 const unknownKey = 'unreviewed-secret-field';
 let app: FastifyInstance;
@@ -176,31 +212,12 @@ describe('authenticated service manifest preview through the registered BFF rout
     else if (name === 'unknown-field.json') delete fixed.upstream.backend_scheme;
     else fixed.upstream.gateway_client_key_path = '/etc/ferrum/edge-client.key';
     expect(manifestValidator.safeParse(fixed).success).toBe(true);
-    if (usesCleartextOtlp(fixed)) {
-      expect((await preview(fixed, fixed.gateway.namespace)).statusCode).toBe(400);
-    }
-    const response = await preview(withTlsOtlp(fixed), fixed.gateway?.namespace ?? 'ferrum');
+    const response = await preview(fixed, fixed.gateway?.namespace ?? 'ferrum');
     expect(response.statusCode).toBe(200);
     expect(upstreamFetch).not.toHaveBeenCalled();
   });
 
-  it('refuses a schema-valid fixture whose OTLP endpoint Edge would drop, until it uses https', async () => {
-    const refused = valid.filter(({ body }) => usesCleartextOtlp(body)).map(({ name }) => name);
-    expect(refused).toEqual(['orders-api.json']);
-    const { body } = valid.find(({ name }) => name === 'orders-api.json')!;
-    expect(manifestValidator.safeParse(body).success).toBe(true);
-    const response = await preview(body);
-    expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({
-      error: 'Manifest does not match the supported v1 schema or preview normalization',
-      code: 'FERRUM_BFF_MANIFEST_INVALID',
-    });
-    expect((await preview(withTlsOtlp(body))).statusCode).toBe(200);
-    expect(upstreamFetch).not.toHaveBeenCalled();
-  });
-
-  it.each(valid)('consumes shared valid fixture $name without side effects', async ({ body: raw }) => {
-    const body = withTlsOtlp(raw);
+  it.each(valid)('consumes shared valid fixture $name without side effects', async ({ body }) => {
     const response = await preview(body, body.gateway?.namespace ?? 'ferrum');
     expect(response.statusCode).toBe(200);
     expect(response.headers['cache-control']).toBe('no-store');
@@ -467,16 +484,24 @@ describe('authenticated service manifest preview through the registered BFF rout
 
   it('bounds the serialized response in UTF-8 rather than returning oversized desired data', async () => {
     const body = structuredClone(valid[0].body);
-    // Paths must be ASCII pchars; the host and the OTLP path may carry
-    // multi-byte characters that are counted in UTF-8.
-    const path = `/${'p'.repeat(2000)}`;
-    body.api.public_path = path;
-    body.api.service_base_path = `${path}/`;
-    body.agents.endpoint_path = `${path}/mcp`;
-    body.upstream.host = '界'.repeat(2000);
-    body.gateway = { otel_endpoint: `https://otel.test/${'界'.repeat(2000)}` };
-    expect(JSON.stringify(body).length).toBeLessThan(MANIFEST_RESPONSE_LIMIT);
-    expect(Buffer.byteLength(JSON.stringify(body))).toBeGreaterThan(MANIFEST_RESPONSE_LIMIT);
+    // Every field stays within the v1 schema bounds; multi-byte characters in
+    // the host and OTLP path push the preview's UTF-8 size past the budget
+    // while its UTF-16 string length stays under it.
+    const publicPath = `/${'p'.repeat(499)}`;
+    body.api.public_path = publicPath;
+    body.api.service_base_path = `/${'b'.repeat(2047)}/`;
+    body.agents.endpoint_path = `${publicPath}/${'m'.repeat(2048 - publicPath.length - 1)}`;
+    body.health = { path: `/${'h'.repeat(2047)}` };
+    body.upstream.host = '界'.repeat(255);
+    body.gateway = {
+      proxy_id: 'a'.repeat(239),
+      otel_endpoint: `https://otel.test/${'界'.repeat(2030)}`,
+    };
+    const manifest = validatedManifest(body);
+    expect(manifest).not.toBeNull();
+    const serialized = JSON.stringify(createManifestPreview(manifest!));
+    expect(serialized.length).toBeLessThan(MANIFEST_RESPONSE_LIMIT);
+    expect(Buffer.byteLength(serialized)).toBeGreaterThan(MANIFEST_RESPONSE_LIMIT);
     const response = await preview(body);
     expect(response.statusCode).toBe(400);
     expect(response.json()).toEqual({ error: 'Desired configuration exceeds the preview budget' });
@@ -700,7 +725,7 @@ describe('authenticated service manifest preview through the registered BFF rout
   });
 
   it('derives the backend path and default agents path in linear time', () => {
-    const manifest = validatedManifest(withTlsOtlp(valid[0].body))!;
+    const manifest = validatedManifest(valid[0].body)!;
     expect(manifest).not.toBeNull();
     const slashes = '/'.repeat(200_000);
     manifest.api = { ...manifest.api, public_path: `${slashes}x`, service_base_path: `${slashes}y` };
@@ -738,8 +763,7 @@ describe('authenticated service manifest preview through the registered BFF rout
   });
 
   it('maps health and TLS to the upstream, redacts paths and never reads them', async () => {
-    const body = valid.find((fixture) => fixture.name === 'orders-api.json')!.body;
-    const orders = withTlsOtlp(body);
+    const orders = structuredClone(valid.find((fixture) => fixture.name === 'orders-api.json')!.body);
     orders.upstream.gateway_client_key_path = `/nonexistent/${secret}.key`;
     orders.service.description = secret;
     orders.api.openapi = `/nonexistent/${secret}.json`;
@@ -762,6 +786,28 @@ describe('authenticated service manifest preview through the registered BFF rout
     expect(desired.upstream.health_checks).not.toHaveProperty('enabled');
     expect(summary.tlsPathFields).toHaveLength(3);
     expect(response.body + logs).not.toContain(secret);
+    expect(upstreamFetch).not.toHaveBeenCalled();
+  });
+
+  it('previews the edge-limits and unicode-host valid fixtures at their exact Edge bounds', async () => {
+    const limits = valid.find((fixture) => fixture.name === 'edge-limits.json')!.body;
+    const limitsResponse = await preview(limits);
+    expect(limitsResponse.statusCode).toBe(200);
+    const { desired: limitsDesired } = limitsResponse.json();
+    expect(limitsDesired.proxy.listen_path).toHaveLength(500);
+    expect(limitsDesired.proxy.backend_path).toHaveLength(2048);
+    expect(limitsDesired.proxy.backend_connect_timeout_ms).toBe(86400000);
+    expect(limitsDesired.proxy.backend_read_timeout_ms).toBe(86400000);
+    expect(limitsDesired.proxy.backend_write_timeout_ms).toBe(86400000);
+    expect(limitsDesired.upstream.targets[0].host).toHaveLength(255);
+    expect(limitsDesired.upstream.health_checks.active).toMatchObject({
+      http_path: limits.health.path, interval_seconds: 3600, timeout_ms: 86400000,
+    });
+
+    const unicodeHost = valid.find((fixture) => fixture.name === 'unicode-host.json')!.body;
+    const unicodeResponse = await preview(unicodeHost, 'retail');
+    expect(unicodeResponse.statusCode).toBe(200);
+    expect(unicodeResponse.json().desired.proxy.backend_host).toBe(unicodeHost.upstream.host);
     expect(upstreamFetch).not.toHaveBeenCalled();
   });
 
