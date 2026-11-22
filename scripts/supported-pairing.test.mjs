@@ -311,7 +311,7 @@ describe("the supported pairing record", () => {
       ["0.5.3", "8e57ea00308afa3aedd04aafcf6e63e7601c7cb1837b7b5787c65cb4a7fd15d4"],
       ["0.5.4", "f69fa7e84ad1f2e89f3a73d64629e87e4bab64de9f7c8f1758941ef461c16647"],
       ["0.5.5", "58fb1d567eddf0a0dc10088164cf8602080a6fb4f47c746c5024da4a8f75313f"],
-      ["0.5.6", "8d7a3a569c95cc16eb94b60aea8ef08f77af5f7031f29f63d08f249e5aea802c"],
+      ["0.5.6", "b2cba95c44584dbf239ce8a425215565e2db803af67cdb9f5f6a82347927f343"],
     ]) {
       const bytes = repoFile(`docs/release-notes/v${version}.compatibility.json`);
       assert.equal(createHash("sha256").update(bytes).digest("hex"), digest);

@@ -1,5 +1,5 @@
 {
-  "$comment": "Supported Foundry-Edge pairing, metadata version 2. qualification records hosted pairing acceptance separately from actual Foundry publication and verified Edge distribution. Immutable v0.4.0, v0.5.0, v0.5.1, v0.5.2, v0.5.3, v0.5.4, v0.5.5 and v0.5.6 release records are under docs/release-notes/. CI reads edge.image; docs/compatibility.md records the unchanged support envelope.",
+  "$comment": "Supported Foundry-Edge pairing, metadata version 2. qualification records hosted pairing acceptance separately from actual Foundry publication and verified Edge distribution. Immutable v0.4.0, v0.5.0, v0.5.1, v0.5.2, v0.5.3, v0.5.4, v0.5.5 and v0.5.6 release records are under docs/release-notes/. CI reads edge.image; docs/compatibility.md records the support envelope, including the starter production identity path first qualified in v0.5.6.",
   "record_version": 2,
   "status": "released",
   "foundry": {
