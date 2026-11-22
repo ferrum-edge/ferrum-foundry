@@ -19,6 +19,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   if any of those four headers reaches oauth2-proxy on `/oauth2/` or
   `/oauth2/auth`, rather than logging it as a note.
 
+### Changed
+
+- Pin published Ferrum Edge v0.9.21 (`f9915358`, index `sha256:e6b0e480…`,
+  `linux/amd64` `sha256:dff4c3af…`, `linux/arm64` `sha256:f7811d35…`) for the
+  unreleased Foundry v0.5.7 candidate (#728). Package and lockfile root
+  versions move to `0.5.7`, the starter Compose `demo-gateway` and local-run
+  instructions use the new digest, and the published v0.5.6 / Edge v0.9.20
+  record stays immutable. Edge v0.9.21 retains the same 82 plugins, priorities,
+  stream protocol matrix, and `provisioned-by` attribution, backed by
+  re-vendored `contracts-edge-0.9.21` (#723).
+- Sync `PLUGIN_SENSITIVITY` and `PLUGIN_SENSITIVITY_SOURCE` to Ferrum Edge
+  v0.9.21 (`f9915358`, #728): add the 14 plugin deltas named in #728
+  (`request_termination`, `transaction_debugger`, `ai_semantic_firewall`,
+  `waf`, `openapi_validator`, `ai_tool_governor`, `mcp_gateway`, `opa`,
+  `mesh_route_dispatch`, `request_mirror`, `mtls_auth`, `soap_ws_security`,
+  `udp_logging`, `mesh_authz`) plus `redis_url` on `jwks_auth`, `hmac_auth`,
+  and `soap_ws_security` added in v0.9.21. Pre-save placeholder checks and
+  failed-write redaction now classify `endpoint-path`, `certificate`, and
+  `private-key` sites directly from the pinned table.
+- Re-review guided plugin schemas (`PLUGIN_SCHEMA_SPEC.ref` and the updated
+  `RateLimitingConfig` / `RateLimitingRuleConfig` digests) and
+  `SubsetTrafficPolicy` (`SUBSET_TRAFFIC_POLICY_SOURCE`) at Edge v0.9.21
+  (`f9915358`); no guided descriptor or server-owned subset field list changed.
+
 ### Fixed
 
 - Re-vendor `contracts/ferrum-contracts/` from the SSH-signed

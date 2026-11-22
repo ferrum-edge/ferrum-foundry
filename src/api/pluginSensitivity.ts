@@ -21,9 +21,9 @@ export const PLUGIN_SENSITIVITY_SOURCE = {
   repository: "ferrum-edge/ferrum-edge",
   path: "src/admin/plugin_config_projection.rs",
   /** The Edge source the table was last checked against. */
-  commit: "e4a606a00352674daaef08636e3e359e6c48ba18",
+  commit: "f9915358c8032214f4034a17c28cdf72d14006c3",
   /** The Edge release at that commit. */
-  release: "v0.9.20",
+  release: "v0.9.21",
 } as const;
 
 /**
@@ -33,9 +33,7 @@ export const PLUGIN_SENSITIVITY_SOURCE = {
  * an `endpoint` or `redis` URL (the whole value when it is not a URL), and
  * every `kafka` producer property off the safe list.
  *
- * Edge `main` (ferrum-edge#7054, after v0.9.20) adds three TLS and path
- * classes, which Foundry implements ahead of the pin so its table can be
- * re-synced when the pin moves:
+ * Edge v0.9.21 (ferrum-edge#7054) adds three TLS and path classes:
  *
  * - `certificate` (`CertificateSource`): a certificate or CA source, inline
  *   PEM or a reference. It stays visible unless it carries a PEM private-key
@@ -66,8 +64,67 @@ export interface SensitivityRule {
 const secret = (...path: string[]): SensitivityRule => ({ path, sensitivity: "secret" });
 const endpoint = (...path: string[]): SensitivityRule => ({ path, sensitivity: "endpoint" });
 const redis = (...path: string[]): SensitivityRule => ({ path, sensitivity: "redis" });
+const privateKey = (...path: string[]): SensitivityRule => ({ path, sensitivity: "private-key" });
+const endpointPath = (...path: string[]): SensitivityRule => ({
+  path,
+  sensitivity: "endpoint-path",
+});
+const certificate = (...path: string[]): SensitivityRule => ({ path, sensitivity: "certificate" });
 const REDIS_BACKED = [redis("redis_url")];
 const NONE: readonly SensitivityRule[] = [];
+const MESH_AUTHZ: readonly SensitivityRule[] = [
+  secret("mesh_policies", "*", "rules", "*", "to", "*", "headers", "*"),
+  secret("mesh_policies", "*", "rules", "*", "when", "*", "values", "*"),
+  secret("mesh_policies", "*", "rules", "*", "when", "*", "not_values", "*"),
+  secret("mesh_slice", "mesh_policies", "*", "rules", "*", "to", "*", "headers", "*"),
+  secret("mesh_slice", "mesh_policies", "*", "rules", "*", "when", "*", "values", "*"),
+  secret("mesh_slice", "mesh_policies", "*", "rules", "*", "when", "*", "not_values", "*"),
+  secret(
+    "mesh_slice",
+    "node_waypoint_capture_mesh_policies",
+    "*",
+    "rules",
+    "*",
+    "to",
+    "*",
+    "headers",
+    "*",
+  ),
+  secret(
+    "mesh_slice",
+    "node_waypoint_capture_mesh_policies",
+    "*",
+    "rules",
+    "*",
+    "when",
+    "*",
+    "values",
+    "*",
+  ),
+  secret(
+    "mesh_slice",
+    "node_waypoint_capture_mesh_policies",
+    "*",
+    "rules",
+    "*",
+    "when",
+    "*",
+    "not_values",
+    "*",
+  ),
+  secret("mesh_slice", "ext_authz_providers", "*", "include_additional_headers_in_check", "*", "value"),
+  secret("mesh_slice", "ext_authz_providers", "*", "path_prefix"),
+  secret("mesh_slice", "proxy_configs", "*", "environment", "*"),
+  secret("mesh_slice", "extension_configs", "*", "value"),
+  endpoint("mesh_slice", "telemetry_resources", "*", "config", "tracing", "providers", "*", "config", "url"),
+  endpoint("mesh_slice", "telemetry_resources", "*", "config", "tracing", "providers", "*", "config", "agent_url"),
+  endpoint("mesh_slice", "telemetry_resources", "*", "config", "tracing", "providers", "*", "config", "collector_url"),
+  endpoint("mesh_slice", "telemetry_resources", "*", "config", "tracing", "providers", "*", "config", "endpoint"),
+  endpoint("mesh_slice", "request_authentications", "*", "jwt_rules", "*", "jwks_uri"),
+  endpoint("mesh_slice", "multi_cluster", "federation_endpoint"),
+  endpoint("mesh_slice", "multi_cluster", "remote_clusters", "*", "control_plane_url"),
+  endpoint("mesh_slice", "multi_cluster", "remote_clusters", "*", "federation_endpoint"),
+];
 
 /**
  * Edge's `PLUGIN_SENSITIVITY_SCHEMAS`, transcribed rule for rule. A plugin
@@ -80,7 +137,7 @@ export const PLUGIN_SENSITIVITY = new Map<string, readonly SensitivityRule[]>([
   ["otel_tracing", [endpoint("endpoint"), secret("authorization"), secret("headers", "*")]],
   ["correlation_id", NONE],
   ["cors", NONE],
-  ["request_termination", NONE],
+  ["request_termination", [secret("trigger", "header_value")]],
   ["mesh_outbound_registry", NONE],
   ["ip_restriction", NONE],
   ["geo_restriction", NONE],
@@ -90,12 +147,13 @@ export const PLUGIN_SENSITIVITY = new Map<string, readonly SensitivityRule[]>([
   ["grpc_web", NONE],
   ["grpc_method_router", REDIS_BACKED],
   ["spiffe_identity", NONE],
-  ["mtls_auth", NONE],
+  ["mtls_auth", [certificate("allowed_issuers", "*", "ca_certificate_pem")]],
   ["jwks_auth", [
     endpoint("providers", "*", "discovery_url"),
     endpoint("providers", "*", "jwks_uri"),
     endpoint("discovery_url"),
     endpoint("jwks_uri"),
+    redis("redis_url"),
   ]],
   ["oauth2_introspection", [
     endpoint("providers", "*", "discovery_url"),
@@ -121,12 +179,16 @@ export const PLUGIN_SENSITIVITY = new Map<string, readonly SensitivityRule[]>([
   ["key_auth", NONE],
   ["ldap_auth", [endpoint("ldap_url"), endpoint("failover_ldap_urls")]],
   ["basic_auth", NONE],
-  ["hmac_auth", NONE],
-  ["soap_ws_security", NONE],
+  ["hmac_auth", REDIS_BACKED],
+  ["soap_ws_security", [
+    certificate("x509_signature", "trusted_certs", "*"),
+    certificate("saml", "trusted_signing_certs", "*"),
+    redis("redis_url"),
+  ]],
   ["access_control", NONE],
   ["tcp_connection_throttle", NONE],
-  ["mesh_authz", NONE],
-  ["opa", [secret("headers", "*")]],
+  ["mesh_authz", MESH_AUTHZ],
+  ["opa", [endpoint("opa_host"), secret("headers", "*")]],
   ["adaptive_concurrency", NONE],
   ["request_deduplication", REDIS_BACKED],
   ["request_size_limiting", NONE],
@@ -143,17 +205,38 @@ export const PLUGIN_SENSITIVITY = new Map<string, readonly SensitivityRule[]>([
     secret("custom_headers", "*"),
   ]],
   ["ai_prompt_shield", NONE],
-  ["waf", [secret("global_exemptions", "header_present", "*")]],
+  ["waf", [
+    secret("global_exemptions", "header_present", "*"),
+    secret("custom_rules", "*", "conditions", "headers", "*"),
+    secret("rule_overrides", "*", "conditions", "headers", "*"),
+  ]],
   ["fault_injection", [secret("match", "headers", "*")]],
   ["body_validator", NONE],
-  ["openapi_validator", NONE],
-  ["ai_semantic_firewall", [endpoint("provider", "endpoint")]],
+  ["openapi_validator", [secret("bypass", "header_present", "*")]],
+  ["ai_semantic_firewall", [
+    endpoint("provider", "endpoint"),
+    secret("privacy", "snippet_hash_salt"),
+  ]],
   ["ai_request_guard", NONE],
-  ["ai_tool_governor", [endpoint("endpoint_url"), endpoint("approval", "endpoint_url")]],
+  ["ai_tool_governor", [
+    endpoint("endpoint_url"),
+    endpoint("approval", "endpoint_url"),
+    secret("approval", "headers", "*"),
+  ]],
   ["ai_stream_router", [endpoint("providers", "*", "endpoint")]],
-  ["mcp_gateway", [endpoint("servers", "*", "upstream_url"), endpoint("upstream_url")]],
+  ["mcp_gateway", [
+    endpoint("servers", "*", "upstream_url"),
+    endpoint("upstream_url"),
+    secret("servers", "*", "headers", "*"),
+  ]],
   ["a2a_gateway", NONE],
-  ["mesh_route_dispatch", [secret("rules", "*", "request_transform", "*", "value")]],
+  ["mesh_route_dispatch", [
+    secret("rules", "*", "request_transform", "*", "value"),
+    secret("rules", "*", "match", "headers", "*", "*"),
+    secret("rules", "*", "match", "without_headers", "*", "*"),
+    secret("rules", "*", "match", "query_params", "*", "*"),
+    endpointPath("rules", "*", "rewrite", "uri"),
+  ]],
   ["ai_semantic_cache", [
     redis("redis_url"),
     endpoint("semantic_embedding_endpoint"),
@@ -171,7 +254,7 @@ export const PLUGIN_SENSITIVITY = new Map<string, readonly SensitivityRule[]>([
   ]],
   ["grpc_deadline", NONE],
   ["load_testing", NONE],
-  ["request_mirror", NONE],
+  ["request_mirror", [endpointPath("mirror_path")]],
   ["response_size_limiting", NONE],
   ["response_caching", NONE],
   ["response_transformer", NONE],
@@ -193,9 +276,13 @@ export const PLUGIN_SENSITIVITY = new Map<string, readonly SensitivityRule[]>([
     secret("authorization_header"),
     secret("custom_headers", "*"),
   ]],
-  ["udp_logging", NONE],
+  ["udp_logging", [
+    privateKey("dtls_key_path"),
+    certificate("dtls_cert_path"),
+    certificate("dtls_ca_cert_path"),
+  ]],
   ["ws_logging", [endpoint("endpoint_url"), secret("custom_headers", "*")]],
-  ["transaction_debugger", NONE],
+  ["transaction_debugger", [secret("capture_request_header_value")]],
   ["proxy_alerts", [
     endpoint("channels", "*", "webhook_url"),
     endpoint("channels", "*", "url"),

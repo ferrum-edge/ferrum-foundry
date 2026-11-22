@@ -14,14 +14,17 @@ request.
 For a walkthrough that ends in an authenticated request through the data
 plane, see [`docs/getting-started.md`](../../docs/getting-started.md).
 
-**Published pairing.** The demo profile pins published Edge v0.9.20 with
-published Foundry v0.5.6. The [v0.5.6 record](../../docs/release-notes/v0.5.6.compatibility.json)
+**Candidate pairing.** The demo profile pins published Edge v0.9.21 for the
+Foundry v0.5.7 candidate; hosted qualification and Foundry publication are
+pending. The latest published pairing remains **Foundry v0.5.6 / Edge v0.9.20**,
+whose [v0.5.6 record](../../docs/release-notes/v0.5.6.compatibility.json)
 preserves source `05df8c6cee1718fdd54fc923f2b2d7cf33490398`, hosted
 [qualification run 44967080032](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/44967080032)
 (source and tested commit `618a75f6`), and
 [publication run 44968397446](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/44968397446)
-(published 2026-11-22 at 00:57:56 UTC). The default Foundry image is pinned to
-`ferrumedge/ferrum-foundry@sha256:1dbe6878b6833bb56805c6de5f5162f1f4970b7a50d71d8921ea2f6bdd46010e`;
+(published 2026-11-22 at 00:57:56 UTC). The default Foundry image remains pinned
+to published v0.5.6
+(`ferrumedge/ferrum-foundry@sha256:1dbe6878b6833bb56805c6de5f5162f1f4970b7a50d71d8921ea2f6bdd46010e`);
 set `FOUNDRY_IMAGE` to another released digest
 (`FOUNDRY_IMAGE=ferrumedge/ferrum-foundry@sha256:<digest>`) when selecting a
 different pairing. CI runs the starter with the image under test.

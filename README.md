@@ -49,11 +49,13 @@ works the same way against a live Ferrum Edge gateway.
 
 ## Supported Ferrum Edge version
 
-The published pairing is **Foundry v0.5.6 / Ferrum Edge v0.9.20** (#686),
-pinned by digest in `docs/compatibility.json`. Its source, image, platform
+The current candidate pairing is **Foundry v0.5.7 / Ferrum Edge v0.9.21**
+(#728), pinned by digest in `docs/compatibility.json`; hosted qualification and
+Foundry publication are pending. The latest published pairing remains
+**Foundry v0.5.6 / Ferrum Edge v0.9.20** (#686), whose source, image, platform
 digests, qualification and publication evidence are preserved in the
 [immutable v0.5.6 record](docs/release-notes/v0.5.6.compatibility.json).
-Published v0.5.5 / Edge v0.9.15 and earlier pairings remain unchanged in the
+Earlier pairings remain unchanged in the
 [pairing record](docs/compatibility.md#history).
 
 The qualification envelope stays `database` mode on SQLite (writable and

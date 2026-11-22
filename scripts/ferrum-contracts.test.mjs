@@ -71,11 +71,7 @@ const CONTRACTS_TAG_EDGE_VERSIONS = {
   // Foundry moved from v0.9.15 straight to v0.9.20 (#686) and never vendored
   // contracts-edge-0.9.17 or contracts-edge-0.9.19.
   "contracts-edge-0.9.20": ["v0.9.20"],
-  // contracts-edge-0.9.21 keeps the same 82 plugins, priorities, and
-  // provisioned-by values as v0.9.20 while shipping the service-manifest v1
-  // #74/#82 updates (#723); allow v0.9.20 until the Edge v0.9.21 pin (#748)
-  // lands.
-  "contracts-edge-0.9.21": ["v0.9.20", "v0.9.21"],
+  "contracts-edge-0.9.21": ["v0.9.21"],
 };
 
 function describeSetDrift(actual, expected, label) {
@@ -226,32 +222,17 @@ test("the vocabularies bind the published Edge source without changing attributi
   const compatibility = JSON.parse(
     readFileSync(new URL("../docs/compatibility.json", import.meta.url), "utf8"),
   );
-  // While docs/compatibility.json still pins v0.9.20 ahead of #748, the
-  // re-vendored contracts-edge-0.9.21 vocabularies bind published Edge v0.9.21;
-  // once compatibility.edge.release.version matches, bind it directly.
-  const contractsEdgeSource =
-    pluginCatalog.edge_release === compatibility.edge.release.version
-      ? {
-          version: compatibility.edge.release.version,
-          commit: compatibility.edge.source_commit,
-          openapiSha256: compatibility.edge.release.openapi.sha256,
-        }
-      : {
-          version: "v0.9.21",
-          commit: "f9915358c8032214f4034a17c28cdf72d14006c3",
-          openapiSha256: "13c21d12d3028c8044ad2f467cbca6425d9bd2f3fce787d6fe7ae78316c21bee",
-        };
   for (const vocabulary of [pluginCatalog, provisionedBy]) {
-    assert.equal(vocabulary.edge_release, contractsEdgeSource.version);
+    assert.equal(vocabulary.edge_release, compatibility.edge.release.version);
     for (const source of vocabulary.provenance) {
       assert.equal(source.repo, "ferrum-edge/ferrum-edge");
-      assert.equal(source.ref, contractsEdgeSource.version);
-      assert.equal(source.commit, contractsEdgeSource.commit);
+      assert.equal(source.ref, compatibility.edge.release.version);
+      assert.equal(source.commit, compatibility.edge.source_commit);
     }
     assert.equal(Object.hasOwn(vocabulary, "main_branch_delta"), false);
   }
-  assert.equal(pluginCatalog.config_schema_document.commit, contractsEdgeSource.commit);
-  assert.equal(pluginCatalog.config_schema_document.sha256, contractsEdgeSource.openapiSha256);
+  assert.equal(pluginCatalog.config_schema_document.commit, compatibility.edge.source_commit);
+  assert.equal(pluginCatalog.config_schema_document.sha256, compatibility.edge.release.openapi.sha256);
   assert.equal(provisionedBy.label.key, "provisioned-by");
   assert.equal(provisionedBy.label.available_since, "v0.9.5");
   assert.equal(provisionedBy.header.name, "X-Ferrum-Provisioned-By");
