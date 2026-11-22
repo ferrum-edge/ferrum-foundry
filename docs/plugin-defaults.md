@@ -98,7 +98,8 @@ the org's central contract store, in
 The pinned files and the local plugin names and provisioning markers are checked
 by `scripts/ferrum-contracts.test.mjs` in the normal contract test suite.
 The canonical pin is published `contracts-edge-0.9.20` at
-`39da322083044c2e92617209e62983c92387f0ad`, mapped to Edge v0.9.20. Besides the
+`39da322083044c2e92617209e62983c92387f0ad`, mapped to Edge v0.9.20 and
+retained for the v0.9.21 candidate pending `contracts-edge-0.9.21`. Besides the
 plugin catalog, the provisioning vocabulary and their vocabulary schemas, the
 pin includes the implemented service-manifest schema, every shared manifest
 fixture and the canonical invalid-expectations file for the
