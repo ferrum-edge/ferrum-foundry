@@ -5,11 +5,13 @@ with that image says nothing about any other Edge build, older or newer.
 [`compatibility.json`](compatibility.json) is the machine-readable current
 candidate record, and CI reads the gateway image from it.
 
-**Record version 2, status: candidate; qualification: pending.** The Foundry
-v0.5.6 candidate selects published Edge v0.9.20, the latest Edge release, and
-canonical `contracts-edge-0.9.20` (#686). Foundry source, image and
-publication CI fields are null; all four qualification identity fields are
-null. This source preparation is not a release or a recorded qualification.
+**Record version 2, status: candidate.** The Foundry v0.5.6 candidate
+selects published Edge v0.9.20, the latest Edge release, and canonical
+`contracts-edge-0.9.20` (#686). Foundry source, image and publication CI
+fields are null until the release step. The `qualification` object in the
+record holds the hosted pairing qualification: pending, with null identity
+fields, until a hosted CI run of the candidate passes, and then that run's
+identity. The candidate is not a release.
 The latest published pairing remains Foundry v0.5.5 / Edge v0.9.15, preserved
 byte-for-byte in [its immutable record](release-notes/v0.5.5.compatibility.json).
 Earlier pairings and their immutable records are in [History](#history).
@@ -21,8 +23,8 @@ Earlier pairings and their immutable records are in [History](#history).
 | Version | v0.5.6 candidate; previous release v0.5.5 | [Ferrum Edge v0.9.20](https://github.com/ferrum-edge/ferrum-edge/releases/tag/v0.9.20) |
 | Source commit | *release step*: null until publication | `e4a606a00352674daaef08636e3e359e6c48ba18`, immutable `v0.9.20` tag target |
 | Image | *release step*: null until publication | `ferrumedge/ferrum-edge@sha256:32a0b0574bb2ed105d315888fab12e33242e1cec3ae9f1ae34c1fb4d0c9a2689` |
-| Platforms | `linux/amd64`, `linux/arm64` qualification pending | `linux/amd64` `sha256:d3e3e7e8409d0583b23e0fa4eee4b85c7b20885a314d4ada2ca8aad66bd33e1c`; `linux/arm64` `sha256:406d8335e60f15ee024141762a7b280bea4abe76fef37ac26b65c45085ae7426` |
-| CI evidence | Qualification pending; publication *release step* | [Edge release run 41590569525](https://github.com/ferrum-edge/ferrum-edge/actions/runs/41590569525), all 20 jobs successful; distribution evidence only |
+| Platforms | `linux/amd64`, `linux/arm64` Container Gates; see `qualification` | `linux/amd64` `sha256:d3e3e7e8409d0583b23e0fa4eee4b85c7b20885a314d4ada2ca8aad66bd33e1c`; `linux/arm64` `sha256:406d8335e60f15ee024141762a7b280bea4abe76fef37ac26b65c45085ae7426` |
+| CI evidence | Hosted qualification in the record's `qualification` object; publication *release step* | [Edge release run 41590569525](https://github.com/ferrum-edge/ferrum-edge/actions/runs/41590569525), all 20 jobs successful; distribution evidence only |
 | Published | *release step* | GitHub release 432463173, 2026-11-03 08:58:10 UTC |
 
 Edge v0.9.20 is stricter than v0.9.15 about the plugin configuration Foundry
@@ -109,9 +111,9 @@ Its `info.version: 0.2.0` is schema metadata, not either product's version.
    table follows rule for rule and `PLUGIN_SENSITIVITY_SOURCE` names
    e4a606a0. Edge's name heuristic for config keys narrowed to its listed
    rules; Foundry's name floor is unchanged and stays the broader of the two.
-4. **Hosted pairing qualification pending.** The candidate pull request runs
-   every gateway-backed gate against the new image; the run that qualifies the
-   tagged source is recorded in `qualification` when the release is prepared.
+4. **Hosted pairing qualification.** A hosted CI run of the candidate source
+   runs every gateway-backed gate against the new image; that run is recorded
+   in `qualification` before the tag.
 5. **Foundry publication pending** (*release step*).
 
 The database profiles, Node floors and `viewer` / `operator` / `admin` tiers are
@@ -150,7 +152,11 @@ qualifies only if:
    Contract (including capability parity, writable and read-only), Deployment
    Starter, Starter Production Profile, Critical Journeys, and Container Gate.
    `QUALIFICATION_JOBS` in `scripts/hosted-qualification.mjs` is that list;
-   release readiness refuses a run in which any of them did not succeed.
+   release readiness refuses a run in which any of them did not succeed. The
+   release evidence recorded in `qualification` is a successful hosted run of
+   `ci.yml` itself: a `main` push run of the candidate source. Pull-request
+   runs come from the required-workflow ruleset under another workflow id,
+   which release readiness refuses, so they are required checks only.
 
 `node scripts/supported-pairing.mjs release-ready` verifies this through hosted
 GitHub Actions with `actions: read` and `contents: read`. The release workflow
@@ -449,7 +455,7 @@ table is unchanged and `PLUGIN_SENSITIVITY_SOURCE` now names 25b37395. The
 ### Admin API changes in v0.9.16 through v0.9.20
 
 Edge published v0.9.17 (2026-10-10), v0.9.19 (2026-10-27) and v0.9.20
-(2026-11-02); v0.9.16 and v0.9.18 were tagged but not published. Most of the
+(2026-11-03 UTC); v0.9.16 and v0.9.18 were tagged but not published. Most of the
 changes are data-plane, mesh, Gateway API and per-plugin runtime hardening.
 The changes on surfaces Foundry writes or reads are:
 

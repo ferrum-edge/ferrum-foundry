@@ -234,7 +234,9 @@ describe("the supported pairing record", () => {
     assert.equal(record.foundry.version, "0.5.6");
     assert.equal(record.foundry.previous_release, "v0.5.5");
     assert.equal(record.status, "candidate");
-    assert.equal(record.qualification.status, "pending");
+    // The release pull request records its hosted qualification on the
+    // candidate before tagging; only that object changes (release-ready).
+    assert.ok(["pending", "qualified"].includes(record.qualification.status));
     const pkg = JSON.parse(repoFile("package.json"));
     const lock = JSON.parse(repoFile("package-lock.json"));
     // The release workflow requires the tag, package.json, and the record to agree.

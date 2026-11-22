@@ -1,8 +1,9 @@
 # Ferrum Foundry — next release (draft)
 
 > **Draft notes.** The unreleased v0.5.6 candidate is documented in
-> [v0.5.6.md](v0.5.6.md) and the `[Unreleased]` changelog bucket. Hosted
-> qualification and Foundry publication are pending. The latest published
+> [v0.5.6.md](v0.5.6.md) and the `[0.5.6]` changelog section. Its hosted
+> qualification is held in the record's `qualification` object, and Foundry
+> publication is pending. The latest published
 > pairing remains v0.5.5 / Edge v0.9.15 in its
 > [immutable release record](v0.5.5.compatibility.json).
 > The release workflow requires matching package/compatibility versions,

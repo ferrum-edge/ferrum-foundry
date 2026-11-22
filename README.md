@@ -50,9 +50,9 @@ works the same way against a live Ferrum Edge gateway.
 ## Supported Ferrum Edge version
 
 The **Foundry v0.5.6 candidate** pins published **Ferrum Edge v0.9.20** by
-digest in `docs/compatibility.json` (#686). Hosted pairing qualification and
-Foundry publication are pending; verified Edge distribution does not qualify
-Foundry. The latest published pairing is **Foundry v0.5.5 / Ferrum Edge
+digest in `docs/compatibility.json` (#686). The record's `qualification`
+object holds the hosted pairing qualification, and Foundry publication is
+pending; verified Edge distribution does not qualify Foundry. The latest published pairing is **Foundry v0.5.5 / Ferrum Edge
 v0.9.15**, preserved in its
 [immutable record](docs/release-notes/v0.5.5.compatibility.json); earlier
 pairings are in the [pairing record](docs/compatibility.md).
