@@ -136,7 +136,10 @@ e2e/production-smoke/run.sh down
   (`forwarded-headers.mjs`), the requests to oauth2-proxy carry exactly one of
   each forwarded header it reads, with nginx's own value, on `/oauth2/start`
   and on the `/oauth2/auth` subrequest. `X-Auth-Request-Redirect` is the
-  request URI on `/oauth2/start` and absent on the subrequest. Foundry
+  request URI on `/oauth2/start` and absent on the subrequest, and the BFF's
+  `X-Ferrum-Auth-Secret`, `X-Forwarded-User`, `X-Ferrum-Role`, and
+  `X-Ferrum-Namespaces` headers are absent on both `/oauth2/start` and
+  `/oauth2/auth`. Foundry
   receives nginx's `X-Forwarded-Host`, `-Proto` and `X-Real-IP`, an
   `X-Forwarded-For` ending with nginx's peer, and no `X-Forwarded-Uri`,
   `X-Auth-Request-Redirect`, or oauth2-proxy `X-Auth-Request-*` identity
@@ -160,10 +163,12 @@ e2e/production-smoke/run.sh down
   disjoint from the trusted range.
 
 Every forwarded and identity value the probes forge carries a marker string,
-except the role, which is an enum; the session check shows the client's role
-is ignored. Any other header carrying a marker fails at Foundry. At
-oauth2-proxy it is printed as a note, because oauth2-proxy reads only the
-headers checked above. A client header without a marker is not detected.
+except the role, which is an enum; `X-Ferrum-Role` is checked by absence at
+oauth2-proxy, and the session check shows the client's role is ignored at
+Foundry. Any other header carrying a marker fails at Foundry. At oauth2-proxy
+it is printed as a note, because oauth2-proxy reads only the headers checked
+above. A client header without a marker is not detected unless it is required
+to be absent.
 
 CI runs this as the **Starter Production Profile** job, against the image built
 from the commit, and prints every container's logs when it fails.

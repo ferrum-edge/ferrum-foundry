@@ -12,7 +12,9 @@
 //     (X-Forwarded-For/-Host/-Proto/-Uri, X-Real-IP) arrives exactly once,
 //     with nginx's own value; X-Auth-Request-Redirect arrives once, set to
 //     the request URI, on the /oauth2/ sign-in routes, and not at all on the
-//     /oauth2/auth subrequest;
+//     /oauth2/auth subrequest; and the BFF's trusted-proxy proof secret and
+//     identity headers (X-Ferrum-Auth-Secret, X-Forwarded-User, X-Ferrum-Role,
+//     X-Ferrum-Namespaces) are not sent on either route;
 //   - at Foundry, which trusts X-Forwarded-* from nginx, X-Forwarded-Host,
 //     -Proto and X-Real-IP are nginx's, X-Forwarded-For ends with nginx's
 //     peer, and X-Forwarded-Uri, X-Auth-Request-Redirect and oauth2-proxy's
@@ -22,9 +24,10 @@
 //
 // "Spoofed value" means one of the marker strings in the expectations: the
 // probes put a marker in every forwarded and identity value they forge (all
-// but the role, an enum the session check covers). Any other header carrying
-// a marker fails at Foundry and is reported at oauth2-proxy (see
-// e2e/README.md). A client header with no marker is not detected.
+// but the role, an enum checked by absence at oauth2-proxy and by the session
+// check at Foundry). Any other header carrying a marker fails at Foundry and
+// is reported at oauth2-proxy (see e2e/README.md). A client header with no
+// marker is not detected unless listed in `absent`.
 //
 //   node e2e/production-smoke/forwarded-headers.mjs <capture.pcap> <expectations.json>
 
@@ -38,6 +41,20 @@ export const REDIRECT_HEADER = "x-auth-request-redirect";
 
 /** Logged by oauth2-proxy as the request ID; nginx sends its own $request_id. */
 export const REQUEST_ID_HEADER = "x-request-id";
+
+/**
+ * The BFF's trusted-proxy proof secret and identity headers. nginx replaces
+ * them toward Foundry via inject.conf and must clear them toward oauth2-proxy
+ * on both /oauth2/ and /oauth2/auth so a client-supplied value (including the
+ * starter preflight's forged-identity probe carrying the real proof secret)
+ * never reaches oauth2-proxy.
+ */
+export const CLEARED_TOWARD_OAUTH2_PROXY = [
+  "x-ferrum-auth-secret",
+  "x-forwarded-user",
+  "x-ferrum-role",
+  "x-ferrum-namespaces",
+];
 
 /**
  * oauth2-proxy's identity response headers. nginx reads them from the auth
@@ -272,7 +289,10 @@ function rulesFor(probe, upstream, { host, proto }) {
         [REQUEST_ID_HEADER]: isRequestId,
         ...(signIn ? { [REDIRECT_HEADER]: probe.uri } : {}),
       },
-      absent: signIn ? [] : [REDIRECT_HEADER],
+      absent: [
+        ...(signIn ? [] : [REDIRECT_HEADER]),
+        ...CLEARED_TOWARD_OAUTH2_PROXY,
+      ],
       appendedForwardedFor: false,
     };
   }

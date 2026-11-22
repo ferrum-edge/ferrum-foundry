@@ -226,6 +226,11 @@ test("nginx's own forwarded headers pass", () => {
   assert.deepEqual(errors, []);
   assert.deepEqual(observed.map((entry) => entry.probe), ["start", "auth-session", "foundry-session"]);
   assert.deepEqual(observed[1].headers["x-auth-request-redirect"], [], "the auth subrequest sends no redirect");
+  for (const entry of [observed[0], observed[1]]) {
+    for (const header of ["x-ferrum-auth-secret", "x-forwarded-user", "x-ferrum-role", "x-ferrum-namespaces"]) {
+      assert.deepEqual(entry.headers[header], [], `${entry.probe} sends no ${header}`);
+    }
+  }
   assert.deepEqual(passthrough, []);
 });
 
@@ -265,6 +270,33 @@ test("a client's X-Auth-Request-Redirect on the auth subrequest fails", () => {
   assert.deepEqual(errors, [
     'probe auth-session: x-auth-request-redirect must not reach oauth2-proxy on /oauth2/auth (1 sent, with the forged "spoofed.invalid")',
   ]);
+});
+
+test("a client's BFF proof secret or identity headers reaching oauth2-proxy fail", () => {
+  for (const [index, probeId, path] of [
+    [0, "start", "/oauth2/start"],
+    [1, "auth-session", "/oauth2/auth"],
+  ]) {
+    for (const [header, value, marker] of [
+      ["x-ferrum-auth-secret", "spoofed-proof-secret-at-least-32-characters", "spoofed-proof-secret"],
+      // Even a real secret carrying no spoof marker fails without being echoed.
+      ["x-ferrum-auth-secret", "real-proxy-proof-secret-not-in-markers", undefined],
+      ["x-forwarded-user", "spoofed-user@example.com", "spoofed-user"],
+      ["x-ferrum-role", "admin", undefined],
+      ["x-ferrum-namespaces", "production,spoofed-namespace", "spoofed-namespace"],
+    ]) {
+      const requests = cleanRequests();
+      requests[index].headers.push([header, value]);
+      const { errors, observed, passthrough } = checkProbes(requests, EXPECTATIONS);
+      const expected = marker
+        ? `probe ${probeId}: ${header} must not reach oauth2-proxy on ${path} (1 sent, with the forged "${marker}")`
+        : `probe ${probeId}: ${header} must not reach oauth2-proxy on ${path} (1 sent)`;
+      assert.deepEqual(errors, [expected], `${probeId} ${header}`);
+      assert.deepEqual(passthrough, [], `${probeId} ${header} must fail, not pass as a note`);
+      // Neither the secret nor any raw identity header value is echoed into logs.
+      assert.ok(!JSON.stringify({ errors, observed }).includes(value), `${probeId} ${header}`);
+    }
+  }
 });
 
 test("a duplicated, missing, or rewritten header fails", () => {

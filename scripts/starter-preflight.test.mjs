@@ -643,6 +643,29 @@ test("the production proxy sets every forwarded header oauth2-proxy reads", asyn
   }
 });
 
+test("the production proxy clears the BFF's identity headers toward oauth2-proxy", async () => {
+  // nginx must not forward the BFF's proof secret or identity headers to
+  // oauth2-proxy on /oauth2/ or the /oauth2/auth subrequest (for example,
+  // starter-preflight's forged-identity probe sends the real proof secret to
+  // the front door, which runs /oauth2/auth before location /).
+  const production = await readFile(new URL("nginx/foundry.conf", STARTER), "utf8");
+  for (const location of ["location /oauth2/ {", "location = /oauth2/auth {"]) {
+    const block = locationBlock(production, location, "foundry.conf");
+    for (const header of [
+      "X-Ferrum-Auth-Secret",
+      "X-Forwarded-User",
+      "X-Ferrum-Role",
+      "X-Ferrum-Namespaces",
+    ]) {
+      assert.deepEqual(
+        proxySetHeader(block, header),
+        ['""'],
+        `${location} must clear ${header} with ""`,
+      );
+    }
+  }
+});
+
 test("the BFF receives only nginx's forwarded headers and request ID", async () => {
   // The BFF trusts X-Forwarded-* from its directly connected hop, nginx, so in
   // both profiles nginx sets or clears every one it could otherwise pass on
