@@ -297,9 +297,13 @@ Things that are easy to get wrong:
   `X-Request-Id` (`$request_id`), which oauth2-proxy logs as the request ID.
   Set `X-Auth-Request-Redirect` to `$request_uri` on `/oauth2/`, and to `""`
   on `/oauth2/auth`, which does not read it and would otherwise inherit the
-  client's copy. oauth2-proxy runs with `--reverse-proxy` and believes these
-  headers; a client's `X-Forwarded-For` or `X-Forwarded-Uri` passed through is
-  what its header-spoofing bypasses use.
+  client's copy. Clear `X-Ferrum-Auth-Secret`, `X-Forwarded-User`,
+  `X-Ferrum-Role`, and `X-Ferrum-Namespaces` (`""`) on both `/oauth2/` and
+  `/oauth2/auth` as well, so client-supplied copies — including the starter
+  preflight's forged-identity probe carrying the real proof secret — never
+  reach oauth2-proxy. oauth2-proxy runs with `--reverse-proxy` and believes
+  these forwarded headers; a client's `X-Forwarded-For` or `X-Forwarded-Uri`
+  passed through is what its header-spoofing bypasses use.
 - **Believe those headers only from the proxy's network.** Set
   oauth2-proxy's `--trusted-proxy-ip` (`OAUTH2_PROXY_TRUSTED_PROXY_IPS`) to
   the narrowest range that holds the proxy. Without it oauth2-proxy believes
@@ -828,8 +832,9 @@ SBOM attestations. See [Release and supply-chain gates](release-security.md).
 
 - [ ] TLS terminates at the identity-aware proxy, with a current certificate.
 - [ ] The proxy strips client copies of `X-Ferrum-Auth-Secret`,
-      `X-Forwarded-User`, `X-Ferrum-Role`, and `X-Ferrum-Namespaces` and sets
-      its own values for all four.
+      `X-Forwarded-User`, `X-Ferrum-Role`, and `X-Ferrum-Namespaces`, sets
+      its own values for all four toward the BFF, and clears all four toward
+      oauth2-proxy on `/oauth2/` and `/oauth2/auth`.
 - [ ] The proxy sets or clears every `X-Forwarded-*` header,
       `X-Auth-Request-Redirect`, and `X-Request-Id` it sends oauth2-proxy and
       the BFF, as `deploy/starter/nginx/foundry.conf` does, and clears

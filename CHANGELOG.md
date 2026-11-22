@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Clear the BFF's trusted-proxy proof secret (`X-Ferrum-Auth-Secret`) and
+  identity headers (`X-Forwarded-User`, `X-Ferrum-Role`, `X-Ferrum-Namespaces`)
+  on both `location /oauth2/` and `location = /oauth2/auth` in the deployment
+  starter's production proxy (`deploy/starter/nginx/foundry.conf`), so a
+  client-supplied value — including `scripts/starter-preflight.mjs`'s
+  forged-identity probe carrying the real proof secret — is never forwarded to
+  oauth2-proxy. The production smoke test (`e2e/production-smoke/`) now fails
+  if any of those four headers reaches oauth2-proxy on `/oauth2/` or
+  `/oauth2/auth`, rather than logging it as a note.
+
 ### Changed
 
 - Pin published Ferrum Edge v0.9.21 (`f9915358`, index `sha256:e6b0e480…`,

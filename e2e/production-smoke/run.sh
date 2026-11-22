@@ -14,7 +14,8 @@
 #      groups to, and a user in no Ferrum group is refused at login;
 #   3. nginx sets every forwarded header oauth2-proxy reads, on /oauth2/ and on
 #      the /oauth2/auth subrequest, clears X-Auth-Request-Redirect on the
-#      subrequest, sets or clears every X-Forwarded-* header and the redirect
+#      subrequest and the BFF's proof secret and identity headers on both
+#      routes, sets or clears every X-Forwarded-* header and the redirect
 #      header it sends Foundry, sends its own X-Request-Id to both, and a
 #      client's spoofed values reach neither oauth2-proxy nor Foundry;
 #   4. oauth2-proxy believes forged X-Forwarded-* headers sent to it directly
@@ -277,7 +278,7 @@ session_field() {
 
 # The forwarded headers a client sends to try to steer oauth2-proxy, plus the
 # identity headers (Foundry's and oauth2-proxy's) it sends to try to steer
-# Foundry.
+# Foundry or leak the BFF proof secret to oauth2-proxy.
 SPOOF_HEADERS=(
   -H "X-Forwarded-For: $SPOOFED_ADDRESS"
   -H "X-Real-IP: $SPOOFED_ADDRESS"
@@ -447,7 +448,7 @@ verify() {
   # A log that cannot be read fails rather than passing as clean.
   read_log "oauth2-proxy's log" "$WORK/oauth2-proxy.log" compose logs --no-color oauth2-proxy
   log_names_none "oauth2-proxy's log" "$WORK/oauth2-proxy.log" \
-    "$SPOOFED_ADDRESS" "$SPOOFED_HOST" "$SPOOFED_REQUEST_ID"
+    "$SPOOFED_ADDRESS" "$SPOOFED_HOST" "$SPOOFED_REQUEST_ID" "$SPOOFED_SECRET"
   # The BFF trusts X-Forwarded-* from nginx and logs the host it resolves, so
   # its log is a witness that nginx set X-Forwarded-Host itself.
   read_log "Foundry's log" "$WORK/foundry.log" compose logs --no-color foundry

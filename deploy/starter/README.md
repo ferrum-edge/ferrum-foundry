@@ -180,7 +180,11 @@ or `unmapped`). It is for a first run and for CI. Do not expose it.
   from its own view of the request. `X-Auth-Request-Redirect` is set to the
   request URI on the sign-in routes and cleared on the subrequest, and every
   upstream gets nginx's own `X-Request-Id` (`$request_id`), so a client cannot
-  choose the request ID oauth2-proxy logs.
+  choose the request ID oauth2-proxy logs. Both `/oauth2/` and `/oauth2/auth`
+  also clear `X-Ferrum-Auth-Secret`, `X-Forwarded-User`, `X-Ferrum-Role`, and
+  `X-Ferrum-Namespaces`, so the BFF's proof secret and identity headers never
+  reach oauth2-proxy — including when `starter-preflight.mjs` sends the real
+  proof secret in its forged-identity probe.
 - **oauth2-proxy believes those headers only from this stack's network.**
   The Compose network has a fixed subnet, `10.73.88.0/24` unless
   `FOUNDRY_STARTER_SUBNET` in `.env` says otherwise, and oauth2-proxy runs
