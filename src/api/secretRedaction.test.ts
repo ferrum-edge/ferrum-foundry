@@ -276,6 +276,60 @@ describe("plugin configurations follow Ferrum Edge's projection", () => {
       custom_headers: { "x-collector": "wl-1" },
     }, ["wl-1"]],
     ["ldap_auth", { failover_ldap_urls: ["ldap2.internal/t0ken"] }, ["ldap2.internal/t0ken"]],
+    // Rules Edge v0.9.21 adds to its projection (plugin_config_projection.rs, #728).
+    ["request_termination", { trigger: { header: "x-maint", header_value: "maint-tok-1" } }, ["maint-tok-1"]],
+    ["transaction_debugger", { capture_request_header_value: "dbg-tok-1", log_request_body: false }, ["dbg-tok-1"]],
+    ["ai_semantic_firewall", { privacy: { snippet_hash_salt: "salt-1" } }, ["salt-1"]],
+    ["waf", {
+      custom_rules: [{ conditions: { headers: { "x-allow": "w-1" } } }],
+      rule_overrides: { r1: { conditions: { headers: { "x-override": "w-2" } } } },
+    }, ["w-1", "w-2"]],
+    ["openapi_validator", { bypass: { header_present: { "x-skip": "ov-1" } } }, ["ov-1"]],
+    ["ai_tool_governor", {
+      approval: { endpoint_url: "https://approve.internal", headers: { "x-approve": "atg-1" } },
+    }, ["atg-1"]],
+    ["mcp_gateway", {
+      servers: { docs: { upstream_url: "https://mcp.internal", headers: { "x-mcp-key": "mcp-1" } } },
+    }, ["mcp-1"]],
+    ["opa", { opa_host: "https://opa.internal:8181/v1/secret-tenant" }, [
+      "https://opa.internal:8181/v1/secret-tenant",
+      "/v1/secret-tenant",
+    ]],
+    ["opa", { opa_host: "opa.internal/t0ken" }, ["opa.internal/t0ken"]],
+    ["request_mirror", { mirror_host: "127.0.0.1", mirror_path: "/ingest/tok-1" }, ["/ingest/tok-1"]],
+    ["request_mirror", { mirror_host: "127.0.0.1", mirror_path: "/" }, []],
+    ["request_mirror", { mirror_host: "127.0.0.1", mirror_path: "" }, []],
+    ["mesh_route_dispatch", {
+      rules: [{
+        match: {
+          headers: { "x-tok": { exact: "mh-1" } },
+          without_headers: { "x-neg": "mn-1" },
+          query_params: { code: { prefix: "mq-1" } },
+        },
+        rewrite: { uri: "/internal/tok-2" },
+      }],
+    }, ["/internal/tok-2", "mh-1", "mn-1", "mq-1"]],
+    ["mesh_route_dispatch", { rules: [{ rewrite: { uri: "/" } }] }, []],
+    ["udp_logging", {
+      dtls_key_path: "/etc/ferrum/dtls.key",
+      dtls_cert_path: "/etc/ferrum/dtls.crt",
+      dtls_ca_cert_path: "system://",
+    }, []],
+    ["udp_logging", { dtls_key_path: PEM }, [PEM]],
+    ["udp_logging", { dtls_key_path: "/etc/ferrum/dtls\u0007.key" }, ["/etc/ferrum/dtls\u0007.key"]],
+    ["jwks_auth", { redis_url: "cache.internal/dpop" }, ["cache.internal/dpop"]],
+    ["hmac_auth", { redis_url: "cache.internal/replay" }, ["cache.internal/replay"]],
+    ["soap_ws_security", {
+      saml: { trusted_signing_certs: ["/etc/ferrum/idp.pem", CERT] },
+      redis_url: "cache.internal/nonce",
+    }, ["cache.internal/nonce"]],
+    ["mesh_authz", {
+      mesh_policies: [{ rules: [{ when: [{ values: ["v-1"], not_values: ["nv-1"] }] }] }],
+      mesh_slice: {
+        ext_authz_providers: [{ path_prefix: "/check/tok-1" }],
+        multi_cluster: { federation_endpoint: "fed.internal/tok-2" },
+      },
+    }, ["/check/tok-1", "fed.internal/tok-2", "nv-1", "v-1"]],
   ])("%s: takes the paths Edge redacts and nothing else", (plugin, config, expected) => {
     expect(classifiedValues(pluginConfigSecrets(plugin, config))).toEqual([...expected].sort());
   });

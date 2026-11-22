@@ -42,8 +42,8 @@ export interface SchemaProvenance {
 export const PLUGIN_SCHEMA_SPEC = {
   repository: "ferrum-edge/ferrum-edge",
   path: "openapi.yaml",
-  /** Released source the descriptors were last re-read against (Edge v0.9.20). */
-  ref: "e4a606a00352674daaef08636e3e359e6c48ba18",
+  /** Released source the descriptors were last re-read against (Edge v0.9.21). */
+  ref: "f9915358c8032214f4034a17c28cdf72d14006c3",
   /** `info.version` at that revision. */
   version: "0.2.0",
 } as const;
@@ -55,11 +55,11 @@ export const PLUGIN_SCHEMA_PROVENANCE: readonly SchemaProvenance[] = [
   },
   {
     component: "RateLimitingConfig",
-    sha256: "bdf7cf6c6da35aabe48a79b5f4f6ddd768c37f3e0a39c870d8be2fe2697d7e1a",
+    sha256: "d378b0338ce52c2664bb9bc968e42adb344a08db59b46966ba5255f0498da5f4",
   },
   {
     component: "RateLimitingRuleConfig",
-    sha256: "baeb7755166ff2af60d33fdc8eff36e94fb04e5b15ef099c69792a064eb2489d",
+    sha256: "d173852f113c1823ee6231478cea929e2c915c77b778ff4abc8015dec1e270b0",
   },
   {
     component: "CorsConfig",

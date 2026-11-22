@@ -23,7 +23,7 @@ Foundry keeps no copy of `openapi.yaml`. It stores the reviewed descriptors and
 the SHA-256 of each source component block instead:
 
 - `PLUGIN_SCHEMA_SPEC` pins the upstream commit
-  (`ferrum-edge/ferrum-edge@e4a606a00352674daaef08636e3e359e6c48ba18`, Edge v0.9.20,
+  (`ferrum-edge/ferrum-edge@f9915358c8032214f4034a17c28cdf72d14006c3`, Edge v0.9.21,
   `info.version: 0.2.0`).
 - `PLUGIN_SCHEMA_PROVENANCE` pins one digest per component.
 
@@ -140,6 +140,25 @@ The descriptor changes are listed under
 [Current schema notes](#current-schema-notes). The hosted producer export of
 v0.5.6's Pinned Gateway Contract runs reports every component
 `unchanged` at the new digests.
+
+#### v0.5.7 review at Edge v0.9.21
+
+Re-read at `f9915358c8032214f4034a17c28cdf72d14006c3` (#728), against the
+v0.9.20 blocks at `e4a606a00352674daaef08636e3e359e6c48ba18`:
+
+| Component | v0.9.20 digest | v0.9.21 digest |
+| --- | --- | --- |
+| `KeyAuthConfig` | `9385df5fb8f1900b720cdda6ac8c5ede0382b90517921d6cf9de5604c182c818` | unchanged |
+| `RateLimitingConfig` | `bdf7cf6c6da35aabe48a79b5f4f6ddd768c37f3e0a39c870d8be2fe2697d7e1a` | `d378b0338ce52c2664bb9bc968e42adb344a08db59b46966ba5255f0498da5f4` |
+| `RateLimitingRuleConfig` | `baeb7755166ff2af60d33fdc8eff36e94fb04e5b15ef099c69792a064eb2489d` | `d173852f113c1823ee6231478cea929e2c915c77b778ff4abc8015dec1e270b0` |
+| `CorsConfig` | `e85a83a4743491dc1b7fa8e80e0d2213af269de94392c250c17de2373f8005c3` | unchanged |
+| `PrometheusMetricsConfig` | `dc406f5e376290918f45dab2b3cac64234582b52951fcbbc480216171a0ac543` | unchanged |
+
+`RateLimitingConfig` dropped the redundant `default:` keyword on
+`redis_key_prefix` (its prose still documents the same default), and
+`RateLimitingRuleConfig` updated the unmodelled `consumers` description to
+clarify mapped Consumer username matching only (GHSA-rxwj-x6c6-f4j5). No guided
+descriptor changed.
 
 ## What guided editing does to a configuration
 

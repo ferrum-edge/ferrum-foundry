@@ -61,13 +61,112 @@ describe("plugin config sites Edge refuses for a non-admin role", () => {
       reserved: ["/config/redaction_placeholder"],
       other: ["/config/docs_url"],
     });
-    // A certificate-plus-key bundle Edge main masks in `mtls_auth` reads as
-    // `[REDACTED]`, which the pinned table has no rule for: still blocked.
+    // A certificate-plus-key bundle Edge v0.9.21 masks in `mtls_auth` reads as
+    // `[REDACTED]` and classifies as a TLS source.
     expect(
-      pluginConfigRefusedSites("mtls_auth", {
-        allowed_issuers: [{ ca_certificate_pem: "[REDACTED]" }],
-      }),
-    ).toEqual(["/config/allowed_issuers/0/ca_certificate_pem"]);
+      pluginConfigPlaceholderSites(
+        "mtls_auth",
+        { allowed_issuers: [{ ca_certificate_pem: "[REDACTED]" }] },
+        "operator",
+      ),
+    ).toEqual({
+      blocking: ["/config/allowed_issuers/0/ca_certificate_pem"],
+      sources: ["/config/allowed_issuers/0/ca_certificate_pem"],
+      reserved: [],
+      other: [],
+    });
+  });
+
+  it("classifies Edge v0.9.21 endpoint-path, endpoint, TLS source, and secret rules (#728)", () => {
+    expect(
+      pluginConfigPlaceholderSites(
+        "request_mirror",
+        { mirror_host: "127.0.0.1", mirror_path: "[REDACTED]" },
+        "operator",
+      ),
+    ).toEqual({
+      blocking: ["/config/mirror_path"],
+      sources: [],
+      reserved: [],
+      other: [],
+    });
+    expect(
+      pluginConfigPlaceholderSites(
+        "request_mirror",
+        { mirror_host: "127.0.0.1", mirror_path: "/" },
+        "operator",
+      ).blocking,
+    ).toEqual([]);
+    expect(
+      pluginConfigPlaceholderSites(
+        "mesh_route_dispatch",
+        { rules: [{ rewrite: { uri: "[REDACTED]" } }] },
+        "operator",
+      ),
+    ).toEqual({
+      blocking: ["/config/rules/0/rewrite/uri"],
+      sources: [],
+      reserved: [],
+      other: [],
+    });
+    expect(
+      pluginConfigPlaceholderSites(
+        "opa",
+        { opa_host: "https://opa.internal/[REDACTED_PATH]" },
+        "operator",
+      ),
+    ).toEqual({
+      blocking: ["/config/opa_host"],
+      sources: [],
+      reserved: [],
+      other: [],
+    });
+    expect(
+      pluginConfigPlaceholderSites(
+        "udp_logging",
+        {
+          dtls_key_path: "[REDACTED]",
+          dtls_cert_path: "[REDACTED]",
+          dtls_ca_cert_path: "/etc/ferrum/ca.pem",
+        },
+        "operator",
+      ),
+    ).toEqual({
+      blocking: ["/config/dtls_key_path", "/config/dtls_cert_path"],
+      sources: ["/config/dtls_key_path", "/config/dtls_cert_path"],
+      reserved: [],
+      other: [],
+    });
+    expect(
+      pluginConfigPlaceholderSites(
+        "request_termination",
+        { trigger: { header: "x-maint", header_value: "[REDACTED]" } },
+        "operator",
+      ),
+    ).toEqual({
+      blocking: ["/config/trigger/header_value"],
+      sources: [],
+      reserved: [],
+      other: [],
+    });
+    expect(
+      pluginConfigPlaceholderSites(
+        "mesh_authz",
+        {
+          mesh_slice: {
+            multi_cluster: {
+              federation_endpoint: "https://fed.internal/[REDACTED_PATH]",
+            },
+          },
+        },
+        "operator",
+      ),
+    ).toEqual({
+      blocking: ["/config/mesh_slice/multi_cluster/federation_endpoint"],
+      sources: [],
+      reserved: [],
+      other: [],
+    });
   });
 
   it("tells a masked secret from a TLS source and a reserved literal", () => {

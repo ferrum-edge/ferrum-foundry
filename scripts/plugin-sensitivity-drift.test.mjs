@@ -29,6 +29,9 @@ pub enum FieldSensitivity {
     EndpointUrl,
     RedisUrl,
     KafkaProducerProperties,
+    PrivateKeySource,
+    CertificateSource,
+    EndpointPath,
 }
 
 pub struct SensitivityRule {
@@ -54,6 +57,27 @@ const fn redis_url(path: &'static [&'static str]) -> SensitivityRule {
     SensitivityRule {
         path,
         sensitivity: FieldSensitivity::RedisUrl,
+    }
+}
+
+const fn private_key_source(path: &'static [&'static str]) -> SensitivityRule {
+    SensitivityRule {
+        path,
+        sensitivity: FieldSensitivity::PrivateKeySource,
+    }
+}
+
+const fn endpoint_path(path: &'static [&'static str]) -> SensitivityRule {
+    SensitivityRule {
+        path,
+        sensitivity: FieldSensitivity::EndpointPath,
+    }
+}
+
+const fn certificate_source(path: &'static [&'static str]) -> SensitivityRule {
+    SensitivityRule {
+        path,
+        sensitivity: FieldSensitivity::CertificateSource,
     }
 }
 
@@ -109,7 +133,14 @@ function tables(schemas, kafka = ["acks", "linger.ms"]) {
   return { schemas, kafka: new Set(kafka) };
 }
 
-const RUST_CONSTRUCTOR = { secret: "secret", endpoint: "endpoint_url", redis: "redis_url" };
+const RUST_CONSTRUCTOR = {
+  secret: "secret",
+  endpoint: "endpoint_url",
+  redis: "redis_url",
+  certificate: "certificate_source",
+  "private-key": "private_key_source",
+  "endpoint-path": "endpoint_path",
+};
 
 /** Foundry's table rendered back as the Rust Edge writes it. */
 function renderRust({ schemas, kafka }) {
@@ -216,30 +247,8 @@ test("reports a built-in Foundry is missing, a changed rule, an extra plugin, an
   );
 });
 
-test("reads Edge main's certificate, private-key, and destination-path classes (ferrum-edge#7054)", () => {
-  // Shaped like Edge main's constructors and rules for these classes.
-  const constructors = `
-const fn private_key_source(path: &'static [&'static str]) -> SensitivityRule {
-    SensitivityRule {
-        path,
-        sensitivity: FieldSensitivity::PrivateKeySource,
-    }
-}
-
-const fn endpoint_path(path: &'static [&'static str]) -> SensitivityRule {
-    SensitivityRule {
-        path,
-        sensitivity: FieldSensitivity::EndpointPath,
-    }
-}
-
-const fn certificate_source(path: &'static [&'static str]) -> SensitivityRule {
-    SensitivityRule {
-        path,
-        sensitivity: FieldSensitivity::CertificateSource,
-    }
-}
-`;
+test("reads Edge v0.9.21's certificate, private-key, and destination-path classes (ferrum-edge#7054)", () => {
+  // Shaped like Edge's constructors and rules for these classes.
   const rules = `
     (
         "mtls_auth",
@@ -264,9 +273,7 @@ const fn certificate_source(path: &'static [&'static str]) -> SensitivityRule {
         ],
     ),
     ("cors", NONE),`;
-  const source = SOURCE
-    .replace("const NONE: &[SensitivityRule] = &[];", `${constructors}\nconst NONE: &[SensitivityRule] = &[];`)
-    .replace('    ("cors", NONE),', rules);
+  const source = SOURCE.replace('    ("cors", NONE),', rules);
   const parsed = parseSensitivitySchemas(source);
   assert.deepEqual(parsed.get("mtls_auth"), [
     { path: ["allowed_issuers", "*", "ca_certificate_pem"], sensitivity: "certificate" },

@@ -1,18 +1,19 @@
 # Ferrum Foundry — next release (draft)
 
-> **Draft notes.** Foundry v0.5.6 was published; its versioned notes are
-> [v0.5.6.md](v0.5.6.md), and its qualification and publication evidence are
-> in [the immutable release record](v0.5.6.compatibility.json). The latest
-> published pairing is v0.5.6 / Edge v0.9.20.
+> **Draft notes.** The unreleased v0.5.7 candidate is documented in
+> [v0.5.7.md](v0.5.7.md) and the `[Unreleased]` changelog bucket. Hosted
+> qualification and Foundry publication are pending. The latest published
+> pairing remains v0.5.6 / Edge v0.9.20 in its
+> [immutable release record](v0.5.6.compatibility.json).
 > The release workflow requires matching package/compatibility versions,
 > versioned notes and hosted `release-ready` verification.
 >
 > Name an Edge image only in versioned notes using `edge.release` from the
 > current record; moving the pin requires full qualification.
 
-### Changes since v0.5.6
+### Changes since v0.5.7
 
-No changes since the published v0.5.6 release are recorded yet. Summarize
+No changes beyond the prepared v0.5.7 candidate are recorded yet. Summarize
 future work from `[Unreleased]` here when preparing the next versioned notes.
 
 ### Known limitations

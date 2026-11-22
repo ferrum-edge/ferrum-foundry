@@ -5,45 +5,46 @@ with that image says nothing about any other Edge build, older or newer.
 [`compatibility.json`](compatibility.json) is the machine-readable current
 pairing record, and CI reads the gateway image from it.
 
-**Record version 2, status: released; qualification: passed.** Published
-Foundry v0.5.6 pairs with published Edge v0.9.20, the latest Edge release, and
-canonical `contracts-edge-0.9.20` (#686). Its source, image, qualification and
-publication evidence are preserved in the immutable
-[v0.5.6 record](release-notes/v0.5.6.compatibility.json). The previous
-v0.5.5 / Edge v0.9.15 pairing remains byte-for-byte in
-[its immutable record](release-notes/v0.5.5.compatibility.json). Earlier
-pairings and their immutable records are in [History](#history).
+**Record version 2, status: candidate; qualification: pending.** The unreleased
+Foundry v0.5.7 candidate pins published Edge v0.9.21, the latest Edge release
+(#728), while retaining canonical `contracts-edge-0.9.20` pending publication
+of `contracts-edge-0.9.21`. The latest published pairing remains Foundry v0.5.6
+/ Edge v0.9.20, whose source, image, qualification and publication evidence are
+preserved byte-for-byte in the immutable
+[v0.5.6 record](release-notes/v0.5.6.compatibility.json). Earlier pairings and
+their immutable records are in [History](#history).
 
-## The published pairing
+## The candidate pairing
 
 | | Foundry | Ferrum Edge |
 | --- | --- | --- |
-| Version | v0.5.6; previous release v0.5.5 | [Ferrum Edge v0.9.20](https://github.com/ferrum-edge/ferrum-edge/releases/tag/v0.9.20) |
-| Source commit | `05df8c6cee1718fdd54fc923f2b2d7cf33490398`, tag target; qualification PR #745 merge, second parent `ac272d630519790909eaea63b12740f9f554808b` | `e4a606a00352674daaef08636e3e359e6c48ba18`, immutable `v0.9.20` tag target |
-| Image | `ferrumedge/ferrum-foundry@sha256:1dbe6878b6833bb56805c6de5f5162f1f4970b7a50d71d8921ea2f6bdd46010e` | `ferrumedge/ferrum-edge@sha256:32a0b0574bb2ed105d315888fab12e33242e1cec3ae9f1ae34c1fb4d0c9a2689` |
-| Platforms | `linux/amd64` `sha256:2d28d76ad174d5e11795206b6600e753e0d5aaf45778d16e5589c31bc1b18b45`; `linux/arm64` `sha256:f1c4adaa355060bc72c658b873ab9a798c8785edb61b97bc4a506bd9a520946a` | `linux/amd64` `sha256:d3e3e7e8409d0583b23e0fa4eee4b85c7b20885a314d4ada2ca8aad66bd33e1c`; `linux/arm64` `sha256:406d8335e60f15ee024141762a7b280bea4abe76fef37ac26b65c45085ae7426` |
-| Qualification | [Main push run 44967080032](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/44967080032), attempt 1; source and tested commit `618a75f619a1d1beb44d97852c9795bd19551b8f` (release PR #742 merge) | [Edge release run 41590569525](https://github.com/ferrum-edge/ferrum-edge/actions/runs/41590569525), all 20 jobs successful; distribution evidence only |
-| Publication | [Release run 44968397446](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/44968397446), success; GitHub release 454098852, published 2026-11-22 00:57:56 UTC | GitHub release 432463173, published 2026-11-03 08:58:10 UTC |
+| Version | v0.5.7 (candidate); previous release v0.5.6 | [Ferrum Edge v0.9.21](https://github.com/ferrum-edge/ferrum-edge/releases/tag/v0.9.21) |
+| Source commit | *release step* | `f9915358c8032214f4034a17c28cdf72d14006c3`, immutable `v0.9.21` tag target |
+| Image | *release step* | `ferrumedge/ferrum-edge@sha256:e6b0e4801609ea928b561494c6c5ed518ba97908d6e2dfcb6dd59998eb4f93be` |
+| Platforms | `linux/amd64`, `linux/arm64` (*release step*) | `linux/amd64` `sha256:dff4c3afbb8a4c43939f6dc0628b74f0852de2c5c5fb69dfcb4e0073126e2abf`; `linux/arm64` `sha256:f7811d35889f7357c59a04b606451c689857a134937638ddd55e92538a123658` |
+| Qualification | Pending | [Edge release run 44972356983](https://github.com/ferrum-edge/ferrum-edge/actions/runs/44972356983) (attempt 2); distribution evidence only |
+| Publication | *release step* | GitHub release 454250773, published 2026-11-22 06:29:03 UTC |
 
-Edge v0.9.20 is stricter than v0.9.15 about the plugin configuration Foundry
-writes: every plugin config refuses unknown keys at every depth, and many
-built-in plugins gained bounds and refusals. The changes Foundry reacts to are
-in [Admin API changes in v0.9.16 through v0.9.20](#admin-api-changes-in-v0916-through-v0920).
+Edge v0.9.21 ships non-admin TLS-material and trigger-operand redaction, exact
+`[REDACTED]` placeholder reservation on plugin writes, consumer credential
+`If-Match` preconditions, external-identity trigger predicates, and further
+config-admission cleanups. The changes Foundry reacts to are in
+[Admin API changes in v0.9.21](#admin-api-changes-in-v0921).
 
 ## The CI pin
 
-Every gateway-backed gate reads `edge.image`, the published v0.9.20 default
-multi-architecture index above. Edge release `432463173` was published at
-2026-11-03 08:58:10 UTC from tag commit
-`e4a606a00352674daaef08636e3e359e6c48ba18`, after the main-push workflows on
-that commit succeeded. Release run `41590569525` completed all 20 jobs
-successfully, including signing, attestation and both release gates (Linux
-GNU ABI and image attestation). The raw Docker Hub index bytes for both the
-`0.9.20` and `v0.9.20` tags hash to the recorded index digest (read with the
-OCI index media type and an anonymous pull token), and the two platform
-manifests and the `linux/amd64` config were read from the registry by digest.
+Every gateway-backed gate reads `edge.image`, the published v0.9.21 default
+multi-architecture index above. Edge release `454250773` was published at
+2026-11-22 06:29:03 UTC from tag commit
+`f9915358c8032214f4034a17c28cdf72d14006c3`. Release run `44972356983` (attempt
+2) completed 19 of 20 jobs successfully, including all platform builds, default
+and eBPF manifests, signing, attestation, GitHub release creation, and both
+release gates (Linux GNU ABI and image attestation); its `Anonymous image pull
+smoke` job failed on `SQLite volume smoke` (expecting UID/GID `65532:65532`,
+observing `65532`). Both Docker Hub tags `0.9.21` and `v0.9.21` (and GHCR
+`v0.9.21`) resolve to the recorded index digest and two platform manifests.
 `edge.release.binary_sha256` records the seven published binary hashes; each
-equals its GitHub API asset digest and its published `.sha256` sidecar.
+equals its GitHub API asset digest and the release notes checksum table.
 
 Unlike the v0.9.15 pin, the image layers were not downloaded for this move, so
 `distribution.default_image_binaries_match_release_assets` is `null`: no byte
@@ -56,82 +57,61 @@ ran locally for this preparation.
 Anonymous GHCR access is not claimed. Published Edge configs have no revision
 label. Source identity rests on the immutable release tag and the release
 run's attestation gate; no local cryptographic verification is claimed. The
-`0.9.20-ebpf` and `0.9.20-ebpf-tools` variants are published but outside the
-v0.5.6 qualification target.
+`0.9.21-ebpf` and `0.9.21-ebpf-tools` variants are published but outside the
+v0.5.7 qualification target.
 
 The raw canonical OpenAPI at the immutable Edge source has SHA-256
-`8fa7232d96e1094578dee03cfa1966a4fdd9df77b8e027a9625f56ce6bfd355e`.
+`13c21d12d3028c8044ad2f467cbca6425d9bd2f3fce787d6fe7ae78316c21bee`.
 Its `info.version: 0.2.0` is schema metadata, not either product's version.
 
 ## Qualification evidence
 
-1. **Canonical adoption complete.** Published
+1. **Canonical contracts retained pending `contracts-edge-0.9.21`.** Published
    [contracts-edge-0.9.20](https://github.com/ferrum-edge/ferrum-contracts/releases/tag/contracts-edge-0.9.20)
-   names `39da322083044c2e92617209e62983c92387f0ad`; release `432497834`
-   was published at 09:34:12 UTC on 2026-11-03 after the main
-   [Validate contracts run 41611708250](https://github.com/ferrum-edge/ferrum-contracts/actions/runs/41611708250)
-   succeeded on that commit. The same 18 scoped files are taken byte-exact from
-   the tag, and each Git blob matches. Only the two vocabularies and the
-   complete canonical invalid-expectations file change. The plugin catalog
-   keeps all 82 plugins; its provenance moves to v0.9.20, `ai_token_metrics`
-   moves from priority 4100 to 4070 (so does `PLUGIN_PRIORITY`),
-   `stdout_logging`'s registration failure policy becomes
-   `keep_last_known_good`, `openapi_validator` records its proxy scope
-   constraint, `request_transformer` adds the `websocket` protocol (handshake
-   headers and query only), and several plugins list new phases. The stream
-   plugin set Foundry mirrors (`src/lib/pluginProtocols.ts`) is unchanged.
-   Provisioning values, both vocabulary schemas, the manifest schema and all
-   12 manifest fixtures are unchanged. Shared manifest/report status remains
-   EXISTING/implemented at Alloy owner
-   `81cbb410d34ff5fba1f3d54cfd2e7ebccaed397e`, whose availability stays
-   unreleased.
+   (`39da322083044c2e92617209e62983c92387f0ad`, release `432497834`) remains
+   pinned until `contracts-edge-0.9.21` is published in
+   `ferrum-edge/ferrum-contracts`. Comparing `src/plugins/builtin_parity.rs`
+   between v0.9.20 and v0.9.21 confirms all 82 plugins, priorities
+   (`PLUGIN_PRIORITY`), and stream protocols (`src/lib/pluginProtocols.ts`) are
+   unchanged (only `active_phases` on `request_transformer`,
+   `response_transformer`, and five logging sinks, plus `zstd` in `compression`
+   rationale, changed). Provisioning attribution, the manifest schema, and all
+   12 fixtures remain unchanged; `scripts/ferrum-contracts.test.mjs` maps
+   `contracts-edge-0.9.20` to `["v0.9.20", "v0.9.21"]` until
+   `contracts-edge-0.9.21` is cut and re-vendored.
 2. **Guided schema static review complete.** At
-   `e4a606a00352674daaef08636e3e359e6c48ba18`, `RateLimitingRuleConfig` is
-   byte-identical to 25b37395; the other four component blocks changed and
-   were re-read. `KeyAuthConfig` `key_location` also admits an ordered list of
-   1 to 8 locations, which the guided editor declines and leaves to JSON.
-   `RateLimitingConfig` adds `limit_by: service` and `max_state_entries`, and
-   `CorsConfig` bounds its method and header lists at 128 entries and adds
-   `allow_private_network`; the guided editor models all of these.
-   `PrometheusMetricsConfig` adds two histogram bucket arrays, left to JSON.
-   `PLUGIN_SCHEMA_SPEC.ref` moves to e4a606a0. The drift check compares the
-   pinned hashes at `edge.source_commit`, and the hosted producer export checks
-   them independently. [Plugin schemas](plugin-schemas.md#review-history)
-   records the review.
-3. **Sensitivity source re-read.** `plugin_config_projection.rs` changed
-   (Git blob `827bf3a7c998c7ea9c995093ab38320facbd072a` to
-   `d50b0d53b7a4ace7454a25a7e8034b4a8ea5c1a8`). `ldap_auth`
-   `failover_ldap_urls` is an endpoint; `waf`
-   `global_exemptions.header_present` values, `fault_injection`
-   `match.headers` values, `mesh_route_dispatch` `request_transform` values,
-   `request_transformer` rule values, `response_mock` match header and query
-   values, and `ws_logging` `custom_headers` values are secret. Foundry's
-   table follows rule for rule and `PLUGIN_SENSITIVITY_SOURCE` names
-   e4a606a0. Edge's name heuristic for config keys narrowed to its listed
-   rules; Foundry's name floor is unchanged and stays the broader of the two.
-4. **Hosted pairing qualification passed.** Main push run
-   [44967080032](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/44967080032),
-   attempt 1, tested release PR #742's merge commit
-   `618a75f619a1d1beb44d97852c9795bd19551b8f` as itself. Every job passed:
-   Qualification Source, Quality Gate on Node 22 and 24, Pinned Gateway
-   Contract (including writable and read-only capability parity), Deployment
-   Starter, Starter Production Profile, Critical Journeys, and both Container
-   Gates. Pull-request runs come from the required-workflow ruleset under
-   another workflow id, which `release-ready` refuses, so the `main` push run
-   is the evidence.
-5. **Foundry publication verified.** Qualification PR #745 merged as protected
-   commit `05df8c6cee1718fdd54fc923f2b2d7cf33490398`, whose second parent is
-   `ac272d630519790909eaea63b12740f9f554808b` and which differs from the
-   qualified tree only in `qualification`. Release run
-   [44968397446](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/44968397446)
-   succeeded; GitHub release
-   [454098852](https://github.com/ferrum-edge/ferrum-foundry/releases/tag/v0.5.6)
-   was published at 2026-11-22 00:57:56 UTC. The tag source, image index,
-   platform digests and CI evidence are preserved in the
-   [immutable v0.5.6 record](release-notes/v0.5.6.compatibility.json).
+   `f9915358c8032214f4034a17c28cdf72d14006c3`, `KeyAuthConfig`, `CorsConfig`,
+   and `PrometheusMetricsConfig` are byte-identical to `e4a606a0`.
+   `RateLimitingConfig` removes the redundant `default:` keyword on
+   `redis_key_prefix` while keeping the same prose default;
+   `RateLimitingRuleConfig` updates the unmodelled `consumers` description to
+   state mapped Consumer username matching only (GHSA-rxwj-x6c6-f4j5). Neither
+   changes any guided descriptor. `PLUGIN_SCHEMA_SPEC.ref` and the two digests
+   move to `f9915358`. `SubsetTrafficPolicy` is byte-identical to `e4a606a0`,
+   and `SUBSET_TRAFFIC_POLICY_SOURCE` moves to `f9915358`.
+   [Plugin schemas](plugin-schemas.md#review-history) records the review.
+3. **Sensitivity source re-read (#728).** `plugin_config_projection.rs` changed
+   (Git blob `d50b0d53b7a4ace7454a25a7e8034b4a8ea5c1a8` to
+   `5f96f581ead10e8c777fc088fda10ffe89c96b6d`). Sixteen plugins gain rules:
+   `request_termination`, `transaction_debugger`, `ai_semantic_firewall`,
+   `waf`, `openapi_validator`, `ai_tool_governor`, `mcp_gateway`, `opa`,
+   `mesh_route_dispatch`, `request_mirror`, `mtls_auth`, `soap_ws_security`,
+   `udp_logging`, `mesh_authz`, plus `redis_url` on `jwks_auth`, `hmac_auth`,
+   and `soap_ws_security`. Foundry's table follows rule for rule and
+   `PLUGIN_SENSITIVITY_SOURCE` names `f9915358`. Trigger predicate lists
+   (`TRIGGER_CLIENT_FIELD_PREDICATES`, `TRIGGER_VISIBLE_PREDICATES`, including
+   `external_identity` and `external_identity_authority`) and
+   `PluginTriggerMatch` match v0.9.21.
+4. **Hosted pairing qualification pending.** Every gate must run and pass on
+   the candidate source before v0.5.7 is tagged: Qualification Source, Quality
+   Gate on Node 22 and 24, Pinned Gateway Contract (including writable and
+   read-only capability parity), Deployment Starter, Starter Production
+   Profile, Critical Journeys, and both Container Gates. Prior v0.5.6 evidence
+   cannot qualify this pin.
+5. **Foundry publication pending.** *release step* after qualification passes.
 
 The database profiles, Node floors and `viewer` / `operator` / `admin` tiers are
-unchanged. Like v0.5.2 through v0.5.5, this release includes the initial
+unchanged. Like v0.5.2 through v0.5.6, this candidate includes the initial
 untagged-write refusal of the adopted guarded-write policy #542 (see
 [below](#guarded-write-initial-validator-policy-542)).
 
@@ -143,11 +123,11 @@ qualifies only if:
 1. **It includes ferrum-edge#5661**: a strong `ETag` on resource reads and
    `If-Match` on `PUT`/`DELETE` of proxies, upstreams, consumers, and plugin
    configurations. v0.9.7 introduced it; every published release since, v0.9.8
-   through v0.9.20, retains it. See
+   through v0.9.21, retains it. See
    [Conditional writes on the paired release](#conditional-writes-on-the-paired-release).
 2. **Its proxy-association and namespace-identity behavior matches what
    Foundry's walkthrough and critical journeys assert.** Every Edge 0.9.x
-   release, including v0.9.5 and v0.9.7 through v0.9.20, has both:
+   release, including v0.9.5 and v0.9.7 through v0.9.21, has both:
    - Edge attaches the proxy association itself when a proxy-scoped plugin
      configuration is written (ferrum-edge#4611).
      `scripts/starter-journey.mjs` checks that the configuration protects the
@@ -533,6 +513,37 @@ critical journeys exercise the admin routes Foundry calls against v0.9.20.
 ConfigSync, mesh, Gateway API and data-plane changes have no Foundry admin
 contract.
 
+### Admin API changes in v0.9.21
+
+Edge v0.9.21 (published 2026-11-22 UTC) follows v0.9.20 directly. The changes
+on surfaces Foundry writes or reads are:
+
+- **Non-admin TLS-material, destination-path, and trigger-operand redaction**
+  (ferrum-edge#7054, #7060). Non-admin reads withhold stored backend TLS
+  private keys, inline TLS private-key material and certificate-plus-key
+  bundles, non-trivial destination paths (`request_mirror` `mirror_path`,
+  `mesh_route_dispatch` `rules.*.rewrite.uri`), and plugin trigger `header`,
+  `query`, and `cookie` comparison operands, and non-admin plugin-config writes
+  reserve the exact `[REDACTED]` literal in any string. Foundry's
+  `PLUGIN_SENSITIVITY` table syncs all 16 updated plugins (`#728`), and
+  `scripts/gateway-contract-smoke.mjs` asserts that the pinned gateway refuses
+  the reserved `[REDACTED]` literal in `otel_tracing`'s `service_name`.
+- **Consumer credential `If-Match` preconditions** (ferrum-edge#7393). Indexed
+  credential deletes now evaluate `If-Match` against the consumer `ETag`,
+  returning `412` on staleness instead of `400`.
+- **External-identity trigger predicates** (ferrum-edge#7417).
+  `PluginTriggerMatch` gains `external_identity` and
+  `external_identity_authority`, already modelled in `src/api/types.ts` and
+  `TRIGGER_VISIBLE_PREDICATES` (#737).
+- **Removed unused/deprecated fields.** `pool_max_requests_per_connection` on
+  proxies (#7218) and `discovery.hide_denied_items` on `mcp_gateway` (#7136)
+  are rejected as unknown keys; Foundry already omits/strips both (#712).
+- **`request_mirror` cleartext egress** (GHSA-gcwp-xp94-4pcv, #6659). Cleartext
+  `http` targets off loopback require `allow_plaintext: true`; Foundry's
+  template already points at `127.0.0.1`.
+- **Database mTLS DNS admission fence.** Detailed `/health` may report
+  `database.mtls_dns_admission_fence`, surfaced on the Status page (#734).
+
 ## Evaluated and rejected
 
 No Edge image is currently rejected (`edge.rejected_images` is empty). A
@@ -638,10 +649,10 @@ CI. Report problems; they do not block releases.
 - Any Foundry version other than published v0.5.6 against Edge v0.9.20, and
   the earlier published pairings in [History](#history) against their own
   Edge images. Previous successful qualification cannot qualify a moved pin.
-- Any Ferrum Edge release other than v0.9.20 (`edge.release`) for this
-  release.
-- Any Ferrum Edge image other than `edge.image`, including the `0.9.20-ebpf`
-  and `0.9.20-ebpf-tools` variants of the same release.
+- Any Ferrum Edge release other than v0.9.21 (`edge.release`) for the v0.5.7
+  candidate.
+- Any Ferrum Edge image other than `edge.image`, including the `0.9.21-ebpf`
+  and `0.9.21-ebpf-tools` variants of the same release.
 - Browser latency, and more than one operator editing at scale.
 
 ## Conditional writes on the paired release
@@ -650,7 +661,7 @@ ferrum-edge#5661 (a strong `ETag` on resource reads and `If-Match` on
 `PUT`/`DELETE` of proxies, upstreams, consumers, and plugin configurations)
 was merged to Ferrum Edge `main` as `e55ce01893c25bd802cb4f10831c07ca32b3deda`
 on 2026-09-23 and released in v0.9.7. Every published release since, v0.9.8
-through v0.9.20, retains it. It is not in v0.9.5.
+through v0.9.21, retains it. It is not in v0.9.5.
 
 Foundry sends `If-Match` whenever its verification read carries a strong tag.
 The v0.9.15 contract gate confirmed the strong item tags for v0.5.5, and the

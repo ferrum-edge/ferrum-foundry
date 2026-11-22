@@ -23,9 +23,9 @@ export const SUBSET_TRAFFIC_POLICY_SOURCE = {
   path: "openapi.yaml",
   component: "SubsetTrafficPolicy",
   /** The Edge source the list was last checked against. */
-  commit: "e4a606a00352674daaef08636e3e359e6c48ba18",
+  commit: "f9915358c8032214f4034a17c28cdf72d14006c3",
   /** The Edge release at that commit. */
-  release: "v0.9.20",
+  release: "v0.9.21",
 } as const;
 
 /**

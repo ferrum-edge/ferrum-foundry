@@ -78,9 +78,9 @@ node scripts/demo-traffic-client.mjs mixed
 ### Running the gateway locally
 
 Run the Ferrum Edge image CI pins, by digest, so local results match CI. It is
-the published Ferrum Edge v0.9.20 release qualified with published Foundry
-v0.5.6. The published v0.5.5 / Edge v0.9.15 pairing and earlier pairings
-remain in history.
+the published Ferrum Edge v0.9.21 release selected for the Foundry v0.5.7
+candidate; hosted pairing qualification is pending. The published Foundry
+v0.5.6 / Edge v0.9.20 pairing and earlier pairings remain in history.
 `edge.image` in `docs/compatibility.json` is the single source: CI reads it
 (`node scripts/supported-pairing.mjs edge-image`), and
 `scripts/supported-pairing.test.mjs` fails if the starter, this command, or any
@@ -99,7 +99,7 @@ docker run --rm -d --name ferrum-edge \
   -e FERRUM_ADMIN_BIND_ADDRESS=0.0.0.0 \
   -e FERRUM_ALLOW_INSECURE_ADMIN_HTTP=true \
   -p 127.0.0.1:9000:9000 -p 127.0.0.1:8000:8000 \
-  ferrumedge/ferrum-edge@sha256:32a0b0574bb2ed105d315888fab12e33242e1cec3ae9f1ae34c1fb4d0c9a2689 run -m database -v
+  ferrumedge/ferrum-edge@sha256:e6b0e4801609ea928b561494c6c5ed518ba97908d6e2dfcb6dd59998eb4f93be run -m database -v
 ```
 
 The plaintext admin bind above is a local-development exception; Docker's port
@@ -299,10 +299,11 @@ See `docs/concurrent-edits.md`.
   the consumer `ETag` of the read the operator selected the index from
   (`consumerEtag`, kept on the rendered consumer by `shareTaggedRead`). A
   `412` is `CredentialListChangedError` (nothing deleted, select again); an
-  untagged read refuses before sending (#703, ferrum-edge#7393). Against an
-  Edge without that precondition (the v0.9.20 pin), its "If-Match is only
-  supported on" `400` triggers a verified re-read fallback: same tag, then an
-  unconditional delete; otherwise `CredentialListChangedError`.
+  untagged read refuses before sending (#703, ferrum-edge#7393, released in
+  Edge v0.9.21). Against an older Edge without that precondition (v0.9.20 and
+  earlier), its "If-Match is only supported on" `400` triggers a verified
+  re-read fallback: same tag, then an unconditional delete; otherwise
+  `CredentialListChangedError`.
 - `update()` and `remove()` on proxies, upstreams, and consumers take the guard
   as a required argument. Pass `null` only from a caller that provably cannot
   lose a concurrent change.
@@ -378,10 +379,10 @@ See `docs/concurrent-edits.md`.
   `FieldSensitivity` the parser accepts (`SENSITIVITY_VARIANTS`) needs a
   projection in both `secretRedaction.ts` and the placeholder replay
   (`refusedPlaceholderSites` in `maskedSecrets.ts`).
-- A plugin `trigger` (a sibling of `config`) is classified by Edge main's
+- A plugin `trigger` (a sibling of `config`) is classified by Edge v0.9.21's
   trigger projection (`pluginTriggerWithheldSites` in
-  `src/lib/resourceBaseline.ts`, ferrum-edge#7054), on every gateway, the
-  pinned v0.9.20 included: every `header` / `query` / `cookie` comparison
+  `src/lib/resourceBaseline.ts`, ferrum-edge#7054), on every gateway (older
+  v0.9.20 gateways included): every `header` / `query` / `cookie` comparison
   operand is secret (numbers and booleans too, as `Secrets.scalars`), as is
   any shape a `PluginTrigger` cannot have, including content under a visible
   key without the type Edge declares for it (a draft is unvalidated); the
