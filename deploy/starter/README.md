@@ -26,8 +26,8 @@ set `FOUNDRY_IMAGE` to another released digest when selecting a different
 pairing. Unless `FOUNDRY_IMAGE` is set, the demo profile therefore runs
 released Foundry v0.5.5 against Edge v0.9.20, outside the qualified envelope,
 until the release step moves this default to the published v0.5.6 digest; at
-the `v0.5.6` tag, set `FOUNDRY_IMAGE` to the index digest its GitHub release
-lists. CI runs the starter with the candidate's own production image.
+the `v0.5.6` tag, set `FOUNDRY_IMAGE=ferrumedge/ferrum-foundry@sha256:<digest>`
+with the index digest its GitHub release lists. CI runs the starter with the candidate's own production image.
 
 ## Two profiles
 
