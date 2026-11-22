@@ -795,7 +795,12 @@ describe('authenticated service manifest preview through the registered BFF rout
     expect(limitsResponse.statusCode).toBe(200);
     const { desired: limitsDesired } = limitsResponse.json();
     expect(limitsDesired.proxy.listen_path).toHaveLength(500);
-    expect(limitsDesired.proxy.backend_path).toHaveLength(2048);
+    // edge-limits.json uses a 2,048-char service_base_path (1 leading '/' + 2,046 'b's + 1
+    // trailing '/') so Alloy main (which currently caps service_base_path at 2,048 including '/')
+    // also accepts it; stripping the single trailing '/' leaves a 2,047-byte backend_path.
+    expect(limits.api.service_base_path).toHaveLength(2048);
+    expect(limitsDesired.proxy.backend_path).toHaveLength(2047);
+    expect(limitsDesired.proxy.backend_path).toBe(limits.api.service_base_path.slice(0, -1));
     expect(limitsDesired.proxy.backend_connect_timeout_ms).toBe(86400000);
     expect(limitsDesired.proxy.backend_read_timeout_ms).toBe(86400000);
     expect(limitsDesired.proxy.backend_write_timeout_ms).toBe(86400000);
@@ -803,6 +808,14 @@ describe('authenticated service manifest preview through the registered BFF rout
     expect(limitsDesired.upstream.health_checks.active).toMatchObject({
       http_path: limits.health.path, interval_seconds: 3600, timeout_ms: 86400000,
     });
+
+    // The v1 schema allows 2,049 chars on service_base_path (2,048-byte Edge backend_path + '/').
+    const maxBasePath = structuredClone(limits);
+    maxBasePath.api.service_base_path = `/${'b'.repeat(2047)}/`;
+    expect(maxBasePath.api.service_base_path).toHaveLength(2049);
+    const maxBasePathResponse = await preview(maxBasePath);
+    expect(maxBasePathResponse.statusCode).toBe(200);
+    expect(maxBasePathResponse.json().desired.proxy.backend_path).toHaveLength(2048);
 
     const unicodeHost = valid.find((fixture) => fixture.name === 'unicode-host.json')!.body;
     const unicodeResponse = await preview(unicodeHost, 'retail');
