@@ -564,7 +564,7 @@ envelope; they do not qualify other Edge images or gateway modes.
 | Authentication | `trusted-proxy` behind the starter's nginx identity proxy, with the shared group-to-role policy | Deployment Starter, Critical Journeys |
 | Production identity path | The starter's `production` profile as shipped: TLS nginx and oauth2-proxy (OIDC with PKCE S256, `--trusted-proxy-ip` set to the stack's subnet) against a mock OIDC provider, with no gateway | Starter Production Profile |
 | Deployment path | `deploy/starter` (Compose) with the production Foundry image | Deployment Starter, Critical Journeys |
-| Browser | Chromium bundled with `@playwright/test` 1.63.0, Desktop Chrome profile | Critical Journeys |
+| Browser | Chromium bundled with `@playwright/test` 1.65.1, Desktop Chrome profile | Critical Journeys |
 | Container platforms | `linux/amd64`, `linux/arm64` | Container Gate (both builds start and serve a protected request) |
 | BFF Node.js | 22.22.2 and 24.15.0 minimums (the image ships 24) | Quality Gate matrix |
 
@@ -572,7 +572,10 @@ The production identity path row and its gate are new for the v0.5.6
 candidate: v0.5.5 was not qualified on it. It adds a required gate, not a
 dimension of the machine-readable `tested` record, which describes the
 gateway, roles, authentication mode and deployment the gates run and stays
-as v0.5.5 recorded it.
+as v0.5.5 recorded it, apart from the Playwright version. The Browser row
+and `tested.browsers` name the `@playwright/test` version `package-lock.json`
+locks, which the Critical Journeys install (v0.5.5 ran 1.63.0), and
+`scripts/supported-pairing.test.mjs` fails when they differ.
 
 ### Tested scale
 

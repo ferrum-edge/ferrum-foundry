@@ -188,7 +188,11 @@ Dark and light themes via CSS custom properties. Dark is the default.
   `api-specs/` (spec import), `audit/`, `cluster/`, and `mesh/` (service graph,
   drift, egress, waypoints, trust)
 - `src/components/forms/` - CRUD forms (`ProxyForm`, `ConsumerForm`, `PluginConfigForm`, `UpstreamForm`, etc.)
-- `src/components/metrics/` - metrics dashboard panels (`OpsPanels.tsx` covers overload, runtime, and chargeback)
+- `src/components/metrics/` - metrics dashboard panels (`OpsPanels.tsx` covers overload, runtime, and chargeback).
+  `src/lib/adminMetricsReporting.ts` decides, per `gateway.mode`, which
+  `/admin/metrics` values are measurements; the Metrics page and the Dashboard
+  both use it, so a control plane's or node agent's zero placeholders are never
+  shown as values
 - `src/components/mcp/` - the proxy page's MCP Tools tab: the node-local
   `mcp_gateway` tool catalog (`src/api/mcpTools.ts`), inline per-tool policy
   edits (one `policy.tools` entry per guarded write, `src/lib/mcpToolPolicy.ts`),
