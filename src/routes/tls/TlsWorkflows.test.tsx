@@ -425,13 +425,13 @@ describe("TLS inventory and events", () => {
   it("renders event revisions and errors and applies the selected outcome filter", async () => {
     const events: TlsSourceEvent[] = [{
       id: 1, at, surface: "proxy_https", outcome: "rotated", revision: 7,
-      sources: [{ label: "leaf", cert_id: "edge", source_id: "managed://certificates/edge", scheme: "managed", kind: "certificate" }],
+      sources: [{ label: "leaf", cert_id: "edge", source_id: "source-91a4c8e2d7f03b5a12e84f60", scheme: "managed", kind: "certificate" }],
     }, { id: 2, at, surface: "backend_tls", outcome: "load_error", error: "issuer unavailable", sources: [] },
     { id: 3, at, surface: "backend_tls", outcome: "recovered", sources: [] }];
     collections.events = events;
     await mount("Events");
     await settle(() => expect(panel().textContent).toContain("rev 7"));
-    expect(panel().textContent).toContain("leaf: managed://certificates/edge");
+    expect(panel().textContent).toContain("leaf: source-91a4c8e2d7f03b5a12e84f60");
     expect(panel().textContent).toContain("issuer unavailable");
     expect(panel().textContent).toContain("recovered");
     await selectOption("Outcome", "Recovered");
@@ -481,12 +481,13 @@ describe("TLS inventory and events", () => {
       expect(panel().textContent).toContain("recovered");
     });
 
-    const recoveredEventRequests = requests
+    const eventRequestsAfterSelect = requests
       .slice(beforeCount)
       .map((request) => new URL(request.url))
-      .filter((url) => url.pathname.endsWith("/admin/tls/events") && url.searchParams.get("outcome") === "recovered");
-    expect(recoveredEventRequests.length).toBeGreaterThanOrEqual(1);
-    for (const url of recoveredEventRequests) {
+      .filter((url) => url.pathname.endsWith("/admin/tls/events"));
+    expect(eventRequestsAfterSelect.length).toBeGreaterThanOrEqual(1);
+    for (const url of eventRequestsAfterSelect) {
+      expect(url.searchParams.get("outcome")).toBe("recovered");
       expect(url.searchParams.get("offset")).toBe("0");
       expect(url.searchParams.get("limit")).toBe("20");
     }
