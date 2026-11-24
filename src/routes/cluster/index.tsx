@@ -338,7 +338,9 @@ function ClusterWorkspace() {
                 )}
               </>
             ) : (
-              <Badge variant="default">CP unavailable</Badge>
+              <Badge variant="default">
+                {clusterError ? "Last known CP status unknown" : "CP status unknown"}
+              </Badge>
             )}
           </div>
           {cluster.control_plane ? (
@@ -357,7 +359,9 @@ function ClusterWorkspace() {
             </div>
           ) : (
             <p className="text-sm text-text-muted">
-              No control plane connection state reported yet.
+              {clusterError
+                ? "No control plane connection state in last known snapshot."
+                : "No control plane connection state reported yet."}
             </p>
           )}
         </Card>

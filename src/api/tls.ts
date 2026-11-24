@@ -34,7 +34,6 @@ export interface TlsInventorySource {
 export interface TlsInventoryUsage {
   surface: string;
   role: string;
-  namespace?: string;
   resource_type: string;
   resource_id: string;
   field: string;

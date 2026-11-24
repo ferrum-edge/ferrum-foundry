@@ -85,6 +85,18 @@ beforeEach(() => {
     if (path === "acme/certificates/acme-edge") return Response.json(certificate);
     if (path === "acme/orders/order-edge") return Response.json({ ...order, status: "valid" });
     if (!(path in collections)) throw new Error(`Unexpected TLS read: ${path}`);
+    if (path === "events") {
+      const url = new URL(request.url);
+      const outcome = url.searchParams.get("outcome");
+      const offset = Number(url.searchParams.get("offset") ?? 0);
+      const limit = Number(url.searchParams.get("limit") ?? 50);
+      const all = collections.events as TlsSourceEvent[];
+      const filtered = outcome ? all.filter((event) => event.outcome === outcome) : all;
+      return Response.json({
+        data: filtered.slice(offset, offset + limit),
+        pagination: { offset, limit, total: filtered.length },
+      });
+    }
     if ([
       "certificates", "ca-bundles", "crls", "ocsp-responses", "jwks",
       "acme/certificates", "acme/orders", "acme/accounts",
@@ -415,7 +427,7 @@ describe("TLS inventory and events", () => {
       id: 1, at, surface: "proxy_https", outcome: "rotated", revision: 7,
       sources: [{ label: "leaf", cert_id: "edge", source_id: "managed://certificates/edge", scheme: "managed", kind: "certificate" }],
     }, { id: 2, at, surface: "backend_tls", outcome: "load_error", error: "issuer unavailable", sources: [] },
-    { id: 3, at, surface: "backend_tls", outcome: "recovered", revision: 8, sources: [] }];
+    { id: 3, at, surface: "backend_tls", outcome: "recovered", sources: [] }];
     collections.events = events;
     await mount("Events");
     await settle(() => expect(panel().textContent).toContain("rev 7"));
@@ -423,11 +435,53 @@ describe("TLS inventory and events", () => {
     expect(panel().textContent).toContain("issuer unavailable");
     expect(panel().textContent).toContain("recovered");
     await selectOption("Outcome", "Recovered");
-    await settle(() => expect(requests.some((request) => new URL(request.url).searchParams.get("outcome") === "recovered")).toBe(true));
+    await settle(() => expect(panel().textContent).not.toContain("issuer unavailable"));
+    expect(panel().textContent).not.toContain("rev 7");
+    expect(panel().textContent).toContain("recovered");
+    const recoveredBadge = Array.from(panel().querySelectorAll("span")).find(
+      (node) => node.textContent === "recovered",
+    );
+    expect(recoveredBadge?.className).toContain("text-success");
+    expect(requests.some((request) => new URL(request.url).searchParams.get("outcome") === "recovered")).toBe(true);
     await selectOption("Outcome", "Load error");
-    await settle(() => expect(requests.some((request) => new URL(request.url).searchParams.get("outcome") === "load_error")).toBe(true));
+    await settle(() => expect(panel().textContent).toContain("issuer unavailable"));
+    expect(panel().textContent).not.toContain("recovered");
+    expect(requests.some((request) => new URL(request.url).searchParams.get("outcome") === "load_error")).toBe(true);
     await selectOption("Outcome", "All outcomes");
     await settle(() => expect(panel().querySelector('[role="combobox"]')?.textContent).toBe("All outcomes"));
+    await settle(() => expect(panel().textContent).toContain("rev 7"));
+  });
+
+  it("resets offset atomically in one navigation when changing outcome filter from page 2", async () => {
+    const events: TlsSourceEvent[] = [
+      ...Array.from({ length: 25 }, (_, i) => ({
+        id: i + 1,
+        at,
+        surface: "proxy_https",
+        outcome: "rotated" as const,
+        revision: i + 1,
+        sources: [],
+      })),
+      { id: 26, at, surface: "backend_tls", outcome: "recovered", sources: [] },
+    ];
+    collections.events = events;
+    await mount("Inventory", "/tls?tab=events&offset=20&limit=20");
+    await settle(() => expect(panel().textContent).toContain("rev 21"));
+
+    const beforeCount = requests.length;
+    await selectOption("Outcome", "Recovered");
+    await settle(() => expect(panel().textContent).not.toContain("rev 21"));
+    expect(panel().textContent).toContain("recovered");
+
+    const recoveredEventRequests = requests
+      .slice(beforeCount)
+      .map((request) => new URL(request.url))
+      .filter((url) => url.pathname.endsWith("/admin/tls/events") && url.searchParams.get("outcome") === "recovered");
+    expect(recoveredEventRequests.length).toBeGreaterThanOrEqual(1);
+    for (const url of recoveredEventRequests) {
+      expect(url.searchParams.get("offset")).toBe("0");
+      expect(url.searchParams.get("limit")).toBe("20");
+    }
   });
 });
 

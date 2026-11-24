@@ -330,11 +330,16 @@ describe("Data-plane backend egress attestation (Edge v0.9.14)", () => {
     expect(host.textContent).not.toContain("egress public");
   });
 
-  it("renders DP mode cleanly when control_plane is null", async () => {
+  it("renders DP mode cleanly when control_plane is null and qualifies stale refreshes", async () => {
     topology = { mode: "dp", control_plane: null };
     await mount();
     await expectText("DATA PLANE");
-    expect(host.textContent).toContain("CP unavailable");
+    expect(host.textContent).toContain("CP status unknown");
     expect(host.textContent).toContain("No control plane connection state reported yet.");
+
+    failTopology = true;
+    await refetch("cluster");
+    await expectText("Last known CP status unknown");
+    expect(host.textContent).toContain("No control plane connection state in last known snapshot.");
   });
 });
