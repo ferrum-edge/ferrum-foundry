@@ -435,21 +435,27 @@ describe("TLS inventory and events", () => {
     expect(panel().textContent).toContain("issuer unavailable");
     expect(panel().textContent).toContain("recovered");
     await selectOption("Outcome", "Recovered");
-    await settle(() => expect(panel().textContent).not.toContain("issuer unavailable"));
-    expect(panel().textContent).not.toContain("rev 7");
-    expect(panel().textContent).toContain("recovered");
+    await settle(() => {
+      expect(panel().textContent).not.toContain("issuer unavailable");
+      expect(panel().textContent).not.toContain("rev 7");
+      expect(panel().textContent).toContain("recovered");
+    });
     const recoveredBadge = Array.from(panel().querySelectorAll("span")).find(
       (node) => node.textContent === "recovered",
     );
     expect(recoveredBadge?.className).toContain("text-success");
     expect(requests.some((request) => new URL(request.url).searchParams.get("outcome") === "recovered")).toBe(true);
     await selectOption("Outcome", "Load error");
-    await settle(() => expect(panel().textContent).toContain("issuer unavailable"));
-    expect(panel().textContent).not.toContain("recovered");
+    await settle(() => {
+      expect(panel().textContent).toContain("issuer unavailable");
+      expect(panel().textContent).not.toContain("recovered");
+    });
     expect(requests.some((request) => new URL(request.url).searchParams.get("outcome") === "load_error")).toBe(true);
     await selectOption("Outcome", "All outcomes");
-    await settle(() => expect(panel().querySelector('[role="combobox"]')?.textContent).toBe("All outcomes"));
-    await settle(() => expect(panel().textContent).toContain("rev 7"));
+    await settle(() => {
+      expect(panel().querySelector('[role="combobox"]')?.textContent).toBe("All outcomes");
+      expect(panel().textContent).toContain("rev 7");
+    });
   });
 
   it("resets offset atomically in one navigation when changing outcome filter from page 2", async () => {
@@ -470,8 +476,10 @@ describe("TLS inventory and events", () => {
 
     const beforeCount = requests.length;
     await selectOption("Outcome", "Recovered");
-    await settle(() => expect(panel().textContent).not.toContain("rev 21"));
-    expect(panel().textContent).toContain("recovered");
+    await settle(() => {
+      expect(panel().textContent).not.toContain("rev 21");
+      expect(panel().textContent).toContain("recovered");
+    });
 
     const recoveredEventRequests = requests
       .slice(beforeCount)

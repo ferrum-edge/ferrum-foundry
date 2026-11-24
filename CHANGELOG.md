@@ -21,6 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Align Cluster and TLS Management views with Ferrum Edge's Admin API contract:
+  handle nullable `control_plane` in data-plane `GET /cluster` responses
+  (including stale refresh wording when a refresh fails), add the `"recovered"`
+  TLS event outcome with green badge styling and filter option, and move the
+  TLS events `outcome` filter into URL search state so changing outcome from
+  page 2+ resets `offset=0` atomically in one navigation.
 - Pin published Ferrum Edge v0.9.21 (`f9915358`, index `sha256:e6b0e480…`,
   `linux/amd64` `sha256:dff4c3af…`, `linux/arm64` `sha256:f7811d35…`) for the
   unreleased Foundry v0.5.7 candidate (#728). Package and lockfile root

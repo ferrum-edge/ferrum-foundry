@@ -1158,9 +1158,9 @@ const tlsInventory = [
 ];
 
 const tlsEvents = [
-  { id: 4, at: ago(10), surface: 'backend_tls', outcome: 'recovered', sources: [{ label: 'ca', cert_id: 'inv-old-ca', source_id: '/etc/ferrum/old-ca.pem', scheme: 'file', kind: 'ca_bundle' }] },
+  { id: 4, at: ago(10), surface: 'backend_tls', outcome: 'recovered', sources: [{ label: 'ca', cert_id: 'inv-old-ca', source_id: 'source-6d9a2e41b0c3f8a1', scheme: 'file', kind: 'ca_bundle' }] },
   { id: 3, at: ago(20), surface: 'proxy_https', outcome: 'rotated', sources: [{ label: 'cert', cert_id: 'inv-edge-cert', source_id: 'managed://certificates/edge-cert', scheme: 'managed', kind: 'cert', fingerprint_sha256: 'ab12cd34' }], revision: 4 },
-  { id: 2, at: ago(1500), surface: 'backend_tls', outcome: 'load_error', sources: [{ label: 'ca', cert_id: 'inv-old-ca', source_id: '/etc/ferrum/old-ca.pem', scheme: 'file', kind: 'ca_bundle' }], error: 'PEM parse error at byte 120' },
+  { id: 2, at: ago(1500), surface: 'backend_tls', outcome: 'load_error', sources: [{ label: 'ca', cert_id: 'inv-old-ca', source_id: 'source-6d9a2e41b0c3f8a1', scheme: 'file', kind: 'ca_bundle' }], error: 'PEM parse error at byte 120' },
 ];
 
 const serviceGraphEdges = [
