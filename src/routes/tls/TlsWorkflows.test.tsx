@@ -414,12 +414,16 @@ describe("TLS inventory and events", () => {
     const events: TlsSourceEvent[] = [{
       id: 1, at, surface: "proxy_https", outcome: "rotated", revision: 7,
       sources: [{ label: "leaf", cert_id: "edge", source_id: "managed://certificates/edge", scheme: "managed", kind: "certificate" }],
-    }, { id: 2, at, surface: "backend_tls", outcome: "load_error", error: "issuer unavailable", sources: [] }];
+    }, { id: 2, at, surface: "backend_tls", outcome: "load_error", error: "issuer unavailable", sources: [] },
+    { id: 3, at, surface: "backend_tls", outcome: "recovered", revision: 8, sources: [] }];
     collections.events = events;
     await mount("Events");
     await settle(() => expect(panel().textContent).toContain("rev 7"));
     expect(panel().textContent).toContain("leaf: managed://certificates/edge");
     expect(panel().textContent).toContain("issuer unavailable");
+    expect(panel().textContent).toContain("recovered");
+    await selectOption("Outcome", "Recovered");
+    await settle(() => expect(requests.some((request) => new URL(request.url).searchParams.get("outcome") === "recovered")).toBe(true));
     await selectOption("Outcome", "Load error");
     await settle(() => expect(requests.some((request) => new URL(request.url).searchParams.get("outcome") === "load_error")).toBe(true));
     await selectOption("Outcome", "All outcomes");

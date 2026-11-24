@@ -34,6 +34,7 @@ export interface TlsInventorySource {
 export interface TlsInventoryUsage {
   surface: string;
   role: string;
+  namespace?: string;
   resource_type: string;
   resource_id: string;
   field: string;
@@ -68,11 +69,17 @@ export interface TlsSourceEventMaterial {
   fingerprint_sha256?: string;
 }
 
+export type TlsSourceEventOutcome =
+  | "rotated"
+  | "load_error"
+  | "rebuild_error"
+  | "recovered";
+
 export interface TlsSourceEvent {
   id: number;
   at: string;
   surface: string;
-  outcome: "rotated" | "load_error" | "rebuild_error";
+  outcome: TlsSourceEventOutcome;
   sources: TlsSourceEventMaterial[];
   revision?: number;
   error?: string;
@@ -82,7 +89,7 @@ export interface TlsEventsParams extends PaginationParams {
   cert_id?: string;
   source_id?: string;
   surface?: string;
-  outcome?: "rotated" | "load_error" | "rebuild_error";
+  outcome?: TlsSourceEventOutcome;
   since?: string;
 }
 

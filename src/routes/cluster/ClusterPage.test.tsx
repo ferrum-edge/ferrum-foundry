@@ -329,4 +329,12 @@ describe("Data-plane backend egress attestation (Edge v0.9.14)", () => {
     expect(host.textContent).not.toContain("egress policy unknown");
     expect(host.textContent).not.toContain("egress public");
   });
+
+  it("renders DP mode cleanly when control_plane is null", async () => {
+    topology = { mode: "dp", control_plane: null };
+    await mount();
+    await expectText("DATA PLANE");
+    expect(host.textContent).toContain("CP unavailable");
+    expect(host.textContent).toContain("No control plane connection state reported yet.");
+  });
 });
